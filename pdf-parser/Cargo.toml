@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 pdf-tokenizer = { path = "../pdf-tokenizer" }
+pdf-object = { path = "../pdf-object" }

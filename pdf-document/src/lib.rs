@@ -1,14 +1,30 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+use pdf_object::{Value, version::Version};
+use pdf_parser::{ParseObject, PdfParser};
+
+/// Represents a PDF document.
+pub struct PdfDocument {
+    /// The version of the PDF document.
+    pub version: Version,
+    /// The objects in the PDF document.
+    pub objects: Vec<Value>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl PdfDocument {
+    pub fn from(input: &[u8]) -> Self {
+        let mut parser = PdfParser::from(input);
+        let version: Version = parser.parse().unwrap();
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+        let mut objects = Vec::new();
+        loop {
+            let object = parser.parse_object().unwrap();
+            println!("{:?}", object);
+            match object {
+                Value::EndOfFile => break,
+                _ => {}
+            }
+
+            objects.push(object);
+        }
+        PdfDocument { version, objects }
     }
 }

@@ -3,11 +3,15 @@
 version = 4
 
 [[package]]
-name = "pdf-ast"
+name = "pdf-document"
 version = "0.1.0"
+dependencies = [
+ "pdf-object",
+ "pdf-parser",
+]
 
 [[package]]
-name = "pdf-document"
+name = "pdf-object"
 version = "0.1.0"
 
 [[package]]
@@ -18,6 +22,7 @@ version = "0.1.0"
 name = "pdf-parser"
 version = "0.1.0"
 dependencies = [
+ "pdf-object",
  "pdf-tokenizer",
 ]
 
