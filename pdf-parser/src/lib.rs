@@ -1,267 +1,242 @@
+pub mod array;
+pub mod boolean;
+pub mod comment;
+pub mod cross_reference_table;
+pub mod dictionary;
+pub mod error;
+pub mod header;
+pub mod hex_string;
+pub mod indirect_object;
+pub mod literal_string;
+pub mod name;
+pub mod null;
+pub mod number;
+pub mod stream;
+pub mod trailer;
+
+use std::str::FromStr;
+
 use error::ParserError;
-use pdf_tokenizer::{Token, Tokenizer};
+use pdf_object::{
+    Value, dictionary::Dictionary, indirect_object::IndirectObjectOrReference, stream::Stream,
+    trailer::Trailer,
+};
+use pdf_tokenizer::{PdfToken, Tokenizer};
 
 pub struct PdfParser<'a> {
     tokenizer: Tokenizer<'a>,
 }
 
-pub mod error;
-
-pub struct Version {
-    major: u8,
-    minor: u8,
+impl<'a> From<&'a [u8]> for PdfParser<'a> {
+    fn from(input: &'a [u8]) -> Self {
+        PdfParser {
+            tokenizer: Tokenizer::new(input),
+        }
+    }
 }
 
-pub enum Value {
-    IndirectValue {
-        object_number: i32,
-        generation_number: i32,
-    },
-    Stream {
-        object_number: u32,
-        generation_number: u16,
-        length: usize,
-    },
-    Dictionary {
-        object_number: u32,
-        generation_number: u16,
-        length: usize,
-    },
-    Array {
-        object_number: u32,
-        generation_number: u16,
-        length: usize,
-    },
-    String {
-        object_number: u32,
-        generation_number: u16,
-        length: usize,
-    },
-    Name {
-        object_number: u32,
-        generation_number: u16,
-        length: usize,
-    },
-    Number {
-        object_number: u32,
-        generation_number: u16,
-        length: usize,
-    },
-    Boolean {
-        object_number: u32,
-        generation_number: u16,
-        length: usize,
-    },
-    Null {
-        object_number: u32,
-        generation_number: u16,
-        length: usize,
-    },
-    HexString {
-        object_number: u32,
-        generation_number: u16,
-        length: usize,
-    },
-    Literal {
-        object_number: u32,
-        generation_number: u16,
-        length: usize,
-    },
-    Reference {
-        object_number: u32,
-        generation_number: u16,
-        length: usize,
-    },
-    IndirectReference {
-        object_number: u32,
-        generation_number: u16,
-        length: usize,
-    },
-    IndirectStream {
-        object_number: u32,
-        generation_number: u16,
-        length: usize,
-    },
+/// A trait for parsing PDF objects into a specific type.
+///
+/// This trait defines a generic interface for parsing PDF objects, allowing
+/// implementors to define how a specific type of object is parsed from an input source.
+///
+/// # Type Parameters
+///
+/// - `T`: The type of the object that will be produced by the parser.
+pub trait ParseObject<T> {
+    fn parse(&mut self) -> Result<T, ParserError>;
+}
+
+pub trait StreamObjectParser {
+    fn parse_stream(&mut self, dictionary: &Dictionary) -> Result<Stream, ParserError>;
 }
 
 impl<'a> PdfParser<'a> {
-    fn find_header_start(input: &'a [u8]) -> Result<&'a [u8], ParserError> {
-        // PDF 1.7 spec, APPENDIX H, 3.4.1 "File Header":
-        // "13. Acrobat viewers require only that the header appear somewhere within the first 1024 bytes of the file."
-        // ...which of course means files depend on it.
-        // All offsets in the file are relative to the header start, not to the start of the file.
+    /// Checks if a character is a whitespace according to PDF 1.7 spec (Section 7.2.2).
+    /// Whitespace characters are defined as:
+    /// - Null (NUL) - `0x00` (`b'\0'`)
+    /// - Horizontal Tab (HT) - `0x09` (`b'\t'`)
+    /// - Line Feed (LF) - `0x0A` (`b'\n'`)
+    /// - Form Feed (FF) - `0x0C` (`b'\x0C'`)
+    /// - Carriage Return (CR) - `0x0D` (`b'\r'`)
+    /// - Space (SP) - `0x20` (`b' '`)
+    const fn id_pdf_whitespace(c: u8) -> bool {
+        matches!(
+            c,
+            // Whitespace characters (Common ones)
+            b' ' | b'\t' | b'\n' | b'\r' | b'\x0C'
+        )
+    }
 
-        const HEADER_START_SEQUENCE: &[u8] = b"%PDF-";
-
-        let result = input
-            .windows(5)
-            .position(|window| window == HEADER_START_SEQUENCE);
-        if let Some(offset) = result {
-            return Ok(&input[offset..]);
-        } else {
-            return Err(ParserError::InvalidHeader);
+    /// Checks if a character is a PDF delimiter according to PDF 1.7 spec (Section 7.2.2).
+    /// Whitespace characters (space, tab, newline, etc.) also act as delimiters.
+    const fn is_pdf_delimiter(c: u8) -> bool {
+        if Self::id_pdf_whitespace(c) {
+            return true;
         }
+        // Delimiter characters
+        matches!(
+            c,
+            // Delimiter characters
+            b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%'
+        )
     }
 
-    pub fn from(input: &'a [u8]) -> Result<PdfParser<'a>, ParserError> {
-        let input = Self::find_header_start(input)?;
-        Ok(PdfParser {
-            tokenizer: Tokenizer::new(input),
-        })
-    }
-
-    pub fn parse_header(&mut self) -> Result<Version, ParserError> {
-        // PDF 1.7 spec, APPENDIX H, 3.4.1 "File Header":
-        // "The header consists of the characters %PDF- followed by a version number."
-        // The version number is a sequence of digits and periods.
-        // The header must be followed by a newline character (ASCII 10).
-        // The header may be preceded by whitespace or comments.
-        // The header may be followed by whitespace or comments.
-        // The header may be followed by any number of bytes.
-        // The header may be followed by any number of bytes.
-
-        self.tokenizer.expect(Token::Percent).unwrap();
-
-        let token = self
-            .tokenizer
-            .read()
-            .ok_or(ParserError::UnexpectedEndOfFile)?;
-
-        match token {
-            Token::Literal(literal) => {
-                if !literal.starts_with("PDF-") {
-                    return Err(ParserError::InvalidHeader);
-                }
-
-                let literal = &literal["PDF-".len()..];
-                let parts = literal.split('.').collect::<Vec<_>>();
-
-                if parts.len() != 2 {
-                    return Err(ParserError::InvalidHeader);
-                }
-                let major = parts[0]
-                    .parse::<u8>()
-                    .map_err(|_| ParserError::InvalidHeader)?;
-                let minor = parts[1]
-                    .parse::<u8>()
-                    .map_err(|_| ParserError::InvalidHeader)?;
-
-                return Ok(Version { major, minor });
-            }
-            Token::Percent => todo!(),
-            Token::LessThan => todo!(),
-            Token::GreaterThan => todo!(),
-            Token::Number(_) => todo!(),
-            Token::NewLine => todo!(),
+    /// Reads an end of line marker from the input stream.
+    /// The end of line marker is defined as either:
+    /// - A carriage return (`\r`) followed by a line feed (`\n`).
+    /// - A line feed (`\n`) alone.
+    /// - A carriage return (`\r`) alone is not valid.
+    /// This function will consume the end of line marker from the input stream.
+    /// If the end of line marker is not found, it will return an error.
+    fn read_end_of_line_marker(&mut self) -> Result<(), ParserError> {
+        if let Some(PdfToken::CarriageReturn) = self.tokenizer.peek()? {
+            self.tokenizer.read();
         }
-    }
-
-    pub fn parse_indirect_value(&mut self) -> Result<Option<Value>, ParserError> {
-        self.tokenizer.save_state()?;
-        if let Some(Token::Number(object_number)) = self.tokenizer.read() {
-            if let Some(Token::Number(generation_number)) = self.tokenizer.read() {
-                if let Some(Token::Literal(literal)) = self.tokenizer.read() {
-                    if literal == "obj" {
-                        return Ok(Some(Value::IndirectValue {
-                            object_number,
-                            generation_number,
-                        }));
-                    }
-                }
-            }
+        if let Some(PdfToken::NewLine) = self.tokenizer.peek()? {
+            self.tokenizer.read();
         }
-        self.tokenizer.restore_state()?;
-        Ok(None)
-    }
-
-    pub fn parse_trailer(&mut self) -> Result<(), ParserError> {
-        // PDF 1.7 spec, APPENDIX H, 3.4.2 "File Trailer":
-        // "The trailer consists of the characters %%EOF followed by a version number."
-        // The version number is a sequence of digits and periods.
-        // The trailer must be followed by a newline character (ASCII 10).
-        // The trailer may be preceded by whitespace or comments.
-        // The trailer may be followed by whitespace or comments.
-        // The trailer may be followed by any number of bytes.
-        // The trailer may be followed by any number of bytes.
         Ok(())
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_find_header_start_valid() {
-        let input = b"Some random data %PDF-1.7 more data";
-        let result = PdfParser::find_header_start(input);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), b"%PDF-1.7 more data");
+    fn skip_whitespace(&mut self) {
+        let _ = self.tokenizer.read_while_u8(|b| Self::id_pdf_whitespace(b));
     }
 
-    #[test]
-    fn test_indirect_value_valid() {
-        let input = b"%PDF-1.7\n0 0 obj\n";
-        let mut parser = PdfParser::from(input).unwrap();
-        let _version = parser.parse_header().unwrap();
-
-        let result = parser.parse_indirect_value().unwrap();
-        assert!(result.is_some());
-        if let Some(Value::IndirectValue {
-            object_number,
-            generation_number,
-        }) = result
-        {
-            assert_eq!(object_number, 0);
-            assert_eq!(generation_number, 0);
-        } else {
-            panic!("Expected IndirectValue");
+    /// Reads and parses a number from the PDF input stream.
+    ///
+    /// This function reads a sequence of ASCII digits from the tokenizer and attempts to parse
+    /// them into the specified numeric type. After reading the number, it validates that the
+    /// following character is either a valid PDF delimiter or a decimal point.
+    ///
+    /// # Type Parameters
+    ///
+    /// - `T`: The target numeric type.
+    ///
+    /// # Parameters
+    ///
+    /// - `error`: A convertible error type that will be returned if no digits are found.
+    ///
+    /// # Returns
+    ///
+    /// - `Result` indicating success or failure.
+    fn read_number<T: FromStr>(&mut self, error: impl Into<ParserError>) -> Result<T, ParserError> {
+        let number_str = self.tokenizer.read_while_u8(|b| b.is_ascii_digit());
+        if number_str.is_empty() {
+            return Err(error.into());
         }
+
+        let number = String::from_utf8_lossy(number_str)
+            .parse::<T>()
+            .or(Err(ParserError::InvalidNumber))?;
+
+        // Check that the following character after the number is a valid delimiter
+        // or a dot (potential decimal number).
+        if let Some(d) = self.tokenizer.data().get(0).copied() {
+            if !Self::is_pdf_delimiter(d) && d != b'.' {
+                return Err(ParserError::MissingDelimiterAfterKeyword(d));
+            }
+        }
+
+        self.skip_whitespace();
+
+        Ok(number)
     }
 
-    #[test]
-    fn test_find_header_start_invalid() {
-        let input = b"Some random data without header";
-        let result = PdfParser::find_header_start(input);
-        assert!(result.is_err());
+    /// Reads a keyword literal from the input stream and validates it.
+    ///
+    /// This function reads a specific keyword literal from the input stream and ensures
+    /// that it matches the expected keyword according to the PDF 1.7 specification.
+    /// If the literal does not match the expected keyword, an error is returned.
+    ///
+    /// After successfully reading the keyword, this function also consumes the
+    /// end-of-line marker that follows the keyword.
+    ///
+    /// # Parameters
+    ///
+    /// - `keyword`: A byte slice representing the expected keyword literal.
+    ///
+    /// # Returns
+    ///
+    /// - `Result` indicating success or failure.
+    fn read_keyword(&mut self, keyword: &[u8]) -> Result<(), ParserError> {
+        let literal = self.tokenizer.read_excactly(keyword.len())?;
+        if literal != keyword {
+            return Err(ParserError::InvalidKeyword(
+                String::from_utf8_lossy(keyword).to_string(),
+                String::from_utf8_lossy(literal).to_string(),
+            ));
+        }
+
+        if let Some(d) = self.tokenizer.data().get(0).copied() {
+            if !Self::is_pdf_delimiter(d) {
+                return Err(ParserError::MissingDelimiterAfterKeyword(d));
+            }
+        }
+
+        // Keyword literals are followed by an end-of-line marker.
+        self.read_end_of_line_marker()
     }
 
-    #[test]
-    fn test_parse_header_valid() {
-        let input = b"%PDF-1.7\n";
-        let mut parser = PdfParser::from(input).unwrap();
-        let version = parser.parse_header().unwrap();
-        assert_eq!(version.major, 1);
-        assert_eq!(version.minor, 7);
-    }
+    pub fn parse_object(&mut self) -> Result<Value, ParserError> {
+        if let Some(token) = self.tokenizer.peek()? {
+            let value = match token {
+                PdfToken::Percent => Value::Comment(self.parse()?),
+                PdfToken::DoublePercent => {
+                    self.tokenizer.read();
+                    const EOF_KEYWORD: &[u8] = b"EOF";
 
-    #[test]
-    fn test_parse_header_invalid_format() {
-        let input = b"%PDF-1.x";
-        let mut parser = PdfParser::from(input).unwrap();
-        let result = parser.parse_header();
-        assert!(result.is_err());
-    }
+                    // Read the keyword `EOF`.
+                    let literal = self.tokenizer.read_excactly(EOF_KEYWORD.len())?;
+                    if literal != EOF_KEYWORD {
+                        return Err(ParserError::InvalidToken);
+                    }
+                    return Ok(Value::EndOfFile);
+                }
+                PdfToken::Alphabetic(t) => {
+                    if t == b't' {
+                        let start = self.tokenizer.position;
+                        let value: Result<Trailer, ParserError> = self.parse();
+                        if let Ok(o) = value {
+                            return Ok(Value::Trailer(o));
+                        }
+                        self.tokenizer.position = start;
 
-    // #[test]
-    // fn test_parse_header_unexpected_token() {
-    //     let input = b"Some random data";
-    //     let mut parser = PdfParser::from(input).unwrap();
-    //     let result = parser.parse_header();
-    //     assert!(result.is_err());
-    // }
+                        Value::Boolean(self.parse()?)
+                    } else if t == b'f' {
+                        Value::Boolean(self.parse()?)
+                    } else if t == b'n' {
+                        Value::Null(self.parse()?)
+                    } else if t == b'x' {
+                        Value::CrossReferenceTable(self.parse()?)
+                    } else {
+                        return Err(ParserError::InvalidToken);
+                    }
+                }
+                PdfToken::DoubleLeftAngleBracket => Value::Dictionary(self.parse()?),
+                PdfToken::LeftAngleBracket => Value::HexString(self.parse()?),
+                PdfToken::Solidus => Value::Name(self.parse()?),
+                PdfToken::Number(_) => {
+                    let start = self.tokenizer.position;
+                    let value: Result<IndirectObjectOrReference, ParserError> = self.parse();
+                    if let Ok(o) = value {
+                        return Ok(Value::IndirectObject(o));
+                    }
 
-    #[test]
-    fn test_from_valid_input() {
-        let input = b"Some data %PDF-1.7 more data";
-        let parser = PdfParser::from(input);
-        assert!(parser.is_ok());
-    }
+                    self.tokenizer.position = start;
+                    Value::Number(self.parse()?)
+                }
+                PdfToken::Minus => Value::Number(self.parse()?),
+                PdfToken::Plus => Value::Number(self.parse()?),
+                PdfToken::LeftSquareBracket => Value::Array(self.parse()?),
+                PdfToken::LeftParenthesis => Value::LiteralString(self.parse()?),
+                r => {
+                    panic!("Unexpected token: {:?}", r);
+                }
+            };
 
-    #[test]
-    fn test_from_invalid_input() {
-        let input = b"Some data without header";
-        let parser = PdfParser::from(input);
-        assert!(parser.is_err());
+            return Ok(value);
+        }
+        Err(ParserError::InvalidToken)
     }
 }
