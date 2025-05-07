@@ -3,15 +3,19 @@ pub mod boolean;
 pub mod comment;
 pub mod cross_reference_table;
 pub mod dictionary;
+pub mod error;
 pub mod hex_string;
 pub mod indirect_object;
 pub mod literal_string;
 pub mod name;
 pub mod null;
 pub mod number;
+pub mod object_collection;
 pub mod stream;
 pub mod trailer;
 pub mod version;
+
+use std::rc::Rc;
 
 use array::Array;
 use boolean::Boolean;
@@ -27,9 +31,9 @@ use number::Number;
 use stream::Stream;
 use trailer::Trailer;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Value {
-    IndirectObject(IndirectObjectOrReference),
+    IndirectObject(Rc<IndirectObjectOrReference>),
     Dictionary(Dictionary),
     Array(Array),
     LiteralString(LiteralString),

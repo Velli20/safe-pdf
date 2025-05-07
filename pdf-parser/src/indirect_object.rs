@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use pdf_object::{Value, indirect_object::IndirectObjectOrReference};
 use pdf_tokenizer::PdfToken;
 
@@ -91,7 +93,7 @@ impl ParseObject<IndirectObjectOrReference> for PdfParser<'_> {
         return Ok(IndirectObjectOrReference::new(
             object_number,
             generation_number,
-            Some(Box::new(object)),
+            Some(object),
         ));
     }
 }
@@ -133,9 +135,9 @@ mod tests {
         assert_eq!(generation_number, 1);
         assert_eq!(
             object,
-            Some(Box::new(Value::LiteralString(LiteralString::new(
-                String::from("HELLO"),
-            ))))
+            Some(Value::LiteralString(LiteralString::new(String::from(
+                "HELLO"
+            ),)))
         );
     }
 }

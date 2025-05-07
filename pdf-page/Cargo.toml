@@ -1,9 +1,7 @@
 [package]
-name = "pdf-document"
+name = "pdf-page"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 pdf-object = { path = "../pdf-object" }
-pdf-parser = { path = "../pdf-parser" }
-pdf-page = { path = "../pdf-page" }

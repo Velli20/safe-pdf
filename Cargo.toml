@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["pdf-document", "pdf-object", "pdf-painter", "pdf-parser", "pdf-tokenizer"]
+members = ["pdf-document", "pdf-object", "pdf-page", "pdf-painter", "pdf-parser", "pdf-tokenizer"]

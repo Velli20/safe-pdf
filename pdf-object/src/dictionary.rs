@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, rc::Rc};
 
-use crate::Value;
+use crate::{Value, array::Array, indirect_object::IndirectObjectOrReference};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Dictionary {
     pub dictionary: BTreeMap<String, Box<Value>>,
 }
@@ -26,6 +26,24 @@ impl Dictionary {
             .get(key)
             .and_then(|value| match value.as_ref() {
                 Value::Name(name) => Some(&name.0),
+                _ => None,
+            })
+    }
+
+    pub fn get_object(&self, key: &str) -> Option<&Rc<IndirectObjectOrReference>> {
+        self.dictionary
+            .get(key)
+            .and_then(|value| match value.as_ref() {
+                Value::IndirectObject(obj) => Some(obj),
+                _ => None,
+            })
+    }
+
+    pub fn get_array(&self, key: &str) -> Option<&Array> {
+        self.dictionary
+            .get(key)
+            .and_then(|value| match value.as_ref() {
+                Value::Array(arr) => Some(arr),
                 _ => None,
             })
     }

@@ -1,6 +1,6 @@
 use crate::dictionary::Dictionary;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Trailer {
     /// The dictionary object containing the trailer information.
     pub dictionary: Dictionary,

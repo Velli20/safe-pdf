@@ -18,7 +18,7 @@
 /// Each entry in the table contains the object number, generation number, and the byte
 /// offset of the object in the file. The cross-reference table is typically located at
 /// the end of the PDF file, preceded by a trailer dictionary with metadata about the file.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct CrossReferenceTable {
     /// The object number of the first entry in this subsection.
     pub first_object_number: u32,
@@ -42,7 +42,7 @@ impl CrossReferenceTable {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct CrossReferenceEntry {
     /// The byte offset of the object from the beginning of the file.
     /// Padded with leading zeros if necessary. For free objects, this

@@ -7,12 +7,20 @@ name = "pdf-document"
 version = "0.1.0"
 dependencies = [
  "pdf-object",
+ "pdf-page",
  "pdf-parser",
 ]
 
 [[package]]
 name = "pdf-object"
 version = "0.1.0"
+
+[[package]]
+name = "pdf-page"
+version = "0.1.0"
+dependencies = [
+ "pdf-object",
+]
 
 [[package]]
 name = "pdf-painter"
