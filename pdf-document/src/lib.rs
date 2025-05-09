@@ -1,6 +1,6 @@
 use error::PdfError;
 use pdf_object::{Value, object_collection::ObjectCollection, trailer::Trailer, version::Version};
-use pdf_page::PdfPage;
+use pdf_page::page::PdfPage;
 use pdf_parser::{ParseObject, PdfParser};
 
 pub mod error;
@@ -76,7 +76,8 @@ impl PdfDocument {
                 .ok_or(PdfError::PageNotFound(p.object_number))?
                 .clone();
 
-            let page = PdfPage::from_dictionary(&page_obj, &objects);
+            let page =
+                PdfPage::from_dictionary(&page_obj, &objects).map_err(|err| PdfError::from(err))?;
             pages.push(page);
         }
 

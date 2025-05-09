@@ -65,4 +65,12 @@ impl Value {
             None
         }
     }
+
+    pub fn as_number(&self) -> Option<&Number> {
+        if let Value::Number(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
 }
