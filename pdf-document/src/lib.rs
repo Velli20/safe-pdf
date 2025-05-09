@@ -68,7 +68,7 @@ impl PdfDocument {
         // Iterate over the `Kids` array and extract the individual page objects.
         let mut pages = vec![];
         for c in &kids.0 {
-            let p = c.as_ref().as_object().ok_or(PdfError::MissingPages)?;
+            let p = c.as_object().ok_or(PdfError::MissingPages)?;
 
             // Get the page object dictionary.
             let page_obj = objects

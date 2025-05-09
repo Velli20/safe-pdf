@@ -39,7 +39,7 @@ impl ParseObject<Array> for PdfParser<'_> {
 
             match self.parse_object() {
                 Ok(value) => {
-                    values.push(Box::new(value));
+                    values.push(value);
                 }
                 Err(err) => {
                     return Err(ParserError::ArrayError(ArrayError::InvalidObject(format!(
