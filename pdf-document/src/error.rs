@@ -1,26 +1,33 @@
+use pdf_page::error::PageError;
 use pdf_parser::error::ParserError;
 
 /// Errors that can occur while reading a PDF document.
 #[derive(Debug)]
 pub enum PdfError {
-    /// Error reading the PDF document.
+    /// An error occurred during the parsing phase of the PDF document structure.
     ReadError(String),
-    /// The document is missing a trailer.
+    /// The PDF document trailer dictionary could not be found or is malformed.
     MissingTrailer,
-    /// The document is missing a root object.
+    /// The `/Root` entry in the trailer, which points to the document catalog, is missing or invalid.
     MissingRoot,
-    /// The document is missing a pages object.
+    /// The `/Pages` entry in the document catalog is missing or invalid.
     MissingPages,
-    /// The document is missing a page tree.
+    /// The `Pages` entry in the document catalog is missing or invalid.
     MissingPageTree,
-    /// The document is missing a catalog.
+    /// The document catalog (the object referenced by `/Root` in the trailer) is missing or invalid.
     MissingCatalog,
-    /// A page with the specified object number was not found.
+    /// A specific page object, referenced by its object number, could not be found or is not a valid page dictionary.
     PageNotFound(i32),
 }
 
 impl From<ParserError> for PdfError {
     fn from(value: ParserError) -> Self {
+        Self::ReadError(value.to_string())
+    }
+}
+
+impl From<PageError> for PdfError {
+    fn from(value: PageError) -> Self {
         Self::ReadError(value.to_string())
     }
 }
