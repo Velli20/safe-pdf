@@ -12,10 +12,10 @@ use pdf_object::{
 /// its resources, and other attributes according to PDF 1.7 specification.
 pub struct PdfPage {
     /// The page object dictionary containing all page-specific information.
-    // dictionary: Dictionary,
     /// Reference to the parent page tree node.
     parent: Option<IndirectObjectOrReference>,
-    /// The contents of the page, which can be a stream or an array of streams.
+    /// The contents of the page, which can be a single stream object or
+    /// an array of streams.
     contents: Value,
 }
 
@@ -108,12 +108,26 @@ impl PdfPage {
         } else {
             contents = contents_ref.object.as_ref().unwrap().clone();
         }
+        println!("contents {:?}", contents);
 
         if let Value::IndirectObject(ss) = &contents {
             if ss.object.is_none() {
                 contents = objects.get(ss.object_number).unwrap().clone();
             } else {
                 contents = ss.object.as_ref().unwrap().clone();
+            }
+        }
+
+        if let Value::Array(array) = &mut contents {
+            for obj in array.0.iter_mut() {
+                if let Value::IndirectObject(ss) = obj {
+                    let ii = objects.get(ss.object_number);
+                    if ii.is_none() {
+                        panic!()
+                    }
+                    let ii = ii.unwrap();
+                    *obj = ii;
+                }
             }
         }
         println!("id {} contents {:?}", id, contents);

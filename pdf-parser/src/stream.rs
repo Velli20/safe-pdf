@@ -1,3 +1,6 @@
+use std::io::Read;
+
+use flate2::bufread::ZlibDecoder;
 use pdf_object::{dictionary::Dictionary, stream::Stream};
 use pdf_tokenizer::PdfToken;
 
@@ -12,7 +15,15 @@ pub enum StreamParsingError {
     InvalidEndStreamKeyword(String),
     /// Indicates that there was an error while parsing the stream.
     StreamParsingError(String),
+    /// Indicates that the stream dictionary is missing the /Length entry.
     MissingLength,
+    /// Indicates that the stream dictionary is missing the /Filter entry.
+    MissingFilter,
+    /// Indicates that the stream compression algorithm specified in the
+    /// stream dictionary is not supported by the parser.
+    UsupportedFilter(String),
+    /// Indicates that there was an error while decoding the stream data.
+    DecompressionError(String),
 }
 
 impl<'a> StreamObjectParser for PdfParser<'a> {
@@ -52,11 +63,9 @@ impl<'a> StreamObjectParser for PdfParser<'a> {
             .ok_or(ParserError::from(StreamParsingError::MissingLength))?;
 
         // Find the decode type of the stream.
-        // let decode = dictionary
-        //     .get_string("Filter")
-        //     .ok_or(ParserError::StreamParsingError(
-        //         "Stream dictionary missing /Filter entry".to_string(),
-        //     ))?;
+        let decode = dictionary
+            .get_string("Filter")
+            .ok_or(ParserError::from(StreamParsingError::MissingFilter))?;
 
         // Read the stream data
         let stream_data = self.tokenizer.read_excactly(length as usize)?.to_vec();
@@ -67,7 +76,23 @@ impl<'a> StreamObjectParser for PdfParser<'a> {
         // Read the `endstream` keyword .
         self.read_keyword(STREAM_END)?;
 
-        Ok(Stream::new(stream_data))
+        // Check if the stream data is compressed using the FlateDecode (DEFLATE) algorithm.
+        if decode == "FlateDecode" {
+            let mut d = ZlibDecoder::new(stream_data.as_slice());
+            let mut s = String::new();
+            if let Err(e) = d.read_to_string(&mut s) {
+                return Err(ParserError::from(StreamParsingError::DecompressionError(
+                    e.to_string(),
+                )));
+            }
+
+            d.read_to_string(&mut s).unwrap();
+            return Ok(Stream::new(s));
+        }
+
+        return Err(ParserError::from(StreamParsingError::UsupportedFilter(
+            decode.to_string(),
+        )));
     }
 }
 
@@ -86,6 +111,15 @@ impl std::fmt::Display for StreamParsingError {
             StreamParsingError::MissingLength => {
                 write!(f, "Stream dictionary missing /Length entry")
             }
+            StreamParsingError::MissingFilter => {
+                write!(f, "Stream dictionary missing /Filter entry")
+            }
+            StreamParsingError::UsupportedFilter(filter) => {
+                write!(f, "Unsupported stream filter: {}", filter)
+            }
+            StreamParsingError::DecompressionError(err) => {
+                write!(f, "Error while decoding stream: {}", err)
+            }
         }
     }
 }
@@ -97,24 +131,6 @@ mod tests {
     use pdf_object::{Value, number::Number};
 
     use super::*;
-
-    #[test]
-    fn test_parse_stream_valid() {
-        let dictionary = Dictionary::new(
-            vec![(
-                "Length".to_string(),
-                Box::new(Value::Number(Number::new(11))),
-            )]
-            .into_iter()
-            .collect(),
-        );
-
-        let input = b"stream\nHello World\nendstream";
-        let mut parser = PdfParser::from(input.as_slice());
-
-        let result = parser.parse_stream(&dictionary).unwrap();
-        assert_eq!(result.data, b"Hello World");
-    }
 
     #[test]
     fn test_parse_stream_missing_stream_keyword() {

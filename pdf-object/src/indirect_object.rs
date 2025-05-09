@@ -1,9 +1,6 @@
 use std::rc::Rc;
 
-use crate::{
-    Value,
-    stream::{self, Stream},
-};
+use crate::{Value, stream::Stream};
 
 /// Represents an indirect object or a reference to an object in a PDF file.
 /// An indirect object is a data structure that can be referenced by other objects.

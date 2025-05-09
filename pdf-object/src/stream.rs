@@ -1,10 +1,10 @@
 #[derive(Debug, PartialEq, Clone)]
 pub struct Stream {
-    pub data: Vec<u8>,
+    pub data: String,
 }
 
 impl Stream {
-    pub fn new(data: Vec<u8>) -> Self {
+    pub fn new(data: String) -> Self {
         Stream { data }
     }
 }
