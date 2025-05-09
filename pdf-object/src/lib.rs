@@ -34,7 +34,7 @@ use trailer::Trailer;
 #[derive(Debug, PartialEq, Clone)]
 pub enum Value {
     IndirectObject(Rc<IndirectObjectOrReference>),
-    Dictionary(Dictionary),
+    Dictionary(Rc<Dictionary>),
     Array(Array),
     LiteralString(LiteralString),
     Name(Name),
@@ -47,4 +47,22 @@ pub enum Value {
     Trailer(Trailer),
     CrossReferenceTable(CrossReferenceTable),
     EndOfFile,
+}
+
+impl Value {
+    pub fn as_dictionary(&self) -> Option<&Rc<Dictionary>> {
+        if let Value::Dictionary(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_object(&self) -> Option<&IndirectObjectOrReference> {
+        if let Value::IndirectObject(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
 }

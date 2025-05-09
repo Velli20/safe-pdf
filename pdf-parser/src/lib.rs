@@ -213,7 +213,7 @@ impl<'a> PdfParser<'a> {
                         return Err(ParserError::InvalidToken);
                     }
                 }
-                PdfToken::DoubleLeftAngleBracket => Value::Dictionary(self.parse()?),
+                PdfToken::DoubleLeftAngleBracket => Value::Dictionary(Rc::new(self.parse()?)),
                 PdfToken::LeftAngleBracket => Value::HexString(self.parse()?),
                 PdfToken::Solidus => Value::Name(self.parse()?),
                 PdfToken::Number(_) => {

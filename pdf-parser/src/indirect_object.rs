@@ -66,6 +66,7 @@ impl ParseObject<IndirectObjectOrReference> for PdfParser<'_> {
                 object_number,
                 generation_number,
                 None,
+                None,
             ));
         }
 
@@ -79,13 +80,15 @@ impl ParseObject<IndirectObjectOrReference> for PdfParser<'_> {
 
         self.skip_whitespace();
 
-        if let Some(PdfToken::Alphabetic(b's')) = self.tokenizer.peek()? {
+        let stream = if let Some(PdfToken::Alphabetic(b's')) = self.tokenizer.peek()? {
             if let Value::Dictionary(dictionary) = &object {
-                let stream = self.parse_stream(dictionary)?;
+                Some(Rc::new(self.parse_stream(dictionary)?))
             } else {
                 return Err(ParserError::StreamObjectWithoutDictionary);
             }
-        }
+        } else {
+            None
+        };
 
         // Read the keyword `endobj`.
         self.read_keyword(ENDOBJ_KEYWORD)?;
@@ -94,6 +97,7 @@ impl ParseObject<IndirectObjectOrReference> for PdfParser<'_> {
             object_number,
             generation_number,
             Some(object),
+            stream,
         ));
     }
 }
@@ -129,6 +133,7 @@ mod tests {
             object_number,
             generation_number,
             object,
+            ..
         } = parser.parse().unwrap();
 
         assert_eq!(object_number, 0);

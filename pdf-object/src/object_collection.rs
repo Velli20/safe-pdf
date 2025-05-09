@@ -1,6 +1,8 @@
 use std::{collections::HashMap, rc::Rc};
 
-use crate::{Value, error::ObjectError, indirect_object::IndirectObjectOrReference};
+use crate::{
+    Value, dictionary::Dictionary, error::ObjectError, indirect_object::IndirectObjectOrReference,
+};
 
 #[derive(Default)]
 pub struct ObjectCollection {
@@ -18,13 +20,21 @@ impl ObjectCollection {
         }
     }
 
-    pub fn get(&self, key: i32) -> Option<&Value> {
+    pub fn get(&self, key: i32) -> Option<Value> {
+        if let Some(obj) = self.map.get(&key) {
+            return Some(Value::IndirectObject(obj.clone()));
+        }
+        None
+    }
+
+    pub fn get_dictionary(&self, key: i32) -> Option<&Dictionary> {
         if let Some(obj) = self.map.get(&key) {
             if let Some(inner) = &obj.object {
                 if let Value::IndirectObject(s) = inner {
-                    return self.get(s.object_number);
+                    return self.get_dictionary(s.object_number);
+                } else if let Value::Dictionary(dictionary) = inner {
+                    return Some(dictionary);
                 }
-                return Some(inner);
             }
         }
         None
