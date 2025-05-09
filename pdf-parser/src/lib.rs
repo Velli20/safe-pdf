@@ -14,7 +14,7 @@ pub mod number;
 pub mod stream;
 pub mod trailer;
 
-use std::str::FromStr;
+use std::{rc::Rc, str::FromStr};
 
 use error::ParserError;
 use pdf_object::{
@@ -213,14 +213,14 @@ impl<'a> PdfParser<'a> {
                         return Err(ParserError::InvalidToken);
                     }
                 }
-                PdfToken::DoubleLeftAngleBracket => Value::Dictionary(self.parse()?),
+                PdfToken::DoubleLeftAngleBracket => Value::Dictionary(Rc::new(self.parse()?)),
                 PdfToken::LeftAngleBracket => Value::HexString(self.parse()?),
                 PdfToken::Solidus => Value::Name(self.parse()?),
                 PdfToken::Number(_) => {
                     let start = self.tokenizer.position;
                     let value: Result<IndirectObjectOrReference, ParserError> = self.parse();
                     if let Ok(o) = value {
-                        return Ok(Value::IndirectObject(o));
+                        return Ok(Value::IndirectObject(Rc::new(o)));
                     }
 
                     self.tokenizer.position = start;

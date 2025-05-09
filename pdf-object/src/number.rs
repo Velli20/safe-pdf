@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Number {
     pub real: Option<f64>,
     pub integer: Option<i64>,

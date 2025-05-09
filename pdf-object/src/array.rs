@@ -1,6 +1,6 @@
 use crate::Value;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Array(pub Vec<Box<Value>>);
 
 impl Array {

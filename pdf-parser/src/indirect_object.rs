@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use pdf_object::{Value, indirect_object::IndirectObjectOrReference};
 use pdf_tokenizer::PdfToken;
 
@@ -64,6 +66,7 @@ impl ParseObject<IndirectObjectOrReference> for PdfParser<'_> {
                 object_number,
                 generation_number,
                 None,
+                None,
             ));
         }
 
@@ -77,13 +80,15 @@ impl ParseObject<IndirectObjectOrReference> for PdfParser<'_> {
 
         self.skip_whitespace();
 
-        if let Some(PdfToken::Alphabetic(b's')) = self.tokenizer.peek()? {
+        let stream = if let Some(PdfToken::Alphabetic(b's')) = self.tokenizer.peek()? {
             if let Value::Dictionary(dictionary) = &object {
-                let stream = self.parse_stream(dictionary)?;
+                Some(Rc::new(self.parse_stream(dictionary)?))
             } else {
                 return Err(ParserError::StreamObjectWithoutDictionary);
             }
-        }
+        } else {
+            None
+        };
 
         // Read the keyword `endobj`.
         self.read_keyword(ENDOBJ_KEYWORD)?;
@@ -91,7 +96,8 @@ impl ParseObject<IndirectObjectOrReference> for PdfParser<'_> {
         return Ok(IndirectObjectOrReference::new(
             object_number,
             generation_number,
-            Some(Box::new(object)),
+            Some(object),
+            stream,
         ));
     }
 }
@@ -127,15 +133,16 @@ mod tests {
             object_number,
             generation_number,
             object,
+            ..
         } = parser.parse().unwrap();
 
         assert_eq!(object_number, 0);
         assert_eq!(generation_number, 1);
         assert_eq!(
             object,
-            Some(Box::new(Value::LiteralString(LiteralString::new(
-                String::from("HELLO"),
-            ))))
+            Some(Value::LiteralString(LiteralString::new(String::from(
+                "HELLO"
+            ),)))
         );
     }
 }
