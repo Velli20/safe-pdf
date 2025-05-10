@@ -92,7 +92,7 @@ impl ParseObject<Trailer> for PdfParser<'_> {
         // Read the offset of the xref section.
         let offset = self.read_number::<u32>(TrailerError::MissingOffset)?;
 
-        Ok(Trailer::new(dictionary))
+        Ok(Trailer::new(dictionary, offset))
     }
 }
 

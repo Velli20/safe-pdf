@@ -1,6 +1,6 @@
 use crate::{error::PageError, media_box::MediaBox};
 use pdf_object::{
-    Value, dictionary::Dictionary, indirect_object::IndirectObjectOrReference,
+    ObjectVariant, Value, dictionary::Dictionary, indirect_object::IndirectObject,
     object_collection::ObjectCollection,
 };
 
@@ -12,10 +12,10 @@ use pdf_object::{
 pub struct PdfPage {
     /// The page object dictionary containing all page-specific information.
     /// Reference to the parent page tree node.
-    parent: Option<IndirectObjectOrReference>,
+    parent: Option<IndirectObject>,
     /// The contents of the page, which can be a single stream object or
     /// an array of streams.
-    contents: Option<Value>,
+    contents: Option<ObjectVariant>,
     /// `/MediaBox` attribute which defines the page boundaries.
     media_box: MediaBox,
 }
@@ -98,20 +98,38 @@ impl PdfPage {
             // 3. An indirect reference to a stream object.
             // 4. An indirect reference to an array of stream objects.
 
-            if let Some(obj) = contents.object.as_ref() {
-                // The object is directly available (not an indirect reference that needs resolving here).
-                Some(obj.clone())
-            } else {
+            if let ObjectVariant::Reference(object_number) = contents {
                 // The object is an indirect reference; resolve it from the `objects` collection.
                 Some(
                     objects
-                        .get(contents.object_number)
+                        .get(*object_number)
                         .ok_or(PageError::MissingContent)?,
                 )
+            } else if let ObjectVariant::IndirectObject(obj) = contents {
+                // The object is directly available (not an indirect reference that needs resolving here).
+                Some(contents.clone())
+            } else {
+                return Err(PageError::MissingContent);
             }
         } else {
             None
         };
+
+        if let Some(ObjectVariant::IndirectObject(s)) = &contents {
+            if let Some(Value::Array(array)) = &s.object {
+                // println!("Has arry {:?}", array);
+                for obj in array.0.iter() {
+                    if let Value::IndirectObject(s) = obj {
+                        // println!("Has arry inner {:?}", s);
+                        if let Some(ObjectVariant::IndirectObject(ss)) =
+                            objects.get(s.object_number())
+                        {
+                            println!("inner inner cont: {:?}", ss);
+                        }
+                    }
+                }
+            }
+        }
 
         println!("contents {:?}", contents);
 
@@ -121,13 +139,12 @@ impl PdfPage {
                 // Pattern match for exactly 4 elements in the slice.
                 [l, t, r, b] => {
                     // Safely extract and cast the values
+                    let left = l.as_number::<u32>()?;
+                    let top = t.as_number::<u32>()?;
+                    let right = r.as_number::<u32>()?;
+                    let bottom = b.as_number::<u32>()?;
 
-                    let left = l.as_number().unwrap().integer.unwrap();
-                    let top = t.as_number().unwrap().integer.unwrap();
-                    let right = r.as_number().unwrap().integer.unwrap();
-                    let bottom = b.as_number().unwrap().integer.unwrap();
-
-                    MediaBox::new(left as u32, top as u32, right as u32, bottom as u32)
+                    MediaBox::new(left, top, right, bottom)
                 }
                 _ => {
                     return Err(PageError::InvalidMediaBox(
@@ -139,26 +156,6 @@ impl PdfPage {
             return Err(PageError::MissingMediaBox);
         };
 
-        // if let Some(Value::IndirectObject(ss)) = &contents {
-        //     if ss.object.is_none() {
-        //         contents = objects.get(ss.object_number).unwrap().clone();
-        //     } else {
-        //         contents = ss.object.as_ref().unwrap().clone();
-        //     }
-        // }
-
-        // if let Some(Value::Array(array)) = &mut contents {
-        //     for obj in array.0.iter_mut() {
-        //         if let Value::IndirectObject(ss) = obj {
-        //             let ii = objects.get(ss.object_number);
-        //             if ii.is_none() {
-        //                 panic!()
-        //             }
-        //             let ii = ii.unwrap();
-        //             *obj = ii;
-        //         }
-        //     }
-        // }
         Ok(Self {
             parent: None,
             contents,

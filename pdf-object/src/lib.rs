@@ -22,18 +22,38 @@ use boolean::Boolean;
 use comment::Comment;
 use cross_reference_table::CrossReferenceTable;
 use dictionary::Dictionary;
+use error::ObjectError;
 use hex_string::HexString;
-use indirect_object::IndirectObjectOrReference;
+use indirect_object::IndirectObject;
 use literal_string::LiteralString;
 use name::Name;
 use null::NullObject;
 use number::Number;
-use stream::Stream;
+use stream::StreamObject;
 use trailer::Trailer;
+
+use num_traits::FromPrimitive;
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum ObjectVariant {
+    IndirectObject(Rc<IndirectObject>),
+    Reference(i32),
+    Stream(Rc<StreamObject>),
+}
+
+impl ObjectVariant {
+    pub fn object_number(&self) -> i32 {
+        match self {
+            ObjectVariant::IndirectObject(o) => o.object_number,
+            ObjectVariant::Reference(o) => *o,
+            ObjectVariant::Stream(o) => o.object_number,
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Value {
-    IndirectObject(Rc<IndirectObjectOrReference>),
+    IndirectObject(ObjectVariant),
     Dictionary(Rc<Dictionary>),
     Array(Array),
     LiteralString(LiteralString),
@@ -41,7 +61,7 @@ pub enum Value {
     Number(Number),
     Boolean(Boolean),
     Null(NullObject),
-    Stream(Stream),
+    Stream(StreamObject),
     HexString(HexString),
     Comment(Comment),
     Trailer(Trailer),
@@ -58,7 +78,7 @@ impl Value {
         }
     }
 
-    pub fn as_object(&self) -> Option<&IndirectObjectOrReference> {
+    pub fn as_object(&self) -> Option<&ObjectVariant> {
         if let Value::IndirectObject(value) = self {
             Some(value)
         } else {
@@ -66,11 +86,51 @@ impl Value {
         }
     }
 
-    pub fn as_number(&self) -> Option<&Number> {
+    /// Attempts to convert this `Value` into a numeric type `T`.
+    ///
+    /// This function checks if the `Value` is a `Value::Number`.
+    /// If it is, it attempts to convert the inner integer or float
+    /// value into the requested type `T` using the `FromPrimitive` trait.
+    ///
+    /// # Type Parameters
+    ///
+    /// - `T`: The target numeric type. Must implement `num_traits::FromPrimitive`.
+    ///
+    /// # Returns
+    ///
+    /// Value converted to `T` or an error if the conversion from the internal value to `T` fails.
+    pub fn as_number<T>(&self) -> Result<T, ObjectError>
+    where
+        T: FromPrimitive,
+    {
         if let Value::Number(value) = self {
-            Some(value)
-        } else {
-            None
+            if let Some(i) = value.integer {
+                return T::from_i64(i).ok_or(ObjectError::NumberConversionError);
+            } else if let Some(f) = value.real {
+                return T::from_f64(f).ok_or(ObjectError::NumberConversionError);
+            }
+        }
+        Err(ObjectError::TypeMismatch("Number", self.name()))
+    }
+
+    /// Returns a string representation of the `Value` variant's type.
+    /// This is useful for creating descriptive error messages.
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Value::IndirectObject(_) => "IndirectObject",
+            Value::Dictionary(_) => "Dictionary",
+            Value::Array(_) => "Array",
+            Value::LiteralString(_) => "LiteralString",
+            Value::Name(_) => "Name",
+            Value::Number(_) => "Number",
+            Value::Boolean(_) => "Boolean",
+            Value::Null(_) => "Null",
+            Value::Stream(_) => "Stream",
+            Value::HexString(_) => "HexString",
+            Value::Comment(_) => "Comment",
+            Value::Trailer(_) => "Trailer",
+            Value::CrossReferenceTable(_) => "CrossReferenceTable",
+            Value::EndOfFile => "EndOfFile",
         }
     }
 }

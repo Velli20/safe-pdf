@@ -40,7 +40,8 @@ mod tests {
 
         for input in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let result: NullObject = parser.parse().unwrap();
+            let result: Result<NullObject, ParserError> = parser.parse();
+            assert!(result.is_ok());
         }
         let invalid_inputs: Vec<&[u8]> = vec![
             b"nullabc\n",

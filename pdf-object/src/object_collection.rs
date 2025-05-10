@@ -1,17 +1,15 @@
-use std::{collections::HashMap, rc::Rc};
+use std::collections::HashMap;
 
-use crate::{
-    Value, dictionary::Dictionary, error::ObjectError, indirect_object::IndirectObjectOrReference,
-};
+use crate::{ObjectVariant, Value, dictionary::Dictionary, error::ObjectError};
 
 #[derive(Default)]
 pub struct ObjectCollection {
-    pub map: HashMap<i32, Rc<IndirectObjectOrReference>>,
+    pub map: HashMap<i32, ObjectVariant>,
 }
 
 impl ObjectCollection {
-    pub fn insert(&mut self, obj: Rc<IndirectObjectOrReference>) -> Result<(), ObjectError> {
-        let key = obj.object_number;
+    pub fn insert(&mut self, obj: ObjectVariant) -> Result<(), ObjectError> {
+        let key = obj.object_number();
 
         if self.map.insert(key, obj).is_some() {
             Err(ObjectError::DuplicateKeyInObjectCollection(key))
@@ -20,21 +18,37 @@ impl ObjectCollection {
         }
     }
 
-    pub fn get(&self, key: i32) -> Option<Value> {
+    pub fn get(&self, key: i32) -> Option<ObjectVariant> {
         if let Some(obj) = self.map.get(&key) {
-            return Some(Value::IndirectObject(obj.clone()));
+            return Some(obj.clone());
         }
+        None
+    }
+
+    pub fn dereference(&self, mut key: i32) -> Option<ObjectVariant> {
+        loop {
+            if let Some(obj) = self.map.get(&key) {
+                if let ObjectVariant::Reference(object_number) = obj {
+                    key = *object_number;
+                }
+                return Some(obj.clone());
+            } else {
+                break;
+            }
+        }
+
         None
     }
 
     pub fn get_dictionary(&self, key: i32) -> Option<&Dictionary> {
         if let Some(obj) = self.map.get(&key) {
-            if let Some(inner) = &obj.object {
-                if let Value::IndirectObject(s) = inner {
-                    return self.get_dictionary(s.object_number);
-                } else if let Value::Dictionary(dictionary) = inner {
-                    return Some(dictionary);
+            if let ObjectVariant::IndirectObject(inner) = obj {
+                if let Some(Value::Dictionary(dictionary)) = &inner.object {
+                    return Some(dictionary.as_ref());
                 }
+            }
+            if let ObjectVariant::Reference(object_number) = obj {
+                return self.get_dictionary(*object_number);
             }
         }
         None

@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, rc::Rc};
 
-use crate::{Value, array::Array, indirect_object::IndirectObjectOrReference};
+use crate::{ObjectVariant, Value, array::Array, indirect_object::IndirectObject};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Dictionary {
@@ -30,7 +30,7 @@ impl Dictionary {
             })
     }
 
-    pub fn get_object(&self, key: &str) -> Option<&Rc<IndirectObjectOrReference>> {
+    pub fn get_object(&self, key: &str) -> Option<&ObjectVariant> {
         self.dictionary
             .get(key)
             .and_then(|value| match value.as_ref() {

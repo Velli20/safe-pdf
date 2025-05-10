@@ -18,8 +18,8 @@ use std::{rc::Rc, str::FromStr};
 
 use error::ParserError;
 use pdf_object::{
-    Value, dictionary::Dictionary, indirect_object::IndirectObjectOrReference, stream::Stream,
-    trailer::Trailer,
+    ObjectVariant, Value, dictionary::Dictionary, indirect_object::IndirectObject,
+    stream::StreamObject, trailer::Trailer,
 };
 use pdf_tokenizer::{PdfToken, Tokenizer};
 
@@ -47,8 +47,8 @@ pub trait ParseObject<T> {
     fn parse(&mut self) -> Result<T, ParserError>;
 }
 
-pub trait StreamObjectParser {
-    fn parse_stream(&mut self, dictionary: &Dictionary) -> Result<Stream, ParserError>;
+pub trait StreamParser {
+    fn parse_stream(&mut self, dictionary: &Dictionary) -> Result<Vec<u8>, ParserError>;
 }
 
 impl<'a> PdfParser<'a> {
@@ -189,7 +189,10 @@ impl<'a> PdfParser<'a> {
                     // Read the keyword `EOF`.
                     let literal = self.tokenizer.read_excactly(EOF_KEYWORD.len())?;
                     if literal != EOF_KEYWORD {
-                        return Err(ParserError::InvalidToken);
+                        return Err(ParserError::InvalidKeyword(
+                            "EOF".to_string(),
+                            String::from_utf8_lossy(literal).to_string(),
+                        ));
                     }
                     return Ok(Value::EndOfFile);
                 }
@@ -218,9 +221,9 @@ impl<'a> PdfParser<'a> {
                 PdfToken::Solidus => Value::Name(self.parse()?),
                 PdfToken::Number(_) => {
                     let start = self.tokenizer.position;
-                    let value: Result<IndirectObjectOrReference, ParserError> = self.parse();
+                    let value: Result<ObjectVariant, ParserError> = self.parse();
                     if let Ok(o) = value {
-                        return Ok(Value::IndirectObject(Rc::new(o)));
+                        return Ok(Value::IndirectObject(o));
                     }
 
                     self.tokenizer.position = start;

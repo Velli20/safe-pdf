@@ -1,10 +1,10 @@
 use std::io::Read;
 
 use flate2::bufread::ZlibDecoder;
-use pdf_object::{dictionary::Dictionary, stream::Stream};
+use pdf_object::dictionary::Dictionary;
 use pdf_tokenizer::PdfToken;
 
-use crate::{PdfParser, StreamObjectParser, error::ParserError};
+use crate::{PdfParser, StreamParser, error::ParserError};
 
 /// Represents an error that can occur while parsing an indirect object or an object reference.
 #[derive(Debug, PartialEq)]
@@ -26,7 +26,7 @@ pub enum StreamParsingError {
     DecompressionError(String),
 }
 
-impl<'a> StreamObjectParser for PdfParser<'a> {
+impl<'a> StreamParser for PdfParser<'a> {
     /// Parses a PDF stream object from the current position in the input buffer.
     ///
     /// A stream object consists of a dictionary followed by the keywords `stream` and `endstream`,
@@ -50,7 +50,7 @@ impl<'a> StreamObjectParser for PdfParser<'a> {
     /// # Parameters
     ///
     /// - `dictionary`: A reference to the dictionary object that describes the stream.
-    fn parse_stream(&mut self, dictionary: &Dictionary) -> Result<Stream, ParserError> {
+    fn parse_stream(&mut self, dictionary: &Dictionary) -> Result<Vec<u8>, ParserError> {
         const STREAM_START: &[u8] = b"stream";
         const STREAM_END: &[u8] = b"endstream";
 
@@ -79,17 +79,16 @@ impl<'a> StreamObjectParser for PdfParser<'a> {
         // Check if the stream data is compressed using the FlateDecode (DEFLATE) algorithm.
         if decode == "FlateDecode" {
             let mut d = ZlibDecoder::new(stream_data.as_slice());
-            let mut s = String::new();
-            if let Err(e) = d.read_to_string(&mut s) {
+            let mut s = Vec::new();
+
+            if let Err(e) = d.read_to_end(&mut s) {
                 return Err(ParserError::from(StreamParsingError::DecompressionError(
                     e.to_string(),
                 )));
             }
 
-            d.read_to_string(&mut s).unwrap();
-            return Ok(Stream::new(s));
+            return Ok(s);
         }
-
         return Err(ParserError::from(StreamParsingError::UsupportedFilter(
             decode.to_string(),
         )));

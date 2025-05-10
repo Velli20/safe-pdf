@@ -50,7 +50,7 @@ impl PdfDocument {
 
         // Get the catalog.
         let catalog = objects
-            .get_dictionary(root.object_number)
+            .get_dictionary(root.object_number())
             .ok_or(PdfError::MissingCatalog)?
             .clone();
 
@@ -58,7 +58,7 @@ impl PdfDocument {
         let pages_num = catalog.get_object("Pages").unwrap();
 
         let pages_dict = objects
-            .get_dictionary(pages_num.object_number)
+            .get_dictionary(pages_num.object_number())
             .ok_or(PdfError::MissingPages)?
             .clone();
 
@@ -72,8 +72,8 @@ impl PdfDocument {
 
             // Get the page object dictionary.
             let page_obj = objects
-                .get_dictionary(p.object_number)
-                .ok_or(PdfError::PageNotFound(p.object_number))?
+                .get_dictionary(p.object_number())
+                .ok_or(PdfError::PageNotFound(p.object_number()))?
                 .clone();
 
             let page =

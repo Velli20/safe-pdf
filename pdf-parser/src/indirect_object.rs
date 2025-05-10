@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
-use pdf_object::{Value, indirect_object::IndirectObjectOrReference};
+use pdf_object::{ObjectVariant, Value, indirect_object::IndirectObject, stream::StreamObject};
 use pdf_tokenizer::PdfToken;
 
-use crate::{ParseObject, PdfParser, StreamObjectParser, error::ParserError};
+use crate::{ParseObject, PdfParser, StreamParser, error::ParserError};
 
 /// Represents an error that can occur while parsing an indirect object or an object reference.
 #[derive(Debug, PartialEq)]
@@ -14,7 +14,7 @@ pub enum IndirectObjectError {
     MissingGenerationNumber,
 }
 
-impl ParseObject<IndirectObjectOrReference> for PdfParser<'_> {
+impl ParseObject<ObjectVariant> for PdfParser<'_> {
     /// Parses an indirect object or an object reference from the current position in the input stream.
     ///
     /// # Indirect Object
@@ -49,7 +49,7 @@ impl ParseObject<IndirectObjectOrReference> for PdfParser<'_> {
     /// ```text
     /// 15 0 R
     /// ```
-    fn parse(&mut self) -> Result<IndirectObjectOrReference, ParserError> {
+    fn parse(&mut self) -> Result<ObjectVariant, ParserError> {
         const OBJ_KEYWORD: &[u8] = b"obj";
         const ENDOBJ_KEYWORD: &[u8] = b"endobj";
 
@@ -62,12 +62,7 @@ impl ParseObject<IndirectObjectOrReference> for PdfParser<'_> {
         // If the next token is 'R', it means this is an object reference.
         if let Some(PdfToken::Alphabetic(b'R')) = self.tokenizer.peek()? {
             self.tokenizer.read();
-            return Ok(IndirectObjectOrReference::new(
-                object_number,
-                generation_number,
-                None,
-                None,
-            ));
+            return Ok(ObjectVariant::Reference(object_number));
         }
 
         // Read the keyword `obj`.
@@ -80,25 +75,32 @@ impl ParseObject<IndirectObjectOrReference> for PdfParser<'_> {
 
         self.skip_whitespace();
 
-        let stream = if let Some(PdfToken::Alphabetic(b's')) = self.tokenizer.peek()? {
+        if let Some(PdfToken::Alphabetic(b's')) = self.tokenizer.peek()? {
             if let Value::Dictionary(dictionary) = &object {
-                Some(Rc::new(self.parse_stream(dictionary)?))
+                let stream = self.parse_stream(dictionary)?;
+
+                // Read the keyword `endobj`.
+                self.read_keyword(ENDOBJ_KEYWORD)?;
+
+                return Ok(ObjectVariant::Stream(Rc::new(StreamObject::new(
+                    object_number,
+                    generation_number,
+                    dictionary.clone(),
+                    stream,
+                ))));
             } else {
                 return Err(ParserError::StreamObjectWithoutDictionary);
             }
-        } else {
-            None
-        };
+        }
 
         // Read the keyword `endobj`.
         self.read_keyword(ENDOBJ_KEYWORD)?;
 
-        return Ok(IndirectObjectOrReference::new(
+        return Ok(ObjectVariant::IndirectObject(Rc::new(IndirectObject::new(
             object_number,
             generation_number,
             Some(object),
-            stream,
-        ));
+        ))));
     }
 }
 
@@ -129,20 +131,24 @@ mod tests {
         let input = b"0 1 obj\n(HELLO)\nendobj\n";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let IndirectObjectOrReference {
-            object_number,
-            generation_number,
-            object,
-            ..
-        } = parser.parse().unwrap();
+        if let ObjectVariant::IndirectObject(indirect_object) = parser.parse().unwrap() {
+            let IndirectObject {
+                object_number,
+                generation_number,
+                object,
+                ..
+            } = indirect_object.as_ref();
 
-        assert_eq!(object_number, 0);
-        assert_eq!(generation_number, 1);
-        assert_eq!(
-            object,
-            Some(Value::LiteralString(LiteralString::new(String::from(
-                "HELLO"
-            ),)))
-        );
+            assert_eq!(*object_number, 0);
+            assert_eq!(*generation_number, 1);
+            assert_eq!(
+                *object,
+                Some(Value::LiteralString(LiteralString::new(String::from(
+                    "HELLO"
+                ),)))
+            );
+        } else {
+            panic!("Expected IndirectObject variant");
+        }
     }
 }
