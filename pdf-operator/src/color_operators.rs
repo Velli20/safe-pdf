@@ -1,4 +1,4 @@
-use crate::PdfOperator;
+use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
 
 /// Sets the fill color to a grayscale value. (PDF operator `g`)
 /// The gray level applies to subsequent fill operations.
@@ -8,15 +8,19 @@ pub struct SetGrayFill {
     gray: f32,
 }
 
-impl PdfOperator for SetGrayFill {
-    fn operator() -> &'static str {
+impl SetGrayFill {
+    pub const fn operator_name() -> &'static str {
         "g"
     }
-}
 
-impl SetGrayFill {
     pub fn new(gray: f32) -> Self {
         Self { gray }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -28,15 +32,19 @@ pub struct SetGrayStroke {
     gray: f32,
 }
 
-impl PdfOperator for SetGrayStroke {
-    fn operator() -> &'static str {
+impl SetGrayStroke {
+    pub const fn operator_name() -> &'static str {
         "G"
     }
-}
 
-impl SetGrayStroke {
     pub fn new(gray: f32) -> Self {
         Self { gray }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -52,15 +60,19 @@ pub struct SetRGBFill {
     b: f32,
 }
 
-impl PdfOperator for SetRGBFill {
-    fn operator() -> &'static str {
+impl SetRGBFill {
+    pub const fn operator_name() -> &'static str {
         "rg"
     }
-}
 
-impl SetRGBFill {
     pub fn new(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -76,15 +88,19 @@ pub struct SetRGBStroke {
     b: f32,
 }
 
-impl PdfOperator for SetRGBStroke {
-    fn operator() -> &'static str {
+impl SetRGBStroke {
+    pub const fn operator_name() -> &'static str {
         "RG"
     }
-}
 
-impl SetRGBStroke {
     pub fn new(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -102,15 +118,19 @@ pub struct SetCMYKFill {
     k: f32,
 }
 
-impl PdfOperator for SetCMYKFill {
-    fn operator() -> &'static str {
+impl SetCMYKFill {
+    pub const fn operator_name() -> &'static str {
         "k"
     }
-}
 
-impl SetCMYKFill {
     pub fn new(c: f32, m: f32, y: f32, k: f32) -> Self {
         Self { c, m, y, k }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -128,14 +148,18 @@ pub struct SetCMYKStroke {
     k: f32,
 }
 
-impl PdfOperator for SetCMYKStroke {
-    fn operator() -> &'static str {
+impl SetCMYKStroke {
+    pub const fn operator_name() -> &'static str {
         "K"
     }
-}
 
-impl SetCMYKStroke {
     pub fn new(c: f32, m: f32, y: f32, k: f32) -> Self {
         Self { c, m, y, k }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }

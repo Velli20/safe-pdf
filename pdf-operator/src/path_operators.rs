@@ -1,4 +1,4 @@
-use crate::PdfOperator;
+use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
 
 /// Begins a new subpath by moving the current point to coordinates (x, y), omitting any connecting line segment. (PDF operator `m`)
 /// If the `m` operator is the first operator in a path, it sets the current point.
@@ -10,8 +10,8 @@ pub struct MoveTo {
     y: f32,
 }
 
-impl PdfOperator for MoveTo {
-    fn operator() -> &'static str {
+impl MoveTo {
+    pub const fn operator_name() -> &'static str {
         "m"
     }
 }
@@ -19,6 +19,12 @@ impl PdfOperator for MoveTo {
 impl MoveTo {
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -32,8 +38,8 @@ pub struct LineTo {
     y: f32,
 }
 
-impl PdfOperator for LineTo {
-    fn operator() -> &'static str {
+impl LineTo {
+    pub const fn operator_name() -> &'static str {
         "l"
     }
 }
@@ -41,6 +47,12 @@ impl PdfOperator for LineTo {
 impl LineTo {
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -63,8 +75,8 @@ pub struct CurveTo {
     y3: f32,
 }
 
-impl PdfOperator for CurveTo {
-    fn operator() -> &'static str {
+impl CurveTo {
+    pub const fn operator_name() -> &'static str {
         "c"
     }
 }
@@ -79,6 +91,12 @@ impl CurveTo {
             x3,
             y3,
         }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -98,15 +116,19 @@ pub struct CurveToV {
     y3: f32,
 } // Initial point replicated
 
-impl PdfOperator for CurveToV {
-    fn operator() -> &'static str {
+impl CurveToV {
+    pub const fn operator_name() -> &'static str {
         "v"
     }
-}
 
-impl CurveToV {
     pub fn new(x2: f32, y2: f32, x3: f32, y3: f32) -> Self {
         Self { x2, y2, x3, y3 }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -125,15 +147,19 @@ pub struct CurveToY {
     y3: f32,
 } // Final point replicated
 
-impl PdfOperator for CurveToY {
-    fn operator() -> &'static str {
+impl CurveToY {
+    pub const fn operator_name() -> &'static str {
         "y"
     }
-}
 
-impl CurveToY {
     pub fn new(x1: f32, y1: f32, x3: f32, y3: f32) -> Self {
         Self { x1, y1, x3, y3 }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -142,15 +168,18 @@ impl CurveToY {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClosePath;
 
-impl PdfOperator for ClosePath {
-    fn operator() -> &'static str {
+impl ClosePath {
+    pub const fn operator_name() -> &'static str {
         "h"
     }
-}
 
-impl ClosePath {
     pub fn new() -> Self {
         Self
+    }
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -169,13 +198,11 @@ pub struct Rectangle {
     height: f32,
 }
 
-impl PdfOperator for Rectangle {
-    fn operator() -> &'static str {
+impl Rectangle {
+    pub const fn operator_name() -> &'static str {
         "re"
     }
-}
 
-impl Rectangle {
     pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
         Self {
             x,
@@ -183,5 +210,11 @@ impl Rectangle {
             width,
             height,
         }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }

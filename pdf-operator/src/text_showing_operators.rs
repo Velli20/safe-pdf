@@ -1,4 +1,5 @@
-use crate::{PdfOperator, TextElement};
+use crate::TextElement;
+use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
 
 /// Shows a text string. (PDF operator `Tj`)
 #[derive(Debug, Clone, PartialEq)]
@@ -7,15 +8,19 @@ pub struct ShowText {
     text: String,
 }
 
-impl PdfOperator for ShowText {
-    fn operator() -> &'static str {
+impl ShowText {
+    pub const fn operator_name() -> &'static str {
         "Tj"
     }
-}
 
-impl ShowText {
     pub fn new(text: String) -> Self {
         Self { text }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -27,15 +32,19 @@ pub struct MoveNextLineShowText {
     text: String,
 }
 
-impl PdfOperator for MoveNextLineShowText {
-    fn operator() -> &'static str {
+impl MoveNextLineShowText {
+    pub const fn operator_name() -> &'static str {
         "'"
     }
-}
 
-impl MoveNextLineShowText {
     pub fn new(text: String) -> Self {
         Self { text }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -52,19 +61,23 @@ pub struct SetSpacingMoveShowText {
     text: String,
 }
 
-impl PdfOperator for SetSpacingMoveShowText {
-    fn operator() -> &'static str {
+impl SetSpacingMoveShowText {
+    pub const fn operator_name() -> &'static str {
         "\""
     }
-}
 
-impl SetSpacingMoveShowText {
     pub fn new(word_spacing: f32, char_spacing: f32, text: String) -> Self {
         Self {
             word_spacing,
             char_spacing,
             text,
         }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -78,14 +91,18 @@ pub struct ShowTextArray {
     elements: Vec<TextElement>, // Assuming TextElement is defined elsewhere (e.g., in lib.rs or a common module)
 }
 
-impl PdfOperator for ShowTextArray {
-    fn operator() -> &'static str {
+impl ShowTextArray {
+    pub const fn operator_name() -> &'static str {
         "TJ"
     }
-}
 
-impl ShowTextArray {
     pub fn new(elements: Vec<TextElement>) -> Self {
         Self { elements }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }

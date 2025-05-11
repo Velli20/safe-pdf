@@ -1,4 +1,4 @@
-use crate::PdfOperator;
+use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
 
 /// Begins a marked-content sequence. (PDF operator `BMC`)
 /// Marked-content sequences associate a tag with a sequence of content stream operations.
@@ -8,15 +8,19 @@ pub struct BeginMarkedContent {
     tag: String,
 }
 
-impl PdfOperator for BeginMarkedContent {
-    fn operator() -> &'static str {
+impl BeginMarkedContent {
+    pub const fn operator_name() -> &'static str {
         "BMC"
     }
-}
 
-impl BeginMarkedContent {
     pub fn new(tag: String) -> Self {
         Self { tag }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -31,15 +35,19 @@ pub struct BeginMarkedContentWithProps {
     properties: String,
 }
 
-impl PdfOperator for BeginMarkedContentWithProps {
-    fn operator() -> &'static str {
+impl BeginMarkedContentWithProps {
+    pub const fn operator_name() -> &'static str {
         "BDC"
     }
-}
 
-impl BeginMarkedContentWithProps {
     pub fn new(tag: String, properties: String) -> Self {
         Self { tag, properties }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -47,14 +55,18 @@ impl BeginMarkedContentWithProps {
 #[derive(Debug, Clone, PartialEq)]
 pub struct EndMarkedContent;
 
-impl PdfOperator for EndMarkedContent {
-    fn operator() -> &'static str {
+impl EndMarkedContent {
+    pub const fn operator_name() -> &'static str {
         "EMC"
     }
-}
 
-impl EndMarkedContent {
     pub fn new() -> Self {
         Self
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }

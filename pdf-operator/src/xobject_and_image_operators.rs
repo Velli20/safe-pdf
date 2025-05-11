@@ -1,4 +1,4 @@
-use crate::PdfOperator;
+use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
 
 /// Invokes a named XObject. (PDF operator `Do`)
 /// XObjects are external objects such as images or self-contained page descriptions (Form XObjects).
@@ -8,15 +8,19 @@ pub struct InvokeXObject {
     name: String,
 }
 
-impl PdfOperator for InvokeXObject {
-    fn operator() -> &'static str {
+impl InvokeXObject {
+    pub const fn operator_name() -> &'static str {
         "Do"
     }
-}
 
-impl InvokeXObject {
     pub fn new(name: String) -> Self {
         Self { name }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -24,15 +28,20 @@ impl InvokeXObject {
 /// This operator is followed by key-value pairs defining the image's properties, then the `ID` operator and image data, and finally `EI`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BeginInlineImage;
-impl PdfOperator for BeginInlineImage {
-    fn operator() -> &'static str {
-        "BI"
-    }
-}
 
 impl BeginInlineImage {
+    pub const fn operator_name() -> &'static str {
+        "BI"
+    }
+
     pub fn new() -> Self {
         Self
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -45,29 +54,37 @@ pub struct InlineImageData {
     data: Vec<u8>,
 }
 
-impl PdfOperator for InlineImageData {
-    fn operator() -> &'static str {
+impl InlineImageData {
+    pub const fn operator_name() -> &'static str {
         "ID"
     }
-}
 
-impl InlineImageData {
     pub fn new(data: Vec<u8>) -> Self {
         Self { data }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
 /// Ends an inline image object. (PDF operator `EI`)
 #[derive(Debug, Clone, PartialEq)]
 pub struct EndInlineImage;
-impl PdfOperator for EndInlineImage {
-    fn operator() -> &'static str {
+impl EndInlineImage {
+    pub const fn operator_name() -> &'static str {
         "EI"
     }
-}
 
-impl EndInlineImage {
     pub fn new() -> Self {
         Self
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }

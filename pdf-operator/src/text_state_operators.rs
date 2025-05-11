@@ -1,4 +1,4 @@
-use crate::PdfOperator;
+use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
 
 /// Sets the character spacing, `Tc`, which is a number expressed in unscaled text space units. (PDF operator `Tc`)
 #[derive(Debug, Clone, PartialEq)]
@@ -7,14 +7,20 @@ pub struct SetCharacterSpacing {
     spacing: f32,
 }
 
-impl PdfOperator for SetCharacterSpacing {
-    fn operator() -> &'static str {
+impl SetCharacterSpacing {
+    pub const fn operator_name() -> &'static str {
         "Tc"
     }
 }
 impl SetCharacterSpacing {
     pub fn new(spacing: f32) -> Self {
         Self { spacing }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -26,15 +32,19 @@ pub struct SetWordSpacing {
     spacing: f32,
 }
 
-impl PdfOperator for SetWordSpacing {
-    fn operator() -> &'static str {
+impl SetWordSpacing {
+    pub const fn operator_name() -> &'static str {
         "Tw"
     }
-}
 
-impl SetWordSpacing {
     pub fn new(spacing: f32) -> Self {
         Self { spacing }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -45,15 +55,19 @@ pub struct SetHorizontalScaling {
     scale: f32,
 }
 
-impl PdfOperator for SetHorizontalScaling {
-    fn operator() -> &'static str {
+impl SetHorizontalScaling {
+    pub const fn operator_name() -> &'static str {
         "Tz"
     }
-}
 
-impl SetHorizontalScaling {
     pub fn new(scale: f32) -> Self {
         Self { scale }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -64,15 +78,19 @@ pub struct SetLeading {
     leading: f32,
 }
 
-impl PdfOperator for SetLeading {
-    fn operator() -> &'static str {
+impl SetLeading {
+    pub const fn operator_name() -> &'static str {
         "TL"
     }
-}
 
-impl SetLeading {
     pub fn new(leading: f32) -> Self {
         Self { leading }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -85,15 +103,19 @@ pub struct SetFont {
     size: f32,
 }
 
-impl PdfOperator for SetFont {
-    fn operator() -> &'static str {
+impl SetFont {
+    pub const fn operator_name() -> &'static str {
         "Tf"
     }
-}
 
-impl SetFont {
     pub fn new(name: String, size: f32) -> Self {
         Self { name, size }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -112,15 +134,19 @@ pub struct SetRenderingMode {
     mode: u8,
 }
 
-impl PdfOperator for SetRenderingMode {
-    fn operator() -> &'static str {
+impl SetRenderingMode {
+    pub const fn operator_name() -> &'static str {
         "Tr"
     }
-}
 
-impl SetRenderingMode {
     pub fn new(mode: u8) -> Self {
         Self { mode }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -131,14 +157,18 @@ pub struct SetTextRise {
     rise: f32,
 }
 
-impl PdfOperator for SetTextRise {
-    fn operator() -> &'static str {
+impl SetTextRise {
+    pub const fn operator_name() -> &'static str {
         "Ts"
     }
-}
 
-impl SetTextRise {
     pub fn new(rise: f32) -> Self {
         Self { rise }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }

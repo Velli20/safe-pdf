@@ -1,4 +1,4 @@
-use crate::PdfOperator;
+use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
 
 /// Sets the line width for path stroking. (PDF operator `w`)
 #[derive(Debug, Clone, PartialEq)]
@@ -7,15 +7,19 @@ pub struct SetLineWidth {
     width: f32,
 }
 
-impl PdfOperator for SetLineWidth {
-    fn operator() -> &'static str {
+impl SetLineWidth {
+    pub const fn operator_name() -> &'static str {
         "w"
     }
-}
 
-impl SetLineWidth {
     pub fn new(width: f32) -> Self {
         Self { width }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -27,15 +31,19 @@ pub struct SetLineCapStyle {
     style: u8,
 }
 
-impl PdfOperator for SetLineCapStyle {
-    fn operator() -> &'static str {
+impl SetLineCapStyle {
+    pub const fn operator_name() -> &'static str {
         "J"
     }
-}
 
-impl SetLineCapStyle {
     pub fn new(style: u8) -> Self {
         Self { style }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -47,15 +55,19 @@ pub struct SetLineJoinStyle {
     style: u8,
 }
 
-impl PdfOperator for SetLineJoinStyle {
-    fn operator() -> &'static str {
+impl SetLineJoinStyle {
+    pub const fn operator_name() -> &'static str {
         "j"
     }
-}
 
-impl SetLineJoinStyle {
     pub fn new(style: u8) -> Self {
         Self { style }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -67,15 +79,19 @@ pub struct SetMiterLimit {
     limit: f32,
 }
 
-impl PdfOperator for SetMiterLimit {
-    fn operator() -> &'static str {
+impl SetMiterLimit {
+    pub const fn operator_name() -> &'static str {
         "M"
     }
-}
 
-impl SetMiterLimit {
     pub fn new(limit: f32) -> Self {
         Self { limit }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -88,15 +104,19 @@ pub struct SetDashPattern {
     phase: f32,
 }
 
-impl PdfOperator for SetDashPattern {
-    fn operator() -> &'static str {
+impl SetDashPattern {
+    pub const fn operator_name() -> &'static str {
         "d"
     }
-}
 
-impl SetDashPattern {
     pub fn new(array: Vec<f32>, phase: f32) -> Self {
         Self { array, phase }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -104,15 +124,18 @@ impl SetDashPattern {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SaveGraphicsState;
 
-impl PdfOperator for SaveGraphicsState {
-    fn operator() -> &'static str {
+impl SaveGraphicsState {
+    pub const fn operator_name() -> &'static str {
         "q"
     }
-}
 
-impl SaveGraphicsState {
     pub fn new() -> Self {
         Self
+    }
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -120,15 +143,18 @@ impl SaveGraphicsState {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RestoreGraphicsState;
 
-impl PdfOperator for RestoreGraphicsState {
-    fn operator() -> &'static str {
+impl RestoreGraphicsState {
+    pub const fn operator_name() -> &'static str {
         "Q"
     }
-}
 
-impl RestoreGraphicsState {
     pub fn new() -> Self {
         Self
+    }
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -140,14 +166,18 @@ pub struct ConcatMatrix {
     matrix: [f32; 6],
 }
 
-impl PdfOperator for ConcatMatrix {
-    fn operator() -> &'static str {
+impl ConcatMatrix {
+    pub const fn operator_name() -> &'static str {
         "cm"
     }
-}
 
-impl ConcatMatrix {
     pub fn new(matrix: [f32; 6]) -> Self {
         Self { matrix }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }

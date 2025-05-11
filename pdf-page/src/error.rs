@@ -19,6 +19,7 @@ impl From<ObjectError> for PageError {
         Self::ObjectError(err.to_string())
     }
 }
+
 impl std::fmt::Display for PageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

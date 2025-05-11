@@ -1,4 +1,4 @@
-use crate::PdfOperator;
+use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
 
 /// Moves to the start of the next line, offset from the start of the current line by (`tx`, `ty`). (PDF operator `Td`)
 /// `tx` and `ty` are numbers expressed in unscaled text space units.
@@ -12,15 +12,19 @@ pub struct MoveTextPosition {
     ty: f32,
 }
 
-impl PdfOperator for MoveTextPosition {
-    fn operator() -> &'static str {
+impl MoveTextPosition {
+    pub const fn operator_name() -> &'static str {
         "Td"
     }
-}
 
-impl MoveTextPosition {
     pub fn new(tx: f32, ty: f32) -> Self {
         Self { tx, ty }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -35,15 +39,19 @@ pub struct MoveTextPositionAndSetLeading {
     ty: f32,
 }
 
-impl PdfOperator for MoveTextPositionAndSetLeading {
-    fn operator() -> &'static str {
+impl MoveTextPositionAndSetLeading {
+    pub const fn operator_name() -> &'static str {
         "TD"
     }
-}
 
-impl MoveTextPositionAndSetLeading {
     pub fn new(tx: f32, ty: f32) -> Self {
         Self { tx, ty }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -59,15 +67,19 @@ pub struct SetTextMatrix {
     matrix: [f32; 6],
 }
 
-impl PdfOperator for SetTextMatrix {
-    fn operator() -> &'static str {
+impl SetTextMatrix {
+    pub const fn operator_name() -> &'static str {
         "Tm"
     }
-}
 
-impl SetTextMatrix {
     pub fn new(matrix: [f32; 6]) -> Self {
         Self { matrix }
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
 
@@ -77,14 +89,18 @@ impl SetTextMatrix {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MoveToNextLine;
 
-impl PdfOperator for MoveToNextLine {
-    fn operator() -> &'static str {
+impl MoveToNextLine {
+    pub const fn operator_name() -> &'static str {
         "T*"
     }
-}
 
-impl MoveToNextLine {
     pub fn new() -> Self {
         Self
+    }
+
+    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
+        Err(PdfPainterError::UnimplementedOperation(
+            Self::operator_name(),
+        ))
     }
 }
