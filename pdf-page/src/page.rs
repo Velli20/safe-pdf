@@ -97,7 +97,6 @@ impl PdfPage {
             // 2. An array of direct stream objects.
             // 3. An indirect reference to a stream object.
             // 4. An indirect reference to an array of stream objects.
-
             if let ObjectVariant::Reference(object_number) = contents {
                 // The object is an indirect reference; resolve it from the `objects` collection.
                 Some(
@@ -105,11 +104,9 @@ impl PdfPage {
                         .get(*object_number)
                         .ok_or(PageError::MissingContent)?,
                 )
-            } else if let ObjectVariant::IndirectObject(obj) = contents {
+            } else {
                 // The object is directly available (not an indirect reference that needs resolving here).
                 Some(contents.clone())
-            } else {
-                return Err(PageError::MissingContent);
             }
         } else {
             None
@@ -117,13 +114,11 @@ impl PdfPage {
 
         if let Some(ObjectVariant::IndirectObject(s)) = &contents {
             if let Some(Value::Array(array)) = &s.object {
-                // println!("Has arry {:?}", array);
+                println!("Has arry {:?}", array);
                 for obj in array.0.iter() {
                     if let Value::IndirectObject(s) = obj {
                         // println!("Has arry inner {:?}", s);
-                        if let Some(ObjectVariant::IndirectObject(ss)) =
-                            objects.get(s.object_number())
-                        {
+                        if let Some(ss) = objects.get(s.object_number()) {
                             println!("inner inner cont: {:?}", ss);
                         }
                     }

@@ -1,0 +1,73 @@
+use crate::{
+    clipping_path_operators::*, color_operators::*, graphics_state_operators::*,
+    marked_content_operators::*, path_operators::*, path_paint_operators::*,
+    text_object_operators::*, text_positioning_operators::*, text_showing_operators::*,
+    text_state_operators::*, xobject_and_image_operators::*,
+};
+
+/// Represents all possible PDF content stream operators defined within this crate.
+///
+/// This enum acts as a sum type, allowing for type-safe handling of various
+/// PDF operators. Each variant holds the specific operator struct, which in turn
+/// contains its operands and associated methods.
+///
+/// Each operator performs a specific function, such as
+/// drawing a line, displaying text, or setting a color.
+pub enum PdfOperatorVariant {
+    LineTo(LineTo),
+    MoveTo(MoveTo),
+    CurveTo(CurveTo),
+    CurveToV(CurveToV),
+    CurveToY(CurveToY),
+    ClosePath(ClosePath),
+    Rectangle(Rectangle),
+    StrokePath(StrokePath),
+    CloseStrokePath(CloseStrokePath),
+    FillPathNonZero(FillPathNonZero),
+    FillPathEvenOdd(FillPathEvenOdd),
+    FillAndStrokePathNonZero(FillAndStrokePathNonZero),
+    FillAndStrokePathEvenOdd(FillAndStrokePathEvenOdd),
+    CloseFillAndStrokePathNonZero(CloseFillAndStrokePathNonZero),
+    CloseFillAndStrokePathEvenOdd(CloseFillAndStrokePathEvenOdd),
+    EndPath(EndPath),
+    ClipNonZero(ClipNonZero),
+    ClipEvenOdd(ClipEvenOdd),
+    SetGrayFill(SetGrayFill),
+    SetGrayStroke(SetGrayStroke),
+    SetRGBFill(SetRGBFill),
+    SetRGBStroke(SetRGBStroke),
+    SetCMYKFill(SetCMYKFill),
+    SetCMYKStroke(SetCMYKStroke),
+    SetLineWidth(SetLineWidth),
+    SetLineCapStyle(SetLineCapStyle),
+    SetLineJoinStyle(SetLineJoinStyle),
+    SetMiterLimit(SetMiterLimit),
+    SetDashPattern(SetDashPattern),
+    SaveGraphicsState(SaveGraphicsState),
+    RestoreGraphicsState(RestoreGraphicsState),
+    ConcatMatrix(ConcatMatrix),
+    BeginMarkedContent(BeginMarkedContent),
+    BeginMarkedContentWithProps(BeginMarkedContentWithProps),
+    EndMarkedContent(EndMarkedContent),
+    BeginText(BeginText),
+    EndText(EndText),
+    MoveTextPosition(MoveTextPosition),
+    MoveTextPositionAndSetLeading(MoveTextPositionAndSetLeading),
+    SetTextMatrix(SetTextMatrix),
+    MoveToNextLine(MoveToNextLine),
+    ShowText(ShowText),
+    MoveNextLineShowText(MoveNextLineShowText),
+    SetSpacingMoveShowText(SetSpacingMoveShowText),
+    ShowTextArray(ShowTextArray),
+    SetCharacterSpacing(SetCharacterSpacing),
+    SetWordSpacing(SetWordSpacing),
+    SetHorizontalScaling(SetHorizontalScaling),
+    SetLeading(SetLeading),
+    SetFont(SetFont),
+    SetRenderingMode(SetRenderingMode),
+    SetTextRise(SetTextRise),
+    InvokeXObject(InvokeXObject),
+    BeginInlineImage(BeginInlineImage),
+    InlineImageData(InlineImageData),
+    EndInlineImage(EndInlineImage),
+}
