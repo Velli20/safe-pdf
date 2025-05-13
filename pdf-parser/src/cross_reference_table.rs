@@ -80,28 +80,30 @@ impl ParseObject<CrossReferenceTable> for PdfParser<'_> {
         loop {
             // Read the first object number.
             if let Some(PdfToken::Number(_)) = self.tokenizer.peek()? {
-                let first_object_number_in_section =
-                    self.read_number::<i32>(ParserError::InvalidNumber)?;
+                let first_object_number_in_section = self.read_number::<i32>()?;
                 if first_object_number.is_none() {
                     first_object_number = Some(first_object_number_in_section);
                 }
             }
 
             // Read the number of objects.
-            let number_of_objects =
-                self.read_number::<u32>(CrossReferenceTableError::MissingTableEntryCount)?;
+            let number_of_objects = self
+                .read_number::<u32>()
+                .map_err(|err| CrossReferenceTableError::MissingTableEntryCount)?;
 
             // Read the entries.
             for _ in 0..number_of_objects {
                 total_number_of_entries += 1;
 
                 // Read the object number.
-                let object_number =
-                    self.read_number::<u32>(CrossReferenceTableError::MissingObjectNumber)?;
+                let object_number = self
+                    .read_number::<u32>()
+                    .map_err(|err| CrossReferenceTableError::MissingObjectNumber)?;
 
                 // Read the generation number.
-                let generation_number =
-                    self.read_number::<u16>(CrossReferenceTableError::MissingGenerationNumber)?;
+                let generation_number = self
+                    .read_number::<u16>()
+                    .map_err(|err| CrossReferenceTableError::MissingGenerationNumber)?;
 
                 // Read the status.
                 if let Some(PdfToken::Alphabetic(e)) = self.tokenizer.read() {

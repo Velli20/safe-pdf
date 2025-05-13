@@ -1,4 +1,7 @@
-use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
+use crate::{
+    error::PdfPainterError,
+    pdf_operator::{Operands, PdfOperatorVariant},
+};
 
 /// Sets the line width for path stroking. (PDF operator `w`)
 #[derive(Debug, Clone, PartialEq)]
@@ -16,10 +19,9 @@ impl SetLineWidth {
         Self { width }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let width = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetLineWidth(Self::new(width)))
     }
 }
 
@@ -40,10 +42,9 @@ impl SetLineCapStyle {
         Self { style }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let style = operands.get_u8()?;
+        Ok(PdfOperatorVariant::SetLineCapStyle(Self::new(style)))
     }
 }
 
@@ -64,10 +65,9 @@ impl SetLineJoinStyle {
         Self { style }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let style = operands.get_u8()?;
+        Ok(PdfOperatorVariant::SetLineJoinStyle(Self::new(style)))
     }
 }
 
@@ -88,10 +88,9 @@ impl SetMiterLimit {
         Self { limit }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let limit = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetMiterLimit(Self::new(limit)))
     }
 }
 
@@ -113,10 +112,10 @@ impl SetDashPattern {
         Self { array, phase }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let array = operands.get_f32_array()?;
+        let phase = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetDashPattern(Self::new(array, phase)))
     }
 }
 
@@ -129,13 +128,12 @@ impl SaveGraphicsState {
         "q"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+
+    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::SaveGraphicsState(Self::new()))
     }
 }
 
@@ -148,13 +146,11 @@ impl RestoreGraphicsState {
         "Q"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::RestoreGraphicsState(Self::new()))
     }
 }
 
@@ -175,9 +171,15 @@ impl ConcatMatrix {
         Self { matrix }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let a = operands.get_f32()?;
+        let b = operands.get_f32()?;
+        let c = operands.get_f32()?;
+        let d = operands.get_f32()?;
+        let e = operands.get_f32()?;
+        let f = operands.get_f32()?;
+        Ok(PdfOperatorVariant::ConcatMatrix(Self::new([
+            a, b, c, d, e, f,
+        ])))
     }
 }

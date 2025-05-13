@@ -1,4 +1,4 @@
-use crate::{error::PageError, media_box::MediaBox};
+use crate::{content_stream::ContentStream, error::PageError, media_box::MediaBox};
 use pdf_object::{
     ObjectVariant, Value, dictionary::Dictionary, indirect_object::IndirectObject,
     object_collection::ObjectCollection,
@@ -119,7 +119,12 @@ impl PdfPage {
                     if let Value::IndirectObject(s) = obj {
                         // println!("Has arry inner {:?}", s);
                         if let Some(ss) = objects.get(s.object_number()) {
-                            println!("inner inner cont: {:?}", ss);
+                            if let ObjectVariant::Stream(s) = ss {
+                                let content_stream = ContentStream::from(s.data.as_slice())?;
+                                println!("content stream: {:?}", content_stream.operations);
+                            } else {
+                                println!("inner inner cont: {:?}", ss);
+                            }
                         }
                     }
                 }

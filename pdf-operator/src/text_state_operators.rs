@@ -1,4 +1,7 @@
-use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
+use crate::{
+    error::PdfPainterError,
+    pdf_operator::{Operands, PdfOperatorVariant},
+};
 
 /// Sets the character spacing, `Tc`, which is a number expressed in unscaled text space units. (PDF operator `Tc`)
 #[derive(Debug, Clone, PartialEq)]
@@ -11,16 +14,14 @@ impl SetCharacterSpacing {
     pub const fn operator_name() -> &'static str {
         "Tc"
     }
-}
-impl SetCharacterSpacing {
+
     pub fn new(spacing: f32) -> Self {
         Self { spacing }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let spacing = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetCharacterSpacing(Self::new(spacing)))
     }
 }
 
@@ -41,10 +42,9 @@ impl SetWordSpacing {
         Self { spacing }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let spacing = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetWordSpacing(Self::new(spacing)))
     }
 }
 
@@ -64,10 +64,9 @@ impl SetHorizontalScaling {
         Self { scale }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let scale = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetHorizontalScaling(Self::new(scale)))
     }
 }
 
@@ -87,10 +86,9 @@ impl SetLeading {
         Self { leading }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let leading = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetLeading(Self::new(leading)))
     }
 }
 
@@ -112,10 +110,10 @@ impl SetFont {
         Self { name, size }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let name = operands.get_name()?;
+        let size = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetFont(Self::new(name, size)))
     }
 }
 
@@ -143,10 +141,9 @@ impl SetRenderingMode {
         Self { mode }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let mode = operands.get_u8()?;
+        Ok(PdfOperatorVariant::SetRenderingMode(Self::new(mode)))
     }
 }
 
@@ -166,9 +163,8 @@ impl SetTextRise {
         Self { rise }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let rise = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetTextRise(Self::new(rise)))
     }
 }

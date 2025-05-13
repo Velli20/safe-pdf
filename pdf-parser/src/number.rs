@@ -33,13 +33,13 @@ impl ParseObject<Number> for PdfParser<'_> {
         }
 
         // 2. Parse leading digits (integral part).
-        let digits = self.read_number::<i64>(ParserError::InvalidNumber)?;
+        let digits = self.read_number::<i64>()?;
 
         // 3. Check for decimal point
         if let Some(PdfToken::Period) = self.tokenizer.peek()? {
             self.tokenizer.read();
             // 4. Parse fractional part.
-            let fraction = self.read_number::<i64>(ParserError::InvalidNumber)?;
+            let fraction = self.read_number::<i64>()?;
             // 5. Combine integral and fractional parts.
             let number_str = if has_minus {
                 format!("-{}.{}", digits, fraction)

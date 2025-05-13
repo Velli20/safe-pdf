@@ -1,4 +1,7 @@
-use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
+use crate::{
+    error::PdfPainterError,
+    pdf_operator::{Operands, PdfOperatorVariant},
+};
 
 /// Strokes the current path. (PDF operator `S`)
 #[derive(Debug, Clone, PartialEq)]
@@ -9,14 +12,12 @@ impl StrokePath {
         "S"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::StrokePath(Self::new()))
     }
 }
 
@@ -30,14 +31,12 @@ impl CloseStrokePath {
         "s"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::CloseStrokePath(Self::new()))
     }
 }
 
@@ -51,14 +50,12 @@ impl FillPathNonZero {
         "f" // TODO: or "F"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::FillPathNonZero(Self::new()))
     }
 }
 
@@ -71,14 +68,12 @@ impl FillPathEvenOdd {
         "f*"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::FillPathEvenOdd(Self::new()))
     }
 }
 
@@ -92,14 +87,12 @@ impl FillAndStrokePathNonZero {
         "B"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::FillAndStrokePathNonZero(Self::new()))
     }
 }
 
@@ -113,14 +106,12 @@ impl FillAndStrokePathEvenOdd {
         "B*"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::FillAndStrokePathEvenOdd(Self::new()))
     }
 }
 
@@ -134,13 +125,13 @@ impl CloseFillAndStrokePathNonZero {
         "b"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
+    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::CloseFillAndStrokePathNonZero(
+            Self::new(),
         ))
     }
 }
@@ -155,13 +146,13 @@ impl CloseFillAndStrokePathEvenOdd {
         "b*"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
+    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::CloseFillAndStrokePathEvenOdd(
+            Self::new(),
         ))
     }
 }
@@ -176,13 +167,11 @@ impl EndPath {
         "n"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::EndPath(Self::new()))
     }
 }

@@ -1,4 +1,7 @@
-use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
+use crate::{
+    error::PdfPainterError,
+    pdf_operator::{Operands, PdfOperatorVariant},
+};
 
 /// Begins a new subpath by moving the current point to coordinates (x, y), omitting any connecting line segment. (PDF operator `m`)
 /// If the `m` operator is the first operator in a path, it sets the current point.
@@ -14,17 +17,15 @@ impl MoveTo {
     pub const fn operator_name() -> &'static str {
         "m"
     }
-}
 
-impl MoveTo {
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let x = operands.get_f32()?;
+        let y = operands.get_f32()?;
+        Ok(PdfOperatorVariant::MoveTo(Self::new(x, y)))
     }
 }
 
@@ -42,17 +43,15 @@ impl LineTo {
     pub const fn operator_name() -> &'static str {
         "l"
     }
-}
 
-impl LineTo {
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let x = operands.get_f32()?;
+        let y = operands.get_f32()?;
+        Ok(PdfOperatorVariant::LineTo(Self::new(x, y)))
     }
 }
 
@@ -79,9 +78,7 @@ impl CurveTo {
     pub const fn operator_name() -> &'static str {
         "c"
     }
-}
 
-impl CurveTo {
     pub fn new(x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32) -> Self {
         Self {
             x1,
@@ -93,10 +90,16 @@ impl CurveTo {
         }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let x1 = operands.get_f32()?;
+        let y1 = operands.get_f32()?;
+        let x2 = operands.get_f32()?;
+        let y2 = operands.get_f32()?;
+        let x3 = operands.get_f32()?;
+        let y3 = operands.get_f32()?;
+        Ok(PdfOperatorVariant::CurveTo(Self::new(
+            x1, y1, x2, y2, x3, y3,
+        )))
     }
 }
 
@@ -125,10 +128,12 @@ impl CurveToV {
         Self { x2, y2, x3, y3 }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let x2 = operands.get_f32()?;
+        let y2 = operands.get_f32()?;
+        let x3 = operands.get_f32()?;
+        let y3 = operands.get_f32()?;
+        Ok(PdfOperatorVariant::CurveToV(Self::new(x2, y2, x3, y3)))
     }
 }
 
@@ -156,10 +161,12 @@ impl CurveToY {
         Self { x1, y1, x3, y3 }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let x1 = operands.get_f32()?;
+        let y1 = operands.get_f32()?;
+        let x3 = operands.get_f32()?;
+        let y3 = operands.get_f32()?;
+        Ok(PdfOperatorVariant::CurveToY(Self::new(x1, y1, x3, y3)))
     }
 }
 
@@ -173,13 +180,12 @@ impl ClosePath {
         "h"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::ClosePath(Self::new()))
     }
 }
 
@@ -212,9 +218,13 @@ impl Rectangle {
         }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let x = operands.get_f32()?;
+        let y = operands.get_f32()?;
+        let width = operands.get_f32()?;
+        let height = operands.get_f32()?;
+        Ok(PdfOperatorVariant::Rectangle(Self::new(
+            x, y, width, height,
+        )))
     }
 }

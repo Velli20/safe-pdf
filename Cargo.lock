@@ -76,6 +76,11 @@ dependencies = [
 [[package]]
 name = "pdf-operator"
 version = "0.1.0"
+dependencies = [
+ "pdf-object",
+ "pdf-parser",
+ "pdf-tokenizer",
+]
 
 [[package]]
 name = "pdf-page"

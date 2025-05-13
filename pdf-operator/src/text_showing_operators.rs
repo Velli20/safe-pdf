@@ -1,5 +1,8 @@
 use crate::TextElement;
-use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
+use crate::{
+    error::PdfPainterError,
+    pdf_operator::{Operands, PdfOperatorVariant},
+};
 
 /// Shows a text string. (PDF operator `Tj`)
 #[derive(Debug, Clone, PartialEq)]
@@ -17,10 +20,9 @@ impl ShowText {
         Self { text }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let text = operands.get_str()?;
+        Ok(PdfOperatorVariant::ShowText(Self::new(text)))
     }
 }
 
@@ -41,10 +43,9 @@ impl MoveNextLineShowText {
         Self { text }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let text = operands.get_str()?;
+        Ok(PdfOperatorVariant::MoveNextLineShowText(Self::new(text)))
     }
 }
 
@@ -74,10 +75,15 @@ impl SetSpacingMoveShowText {
         }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let word_spacing = operands.get_f32()?;
+        let char_spacing = operands.get_f32()?;
+        let text = operands.get_str()?;
+        Ok(PdfOperatorVariant::SetSpacingMoveShowText(Self::new(
+            word_spacing,
+            char_spacing,
+            text,
+        )))
     }
 }
 
@@ -100,9 +106,8 @@ impl ShowTextArray {
         Self { elements }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let elements = operands.get_text_element_array()?;
+        Ok(PdfOperatorVariant::ShowTextArray(Self::new(elements)))
     }
 }

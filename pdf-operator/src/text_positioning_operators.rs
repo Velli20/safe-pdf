@@ -1,4 +1,7 @@
-use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
+use crate::{
+    error::PdfPainterError,
+    pdf_operator::{Operands, PdfOperatorVariant},
+};
 
 /// Moves to the start of the next line, offset from the start of the current line by (`tx`, `ty`). (PDF operator `Td`)
 /// `tx` and `ty` are numbers expressed in unscaled text space units.
@@ -21,10 +24,10 @@ impl MoveTextPosition {
         Self { tx, ty }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let tx = operands.get_f32()?;
+        let ty = operands.get_f32()?;
+        Ok(PdfOperatorVariant::MoveTextPosition(Self::new(tx, ty)))
     }
 }
 
@@ -48,9 +51,11 @@ impl MoveTextPositionAndSetLeading {
         Self { tx, ty }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let tx = operands.get_f32()?;
+        let ty = operands.get_f32()?;
+        Ok(PdfOperatorVariant::MoveTextPositionAndSetLeading(
+            Self::new(tx, ty),
         ))
     }
 }
@@ -76,10 +81,16 @@ impl SetTextMatrix {
         Self { matrix }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let a = operands.get_f32()?;
+        let b = operands.get_f32()?;
+        let c = operands.get_f32()?;
+        let d = operands.get_f32()?;
+        let e = operands.get_f32()?;
+        let f = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetTextMatrix(Self::new([
+            a, b, c, d, e, f,
+        ])))
     }
 }
 
@@ -94,13 +105,11 @@ impl MoveToNextLine {
         "T*"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::MoveToNextLine(Self::new()))
     }
 }

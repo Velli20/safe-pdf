@@ -1,4 +1,5 @@
 use pdf_object::error::ObjectError;
+use pdf_operator::error::PdfPainterError;
 
 /// Defines errors that can occur when interpreting a PDF page object.
 #[derive(Debug, Clone, PartialEq)]
@@ -12,11 +13,19 @@ pub enum PageError {
     /// Wraps an error message from an `ObjectError`
     /// encountered while processing a PDF object related to the page.
     ObjectError(String),
+    /// Wraps an error message from a `PdfPainterError`
+    PdfOperatorError(String),
 }
 
 impl From<ObjectError> for PageError {
     fn from(err: ObjectError) -> Self {
         Self::ObjectError(err.to_string())
+    }
+}
+
+impl From<PdfPainterError> for PageError {
+    fn from(err: PdfPainterError) -> Self {
+        Self::PdfOperatorError(err.to_string())
     }
 }
 
@@ -33,6 +42,13 @@ impl std::fmt::Display for PageError {
                 write!(f, "Invalid `/MediaBox` entry: {}", err)
             }
             PageError::ObjectError(err) => {
+                write!(
+                    f,
+                    "Failed to process a PDF object related to the page: {}",
+                    err
+                )
+            }
+            PageError::PdfOperatorError(err) => {
                 write!(
                     f,
                     "Failed to process a PDF object related to the page: {}",
