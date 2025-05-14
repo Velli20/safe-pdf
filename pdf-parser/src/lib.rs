@@ -17,14 +17,11 @@ pub mod trailer;
 use std::{rc::Rc, str::FromStr};
 
 use error::ParserError;
-use pdf_object::{
-    ObjectVariant, Value, dictionary::Dictionary, indirect_object::IndirectObject,
-    stream::StreamObject, trailer::Trailer,
-};
+use pdf_object::{ObjectVariant, Value, dictionary::Dictionary, trailer::Trailer};
 use pdf_tokenizer::{PdfToken, Tokenizer};
 
 pub struct PdfParser<'a> {
-    tokenizer: Tokenizer<'a>,
+    pub tokenizer: Tokenizer<'a>,
 }
 
 impl<'a> From<&'a [u8]> for PdfParser<'a> {
@@ -99,7 +96,7 @@ impl<'a> PdfParser<'a> {
         Ok(())
     }
 
-    fn skip_whitespace(&mut self) {
+    pub fn skip_whitespace(&mut self) {
         let _ = self.tokenizer.read_while_u8(|b| Self::id_pdf_whitespace(b));
     }
 
@@ -120,10 +117,10 @@ impl<'a> PdfParser<'a> {
     /// # Returns
     ///
     /// - `Result` indicating success or failure.
-    fn read_number<T: FromStr>(&mut self, error: impl Into<ParserError>) -> Result<T, ParserError> {
+    pub fn read_number<T: FromStr>(&mut self) -> Result<T, ParserError> {
         let number_str = self.tokenizer.read_while_u8(|b| b.is_ascii_digit());
         if number_str.is_empty() {
-            return Err(error.into());
+            return Err(ParserError::UnexpectedEndOfFile);
         }
 
         let number = String::from_utf8_lossy(number_str)

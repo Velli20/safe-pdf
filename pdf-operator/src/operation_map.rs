@@ -1,8 +1,18 @@
+use pdf_object::Value;
+
 use crate::{
-    clipping_path_operators::*, color_operators::*, error::PdfPainterError,
-    graphics_state_operators::*, marked_content_operators::*, path_operators::*,
-    path_paint_operators::*, pdf_operator::PdfOperatorVariant, text_object_operators::*,
-    text_positioning_operators::*, text_showing_operators::*, text_state_operators::*,
+    clipping_path_operators::*,
+    color_operators::*,
+    error::PdfPainterError,
+    graphics_state_operators::*,
+    marked_content_operators::*,
+    path_operators::*,
+    path_paint_operators::*,
+    pdf_operator::{Operands, PdfOperatorVariant},
+    text_object_operators::*,
+    text_positioning_operators::*,
+    text_showing_operators::*,
+    text_state_operators::*,
     xobject_and_image_operators::*,
 };
 
@@ -12,15 +22,15 @@ use crate::{
 /// encountered in the PDF content.
 pub struct OperationMap {
     /// The string representation of the PDF operator (e.g., "m", "BT", "rg").
-    name: &'static str,
+    pub name: &'static str,
     /// A function pointer to the parser for this specific operator.
     /// The parser function takes a mutable vector of `PdfOperator` trait objects,
     /// reads the operator and its operands from an (implicit) input stream,
     /// and adds the newly created operator object to the vector.
-    parser: fn() -> Result<PdfOperatorVariant, PdfPainterError>,
+    pub parser: fn(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError>,
 }
 
-pub const READ_MAP: &'static [OperationMap] = &[
+pub(crate) const READ_MAP: &'static [OperationMap] = &[
     OperationMap {
         name: ClipNonZero::operator_name(),
         parser: ClipNonZero::read,

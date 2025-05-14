@@ -1,4 +1,7 @@
-use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
+use crate::{
+    error::PdfPainterError,
+    pdf_operator::{Operands, PdfOperatorVariant},
+};
 
 /// Begins a text object, initializing the text matrix and text line matrix to the identity matrix. (PDF operator `BT`)
 #[derive(Debug, Clone, PartialEq)]
@@ -9,14 +12,12 @@ impl BeginText {
         "BT"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::BeginText(Self::new()))
     }
 }
 
@@ -29,13 +30,11 @@ impl EndText {
         "ET"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::EndText(Self::new()))
     }
 }

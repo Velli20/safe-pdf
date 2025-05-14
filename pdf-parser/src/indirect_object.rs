@@ -54,10 +54,14 @@ impl ParseObject<ObjectVariant> for PdfParser<'_> {
         const ENDOBJ_KEYWORD: &[u8] = b"endobj";
 
         // Read the object number.
-        let object_number = self.read_number(IndirectObjectError::MissingObjectNumber)?;
+        let object_number = self
+            .read_number()
+            .map_err(|err| IndirectObjectError::MissingObjectNumber)?;
 
         // Read the generation number.
-        let generation_number = self.read_number(IndirectObjectError::MissingGenerationNumber)?;
+        let generation_number = self
+            .read_number()
+            .map_err(|err| IndirectObjectError::MissingGenerationNumber)?;
 
         // If the next token is 'R', it means this is an object reference.
         if let Some(PdfToken::Alphabetic(b'R')) = self.tokenizer.peek()? {

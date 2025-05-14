@@ -1,4 +1,7 @@
-use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
+use crate::{
+    error::PdfPainterError,
+    pdf_operator::{Operands, PdfOperatorVariant},
+};
 
 /// Modifies the current clipping path by intersecting it with the current path, using the non-zero winding number rule to determine the region to clip.
 /// (PDF operator `W`)
@@ -10,14 +13,12 @@ impl ClipNonZero {
         "W"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::ClipNonZero(Self::new()))
     }
 }
 
@@ -31,13 +32,11 @@ impl ClipEvenOdd {
         "W*"
     }
 
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        Ok(PdfOperatorVariant::ClipEvenOdd(Self::new()))
     }
 }

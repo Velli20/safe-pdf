@@ -1,4 +1,7 @@
-use crate::{error::PdfPainterError, pdf_operator::PdfOperatorVariant};
+use crate::{
+    error::PdfPainterError,
+    pdf_operator::{Operands, PdfOperatorVariant},
+};
 
 /// Sets the fill color to a grayscale value. (PDF operator `g`)
 /// The gray level applies to subsequent fill operations.
@@ -17,10 +20,9 @@ impl SetGrayFill {
         Self { gray }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let gray = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetGrayFill(Self::new(gray)))
     }
 }
 
@@ -41,10 +43,9 @@ impl SetGrayStroke {
         Self { gray }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let gray = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetGrayStroke(Self::new(gray)))
     }
 }
 
@@ -69,10 +70,11 @@ impl SetRGBFill {
         Self { r, g, b }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let r = operands.get_f32()?;
+        let g = operands.get_f32()?;
+        let b = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetRGBFill(Self::new(r, g, b)))
     }
 }
 
@@ -97,10 +99,11 @@ impl SetRGBStroke {
         Self { r, g, b }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let r = operands.get_f32()?;
+        let g = operands.get_f32()?;
+        let b = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetRGBStroke(Self::new(r, g, b)))
     }
 }
 
@@ -127,10 +130,12 @@ impl SetCMYKFill {
         Self { c, m, y, k }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let c = operands.get_f32()?;
+        let m = operands.get_f32()?;
+        let y = operands.get_f32()?;
+        let k = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetCMYKFill(Self::new(c, m, y, k)))
     }
 }
 
@@ -157,9 +162,11 @@ impl SetCMYKStroke {
         Self { c, m, y, k }
     }
 
-    pub fn read() -> Result<PdfOperatorVariant, PdfPainterError> {
-        Err(PdfPainterError::UnimplementedOperation(
-            Self::operator_name(),
-        ))
+    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+        let c = operands.get_f32()?;
+        let m = operands.get_f32()?;
+        let y = operands.get_f32()?;
+        let k = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetCMYKStroke(Self::new(c, m, y, k)))
     }
 }
