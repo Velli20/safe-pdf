@@ -1,177 +1,137 @@
 use crate::{
-    error::PdfPainterError,
-    pdf_operator::{Operands, PdfOperatorVariant},
+    error::PdfOperatorError,
+    pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
 };
 
-/// Strokes the current path. (PDF operator `S`)
-#[derive(Debug, Clone, PartialEq)]
+/// Strokes the current path.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct StrokePath;
 
-impl StrokePath {
-    pub const fn operator_name() -> &'static str {
-        "S"
-    }
+impl PdfOperator for StrokePath {
+    const NAME: &'static str = "S";
 
-    pub const fn new() -> Self {
-        Self
-    }
+    const OPERAND_COUNT: usize = 0;
 
-    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
-        Ok(PdfOperatorVariant::StrokePath(Self::new()))
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        Ok(PdfOperatorVariant::StrokePath(Self::default()))
     }
 }
 
-/// Closes the current subpath and then strokes the path. (PDF operator `s`)
+/// Closes the current subpath and then strokes the path.
 /// This is equivalent to a `ClosePath` followed by a `StrokePath`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct CloseStrokePath;
 
-impl CloseStrokePath {
-    pub const fn operator_name() -> &'static str {
-        "s"
-    }
+impl PdfOperator for CloseStrokePath {
+    const NAME: &'static str = "s";
 
-    pub const fn new() -> Self {
-        Self
-    }
+    const OPERAND_COUNT: usize = 0;
 
-    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
-        Ok(PdfOperatorVariant::CloseStrokePath(Self::new()))
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        Ok(PdfOperatorVariant::CloseStrokePath(Self::default()))
     }
 }
 
 /// Fills the current path using the non-zero winding number rule. (PDF operator `f` or `F`)
 /// The `F` operator is a synonym for `f`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct FillPathNonZero;
 
-impl FillPathNonZero {
-    pub const fn operator_name() -> &'static str {
-        "f" // TODO: or "F"
-    }
+impl PdfOperator for FillPathNonZero {
+    const NAME: &'static str = "f"; // TODO: or "F"
 
-    pub const fn new() -> Self {
-        Self
-    }
+    const OPERAND_COUNT: usize = 0;
 
-    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
-        Ok(PdfOperatorVariant::FillPathNonZero(Self::new()))
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        Ok(PdfOperatorVariant::FillPathNonZero(Self::default()))
     }
 }
 
-/// Fills the current path using the even-odd rule. (PDF operator `f*`)
-#[derive(Debug, Clone, PartialEq)]
+/// Fills the current path using the even-odd rule.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct FillPathEvenOdd;
 
-impl FillPathEvenOdd {
-    pub const fn operator_name() -> &'static str {
-        "f*"
-    }
+impl PdfOperator for FillPathEvenOdd {
+    const NAME: &'static str = "f*";
 
-    pub const fn new() -> Self {
-        Self
-    }
+    const OPERAND_COUNT: usize = 0;
 
-    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
-        Ok(PdfOperatorVariant::FillPathEvenOdd(Self::new()))
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        Ok(PdfOperatorVariant::FillPathEvenOdd(Self::default()))
     }
 }
 
 /// Fills and then strokes the current path, using the non-zero winding number rule to determine the region to fill.
-/// (PDF operator `B`)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct FillAndStrokePathNonZero;
 
-impl FillAndStrokePathNonZero {
-    pub const fn operator_name() -> &'static str {
-        "B"
-    }
+impl PdfOperator for FillAndStrokePathNonZero {
+    const NAME: &'static str = "B";
 
-    pub const fn new() -> Self {
-        Self
-    }
+    const OPERAND_COUNT: usize = 0;
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
-        Ok(PdfOperatorVariant::FillAndStrokePathNonZero(Self::new()))
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        Ok(PdfOperatorVariant::FillAndStrokePathNonZero(Self::default()))
     }
 }
 
 /// Fills and then strokes the current path, using the even-odd rule to determine the region to fill.
-/// (PDF operator `B*`)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct FillAndStrokePathEvenOdd;
 
-impl FillAndStrokePathEvenOdd {
-    pub const fn operator_name() -> &'static str {
-        "B*"
-    }
+impl PdfOperator for FillAndStrokePathEvenOdd {
+    const NAME: &'static str = "B*";
 
-    pub const fn new() -> Self {
-        Self
-    }
+    const OPERAND_COUNT: usize = 0;
 
-    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
-        Ok(PdfOperatorVariant::FillAndStrokePathEvenOdd(Self::new()))
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        Ok(PdfOperatorVariant::FillAndStrokePathEvenOdd(Self::default()))
     }
 }
 
 /// Closes, fills, and then strokes the current path, using the non-zero winding number rule to determine the region to fill.
-/// (PDF operator `b`)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct CloseFillAndStrokePathNonZero;
 
-impl CloseFillAndStrokePathNonZero {
-    pub const fn operator_name() -> &'static str {
-        "b"
-    }
+impl PdfOperator for CloseFillAndStrokePathNonZero {
+    const NAME: &'static str = "b";
 
-    pub const fn new() -> Self {
-        Self
-    }
+    const OPERAND_COUNT: usize = 0;
 
-    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::CloseFillAndStrokePathNonZero(
-            Self::new(),
+            Self::default(),
         ))
     }
 }
 
 /// Closes, fills, and then strokes the current path, using the even-odd rule to determine the region to fill.
-/// (PDF operator `b*`)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct CloseFillAndStrokePathEvenOdd;
 
-impl CloseFillAndStrokePathEvenOdd {
-    pub const fn operator_name() -> &'static str {
-        "b*"
-    }
+impl PdfOperator for CloseFillAndStrokePathEvenOdd {
+    const NAME: &'static str = "b*";
 
-    pub const fn new() -> Self {
-        Self
-    }
+    const OPERAND_COUNT: usize = 0;
 
-    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::CloseFillAndStrokePathEvenOdd(
-            Self::new(),
+            Self::default(),
         ))
     }
 }
 
-/// Ends the current path object without filling or stroking it. (PDF operator `n`)
+/// Ends the current path object without filling or stroking it.
 /// This operator is a path-painting no-op, used to discard the current path.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct EndPath;
 
-impl EndPath {
-    pub const fn operator_name() -> &'static str {
-        "n"
-    }
+impl PdfOperator for EndPath {
+    const NAME: &'static str = "n";
 
-    pub const fn new() -> Self {
-        Self
-    }
+    const OPERAND_COUNT: usize = 0;
 
-    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
-        Ok(PdfOperatorVariant::EndPath(Self::new()))
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        Ok(PdfOperatorVariant::EndPath(Self::default()))
     }
 }

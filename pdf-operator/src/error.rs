@@ -3,35 +3,43 @@ use pdf_tokenizer::error::TokenizerError;
 
 /// Defines errors that can occur in pdf-painter crate.
 #[derive(Debug, Clone, PartialEq)]
-pub enum PdfPainterError {
+pub enum PdfOperatorError {
     UnimplementedOperation(&'static str),
     OperandTokenizationError(String),
     InvalidOperandType,
+    IncorrectOperandCount(usize, usize),
 }
 
-impl std::fmt::Display for PdfPainterError {
+impl std::fmt::Display for PdfOperatorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PdfPainterError::UnimplementedOperation(name) => {
+            PdfOperatorError::UnimplementedOperation(name) => {
                 write!(f, "Unimplemented operation: {}", name)
             }
-            PdfPainterError::OperandTokenizationError(err) => {
+            PdfOperatorError::OperandTokenizationError(err) => {
                 write!(f, "Operand tokenization error: {}", err)
             }
-            PdfPainterError::InvalidOperandType => {
+            PdfOperatorError::InvalidOperandType => {
                 write!(f, "Invalid operand type")
+            }
+            PdfOperatorError::IncorrectOperandCount(got, expected) => {
+                write!(
+                    f,
+                    "Incorrect operand count: got {}, expected {}",
+                    got, expected
+                )
             }
         }
     }
 }
 
-impl From<TokenizerError> for PdfPainterError {
+impl From<TokenizerError> for PdfOperatorError {
     fn from(value: TokenizerError) -> Self {
         Self::OperandTokenizationError(value.to_string())
     }
 }
 
-impl From<ParserError> for PdfPainterError {
+impl From<ParserError> for PdfOperatorError {
     fn from(value: ParserError) -> Self {
         Self::OperandTokenizationError(value.to_string())
     }

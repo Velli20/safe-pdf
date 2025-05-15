@@ -1,40 +1,32 @@
 use crate::{
-    error::PdfPainterError,
-    pdf_operator::{Operands, PdfOperatorVariant},
+    error::PdfOperatorError,
+    pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
 };
 
-/// Begins a text object, initializing the text matrix and text line matrix to the identity matrix. (PDF operator `BT`)
-#[derive(Debug, Clone, PartialEq)]
+/// Begins a text object, initializing the text matrix and text line matrix to the identity matrix.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct BeginText;
 
-impl BeginText {
-    pub const fn operator_name() -> &'static str {
-        "BT"
-    }
+impl PdfOperator for BeginText {
+    const NAME: &'static str = "BT";
 
-    pub const fn new() -> Self {
-        Self
-    }
+    const OPERAND_COUNT: usize = 0;
 
-    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
-        Ok(PdfOperatorVariant::BeginText(Self::new()))
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        Ok(PdfOperatorVariant::BeginText(Self::default()))
     }
 }
 
-/// Ends a text object, discarding the text matrix and text line matrix. (PDF operator `ET`)
-#[derive(Debug, Clone, PartialEq)]
+/// Ends a text object, discarding the text matrix and text line matrix.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct EndText;
 
-impl EndText {
-    pub const fn operator_name() -> &'static str {
-        "ET"
-    }
+impl PdfOperator for EndText {
+    const NAME: &'static str = "ET";
 
-    pub const fn new() -> Self {
-        Self
-    }
+    const OPERAND_COUNT: usize = 0;
 
-    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
-        Ok(PdfOperatorVariant::EndText(Self::new()))
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        Ok(PdfOperatorVariant::EndText(Self::default()))
     }
 }

@@ -1,9 +1,9 @@
 use crate::{
-    error::PdfPainterError,
-    pdf_operator::{Operands, PdfOperatorVariant},
+    error::PdfOperatorError,
+    pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
 };
 
-/// Sets the line width for path stroking. (PDF operator `w`)
+/// Sets the line width for path stroking.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetLineWidth {
     /// The new line width in user space units.
@@ -11,21 +11,23 @@ pub struct SetLineWidth {
 }
 
 impl SetLineWidth {
-    pub const fn operator_name() -> &'static str {
-        "w"
-    }
-
     pub fn new(width: f32) -> Self {
         Self { width }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for SetLineWidth {
+    const NAME: &'static str = "w";
+
+    const OPERAND_COUNT: usize = 1;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let width = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetLineWidth(Self::new(width)))
     }
 }
 
-/// Sets the line cap style for path stroking. (PDF operator `J`)
+/// Sets the line cap style for path stroking.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetLineCapStyle {
     /// The line cap style to apply.
@@ -34,21 +36,23 @@ pub struct SetLineCapStyle {
 }
 
 impl SetLineCapStyle {
-    pub const fn operator_name() -> &'static str {
-        "J"
-    }
-
     pub fn new(style: u8) -> Self {
         Self { style }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for SetLineCapStyle {
+    const NAME: &'static str = "J";
+
+    const OPERAND_COUNT: usize = 1;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let style = operands.get_u8()?;
         Ok(PdfOperatorVariant::SetLineCapStyle(Self::new(style)))
     }
 }
 
-/// Sets the line join style for path stroking. (PDF operator `j`)
+/// Sets the line join style for path stroking.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetLineJoinStyle {
     /// The line join style to apply.
@@ -57,21 +61,23 @@ pub struct SetLineJoinStyle {
 }
 
 impl SetLineJoinStyle {
-    pub const fn operator_name() -> &'static str {
-        "j"
-    }
-
     pub fn new(style: u8) -> Self {
         Self { style }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for SetLineJoinStyle {
+    const NAME: &'static str = "j";
+
+    const OPERAND_COUNT: usize = 1;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let style = operands.get_u8()?;
         Ok(PdfOperatorVariant::SetLineJoinStyle(Self::new(style)))
     }
 }
 
-/// Sets the miter limit for path stroking. (PDF operator `M`)
+/// Sets the miter limit for path stroking.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetMiterLimit {
     /// The new miter limit. This controls when a miter join is automatically
@@ -80,21 +86,23 @@ pub struct SetMiterLimit {
 }
 
 impl SetMiterLimit {
-    pub const fn operator_name() -> &'static str {
-        "M"
-    }
-
     pub fn new(limit: f32) -> Self {
         Self { limit }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for SetMiterLimit {
+    const NAME: &'static str = "M";
+
+    const OPERAND_COUNT: usize = 1;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let limit = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetMiterLimit(Self::new(limit)))
     }
 }
 
-/// Sets the dash pattern for path stroking. (PDF operator `d`)
+/// Sets the dash pattern for path stroking.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetDashPattern {
     /// An array of numbers specifying the lengths of alternating dashes and gaps.
@@ -104,57 +112,52 @@ pub struct SetDashPattern {
 }
 
 impl SetDashPattern {
-    pub const fn operator_name() -> &'static str {
-        "d"
-    }
-
     pub fn new(array: Vec<f32>, phase: f32) -> Self {
         Self { array, phase }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for SetDashPattern {
+    const NAME: &'static str = "d";
+
+    const OPERAND_COUNT: usize = 2;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let array = operands.get_f32_array()?;
         let phase = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetDashPattern(Self::new(array, phase)))
     }
 }
 
-/// Saves the current graphics state on the graphics state stack. (PDF operator `q`)
-#[derive(Debug, Clone, PartialEq)]
+/// Saves the current graphics state on the graphics state stack.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct SaveGraphicsState;
 
-impl SaveGraphicsState {
-    pub const fn operator_name() -> &'static str {
-        "q"
-    }
+impl PdfOperator for SaveGraphicsState {
+    const NAME: &'static str = "q";
 
-    pub const fn new() -> Self {
-        Self
-    }
+    const OPERAND_COUNT: usize = 0;
 
-    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
-        Ok(PdfOperatorVariant::SaveGraphicsState(Self::new()))
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        Ok(PdfOperatorVariant::SaveGraphicsState(Self::default()))
     }
 }
 
-/// Restores the graphics state by removing the most recently saved state from the stack. (PDF operator `Q`)
-#[derive(Debug, Clone, PartialEq)]
+/// Restores the graphics state by removing the most recently saved state from the stack.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct RestoreGraphicsState;
 
-impl RestoreGraphicsState {
-    pub const fn operator_name() -> &'static str {
-        "Q"
-    }
+impl PdfOperator for RestoreGraphicsState {
+    const NAME: &'static str = "Q";
 
-    pub const fn new() -> Self {
-        Self
-    }
-    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
-        Ok(PdfOperatorVariant::RestoreGraphicsState(Self::new()))
+    const OPERAND_COUNT: usize = 0;
+
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        Ok(PdfOperatorVariant::RestoreGraphicsState(Self::default()))
     }
 }
 
-/// Modifies the current transformation matrix (CTM) by concatenating the specified matrix. (PDF operator `cm`)
+/// Modifies the current transformation matrix (CTM) by concatenating the specified matrix.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConcatMatrix {
     /// The matrix to concatenate with the CTM.
@@ -163,15 +166,17 @@ pub struct ConcatMatrix {
 }
 
 impl ConcatMatrix {
-    pub const fn operator_name() -> &'static str {
-        "cm"
-    }
-
     pub fn new(matrix: [f32; 6]) -> Self {
         Self { matrix }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for ConcatMatrix {
+    const NAME: &'static str = "cm";
+
+    const OPERAND_COUNT: usize = 6;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let a = operands.get_f32()?;
         let b = operands.get_f32()?;
         let c = operands.get_f32()?;

@@ -3,77 +3,91 @@ use pdf_parser::{ParseObject, PdfParser};
 use pdf_tokenizer::PdfToken;
 
 use crate::{
-    TextElement, clipping_path_operators::*, color_operators::*, error::PdfPainterError,
+    TextElement, clipping_path_operators::*, color_operators::*, error::PdfOperatorError,
     graphics_state_operators::*, marked_content_operators::*, operation_map::READ_MAP,
     operator_tokenizer::OperatorReader, path_operators::*, path_paint_operators::*,
     text_object_operators::*, text_positioning_operators::*, text_showing_operators::*,
     text_state_operators::*, xobject_and_image_operators::*,
 };
 
-pub trait Op {
+/// Represents a PDF content stream operator.
+///
+/// This trait provides metadata about a PDF operator, such as its name
+/// (the string representation used in PDF content streams) and the number
+/// of operands it expects.
+///
+/// Implementors of this trait are typically structs that represent specific
+/// PDF operators (e.g., `MoveTo`, `SetLineWidth`).
+pub trait PdfOperator {
+    /// The string representation of the PDF operator (e.g., "m", "BT", "rg").
     const NAME: &'static str;
-    const INSTRUCTION: &'static str;
+
+    /// The number of operands this operator consumes from the operand stack.
     const OPERAND_COUNT: usize;
+
+    /// Reads and consumes the necessary operands from the provided `Operands`
+    /// slice and constructs the specific `PdfOperatorVariant`.
+    ///
+    /// # Parameters
+    ///
+    /// - `operands`: A sequence of `Value`s that are potential operands for this operator.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the constructed `PdfOperatorVariant`,
+    /// or a `PdfOperatorError` on an error.
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError>;
 }
 
 pub struct Operands<'a>(&'a [Value]);
 
 impl Operands<'_> {
-    pub fn get_f32(&mut self) -> Result<f32, PdfPainterError> {
-        let value = self.0.get(0);
-        self.0 = &self.0[1..];
-
-        if let Some(Value::Number(number)) = value {
-            if let Some(number) = number.as_f32() {
-                Ok(number)
-            } else {
-                Err(PdfPainterError::InvalidOperandType)
-            }
+    pub fn get_f32(&mut self) -> Result<f32, PdfOperatorError> {
+        if let Some((value, rest)) = self.0.split_first() {
+            self.0 = rest;
+            value
+                .as_number::<f32>()
+                .map_err(|_| PdfOperatorError::InvalidOperandType)
         } else {
-            Err(PdfPainterError::InvalidOperandType)
+            Err(PdfOperatorError::InvalidOperandType)
         }
     }
 
-    pub fn get_str(&mut self) -> Result<String, PdfPainterError> {
-        let value = self.0.get(0);
-        self.0 = &self.0[1..];
-
-        if let Some(Value::LiteralString(string)) = value {
-            Ok(string.0.clone())
-        } else if let Some(Value::HexString(string)) = value {
-            Ok(string.0.clone())
+    pub fn get_str(&mut self) -> Result<String, PdfOperatorError> {
+        if let Some((value, rest)) = self.0.split_first() {
+            self.0 = rest;
+            value
+                .as_str()
+                .ok_or(PdfOperatorError::InvalidOperandType)
+                .map(|s| s.to_string())
         } else {
-            Err(PdfPainterError::InvalidOperandType)
+            Err(PdfOperatorError::InvalidOperandType)
         }
     }
 
-    pub fn get_name(&mut self) -> Result<String, PdfPainterError> {
+    pub fn get_name(&mut self) -> Result<String, PdfOperatorError> {
         let value = self.0.get(0);
         self.0 = &self.0[1..];
 
         if let Some(Value::Name(name)) = value {
             Ok(name.0.clone())
         } else {
-            Err(PdfPainterError::InvalidOperandType)
+            Err(PdfOperatorError::InvalidOperandType)
         }
     }
 
-    pub fn get_u8(&mut self) -> Result<u8, PdfPainterError> {
-        let value = self.0.get(0);
-        self.0 = &self.0[1..];
-
-        if let Some(Value::Number(number)) = value {
-            if let Some(number) = number.as_i64() {
-                u8::try_from(number).map_err(|_| PdfPainterError::InvalidOperandType)
-            } else {
-                Err(PdfPainterError::InvalidOperandType)
-            }
+    pub fn get_u8(&mut self) -> Result<u8, PdfOperatorError> {
+        if let Some((value, rest)) = self.0.split_first() {
+            self.0 = rest;
+            value
+                .as_number::<u8>()
+                .map_err(|_| PdfOperatorError::InvalidOperandType)
         } else {
-            Err(PdfPainterError::InvalidOperandType)
+            Err(PdfOperatorError::InvalidOperandType)
         }
     }
 
-    pub fn get_text_element_array(&mut self) -> Result<Vec<TextElement>, PdfPainterError> {
+    pub fn get_text_element_array(&mut self) -> Result<Vec<TextElement>, PdfOperatorError> {
         let value = self.0.get(0);
         self.0 = &self.0[1..];
 
@@ -88,19 +102,19 @@ impl Operands<'_> {
                         if let Some(num_f32) = n.as_f32() {
                             elements.push(TextElement::Adjustment { amount: num_f32 });
                         } else {
-                            return Err(PdfPainterError::InvalidOperandType);
+                            return Err(PdfOperatorError::InvalidOperandType);
                         }
                     }
-                    _ => return Err(PdfPainterError::InvalidOperandType),
+                    _ => return Err(PdfOperatorError::InvalidOperandType),
                 }
             }
             Ok(elements)
         } else {
-            Err(PdfPainterError::InvalidOperandType)
+            Err(PdfOperatorError::InvalidOperandType)
         }
     }
 
-    pub fn get_f32_array(&mut self) -> Result<Vec<f32>, PdfPainterError> {
+    pub fn get_f32_array(&mut self) -> Result<Vec<f32>, PdfOperatorError> {
         let value = self.0.get(0);
         self.0 = &self.0[1..];
 
@@ -112,15 +126,15 @@ impl Operands<'_> {
                         if let Some(num_f32) = n.as_f32() {
                             numbers.push(num_f32);
                         } else {
-                            return Err(PdfPainterError::InvalidOperandType);
+                            return Err(PdfOperatorError::InvalidOperandType);
                         }
                     }
-                    _ => return Err(PdfPainterError::InvalidOperandType),
+                    _ => return Err(PdfOperatorError::InvalidOperandType),
                 }
             }
             Ok(numbers)
         } else {
-            Err(PdfPainterError::InvalidOperandType)
+            Err(PdfOperatorError::InvalidOperandType)
         }
     }
 }
@@ -194,7 +208,7 @@ pub enum PdfOperatorVariant {
 }
 
 impl PdfOperatorVariant {
-    pub fn from(input: &[u8]) -> Result<Vec<PdfOperatorVariant>, PdfPainterError> {
+    pub fn from(input: &[u8]) -> Result<Vec<PdfOperatorVariant>, PdfOperatorError> {
         let mut parser = PdfParser::from(input);
         let mut operators = Vec::new();
         let mut operands = Vec::new();
@@ -220,6 +234,13 @@ impl PdfOperatorVariant {
 
                 for operation in READ_MAP {
                     if name == operation.name {
+                        if operands.len() != operation.operand_count {
+                            return Err(PdfOperatorError::IncorrectOperandCount(
+                                operands.len(),
+                                operation.operand_count,
+                            ));
+                        }
+
                         let mut ops = Operands(operands.as_slice());
                         let operator = (operation.parser)(&mut ops)?;
                         operators.push(operator);
@@ -293,7 +314,7 @@ mod tests {
                     PdfOperatorVariant::MoveTo(MoveTo::new(10.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 50.0)),
-                    PdfOperatorVariant::ClosePath(ClosePath::new()),
+                    PdfOperatorVariant::ClosePath(ClosePath::default()),
                 ],
             },
             TestCase {
@@ -337,7 +358,7 @@ mod tests {
                     PdfOperatorVariant::MoveTo(MoveTo::new(10.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(20.0, 20.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(30.0, 30.0)),
-                    PdfOperatorVariant::ClosePath(ClosePath::new()),
+                    PdfOperatorVariant::ClosePath(ClosePath::default()),
                 ],
             },
             TestCase {
@@ -365,7 +386,7 @@ mod tests {
                 expected_ops: vec![
                     PdfOperatorVariant::MoveTo(MoveTo::new(10.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(100.0, 100.0)),
-                    PdfOperatorVariant::StrokePath(StrokePath::new()),
+                    PdfOperatorVariant::StrokePath(StrokePath::default()),
                 ],
             },
             TestCase {
@@ -376,8 +397,8 @@ mod tests {
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 50.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(10.0, 50.0)),
-                    PdfOperatorVariant::ClosePath(ClosePath::new()),
-                    PdfOperatorVariant::FillPathNonZero(FillPathNonZero::new()),
+                    PdfOperatorVariant::ClosePath(ClosePath::default()),
+                    PdfOperatorVariant::FillPathNonZero(FillPathNonZero::default()),
                 ],
             },
             TestCase {
@@ -388,8 +409,8 @@ mod tests {
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 50.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(10.0, 50.0)),
-                    PdfOperatorVariant::ClosePath(ClosePath::new()),
-                    PdfOperatorVariant::FillPathEvenOdd(FillPathEvenOdd::new()),
+                    PdfOperatorVariant::ClosePath(ClosePath::default()),
+                    PdfOperatorVariant::FillPathEvenOdd(FillPathEvenOdd::default()),
                 ],
             },
             TestCase {
@@ -399,7 +420,7 @@ mod tests {
                     PdfOperatorVariant::MoveTo(MoveTo::new(10.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 50.0)),
-                    PdfOperatorVariant::CloseStrokePath(CloseStrokePath::new()),
+                    PdfOperatorVariant::CloseStrokePath(CloseStrokePath::default()),
                 ],
             },
             TestCase {
@@ -407,7 +428,9 @@ mod tests {
                 input: b"10 10 100 50 re B",
                 expected_ops: vec![
                     PdfOperatorVariant::Rectangle(Rectangle::new(10.0, 10.0, 100.0, 50.0)),
-                    PdfOperatorVariant::FillAndStrokePathNonZero(FillAndStrokePathNonZero::new()),
+                    PdfOperatorVariant::FillAndStrokePathNonZero(
+                        FillAndStrokePathNonZero::default(),
+                    ),
                 ],
             },
             TestCase {
@@ -415,7 +438,9 @@ mod tests {
                 input: b"10 10 100 50 re B*",
                 expected_ops: vec![
                     PdfOperatorVariant::Rectangle(Rectangle::new(10.0, 10.0, 100.0, 50.0)),
-                    PdfOperatorVariant::FillAndStrokePathEvenOdd(FillAndStrokePathEvenOdd::new()),
+                    PdfOperatorVariant::FillAndStrokePathEvenOdd(
+                        FillAndStrokePathEvenOdd::default(),
+                    ),
                 ],
             },
             TestCase {
@@ -426,7 +451,7 @@ mod tests {
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 50.0)),
                     PdfOperatorVariant::CloseFillAndStrokePathNonZero(
-                        CloseFillAndStrokePathNonZero::new(),
+                        CloseFillAndStrokePathNonZero::default(),
                     ),
                 ],
             },
@@ -438,7 +463,7 @@ mod tests {
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 50.0)),
                     PdfOperatorVariant::CloseFillAndStrokePathEvenOdd(
-                        CloseFillAndStrokePathEvenOdd::new(),
+                        CloseFillAndStrokePathEvenOdd::default(),
                     ),
                 ],
             },
@@ -448,7 +473,7 @@ mod tests {
                 expected_ops: vec![
                     PdfOperatorVariant::MoveTo(MoveTo::new(10.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(100.0, 100.0)),
-                    PdfOperatorVariant::EndPath(EndPath::new()),
+                    PdfOperatorVariant::EndPath(EndPath::default()),
                 ],
             },
             TestCase {
@@ -459,7 +484,7 @@ mod tests {
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 100.0)),
                     PdfOperatorVariant::CurveTo(CurveTo::new(100.0, 0.0, 150.0, 100.0, 200.0, 0.0)),
                     PdfOperatorVariant::CurveToY(CurveToY::new(250.0, -50.0, 300.0, 0.0)),
-                    PdfOperatorVariant::ClosePath(ClosePath::new()),
+                    PdfOperatorVariant::ClosePath(ClosePath::default()),
                 ],
             },
             TestCase {
@@ -470,7 +495,7 @@ mod tests {
                     PdfOperatorVariant::LineTo(LineTo::new(100.0, 100.0)),
                     PdfOperatorVariant::MoveTo(MoveTo::new(200.0, 200.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(300.0, 300.0)),
-                    PdfOperatorVariant::StrokePath(StrokePath::new()),
+                    PdfOperatorVariant::StrokePath(StrokePath::default()),
                 ],
             },
         ];

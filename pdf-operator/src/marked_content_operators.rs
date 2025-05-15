@@ -1,9 +1,9 @@
 use crate::{
-    error::PdfPainterError,
-    pdf_operator::{Operands, PdfOperatorVariant},
+    error::PdfOperatorError,
+    pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
 };
 
-/// Begins a marked-content sequence. (PDF operator `BMC`)
+/// Begins a marked-content sequence.
 /// Marked-content sequences associate a tag with a sequence of content stream operations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BeginMarkedContent {
@@ -12,21 +12,23 @@ pub struct BeginMarkedContent {
 }
 
 impl BeginMarkedContent {
-    pub const fn operator_name() -> &'static str {
-        "BMC"
-    }
-
     pub fn new(tag: String) -> Self {
         Self { tag }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for BeginMarkedContent {
+    const NAME: &'static str = "BMC";
+
+    const OPERAND_COUNT: usize = 1;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let tag = operands.get_str()?;
         Ok(PdfOperatorVariant::BeginMarkedContent(Self::new(tag)))
     }
 }
 
-/// Begins a marked-content sequence with an associated property list. (PDF operator `BDC`)
+/// Begins a marked-content sequence with an associated property list.
 /// The property list can be either a name (referring to an entry in the Properties subdictionary
 /// of the current resource dictionary) or an inline dictionary.
 #[derive(Debug, Clone, PartialEq)]
@@ -38,15 +40,17 @@ pub struct BeginMarkedContentWithProps {
 }
 
 impl BeginMarkedContentWithProps {
-    pub const fn operator_name() -> &'static str {
-        "BDC"
-    }
-
     pub fn new(tag: String, properties: String) -> Self {
         Self { tag, properties }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for BeginMarkedContentWithProps {
+    const NAME: &'static str = "BDC";
+
+    const OPERAND_COUNT: usize = 2;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let tag = operands.get_str()?;
         let properties = operands.get_str()?;
         Ok(PdfOperatorVariant::BeginMarkedContentWithProps(Self::new(
@@ -55,20 +59,16 @@ impl BeginMarkedContentWithProps {
     }
 }
 
-/// Ends a marked-content sequence begun by a `BMC` or `BDC` operator. (PDF operator `EMC`)
-#[derive(Debug, Clone, PartialEq)]
+/// Ends a marked-content sequence begun by a `BMC` or `BDC` operator.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct EndMarkedContent;
 
-impl EndMarkedContent {
-    pub const fn operator_name() -> &'static str {
-        "EMC"
-    }
+impl PdfOperator for EndMarkedContent {
+    const NAME: &'static str = "EMC";
 
-    pub const fn new() -> Self {
-        Self
-    }
+    const OPERAND_COUNT: usize = 0;
 
-    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
-        Ok(PdfOperatorVariant::EndMarkedContent(Self::new()))
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        Ok(PdfOperatorVariant::EndMarkedContent(Self::default()))
     }
 }

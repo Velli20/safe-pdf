@@ -1,42 +1,32 @@
 use crate::{
-    error::PdfPainterError,
-    pdf_operator::{Operands, PdfOperatorVariant},
+    error::PdfOperatorError,
+    pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
 };
 
 /// Modifies the current clipping path by intersecting it with the current path, using the non-zero winding number rule to determine the region to clip.
-/// (PDF operator `W`)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ClipNonZero;
 
-impl ClipNonZero {
-    pub const fn operator_name() -> &'static str {
-        "W"
-    }
+impl PdfOperator for ClipNonZero {
+    const NAME: &'static str = "W";
 
-    pub const fn new() -> Self {
-        Self
-    }
+    const OPERAND_COUNT: usize = 0;
 
-    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
-        Ok(PdfOperatorVariant::ClipNonZero(Self::new()))
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        Ok(PdfOperatorVariant::ClipNonZero(Self::default()))
     }
 }
 
 /// Modifies the current clipping path by intersecting it with the current path, using the even-odd rule to determine the region to clip.
-/// (PDF operator `W*`)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ClipEvenOdd;
 
-impl ClipEvenOdd {
-    pub const fn operator_name() -> &'static str {
-        "W*"
-    }
+impl PdfOperator for ClipEvenOdd {
+    const NAME: &'static str = "W*";
 
-    pub const fn new() -> Self {
-        Self
-    }
+    const OPERAND_COUNT: usize = 0;
 
-    pub fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
-        Ok(PdfOperatorVariant::ClipEvenOdd(Self::new()))
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        Ok(PdfOperatorVariant::ClipEvenOdd(Self::default()))
     }
 }

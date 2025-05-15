@@ -1,6 +1,6 @@
 use crate::{
-    error::PdfPainterError,
-    pdf_operator::{Operands, PdfOperatorVariant},
+    error::PdfOperatorError,
+    pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
 };
 
 /// Begins a new subpath by moving the current point to coordinates (x, y), omitting any connecting line segment. (PDF operator `m`)
@@ -14,15 +14,17 @@ pub struct MoveTo {
 }
 
 impl MoveTo {
-    pub const fn operator_name() -> &'static str {
-        "m"
-    }
-
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for MoveTo {
+    const NAME: &'static str = "m";
+
+    const OPERAND_COUNT: usize = 2;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let x = operands.get_f32()?;
         let y = operands.get_f32()?;
         Ok(PdfOperatorVariant::MoveTo(Self::new(x, y)))
@@ -40,15 +42,17 @@ pub struct LineTo {
 }
 
 impl LineTo {
-    pub const fn operator_name() -> &'static str {
-        "l"
-    }
-
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for LineTo {
+    const NAME: &'static str = "l";
+
+    const OPERAND_COUNT: usize = 2;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let x = operands.get_f32()?;
         let y = operands.get_f32()?;
         Ok(PdfOperatorVariant::LineTo(Self::new(x, y)))
@@ -75,10 +79,6 @@ pub struct CurveTo {
 }
 
 impl CurveTo {
-    pub const fn operator_name() -> &'static str {
-        "c"
-    }
-
     pub fn new(x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32) -> Self {
         Self {
             x1,
@@ -89,8 +89,14 @@ impl CurveTo {
             y3,
         }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for CurveTo {
+    const NAME: &'static str = "c";
+
+    const OPERAND_COUNT: usize = 6;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let x1 = operands.get_f32()?;
         let y1 = operands.get_f32()?;
         let x2 = operands.get_f32()?;
@@ -120,15 +126,17 @@ pub struct CurveToV {
 } // Initial point replicated
 
 impl CurveToV {
-    pub const fn operator_name() -> &'static str {
-        "v"
-    }
-
     pub fn new(x2: f32, y2: f32, x3: f32, y3: f32) -> Self {
         Self { x2, y2, x3, y3 }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for CurveToV {
+    const NAME: &'static str = "v";
+
+    const OPERAND_COUNT: usize = 4;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let x2 = operands.get_f32()?;
         let y2 = operands.get_f32()?;
         let x3 = operands.get_f32()?;
@@ -153,15 +161,17 @@ pub struct CurveToY {
 } // Final point replicated
 
 impl CurveToY {
-    pub const fn operator_name() -> &'static str {
-        "y"
-    }
-
     pub fn new(x1: f32, y1: f32, x3: f32, y3: f32) -> Self {
         Self { x1, y1, x3, y3 }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for CurveToY {
+    const NAME: &'static str = "y";
+
+    const OPERAND_COUNT: usize = 4;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let x1 = operands.get_f32()?;
         let y1 = operands.get_f32()?;
         let x3 = operands.get_f32()?;
@@ -172,20 +182,16 @@ impl CurveToY {
 
 /// Closes the current subpath by appending a straight line segment from the current point
 /// to the starting point of the subpath. (PDF operator `h`)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ClosePath;
 
-impl ClosePath {
-    pub const fn operator_name() -> &'static str {
-        "h"
-    }
+impl PdfOperator for ClosePath {
+    const NAME: &'static str = "h";
 
-    pub const fn new() -> Self {
-        Self
-    }
+    const OPERAND_COUNT: usize = 0;
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
-        Ok(PdfOperatorVariant::ClosePath(Self::new()))
+    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        Ok(PdfOperatorVariant::ClosePath(Self::default()))
     }
 }
 
@@ -205,10 +211,6 @@ pub struct Rectangle {
 }
 
 impl Rectangle {
-    pub const fn operator_name() -> &'static str {
-        "re"
-    }
-
     pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
         Self {
             x,
@@ -217,8 +219,14 @@ impl Rectangle {
             height,
         }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for Rectangle {
+    const NAME: &'static str = "re";
+
+    const OPERAND_COUNT: usize = 4;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let x = operands.get_f32()?;
         let y = operands.get_f32()?;
         let width = operands.get_f32()?;

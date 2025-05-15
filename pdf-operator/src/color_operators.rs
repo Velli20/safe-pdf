@@ -1,9 +1,9 @@
 use crate::{
-    error::PdfPainterError,
-    pdf_operator::{Operands, PdfOperatorVariant},
+    error::PdfOperatorError,
+    pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
 };
 
-/// Sets the fill color to a grayscale value. (PDF operator `g`)
+/// Sets the fill color to a grayscale value.
 /// The gray level applies to subsequent fill operations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetGrayFill {
@@ -12,21 +12,23 @@ pub struct SetGrayFill {
 }
 
 impl SetGrayFill {
-    pub const fn operator_name() -> &'static str {
-        "g"
-    }
-
     pub fn new(gray: f32) -> Self {
         Self { gray }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for SetGrayFill {
+    const NAME: &'static str = "g";
+
+    const OPERAND_COUNT: usize = 1;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let gray = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetGrayFill(Self::new(gray)))
     }
 }
 
-/// Sets the stroke color to a grayscale value. (PDF operator `G`)
+/// Sets the stroke color to a grayscale value.
 /// The gray level applies to subsequent stroke operations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetGrayStroke {
@@ -35,21 +37,23 @@ pub struct SetGrayStroke {
 }
 
 impl SetGrayStroke {
-    pub const fn operator_name() -> &'static str {
-        "G"
-    }
-
     pub fn new(gray: f32) -> Self {
         Self { gray }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for SetGrayStroke {
+    const NAME: &'static str = "G";
+
+    const OPERAND_COUNT: usize = 1;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let gray = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetGrayStroke(Self::new(gray)))
     }
 }
 
-/// Sets the fill color to an RGB (Red, Green, Blue) value. (PDF operator `rg`)
+/// Sets the fill color to an RGB (Red, Green, Blue) value.
 /// The RGB color applies to subsequent fill operations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetRGBFill {
@@ -62,15 +66,17 @@ pub struct SetRGBFill {
 }
 
 impl SetRGBFill {
-    pub const fn operator_name() -> &'static str {
-        "rg"
-    }
-
     pub fn new(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for SetRGBFill {
+    const NAME: &'static str = "rg";
+
+    const OPERAND_COUNT: usize = 3;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let r = operands.get_f32()?;
         let g = operands.get_f32()?;
         let b = operands.get_f32()?;
@@ -78,7 +84,7 @@ impl SetRGBFill {
     }
 }
 
-/// Sets the stroke color to an RGB (Red, Green, Blue) value. (PDF operator `RG`)
+/// Sets the stroke color to an RGB (Red, Green, Blue) value.
 /// The RGB color applies to subsequent stroke operations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetRGBStroke {
@@ -91,15 +97,17 @@ pub struct SetRGBStroke {
 }
 
 impl SetRGBStroke {
-    pub const fn operator_name() -> &'static str {
-        "RG"
-    }
-
     pub fn new(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for SetRGBStroke {
+    const NAME: &'static str = "RG";
+
+    const OPERAND_COUNT: usize = 3;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let r = operands.get_f32()?;
         let g = operands.get_f32()?;
         let b = operands.get_f32()?;
@@ -107,7 +115,7 @@ impl SetRGBStroke {
     }
 }
 
-/// Sets the fill color to a CMYK (Cyan, Magenta, Yellow, Black/Key) value. (PDF operator `k`)
+/// Sets the fill color to a CMYK (Cyan, Magenta, Yellow, Black/Key) value.
 /// The CMYK color applies to subsequent fill operations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetCMYKFill {
@@ -122,15 +130,17 @@ pub struct SetCMYKFill {
 }
 
 impl SetCMYKFill {
-    pub const fn operator_name() -> &'static str {
-        "k"
-    }
-
     pub fn new(c: f32, m: f32, y: f32, k: f32) -> Self {
         Self { c, m, y, k }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for SetCMYKFill {
+    const NAME: &'static str = "k";
+
+    const OPERAND_COUNT: usize = 4;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let c = operands.get_f32()?;
         let m = operands.get_f32()?;
         let y = operands.get_f32()?;
@@ -139,7 +149,7 @@ impl SetCMYKFill {
     }
 }
 
-/// Sets the stroke color to a CMYK (Cyan, Magenta, Yellow, Black/Key) value. (PDF operator `K`)
+/// Sets the stroke color to a CMYK (Cyan, Magenta, Yellow, Black/Key) value.
 /// The CMYK color applies to subsequent stroke operations.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetCMYKStroke {
@@ -154,15 +164,17 @@ pub struct SetCMYKStroke {
 }
 
 impl SetCMYKStroke {
-    pub const fn operator_name() -> &'static str {
-        "K"
-    }
-
     pub fn new(c: f32, m: f32, y: f32, k: f32) -> Self {
         Self { c, m, y, k }
     }
+}
 
-    pub fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfPainterError> {
+impl PdfOperator for SetCMYKStroke {
+    const NAME: &'static str = "K";
+
+    const OPERAND_COUNT: usize = 4;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let c = operands.get_f32()?;
         let m = operands.get_f32()?;
         let y = operands.get_f32()?;
