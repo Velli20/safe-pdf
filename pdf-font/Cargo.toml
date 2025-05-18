@@ -1,0 +1,7 @@
+[package]
+name = "pdf-font"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pdf-object = { path = "../pdf-object" }

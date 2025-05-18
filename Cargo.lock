@@ -61,9 +61,17 @@ dependencies = [
 name = "pdf-document"
 version = "0.1.0"
 dependencies = [
+ "pdf-font",
  "pdf-object",
  "pdf-page",
  "pdf-parser",
+]
+
+[[package]]
+name = "pdf-font"
+version = "0.1.0"
+dependencies = [
+ "pdf-object",
 ]
 
 [[package]]
@@ -86,6 +94,7 @@ dependencies = [
 name = "pdf-page"
 version = "0.1.0"
 dependencies = [
+ "pdf-font",
  "pdf-object",
  "pdf-operator",
 ]

@@ -13,6 +13,7 @@ pub mod number;
 pub mod object_collection;
 pub mod stream;
 pub mod trailer;
+pub mod traits;
 pub mod version;
 
 use std::rc::Rc;
@@ -81,6 +82,16 @@ impl Value {
     pub fn as_object(&self) -> Option<&ObjectVariant> {
         if let Value::IndirectObject(value) = self {
             Some(value)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_str(&self) -> Option<&str> {
+        if let Value::LiteralString(value) = self {
+            Some(&value.0)
+        } else if let Value::HexString(value) = self {
+            Some(&value.0)
         } else {
             None
         }

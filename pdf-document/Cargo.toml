@@ -7,3 +7,4 @@ edition = "2024"
 pdf-object = { path = "../pdf-object" }
 pdf-parser = { path = "../pdf-parser" }
 pdf-page = { path = "../pdf-page" }
+pdf-font = { path = "../pdf-font" }

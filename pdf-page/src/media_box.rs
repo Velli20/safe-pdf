@@ -1,3 +1,9 @@
+use pdf_object::{
+    dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
+};
+
+use crate::error::PageError;
+
 /// Defines the page boundaries within a PDF document.
 ///
 /// The `MediaBox` is a rectangle, expressed in default user space units,
@@ -22,6 +28,39 @@ impl MediaBox {
             top,
             right,
             bottom,
+        }
+    }
+}
+
+impl FromDictionary for MediaBox {
+    const KEY: &'static str = "MediaBox";
+    type ResultType = MediaBox;
+    type ErrorType = PageError;
+
+    fn from_dictionary(
+        dictionary: &Dictionary,
+        _objects: &ObjectCollection,
+    ) -> Result<Self::ResultType, PageError> {
+        let array = dictionary
+            .get_array(Self::KEY)
+            .ok_or(PageError::MissingMediaBox)?;
+
+        match array.0.as_slice() {
+            // Pattern match for exactly 4 elements in the slice.
+            [l, t, r, b] => {
+                // Safely extract and cast the values
+                let left = l.as_number::<u32>()?;
+                let top = t.as_number::<u32>()?;
+                let right = r.as_number::<u32>()?;
+                let bottom = b.as_number::<u32>()?;
+
+                return Ok(MediaBox::new(left, top, right, bottom));
+            }
+            _ => {
+                return Err(PageError::InvalidMediaBox(
+                    "MediaBox array must contain exactly 4 numbers",
+                ));
+            }
         }
     }
 }

@@ -1,5 +1,8 @@
 use error::PdfError;
-use pdf_object::{Value, object_collection::ObjectCollection, trailer::Trailer, version::Version};
+use pdf_object::{
+    Value, object_collection::ObjectCollection, trailer::Trailer, traits::FromDictionary,
+    version::Version,
+};
 use pdf_page::page::PdfPage;
 use pdf_parser::{ParseObject, PdfParser};
 

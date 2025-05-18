@@ -25,19 +25,8 @@ impl ObjectCollection {
         None
     }
 
-    pub fn dereference(&self, mut key: i32) -> Option<ObjectVariant> {
-        loop {
-            if let Some(obj) = self.map.get(&key) {
-                if let ObjectVariant::Reference(object_number) = obj {
-                    key = *object_number;
-                }
-                return Some(obj.clone());
-            } else {
-                break;
-            }
-        }
-
-        None
+    pub fn get2(&self, obj: &ObjectVariant) -> Option<&ObjectVariant> {
+        return self.map.get(&obj.object_number());
     }
 
     pub fn get_dictionary(&self, key: i32) -> Option<&Dictionary> {

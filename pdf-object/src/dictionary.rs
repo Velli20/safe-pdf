@@ -39,6 +39,15 @@ impl Dictionary {
             })
     }
 
+    pub fn get_dictionary(&self, key: &str) -> Option<&Rc<Dictionary>> {
+        self.dictionary
+            .get(key)
+            .and_then(|value| match value.as_ref() {
+                Value::Dictionary(obj) => Some(obj),
+                _ => None,
+            })
+    }
+
     pub fn get_array(&self, key: &str) -> Option<&Array> {
         self.dictionary
             .get(key)

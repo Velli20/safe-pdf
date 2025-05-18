@@ -1,0 +1,110 @@
+use pdf_object::{
+    ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection,
+    traits::FromDictionary,
+};
+
+use crate::error::FontError;
+
+/// Represents a font descriptor, a dictionary that provides detailed information
+/// about a font, such as its metrics, style, and font file data.
+#[derive(Debug)]
+pub struct FontDescriptor {
+    /// The maximum height above the baseline reached by glyphs in this font.
+    /// This value is positive for ascenders.
+    ascent: i64,
+    /// The maximum depth below the baseline reached by glyphs in this font.
+    /// This value is negative for descenders.
+    descent: i64,
+    /// The y-coordinate of the top of flat capital letters, measured from the baseline.
+    cap_height: i64,
+    /// A collection of flags specifying various characteristics of the font.
+    flags: i64,
+    /// A rectangle, expressed in the glyph coordinate system,
+    /// that specifies the font bounding box. This is the smallest rectangle enclosing
+    /// the shape that would result if all of the glyphs of the font were
+    /// placed with their origins coincident and then filled.
+    font_bounding_box: [i32; 4],
+    /// A string specifying the preferred font family name.
+    font_family: Option<String>,
+    /// A stream containing the font program.
+    /// This can be FontFile, FontFile2, or FontFile3 depending on the font type.
+    font_file: Option<ObjectVariant>,
+    /// The PostScript name of the font.
+    font_name: String,
+    /// The weight (thickness) of the font's strokes.
+    font_weight: Option<i64>,
+    /// The angle, in degrees counterclockwise from the vertical, of the dominant vertical strokes of the font.
+    italic_angle: i64,
+    /// The width to use for glyphs not found in the font's encoding.
+    missing_width: i64,
+    /// The maximum width of a glyph in the font.
+    max_width: Option<i64>,
+    /// The thickness, measured horizontally, of the dominant vertical stems of glyphs in the font.
+    stem_v: i64,
+}
+
+impl FromDictionary for FontDescriptor {
+    const KEY: &'static str = "FontDescriptor";
+
+    type ResultType = Self;
+    type ErrorType = FontError;
+
+    fn from_dictionary(
+        dictionary: &Dictionary,
+        objects: &ObjectCollection,
+    ) -> Result<Self::ResultType, Self::ErrorType> {
+        let ascent = dictionary.get_number("Ascent").unwrap_or(0);
+        let descent = dictionary.get_number("Descent").unwrap_or(0);
+        let cap_height = dictionary.get_number("CapHeight").unwrap_or(0);
+        let flags = dictionary.get_number("Flags").unwrap_or(0);
+        let font_bounding_box = dictionary.get_array("FontBBox").unwrap();
+        let font_bounding_box = match font_bounding_box.0.as_slice() {
+            // Pattern match for exactly 4 elements in the slice.
+            [l, t, r, b] => {
+                let left = l.as_number::<i32>()?;
+                let top = t.as_number::<i32>()?;
+                let right = r.as_number::<i32>()?;
+                let bottom = b.as_number::<i32>()?;
+
+                [left, top, right, bottom]
+            }
+            _ => {
+                return Err(FontError::InvalidFontDescriptor(
+                    "font_bounding_box array must contain exactly 4 numbers",
+                ));
+            }
+        };
+        let font_family = dictionary.get_string("FontFamily").cloned();
+
+        let font_file = if let Some(s) = dictionary.get_object("FontFile2") {
+            objects.get2(s).cloned()
+        } else {
+            None
+        };
+        let font_name = dictionary
+            .get_string("FontName")
+            .unwrap_or(&String::new())
+            .clone();
+        let font_weight = dictionary.get_number("FontWeight");
+        let italic_angle = dictionary.get_number("ItalicAngle").unwrap_or(0);
+        let missing_width = dictionary.get_number("MissingWidth").unwrap_or(0);
+        let max_width = dictionary.get_number("MaxWidth");
+        let stem_v = dictionary.get_number("StemV").unwrap_or(0);
+
+        Ok(Self {
+            ascent,
+            descent,
+            cap_height,
+            flags,
+            font_bounding_box,
+            font_family,
+            font_file,
+            font_name,
+            font_weight,
+            italic_angle,
+            missing_width,
+            max_width,
+            stem_v,
+        })
+    }
+}
