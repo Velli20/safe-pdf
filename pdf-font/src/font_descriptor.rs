@@ -5,6 +5,36 @@ use pdf_object::{
 
 use crate::error::FontError;
 
+use bitflags::bitflags;
+
+bitflags! {
+    /// Defines various characteristics of a font, such as whether it is serif, italic, etc.
+    /// These flags correspond to the values specified in Table 9.8 "Font Descriptor Flags"
+    /// in the PDF 1.7 specification (ISO 32000-1:2008).
+    /// Each flag represents a specific attribute of the font's appearance or behavior.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct FontDescriptorFlags: u32 {
+        /// Set if the font is monospaced.
+        const FIXED_PITCH  = 0x0001;
+        ///	Set if the font uses serifs.
+        const SERIF        = 0x0002;
+        /// Set if the font contains characters outside the Adobe standard Latin set.
+        const SYMBOLIC     = 0x0004;
+        /// Set if the font is script-style (glyphs resemble cursive handwriting).
+        const SCRIPT       = 0x0008;
+        /// Set if the font uses the Adobe standard Latin set.
+        const NONSYMBOLIC  = 0x0010;
+        /// Set if the font is italic.
+        const ITALIC       = 0x0020;
+        /// Set if the font is all caps.
+        const ALL_CAP      = 0x0040;
+        /// Set if the font is small caps.
+        const SMALL_CAP    = 0x0080;
+        /// Set if the font is forcibly bold.
+        const FORCE_BOLD   = 0x0100;
+    }
+}
+
 /// Represents a font descriptor, a dictionary that provides detailed information
 /// about a font, such as its metrics, style, and font file data.
 #[derive(Debug)]
@@ -18,7 +48,7 @@ pub struct FontDescriptor {
     /// The y-coordinate of the top of flat capital letters, measured from the baseline.
     cap_height: i64,
     /// A collection of flags specifying various characteristics of the font.
-    flags: i64,
+    flags: FontDescriptorFlags,
     /// A rectangle, expressed in the glyph coordinate system,
     /// that specifies the font bounding box. This is the smallest rectangle enclosing
     /// the shape that would result if all of the glyphs of the font were
@@ -57,6 +87,7 @@ impl FromDictionary for FontDescriptor {
         let descent = dictionary.get_number("Descent").unwrap_or(0);
         let cap_height = dictionary.get_number("CapHeight").unwrap_or(0);
         let flags = dictionary.get_number("Flags").unwrap_or(0);
+        let flags = FontDescriptorFlags::from_bits_truncate(flags as u32);
         let font_bounding_box = dictionary.get_array("FontBBox").unwrap();
         let font_bounding_box = match font_bounding_box.0.as_slice() {
             // Pattern match for exactly 4 elements in the slice.

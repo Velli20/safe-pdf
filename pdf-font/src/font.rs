@@ -38,17 +38,15 @@ impl FromDictionary for Font {
 
         let cmap: Option<CharacterMap> = dictionary
             .get_object("ToUnicode")
-            .map(|to_unicode_obj| {
-                match to_unicode_obj {
-                    ObjectVariant::Reference(num) => objects
-                        .get(*num)
-                        .ok_or(FontError::MissingFontDescriptor)
-                        .and_then(|resolved_obj| match resolved_obj {
-                            ObjectVariant::Stream(s) => CharacterMap::from_stream_object(&s),
-                            _ => Err(FontError::MissingFontDescriptor),
-                        }),
-                    _ => Err(FontError::MissingFontDescriptor),
-                }
+            .map(|to_unicode_obj| match to_unicode_obj {
+                ObjectVariant::Reference(num) => objects
+                    .get(*num)
+                    .ok_or(FontError::MissingFontDescriptor)
+                    .and_then(|resolved_obj| match resolved_obj {
+                        ObjectVariant::Stream(s) => CharacterMap::from_stream_object(&s),
+                        _ => Err(FontError::MissingFontDescriptor),
+                    }),
+                _ => Err(FontError::MissingFontDescriptor),
             })
             .transpose()?;
 

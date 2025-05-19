@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 pdf-object = { path = "../pdf-object" }
+bitflags = "2.9.1"
