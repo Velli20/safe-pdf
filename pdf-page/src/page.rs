@@ -20,6 +20,7 @@ pub struct PdfPage {
     contents: Option<ContentStream>,
     /// `/MediaBox` attribute which defines the page boundaries.
     media_box: MediaBox,
+    resources: Option<Resources>,
 }
 
 impl FromDictionary for PdfPage {
@@ -42,14 +43,12 @@ impl FromDictionary for PdfPage {
         let media_box = MediaBox::from_dictionary(dictionary, objects)?;
 
         let resources = Resources::from_dictionary(dictionary, objects).ok();
-        if let Some(resources) = &resources {
-            // println!("resources {:?}", resources);
-        }
 
         Ok(Self {
             parent: None,
             contents,
             media_box,
+            resources,
         })
     }
 }

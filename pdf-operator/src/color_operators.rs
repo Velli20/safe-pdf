@@ -1,6 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
+    pdf_operator_backend::PdfOperatorBackend,
 };
 
 /// Sets the fill color to a grayscale value.
@@ -26,6 +27,10 @@ impl PdfOperator for SetGrayFill {
         let gray = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetGrayFill(Self::new(gray)))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_non_stroking_gray(self.gray)
+    }
 }
 
 /// Sets the stroke color to a grayscale value.
@@ -50,6 +55,10 @@ impl PdfOperator for SetGrayStroke {
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let gray = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetGrayStroke(Self::new(gray)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_stroking_gray(self.gray)
     }
 }
 
@@ -82,6 +91,10 @@ impl PdfOperator for SetRGBFill {
         let b = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetRGBFill(Self::new(r, g, b)))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_non_stroking_rgb(self.r, self.g, self.b)
+    }
 }
 
 /// Sets the stroke color to an RGB (Red, Green, Blue) value.
@@ -112,6 +125,10 @@ impl PdfOperator for SetRGBStroke {
         let g = operands.get_f32()?;
         let b = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetRGBStroke(Self::new(r, g, b)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_stroking_rgb(self.r, self.g, self.b)
     }
 }
 
@@ -147,6 +164,10 @@ impl PdfOperator for SetCMYKFill {
         let k = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetCMYKFill(Self::new(c, m, y, k)))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_non_stroking_cmyk(self.c, self.m, self.y, self.k)
+    }
 }
 
 /// Sets the stroke color to a CMYK (Cyan, Magenta, Yellow, Black/Key) value.
@@ -180,5 +201,9 @@ impl PdfOperator for SetCMYKStroke {
         let y = operands.get_f32()?;
         let k = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetCMYKStroke(Self::new(c, m, y, k)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_stroking_cmyk(self.c, self.m, self.y, self.k)
     }
 }

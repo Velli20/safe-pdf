@@ -1,6 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
+    pdf_operator_backend::PdfOperatorBackend,
 };
 
 /// Sets the line width for path stroking.
@@ -24,6 +25,10 @@ impl PdfOperator for SetLineWidth {
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let width = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetLineWidth(Self::new(width)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_line_width(self.width)
     }
 }
 
@@ -50,6 +55,10 @@ impl PdfOperator for SetLineCapStyle {
         let style = operands.get_u8()?;
         Ok(PdfOperatorVariant::SetLineCapStyle(Self::new(style)))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_line_cap(self.style as i32)
+    }
 }
 
 /// Sets the line join style for path stroking.
@@ -75,6 +84,10 @@ impl PdfOperator for SetLineJoinStyle {
         let style = operands.get_u8()?;
         Ok(PdfOperatorVariant::SetLineJoinStyle(Self::new(style)))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_line_join(self.style as i32)
+    }
 }
 
 /// Sets the miter limit for path stroking.
@@ -99,6 +112,10 @@ impl PdfOperator for SetMiterLimit {
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let limit = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetMiterLimit(Self::new(limit)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_miter_limit(self.limit)
     }
 }
 
@@ -127,6 +144,10 @@ impl PdfOperator for SetDashPattern {
         let phase = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetDashPattern(Self::new(array, phase)))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_dash_pattern(&self.array, self.phase)
+    }
 }
 
 /// Saves the current graphics state on the graphics state stack.
@@ -141,6 +162,10 @@ impl PdfOperator for SaveGraphicsState {
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::SaveGraphicsState(Self::default()))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.save_graphics_state()
+    }
 }
 
 /// Restores the graphics state by removing the most recently saved state from the stack.
@@ -154,6 +179,10 @@ impl PdfOperator for RestoreGraphicsState {
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::RestoreGraphicsState(Self::default()))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.restore_graphics_state()
     }
 }
 
@@ -186,5 +215,16 @@ impl PdfOperator for ConcatMatrix {
         Ok(PdfOperatorVariant::ConcatMatrix(Self::new([
             a, b, c, d, e, f,
         ])))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.concat_matrix(
+            self.matrix[0],
+            self.matrix[1],
+            self.matrix[2],
+            self.matrix[3],
+            self.matrix[4],
+            self.matrix[5],
+        )
     }
 }

@@ -1,6 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
+    pdf_operator_backend::PdfOperatorBackend,
 };
 
 /// Invokes a named XObject.
@@ -26,6 +27,10 @@ impl PdfOperator for InvokeXObject {
         let name = operands.get_name()?;
         Ok(PdfOperatorVariant::InvokeXObject(Self::new(name)))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.invoke_xobject(&self.name)
+    }
 }
 
 /// Begins an inline image object.
@@ -50,8 +55,8 @@ impl PdfOperator for BeginInlineImage {
 }
 
 /// Represents the image data within an inline image object.
-/// The `ID` operator itself marks the beginning of the image data stream, which is then followed by the actual image data.
-/// This struct holds that image data.
+/// The `ID` operator itself marks the beginning of the image data stream, which is then
+/// followed by the actual image data.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InlineImageData {
     /// The raw byte data of the inline image.

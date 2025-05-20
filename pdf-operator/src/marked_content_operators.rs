@@ -1,6 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
+    pdf_operator_backend::PdfOperatorBackend,
 };
 
 /// Begins a marked-content sequence.
@@ -25,6 +26,10 @@ impl PdfOperator for BeginMarkedContent {
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let tag = operands.get_str()?;
         Ok(PdfOperatorVariant::BeginMarkedContent(Self::new(tag)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.begin_marked_content(&self.tag)
     }
 }
 
@@ -57,6 +62,10 @@ impl PdfOperator for BeginMarkedContentWithProps {
             tag, properties,
         )))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.begin_marked_content_with_properties(&self.tag, &self.properties)
+    }
 }
 
 /// Ends a marked-content sequence begun by a `BMC` or `BDC` operator.
@@ -70,5 +79,9 @@ impl PdfOperator for EndMarkedContent {
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::EndMarkedContent(Self::default()))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.end_marked_content()
     }
 }

@@ -1,6 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
+    pdf_operator_backend::PdfOperatorBackend,
 };
 
 /// Moves to the start of the next line, offset from the start of the current line by (`tx`, `ty`).
@@ -30,6 +31,10 @@ impl PdfOperator for MoveTextPosition {
         let tx = operands.get_f32()?;
         let ty = operands.get_f32()?;
         Ok(PdfOperatorVariant::MoveTextPosition(Self::new(tx, ty)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.move_text_position(self.tx, self.ty)
     }
 }
 
@@ -61,6 +66,10 @@ impl PdfOperator for MoveTextPositionAndSetLeading {
         Ok(PdfOperatorVariant::MoveTextPositionAndSetLeading(
             Self::new(tx, ty),
         ))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.move_text_position_and_set_leading(self.tx, self.ty)
     }
 }
 
@@ -98,6 +107,17 @@ impl PdfOperator for SetTextMatrix {
             a, b, c, d, e, f,
         ])))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_text_matrix(
+            self.matrix[0],
+            self.matrix[1],
+            self.matrix[2],
+            self.matrix[3],
+            self.matrix[4],
+            self.matrix[5],
+        )
+    }
 }
 
 /// Moves to the start of the next line.
@@ -113,5 +133,9 @@ impl PdfOperator for MoveToNextLine {
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::MoveToNextLine(Self::default()))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.move_to_start_of_next_line()
     }
 }

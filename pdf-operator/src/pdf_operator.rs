@@ -3,11 +3,22 @@ use pdf_parser::{ParseObject, PdfParser};
 use pdf_tokenizer::PdfToken;
 
 use crate::{
-    TextElement, clipping_path_operators::*, color_operators::*, error::PdfOperatorError,
-    graphics_state_operators::*, marked_content_operators::*, operation_map::READ_MAP,
-    operator_tokenizer::OperatorReader, path_operators::*, path_paint_operators::*,
-    text_object_operators::*, text_positioning_operators::*, text_showing_operators::*,
-    text_state_operators::*, xobject_and_image_operators::*,
+    TextElement,
+    clipping_path_operators::*,
+    color_operators::*,
+    error::PdfOperatorError,
+    graphics_state_operators::*,
+    marked_content_operators::*,
+    operation_map::READ_MAP,
+    operator_tokenizer::OperatorReader,
+    path_operators::*,
+    path_paint_operators::*,
+    pdf_operator_backend::{PathConstructionOps, PdfOperatorBackend},
+    text_object_operators::*,
+    text_positioning_operators::*,
+    text_showing_operators::*,
+    text_state_operators::*,
+    xobject_and_image_operators::*,
 };
 
 /// Represents a PDF content stream operator.
@@ -37,6 +48,10 @@ pub trait PdfOperator {
     /// A `Result` containing the constructed `PdfOperatorVariant`,
     /// or a `PdfOperatorError` on an error.
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError>;
+
+    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), T::ErrorType> {
+        todo!("Unimplemented operator {}", Self::NAME)
+    }
 }
 
 pub struct Operands<'a>(&'a [Value]);

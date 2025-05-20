@@ -3,6 +3,7 @@ use crate::pdf_operator::PdfOperator;
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperatorVariant},
+    pdf_operator_backend::PdfOperatorBackend,
 };
 
 /// Shows a text string.
@@ -27,10 +28,13 @@ impl PdfOperator for ShowText {
         let text = operands.get_str()?;
         Ok(PdfOperatorVariant::ShowText(Self::new(text)))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.show_text(self.text.as_bytes())
+    }
 }
 
-/// Moves to the next line and shows a text string. (
-/// /// This is equivalent to `MoveToNextLine` followed by `ShowText`.
+/// Moves to the next line and shows a text string.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MoveNextLineShowText {
     /// The text string to be shown.
@@ -51,6 +55,10 @@ impl PdfOperator for MoveNextLineShowText {
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let text = operands.get_str()?;
         Ok(PdfOperatorVariant::MoveNextLineShowText(Self::new(text)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.move_to_next_line_and_show_text(self.text.as_bytes())
     }
 }
 
@@ -91,6 +99,10 @@ impl PdfOperator for SetSpacingMoveShowText {
             text,
         )))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_spacing_and_show_text(self.word_spacing, self.char_spacing, self.text.as_bytes())
+    }
 }
 
 /// Shows one or more text strings, allowing individual glyph positioning.
@@ -117,5 +129,9 @@ impl PdfOperator for ShowTextArray {
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let elements = operands.get_text_element_array()?;
         Ok(PdfOperatorVariant::ShowTextArray(Self::new(elements)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.show_text_with_glyph_positioning(&self.elements)
     }
 }

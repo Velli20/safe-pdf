@@ -8,6 +8,8 @@ pub mod operator_tokenizer;
 pub mod path_operators;
 pub mod path_paint_operators;
 pub mod pdf_operator;
+pub mod pdf_operator_backend;
+pub mod recording_pdf_operator_backend;
 pub mod text_object_operators;
 pub mod text_positioning_operators;
 pub mod text_showing_operators;

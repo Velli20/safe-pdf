@@ -1,9 +1,11 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
+    pdf_operator_backend::PdfOperatorBackend,
 };
 
-/// Begins a text object, initializing the text matrix and text line matrix to the identity matrix.
+/// Begins a text object, initializing the text matrix and text line matrix to
+/// the identity matrix.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct BeginText;
 
@@ -14,6 +16,10 @@ impl PdfOperator for BeginText {
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::BeginText(Self::default()))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.begin_text_object()
     }
 }
 
@@ -28,5 +34,9 @@ impl PdfOperator for EndText {
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::EndText(Self::default()))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.end_text_object()
     }
 }

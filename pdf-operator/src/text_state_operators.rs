@@ -1,6 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
+    pdf_operator_backend::PdfOperatorBackend,
 };
 
 /// Sets the character spacing, `Tc`, which is a number expressed in unscaled text space units.
@@ -24,6 +25,10 @@ impl PdfOperator for SetCharacterSpacing {
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let spacing = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetCharacterSpacing(Self::new(spacing)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_character_spacing(self.spacing)
     }
 }
 
@@ -50,9 +55,14 @@ impl PdfOperator for SetWordSpacing {
         let spacing = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetWordSpacing(Self::new(spacing)))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_word_spacing(self.spacing)
+    }
 }
 
-/// Sets the horizontal scaling, `Tz`, which adjusts the width of glyphs by stretching or compressing them horizontally.
+/// Sets the horizontal scaling, `Tz`, which adjusts the width of glyphs by
+/// stretching or compressing them horizontally.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetHorizontalScaling {
     /// The horizontal scaling factor as a percentage (e.g., 100.0 for 100% - no scaling).
@@ -74,9 +84,14 @@ impl PdfOperator for SetHorizontalScaling {
         let scale = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetHorizontalScaling(Self::new(scale)))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_horizontal_text_scaling(self.scale)
+    }
 }
 
-/// Sets the text leading, `TL`, which is the vertical distance between the baselines of adjacent lines of text.
+/// Sets the text leading, `TL`, which is the vertical distance between the baselines of
+/// adjacent lines of text.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetLeading {
     /// The text leading, in unscaled text space units.
@@ -98,9 +113,14 @@ impl PdfOperator for SetLeading {
         let leading = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetLeading(Self::new(leading)))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_text_leading(self.leading)
+    }
 }
 
-/// Sets the text font, `Tf`, to a font resource in the resource dictionary and the text font size, `Tfs`, in unscaled text space units. (PDF operator `Tf`)
+/// Sets the text font, `Tf`, to a font resource in the resource dictionary and the text
+/// font size, `Tfs`, in unscaled text space units.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetFont {
     /// The name of the font resource.
@@ -124,6 +144,10 @@ impl PdfOperator for SetFont {
         let name = operands.get_name()?;
         let size = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetFont(Self::new(name, size)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_font_and_size(&self.name, self.size)
     }
 }
 
@@ -158,6 +182,10 @@ impl PdfOperator for SetRenderingMode {
         let mode = operands.get_u8()?;
         Ok(PdfOperatorVariant::SetRenderingMode(Self::new(mode)))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_text_rendering_mode(self.mode as i32)
+    }
 }
 
 /// Sets the text rise, `Ts`, which specifies the vertical distance
@@ -182,5 +210,9 @@ impl PdfOperator for SetTextRise {
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let rise = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetTextRise(Self::new(rise)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_text_rise(self.rise)
     }
 }

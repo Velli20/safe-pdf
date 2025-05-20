@@ -1,11 +1,10 @@
+use bitflags::bitflags;
 use pdf_object::{
     ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection,
     traits::FromDictionary,
 };
 
 use crate::error::FontError;
-
-use bitflags::bitflags;
 
 bitflags! {
     /// Defines various characteristics of a font, such as whether it is serif, italic, etc.

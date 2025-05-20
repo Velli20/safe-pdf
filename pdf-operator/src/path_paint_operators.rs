@@ -1,6 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
+    pdf_operator_backend::PdfOperatorBackend,
 };
 
 /// Strokes the current path.
@@ -14,6 +15,10 @@ impl PdfOperator for StrokePath {
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::StrokePath(Self::default()))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.stroke_path()
     }
 }
 
@@ -30,10 +35,13 @@ impl PdfOperator for CloseStrokePath {
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::CloseStrokePath(Self::default()))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.close_and_stroke_path()
+    }
 }
 
-/// Fills the current path using the non-zero winding number rule. (PDF operator `f` or `F`)
-/// The `F` operator is a synonym for `f`.
+/// Fills the current path using the non-zero winding number rule.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FillPathNonZero;
 
@@ -44,6 +52,10 @@ impl PdfOperator for FillPathNonZero {
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::FillPathNonZero(Self::default()))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.fill_path_nonzero_winding()
     }
 }
 
@@ -59,9 +71,14 @@ impl PdfOperator for FillPathEvenOdd {
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::FillPathEvenOdd(Self::default()))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.fill_path_even_odd()
+    }
 }
 
-/// Fills and then strokes the current path, using the non-zero winding number rule to determine the region to fill.
+/// Fills and then strokes the current path, using the non-zero winding number rule
+/// to determine the region to fill.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FillAndStrokePathNonZero;
 
@@ -73,9 +90,14 @@ impl PdfOperator for FillAndStrokePathNonZero {
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::FillAndStrokePathNonZero(Self::default()))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.fill_and_stroke_path_nonzero_winding()
+    }
 }
 
-/// Fills and then strokes the current path, using the even-odd rule to determine the region to fill.
+/// Fills and then strokes the current path, using the even-odd rule to determine the
+/// region to fill.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FillAndStrokePathEvenOdd;
 
@@ -87,9 +109,14 @@ impl PdfOperator for FillAndStrokePathEvenOdd {
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::FillAndStrokePathEvenOdd(Self::default()))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.fill_and_stroke_path_even_odd()
+    }
 }
 
-/// Closes, fills, and then strokes the current path, using the non-zero winding number rule to determine the region to fill.
+/// Closes, fills, and then strokes the current path, using the non-zero winding number
+/// rule to determine the region to fill.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CloseFillAndStrokePathNonZero;
 
@@ -103,9 +130,14 @@ impl PdfOperator for CloseFillAndStrokePathNonZero {
             Self::default(),
         ))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.close_fill_and_stroke_path_nonzero_winding()
+    }
 }
 
-/// Closes, fills, and then strokes the current path, using the even-odd rule to determine the region to fill.
+/// Closes, fills, and then strokes the current path, using the even-odd rule to determine
+/// the region to fill.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CloseFillAndStrokePathEvenOdd;
 
@@ -118,6 +150,10 @@ impl PdfOperator for CloseFillAndStrokePathEvenOdd {
         Ok(PdfOperatorVariant::CloseFillAndStrokePathEvenOdd(
             Self::default(),
         ))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.close_fill_and_stroke_path_even_odd()
     }
 }
 
@@ -133,5 +169,9 @@ impl PdfOperator for EndPath {
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::EndPath(Self::default()))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.end_path_no_op()
     }
 }

@@ -1,9 +1,10 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
+    pdf_operator_backend::PdfOperatorBackend,
 };
 
-/// Begins a new subpath by moving the current point to coordinates (x, y), omitting any connecting line segment. (PDF operator `m`)
+/// Begins a new subpath by moving the current point to coordinates (x, y), omitting any connecting line segment.
 /// If the `m` operator is the first operator in a path, it sets the current point.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MoveTo {
@@ -29,9 +30,13 @@ impl PdfOperator for MoveTo {
         let y = operands.get_f32()?;
         Ok(PdfOperatorVariant::MoveTo(Self::new(x, y)))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.move_to(self.x, self.y)
+    }
 }
 
-/// Appends a straight line segment from the current point to the specified point (x, y). (PDF operator `l`)
+/// Appends a straight line segment from the current point to the specified point (x, y).
 /// The new current point becomes (x, y).
 #[derive(Debug, Clone, PartialEq)]
 pub struct LineTo {
@@ -57,9 +62,13 @@ impl PdfOperator for LineTo {
         let y = operands.get_f32()?;
         Ok(PdfOperatorVariant::LineTo(Self::new(x, y)))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.line_to(self.x, self.y)
+    }
 }
 
-/// Appends a cubic Bézier curve to the current path. (PDF operator `c`)
+/// Appends a cubic Bézier curve to the current path.
 /// The curve extends from the current point to (x3, y3), using (x1, y1) and (x2, y2) as Bézier control points.
 /// The new current point becomes (x3, y3).
 #[derive(Debug, Clone, PartialEq)]
@@ -107,9 +116,13 @@ impl PdfOperator for CurveTo {
             x1, y1, x2, y2, x3, y3,
         )))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.curve_to(self.x1, self.y1, self.x2, self.y2, self.x3, self.y3)
+    }
 }
 
-/// Appends a cubic Bézier curve to the current path. (PDF operator `v`)
+/// Appends a cubic Bézier curve to the current path.
 /// The current point is used as the first control point (x1, y1).
 /// (x2, y2) is the second Bézier control point, and (x3, y3) is the end point of the curve.
 /// The new current point becomes (x3, y3).
@@ -123,7 +136,7 @@ pub struct CurveToV {
     x3: f32,
     /// The y-coordinate of the curve's end point.
     y3: f32,
-} // Initial point replicated
+}
 
 impl CurveToV {
     pub fn new(x2: f32, y2: f32, x3: f32, y3: f32) -> Self {
@@ -143,9 +156,13 @@ impl PdfOperator for CurveToV {
         let y3 = operands.get_f32()?;
         Ok(PdfOperatorVariant::CurveToV(Self::new(x2, y2, x3, y3)))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.curve_to_v(self.x2, self.y2, self.x3, self.y3)
+    }
 }
 
-/// Appends a cubic Bézier curve to the current path. (PDF operator `y`)
+/// Appends a cubic Bézier curve to the current path.
 /// (x1, y1) is the first Bézier control point. The second control point (x2, y2) is the same as the curve's end point (x3, y3).
 /// The new current point becomes (x3, y3).
 #[derive(Debug, Clone, PartialEq)]
@@ -158,7 +175,7 @@ pub struct CurveToY {
     x3: f32,
     /// The y-coordinate of the curve's end point (and second control point).
     y3: f32,
-} // Final point replicated
+}
 
 impl CurveToY {
     pub fn new(x1: f32, y1: f32, x3: f32, y3: f32) -> Self {
@@ -178,6 +195,10 @@ impl PdfOperator for CurveToY {
         let y3 = operands.get_f32()?;
         Ok(PdfOperatorVariant::CurveToY(Self::new(x1, y1, x3, y3)))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.curve_to_y(self.x1, self.y1, self.x3, self.y3)
+    }
 }
 
 /// Closes the current subpath by appending a straight line segment from the current point
@@ -193,10 +214,14 @@ impl PdfOperator for ClosePath {
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::ClosePath(Self::default()))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.close_path()
+    }
 }
 
 /// Appends a complete rectangle, defined by its bottom-left corner (x, y), width, and height,
-/// to the current path as a complete subpath. (PDF operator `re`)
+/// to the current path as a complete subpath.
 /// The new current point is undefined after this operation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rectangle {
@@ -234,5 +259,25 @@ impl PdfOperator for Rectangle {
         Ok(PdfOperatorVariant::Rectangle(Self::new(
             x, y, width, height,
         )))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.rectangle(self.x, self.y, self.width, self.height)
+    }
+}
+
+mod tests {
+    use crate::{
+        pdf_operator_backend::PdfOperatorBackend,
+        recording_pdf_operator_backend::RecordingBackend,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_path_operations() {
+        let mut backend = RecordingBackend::default();
+        let a = MoveTo::new(0.0, 0.0);
+        a.call(&mut backend).unwrap();
     }
 }
