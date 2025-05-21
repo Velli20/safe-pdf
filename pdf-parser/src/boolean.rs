@@ -4,10 +4,21 @@ use pdf_tokenizer::PdfToken;
 use crate::{ParseObject, PdfParser, error::ParserError};
 
 impl ParseObject<Boolean> for PdfParser<'_> {
-    /// Parses a boolean object from the current position in the input stream.
+    /// Parses a PDF boolean object from the current position in the input stream.
     ///
-    /// According to the PDF 1.7 Specification, Section 7.3.2:
-    /// - Boolean objects are represented by the keywords `true` and `false`.
+    /// According to PDF 1.7 Specification (Section 7.3.2), a boolean object:
+    ///
+    /// # Format
+    ///
+    /// - Is represented by one of two literal keywords: `true` or `false`.
+    /// - These keywords are case-sensitive.
+    ///
+    /// # Example Inputs
+    ///
+    /// ```text
+    /// true
+    /// false
+    /// ```
     fn parse(&mut self) -> Result<Boolean, ParserError> {
         const BOOLEAN_LITERAL_TRUE: &[u8] = b"true";
         const BOOLEAN_LITERAL_FALSE: &[u8] = b"false";

@@ -17,18 +17,34 @@ pub enum DictionaryError {
 impl ParseObject<Dictionary> for PdfParser<'_> {
     /// Parses a PDF dictionary object from the current position in the input stream.
     ///
-    /// Dictionaries are key-value aggregates enclosed in double angle brackets (`<< ... >>`).
-    /// Keys must be PDF Name objects (e.g., `/KeyName`), and values can be any valid
-    /// PDF object type (booleans, numbers, strings, names, arrays, streams, or other
-    /// dictionaries).
+    /// According to the PDF 1.7 Specification (Section 7.3.7 "Dictionary Objects"):
+    /// A dictionary object is an associative table containing pairs of objects, known as
+    /// the dictionary's entries.
     ///
-    /// This function expects the parser's current position to be at or before the
-    /// opening `<<` marker of the dictionary. It consumes the dictionary content,
-    /// including the delimiters, advancing the parser state past the closing `>>`.
-    /// Whitespace is generally ignored between tokens as per PDF specification rules.
+    /// # Format
     ///
-    /// See PDF 1.7 Specification, Section 7.3.7 for the full definition of a
-    /// dictionary object.
+    /// - Must begin with double left angle brackets (`<<`) and end with double right
+    ///   angle brackets (`>>`).
+    /// - Contains zero or more key-value pairs.
+    /// - Each key must be a PDF Name object (e.g., `/Type`, `/Size`).
+    /// - Each value can be any valid PDF object (e.g., another dictionary, an array,
+    ///   a number, a string, a name, a boolean, null, or an indirect reference).
+    /// - Whitespace is generally ignored between tokens within the dictionary.
+    ///
+    /// # Example Inputs
+    ///
+    /// ```text
+    /// << >>
+    /// << /Type /Catalog /Pages 2 0 R >>
+    /// << /Key1 (Value1) /Key2 123 /Key3 [1 2 3] >>
+    /// << /NestedDict << /InnerKey /InnerValue >> >>
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// A `Dictionary` object containing the parsed key-value pairs,
+    /// or a `ParserError` if the input is malformed (e.g., missing delimiters,
+    /// invalid key or value syntax, or an unexpected token).
     fn parse(&mut self) -> Result<Dictionary, ParserError> {
         // Expect the opening `<<` of the dictionary.
         self.tokenizer.expect(PdfToken::DoubleLeftAngleBracket)?;

@@ -13,32 +13,45 @@ pub enum LiteralStringObjectError {
 }
 
 impl ParseObject<LiteralString> for PdfParser<'_> {
-    /// Parses a literal string object from the current position in the input stream.
+    /// Parses a PDF literal string object from the current position in the input stream.
     ///
-    /// This function implements the parsing rules for literal strings as defined in the PDF 1.7 Specification, Section 7.3.4:
+    /// According to the PDF 1.7 Specification (Section 7.3.4.2), a literal string:
     ///
-    /// - A literal string is enclosed in parentheses `(...)`.
-    /// - It may contain any character except unbalanced left or right parentheses.
-    /// - Nested parentheses are allowed and must be properly balanced.
-    /// - The backslash `\` character is used as an escape character to represent special sequences, such as `\n` for a newline or `\\` for a literal backslash.
+    /// # Format
     ///
-    /// Examples of valid strings:
-    /// - `(Hello, World!)`
-    /// - `(This is a string with (nested) parentheses and special characters *!% and so on.)`
+    /// - Must begin with a left parenthesis `(` and end with a right parenthesis `)`.
+    /// - Can contain any characters.
+    /// - Parentheses `()` within the string must be balanced (e.g., `(string with (nested) parens)`).
+    ///   The parser correctly handles nested parentheses by maintaining a depth count.
     ///
-    /// Within a literal string, the backslash `\` character is used as an escape character.
+    /// # Note on Escape Sequences and Line Endings
     ///
-    /// # Parsing Rules
+    /// The PDF specification (Section 7.3.4.2) defines escape sequences (e.g., `\n` for newline,
+    /// `\\` for backslash, `\ddd` for octal codes). It also states that line endings
+    /// (CR, LF, or CRLF) within a literal string should be treated as a single line feed (LF)
+    /// character.
     ///
-    /// 1. The function begins by expecting an opening parenthesis `(`.
-    /// 2. It reads the content of the string, handling nested parentheses by maintaining a depth counter.
-    /// 3. The backslash `\` is treated as an escape character, allowing sequences like `\(` or `\)` to represent literal parentheses.
-    /// 4. Parsing continues until a matching closing parenthesis `)` is encountered at the correct depth.
-    /// 5. If the parentheses are unbalanced or an invalid token is encountered, an error is returned.
+    /// This current parser implementation reads characters literally:
+    /// - It does **not** process standard PDF escape sequences. For example, a PDF string `(line1\nline2)`
+    ///   would be parsed into a Rust string containing the literal characters `\` and `n`.
+    /// - It does **not** normalize line endings. A PDF string `(line1\r\nline2)` would retain
+    ///   the `\r\n` sequence in the resulting Rust string.
+    ///
+    /// # Example Inputs
+    ///
+    /// ```text
+    /// (This is a string)
+    /// (Strings may contain newlines
+    /// and such.)
+    /// (Strings may contain balanced parentheses (such as these).)
+    /// (This string contains \n and \\ literally, not as escapes)
+    /// ```
     ///
     /// # Returns
     ///
-    /// A literal string object containing the parsed string if successful.
+    /// A `LiteralString` object containing the characters between the outermost parentheses,
+    /// or a `ParserError` if the parentheses are unbalanced, delimiters are missing, or an
+    /// unexpected token is encountered.
     fn parse(&mut self) -> Result<LiteralString, crate::error::ParserError> {
         // Expect the opening parenthesis `(`.
         self.tokenizer.expect(PdfToken::LeftParenthesis)?;

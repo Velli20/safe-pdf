@@ -4,21 +4,37 @@ use pdf_tokenizer::PdfToken;
 use crate::{ParseObject, PdfParser, error::ParserError};
 
 impl ParseObject<Version> for PdfParser<'_> {
-    /// Parses the PDF header from the current position in the input stream.
+    /// Parses the PDF file header from the current position in the input stream.
     ///
-    /// # Parsing Rules
+    /// According to the PDF 1.7 Specification (Section 7.5.2 "File Header"):
+    /// The first line of a PDF file shall be a header identifying the version of
+    /// the PDF specification to which the file conforms.
     ///
-    /// According to the PDF 1.7 Specification, Section 7.5.2:
-    /// - The header must appear within the first 1024 bytes of the file.
-    /// - It must begin with the exact character sequence `%PDF-`.
-    /// - Immediately after `%PDF-`, the version number must follow, in the format `major.minor` (e.g., `1.7`).
-    /// - The major and minor version numbers must consist of digits separated by a single period (`.`).
-    /// - After the version number, optional whitespace or line breaks may appear.
+    /// # Format
     ///
-    /// - The header consists of the characters %PDF- followed by a version number of
-    /// the form 1.N, where N is a digit between 0 and 7.
-    /// - The specification states that the header must be the very first line of the file,
-    /// starting at byte 0
+    /// - The header must start with the 5 characters `%PDF-`.
+    /// - This is followed by a version number of the form `major.minor`.
+    ///   - `major` and `minor` are integers. For example, for PDF 1.7,
+    ///     `major` is 1 and `minor` is 7.
+    /// - The header line must be terminated by an end-of-line (EOL) marker.
+    ///   The EOL marker can be a carriage return (CR), a line feed (LF), or
+    ///   a CR followed by an LF.
+    /// - The header line should not contain any other characters, except that
+    ///   versions of PDF later than 1.4 may have a comment after the EOL marker
+    ///   on the first line (this parser currently expects only the version and EOL).
+    ///
+    /// # Example Inputs
+    ///
+    /// ```text
+    /// %PDF-1.7
+    /// ```
+    /// (Followed by an EOL marker like `\n` or `\r\n`)
+    ///
+    /// # Returns
+    ///
+    /// A `Version` object containing the parsed major and minor version numbers,
+    /// or a `ParserError` if the header is malformed (e.g., missing `%PDF-` prefix,
+    /// invalid version format, or missing EOL).
     fn parse(&mut self) -> Result<Version, ParserError> {
         self.tokenizer.expect(PdfToken::Percent).unwrap();
 

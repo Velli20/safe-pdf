@@ -13,35 +13,40 @@ pub enum NameObjectError {
 impl ParseObject<Name> for PdfParser<'_> {
     /// Parses a PDF name object from the current position in the input stream.
     ///
-    /// According to PDF 1.7 Specification (Section 7.3.5), a name object:
+    /// According to the PDF 1.7 Specification (Section 7.3.5 "Name Objects"):
+    /// A name object is an atomic symbol uniquely defined by a sequence of characters.
     ///
-    /// # Parsing Rules
+    /// # Format
     ///
-    /// - Must begin with a forward slash `/` (solidus) character
-    /// - Can contain any regular characters except:
-    ///   - Delimiters: `( ) < > [ ] { } / %`
-    ///   - Whitespace: NUL, TAB, LF, FF, CR, SPACE
-    ///
-    /// # Escape Sequences
-    ///
-    /// - Special characters are encoded using `#` followed by two hex digits
-    /// - The hex digits represent the ASCII value of the character
-    /// - For example, `#20` represents a space character
+    /// - Must begin with a solidus character (`/`). The solidus is a prefix and not
+    ///   part of the name itself.
+    /// - The sequence of characters following the solidus forms the name.
+    /// - The name can include any regular characters. Regular characters are any
+    ///   characters except null (0x00), tab (0x09), line feed (0x0A), form feed (0x0C),
+    ///   carriage return (0x0D), space (0x20), and the delimiter characters:
+    ///   `( ) < > [ ] { } / %`.
+    /// - Any character that is not a regular character (including space, delimiters,
+    ///   or characters outside the printable ASCII range) must be encoded using a
+    ///   number sign (`#`) followed by its two-digit hexadecimal code (e.g., `#20` for a space).
+    /// - The name is terminated by any whitespace or delimiter character.
+    /// - The maximum length of a name is 127 bytes. (This parser does not currently enforce this limit).
     ///
     /// # Example Inputs
     ///
     /// ```text
-    /// /Name1                   → "Name1"
-    /// /ASomewhat               → "ASomewhat"
-    /// /A#20Name                → "A Name"
-    /// /Adobe#20Green           → "Adobe Green"
-    /// /PANTONE#205757#20CV     → "PANTONE 5757 CV"
-    /// /paired#28#29parentheses → "paired()parentheses"
+    /// /Name1
+    /// /ASimpleName
+    /// /NameWithSpaces#20Here
+    /// /Path#2FTo#2FFile
+    /// /A#25SymbolWithPercent
+    /// /FontName#20#28Bold#29
     /// ```
     ///
     /// # Returns
     ///
-    /// Returns a `Name` object on success, or an error if the input is malformed
+    /// A `Name` object containing the decoded name string (with hex escapes resolved),
+    /// or a `ParserError` if the input does not start with `/`, is empty after the `/`,
+    /// or contains an invalid hex escape sequence.
     fn parse(&mut self) -> Result<Name, ParserError> {
         self.tokenizer.expect(PdfToken::Solidus)?;
 

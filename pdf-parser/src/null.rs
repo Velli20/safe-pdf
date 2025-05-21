@@ -3,13 +3,29 @@ use pdf_object::null::NullObject;
 use crate::{ParseObject, PdfParser, error::ParserError};
 
 impl ParseObject<NullObject> for PdfParser<'_> {
-    /// Parses a null object from the current position in the input stream.
+    /// Parses a PDF null object from the current position in the input stream.
     ///
-    /// According to PDF 1.7, Section 7.3.7:
-    /// The null object is represented by the keyword `null`. It signifies the absence
-    /// of a value.
+    /// According to the PDF 1.7 Specification (Section 7.3.9 "Null Object"):
+    /// The null object is used to represent a non-existent or undefined value.
     ///
-    /// Like any keyword, 'null' must be followed by a delimiter character or EOF.
+    /// # Format
+    ///
+    /// - Represented by the literal keyword `null`.
+    /// - The keyword `null` is case-sensitive.
+    /// - It must be followed by a delimiter character (e.g., whitespace, `)`, `]`, `>`, `/`, `%`).
+    ///
+    /// # Example Inputs
+    ///
+    /// ```text
+    /// null
+    /// null%comment
+    /// null]
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// A `NullObject` if the `null` keyword is successfully parsed,
+    /// or a `ParserError` if the keyword is not found or is malformed.
     fn parse(&mut self) -> Result<NullObject, ParserError> {
         const NULL_LITERAL: &[u8] = b"null";
 

@@ -6,21 +6,48 @@ use crate::{ParseObject, PdfParser, error::ParserError};
 impl ParseObject<Number> for PdfParser<'_> {
     /// Parses a PDF numeric object (integer or real) from the current position in the input stream.
     ///
-    /// # Parsing Rules
+    /// According to the PDF 1.7 Specification (Section 7.3.3), numeric objects can be
+    /// integers or real numbers.
     ///
-    /// - Numeric objects can be either integers or real numbers.
-    /// - Integers are represented as a sequence of digits (0-9) with an optional leading sign (`+` or `-`).
-    /// - Examples: `123`, `-456`, `+789`.
-    /// - Real numbers are represented as a sequence of digits, optionally followed by a decimal point (`.`)
-    ///  and another sequence of digits.
-    /// - A real number may also include an optional leading sign (`+` or `-`).
-    /// - Examples: `3.14`, `-0.5`, `+123.456`.
-    /// - Leading and trailing whitespace around the numeric object is ignored.
+    /// # Format
+    ///
+    /// ## Integers
+    /// - Consist of an optional sign (`+` or `-`) followed by one or more decimal digits.
+    /// - Examples: `123`, `-45`, `+0`
+    ///
+    /// ## Real Numbers
+    /// - Can be represented in several forms:
+    ///   - `digits.digits` (e.g., `34.5`, `-3.62`, `+123.6`)
+    ///   - `.digits` (e.g., `.5`)
+    ///   - `digits.` (e.g., `0.`, `123.`)
+    /// - An optional sign (`+` or `-`) can precede the number.
+    /// - This parser specifically handles the `digits.digits` form after an optional sign.
+    ///   It reads the integral part, then if a decimal point is present, reads the fractional part.
+    ///
+    /// # Implementation Notes
+    ///
+    /// - The parser first attempts to read an optional sign (`+` or `-`).
+    /// - It then reads the integral part of the number.
+    /// - If a decimal point (`.`) is encountered, it proceeds to read the fractional part.
+    /// - Integers are stored as `i64` if no decimal is present.
+    /// - Real numbers (with a decimal) are parsed into `f64`.
+    ///
+    /// # Example Inputs
+    ///
+    /// ```text
+    /// 123
+    /// -456
+    /// +0.789
+    /// 3.14159
+    /// -100.
+    /// .5
+    /// ```
     ///
     /// # Returns
     ///
-    /// A number object containing the parsed numeric value or an error  if the input is malformed or does not
-    /// represent a valid numeric object.
+    /// A `Number` object containing the parsed integer (`i64`) or real (`f64`) value,
+    /// or a `ParserError` if the input is malformed (e.g., invalid characters,
+    /// missing digits after a sign or decimal point).
     fn parse(&mut self) -> Result<Number, ParserError> {
         let mut has_minus = false;
 

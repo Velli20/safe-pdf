@@ -13,18 +13,32 @@ pub enum ArrayError {
 impl ParseObject<Array> for PdfParser<'_> {
     /// Parses a PDF array object from the current position in the input stream.
     ///
-    /// According to the PDF 1.7 Specification, Section 7.3.6:
-    /// - Arrays are ordered collections of objects enclosed in square brackets (`[...]`).
-    /// - Each element in the array can be any valid PDF object (e.g., numbers, strings, dictionaries, etc.).
-    /// - Whitespace and delimiters are ignored between elements.
+    /// According to the PDF 1.7 Specification (Section 7.3.6 "Array Objects"):
+    /// An array object is a one-dimensional collection of objects arranged sequentially.
     ///
-    /// This function expects the parser's current position to be at or before the
-    /// opening `[` of the array. It consumes the array content, including the delimiters,
-    /// advancing the parser state past the closing `]`.
+    /// # Format
+    ///
+    /// - Must begin with a left square bracket `[` and end with a right square bracket `]`.
+    /// - Contains zero or more PDF objects as its elements.
+    /// - Elements can be any valid PDF object type (e.g., numbers, strings, names,
+    ///   dictionaries, other arrays, booleans, null, or indirect references).
+    /// - Elements are separated by whitespace. Whitespace is generally ignored between tokens.
+    ///
+    /// # Example Inputs
+    ///
+    /// ```text
+    /// []
+    /// [1 2 3]
+    /// [ /Name (String) 12.3 true null ]
+    /// [ [1 2] << /Key /Value >> ]
+    /// [ 549 3.14 false /SomeName (This is a string.) ]
+    /// ```
     ///
     /// # Returns
     ///
-    /// An `Array` object containing the parsed elements or an error if the input is malformed.
+    /// An `Array` object containing the parsed PDF objects as its elements,
+    /// or a `ParserError` if the input is malformed (e.g., missing delimiters,
+    /// invalid object syntax within the array, or an unexpected token).
     fn parse(&mut self) -> Result<Array, ParserError> {
         self.tokenizer.expect(PdfToken::LeftSquareBracket)?;
         self.skip_whitespace();

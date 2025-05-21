@@ -21,11 +21,6 @@ impl ParseObject<HexString> for PdfParser<'_> {
     /// - Contains an even number of hexadecimal digits between the delimiters
     /// - Valid digits are: `0`-`9`, `a`-`f`, and `A`-`F` (case-insensitive)
     ///
-    /// # Processing Rules
-    ///
-    /// If the filtered string contains an odd number of digits,
-    ///    a `0` is automatically appended before processing.
-    ///
     /// # Exampe Inputs
     ///
     /// ```text

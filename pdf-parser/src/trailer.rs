@@ -33,44 +33,48 @@ impl std::fmt::Display for TrailerError {
 }
 
 impl ParseObject<Trailer> for PdfParser<'_> {
-    /// Parses the trailer section at the end of a PDF file according to the PDF 1.7 specification.
+    /// Parses the PDF file trailer from the current position in the input stream.
     ///
-    /// # Syntax Rules for `trailer` Object:
+    /// According to the PDF 1.7 Specification (Section 7.5.5 "File Trailer"):
+    /// The trailer of a PDF file enables a conforming reader to quickly find the
+    /// cross-reference table and certain special objects. Conforming readers should
+    /// read a PDF file from its end. The last line of the file shall contain only the
+    /// end-of-file marker, `%%EOF`.
     ///
-    /// 1. The trailer object begins with the keyword `trailer` followed by a whitespace character.
-    /// 2. This is immediately followed by a dictionary object enclosed in double angle brackets (`<< ... >>`).
-    /// 3. The dictionary **must** include the following keys:
-    ///    - `/Size` (required): An integer representing the total number of entries in the cross-reference table.
-    ///    - `/Root` (required): A reference to the document catalog dictionary (`/Catalog`).
-    /// 4. The dictionary **may** include the following optional keys:
-    ///    - `/Prev`: A byte offset to the previous cross-reference section (used in incremental updates).
-    ///    - `/Encrypt`: A reference to the encryption dictionary, if the document is encrypted.
-    ///    - `/ID`: An array of two byte strings that uniquely identify the file.
-    ///    - `/Info`: A reference to the document information dictionary.
-    /// 5. The trailer dictionary is always followed by:
-    ///    - The `startxref` keyword on a new line.
-    ///    - An integer offset (in bytes) indicating the beginning of the xref table.
-    ///    - The `%%EOF` marker to indicate the end of the file.
+    /// # Format
     ///
-    /// # Notes:
+    /// The trailer consists of:
+    /// 1. The keyword `trailer`.
+    /// 2. A dictionary object (enclosed in `<<` and `>>`) containing key-value pairs.
+    ///    Common and important keys include:
+    ///    - `/Size`: (Integer, Required) The total number of entries in the file’s
+    ///      cross-reference table.
+    ///    - `/Root`: (Indirect Reference, Required) The catalog dictionary for the PDF document.
+    ///    - `/Prev`: (Integer, Optional) The byte offset of the previous cross-reference section.
+    ///    - `/Encrypt`: (Indirect Reference, Optional) The document’s encryption dictionary.
+    ///    - `/Info`: (Indirect Reference, Optional) The document’s information dictionary.
+    ///    - `/ID`: (Array, Optional) An array of two byte strings constituting a file identifier.
+    /// 3. The keyword `startxref`.
+    /// 4. An integer representing the byte offset from the beginning of the file to the
+    ///    `xref` keyword of the last (or only) cross-reference section.
+    /// 5. The end-of-file marker `%%EOF` (This parser expects `%%EOF` to be handled
+    ///    separately after the trailer is parsed).
     ///
-    /// - Whitespace, comments, and line breaks must be handled according to PDF lexical conventions.
-    /// - The trailer may appear more than once in a file if incremental updates have been applied.
-    /// - The last `trailer` in the file (after the last `xref` section) is considered the authoritative one.
-    ///
-    /// # Example input
+    /// # Example Input
     ///
     /// ```text
     /// trailer
-    /// <<
-    ///   /Size 22 % Total objects are 0-21
-    ///   /Root 1 0 R
-    ///   /Prev 12345 % Offset of previous xref section (if any)
-    /// >>
+    /// << /Size 22 /Root 2 0 R /Info 1 0 R >>
     /// startxref
-    /// 512 % Offset of this xref section
+    /// 1879
     /// %%EOF
     /// ```
+    ///
+    /// # Returns
+    ///
+    /// A `Trailer` object containing the parsed dictionary and the `startxref` offset,
+    /// or a `ParserError` if the trailer is malformed (e.g., missing keywords,
+    /// invalid dictionary, or missing offset).
     fn parse(&mut self) -> Result<Trailer, ParserError> {
         const TRAILER_KEYWORD: &[u8] = b"trailer";
         const START_XREF_KEYWORD: &[u8] = b"startxref";
