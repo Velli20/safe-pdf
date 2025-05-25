@@ -20,6 +20,8 @@ pub enum FontError {
     /// Indicates that a Character Identifier (CID) font dictionary, expected as a descendant
     /// of a Type0 font, is missing or could not be processed.
     MissingCharacterIdentifierFont,
+    /// Indicates an error occurred while parsing a Character Map stream.
+    CMapParseError(String),
 }
 
 impl From<ObjectError> for FontError {
@@ -53,6 +55,9 @@ impl std::fmt::Display for FontError {
             }
             FontError::MissingCharacterIdentifierFont => {
                 write!(f, "Missing Character Identifier (CID) font dictionary")
+            }
+            FontError::CMapParseError(err) => {
+                write!(f, "Failed to parse CMap: {}", err)
             }
         }
     }

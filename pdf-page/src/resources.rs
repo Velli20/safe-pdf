@@ -9,7 +9,7 @@ use pdf_object::{
 use crate::error::PageError;
 
 pub struct Resources {
-    fonts: HashMap<String, Font>,
+    pub fonts: HashMap<String, Font>,
 }
 
 impl FromDictionary for Resources {

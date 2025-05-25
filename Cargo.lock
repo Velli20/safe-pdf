@@ -1618,7 +1618,9 @@ dependencies = [
 name = "pdf-graphics"
 version = "0.1.0"
 dependencies = [
+ "pdf-font",
  "pdf-operator",
+ "pdf-page",
 ]
 
 [[package]]

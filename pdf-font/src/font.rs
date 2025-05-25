@@ -18,7 +18,7 @@ pub struct Font {
     /// The font subtype. For Type0 fonts, this value must be `/Type0`.
     subtype: String,
     /// A stream defining a CMap that maps character codes to Unicode values.
-    cmap: Option<CharacterMap>,
+    pub cmap: Option<CharacterMap>,
     /// (Required for Type0 fonts) The CIDFont dictionary that is the descendant of this Type0 font.
     /// This CIDFont provides the actual glyph descriptions.
     cid_font: CharacterIdentifierFont,

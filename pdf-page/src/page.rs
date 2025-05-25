@@ -19,8 +19,8 @@ pub struct PdfPage {
     /// an array of streams.
     pub contents: Option<ContentStream>,
     /// `/MediaBox` attribute which defines the page boundaries.
-    media_box: MediaBox,
-    resources: Option<Resources>,
+    pub media_box: MediaBox,
+    pub resources: Option<Resources>,
 }
 
 impl FromDictionary for PdfPage {

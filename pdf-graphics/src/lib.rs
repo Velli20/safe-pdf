@@ -1,9 +1,11 @@
 use error::PdfCanvasError;
+use pdf_font::font::Font;
 use pdf_operator::pdf_operator_backend::{
     ClippingPathOps, ColorOps, GraphicsStateOps, MarkedContentOps, PathConstructionOps,
     PathPaintingOps, PdfOperatorBackend, PdfOperatorBackendError, ShadingOps, TextObjectOps,
     TextPositioningOps, TextShowingOps, TextStateOps, XObjectOps,
 };
+use pdf_page::page::PdfPage;
 use pdf_path::PdfPath;
 
 pub mod error;
@@ -29,6 +31,20 @@ pub enum PathFillType {
 pub struct PdfCanvas<'a> {
     current_path: Option<PdfPath>,
     canvas: &'a mut dyn CanvasBackend,
+    page: &'a PdfPage,
+    current_font: Option<&'a Font>
+}
+
+
+impl<'a> PdfCanvas<'a> {
+    pub fn new(backend: &'a mut dyn CanvasBackend, page: &'a PdfPage) -> Self {
+        Self {
+            current_path: None,
+            canvas: backend,
+            page,
+            current_font: None
+        }
+    }
 }
 
 pub trait CanvasBackend {
@@ -209,6 +225,13 @@ impl<'a> TextStateOps for PdfCanvas<'a> {
 
     fn set_font_and_size(&mut self, font_name: &str, size: f32) -> Result<(), Self::ErrorType> {
         println!("set_font_and_size name: {} size: {}", font_name, size);
+        if let Some(resources) = &self.page.resources {
+            if let Some(font) = resources.fonts.get(font_name) {
+                self.current_font = Some(font);
+            } else {
+                panic!();
+            }
+        }
         Ok(())
     }
 
@@ -255,6 +278,17 @@ impl<'a> TextPositioningOps for PdfCanvas<'a> {
 impl<'a> TextShowingOps for PdfCanvas<'a> {
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
         println!("show_text: {:?}", text);
+        if let Some(font) = self.current_font {
+            if let Some(cmap) = &font.cmap {
+                for c in text {
+                    let mappd = cmap.get_mapping(*c as u32);
+                    if let Some(mappd) = mappd {
+                        println!("mappd: {:?}", mappd as char);
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -322,13 +356,6 @@ impl<'a> MarkedContentOps for PdfCanvas<'a> {
 }
 
 impl<'a> PdfCanvas<'a> {
-    pub fn new(backend: &'a mut dyn CanvasBackend) -> Self {
-        Self {
-            current_path: None,
-            canvas: backend,
-        }
-    }
-
     /// Helper function to reduce repetition in path painting operations
     fn paint_taken_path(
         &mut self,
