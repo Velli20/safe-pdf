@@ -27,7 +27,6 @@ pub enum StreamParsingError {
 }
 
 impl<'a> StreamParser for PdfParser<'a> {
-
     /// Parses a PDF stream object from the input, using a pre-parsed dictionary.
     ///
     /// According to the PDF 1.7 Specification (Section 7.3.8 "Stream Objects"):

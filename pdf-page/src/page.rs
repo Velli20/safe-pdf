@@ -17,7 +17,7 @@ pub struct PdfPage {
     parent: Option<IndirectObject>,
     /// The contents of the page, which can be a single stream object or
     /// an array of streams.
-    contents: Option<ContentStream>,
+    pub contents: Option<ContentStream>,
     /// `/MediaBox` attribute which defines the page boundaries.
     media_box: MediaBox,
     resources: Option<Resources>,

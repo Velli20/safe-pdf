@@ -266,11 +266,9 @@ impl PdfOperator for Rectangle {
     }
 }
 
+#[cfg(test)]
 mod tests {
-    use crate::{
-        pdf_operator_backend::PdfOperatorBackend,
-        recording_pdf_operator_backend::RecordingBackend,
-    };
+    use crate::recording_pdf_operator_backend::RecordingBackend;
 
     use super::*;
 
