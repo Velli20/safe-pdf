@@ -1,9 +1,11 @@
+use std::collections::HashMap;
+
 use pdf_object::{
     ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection,
     traits::FromDictionary,
 };
 
-use crate::{error::FontError, font_descriptor::FontDescriptor};
+use crate::{error::FontError, font_descriptor::FontDescriptor, glyph_widths_map::GlyphWidthsMap};
 
 /// Represents a Character Identifier (CID) font.
 ///
@@ -15,10 +17,12 @@ pub struct CharacterIdentifierFont {
     /// This is the `/DW` entry in the CIDFont dictionary.
     default_width: i64,
     /// The font descriptor for this CIDFont, providing detailed metrics and style information.
-    descriptor: FontDescriptor,
+    pub descriptor: FontDescriptor,
     /// The subtype of this CIDFont, which can be `/CIDFontType0` (for Type 1-based CIDs)
     /// or `/CIDFontType2` (for TrueType-based CIDs).
     subtype: String,
+
+    pub widths: Option<GlyphWidthsMap>,
 }
 
 impl CharacterIdentifierFont {
@@ -37,6 +41,15 @@ impl FromDictionary for CharacterIdentifierFont {
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let default_width = dictionary.get_number("DW").unwrap_or(Self::DEFAULT_WIDTH);
+
+        // Initialize a map to store parsed CID widths.
+        // The key is the starting CID, and the value is a vector of widths
+        // for consecutive CIDs starting from the key.
+        let widths_map = if let Some(array) = dictionary.get_array("W") {
+            Some(GlyphWidthsMap::from_array(array)?)
+        } else {
+            None
+        };
 
         let subtype = dictionary
             .get_string("Subtype")
@@ -58,6 +71,7 @@ impl FromDictionary for CharacterIdentifierFont {
             default_width,
             descriptor,
             subtype,
+            widths: widths_map,
         })
     }
 }

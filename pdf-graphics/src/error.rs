@@ -1,7 +1,10 @@
+use std::fmt::write;
+
 #[derive(Debug)]
 pub enum PdfCanvasError {
     NoActivePath,
     NoCurrentPoint,
+    NoCurrentFont,
 }
 
 impl std::fmt::Display for PdfCanvasError {
@@ -12,6 +15,9 @@ impl std::fmt::Display for PdfCanvasError {
             }
             PdfCanvasError::NoCurrentPoint => {
                 write!(f, "Operation requires a current point, but none is set.")
+            }
+            PdfCanvasError::NoCurrentFont => {
+                write!(f, "Operation requires a current font, but none is set.")
             }
         }
     }

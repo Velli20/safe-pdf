@@ -78,6 +78,13 @@ impl Value {
             None
         }
     }
+    pub fn as_array(&self) -> Option<&Array> {
+        if let Value::Array(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
 
     pub fn as_object(&self) -> Option<&ObjectVariant> {
         if let Value::IndirectObject(value) = self {

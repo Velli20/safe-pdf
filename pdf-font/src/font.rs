@@ -21,7 +21,7 @@ pub struct Font {
     pub cmap: Option<CharacterMap>,
     /// (Required for Type0 fonts) The CIDFont dictionary that is the descendant of this Type0 font.
     /// This CIDFont provides the actual glyph descriptions.
-    cid_font: CharacterIdentifierFont,
+    pub cid_font: CharacterIdentifierFont,
 }
 
 impl FromDictionary for Font {

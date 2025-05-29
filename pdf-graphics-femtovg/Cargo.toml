@@ -22,3 +22,4 @@ femtovg = { version = "0.14.0", features = ["wgpu"] }
 pdf-renderer = { path = "../pdf-renderer" }
 pdf-document = { path = "../pdf-document" }
 pdf-graphics = { path = "../pdf-graphics" }
+ttf-parser = "0.19"

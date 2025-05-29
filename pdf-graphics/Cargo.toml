@@ -7,3 +7,5 @@ edition = "2024"
 pdf-operator = { path = "../pdf-operator" }
 pdf-page = { path = "../pdf-page" }
 pdf-font = { path = "../pdf-font" }
+pdf-object = { path = "../pdf-object" }
+ttf-parser = { version = "0.25.1" }

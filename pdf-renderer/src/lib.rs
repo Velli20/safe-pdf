@@ -1,5 +1,5 @@
 use pdf_document::PdfDocument;
-use pdf_graphics::{CanvasBackend, PdfCanvas};
+use pdf_graphics::{CanvasBackend, pdf_canvas::PdfCanvas};
 
 pub struct PdfRenderer<'a, 'b> {
     document: &'b PdfDocument,

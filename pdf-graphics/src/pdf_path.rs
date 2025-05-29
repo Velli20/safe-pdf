@@ -7,7 +7,7 @@ pub enum PathVerb {
     MoveTo { x: f32, y: f32 },
     /// Draws a straight line from the current point to (`x`, `y`).
     LineTo { x: f32, y: f32 },
-    /// Draws a cubic Bézier curve from the current point to (`x3`, `y3`).
+    /// Draws a cubic Bezier curve from the current point to (`x3`, `y3`).
     /// (`x1`, `y1`) and (`x2`, `y2`) are the control points.
     CubicTo {
         /// The x-coordinate of the first control point.
@@ -22,6 +22,18 @@ pub enum PathVerb {
         x3: f32,
         /// The y-coordinate of the final point of the curve.
         y3: f32,
+    },
+    /// Draws a quadratic Bezier curve from the current point to (`x2`, `y2`).
+    /// (`x1`, `y1`) is the control point.
+    QuadTo {
+        /// The x-coordinate of the control point.
+        x1: f32,
+        /// The y-coordinate of the control point.
+        y1: f32,
+        /// The x-coordinate of the final point of the curve.
+        x2: f32,
+        /// The y-coordinate of the final point of the curve.
+        y2: f32,
     },
     /// Closes the current subpath by drawing a straight line from the current
     /// point to the starting point of the subpath.
@@ -100,6 +112,21 @@ impl PdfPath {
             x3,
             y3,
         });
+
+        Ok(())
+    }
+
+    /// Appends a `QuadTo` verb to the path, updating the current point to (`x2`, `y2`).
+    ///
+    /// # Arguments
+    ///
+    /// - `x1`, `y1`: Coordinates of the Bézier control point.
+    /// - `x2`, `y2`: Coordinates of the end point of the curve.
+    pub fn quad_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32) -> Result<(), PdfCanvasError> {
+        self.current_x = x2;
+        self.current_y = y2;
+
+        self.verbs.push(PathVerb::QuadTo { x1, y1, x2, y2 });
 
         Ok(())
     }

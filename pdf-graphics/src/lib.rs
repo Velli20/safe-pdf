@@ -1,15 +1,20 @@
 use error::PdfCanvasError;
-use pdf_font::font::Font;
+use pdf_canvas::PdfCanvas;
+use pdf_object::ObjectVariant;
 use pdf_operator::pdf_operator_backend::{
-    ClippingPathOps, ColorOps, GraphicsStateOps, MarkedContentOps, PathConstructionOps,
-    PathPaintingOps, PdfOperatorBackend, PdfOperatorBackendError, ShadingOps, TextObjectOps,
-    TextPositioningOps, TextShowingOps, TextStateOps, XObjectOps,
+    ClippingPathOps, ColorOps, GraphicsStateOps, MarkedContentOps, PdfOperatorBackend,
+    PdfOperatorBackendError, ShadingOps, TextObjectOps, TextPositioningOps, TextShowingOps,
+    TextStateOps, XObjectOps,
 };
-use pdf_page::page::PdfPage;
 use pdf_path::PdfPath;
+use transform::Transform;
+use ttf_parser::{Face, GlyphId, OutlineBuilder};
 
+pub mod canvas_path_ops;
 pub mod error;
+pub mod pdf_canvas;
 pub mod pdf_path;
+pub mod transform;
 
 #[derive(Default, Clone)]
 pub enum PaintMode {
@@ -28,31 +33,12 @@ pub enum PathFillType {
     EvenOdd,
 }
 
-pub struct PdfCanvas<'a> {
-    current_path: Option<PdfPath>,
-    canvas: &'a mut dyn CanvasBackend,
-    page: &'a PdfPage,
-    current_font: Option<&'a Font>
-}
-
-
-impl<'a> PdfCanvas<'a> {
-    pub fn new(backend: &'a mut dyn CanvasBackend, page: &'a PdfPage) -> Self {
-        Self {
-            current_path: None,
-            canvas: backend,
-            page,
-            current_font: None
-        }
-    }
-}
-
 pub trait CanvasBackend {
     fn draw_path(&mut self, path: &PdfPath, mode: PaintMode, fill_type: PathFillType);
 
-    fn save(&mut self);
+    fn width(&self) -> f32;
 
-    fn restore(&mut self);
+    fn height(&self) -> f32;
 }
 
 impl<'a> PdfOperatorBackend for PdfCanvas<'a> {}
@@ -69,12 +55,12 @@ impl<'a> ClippingPathOps for PdfCanvas<'a> {
 
 impl<'a> GraphicsStateOps for PdfCanvas<'a> {
     fn save_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
-        self.canvas.save();
+        self.save();
         Ok(())
     }
 
     fn restore_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
-        self.canvas.restore();
+        self.restore();
         Ok(())
     }
 
@@ -193,30 +179,31 @@ impl<'a> ColorOps for PdfCanvas<'a> {
 
 impl<'a> TextObjectOps for PdfCanvas<'a> {
     fn begin_text_object(&mut self) -> Result<(), Self::ErrorType> {
-        println!("begin_text_object");
-        // text_matrix = Transform::new();
-        // text_line_matrix = Transform::new();
+        self.text_matrix = Transform::identity();
+        self.text_line_matrix = Transform::identity();
 
         Ok(())
     }
 
     fn end_text_object(&mut self) -> Result<(), Self::ErrorType> {
-        println!("end_text_object");
         Ok(())
     }
 }
 
 impl<'a> TextStateOps for PdfCanvas<'a> {
     fn set_character_spacing(&mut self, spacing: f32) -> Result<(), Self::ErrorType> {
-        todo!()
+        self.text_character_spacing = spacing;
+        Ok(())
     }
 
     fn set_word_spacing(&mut self, spacing: f32) -> Result<(), Self::ErrorType> {
-        todo!()
+        self.text_word_spacing = spacing;
+        Ok(())
     }
 
     fn set_horizontal_text_scaling(&mut self, scale_percent: f32) -> Result<(), Self::ErrorType> {
-        todo!()
+        self.text_horizontal_scaling = scale_percent;
+        Ok(())
     }
 
     fn set_text_leading(&mut self, leading: f32) -> Result<(), Self::ErrorType> {
@@ -225,8 +212,19 @@ impl<'a> TextStateOps for PdfCanvas<'a> {
 
     fn set_font_and_size(&mut self, font_name: &str, size: f32) -> Result<(), Self::ErrorType> {
         println!("set_font_and_size name: {} size: {}", font_name, size);
+        self.text_font_size = size;
+
         if let Some(resources) = &self.page.resources {
             if let Some(font) = resources.fonts.get(font_name) {
+                if let Some(font_file) = &font.cid_font.descriptor.font_file {
+                    if let ObjectVariant::Stream(s) = &font_file {
+                        let face =
+                            Face::parse(s.data.as_slice(), 0).expect("Failed to parse font face");
+                        self.font_face = Some(face);
+                        self.text_word_spacing = 0.0;
+                    }
+                }
+
                 self.current_font = Some(font);
             } else {
                 panic!();
@@ -240,13 +238,15 @@ impl<'a> TextStateOps for PdfCanvas<'a> {
     }
 
     fn set_text_rise(&mut self, rise: f32) -> Result<(), Self::ErrorType> {
-        todo!()
+        self.text_rise = rise;
+        Ok(())
     }
 }
 
 impl<'a> TextPositioningOps for PdfCanvas<'a> {
     fn move_text_position(&mut self, tx: f32, ty: f32) -> Result<(), Self::ErrorType> {
         println!("move_text_position tx: {} ty: {}", tx, ty);
+        self.text_matrix.translate(tx, ty);
         Ok(())
     }
 
@@ -275,18 +275,111 @@ impl<'a> TextPositioningOps for PdfCanvas<'a> {
     }
 }
 
+#[derive(Default)]
+struct PdfGlyphOutline {
+    path: PdfPath,
+    transform: Transform,
+}
+
+impl PdfGlyphOutline {
+    pub fn new(transform: Transform) -> Self {
+        Self {
+            path: PdfPath::default(),
+            transform,
+        }
+    }
+}
+
+impl OutlineBuilder for PdfGlyphOutline {
+    fn move_to(&mut self, x: f32, y: f32) {
+        let (x, y) = self.transform.transform_point(x, y);
+
+        self.path.move_to(x, y).unwrap();
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        let (x, y) = self.transform.transform_point(x, y);
+
+        self.path.line_to(x, y).unwrap();
+    }
+
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        let (x1, y1) = self.transform.transform_point(x1, y1);
+        let (x, y) = self.transform.transform_point(x, y);
+
+        self.path.quad_to(x1, y1, x, y).unwrap()
+    }
+
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        let (x1, y1) = self.transform.transform_point(x1, y1);
+        let (x2, y2) = self.transform.transform_point(x2, y2);
+        let (x, y) = self.transform.transform_point(x, y);
+
+        self.path.curve_to(x1, y1, x2, y2, x, y).unwrap();
+    }
+
+    fn close(&mut self) {
+        self.path.close().unwrap();
+    }
+}
+
 impl<'a> TextShowingOps for PdfCanvas<'a> {
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
-        println!("show_text: {:?}", text);
-        if let Some(font) = self.current_font {
-            if let Some(cmap) = &font.cmap {
-                for c in text {
-                    let mappd = cmap.get_mapping(*c as u32);
-                    if let Some(mappd) = mappd {
-                        println!("mappd: {:?}", mappd as char);
-                    }
-                }
-            }
+        let current_font = self.current_font.ok_or(PdfCanvasError::NoCurrentFont)?;
+
+        let face = self
+            .font_face
+            .as_ref()
+            .ok_or(PdfCanvasError::NoCurrentFont)?;
+
+        let horizontal_scaling = self.text_horizontal_scaling;
+        let mut text_rendering_matrix = self.text_rendering_matrix();
+        // TrueType fonts are prescaled to text_rendering_matrix.x_scale() * text_state().font_size / horizontal_scaling,
+        // cf `Renderer::text_set_font()`. That's the width we get back from `get_glyph_width()` if we use a fallback
+        // (or built-in) font. Scale the width size too, so the m_width.get() codepath is consistent.
+        let font_size = text_rendering_matrix.sx * self.text_font_size / horizontal_scaling;
+
+        let character_spacing = self.text_character_spacing;
+        let word_spacing = self.text_word_spacing;
+
+        let units_per_em = face.units_per_em() as f32;
+        let scale = self.text_font_size / units_per_em;
+
+        let mut transform = self.current_state().transform.clone();
+
+        transform.scale(scale, scale);
+
+        for cid in text {
+            let glyph_id = GlyphId(*cid as u16);
+            let mut builder = PdfGlyphOutline::new(transform.clone());
+            face.outline_glyph(glyph_id, &mut builder);
+            self.canvas
+                .draw_path(&builder.path, PaintMode::Fill, PathFillType::EvenOdd);
+
+            // FIGURE 5.5 Metrics for horizontal and vertical writing modes
+
+            // Use the width specified in the font's dictionary if available,
+            // and use the default width for the given font otherwise.
+
+            let glyph_width = if let Some(width) = current_font
+                .cid_font
+                .widths
+                .as_ref()
+                .unwrap()
+                .get_width(*cid as i64)
+            {
+                font_size * width / 1000.0
+            } else {
+                font_size * current_font.cid_font.descriptor.missing_width as f32 / 1000.0
+            };
+
+            // 'advance_user_units' is the glyph's horizontal advance in PDF user space units.
+            // let advance_user_units = face.glyph_hor_advance(glyph_id).unwrap() as f32 * scale;
+            let advance_user_units = glyph_width;
+            // Transform this user space advance to a canvas space advance vector using the CTM's linear components.
+            let canvas_advance_x = self.current_state().transform.sx * advance_user_units;
+            // self.transform.ky is 0 for the typical CTM setup, so canvas_advance_y is 0.
+            transform.translate(canvas_advance_x, 0.0);
         }
 
         Ok(())
@@ -296,6 +389,20 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
         &mut self,
         elements: &[pdf_operator::TextElement],
     ) -> Result<(), Self::ErrorType> {
+        //for (auto& element : elements) {
+        //    if (element.has_number()) {
+        //        float shift = element.to_float() / 1000.0f;
+        //        if (text_state().font->writing_mode() == WritingMode::Horizontal)
+        //            m_text_matrix.translate(-shift * text_state().font_size * text_state().horizontal_scaling, 0.0f);
+        //        else
+        //            m_text_matrix.translate(0.0f, -shift * text_state().font_size);
+        //        m_text_rendering_matrix_is_dirty = true;
+        //    } else {
+        //        auto str = element.get<NonnullRefPtr<Object>>()->cast<StringObject>()->string();
+        //        TRY(show_text(str));
+        //    }
+        //}
+
         todo!()
     }
 
@@ -373,110 +480,4 @@ impl<'a> PdfCanvas<'a> {
 
 impl PdfOperatorBackendError for PdfCanvas<'_> {
     type ErrorType = PdfCanvasError;
-}
-
-impl<'a> PathConstructionOps for PdfCanvas<'a> {
-    fn move_to(&mut self, x: f32, y: f32) -> Result<(), Self::ErrorType> {
-        self.current_path
-            .get_or_insert(PdfPath::default())
-            .move_to(x, y)
-    }
-
-    fn line_to(&mut self, x: f32, y: f32) -> Result<(), Self::ErrorType> {
-        self.current_path
-            .get_or_insert(PdfPath::default())
-            .line_to(x, y)
-    }
-
-    fn curve_to(
-        &mut self,
-        x1: f32,
-        y1: f32,
-        x2: f32,
-        y2: f32,
-        x3: f32,
-        y3: f32,
-    ) -> Result<(), Self::ErrorType> {
-        self.current_path
-            .get_or_insert(PdfPath::default())
-            .curve_to(x1, y1, x2, y2, x3, y3)
-    }
-
-    fn curve_to_v(&mut self, x2: f32, y2: f32, x3: f32, y3: f32) -> Result<(), Self::ErrorType> {
-        let path = self.current_path.get_or_insert(PdfPath::default());
-        if let Some((x, y)) = path.current_point() {
-            path.curve_to(x, y, x2, y2, x3, y3)
-        } else {
-            Err(PdfCanvasError::NoCurrentPoint)
-        }
-    }
-
-    fn curve_to_y(&mut self, x1: f32, y1: f32, x3: f32, y3: f32) -> Result<(), Self::ErrorType> {
-        self.current_path
-            .get_or_insert(PdfPath::default())
-            .curve_to(x1, y1, x3, y3, x3, y3)
-    }
-
-    fn close_path(&mut self) -> Result<(), Self::ErrorType> {
-        self.current_path.get_or_insert(PdfPath::default()).close()
-    }
-
-    fn rectangle(
-        &mut self,
-        x: f32,
-        y: f32,
-        width: f32,
-        height: f32,
-    ) -> Result<(), Self::ErrorType> {
-        let path = self.current_path.get_or_insert(PdfPath::default());
-
-        path.move_to(x, y)?;
-        path.line_to(x + width, y)?;
-        path.line_to(x + width, y + height)?;
-        path.line_to(x, y + height)?;
-        path.close()
-    }
-}
-
-impl<'a> PathPaintingOps for PdfCanvas<'a> {
-    fn stroke_path(&mut self) -> Result<(), Self::ErrorType> {
-        self.paint_taken_path(PaintMode::Stroke, PathFillType::default())
-    }
-
-    fn close_and_stroke_path(&mut self) -> Result<(), Self::ErrorType> {
-        self.close_path()?;
-        self.stroke_path()
-    }
-
-    fn fill_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
-        self.paint_taken_path(PaintMode::Fill, PathFillType::Winding)
-    }
-
-    fn fill_path_even_odd(&mut self) -> Result<(), Self::ErrorType> {
-        self.paint_taken_path(PaintMode::Fill, PathFillType::EvenOdd)
-    }
-
-    fn fill_and_stroke_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
-        self.paint_taken_path(PaintMode::FillAndStroke, PathFillType::Winding)
-    }
-
-    fn fill_and_stroke_path_even_odd(&mut self) -> Result<(), Self::ErrorType> {
-        self.paint_taken_path(PaintMode::FillAndStroke, PathFillType::EvenOdd)
-    }
-
-    fn close_fill_and_stroke_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
-        self.close_path()?;
-        self.fill_and_stroke_path_nonzero_winding()
-    }
-
-    fn close_fill_and_stroke_path_even_odd(&mut self) -> Result<(), Self::ErrorType> {
-        self.close_path()?;
-        self.fill_and_stroke_path_even_odd()
-    }
-
-    fn end_path_no_op(&mut self) -> Result<(), Self::ErrorType> {
-        // Discard the current path, making it undefined.
-        self.current_path.take();
-        Ok(())
-    }
 }

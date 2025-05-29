@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use femtovg::renderer::WGPURenderer;
-use femtovg::{Canvas, Color, Paint, Path};
+use femtovg::{Canvas, Color, FontId, Paint, Path};
 use pdf_document::PdfDocument;
 use pdf_graphics::pdf_path::{PathVerb, PdfPath};
 use pdf_graphics::{CanvasBackend, PaintMode, PathFillType};
@@ -147,6 +147,7 @@ impl App {
 
 struct Renderer2 {}
 
+use ttf_parser::{Face, GlyphId};
 impl AppRenderer for Renderer2 {
     fn on_init(&mut self) {}
 
@@ -155,15 +156,8 @@ impl AppRenderer for Renderer2 {
         canvas: &mut Canvas<femtovg::renderer::WGPURenderer>,
         document: &PdfDocument,
     ) {
-        println!("on_render");
-        canvas.clear_rect(0, 0, 400, 400, Color::rgbf(1.0, 1.0, 1.0));
+        canvas.clear_rect(0, 0, 595, 842, Color::rgbf(1.0, 1.0, 1.0));
         canvas.save();
-
-        // Move origin to bottom-left
-        canvas.translate(0.0, 400.0);
-
-        // Flip the Y-axis
-        canvas.scale(1.0, -1.0);
 
         let mut canvas_impl = CanvasImpl { canvas: canvas };
         let mut renderer = PdfRenderer::new(document, &mut canvas_impl);
@@ -178,9 +172,7 @@ struct CanvasImpl<'a> {
 
 impl CanvasBackend for CanvasImpl<'_> {
     fn draw_path(&mut self, pdf_path: &PdfPath, mode: PaintMode, fill_type: PathFillType) {
-        println!("draw_path");
         let mut path = Path::new();
-
         for verb in &pdf_path.verbs {
             match verb {
                 PathVerb::MoveTo { x, y } => {
@@ -202,21 +194,29 @@ impl CanvasBackend for CanvasImpl<'_> {
                 PathVerb::Close => {
                     path.close();
                 }
+                PathVerb::QuadTo { x1, y1, x2, y2 } => {
+                    path.quad_to(*x1, *y1, *x2, *y2);
+                }
             }
         }
 
-        let mut fill_paint = Paint::color(Color::rgb(50, 100, 200)); // Blueish color
+        let mut fill_paint = Paint::color(Color::rgb(50, 100, 200));
+
         fill_paint.set_line_width(10.0);
-        // Fill the path
-        self.canvas.stroke_path(&mut path, &fill_paint);
+
+        match mode {
+            PaintMode::Fill => self.canvas.fill_path(&mut path, &fill_paint),
+            PaintMode::Stroke => self.canvas.stroke_path(&mut path, &fill_paint),
+            PaintMode::FillAndStroke => todo!(),
+        }
     }
 
-    fn save(&mut self) {
-        self.canvas.save();
+    fn width(&self) -> f32 {
+        self.canvas.width() as f32
     }
 
-    fn restore(&mut self) {
-        self.canvas.restore();
+    fn height(&self) -> f32 {
+        self.canvas.height() as f32
     }
 }
 fn main() {
@@ -224,7 +224,7 @@ fn main() {
         include_bytes!("/Users/viktore/safe-pdf/pdf-document/tests/assets/test4.pdf");
     let document = PdfDocument::from(INPUT).unwrap();
 
-    let mut app = App::new(400, 400, true, document);
+    let mut app = App::new(595, 842, true, document);
     let rend = Renderer2 {};
 
     futures::executor::block_on(app.run(rend));

@@ -30,6 +30,14 @@ impl MediaBox {
             bottom,
         }
     }
+
+    pub fn width(&self) -> u32 {
+        self.right - self.left
+    }
+
+    pub fn height(&self) -> u32 {
+        self.bottom - self.top
+    }
 }
 
 impl FromDictionary for MediaBox {
