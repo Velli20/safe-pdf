@@ -15,7 +15,7 @@ use crate::{error::FontError, font_descriptor::FontDescriptor, glyph_widths_map:
 pub struct CharacterIdentifierFont {
     /// The default width for glyphs in the font.
     /// This is the `/DW` entry in the CIDFont dictionary.
-    default_width: i64,
+    pub default_width: i64,
     /// The font descriptor for this CIDFont, providing detailed metrics and style information.
     pub descriptor: FontDescriptor,
     /// The subtype of this CIDFont, which can be `/CIDFontType0` (for Type 1-based CIDs)

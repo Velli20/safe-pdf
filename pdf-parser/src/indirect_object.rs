@@ -65,8 +65,15 @@ impl ParseObject<ObjectVariant> for PdfParser<'_> {
 
         // If the next token is 'R', it means this is an object reference.
         if let Some(PdfToken::Alphabetic(b'R')) = self.tokenizer.peek()? {
-            self.tokenizer.read();
-            return Ok(ObjectVariant::Reference(object_number));
+            if let Some(s) = self.tokenizer.data().get(1) {
+                if *s != b'G' {
+                    self.tokenizer.read();
+                    return Ok(ObjectVariant::Reference(object_number));
+                }
+            } else {
+                self.tokenizer.read();
+                return Ok(ObjectVariant::Reference(object_number));
+            }
         }
 
         // Read the keyword `obj`.

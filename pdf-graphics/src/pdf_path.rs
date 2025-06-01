@@ -1,4 +1,4 @@
-use crate::error::PdfCanvasError;
+use crate::{error::PdfCanvasError, transform::Transform};
 
 /// Represents a single operation in a graphics path.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -134,6 +134,51 @@ impl PdfPath {
     /// Appends a `Close` verb to the path.
     pub fn close(&mut self) -> Result<(), PdfCanvasError> {
         self.verbs.push(PathVerb::Close);
+        Ok(())
+    }
+
+    pub fn transform(&mut self, transform: &Transform) -> Result<(), PdfCanvasError> {
+        for verb in &mut self.verbs {
+            match verb {
+                PathVerb::MoveTo { x, y } => {
+                    let (xt, yt) = transform.transform_point(*x, *y);
+                    *x = xt;
+                    *y = yt;
+                }
+                PathVerb::LineTo { x, y } => {
+                    let (xt, yt) = transform.transform_point(*x, *y);
+                    *x = xt;
+                    *y = yt;
+                }
+                PathVerb::CubicTo {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    x3,
+                    y3,
+                } => {
+                    let (x1t, y1t) = transform.transform_point(*x1, *y1);
+                    let (x2t, y2t) = transform.transform_point(*x2, *y2);
+                    let (x3t, y3t) = transform.transform_point(*x3, *y3);
+                    *x1 = x1t;
+                    *y1 = y1t;
+                    *x2 = x2t;
+                    *y2 = y2t;
+                    *x3 = x3t;
+                    *y3 = y3t;
+                }
+                PathVerb::QuadTo { x1, y1, x2, y2 } => {
+                    let (x1t, y1t) = transform.transform_point(*x1, *y1);
+                    let (x2t, y2t) = transform.transform_point(*x2, *y2);
+                    *x1 = x1t;
+                    *y1 = y1t;
+                    *x2 = x2t;
+                    *y2 = y2t;
+                }
+                PathVerb::Close => {}
+            }
+        }
         Ok(())
     }
 }

@@ -241,6 +241,7 @@ impl PdfOperatorVariant {
                     if name == operation.name {
                         if operands.len() != operation.operand_count {
                             return Err(PdfOperatorError::IncorrectOperandCount(
+                                operation.name,
                                 operands.len(),
                                 operation.operand_count,
                             ));

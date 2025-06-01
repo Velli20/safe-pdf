@@ -3,7 +3,7 @@ use pdf_object::{
     Value, object_collection::ObjectCollection, trailer::Trailer, traits::FromDictionary,
     version::Version,
 };
-use pdf_page::page::PdfPage;
+use pdf_page::{page::PdfPage, pages::PdfPages};
 use pdf_parser::{ParseObject, PdfParser};
 
 pub mod error;
@@ -76,13 +76,19 @@ impl PdfDocument {
             // Get the page object dictionary.
             let page_obj = objects
                 .get_dictionary(p.object_number())
-                .ok_or(PdfError::PageNotFound(p.object_number()))?
-                .clone();
+                .ok_or(PdfError::PageNotFound(p.object_number()))?;
+            let object_type = page_obj.get_string("Type").ok_or(PdfError::MissingType)?;
 
-            let page =
-                PdfPage::from_dictionary(&page_obj, &objects).map_err(|err| PdfError::from(err))?;
-            pages.push(page);
+            if object_type == PdfPage::KEY {
+                let page = PdfPage::from_dictionary(&page_obj, &objects)
+                    .map_err(|err| PdfError::from(err))?;
+                pages.push(page);
+            } else if object_type == "Pages" {
+                let pages_obj = PdfPages::from_dictionary(&page_obj, &objects)?;
+                pages.extend(pages_obj.pages);
+            }
         }
+        println!("Page count {}", pages.len());
 
         Ok(PdfDocument {
             version,

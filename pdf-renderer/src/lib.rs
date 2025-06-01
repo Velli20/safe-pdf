@@ -12,12 +12,13 @@ impl<'a, 'b> PdfRenderer<'a, 'b> {
     }
 
     pub fn render(&mut self, pages: &[usize]) {
-        println!("Rendering pages: {:?}", pages);
+        // println!("Rendering pages: {:?}", pages);
+
         for index in pages {
             if let Some(p) = self.document.pages.get(*index) {
                 let mut canvas = PdfCanvas::new(self.canvas, p);
                 if let Some(cs) = &p.contents {
-                    println!("Operations: {:?}", &cs.operations);
+                    // println!("Operations: {:?}", &cs.operations);
                     for op in &cs.operations {
                         op.call(&mut canvas).unwrap();
                     }

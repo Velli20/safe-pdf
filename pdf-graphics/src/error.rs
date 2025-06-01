@@ -1,10 +1,11 @@
-use std::fmt::write;
-
 #[derive(Debug)]
 pub enum PdfCanvasError {
     NoActivePath,
     NoCurrentPoint,
     NoCurrentFont,
+    MissingPageResources,
+    InvalidFont(&'static str),
+    FontNotFound(String),
 }
 
 impl std::fmt::Display for PdfCanvasError {
@@ -18,6 +19,15 @@ impl std::fmt::Display for PdfCanvasError {
             }
             PdfCanvasError::NoCurrentFont => {
                 write!(f, "Operation requires a current font, but none is set.")
+            }
+            PdfCanvasError::MissingPageResources => {
+                write!(f, "Missing page resources")
+            }
+            PdfCanvasError::FontNotFound(name) => {
+                write!(f, "Font '{}' not found", name)
+            }
+            PdfCanvasError::InvalidFont(err) => {
+                write!(f, "Invalid font: {}", err)
             }
         }
     }
