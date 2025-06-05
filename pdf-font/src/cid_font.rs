@@ -46,15 +46,12 @@ impl FromDictionary for CharacterIdentifierFont {
         // The key is the starting CID, and the value is a vector of widths
         // for consecutive CIDs starting from the key.
         let widths_map = if let Some(array) = dictionary.get_array("W") {
-            Some(GlyphWidthsMap::from_array(array)?)
+            Some(GlyphWidthsMap::from_array(array).unwrap())
         } else {
             None
         };
 
-        let subtype = dictionary
-            .get_string("Subtype")
-            .cloned()
-            .ok_or(FontError::MissingSubtype)?;
+        let subtype = dictionary.get_string("Subtype").cloned().unwrap();
 
         let descriptor =
             if let Some(ObjectVariant::Reference(num)) = dictionary.get_object("FontDescriptor") {
@@ -66,7 +63,6 @@ impl FromDictionary for CharacterIdentifierFont {
             } else {
                 return Err(FontError::MissingFontDescriptor);
             };
-
         Ok(Self {
             default_width,
             descriptor,

@@ -99,6 +99,16 @@ impl Value {
             Some(&value.0)
         } else if let Value::HexString(value) = self {
             Some(&value.0)
+        } else if let Value::Name(value) = self {
+            Some(&value.0)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_boolean(&self) -> Option<bool> {
+        if let Value::Boolean(value) = self {
+            Some(value.0)
         } else {
             None
         }

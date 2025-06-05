@@ -7,32 +7,56 @@ use crate::{
     transform::Transform,
 };
 
-pub struct PdfCanvas<'a> {
-    pub(crate) current_path: Option<PdfPath>,
-    pub(crate) canvas: &'a mut dyn CanvasBackend,
-    pub(crate) page: &'a PdfPage,
-    pub(crate) current_font: Option<&'a Font>,
+/// Encapsulates text-specific state parameters.
+/// These parameters are part of the PDF graphics state and can be saved and restored.
+#[derive(Clone)] // Not Copy due to Face<'a>
+pub(crate) struct TextState<'a> {
+    /// The text matrix (Tm), transforming text space to user space.
+    pub(crate) matrix: Transform,
+    /// The text line matrix (Tlm), tracking the start of the current line.
+    pub(crate) line_matrix: Transform,
+    /// Horizontal scaling of text (Th), as a percentage (default: 100.0).
+    pub(crate) horizontal_scaling: f32,
+    /// Font size (Tfs), in user space units.
+    pub(crate) font_size: f32,
+    /// Character spacing (Tc), in unscaled text space units.
+    pub(crate) character_spacing: f32,
+    /// Word spacing (Tw), in unscaled text space units.
+    pub(crate) word_spacing: f32,
+    /// Text rise (Ts), a vertical offset from the baseline, in unscaled text space units.
+    pub(crate) rise: f32,
+    /// The current font resource.
+    pub(crate) font: Option<&'a Font>,
+    /// The parsed ttf_parser Face for the current font.
     pub(crate) font_face: Option<Face<'a>>,
-    canvas_stack: Vec<CanvasState>,
-
-    pub(crate) text_matrix: Transform,
-    pub(crate) text_line_matrix: Transform,
-    pub(crate) text_horizontal_scaling: f32,
-    pub(crate) text_font_size: f32,
-    pub(crate) text_character_spacing: f32,
-    pub(crate) text_word_spacing: f32,
-    pub(crate) text_rise: f32,
 }
 
-#[derive(Clone, Copy)]
-pub(crate) struct CanvasState {
+impl<'a> Default for TextState<'a> {
+    fn default() -> Self {
+        Self {
+            matrix: Transform::identity(),      // Initialized by BT operator
+            line_matrix: Transform::identity(), // Initialized by BT operator
+            horizontal_scaling: 100.0,          // PDF spec default
+            font_size: 0.0, // PDF spec: undefined, must be set by Tf. Using 0 as placeholder.
+            character_spacing: 0.0, // PDF spec default
+            word_spacing: 0.0, // PDF spec default
+            rise: 0.0,      // PDF spec default
+            font: None,
+            font_face: None,
+        }
+    }
+}
+
+#[derive(Clone)] // Not Copy due to TextState<'a>
+pub(crate) struct CanvasState<'a> {
     pub transform: Transform,
     pub stroke_color: Color,
     pub fill_color: Color,
     pub line_width: f32,
+    pub text_state: TextState<'a>,
 }
 
-impl CanvasState {
+impl CanvasState<'_> {
     /// Default line width in user space units.
     /// PDF 1.7 Specification, Section 8.4.3.2 "Line Width", states the default value is 1.0.
     const DEFAULT_LINE_WIDTH: f32 = 1.0;
@@ -46,15 +70,24 @@ impl CanvasState {
     const DEFAULT_STROKE_COLOR: Color = Color::from_rgb(0.0, 0.0, 0.0);
 }
 
-impl Default for CanvasState {
+impl<'a> Default for CanvasState<'a> {
     fn default() -> Self {
         Self {
             transform: Transform::identity(),
             stroke_color: Self::DEFAULT_STROKE_COLOR,
             fill_color: Self::DEFAULT_FILL_COLOR,
             line_width: Self::DEFAULT_LINE_WIDTH,
+            text_state: TextState::default(),
         }
     }
+}
+
+pub struct PdfCanvas<'a> {
+    pub(crate) current_path: Option<PdfPath>,
+    pub(crate) canvas: &'a mut dyn CanvasBackend,
+    pub(crate) page: &'a PdfPage,
+    // canvas_stack stores the graphics states, including text state.
+    canvas_stack: Vec<CanvasState<'a>>,
 }
 
 impl<'a> PdfCanvas<'a> {
@@ -97,8 +130,16 @@ impl<'a> PdfCanvas<'a> {
             backend_canvas_height, // ty: Translate Y to move origin to top-left after reflection
         );
 
+        // Initialize TextState with application-specific defaults if different from PDF spec.
+        // For example, PdfCanvas used an initial font size of 18.0.
+        let initial_text_state = TextState {
+            font_size: 18.0, // Application-specific default for initial state
+            ..TextState::default()
+        };
+
         let canvas_stack = vec![CanvasState {
             transform: userspace_matrix,
+            text_state: initial_text_state,
             ..Default::default()
         }];
 
@@ -106,33 +147,24 @@ impl<'a> PdfCanvas<'a> {
             current_path: None,
             canvas: backend,
             page,
-            current_font: None,
-            font_face: None,
             canvas_stack,
-            text_matrix: Transform::identity(),
-            text_line_matrix: Transform::identity(),
-            text_horizontal_scaling: 100.0,
-            text_font_size: 1.0,
-            text_rise: 0.0,
-            text_character_spacing: 0.0,
-            text_word_spacing: 0.0,
         }
     }
 
     pub(crate) fn map_point(&self, x: f32, y: f32) -> (f32, f32) {
         self.current_state().transform.transform_point(x, y)
     }
-
-    pub(crate) fn current_state(&self) -> &CanvasState {
+    pub(crate) fn current_state(&self) -> &CanvasState<'a> {
         self.canvas_stack.last().unwrap()
     }
 
-    pub(crate) fn current_state_mut(&mut self) -> &mut CanvasState {
+    pub(crate) fn current_state_mut(&mut self) -> &mut CanvasState<'a> {
         self.canvas_stack.last_mut().unwrap()
     }
 
     pub(crate) fn save(&mut self) {
-        self.canvas_stack.push(self.current_state().clone());
+        let state = self.current_state().clone();
+        self.canvas_stack.push(state);
     }
 
     pub(crate) fn restore(&mut self) {

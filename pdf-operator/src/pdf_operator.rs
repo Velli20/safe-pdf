@@ -1,4 +1,6 @@
-use pdf_object::{Value, comment::Comment};
+use std::rc::Rc;
+
+use pdf_object::{Value, comment::Comment, dictionary::Dictionary};
 use pdf_parser::{ParseObject, PdfParser};
 use pdf_tokenizer::PdfToken;
 
@@ -53,6 +55,16 @@ impl Operands<'_> {
             value
                 .as_number::<f32>()
                 .map_err(|_| PdfOperatorError::InvalidOperandType)
+        } else {
+            Err(PdfOperatorError::InvalidOperandType)
+        }
+    }
+
+    pub fn get_dictionary(&mut self) -> Result<Rc<Dictionary>, PdfOperatorError> {
+        let value = self.0.get(0);
+        self.0 = &self.0[1..];
+        if let Some(Value::Dictionary(value)) = value {
+            Ok(value.clone())
         } else {
             Err(PdfOperatorError::InvalidOperandType)
         }
@@ -183,6 +195,7 @@ pub enum PdfOperatorVariant {
     SetLineJoinStyle(SetLineJoinStyle),
     SetMiterLimit(SetMiterLimit),
     SetDashPattern(SetDashPattern),
+    SetGraphicsStateFromDict(SetGraphicsStateFromDict),
     SaveGraphicsState(SaveGraphicsState),
     RestoreGraphicsState(RestoreGraphicsState),
     ConcatMatrix(ConcatMatrix),
@@ -237,6 +250,7 @@ impl PdfOperatorVariant {
                     break;
                 }
 
+                let mut handled = false;
                 for operation in READ_MAP {
                     if name == operation.name {
                         if operands.len() != operation.operand_count {
@@ -250,11 +264,15 @@ impl PdfOperatorVariant {
                         let mut ops = Operands(operands.as_slice());
                         let operator = (operation.parser)(&mut ops)?;
                         operators.push(operator);
+                        handled = true;
 
                         // Clear operands after they've been consumed.
                         operands.clear();
                         break;
                     }
+                }
+                if !handled {
+                    return Err(PdfOperatorError::UnknownOperator(name.to_string()));
                 }
                 continue;
             }
@@ -297,6 +315,7 @@ impl PdfOperatorVariant {
             PdfOperatorVariant::SetLineJoinStyle(op) => op.call(backend),
             PdfOperatorVariant::SetMiterLimit(op) => op.call(backend),
             PdfOperatorVariant::SetDashPattern(op) => op.call(backend),
+            PdfOperatorVariant::SetGraphicsStateFromDict(op) => op.call(backend),
             PdfOperatorVariant::SaveGraphicsState(op) => op.call(backend),
             PdfOperatorVariant::RestoreGraphicsState(op) => op.call(backend),
             PdfOperatorVariant::ConcatMatrix(op) => op.call(backend),

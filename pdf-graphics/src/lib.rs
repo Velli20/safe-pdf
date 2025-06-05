@@ -1,14 +1,15 @@
-use std::path;
+use std::{path, rc::Rc};
 
 use color::Color;
 use error::PdfCanvasError;
 use pdf_canvas::PdfCanvas;
-use pdf_object::ObjectVariant;
+use pdf_object::{ObjectVariant, dictionary::Dictionary};
 use pdf_operator::pdf_operator_backend::{
     ClippingPathOps, ColorOps, GraphicsStateOps, MarkedContentOps, PdfOperatorBackend,
     PdfOperatorBackendError, ShadingOps, TextObjectOps, TextPositioningOps, TextShowingOps,
     TextStateOps, XObjectOps,
 };
+use pdf_page::external_graphics_state::ExternalGraphicsStateKey;
 use pdf_path::PdfPath;
 use transform::Transform;
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
@@ -91,7 +92,21 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
         e: f32,
         f: f32,
     ) -> Result<(), Self::ErrorType> {
-        todo!()
+        // a d Horizontal and vertical scaling
+        // b c Skewing (shear)
+        // e f Translation (move x, y)
+
+        let mat = Transform::from_row(a, b, c, d, e, f);
+        // The cm operator concatenates the operand matrix M to the CTM.
+        // The effect is to apply the new transform M *after* the current CTM.
+        // With column vectors and standard matrix multiplication (A*B applies B then A),
+        // the combined transform is M * CTM_old.
+        // Assuming the transform crate's 'concat' method performs post-multiplication (self = self * other).
+        let ctm_old = self.current_state().transform.clone();
+        let mut ctm_new = mat; // Start with M
+        ctm_new.concat(&ctm_old); // Calculate M * CTM_old (assuming concat is self = self * other)
+        self.current_state_mut().transform = ctm_new;
+        Ok(())
     }
 
     fn set_line_width(&mut self, width: f32) -> Result<(), Self::ErrorType> {
@@ -127,7 +142,39 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
     }
 
     fn set_graphics_state_from_dict(&mut self, dict_name: &str) -> Result<(), Self::ErrorType> {
-        todo!()
+        if let Some(resources) = self.page.resources.as_ref() {
+            if let Some(states) = resources.external_graphics_states.get(dict_name) {
+                for state in &states.params {
+                    match state {
+                        ExternalGraphicsStateKey::LineWidth(_) => todo!(),
+                        ExternalGraphicsStateKey::LineCap(_) => todo!(),
+                        ExternalGraphicsStateKey::LineJoin(_) => todo!(),
+                        ExternalGraphicsStateKey::MiterLimit(_) => todo!(),
+                        ExternalGraphicsStateKey::DashPattern(items, _) => todo!(),
+                        ExternalGraphicsStateKey::RenderingIntent(_) => todo!(),
+                        ExternalGraphicsStateKey::OverprintStroke(_) => todo!(),
+                        ExternalGraphicsStateKey::OverprintFill(_) => todo!(),
+                        ExternalGraphicsStateKey::OverprintMode(_) => todo!(),
+                        ExternalGraphicsStateKey::Font(_, _) => todo!(),
+                        ExternalGraphicsStateKey::BlendMode(items) => {
+                            // println!("Blend mode {:?}", items);
+                        }
+                        ExternalGraphicsStateKey::SoftMask(dictionary) => todo!(),
+                        ExternalGraphicsStateKey::StrokingAlpha(alpha) => {
+                            self.current_state_mut().stroke_color.a = *alpha
+                        }
+                        ExternalGraphicsStateKey::NonStrokingAlpha(alpha) => {
+                            self.current_state_mut().fill_color.a = *alpha
+                        }
+                    }
+                }
+            } else {
+                panic!()
+            }
+        } else {
+            panic!()
+        }
+        Ok(())
     }
 }
 
@@ -199,8 +246,8 @@ impl<'a> ColorOps for PdfCanvas<'a> {
 
 impl<'a> TextObjectOps for PdfCanvas<'a> {
     fn begin_text_object(&mut self) -> Result<(), Self::ErrorType> {
-        self.text_matrix = Transform::identity();
-        self.text_line_matrix = Transform::identity();
+        self.current_state_mut().text_state.matrix = Transform::identity();
+        self.current_state_mut().text_state.line_matrix = Transform::identity();
 
         Ok(())
     }
@@ -212,26 +259,26 @@ impl<'a> TextObjectOps for PdfCanvas<'a> {
 
 impl<'a> TextStateOps for PdfCanvas<'a> {
     fn set_character_spacing(&mut self, spacing: f32) -> Result<(), Self::ErrorType> {
-        self.text_character_spacing = spacing;
+        self.current_state_mut().text_state.character_spacing = spacing;
         Ok(())
     }
 
     fn set_word_spacing(&mut self, spacing: f32) -> Result<(), Self::ErrorType> {
-        self.text_word_spacing = spacing;
+        self.current_state_mut().text_state.word_spacing = spacing;
         Ok(())
     }
 
     fn set_horizontal_text_scaling(&mut self, scale_percent: f32) -> Result<(), Self::ErrorType> {
-        self.text_horizontal_scaling = scale_percent;
+        self.current_state_mut().text_state.horizontal_scaling = scale_percent;
         Ok(())
     }
 
     fn set_text_leading(&mut self, leading: f32) -> Result<(), Self::ErrorType> {
-        todo!()
+        todo!("Implement text leading TL: {}", leading)
     }
 
     fn set_font_and_size(&mut self, font_name: &str, size: f32) -> Result<(), Self::ErrorType> {
-        self.text_font_size = size;
+        self.current_state_mut().text_state.font_size = size;
 
         let resources = self
             .page
@@ -248,21 +295,21 @@ impl<'a> TextStateOps for PdfCanvas<'a> {
             if let ObjectVariant::Stream(s) = &font_file {
                 let face = Face::parse(s.data.as_slice(), 0).expect("Failed to parse font face");
 
-                self.font_face = Some(face);
-                self.text_word_spacing = 0.0;
+                self.current_state_mut().text_state.font_face = Some(face);
+                self.current_state_mut().text_state.word_spacing = 0.0; // Tj operator spec: "word spacing is applied to every occurrence of the single-byte character code 32 in a string when using a simple font or a composite font that defines code 32 as a space."
             }
         }
 
-        self.current_font = Some(font);
+        self.current_state_mut().text_state.font = Some(font);
         Ok(())
     }
 
     fn set_text_rendering_mode(&mut self, mode: i32) -> Result<(), Self::ErrorType> {
-        todo!()
+        todo!("Implement text rendering mode Tr: {}", mode)
     }
 
     fn set_text_rise(&mut self, rise: f32) -> Result<(), Self::ErrorType> {
-        self.text_rise = rise;
+        self.current_state_mut().text_state.rise = rise;
         Ok(())
     }
 }
@@ -270,8 +317,9 @@ impl<'a> TextStateOps for PdfCanvas<'a> {
 impl<'a> TextPositioningOps for PdfCanvas<'a> {
     fn move_text_position(&mut self, tx: f32, ty: f32) -> Result<(), Self::ErrorType> {
         let mat = Transform::from_translate(tx, ty);
-        self.text_line_matrix.concat(&mat);
-        self.text_matrix = self.text_line_matrix.clone();
+        self.current_state_mut().text_state.line_matrix.concat(&mat);
+        self.current_state_mut().text_state.matrix =
+            self.current_state().text_state.line_matrix.clone();
         Ok(())
     }
 
@@ -280,7 +328,7 @@ impl<'a> TextPositioningOps for PdfCanvas<'a> {
         tx: f32,
         ty: f32,
     ) -> Result<(), Self::ErrorType> {
-        todo!()
+        todo!("Implement TD operator: tx={}, ty={}", tx, ty)
     }
 
     fn set_text_matrix(
@@ -292,11 +340,14 @@ impl<'a> TextPositioningOps for PdfCanvas<'a> {
         e: f32,
         f: f32,
     ) -> Result<(), Self::ErrorType> {
-        todo!()
+        let mat = Transform::from_row(a, b, c, d, e, f);
+        self.current_state_mut().text_state.line_matrix = mat.clone(); // text_line_matrix is also set
+        self.current_state_mut().text_state.matrix = mat;
+        Ok(())
     }
 
     fn move_to_start_of_next_line(&mut self) -> Result<(), Self::ErrorType> {
-        todo!()
+        todo!("Implement T* operator")
     }
 }
 
@@ -346,18 +397,19 @@ impl OutlineBuilder for PdfGlyphOutline {
 
 impl<'a> TextShowingOps for PdfCanvas<'a> {
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
-        let current_font = self.current_font.ok_or(PdfCanvasError::NoCurrentFont)?;
-        let face = self
+        let text_state = &self.current_state().text_state.clone();
+        let current_font = text_state.font.ok_or(PdfCanvasError::NoCurrentFont)?;
+        let face = text_state
             .font_face
             .as_ref()
             .ok_or(PdfCanvasError::NoCurrentFont)?;
 
         // Text state parameters (PDF 1.7 Spec, Section 5.3.3)
         let units_per_em_f32 = face.units_per_em() as f32;
-        let char_spacing = self.text_character_spacing; // Tc: Character spacing
-        let word_spacing = self.text_word_spacing; // Tw: Word spacing
-        let text_font_size = self.text_font_size; // Tfs: Text font size
-        let text_rise = self.text_rise; // Ts: Text rise
+        let char_spacing = text_state.character_spacing; // Tc: Character spacing
+        let word_spacing = text_state.word_spacing; // Tw: Word spacing
+        let text_font_size = text_state.font_size; // Tfs: Text font size
+        let text_rise = text_state.rise; // Ts: Text rise
 
         // Avoid division by zero if units_per_em is somehow zero, though unlikely for valid fonts.
         let upe_inv = if units_per_em_f32 != 0.0 {
@@ -367,7 +419,7 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
         }; // Inverse of units_per_em, for converting font units to 1-unit glyph space.
 
         // Th_factor: Horizontal scaling factor (Th / 100). (PDF Spec 5.3.3)
-        let th_factor = self.text_horizontal_scaling / 100.0;
+        let th_factor = text_state.horizontal_scaling / 100.0;
 
         // M_params: This matrix accounts for font size (Tfs), horizontal scaling (Th),
         // and text rise (Ts). It transforms glyph coordinates from font design units
@@ -385,8 +437,13 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
             text_rise,                            // ty = Ts (text_rise)
         );
 
+        let fill_color = self.current_state().fill_color;
         for char_code_byte in text {
             let char_code = *char_code_byte;
+            if face.glyph_index(char_code as char).is_none() {
+                continue;
+            }
+
             let glyph_id = GlyphId(char_code as u16);
 
             // Calculate the final glyph rendering matrix for the current glyph:
@@ -400,20 +457,15 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
             // 1. m_params.concat(&self.text_matrix) results in: T_m * M_params
             // 2. (T_m * M_params).concat(&self.current_state().transform) results in: CTM * T_m * M_params
             let mut glyph_matrix_for_char = m_params.clone();
-            glyph_matrix_for_char.concat(&self.text_matrix);
+            glyph_matrix_for_char.concat(&self.current_state().text_state.matrix);
             glyph_matrix_for_char.concat(&self.current_state().transform);
-
             let mut builder = PdfGlyphOutline::new(glyph_matrix_for_char);
 
             face.outline_glyph(glyph_id, &mut builder);
-
             // Render the glyph path. According to the specification, the
             // default fill-rule for text is non-zero winding rule.
-            self.canvas.fill_path(
-                &builder.path,
-                PathFillType::Winding,
-                self.current_state().fill_color,
-            );
+            self.canvas
+                .fill_path(&builder.path, PathFillType::Winding, fill_color);
 
             // Calculate horizontal displacement (advance_x) for the current glyph in text space.
             // (PDF Spec 1.7, Section 5.3.2, Tj operator)
@@ -442,7 +494,10 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
             let advance_x =
                 (glyph_width_tfs_scaled + char_spacing + word_spacing_for_char) * th_factor;
             // Update the text matrix T_m for the next glyph: T_m_new = Translate(advance_x, 0) * T_m_old
-            self.text_matrix.translate(advance_x, 0.0);
+            self.current_state_mut()
+                .text_state
+                .matrix
+                .translate(advance_x, 0.0);
         }
 
         Ok(())
@@ -452,11 +507,11 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
         &mut self,
         elements: &[pdf_operator::TextElement],
     ) -> Result<(), Self::ErrorType> {
-        todo!()
+        todo!("Implement TJ operator: {:?}", elements)
     }
 
     fn move_to_next_line_and_show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
-        todo!()
+        todo!("Implement ' operator: {:?}", text)
     }
 
     fn set_spacing_and_show_text(
@@ -465,7 +520,12 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
         char_spacing: f32,
         text: &[u8],
     ) -> Result<(), Self::ErrorType> {
-        todo!()
+        todo!(
+            "Implement \" operator: word_spacing={}, char_spacing={}, text={:?}",
+            word_spacing,
+            char_spacing,
+            text
+        )
     }
 }
 
@@ -500,14 +560,14 @@ impl<'a> MarkedContentOps for PdfCanvas<'a> {
 
     fn begin_marked_content_with_properties(
         &mut self,
-        tag: &str,
-        properties_name_or_dict: &str,
+        _tag: &str,
+        _properties: &Rc<Dictionary>,
     ) -> Result<(), Self::ErrorType> {
-        todo!()
+        Ok(())
     }
 
     fn end_marked_content(&mut self) -> Result<(), Self::ErrorType> {
-        todo!()
+        Ok(())
     }
 }
 

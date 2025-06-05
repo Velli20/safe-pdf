@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use pdf_object::{array::Array, traits::FromDictionary};
+use pdf_object::array::Array;
 
 use crate::error::FontError;
 
@@ -8,10 +8,11 @@ use crate::error::FontError;
 ///
 /// This map is populated from the `/W` array in the CIDFont dictionary.
 /// According to the PDF 1.7 specification (Section 9.7.4.3, "Glyph Metrics in CIDFonts"),
-/// the `/W` array can define widths for individual CIDs or ranges of CIDs.
-/// This implementation currently parses entries of the form `c [w1 w2 ... wn]`,
-/// where `c` is the starting CID, and `w1, w2, ..., wn` are the widths for
-/// `n` consecutive CIDs starting from `c`.
+/// the `/W` array defines widths for CIDs. This implementation parses entries of two forms:
+/// 1. `c [w1 w2 ... wn]`: `c` is the starting CID, and `w1, ..., wn` are the widths
+///    for `n` consecutive CIDs starting from `c`.
+/// 2. `c_first c_last w`: `c_first` and `c_last` define a range of CIDs (inclusive),
+///    and `w` is the common width for all CIDs in that range.
 /// The key in the `HashMap` is the starting `character_id` (CID), and the `Vec<f32>`
 /// contains the widths for that CID and subsequent CIDs.
 pub struct GlyphWidthsMap {
@@ -22,46 +23,72 @@ impl GlyphWidthsMap {
     pub fn from_array(array: &Array) -> Result<GlyphWidthsMap, FontError> {
         // The "W" array (Widths) defines widths for specific CIDs.
         // PDF 1.7 spec, section 9.7.4.3 "Glyph Metrics in CIDFonts".
-        // This parser specifically handles the form: c [w1 w2 ... wn]
-        // where 'c' is an integer (starting CID), and [w1 w2 ... wn] is a PDF array
-        // of numbers representing widths for CIDs c, c+1, ..., c+n-1.
+        // This parser handles two forms for entries in the /W array:
+        // 1. c [w1 w2 ... wn]
+        //    where 'c' is an integer (starting CID), and [w1 w2 ... wn] is a PDF array
+        //    of numbers representing widths for CIDs c, c+1, ..., c+n-1.
+        // 2. c_first c_last w
+        //    where 'c_first' and 'c_last' are integers defining a range of CIDs,
+        //    and 'w' is a number representing the width for all CIDs from
+        //    c_first to c_last, inclusive.
         //
-        // Example: [ 0 [500 450], 10 [600] ]
+        // Example: [ 0 [500 450], 10 [600], 20 22 750 ]
         // - CID 0 has width 500, CID 1 has width 450.
         // - CID 10 has width 600.
+        // - CIDs 20, 21, 22 all have width 750.
         //
-        // The other form (c_first c_last w) for ranges is not handled by this logic.
-        // The code iterates through the /W array expecting pairs of (CID, ArrayOfWidths).
+        // The array is processed sequentially; a later entry can override an earlier one
+        // for a particular CID (though this implementation stores ranges, so overlaps
+        // are based on the starting CID of a range).
 
         let mut widths_map = HashMap::new();
-
         let mut iter = array.0.iter();
-        while let Some(cid_value_element) = iter.next() {
-            // The first element in a pair is expected to be the starting CID (integer).
-            let character_id = cid_value_element.as_number::<i64>()?;
 
-            // The next element should be a PDF array containing the width(s).
-            if let Some(widths_for_cid_value_element) = iter.next() {
-                // Attempt to interpret this element as a PDF array.
-                if let Some(widths_pdf_array) = widths_for_cid_value_element.as_array() {
+        while let Some(cid_or_c_first_element) = iter.next() {
+            let c_or_c_first = cid_or_c_first_element.as_number::<i64>()?;
+
+            // The next element determines the format.
+            if let Some(next_element) = iter.next() {
+                if let Some(widths_pdf_array) = next_element.as_array() {
+                    // Form: c [w1 w2 ... wn]
+                    // c_or_c_first is 'c'
                     let mut parsed_widths = Vec::new();
                     for width_value in &widths_pdf_array.0 {
-                        // Each item in this inner array should be a number (width).
                         let width_f32 = width_value.as_number::<f32>()?;
                         parsed_widths.push(width_f32);
                     }
-                    widths_map.insert(character_id, parsed_widths);
+                    widths_map.insert(c_or_c_first, parsed_widths);
+                } else if let Ok(c_last) = next_element.as_number::<i64>() {
+                    // Form: c_first c_last w
+                    // c_or_c_first is 'c_first', next_element (parsed as c_last) is 'c_last'
+                    if c_last < c_or_c_first {
+                        return Err(FontError::InvalidFontDescriptor(
+                            "Invalid /W array (form c_first c_last w): c_last cannot be less than c_first.",
+                        ));
+                    }
+
+                    if let Some(width_element) = iter.next() {
+                        let width = width_element.as_number::<f32>()?;
+                        let num_cids = (c_last - c_or_c_first + 1) as usize;
+                        let parsed_widths: Vec<f32> =
+                            std::iter::repeat(width).take(num_cids).collect();
+                        widths_map.insert(c_or_c_first, parsed_widths);
+                    } else {
+                        return Err(FontError::InvalidFontDescriptor(
+                            "Invalid /W array (form c_first c_last w): missing width 'w' after c_last.",
+                        ));
+                    }
                 } else {
-                    // Expected a PDF array for widths, but found a different type.
+                    // The element after c_or_c_first is neither an array (for form 1)
+                    // nor an integer (for c_last in form 2).
                     return Err(FontError::InvalidFontDescriptor(
-                        "Invalid /W array: expected an array of widths following a CID.",
+                        "Invalid /W array: expected an array of widths or a c_last integer after a CID.",
                     ));
                 }
             } else {
-                // The /W array has an odd number of elements at this level,
-                // meaning a CID was found without a subsequent width array.
+                // c_or_c_first was found without any subsequent elements.
                 return Err(FontError::InvalidFontDescriptor(
-                    "Invalid /W array: CID found without a corresponding width array.",
+                    "Invalid /W array: CID found without a corresponding width array or c_last value.",
                 ));
             }
         }
@@ -287,5 +314,100 @@ mod tests {
         assert_eq!(glyph_widths_map.get_width(-6), None);
         assert_eq!(glyph_widths_map.get_width(-3), None);
         assert_eq!(glyph_widths_map.get_width(0), Some(300.0));
+    }
+
+    #[test]
+    fn test_from_array_c_first_c_last_w_form_single_entry() {
+        // [ 10 12 600 ] -> CIDs 10, 11, 12 have width 600
+        let input_array = Array(vec![num_i64(10), num_i64(12), num_f32(600.0)]);
+        let glyph_widths_map = GlyphWidthsMap::from_array(&input_array).unwrap();
+        assert_eq!(glyph_widths_map.map.len(), 1);
+        assert_eq!(
+            glyph_widths_map.map.get(&10).unwrap(),
+            &vec![600.0, 600.0, 600.0]
+        );
+    }
+
+    #[test]
+    fn test_from_array_c_first_c_last_w_form_c_first_equals_c_last() {
+        // [ 5 5 300 ] -> CID 5 has width 300
+        let input_array = Array(vec![num_i64(5), num_i64(5), num_f32(300.0)]);
+        let glyph_widths_map = GlyphWidthsMap::from_array(&input_array).unwrap();
+        assert_eq!(glyph_widths_map.map.len(), 1);
+        assert_eq!(glyph_widths_map.map.get(&5).unwrap(), &vec![300.0]);
+    }
+
+    #[test]
+    fn test_from_array_mixed_forms() {
+        // [ 0 [500], 10 11 600, 20 [700 750] ]
+        let input_array = Array(vec![
+            num_i64(0),
+            arr(vec![num_f32(500.0)]),
+            num_i64(10),
+            num_i64(11),
+            num_f32(600.0),
+            num_i64(20),
+            arr(vec![num_f32(700.0), num_f32(750.0)]),
+        ]);
+        let glyph_widths_map = GlyphWidthsMap::from_array(&input_array).unwrap();
+        assert_eq!(glyph_widths_map.map.len(), 3);
+        assert_eq!(glyph_widths_map.map.get(&0).unwrap(), &vec![500.0]);
+        assert_eq!(glyph_widths_map.map.get(&10).unwrap(), &vec![600.0, 600.0]);
+        assert_eq!(glyph_widths_map.map.get(&20).unwrap(), &vec![700.0, 750.0]);
+    }
+
+    #[test]
+    fn test_from_array_error_c_last_less_than_c_first() {
+        // [ 10 8 600 ]
+        let input_array = Array(vec![num_i64(10), num_i64(8), num_f32(600.0)]);
+        let result = GlyphWidthsMap::from_array(&input_array);
+        assert!(matches!(
+            result,
+            Err(FontError::InvalidFontDescriptor(
+                "Invalid /W array (form c_first c_last w): c_last cannot be less than c_first."
+            ))
+        ));
+    }
+
+    #[test]
+    fn test_from_array_error_missing_w_in_c_first_c_last_w() {
+        // [ 10 12 ] (missing w)
+        let input_array = Array(vec![num_i64(10), num_i64(12)]);
+        let result = GlyphWidthsMap::from_array(&input_array);
+        assert!(matches!(
+            result,
+            Err(FontError::InvalidFontDescriptor(
+                "Invalid /W array (form c_first c_last w): missing width 'w' after c_last."
+            ))
+        ));
+    }
+
+    #[test]
+    fn test_from_array_error_w_not_a_number() {
+        // [ 10 12 "not_a_width" ]
+        let input_array = Array(vec![
+            num_i64(10),
+            num_i64(12),
+            Value::LiteralString(LiteralString::new("not_a_width".to_string())),
+        ]);
+        let result = GlyphWidthsMap::from_array(&input_array);
+        assert!(matches!(result, Err(FontError::ObjectError(_))));
+    }
+
+    #[test]
+    fn test_from_array_error_c_last_not_a_number() {
+        // [ 10 "not_c_last" 600 ]
+        let input_array = Array(vec![
+            num_i64(10),
+            Value::LiteralString(LiteralString::new("not_c_last".to_string())),
+            num_f32(600.0),
+        ]);
+        let result = GlyphWidthsMap::from_array(&input_array);
+        assert!(matches!(
+            result,
+            Err(FontError::InvalidFontDescriptor(
+                "Invalid /W array: expected an array of widths or a c_last integer after a CID."
+            ))
+        ));
     }
 }

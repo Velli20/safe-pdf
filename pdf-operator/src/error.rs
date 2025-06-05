@@ -6,6 +6,7 @@ use pdf_tokenizer::error::TokenizerError;
 pub enum PdfOperatorError {
     UnimplementedOperation(&'static str),
     OperandTokenizationError(String),
+    UnknownOperator(String),
     InvalidOperandType,
     IncorrectOperandCount(&'static str, usize, usize),
 }
@@ -15,6 +16,9 @@ impl std::fmt::Display for PdfOperatorError {
         match self {
             PdfOperatorError::UnimplementedOperation(name) => {
                 write!(f, "Unimplemented operation: {}", name)
+            }
+            PdfOperatorError::UnknownOperator(name) => {
+                write!(f, "Unknown operator: '{}'", name)
             }
             PdfOperatorError::OperandTokenizationError(err) => {
                 write!(f, "Operand tokenization error: {}", err)

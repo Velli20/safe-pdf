@@ -66,7 +66,6 @@ impl FromDictionary for Font {
         } else {
             return Err(FontError::MissingCharacterIdentifierFont);
         };
-
         return Ok(Self {
             base_font,
             subtype,

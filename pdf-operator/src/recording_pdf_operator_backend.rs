@@ -1,3 +1,7 @@
+use std::rc::Rc;
+
+use pdf_object::dictionary::Dictionary;
+
 use crate::TextElement;
 use crate::pdf_operator_backend::*;
 
@@ -206,7 +210,7 @@ pub enum RecordedOperation {
     },
     BeginMarkedContentWithProperties {
         tag: String,
-        properties_name_or_dict: String,
+        properties_name_or_dict: Rc<Dictionary>,
     },
     EndMarkedContent,
 }
@@ -730,12 +734,12 @@ impl MarkedContentOps for RecordingBackend {
     fn begin_marked_content_with_properties(
         &mut self,
         tag: &str,
-        properties_name_or_dict: &str,
+        properties_name_or_dict: &Rc<Dictionary>,
     ) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::BeginMarkedContentWithProperties {
                 tag: tag.to_string(),
-                properties_name_or_dict: properties_name_or_dict.to_string(),
+                properties_name_or_dict: properties_name_or_dict.clone(),
             });
         Ok(())
     }

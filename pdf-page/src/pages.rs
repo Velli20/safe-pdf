@@ -29,9 +29,15 @@ impl FromDictionary for PdfPages {
             let page_obj = objects
                 .get_dictionary(p.object_number())
                 .ok_or(PageError::PageNotFound(p.object_number()))?;
+            let object_type = page_obj.get_string("Type").ok_or(PageError::MissingPages)?;
 
-            let page = PdfPage::from_dictionary(&page_obj, &objects)?;
-            pages.push(page);
+            if object_type == PdfPage::KEY {
+                let page = PdfPage::from_dictionary(&page_obj, &objects)?;
+                pages.push(page);
+            } else if object_type == "Pages" {
+                let pages_obj = PdfPages::from_dictionary(&page_obj, &objects)?;
+                pages.extend(pages_obj.pages);
+            }
         }
 
         Ok(Self { pages })

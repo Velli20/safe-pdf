@@ -35,11 +35,6 @@ impl FromDictionary for PdfPage {
     ) -> Result<Self::ResultType, PageError> {
         // Get the optional `/Contents` entry from the page dictionary.
         let contents = ContentStream::from_dictionary(dictionary, objects).ok();
-        if let Some(contents) = &contents {
-            println!("contents {:?}", contents.operations);
-        } else {
-            println!("contents none {:?}", dictionary);
-        }
 
         // TODO: If the mediabox is missing, try to inherit one from the parent page.
         let media_box = {

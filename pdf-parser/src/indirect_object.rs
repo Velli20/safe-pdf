@@ -66,7 +66,7 @@ impl ParseObject<ObjectVariant> for PdfParser<'_> {
         // If the next token is 'R', it means this is an object reference.
         if let Some(PdfToken::Alphabetic(b'R')) = self.tokenizer.peek()? {
             if let Some(s) = self.tokenizer.data().get(1) {
-                if *s != b'G' {
+                if Self::is_pdf_delimiter(*s) {
                     self.tokenizer.read();
                     return Ok(ObjectVariant::Reference(object_number));
                 }

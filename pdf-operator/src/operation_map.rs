@@ -18,7 +18,7 @@ use crate::{
 /// and a function that can construct that operator an array of operands.
 /// This is used to dynamically dispatch to the correct parsing logic based on the operator
 /// encountered in the PDF content.
-pub(crate) struct OpDescriptor {
+pub struct OpDescriptor {
     pub name: &'static str,
     pub operand_count: usize,
     pub parser: fn(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError>,
@@ -48,6 +48,7 @@ pub(crate) const READ_MAP: &'static [OpDescriptor] = &[
     OpDescriptor::from::<SetLineJoinStyle>(),
     OpDescriptor::from::<SetMiterLimit>(),
     OpDescriptor::from::<SetDashPattern>(),
+    OpDescriptor::from::<SetGraphicsStateFromDict>(),
     OpDescriptor::from::<SaveGraphicsState>(),
     OpDescriptor::from::<RestoreGraphicsState>(),
     OpDescriptor::from::<ConcatMatrix>(),
@@ -92,3 +93,7 @@ pub(crate) const READ_MAP: &'static [OpDescriptor] = &[
     OpDescriptor::from::<InlineImageData>(),
     OpDescriptor::from::<EndInlineImage>(),
 ];
+
+pub fn get_operation_descriptor(name: &str) -> Option<&'static OpDescriptor> {
+    READ_MAP.iter().find(|op| op.name == name)
+}

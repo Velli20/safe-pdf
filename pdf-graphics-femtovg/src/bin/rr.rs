@@ -4,7 +4,7 @@ use femtovg::renderer::WGPURenderer;
 use femtovg::{Canvas, Color, FillRule, Paint, Path};
 use pdf_document::PdfDocument;
 use pdf_graphics::pdf_path::{PathVerb, PdfPath};
-use pdf_graphics::{CanvasBackend, PaintMode, PathFillType};
+use pdf_graphics::{CanvasBackend, PathFillType};
 use pdf_renderer::PdfRenderer;
 use winit::{event_loop::EventLoop, window::WindowBuilder};
 
@@ -196,6 +196,7 @@ fn to_femtovg_path(pdf_path: &PdfPath) -> Path {
     }
     path
 }
+
 impl CanvasBackend for CanvasImpl<'_> {
     fn fill_path(
         &mut self,
@@ -240,8 +241,9 @@ impl CanvasBackend for CanvasImpl<'_> {
     }
 }
 fn main() {
-    const INPUT: &[u8] =
-        include_bytes!("/Users/viktore/safe-pdf/pdf-document/tests/assets/test6.pdf");
+    const INPUT: &[u8] = include_bytes!(
+        "/Users/viktore/safe-pdf/pdf-document/tests/assets/dd5cf1a7d6d190f94a28201777f11bf4.pdf"
+    );
     let document = PdfDocument::from(INPUT).unwrap();
 
     let mut app = App::new(595, 842, true, document);

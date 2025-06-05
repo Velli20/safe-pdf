@@ -12,14 +12,8 @@ pub struct ContentStream {
 
 impl ContentStream {
     pub fn from(input: &[u8]) -> Result<Self, PageError> {
-        let operations = PdfOperatorVariant::from(input);
-        if let Err(err) = &operations {
-            println!("operations err: {:?}", err.to_string());
-            panic!();
-        }
-        Ok(Self {
-            operations: operations.unwrap(),
-        })
+        let operations = PdfOperatorVariant::from(input)?;
+        Ok(Self { operations })
     }
 }
 
@@ -32,7 +26,6 @@ impl FromDictionary for ContentStream {
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, PageError> {
-        // println!("ContentStream from_dictionary {:?}", dictionary);
         // Get the optional `/Contents` entry from the page dictionary.
         let contents = if let Some(contents) = dictionary.get_object(Self::KEY) {
             // The `/Contents` entry can be either:
@@ -50,7 +43,6 @@ impl FromDictionary for ContentStream {
                 contents.clone()
             }
         } else {
-            println!("Missing contents");
             return Err(PageError::MissingContent);
         };
 
@@ -60,26 +52,14 @@ impl FromDictionary for ContentStream {
                     if let Value::IndirectObject(s) = obj {
                         if let Some(ss) = objects.get(s.object_number()) {
                             if let ObjectVariant::Stream(s) = ss {
-                                println!(
-                                    "contents arr ? {:?}",
-                                    String::from_utf8_lossy(s.data.as_slice())
-                                );
-                                let content_stream = ContentStream::from(s.data.as_slice())?;
-                                println!("content_stream {:?}", content_stream.operations);
-                                return Ok(content_stream);
-                            } else {
-                                println!("not stream {:?}", ss);
+                                return ContentStream::from(s.data.as_slice());
                             }
                         }
-                    } else {
-                        println!("not indirect {:?}", obj);
                     }
                 }
-            } else {
-                println!("not array {:?}", s.object);
             }
-        } else {
-            println!("not indirect ",);
+        } else if let ObjectVariant::Stream(s) = &contents {
+            return ContentStream::from(s.data.as_slice());
         }
 
         Err(PageError::MissingContent)
