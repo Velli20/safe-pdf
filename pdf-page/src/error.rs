@@ -21,6 +21,10 @@ pub enum PageError {
     /// Wraps an error message from a `FontError`.
     FontResourceError(String),
     NotDictionary(&'static str),
+    /// The `/Pages` entry in the document catalog is missing or invalid.
+    MissingPages,
+    /// A specific page object, referenced by its object number, could not be found or is not a valid page dictionary.
+    PageNotFound(i32),
 }
 
 impl From<ObjectError> for PageError {
@@ -75,6 +79,12 @@ impl std::fmt::Display for PageError {
             }
             PageError::NotDictionary(name) => {
                 write!(f, "Expected a Dictionary object for {}", name)
+            }
+            PageError::MissingPages => {
+                write!(f, "Missing `/Pages` entry in the document catalog")
+            }
+            PageError::PageNotFound(number) => {
+                write!(f, "Page with object number {} not found", number)
             }
         }
     }

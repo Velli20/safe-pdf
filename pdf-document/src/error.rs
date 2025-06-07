@@ -18,6 +18,7 @@ pub enum PdfError {
     MissingCatalog,
     /// A specific page object, referenced by its object number, could not be found or is not a valid page dictionary.
     PageNotFound(i32),
+    MissingType,
 }
 
 impl From<ParserError> for PdfError {

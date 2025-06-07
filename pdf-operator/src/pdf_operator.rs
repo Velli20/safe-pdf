@@ -1,23 +1,15 @@
-use pdf_object::{Value, comment::Comment};
+use std::rc::Rc;
+
+use pdf_object::{Value, comment::Comment, dictionary::Dictionary};
 use pdf_parser::{ParseObject, PdfParser};
 use pdf_tokenizer::PdfToken;
 
 use crate::{
-    TextElement,
-    clipping_path_operators::*,
-    color_operators::*,
-    error::PdfOperatorError,
-    graphics_state_operators::*,
-    marked_content_operators::*,
-    operation_map::READ_MAP,
-    operator_tokenizer::OperatorReader,
-    path_operators::*,
-    path_paint_operators::*,
-    pdf_operator_backend::{PathConstructionOps, PdfOperatorBackend},
-    text_object_operators::*,
-    text_positioning_operators::*,
-    text_showing_operators::*,
-    text_state_operators::*,
+    TextElement, clipping_path_operators::*, color_operators::*, error::PdfOperatorError,
+    graphics_state_operators::*, marked_content_operators::*, operation_map::READ_MAP,
+    operator_tokenizer::OperatorReader, path_operators::*, path_paint_operators::*,
+    pdf_operator_backend::PdfOperatorBackend, text_object_operators::*,
+    text_positioning_operators::*, text_showing_operators::*, text_state_operators::*,
     xobject_and_image_operators::*,
 };
 
@@ -63,6 +55,16 @@ impl Operands<'_> {
             value
                 .as_number::<f32>()
                 .map_err(|_| PdfOperatorError::InvalidOperandType)
+        } else {
+            Err(PdfOperatorError::InvalidOperandType)
+        }
+    }
+
+    pub fn get_dictionary(&mut self) -> Result<Rc<Dictionary>, PdfOperatorError> {
+        let value = self.0.get(0);
+        self.0 = &self.0[1..];
+        if let Some(Value::Dictionary(value)) = value {
+            Ok(value.clone())
         } else {
             Err(PdfOperatorError::InvalidOperandType)
         }
@@ -193,6 +195,7 @@ pub enum PdfOperatorVariant {
     SetLineJoinStyle(SetLineJoinStyle),
     SetMiterLimit(SetMiterLimit),
     SetDashPattern(SetDashPattern),
+    SetGraphicsStateFromDict(SetGraphicsStateFromDict),
     SaveGraphicsState(SaveGraphicsState),
     RestoreGraphicsState(RestoreGraphicsState),
     ConcatMatrix(ConcatMatrix),
@@ -247,10 +250,12 @@ impl PdfOperatorVariant {
                     break;
                 }
 
+                let mut handled = false;
                 for operation in READ_MAP {
                     if name == operation.name {
                         if operands.len() != operation.operand_count {
                             return Err(PdfOperatorError::IncorrectOperandCount(
+                                operation.name,
                                 operands.len(),
                                 operation.operand_count,
                             ));
@@ -259,11 +264,15 @@ impl PdfOperatorVariant {
                         let mut ops = Operands(operands.as_slice());
                         let operator = (operation.parser)(&mut ops)?;
                         operators.push(operator);
+                        handled = true;
 
                         // Clear operands after they've been consumed.
                         operands.clear();
                         break;
                     }
+                }
+                if !handled {
+                    return Err(PdfOperatorError::UnknownOperator(name.to_string()));
                 }
                 continue;
             }
@@ -273,6 +282,68 @@ impl PdfOperatorVariant {
         }
 
         Ok(operators)
+    }
+
+    pub fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        match self {
+            PdfOperatorVariant::LineTo(op) => op.call(backend),
+            PdfOperatorVariant::MoveTo(op) => op.call(backend),
+            PdfOperatorVariant::CurveTo(op) => op.call(backend),
+            PdfOperatorVariant::CurveToV(op) => op.call(backend),
+            PdfOperatorVariant::CurveToY(op) => op.call(backend),
+            PdfOperatorVariant::ClosePath(op) => op.call(backend),
+            PdfOperatorVariant::Rectangle(op) => op.call(backend),
+            PdfOperatorVariant::StrokePath(op) => op.call(backend),
+            PdfOperatorVariant::CloseStrokePath(op) => op.call(backend),
+            PdfOperatorVariant::FillPathNonZero(op) => op.call(backend),
+            PdfOperatorVariant::FillPathEvenOdd(op) => op.call(backend),
+            PdfOperatorVariant::FillAndStrokePathNonZero(op) => op.call(backend),
+            PdfOperatorVariant::FillAndStrokePathEvenOdd(op) => op.call(backend),
+            PdfOperatorVariant::CloseFillAndStrokePathNonZero(op) => op.call(backend),
+            PdfOperatorVariant::CloseFillAndStrokePathEvenOdd(op) => op.call(backend),
+            PdfOperatorVariant::EndPath(op) => op.call(backend),
+            PdfOperatorVariant::ClipNonZero(op) => op.call(backend),
+            PdfOperatorVariant::ClipEvenOdd(op) => op.call(backend),
+            PdfOperatorVariant::SetGrayFill(op) => op.call(backend),
+            PdfOperatorVariant::SetGrayStroke(op) => op.call(backend),
+            PdfOperatorVariant::SetRGBFill(op) => op.call(backend),
+            PdfOperatorVariant::SetRGBStroke(op) => op.call(backend),
+            PdfOperatorVariant::SetCMYKFill(op) => op.call(backend),
+            PdfOperatorVariant::SetCMYKStroke(op) => op.call(backend),
+            PdfOperatorVariant::SetLineWidth(op) => op.call(backend),
+            PdfOperatorVariant::SetLineCapStyle(op) => op.call(backend),
+            PdfOperatorVariant::SetLineJoinStyle(op) => op.call(backend),
+            PdfOperatorVariant::SetMiterLimit(op) => op.call(backend),
+            PdfOperatorVariant::SetDashPattern(op) => op.call(backend),
+            PdfOperatorVariant::SetGraphicsStateFromDict(op) => op.call(backend),
+            PdfOperatorVariant::SaveGraphicsState(op) => op.call(backend),
+            PdfOperatorVariant::RestoreGraphicsState(op) => op.call(backend),
+            PdfOperatorVariant::ConcatMatrix(op) => op.call(backend),
+            PdfOperatorVariant::BeginMarkedContent(op) => op.call(backend),
+            PdfOperatorVariant::BeginMarkedContentWithProps(op) => op.call(backend),
+            PdfOperatorVariant::EndMarkedContent(op) => op.call(backend),
+            PdfOperatorVariant::BeginText(op) => op.call(backend),
+            PdfOperatorVariant::EndText(op) => op.call(backend),
+            PdfOperatorVariant::MoveTextPosition(op) => op.call(backend),
+            PdfOperatorVariant::MoveTextPositionAndSetLeading(op) => op.call(backend),
+            PdfOperatorVariant::SetTextMatrix(op) => op.call(backend),
+            PdfOperatorVariant::MoveToNextLine(op) => op.call(backend),
+            PdfOperatorVariant::ShowText(op) => op.call(backend),
+            PdfOperatorVariant::MoveNextLineShowText(op) => op.call(backend),
+            PdfOperatorVariant::SetSpacingMoveShowText(op) => op.call(backend),
+            PdfOperatorVariant::ShowTextArray(op) => op.call(backend),
+            PdfOperatorVariant::SetCharacterSpacing(op) => op.call(backend),
+            PdfOperatorVariant::SetWordSpacing(op) => op.call(backend),
+            PdfOperatorVariant::SetHorizontalScaling(op) => op.call(backend),
+            PdfOperatorVariant::SetLeading(op) => op.call(backend),
+            PdfOperatorVariant::SetFont(op) => op.call(backend),
+            PdfOperatorVariant::SetRenderingMode(op) => op.call(backend),
+            PdfOperatorVariant::SetTextRise(op) => op.call(backend),
+            PdfOperatorVariant::InvokeXObject(op) => op.call(backend),
+            PdfOperatorVariant::BeginInlineImage(op) => op.call(backend),
+            PdfOperatorVariant::InlineImageData(op) => op.call(backend),
+            PdfOperatorVariant::EndInlineImage(op) => op.call(backend),
+        }
     }
 }
 

@@ -228,6 +228,7 @@ impl<'a> PdfParser<'a> {
                 }
                 PdfToken::Minus => Value::Number(self.parse()?),
                 PdfToken::Plus => Value::Number(self.parse()?),
+                PdfToken::Period => Value::Number(self.parse()?),
                 PdfToken::LeftSquareBracket => Value::Array(self.parse()?),
                 PdfToken::LeftParenthesis => Value::LiteralString(self.parse()?),
                 r => {

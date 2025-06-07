@@ -228,3 +228,36 @@ impl PdfOperator for ConcatMatrix {
         )
     }
 }
+
+/// Sets multiple graphics state parameters from a named graphics state parameter dictionary.
+/// The dictionary is expected to be in the resource dictionary. (PDF operator `gs`)
+///
+/// PDF 1.7 Specification, Section 8.4.5 "Graphics State Parameter Dictionaries".
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetGraphicsStateFromDict {
+    /// The name of the graphics state parameter dictionary.
+    dict_name: String,
+}
+
+impl SetGraphicsStateFromDict {
+    pub fn new(dict_name: String) -> Self {
+        Self { dict_name }
+    }
+}
+
+impl PdfOperator for SetGraphicsStateFromDict {
+    const NAME: &'static str = "gs";
+
+    const OPERAND_COUNT: usize = 1;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        let dict_name = operands.get_name()?;
+        Ok(PdfOperatorVariant::SetGraphicsStateFromDict(Self::new(
+            dict_name,
+        )))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_graphics_state_from_dict(&self.dict_name)
+    }
+}

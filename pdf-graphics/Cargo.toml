@@ -1,0 +1,11 @@
+[package]
+name = "pdf-graphics"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pdf-operator = { path = "../pdf-operator" }
+pdf-page = { path = "../pdf-page" }
+pdf-font = { path = "../pdf-font" }
+pdf-object = { path = "../pdf-object" }
+ttf-parser = { version = "0.25.1" }

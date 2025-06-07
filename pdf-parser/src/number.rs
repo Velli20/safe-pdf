@@ -60,7 +60,11 @@ impl ParseObject<Number> for PdfParser<'_> {
         }
 
         // 2. Parse leading digits (integral part).
-        let digits = self.read_number::<i64>()?;
+        let digits = if let Some(PdfToken::Period) = self.tokenizer.peek()? {
+            0
+        } else {
+            self.read_number::<i64>()?
+        };
 
         // 3. Check for decimal point
         if let Some(PdfToken::Period) = self.tokenizer.peek()? {

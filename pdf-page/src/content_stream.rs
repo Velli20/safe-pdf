@@ -52,14 +52,14 @@ impl FromDictionary for ContentStream {
                     if let Value::IndirectObject(s) = obj {
                         if let Some(ss) = objects.get(s.object_number()) {
                             if let ObjectVariant::Stream(s) = ss {
-                                let content_stream = ContentStream::from(s.data.as_slice())?;
-                                println!("content_stream {:?}", content_stream.operations);
-                                return Ok(content_stream);
+                                return ContentStream::from(s.data.as_slice());
                             }
                         }
                     }
                 }
             }
+        } else if let ObjectVariant::Stream(s) = &contents {
+            return ContentStream::from(s.data.as_slice());
         }
 
         Err(PageError::MissingContent)

@@ -3,6 +3,10 @@
 //! PDF drawing, text, and state commands, allowing for different backends
 //! (e.g., renderers, text extractors) to selectively implement functionality.
 
+use std::rc::Rc;
+
+use pdf_object::dictionary::Dictionary;
+
 use crate::TextElement;
 
 pub trait PdfOperatorBackendError {
@@ -224,6 +228,15 @@ pub trait GraphicsStateOps: PdfOperatorBackendError {
 
     /// Modifies the current transformation matrix (CTM) by concatenating it with the specified matrix.
     /// The matrix is `[a b c d e f]`.
+    ///
+    /// # Parameters
+    ///
+    /// - `a`: Horizontal scaling.
+    /// - `b`: Skewing factor; affects the y-coordinate based on the x-coordinate.
+    /// - `c`: Skewing factor; affects the x-coordinate based on the y-coordinate.
+    /// - `d`: Vertical scaling.
+    /// - `e`: Horizontal translation.
+    /// - `f`: Vertical translation.
     ///
     /// # Returns
     ///
@@ -797,7 +810,7 @@ pub trait MarkedContentOps: PdfOperatorBackendError {
     fn begin_marked_content_with_properties(
         &mut self,
         tag: &str,
-        properties_name_or_dict: &str,
+        properties_name_or_dict: &Rc<Dictionary>,
     ) -> Result<(), Self::ErrorType>;
 
     /// Ends a marked-content sequence.

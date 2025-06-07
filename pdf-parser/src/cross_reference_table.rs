@@ -126,11 +126,6 @@ impl ParseObject<CrossReferenceTable> for PdfParser<'_> {
             // If the next token is not a number, we are done reading entries.
             if !matches!(self.tokenizer.peek()?, Some(PdfToken::Number(_))) {
                 if entries.len() != total_number_of_entries as usize {
-                    println!(
-                        "Expected {} entries, but found {}",
-                        total_number_of_entries,
-                        entries.len()
-                    );
                     return Err(ParserError::CrossReferenceTableError(
                         CrossReferenceTableError::MissigTableEntries(
                             total_number_of_entries as usize,

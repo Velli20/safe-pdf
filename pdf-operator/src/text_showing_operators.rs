@@ -101,7 +101,11 @@ impl PdfOperator for SetSpacingMoveShowText {
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        backend.set_spacing_and_show_text(self.word_spacing, self.char_spacing, self.text.as_bytes())
+        backend.set_spacing_and_show_text(
+            self.word_spacing,
+            self.char_spacing,
+            self.text.as_bytes(),
+        )
     }
 }
 

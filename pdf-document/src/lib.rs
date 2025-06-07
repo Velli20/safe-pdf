@@ -3,7 +3,7 @@ use pdf_object::{
     Value, object_collection::ObjectCollection, trailer::Trailer, traits::FromDictionary,
     version::Version,
 };
-use pdf_page::page::PdfPage;
+use pdf_page::{page::PdfPage, pages::PdfPages};
 use pdf_parser::{ParseObject, PdfParser};
 
 pub mod error;
@@ -65,29 +65,12 @@ impl PdfDocument {
             .ok_or(PdfError::MissingPages)?
             .clone();
 
-        // Get the `Kids` array from the `Pages` object, which contains references to the individual pages.
-        let kids = pages_dict.get_array("Kids").unwrap();
-
-        // Iterate over the `Kids` array and extract the individual page objects.
-        let mut pages = vec![];
-        for c in &kids.0 {
-            let p = c.as_object().ok_or(PdfError::MissingPages)?;
-
-            // Get the page object dictionary.
-            let page_obj = objects
-                .get_dictionary(p.object_number())
-                .ok_or(PdfError::PageNotFound(p.object_number()))?
-                .clone();
-
-            let page =
-                PdfPage::from_dictionary(&page_obj, &objects).map_err(|err| PdfError::from(err))?;
-            pages.push(page);
-        }
+        let pages = PdfPages::from_dictionary(&pages_dict, &objects)?;
 
         Ok(PdfDocument {
             version,
             objects,
-            pages,
+            pages: pages.pages,
             trailer,
         })
     }

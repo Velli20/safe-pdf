@@ -57,7 +57,7 @@ pub struct FontDescriptor {
     font_family: Option<String>,
     /// A stream containing the font program.
     /// This can be FontFile, FontFile2, or FontFile3 depending on the font type.
-    font_file: Option<ObjectVariant>,
+    pub font_file: Option<ObjectVariant>,
     /// The PostScript name of the font.
     font_name: String,
     /// The weight (thickness) of the font's strokes.
@@ -65,7 +65,7 @@ pub struct FontDescriptor {
     /// The angle, in degrees counterclockwise from the vertical, of the dominant vertical strokes of the font.
     italic_angle: i64,
     /// The width to use for glyphs not found in the font's encoding.
-    missing_width: i64,
+    pub missing_width: i64,
     /// The maximum width of a glyph in the font.
     max_width: Option<i64>,
     /// The thickness, measured horizontally, of the dominant vertical stems of glyphs in the font.

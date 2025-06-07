@@ -78,6 +78,13 @@ impl Value {
             None
         }
     }
+    pub fn as_array(&self) -> Option<&Array> {
+        if let Value::Array(value) = self {
+            Some(value)
+        } else {
+            None
+        }
+    }
 
     pub fn as_object(&self) -> Option<&ObjectVariant> {
         if let Value::IndirectObject(value) = self {
@@ -92,6 +99,16 @@ impl Value {
             Some(&value.0)
         } else if let Value::HexString(value) = self {
             Some(&value.0)
+        } else if let Value::Name(value) = self {
+            Some(&value.0)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_boolean(&self) -> Option<bool> {
+        if let Value::Boolean(value) = self {
+            Some(value.0)
         } else {
             None
         }

@@ -1,9 +1,9 @@
 use crate::{
-    FromDictionary, content_stream::ContentStream, error::PageError, media_box::MediaBox,
-    resources::Resources,
+    content_stream::ContentStream, error::PageError, media_box::MediaBox, resources::Resources,
 };
 use pdf_object::{
     dictionary::Dictionary, indirect_object::IndirectObject, object_collection::ObjectCollection,
+    traits::FromDictionary,
 };
 
 /// Represents a single page in a PDF document.
@@ -17,10 +17,10 @@ pub struct PdfPage {
     parent: Option<IndirectObject>,
     /// The contents of the page, which can be a single stream object or
     /// an array of streams.
-    contents: Option<ContentStream>,
+    pub contents: Option<ContentStream>,
     /// `/MediaBox` attribute which defines the page boundaries.
-    media_box: MediaBox,
-    resources: Option<Resources>,
+    pub media_box: MediaBox,
+    pub resources: Option<Resources>,
 }
 
 impl FromDictionary for PdfPage {
@@ -35,12 +35,21 @@ impl FromDictionary for PdfPage {
     ) -> Result<Self::ResultType, PageError> {
         // Get the optional `/Contents` entry from the page dictionary.
         let contents = ContentStream::from_dictionary(dictionary, objects).ok();
-        if let Some(contents) = &contents {
-            println!("contents {:?}", contents.operations);
-        }
 
         // TODO: If the mediabox is missing, try to inherit one from the parent page.
-        let media_box = MediaBox::from_dictionary(dictionary, objects)?;
+        let media_box = {
+            let media_box = MediaBox::from_dictionary(dictionary, objects);
+            if let Err(PageError::MissingMediaBox) = media_box {
+                Ok(MediaBox {
+                    left: 0,
+                    top: 0,
+                    right: 800,
+                    bottom: 800,
+                })
+            } else {
+                media_box
+            }
+        }?;
 
         let resources = Resources::from_dictionary(dictionary, objects).ok();
 
