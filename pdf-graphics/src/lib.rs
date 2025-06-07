@@ -1,4 +1,4 @@
-use std::{path, rc::Rc};
+use std::rc::Rc;
 
 use color::Color;
 use error::PdfCanvasError;
@@ -92,19 +92,10 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
         e: f32,
         f: f32,
     ) -> Result<(), Self::ErrorType> {
-        // a d Horizontal and vertical scaling
-        // b c Skewing (shear)
-        // e f Translation (move x, y)
-
         let mat = Transform::from_row(a, b, c, d, e, f);
-        // The cm operator concatenates the operand matrix M to the CTM.
-        // The effect is to apply the new transform M *after* the current CTM.
-        // With column vectors and standard matrix multiplication (A*B applies B then A),
-        // the combined transform is M * CTM_old.
-        // Assuming the transform crate's 'concat' method performs post-multiplication (self = self * other).
         let ctm_old = self.current_state().transform.clone();
-        let mut ctm_new = mat; // Start with M
-        ctm_new.concat(&ctm_old); // Calculate M * CTM_old (assuming concat is self = self * other)
+        let mut ctm_new = mat;
+        ctm_new.concat(&ctm_old);
         self.current_state_mut().transform = ctm_new;
         Ok(())
     }
@@ -404,74 +395,63 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
             .as_ref()
             .ok_or(PdfCanvasError::NoCurrentFont)?;
 
-        // Text state parameters (PDF 1.7 Spec, Section 5.3.3)
+        // Extract font and text state parameters.
         let units_per_em_f32 = face.units_per_em() as f32;
-        let char_spacing = text_state.character_spacing; // Tc: Character spacing
-        let word_spacing = text_state.word_spacing; // Tw: Word spacing
-        let text_font_size = text_state.font_size; // Tfs: Text font size
-        let text_rise = text_state.rise; // Ts: Text rise
+        let char_spacing = text_state.character_spacing;
+        let word_spacing = text_state.word_spacing;
+        let text_font_size = text_state.font_size;
+        let text_rise = text_state.rise;
 
-        // Avoid division by zero if units_per_em is somehow zero, though unlikely for valid fonts.
+        // Compute the inverse of units per em for scaling.
         let upe_inv = if units_per_em_f32 != 0.0 {
             1.0 / units_per_em_f32
         } else {
             0.0
-        }; // Inverse of units_per_em, for converting font units to 1-unit glyph space.
+        };
 
-        // Th_factor: Horizontal scaling factor (Th / 100). (PDF Spec 5.3.3)
+        // Th_factor: Horizontal scaling factor (Th / 100).
         let th_factor = text_state.horizontal_scaling / 100.0;
 
-        // M_params: This matrix accounts for font size (Tfs), horizontal scaling (Th),
-        // and text rise (Ts). It transforms glyph coordinates from font design units
-        // (scaled by 1/units_per_em) into a text space that is appropriately scaled and shifted.
-        // (PDF Spec 1.7, Section 5.3.1, Figure 46)
-        // M_params = [ (Tfs/upe) * (Th/100)     0                     0 ]
-        //            [ 0                        (Tfs/upe)             0 ]
-        //            [ 0                        Ts (self.text_rise)   1 ]
+        // Build the text rendering transform for this glyph:
+        // - sx: horizontal scale (font size, units per em, horizontal scaling)
+        // - sy: vertical scale (font size, units per em)
+        // - ty: vertical offset (text rise)
         let m_params = Transform::from_row(
-            text_font_size * upe_inv * th_factor, // sx = (Tfs/upe) * (Th/100)
+            text_font_size * upe_inv * th_factor, // sx
             0.0,                                  // ky (skew)
             0.0,                                  // kx (skew)
-            text_font_size * upe_inv,             // sy = Tfs/upe
+            text_font_size * upe_inv,             // sy
             0.0,                                  // tx
-            text_rise,                            // ty = Ts (text_rise)
+            text_rise,                            // ty
         );
 
         let fill_color = self.current_state().fill_color;
+        // Iterate over each character in the input text.
         for char_code_byte in text {
             let char_code = *char_code_byte;
+            // Skip characters not present in the font.
             if face.glyph_index(char_code as char).is_none() {
                 continue;
             }
 
             let glyph_id = GlyphId(char_code as u16);
 
-            // Calculate the final glyph rendering matrix for the current glyph:
-            // M_glyph = CTM * T_m * M_params
-            // Where:
-            //  - CTM is the Current Transformation Matrix (from graphics state)
-            //  - T_m is the Text Matrix (self.text_matrix, updated by text positioning ops)
-            //  - M_params incorporates Tfs, Th, Ts (calculated above)
-            //
-            // The 'concat' method performs pre-multiplication: A.concat(B) results in B * A.
-            // 1. m_params.concat(&self.text_matrix) results in: T_m * M_params
-            // 2. (T_m * M_params).concat(&self.current_state().transform) results in: CTM * T_m * M_params
+            // Compose the final transformation matrix for this glyph:
+            // m_params -> text matrix -> current transformation matrix
             let mut glyph_matrix_for_char = m_params.clone();
             glyph_matrix_for_char.concat(&self.current_state().text_state.matrix);
             glyph_matrix_for_char.concat(&self.current_state().transform);
+
+            // Build the glyph outline using the composed transform.
             let mut builder = PdfGlyphOutline::new(glyph_matrix_for_char);
 
             face.outline_glyph(glyph_id, &mut builder);
-            // Render the glyph path. According to the specification, the
-            // default fill-rule for text is non-zero winding rule.
+
+            // Fill it on the canvas
             self.canvas
                 .fill_path(&builder.path, PathFillType::Winding, fill_color);
 
-            // Calculate horizontal displacement (advance_x) for the current glyph in text space.
-            // (PDF Spec 1.7, Section 5.3.2, Tj operator)
-            //
-            // w0: Glyph width in font design units (typically 1000ths of an em,
-            //     obtained from /Widths array or /DW in the font dictionary).
+            // Determine the glyph's advance width in font units.
             let w0_glyph_units = current_font
                 .cid_font
                 .widths
@@ -479,21 +459,20 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
                 .and_then(|w_array| w_array.get_width(char_code as i64))
                 .unwrap_or_else(|| current_font.cid_font.default_width as f32);
 
-            // Convert w0 to ems (PDF widths are often in 1000ths of a unit of text space).
+            // Convert width from font units to ems.
             let w0_ems = w0_glyph_units / 1000.0;
 
-            // Glyph width in text space, scaled by Tfs: (w0/1000) * Tfs.
-            // This is before applying horizontal scaling (Th).
+            // Scale the glyph width by the font size.
             let glyph_width_tfs_scaled = w0_ems * text_font_size;
 
-            // Apply word spacing (Tw) if the character is a space (ASCII 32).
+            // Apply word spacing only to space characters.
             let word_spacing_for_char = if char_code == 32 { word_spacing } else { 0.0 };
 
-            // Total horizontal displacement tx for this glyph:
-            // tx = ((w0_ems * Tfs) + Tc + Tw_for_char) * (Th/100)
+            // Compute the horizontal advance for this glyph.
             let advance_x =
                 (glyph_width_tfs_scaled + char_spacing + word_spacing_for_char) * th_factor;
-            // Update the text matrix T_m for the next glyph: T_m_new = Translate(advance_x, 0) * T_m_old
+
+            // Advance the text matrix for the next glyph.
             self.current_state_mut()
                 .text_state
                 .matrix

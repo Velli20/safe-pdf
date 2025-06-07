@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use pdf_object::{
     ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection,
     traits::FromDictionary,

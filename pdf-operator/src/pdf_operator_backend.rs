@@ -229,6 +229,15 @@ pub trait GraphicsStateOps: PdfOperatorBackendError {
     /// Modifies the current transformation matrix (CTM) by concatenating it with the specified matrix.
     /// The matrix is `[a b c d e f]`.
     ///
+    /// # Parameters
+    ///
+    /// - `a`: Horizontal scaling.
+    /// - `b`: Skewing factor; affects the y-coordinate based on the x-coordinate.
+    /// - `c`: Skewing factor; affects the x-coordinate based on the y-coordinate.
+    /// - `d`: Vertical scaling.
+    /// - `e`: Horizontal translation.
+    /// - `f`: Vertical translation.
+    ///
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.

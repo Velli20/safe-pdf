@@ -152,19 +152,18 @@ impl FromDictionary for ExternalGraphicsState {
                 // Dash pattern (array and number)
                 "D" => {
                     let arr = pdf_obj_value.as_array().unwrap();
-                    // TODO: Replace unwrap with ok_or_else for robust error handling
                     // e.g., .ok_or_else(|| PageError::General("Dash pattern /D expects an array".to_string()))?;
                     if arr.0.len() != 2 {
                         panic!("Dash pattern /D expects an array with 2 elements");
                     }
-                    let dash_array_obj = arr.0[0].as_array().unwrap(); // TODO: Replace unwrap
+                    let dash_array_obj = arr.0[0].as_array().unwrap();
                     let dash_array_f32 = dash_array_obj
                         .0
                         .iter()
                         .map(|obj| obj.as_number::<f32>())
                         .collect::<Result<Vec<f32>, _>>()?;
 
-                    let dash_phase = arr.0[1].as_number::<f32>()?; // TODO: Replace unwrap if as_number can fail other than type
+                    let dash_phase = arr.0[1].as_number::<f32>()?;
                     ExternalGraphicsStateKey::DashPattern(dash_array_f32, dash_phase)
                 }
                 // Rendering intent (name)
@@ -184,19 +183,17 @@ impl FromDictionary for ExternalGraphicsState {
                 // Font (array: [font reference, size])
                 "Font" => {
                     let arr = pdf_obj_value.as_array().unwrap();
-                    // TODO: Replace unwrap with ok_or_else
                     if arr.0.len() != 2 {
                         panic!("Font entry /Font expects an array with 2 elements");
                     }
-                    let font_ref = arr.0[0].as_object().unwrap(); // TODO: Replace unwrap
-                    let font_size = arr.0[1].as_number::<f32>()?; // TODO: Replace unwrap if applicable
+                    let font_ref = arr.0[0].as_object().unwrap();
+                    let font_size = arr.0[1].as_number::<f32>()?;
                     ExternalGraphicsStateKey::Font(font_ref.object_number(), font_size)
                 }
                 // Blend mode (name or array of names)
                 "BM" => {
                     let blend_modes_vec: Vec<BlendMode>;
                     if let Some(name_str) = pdf_obj_value.as_str() {
-                        // Assumes as_str() is suitable for PDF Names
                         let mode = name_str.parse::<BlendMode>().unwrap();
                         blend_modes_vec = vec![mode];
                     } else if let Some(pdf_array) = pdf_obj_value.as_array() {

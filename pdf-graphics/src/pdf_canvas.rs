@@ -8,8 +8,7 @@ use crate::{
 };
 
 /// Encapsulates text-specific state parameters.
-/// These parameters are part of the PDF graphics state and can be saved and restored.
-#[derive(Clone)] // Not Copy due to Face<'a>
+#[derive(Clone)]
 pub(crate) struct TextState<'a> {
     /// The text matrix (Tm), transforming text space to user space.
     pub(crate) matrix: Transform,
@@ -27,20 +26,20 @@ pub(crate) struct TextState<'a> {
     pub(crate) rise: f32,
     /// The current font resource.
     pub(crate) font: Option<&'a Font>,
-    /// The parsed ttf_parser Face for the current font.
+    /// The current font face object.
     pub(crate) font_face: Option<Face<'a>>,
 }
 
 impl<'a> Default for TextState<'a> {
     fn default() -> Self {
         Self {
-            matrix: Transform::identity(),      // Initialized by BT operator
-            line_matrix: Transform::identity(), // Initialized by BT operator
-            horizontal_scaling: 100.0,          // PDF spec default
-            font_size: 0.0, // PDF spec: undefined, must be set by Tf. Using 0 as placeholder.
-            character_spacing: 0.0, // PDF spec default
-            word_spacing: 0.0, // PDF spec default
-            rise: 0.0,      // PDF spec default
+            matrix: Transform::identity(),
+            line_matrix: Transform::identity(),
+            horizontal_scaling: 100.0,
+            font_size: 0.0,
+            character_spacing: 0.0,
+            word_spacing: 0.0,
+            rise: 0.0,
             font: None,
             font_face: None,
         }
@@ -58,15 +57,10 @@ pub(crate) struct CanvasState<'a> {
 
 impl CanvasState<'_> {
     /// Default line width in user space units.
-    /// PDF 1.7 Specification, Section 8.4.3.2 "Line Width", states the default value is 1.0.
     const DEFAULT_LINE_WIDTH: f32 = 1.0;
     /// Default fill color.
-    /// PDF 1.7 Specification, Section 8.6.4 "Color Spaces", states the initial nonstroking color
-    /// is black in the DeviceGray color space. This is equivalent to (0.0, 0.0, 0.0) in DeviceRGB.
     const DEFAULT_FILL_COLOR: Color = Color::from_rgb(0.0, 0.0, 0.0);
     /// Default stroke color.
-    /// PDF 1.7 Specification, Section 8.6.4 "Color Spaces", states the initial stroking color
-    /// is black in the DeviceGray color space. This is equivalent to (0.0, 0.0, 0.0) in DeviceRGB.
     const DEFAULT_STROKE_COLOR: Color = Color::from_rgb(0.0, 0.0, 0.0);
 }
 
