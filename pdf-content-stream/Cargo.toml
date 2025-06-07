@@ -1,5 +1,5 @@
 [package]
-name = "pdf-operator"
+name = "pdf-content-stream"
 version = "0.1.0"
 edition = "2024"
 

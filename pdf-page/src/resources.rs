@@ -6,10 +6,7 @@ use pdf_object::{
     traits::FromDictionary,
 };
 
-use crate::{
-    error::PageError,
-    external_graphics_state::{self, ExternalGraphicsState},
-};
+use crate::{error::PageError, external_graphics_state::ExternalGraphicsState};
 
 pub struct Resources {
     pub fonts: HashMap<String, Font>,

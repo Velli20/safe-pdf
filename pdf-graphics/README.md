@@ -20,7 +20,7 @@ Represents a sequence of path construction commands, stored as `PathVerb` enums 
 An enum defining the individual operations within a `PdfPath`, like moving to a point, drawing a line to a point, drawing a curve, or closing the path.
 
 ### `CanvasBackend` Trait
-A crucial trait that must be implemented by any backend intended for use with `PdfCanvas`. It defines how paths are actually drawn via the `draw_path` method. It also has extensive supertrait bounds from `pdf_operator::pdf_operator_backend` (like `ClippingPathOps`, `ColorOps`, `GraphicsStateOps`, etc.), indicating that a compliant backend is a full-featured PDF operator handler.
+A crucial trait that must be implemented by any backend intended for use with `PdfCanvas`. It defines how paths are actually drawn via the `draw_path` method. It also has extensive supertrait bounds from `pdf_content_stream::pdf_operator_backend` (like `ClippingPathOps`, `ColorOps`, `GraphicsStateOps`, etc.), indicating that a compliant backend is a full-featured PDF operator handler.
 
 ### `PaintMode` and `PathFillType`
 Enums that control how a path is rendered:

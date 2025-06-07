@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-pdf-operator = { path = "../pdf-operator" }
+pdf-content-stream = { path = "../pdf-content-stream" }
 pdf-page = { path = "../pdf-page" }
 pdf-font = { path = "../pdf-font" }
 pdf-object = { path = "../pdf-object" }

@@ -1093,6 +1093,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
+name = "pdf-content-stream"
+version = "0.1.0"
+dependencies = [
+ "pdf-object",
+ "pdf-parser",
+ "pdf-tokenizer",
+]
+
+[[package]]
 name = "pdf-document"
 version = "0.1.0"
 dependencies = [
@@ -1114,9 +1123,9 @@ dependencies = [
 name = "pdf-graphics"
 version = "0.1.0"
 dependencies = [
+ "pdf-content-stream",
  "pdf-font",
  "pdf-object",
- "pdf-operator",
  "pdf-page",
  "ttf-parser",
 ]
@@ -1142,21 +1151,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "pdf-operator"
-version = "0.1.0"
-dependencies = [
- "pdf-object",
- "pdf-parser",
- "pdf-tokenizer",
-]
-
-[[package]]
 name = "pdf-page"
 version = "0.1.0"
 dependencies = [
+ "pdf-content-stream",
  "pdf-font",
  "pdf-object",
- "pdf-operator",
 ]
 
 [[package]]
@@ -1172,9 +1172,9 @@ dependencies = [
 name = "pdf-renderer"
 version = "0.1.0"
 dependencies = [
+ "pdf-content-stream",
  "pdf-document",
  "pdf-graphics",
- "pdf-operator",
  "pdf-page",
 ]
 

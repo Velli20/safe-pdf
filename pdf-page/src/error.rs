@@ -1,6 +1,6 @@
+use pdf_content_stream::error::PdfOperatorError;
 use pdf_font::error::FontError;
 use pdf_object::error::ObjectError;
-use pdf_operator::error::PdfOperatorError;
 
 /// Defines errors that can occur when interpreting a PDF page object.
 #[derive(Debug, Clone, PartialEq)]

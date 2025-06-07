@@ -5,5 +5,5 @@ edition = "2024"
 
 [dependencies]
 pdf-object = { path = "../pdf-object" }
-pdf-operator = { path = "../pdf-operator" }
+pdf-content-stream = { path = "../pdf-content-stream" }
 pdf-font = { path = "../pdf-font" }

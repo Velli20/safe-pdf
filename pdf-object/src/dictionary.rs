@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, rc::Rc};
 
-use crate::{ObjectVariant, Value, array::Array, indirect_object::IndirectObject};
+use crate::{ObjectVariant, Value, array::Array};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Dictionary {

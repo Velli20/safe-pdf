@@ -1,8 +1,8 @@
+use pdf_content_stream::pdf_operator::PdfOperatorVariant;
 use pdf_object::{
     ObjectVariant, Value, dictionary::Dictionary, object_collection::ObjectCollection,
     traits::FromDictionary,
 };
-use pdf_operator::pdf_operator::PdfOperatorVariant;
 
 use crate::error::PageError;
 
