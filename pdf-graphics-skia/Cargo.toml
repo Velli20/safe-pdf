@@ -1,0 +1,20 @@
+[package]
+name = "pdf-graphics-skia"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "skia-impl"
+test = false
+bench = false
+
+[dependencies]
+pdf-renderer = { path = "../pdf-renderer" }
+pdf-document = { path = "../pdf-document" }
+pdf-graphics = { path = "../pdf-graphics" }
+skia-safe = { version = "0.86.0", features = ["gl"] }
+glutin = "0.32.0"
+glutin-winit = "0.5.0"
+raw-window-handle = "0.6.0"
+gl-rs = { version = "0.14.0", package = "gl" }
+winit = "0.30.2"

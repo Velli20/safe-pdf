@@ -285,9 +285,7 @@ impl<'a> TextStateOps for PdfCanvas<'a> {
         if let Some(font_file) = &font.cid_font.descriptor.font_file {
             if let ObjectVariant::Stream(s) = &font_file {
                 let face = Face::parse(s.data.as_slice(), 0).expect("Failed to parse font face");
-
                 self.current_state_mut().text_state.font_face = Some(face);
-                self.current_state_mut().text_state.word_spacing = 0.0; // Tj operator spec: "word spacing is applied to every occurrence of the single-byte character code 32 in a string when using a simple font or a composite font that defines code 32 as a space."
             }
         }
 

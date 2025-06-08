@@ -21,6 +21,14 @@ pub struct PdfDocument {
 }
 
 impl PdfDocument {
+    pub fn page_count(&self) -> usize {
+        self.pages.len()
+    }
+
+    pub fn get_page(&self, index: usize) -> Option<&PdfPage> {
+        self.pages.get(index)
+    }
+
     pub fn from(input: &[u8]) -> Result<Self, PdfError> {
         let mut parser = PdfParser::from(input);
         let version: Version = parser.parse().unwrap();
