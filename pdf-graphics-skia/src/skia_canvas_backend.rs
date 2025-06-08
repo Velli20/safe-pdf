@@ -1,4 +1,4 @@
-use skia_safe::{Color4f, Paint, Path as SkiaPath, PathFillType as SkiaPathFillType};
+use skia_safe::{ClipOp, Color4f, Paint, Path as SkiaPath, PathFillType as SkiaPathFillType};
 
 use pdf_graphics::{
     CanvasBackend, PathFillType as PdfPathFillType,
@@ -75,7 +75,14 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
             PdfPathFillType::Winding => SkiaPathFillType::Winding,
             PdfPathFillType::EvenOdd => SkiaPathFillType::EvenOdd,
         };
+        // self.stroke_path(path,  PdfColor::from_rgba(0.7, 0.5, 0.3, 1.0),2.0);
         sk_path.set_fill_type(sk_fill_type);
-        self.canvas.clip_path(&sk_path, None, Some(true)); // Default op: Intersect, anti_alias: true
+        self.canvas.save();
+        self.canvas
+            .clip_path(&sk_path, ClipOp::Intersect, Some(true));
+    }
+
+    fn reset_clip(&mut self) {
+        self.canvas.restore();
     }
 }

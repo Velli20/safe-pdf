@@ -12,6 +12,10 @@ impl Dictionary {
         Dictionary { dictionary }
     }
 
+    pub fn get(&self, key: &str) -> Option<&Box<Value>> {
+        self.dictionary.get(key)
+    }
+
     pub fn get_number(&self, key: &str) -> Option<i64> {
         self.dictionary
             .get(key)

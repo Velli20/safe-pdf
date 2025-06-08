@@ -99,7 +99,7 @@ impl FromDictionary for FontDescriptor {
                 [left, top, right, bottom]
             }
             _ => {
-                return Err(FontError::InvalidFontDescriptor(
+                return Err(FontError::InvalidFontDescriptorData(
                     "font_bounding_box array must contain exactly 4 numbers",
                 ));
             }

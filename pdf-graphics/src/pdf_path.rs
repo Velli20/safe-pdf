@@ -41,7 +41,7 @@ pub enum PathVerb {
 }
 
 /// Represents a sequence of path construction operations.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct PdfPath {
     current_x: f32,
     current_y: f32,

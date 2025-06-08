@@ -53,6 +53,7 @@ pub(crate) struct CanvasState<'a> {
     pub fill_color: Color,
     pub line_width: f32,
     pub text_state: TextState<'a>,
+    pub clip_path: Option<PdfPath>,
 }
 
 impl CanvasState<'_> {
@@ -72,6 +73,7 @@ impl<'a> Default for CanvasState<'a> {
             fill_color: Self::DEFAULT_FILL_COLOR,
             line_width: Self::DEFAULT_LINE_WIDTH,
             text_state: TextState::default(),
+            clip_path: None,
         }
     }
 }
@@ -90,8 +92,8 @@ impl<'a> PdfCanvas<'a> {
 
         // Use descriptive names and ensure f32 type for PDF dimensions.
         // The `as f32` cast assumes media_box.width/height might return non-f32 types.
-        let pdf_media_width = media_box.width() as f32;
-        let pdf_media_height = media_box.height() as f32;
+        let pdf_media_width = media_box.as_ref().unwrap().width() as f32;
+        let pdf_media_height = media_box.as_ref().unwrap().height() as f32;
 
         // Backend dimensions are already f32 as per CanvasBackend trait.
         let backend_canvas_width = backend.width();
@@ -162,7 +164,12 @@ impl<'a> PdfCanvas<'a> {
     }
 
     pub(crate) fn restore(&mut self) {
-        self.canvas_stack.pop();
+        let prev = self.canvas_stack.pop();
+        if let Some(state) = prev {
+            if state.clip_path.is_some() {
+                self.canvas.reset_clip();
+            }
+        }
     }
 
     pub(crate) fn paint_taken_path(

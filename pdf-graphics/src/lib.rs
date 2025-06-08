@@ -48,6 +48,8 @@ pub trait CanvasBackend {
     fn width(&self) -> f32;
 
     fn height(&self) -> f32;
+
+    fn reset_clip(&mut self);
 }
 
 impl<'a> PdfOperatorBackend for PdfCanvas<'a> {}
@@ -56,6 +58,7 @@ impl<'a> ClippingPathOps for PdfCanvas<'a> {
     fn clip_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
         if let Some(path) = self.current_path.take() {
             self.canvas.set_clip_region(&path, PathFillType::Winding);
+            self.current_state_mut().clip_path = Some(path);
             Ok(())
         } else {
             Err(PdfCanvasError::NoActivePath)
@@ -65,6 +68,7 @@ impl<'a> ClippingPathOps for PdfCanvas<'a> {
     fn clip_path_even_odd(&mut self) -> Result<(), Self::ErrorType> {
         if let Some(path) = self.current_path.take() {
             self.canvas.set_clip_region(&path, PathFillType::EvenOdd);
+            self.current_state_mut().clip_path = Some(path);
             Ok(())
         } else {
             Err(PdfCanvasError::NoActivePath)
@@ -424,15 +428,20 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
         );
 
         let fill_color = self.current_state().fill_color;
+        let mut iter = text.iter();
+        if current_font.encoding.is_some() {
+            let _ = iter.next();
+        }
+
         // Iterate over each character in the input text.
-        for char_code_byte in text {
-            let char_code = *char_code_byte;
-            // Skip characters not present in the font.
-            if face.glyph_index(char_code as char).is_none() {
-                continue;
+        while let Some(char_code_byte) = iter.next() {
+            if current_font.encoding.is_some() {
+                let _ = iter.next();
             }
 
-            let glyph_id = GlyphId(char_code as u16);
+            let char_code = *char_code_byte;
+
+            let mut glyph_id = GlyphId(char_code as u16);
 
             // Compose the final transformation matrix for this glyph:
             // m_params -> text matrix -> current transformation matrix
@@ -442,6 +451,19 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
 
             // Build the glyph outline using the composed transform.
             let mut builder = PdfGlyphOutline::new(glyph_matrix_for_char);
+
+            let a = current_font
+                .cmap
+                .as_ref()
+                .unwrap()
+                .get_mapping(*char_code_byte as u32);
+            if let Some(a) = a {
+                // let ty = &current_font.subtype;
+                // println!("Subtype {} Map '{}' -> {}", ty, *char_code_byte as char, a);
+                if let Some(x) = face.glyph_index(a) {
+                    glyph_id = x;
+                }
+            }
 
             face.outline_glyph(glyph_id, &mut builder);
 

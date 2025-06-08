@@ -72,11 +72,13 @@ impl CanvasBackend for CanvasImpl<'_> {
         self.canvas.height() as f32
     }
 
-    fn set_clip_region(&mut self, path: &PdfPath, mode: PathFillType) {
+    fn set_clip_region(&mut self, _path: &PdfPath, mode: PathFillType) {
         // let mut path = to_femtovg_path(path);
         match mode {
             PathFillType::Winding => {}
             PathFillType::EvenOdd => {}
         }
     }
+
+    fn reset_clip(&mut self) {}
 }
