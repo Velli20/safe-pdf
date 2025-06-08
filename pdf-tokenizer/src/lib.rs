@@ -1,7 +1,5 @@
 pub mod error;
 
-use std::str::FromStr;
-
 use error::TokenizerError;
 
 pub struct Tokenizer<'a> {
@@ -183,25 +181,11 @@ impl<'a> Tokenizer<'a> {
         }
         &self.input[start..self.position]
     }
-
-    pub fn read_number<T: FromStr>(&mut self) -> Result<T, TokenizerError> {
-        let number_str = self.read_while_u8(|b| b.is_ascii_digit());
-        if number_str.is_empty() {
-            return Err(TokenizerError::InvalidNumber);
-        }
-
-        let number = String::from_utf8_lossy(number_str)
-            .parse::<T>()
-            .or(Err(TokenizerError::InvalidNumber))?;
-
-        Ok(number)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fmt::Debug;
 
     #[test]
     fn test_tokenize_number() {
@@ -211,90 +195,5 @@ mod tests {
         assert_eq!(tokenizer.read(), Some(PdfToken::Number(2)));
         assert_eq!(tokenizer.read(), Some(PdfToken::Number(3)));
         assert_eq!(tokenizer.read(), None);
-    }
-
-    // Helper function to comprehensively test read_number
-    fn check_read_number<T: FromStr + PartialEq + Debug>(
-        input: &'static [u8],
-        expected_output: Result<T, TokenizerError>,
-        expected_pos_after_read: usize,
-        expected_remaining_data: &'static [u8],
-    ) {
-        let mut tokenizer = Tokenizer::new(input);
-        let result: Result<T, TokenizerError> = tokenizer.read_number();
-
-        assert_eq!(
-            result,
-            expected_output,
-            "Test failed for input: \"{}\". Expected result: {:?}, got: {:?}.",
-            String::from_utf8_lossy(input),
-            expected_output,
-            result
-        );
-
-        assert_eq!(
-            tokenizer.position,
-            expected_pos_after_read,
-            "Test failed for input: \"{}\". Expected position: {}, got: {}.",
-            String::from_utf8_lossy(input),
-            expected_pos_after_read,
-            tokenizer.position
-        );
-
-        assert_eq!(
-            tokenizer.data(),
-            expected_remaining_data,
-            "Test failed for input: \"{}\". Expected remaining data: \"{}\", got: \"{}\".",
-            String::from_utf8_lossy(input),
-            String::from_utf8_lossy(expected_remaining_data),
-            String::from_utf8_lossy(tokenizer.data())
-        );
-    }
-
-    #[test]
-    fn test_read_number_generic_cases() {
-        // Successful parsing
-        check_read_number::<u32>(b"123 abc", Ok(123), 3, b" abc");
-        check_read_number::<u64>(b"9876543210", Ok(9876543210), 10, b"");
-        check_read_number::<u8>(b"0xyz", Ok(0), 1, b"xyz");
-        check_read_number::<String>(b"007 bond", Ok("007".to_string()), 3, b" bond");
-        check_read_number::<u16>(b"65535stop", Ok(65535), 5, b"stop");
-        check_read_number::<i32>(b"123.45", Ok(123), 3, b".45"); // Reads only the integer part
-
-        // Input with no digits at the current position
-        check_read_number::<u32>(b"abc123", Err(TokenizerError::InvalidNumber), 0, b"abc123");
-        check_read_number::<u32>(b" xyz", Err(TokenizerError::InvalidNumber), 0, b" xyz");
-        check_read_number::<u32>(b"", Err(TokenizerError::InvalidNumber), 0, b"");
-        check_read_number::<String>(
-            b" no_digits",
-            Err(TokenizerError::InvalidNumber),
-            0,
-            b" no_digits",
-        );
-
-        // For u8 (max 255)
-        check_read_number::<u8>(b"256", Err(TokenizerError::InvalidNumber), 3, b"");
-        check_read_number::<u8>(
-            b"300 and more",
-            Err(TokenizerError::InvalidNumber),
-            3,
-            b" and more",
-        );
-
-        // For i16 (max 32767)
-        check_read_number::<i16>(b"32768", Err(TokenizerError::InvalidNumber), 5, b"");
-        check_read_number::<i16>(
-            b"100000rest",
-            Err(TokenizerError::InvalidNumber),
-            6,
-            b"rest",
-        );
-
-        // For i8 (min -128, max 127)
-        // While `read_number` itself doesn't handle signs, if `T` was signed and `FromStr` for `T`
-        // expected only non-negative numbers from this particular path, this would test it.
-        // However, `read_number` only extracts positive digit sequences.
-        // The following tests `FromStr` for `i8` with a number that's too large positive.
-        check_read_number::<i8>(b"128", Err(TokenizerError::InvalidNumber), 3, b"");
     }
 }

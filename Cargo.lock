@@ -1644,6 +1644,7 @@ version = "0.1.0"
 dependencies = [
  "bitflags 2.9.1",
  "pdf-object",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -1690,6 +1691,7 @@ name = "pdf-object"
 version = "0.1.0"
 dependencies = [
  "num-traits",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -1723,6 +1725,9 @@ dependencies = [
 [[package]]
 name = "pdf-tokenizer"
 version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.12",
+]
 
 [[package]]
 name = "percent-encoding"

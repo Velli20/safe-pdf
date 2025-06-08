@@ -1,12 +1,22 @@
 use crate::PdfToken;
+use thiserror::Error;
 
 /// An error that can occur while tokenizing a PDF file.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Error)]
 pub enum TokenizerError {
-    /// This error is used to indicate that the tokenizer has run out of stack space
-    SaveStackExchausted,
+    /// Occurs when a specific token was expected, but a different token
+    /// (or end of input) was encountered.
+    /// The first `Option<PdfToken>` is the actual token found (None if end of input),
+    /// and the second `PdfToken` is the token that was expected.
+    #[error("Unexpected token: {0:?}, expected: {1:?}")]
     UnexpectedToken(Option<PdfToken>, PdfToken),
-    InvalidNumber,
+    /// Raised when the end of the input stream was reached prematurely
+    /// while trying to read a specific number of bytes.
+    /// The first `usize` is the expected number of bytes, and the second `usize`
+    /// is the number of bytes actually remaining or read.
+    #[error(
+        "Unexpected end of file: expected to read {0} bytes, but only {1} bytes were available"
+    )]
     UnexpectedEndOfFile(usize, usize),
 }
 
@@ -44,23 +54,6 @@ impl std::fmt::Debug for PdfToken {
             Self::Unknown(arg0) => f.debug_tuple("Unknown").field(arg0).finish(),
 
             _ => std::fmt::Display::fmt(self, f),
-        }
-    }
-}
-
-impl std::fmt::Display for TokenizerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TokenizerError::UnexpectedEndOfFile(expected_len, remaining) => write!(
-                f,
-                "Failed to read exactly {} bytes. Remaining: {}",
-                expected_len, remaining
-            ),
-            TokenizerError::InvalidNumber => write!(f, "Failed to parse number"),
-            TokenizerError::SaveStackExchausted => write!(f, "Save stack exhausted"),
-            TokenizerError::UnexpectedToken(token, token1) => {
-                write!(f, "Unexpected token: {:?}, expected: {:?}", token, token1)
-            }
         }
     }
 }

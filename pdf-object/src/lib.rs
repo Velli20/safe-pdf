@@ -50,6 +50,16 @@ impl ObjectVariant {
             ObjectVariant::Stream(o) => o.object_number,
         }
     }
+
+    /// Returns a string representation of the `ObjectVariant`'s type.
+    /// This is useful for creating descriptive error messages.
+    pub const fn name(&self) -> &'static str {
+        match self {
+            ObjectVariant::IndirectObject(_) => "IndirectObjectValue", // Represents a fully resolved IndirectObject containing its Value
+            ObjectVariant::Reference(_) => "Reference",
+            ObjectVariant::Stream(_) => "StreamValue", // Represents a fully resolved StreamObject
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]

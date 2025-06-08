@@ -1,22 +1,34 @@
+use crate::error::FontError;
 use pdf_object::{stream::StreamObject, traits::FromStreamObject};
 use std::collections::HashMap;
+use thiserror::Error;
 
-use crate::error::FontError;
+/// Errors that can occur during CMap parsing.
+#[derive(Debug, Error, Clone, PartialEq)]
+pub enum CMapError {
+    /// The hexadecimal string has an odd number of characters, making it invalid.
+    #[error("Hex string '{0}' has an odd number of characters")]
+    OddHexLength(String),
+    /// The string contains an invalid hexadecimal sequence.
+    #[error("Invalid hex sequence '{original_hex}' in CMap: {source}")]
+    InvalidHexSequence {
+        original_hex: String,
+        #[source]
+        source: std::num::ParseIntError,
+    },
+    /// The parsed u32 value from a hex string is not a valid Unicode scalar value.
+    #[error(
+        "Hex value <{hex_value}> ({u32_value}) is not a valid Unicode scalar value for a CMap character"
+    )]
+    InvalidUnicodeScalar { hex_value: String, u32_value: u32 },
+}
 
-/// Parses a hexadecimal string into a vector of bytes.
-/// Example: "010A" -> vec![0x01, 0x0A]
-fn hex_str_to_bytes(hex: &str) -> Result<u32, FontError> {
-    if hex.len() % 2 != 0 {
-        return Err(FontError::CMapParseError(format!(
-            "Hex string '{}' has an odd number of characters",
-            hex
-        )));
-    }
-    u32::from_str_radix(hex, 16).map_err(|e| {
-        FontError::CMapParseError(format!(
-            "Invalid hex sequence '{}' in string '{}': {}",
-            hex, hex, e
-        ))
+/// Parses a hexadecimal string representation into a u32 value.
+/// Example: "010A" -> 0x010A (266 decimal)
+fn parse_hex_to_u32(hex: &str) -> Result<u32, CMapError> {
+    u32::from_str_radix(hex, 16).map_err(|e| CMapError::InvalidHexSequence {
+        original_hex: hex.to_string(),
+        source: e,
     })
 }
 
@@ -67,22 +79,27 @@ impl FromStreamObject for CharacterMap {
 
             if in_bfchar_block {
                 let parts: Vec<&str> = trimmed_line.split_whitespace().collect();
-                if parts.len() == 2 && parts[0].starts_with('<') && parts[0].ends_with('>') && parts[0].len() > 2 && /* e.g. <01> not <> */
-                   parts[1].starts_with('<') && parts[1].ends_with('>') && parts[1].len() > 2
+                if parts.len() == 2
+                    && parts[0].starts_with('<')
+                    && parts[0].ends_with('>')
+                    && parts[0].len() > 2
+                    && parts[1].starts_with('<')
+                    && parts[1].ends_with('>')
+                    && parts[1].len() > 2
                 {
                     let src_hex = &parts[0][1..parts[0].len() - 1];
                     let dst_hex = &parts[1][1..parts[1].len() - 1];
 
-                    let src_bytes = hex_str_to_bytes(src_hex)?;
-                    let dst_bytes = hex_str_to_bytes(dst_hex)?;
-                    let dst_bytes = char::from_u32(dst_bytes).ok_or_else(|| {
-                        FontError::CMapParseError(format!(
-                            "Invalid destination character code: {}",
-                            dst_bytes
-                        ))
-                    })?;
+                    let src_code = parse_hex_to_u32(src_hex)?;
+                    let dst_u32 = parse_hex_to_u32(dst_hex)?;
 
-                    bfchar_mappings.insert(src_bytes, dst_bytes);
+                    let dst_char =
+                        char::from_u32(dst_u32).ok_or_else(|| CMapError::InvalidUnicodeScalar {
+                            hex_value: dst_hex.to_string(),
+                            u32_value: dst_u32,
+                        })?;
+
+                    bfchar_mappings.insert(src_code, dst_char);
                 }
             }
         }
