@@ -5,6 +5,45 @@ use pdf_object::{
     dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
 };
 
+use thiserror::Error;
+
+/// Errors that can occur during parsing of an External Graphics State dictionary.
+#[derive(Error, Debug)]
+pub enum ExternalGraphicsStateError {
+    //#[error("Error processing PDF object for key '{key_name}': {source}")]
+    //PdfObjectError {
+    //    key_name: String,
+    //    source: Pd,
+    //},
+    #[error("Failed to parse blend mode string '{value}' for key '{key_name}': {source}")]
+    BlendModeParseError {
+        key_name: String,
+        value: String,
+        source: ParseBlendModeError,
+    },
+    #[error(
+        "Invalid array structure for key '{key_name}': expected {expected_desc}, found {actual_desc}"
+    )]
+    InvalidArrayStructureError {
+        key_name: String,
+        expected_desc: String,
+        actual_desc: String,
+    },
+    #[error("Invalid value for key '{key_name}': {description}")]
+    InvalidValueError {
+        key_name: String,
+        description: String,
+    },
+    #[error(
+        "Unsupported PDF object type for key '{key_name}': expected {expected_type}, found {found_type}"
+    )]
+    UnsupportedTypeError {
+        key_name: String,
+        expected_type: String,
+        found_type: String,
+    },
+}
+
 /// Represents the standard blend modes allowed in PDF.
 /// Reference: PDF 32000-1:2008, Tables 72 & 73.
 #[derive(Debug, PartialEq, Clone)]

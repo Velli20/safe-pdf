@@ -6,14 +6,12 @@ use crate::{
 
 impl<'a> PathConstructionOps for PdfCanvas<'a> {
     fn move_to(&mut self, x: f32, y: f32) -> Result<(), Self::ErrorType> {
-        let (x, y) = self.map_point(x, y);
         self.current_path
             .get_or_insert(PdfPath::default())
             .move_to(x, y)
     }
 
     fn line_to(&mut self, x: f32, y: f32) -> Result<(), Self::ErrorType> {
-        let (x, y) = self.map_point(x, y);
         self.current_path
             .get_or_insert(PdfPath::default())
             .line_to(x, y)
@@ -28,19 +26,12 @@ impl<'a> PathConstructionOps for PdfCanvas<'a> {
         x3: f32,
         y3: f32,
     ) -> Result<(), Self::ErrorType> {
-        let (x1, y1) = self.map_point(x1, y1);
-        let (x2, y2) = self.map_point(x2, y2);
-        let (x3, y3) = self.map_point(x3, y3);
-
         self.current_path
             .get_or_insert(PdfPath::default())
             .curve_to(x1, y1, x2, y2, x3, y3)
     }
 
     fn curve_to_v(&mut self, x2: f32, y2: f32, x3: f32, y3: f32) -> Result<(), Self::ErrorType> {
-        let (x2, y2) = self.map_point(x2, y2);
-        let (x3, y3) = self.map_point(x3, y3);
-
         let path = self.current_path.get_or_insert(PdfPath::default());
         if let Some((x, y)) = path.current_point() {
             path.curve_to(x, y, x2, y2, x3, y3)
@@ -50,9 +41,6 @@ impl<'a> PathConstructionOps for PdfCanvas<'a> {
     }
 
     fn curve_to_y(&mut self, x1: f32, y1: f32, x3: f32, y3: f32) -> Result<(), Self::ErrorType> {
-        let (x1, y1) = self.map_point(x1, y1);
-        let (x3, y3) = self.map_point(x3, y3);
-
         self.current_path
             .get_or_insert(PdfPath::default())
             .curve_to(x1, y1, x3, y3, x3, y3)
@@ -69,7 +57,6 @@ impl<'a> PathConstructionOps for PdfCanvas<'a> {
         width: f32,
         height: f32,
     ) -> Result<(), Self::ErrorType> {
-        let (x, y) = self.map_point(x, y);
         let path = self.current_path.get_or_insert(PdfPath::default());
 
         path.move_to(x, y)?;

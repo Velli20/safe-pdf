@@ -1701,6 +1701,7 @@ dependencies = [
  "pdf-content-stream",
  "pdf-font",
  "pdf-object",
+ "thiserror 2.0.12",
 ]
 
 [[package]]

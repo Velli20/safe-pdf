@@ -56,7 +56,8 @@ impl<'a> PdfOperatorBackend for PdfCanvas<'a> {}
 
 impl<'a> ClippingPathOps for PdfCanvas<'a> {
     fn clip_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
-        if let Some(path) = self.current_path.take() {
+        if let Some(mut path) = self.current_path.take() {
+            path.transform(&self.current_state().transform)?;
             self.canvas.set_clip_region(&path, PathFillType::Winding);
             self.current_state_mut().clip_path = Some(path);
             Ok(())
@@ -66,7 +67,8 @@ impl<'a> ClippingPathOps for PdfCanvas<'a> {
     }
 
     fn clip_path_even_odd(&mut self) -> Result<(), Self::ErrorType> {
-        if let Some(path) = self.current_path.take() {
+        if let Some(mut path) = self.current_path.take() {
+            path.transform(&self.current_state().transform)?;
             self.canvas.set_clip_region(&path, PathFillType::EvenOdd);
             self.current_state_mut().clip_path = Some(path);
             Ok(())

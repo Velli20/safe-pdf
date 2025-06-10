@@ -40,7 +40,7 @@ fn main() {
 
     let window_attributes = WindowAttributes::default()
         .with_title("rust-skia-gl-window")
-        .with_inner_size(LogicalSize::new(800, 800));
+        .with_inner_size(LogicalSize::new(595, 842));
 
     let template = ConfigTemplateBuilder::new()
         .with_alpha_size(8)
@@ -321,8 +321,14 @@ fn main() {
                     }
                 }
                 WindowEvent::RedrawRequested => {
+                    println!(
+                        "W {} H {}",
+                        self.env.surface.width(),
+                        self.env.surface.height()
+                    );
                     let canvas = self.env.surface.canvas();
                     let size = self.env.window.inner_size();
+
                     self.previous_frame_start = Instant::now();
 
                     self.env.pdf_logic.on_render(

@@ -147,9 +147,6 @@ impl<'a> PdfCanvas<'a> {
         }
     }
 
-    pub(crate) fn map_point(&self, x: f32, y: f32) -> (f32, f32) {
-        self.current_state().transform.transform_point(x, y)
-    }
     pub(crate) fn current_state(&self) -> &CanvasState<'a> {
         self.canvas_stack.last().unwrap()
     }
@@ -177,7 +174,8 @@ impl<'a> PdfCanvas<'a> {
         mode: PaintMode,
         fill_type: PathFillType,
     ) -> Result<(), PdfCanvasError> {
-        if let Some(path) = self.current_path.take() {
+        if let Some(mut path) = self.current_path.take() {
+            path.transform(&self.current_state().transform)?;
             if mode == PaintMode::Fill {
                 self.canvas
                     .fill_path(&path, fill_type, self.current_state().fill_color);

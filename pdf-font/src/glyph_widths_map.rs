@@ -1,188 +1,143 @@
-use std::collections::HashMap;
-
 use pdf_object::{Value, array::Array, error::ObjectError};
+use std::collections::HashMap;
 use thiserror::Error;
 
 /// Errors that can occur during GlyphWidthsMap parsing from a /W array.
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum GlyphWidthsMapError {
-    /// Failed to convert a PDF Value to a required number type.
+    /// Error converting a PDF value to a number.
     #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
     NumericConversionError {
         entry_description: &'static str,
         #[source]
         source: ObjectError,
     },
-    /// In the form `c_first c_last w`, `c_last` was less than `c_first`.
-    #[error(
-        "Invalid /W array structure: c_last ({c_last}) cannot be less than c_first ({c_first}) for CID range"
-    )]
+    /// The end of a CID range is less than the start.
+    #[error("Invalid CID range: c_last ({c_last}) < c_first ({c_first})")]
     InvalidCIDRange { c_first: i64, c_last: i64 },
-    /// In the form `c_first c_last w`, the width `w` was missing.
-    #[error(
-        "Invalid /W array structure: missing width 'w' after c_last for range starting at CID {c_first}"
-    )]
+    /// Missing width value after a CID range.
+    #[error("Missing width after c_last for range starting at CID {c_first}")]
     MissingWidthForCIDRange { c_first: i64 },
-    /// An unexpected element was found after a CID, not matching either `[w1 ... wn]` or `c_last w`.
-    #[error(
-        "Invalid /W array structure: expected an array of widths or a c_last integer after CID {cid}, found value of type {found_type}"
-    )]
+    /// Unexpected element type after a CID.
+    #[error("Expected array or c_last after CID {cid}, found {found_type}")]
     UnexpectedElementAfterCID { cid: i64, found_type: &'static str },
-    /// A CID was found without any subsequent elements to define its width(s).
-    #[error(
-        "Invalid /W array structure: CID {cid} found without a corresponding width array or c_last value"
-    )]
+    /// CID entry is incomplete.
+    #[error("CID {cid} found without a corresponding width array or c_last value")]
     IncompleteCIDEntry { cid: i64 },
 }
 
-/// A map storing glyph widths for specific Character IDs (CIDs).
+/// Stores glyph widths for CIDs, parsed from the /W array.
 ///
-/// This map is populated from the `/W` array in the CIDFont dictionary.
-/// According to the PDF 1.7 specification (Section 9.7.4.3, "Glyph Metrics in CIDFonts"),
-/// the `/W` array defines widths for CIDs. This implementation parses entries of two forms:
-/// 1. `c [w1 w2 ... wn]`: `c` is the starting CID, and `w1, ..., wn` are the widths
-///    for `n` consecutive CIDs starting from `c`.
-/// 2. `c_first c_last w`: `c_first` and `c_last` define a range of CIDs (inclusive),
-///    and `w` is the common width for all CIDs in that range.
-/// The key in the `HashMap` is the starting `character_id` (CID), and the `Vec<f32>`
-/// contains the widths for that CID and subsequent CIDs.
+/// The internal map uses the starting CID as the key and a vector of
+/// widths as the value. For a range, the vector contains repeated
+/// widths; for an explicit array, the vector contains the widths as specified.
 pub struct GlyphWidthsMap {
     map: HashMap<i64, Vec<f32>>,
 }
 
 impl GlyphWidthsMap {
-    pub fn from_array(array: &Array) -> Result<GlyphWidthsMap, GlyphWidthsMapError> {
-        // The "W" array (Widths) defines widths for specific CIDs.
-        // PDF 1.7 spec, section 9.7.4.3 "Glyph Metrics in CIDFonts".
-        // This parser handles two forms for entries in the /W array:
-        // 1. c [w1 w2 ... wn]
-        //    where 'c' is an integer (starting CID), and [w1 w2 ... wn] is a PDF array
-        //    of numbers representing widths for CIDs c, c+1, ..., c+n-1.
-        // 2. c_first c_last w
-        //    where 'c_first' and 'c_last' are integers defining a range of CIDs,
-        //    and 'w' is a number representing the width for all CIDs from
-        //    c_first to c_last, inclusive.
-        //
-        // Example: [ 0 [500 450], 10 [600], 20 22 750 ]
-        // - CID 0 has width 500, CID 1 has width 450.
-        // - CID 10 has width 600.
-        // - CIDs 20, 21, 22 all have width 750.
-        //
-        // The array is processed sequentially; a later entry can override an earlier one
-        // for a particular CID (though this implementation stores ranges, so overlaps
-        // are based on the starting CID of a range).
-
-        let mut widths_map = HashMap::new();
+    /// Parses a PDF /W array into a `GlyphWidthsMap`.
+    ///
+    /// The /W array can contain entries of the form:
+    /// - `[c_first [w1 ... wn]]` (explicit widths for consecutive CIDs starting at `c_first`)
+    /// - `[c_first c_last w]` (all CIDs from `c_first` to `c_last` have width `w`)
+    ///
+    /// # Arguments
+    ///
+    /// - `array`: - The PDF array representing the /W widths.
+    ///
+    /// # Errors
+    ///
+    /// Returns `GlyphWidthsMapError` if the array is malformed or contains invalid values.
+    pub fn from_array(array: &Array) -> Result<Self, GlyphWidthsMapError> {
+        let mut map = HashMap::new();
         let mut iter = array.0.iter();
 
-        while let Some(cid_or_c_first_element) = iter.next() {
-            let c_or_c_first = cid_or_c_first_element.as_number::<i64>().map_err(|e| {
+        while let Some(cid_val) = iter.next() {
+            // Parse the starting CID (or c_first)
+            let cid = cid_val.as_number::<i64>().map_err(|e| {
                 GlyphWidthsMapError::NumericConversionError {
                     entry_description: "CID or c_first",
                     source: e,
                 }
             })?;
 
-            // The next element determines the format.
-            if let Some(next_element) = iter.next() {
-                if let Some(widths_pdf_array) = next_element.as_array() {
-                    // Form: c [w1 w2 ... wn]
-                    // c_or_c_first is 'c'
-                    let mut parsed_widths = Vec::with_capacity(widths_pdf_array.0.len());
-                    for width_value in &widths_pdf_array.0 {
-                        let width_f32 = width_value.as_number::<f32>().map_err(|e| {
-                            GlyphWidthsMapError::NumericConversionError {
-                                entry_description: "width in [w1...wn] array",
-                                source: e,
-                            }
-                        })?;
-                        parsed_widths.push(width_f32);
-                    }
-                    widths_map.insert(c_or_c_first, parsed_widths);
-                } else if let Value::Number(_) = next_element {
-                    // Form: c_first c_last w
-                    // c_or_c_first is 'c_first', next_element (parsed as c_last) is 'c_last'
-                    let c_last = next_element.as_number::<i64>().map_err(|e| {
+            // Next element must be either an array of widths or c_last
+            let Some(next) = iter.next() else {
+                return Err(GlyphWidthsMapError::IncompleteCIDEntry { cid });
+            };
+
+            match next {
+                // Case: [c_first [w1 ... wn]]
+                Value::Array(widths_arr) => {
+                    let widths = widths_arr
+                        .0
+                        .iter()
+                        .map(|w| {
+                            w.as_number::<f32>().map_err(|e| {
+                                GlyphWidthsMapError::NumericConversionError {
+                                    entry_description: "width in [w1...wn] array",
+                                    source: e,
+                                }
+                            })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    map.insert(cid, widths);
+                }
+                // Case: [c_first c_last w]
+                Value::Number(_) => {
+                    let c_last = next.as_number::<i64>().map_err(|e| {
                         GlyphWidthsMapError::NumericConversionError {
                             entry_description: "c_last",
                             source: e,
                         }
                     })?;
-
-                    if c_last < c_or_c_first {
+                    if c_last < cid {
                         return Err(GlyphWidthsMapError::InvalidCIDRange {
-                            c_first: c_or_c_first,
+                            c_first: cid,
                             c_last,
                         });
                     }
-
-                    if let Some(width_element) = iter.next() {
-                        let width = width_element.as_number::<f32>().map_err(|e| {
-                            GlyphWidthsMapError::NumericConversionError {
-                                entry_description: "width 'w' for c_first c_last w form",
-                                source: e,
-                            }
-                        })?;
-                        let num_cids = (c_last - c_or_c_first + 1) as usize;
-                        let parsed_widths: Vec<f32> =
-                            std::iter::repeat(width).take(num_cids).collect();
-                        widths_map.insert(c_or_c_first, parsed_widths);
-                    } else {
-                        return Err(GlyphWidthsMapError::MissingWidthForCIDRange {
-                            c_first: c_or_c_first,
-                        });
-                    }
-                } else {
-                    // The element after c_or_c_first is neither an array (for form 1)
-                    // nor an integer (for c_last in form 2).
+                    let Some(width_val) = iter.next() else {
+                        return Err(GlyphWidthsMapError::MissingWidthForCIDRange { c_first: cid });
+                    };
+                    let width = width_val.as_number::<f32>().map_err(|e| {
+                        GlyphWidthsMapError::NumericConversionError {
+                            entry_description: "width 'w' for c_first c_last w form",
+                            source: e,
+                        }
+                    })?;
+                    let count = (c_last - cid + 1) as usize;
+                    map.insert(cid, vec![width; count]);
+                }
+                // Unexpected element type
+                other => {
                     return Err(GlyphWidthsMapError::UnexpectedElementAfterCID {
-                        cid: c_or_c_first,
-                        found_type: next_element.name(),
+                        cid,
+                        found_type: other.name(),
                     });
                 }
-            } else {
-                // c_or_c_first was found without any subsequent elements.
-                return Err(GlyphWidthsMapError::IncompleteCIDEntry { cid: c_or_c_first });
             }
         }
-
-        Ok(Self { map: widths_map })
+        Ok(Self { map })
     }
+
+    /// Returns the width for a given CID (character ID), if present.
+    ///
+    /// # Arguments
+    /// * `character_id` - The CID to look up.
+    ///
+    /// # Returns
+    /// * `Some(width)` if the width is found, or `None` if not present.
     pub fn get_width(&self, character_id: i64) -> Option<f32> {
-        // Iterate through all stored CID ranges in the map.
-        // Each entry consists of a starting CID and a vector of widths for consecutive CIDs.
-        for (start_cid_key, widths_for_range) in &self.map {
-            let start_cid = *start_cid_key; // Dereference the key to get the i64 value.
-
-            // Check if the requested character_id is potentially within the range
-            // covered by this entry (i.e., character_id is not before start_cid).
-            if character_id >= start_cid {
-                // Calculate the offset of the character_id from the start_cid of this range.
-                let offset = character_id - start_cid; // This will be an i64 value.
-
-                // The offset must be non-negative (which is guaranteed by `character_id >= start_cid`)
-                // and must be less than the number of widths stored for this range.
-                // We cast `widths_for_range.len()` (usize) to i64 for a safe comparison.
-                // This assumes the length of any width vector fits within an i64, which is practical.
-                if offset < (widths_for_range.len() as i64) {
-                    // If the offset is valid, it means the character_id falls within this range.
-                    // Cast the offset to usize to use it as an index.
-                    let index = offset as usize;
-
-                    // Retrieve the width. Since f32 is Copy, we can directly access and return.
-                    // The bounds check `offset < (widths_for_range.len() as i64)` ensures
-                    // that `index` will be a valid index for `widths_for_range`.
-                    return Some(widths_for_range[index]);
-                }
-                // If offset is too large, character_id is past the end of this specific range.
-                // Continue to the next entry in the map.
+        self.map.iter().find_map(|(&start, widths)| {
+            let offset = character_id - start;
+            if offset >= 0 && (offset as usize) < widths.len() {
+                Some(widths[offset as usize])
+            } else {
+                None
             }
-            // If character_id < start_cid, this range starts after the character_id,
-            // so we continue to the next entry.
-        }
-
-        // If the loop completes, it means the character_id was not found in any defined range.
-        None
+        })
     }
 }
 
