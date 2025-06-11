@@ -6,7 +6,13 @@ use femtovg::{Color, renderer::WGPURenderer};
 use pdf_document::PdfDocument;
 use pdf_graphics_femtovg::femtovg_canvas_backend::CanvasImpl;
 use pdf_renderer::PdfRenderer;
-use winit::{event_loop::EventLoop, window::WindowBuilder};
+use winit::{
+    application::ApplicationHandler,
+    dpi::LogicalSize,
+    event::WindowEvent,
+    event_loop::{ControlFlow, EventLoop},
+    window::{Window, WindowAttributes},
+};
 
 pub trait AppRenderer {
     fn on_init(&mut self);
@@ -22,7 +28,7 @@ pub struct App {
     width: u32,
     height: u32,
     keep_flushing: bool,
-    document: PdfDocument,
+    document: Option<PdfDocument>,
 }
 
 impl App {
@@ -31,22 +37,23 @@ impl App {
             width,
             height,
             keep_flushing,
-            document,
+            document: Some(document),
         }
     }
 
     pub async fn run<T: AppRenderer>(&mut self, mut render: T) {
-        let event_loop = EventLoop::new().unwrap();
+        let el = EventLoop::new().expect("Failed to create event loop");
 
-        #[cfg(not(target_arch = "wasm32"))]
-        let window = {
-            let window_builder = WindowBuilder::new()
-                .with_inner_size(winit::dpi::PhysicalSize::new(self.width, self.height))
-                .with_resizable(true)
-                .with_title("Hello");
-            window_builder.build(&event_loop).unwrap()
-        };
+        let window_attributes = WindowAttributes::default()
+            .with_inner_size(LogicalSize::new(self.width, self.height))
+            .with_title("Hello");
+
+        // Use winit's new window creation API, similar to skia.rs
+        let window = el
+            .create_window(window_attributes)
+            .expect("Failed to create window");
         let window = Arc::new(window);
+
         let backends = wgpu::Backends::from_env().unwrap_or_default();
         let dx12_shader_compiler = wgpu::Dx12Compiler::from_env().unwrap_or_default();
         let gles_minor_version = wgpu::Gles3MinorVersion::from_env().unwrap_or_default();
@@ -75,7 +82,6 @@ impl App {
                 &wgpu::DeviceDescriptor {
                     label: None,
                     required_features: wgpu::Features::empty(),
-                    // Make sure we use the texture resolution limits from the adapter, so we can support images the size of the swapchain.
                     required_limits: wgpu::Limits::downlevel_webgl2_defaults()
                         .using_resolution(adapter.limits()),
                     memory_hints: wgpu::MemoryHints::MemoryUsage,
@@ -104,36 +110,69 @@ impl App {
         canvas.set_size(self.width, self.height, 2.0);
         render.on_init();
 
-        let _ = event_loop.run(|e, elwt| match e {
-            winit::event::Event::WindowEvent {
-                window_id: _,
-                event,
-            } => match event {
-                winit::event::WindowEvent::CloseRequested => {
-                    elwt.exit();
-                }
-                winit::event::WindowEvent::RedrawRequested => {
-                    render.on_render(&mut canvas, &self.document);
+        struct Application<T: AppRenderer> {
+            render: T,
+            canvas: Canvas<WGPURenderer>,
+            surface: wgpu::Surface<'static>,
+            queue: wgpu::Queue,
+            document: PdfDocument,
+            keep_flushing: bool,
+            window: Arc<Window>,
+        }
 
-                    let frame = surface
-                        .get_current_texture()
-                        .expect("unable to get next texture from swapchain");
+        impl<T: AppRenderer> ApplicationHandler for Application<T> {
+            fn window_event(
+                &mut self,
+                event_loop: &winit::event_loop::ActiveEventLoop,
+                _window_id: winit::window::WindowId,
+                event: WindowEvent,
+            ) {
+                match event {
+                    WindowEvent::CloseRequested => {
+                        event_loop.exit();
+                    }
+                    WindowEvent::RedrawRequested => {
+                        self.render.on_render(&mut self.canvas, &self.document);
 
-                    let commands = canvas.flush_to_surface(&frame.texture);
-                    queue.submit(Some(commands));
-                    frame.present();
-                }
-                _ => {}
-            },
-            winit::event::Event::AboutToWait => {
-                if self.keep_flushing {
-                    window.request_redraw();
-                } else {
-                    elwt.exit();
+                        let frame = self
+                            .surface
+                            .get_current_texture()
+                            .expect("unable to get next texture from swapchain");
+
+                        let commands = self.canvas.flush_to_surface(&frame.texture);
+                        self.queue.submit(Some(commands));
+                        frame.present();
+                    }
+                    _ => {}
                 }
             }
-            _ => {}
-        });
+
+            fn new_events(
+                &mut self,
+                event_loop: &winit::event_loop::ActiveEventLoop,
+                _cause: winit::event::StartCause,
+            ) {
+                if self.keep_flushing {
+                    self.window.request_redraw();
+                } else {
+                    event_loop.exit();
+                }
+            }
+
+            fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
+        }
+
+        let mut application = Application {
+            render,
+            canvas,
+            surface,
+            queue,
+            document: self.document.take().unwrap(),
+            keep_flushing: self.keep_flushing,
+            window: window.clone(),
+        };
+
+        el.run_app(&mut application).expect("run() failed");
     }
 }
 
@@ -159,7 +198,7 @@ impl AppRenderer for Renderer2 {
 
 fn main() {
     const INPUT: &[u8] = include_bytes!(
-        "/Users/viktore/safe-pdf/pdf-document/tests/assets/dd5cf1a7d6d190f94a28201777f11bf4.pdf"
+        "/Users/viktore/safe-pdf/crates/pdf-document/tests/assets/dd5cf1a7d6d190f94a28201777f11bf4.pdf"
     );
     let document = PdfDocument::from(INPUT).unwrap();
 

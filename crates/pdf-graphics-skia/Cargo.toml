@@ -1,0 +1,9 @@
+[package]
+name = "pdf-graphics-skia"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pdf-document = { path = "../pdf-document" }
+pdf-graphics = { path = "../pdf-graphics" }
+skia-safe = { version = "0.86.0" }

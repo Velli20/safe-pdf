@@ -15,6 +15,7 @@ use glutin::{
     surface::{Surface as GlutinSurface, SurfaceAttributesBuilder, WindowSurface},
 };
 use glutin_winit::DisplayBuilder;
+
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
 #[allow(deprecated)]
 use raw_window_handle::HasRawWindowHandle;
@@ -38,9 +39,7 @@ use pdf_renderer::PdfRenderer;
 fn main() {
     let el = EventLoop::new().expect("Failed to create event loop");
 
-    let window_attributes = WindowAttributes::default()
-        .with_title("rust-skia-gl-window")
-        .with_inner_size(LogicalSize::new(595, 842));
+    let window_attributes = WindowAttributes::default().with_inner_size(LogicalSize::new(595, 842));
 
     let template = ConfigTemplateBuilder::new()
         .with_alpha_size(8)
@@ -192,7 +191,7 @@ fn main() {
 
     // Load PDF Document (using the same example PDF as femtovg-impl.rs)
     const INPUT: &[u8] = include_bytes!(
-        "/Users/viktore/safe-pdf/pdf-document/tests/assets/dd5cf1a7d6d190f94a28201777f11bf4.pdf"
+        "/Users/viktore/safe-pdf/crates/pdf-document/tests/assets/dd5cf1a7d6d190f94a28201777f11bf4.pdf"
     );
     let pdf_document = Arc::new(PdfDocument::from(INPUT).unwrap());
 

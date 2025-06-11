@@ -1,0 +1,52 @@
+[package]
+name = "examples"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT"
+
+[dev-dependencies]
+skia-safe          = { version = "0.86.0", features = ["gl"]  }
+glutin             = { version = "0.32.0" }
+glutin-winit       = { version = "0.5.0" }
+raw-window-handle  = { version = "0.6.0" }
+gl-rs              = { version = "0.14.0", package = "gl"  }
+winit              = { version = "0.30.2" }
+femtovg            = { version = "0.14.0", features = ["wgpu"] }
+wgpu               = { version = "24.0.3" }
+futures            = { version = "0.3.30" }
+
+[dependencies]
+pdf-document         = { path = "../crates/pdf-document" }
+pdf-object           = { path = "../crates/pdf-object" }
+pdf-page             = { path = "../crates/pdf-page" }
+pdf-content-stream   = { path = "../crates/pdf-content-stream" }
+pdf-parser           = { path = "../crates/pdf-parser" }
+pdf-tokenizer        = { path = "../crates/pdf-tokenizer" }
+pdf-font             = { path = "../crates/pdf-font" }
+pdf-renderer         = { path = "../crates/pdf-renderer" }
+pdf-graphics         = { path = "../crates/pdf-graphics" }
+pdf-graphics-femtovg = { path = "../crates/pdf-graphics-femtovg", optional = true  }
+pdf-graphics-skia    = { path = "../crates/pdf-graphics-skia", optional = true  }
+
+[features]
+default = []
+skia = [
+    "dep:pdf-graphics-skia",
+]
+femtovg = [
+    "dep:pdf-graphics-femtovg",
+]
+
+[[example]]
+name = "skia"
+path = "skia.rs"
+test = false
+required-features = ["skia"]
+
+[[example]]
+name = "femtovg"
+path = "femtovg.rs"
+test = false
+required-features = ["femtovg"]
+

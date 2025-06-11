@@ -1,16 +1,4 @@
 [workspace]
 resolver = "2"
-members = [
-    "pdf-document",
-    "pdf-object",
-    "pdf-page",
-    "pdf-content-stream",
-    "pdf-parser",
-    "pdf-tokenizer",
-    "pdf-font",
-    "pdf-renderer",
-    "pdf-graphics",
-    "pdf-graphics-femtovg",
-    "pdf-graphics-skia"
-]
-
+members = ["crates/*", "examples"]
+default-members = ["crates/*", "examples"]

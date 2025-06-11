@@ -3,16 +3,8 @@ name = "pdf-graphics-femtovg"
 version = "0.1.0"
 edition = "2024"
 
-[[bin]]
-name = "femtovg-impl"
-test = false
-bench = false
 
 [dependencies]
-wgpu = "24.0.3"
-futures = "0.3.30"
-winit = "0.29.15"
 femtovg = { version = "0.14.0", features = ["wgpu"] }
-pdf-renderer = { path = "../pdf-renderer" }
 pdf-document = { path = "../pdf-document" }
 pdf-graphics = { path = "../pdf-graphics" }
