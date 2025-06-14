@@ -73,7 +73,7 @@ impl PdfDocument {
             .ok_or(PdfError::MissingPages)?
             .clone();
 
-        let pages = PdfPages::from_dictionary(&pages_dict, &objects)?;
+        let pages = PdfPages::from_dictionary(&pages_dict, &objects).unwrap();
 
         Ok(PdfDocument {
             version,

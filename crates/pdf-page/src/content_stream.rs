@@ -19,7 +19,7 @@ impl ContentStream {
 
 impl FromDictionary for ContentStream {
     const KEY: &'static str = "Contents";
-    type ResultType = ContentStream;
+    type ResultType = Option<ContentStream>;
     type ErrorType = PageError;
 
     fn from_dictionary(
@@ -43,7 +43,7 @@ impl FromDictionary for ContentStream {
                 contents.clone()
             }
         } else {
-            return Err(PageError::MissingContent);
+            return Ok(None);
         };
 
         if let ObjectVariant::IndirectObject(s) = &contents {
@@ -52,14 +52,14 @@ impl FromDictionary for ContentStream {
                     if let Value::IndirectObject(s) = obj {
                         if let Some(ss) = objects.get(s.object_number()) {
                             if let ObjectVariant::Stream(s) = ss {
-                                return ContentStream::from(s.data.as_slice());
+                                return Ok(Some(ContentStream::from(s.data.as_slice())?));
                             }
                         }
                     }
                 }
             }
         } else if let ObjectVariant::Stream(s) = &contents {
-            return ContentStream::from(s.data.as_slice());
+            return Ok(Some(ContentStream::from(s.data.as_slice())?));
         }
 
         Err(PageError::MissingContent)

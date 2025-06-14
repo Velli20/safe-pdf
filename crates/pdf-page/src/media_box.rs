@@ -42,16 +42,16 @@ impl MediaBox {
 
 impl FromDictionary for MediaBox {
     const KEY: &'static str = "MediaBox";
-    type ResultType = MediaBox;
+    type ResultType = Option<MediaBox>;
     type ErrorType = PageError;
 
     fn from_dictionary(
         dictionary: &Dictionary,
         _objects: &ObjectCollection,
     ) -> Result<Self::ResultType, PageError> {
-        let array = dictionary
-            .get_array(Self::KEY)
-            .ok_or(PageError::MissingMediaBox)?;
+        let Some(array) = dictionary.get_array(Self::KEY) else {
+            return Ok(None);
+        };
 
         match array.0.as_slice() {
             // Pattern match for exactly 4 elements in the slice.
@@ -62,7 +62,7 @@ impl FromDictionary for MediaBox {
                 let right = r.as_number::<u32>()?;
                 let bottom = b.as_number::<u32>()?;
 
-                return Ok(MediaBox::new(left, top, right, bottom));
+                return Ok(Some(MediaBox::new(left, top, right, bottom)));
             }
             _ => {
                 return Err(PageError::InvalidMediaBox(

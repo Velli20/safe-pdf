@@ -1,4 +1,3 @@
-use crate::error::FontError;
 use pdf_object::{stream::StreamObject, traits::FromStreamObject};
 use std::collections::HashMap;
 use thiserror::Error;
@@ -52,7 +51,7 @@ impl CharacterMap {
 
 impl FromStreamObject for CharacterMap {
     type ResultType = Self;
-    type ErrorType = FontError;
+    type ErrorType = CMapError;
 
     fn from_stream_object(stream: &StreamObject) -> Result<Self::ResultType, Self::ErrorType> {
         let content = String::from_utf8_lossy(&stream.data);

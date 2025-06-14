@@ -16,8 +16,6 @@ pub enum PdfError {
     MissingPageTree,
     /// The document catalog (the object referenced by `/Root` in the trailer) is missing or invalid.
     MissingCatalog,
-    /// A specific page object, referenced by its object number, could not be found or is not a valid page dictionary.
-    PageNotFound(i32),
     MissingType,
 }
 

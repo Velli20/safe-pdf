@@ -3,7 +3,11 @@ use pdf_object::{
     traits::FromDictionary,
 };
 
-use crate::{error::FontError, font_descriptor::FontDescriptor, glyph_widths_map::GlyphWidthsMap};
+use crate::{
+    font_descriptor::{FontDescriptor, FontDescriptorError},
+    glyph_widths_map::GlyphWidthsMap,
+};
+use thiserror::Error;
 
 /// Represents a Character Identifier (CID) font.
 ///
@@ -28,11 +32,20 @@ impl CharacterIdentifierFont {
     const DEFAULT_WIDTH: i64 = 1000;
 }
 
+/// Defines errors that can occur while reading a PDF objects.
+#[derive(Debug, Error, Clone, PartialEq)]
+pub enum CidFontError {
+    #[error("Missing /FontDescriptor entry")]
+    MissingFontDescriptor,
+    #[error("FontDescriptor parsing error: {0}")]
+    FontDescriptorError(#[from] FontDescriptorError),
+}
+
 impl FromDictionary for CharacterIdentifierFont {
     const KEY: &'static str = "Font";
 
     type ResultType = Self;
-    type ErrorType = FontError;
+    type ErrorType = CidFontError;
 
     fn from_dictionary(
         dictionary: &Dictionary,
@@ -56,10 +69,10 @@ impl FromDictionary for CharacterIdentifierFont {
                 if let Some(s) = objects.get_dictionary(*num) {
                     FontDescriptor::from_dictionary(s, objects)?
                 } else {
-                    return Err(FontError::MissingFontDescriptor);
+                    return Err(CidFontError::MissingFontDescriptor);
                 }
             } else {
-                return Err(FontError::MissingFontDescriptor);
+                return Err(CidFontError::MissingFontDescriptor);
             };
         Ok(Self {
             default_width,

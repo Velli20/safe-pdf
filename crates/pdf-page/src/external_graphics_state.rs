@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
-use crate::error::PageError;
 use pdf_object::{
-    dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
+    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    traits::FromDictionary,
 };
 
 use thiserror::Error;
@@ -10,11 +10,6 @@ use thiserror::Error;
 /// Errors that can occur during parsing of an External Graphics State dictionary.
 #[derive(Error, Debug)]
 pub enum ExternalGraphicsStateError {
-    //#[error("Error processing PDF object for key '{key_name}': {source}")]
-    //PdfObjectError {
-    //    key_name: String,
-    //    source: Pd,
-    //},
     #[error("Failed to parse blend mode string '{value}' for key '{key_name}': {source}")]
     BlendModeParseError {
         key_name: String,
@@ -26,7 +21,7 @@ pub enum ExternalGraphicsStateError {
     )]
     InvalidArrayStructureError {
         key_name: String,
-        expected_desc: String,
+        expected_desc: &'static str,
         actual_desc: String,
     },
     #[error("Invalid value for key '{key_name}': {description}")]
@@ -39,13 +34,19 @@ pub enum ExternalGraphicsStateError {
     )]
     UnsupportedTypeError {
         key_name: String,
-        expected_type: String,
+        expected_type: &'static str,
         found_type: String,
+    },
+    /// Error converting a PDF value to a number.
+    #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
+    NumericConversionError {
+        entry_description: &'static str,
+        #[source]
+        source: ObjectError,
     },
 }
 
 /// Represents the standard blend modes allowed in PDF.
-/// Reference: PDF 32000-1:2008, Tables 72 & 73.
 #[derive(Debug, PartialEq, Clone)]
 pub enum BlendMode {
     // Standard separable blend modes
@@ -168,7 +169,7 @@ impl FromDictionary for ExternalGraphicsState {
 
     type ResultType = Self;
 
-    type ErrorType = PageError;
+    type ErrorType = ExternalGraphicsStateError;
 
     fn from_dictionary(
         dictionary: &Dictionary,
@@ -176,121 +177,212 @@ impl FromDictionary for ExternalGraphicsState {
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let mut params: Vec<ExternalGraphicsStateKey> = Vec::new();
 
-        for (name, pdf_obj_value) in &dictionary.dictionary {
-            let key_variant = match name.as_str() {
-                // Line width (number)
-                "LW" => ExternalGraphicsStateKey::LineWidth(pdf_obj_value.as_number::<f32>()?),
-                // Line cap style (integer)
-                // Note: The PDF spec defines these as integers 0, 1, 2.
-                // Consider creating enums for LineCap and LineJoin for type safety.
-                "LC" => ExternalGraphicsStateKey::LineCap(pdf_obj_value.as_number::<i32>()?),
-                // Line join style (integer)
-                "LJ" => ExternalGraphicsStateKey::LineJoin(pdf_obj_value.as_number::<i32>()?),
-                // Miter limit (number)
-                "ML" => ExternalGraphicsStateKey::MiterLimit(pdf_obj_value.as_number::<f32>()?),
-                // Dash pattern (array and number)
-                "D" => {
-                    let arr = pdf_obj_value.as_array().unwrap();
-                    // e.g., .ok_or_else(|| PageError::General("Dash pattern /D expects an array".to_string()))?;
-                    if arr.0.len() != 2 {
-                        panic!("Dash pattern /D expects an array with 2 elements");
+        for (name, value) in &dictionary.dictionary {
+            let key_variant =
+                match name.as_str() {
+                    "LW" => ExternalGraphicsStateKey::LineWidth(value.as_number::<f32>().map_err(
+                        |e| ExternalGraphicsStateError::NumericConversionError {
+                            entry_description: "LW",
+                            source: e,
+                        },
+                    )?),
+                    "LC" => ExternalGraphicsStateKey::LineCap(value.as_number::<i32>().map_err(
+                        |e| ExternalGraphicsStateError::NumericConversionError {
+                            entry_description: "LC",
+                            source: e,
+                        },
+                    )?),
+                    "LJ" => ExternalGraphicsStateKey::LineJoin(value.as_number::<i32>().map_err(
+                        |e| ExternalGraphicsStateError::NumericConversionError {
+                            entry_description: "LJ",
+                            source: e,
+                        },
+                    )?),
+                    "ML" => {
+                        ExternalGraphicsStateKey::MiterLimit(value.as_number::<f32>().map_err(
+                            |e| ExternalGraphicsStateError::NumericConversionError {
+                                entry_description: "ML",
+                                source: e,
+                            },
+                        )?)
                     }
-                    let dash_array_obj = arr.0[0].as_array().unwrap();
-                    let dash_array_f32 = dash_array_obj
-                        .0
-                        .iter()
-                        .map(|obj| obj.as_number::<f32>())
-                        .collect::<Result<Vec<f32>, _>>()?;
-
-                    let dash_phase = arr.0[1].as_number::<f32>()?;
-                    ExternalGraphicsStateKey::DashPattern(dash_array_f32, dash_phase)
-                }
-                // Rendering intent (name)
-                "RI" => ExternalGraphicsStateKey::RenderingIntent(
-                    pdf_obj_value.as_str().unwrap().to_string(),
-                ),
-                // Overprint for stroke (boolean)
-                "OP" => {
-                    ExternalGraphicsStateKey::OverprintStroke(pdf_obj_value.as_boolean().unwrap())
-                }
-                // Overprint for fill (boolean)
-                "op" => {
-                    ExternalGraphicsStateKey::OverprintFill(pdf_obj_value.as_boolean().unwrap())
-                }
-                // Overprint mode (integer)
-                "OPM" => ExternalGraphicsStateKey::OverprintMode(pdf_obj_value.as_number::<i32>()?),
-                // Font (array: [font reference, size])
-                "Font" => {
-                    let arr = pdf_obj_value.as_array().unwrap();
-                    if arr.0.len() != 2 {
-                        panic!("Font entry /Font expects an array with 2 elements");
-                    }
-                    let font_ref = arr.0[0].as_object().unwrap();
-                    let font_size = arr.0[1].as_number::<f32>()?;
-                    ExternalGraphicsStateKey::Font(font_ref.object_number(), font_size)
-                }
-                // Blend mode (name or array of names)
-                "BM" => {
-                    let blend_modes_vec: Vec<BlendMode>;
-                    if let Some(name_str) = pdf_obj_value.as_str() {
-                        let mode = name_str.parse::<BlendMode>().unwrap();
-                        blend_modes_vec = vec![mode];
-                    } else if let Some(pdf_array) = pdf_obj_value.as_array() {
-                        blend_modes_vec = pdf_array
+                    "D" => {
+                        let arr = value.as_array().ok_or(
+                            ExternalGraphicsStateError::UnsupportedTypeError {
+                                key_name: name.clone(),
+                                expected_type: "Array",
+                                found_type: format!("{:?}", value),
+                            },
+                        )?;
+                        if arr.0.len() != 2 {
+                            return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
+                                key_name: name.clone(),
+                                expected_desc: "array with 2 elements",
+                                actual_desc: format!("array with {} elements", arr.0.len()),
+                            });
+                        }
+                        let dash_array_obj = arr.0[0].as_array().ok_or(
+                            ExternalGraphicsStateError::UnsupportedTypeError {
+                                key_name: name.clone(),
+                                expected_type: "Array",
+                                found_type: format!("{:?}", arr.0[0]),
+                            },
+                        )?;
+                        let dash_array_f32 = dash_array_obj
                             .0
                             .iter()
                             .map(|obj| {
-                                let name_str = obj.as_str().unwrap();
-                                name_str.parse::<BlendMode>().unwrap()
+                                obj.as_number::<f32>().map_err(|e| {
+                                    ExternalGraphicsStateError::NumericConversionError {
+                                        entry_description: "Dash array",
+                                        source: e,
+                                    }
+                                })
                             })
-                            .collect::<Vec<BlendMode>>();
-                    } else {
-                        panic!(
-                            "Blend mode /BM expects a Name or an Array of Names. Found unexpected type."
-                        );
+                            .collect::<Result<Vec<f32>, _>>()?;
+
+                        let dash_phase = arr.0[1].as_number::<f32>().map_err(|e| {
+                            ExternalGraphicsStateError::NumericConversionError {
+                                entry_description: "Dash phase",
+                                source: e,
+                            }
+                        })?;
+                        ExternalGraphicsStateKey::DashPattern(dash_array_f32, dash_phase)
                     }
-                    ExternalGraphicsStateKey::BlendMode(blend_modes_vec)
-                }
-                // Soft mask (dictionary or name)
-                "SMask" => {
-                    panic!()
-                    // if pdf_obj_value.is_name() {
-                    //     if pdf_obj_value.as_name_str()? == "None" {
-                    //         ExtGStateKey::SoftMask(None)
-                    //     } else {
-                    //         return Err(PageError::General(format!(
-                    //             "Invalid name for /SMask: {}",
-                    //             pdf_obj_value.as_name_str()?
-                    //         )));
-                    //     }
-                    // } else if pdf_obj_value.is_dictionary() {
-                    //     // Cloning the dictionary. Consider if a reference or more detailed parsing is needed.
-                    //     ExtGStateKey::SoftMask(Some(pdf_obj_value.as_dictionary()?.clone()))
-                    // } else {
-                    //     return Err(PageError::General(
-                    //         "Soft mask /SMask expects a Dictionary or the Name 'None'"
-                    //             .to_string(),
-                    //     ));
-                    // }
-                }
-                // Stroking alpha constant (number)
-                "CA" => ExternalGraphicsStateKey::StrokingAlpha(pdf_obj_value.as_number::<f32>()?),
-                // Nonstroking alpha constant (number)
-                "ca" => {
-                    ExternalGraphicsStateKey::NonStrokingAlpha(pdf_obj_value.as_number::<f32>()?)
-                }
-                // Add other ExtGState parameters as needed
-                unknown_key => {
-                    // It's generally better to ignore unknown keys or log a warning
-                    // than to panic, as PDF files can contain custom keys.
-                    // For now, let's keep the panic to match original behavior for unhandled knowns.
-                    eprintln!(
-                        "Warning: Unknown ExtGState parameter encountered: {}",
-                        unknown_key
-                    );
-                    continue; // Skip unknown keys
-                }
-            };
+                    "RI" => ExternalGraphicsStateKey::RenderingIntent(
+                        value
+                            .as_str()
+                            .ok_or(ExternalGraphicsStateError::UnsupportedTypeError {
+                                key_name: name.clone(),
+                                expected_type: "String",
+                                found_type: format!("{:?}", value),
+                            })?
+                            .to_string(),
+                    ),
+                    "OP" => ExternalGraphicsStateKey::OverprintStroke(value.as_boolean().ok_or(
+                        ExternalGraphicsStateError::UnsupportedTypeError {
+                            key_name: name.clone(),
+                            expected_type: "Boolean",
+                            found_type: format!("{:?}", value),
+                        },
+                    )?),
+                    "op" => ExternalGraphicsStateKey::OverprintFill(value.as_boolean().ok_or(
+                        ExternalGraphicsStateError::UnsupportedTypeError {
+                            key_name: name.clone(),
+                            expected_type: "Boolean",
+                            found_type: format!("{:?}", value),
+                        },
+                    )?),
+                    "OPM" => {
+                        ExternalGraphicsStateKey::OverprintMode(value.as_number::<i32>().map_err(
+                            |e| ExternalGraphicsStateError::NumericConversionError {
+                                entry_description: "OPM",
+                                source: e,
+                            },
+                        )?)
+                    }
+                    "Font" => {
+                        let arr = value.as_array().ok_or(
+                            ExternalGraphicsStateError::UnsupportedTypeError {
+                                key_name: name.clone(),
+                                expected_type: "Array",
+                                found_type: format!("{:?}", value),
+                            },
+                        )?;
+                        if arr.0.len() != 2 {
+                            return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
+                                key_name: name.clone(),
+                                expected_desc: "array with 2 elements",
+                                actual_desc: format!("array with {} elements", arr.0.len()),
+                            });
+                        }
+                        let font_ref = arr.0[0].as_object().ok_or(
+                            ExternalGraphicsStateError::UnsupportedTypeError {
+                                key_name: name.clone(),
+                                expected_type: "Object",
+                                found_type: format!("{:?}", arr.0[0]),
+                            },
+                        )?;
+                        let font_size = arr.0[1].as_number::<f32>().map_err(|e| {
+                            ExternalGraphicsStateError::NumericConversionError {
+                                entry_description: "Font size",
+                                source: e,
+                            }
+                        })?;
+                        ExternalGraphicsStateKey::Font(font_ref.object_number(), font_size)
+                    }
+                    "BM" => {
+                        let blend_modes_vec: Vec<BlendMode>;
+                        if let Some(name_str) = value.as_str() {
+                            let mode = name_str.parse::<BlendMode>().map_err(|e| {
+                                ExternalGraphicsStateError::BlendModeParseError {
+                                    key_name: name.clone(),
+                                    value: name_str.to_string(),
+                                    source: e,
+                                }
+                            })?;
+                            blend_modes_vec = vec![mode];
+                        } else if let Some(pdf_array) = value.as_array() {
+                            blend_modes_vec = pdf_array
+                                .0
+                                .iter()
+                                .map(|obj| {
+                                    let name_str = obj.as_str().ok_or(
+                                        ExternalGraphicsStateError::UnsupportedTypeError {
+                                            key_name: name.clone(),
+                                            expected_type: "String",
+                                            found_type: format!("{:?}", obj),
+                                        },
+                                    )?;
+                                    name_str.parse::<BlendMode>().map_err(|e| {
+                                        ExternalGraphicsStateError::BlendModeParseError {
+                                            key_name: name.clone(),
+                                            value: name_str.to_string(),
+                                            source: e,
+                                        }
+                                    })
+                                })
+                                .collect::<Result<Vec<BlendMode>, _>>()?;
+                        } else {
+                            return Err(ExternalGraphicsStateError::UnsupportedTypeError {
+                                key_name: name.clone(),
+                                expected_type: "Name or Array of Names",
+                                found_type: format!("{:?}", value),
+                            });
+                        }
+                        ExternalGraphicsStateKey::BlendMode(blend_modes_vec)
+                    }
+                    "SMask" => {
+                        return Err(ExternalGraphicsStateError::UnsupportedTypeError {
+                            key_name: name.clone(),
+                            expected_type: "Dictionary or Name",
+                            found_type: format!("{:?}", value),
+                        });
+                    }
+                    "CA" => {
+                        ExternalGraphicsStateKey::StrokingAlpha(value.as_number::<f32>().map_err(
+                            |e| ExternalGraphicsStateError::NumericConversionError {
+                                entry_description: "CA",
+                                source: e,
+                            },
+                        )?)
+                    }
+                    "ca" => ExternalGraphicsStateKey::NonStrokingAlpha(
+                        value.as_number::<f32>().map_err(|e| {
+                            ExternalGraphicsStateError::NumericConversionError {
+                                entry_description: "ca",
+                                source: e,
+                            }
+                        })?,
+                    ),
+                    unknown_key => {
+                        eprintln!(
+                            "Warning: Unknown ExtGState parameter encountered: {}",
+                            unknown_key
+                        );
+                        continue;
+                    }
+                };
             params.push(key_variant);
         }
 

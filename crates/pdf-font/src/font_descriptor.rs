@@ -1,10 +1,9 @@
 use bitflags::bitflags;
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     traits::FromDictionary,
 };
-
-use crate::error::FontError;
+use thiserror::Error;
 
 bitflags! {
     /// Defines various characteristics of a font, such as whether it is serif, italic, etc.
@@ -32,6 +31,24 @@ bitflags! {
         /// Set if the font is forcibly bold.
         const FORCE_BOLD   = 0x0100;
     }
+}
+
+/// Defines errors that can occur while reading or processing font-related PDF objects.
+#[derive(Debug, Error, Clone, PartialEq)]
+pub enum FontDescriptorError {
+    #[error("Invalid data for /FontBBox entry")]
+    InvalidFontBoundingBox,
+    #[error("Missing /FontBBox entry")]
+    MissingFontBoundingBox,
+    #[error("Missing /FontName entry")]
+    MissingFontName,
+    /// Error converting a PDF value to a number.
+    #[error("Failed to convert PDF value to number for '{entry_description}': {err}")]
+    FontBoundingBoxNumericConversionError {
+        entry_description: &'static str,
+        #[source]
+        err: ObjectError,
+    },
 }
 
 /// Represents a font descriptor, a dictionary that provides detailed information
@@ -76,7 +93,7 @@ impl FromDictionary for FontDescriptor {
     const KEY: &'static str = "FontDescriptor";
 
     type ResultType = Self;
-    type ErrorType = FontError;
+    type ErrorType = FontDescriptorError;
 
     fn from_dictionary(
         dictionary: &Dictionary,
@@ -87,21 +104,33 @@ impl FromDictionary for FontDescriptor {
         let cap_height = dictionary.get_number("CapHeight").unwrap_or(0);
         let flags = dictionary.get_number("Flags").unwrap_or(0);
         let flags = FontDescriptorFlags::from_bits_truncate(flags as u32);
-        let font_bounding_box = dictionary.get_array("FontBBox").unwrap();
+        let font_bounding_box = dictionary
+            .get_array("FontBBox")
+            .ok_or(FontDescriptorError::MissingFontBoundingBox)?;
+
+        // Helper closure to convert a PDF Value to i32 for FontBBox entries
+        // and map errors appropriately.
+        let convert_bbox_entry = |value: &pdf_object::Value, description: &'static str| {
+            value.as_number::<i32>().map_err(|err| {
+                FontDescriptorError::FontBoundingBoxNumericConversionError {
+                    entry_description: description,
+                    err,
+                }
+            })
+        };
+
         let font_bounding_box = match font_bounding_box.0.as_slice() {
             // Pattern match for exactly 4 elements in the slice.
             [l, t, r, b] => {
-                let left = l.as_number::<i32>()?;
-                let top = t.as_number::<i32>()?;
-                let right = r.as_number::<i32>()?;
-                let bottom = b.as_number::<i32>()?;
-
-                [left, top, right, bottom]
+                [
+                    convert_bbox_entry(l, "left")?,   // Corresponds to llx
+                    convert_bbox_entry(t, "top")?,    // Corresponds to lly
+                    convert_bbox_entry(r, "right")?,  // Corresponds to urx
+                    convert_bbox_entry(b, "bottom")?, // Corresponds to ury
+                ]
             }
             _ => {
-                return Err(FontError::InvalidFontDescriptorData(
-                    "font_bounding_box array must contain exactly 4 numbers",
-                ));
+                return Err(FontDescriptorError::InvalidFontBoundingBox);
             }
         };
         let font_family = dictionary.get_string("FontFamily").cloned();

@@ -1,16 +1,14 @@
 use pdf_content_stream::error::PdfOperatorError;
-use pdf_font::error::FontError;
+use pdf_font::font::FontError;
 use pdf_object::error::ObjectError;
+
+use crate::resources::ResourcesError;
 
 /// Defines errors that can occur when interpreting a PDF page object.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PageError {
     /// The page dictionary is missing `/Contents` entry.
     MissingContent,
-    /// The page is missing required `/MediaBox` entry.
-    MissingMediaBox,
-    /// The page is missing required `/Resorces` entry.
-    MissingResources,
     /// The `/MediaBox` entry in the page dictionary is invalid.
     InvalidMediaBox(&'static str),
     /// Wraps an error message from an `ObjectError`
@@ -20,11 +18,8 @@ pub enum PageError {
     PdfOperatorError(String),
     /// Wraps an error message from a `FontError`.
     FontResourceError(String),
+    PageResourcesError(String),
     NotDictionary(&'static str),
-    /// The `/Pages` entry in the document catalog is missing or invalid.
-    MissingPages,
-    /// A specific page object, referenced by its object number, could not be found or is not a valid page dictionary.
-    PageNotFound(i32),
 }
 
 impl From<ObjectError> for PageError {
@@ -45,17 +40,17 @@ impl From<FontError> for PageError {
     }
 }
 
+impl From<ResourcesError> for PageError {
+    fn from(err: ResourcesError) -> Self {
+        Self::PageResourcesError(err.to_string())
+    }
+}
+
 impl std::fmt::Display for PageError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PageError::MissingContent => {
                 write!(f, "Missing `/Contents` entry")
-            }
-            PageError::MissingMediaBox => {
-                write!(f, "Missing `/MediaBox` entry")
-            }
-            PageError::MissingResources => {
-                write!(f, "Missing `/MissingResources` entry")
             }
             PageError::InvalidMediaBox(err) => {
                 write!(f, "Invalid `/MediaBox` entry: {}", err)
@@ -77,14 +72,11 @@ impl std::fmt::Display for PageError {
             PageError::FontResourceError(err) => {
                 write!(f, "Error loading font resource: {}", err)
             }
+            PageError::PageResourcesError(err) => {
+                write!(f, "Error loading page resources: {}", err)
+            }
             PageError::NotDictionary(name) => {
                 write!(f, "Expected a Dictionary object for {}", name)
-            }
-            PageError::MissingPages => {
-                write!(f, "Missing `/Pages` entry in the document catalog")
-            }
-            PageError::PageNotFound(number) => {
-                write!(f, "Page with object number {} not found", number)
             }
         }
     }
