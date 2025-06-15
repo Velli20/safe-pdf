@@ -2,7 +2,7 @@ use pdf_content_stream::error::PdfOperatorError;
 use pdf_font::font::FontError;
 use pdf_object::error::ObjectError;
 
-use crate::resources::ResourcesError;
+use crate::{content_stream::ContentStreamReadError, resources::ResourcesError};
 
 /// Defines errors that can occur when interpreting a PDF page object.
 #[derive(Debug, Clone, PartialEq)]
@@ -19,6 +19,7 @@ pub enum PageError {
     /// Wraps an error message from a `FontError`.
     FontResourceError(String),
     PageResourcesError(String),
+    ContentStreamReadError(String),
     NotDictionary(&'static str),
 }
 
@@ -43,6 +44,11 @@ impl From<FontError> for PageError {
 impl From<ResourcesError> for PageError {
     fn from(err: ResourcesError) -> Self {
         Self::PageResourcesError(err.to_string())
+    }
+}
+impl From<ContentStreamReadError> for PageError {
+    fn from(err: ContentStreamReadError) -> Self {
+        Self::ContentStreamReadError(err.to_string())
     }
 }
 
@@ -74,6 +80,9 @@ impl std::fmt::Display for PageError {
             }
             PageError::PageResourcesError(err) => {
                 write!(f, "Error loading page resources: {}", err)
+            }
+            PageError::ContentStreamReadError(err) => {
+                write!(f, "Error reading content stream: {}", err)
             }
             PageError::NotDictionary(name) => {
                 write!(f, "Expected a Dictionary object for {}", name)

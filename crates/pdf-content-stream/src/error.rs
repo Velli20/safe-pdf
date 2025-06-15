@@ -48,3 +48,5 @@ impl From<ParserError> for PdfOperatorError {
         Self::OperandTokenizationError(value.to_string())
     }
 }
+
+impl std::error::Error for PdfOperatorError {}

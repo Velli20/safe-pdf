@@ -37,14 +37,6 @@ pub enum PdfPagesError {
     PageProcessingError {
         obj_num: i32, /* , #[source] source: PageError  */
     },
-
-    /// An error occurred while processing a nested `PdfPages` object.
-    #[error("Error processing nested Pages object (obj {obj_num}): {source}")]
-    NestedPagesError {
-        obj_num: i32,
-        #[source]
-        source: Box<PdfPagesError>,
-    },
 }
 
 pub struct PdfPages {
@@ -100,12 +92,7 @@ impl FromDictionary for PdfPages {
                 })?;
                 pages.push(page);
             } else if object_type == Self::KEY {
-                let pages_obj = PdfPages::from_dictionary(kid_dict, objects).map_err(|source| {
-                    PdfPagesError::NestedPagesError {
-                        obj_num: kid_obj_num,
-                        source: Box::new(source),
-                    }
-                })?;
+                let pages_obj = PdfPages::from_dictionary(kid_dict, objects)?;
                 pages.extend(pages_obj.pages);
             } else {
                 return Err(PdfPagesError::UnexpectedObjectTypeInKids {

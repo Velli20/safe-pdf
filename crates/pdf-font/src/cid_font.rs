@@ -5,7 +5,7 @@ use pdf_object::{
 
 use crate::{
     font_descriptor::{FontDescriptor, FontDescriptorError},
-    glyph_widths_map::GlyphWidthsMap,
+    glyph_widths_map::{GlyphWidthsMap, GlyphWidthsMapError},
 };
 use thiserror::Error;
 
@@ -39,6 +39,10 @@ pub enum CidFontError {
     MissingFontDescriptor,
     #[error("FontDescriptor parsing error: {0}")]
     FontDescriptorError(#[from] FontDescriptorError),
+    #[error("GlyphWidthsMap parsing error: {0}")]
+    GlyphWidthsMapError(#[from] GlyphWidthsMapError),
+    #[error("Missing /Subtype entry")]
+    MissingSubType,
 }
 
 impl FromDictionary for CharacterIdentifierFont {
@@ -57,12 +61,15 @@ impl FromDictionary for CharacterIdentifierFont {
         // The key is the starting CID, and the value is a vector of widths
         // for consecutive CIDs starting from the key.
         let widths_map = if let Some(array) = dictionary.get_array("W") {
-            Some(GlyphWidthsMap::from_array(array).unwrap())
+            Some(GlyphWidthsMap::from_array(array)?)
         } else {
             None
         };
 
-        let subtype = dictionary.get_string("Subtype").cloned().unwrap();
+        let subtype = dictionary
+            .get_string("Subtype")
+            .ok_or(CidFontError::MissingSubType)?
+            .to_string();
 
         let descriptor =
             if let Some(ObjectVariant::Reference(num)) = dictionary.get_object("FontDescriptor") {
