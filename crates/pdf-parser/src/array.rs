@@ -1,16 +1,23 @@
 use pdf_object::array::Array;
-use pdf_tokenizer::PdfToken;
+use pdf_tokenizer::{PdfToken, error::TokenizerError};
+use thiserror::Error;
 
-use crate::{ParseObject, PdfParser, error::ParserError};
+use crate::{PdfParser, traits::ArrayParser};
 
 /// Represents an error that can occur while parsing an array object.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Error)]
 pub enum ArrayError {
     /// Indicates that there was an error while parsing an object within the array.
-    InvalidObject(String),
+    #[error("Error parsing an object within the array: {err}")]
+    ObjectParseError { err: String },
+    /// Indicates an error from the tokenizer.
+    #[error("Tokenizer error: {0}")]
+    TokenizerError(#[from] TokenizerError),
 }
 
-impl ParseObject<Array> for PdfParser<'_> {
+impl ArrayParser for PdfParser<'_> {
+    type ErrorType = ArrayError;
+
     /// Parses a PDF array object from the current position in the input stream.
     ///
     /// According to the PDF 1.7 Specification (Section 7.3.6 "Array Objects"):
@@ -39,31 +46,24 @@ impl ParseObject<Array> for PdfParser<'_> {
     /// An `Array` object containing the parsed PDF objects as its elements,
     /// or a `ParserError` if the input is malformed (e.g., missing delimiters,
     /// invalid object syntax within the array, or an unexpected token).
-    fn parse(&mut self) -> Result<Array, ParserError> {
+    fn parse_array(&mut self) -> Result<Array, ArrayError> {
         self.tokenizer.expect(PdfToken::LeftSquareBracket)?;
         self.skip_whitespace();
 
         let mut values = Vec::new();
-        while let Some(token) = self.tokenizer.peek()? {
+        while let Some(token) = self.tokenizer.peek() {
             self.skip_whitespace();
 
             if let PdfToken::RightSquareBracket = token {
                 break;
             }
 
-            match self.parse_object() {
-                Ok(value) => {
-                    values.push(value);
-                }
-                Err(err) => {
-                    return Err(ParserError::ArrayError(ArrayError::InvalidObject(format!(
-                        "Invalid object in array: {:?}",
-                        err
-                    ))));
-                }
-            }
+            values.push(
+                self.parse_object()
+                    .map_err(|e| ArrayError::ObjectParseError { err: e.to_string() })?,
+            );
 
-            if let Some(PdfToken::RightSquareBracket) = self.tokenizer.peek()? {
+            if let Some(PdfToken::RightSquareBracket) = self.tokenizer.peek() {
                 break;
             }
             self.skip_whitespace();
@@ -72,16 +72,6 @@ impl ParseObject<Array> for PdfParser<'_> {
         self.tokenizer.expect(PdfToken::RightSquareBracket)?;
 
         Ok(Array::new(values))
-    }
-}
-
-impl std::fmt::Display for ArrayError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ArrayError::InvalidObject(err) => {
-                write!(f, "Error while parsing array object: {}", err)
-            }
-        }
     }
 }
 
@@ -102,7 +92,7 @@ mod tests {
 
         for (input, expected_count) in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let result: Array = parser.parse().unwrap();
+            let result = parser.parse_array().unwrap();
             assert_eq!(
                 result.0.len(),
                 expected_count,
@@ -123,7 +113,7 @@ mod tests {
 
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            if let Ok(Array(v)) = parser.parse() {
+            if let Ok(Array(v)) = parser.parse_array() {
                 panic!(
                     "Expected Err, got {:?} len {} input '{}™",
                     v,

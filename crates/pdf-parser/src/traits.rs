@@ -1,0 +1,89 @@
+use pdf_object::{
+    ObjectVariant, array::Array, boolean::Boolean, comment::Comment,
+    cross_reference_table::CrossReferenceTable, dictionary::Dictionary, hex_string::HexString,
+    literal_string::LiteralString, name::Name, null::NullObject, number::Number, trailer::Trailer,
+    version::Version,
+};
+
+pub trait ArrayParser {
+    type ErrorType;
+
+    fn parse_array(&mut self) -> Result<Array, Self::ErrorType>;
+}
+
+pub trait StreamParser {
+    type ErrorType;
+
+    fn parse_stream(&mut self, dictionary: &Dictionary) -> Result<Vec<u8>, Self::ErrorType>;
+}
+
+pub trait BooleanParser {
+    type ErrorType;
+
+    fn parse_boolean(&mut self) -> Result<Boolean, Self::ErrorType>;
+}
+
+pub trait CommentParser {
+    type ErrorType;
+
+    fn parse_comment(&mut self) -> Result<Comment, Self::ErrorType>;
+}
+
+pub trait CrossReferenceTableParser {
+    type ErrorType;
+
+    fn parse_cross_reference_table(&mut self) -> Result<CrossReferenceTable, Self::ErrorType>;
+}
+
+pub trait DictionaryParser {
+    type ErrorType;
+
+    fn parse_dictionary(&mut self) -> Result<Dictionary, Self::ErrorType>;
+}
+
+pub trait HeaderParser {
+    type ErrorType;
+
+    fn parse_header(&mut self) -> Result<Version, Self::ErrorType>;
+}
+
+pub trait HexStringParser {
+    type ErrorType;
+
+    fn parse_hex_string(&mut self) -> Result<HexString, Self::ErrorType>;
+}
+
+pub trait IndirectObjectParser {
+    type ErrorType;
+
+    fn parse_indirect_object(&mut self) -> Result<ObjectVariant, Self::ErrorType>;
+}
+
+pub trait LiteralStringParser {
+    type ErrorType;
+
+    fn parse_literal_string(&mut self) -> Result<LiteralString, Self::ErrorType>;
+}
+
+pub trait NameParser {
+    type ErrorType;
+
+    fn parse_name(&mut self) -> Result<Name, Self::ErrorType>;
+}
+
+pub trait NullObjectParser {
+    type ErrorType;
+
+    fn parse_null_object(&mut self) -> Result<NullObject, Self::ErrorType>;
+}
+
+pub trait NumberParser {
+    type ErrorType;
+
+    fn parse_number(&mut self) -> Result<Number, Self::ErrorType>;
+}
+pub trait TrailerParser {
+    type ErrorType;
+
+    fn parse_trailer(&mut self) -> Result<Trailer, Self::ErrorType>;
+}

@@ -4,7 +4,7 @@ use pdf_object::{
     version::Version,
 };
 use pdf_page::{page::PdfPage, pages::PdfPages};
-use pdf_parser::{ParseObject, PdfParser};
+use pdf_parser::{PdfParser, traits::HeaderParser};
 
 pub mod error;
 
@@ -31,7 +31,7 @@ impl PdfDocument {
 
     pub fn from(input: &[u8]) -> Result<Self, PdfError> {
         let mut parser = PdfParser::from(input);
-        let version: Version = parser.parse().unwrap();
+        let version = parser.parse_header().unwrap();
 
         let mut trailer = None;
         let mut objects = ObjectCollection::default();

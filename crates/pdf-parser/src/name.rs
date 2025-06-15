@@ -1,16 +1,33 @@
 use pdf_object::name::Name;
-use pdf_tokenizer::PdfToken;
+use pdf_tokenizer::{PdfToken, error::TokenizerError};
+use thiserror::Error;
 
-use crate::{ParseObject, PdfParser, error::ParserError};
+use crate::{PdfParser, traits::NameParser};
 
 /// Represents an error that can occur while parsing a Name object.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Error)]
 pub enum NameObjectError {
-    /// Indicates that the escape sequence is invalid.
-    InvalidEscapeSequence,
+    #[error(
+        "Invalid hex escape in name object: Incomplete sequence, expected two hex digits after '#'"
+    )]
+    IncompleteHexEscape,
+    #[error("Invalid hex escape in name object: Non-hex character '{0}' found in sequence")]
+    NonHexDigitInEscape(char),
+    #[error(
+        "Invalid hex escape in name object: Could not parse hex string '{hex_pair}'. Reason: {reason}"
+    )]
+    HexRadixError { hex_pair: String, reason: String },
+
+    // Existing errors
+    #[error("Invalid token in name object (e.g., empty name after '/')")]
+    InvalidToken,
+    #[error("Tokenizer error: {0}")]
+    TokenizerError(#[from] TokenizerError),
 }
 
-impl ParseObject<Name> for PdfParser<'_> {
+impl NameParser for PdfParser<'_> {
+    type ErrorType = NameObjectError;
+
     /// Parses a PDF name object from the current position in the input stream.
     ///
     /// According to the PDF 1.7 Specification (Section 7.3.5 "Name Objects"):
@@ -47,12 +64,12 @@ impl ParseObject<Name> for PdfParser<'_> {
     /// A `Name` object containing the decoded name string (with hex escapes resolved),
     /// or a `ParserError` if the input does not start with `/`, is empty after the `/`,
     /// or contains an invalid hex escape sequence.
-    fn parse(&mut self) -> Result<Name, ParserError> {
+    fn parse_name(&mut self) -> Result<Name, Self::ErrorType> {
         self.tokenizer.expect(PdfToken::Solidus)?;
 
         let name = self.tokenizer.read_while_u8(|b| !Self::is_pdf_delimiter(b));
         if name.is_empty() {
-            return Err(ParserError::InvalidToken);
+            return Err(NameObjectError::InvalidToken);
         }
 
         let name = escape(name)?;
@@ -63,39 +80,47 @@ impl ParseObject<Name> for PdfParser<'_> {
 
 /// Decodes escape sequences in PDF name objects.
 /// Handles '#' followed by two hex digits by converting them to the corresponding ASCII character.
-fn escape(input: &[u8]) -> Result<String, ParserError> {
+fn escape(input: &[u8]) -> Result<String, NameObjectError> {
     let mut result = String::with_capacity(input.len());
     let mut chars = input.iter();
 
     while let Some(byte) = chars.next() {
         match byte {
             b'#' => {
-                // Read next two bytes for hex digits
-                let hex = match (chars.next(), chars.next()) {
-                    (Some(&h1), Some(&h2)) if h1.is_ascii_hexdigit() && h2.is_ascii_hexdigit() => {
-                        let hex_str = [h1 as char, h2 as char];
-                        u8::from_str_radix(&String::from_iter(hex_str), 16).map_err(|_| {
-                            ParserError::from(NameObjectError::InvalidEscapeSequence)
-                        })?
-                    }
-                    _ => return Err(ParserError::from(NameObjectError::InvalidEscapeSequence)),
+                // Read the first hex digit character
+                let h1_byte = match chars.next() {
+                    Some(b) => *b,
+                    None => return Err(NameObjectError::IncompleteHexEscape),
                 };
-                result.push(hex as char);
+                // Read the second hex digit character
+                let h2_byte = match chars.next() {
+                    Some(b) => *b,
+                    None => return Err(NameObjectError::IncompleteHexEscape),
+                };
+
+                let h1_char = h1_byte as char;
+                let h2_char = h2_byte as char;
+
+                if !h1_char.is_ascii_hexdigit() {
+                    return Err(NameObjectError::NonHexDigitInEscape(h1_char));
+                }
+                if !h2_char.is_ascii_hexdigit() {
+                    return Err(NameObjectError::NonHexDigitInEscape(h2_char));
+                }
+
+                let hex_pair_str = String::from_iter([h1_char, h2_char]);
+                let byte_val = u8::from_str_radix(&hex_pair_str, 16).map_err(|e| {
+                    NameObjectError::HexRadixError {
+                        hex_pair: hex_pair_str,
+                        reason: e.to_string(),
+                    }
+                })?;
+                result.push(byte_val as char);
             }
             _ => result.push(*byte as char),
         }
     }
     Ok(result)
-}
-
-impl std::fmt::Display for NameObjectError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            NameObjectError::InvalidEscapeSequence => {
-                write!(f, "Invalid escape sequence in name object")
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -123,7 +148,7 @@ mod tests {
         ];
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let Name(value) = parser.parse().unwrap();
+            let Name(value) = parser.parse_name().unwrap();
             if value != expected {
                 panic!(
                     "Expected `{}`, but got `{}` for input `{}`",
@@ -149,7 +174,7 @@ mod tests {
         ];
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            let result: Result<Name, ParserError> = parser.parse();
+            let result = parser.parse_name();
             if result.is_ok() {
                 panic!(
                     "Expected error for input `{}`",

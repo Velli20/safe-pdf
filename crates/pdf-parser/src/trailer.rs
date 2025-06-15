@@ -1,38 +1,26 @@
-use crate::{ParseObject, PdfParser, error::ParserError};
+use crate::{PdfParser, error::ParserError, traits::TrailerParser};
 use pdf_object::{Value, trailer::Trailer};
+use thiserror::Error;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Error)]
 pub enum TrailerError {
-    InvalidKeyword(String),
-    InvalidSize,
-    InvalidRoot,
-    InvalidPrev,
-    InvalidEncrypt,
-    InvalidID,
-    InvalidInfo,
-    MissingOffset,
+    #[error("Failed to parse 'trailer' keyword: {source}")]
+    FailedToParseTrailerKeyword { source: ParserError },
+    #[error("Failed to parse 'startxref' keyword: {source}")]
+    FailedToParseStartXrefKeyword { source: ParserError },
+    #[error("Error while reading offset in trailer: {source}")]
+    OffsetReadError { source: ParserError },
+    #[error("Missing EOL marker after trailer dictionary: {source}")]
+    MissingEOLAfterDictionary { source: ParserError },
+    #[error("Failed to parse dictionary object in trailer: {source}")]
+    FailedToParseDictionary { source: ParserError },
+    #[error("Missing dictionary object in trailer")]
     MissingDictionary,
 }
 
-impl std::fmt::Display for TrailerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TrailerError::InvalidKeyword(keyword) => {
-                write!(f, "Invalid trailer keyword: {}", keyword)
-            }
-            TrailerError::InvalidSize => write!(f, "Invalid /Size in trailer"),
-            TrailerError::InvalidRoot => write!(f, "Invalid /Root in trailer"),
-            TrailerError::InvalidPrev => write!(f, "Invalid /Prev in trailer"),
-            TrailerError::InvalidEncrypt => write!(f, "Invalid /Encrypt in trailer"),
-            TrailerError::InvalidID => write!(f, "Invalid /ID in trailer"),
-            TrailerError::InvalidInfo => write!(f, "Invalid /Info in trailer"),
-            TrailerError::MissingOffset => write!(f, "Missing offset in trailer"),
-            TrailerError::MissingDictionary => write!(f, "Missing dictionary object in trailer"),
-        }
-    }
-}
+impl TrailerParser for PdfParser<'_> {
+    type ErrorType = TrailerError;
 
-impl ParseObject<Trailer> for PdfParser<'_> {
     /// Parses the PDF file trailer from the current position in the input stream.
     ///
     /// According to the PDF 1.7 Specification (Section 7.5.5 "File Trailer"):
@@ -75,28 +63,34 @@ impl ParseObject<Trailer> for PdfParser<'_> {
     /// A `Trailer` object containing the parsed dictionary and the `startxref` offset,
     /// or a `ParserError` if the trailer is malformed (e.g., missing keywords,
     /// invalid dictionary, or missing offset).
-    fn parse(&mut self) -> Result<Trailer, ParserError> {
+    fn parse_trailer(&mut self) -> Result<Trailer, Self::ErrorType> {
         const TRAILER_KEYWORD: &[u8] = b"trailer";
         const START_XREF_KEYWORD: &[u8] = b"startxref";
 
         // Expect the `trailer` keyword.
-        self.read_keyword(TRAILER_KEYWORD)?;
+        self.read_keyword(TRAILER_KEYWORD)
+            .map_err(|source| TrailerError::FailedToParseTrailerKeyword { source })?;
 
         // Try parse dictionary object.
-        let dictionary = match self.parse_object()? {
-            Value::Dictionary(dictionary) => dictionary,
-            _ => return Err(ParserError::from(TrailerError::MissingDictionary)),
+        let dictionary = match self.parse_object() {
+            Ok(Value::Dictionary(dict)) => dict,
+            Ok(_) => return Err(TrailerError::MissingDictionary),
+            Err(source) => {
+                return Err(TrailerError::FailedToParseDictionary { source });
+            }
         };
 
-        self.read_end_of_line_marker()?;
+        self.read_end_of_line_marker()
+            .map_err(|source| TrailerError::MissingEOLAfterDictionary { source })?;
 
         // Read the `startxref` keyword.
-        self.read_keyword(START_XREF_KEYWORD)?;
+        self.read_keyword(START_XREF_KEYWORD)
+            .map_err(|source| TrailerError::FailedToParseStartXrefKeyword { source })?;
 
         // Read the offset of the xref section.
         let offset = self
             .read_number::<u32>()
-            .map_err(|err| TrailerError::MissingOffset)?;
+            .map_err(|source| TrailerError::OffsetReadError { source })?;
 
         Ok(Trailer::new(dictionary, offset))
     }
@@ -111,7 +105,7 @@ mod tests {
         let input = b"trailer\n<< /Size 22 /Root 1 0 R >>\nstartxref\n187\n%%EOF";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let trailer: Trailer = parser.parse().unwrap();
+        let trailer = parser.parse_trailer().unwrap();
 
         assert_eq!(trailer.dictionary.get_number("Size").unwrap(), 22);
         // assert_eq!(trailer.dictionary.get("Root").unwrap(), &Value::Reference(1, 0));

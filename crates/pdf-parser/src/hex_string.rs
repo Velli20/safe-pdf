@@ -1,16 +1,22 @@
 use pdf_object::hex_string::HexString;
-use pdf_tokenizer::PdfToken;
+use pdf_tokenizer::{PdfToken, error::TokenizerError};
+use thiserror::Error;
 
-use crate::{ParseObject, PdfParser, error::ParserError};
+use crate::{PdfParser, traits::HexStringParser};
 
 /// Represents an error that can occur while parsing a hex string object.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Error)]
 pub enum HexStringError {
     /// Indicates that the input contains a non-hexadecimal character.
-    NotHexadecimal(char),
+    #[error("Invalid non-hex decimal character in the input: '{0}'")]
+    NotHexDecimal(char),
+    #[error("Tokenizer error: {0}")]
+    TokenizerError(#[from] TokenizerError),
 }
 
-impl ParseObject<HexString> for PdfParser<'_> {
+impl HexStringParser for PdfParser<'_> {
+    type ErrorType = HexStringError;
+
     /// Parses a hexadecimal string object from the current position in the input stream.
     ///
     /// According to PDF 1.7 Specification (Section 7.3.4.3), a hex string:
@@ -31,7 +37,7 @@ impl ParseObject<HexString> for PdfParser<'_> {
     ///
     /// `HexString` containing the decoded string value or an error if invalid format
     /// or characters are encountered.
-    fn parse(&mut self) -> Result<HexString, ParserError> {
+    fn parse_hex_string(&mut self) -> Result<HexString, Self::ErrorType> {
         self.tokenizer.expect(PdfToken::LeftAngleBracket)?;
 
         // 1. Read until the closing `>` of the hex string.
@@ -46,9 +52,7 @@ impl ParseObject<HexString> for PdfParser<'_> {
 
             // 2. Check if the character is a valid hex digit (0-9, a-f, A-F)
             if !b.is_ascii_hexdigit() {
-                return Err(ParserError::HexStringError(HexStringError::NotHexadecimal(
-                    *b as char,
-                )));
+                return Err(HexStringError::NotHexDecimal(*b as char));
             }
             // 3. Append hex digits to the hex string.
             filtered.push(*b);
@@ -77,16 +81,6 @@ impl ParseObject<HexString> for PdfParser<'_> {
 
         // Return the hex string as a Value
         Ok(HexString::new(hex_string))
-    }
-}
-
-impl std::fmt::Display for HexStringError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            HexStringError::NotHexadecimal(c) => {
-                write!(f, "Invalid non-hex decimal character in the input: '{}'", c)
-            }
-        }
     }
 }
 
@@ -123,7 +117,7 @@ mod tests {
 
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse().unwrap();
+            let result = parser.parse_hex_string().unwrap();
             let HexString(value) = result;
             assert_eq!(value, expected);
         }
@@ -140,7 +134,7 @@ mod tests {
 
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            let result: Result<HexString, ParserError> = parser.parse();
+            let result = parser.parse_hex_string();
             assert!(
                 result.is_err(),
                 "Expected error for invalid input `{}`",

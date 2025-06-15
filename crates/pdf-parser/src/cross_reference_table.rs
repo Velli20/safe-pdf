@@ -1,28 +1,41 @@
 use pdf_object::cross_reference_table::{
     CrossReferenceEntry, CrossReferenceStatus, CrossReferenceTable,
 };
-use pdf_tokenizer::PdfToken;
+use pdf_tokenizer::{PdfToken, error::TokenizerError};
+use thiserror::Error;
 
-use crate::{ParseObject, PdfParser, error::ParserError};
+use crate::{PdfParser, traits::CrossReferenceTableParser};
 
 /// Represents an error that can occur while parsing a cross-reference table.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Error)]
 pub enum CrossReferenceTableError {
     /// Indicates that the status character in a cross-reference entry is invalid.
-    InvalidCrossReferenceStatus(u8),
+    #[error("Invalid cross-reference status charachter: '{0}'")]
+    InvalidCrossReferenceStatus(char),
     /// Indicates that the entry count in a cross-reference table is missing.
+    #[error("Missing entry count in cross-reference table")]
     MissingTableEntryCount,
     /// Indicates that the object number in a cross-reference entry is missing.
+    #[error("Missing object number in cross-reference entry")]
     MissingObjectNumber,
     /// Indicates that the generation number in a cross-reference entry is missing.
+    #[error("Missing generation number in cross-reference entry")]
     MissingGenerationNumber,
     /// Indicates that the status in a cross-reference entry is missing.
+    #[error("Missing status in cross-reference entry")]
     MissingStatus,
     /// Indicates that number of entries read does not match the expected count.
+    #[error("Missing one or more table entries. Expected {0} entries, but found {1}")]
     MissigTableEntries(usize, usize),
+    #[error("Tokenizer error: {0}")]
+    TokenizerError(#[from] TokenizerError),
+    #[error("Parser error: {err}")]
+    ParserError { err: String },
 }
 
-impl ParseObject<CrossReferenceTable> for PdfParser<'_> {
+impl CrossReferenceTableParser for PdfParser<'_> {
+    type ErrorType = CrossReferenceTableError;
+
     /// Parses a cross-reference (xref) table from a PDF 1.7 document.
     ///
     /// According to the PDF 1.7 specification, section 7.5.4, a traditional
@@ -67,11 +80,14 @@ impl ParseObject<CrossReferenceTable> for PdfParser<'_> {
     /// 0000000017 00000 n
     /// 0000000081 00000 n
     /// ```
-    fn parse(&mut self) -> Result<CrossReferenceTable, ParserError> {
+    fn parse_cross_reference_table(&mut self) -> Result<CrossReferenceTable, Self::ErrorType> {
         const XREF_KEYWORD: &[u8] = b"xref";
 
         // Expect the `xref` keyword.
-        self.read_keyword(XREF_KEYWORD)?;
+        self.read_keyword(XREF_KEYWORD)
+            .map_err(|err| CrossReferenceTableError::ParserError {
+                err: err.to_string(),
+            })?;
 
         let mut total_number_of_entries = 0;
         let mut first_object_number = None;
@@ -79,8 +95,12 @@ impl ParseObject<CrossReferenceTable> for PdfParser<'_> {
         let mut entries = Vec::new();
         loop {
             // Read the first object number.
-            if let Some(PdfToken::Number(_)) = self.tokenizer.peek()? {
-                let first_object_number_in_section = self.read_number::<i32>()?;
+            if let Some(PdfToken::Number(_)) = self.tokenizer.peek() {
+                let first_object_number_in_section = self.read_number::<i32>().map_err(|err| {
+                    CrossReferenceTableError::ParserError {
+                        err: err.to_string(),
+                    }
+                })?;
                 if first_object_number.is_none() {
                     first_object_number = Some(first_object_number_in_section);
                 }
@@ -107,30 +127,26 @@ impl ParseObject<CrossReferenceTable> for PdfParser<'_> {
 
                 // Read the status.
                 if let Some(PdfToken::Alphabetic(e)) = self.tokenizer.read() {
-                    let status = CrossReferenceStatus::from_byte(e).ok_or(ParserError::from(
-                        CrossReferenceTableError::InvalidCrossReferenceStatus(e),
-                    ))?;
+                    let status = CrossReferenceStatus::from_byte(e).ok_or(
+                        CrossReferenceTableError::InvalidCrossReferenceStatus(e as char),
+                    )?;
                     entries.push(CrossReferenceEntry::new(
                         object_number,
                         generation_number,
                         status,
                     ));
                 } else {
-                    return Err(ParserError::CrossReferenceTableError(
-                        CrossReferenceTableError::MissingStatus,
-                    ));
+                    return Err(CrossReferenceTableError::MissingStatus);
                 }
                 self.skip_whitespace();
             }
 
             // If the next token is not a number, we are done reading entries.
-            if !matches!(self.tokenizer.peek()?, Some(PdfToken::Number(_))) {
+            if !matches!(self.tokenizer.peek(), Some(PdfToken::Number(_))) {
                 if entries.len() != total_number_of_entries as usize {
-                    return Err(ParserError::CrossReferenceTableError(
-                        CrossReferenceTableError::MissigTableEntries(
-                            total_number_of_entries as usize,
-                            entries.len(),
-                        ),
+                    return Err(CrossReferenceTableError::MissigTableEntries(
+                        total_number_of_entries as usize,
+                        entries.len(),
                     ));
                 }
                 break;
@@ -146,39 +162,6 @@ impl ParseObject<CrossReferenceTable> for PdfParser<'_> {
     }
 }
 
-impl std::fmt::Display for CrossReferenceTableError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CrossReferenceTableError::InvalidCrossReferenceStatus(status) => {
-                write!(
-                    f,
-                    "Invalid cross-reference status charachter: '{}'",
-                    String::from_utf8_lossy(&[*status])
-                )
-            }
-            CrossReferenceTableError::MissingObjectNumber => {
-                write!(f, "Missing object number in cross-reference entry")
-            }
-            CrossReferenceTableError::MissingGenerationNumber => {
-                write!(f, "Missing generation number in cross-reference entry")
-            }
-            CrossReferenceTableError::MissingStatus => {
-                write!(f, "Missing status in cross-reference entry")
-            }
-            CrossReferenceTableError::MissingTableEntryCount => {
-                write!(f, "Missing entry count in cross-reference table")
-            }
-            CrossReferenceTableError::MissigTableEntries(expected, actual) => {
-                write!(
-                    f,
-                    "Missing one or more table entries. Expected {} entries, but found {}",
-                    expected, actual
-                )
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,7 +171,7 @@ mod tests {
         let data = b"xref\n0 2\n0000000000 65535 f\n0000000017 00000 n\n";
         let mut parser = PdfParser::from(data.as_slice());
 
-        let result: Result<CrossReferenceTable, ParserError> = parser.parse();
+        let result = parser.parse_cross_reference_table();
         assert!(result.is_ok());
 
         let table = result.unwrap();
@@ -210,7 +193,7 @@ mod tests {
         let data = b"xref\n0 2\n0000000000 65535 f\n";
         let mut parser = PdfParser::from(data.as_slice());
 
-        let result: Result<CrossReferenceTable, ParserError> = parser.parse();
+        let result = parser.parse_cross_reference_table();
         assert!(result.is_err());
     }
 
@@ -219,7 +202,8 @@ mod tests {
         let data = b"xref\n0 0\n";
         let mut parser = PdfParser::from(data.as_slice());
 
-        let result: Result<CrossReferenceTable, ParserError> = parser.parse();
+        let result: Result<CrossReferenceTable, CrossReferenceTableError> =
+            parser.parse_cross_reference_table();
         assert!(result.is_ok());
 
         let table = result.unwrap();
@@ -240,7 +224,8 @@ mod tests {
 
         let mut parser = PdfParser::from(data.as_slice());
 
-        let result: Result<CrossReferenceTable, ParserError> = parser.parse();
+        let result: Result<CrossReferenceTable, CrossReferenceTableError> =
+            parser.parse_cross_reference_table();
         assert!(result.is_ok());
 
         let table = result.unwrap();

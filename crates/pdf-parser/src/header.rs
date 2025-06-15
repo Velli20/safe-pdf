@@ -1,9 +1,27 @@
 use pdf_object::version::Version;
-use pdf_tokenizer::PdfToken;
+use pdf_tokenizer::{PdfToken, error::TokenizerError};
+use thiserror::Error;
 
-use crate::{ParseObject, PdfParser, error::ParserError};
+use crate::{PdfParser, traits::HeaderParser};
 
-impl ParseObject<Version> for PdfParser<'_> {
+#[derive(Debug, PartialEq, Error)]
+pub enum HeaderError {
+    #[error("Tokenizer error: {0}")]
+    TokenizerError(#[from] TokenizerError),
+    #[error("Invalid PDF header prefix: expected '%PDF-', found '{0}'")]
+    InvalidPrefix(String),
+    #[error("Invalid version format in PDF header: expected 'major.minor', found '{0}'")]
+    InvalidVersionFormat(String),
+    #[error("Failed to parse major version number '{0}': {1}")]
+    InvalidMajorVersion(String, #[source] std::num::ParseIntError),
+    #[error("Failed to parse minor version number '{0}': {1}")]
+    InvalidMinorVersion(String, #[source] std::num::ParseIntError),
+    #[error("Missing end-of-line marker after PDF header")]
+    MissingEOL,
+}
+
+impl HeaderParser for PdfParser<'_> {
+    type ErrorType = HeaderError;
     /// Parses the PDF file header from the current position in the input stream.
     ///
     /// According to the PDF 1.7 Specification (Section 7.5.2 "File Header"):
@@ -35,35 +53,47 @@ impl ParseObject<Version> for PdfParser<'_> {
     /// A `Version` object containing the parsed major and minor version numbers,
     /// or a `ParserError` if the header is malformed (e.g., missing `%PDF-` prefix,
     /// invalid version format, or missing EOL).
-    fn parse(&mut self) -> Result<Version, ParserError> {
-        self.tokenizer.expect(PdfToken::Percent).unwrap();
+    fn parse_header(&mut self) -> Result<Version, HeaderError> {
+        self.tokenizer.expect(PdfToken::Percent)?;
 
         const PDF_HEADER: &[u8] = b"PDF-";
 
-        // Read the PDF header prefix
-        let literal = self.tokenizer.read_while_u8(|b| b != b'\n');
-        if !literal.starts_with(PDF_HEADER) {
-            return Err(ParserError::InvalidHeader);
+        // Read up to the EOL, but don't consume EOL yet.
+        // We need to check the prefix first.
+        let current_pos = self.tokenizer.position;
+        let line_bytes = self.tokenizer.read_while_u8(|b| b != b'\n' && b != b'\r');
+
+        if !line_bytes.starts_with(PDF_HEADER) {
+            return Err(HeaderError::InvalidPrefix(
+                String::from_utf8_lossy(line_bytes).into_owned(),
+            ));
         }
 
-        // Remove the `PDF-`` prefix
-        let literal = String::from_utf8_lossy(&literal[PDF_HEADER.len()..]);
+        // Extract the version part (after "PDF-")
+        let version_str = String::from_utf8_lossy(&line_bytes[PDF_HEADER.len()..]);
 
         // Split the version number into major and minor parts.
-        let parts = literal.split('.').collect::<Vec<_>>();
+        let parts: Vec<&str> = version_str.split('.').collect();
         if parts.len() != 2 {
-            return Err(ParserError::InvalidHeader);
+            return Err(HeaderError::InvalidVersionFormat(version_str.into_owned()));
         }
 
-        let major = parts[0]
-            .parse::<u8>()
-            .map_err(|_| ParserError::InvalidHeader)?;
+        let major_str = parts[0];
+        let minor_str = parts[1];
 
-        let minor = parts[1]
+        let major = major_str
             .parse::<u8>()
-            .map_err(|_| ParserError::InvalidHeader)?;
+            .map_err(|e| HeaderError::InvalidMajorVersion(major_str.to_string(), e))?;
 
-        self.read_end_of_line_marker()?;
+        let minor = minor_str
+            .parse::<u8>()
+            .map_err(|e| HeaderError::InvalidMinorVersion(minor_str.to_string(), e))?;
+
+        // Now that we've parsed the version, consume the EOL from the original line.
+        // Reset position to where EOL reading should start.
+        self.tokenizer.position = current_pos + line_bytes.len();
+        self.read_end_of_line_marker()
+            .map_err(|_| HeaderError::MissingEOL)?;
 
         Ok(Version::new(major, minor))
     }
@@ -77,7 +107,7 @@ mod tests {
     fn test_parse_header_valid() {
         let input = b"%PDF-1.7\n";
         let mut parser = PdfParser::from(input.as_slice());
-        let version: Result<Version, ParserError> = parser.parse();
+        let version: Result<Version, HeaderError> = parser.parse_header();
         let version = version.unwrap();
         assert_eq!(version.major(), 1);
         assert_eq!(version.minor(), 7);
@@ -87,7 +117,7 @@ mod tests {
     fn test_parse_header_invalid_format() {
         let input = b"%PDF-1.x";
         let mut parser = PdfParser::from(input.as_slice());
-        let result: Result<Version, ParserError> = parser.parse();
+        let result: Result<Version, HeaderError> = parser.parse_header();
         assert!(result.is_err());
     }
 }

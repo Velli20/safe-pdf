@@ -1,9 +1,19 @@
 use pdf_object::comment::Comment;
-use pdf_tokenizer::PdfToken;
+use pdf_tokenizer::{PdfToken, error::TokenizerError};
+use thiserror::Error;
 
-use crate::{ParseObject, PdfParser};
+use crate::{PdfParser, error::ParserError, traits::CommentParser};
 
-impl ParseObject<Comment> for PdfParser<'_> {
+#[derive(Debug, PartialEq, Error)]
+pub enum CommentError {
+    #[error("Tokenizer error: {0}")]
+    TokenizerError(#[from] TokenizerError),
+    #[error("Failed to read end-of-line marker after comment: {err}")]
+    MissingEOL { err: String },
+}
+impl CommentParser for PdfParser<'_> {
+    type ErrorType = CommentError;
+
     /// Parses a PDF comment object from the current position in the input stream.
     ///
     /// According to the PDF 1.7 Specification (Section 7.2.3), comments:
@@ -30,20 +40,21 @@ impl ParseObject<Comment> for PdfParser<'_> {
     ///
     /// A `Comment` object containing the text of the comment (excluding the leading `%`
     /// and trailing EOL marker) or an error if the input does not start with `%`.
-    fn parse(&mut self) -> Result<Comment, crate::error::ParserError> {
-        self.tokenizer.expect(PdfToken::Percent)?;
+    fn parse_comment(&mut self) -> Result<Comment, Self::ErrorType> {
+        self.tokenizer.expect(PdfToken::Percent)?; // TokenizerError will be converted by `?`
         // Read until the end of the line.
         let text = self.tokenizer.read_while_u8(|c| c != b'\n' && c != b'\r');
         let text = String::from_utf8_lossy(text).to_string();
-        self.read_end_of_line_marker()?;
+        self.read_end_of_line_marker()
+            .map_err(|err| CommentError::MissingEOL {
+                err: err.to_string(),
+            })?;
         Ok(Comment::new(text))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::error::ParserError;
-
     use super::*;
 
     #[test]
@@ -59,7 +70,7 @@ mod tests {
 
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let result: Comment = parser.parse().unwrap();
+            let result = parser.parse_comment().unwrap();
             assert_eq!(result.text(), expected);
         }
     }
@@ -72,7 +83,7 @@ mod tests {
 
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            let result: Result<Comment, ParserError> = parser.parse();
+            let result: Result<Comment, CommentError> = parser.parse_comment();
             assert!(
                 result.is_err(),
                 "Expected error for invalid input `{}`",

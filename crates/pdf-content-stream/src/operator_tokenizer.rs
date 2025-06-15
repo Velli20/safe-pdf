@@ -1,6 +1,5 @@
 use alloc::borrow::Cow;
-use pdf_object::comment::Comment;
-use pdf_parser::{ParseObject, PdfParser, error::ParserError};
+use pdf_parser::{PdfParser, traits::CommentParser};
 use pdf_tokenizer::PdfToken;
 
 use crate::error::PdfOperatorError;
@@ -37,8 +36,8 @@ impl<'a> OperatorReader<'a> for PdfParser<'a> {
     fn skip_whitespace_and_comments(&mut self) -> Result<(), PdfOperatorError> {
         self.skip_whitespace();
 
-        if let Some(PdfToken::Percent) = self.tokenizer.peek()? {
-            let _comment: Result<Comment, ParserError> = self.parse();
+        if let Some(PdfToken::Percent) = self.tokenizer.peek() {
+            let _comment = self.parse_comment();
         }
         Ok(())
     }

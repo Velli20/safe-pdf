@@ -63,11 +63,11 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    pub fn peek(&mut self) -> Result<Option<PdfToken>, TokenizerError> {
+    pub fn peek(&mut self) -> Option<PdfToken> {
         let state = self.position;
         let token = self.read();
         self.position = state;
-        Ok(token)
+        token
     }
 
     /// Reads the next token from the input.

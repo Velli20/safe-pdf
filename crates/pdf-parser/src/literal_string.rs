@@ -1,18 +1,25 @@
 use pdf_object::literal_string::LiteralString;
-use pdf_tokenizer::PdfToken;
+use pdf_tokenizer::{PdfToken, error::TokenizerError};
+use thiserror::Error;
 
-use crate::{ParseObject, PdfParser, error::ParserError};
+use crate::{PdfParser, traits::LiteralStringParser};
 
 /// Represents an error that can occur while parsing a literal string object.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Error)]
 pub enum LiteralStringObjectError {
     /// Indicates that the escape sequence is invalid.
+    #[error("Invalid escape sequence in literal string")]
     InvalidEscapeSequence,
     /// Indicates that the parentheses are unbalanced.
+    #[error("Unbalanced parentheses in literal string")]
     UnbalancedParentheses,
+    #[error("Tokenizer error: {0}")]
+    TokenizerError(#[from] TokenizerError),
 }
 
-impl ParseObject<LiteralString> for PdfParser<'_> {
+impl LiteralStringParser for PdfParser<'_> {
+    type ErrorType = LiteralStringObjectError;
+
     /// Parses a PDF literal string object from the current position in the input stream.
     ///
     /// According to the PDF 1.7 Specification (Section 7.3.4.2), a literal string:
@@ -52,7 +59,7 @@ impl ParseObject<LiteralString> for PdfParser<'_> {
     /// A `LiteralString` object containing the characters between the outermost parentheses,
     /// or a `ParserError` if the parentheses are unbalanced, delimiters are missing, or an
     /// unexpected token is encountered.
-    fn parse(&mut self) -> Result<LiteralString, crate::error::ParserError> {
+    fn parse_literal_string(&mut self) -> Result<LiteralString, Self::ErrorType> {
         // Expect the opening parenthesis `(`.
         self.tokenizer.expect(PdfToken::LeftParenthesis)?;
 
@@ -89,7 +96,7 @@ impl ParseObject<LiteralString> for PdfParser<'_> {
                     }
                     _ => {
                         // Invalid token for a literal string
-                        return Err(ParserError::InvalidToken);
+                        return Err(LiteralStringObjectError::UnbalancedParentheses);
                     }
                 }
             }
@@ -97,22 +104,7 @@ impl ParseObject<LiteralString> for PdfParser<'_> {
         }
 
         // If we reach here, it means we have an unbalanced parenthesis.
-        Err(ParserError::from(
-            LiteralStringObjectError::UnbalancedParentheses,
-        ))
-    }
-}
-
-impl std::fmt::Display for LiteralStringObjectError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LiteralStringObjectError::InvalidEscapeSequence => {
-                write!(f, "Invalid escape sequence in literal string")
-            }
-            LiteralStringObjectError::UnbalancedParentheses => {
-                write!(f, "Unbalanced parentheses in literal string")
-            }
-        }
+        Err(LiteralStringObjectError::UnbalancedParentheses)
     }
 }
 
@@ -132,7 +124,7 @@ mod tests {
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
 
-            let LiteralString(result) = parser.parse().unwrap();
+            let LiteralString(result) = parser.parse_literal_string().unwrap();
             assert_eq!(result, expected);
         }
     }
@@ -147,7 +139,7 @@ mod tests {
 
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            let result: Result<LiteralString, ParserError> = parser.parse();
+            let result = parser.parse_literal_string();
             assert!(
                 result.is_err(),
                 "Expected error for invalid input `{}`",

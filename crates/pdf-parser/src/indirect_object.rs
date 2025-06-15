@@ -1,20 +1,64 @@
 use std::rc::Rc;
 
 use pdf_object::{ObjectVariant, Value, indirect_object::IndirectObject, stream::StreamObject};
-use pdf_tokenizer::PdfToken;
+use pdf_tokenizer::{PdfToken, error::TokenizerError};
+use thiserror::Error;
 
-use crate::{ParseObject, PdfParser, StreamParser, error::ParserError};
+use crate::{
+    PdfParser,
+    error::ParserError,
+    stream::StreamParsingError,
+    traits::{IndirectObjectParser, StreamParser},
+};
 
 /// Represents an error that can occur while parsing an indirect object or an object reference.
-#[derive(Debug, PartialEq)]
+#[derive(Error, Debug, PartialEq)]
 pub enum IndirectObjectError {
-    /// Indicates that there was an error while parsing the object.
-    InvalidObject(String),
-    MissingObjectNumber,
-    MissingGenerationNumber,
+    /// Indicates that there was an error while parsing the object within the indirect object.
+    #[error("Error while parsing object within indirect object: {source}")]
+    InvalidObject {
+        #[source]
+        source: ParserError,
+    },
+    /// Indicates that the object number is missing.
+    #[error("Missing object number in indirect object: {source}")]
+    MissingObjectNumber {
+        #[source]
+        source: ParserError,
+    },
+    /// Indicates that the generation number is missing.
+    #[error("Missing generation number in indirect object: {source}")]
+    MissingGenerationNumber {
+        #[source]
+        source: ParserError,
+    },
+    /// Indicates that a stream object was encountered without a preceding dictionary.
+    #[error("Stream object found without a preceding dictionary")]
+    StreamObjectWithoutDictionary,
+    /// Propagates errors from stream parsing.
+    #[error("Stream parsing error: {0}")]
+    StreamError(#[from] StreamParsingError),
+    /// Indicates an error while parsing the 'obj' keyword.
+    #[error("Failed to parse 'obj' keyword: {source}")]
+    InvalidObjKeyword {
+        #[source]
+        source: ParserError,
+    },
+    /// Indicates an error while parsing the 'endobj' keyword.
+    #[error("Failed to parse 'endobj' keyword: {source}")]
+    InvalidEndObjKeyword {
+        #[source]
+        source: ParserError,
+    },
+    #[error("Tokenizer error: {0}")]
+    TokenizerError(#[from] TokenizerError),
+    #[error("Parser error: {0}")]
+    ParserError(#[from] ParserError),
 }
 
-impl ParseObject<ObjectVariant> for PdfParser<'_> {
+impl IndirectObjectParser for PdfParser<'_> {
+    type ErrorType = IndirectObjectError;
+
     /// Parses an indirect object or an object reference from the current position in the input stream.
     ///
     /// # Indirect Object
@@ -49,22 +93,22 @@ impl ParseObject<ObjectVariant> for PdfParser<'_> {
     /// ```text
     /// 15 0 R
     /// ```
-    fn parse(&mut self) -> Result<ObjectVariant, ParserError> {
+    fn parse_indirect_object(&mut self) -> Result<ObjectVariant, Self::ErrorType> {
         const OBJ_KEYWORD: &[u8] = b"obj";
         const ENDOBJ_KEYWORD: &[u8] = b"endobj";
 
         // Read the object number.
         let object_number = self
             .read_number()
-            .map_err(|err| IndirectObjectError::MissingObjectNumber)?;
+            .map_err(|source| IndirectObjectError::MissingObjectNumber { source })?;
 
         // Read the generation number.
         let generation_number = self
             .read_number()
-            .map_err(|err| IndirectObjectError::MissingGenerationNumber)?;
+            .map_err(|source| IndirectObjectError::MissingGenerationNumber { source })?;
 
         // If the next token is 'R', it means this is an object reference.
-        if let Some(PdfToken::Alphabetic(b'R')) = self.tokenizer.peek()? {
+        if let Some(PdfToken::Alphabetic(b'R')) = self.tokenizer.peek() {
             if let Some(s) = self.tokenizer.data().get(1) {
                 if Self::is_pdf_delimiter(*s) {
                     self.tokenizer.read();
@@ -77,21 +121,23 @@ impl ParseObject<ObjectVariant> for PdfParser<'_> {
         }
 
         // Read the keyword `obj`.
-        self.read_keyword(OBJ_KEYWORD)?;
+        self.read_keyword(OBJ_KEYWORD)
+            .map_err(|source| IndirectObjectError::InvalidObjKeyword { source })?;
 
         // Parse the object.
         let object = self
             .parse_object()
-            .map_err(|e| ParserError::from(IndirectObjectError::InvalidObject(e.to_string())))?;
+            .map_err(|source| IndirectObjectError::InvalidObject { source })?;
 
         self.skip_whitespace();
 
-        if let Some(PdfToken::Alphabetic(b's')) = self.tokenizer.peek()? {
+        if let Some(PdfToken::Alphabetic(b's')) = self.tokenizer.peek() {
             if let Value::Dictionary(dictionary) = &object {
                 let stream = self.parse_stream(dictionary)?;
 
                 // Read the keyword `endobj`.
-                self.read_keyword(ENDOBJ_KEYWORD)?;
+                self.read_keyword(ENDOBJ_KEYWORD)
+                    .map_err(|source| IndirectObjectError::InvalidEndObjKeyword { source })?;
 
                 return Ok(ObjectVariant::Stream(Rc::new(StreamObject::new(
                     object_number,
@@ -100,34 +146,19 @@ impl ParseObject<ObjectVariant> for PdfParser<'_> {
                     stream,
                 ))));
             } else {
-                return Err(ParserError::StreamObjectWithoutDictionary);
+                return Err(IndirectObjectError::StreamObjectWithoutDictionary);
             }
         }
 
         // Read the keyword `endobj`.
-        self.read_keyword(ENDOBJ_KEYWORD)?;
+        self.read_keyword(ENDOBJ_KEYWORD)
+            .map_err(|source| IndirectObjectError::InvalidEndObjKeyword { source })?;
 
         return Ok(ObjectVariant::IndirectObject(Rc::new(IndirectObject::new(
             object_number,
             generation_number,
             Some(object),
         ))));
-    }
-}
-
-impl std::fmt::Display for IndirectObjectError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            IndirectObjectError::InvalidObject(e) => {
-                write!(f, "Error while parsing indirect object: {}", e)
-            }
-            IndirectObjectError::MissingObjectNumber => {
-                write!(f, "Missing object number")
-            }
-            IndirectObjectError::MissingGenerationNumber => {
-                write!(f, "Missing generation number")
-            }
-        }
     }
 }
 
@@ -142,7 +173,9 @@ mod tests {
         let input = b"0 1 obj\n(HELLO)\nendobj\n";
         let mut parser = PdfParser::from(input.as_slice());
 
-        if let ObjectVariant::IndirectObject(indirect_object) = parser.parse().unwrap() {
+        if let ObjectVariant::IndirectObject(indirect_object) =
+            parser.parse_indirect_object().unwrap()
+        {
             let IndirectObject {
                 object_number,
                 generation_number,

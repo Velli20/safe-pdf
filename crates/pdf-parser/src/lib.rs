@@ -13,12 +13,19 @@ pub mod null;
 pub mod number;
 pub mod stream;
 pub mod trailer;
+pub mod traits;
 
 use std::{rc::Rc, str::FromStr};
 
 use error::ParserError;
-use pdf_object::{ObjectVariant, Value, dictionary::Dictionary, trailer::Trailer};
+use pdf_object::Value;
 use pdf_tokenizer::{PdfToken, Tokenizer};
+
+use crate::traits::{
+    ArrayParser, BooleanParser, CommentParser, CrossReferenceTableParser, DictionaryParser,
+    HexStringParser, IndirectObjectParser, LiteralStringParser, NameParser, NullObjectParser,
+    NumberParser, TrailerParser,
+};
 
 pub struct PdfParser<'a> {
     pub tokenizer: Tokenizer<'a>,
@@ -42,10 +49,6 @@ impl<'a> From<&'a [u8]> for PdfParser<'a> {
 /// - `T`: The type of the object that will be produced by the parser.
 pub trait ParseObject<T> {
     fn parse(&mut self) -> Result<T, ParserError>;
-}
-
-pub trait StreamParser {
-    fn parse_stream(&mut self, dictionary: &Dictionary) -> Result<Vec<u8>, ParserError>;
 }
 
 impl<'a> PdfParser<'a> {
@@ -87,10 +90,10 @@ impl<'a> PdfParser<'a> {
     /// This function will consume the end of line marker from the input stream.
     /// If the end of line marker is not found, it will return an error.
     fn read_end_of_line_marker(&mut self) -> Result<(), ParserError> {
-        if let Some(PdfToken::CarriageReturn) = self.tokenizer.peek()? {
+        if let Some(PdfToken::CarriageReturn) = self.tokenizer.peek() {
             self.tokenizer.read();
         }
-        if let Some(PdfToken::NewLine) = self.tokenizer.peek()? {
+        if let Some(PdfToken::NewLine) = self.tokenizer.peek() {
             self.tokenizer.read();
         }
         Ok(())
@@ -176,9 +179,9 @@ impl<'a> PdfParser<'a> {
     }
 
     pub fn parse_object(&mut self) -> Result<Value, ParserError> {
-        if let Some(token) = self.tokenizer.peek()? {
+        if let Some(token) = self.tokenizer.peek() {
             let value = match token {
-                PdfToken::Percent => Value::Comment(self.parse()?),
+                PdfToken::Percent => Value::Comment(self.parse_comment()?),
                 PdfToken::DoublePercent => {
                     self.tokenizer.read();
                     const EOF_KEYWORD: &[u8] = b"EOF";
@@ -196,41 +199,43 @@ impl<'a> PdfParser<'a> {
                 PdfToken::Alphabetic(t) => {
                     if t == b't' {
                         let start = self.tokenizer.position;
-                        let value: Result<Trailer, ParserError> = self.parse();
+                        let value = self.parse_trailer();
                         if let Ok(o) = value {
                             return Ok(Value::Trailer(o));
                         }
                         self.tokenizer.position = start;
 
-                        Value::Boolean(self.parse()?)
+                        Value::Boolean(self.parse_boolean()?)
                     } else if t == b'f' {
-                        Value::Boolean(self.parse()?)
+                        Value::Boolean(self.parse_boolean()?)
                     } else if t == b'n' {
-                        Value::Null(self.parse()?)
+                        Value::Null(self.parse_null_object()?)
                     } else if t == b'x' {
-                        Value::CrossReferenceTable(self.parse()?)
+                        Value::CrossReferenceTable(self.parse_cross_reference_table()?)
                     } else {
                         return Err(ParserError::InvalidToken);
                     }
                 }
-                PdfToken::DoubleLeftAngleBracket => Value::Dictionary(Rc::new(self.parse()?)),
-                PdfToken::LeftAngleBracket => Value::HexString(self.parse()?),
-                PdfToken::Solidus => Value::Name(self.parse()?),
+                PdfToken::DoubleLeftAngleBracket => {
+                    Value::Dictionary(Rc::new(self.parse_dictionary()?))
+                }
+                PdfToken::LeftAngleBracket => Value::HexString(self.parse_hex_string()?),
+                PdfToken::Solidus => Value::Name(self.parse_name()?),
                 PdfToken::Number(_) => {
                     let start = self.tokenizer.position;
-                    let value: Result<ObjectVariant, ParserError> = self.parse();
+                    let value = self.parse_indirect_object();
                     if let Ok(o) = value {
                         return Ok(Value::IndirectObject(o));
                     }
 
                     self.tokenizer.position = start;
-                    Value::Number(self.parse()?)
+                    Value::Number(self.parse_number()?)
                 }
-                PdfToken::Minus => Value::Number(self.parse()?),
-                PdfToken::Plus => Value::Number(self.parse()?),
-                PdfToken::Period => Value::Number(self.parse()?),
-                PdfToken::LeftSquareBracket => Value::Array(self.parse()?),
-                PdfToken::LeftParenthesis => Value::LiteralString(self.parse()?),
+                PdfToken::Minus => Value::Number(self.parse_number()?),
+                PdfToken::Plus => Value::Number(self.parse_number()?),
+                PdfToken::Period => Value::Number(self.parse_number()?),
+                PdfToken::LeftSquareBracket => Value::Array(self.parse_array()?),
+                PdfToken::LeftParenthesis => Value::LiteralString(self.parse_literal_string()?),
                 r => {
                     panic!("Unexpected token: {:?}", r);
                 }

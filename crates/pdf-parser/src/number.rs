@@ -1,9 +1,27 @@
 use pdf_object::number::Number;
-use pdf_tokenizer::PdfToken;
+use pdf_tokenizer::{PdfToken, error::TokenizerError};
+use thiserror::Error;
 
-use crate::{ParseObject, PdfParser, error::ParserError};
+use crate::{PdfParser, traits::NumberParser};
 
-impl ParseObject<Number> for PdfParser<'_> {
+#[derive(Debug, PartialEq, Error)]
+pub enum NumberError {
+    #[error("Tokenizer error: {0}")]
+    TokenizerError(#[from] TokenizerError),
+    #[error("Failed to parse integral part of number: {err}")]
+    IntegralPartError { err: String },
+    #[error("Failed to parse fractional part of number: {err}")]
+    FractionalPartError { err: String },
+    #[error("Failed to parse '{number_str}' as a real number: {source}")]
+    RealNumberParseError {
+        number_str: String,
+        #[source]
+        source: std::num::ParseFloatError,
+    },
+}
+impl NumberParser for PdfParser<'_> {
+    type ErrorType = NumberError;
+
     /// Parses a PDF numeric object (integer or real) from the current position in the input stream.
     ///
     /// According to the PDF 1.7 Specification (Section 7.3.3), numeric objects can be
@@ -48,29 +66,36 @@ impl ParseObject<Number> for PdfParser<'_> {
     /// A `Number` object containing the parsed integer (`i64`) or real (`f64`) value,
     /// or a `ParserError` if the input is malformed (e.g., invalid characters,
     /// missing digits after a sign or decimal point).
-    fn parse(&mut self) -> Result<Number, ParserError> {
+    fn parse_number(&mut self) -> Result<Number, NumberError> {
         let mut has_minus = false;
 
         // 1. Check for optional sign.
-        if let Some(PdfToken::Plus) = self.tokenizer.peek()? {
+        if let Some(PdfToken::Plus) = self.tokenizer.peek() {
             self.tokenizer.read();
-        } else if let Some(PdfToken::Minus) = self.tokenizer.peek()? {
+        } else if let Some(PdfToken::Minus) = self.tokenizer.peek() {
             self.tokenizer.read();
             has_minus = true;
         }
 
         // 2. Parse leading digits (integral part).
-        let digits = if let Some(PdfToken::Period) = self.tokenizer.peek()? {
+        let digits = if let Some(PdfToken::Period) = self.tokenizer.peek() {
             0
         } else {
-            self.read_number::<i64>()?
+            self.read_number::<i64>()
+                .map_err(|source| NumberError::IntegralPartError {
+                    err: source.to_string(),
+                })?
         };
 
         // 3. Check for decimal point
-        if let Some(PdfToken::Period) = self.tokenizer.peek()? {
+        if let Some(PdfToken::Period) = self.tokenizer.peek() {
             self.tokenizer.read();
             // 4. Parse fractional part.
-            let fraction = self.read_number::<i64>()?;
+            let fraction =
+                self.read_number::<i64>()
+                    .map_err(|source| NumberError::IntegralPartError {
+                        err: source.to_string(),
+                    })?;
             // 5. Combine integral and fractional parts.
             let number_str = if has_minus {
                 format!("-{}.{}", digits, fraction)
@@ -78,9 +103,13 @@ impl ParseObject<Number> for PdfParser<'_> {
                 format!("{}.{}", digits, fraction)
             };
             // 6. Convert to f64.
-            let number = number_str
-                .parse::<f64>()
-                .map_err(|_| ParserError::InvalidNumber)?;
+            let number =
+                number_str
+                    .parse::<f64>()
+                    .map_err(|e| NumberError::RealNumberParseError {
+                        number_str: number_str.clone(),
+                        source: e,
+                    })?;
 
             self.skip_whitespace();
             Ok(Number::new(number))
@@ -113,7 +142,7 @@ mod tests {
 
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let result: Number = parser.parse().unwrap();
+            let result = parser.parse_number().unwrap();
             assert_eq!(result, Number::new(expected));
         }
     }
@@ -129,7 +158,7 @@ mod tests {
 
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let result: Number = parser.parse().unwrap();
+            let result = parser.parse_number().unwrap();
             assert_eq!(result, Number::new(expected));
         }
     }
@@ -149,7 +178,7 @@ mod tests {
 
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            let result: Result<Number, ParserError> = parser.parse();
+            let result: Result<Number, NumberError> = parser.parse_number();
             assert!(
                 result.is_err(),
                 "Expected error for invalid input `{}`",

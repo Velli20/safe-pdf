@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
-use pdf_object::{Value, comment::Comment, dictionary::Dictionary};
-use pdf_parser::{ParseObject, PdfParser};
+use pdf_object::{Value, dictionary::Dictionary};
+use pdf_parser::{PdfParser, traits::CommentParser};
 use pdf_tokenizer::PdfToken;
 
 use crate::{
@@ -234,12 +234,12 @@ impl PdfOperatorVariant {
         loop {
             parser.skip_whitespace();
 
-            if let Some(PdfToken::Percent) = parser.tokenizer.peek()? {
-                let _comment: Comment = parser.parse()?;
+            if let Some(PdfToken::Percent) = parser.tokenizer.peek() {
+                let _comment = parser.parse_comment().unwrap();
                 continue;
             }
 
-            let peeked = parser.tokenizer.peek()?;
+            let peeked = parser.tokenizer.peek();
             if peeked.is_none() {
                 break;
             }

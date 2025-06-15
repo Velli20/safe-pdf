@@ -1,8 +1,10 @@
 use pdf_object::null::NullObject;
 
-use crate::{ParseObject, PdfParser, error::ParserError};
+use crate::{PdfParser, error::ParserError, traits::NullObjectParser};
 
-impl ParseObject<NullObject> for PdfParser<'_> {
+impl NullObjectParser for PdfParser<'_> {
+    type ErrorType = ParserError;
+
     /// Parses a PDF null object from the current position in the input stream.
     ///
     /// According to the PDF 1.7 Specification (Section 7.3.9 "Null Object"):
@@ -26,7 +28,7 @@ impl ParseObject<NullObject> for PdfParser<'_> {
     ///
     /// A `NullObject` if the `null` keyword is successfully parsed,
     /// or a `ParserError` if the keyword is not found or is malformed.
-    fn parse(&mut self) -> Result<NullObject, ParserError> {
+    fn parse_null_object(&mut self) -> Result<NullObject, Self::ErrorType> {
         const NULL_LITERAL: &[u8] = b"null";
 
         self.read_keyword(NULL_LITERAL)?;
@@ -56,7 +58,7 @@ mod tests {
 
         for input in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let result: Result<NullObject, ParserError> = parser.parse();
+            let result = parser.parse_null_object();
             assert!(result.is_ok());
         }
         let invalid_inputs: Vec<&[u8]> = vec![
@@ -73,7 +75,7 @@ mod tests {
         ];
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            let result: Result<NullObject, ParserError> = parser.parse();
+            let result = parser.parse_null_object();
             assert!(result.is_err());
         }
     }

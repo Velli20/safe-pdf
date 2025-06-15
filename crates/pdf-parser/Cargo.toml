@@ -7,3 +7,4 @@ edition = "2024"
 pdf-tokenizer = { path = "../pdf-tokenizer" }
 pdf-object = { path = "../pdf-object" }
 flate2 = "1.1.1"
+thiserror = "2.0.12"

@@ -1613,6 +1613,7 @@ dependencies = [
  "flate2",
  "pdf-object",
  "pdf-tokenizer",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
