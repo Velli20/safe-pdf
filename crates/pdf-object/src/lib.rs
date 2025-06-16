@@ -1,7 +1,6 @@
 pub mod cross_reference_table;
 pub mod dictionary;
 pub mod error;
-pub mod hex_string;
 pub mod indirect_object;
 pub mod literal_string;
 pub mod null;
@@ -17,7 +16,6 @@ use std::rc::Rc;
 use cross_reference_table::CrossReferenceTable;
 use dictionary::Dictionary;
 use error::ObjectError;
-use hex_string::HexString;
 use indirect_object::IndirectObject;
 use literal_string::LiteralString;
 use null::NullObject;
@@ -65,7 +63,7 @@ pub enum Value {
     Boolean(bool),
     Null(NullObject),
     Stream(StreamObject),
-    HexString(HexString),
+    HexString(String),
     Comment(String),
     Trailer(Trailer),
     CrossReferenceTable(CrossReferenceTable),
@@ -100,7 +98,7 @@ impl Value {
         if let Value::LiteralString(value) = self {
             Some(&value.0)
         } else if let Value::HexString(value) = self {
-            Some(&value.0)
+            Some(value)
         } else if let Value::Name(value) = self {
             Some(value)
         } else {

@@ -1,7 +1,7 @@
 use pdf_object::{
     ObjectVariant, Value, cross_reference_table::CrossReferenceTable, dictionary::Dictionary,
-    hex_string::HexString, literal_string::LiteralString, null::NullObject, number::Number,
-    trailer::Trailer, version::Version,
+    literal_string::LiteralString, null::NullObject, number::Number, trailer::Trailer,
+    version::Version,
 };
 
 pub trait ArrayParser {
@@ -49,7 +49,7 @@ pub trait HeaderParser {
 pub trait HexStringParser {
     type ErrorType;
 
-    fn parse_hex_string(&mut self) -> Result<HexString, Self::ErrorType>;
+    fn parse_hex_string(&mut self) -> Result<String, Self::ErrorType>;
 }
 
 pub trait IndirectObjectParser {
