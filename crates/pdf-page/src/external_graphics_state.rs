@@ -295,7 +295,7 @@ impl FromDictionary for ExternalGraphicsState {
                                 actual_desc: format!("array with {} elements", arr.len()),
                             });
                         }
-                        let font_ref = arr[0].as_object().ok_or(
+                        let font_ref = arr[0].as_reference().ok_or(
                             ExternalGraphicsStateError::UnsupportedTypeError {
                                 key_name: name.clone(),
                                 expected_type: "Object",
@@ -308,7 +308,7 @@ impl FromDictionary for ExternalGraphicsState {
                                 source: e,
                             }
                         })?;
-                        ExternalGraphicsStateKey::Font(font_ref.object_number(), font_size)
+                        ExternalGraphicsStateKey::Font(font_ref, font_size)
                     }
                     "BM" => {
                         let blend_modes_vec: Vec<BlendMode>;

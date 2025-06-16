@@ -1,4 +1,4 @@
-use pdf_object::{Value, error::ObjectError};
+use pdf_object::{ObjectVariant, error::ObjectError};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -49,7 +49,7 @@ impl GlyphWidthsMap {
     /// # Errors
     ///
     /// Returns `GlyphWidthsMapError` if the array is malformed or contains invalid values.
-    pub fn from_array(array: &[Value]) -> Result<Self, GlyphWidthsMapError> {
+    pub fn from_array(array: &[ObjectVariant]) -> Result<Self, GlyphWidthsMapError> {
         let mut map = HashMap::new();
         let mut iter = array.iter();
 
@@ -69,7 +69,7 @@ impl GlyphWidthsMap {
 
             match next {
                 // Case: [c_first [w1 ... wn]]
-                Value::Array(widths_arr) => {
+                ObjectVariant::Array(widths_arr) => {
                     let widths = widths_arr
                         .iter()
                         .map(|w| {
@@ -84,7 +84,7 @@ impl GlyphWidthsMap {
                     map.insert(cid, widths);
                 }
                 // Case: [c_first c_last w]
-                Value::Number(_) => {
+                ObjectVariant::Number(_) => {
                     let c_last = next.as_number::<i64>().map_err(|e| {
                         GlyphWidthsMapError::NumericConversionError {
                             entry_description: "c_last",
@@ -143,21 +143,21 @@ impl GlyphWidthsMap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pdf_object::{Value, number::Number};
+    use pdf_object::{ObjectVariant, number::Number};
 
     // Helper to create a pdf_object::Value::Number for i64
-    fn num_i64(n: i64) -> Value {
-        Value::Number(Number::new(n))
+    fn num_i64(n: i64) -> ObjectVariant {
+        ObjectVariant::Number(Number::new(n))
     }
 
     // Helper to create a pdf_object::Value::Number for f32
-    fn num_f32(n: f32) -> Value {
-        Value::Number(Number::new(n as f64))
+    fn num_f32(n: f32) -> ObjectVariant {
+        ObjectVariant::Number(Number::new(n as f64))
     }
 
     // Helper to create a pdf_object::Value::Array
-    fn arr(elements: Vec<Value>) -> Value {
-        Value::Array(elements)
+    fn arr(elements: Vec<ObjectVariant>) -> ObjectVariant {
+        ObjectVariant::Array(elements)
     }
 
     #[test]
@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn test_from_array_invalid_cid_not_a_number() {
         let input_array = vec![
-            Value::LiteralString("not_a_cid".to_string()),
+            ObjectVariant::LiteralString("not_a_cid".to_string()),
             arr(vec![num_f32(500.0)]),
         ];
         let result = GlyphWidthsMap::from_array(&input_array);
@@ -395,7 +395,7 @@ mod tests {
         let input_array = vec![
             num_i64(10),
             num_i64(12),
-            Value::LiteralString("not_a_width".to_string()),
+            ObjectVariant::LiteralString("not_a_width".to_string()),
         ];
         let result = GlyphWidthsMap::from_array(&input_array);
         assert!(matches!(
@@ -409,7 +409,7 @@ mod tests {
         // [ 10 "not_c_last" 600 ]
         let input_array = vec![
             num_i64(10),
-            Value::LiteralString("not_c_last".to_string()),
+            ObjectVariant::LiteralString("not_c_last".to_string()),
             num_f32(600.0),
         ];
         let result = GlyphWidthsMap::from_array(&input_array);

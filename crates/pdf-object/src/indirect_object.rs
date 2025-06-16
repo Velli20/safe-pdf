@@ -1,4 +1,4 @@
-use crate::Value;
+use crate::ObjectVariant;
 
 /// Represents an indirect object in a PDF file.
 /// An indirect object is a data structure that can be referenced by other objects.
@@ -9,11 +9,11 @@ pub struct IndirectObject {
     /// The generation number, used for PDF incremental updates.
     pub generation_number: i32,
     /// The object associated with this indirect object.
-    pub object: Option<Value>,
+    pub object: Option<ObjectVariant>,
 }
 
 impl IndirectObject {
-    pub fn new(object_number: i32, generation_number: i32, object: Option<Value>) -> Self {
+    pub fn new(object_number: i32, generation_number: i32, object: Option<ObjectVariant>) -> Self {
         IndirectObject {
             object_number,
             generation_number,

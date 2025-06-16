@@ -1,5 +1,5 @@
 use pdf_object::{
-    ObjectVariant, Value,
+    ObjectVariant,
     dictionary::Dictionary,
     object_collection::ObjectCollection,
     traits::{FromDictionary, FromStreamObject},
@@ -125,8 +125,8 @@ impl FromDictionary for Font {
             });
         }
 
-        let cmap = if let Some(obj) = dictionary.get_object("ToUnicode") {
-            match obj {
+        let cmap = if let Some(obj) = dictionary.get("ToUnicode") {
+            match obj.as_ref() {
                 ObjectVariant::Reference(num) => {
                     let resolved_obj = objects.get(*num).ok_or_else(|| {
                         FontError::ToUnicodeResolution(format!(
@@ -170,7 +170,7 @@ impl FromDictionary for Font {
             .ok_or_else(|| FontError::InvalidDescendantFonts("Array is empty".to_string()))?;
 
         let cid_font = match cid_font_ref_val {
-            Value::IndirectObject(ObjectVariant::Reference(num)) => {
+            ObjectVariant::Reference(num) => {
                 let dictionary = objects.get_dictionary(*num).ok_or_else(|| {
                     FontError::InvalidDescendantFonts(format!(
                         "Could not resolve CIDFont reference {} from /DescendantFonts",

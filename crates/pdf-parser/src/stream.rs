@@ -152,7 +152,7 @@ impl<'a> StreamParser for PdfParser<'a> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_object::{Value, number::Number};
+    use pdf_object::{ObjectVariant, number::Number};
 
     use super::*;
 
@@ -161,7 +161,7 @@ mod tests {
         let dictionary = Dictionary::new(
             vec![(
                 "Length".to_string(),
-                Box::new(Value::Number(Number::new(11))),
+                Box::new(ObjectVariant::Number(Number::new(11))),
             )]
             .into_iter()
             .collect(),
@@ -179,7 +179,7 @@ mod tests {
         let dictionary = Dictionary::new(
             vec![(
                 "Length".to_string(),
-                Box::new(Value::Number(Number::new(11))),
+                Box::new(ObjectVariant::Number(Number::new(11))),
             )]
             .into_iter()
             .collect(),
@@ -208,7 +208,7 @@ mod tests {
         let dictionary = Dictionary::new(
             vec![(
                 "Length".to_string(),
-                Box::new(Value::Number(Number::new(5))),
+                Box::new(ObjectVariant::Number(Number::new(5))),
             )] // Incorrect length
             .into_iter()
             .collect(),
@@ -226,7 +226,7 @@ mod tests {
         let dictionary = Dictionary::new(
             vec![(
                 "Length".to_string(),
-                Box::new(Value::Number(Number::new(11))),
+                Box::new(ObjectVariant::Number(Number::new(11))),
             )]
             .into_iter()
             .collect(),

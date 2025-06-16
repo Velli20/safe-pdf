@@ -1,5 +1,5 @@
 use crate::{PdfParser, error::ParserError, traits::TrailerParser};
-use pdf_object::{Value, trailer::Trailer};
+use pdf_object::{ObjectVariant, trailer::Trailer};
 use thiserror::Error;
 
 #[derive(Debug, PartialEq, Error)]
@@ -73,7 +73,7 @@ impl TrailerParser for PdfParser<'_> {
 
         // Try parse dictionary object.
         let dictionary = match self.parse_object() {
-            Ok(Value::Dictionary(dict)) => dict,
+            Ok(ObjectVariant::Dictionary(dict)) => dict,
             Ok(_) => return Err(TrailerError::MissingDictionary),
             Err(source) => {
                 return Err(TrailerError::FailedToParseDictionary { source });

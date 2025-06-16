@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use pdf_font::font::{Font, FontError};
 use pdf_object::{
-    ObjectVariant, Value, dictionary::Dictionary, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection,
     traits::FromDictionary,
 };
 use thiserror::Error;
@@ -72,7 +72,7 @@ impl FromDictionary for Resources {
             for (name, v) in &font_dictionary.dictionary {
                 // According to PDF spec, font resource entries must be indirect references.
                 let font_obj_num = match v.as_ref() {
-                    Value::IndirectObject(ObjectVariant::Reference(num)) => *num,
+                    ObjectVariant::Reference(num) => *num,
                     other => {
                         return Err(ResourcesError::UnexpectedFontEntryType {
                             font_name: name.clone(),
@@ -99,14 +99,14 @@ impl FromDictionary for Resources {
             for (name, v) in &eg.dictionary {
                 // Value can be a direct dictionary or an indirect reference to one.
                 let v = match v.as_ref() {
-                    Value::IndirectObject(ObjectVariant::Reference(number)) => {
+                    ObjectVariant::Reference(number) => {
                         objects.get_dictionary(*number).ok_or_else(|| {
                             ResourcesError::FailedResolveExternalGraphicsStateObjectReference {
                                 obj_num: *number,
                             }
                         })?
                     }
-                    Value::Dictionary(obj) => obj,
+                    ObjectVariant::Dictionary(obj) => obj,
                     other => {
                         return Err(ResourcesError::UnexpectedExtGStateEntryType {
                             entry_name: name.clone(),

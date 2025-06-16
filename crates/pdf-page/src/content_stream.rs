@@ -1,6 +1,6 @@
 use pdf_content_stream::{error::PdfOperatorError, pdf_operator::PdfOperatorVariant};
 use pdf_object::{
-    ObjectVariant, Value, dictionary::Dictionary, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection,
     traits::FromDictionary,
 };
 use thiserror::Error;
@@ -34,16 +34,16 @@ pub struct ContentStream {
 
 // Helper function to process an array whose elements should be streams or references to streams
 fn process_content_stream_array(
-    array: &[Value],
+    array: &[ObjectVariant],
     objects: &ObjectCollection,
 ) -> Result<Vec<PdfOperatorVariant>, ContentStreamReadError> {
     let mut concatenated_ops = Vec::new();
     for value_in_array in array.iter() {
         let stream_ops = match value_in_array {
-            Value::IndirectObject(indirect_ref) => {
-                let stream_obj = objects.get(indirect_ref.object_number()).ok_or_else(|| {
+            ObjectVariant::Reference(indirect_ref) => {
+                let stream_obj = objects.get(*indirect_ref).ok_or_else(|| {
                     ContentStreamReadError::FailedToResolveReference {
-                        obj_num: indirect_ref.object_number(),
+                        obj_num: *indirect_ref,
                     }
                 })?;
                 // Expect this resolved object to be a stream
@@ -53,7 +53,7 @@ fn process_content_stream_array(
                     return Err(ContentStreamReadError::ExpectedStreamInArray);
                 }
             }
-            Value::Stream(direct_stream_val) => {
+            ObjectVariant::Stream(direct_stream_val) => {
                 PdfOperatorVariant::from(direct_stream_val.data.as_slice())?
             }
             other => {
@@ -77,36 +77,35 @@ impl FromDictionary for ContentStream {
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         // Get the optional `/Contents` entry from the page dictionary.
-        let Some(contents) = dictionary.get_object(Self::KEY) else {
+        let Some(contents) = dictionary.get(Self::KEY) else {
             return Ok(None);
         };
 
         // Resolve the /Contents entry if it's an indirect reference.
-        let contents = match contents {
+        let contents = match contents.as_ref() {
             ObjectVariant::Reference(num) => {
                 // The object is an indirect reference; resolve it from the `objects` collection.
                 objects.get(*num).ok_or(
                     ContentStreamReadError::FailedResolveFontObjectReference { obj_num: *num },
                 )?
             }
-            _ => contents.clone(),
+            _ => contents.as_ref().clone(),
         };
 
         // Process the resolved /Contents object.
         // It should be a Stream, an Array, or an IndirectObject whose payload is one of these.
         let operations = match &contents {
             ObjectVariant::Stream(s) => PdfOperatorVariant::from(s.data.as_slice())?,
-            //ObjectVariant::Array(array_obj) => {
-            //    // The /Contents entry is an array of streams.
-            //    Self::process_content_stream_array(array_obj, objects)?
-            //}
+            ObjectVariant::Array(array_obj) => {
+                // The /Contents entry is an array of streams.
+                process_content_stream_array(array_obj, objects)?
+            }
             ObjectVariant::IndirectObject(s) => match &s.object {
-                Some(Value::Stream(stream_val)) => {
+                Some(ObjectVariant::Stream(stream_val)) => {
                     PdfOperatorVariant::from(stream_val.data.as_slice())?
                 }
-                Some(Value::Array(array_val)) => process_content_stream_array(array_val, objects)?,
-                Some(Value::IndirectObject(ObjectVariant::Stream(s))) => {
-                    PdfOperatorVariant::from(s.data.as_slice())?
+                Some(ObjectVariant::Array(array_val)) => {
+                    process_content_stream_array(array_val, objects)?
                 }
                 Some(other) => {
                     return Err(ContentStreamReadError::UnsupportedEntryType {

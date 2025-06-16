@@ -1,6 +1,5 @@
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection,
-    traits::FromDictionary,
+    dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
 };
 
 use crate::{
@@ -71,16 +70,15 @@ impl FromDictionary for CharacterIdentifierFont {
             .ok_or(CidFontError::MissingSubType)?
             .to_string();
 
-        let descriptor =
-            if let Some(ObjectVariant::Reference(num)) = dictionary.get_object("FontDescriptor") {
-                if let Some(s) = objects.get_dictionary(*num) {
-                    FontDescriptor::from_dictionary(s, objects)?
-                } else {
-                    return Err(CidFontError::MissingFontDescriptor);
-                }
+        let descriptor = if let Some(num) = dictionary.get_object_reference("FontDescriptor") {
+            if let Some(s) = objects.get_dictionary(num) {
+                FontDescriptor::from_dictionary(s, objects)?
             } else {
                 return Err(CidFontError::MissingFontDescriptor);
-            };
+            }
+        } else {
+            return Err(CidFontError::MissingFontDescriptor);
+        };
         Ok(Self {
             default_width,
             descriptor,

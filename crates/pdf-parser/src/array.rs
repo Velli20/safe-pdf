@@ -1,4 +1,4 @@
-use pdf_object::Value;
+use pdf_object::ObjectVariant;
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
@@ -46,7 +46,7 @@ impl ArrayParser for PdfParser<'_> {
     /// An `Array` object containing the parsed PDF objects as its elements,
     /// or a `ParserError` if the input is malformed (e.g., missing delimiters,
     /// invalid object syntax within the array, or an unexpected token).
-    fn parse_array(&mut self) -> Result<Vec<Value>, ArrayError> {
+    fn parse_array(&mut self) -> Result<Vec<ObjectVariant>, ArrayError> {
         self.tokenizer.expect(PdfToken::LeftSquareBracket)?;
         self.skip_whitespace();
 

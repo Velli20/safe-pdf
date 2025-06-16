@@ -18,7 +18,7 @@ pub mod traits;
 use std::{rc::Rc, str::FromStr};
 
 use error::ParserError;
-use pdf_object::Value;
+use pdf_object::ObjectVariant;
 use pdf_tokenizer::{PdfToken, Tokenizer};
 
 use crate::traits::{
@@ -178,10 +178,10 @@ impl<'a> PdfParser<'a> {
         self.read_end_of_line_marker()
     }
 
-    pub fn parse_object(&mut self) -> Result<Value, ParserError> {
+    pub fn parse_object(&mut self) -> Result<ObjectVariant, ParserError> {
         if let Some(token) = self.tokenizer.peek() {
             let value = match token {
-                PdfToken::Percent => Value::Comment(self.parse_comment()?),
+                PdfToken::Percent => ObjectVariant::Comment(self.parse_comment()?),
                 PdfToken::DoublePercent => {
                     self.tokenizer.read();
                     const EOF_KEYWORD: &[u8] = b"EOF";
@@ -194,49 +194,51 @@ impl<'a> PdfParser<'a> {
                             String::from_utf8_lossy(literal).to_string(),
                         ));
                     }
-                    return Ok(Value::EndOfFile);
+                    return Ok(ObjectVariant::EndOfFile);
                 }
                 PdfToken::Alphabetic(t) => {
                     if t == b't' {
                         let start = self.tokenizer.position;
                         let value = self.parse_trailer();
                         if let Ok(o) = value {
-                            return Ok(Value::Trailer(o));
+                            return Ok(ObjectVariant::Trailer(o));
                         }
                         self.tokenizer.position = start;
 
-                        Value::Boolean(self.parse_boolean()?)
+                        ObjectVariant::Boolean(self.parse_boolean()?)
                     } else if t == b'f' {
-                        Value::Boolean(self.parse_boolean()?)
+                        ObjectVariant::Boolean(self.parse_boolean()?)
                     } else if t == b'n' {
                         self.parse_null_object()?;
-                        Value::Null
+                        ObjectVariant::Null
                     } else if t == b'x' {
-                        Value::CrossReferenceTable(self.parse_cross_reference_table()?)
+                        ObjectVariant::CrossReferenceTable(self.parse_cross_reference_table()?)
                     } else {
                         return Err(ParserError::InvalidToken);
                     }
                 }
                 PdfToken::DoubleLeftAngleBracket => {
-                    Value::Dictionary(Rc::new(self.parse_dictionary()?))
+                    ObjectVariant::Dictionary(Rc::new(self.parse_dictionary()?))
                 }
-                PdfToken::LeftAngleBracket => Value::HexString(self.parse_hex_string()?),
-                PdfToken::Solidus => Value::Name(self.parse_name()?),
+                PdfToken::LeftAngleBracket => ObjectVariant::HexString(self.parse_hex_string()?),
+                PdfToken::Solidus => ObjectVariant::Name(self.parse_name()?),
                 PdfToken::Number(_) => {
                     let start = self.tokenizer.position;
                     let value = self.parse_indirect_object();
                     if let Ok(o) = value {
-                        return Ok(Value::IndirectObject(o));
+                        return Ok(o);
                     }
 
                     self.tokenizer.position = start;
-                    Value::Number(self.parse_number()?)
+                    ObjectVariant::Number(self.parse_number()?)
                 }
-                PdfToken::Minus => Value::Number(self.parse_number()?),
-                PdfToken::Plus => Value::Number(self.parse_number()?),
-                PdfToken::Period => Value::Number(self.parse_number()?),
-                PdfToken::LeftSquareBracket => Value::Array(self.parse_array()?),
-                PdfToken::LeftParenthesis => Value::LiteralString(self.parse_literal_string()?),
+                PdfToken::Minus => ObjectVariant::Number(self.parse_number()?),
+                PdfToken::Plus => ObjectVariant::Number(self.parse_number()?),
+                PdfToken::Period => ObjectVariant::Number(self.parse_number()?),
+                PdfToken::LeftSquareBracket => ObjectVariant::Array(self.parse_array()?),
+                PdfToken::LeftParenthesis => {
+                    ObjectVariant::LiteralString(self.parse_literal_string()?)
+                }
                 r => {
                     panic!("Unexpected token: {:?}", r);
                 }

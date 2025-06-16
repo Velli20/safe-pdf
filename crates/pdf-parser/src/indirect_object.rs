@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use pdf_object::{ObjectVariant, Value, indirect_object::IndirectObject, stream::StreamObject};
+use pdf_object::{ObjectVariant, indirect_object::IndirectObject, stream::StreamObject};
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
@@ -132,7 +132,7 @@ impl IndirectObjectParser for PdfParser<'_> {
         self.skip_whitespace();
 
         if let Some(PdfToken::Alphabetic(b's')) = self.tokenizer.peek() {
-            if let Value::Dictionary(dictionary) = &object {
+            if let ObjectVariant::Dictionary(dictionary) = &object {
                 let stream = self.parse_stream(dictionary)?;
 
                 // Read the keyword `endobj`.
@@ -164,7 +164,7 @@ impl IndirectObjectParser for PdfParser<'_> {
 
 #[cfg(test)]
 mod tests {
-    use pdf_object::Value;
+    use pdf_object::ObjectVariant;
 
     use super::*;
 
@@ -185,7 +185,10 @@ mod tests {
 
             assert_eq!(*object_number, 0);
             assert_eq!(*generation_number, 1);
-            assert_eq!(*object, Some(Value::LiteralString(String::from("HELLO"),)));
+            assert_eq!(
+                *object,
+                Some(ObjectVariant::LiteralString(String::from("HELLO"),))
+            );
         } else {
             panic!("Expected IndirectObject variant");
         }

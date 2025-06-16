@@ -110,7 +110,7 @@ impl FromDictionary for FontDescriptor {
 
         // Helper closure to convert a PDF Value to i32 for FontBBox entries
         // and map errors appropriately.
-        let convert_bbox_entry = |value: &pdf_object::Value, description: &'static str| {
+        let convert_bbox_entry = |value: &pdf_object::ObjectVariant, description: &'static str| {
             value.as_number::<i32>().map_err(|err| {
                 FontDescriptorError::FontBoundingBoxNumericConversionError {
                     entry_description: description,
@@ -135,11 +135,12 @@ impl FromDictionary for FontDescriptor {
         };
         let font_family = dictionary.get_string("FontFamily").cloned();
 
-        let font_file = if let Some(s) = dictionary.get_object("FontFile2") {
+        let font_file = if let Some(s) = dictionary.get("FontFile2") {
             objects.get2(s).cloned()
         } else {
             None
         };
+
         let font_name = dictionary
             .get_string("FontName")
             .unwrap_or(&String::new())

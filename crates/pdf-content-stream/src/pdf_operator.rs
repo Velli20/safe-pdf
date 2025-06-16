@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use pdf_object::{Value, dictionary::Dictionary};
+use pdf_object::{ObjectVariant, dictionary::Dictionary};
 use pdf_parser::{PdfParser, traits::CommentParser};
 use pdf_tokenizer::PdfToken;
 
@@ -46,7 +46,7 @@ pub trait PdfOperator {
     }
 }
 
-pub struct Operands<'a>(&'a [Value]);
+pub struct Operands<'a>(&'a [ObjectVariant]);
 
 impl Operands<'_> {
     pub fn get_f32(&mut self) -> Result<f32, PdfOperatorError> {
@@ -63,7 +63,7 @@ impl Operands<'_> {
     pub fn get_dictionary(&mut self) -> Result<Rc<Dictionary>, PdfOperatorError> {
         let value = self.0.get(0);
         self.0 = &self.0[1..];
-        if let Some(Value::Dictionary(value)) = value {
+        if let Some(ObjectVariant::Dictionary(value)) = value {
             Ok(value.clone())
         } else {
             Err(PdfOperatorError::InvalidOperandType)
@@ -86,7 +86,7 @@ impl Operands<'_> {
         let value = self.0.get(0);
         self.0 = &self.0[1..];
 
-        if let Some(Value::Name(name)) = value {
+        if let Some(ObjectVariant::Name(name)) = value {
             Ok(name.clone())
         } else {
             Err(PdfOperatorError::InvalidOperandType)
@@ -108,14 +108,14 @@ impl Operands<'_> {
         let value = self.0.get(0);
         self.0 = &self.0[1..];
 
-        if let Some(Value::Array(array_values)) = value {
+        if let Some(ObjectVariant::Array(array_values)) = value {
             let mut elements = Vec::new();
             for val_obj in array_values {
                 match val_obj {
-                    Value::LiteralString(s) => {
+                    ObjectVariant::LiteralString(s) => {
                         elements.push(TextElement::Text { value: s.clone() });
                     }
-                    Value::Number(n) => {
+                    ObjectVariant::Number(n) => {
                         if let Some(num_f32) = n.as_f32() {
                             elements.push(TextElement::Adjustment { amount: num_f32 });
                         } else {
@@ -135,11 +135,11 @@ impl Operands<'_> {
         let value = self.0.get(0);
         self.0 = &self.0[1..];
 
-        if let Some(Value::Array(array_values)) = value {
+        if let Some(ObjectVariant::Array(array_values)) = value {
             let mut numbers = Vec::new();
             for val_obj in array_values {
                 match val_obj {
-                    Value::Number(n) => {
+                    ObjectVariant::Number(n) => {
                         if let Some(num_f32) = n.as_f32() {
                             numbers.push(num_f32);
                         } else {

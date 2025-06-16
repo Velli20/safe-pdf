@@ -1,6 +1,6 @@
 use error::PdfError;
 use pdf_object::{
-    Value, object_collection::ObjectCollection, trailer::Trailer, traits::FromDictionary,
+    ObjectVariant, object_collection::ObjectCollection, trailer::Trailer, traits::FromDictionary,
     version::Version,
 };
 use pdf_page::{page::PdfPage, pages::PdfPages};
@@ -39,14 +39,17 @@ impl PdfDocument {
             let object = parser.parse_object()?;
 
             match object {
-                Value::EndOfFile => break,
-                Value::IndirectObject(v) => {
-                    objects.insert(v).unwrap();
+                ObjectVariant::EndOfFile => break,
+                ObjectVariant::IndirectObject(_)
+                | ObjectVariant::Reference(_)
+                | ObjectVariant::Stream(_) => {
+                    objects.insert(object).unwrap();
                 }
-                Value::Trailer(t) => {
+
+                ObjectVariant::Trailer(t) => {
                     trailer = Some(t);
                 }
-                Value::CrossReferenceTable(_) => {}
+                ObjectVariant::CrossReferenceTable(_) => {}
                 _ => {}
             }
         }
@@ -56,20 +59,20 @@ impl PdfDocument {
         // Get the `Root` object reference.
         let root = trailer
             .dictionary
-            .get_object("Root")
+            .get_object_reference("Root")
             .ok_or(PdfError::MissingRoot)?;
 
         // Get the catalog.
         let catalog = objects
-            .get_dictionary(root.object_number())
+            .get_dictionary(root)
             .ok_or(PdfError::MissingCatalog)?
             .clone();
 
         // Get the `Pages` object reference from the catalog, which defines the order of the pages in the document.
-        let pages_num = catalog.get_object("Pages").unwrap();
+        let pages_num = catalog.get_object_reference("Pages").unwrap();
 
         let pages_dict = objects
-            .get_dictionary(pages_num.object_number())
+            .get_dictionary(pages_num)
             .ok_or(PdfError::MissingPages)?
             .clone();
 

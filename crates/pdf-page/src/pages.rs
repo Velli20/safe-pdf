@@ -61,13 +61,12 @@ impl FromDictionary for PdfPages {
         // Iterate over the `Kids` array and extract the individual page objects.
         let mut pages = vec![];
         for kid_value in kids_array {
-            let kid_ref = kid_value
-                .as_object()
-                .ok_or_else(|| PdfPagesError::InvalidKidEntry {
-                    found_type: kid_value.name(),
-                })?;
-
-            let kid_obj_num = kid_ref.object_number();
+            let kid_obj_num =
+                kid_value
+                    .as_reference()
+                    .ok_or_else(|| PdfPagesError::InvalidKidEntry {
+                        found_type: kid_value.name(),
+                    })?;
 
             // Get the page object dictionary.
             let kid_dict =
@@ -86,6 +85,7 @@ impl FromDictionary for PdfPages {
 
             if object_type == PdfPage::KEY {
                 let page = PdfPage::from_dictionary(kid_dict, objects).map_err(|source| {
+                    panic!("err {}", source);
                     PdfPagesError::PageProcessingError {
                         obj_num: kid_obj_num, /* , source */
                     }

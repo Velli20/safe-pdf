@@ -1,12 +1,12 @@
 use pdf_object::{
-    ObjectVariant, Value, cross_reference_table::CrossReferenceTable, dictionary::Dictionary,
+    ObjectVariant, cross_reference_table::CrossReferenceTable, dictionary::Dictionary,
     number::Number, trailer::Trailer, version::Version,
 };
 
 pub trait ArrayParser {
     type ErrorType;
 
-    fn parse_array(&mut self) -> Result<Vec<Value>, Self::ErrorType>;
+    fn parse_array(&mut self) -> Result<Vec<ObjectVariant>, Self::ErrorType>;
 }
 
 pub trait StreamParser {

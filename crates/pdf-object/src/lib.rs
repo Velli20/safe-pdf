@@ -23,90 +23,66 @@ use num_traits::FromPrimitive;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ObjectVariant {
+    Dictionary(Rc<Dictionary>),
+    Array(Vec<ObjectVariant>),
+    LiteralString(String),
+    Name(String),
+    Number(Number),
+    Boolean(bool),
+    Null,
+    HexString(String),
+    Comment(String),
+    Trailer(Trailer),
+    CrossReferenceTable(CrossReferenceTable),
+    EndOfFile,
     IndirectObject(Rc<IndirectObject>),
     Reference(i32),
     Stream(Rc<StreamObject>),
 }
 
 impl ObjectVariant {
-    pub fn object_number(&self) -> i32 {
-        match self {
-            ObjectVariant::IndirectObject(o) => o.object_number,
-            ObjectVariant::Reference(o) => *o,
-            ObjectVariant::Stream(o) => o.object_number,
-        }
-    }
-
-    /// Returns a string representation of the `ObjectVariant`'s type.
-    /// This is useful for creating descriptive error messages.
-    pub const fn name(&self) -> &'static str {
-        match self {
-            ObjectVariant::IndirectObject(_) => "IndirectObjectValue", // Represents a fully resolved IndirectObject containing its Value
-            ObjectVariant::Reference(_) => "Reference",
-            ObjectVariant::Stream(_) => "StreamValue", // Represents a fully resolved StreamObject
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum Value {
-    IndirectObject(ObjectVariant),
-    Dictionary(Rc<Dictionary>),
-    Array(Vec<Value>),
-    LiteralString(String),
-    Name(String),
-    Number(Number),
-    Boolean(bool),
-    Null,
-    Stream(StreamObject),
-    HexString(String),
-    Comment(String),
-    Trailer(Trailer),
-    CrossReferenceTable(CrossReferenceTable),
-    EndOfFile,
-}
-
-impl Value {
     pub fn as_dictionary(&self) -> Option<&Rc<Dictionary>> {
-        if let Value::Dictionary(value) = self {
-            Some(value)
-        } else {
-            None
+        match self {
+            ObjectVariant::Dictionary(value) => Some(value),
+            _ => None,
         }
     }
-    pub fn as_array(&self) -> Option<&[Value]> {
-        if let Value::Array(value) = self {
-            Some(value)
-        } else {
-            None
+    pub fn as_array(&self) -> Option<&[ObjectVariant]> {
+        match self {
+            ObjectVariant::Array(value) => Some(value),
+            _ => None,
         }
     }
 
-    pub fn as_object(&self) -> Option<&ObjectVariant> {
-        if let Value::IndirectObject(value) = self {
-            Some(value)
-        } else {
-            None
+    pub fn as_reference(&self) -> Option<i32> {
+        match self {
+            ObjectVariant::Reference(value) => Some(*value),
+            _ => None,
         }
     }
 
     pub fn as_str(&self) -> Option<&str> {
-        if let Value::LiteralString(value) = self {
-            Some(value)
-        } else if let Value::HexString(value) = self {
-            Some(value)
-        } else if let Value::Name(value) = self {
-            Some(value)
-        } else {
-            None
+        match self {
+            ObjectVariant::LiteralString(s)
+            | ObjectVariant::HexString(s)
+            | ObjectVariant::Name(s) => Some(s),
+            _ => None,
         }
     }
 
     pub fn as_boolean(&self) -> Option<bool> {
-        if let Value::Boolean(value) = self {
-            Some(*value)
-        } else {
-            None
+        match self {
+            ObjectVariant::Boolean(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn to_object_number(&self) -> Option<i32> {
+        match self {
+            ObjectVariant::IndirectObject(o) => Some(o.object_number),
+            ObjectVariant::Reference(o) => Some(*o),
+            ObjectVariant::Stream(o) => Some(o.object_number),
+            _ => None,
         }
     }
 
@@ -127,7 +103,7 @@ impl Value {
     where
         T: FromPrimitive,
     {
-        if let Value::Number(value) = self {
+        if let ObjectVariant::Number(value) = self {
             if let Some(i) = value.integer {
                 return T::from_i64(i).ok_or(ObjectError::NumberConversionError);
             } else if let Some(f) = value.real {
@@ -141,20 +117,21 @@ impl Value {
     /// This is useful for creating descriptive error messages.
     pub const fn name(&self) -> &'static str {
         match self {
-            Value::IndirectObject(_) => "IndirectObject",
-            Value::Dictionary(_) => "Dictionary",
-            Value::Array(_) => "Array",
-            Value::LiteralString(_) => "LiteralString",
-            Value::Name(_) => "Name",
-            Value::Number(_) => "Number",
-            Value::Boolean(_) => "Boolean",
-            Value::Null => "Null",
-            Value::Stream(_) => "Stream",
-            Value::HexString(_) => "HexString",
-            Value::Comment(_) => "Comment",
-            Value::Trailer(_) => "Trailer",
-            Value::CrossReferenceTable(_) => "CrossReferenceTable",
-            Value::EndOfFile => "EndOfFile",
+            ObjectVariant::IndirectObject(_) => "IndirectObject",
+            ObjectVariant::Dictionary(_) => "Dictionary",
+            ObjectVariant::Array(_) => "Array",
+            ObjectVariant::LiteralString(_) => "LiteralString",
+            ObjectVariant::Name(_) => "Name",
+            ObjectVariant::Number(_) => "Number",
+            ObjectVariant::Boolean(_) => "Boolean",
+            ObjectVariant::Null => "Null",
+            ObjectVariant::Stream(_) => "Stream",
+            ObjectVariant::HexString(_) => "HexString",
+            ObjectVariant::Comment(_) => "Comment",
+            ObjectVariant::Trailer(_) => "Trailer",
+            ObjectVariant::CrossReferenceTable(_) => "CrossReferenceTable",
+            ObjectVariant::EndOfFile => "EndOfFile",
+            ObjectVariant::Reference(_) => "Reference",
         }
     }
 }
