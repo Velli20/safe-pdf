@@ -2,7 +2,6 @@ pub mod cross_reference_table;
 pub mod dictionary;
 pub mod error;
 pub mod indirect_object;
-pub mod null;
 pub mod number;
 pub mod object_collection;
 pub mod stream;
@@ -16,7 +15,6 @@ use cross_reference_table::CrossReferenceTable;
 use dictionary::Dictionary;
 use error::ObjectError;
 use indirect_object::IndirectObject;
-use null::NullObject;
 use number::Number;
 use stream::StreamObject;
 use trailer::Trailer;
@@ -59,7 +57,7 @@ pub enum Value {
     Name(String),
     Number(Number),
     Boolean(bool),
-    Null(NullObject),
+    Null,
     Stream(StreamObject),
     HexString(String),
     Comment(String),
@@ -150,7 +148,7 @@ impl Value {
             Value::Name(_) => "Name",
             Value::Number(_) => "Number",
             Value::Boolean(_) => "Boolean",
-            Value::Null(_) => "Null",
+            Value::Null => "Null",
             Value::Stream(_) => "Stream",
             Value::HexString(_) => "HexString",
             Value::Comment(_) => "Comment",

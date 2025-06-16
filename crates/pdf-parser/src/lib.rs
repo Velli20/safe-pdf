@@ -209,7 +209,8 @@ impl<'a> PdfParser<'a> {
                     } else if t == b'f' {
                         Value::Boolean(self.parse_boolean()?)
                     } else if t == b'n' {
-                        Value::Null(self.parse_null_object()?)
+                        self.parse_null_object()?;
+                        Value::Null
                     } else if t == b'x' {
                         Value::CrossReferenceTable(self.parse_cross_reference_table()?)
                     } else {

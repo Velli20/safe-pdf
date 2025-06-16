@@ -1,5 +1,3 @@
-use pdf_object::null::NullObject;
-
 use crate::{PdfParser, error::ParserError, traits::NullObjectParser};
 
 impl NullObjectParser for PdfParser<'_> {
@@ -26,14 +24,14 @@ impl NullObjectParser for PdfParser<'_> {
     ///
     /// # Returns
     ///
-    /// A `NullObject` if the `null` keyword is successfully parsed,
+    /// A `()` if the `null` keyword is successfully parsed,
     /// or a `ParserError` if the keyword is not found or is malformed.
-    fn parse_null_object(&mut self) -> Result<NullObject, Self::ErrorType> {
+    fn parse_null_object(&mut self) -> Result<(), Self::ErrorType> {
         const NULL_LITERAL: &[u8] = b"null";
 
         self.read_keyword(NULL_LITERAL)?;
 
-        Ok(NullObject::new())
+        Ok(())
     }
 }
 
