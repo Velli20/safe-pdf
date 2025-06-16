@@ -1,4 +1,3 @@
-use pdf_object::literal_string::LiteralString;
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
@@ -59,7 +58,7 @@ impl LiteralStringParser for PdfParser<'_> {
     /// A `LiteralString` object containing the characters between the outermost parentheses,
     /// or a `ParserError` if the parentheses are unbalanced, delimiters are missing, or an
     /// unexpected token is encountered.
-    fn parse_literal_string(&mut self) -> Result<LiteralString, Self::ErrorType> {
+    fn parse_literal_string(&mut self) -> Result<String, Self::ErrorType> {
         // Expect the opening parenthesis `(`.
         self.tokenizer.expect(PdfToken::LeftParenthesis)?;
 
@@ -84,9 +83,7 @@ impl LiteralStringParser for PdfParser<'_> {
                         if depth == 0 {
                             // End of a literal string
 
-                            return Ok(LiteralString::new(
-                                String::from_utf8_lossy(&characthers).to_string(),
-                            ));
+                            return Ok(String::from_utf8_lossy(&characthers).to_string());
                         } else {
                             // Nested parenthesis
                             depth -= 1;
@@ -124,7 +121,7 @@ mod tests {
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
 
-            let LiteralString(result) = parser.parse_literal_string().unwrap();
+            let result = parser.parse_literal_string().unwrap();
             assert_eq!(result, expected);
         }
     }

@@ -2,7 +2,6 @@ pub mod cross_reference_table;
 pub mod dictionary;
 pub mod error;
 pub mod indirect_object;
-pub mod literal_string;
 pub mod null;
 pub mod number;
 pub mod object_collection;
@@ -17,7 +16,6 @@ use cross_reference_table::CrossReferenceTable;
 use dictionary::Dictionary;
 use error::ObjectError;
 use indirect_object::IndirectObject;
-use literal_string::LiteralString;
 use null::NullObject;
 use number::Number;
 use stream::StreamObject;
@@ -57,7 +55,7 @@ pub enum Value {
     IndirectObject(ObjectVariant),
     Dictionary(Rc<Dictionary>),
     Array(Vec<Value>),
-    LiteralString(LiteralString),
+    LiteralString(String),
     Name(String),
     Number(Number),
     Boolean(bool),
@@ -96,7 +94,7 @@ impl Value {
 
     pub fn as_str(&self) -> Option<&str> {
         if let Value::LiteralString(value) = self {
-            Some(&value.0)
+            Some(value)
         } else if let Value::HexString(value) = self {
             Some(value)
         } else if let Value::Name(value) = self {

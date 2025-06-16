@@ -113,7 +113,7 @@ impl Operands<'_> {
             for val_obj in array_values {
                 match val_obj {
                     Value::LiteralString(s) => {
-                        elements.push(TextElement::Text { value: s.0.clone() });
+                        elements.push(TextElement::Text { value: s.clone() });
                     }
                     Value::Number(n) => {
                         if let Some(num_f32) = n.as_f32() {

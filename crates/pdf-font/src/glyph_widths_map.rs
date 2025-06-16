@@ -143,7 +143,7 @@ impl GlyphWidthsMap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pdf_object::{Value, literal_string::LiteralString, number::Number};
+    use pdf_object::{Value, number::Number};
 
     // Helper to create a pdf_object::Value::Number for i64
     fn num_i64(n: i64) -> Value {
@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn test_from_array_invalid_cid_not_a_number() {
         let input_array = vec![
-            Value::LiteralString(LiteralString::new("not_a_cid".to_string())),
+            Value::LiteralString("not_a_cid".to_string()),
             arr(vec![num_f32(500.0)]),
         ];
         let result = GlyphWidthsMap::from_array(&input_array);
@@ -395,7 +395,7 @@ mod tests {
         let input_array = vec![
             num_i64(10),
             num_i64(12),
-            Value::LiteralString(LiteralString::new("not_a_width".to_string())),
+            Value::LiteralString("not_a_width".to_string()),
         ];
         let result = GlyphWidthsMap::from_array(&input_array);
         assert!(matches!(
@@ -409,7 +409,7 @@ mod tests {
         // [ 10 "not_c_last" 600 ]
         let input_array = vec![
             num_i64(10),
-            Value::LiteralString(LiteralString::new("not_c_last".to_string())),
+            Value::LiteralString("not_c_last".to_string()),
             num_f32(600.0),
         ];
         let result = GlyphWidthsMap::from_array(&input_array);

@@ -164,7 +164,7 @@ impl IndirectObjectParser for PdfParser<'_> {
 
 #[cfg(test)]
 mod tests {
-    use pdf_object::{Value, literal_string::LiteralString};
+    use pdf_object::Value;
 
     use super::*;
 
@@ -185,12 +185,7 @@ mod tests {
 
             assert_eq!(*object_number, 0);
             assert_eq!(*generation_number, 1);
-            assert_eq!(
-                *object,
-                Some(Value::LiteralString(LiteralString::new(String::from(
-                    "HELLO"
-                ),)))
-            );
+            assert_eq!(*object, Some(Value::LiteralString(String::from("HELLO"),)));
         } else {
             panic!("Expected IndirectObject variant");
         }
