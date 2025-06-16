@@ -1,8 +1,7 @@
 use pdf_object::{
-    ObjectVariant, Value, boolean::Boolean, comment::Comment,
-    cross_reference_table::CrossReferenceTable, dictionary::Dictionary, hex_string::HexString,
-    literal_string::LiteralString, name::Name, null::NullObject, number::Number, trailer::Trailer,
-    version::Version,
+    ObjectVariant, Value, comment::Comment, cross_reference_table::CrossReferenceTable,
+    dictionary::Dictionary, hex_string::HexString, literal_string::LiteralString, name::Name,
+    null::NullObject, number::Number, trailer::Trailer, version::Version,
 };
 
 pub trait ArrayParser {
@@ -20,7 +19,7 @@ pub trait StreamParser {
 pub trait BooleanParser {
     type ErrorType;
 
-    fn parse_boolean(&mut self) -> Result<Boolean, Self::ErrorType>;
+    fn parse_boolean(&mut self) -> Result<bool, Self::ErrorType>;
 }
 
 pub trait CommentParser {

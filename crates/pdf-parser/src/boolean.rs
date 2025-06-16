@@ -1,4 +1,3 @@
-use pdf_object::boolean::Boolean;
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
@@ -32,7 +31,7 @@ impl BooleanParser for PdfParser<'_> {
     /// true
     /// false
     /// ```
-    fn parse_boolean(&mut self) -> Result<Boolean, Self::ErrorType> {
+    fn parse_boolean(&mut self) -> Result<bool, Self::ErrorType> {
         const BOOLEAN_LITERAL_TRUE: &[u8] = b"true";
         const BOOLEAN_LITERAL_FALSE: &[u8] = b"false";
 
@@ -48,7 +47,7 @@ impl BooleanParser for PdfParser<'_> {
             }
         })?;
 
-        Ok(Boolean::new(expected_literal == BOOLEAN_LITERAL_TRUE))
+        Ok(expected_literal == BOOLEAN_LITERAL_TRUE)
     }
 }
 
@@ -67,8 +66,7 @@ mod tests {
 
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_boolean().unwrap();
-            let Boolean(value) = result;
+            let value = parser.parse_boolean().unwrap();
             assert_eq!(value, expected);
         }
     }

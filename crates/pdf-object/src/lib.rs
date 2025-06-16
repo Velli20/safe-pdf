@@ -1,4 +1,3 @@
-pub mod boolean;
 pub mod comment;
 pub mod cross_reference_table;
 pub mod dictionary;
@@ -17,7 +16,6 @@ pub mod version;
 
 use std::rc::Rc;
 
-use boolean::Boolean;
 use comment::Comment;
 use cross_reference_table::CrossReferenceTable;
 use dictionary::Dictionary;
@@ -68,7 +66,7 @@ pub enum Value {
     LiteralString(LiteralString),
     Name(Name),
     Number(Number),
-    Boolean(Boolean),
+    Boolean(bool),
     Null(NullObject),
     Stream(StreamObject),
     HexString(HexString),
@@ -116,7 +114,7 @@ impl Value {
 
     pub fn as_boolean(&self) -> Option<bool> {
         if let Value::Boolean(value) = self {
-            Some(value.0)
+            Some(*value)
         } else {
             None
         }
