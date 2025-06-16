@@ -166,7 +166,6 @@ impl FromDictionary for Font {
             .ok_or(FontError::MissingDescendantFonts)?;
 
         let cid_font_ref_val = descendant_fonts_array
-            .0
             .first()
             .ok_or_else(|| FontError::InvalidDescendantFonts("Array is empty".to_string()))?;
 

@@ -1,4 +1,4 @@
-use pdf_object::array::Array;
+use pdf_object::Value;
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
@@ -46,7 +46,7 @@ impl ArrayParser for PdfParser<'_> {
     /// An `Array` object containing the parsed PDF objects as its elements,
     /// or a `ParserError` if the input is malformed (e.g., missing delimiters,
     /// invalid object syntax within the array, or an unexpected token).
-    fn parse_array(&mut self) -> Result<Array, ArrayError> {
+    fn parse_array(&mut self) -> Result<Vec<Value>, ArrayError> {
         self.tokenizer.expect(PdfToken::LeftSquareBracket)?;
         self.skip_whitespace();
 
@@ -71,7 +71,7 @@ impl ArrayParser for PdfParser<'_> {
 
         self.tokenizer.expect(PdfToken::RightSquareBracket)?;
 
-        Ok(Array::new(values))
+        Ok(values)
     }
 }
 
@@ -94,11 +94,11 @@ mod tests {
             let mut parser = PdfParser::from(input);
             let result = parser.parse_array().unwrap();
             assert_eq!(
-                result.0.len(),
+                result.len(),
                 expected_count,
                 "Expected {} elements, got {}",
                 expected_count,
-                result.0.len()
+                result.len()
             );
         }
     }
@@ -113,7 +113,7 @@ mod tests {
 
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            if let Ok(Array(v)) = parser.parse_array() {
+            if let Ok(v) = parser.parse_array() {
                 panic!(
                     "Expected Err, got {:?} len {} input '{}™",
                     v,

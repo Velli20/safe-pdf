@@ -1,4 +1,3 @@
-pub mod array;
 pub mod boolean;
 pub mod comment;
 pub mod cross_reference_table;
@@ -18,7 +17,6 @@ pub mod version;
 
 use std::rc::Rc;
 
-use array::Array;
 use boolean::Boolean;
 use comment::Comment;
 use cross_reference_table::CrossReferenceTable;
@@ -66,7 +64,7 @@ impl ObjectVariant {
 pub enum Value {
     IndirectObject(ObjectVariant),
     Dictionary(Rc<Dictionary>),
-    Array(Array),
+    Array(Vec<Value>),
     LiteralString(LiteralString),
     Name(Name),
     Number(Number),
@@ -88,7 +86,7 @@ impl Value {
             None
         }
     }
-    pub fn as_array(&self) -> Option<&Array> {
+    pub fn as_array(&self) -> Option<&[Value]> {
         if let Value::Array(value) = self {
             Some(value)
         } else {

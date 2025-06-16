@@ -214,22 +214,21 @@ impl FromDictionary for ExternalGraphicsState {
                                 found_type: format!("{:?}", value),
                             },
                         )?;
-                        if arr.0.len() != 2 {
+                        if arr.len() != 2 {
                             return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
                                 key_name: name.clone(),
                                 expected_desc: "array with 2 elements",
-                                actual_desc: format!("array with {} elements", arr.0.len()),
+                                actual_desc: format!("array with {} elements", arr.len()),
                             });
                         }
-                        let dash_array_obj = arr.0[0].as_array().ok_or(
+                        let dash_array_obj = arr[0].as_array().ok_or(
                             ExternalGraphicsStateError::UnsupportedTypeError {
                                 key_name: name.clone(),
                                 expected_type: "Array",
-                                found_type: format!("{:?}", arr.0[0]),
+                                found_type: format!("{:?}", arr[0]),
                             },
                         )?;
                         let dash_array_f32 = dash_array_obj
-                            .0
                             .iter()
                             .map(|obj| {
                                 obj.as_number::<f32>().map_err(|e| {
@@ -241,7 +240,7 @@ impl FromDictionary for ExternalGraphicsState {
                             })
                             .collect::<Result<Vec<f32>, _>>()?;
 
-                        let dash_phase = arr.0[1].as_number::<f32>().map_err(|e| {
+                        let dash_phase = arr[1].as_number::<f32>().map_err(|e| {
                             ExternalGraphicsStateError::NumericConversionError {
                                 entry_description: "Dash phase",
                                 source: e,
@@ -289,21 +288,21 @@ impl FromDictionary for ExternalGraphicsState {
                                 found_type: format!("{:?}", value),
                             },
                         )?;
-                        if arr.0.len() != 2 {
+                        if arr.len() != 2 {
                             return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
                                 key_name: name.clone(),
                                 expected_desc: "array with 2 elements",
-                                actual_desc: format!("array with {} elements", arr.0.len()),
+                                actual_desc: format!("array with {} elements", arr.len()),
                             });
                         }
-                        let font_ref = arr.0[0].as_object().ok_or(
+                        let font_ref = arr[0].as_object().ok_or(
                             ExternalGraphicsStateError::UnsupportedTypeError {
                                 key_name: name.clone(),
                                 expected_type: "Object",
-                                found_type: format!("{:?}", arr.0[0]),
+                                found_type: format!("{:?}", arr[0]),
                             },
                         )?;
-                        let font_size = arr.0[1].as_number::<f32>().map_err(|e| {
+                        let font_size = arr[1].as_number::<f32>().map_err(|e| {
                             ExternalGraphicsStateError::NumericConversionError {
                                 entry_description: "Font size",
                                 source: e,
@@ -324,7 +323,6 @@ impl FromDictionary for ExternalGraphicsState {
                             blend_modes_vec = vec![mode];
                         } else if let Some(pdf_array) = value.as_array() {
                             blend_modes_vec = pdf_array
-                                .0
                                 .iter()
                                 .map(|obj| {
                                     let name_str = obj.as_str().ok_or(

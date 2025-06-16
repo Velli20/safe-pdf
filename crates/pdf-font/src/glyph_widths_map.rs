@@ -1,4 +1,4 @@
-use pdf_object::{Value, array::Array, error::ObjectError};
+use pdf_object::{Value, error::ObjectError};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -49,9 +49,9 @@ impl GlyphWidthsMap {
     /// # Errors
     ///
     /// Returns `GlyphWidthsMapError` if the array is malformed or contains invalid values.
-    pub fn from_array(array: &Array) -> Result<Self, GlyphWidthsMapError> {
+    pub fn from_array(array: &[Value]) -> Result<Self, GlyphWidthsMapError> {
         let mut map = HashMap::new();
-        let mut iter = array.0.iter();
+        let mut iter = array.iter();
 
         while let Some(cid_val) = iter.next() {
             // Parse the starting CID (or c_first)
@@ -71,7 +71,6 @@ impl GlyphWidthsMap {
                 // Case: [c_first [w1 ... wn]]
                 Value::Array(widths_arr) => {
                     let widths = widths_arr
-                        .0
                         .iter()
                         .map(|w| {
                             w.as_number::<f32>().map_err(|e| {
@@ -158,12 +157,12 @@ mod tests {
 
     // Helper to create a pdf_object::Value::Array
     fn arr(elements: Vec<Value>) -> Value {
-        Value::Array(Array::new(elements))
+        Value::Array(elements)
     }
 
     #[test]
     fn test_from_array_empty() {
-        let input_array = Array(vec![]);
+        let input_array = vec![];
         let glyph_widths_map = GlyphWidthsMap::from_array(&input_array).unwrap();
         assert!(glyph_widths_map.map.is_empty());
     }
@@ -171,7 +170,7 @@ mod tests {
     #[test]
     fn test_from_array_single_entry() {
         // [ 0 [500 450] ]
-        let input_array = Array(vec![num_i64(0), arr(vec![num_f32(500.0), num_f32(450.0)])]);
+        let input_array = vec![num_i64(0), arr(vec![num_f32(500.0), num_f32(450.0)])];
         let glyph_widths_map = GlyphWidthsMap::from_array(&input_array).unwrap();
         assert_eq!(glyph_widths_map.map.len(), 1);
         assert_eq!(glyph_widths_map.map.get(&0).unwrap(), &vec![500.0, 450.0]);
@@ -180,14 +179,14 @@ mod tests {
     #[test]
     fn test_from_array_multiple_entries() {
         // [ 0 [500], 10 [600 650], 20 [700] ]
-        let input_array = Array(vec![
+        let input_array = vec![
             num_i64(0),
             arr(vec![num_f32(500.0)]),
             num_i64(10),
             arr(vec![num_f32(600.0), num_f32(650.0)]),
             num_i64(20),
             arr(vec![num_f32(700.0)]),
-        ]);
+        ];
         let glyph_widths_map = GlyphWidthsMap::from_array(&input_array).unwrap();
         assert_eq!(glyph_widths_map.map.len(), 3);
         assert_eq!(glyph_widths_map.map.get(&0).unwrap(), &vec![500.0]);
@@ -197,10 +196,10 @@ mod tests {
 
     #[test]
     fn test_from_array_invalid_cid_not_a_number() {
-        let input_array = Array(vec![
+        let input_array = vec![
             Value::LiteralString(LiteralString::new("not_a_cid".to_string())),
             arr(vec![num_f32(500.0)]),
-        ]);
+        ];
         let result = GlyphWidthsMap::from_array(&input_array);
         assert!(matches!(
             result,
@@ -211,7 +210,7 @@ mod tests {
     #[test]
     fn test_from_array_missing_widths_array() {
         // [ 0 ] (missing widths array)
-        let input_array = Array(vec![num_i64(0)]);
+        let input_array = vec![num_i64(0)];
         let result = GlyphWidthsMap::from_array(&input_array);
         assert!(matches!(
             result,
@@ -222,7 +221,7 @@ mod tests {
     #[test]
     fn test_from_array_widths_not_an_array() {
         // [ 0, 500 ] (500 is not an array)
-        let input_array = Array(vec![num_i64(0), num_f32(500.0)]);
+        let input_array = vec![num_i64(0), num_f32(500.0)];
         let result = GlyphWidthsMap::from_array(&input_array);
         assert!(matches!(
             result,
@@ -328,7 +327,7 @@ mod tests {
     #[test]
     fn test_from_array_c_first_c_last_w_form_single_entry() {
         // [ 10 12 600 ] -> CIDs 10, 11, 12 have width 600
-        let input_array = Array(vec![num_i64(10), num_i64(12), num_f32(600.0)]);
+        let input_array = vec![num_i64(10), num_i64(12), num_f32(600.0)];
         let glyph_widths_map = GlyphWidthsMap::from_array(&input_array).unwrap();
         assert_eq!(glyph_widths_map.map.len(), 1);
         assert_eq!(
@@ -340,7 +339,7 @@ mod tests {
     #[test]
     fn test_from_array_c_first_c_last_w_form_c_first_equals_c_last() {
         // [ 5 5 300 ] -> CID 5 has width 300
-        let input_array = Array(vec![num_i64(5), num_i64(5), num_f32(300.0)]);
+        let input_array = vec![num_i64(5), num_i64(5), num_f32(300.0)];
         let glyph_widths_map = GlyphWidthsMap::from_array(&input_array).unwrap();
         assert_eq!(glyph_widths_map.map.len(), 1);
         assert_eq!(glyph_widths_map.map.get(&5).unwrap(), &vec![300.0]);
@@ -349,7 +348,7 @@ mod tests {
     #[test]
     fn test_from_array_mixed_forms() {
         // [ 0 [500], 10 11 600, 20 [700 750] ]
-        let input_array = Array(vec![
+        let input_array = vec![
             num_i64(0),
             arr(vec![num_f32(500.0)]),
             num_i64(10),
@@ -357,7 +356,7 @@ mod tests {
             num_f32(600.0),
             num_i64(20),
             arr(vec![num_f32(700.0), num_f32(750.0)]),
-        ]);
+        ];
         let glyph_widths_map = GlyphWidthsMap::from_array(&input_array).unwrap();
         assert_eq!(glyph_widths_map.map.len(), 3);
         assert_eq!(glyph_widths_map.map.get(&0).unwrap(), &vec![500.0]);
@@ -368,7 +367,7 @@ mod tests {
     #[test]
     fn test_from_array_error_c_last_less_than_c_first() {
         // [ 10 8 600 ]
-        let input_array = Array(vec![num_i64(10), num_i64(8), num_f32(600.0)]);
+        let input_array = vec![num_i64(10), num_i64(8), num_f32(600.0)];
         let result = GlyphWidthsMap::from_array(&input_array);
         assert!(matches!(
             result,
@@ -382,7 +381,7 @@ mod tests {
     #[test]
     fn test_from_array_error_missing_w_in_c_first_c_last_w() {
         // [ 10 12 ] (missing w)
-        let input_array = Array(vec![num_i64(10), num_i64(12)]);
+        let input_array = vec![num_i64(10), num_i64(12)];
         let result = GlyphWidthsMap::from_array(&input_array);
         assert!(matches!(
             result,
@@ -393,11 +392,11 @@ mod tests {
     #[test]
     fn test_from_array_error_w_not_a_number() {
         // [ 10 12 "not_a_width" ]
-        let input_array = Array(vec![
+        let input_array = vec![
             num_i64(10),
             num_i64(12),
             Value::LiteralString(LiteralString::new("not_a_width".to_string())),
-        ]);
+        ];
         let result = GlyphWidthsMap::from_array(&input_array);
         assert!(matches!(
             result,
@@ -408,11 +407,11 @@ mod tests {
     #[test]
     fn test_from_array_error_c_last_not_a_number() {
         // [ 10 "not_c_last" 600 ]
-        let input_array = Array(vec![
+        let input_array = vec![
             num_i64(10),
             Value::LiteralString(LiteralString::new("not_c_last".to_string())),
             num_f32(600.0),
-        ]);
+        ];
         let result = GlyphWidthsMap::from_array(&input_array);
         assert!(matches!(
             result,

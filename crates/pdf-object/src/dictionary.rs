@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, rc::Rc};
 
-use crate::{ObjectVariant, Value, array::Array};
+use crate::{ObjectVariant, Value};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Dictionary {
@@ -52,7 +52,7 @@ impl Dictionary {
             })
     }
 
-    pub fn get_array(&self, key: &str) -> Option<&Array> {
+    pub fn get_array(&self, key: &str) -> Option<&Vec<Value>> {
         self.dictionary
             .get(key)
             .and_then(|value| match value.as_ref() {

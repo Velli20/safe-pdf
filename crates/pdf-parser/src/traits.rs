@@ -1,5 +1,5 @@
 use pdf_object::{
-    ObjectVariant, array::Array, boolean::Boolean, comment::Comment,
+    ObjectVariant, Value, boolean::Boolean, comment::Comment,
     cross_reference_table::CrossReferenceTable, dictionary::Dictionary, hex_string::HexString,
     literal_string::LiteralString, name::Name, null::NullObject, number::Number, trailer::Trailer,
     version::Version,
@@ -8,7 +8,7 @@ use pdf_object::{
 pub trait ArrayParser {
     type ErrorType;
 
-    fn parse_array(&mut self) -> Result<Array, Self::ErrorType>;
+    fn parse_array(&mut self) -> Result<Vec<Value>, Self::ErrorType>;
 }
 
 pub trait StreamParser {

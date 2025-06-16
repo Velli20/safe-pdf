@@ -53,7 +53,7 @@ impl FromDictionary for MediaBox {
             return Ok(None);
         };
 
-        match array.0.as_slice() {
+        match array.as_slice() {
             // Pattern match for exactly 4 elements in the slice.
             [l, t, r, b] => {
                 // Safely extract and cast the values

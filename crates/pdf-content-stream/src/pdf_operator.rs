@@ -110,7 +110,7 @@ impl Operands<'_> {
 
         if let Some(Value::Array(array_values)) = value {
             let mut elements = Vec::new();
-            for val_obj in &array_values.0 {
+            for val_obj in array_values {
                 match val_obj {
                     Value::LiteralString(s) => {
                         elements.push(TextElement::Text { value: s.0.clone() });
@@ -137,7 +137,7 @@ impl Operands<'_> {
 
         if let Some(Value::Array(array_values)) = value {
             let mut numbers = Vec::new();
-            for val_obj in &array_values.0 {
+            for val_obj in array_values {
                 match val_obj {
                     Value::Number(n) => {
                         if let Some(num_f32) = n.as_f32() {

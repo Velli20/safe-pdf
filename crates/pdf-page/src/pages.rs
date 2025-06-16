@@ -60,7 +60,7 @@ impl FromDictionary for PdfPages {
 
         // Iterate over the `Kids` array and extract the individual page objects.
         let mut pages = vec![];
-        for kid_value in &kids_array.0 {
+        for kid_value in kids_array {
             let kid_ref = kid_value
                 .as_object()
                 .ok_or_else(|| PdfPagesError::InvalidKidEntry {

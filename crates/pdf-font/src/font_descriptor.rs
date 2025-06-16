@@ -119,7 +119,7 @@ impl FromDictionary for FontDescriptor {
             })
         };
 
-        let font_bounding_box = match font_bounding_box.0.as_slice() {
+        let font_bounding_box = match font_bounding_box.as_slice() {
             // Pattern match for exactly 4 elements in the slice.
             [l, t, r, b] => {
                 [
