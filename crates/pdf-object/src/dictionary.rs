@@ -29,7 +29,7 @@ impl Dictionary {
         self.dictionary
             .get(key)
             .and_then(|value| match value.as_ref() {
-                Value::Name(name) => Some(&name.0),
+                Value::Name(name) => Some(name),
                 _ => None,
             })
     }

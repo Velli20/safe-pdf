@@ -84,7 +84,7 @@ impl DictionaryParser for PdfParser<'_> {
                 .parse_object()
                 .map_err(|e| DictionaryError::InvalidValue(e.to_string()))?;
 
-            dictionary.insert(key.0, Box::new(value));
+            dictionary.insert(key, Box::new(value));
             self.skip_whitespace();
         }
 

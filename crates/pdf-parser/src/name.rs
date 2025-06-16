@@ -1,4 +1,3 @@
-use pdf_object::name::Name;
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
@@ -64,7 +63,7 @@ impl NameParser for PdfParser<'_> {
     /// A `Name` object containing the decoded name string (with hex escapes resolved),
     /// or a `ParserError` if the input does not start with `/`, is empty after the `/`,
     /// or contains an invalid hex escape sequence.
-    fn parse_name(&mut self) -> Result<Name, Self::ErrorType> {
+    fn parse_name(&mut self) -> Result<String, Self::ErrorType> {
         self.tokenizer.expect(PdfToken::Solidus)?;
 
         let name = self.tokenizer.read_while_u8(|b| !Self::is_pdf_delimiter(b));
@@ -74,7 +73,7 @@ impl NameParser for PdfParser<'_> {
 
         let name = escape(name)?;
 
-        Ok(Name::new(name))
+        Ok(name)
     }
 }
 
@@ -148,7 +147,7 @@ mod tests {
         ];
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let Name(value) = parser.parse_name().unwrap();
+            let value = parser.parse_name().unwrap();
             if value != expected {
                 panic!(
                     "Expected `{}`, but got `{}` for input `{}`",

@@ -87,7 +87,7 @@ impl Operands<'_> {
         self.0 = &self.0[1..];
 
         if let Some(Value::Name(name)) = value {
-            Ok(name.0.clone())
+            Ok(name.clone())
         } else {
             Err(PdfOperatorError::InvalidOperandType)
         }

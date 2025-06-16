@@ -4,7 +4,6 @@ pub mod error;
 pub mod hex_string;
 pub mod indirect_object;
 pub mod literal_string;
-pub mod name;
 pub mod null;
 pub mod number;
 pub mod object_collection;
@@ -21,7 +20,6 @@ use error::ObjectError;
 use hex_string::HexString;
 use indirect_object::IndirectObject;
 use literal_string::LiteralString;
-use name::Name;
 use null::NullObject;
 use number::Number;
 use stream::StreamObject;
@@ -62,7 +60,7 @@ pub enum Value {
     Dictionary(Rc<Dictionary>),
     Array(Vec<Value>),
     LiteralString(LiteralString),
-    Name(Name),
+    Name(String),
     Number(Number),
     Boolean(bool),
     Null(NullObject),
@@ -104,7 +102,7 @@ impl Value {
         } else if let Value::HexString(value) = self {
             Some(&value.0)
         } else if let Value::Name(value) = self {
-            Some(&value.0)
+            Some(value)
         } else {
             None
         }
