@@ -1,4 +1,3 @@
-pub mod comment;
 pub mod cross_reference_table;
 pub mod dictionary;
 pub mod error;
@@ -16,7 +15,6 @@ pub mod version;
 
 use std::rc::Rc;
 
-use comment::Comment;
 use cross_reference_table::CrossReferenceTable;
 use dictionary::Dictionary;
 use error::ObjectError;
@@ -70,7 +68,7 @@ pub enum Value {
     Null(NullObject),
     Stream(StreamObject),
     HexString(HexString),
-    Comment(Comment),
+    Comment(String),
     Trailer(Trailer),
     CrossReferenceTable(CrossReferenceTable),
     EndOfFile,

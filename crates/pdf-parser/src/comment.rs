@@ -1,8 +1,7 @@
-use pdf_object::comment::Comment;
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
-use crate::{PdfParser, error::ParserError, traits::CommentParser};
+use crate::{PdfParser, traits::CommentParser};
 
 #[derive(Debug, PartialEq, Error)]
 pub enum CommentError {
@@ -40,8 +39,8 @@ impl CommentParser for PdfParser<'_> {
     ///
     /// A `Comment` object containing the text of the comment (excluding the leading `%`
     /// and trailing EOL marker) or an error if the input does not start with `%`.
-    fn parse_comment(&mut self) -> Result<Comment, Self::ErrorType> {
-        self.tokenizer.expect(PdfToken::Percent)?; // TokenizerError will be converted by `?`
+    fn parse_comment(&mut self) -> Result<String, Self::ErrorType> {
+        self.tokenizer.expect(PdfToken::Percent)?;
         // Read until the end of the line.
         let text = self.tokenizer.read_while_u8(|c| c != b'\n' && c != b'\r');
         let text = String::from_utf8_lossy(text).to_string();
@@ -49,7 +48,7 @@ impl CommentParser for PdfParser<'_> {
             .map_err(|err| CommentError::MissingEOL {
                 err: err.to_string(),
             })?;
-        Ok(Comment::new(text))
+        Ok(text)
     }
 }
 
@@ -71,7 +70,7 @@ mod tests {
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
             let result = parser.parse_comment().unwrap();
-            assert_eq!(result.text(), expected);
+            assert_eq!(result, expected);
         }
     }
 
@@ -83,7 +82,7 @@ mod tests {
 
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            let result: Result<Comment, CommentError> = parser.parse_comment();
+            let result = parser.parse_comment();
             assert!(
                 result.is_err(),
                 "Expected error for invalid input `{}`",
