@@ -2,7 +2,6 @@ pub mod cross_reference_table;
 pub mod dictionary;
 pub mod error;
 pub mod indirect_object;
-pub mod number;
 pub mod object_collection;
 pub mod stream;
 pub mod trailer;
@@ -15,7 +14,6 @@ use cross_reference_table::CrossReferenceTable;
 use dictionary::Dictionary;
 use error::ObjectError;
 use indirect_object::IndirectObject;
-use number::Number;
 use stream::StreamObject;
 use trailer::Trailer;
 
@@ -27,7 +25,8 @@ pub enum ObjectVariant {
     Array(Vec<ObjectVariant>),
     LiteralString(String),
     Name(String),
-    Number(Number),
+    Integer(i64),
+    Real(f64),
     Boolean(bool),
     Null,
     HexString(String),
@@ -103,14 +102,13 @@ impl ObjectVariant {
     where
         T: FromPrimitive,
     {
-        if let ObjectVariant::Number(value) = self {
-            if let Some(i) = value.integer {
-                return T::from_i64(i).ok_or(ObjectError::NumberConversionError);
-            } else if let Some(f) = value.real {
-                return T::from_f64(f).ok_or(ObjectError::NumberConversionError);
-            }
+        if let ObjectVariant::Integer(value) = self {
+            T::from_i64(*value).ok_or(ObjectError::NumberConversionError)
+        } else if let ObjectVariant::Real(value) = self {
+            T::from_f64(*value).ok_or(ObjectError::NumberConversionError)
+        } else {
+            Err(ObjectError::TypeMismatch("Number", self.name()))
         }
-        Err(ObjectError::TypeMismatch("Number", self.name()))
     }
 
     /// Returns a string representation of the `Value` variant's type.
@@ -122,7 +120,8 @@ impl ObjectVariant {
             ObjectVariant::Array(_) => "Array",
             ObjectVariant::LiteralString(_) => "LiteralString",
             ObjectVariant::Name(_) => "Name",
-            ObjectVariant::Number(_) => "Number",
+            ObjectVariant::Integer(_) => "Integer",
+            ObjectVariant::Real(_) => "Real",
             ObjectVariant::Boolean(_) => "Boolean",
             ObjectVariant::Null => "Null",
             ObjectVariant::Stream(_) => "Stream",

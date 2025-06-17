@@ -1,5 +1,6 @@
 use pdf_object::{
-    dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
+    ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection,
+    traits::FromDictionary,
 };
 
 use crate::{
@@ -34,14 +35,26 @@ impl CharacterIdentifierFont {
 /// Defines errors that can occur while reading a PDF objects.
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum CidFontError {
-    #[error("Missing /FontDescriptor entry")]
+    #[error("Missing /FontDescriptor entry in CIDFont dictionary")]
     MissingFontDescriptor,
     #[error("FontDescriptor parsing error: {0}")]
     FontDescriptorError(#[from] FontDescriptorError),
     #[error("GlyphWidthsMap parsing error: {0}")]
     GlyphWidthsMapError(#[from] GlyphWidthsMapError),
-    #[error("Missing /Subtype entry")]
+    #[error("Missing /Subtype entry in CIDFont dictionary")]
     MissingSubType,
+    #[error(
+        "Invalid /FontDescriptor reference in CIDFont dictionary: object {0} could not be resolved to a dictionary"
+    )]
+    InvalidFontDescriptorReference(i32),
+    #[error(
+        "Invalid type for CIDFont entry /{entry_name}: expected {expected_type}, found {found_type}"
+    )]
+    InvalidEntryType {
+        entry_name: &'static str,
+        expected_type: &'static str,
+        found_type: &'static str,
+    },
 }
 
 impl FromDictionary for CharacterIdentifierFont {
@@ -56,29 +69,38 @@ impl FromDictionary for CharacterIdentifierFont {
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let default_width = dictionary.get_number("DW").unwrap_or(Self::DEFAULT_WIDTH);
 
-        // Initialize a map to store parsed CID widths.
-        // The key is the starting CID, and the value is a vector of widths
-        // for consecutive CIDs starting from the key.
-        let widths_map = if let Some(array) = dictionary.get_array("W") {
-            Some(GlyphWidthsMap::from_array(array)?)
-        } else {
-            None
-        };
+        let widths_map = dictionary
+            .get_array("W")
+            .map(|array| GlyphWidthsMap::from_array(array))
+            .transpose()?;
 
         let subtype = dictionary
             .get_string("Subtype")
             .ok_or(CidFontError::MissingSubType)?
             .to_string();
 
-        let descriptor = if let Some(num) = dictionary.get_object_reference("FontDescriptor") {
-            if let Some(s) = objects.get_dictionary(num) {
-                FontDescriptor::from_dictionary(s, objects)?
-            } else {
-                return Err(CidFontError::MissingFontDescriptor);
-            }
-        } else {
-            return Err(CidFontError::MissingFontDescriptor);
+        // According to PDF 1.7 Spec (Table 114), FontDescriptor must be an indirect reference.
+        let descriptor = match dictionary.get("FontDescriptor") {
+            Some(obj_var_box) => match obj_var_box.as_ref() {
+                ObjectVariant::Reference(obj_num) => {
+                    let desc_dict = objects
+                        .get_dictionary(*obj_num)
+                        .ok_or_else(|| CidFontError::InvalidFontDescriptorReference(*obj_num))?;
+                    FontDescriptor::from_dictionary(desc_dict, objects)
+                        .map_err(CidFontError::FontDescriptorError)?
+                }
+                other => {
+                    // FontDescriptor is present, but not an indirect reference as required.
+                    return Err(CidFontError::InvalidEntryType {
+                        entry_name: "FontDescriptor",
+                        expected_type: "Indirect Reference",
+                        found_type: other.name(),
+                    });
+                }
+            },
+            None => return Err(CidFontError::MissingFontDescriptor),
         };
+
         Ok(Self {
             default_width,
             descriptor,

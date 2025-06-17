@@ -84,7 +84,7 @@ impl GlyphWidthsMap {
                     map.insert(cid, widths);
                 }
                 // Case: [c_first c_last w]
-                ObjectVariant::Number(_) => {
+                ObjectVariant::Integer(_) | ObjectVariant::Real(_) => {
                     let c_last = next.as_number::<i64>().map_err(|e| {
                         GlyphWidthsMapError::NumericConversionError {
                             entry_description: "c_last",
@@ -143,16 +143,16 @@ impl GlyphWidthsMap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pdf_object::{ObjectVariant, number::Number};
+    use pdf_object::ObjectVariant;
 
     // Helper to create a pdf_object::Value::Number for i64
     fn num_i64(n: i64) -> ObjectVariant {
-        ObjectVariant::Number(Number::new(n))
+        ObjectVariant::Integer(n)
     }
 
     // Helper to create a pdf_object::Value::Number for f32
     fn num_f32(n: f32) -> ObjectVariant {
-        ObjectVariant::Number(Number::new(n as f64))
+        ObjectVariant::Real(n as f64)
     }
 
     // Helper to create a pdf_object::Value::Array

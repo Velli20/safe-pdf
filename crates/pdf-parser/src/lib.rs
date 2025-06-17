@@ -230,11 +230,11 @@ impl<'a> PdfParser<'a> {
                     }
 
                     self.tokenizer.position = start;
-                    ObjectVariant::Number(self.parse_number()?)
+                    self.parse_number()?
                 }
-                PdfToken::Minus => ObjectVariant::Number(self.parse_number()?),
-                PdfToken::Plus => ObjectVariant::Number(self.parse_number()?),
-                PdfToken::Period => ObjectVariant::Number(self.parse_number()?),
+                PdfToken::Minus => self.parse_number()?,
+                PdfToken::Plus => self.parse_number()?,
+                PdfToken::Period => self.parse_number()?,
                 PdfToken::LeftSquareBracket => ObjectVariant::Array(self.parse_array()?),
                 PdfToken::LeftParenthesis => {
                     ObjectVariant::LiteralString(self.parse_literal_string()?)

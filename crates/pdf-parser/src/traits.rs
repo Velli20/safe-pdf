@@ -1,6 +1,6 @@
 use pdf_object::{
     ObjectVariant, cross_reference_table::CrossReferenceTable, dictionary::Dictionary,
-    number::Number, trailer::Trailer, version::Version,
+    trailer::Trailer, version::Version,
 };
 
 pub trait ArrayParser {
@@ -78,7 +78,7 @@ pub trait NullObjectParser {
 pub trait NumberParser {
     type ErrorType;
 
-    fn parse_number(&mut self) -> Result<Number, Self::ErrorType>;
+    fn parse_number(&mut self) -> Result<ObjectVariant, Self::ErrorType>;
 }
 pub trait TrailerParser {
     type ErrorType;

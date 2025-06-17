@@ -152,19 +152,16 @@ impl<'a> StreamParser for PdfParser<'a> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_object::{ObjectVariant, number::Number};
+    use pdf_object::ObjectVariant;
 
     use super::*;
 
     #[test]
     fn test_parse_stream_missing_stream_keyword() {
         let dictionary = Dictionary::new(
-            vec![(
-                "Length".to_string(),
-                Box::new(ObjectVariant::Number(Number::new(11))),
-            )]
-            .into_iter()
-            .collect(),
+            vec![("Length".to_string(), Box::new(ObjectVariant::Integer(11)))]
+                .into_iter()
+                .collect(),
         );
 
         let input = b"strm\nHello World\nendstream";
@@ -177,12 +174,9 @@ mod tests {
     #[test]
     fn test_parse_stream_missing_endstream_keyword() {
         let dictionary = Dictionary::new(
-            vec![(
-                "Length".to_string(),
-                Box::new(ObjectVariant::Number(Number::new(11))),
-            )]
-            .into_iter()
-            .collect(),
+            vec![("Length".to_string(), Box::new(ObjectVariant::Integer(11)))]
+                .into_iter()
+                .collect(),
         );
 
         let input = b"stream\nHello World\nendstrm";
@@ -206,12 +200,9 @@ mod tests {
     #[test]
     fn test_parse_stream_incorrect_length() {
         let dictionary = Dictionary::new(
-            vec![(
-                "Length".to_string(),
-                Box::new(ObjectVariant::Number(Number::new(5))),
-            )] // Incorrect length
-            .into_iter()
-            .collect(),
+            vec![("Length".to_string(), Box::new(ObjectVariant::Integer(5)))] // Incorrect length
+                .into_iter()
+                .collect(),
         );
 
         let input = b"stream\nHello World\nendstream";
@@ -224,12 +215,9 @@ mod tests {
     #[test]
     fn test_parse_stream_with_extra_whitespace() {
         let dictionary = Dictionary::new(
-            vec![(
-                "Length".to_string(),
-                Box::new(ObjectVariant::Number(Number::new(11))),
-            )]
-            .into_iter()
-            .collect(),
+            vec![("Length".to_string(), Box::new(ObjectVariant::Integer(11)))]
+                .into_iter()
+                .collect(),
         );
 
         let input = b"stream\n   Hello World   \nendstream";

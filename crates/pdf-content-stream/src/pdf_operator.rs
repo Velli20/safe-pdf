@@ -141,7 +141,7 @@ impl Operands<'_> {
                         ObjectVariant::LiteralString(s) => {
                             elements.push(TextElement::Text { value: s.clone() });
                         }
-                        ObjectVariant::Number(_) => {
+                        ObjectVariant::Integer(_) | ObjectVariant::Real(_) => {
                             if let Ok(amount) = val_obj.as_number::<f32>() {
                                 elements.push(TextElement::Adjustment { amount });
                             } else {
@@ -180,7 +180,7 @@ impl Operands<'_> {
                 let mut numbers = Vec::with_capacity(array_values.len());
                 for val_obj in array_values {
                     match val_obj {
-                        ObjectVariant::Number(_) => {
+                        ObjectVariant::Integer(_) | ObjectVariant::Real(_) => {
                             if let Ok(num_f32) = val_obj.as_number::<f32>() {
                                 numbers.push(num_f32);
                             } else {

@@ -1,4 +1,4 @@
-use pdf_object::number::Number;
+use pdf_object::ObjectVariant;
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
@@ -19,6 +19,7 @@ pub enum NumberError {
         source: std::num::ParseFloatError,
     },
 }
+
 impl NumberParser for PdfParser<'_> {
     type ErrorType = NumberError;
 
@@ -66,7 +67,7 @@ impl NumberParser for PdfParser<'_> {
     /// A `Number` object containing the parsed integer (`i64`) or real (`f64`) value,
     /// or a `ParserError` if the input is malformed (e.g., invalid characters,
     /// missing digits after a sign or decimal point).
-    fn parse_number(&mut self) -> Result<Number, NumberError> {
+    fn parse_number(&mut self) -> Result<ObjectVariant, NumberError> {
         let mut has_minus = false;
 
         // 1. Check for optional sign.
@@ -112,14 +113,14 @@ impl NumberParser for PdfParser<'_> {
                     })?;
 
             self.skip_whitespace();
-            Ok(Number::new(number))
+            Ok(ObjectVariant::Real(number))
         } else {
             // 7. No decimal point, parse as integer.
             self.skip_whitespace();
             if has_minus {
-                Ok(Number::new(-digits))
+                Ok(ObjectVariant::Integer(-digits))
             } else {
-                Ok(Number::new(digits))
+                Ok(ObjectVariant::Integer(digits))
             }
         }
     }
@@ -143,7 +144,7 @@ mod tests {
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
             let result = parser.parse_number().unwrap();
-            assert_eq!(result, Number::new(expected));
+            assert_eq!(result, ObjectVariant::Integer(expected));
         }
     }
 
@@ -159,7 +160,7 @@ mod tests {
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
             let result = parser.parse_number().unwrap();
-            assert_eq!(result, Number::new(expected));
+            assert_eq!(result, ObjectVariant::Real(expected));
         }
     }
 
@@ -178,7 +179,7 @@ mod tests {
 
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            let result: Result<Number, NumberError> = parser.parse_number();
+            let result = parser.parse_number();
             assert!(
                 result.is_err(),
                 "Expected error for invalid input `{}`",

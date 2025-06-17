@@ -20,7 +20,11 @@ impl Dictionary {
         self.dictionary
             .get(key)
             .and_then(|value| match value.as_ref() {
-                ObjectVariant::Number(number) => Some(number.integer.unwrap_or(0)),
+                ObjectVariant::Integer(number) => Some(*number),
+                ObjectVariant::Real(number) => {
+                    println!("Fixme");
+                    Some(number.round() as i64)
+                }
                 _ => None,
             })
     }

@@ -1,4 +1,4 @@
-use crate::page::PdfPage;
+use crate::page::{PdfPage, PdfPageError}; // Import PdfPageError
 use pdf_object::{
     dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
 };
@@ -33,9 +33,11 @@ pub enum PdfPagesError {
     UnexpectedObjectTypeInKids { obj_num: i32, found_type: String },
 
     /// An error occurred while processing a child `PdfPage` object.
-    #[error("Error processing child Page object (obj {obj_num}):")]
+    #[error("Error processing child Page object (obj {obj_num}): {source}")]
     PageProcessingError {
-        obj_num: i32, /* , #[source] source: PageError  */
+        obj_num: i32,
+        #[source]
+        source: PdfPageError,
     },
 }
 
@@ -84,10 +86,10 @@ impl FromDictionary for PdfPages {
                     })?;
 
             if object_type == PdfPage::KEY {
-                let page = PdfPage::from_dictionary(kid_dict, objects).map_err(|source| {
-                    panic!("err {}", source);
+                let page = PdfPage::from_dictionary(kid_dict, objects).map_err(|err| {
                     PdfPagesError::PageProcessingError {
-                        obj_num: kid_obj_num, /* , source */
+                        obj_num: kid_obj_num,
+                        source: err,
                     }
                 })?;
                 pages.push(page);

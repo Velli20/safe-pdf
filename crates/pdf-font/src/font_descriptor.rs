@@ -49,6 +49,33 @@ pub enum FontDescriptorError {
         #[source]
         err: ObjectError,
     },
+
+    #[error("Missing required entry in FontDescriptor: /{0}")]
+    MissingRequiredEntry(&'static str),
+
+    #[error(
+        "Invalid type for FontDescriptor entry /{entry_name}: expected {expected_type}, found {found_type}"
+    )]
+    InvalidEntryType {
+        entry_name: &'static str,
+        expected_type: &'static str,
+        found_type: &'static str, // Assumes ObjectVariant::name() -> &'static str
+    },
+
+    #[error("Invalid FontBBox entry: expected an array of 4 numbers, found array of length {len}")]
+    InvalidFontBBoxArrayLength { len: usize },
+
+    #[error(
+        "Failed to convert PDF value to number for FontDescriptor entry /{entry_description}: {source}"
+    )]
+    NumericConversionError {
+        entry_description: &'static str,
+        #[source]
+        source: ObjectError,
+    },
+
+    #[error("FontName is required but was an empty string")]
+    EmptyFontName,
 }
 
 /// Represents a font descriptor, a dictionary that provides detailed information
@@ -57,19 +84,19 @@ pub enum FontDescriptorError {
 pub struct FontDescriptor {
     /// The maximum height above the baseline reached by glyphs in this font.
     /// This value is positive for ascenders.
-    ascent: i64,
+    ascent: f32,
     /// The maximum depth below the baseline reached by glyphs in this font.
     /// This value is negative for descenders.
-    descent: i64,
+    descent: f32,
     /// The y-coordinate of the top of flat capital letters, measured from the baseline.
-    cap_height: i64,
+    cap_height: f32,
     /// A collection of flags specifying various characteristics of the font.
     flags: FontDescriptorFlags,
     /// A rectangle, expressed in the glyph coordinate system,
     /// that specifies the font bounding box. This is the smallest rectangle enclosing
     /// the shape that would result if all of the glyphs of the font were
     /// placed with their origins coincident and then filled.
-    font_bounding_box: [i32; 4],
+    font_bounding_box: [f32; 4],
     /// A string specifying the preferred font family name.
     font_family: Option<String>,
     /// A stream containing the font program.
@@ -80,13 +107,13 @@ pub struct FontDescriptor {
     /// The weight (thickness) of the font's strokes.
     font_weight: Option<i64>,
     /// The angle, in degrees counterclockwise from the vertical, of the dominant vertical strokes of the font.
-    italic_angle: i64,
+    italic_angle: f32,
     /// The width to use for glyphs not found in the font's encoding.
-    pub missing_width: i64,
+    pub missing_width: f32,
     /// The maximum width of a glyph in the font.
-    max_width: Option<i64>,
+    max_width: Option<f32>,
     /// The thickness, measured horizontally, of the dominant vertical stems of glyphs in the font.
-    stem_v: i64,
+    stem_v: f32,
 }
 
 impl FromDictionary for FontDescriptor {
@@ -99,57 +126,101 @@ impl FromDictionary for FontDescriptor {
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        let ascent = dictionary.get_number("Ascent").unwrap_or(0);
-        let descent = dictionary.get_number("Descent").unwrap_or(0);
-        let cap_height = dictionary.get_number("CapHeight").unwrap_or(0);
-        let flags = dictionary.get_number("Flags").unwrap_or(0);
-        let flags = FontDescriptorFlags::from_bits_truncate(flags as u32);
+        let get_required_number_field = |key: &'static str| -> Result<f32, FontDescriptorError> {
+            dictionary
+                .get(key)
+                .ok_or(FontDescriptorError::MissingRequiredEntry(key))?
+                .as_number::<f32>()
+                .map_err(|source| FontDescriptorError::NumericConversionError {
+                    entry_description: key,
+                    source,
+                })
+        };
+
+        let get_optional_number_field =
+            |key: &'static str| -> Result<Option<f32>, FontDescriptorError> {
+                match dictionary.get(key) {
+                    Some(val) => val.as_number::<f32>().map(Some).map_err(|source| {
+                        FontDescriptorError::NumericConversionError {
+                            entry_description: key,
+                            source,
+                        }
+                    }),
+                    None => Ok(None),
+                }
+            };
+
+        let ascent = get_required_number_field("Ascent")?;
+        let descent = get_required_number_field("Descent")?;
+        let cap_height = get_required_number_field("CapHeight")?;
+
+        let flags_val = dictionary
+            .get("Flags")
+            .ok_or(FontDescriptorError::MissingRequiredEntry("Flags"))?
+            .as_number::<u32>()
+            .map_err(|source| FontDescriptorError::NumericConversionError {
+                entry_description: "Flags",
+                source,
+            })?;
+        let flags = FontDescriptorFlags::from_bits_truncate(flags_val);
+
         let font_bounding_box = dictionary
             .get_array("FontBBox")
-            .ok_or(FontDescriptorError::MissingFontBoundingBox)?;
+            .ok_or(FontDescriptorError::MissingRequiredEntry("FontBBox"))?;
 
         // Helper closure to convert a PDF Value to i32 for FontBBox entries
         // and map errors appropriately.
-        let convert_bbox_entry = |value: &pdf_object::ObjectVariant, description: &'static str| {
-            value.as_number::<i32>().map_err(|err| {
-                FontDescriptorError::FontBoundingBoxNumericConversionError {
-                    entry_description: description,
-                    err,
-                }
-            })
-        };
-
+        let convert_bbox_entry =
+            |value: &ObjectVariant, coord_name: &'static str| -> Result<f32, FontDescriptorError> {
+                value.as_number::<f32>().map_err(|source| {
+                    FontDescriptorError::NumericConversionError {
+                        entry_description: coord_name, // e.g., "FontBBox[0] (llx)"
+                        source,
+                    }
+                })
+            };
         let font_bounding_box = match font_bounding_box.as_slice() {
             // Pattern match for exactly 4 elements in the slice.
-            [l, t, r, b] => {
-                [
-                    convert_bbox_entry(l, "left")?,   // Corresponds to llx
-                    convert_bbox_entry(t, "top")?,    // Corresponds to lly
-                    convert_bbox_entry(r, "right")?,  // Corresponds to urx
-                    convert_bbox_entry(b, "bottom")?, // Corresponds to ury
-                ]
-            }
-            _ => {
-                return Err(FontDescriptorError::InvalidFontBoundingBox);
+            [l, t, r, b] => [
+                convert_bbox_entry(l, "FontBBox llx")?,
+                convert_bbox_entry(t, "FontBBox lly")?,
+                convert_bbox_entry(r, "FontBBox urx")?,
+                convert_bbox_entry(b, "FontBBox ury")?,
+            ],
+            arr => {
+                return Err(FontDescriptorError::InvalidFontBBoxArrayLength { len: arr.len() });
             }
         };
         let font_family = dictionary.get_string("FontFamily").cloned();
 
-        let font_file = if let Some(s) = dictionary.get("FontFile2") {
-            objects.get2(s).cloned()
-        } else {
-            None
+        let resolve_font_file_stream = |key: &str| -> Option<ObjectVariant> {
+            dictionary
+                .get(key)
+                .and_then(|obj_box| match obj_box.as_ref() {
+                    ObjectVariant::Reference(id) => objects.get(*id),
+                    ObjectVariant::Stream(s) => Some(ObjectVariant::Stream(s.clone())),
+                    _ => None,
+                })
         };
+
+        let font_file = resolve_font_file_stream("FontFile2")
+            .or_else(|| resolve_font_file_stream("FontFile3"))
+            .or_else(|| resolve_font_file_stream("FontFile"));
 
         let font_name = dictionary
             .get_string("FontName")
-            .unwrap_or(&String::new())
+            .ok_or(FontDescriptorError::MissingRequiredEntry("FontName"))?
             .clone();
+
+        if font_name.is_empty() {
+            return Err(FontDescriptorError::EmptyFontName);
+        }
+
         let font_weight = dictionary.get_number("FontWeight");
-        let italic_angle = dictionary.get_number("ItalicAngle").unwrap_or(0);
-        let missing_width = dictionary.get_number("MissingWidth").unwrap_or(0);
-        let max_width = dictionary.get_number("MaxWidth");
-        let stem_v = dictionary.get_number("StemV").unwrap_or(0);
+        let italic_angle = get_required_number_field("ItalicAngle")?;
+        let missing_width = get_optional_number_field("MissingWidth")?.unwrap_or(0.0);
+        let max_width = get_optional_number_field("MaxWidth")?;
+        let stem_v = get_required_number_field("StemV")?;
 
         Ok(Self {
             ascent,
