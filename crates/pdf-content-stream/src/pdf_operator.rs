@@ -52,44 +52,66 @@ impl Operands<'_> {
     pub fn get_f32(&mut self) -> Result<f32, PdfOperatorError> {
         if let Some((value, rest)) = self.0.split_first() {
             self.0 = rest;
-            value
-                .as_number::<f32>()
-                .map_err(|_| PdfOperatorError::InvalidOperandType)
+            value.as_number::<f32>().map_err(|err| {
+                PdfOperatorError::OperandNumericConversionError {
+                    expected_type: "Number (f32)",
+                    source: err,
+                }
+            })
         } else {
-            Err(PdfOperatorError::InvalidOperandType)
+            Err(PdfOperatorError::MissingOperand {
+                expected_type: "Number (f32)",
+            })
         }
     }
 
     pub fn get_dictionary(&mut self) -> Result<Rc<Dictionary>, PdfOperatorError> {
-        let value = self.0.get(0);
-        self.0 = &self.0[1..];
-        if let Some(ObjectVariant::Dictionary(value)) = value {
-            Ok(value.clone())
+        if let Some((value, rest)) = self.0.split_first() {
+            self.0 = rest;
+            match value {
+                ObjectVariant::Dictionary(dict) => Ok(dict.clone()),
+                _ => Err(PdfOperatorError::InvalidOperandType {
+                    expected_type: "Dictionary",
+                    found_type: value.name(),
+                }),
+            }
         } else {
-            Err(PdfOperatorError::InvalidOperandType)
+            Err(PdfOperatorError::MissingOperand {
+                expected_type: "Dictionary",
+            })
         }
     }
 
     pub fn get_str(&mut self) -> Result<String, PdfOperatorError> {
         if let Some((value, rest)) = self.0.split_first() {
             self.0 = rest;
-            value
-                .as_str()
-                .ok_or(PdfOperatorError::InvalidOperandType)
-                .map(|s| s.to_string())
+            value.as_str().map(|s| s.to_string()).ok_or_else(|| {
+                PdfOperatorError::InvalidOperandType {
+                    expected_type: "String",
+                    found_type: value.name(),
+                }
+            })
         } else {
-            Err(PdfOperatorError::InvalidOperandType)
+            Err(PdfOperatorError::MissingOperand {
+                expected_type: "String",
+            })
         }
     }
 
     pub fn get_name(&mut self) -> Result<String, PdfOperatorError> {
-        let value = self.0.get(0);
-        self.0 = &self.0[1..];
-
-        if let Some(ObjectVariant::Name(name)) = value {
-            Ok(name.clone())
+        if let Some((value, rest)) = self.0.split_first() {
+            self.0 = rest;
+            match value {
+                ObjectVariant::Name(name) => Ok(name.clone()),
+                _ => Err(PdfOperatorError::InvalidOperandType {
+                    expected_type: "Name",
+                    found_type: value.name(),
+                }),
+            }
         } else {
-            Err(PdfOperatorError::InvalidOperandType)
+            Err(PdfOperatorError::MissingOperand {
+                expected_type: "Name",
+            })
         }
     }
 
@@ -98,60 +120,95 @@ impl Operands<'_> {
             self.0 = rest;
             value
                 .as_number::<u8>()
-                .map_err(|_| PdfOperatorError::InvalidOperandType)
+                .map_err(|err| PdfOperatorError::OperandNumericConversionError {
+                    expected_type: "Number (u8)",
+                    source: err,
+                })
         } else {
-            Err(PdfOperatorError::InvalidOperandType)
+            Err(PdfOperatorError::MissingOperand {
+                expected_type: "Number (u8)",
+            })
         }
     }
 
     pub fn get_text_element_array(&mut self) -> Result<Vec<TextElement>, PdfOperatorError> {
-        let value = self.0.get(0);
-        self.0 = &self.0[1..];
-
-        if let Some(ObjectVariant::Array(array_values)) = value {
-            let mut elements = Vec::new();
-            for val_obj in array_values {
-                match val_obj {
-                    ObjectVariant::LiteralString(s) => {
-                        elements.push(TextElement::Text { value: s.clone() });
-                    }
-                    ObjectVariant::Number(n) => {
-                        if let Some(num_f32) = n.as_f32() {
-                            elements.push(TextElement::Adjustment { amount: num_f32 });
-                        } else {
-                            return Err(PdfOperatorError::InvalidOperandType);
+        if let Some((first_operand, rest_operands)) = self.0.split_first() {
+            self.0 = rest_operands;
+            if let ObjectVariant::Array(array_values) = first_operand {
+                let mut elements = Vec::with_capacity(array_values.len());
+                for val_obj in array_values {
+                    match val_obj {
+                        ObjectVariant::LiteralString(s) => {
+                            elements.push(TextElement::Text { value: s.clone() });
+                        }
+                        ObjectVariant::Number(_) => {
+                            if let Ok(amount) = val_obj.as_number::<f32>() {
+                                elements.push(TextElement::Adjustment { amount });
+                            } else {
+                                return Err(PdfOperatorError::InvalidOperandType {
+                                    expected_type: "Number (f32 convertible) in array",
+                                    found_type: val_obj.name(),
+                                });
+                            }
+                        }
+                        _ => {
+                            return Err(PdfOperatorError::InvalidOperandType {
+                                expected_type: "LiteralString or Number in array",
+                                found_type: val_obj.name(),
+                            });
                         }
                     }
-                    _ => return Err(PdfOperatorError::InvalidOperandType),
                 }
+                Ok(elements)
+            } else {
+                Err(PdfOperatorError::InvalidOperandType {
+                    expected_type: "Array",
+                    found_type: first_operand.name(),
+                })
             }
-            Ok(elements)
         } else {
-            Err(PdfOperatorError::InvalidOperandType)
+            Err(PdfOperatorError::MissingOperand {
+                expected_type: "Array for TextElement",
+            })
         }
     }
 
     pub fn get_f32_array(&mut self) -> Result<Vec<f32>, PdfOperatorError> {
-        let value = self.0.get(0);
-        self.0 = &self.0[1..];
-
-        if let Some(ObjectVariant::Array(array_values)) = value {
-            let mut numbers = Vec::new();
-            for val_obj in array_values {
-                match val_obj {
-                    ObjectVariant::Number(n) => {
-                        if let Some(num_f32) = n.as_f32() {
-                            numbers.push(num_f32);
-                        } else {
-                            return Err(PdfOperatorError::InvalidOperandType);
+        if let Some((first_operand, rest_operands)) = self.0.split_first() {
+            self.0 = rest_operands;
+            if let ObjectVariant::Array(array_values) = first_operand {
+                let mut numbers = Vec::with_capacity(array_values.len());
+                for val_obj in array_values {
+                    match val_obj {
+                        ObjectVariant::Number(_) => {
+                            if let Ok(num_f32) = val_obj.as_number::<f32>() {
+                                numbers.push(num_f32);
+                            } else {
+                                return Err(PdfOperatorError::InvalidOperandType {
+                                    expected_type: "Number (f32 convertible) in array",
+                                    found_type: val_obj.name(),
+                                });
+                            }
+                        }
+                        _ => {
+                            return Err(PdfOperatorError::InvalidOperandType {
+                                expected_type: "Number in array",
+                                found_type: val_obj.name(),
+                            });
                         }
                     }
-                    _ => return Err(PdfOperatorError::InvalidOperandType),
                 }
+                Ok(numbers)
+            } else {
+                Err(PdfOperatorError::InvalidOperandType {
+                    expected_type: "Array",
+                    found_type: first_operand.name(),
+                })
             }
-            Ok(numbers)
         } else {
-            Err(PdfOperatorError::InvalidOperandType)
+            Err(PdfOperatorError::MissingOperand {
+                expected_type: "Array for f32",
+            })
         }
     }
 }
@@ -254,11 +311,11 @@ impl PdfOperatorVariant {
                 for operation in READ_MAP {
                     if name == operation.name {
                         if operands.len() != operation.operand_count {
-                            return Err(PdfOperatorError::IncorrectOperandCount(
-                                operation.name,
-                                operands.len(),
-                                operation.operand_count,
-                            ));
+                            return Err(PdfOperatorError::IncorrectOperandCount {
+                                op_name: operation.name,
+                                got: operands.len(),
+                                expected: operation.operand_count,
+                            });
                         }
 
                         let mut ops = Operands(operands.as_slice());

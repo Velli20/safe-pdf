@@ -1,52 +1,51 @@
+use pdf_object::error::ObjectError;
 use pdf_parser::error::ParserError;
 use pdf_tokenizer::error::TokenizerError;
+use thiserror::Error;
 
 /// Defines errors that can occur in pdf-painter crate.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Error, Debug, PartialEq)]
 pub enum PdfOperatorError {
+    #[error("Unimplemented operation: {0}")]
     UnimplementedOperation(&'static str),
-    OperandTokenizationError(String),
+
+    #[error("Unknown operator: '{0}'")]
     UnknownOperator(String),
-    InvalidOperandType,
-    IncorrectOperandCount(&'static str, usize, usize),
+
+    // Error for when an operand is expected but not found (e.g., empty stack)
+    #[error("Missing operand: expected a {expected_type}")]
+    MissingOperand { expected_type: &'static str },
+
+    // Error for when an operand has an unexpected type
+    #[error("Invalid operand type: expected {expected_type}, found {found_type}")]
+    InvalidOperandType {
+        expected_type: &'static str,
+        found_type: &'static str,
+    },
+
+    /// Error converting a PDF value to a number.
+    #[error("Failed to convert a PDF value to number of type '{expected_type}': {source}")]
+    OperandNumericConversionError {
+        expected_type: &'static str,
+        #[source]
+        source: ObjectError,
+    },
+
+    // Error for when the number of operands is incorrect for an operator
+    #[error("Incorrect operand count for operation '{op_name}': expected {expected}, got {got}")]
+    IncorrectOperandCount {
+        op_name: &'static str,
+        expected: usize,
+        got: usize,
+    },
+
+    // Errors from underlying pdf_tokenizer
+    #[error("Tokenizer error: {0}")]
+    Tokenizer(#[from] TokenizerError),
+
+    #[error("Parser error: {0}")]
+    Parser(#[from] ParserError),
 }
 
-impl std::fmt::Display for PdfOperatorError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PdfOperatorError::UnimplementedOperation(name) => {
-                write!(f, "Unimplemented operation: {}", name)
-            }
-            PdfOperatorError::UnknownOperator(name) => {
-                write!(f, "Unknown operator: '{}'", name)
-            }
-            PdfOperatorError::OperandTokenizationError(err) => {
-                write!(f, "Operand tokenization error: {}", err)
-            }
-            PdfOperatorError::InvalidOperandType => {
-                write!(f, "Invalid operand type")
-            }
-            PdfOperatorError::IncorrectOperandCount(op, got, expected) => {
-                write!(
-                    f,
-                    "Incorrect operand count for operation '{}' got {}, expected {}",
-                    op, got, expected
-                )
-            }
-        }
-    }
-}
-
-impl From<TokenizerError> for PdfOperatorError {
-    fn from(value: TokenizerError) -> Self {
-        Self::OperandTokenizationError(value.to_string())
-    }
-}
-
-impl From<ParserError> for PdfOperatorError {
-    fn from(value: ParserError) -> Self {
-        Self::OperandTokenizationError(value.to_string())
-    }
-}
-
-impl std::error::Error for PdfOperatorError {}
+// The From<TokenizerError> and From<ParserError> are now handled by #[from]
+// The impl std::error::Error for PdfOperatorError is automatically provided by thiserror::Error

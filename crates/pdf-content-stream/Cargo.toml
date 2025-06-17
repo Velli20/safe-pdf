@@ -7,3 +7,4 @@ edition = "2024"
 pdf-parser = { path = "../pdf-parser" }
 pdf-tokenizer = { path = "../pdf-tokenizer" }
 pdf-object = { path = "../pdf-object" }
+thiserror = "2.0.12"
