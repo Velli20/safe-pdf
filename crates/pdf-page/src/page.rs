@@ -1,6 +1,6 @@
 use crate::{
     content_stream::{ContentStream, ContentStreamReadError},
-    media_box::MediaBox,
+    media_box::{MediaBox, MediaBoxError},
     resources::{Resources, ResourcesError},
 };
 use pdf_object::{
@@ -15,8 +15,8 @@ pub enum PdfPageError {
     #[error("Failed to parse content stream for page: {0}")]
     ContentStreamParse(#[from] ContentStreamReadError),
 
-    // #[error("Failed to parse media box for page: {0}")]
-    // MediaBoxParse(#[from] MediaBoxError),
+    #[error("Failed to parse media box for page: {0}")]
+    MediaBoxParse(#[from] MediaBoxError),
     #[error("Failed to parse resources for page: {0}")]
     ResourcesParse(#[from] ResourcesError),
 }
@@ -42,14 +42,14 @@ impl FromDictionary for PdfPage {
     const KEY: &'static str = "Page";
 
     type ResultType = Self;
-    type ErrorType = PdfPageError; // Use the new, specific error type
+    type ErrorType = PdfPageError;
 
     fn from_dictionary(
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let contents = ContentStream::from_dictionary(dictionary, objects)?;
-        let media_box = MediaBox::from_dictionary(dictionary, objects).unwrap();
+        let media_box = MediaBox::from_dictionary(dictionary, objects)?;
         let resources = Resources::from_dictionary(dictionary, objects)?;
 
         Ok(Self {

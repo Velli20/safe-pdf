@@ -28,14 +28,6 @@ impl ObjectCollection {
         None
     }
 
-    pub fn get2(&self, obj: &ObjectVariant) -> Option<&ObjectVariant> {
-        if let Some(num) = obj.to_object_number() {
-            return self.map.get(&num);
-        }
-
-        None
-    }
-
     pub fn get_dictionary(&self, key: i32) -> Option<&Dictionary> {
         if let Some(obj) = self.map.get(&key) {
             if let ObjectVariant::IndirectObject(inner) = obj {
