@@ -28,9 +28,6 @@ pub enum StreamParsingError {
     /// Indicates that the stream dictionary is missing the /Length entry.
     #[error("Stream dictionary missing /Length entry")]
     MissingLength,
-    /// Indicates that the stream dictionary is missing the /Filter entry.
-    #[error("Stream dictionary missing /Filter entry")]
-    MissingFilter,
     /// Indicates that the stream compression algorithm specified in the
     /// stream dictionary is not supported by the parser.
     #[error("Unsupported stream filter: {0}")]
@@ -119,14 +116,15 @@ impl<'a> StreamParser for PdfParser<'a> {
             .ok_or(StreamParsingError::MissingLength)?;
 
         // Find the decode type of the stream.
-        let decode = dictionary
-            .get_string("Filter")
-            .ok_or(StreamParsingError::MissingFilter)?;
+        let decode = dictionary.get_string("Filter");
 
         // Read the stream data
         let stream_data = self.tokenizer.read_excactly(length as usize)?.to_vec();
 
-        // There should be an end-of-line marker after the data and before `endstream``
+        // There should be an end-of-line marker after the data and before `endstream`.
+        if let Some(PdfToken::CarriageReturn) = self.tokenizer.peek() {
+            let _ = self.tokenizer.read();
+        }
         self.tokenizer.expect(PdfToken::NewLine)?;
 
         // Read the `endstream` keyword .
@@ -134,17 +132,26 @@ impl<'a> StreamParser for PdfParser<'a> {
             .map_err(|source| StreamParsingError::InvalidEndStreamKeyword { source })?;
 
         // Check if the stream data is compressed using the FlateDecode (DEFLATE) algorithm.
-        if decode == "FlateDecode" {
-            let mut d = ZlibDecoder::new(stream_data.as_slice());
-            let mut s = Vec::new();
+        if let Some(decode) = decode {
+            if decode == "FlateDecode" {
+                let mut d = ZlibDecoder::new(stream_data.as_slice());
+                let mut s = Vec::new();
 
-            if let Err(e) = d.read_to_end(&mut s) {
-                return Err(StreamParsingError::DecompressionError(e.to_string()));
+                if let Err(e) = d.read_to_end(&mut s) {
+                    return Err(StreamParsingError::DecompressionError(e.to_string()));
+                }
+
+                return Ok(s);
+            } else if decode == "DCTDecode" {
+                let mut decoder =  zune_jpeg::JpegDecoder::new(stream_data.as_slice());
+                let s = decoder.decode().map_err(|source| StreamParsingError::DecompressionError(source.to_string()))?;
+
+                return Ok(s);
             }
 
-            return Ok(s);
+            return Err(StreamParsingError::UsupportedFilter(decode.to_string()));
         }
-        return Err(StreamParsingError::UsupportedFilter(decode.to_string()));
+        Ok(stream_data)
     }
 }
 

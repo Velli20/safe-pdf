@@ -54,7 +54,7 @@ pub trait HexStringParser {
 pub trait IndirectObjectParser {
     type ErrorType;
 
-    fn parse_indirect_object(&mut self) -> Result<ObjectVariant, Self::ErrorType>;
+    fn parse_indirect_object(&mut self) -> Result<Option<ObjectVariant>, Self::ErrorType>;
 }
 
 pub trait LiteralStringParser {

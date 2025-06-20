@@ -4,16 +4,13 @@ use pdf_tokenizer::error::TokenizerError;
 use thiserror::Error;
 
 use crate::{
-    array::ArrayError, boolean::BooleanError, comment::CommentError,
-    cross_reference_table::CrossReferenceTableError, dictionary::DictionaryError,
-    header::HeaderError, hex_string::HexStringError, literal_string::LiteralStringObjectError,
-    name::NameObjectError, number::NumberError,
+    array::ArrayError, boolean::BooleanError, comment::CommentError, cross_reference_table::CrossReferenceTableError, dictionary::DictionaryError, header::HeaderError, hex_string::HexStringError, indirect_object::IndirectObjectError, literal_string::LiteralStringObjectError, name::NameObjectError, number::NumberError
 };
 
 #[derive(Error, Debug, PartialEq)]
 pub enum ParserError {
-    #[error("Invalid token")]
-    InvalidToken,
+    #[error("Invalid token {0}")]
+    InvalidToken(char),
 
     #[error("Invalid number object")]
     InvalidNumber,
@@ -37,6 +34,8 @@ pub enum ParserError {
     NameObjectError(#[from] NameObjectError),
     #[error("Error while parsing Comment: {0}")]
     CommentError(#[from] CommentError),
+    #[error("Error while indirect object: {0}")]
+    IndirectObjectError(#[from] Box<IndirectObjectError>),
     #[error("Literal string object error: {0}")]
     LiteralStringObjectError(#[from] LiteralStringObjectError),
     #[error("Header parsing error: {0}")]

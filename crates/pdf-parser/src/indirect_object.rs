@@ -93,36 +93,37 @@ impl IndirectObjectParser for PdfParser<'_> {
     /// ```text
     /// 15 0 R
     /// ```
-    fn parse_indirect_object(&mut self) -> Result<ObjectVariant, Self::ErrorType> {
+    fn parse_indirect_object(&mut self) -> Result<Option<ObjectVariant>, Self::ErrorType> {
         const OBJ_KEYWORD: &[u8] = b"obj";
         const ENDOBJ_KEYWORD: &[u8] = b"endobj";
 
         // Read the object number.
-        let object_number = self
-            .read_number()
-            .map_err(|source| IndirectObjectError::MissingObjectNumber { source })?;
+        let Some(object_number) = self.read_number().ok() else {
+            return Ok(None);
+        };
 
         // Read the generation number.
-        let generation_number = self
-            .read_number()
-            .map_err(|source| IndirectObjectError::MissingGenerationNumber { source })?;
+        let Some(generation_number) = self.read_number().ok() else {
+            return Ok(None);
+        };
 
         // If the next token is 'R', it means this is an object reference.
         if let Some(PdfToken::Alphabetic(b'R')) = self.tokenizer.peek() {
             if let Some(s) = self.tokenizer.data().get(1) {
                 if Self::is_pdf_delimiter(*s) {
                     self.tokenizer.read();
-                    return Ok(ObjectVariant::Reference(object_number));
+                    return Ok(Some(ObjectVariant::Reference(object_number)));
                 }
             } else {
                 self.tokenizer.read();
-                return Ok(ObjectVariant::Reference(object_number));
+                return Ok(Some(ObjectVariant::Reference(object_number)));
             }
         }
 
         // Read the keyword `obj`.
-        self.read_keyword(OBJ_KEYWORD)
-            .map_err(|source| IndirectObjectError::InvalidObjKeyword { source })?;
+        let Some(()) = self.read_keyword(OBJ_KEYWORD).ok() else {
+            return Ok(None);
+        };
 
         // Parse the object.
         let object = self
@@ -139,12 +140,12 @@ impl IndirectObjectParser for PdfParser<'_> {
                 self.read_keyword(ENDOBJ_KEYWORD)
                     .map_err(|source| IndirectObjectError::InvalidEndObjKeyword { source })?;
 
-                return Ok(ObjectVariant::Stream(Rc::new(StreamObject::new(
+                return Ok(Some(ObjectVariant::Stream(Rc::new(StreamObject::new(
                     object_number,
                     generation_number,
                     dictionary.clone(),
                     stream,
-                ))));
+                )))));
             } else {
                 return Err(IndirectObjectError::StreamObjectWithoutDictionary);
             }
@@ -154,11 +155,11 @@ impl IndirectObjectParser for PdfParser<'_> {
         self.read_keyword(ENDOBJ_KEYWORD)
             .map_err(|source| IndirectObjectError::InvalidEndObjKeyword { source })?;
 
-        return Ok(ObjectVariant::IndirectObject(Rc::new(IndirectObject::new(
+        return Ok(Some(ObjectVariant::IndirectObject(Rc::new(IndirectObject::new(
             object_number,
             generation_number,
             Some(object),
-        ))));
+        )))));
     }
 }
 
@@ -173,7 +174,7 @@ mod tests {
         let input = b"0 1 obj\n(HELLO)\nendobj\n";
         let mut parser = PdfParser::from(input.as_slice());
 
-        if let ObjectVariant::IndirectObject(indirect_object) =
+        if let Some(ObjectVariant::IndirectObject(indirect_object)) =
             parser.parse_indirect_object().unwrap()
         {
             let IndirectObject {

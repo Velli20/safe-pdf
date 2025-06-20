@@ -214,7 +214,8 @@ impl<'a> PdfParser<'a> {
                     } else if t == b'x' {
                         ObjectVariant::CrossReferenceTable(self.parse_cross_reference_table()?)
                     } else {
-                        return Err(ParserError::InvalidToken);
+                        // println!("Front {}", &String::from_utf8_lossy(self.tokenizer.data())[..20]);
+                        return Err(ParserError::InvalidToken(t as char));
                     }
                 }
                 PdfToken::DoubleLeftAngleBracket => {
@@ -224,8 +225,7 @@ impl<'a> PdfParser<'a> {
                 PdfToken::Solidus => ObjectVariant::Name(self.parse_name()?),
                 PdfToken::Number(_) => {
                     let start = self.tokenizer.position;
-                    let value = self.parse_indirect_object();
-                    if let Ok(o) = value {
+                    if let Some(o) =  self.parse_indirect_object().map_err(|err| ParserError::IndirectObjectError(Box::new(err)))?  {
                         return Ok(o);
                     }
 
@@ -246,6 +246,6 @@ impl<'a> PdfParser<'a> {
 
             return Ok(value);
         }
-        Err(ParserError::InvalidToken)
+        Err(ParserError::InvalidToken('0' as char))
     }
 }
