@@ -120,7 +120,7 @@ impl<'a> PdfParser<'a> {
     /// # Returns
     ///
     /// - `Result` indicating success or failure.
-    pub fn read_number<T: FromStr>(&mut self) -> Result<T, ParserError> {
+    pub fn read_number<T: FromStr>(&mut self, skip_whitespace: bool) -> Result<T, ParserError> {
         let number_str = self.tokenizer.read_while_u8(|b| b.is_ascii_digit());
         if number_str.is_empty() {
             return Err(ParserError::UnexpectedEndOfFile);
@@ -138,7 +138,9 @@ impl<'a> PdfParser<'a> {
             }
         }
 
-        self.skip_whitespace();
+        if skip_whitespace {
+            self.skip_whitespace();
+        }
 
         Ok(number)
     }
@@ -214,7 +216,10 @@ impl<'a> PdfParser<'a> {
                     } else if t == b'x' {
                         ObjectVariant::CrossReferenceTable(self.parse_cross_reference_table()?)
                     } else {
-                        // println!("Front {}", &String::from_utf8_lossy(self.tokenizer.data())[..20]);
+                        println!(
+                            "Front {}",
+                            &String::from_utf8_lossy(self.tokenizer.data())[..20]
+                        );
                         return Err(ParserError::InvalidToken(t as char));
                     }
                 }
@@ -225,7 +230,10 @@ impl<'a> PdfParser<'a> {
                 PdfToken::Solidus => ObjectVariant::Name(self.parse_name()?),
                 PdfToken::Number(_) => {
                     let start = self.tokenizer.position;
-                    if let Some(o) =  self.parse_indirect_object().map_err(|err| ParserError::IndirectObjectError(Box::new(err)))?  {
+                    if let Some(o) = self
+                        .parse_indirect_object()
+                        .map_err(|err| ParserError::IndirectObjectError(Box::new(err)))?
+                    {
                         return Ok(o);
                     }
 

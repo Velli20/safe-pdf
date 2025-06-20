@@ -82,7 +82,7 @@ impl NumberParser for PdfParser<'_> {
         let digits = if let Some(PdfToken::Period) = self.tokenizer.peek() {
             0
         } else {
-            self.read_number::<i64>()
+            self.read_number::<i64>(false)
                 .map_err(|source| NumberError::IntegralPartError {
                     err: source.to_string(),
                 })?
@@ -93,7 +93,7 @@ impl NumberParser for PdfParser<'_> {
             self.tokenizer.read();
             // 4. Parse fractional part.
             let fraction =
-                self.read_number::<i64>()
+                self.read_number::<i64>(true)
                     .map_err(|source| NumberError::IntegralPartError {
                         err: source.to_string(),
                     })?;

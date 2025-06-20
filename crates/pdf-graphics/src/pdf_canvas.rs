@@ -56,7 +56,7 @@ pub(crate) struct CanvasState<'a> {
     pub text_state: TextState<'a>,
     pub clip_path: Option<PdfPath>,
     pub line_cap: LineCap,
-    pub line_join: LineJoin
+    pub line_join: LineJoin,
 }
 
 impl CanvasState<'_> {
@@ -78,7 +78,7 @@ impl<'a> Default for CanvasState<'a> {
             text_state: TextState::default(),
             clip_path: None,
             line_cap: LineCap::Butt,
-            line_join: LineJoin::Miter
+            line_join: LineJoin::Miter,
         }
     }
 }

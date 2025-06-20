@@ -83,13 +83,6 @@ impl<'a> TextStateOps for PdfCanvas<'a> {
 
     fn set_font_and_size(&mut self, font_name: &str, size: f32) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.text_state.font_size = size;
-        if self
-            .page
-            .resources
-            .as_ref().is_none() {
-                println!("Missing page resources");
-                return Ok(());
-            }
 
         let resources = self
             .page
@@ -102,13 +95,15 @@ impl<'a> TextStateOps for PdfCanvas<'a> {
             .get(font_name)
             .ok_or(PdfCanvasError::FontNotFound(font_name.to_string()))?;
 
-        if let Some(font_file) = &font.cid_font.descriptor.font_file {
-            if let ObjectVariant::Stream(s) = &font_file {
-                let face = Face::parse(s.data.as_slice(), 0).expect("Failed to parse font face");
-                self.current_state_mut()?.text_state.font_face = Some(face);
+        if let Some(cid_font) = &font.cid_font {
+            if let Some(font_file) = &cid_font.descriptor.font_file {
+                if let ObjectVariant::Stream(s) = &font_file {
+                    let face =
+                        Face::parse(s.data.as_slice(), 0).expect("Failed to parse font face");
+                    self.current_state_mut()?.text_state.font_face = Some(face);
+                }
             }
         }
-
         self.current_state_mut()?.text_state.font = Some(font);
         Ok(())
     }
@@ -127,6 +122,10 @@ impl<'a> TextStateOps for PdfCanvas<'a> {
 impl<'a> TextShowingOps for PdfCanvas<'a> {
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
         let text_state = &self.current_state()?.text_state.clone();
+        if text_state.font.is_none() || text_state.font_face.is_none() {
+            println!("No font");
+            return Ok(());
+        }
         let current_font = text_state.font.ok_or(PdfCanvasError::NoCurrentFont)?;
         let face = text_state
             .font_face
@@ -212,10 +211,12 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
             // Determine the glyph's advance width in font units.
             let w0_glyph_units = current_font
                 .cid_font
+                .as_ref()
+                .unwrap()
                 .widths
                 .as_ref()
                 .and_then(|w_array| w_array.get_width(char_code as i64))
-                .unwrap_or_else(|| current_font.cid_font.default_width as f32);
+                .unwrap_or_else(|| current_font.cid_font.as_ref().unwrap().default_width as f32);
 
             // Convert width from font units to ems.
             let w0_ems = w0_glyph_units / 1000.0;

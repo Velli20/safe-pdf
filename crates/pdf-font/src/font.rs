@@ -9,6 +9,7 @@ use thiserror::Error;
 use crate::{
     characther_map::{CMapError, CharacterMap},
     cid_font::{CharacterIdentifierFont, CidFontError},
+    type3_font::{Type3Font, Type3FontError},
 };
 
 pub enum FontEncoding {
@@ -33,7 +34,7 @@ impl From<&String> for FontEncoding {
 }
 
 /// Defines errors that can occur while reading a font object.
-#[derive(Debug, Error, Clone, PartialEq)]
+#[derive(Debug, Error, PartialEq)]
 pub enum FontError {
     /// A required dictionary entry was missing.
     #[error("Missing required entry '{entry_name}' in {dictionary_type} dictionary")]
@@ -67,6 +68,9 @@ pub enum FontError {
     /// Indicates an error occurred while parsing a Character Map (CMap) stream.
     #[error("CMap parsing error: {0}")]
     CMapParse(#[from] CMapError),
+    /// Indicates an error occurred while processing a Type3 font.
+    #[error("Error processing Type3 font: {0}")]
+    Type3FontError(#[from] Type3FontError),
     /// The font subtype is unsupported or invalid for the current parsing context.
     #[error("Unsupported or invalid font subtype '{subtype}' for {font_type} font")]
     UnsupportedFontSubtype {
@@ -89,7 +93,8 @@ pub struct Font {
     pub cmap: Option<CharacterMap>,
     /// (Required for Type0 fonts) The CIDFont dictionary that is the descendant of this Type0 font.
     /// This CIDFont provides the actual glyph descriptions.
-    pub cid_font: CharacterIdentifierFont,
+    pub cid_font: Option<CharacterIdentifierFont>,
+    pub type3_font: Option<Type3Font>,
     pub encoding: Option<FontEncoding>,
 }
 
@@ -104,10 +109,7 @@ impl FromDictionary for Font {
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let base_font = dictionary
             .get_string("BaseFont")
-            .ok_or(FontError::MissingEntry {
-                entry_name: "BaseFont",
-                dictionary_type: "Type0 Font",
-            })?
+            .unwrap_or(&String::new())
             .clone();
 
         let subtype = dictionary
@@ -117,6 +119,18 @@ impl FromDictionary for Font {
                 dictionary_type: "Type0 Font",
             })?
             .clone();
+
+        if subtype == "Type3" {
+            let type3_font = Type3Font::from_dictionary(dictionary, objects)?;
+            return Ok(Self {
+                base_font,
+                subtype,
+                cmap: None,
+                cid_font: None,
+                type3_font: Some(type3_font),
+                encoding: None,
+            });
+        }
 
         if subtype != "Type0" {
             return Err(FontError::UnsupportedFontSubtype {
@@ -192,7 +206,8 @@ impl FromDictionary for Font {
             base_font,
             subtype,
             cmap,
-            cid_font,
+            cid_font: Some(cid_font),
+            type3_font: None,
             encoding,
         })
     }

@@ -3,10 +3,13 @@ use std::rc::Rc;
 use color::Color;
 use error::PdfCanvasError;
 use pdf_canvas::PdfCanvas;
-use pdf_content_stream::{graphics_state_operators::{LineCap, LineJoin}, pdf_operator_backend::{
-    ClippingPathOps, ColorOps, GraphicsStateOps, MarkedContentOps, PdfOperatorBackend,
-    PdfOperatorBackendError, ShadingOps, XObjectOps,
-}};
+use pdf_content_stream::{
+    graphics_state_operators::{LineCap, LineJoin},
+    pdf_operator_backend::{
+        ClippingPathOps, ColorOps, GraphicsStateOps, MarkedContentOps, PdfOperatorBackend,
+        PdfOperatorBackendError, ShadingOps, XObjectOps,
+    },
+};
 use pdf_object::dictionary::Dictionary;
 use pdf_page::external_graphics_state::ExternalGraphicsStateKey;
 use pdf_path::PdfPath;

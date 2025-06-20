@@ -89,7 +89,7 @@ impl TrailerParser for PdfParser<'_> {
 
         // Read the offset of the xref section.
         let offset = self
-            .read_number::<u32>()
+            .read_number::<u32>(true)
             .map_err(|source| TrailerError::OffsetReadError { source })?;
 
         Ok(Trailer::new(dictionary, offset))

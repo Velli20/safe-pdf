@@ -18,6 +18,8 @@ pub enum PdfToken {
     Plus,
     /// Period '.'.
     Period,
+    /// Space ' '.
+    Space,
     /// Minus sign '-'.
     Minus,
     /// Represents the '<<' token.
@@ -85,6 +87,10 @@ impl<'a> Tokenizer<'a> {
             b'\r' => {
                 self.position += 1;
                 Some(PdfToken::CarriageReturn)
+            }
+            b' ' => {
+                self.position += 1;
+                Some(PdfToken::Space)
             }
             b'%' => {
                 self.position += 1;

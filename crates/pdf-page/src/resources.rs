@@ -72,9 +72,7 @@ impl FromDictionary for Resources {
             ObjectVariant::Dictionary(dict) => dict.clone(),
             ObjectVariant::Reference(num) => {
                 let dict = objects.get_dictionary(*num).ok_or_else(|| {
-                    ResourcesError::FailedResolveResourcesObjectReference {
-                        obj_num: *num,
-                    }
+                    ResourcesError::FailedResolveResourcesObjectReference { obj_num: *num }
                 })?;
                 dict
             }
@@ -104,7 +102,10 @@ impl FromDictionary for Resources {
                     }
                 })?;
 
-                fonts.insert(name.to_owned(), Font::from_dictionary(font_dict.as_ref(), objects)?);
+                fonts.insert(
+                    name.to_owned(),
+                    Font::from_dictionary(font_dict.as_ref(), objects)?,
+                );
             }
         }
 

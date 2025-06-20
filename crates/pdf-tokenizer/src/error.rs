@@ -42,6 +42,7 @@ impl std::fmt::Display for PdfToken {
             PdfToken::NewLine => write!(f, "\n"),
             PdfToken::CarriageReturn => write!(f, "\r"),
             PdfToken::Unknown(byte) => write!(f, "Unknown token: {}", byte),
+            PdfToken::Space => write!(f, " "),
         }
     }
 }

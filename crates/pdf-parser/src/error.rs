@@ -4,7 +4,10 @@ use pdf_tokenizer::error::TokenizerError;
 use thiserror::Error;
 
 use crate::{
-    array::ArrayError, boolean::BooleanError, comment::CommentError, cross_reference_table::CrossReferenceTableError, dictionary::DictionaryError, header::HeaderError, hex_string::HexStringError, indirect_object::IndirectObjectError, literal_string::LiteralStringObjectError, name::NameObjectError, number::NumberError
+    array::ArrayError, boolean::BooleanError, comment::CommentError,
+    cross_reference_table::CrossReferenceTableError, dictionary::DictionaryError,
+    header::HeaderError, hex_string::HexStringError, indirect_object::IndirectObjectError,
+    literal_string::LiteralStringObjectError, name::NameObjectError, number::NumberError,
 };
 
 #[derive(Error, Debug, PartialEq)]

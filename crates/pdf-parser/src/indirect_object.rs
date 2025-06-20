@@ -98,12 +98,12 @@ impl IndirectObjectParser for PdfParser<'_> {
         const ENDOBJ_KEYWORD: &[u8] = b"endobj";
 
         // Read the object number.
-        let Some(object_number) = self.read_number().ok() else {
+        let Some(object_number) = self.read_number(true).ok() else {
             return Ok(None);
         };
 
         // Read the generation number.
-        let Some(generation_number) = self.read_number().ok() else {
+        let Some(generation_number) = self.read_number(true).ok() else {
             return Ok(None);
         };
 
@@ -155,11 +155,9 @@ impl IndirectObjectParser for PdfParser<'_> {
         self.read_keyword(ENDOBJ_KEYWORD)
             .map_err(|source| IndirectObjectError::InvalidEndObjKeyword { source })?;
 
-        return Ok(Some(ObjectVariant::IndirectObject(Rc::new(IndirectObject::new(
-            object_number,
-            generation_number,
-            Some(object),
-        )))));
+        return Ok(Some(ObjectVariant::IndirectObject(Rc::new(
+            IndirectObject::new(object_number, generation_number, Some(object)),
+        ))));
     }
 }
 

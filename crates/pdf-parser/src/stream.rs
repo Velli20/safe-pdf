@@ -125,7 +125,8 @@ impl<'a> StreamParser for PdfParser<'a> {
         if let Some(PdfToken::CarriageReturn) = self.tokenizer.peek() {
             let _ = self.tokenizer.read();
         }
-        self.tokenizer.expect(PdfToken::NewLine)?;
+
+        self.read_end_of_line_marker()?;
 
         // Read the `endstream` keyword .
         self.read_keyword(STREAM_END)
@@ -143,8 +144,10 @@ impl<'a> StreamParser for PdfParser<'a> {
 
                 return Ok(s);
             } else if decode == "DCTDecode" {
-                let mut decoder =  zune_jpeg::JpegDecoder::new(stream_data.as_slice());
-                let s = decoder.decode().map_err(|source| StreamParsingError::DecompressionError(source.to_string()))?;
+                let mut decoder = zune_jpeg::JpegDecoder::new(stream_data.as_slice());
+                let s = decoder
+                    .decode()
+                    .map_err(|source| StreamParsingError::DecompressionError(source.to_string()))?;
 
                 return Ok(s);
             }
