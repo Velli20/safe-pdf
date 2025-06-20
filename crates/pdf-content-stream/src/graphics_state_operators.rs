@@ -32,17 +32,35 @@ impl PdfOperator for SetLineWidth {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum LineCap {
+    Butt = 0,
+    Round = 1,
+    Square = 2,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum LineJoin {
+    Miter = 0,
+    Round = 1,
+    Bevel = 2,
+}
+
 /// Sets the line cap style for path stroking.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetLineCapStyle {
     /// The line cap style to apply.
-    /// 0 for butt cap, 1 for round cap, 2 for projecting square cap.
-    style: u8,
+    style: LineCap,
 }
 
 impl SetLineCapStyle {
     pub fn new(style: u8) -> Self {
-        Self { style }
+        match style {
+            0 => Self { style: LineCap::Butt },
+            1 => Self { style: LineCap::Round },
+            2 => Self { style: LineCap::Square },
+            _ => Self { style: LineCap::Butt },
+        }
     }
 }
 
@@ -57,7 +75,7 @@ impl PdfOperator for SetLineCapStyle {
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        backend.set_line_cap(self.style as i32)
+        backend.set_line_cap(self.style )
     }
 }
 
@@ -65,13 +83,17 @@ impl PdfOperator for SetLineCapStyle {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetLineJoinStyle {
     /// The line join style to apply.
-    /// 0 for miter join, 1 for round join, 2 for bevel join.
-    style: u8,
+    style: LineJoin,
 }
 
 impl SetLineJoinStyle {
     pub fn new(style: u8) -> Self {
-        Self { style }
+        match style {
+            0 => Self { style: LineJoin::Miter },
+            1 => Self { style: LineJoin::Round },
+            2 => Self { style: LineJoin::Bevel },
+            _ => Self { style: LineJoin::Miter },
+        }
     }
 }
 
@@ -86,7 +108,7 @@ impl PdfOperator for SetLineJoinStyle {
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        backend.set_line_join(self.style as i32)
+        backend.set_line_join(self.style)
     }
 }
 

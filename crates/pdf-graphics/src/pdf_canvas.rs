@@ -1,3 +1,4 @@
+use pdf_content_stream::graphics_state_operators::{LineCap, LineJoin};
 use pdf_font::font::Font;
 use pdf_page::page::PdfPage;
 use ttf_parser::Face;
@@ -54,6 +55,8 @@ pub(crate) struct CanvasState<'a> {
     pub line_width: f32,
     pub text_state: TextState<'a>,
     pub clip_path: Option<PdfPath>,
+    pub line_cap: LineCap,
+    pub line_join: LineJoin
 }
 
 impl CanvasState<'_> {
@@ -74,6 +77,8 @@ impl<'a> Default for CanvasState<'a> {
             line_width: Self::DEFAULT_LINE_WIDTH,
             text_state: TextState::default(),
             clip_path: None,
+            line_cap: LineCap::Butt,
+            line_join: LineJoin::Miter
         }
     }
 }
@@ -82,7 +87,7 @@ pub struct PdfCanvas<'a> {
     pub(crate) current_path: Option<PdfPath>,
     pub(crate) canvas: &'a mut dyn CanvasBackend,
     pub(crate) page: &'a PdfPage,
-    // canvas_stack stores the graphics states, including text state.
+    // Stores the graphics states, including text state.
     canvas_stack: Vec<CanvasState<'a>>,
 }
 
@@ -126,16 +131,9 @@ impl<'a> PdfCanvas<'a> {
             backend_canvas_height, // ty: Translate Y to move origin to top-left after reflection
         );
 
-        // Initialize TextState with application-specific defaults if different from PDF spec.
-        // For example, PdfCanvas used an initial font size of 18.0.
-        let initial_text_state = TextState {
-            font_size: 18.0, // Application-specific default for initial state
-            ..TextState::default()
-        };
-
         let canvas_stack = vec![CanvasState {
             transform: userspace_matrix,
-            text_state: initial_text_state,
+            text_state: TextState::default(),
             ..Default::default()
         }];
 
@@ -147,19 +145,28 @@ impl<'a> PdfCanvas<'a> {
         }
     }
 
-    pub(crate) fn current_state(&self) -> &CanvasState<'a> {
-        self.canvas_stack.last().unwrap()
+    /// Returns a reference to the current graphics state.
+    pub(crate) fn current_state(&self) -> Result<&CanvasState<'a>, PdfCanvasError> {
+        self.canvas_stack
+            .last()
+            .ok_or(PdfCanvasError::EmptyGraphicsStateStack)
     }
 
-    pub(crate) fn current_state_mut(&mut self) -> &mut CanvasState<'a> {
-        self.canvas_stack.last_mut().unwrap()
+    /// Returns a mutable reference to the current graphics state.
+    pub(crate) fn current_state_mut(&mut self) -> Result<&mut CanvasState<'a>, PdfCanvasError> {
+        self.canvas_stack
+            .last_mut()
+            .ok_or(PdfCanvasError::EmptyGraphicsStateStack)
     }
 
-    pub(crate) fn save(&mut self) {
-        let state = self.current_state().clone();
+    /// Saves a copy of the current graphics state onto the stack.
+    pub(crate) fn save(&mut self) -> Result<(), PdfCanvasError> {
+        let state = self.current_state()?.clone();
         self.canvas_stack.push(state);
+        Ok(())
     }
 
+    /// Restores the graphics state from the top of the stack.
     pub(crate) fn restore(&mut self) {
         let prev = self.canvas_stack.pop();
         if let Some(state) = prev {
@@ -175,15 +182,15 @@ impl<'a> PdfCanvas<'a> {
         fill_type: PathFillType,
     ) -> Result<(), PdfCanvasError> {
         if let Some(mut path) = self.current_path.take() {
-            path.transform(&self.current_state().transform)?;
+            path.transform(&self.current_state()?.transform)?;
             if mode == PaintMode::Fill {
                 self.canvas
-                    .fill_path(&path, fill_type, self.current_state().fill_color);
+                    .fill_path(&path, fill_type, self.current_state()?.fill_color);
             } else {
                 self.canvas.stroke_path(
                     &path,
-                    self.current_state().stroke_color,
-                    self.current_state().line_width,
+                    self.current_state()?.stroke_color,
+                    self.current_state()?.line_width,
                 );
             }
             Ok(())

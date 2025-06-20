@@ -86,7 +86,7 @@ impl FromDictionary for CharacterIdentifierFont {
                     let desc_dict = objects
                         .get_dictionary(*obj_num)
                         .ok_or_else(|| CidFontError::InvalidFontDescriptorReference(*obj_num))?;
-                    FontDescriptor::from_dictionary(desc_dict, objects)
+                    FontDescriptor::from_dictionary(desc_dict.as_ref(), objects)
                         .map_err(CidFontError::FontDescriptorError)?
                 }
                 other => {

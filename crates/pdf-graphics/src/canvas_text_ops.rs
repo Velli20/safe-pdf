@@ -1,21 +1,22 @@
-
-use crate::{error::PdfCanvasError, PathFillType};
 use crate::pdf_canvas::PdfCanvas;
-use pdf_content_stream::pdf_operator_backend::{
-     TextObjectOps, TextPositioningOps, TextShowingOps,
-    TextStateOps,
-};
-use pdf_object::ObjectVariant;
 use crate::pdf_path::PdfPath;
 use crate::transform::Transform;
-use ttf_parser::{Face, GlyphId, OutlineBuilder, };
+use crate::{PathFillType, error::PdfCanvasError};
+use pdf_content_stream::pdf_operator_backend::{
+    TextObjectOps, TextPositioningOps, TextShowingOps, TextStateOps,
+};
+use pdf_object::ObjectVariant;
+use ttf_parser::{Face, GlyphId, OutlineBuilder};
 
 impl<'a> TextPositioningOps for PdfCanvas<'a> {
     fn move_text_position(&mut self, tx: f32, ty: f32) -> Result<(), Self::ErrorType> {
         let mat = Transform::from_translate(tx, ty);
-        self.current_state_mut().text_state.line_matrix.concat(&mat);
-        self.current_state_mut().text_state.matrix =
-            self.current_state().text_state.line_matrix.clone();
+        self.current_state_mut()?
+            .text_state
+            .line_matrix
+            .concat(&mat);
+        self.current_state_mut()?.text_state.matrix =
+            self.current_state()?.text_state.line_matrix.clone();
         Ok(())
     }
 
@@ -37,8 +38,8 @@ impl<'a> TextPositioningOps for PdfCanvas<'a> {
         f: f32,
     ) -> Result<(), Self::ErrorType> {
         let mat = Transform::from_row(a, b, c, d, e, f);
-        self.current_state_mut().text_state.line_matrix = mat.clone(); // text_line_matrix is also set
-        self.current_state_mut().text_state.matrix = mat;
+        self.current_state_mut()?.text_state.line_matrix = mat.clone(); // text_line_matrix is also set
+        self.current_state_mut()?.text_state.matrix = mat;
         Ok(())
     }
 
@@ -49,8 +50,8 @@ impl<'a> TextPositioningOps for PdfCanvas<'a> {
 
 impl<'a> TextObjectOps for PdfCanvas<'a> {
     fn begin_text_object(&mut self) -> Result<(), Self::ErrorType> {
-        self.current_state_mut().text_state.matrix = Transform::identity();
-        self.current_state_mut().text_state.line_matrix = Transform::identity();
+        self.current_state_mut()?.text_state.matrix = Transform::identity();
+        self.current_state_mut()?.text_state.line_matrix = Transform::identity();
 
         Ok(())
     }
@@ -62,17 +63,17 @@ impl<'a> TextObjectOps for PdfCanvas<'a> {
 
 impl<'a> TextStateOps for PdfCanvas<'a> {
     fn set_character_spacing(&mut self, spacing: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut().text_state.character_spacing = spacing;
+        self.current_state_mut()?.text_state.character_spacing = spacing;
         Ok(())
     }
 
     fn set_word_spacing(&mut self, spacing: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut().text_state.word_spacing = spacing;
+        self.current_state_mut()?.text_state.word_spacing = spacing;
         Ok(())
     }
 
     fn set_horizontal_text_scaling(&mut self, scale_percent: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut().text_state.horizontal_scaling = scale_percent;
+        self.current_state_mut()?.text_state.horizontal_scaling = scale_percent;
         Ok(())
     }
 
@@ -81,7 +82,14 @@ impl<'a> TextStateOps for PdfCanvas<'a> {
     }
 
     fn set_font_and_size(&mut self, font_name: &str, size: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut().text_state.font_size = size;
+        self.current_state_mut()?.text_state.font_size = size;
+        if self
+            .page
+            .resources
+            .as_ref().is_none() {
+                println!("Missing page resources");
+                return Ok(());
+            }
 
         let resources = self
             .page
@@ -97,27 +105,28 @@ impl<'a> TextStateOps for PdfCanvas<'a> {
         if let Some(font_file) = &font.cid_font.descriptor.font_file {
             if let ObjectVariant::Stream(s) = &font_file {
                 let face = Face::parse(s.data.as_slice(), 0).expect("Failed to parse font face");
-                self.current_state_mut().text_state.font_face = Some(face);
+                self.current_state_mut()?.text_state.font_face = Some(face);
             }
         }
 
-        self.current_state_mut().text_state.font = Some(font);
+        self.current_state_mut()?.text_state.font = Some(font);
         Ok(())
     }
 
     fn set_text_rendering_mode(&mut self, mode: i32) -> Result<(), Self::ErrorType> {
-        todo!("Implement text rendering mode Tr: {}", mode)
+        println!("Implement text rendering mode Tr: {}", mode);
+        Ok(())
     }
 
     fn set_text_rise(&mut self, rise: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut().text_state.rise = rise;
+        self.current_state_mut()?.text_state.rise = rise;
         Ok(())
     }
 }
 
 impl<'a> TextShowingOps for PdfCanvas<'a> {
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
-        let text_state = &self.current_state().text_state.clone();
+        let text_state = &self.current_state()?.text_state.clone();
         let current_font = text_state.font.ok_or(PdfCanvasError::NoCurrentFont)?;
         let face = text_state
             .font_face
@@ -154,11 +163,18 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
             text_rise,                            // ty
         );
 
-        let fill_color = self.current_state().fill_color;
+        let fill_color = self.current_state()?.fill_color;
         let mut iter = text.iter();
         if current_font.encoding.is_some() {
             let _ = iter.next();
         }
+
+        let cmap = current_font
+            .cmap
+            .as_ref()
+            .ok_or(PdfCanvasError::NoCharacterMapForFont(
+                current_font.base_font.clone(),
+            ))?;
 
         // Iterate over each character in the input text.
         while let Some(char_code_byte) = iter.next() {
@@ -173,18 +189,13 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
             // Compose the final transformation matrix for this glyph:
             // m_params -> text matrix -> current transformation matrix
             let mut glyph_matrix_for_char = m_params.clone();
-            glyph_matrix_for_char.concat(&self.current_state().text_state.matrix);
-            glyph_matrix_for_char.concat(&self.current_state().transform);
+            glyph_matrix_for_char.concat(&self.current_state()?.text_state.matrix);
+            glyph_matrix_for_char.concat(&self.current_state()?.transform);
 
             // Build the glyph outline using the composed transform.
             let mut builder = PdfGlyphOutline::new(glyph_matrix_for_char);
 
-            let a = current_font
-                .cmap
-                .as_ref()
-                .unwrap()
-                .get_mapping(*char_code_byte as u32);
-            if let Some(a) = a {
+            if let Some(a) = cmap.get_mapping(*char_code_byte as u32) {
                 // let ty = &current_font.subtype;
                 // println!("Subtype {} Map '{}' -> {}", ty, *char_code_byte as char, a);
                 if let Some(x) = face.glyph_index(a) {
@@ -220,7 +231,7 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
                 (glyph_width_tfs_scaled + char_spacing + word_spacing_for_char) * th_factor;
 
             // Advance the text matrix for the next glyph.
-            self.current_state_mut()
+            self.current_state_mut()?
                 .text_state
                 .matrix
                 .translate(advance_x, 0.0);
@@ -233,7 +244,8 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
         &mut self,
         elements: &[pdf_content_stream::TextElement],
     ) -> Result<(), Self::ErrorType> {
-        todo!("Implement TJ operator: {:?}", elements)
+        println!("Implement TJ operator: {:?}", elements);
+        Ok(())
     }
 
     fn move_to_next_line_and_show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {

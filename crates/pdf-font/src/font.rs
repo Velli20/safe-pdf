@@ -82,7 +82,7 @@ pub enum FontError {
 pub struct Font {
     /// The PostScript name of the font. For Type0 fonts, this is the
     /// name of the Type0 font itself, not the CIDFont.
-    base_font: String,
+    pub base_font: String,
     /// The font subtype. For Type0 fonts, this value must be `/Type0`.
     pub subtype: String,
     /// A stream defining a CMap that maps character codes to Unicode values.
@@ -178,7 +178,7 @@ impl FromDictionary for Font {
                     ))
                 })?;
 
-                CharacterIdentifierFont::from_dictionary(dictionary, objects)?
+                CharacterIdentifierFont::from_dictionary(dictionary.as_ref(), objects)?
             }
             other => {
                 return Err(FontError::InvalidEntryType {

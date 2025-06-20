@@ -9,3 +9,4 @@ pdf-page = { path = "../pdf-page" }
 pdf-font = { path = "../pdf-font" }
 pdf-object = { path = "../pdf-object" }
 ttf-parser = { version = "0.25.1" }
+thiserror = "2.0.12"

@@ -3,22 +3,21 @@ use std::rc::Rc;
 use color::Color;
 use error::PdfCanvasError;
 use pdf_canvas::PdfCanvas;
-use pdf_content_stream::pdf_operator_backend::{
+use pdf_content_stream::{graphics_state_operators::{LineCap, LineJoin}, pdf_operator_backend::{
     ClippingPathOps, ColorOps, GraphicsStateOps, MarkedContentOps, PdfOperatorBackend,
-    PdfOperatorBackendError, ShadingOps,
-    XObjectOps,
-};
+    PdfOperatorBackendError, ShadingOps, XObjectOps,
+}};
 use pdf_object::dictionary::Dictionary;
 use pdf_page::external_graphics_state::ExternalGraphicsStateKey;
 use pdf_path::PdfPath;
 use transform::Transform;
 
 pub mod canvas_path_ops;
+pub mod canvas_text_ops;
 pub mod color;
 pub mod error;
 pub mod pdf_canvas;
 pub mod pdf_path;
-pub mod canvas_text_ops;
 pub mod transform;
 
 #[derive(Default, Clone, PartialEq)]
@@ -57,9 +56,9 @@ impl<'a> PdfOperatorBackend for PdfCanvas<'a> {}
 impl<'a> ClippingPathOps for PdfCanvas<'a> {
     fn clip_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
         if let Some(mut path) = self.current_path.take() {
-            path.transform(&self.current_state().transform)?;
+            path.transform(&self.current_state()?.transform)?;
             self.canvas.set_clip_region(&path, PathFillType::Winding);
-            self.current_state_mut().clip_path = Some(path);
+            self.current_state_mut()?.clip_path = Some(path);
             Ok(())
         } else {
             Err(PdfCanvasError::NoActivePath)
@@ -68,9 +67,9 @@ impl<'a> ClippingPathOps for PdfCanvas<'a> {
 
     fn clip_path_even_odd(&mut self) -> Result<(), Self::ErrorType> {
         if let Some(mut path) = self.current_path.take() {
-            path.transform(&self.current_state().transform)?;
+            path.transform(&self.current_state()?.transform)?;
             self.canvas.set_clip_region(&path, PathFillType::EvenOdd);
-            self.current_state_mut().clip_path = Some(path);
+            self.current_state_mut()?.clip_path = Some(path);
             Ok(())
         } else {
             Err(PdfCanvasError::NoActivePath)
@@ -80,8 +79,7 @@ impl<'a> ClippingPathOps for PdfCanvas<'a> {
 
 impl<'a> GraphicsStateOps for PdfCanvas<'a> {
     fn save_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
-        self.save();
-        Ok(())
+        self.save()
     }
 
     fn restore_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
@@ -99,23 +97,26 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
         f: f32,
     ) -> Result<(), Self::ErrorType> {
         let mat = Transform::from_row(a, b, c, d, e, f);
-        let ctm_old = self.current_state().transform.clone();
+        let ctm_old = self.current_state()?.transform.clone();
         let mut ctm_new = mat;
         ctm_new.concat(&ctm_old);
-        self.current_state_mut().transform = ctm_new;
+        self.current_state_mut()?.transform = ctm_new;
         Ok(())
     }
 
     fn set_line_width(&mut self, width: f32) -> Result<(), Self::ErrorType> {
-        todo!()
+        self.current_state_mut()?.line_width = width;
+        Ok(())
     }
 
-    fn set_line_cap(&mut self, cap_style: i32) -> Result<(), Self::ErrorType> {
-        todo!()
+    fn set_line_cap(&mut self, cap_style: LineCap) -> Result<(), Self::ErrorType> {
+        self.current_state_mut()?.line_cap = cap_style;
+        Ok(())
     }
 
-    fn set_line_join(&mut self, join_style: i32) -> Result<(), Self::ErrorType> {
-        todo!()
+    fn set_line_join(&mut self, line_join: LineJoin) -> Result<(), Self::ErrorType> {
+        self.current_state_mut()?.line_join = line_join;
+        Ok(())
     }
 
     fn set_miter_limit(&mut self, limit: f32) -> Result<(), Self::ErrorType> {
@@ -127,7 +128,8 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
         dash_array: &[f32],
         dash_phase: f32,
     ) -> Result<(), Self::ErrorType> {
-        todo!()
+        println!("Dash pattern");
+        Ok(())
     }
 
     fn set_rendering_intent(&mut self, intent: &str) -> Result<(), Self::ErrorType> {
@@ -158,10 +160,10 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
                         }
                         ExternalGraphicsStateKey::SoftMask(dictionary) => todo!(),
                         ExternalGraphicsStateKey::StrokingAlpha(alpha) => {
-                            self.current_state_mut().stroke_color.a = *alpha
+                            self.current_state_mut()?.stroke_color.a = *alpha
                         }
                         ExternalGraphicsStateKey::NonStrokingAlpha(alpha) => {
-                            self.current_state_mut().fill_color.a = *alpha
+                            self.current_state_mut()?.fill_color.a = *alpha
                         }
                     }
                 }
@@ -169,7 +171,7 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
                 panic!()
             }
         } else {
-            panic!()
+            // panic!()
         }
         Ok(())
     }
@@ -209,20 +211,22 @@ impl<'a> ColorOps for PdfCanvas<'a> {
     }
 
     fn set_stroking_gray(&mut self, gray: f32) -> Result<(), Self::ErrorType> {
-        todo!()
+        println!("Set stroking gray {:?}", gray);
+        Ok(())
     }
 
     fn set_non_stroking_gray(&mut self, gray: f32) -> Result<(), Self::ErrorType> {
-        todo!()
+        println!("Non stroking gray {:?}", gray);
+        Ok(())
     }
 
     fn set_stroking_rgb(&mut self, r: f32, g: f32, b: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut().stroke_color = Color::from_rgb(r, g, b);
+        self.current_state_mut()?.stroke_color = Color::from_rgb(r, g, b);
         Ok(())
     }
 
     fn set_non_stroking_rgb(&mut self, r: f32, g: f32, b: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut().fill_color = Color::from_rgb(r, g, b);
+        self.current_state_mut()?.fill_color = Color::from_rgb(r, g, b);
         Ok(())
     }
 
@@ -241,16 +245,17 @@ impl<'a> ColorOps for PdfCanvas<'a> {
     }
 }
 
-
 impl<'a> XObjectOps for PdfCanvas<'a> {
     fn invoke_xobject(&mut self, xobject_name: &str) -> Result<(), Self::ErrorType> {
-        todo!()
+        println!("Invoke xobject {:?}", xobject_name);
+        Ok(())
     }
 }
 
 impl<'a> ShadingOps for PdfCanvas<'a> {
     fn paint_shading(&mut self, shading_name: &str) -> Result<(), Self::ErrorType> {
-        todo!()
+        println!("Paint shading {:?}", shading_name);
+        Ok(())
     }
 }
 

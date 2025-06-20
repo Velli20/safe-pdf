@@ -2,6 +2,8 @@ use std::rc::Rc;
 
 use pdf_object::dictionary::Dictionary;
 
+use crate::graphics_state_operators::LineCap;
+use crate::graphics_state_operators::LineJoin;
 use crate::TextElement;
 use crate::pdf_operator_backend::*;
 
@@ -68,10 +70,10 @@ pub enum RecordedOperation {
         width: f32,
     },
     SetLineCap {
-        cap_style: i32,
+        cap_style: LineCap,
     },
     SetLineJoin {
-        join_style: i32,
+        join_style: LineJoin,
     },
     SetMiterLimit {
         limit: f32,
@@ -393,13 +395,13 @@ impl GraphicsStateOps for RecordingBackend {
         Ok(())
     }
 
-    fn set_line_cap(&mut self, cap_style: i32) -> Result<(), Self::ErrorType> {
+    fn set_line_cap(&mut self, cap_style: LineCap) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::SetLineCap { cap_style });
         Ok(())
     }
 
-    fn set_line_join(&mut self, join_style: i32) -> Result<(), Self::ErrorType> {
+    fn set_line_join(&mut self, join_style: LineJoin) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::SetLineJoin { join_style });
         Ok(())

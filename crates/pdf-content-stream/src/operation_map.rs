@@ -1,17 +1,5 @@
 use crate::{
-    clipping_path_operators::*,
-    color_operators::*,
-    error::PdfOperatorError,
-    graphics_state_operators::*,
-    marked_content_operators::*,
-    path_operators::*,
-    path_paint_operators::*,
-    pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
-    text_object_operators::*,
-    text_positioning_operators::*,
-    text_showing_operators::*,
-    text_state_operators::*,
-    xobject_and_image_operators::*,
+    clipping_path_operators::*, color_operators::*, error::PdfOperatorError, graphics_state_operators::*, marked_content_operators::*, path_operators::*, path_paint_operators::*, pdf_operator::{Operands, PdfOperator, PdfOperatorVariant}, shadings_operators::PaintShading, text_object_operators::*, text_positioning_operators::*, text_showing_operators::*, text_state_operators::*, xobject_and_image_operators::*
 };
 
 /// Defines a mapping between a PDF operator's string representation (e.g., "m" for MoveTo)
@@ -92,6 +80,7 @@ pub(crate) const READ_MAP: &'static [OpDescriptor] = &[
     OpDescriptor::from::<BeginInlineImage>(),
     OpDescriptor::from::<InlineImageData>(),
     OpDescriptor::from::<EndInlineImage>(),
+    OpDescriptor::from::<PaintShading>(),
 ];
 
 pub fn get_operation_descriptor(name: &str) -> Option<&'static OpDescriptor> {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 
 use crate::{ObjectVariant, dictionary::Dictionary, error::ObjectError};
 
@@ -28,11 +28,11 @@ impl ObjectCollection {
         None
     }
 
-    pub fn get_dictionary(&self, key: i32) -> Option<&Dictionary> {
+    pub fn get_dictionary(&self, key: i32) -> Option<Rc<Dictionary>> {
         if let Some(obj) = self.map.get(&key) {
             if let ObjectVariant::IndirectObject(inner) = obj {
                 if let Some(ObjectVariant::Dictionary(dictionary)) = &inner.object {
-                    return Some(dictionary.as_ref());
+                    return Some(dictionary.clone());
                 }
             }
             if let ObjectVariant::Reference(object_number) = obj {

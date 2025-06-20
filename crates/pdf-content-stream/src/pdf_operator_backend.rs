@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use pdf_object::dictionary::Dictionary;
 
-use crate::TextElement;
+use crate::{graphics_state_operators::{LineCap, LineJoin}, TextElement};
 
 pub trait PdfOperatorBackendError {
     /// The error type that can be returned by operator handling methods.
@@ -272,7 +272,7 @@ pub trait GraphicsStateOps: PdfOperatorBackendError {
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn set_line_cap(&mut self, cap_style: i32) -> Result<(), Self::ErrorType>;
+    fn set_line_cap(&mut self, cap_style: LineCap) -> Result<(), Self::ErrorType>;
 
     /// Sets the line join style for path stroking.
     ///
@@ -283,7 +283,7 @@ pub trait GraphicsStateOps: PdfOperatorBackendError {
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn set_line_join(&mut self, join_style: i32) -> Result<(), Self::ErrorType>;
+    fn set_line_join(&mut self, join_style: LineJoin) -> Result<(), Self::ErrorType>;
 
     /// Sets the miter limit for path stroking.
     ///
@@ -744,7 +744,7 @@ pub trait XObjectOps: PdfOperatorBackendError {
 
 /// Defines methods to handle PDF Shading operators.
 pub trait ShadingOps: PdfOperatorBackendError {
-    /// Paints an area defined by a named shading pattern. (PDF Spec: Section 4.6.3)
+    /// Paints an area defined by a named shading pattern.
     ///
     /// # Parameters
     ///

@@ -86,7 +86,7 @@ impl FromDictionary for PdfPages {
                     })?;
 
             if object_type == PdfPage::KEY {
-                let page = PdfPage::from_dictionary(kid_dict, objects).map_err(|err| {
+                let page = PdfPage::from_dictionary(kid_dict.as_ref(), objects).map_err(|err| {
                     PdfPagesError::PageProcessingError {
                         obj_num: kid_obj_num,
                         source: err,
@@ -94,7 +94,7 @@ impl FromDictionary for PdfPages {
                 })?;
                 pages.push(page);
             } else if object_type == Self::KEY {
-                let pages_obj = PdfPages::from_dictionary(kid_dict, objects)?;
+                let pages_obj = PdfPages::from_dictionary(kid_dict.as_ref(), objects)?;
                 pages.extend(pages_obj.pages);
             } else {
                 return Err(PdfPagesError::UnexpectedObjectTypeInKids {

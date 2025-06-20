@@ -39,6 +39,9 @@ pub enum ResourcesError {
         found_type: &'static str,
     },
 
+    #[error("Failed to resolve /Resources dictionary object reference {obj_num}")]
+    FailedResolveResourcesObjectReference { obj_num: i32 },
+
     #[error("Failed to resolve font object reference {obj_num}")]
     FailedResolveFontObjectReference { obj_num: i32 },
 
@@ -61,8 +64,21 @@ impl FromDictionary for Resources {
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        let Some(resources) = dictionary.get_dictionary(Self::KEY) else {
+        let Some(resources) = dictionary.get(Self::KEY) else {
             return Ok(None);
+        };
+
+        let resources = match resources.as_ref() {
+            ObjectVariant::Dictionary(dict) => dict.clone(),
+            ObjectVariant::Reference(num) => {
+                let dict = objects.get_dictionary(*num).ok_or_else(|| {
+                    ResourcesError::FailedResolveResourcesObjectReference {
+                        obj_num: *num,
+                    }
+                })?;
+                dict
+            }
+            _ => return Ok(None),
         };
 
         let mut fonts = HashMap::new();
@@ -88,7 +104,7 @@ impl FromDictionary for Resources {
                     }
                 })?;
 
-                fonts.insert(name.to_owned(), Font::from_dictionary(font_dict, objects)?);
+                fonts.insert(name.to_owned(), Font::from_dictionary(font_dict.as_ref(), objects)?);
             }
         }
 
@@ -106,7 +122,7 @@ impl FromDictionary for Resources {
                             }
                         })?
                     }
-                    ObjectVariant::Dictionary(obj) => obj,
+                    ObjectVariant::Dictionary(obj) => obj.clone(),
                     other => {
                         return Err(ResourcesError::UnexpectedExtGStateEntryType {
                             entry_name: name.clone(),
@@ -118,7 +134,7 @@ impl FromDictionary for Resources {
 
                 external_graphics_states.insert(
                     name.to_owned(),
-                    ExternalGraphicsState::from_dictionary(v, objects)?,
+                    ExternalGraphicsState::from_dictionary(v.as_ref(), objects)?,
                 );
             }
         }

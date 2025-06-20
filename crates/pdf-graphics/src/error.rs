@@ -1,34 +1,26 @@
-#[derive(Debug)]
-pub enum PdfCanvasError {
-    NoActivePath,
-    NoCurrentPoint,
-    NoCurrentFont,
-    MissingPageResources,
-    InvalidFont(&'static str),
-    FontNotFound(String),
-}
+use thiserror::Error;
 
-impl std::fmt::Display for PdfCanvasError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PdfCanvasError::NoActivePath => {
-                write!(f, "No active path to perform the painting operation.")
-            }
-            PdfCanvasError::NoCurrentPoint => {
-                write!(f, "Operation requires a current point, but none is set.")
-            }
-            PdfCanvasError::NoCurrentFont => {
-                write!(f, "Operation requires a current font, but none is set.")
-            }
-            PdfCanvasError::MissingPageResources => {
-                write!(f, "Missing page resources")
-            }
-            PdfCanvasError::FontNotFound(name) => {
-                write!(f, "Font '{}' not found", name)
-            }
-            PdfCanvasError::InvalidFont(err) => {
-                write!(f, "Invalid font: {}", err)
-            }
-        }
-    }
+/// Defines errors that can occur during PDF canvas operations.
+#[derive(Debug, Error)]
+pub enum PdfCanvasError {
+    #[error("No active path to perform the painting operation")]
+    NoActivePath,
+    #[error("Operation requires a current point, but none is set")]
+    NoCurrentPoint,
+    #[error("Operation requires a current font, but none is set")]
+    NoCurrentFont,
+    #[error("Missing page resources")]
+    MissingPageResources,
+    #[error("Invalid font: {0}")]
+    InvalidFont(&'static str),
+    #[error("Font '{0}' not found")]
+    FontNotFound(String),
+    #[error("No character map found for font '{0}'")]
+    NoCharacterMapForFont(String),
+    #[error(
+        "Graphics state stack is empty, cannot access current state. This indicates an internal error."
+    )]
+    EmptyGraphicsStateStack,
+    #[error("Cannot restore graphics state: stack underflow (no state to restore).")]
+    GraphicsStateStackUnderflow,
 }

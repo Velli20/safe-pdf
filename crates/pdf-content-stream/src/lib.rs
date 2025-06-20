@@ -15,6 +15,7 @@ pub mod text_positioning_operators;
 pub mod text_showing_operators;
 pub mod text_state_operators;
 pub mod xobject_and_image_operators;
+pub mod shadings_operators;
 
 extern crate alloc;
 

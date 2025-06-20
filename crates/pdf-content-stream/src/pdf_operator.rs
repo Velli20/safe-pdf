@@ -5,12 +5,7 @@ use pdf_parser::{PdfParser, traits::CommentParser};
 use pdf_tokenizer::PdfToken;
 
 use crate::{
-    TextElement, clipping_path_operators::*, color_operators::*, error::PdfOperatorError,
-    graphics_state_operators::*, marked_content_operators::*, operation_map::READ_MAP,
-    operator_tokenizer::OperatorReader, path_operators::*, path_paint_operators::*,
-    pdf_operator_backend::PdfOperatorBackend, text_object_operators::*,
-    text_positioning_operators::*, text_showing_operators::*, text_state_operators::*,
-    xobject_and_image_operators::*,
+    clipping_path_operators::*, color_operators::*, error::PdfOperatorError, graphics_state_operators::*, marked_content_operators::*, operation_map::READ_MAP, operator_tokenizer::OperatorReader, path_operators::*, path_paint_operators::*, pdf_operator_backend::PdfOperatorBackend, shadings_operators::PaintShading, text_object_operators::*, text_positioning_operators::*, text_showing_operators::*, text_state_operators::*, xobject_and_image_operators::*, TextElement
 };
 
 /// Represents a PDF content stream operator.
@@ -280,6 +275,7 @@ pub enum PdfOperatorVariant {
     BeginInlineImage(BeginInlineImage),
     InlineImageData(InlineImageData),
     EndInlineImage(EndInlineImage),
+    PaintShading(PaintShading),
 }
 
 impl PdfOperatorVariant {
@@ -400,6 +396,7 @@ impl PdfOperatorVariant {
             PdfOperatorVariant::BeginInlineImage(op) => op.call(backend),
             PdfOperatorVariant::InlineImageData(op) => op.call(backend),
             PdfOperatorVariant::EndInlineImage(op) => op.call(backend),
+            PdfOperatorVariant::PaintShading(op) => op.call(backend),
         }
     }
 }
