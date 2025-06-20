@@ -22,7 +22,7 @@ impl ShowText {
 impl PdfOperator for ShowText {
     const NAME: &'static str = "Tj";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let text = operands.get_str()?;
@@ -50,7 +50,7 @@ impl MoveNextLineShowText {
 impl PdfOperator for MoveNextLineShowText {
     const NAME: &'static str = "'";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let text = operands.get_str()?;
@@ -87,7 +87,7 @@ impl SetSpacingMoveShowText {
 impl PdfOperator for SetSpacingMoveShowText {
     const NAME: &'static str = "\"";
 
-    const OPERAND_COUNT: usize = 3;
+    const OPERAND_COUNT: Option<usize> = Some(3);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let word_spacing = operands.get_f32()?;
@@ -128,7 +128,7 @@ impl ShowTextArray {
 impl PdfOperator for ShowTextArray {
     const NAME: &'static str = "TJ";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let elements = operands.get_text_element_array()?;

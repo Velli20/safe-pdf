@@ -25,7 +25,7 @@ impl<'a> OperatorReader<'a> for PdfParser<'a> {
 
         let name_bytes = self
             .tokenizer
-            .read_while_u8(|b| b.is_ascii_alphabetic() || b == b'*');
+            .read_while_u8(|b| b.is_ascii_alphabetic() || b == b'*' || b == b'1');
         if name_bytes.is_empty() {
             return Ok(Cow::Borrowed(""));
         }

@@ -23,7 +23,7 @@ impl MoveTo {
 impl PdfOperator for MoveTo {
     const NAME: &'static str = "m";
 
-    const OPERAND_COUNT: usize = 2;
+    const OPERAND_COUNT: Option<usize> = Some(2);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let x = operands.get_f32()?;
@@ -55,7 +55,7 @@ impl LineTo {
 impl PdfOperator for LineTo {
     const NAME: &'static str = "l";
 
-    const OPERAND_COUNT: usize = 2;
+    const OPERAND_COUNT: Option<usize> = Some(2);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let x = operands.get_f32()?;
@@ -103,7 +103,7 @@ impl CurveTo {
 impl PdfOperator for CurveTo {
     const NAME: &'static str = "c";
 
-    const OPERAND_COUNT: usize = 6;
+    const OPERAND_COUNT: Option<usize> = Some(6);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let x1 = operands.get_f32()?;
@@ -147,7 +147,7 @@ impl CurveToV {
 impl PdfOperator for CurveToV {
     const NAME: &'static str = "v";
 
-    const OPERAND_COUNT: usize = 4;
+    const OPERAND_COUNT: Option<usize> = Some(4);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let x2 = operands.get_f32()?;
@@ -186,7 +186,7 @@ impl CurveToY {
 impl PdfOperator for CurveToY {
     const NAME: &'static str = "y";
 
-    const OPERAND_COUNT: usize = 4;
+    const OPERAND_COUNT: Option<usize> = Some(4);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let x1 = operands.get_f32()?;
@@ -209,7 +209,7 @@ pub struct ClosePath;
 impl PdfOperator for ClosePath {
     const NAME: &'static str = "h";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::ClosePath(Self::default()))
@@ -249,7 +249,7 @@ impl Rectangle {
 impl PdfOperator for Rectangle {
     const NAME: &'static str = "re";
 
-    const OPERAND_COUNT: usize = 4;
+    const OPERAND_COUNT: Option<usize> = Some(4);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let x = operands.get_f32()?;

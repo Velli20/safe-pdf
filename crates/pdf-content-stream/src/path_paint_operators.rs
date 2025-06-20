@@ -11,7 +11,7 @@ pub struct StrokePath;
 impl PdfOperator for StrokePath {
     const NAME: &'static str = "S";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::StrokePath(Self::default()))
@@ -30,7 +30,7 @@ pub struct CloseStrokePath;
 impl PdfOperator for CloseStrokePath {
     const NAME: &'static str = "s";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::CloseStrokePath(Self::default()))
@@ -48,7 +48,7 @@ pub struct FillPathNonZero;
 impl PdfOperator for FillPathNonZero {
     const NAME: &'static str = "f"; // TODO: or "F"
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::FillPathNonZero(Self::default()))
@@ -66,7 +66,7 @@ pub struct FillPathEvenOdd;
 impl PdfOperator for FillPathEvenOdd {
     const NAME: &'static str = "f*";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::FillPathEvenOdd(Self::default()))
@@ -85,7 +85,7 @@ pub struct FillAndStrokePathNonZero;
 impl PdfOperator for FillAndStrokePathNonZero {
     const NAME: &'static str = "B";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::FillAndStrokePathNonZero(Self::default()))
@@ -104,7 +104,7 @@ pub struct FillAndStrokePathEvenOdd;
 impl PdfOperator for FillAndStrokePathEvenOdd {
     const NAME: &'static str = "B*";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::FillAndStrokePathEvenOdd(Self::default()))
@@ -123,7 +123,7 @@ pub struct CloseFillAndStrokePathNonZero;
 impl PdfOperator for CloseFillAndStrokePathNonZero {
     const NAME: &'static str = "b";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::CloseFillAndStrokePathNonZero(
@@ -144,7 +144,7 @@ pub struct CloseFillAndStrokePathEvenOdd;
 impl PdfOperator for CloseFillAndStrokePathEvenOdd {
     const NAME: &'static str = "b*";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::CloseFillAndStrokePathEvenOdd(
@@ -165,7 +165,7 @@ pub struct EndPath;
 impl PdfOperator for EndPath {
     const NAME: &'static str = "n";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::EndPath(Self::default()))

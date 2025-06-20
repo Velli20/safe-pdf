@@ -5,7 +5,13 @@ use pdf_parser::{PdfParser, traits::CommentParser};
 use pdf_tokenizer::PdfToken;
 
 use crate::{
-    clipping_path_operators::*, color_operators::*, error::PdfOperatorError, graphics_state_operators::*, marked_content_operators::*, operation_map::READ_MAP, operator_tokenizer::OperatorReader, path_operators::*, path_paint_operators::*, pdf_operator_backend::PdfOperatorBackend, shadings_operators::PaintShading, text_object_operators::*, text_positioning_operators::*, text_showing_operators::*, text_state_operators::*, xobject_and_image_operators::*, TextElement
+    TextElement, clipping_path_operators::*, color_operators::*, error::PdfOperatorError,
+    graphics_state_operators::*, marked_content_operators::*, operation_map::READ_MAP,
+    operator_tokenizer::OperatorReader, path_operators::*, path_paint_operators::*,
+    pdf_operator_backend::PdfOperatorBackend, shadings_operators::PaintShading,
+    text_object_operators::*, text_positioning_operators::*, text_showing_operators::*,
+    text_state_operators::*, type3_font_operators::SetCharWidthAndBoundingBox,
+    xobject_and_image_operators::*,
 };
 
 /// Represents a PDF content stream operator.
@@ -21,7 +27,7 @@ pub trait PdfOperator {
     const NAME: &'static str;
 
     /// The number of operands this operator consumes from the operand stack.
-    const OPERAND_COUNT: usize;
+    const OPERAND_COUNT: Option<usize>;
 
     /// Reads and consumes the necessary operands from the provided `Operands`
     /// slice and constructs the specific `PdfOperatorVariant`.
@@ -276,6 +282,11 @@ pub enum PdfOperatorVariant {
     InlineImageData(InlineImageData),
     EndInlineImage(EndInlineImage),
     PaintShading(PaintShading),
+    SetCharWidthAndBoundingBox(SetCharWidthAndBoundingBox),
+    SetStrokeColorSpace(SetStrokeColorSpace),
+    SetNonStrokingColorSpace(SetNonStrokingColorSpace),
+    SetStrokingColor(SetStrokingColor),
+    SetNonStrokingColor(SetNonStrokingColor),
 }
 
 impl PdfOperatorVariant {
@@ -306,12 +317,15 @@ impl PdfOperatorVariant {
                 let mut handled = false;
                 for operation in READ_MAP {
                     if name == operation.name {
-                        if operands.len() != operation.operand_count {
-                            return Err(PdfOperatorError::IncorrectOperandCount {
-                                op_name: operation.name,
-                                got: operands.len(),
-                                expected: operation.operand_count,
-                            });
+                        match operation.operand_count {
+                            Some(required_count) if operands.len() != required_count => {
+                                return Err(PdfOperatorError::IncorrectOperandCount {
+                                    op_name: operation.name,
+                                    got: operands.len(),
+                                    expected: required_count,
+                                });
+                            }
+                            _ => {} // No fixed operand count or count matches
                         }
 
                         let mut ops = Operands(operands.as_slice());
@@ -397,6 +411,11 @@ impl PdfOperatorVariant {
             PdfOperatorVariant::InlineImageData(op) => op.call(backend),
             PdfOperatorVariant::EndInlineImage(op) => op.call(backend),
             PdfOperatorVariant::PaintShading(op) => op.call(backend),
+            PdfOperatorVariant::SetCharWidthAndBoundingBox(op) => op.call(backend),
+            PdfOperatorVariant::SetStrokeColorSpace(op) => op.call(backend),
+            PdfOperatorVariant::SetNonStrokingColorSpace(op) => op.call(backend),
+            PdfOperatorVariant::SetStrokingColor(op) => op.call(backend),
+            PdfOperatorVariant::SetNonStrokingColor(op) => op.call(backend),
         }
     }
 }
@@ -414,6 +433,14 @@ mod tests {
         }
 
         let test_cases = vec![
+            TestCase {
+                description: "0. ConcatMatrix(cm)",
+                input: b"
+.17576218 0 0 .17576218 2227.4995 159.375 cm",
+                expected_ops: vec![PdfOperatorVariant::ConcatMatrix(ConcatMatrix::new([
+                    0.17576218, 0.0, 0.0, 0.17576218, 2227.4995, 159.375,
+                ]))],
+            },
             TestCase {
                 description: "1. Simple moveto (m)",
                 input: b"100 100 m",

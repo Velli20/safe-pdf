@@ -21,7 +21,7 @@ impl InvokeXObject {
 impl PdfOperator for InvokeXObject {
     const NAME: &'static str = "Do";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let name = operands.get_name()?;
@@ -42,7 +42,7 @@ pub struct BeginInlineImage;
 impl PdfOperator for BeginInlineImage {
     const NAME: &'static str = "BI";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         // The BI operator itself does not consume operands from the stack.
@@ -66,7 +66,7 @@ pub struct InlineImageData {
 impl PdfOperator for InlineImageData {
     const NAME: &'static str = "ID";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         // The ID (Image Data) operator itself does not have preceding operands that form the image data.
@@ -87,7 +87,7 @@ pub struct EndInlineImage;
 impl PdfOperator for EndInlineImage {
     const NAME: &'static str = "EI";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         // The EI operator does not take any operands from the stack.

@@ -1,4 +1,8 @@
-use crate::{error::PdfOperatorError, pdf_operator::{Operands, PdfOperator, PdfOperatorVariant}, pdf_operator_backend::PdfOperatorBackend};
+use crate::{
+    error::PdfOperatorError,
+    pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
+    pdf_operator_backend::PdfOperatorBackend,
+};
 
 /// Paints the shape and color shading defined by a shading dictionary resource.
 /// The `sh` operator takes one operand, the name of a shading dictionary.
@@ -18,7 +22,7 @@ impl PaintShading {
 impl PdfOperator for PaintShading {
     const NAME: &'static str = "sh";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let name = operands.get_name()?;

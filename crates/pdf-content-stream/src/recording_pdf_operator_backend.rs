@@ -2,9 +2,9 @@ use std::rc::Rc;
 
 use pdf_object::dictionary::Dictionary;
 
+use crate::TextElement;
 use crate::graphics_state_operators::LineCap;
 use crate::graphics_state_operators::LineJoin;
-use crate::TextElement;
 use crate::pdf_operator_backend::*;
 
 /// Represents a recorded operation with its parameters.

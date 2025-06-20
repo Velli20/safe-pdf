@@ -25,7 +25,7 @@ impl BeginMarkedContent {
 impl PdfOperator for BeginMarkedContent {
     const NAME: &'static str = "BMC";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let tag = operands.get_str()?;
@@ -57,7 +57,7 @@ impl BeginMarkedContentWithProps {
 impl PdfOperator for BeginMarkedContentWithProps {
     const NAME: &'static str = "BDC";
 
-    const OPERAND_COUNT: usize = 2;
+    const OPERAND_COUNT: Option<usize> = Some(2);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let tag = operands.get_str()?;
@@ -79,7 +79,7 @@ pub struct EndMarkedContent;
 impl PdfOperator for EndMarkedContent {
     const NAME: &'static str = "EMC";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::EndMarkedContent(Self::default()))

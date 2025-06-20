@@ -10,12 +10,13 @@ pub mod path_paint_operators;
 pub mod pdf_operator;
 pub mod pdf_operator_backend;
 pub mod recording_pdf_operator_backend;
+pub mod shadings_operators;
 pub mod text_object_operators;
 pub mod text_positioning_operators;
 pub mod text_showing_operators;
 pub mod text_state_operators;
+pub mod type3_font_operators;
 pub mod xobject_and_image_operators;
-pub mod shadings_operators;
 
 extern crate alloc;
 

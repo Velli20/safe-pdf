@@ -7,7 +7,10 @@ use std::rc::Rc;
 
 use pdf_object::dictionary::Dictionary;
 
-use crate::{graphics_state_operators::{LineCap, LineJoin}, TextElement};
+use crate::{
+    TextElement,
+    graphics_state_operators::{LineCap, LineJoin},
+};
 
 pub trait PdfOperatorBackendError {
     /// The error type that can be returned by operator handling methods.

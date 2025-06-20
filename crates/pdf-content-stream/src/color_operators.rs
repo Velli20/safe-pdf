@@ -21,7 +21,7 @@ impl SetGrayFill {
 impl PdfOperator for SetGrayFill {
     const NAME: &'static str = "g";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let gray = operands.get_f32()?;
@@ -50,7 +50,7 @@ impl SetGrayStroke {
 impl PdfOperator for SetGrayStroke {
     const NAME: &'static str = "G";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let gray = operands.get_f32()?;
@@ -83,7 +83,7 @@ impl SetRGBFill {
 impl PdfOperator for SetRGBFill {
     const NAME: &'static str = "rg";
 
-    const OPERAND_COUNT: usize = 3;
+    const OPERAND_COUNT: Option<usize> = Some(3);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let r = operands.get_f32()?;
@@ -118,7 +118,7 @@ impl SetRGBStroke {
 impl PdfOperator for SetRGBStroke {
     const NAME: &'static str = "RG";
 
-    const OPERAND_COUNT: usize = 3;
+    const OPERAND_COUNT: Option<usize> = Some(3);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let r = operands.get_f32()?;
@@ -155,7 +155,7 @@ impl SetCMYKFill {
 impl PdfOperator for SetCMYKFill {
     const NAME: &'static str = "k";
 
-    const OPERAND_COUNT: usize = 4;
+    const OPERAND_COUNT: Option<usize> = Some(4);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let c = operands.get_f32()?;
@@ -193,7 +193,7 @@ impl SetCMYKStroke {
 impl PdfOperator for SetCMYKStroke {
     const NAME: &'static str = "K";
 
-    const OPERAND_COUNT: usize = 4;
+    const OPERAND_COUNT: Option<usize> = Some(4);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let c = operands.get_f32()?;
@@ -205,5 +205,133 @@ impl PdfOperator for SetCMYKStroke {
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
         backend.set_stroking_cmyk(self.c, self.m, self.y, self.k)
+    }
+}
+
+/// Sets the stroke color space value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetStrokeColorSpace {
+    /// The name of the color space.
+    name: String,
+}
+
+impl SetStrokeColorSpace {
+    pub fn new(name: String) -> Self {
+        Self { name }
+    }
+}
+
+impl PdfOperator for SetStrokeColorSpace {
+    const NAME: &'static str = "CS";
+    const OPERAND_COUNT: Option<usize> = Some(1);
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        let name = operands.get_name()?;
+        Ok(PdfOperatorVariant::SetStrokeColorSpace(Self::new(name)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_stroking_color_space(&self.name)
+    }
+}
+
+/// Sets the non-stroking (fill) color space value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetNonStrokingColorSpace {
+    /// The name of the color space.
+    name: String,
+}
+
+impl SetNonStrokingColorSpace {
+    pub fn new(name: String) -> Self {
+        Self { name }
+    }
+}
+
+impl PdfOperator for SetNonStrokingColorSpace {
+    const NAME: &'static str = "cs";
+    const OPERAND_COUNT: Option<usize> = Some(1);
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        let name = operands.get_name()?;
+        Ok(PdfOperatorVariant::SetNonStrokingColorSpace(Self::new(
+            name,
+        )))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_non_stroking_color_space(&self.name)
+    }
+}
+
+/// Sets the stroking color when the color space requires
+/// multiple color components.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetStrokingColor {
+    /// Color component values.
+    components: Vec<f32>,
+}
+
+impl SetStrokingColor {
+    pub fn new(components: Vec<f32>) -> Self {
+        Self { components }
+    }
+}
+
+impl PdfOperator for SetStrokingColor {
+    const NAME: &'static str = "SCN";
+    const OPERAND_COUNT: Option<usize> = None;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        let mut values = vec![];
+        loop {
+            if let Ok(value) = operands.get_f32() {
+                values.push(value);
+            } else {
+                break;
+            }
+        }
+
+        Ok(PdfOperatorVariant::SetStrokingColor(Self::new(values)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_stroking_color(&self.components)
+    }
+}
+
+/// Sets the non-stroking color when the color space requires
+/// multiple color components.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetNonStrokingColor {
+    /// Color component values.
+    components: Vec<f32>,
+}
+
+impl SetNonStrokingColor {
+    pub fn new(components: Vec<f32>) -> Self {
+        Self { components }
+    }
+}
+
+impl PdfOperator for SetNonStrokingColor {
+    const NAME: &'static str = "scn";
+    const OPERAND_COUNT: Option<usize> = None;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        let mut values = vec![];
+        loop {
+            if let Ok(value) = operands.get_f32() {
+                values.push(value);
+            } else {
+                break;
+            }
+        }
+
+        Ok(PdfOperatorVariant::SetNonStrokingColor(Self::new(values)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_stroking_color(&self.components)
     }
 }

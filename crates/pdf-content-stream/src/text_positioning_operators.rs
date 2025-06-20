@@ -25,7 +25,7 @@ impl MoveTextPosition {
 impl PdfOperator for MoveTextPosition {
     const NAME: &'static str = "Td";
 
-    const OPERAND_COUNT: usize = 2;
+    const OPERAND_COUNT: Option<usize> = Some(2);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let tx = operands.get_f32()?;
@@ -58,7 +58,7 @@ impl MoveTextPositionAndSetLeading {
 impl PdfOperator for MoveTextPositionAndSetLeading {
     const NAME: &'static str = "TD";
 
-    const OPERAND_COUNT: usize = 2;
+    const OPERAND_COUNT: Option<usize> = Some(2);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let tx = operands.get_f32()?;
@@ -94,7 +94,7 @@ impl SetTextMatrix {
 impl PdfOperator for SetTextMatrix {
     const NAME: &'static str = "Tm";
 
-    const OPERAND_COUNT: usize = 6;
+    const OPERAND_COUNT: Option<usize> = Some(6);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let a = operands.get_f32()?;
@@ -129,7 +129,7 @@ pub struct MoveToNextLine;
 impl PdfOperator for MoveToNextLine {
     const NAME: &'static str = "T*";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::MoveToNextLine(Self::default()))

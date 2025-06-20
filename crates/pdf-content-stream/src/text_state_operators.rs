@@ -20,7 +20,7 @@ impl SetCharacterSpacing {
 impl PdfOperator for SetCharacterSpacing {
     const NAME: &'static str = "Tc";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let spacing = operands.get_f32()?;
@@ -49,7 +49,7 @@ impl SetWordSpacing {
 impl PdfOperator for SetWordSpacing {
     const NAME: &'static str = "Tw";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let spacing = operands.get_f32()?;
@@ -78,7 +78,7 @@ impl SetHorizontalScaling {
 impl PdfOperator for SetHorizontalScaling {
     const NAME: &'static str = "Tz";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let scale = operands.get_f32()?;
@@ -107,7 +107,7 @@ impl SetLeading {
 impl PdfOperator for SetLeading {
     const NAME: &'static str = "TL";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let leading = operands.get_f32()?;
@@ -138,7 +138,7 @@ impl SetFont {
 impl PdfOperator for SetFont {
     const NAME: &'static str = "Tf";
 
-    const OPERAND_COUNT: usize = 2;
+    const OPERAND_COUNT: Option<usize> = Some(2);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let name = operands.get_name()?;
@@ -176,7 +176,7 @@ impl SetRenderingMode {
 impl PdfOperator for SetRenderingMode {
     const NAME: &'static str = "Tr";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let mode = operands.get_u8()?;
@@ -205,7 +205,7 @@ impl SetTextRise {
 impl PdfOperator for SetTextRise {
     const NAME: &'static str = "Ts";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let rise = operands.get_f32()?;

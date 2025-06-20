@@ -20,7 +20,7 @@ impl SetLineWidth {
 impl PdfOperator for SetLineWidth {
     const NAME: &'static str = "w";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let width = operands.get_f32()?;
@@ -56,10 +56,18 @@ pub struct SetLineCapStyle {
 impl SetLineCapStyle {
     pub fn new(style: u8) -> Self {
         match style {
-            0 => Self { style: LineCap::Butt },
-            1 => Self { style: LineCap::Round },
-            2 => Self { style: LineCap::Square },
-            _ => Self { style: LineCap::Butt },
+            0 => Self {
+                style: LineCap::Butt,
+            },
+            1 => Self {
+                style: LineCap::Round,
+            },
+            2 => Self {
+                style: LineCap::Square,
+            },
+            _ => Self {
+                style: LineCap::Butt,
+            },
         }
     }
 }
@@ -67,7 +75,7 @@ impl SetLineCapStyle {
 impl PdfOperator for SetLineCapStyle {
     const NAME: &'static str = "J";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let style = operands.get_u8()?;
@@ -75,7 +83,7 @@ impl PdfOperator for SetLineCapStyle {
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        backend.set_line_cap(self.style )
+        backend.set_line_cap(self.style)
     }
 }
 
@@ -89,10 +97,18 @@ pub struct SetLineJoinStyle {
 impl SetLineJoinStyle {
     pub fn new(style: u8) -> Self {
         match style {
-            0 => Self { style: LineJoin::Miter },
-            1 => Self { style: LineJoin::Round },
-            2 => Self { style: LineJoin::Bevel },
-            _ => Self { style: LineJoin::Miter },
+            0 => Self {
+                style: LineJoin::Miter,
+            },
+            1 => Self {
+                style: LineJoin::Round,
+            },
+            2 => Self {
+                style: LineJoin::Bevel,
+            },
+            _ => Self {
+                style: LineJoin::Miter,
+            },
         }
     }
 }
@@ -100,7 +116,7 @@ impl SetLineJoinStyle {
 impl PdfOperator for SetLineJoinStyle {
     const NAME: &'static str = "j";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let style = operands.get_u8()?;
@@ -129,7 +145,7 @@ impl SetMiterLimit {
 impl PdfOperator for SetMiterLimit {
     const NAME: &'static str = "M";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let limit = operands.get_f32()?;
@@ -159,7 +175,7 @@ impl SetDashPattern {
 impl PdfOperator for SetDashPattern {
     const NAME: &'static str = "d";
 
-    const OPERAND_COUNT: usize = 2;
+    const OPERAND_COUNT: Option<usize> = Some(2);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let array = operands.get_f32_array()?;
@@ -179,7 +195,7 @@ pub struct SaveGraphicsState;
 impl PdfOperator for SaveGraphicsState {
     const NAME: &'static str = "q";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::SaveGraphicsState(Self::default()))
@@ -197,7 +213,7 @@ pub struct RestoreGraphicsState;
 impl PdfOperator for RestoreGraphicsState {
     const NAME: &'static str = "Q";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::RestoreGraphicsState(Self::default()))
@@ -225,7 +241,7 @@ impl ConcatMatrix {
 impl PdfOperator for ConcatMatrix {
     const NAME: &'static str = "cm";
 
-    const OPERAND_COUNT: usize = 6;
+    const OPERAND_COUNT: Option<usize> = Some(6);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let a = operands.get_f32()?;
@@ -270,7 +286,7 @@ impl SetGraphicsStateFromDict {
 impl PdfOperator for SetGraphicsStateFromDict {
     const NAME: &'static str = "gs";
 
-    const OPERAND_COUNT: usize = 1;
+    const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let dict_name = operands.get_name()?;

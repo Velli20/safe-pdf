@@ -11,7 +11,7 @@ pub struct ClipNonZero;
 impl PdfOperator for ClipNonZero {
     const NAME: &'static str = "W";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::ClipNonZero(Self::default()))
@@ -29,7 +29,7 @@ pub struct ClipEvenOdd;
 impl PdfOperator for ClipEvenOdd {
     const NAME: &'static str = "W*";
 
-    const OPERAND_COUNT: usize = 0;
+    const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::ClipEvenOdd(Self::default()))
