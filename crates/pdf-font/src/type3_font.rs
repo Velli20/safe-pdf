@@ -246,8 +246,6 @@ pub enum EncodingError {
 }
 
 /// Represents a font encoding dictionary, used to map character codes to glyph names.
-///
-/// See PDF 1.7 Specification, Section 9.6.6, "Font Encoding Dictionaries".
 #[derive(Debug)]
 pub struct FontEncodingDictionary {
     /// The base encoding, which can be a predefined name like `/StandardEncoding`
@@ -259,9 +257,9 @@ pub struct FontEncodingDictionary {
 }
 
 impl FromDictionary for FontEncodingDictionary {
-    const KEY: &'static str = "Encoding"; // This is the key in the Font dictionary
+    const KEY: &'static str = "Encoding";
     type ResultType = Self;
-    type ErrorType = EncodingError; // Use the new error type
+    type ErrorType = EncodingError;
 
     fn from_dictionary(
         dictionary: &Dictionary,

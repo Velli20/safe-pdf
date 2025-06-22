@@ -39,6 +39,28 @@ pub enum LineCap {
     Square = 2,
 }
 
+impl From<u8> for LineCap {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => LineCap::Butt,
+            1 => LineCap::Round,
+            2 => LineCap::Square,
+            _ => LineCap::Butt,
+        }
+    }
+}
+
+impl From<u8> for LineJoin {
+    fn from(value: u8) -> Self {
+        match value {
+            0 => LineJoin::Miter,
+            1 => LineJoin::Round,
+            2 => LineJoin::Bevel,
+            _ => LineJoin::Miter,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum LineJoin {
     Miter = 0,
@@ -55,19 +77,8 @@ pub struct SetLineCapStyle {
 
 impl SetLineCapStyle {
     pub fn new(style: u8) -> Self {
-        match style {
-            0 => Self {
-                style: LineCap::Butt,
-            },
-            1 => Self {
-                style: LineCap::Round,
-            },
-            2 => Self {
-                style: LineCap::Square,
-            },
-            _ => Self {
-                style: LineCap::Butt,
-            },
+        Self {
+            style: LineCap::from(style),
         }
     }
 }
@@ -96,19 +107,8 @@ pub struct SetLineJoinStyle {
 
 impl SetLineJoinStyle {
     pub fn new(style: u8) -> Self {
-        match style {
-            0 => Self {
-                style: LineJoin::Miter,
-            },
-            1 => Self {
-                style: LineJoin::Round,
-            },
-            2 => Self {
-                style: LineJoin::Bevel,
-            },
-            _ => Self {
-                style: LineJoin::Miter,
-            },
+        Self {
+            style: LineJoin::from(style),
         }
     }
 }

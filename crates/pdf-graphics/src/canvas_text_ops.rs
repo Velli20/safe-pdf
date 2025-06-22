@@ -51,12 +51,12 @@ impl<'a> TextPositioningOps for PdfCanvas<'a> {
 
 impl<'a> TextObjectOps for PdfCanvas<'a> {
     fn begin_text_object(&mut self) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.text_state.matrix = Transform::identity();
-        self.current_state_mut()?.text_state.line_matrix = Transform::identity();
         Ok(())
     }
 
     fn end_text_object(&mut self) -> Result<(), Self::ErrorType> {
+        self.current_state_mut()?.text_state.matrix = Transform::identity();
+        self.current_state_mut()?.text_state.line_matrix = Transform::identity();
         Ok(())
     }
 }
@@ -120,7 +120,7 @@ impl<'a> TextStateOps for PdfCanvas<'a> {
 }
 
 impl<'a> TextShowingOps for PdfCanvas<'a> {
-     fn set_char_width_and_bounding_box(
+    fn set_char_width_and_bounding_box(
         &mut self,
         wx: f32,
         wy: f32,
@@ -129,7 +129,7 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
         urx: f32,
         ury: f32,
     ) -> Result<(), Self::ErrorType> {
-        println!("set_char_width_and_bounding_box wx {}, wy {}, llx {}, lly {}, urx {}, ury {}", wx, wy, llx, lly, urx, ury);
+        let _ = (wx, wy, llx, lly, urx, ury);
         Ok(())
     }
 
@@ -276,8 +276,6 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
             text
         )
     }
-
-
 }
 
 #[derive(Default)]

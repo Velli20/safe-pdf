@@ -53,6 +53,7 @@ pub(crate) struct CanvasState<'a> {
     pub stroke_color: Color,
     pub fill_color: Color,
     pub line_width: f32,
+    pub miter_limit: f32,
     pub text_state: TextState<'a>,
     pub clip_path: Option<PdfPath>,
     pub line_cap: LineCap,
@@ -66,6 +67,8 @@ impl CanvasState<'_> {
     const DEFAULT_FILL_COLOR: Color = Color::from_rgb(0.0, 0.0, 0.0);
     /// Default stroke color.
     const DEFAULT_STROKE_COLOR: Color = Color::from_rgb(0.0, 0.0, 0.0);
+    /// Default miter limit.
+    const DEFAULT_MITER_LIMIT: f32 = 0.0;
 }
 
 impl<'a> Default for CanvasState<'a> {
@@ -75,6 +78,7 @@ impl<'a> Default for CanvasState<'a> {
             stroke_color: Self::DEFAULT_STROKE_COLOR,
             fill_color: Self::DEFAULT_FILL_COLOR,
             line_width: Self::DEFAULT_LINE_WIDTH,
+            miter_limit: Self::DEFAULT_MITER_LIMIT,
             text_state: TextState::default(),
             clip_path: None,
             line_cap: LineCap::Butt,
@@ -199,84 +203,79 @@ impl<'a> PdfCanvas<'a> {
         }
     }
 
+    /// Renders a text string using a Type 3 font.
+    ///
+    /// This method processes a sequence of character codes, looks up the corresponding
+    /// glyph procedures from the Type 3 font's `CharProcs` dictionary, and executes
+    /// them to draw the glyphs. It handles the specific transformation logic required
+    /// for Type 3 fonts, including the font matrix, font size, text matrix, and CTM.
     pub(crate) fn show_type3_font_text(&mut self, text: &[u8]) -> Result<(), PdfCanvasError> {
         let text_state = &self.current_state()?.text_state.clone();
         let current_font = text_state.font.ok_or(PdfCanvasError::NoCurrentFont)?;
 
-        let type3_font = current_font.type3_font.as_ref().ok_or(PdfCanvasError::NoCurrentFont)?;
+        let type3_font = current_font
+            .type3_font
+            .as_ref()
+            .ok_or(PdfCanvasError::NoCurrentFont)?;
 
-        let mut font_matrix = if let [a, b, c, d, e, f] = type3_font.font_matrix.as_slice() {
-            Transform::from_row(
-                *a, // Horizontal scaling (X axis).
-                *b, // Horizontal skewing (Y axis).
-                *c, // Vertical skewing (X axis).
-                *d, // Vertical scaling (Y axis).
-                *e, // Horizontal translation.
-                *f, // Vertical translation.
-            )
+        let font_matrix = if let [a, b, c, d, e, f] = type3_font.font_matrix.as_slice() {
+            Transform::from_row(*a, *b, *c, *d, *e, *f)
         } else {
-            return Err(PdfCanvasError::InvalidFont("Invalid FontMatrix in Type3 font"));
+            return Err(PdfCanvasError::InvalidFont(
+                "Invalid FontMatrix in Type3 font",
+            ));
         };
 
-        // Per PDF spec 9.7.5, for Type 3 fonts, the glyph matrix is calculated as:
-        // CTM_new = M_s * FontMatrix * Tm * CTM_old
-        // where M_s = [Tfs*Th 0 0 Tfs 0 0]
+        // For Type 3 fonts, the final transformation for a glyph is CTM * Tm * S * FontMatrix,
+        // where S is a matrix for font size (Tfs), horizontal scaling (Th), and rise (Ts).
+        // S = [Tfs * Th 0 0 Tfs 0 Ts].
+        // We pre-calculate this combined matrix. `concat` performs pre-multiplication (other * self).
+        let th_factor = text_state.horizontal_scaling / 100.0;
+        let font_size_matrix = Transform::from_row(
+            text_state.font_size * th_factor, // sx
+            0.0,                              // ky
+            0.0,                              // kx
+            text_state.font_size,             // sy
+            0.0,                              // tx
+            text_state.rise,                  // ty
+        );
 
-        // Calculate M_s
-        let th_factor = self.current_state()?.text_state.horizontal_scaling / 100.0;
-        let text_font_size = self.current_state()?.text_state.font_size / 1000.0  ;
+        let mut text_rendering_matrix = font_matrix.clone();
+        text_rendering_matrix.concat(&font_size_matrix); // S * FontMatrix
+        text_rendering_matrix.concat(&text_state.matrix); // Tm * (S * FontMatrix)
+        text_rendering_matrix.concat(&self.current_state()?.transform); // CTM * (Tm * S * FontMatrix)
 
-        font_matrix.scale(text_font_size, text_font_size);
-
-        // Iterate over each character in the input text.
+        // For each character code, we will render its glyph.
         let mut iter = text.iter();
         while let Some(char_code_byte) = iter.next() {
-            // 1. For each character code in `text`:
-            //    a. Use the font's encoding to map the character code to a character name.
-            //    b. Look up the character name in the font's /CharProcs dictionary to get the
-            //       glyph's content stream.
-            //    c. Save the current graphics state.
-            //    d. The glyph's content stream is executed. This requires parsing the stream's
-            //       operators and calling the appropriate backend methods on the `canvas`. This
-            //       is a recursive-like call to the content stream processor.
-            //       - `let operators = PdfOperatorVariant::from(&glyph_stream_data)?;`
-            //       - `for op in operators { op.call(canvas)?; }`
-            //    e. The `d1` operator within the glyph stream sets the glyph's width. The
-            //       backend needs to handle this and store the width.
-            //    f. Restore the graphics state.
-            //    g. Calculate the advance amount using the stored width, font size, character
-            //       spacing, and word spacing.
-            //    h. Update the text matrix `Tm` to position the next character.
-            if let Some(encoding) = &type3_font.encoding {
-                let glyph_name = encoding.differences.get(char_code_byte);
-                if let Some(glyph_name) = glyph_name {
-                    let char_procs = type3_font.char_procs.get(glyph_name);
-                    if let Some(char_procs) = char_procs {
-                        self.save()?;
+            // Step 1: Map character code to glyph name using the font's encoding.
+            let glyph_name = type3_font
+                .encoding
+                .as_ref()
+                .and_then(|enc| enc.differences.get(char_code_byte));
 
-                        // Concat with FontMatrix
-                        // Concat with M_s
-                        self.current_state_mut()?.transform.concat(&font_matrix);
-                        self.current_state_mut()?.transform.concat(&text_state.matrix);
-                        for op in char_procs {
-                            op.call(self)?;
-                        }
-                        self.restore();
-                        self.current_state_mut()?.text_state.line_matrix.translate(-4.0, 0.0);
+            if let Some(glyph_name) = glyph_name {
+                // Step 2: Look up the glyph's content stream from the CharProcs dictionary.
+                if let Some(char_procs) = type3_font.char_procs.get(glyph_name) {
+                    // Step 3: Save graphics state before drawing the glyph.
+                    self.save()?;
 
-                        // TODO: Advance the text matrix (Tm) using the glyph width.
-                        // The width is set by the 'd1' operator within the char_procs stream.
-                        // This backend needs to capture that width and use it here to update
-                        // self.current_state_mut()?.text_state.matrix for the next character.
-                    } else {
-                        // If the glyph name is not present in the char proc map, then nothing shall be drawn.
+                    // Step 4: Set the transformation matrix for the glyph and execute its content stream.
+                    // The CTM is temporarily replaced with the computed text rendering matrix.
+                    self.current_state_mut()?.transform = text_rendering_matrix.clone();
+                    for op in char_procs {
+                        op.call(self)?;
                     }
 
-                } else {
-                    println!("No glyph_name");
+                    // Step 5: Restore the original graphics state.
+                    self.restore();
+
+                    // TODO: Step 6: Advance the text matrix (Tm) using the glyph width.
+                    // The width is set by the 'd1' operator within the char_procs stream.
+                    // This backend needs to capture that width and use it here to update
+                    // self.current_state_mut()?.text_state.matrix for the next character.
                 }
-            } else {
-                println!("No encoding");
+                // If the glyph name is not in CharProcs, nothing is drawn.
             }
         }
 

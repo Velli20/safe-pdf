@@ -148,10 +148,20 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
             if let Some(states) = resources.external_graphics_states.get(dict_name) {
                 for state in &states.params {
                     match state {
-                        ExternalGraphicsStateKey::LineWidth(_) => todo!(),
-                        ExternalGraphicsStateKey::LineCap(_) => todo!(),
-                        ExternalGraphicsStateKey::LineJoin(_) => todo!(),
-                        ExternalGraphicsStateKey::MiterLimit(_) => todo!(),
+                        ExternalGraphicsStateKey::LineWidth(width) => {
+                            self.current_state_mut()?.line_width = *width
+                        }
+                        ExternalGraphicsStateKey::LineCap(cap) => {
+                            let cap = LineCap::from(*cap as u8);
+                            self.current_state_mut()?.line_cap = cap
+                        }
+                        ExternalGraphicsStateKey::LineJoin(join) => {
+                            let join = LineJoin::from(*join as u8);
+                            self.current_state_mut()?.line_join = join
+                        },
+                        ExternalGraphicsStateKey::MiterLimit(miter) => {
+                            self.current_state_mut()?.miter_limit = *miter;
+                        },
                         ExternalGraphicsStateKey::DashPattern(items, _) => todo!(),
                         ExternalGraphicsStateKey::RenderingIntent(_) => todo!(),
                         ExternalGraphicsStateKey::OverprintStroke(_) => todo!(),
@@ -182,15 +192,15 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
 
 impl<'a> ColorOps for PdfCanvas<'a> {
     fn set_stroking_color_space(&mut self, name: &str) -> Result<(), Self::ErrorType> {
-        todo!()
+        Ok(())
     }
 
     fn set_non_stroking_color_space(&mut self, name: &str) -> Result<(), Self::ErrorType> {
-        todo!()
+        Ok(())
     }
 
     fn set_stroking_color(&mut self, components: &[f32]) -> Result<(), Self::ErrorType> {
-        todo!()
+        Ok(())
     }
 
     fn set_stroking_color_extended(
@@ -198,11 +208,11 @@ impl<'a> ColorOps for PdfCanvas<'a> {
         components: &[f32],
         pattern_name: Option<&str>,
     ) -> Result<(), Self::ErrorType> {
-        todo!()
+        Ok(())
     }
 
     fn set_non_stroking_color(&mut self, components: &[f32]) -> Result<(), Self::ErrorType> {
-        todo!()
+        Ok(())
     }
 
     fn set_non_stroking_color_extended(

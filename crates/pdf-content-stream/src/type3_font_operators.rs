@@ -48,6 +48,8 @@ impl PdfOperator for SetCharWidthAndBoundingBox {
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        backend.set_char_width_and_bounding_box(self.wx, self.wy, self.llx, self.lly, self.urx, self.ury)
+        backend.set_char_width_and_bounding_box(
+            self.wx, self.wy, self.llx, self.lly, self.urx, self.ury,
+        )
     }
 }
