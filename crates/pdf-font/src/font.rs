@@ -21,8 +21,8 @@ pub enum FontEncoding {
     Unknown(String),
 }
 
-impl From<&String> for FontEncoding {
-    fn from(s: &String) -> Self {
+impl From<&str> for FontEncoding {
+    fn from(s: &str) -> Self {
         if s == "Identity-H" {
             FontEncoding::IdentityHorizontal
         } else if s == "Identity-V" {
@@ -74,9 +74,26 @@ pub enum FontError {
     /// The font subtype is unsupported or invalid for the current parsing context.
     #[error("Unsupported or invalid font subtype '{subtype}' for {font_type} font")]
     UnsupportedFontSubtype {
-        subtype: String,
+        subtype: FontSubType,
         font_type: &'static str,
     },
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum FontSubType {
+    Type0,
+    Type1,
+    Type3,
+}
+
+impl std::fmt::Display for FontSubType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FontSubType::Type0 => write!(f, "/Type0"),
+            FontSubType::Type1 => write!(f, "/Type1"),
+            FontSubType::Type3 => write!(f, "/Type3"),
+        }
+    }
 }
 
 /// Represents a Type0 font, a composite font type in PDF.
@@ -88,7 +105,7 @@ pub struct Font {
     /// name of the Type0 font itself, not the CIDFont.
     pub base_font: String,
     /// The font subtype. For Type0 fonts, this value must be `/Type0`.
-    pub subtype: String,
+    pub subtype: FontSubType,
     /// A stream defining a CMap that maps character codes to Unicode values.
     pub cmap: Option<CharacterMap>,
     /// (Required for Type0 fonts) The CIDFont dictionary that is the descendant of this Type0 font.
@@ -107,20 +124,21 @@ impl FromDictionary for Font {
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        let base_font = dictionary
-            .get_string("BaseFont")
-            .unwrap_or(&String::new())
-            .clone();
+        let base_font = dictionary.get_string("BaseFont").unwrap_or("").to_owned();
 
-        let subtype = dictionary
-            .get_string("Subtype")
-            .ok_or(FontError::MissingEntry {
-                entry_name: "Subtype",
-                dictionary_type: "Type0 Font",
-            })?
-            .clone();
+        let subtype = match dictionary.get_string("Subtype") {
+            Some("Type0") => FontSubType::Type0,
+            Some("Type1") => FontSubType::Type1,
+            Some("Type3") => FontSubType::Type3,
+            _ => {
+                return Err(FontError::MissingEntry {
+                    entry_name: "Subtype",
+                    dictionary_type: "Type0 Font",
+                });
+            }
+        };
 
-        if subtype == "Type3" {
+        if subtype == FontSubType::Type3 {
             let type3_font = Type3Font::from_dictionary(dictionary, objects)?;
             return Ok(Self {
                 base_font,
@@ -132,7 +150,7 @@ impl FromDictionary for Font {
             });
         }
 
-        if subtype != "Type0" {
+        if subtype != FontSubType::Type0 {
             return Err(FontError::UnsupportedFontSubtype {
                 subtype,
                 font_type: "Type0",

@@ -91,27 +91,35 @@ impl NumberParser for PdfParser<'_> {
         // 3. Check for decimal point
         if let Some(PdfToken::Period) = self.tokenizer.peek() {
             self.tokenizer.read();
-            // 4. Parse fractional part.
-            let fraction =
-                self.read_number::<i64>(true)
-                    .map_err(|source| NumberError::IntegralPartError {
-                        err: source.to_string(),
-                    })?;
+            // 4. Parse fractional part as a string to preserve leading zeros.
+            let fraction_bytes = self.tokenizer.read_while_u8(|b| b.is_ascii_digit());
+            let fraction_str = String::from_utf8_lossy(fraction_bytes);
+
+            // A number can be represented as `.d` but not as `.`
+            if digits == 0 && fraction_str.is_empty() {
+                return Err(NumberError::FractionalPartError {
+                    err: "Invalid real number: missing digits after decimal point.".to_string(),
+                });
+            }
+
             // 5. Combine integral and fractional parts.
             let number_str = if has_minus {
-                format!("-{}.{}", digits, fraction)
+                format!("-{}.{}", digits, fraction_str)
             } else {
-                format!("{}.{}", digits, fraction)
+                format!("{}.{}", digits, fraction_str)
             };
             // 6. Convert to f64.
-            let number =
-                number_str
-                    .parse::<f64>()
-                    .map_err(|e| NumberError::RealNumberParseError {
-                        number_str: number_str.clone(),
-                        source: e,
-                    })?;
+            let number = number_str
+                .parse::<f64>()
+                .map_err(|source| NumberError::RealNumberParseError { number_str, source })?;
 
+            if let Some(d) = self.tokenizer.data().get(0).copied() {
+                if !Self::is_pdf_delimiter(d) {
+                    return Err(NumberError::FractionalPartError {
+                        err: format!("Missing delimiter after number, found '{}'", d as char),
+                    });
+                }
+            }
             self.skip_whitespace();
             Ok(ObjectVariant::Real(number))
         } else {
@@ -155,6 +163,8 @@ mod tests {
             (b"-0.789 ", -0.789),
             (b"+3.14 ", 3.14),
             (b"0.0 ", 0.0),
+            (b".00048828125", 0.00048828125),
+            (b"-.00048828125", -0.00048828125),
         ];
 
         for (input, expected) in valid_inputs {
@@ -167,14 +177,16 @@ mod tests {
     #[test]
     fn test_parse_number_invalid() {
         let invalid_inputs: Vec<&[u8]> = vec![
-            b"--42",  // double minus
-            b"++17",  // double plus
-            b"+-5",   // invalid combination
-            b"4,200", // comma not allowed
+            b"--42",    // double minus
+            b"++17",    // double plus
+            b"+-5",     // invalid combination
+            b"4,200",   // comma not allowed
             b"123abc ", // Mixed numeric and non-numeric characters
-                      //      b"--123 ",        // Invalid double minus
-                      //     b"123..456 ",     // Invalid double decimal point
-                      //    b"123.456.789 ",  // Multiple decimal points
+            b".",
+            b"-.",
+            //      b"--123 ",        // Invalid double minus
+            //     b"123..456 ",     // Invalid double decimal point
+            //    b"123.456.789 ",  // Multiple decimal points
         ];
 
         for input in invalid_inputs {

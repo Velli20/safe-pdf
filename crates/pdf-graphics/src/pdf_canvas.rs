@@ -198,4 +198,88 @@ impl<'a> PdfCanvas<'a> {
             Err(PdfCanvasError::NoActivePath)
         }
     }
+
+    pub(crate) fn show_type3_font_text(&mut self, text: &[u8]) -> Result<(), PdfCanvasError> {
+        let text_state = &self.current_state()?.text_state.clone();
+        let current_font = text_state.font.ok_or(PdfCanvasError::NoCurrentFont)?;
+
+        let type3_font = current_font.type3_font.as_ref().ok_or(PdfCanvasError::NoCurrentFont)?;
+
+        let mut font_matrix = if let [a, b, c, d, e, f] = type3_font.font_matrix.as_slice() {
+            Transform::from_row(
+                *a, // Horizontal scaling (X axis).
+                *b, // Horizontal skewing (Y axis).
+                *c, // Vertical skewing (X axis).
+                *d, // Vertical scaling (Y axis).
+                *e, // Horizontal translation.
+                *f, // Vertical translation.
+            )
+        } else {
+            return Err(PdfCanvasError::InvalidFont("Invalid FontMatrix in Type3 font"));
+        };
+
+        // Per PDF spec 9.7.5, for Type 3 fonts, the glyph matrix is calculated as:
+        // CTM_new = M_s * FontMatrix * Tm * CTM_old
+        // where M_s = [Tfs*Th 0 0 Tfs 0 0]
+
+        // Calculate M_s
+        let th_factor = self.current_state()?.text_state.horizontal_scaling / 100.0;
+        let text_font_size = self.current_state()?.text_state.font_size / 1000.0  ;
+
+        font_matrix.scale(text_font_size, text_font_size);
+
+        // Iterate over each character in the input text.
+        let mut iter = text.iter();
+        while let Some(char_code_byte) = iter.next() {
+            // 1. For each character code in `text`:
+            //    a. Use the font's encoding to map the character code to a character name.
+            //    b. Look up the character name in the font's /CharProcs dictionary to get the
+            //       glyph's content stream.
+            //    c. Save the current graphics state.
+            //    d. The glyph's content stream is executed. This requires parsing the stream's
+            //       operators and calling the appropriate backend methods on the `canvas`. This
+            //       is a recursive-like call to the content stream processor.
+            //       - `let operators = PdfOperatorVariant::from(&glyph_stream_data)?;`
+            //       - `for op in operators { op.call(canvas)?; }`
+            //    e. The `d1` operator within the glyph stream sets the glyph's width. The
+            //       backend needs to handle this and store the width.
+            //    f. Restore the graphics state.
+            //    g. Calculate the advance amount using the stored width, font size, character
+            //       spacing, and word spacing.
+            //    h. Update the text matrix `Tm` to position the next character.
+            if let Some(encoding) = &type3_font.encoding {
+                let glyph_name = encoding.differences.get(char_code_byte);
+                if let Some(glyph_name) = glyph_name {
+                    let char_procs = type3_font.char_procs.get(glyph_name);
+                    if let Some(char_procs) = char_procs {
+                        self.save()?;
+
+                        // Concat with FontMatrix
+                        // Concat with M_s
+                        self.current_state_mut()?.transform.concat(&font_matrix);
+                        self.current_state_mut()?.transform.concat(&text_state.matrix);
+                        for op in char_procs {
+                            op.call(self)?;
+                        }
+                        self.restore();
+                        self.current_state_mut()?.text_state.line_matrix.translate(-4.0, 0.0);
+
+                        // TODO: Advance the text matrix (Tm) using the glyph width.
+                        // The width is set by the 'd1' operator within the char_procs stream.
+                        // This backend needs to capture that width and use it here to update
+                        // self.current_state_mut()?.text_state.matrix for the next character.
+                    } else {
+                        // If the glyph name is not present in the char proc map, then nothing shall be drawn.
+                    }
+
+                } else {
+                    println!("No glyph_name");
+                }
+            } else {
+                println!("No encoding");
+            }
+        }
+
+        Ok(())
+    }
 }

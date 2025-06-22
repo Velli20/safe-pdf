@@ -5,6 +5,7 @@ use crate::{PathFillType, error::PdfCanvasError};
 use pdf_content_stream::pdf_operator_backend::{
     TextObjectOps, TextPositioningOps, TextShowingOps, TextStateOps,
 };
+use pdf_font::font::FontSubType;
 use pdf_object::ObjectVariant;
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
 
@@ -38,7 +39,7 @@ impl<'a> TextPositioningOps for PdfCanvas<'a> {
         f: f32,
     ) -> Result<(), Self::ErrorType> {
         let mat = Transform::from_row(a, b, c, d, e, f);
-        self.current_state_mut()?.text_state.line_matrix = mat.clone(); // text_line_matrix is also set
+        self.current_state_mut()?.text_state.line_matrix = mat.clone();
         self.current_state_mut()?.text_state.matrix = mat;
         Ok(())
     }
@@ -52,7 +53,6 @@ impl<'a> TextObjectOps for PdfCanvas<'a> {
     fn begin_text_object(&mut self) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.text_state.matrix = Transform::identity();
         self.current_state_mut()?.text_state.line_matrix = Transform::identity();
-
         Ok(())
     }
 
@@ -120,13 +120,25 @@ impl<'a> TextStateOps for PdfCanvas<'a> {
 }
 
 impl<'a> TextShowingOps for PdfCanvas<'a> {
+     fn set_char_width_and_bounding_box(
+        &mut self,
+        wx: f32,
+        wy: f32,
+        llx: f32,
+        lly: f32,
+        urx: f32,
+        ury: f32,
+    ) -> Result<(), Self::ErrorType> {
+        println!("set_char_width_and_bounding_box wx {}, wy {}, llx {}, lly {}, urx {}, ury {}", wx, wy, llx, lly, urx, ury);
+        Ok(())
+    }
+
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
         let text_state = &self.current_state()?.text_state.clone();
-        if text_state.font.is_none() || text_state.font_face.is_none() {
-            println!("No font");
-            return Ok(());
-        }
         let current_font = text_state.font.ok_or(PdfCanvasError::NoCurrentFont)?;
+        if current_font.subtype == FontSubType::Type3 {
+            return self.show_type3_font_text(text);
+        }
         let face = text_state
             .font_face
             .as_ref()
@@ -195,8 +207,6 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
             let mut builder = PdfGlyphOutline::new(glyph_matrix_for_char);
 
             if let Some(a) = cmap.get_mapping(*char_code_byte as u32) {
-                // let ty = &current_font.subtype;
-                // println!("Subtype {} Map '{}' -> {}", ty, *char_code_byte as char, a);
                 if let Some(x) = face.glyph_index(a) {
                     glyph_id = x;
                 }
@@ -266,6 +276,8 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
             text
         )
     }
+
+
 }
 
 #[derive(Default)]

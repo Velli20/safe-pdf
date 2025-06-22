@@ -191,7 +191,12 @@ impl FromDictionary for FontDescriptor {
                 return Err(FontDescriptorError::InvalidFontBBoxArrayLength { len: arr.len() });
             }
         };
-        let font_family = dictionary.get_string("FontFamily").cloned();
+
+        let font_family = if let Some(font_family) = dictionary.get_string("FontFamily") {
+            Some(font_family.to_owned())
+        } else {
+            None
+        };
 
         let resolve_font_file_stream = |key: &str| -> Option<ObjectVariant> {
             dictionary
@@ -210,7 +215,7 @@ impl FromDictionary for FontDescriptor {
         let font_name = dictionary
             .get_string("FontName")
             .ok_or(FontDescriptorError::MissingRequiredEntry("FontName"))?
-            .clone();
+            .to_owned();
 
         if font_name.is_empty() {
             return Err(FontDescriptorError::EmptyFontName);

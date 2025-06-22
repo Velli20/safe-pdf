@@ -18,8 +18,6 @@ use crate::font_descriptor::FontDescriptorError;
 /// support advanced typographic features like hinting.
 #[derive(Debug)]
 pub struct Type3Font {
-    /// The font subtype. For Type 3 fonts, this value must be `/Type3`.
-    pub subtype: String,
     /// A rectangle in the glyph coordinate system that encloses all glyphs in the font.
     /// This is used to scale and position the font's glyphs correctly.
     pub font_bounding_box: [f32; 4],
@@ -89,13 +87,6 @@ impl FromDictionary for Type3Font {
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        let subtype = dictionary
-            .get_string("Subtype")
-            .ok_or(Type3FontError::MissingEntry {
-                entry_name: "Subtype",
-            })?
-            .clone();
-
         let font_bounding_box =
             dictionary
                 .get_array("FontBBox")
@@ -212,10 +203,13 @@ impl FromDictionary for Type3Font {
 
             match content_stream_obj {
                 ObjectVariant::Stream(stream) => {
-                    char_procs.insert(
+                    let prev = char_procs.insert(
                         name.to_owned(),
                         PdfOperatorVariant::from(stream.data.as_slice())?,
                     );
+                    if prev.is_some() {
+                        panic!()
+                    }
                 }
                 _ => {
                     panic!()
@@ -224,7 +218,6 @@ impl FromDictionary for Type3Font {
         }
 
         Ok(Type3Font {
-            subtype,
             font_bounding_box,
             font_matrix: [
                 font_matrix[0],
@@ -274,7 +267,12 @@ impl FromDictionary for FontEncodingDictionary {
         dictionary: &Dictionary,
         _objects: &ObjectCollection, // No need for objects here based on spec
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        let base_encoding = dictionary.get_string("BaseEncoding").cloned();
+        let base_encoding = if let Some(base_encoding) = dictionary.get_string("BaseEncoding") {
+            Some(base_encoding.to_owned())
+        } else {
+            None
+        };
+
         let mut differences = HashMap::new();
 
         if let Some(diff_array) = dictionary.get_array("Differences") {

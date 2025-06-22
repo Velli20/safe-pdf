@@ -7,7 +7,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SetCharWidthAndBoundingBox {
     wx: f32,
-    // wy is always 0 for d1
+    wy: f32,
     llx: f32,
     lly: f32,
     urx: f32,
@@ -39,6 +39,7 @@ impl PdfOperator for SetCharWidthAndBoundingBox {
 
         Ok(PdfOperatorVariant::SetCharWidthAndBoundingBox(Self {
             wx,
+            wy,
             llx,
             lly,
             urx,
@@ -47,8 +48,6 @@ impl PdfOperator for SetCharWidthAndBoundingBox {
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        // backend.d1(self.wx, self.llx, self.lly, self.urx, self.ury)
-        println!("Todo d1");
-        Ok(())
+        backend.set_char_width_and_bounding_box(self.wx, self.wy, self.llx, self.lly, self.urx, self.ury)
     }
 }

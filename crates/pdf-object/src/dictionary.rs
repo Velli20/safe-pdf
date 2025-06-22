@@ -29,11 +29,11 @@ impl Dictionary {
             })
     }
 
-    pub fn get_string(&self, key: &str) -> Option<&String> {
+    pub fn get_string(&self, key: &str) -> Option<&str> {
         self.dictionary
             .get(key)
             .and_then(|value| match value.as_ref() {
-                ObjectVariant::Name(name) => Some(name),
+                ObjectVariant::Name(name) => Some(name.as_ref()),
                 _ => None,
             })
     }
