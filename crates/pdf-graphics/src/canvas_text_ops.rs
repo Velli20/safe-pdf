@@ -130,6 +130,7 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
         ury: f32,
     ) -> Result<(), Self::ErrorType> {
         let _ = (wx, wy, llx, lly, urx, ury);
+        self.current_state_mut()?.text_state.glyph_w = Some(wx);
         Ok(())
     }
 

@@ -158,10 +158,10 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
                         ExternalGraphicsStateKey::LineJoin(join) => {
                             let join = LineJoin::from(*join as u8);
                             self.current_state_mut()?.line_join = join
-                        },
+                        }
                         ExternalGraphicsStateKey::MiterLimit(miter) => {
                             self.current_state_mut()?.miter_limit = *miter;
-                        },
+                        }
                         ExternalGraphicsStateKey::DashPattern(items, _) => todo!(),
                         ExternalGraphicsStateKey::RenderingIntent(_) => todo!(),
                         ExternalGraphicsStateKey::OverprintStroke(_) => todo!(),

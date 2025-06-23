@@ -29,6 +29,7 @@ pub(crate) struct TextState<'a> {
     pub(crate) font: Option<&'a Font>,
     /// The current font face object.
     pub(crate) font_face: Option<Face<'a>>,
+    pub(crate) glyph_w: Option<f32>,
 }
 
 impl<'a> Default for TextState<'a> {
@@ -43,6 +44,7 @@ impl<'a> Default for TextState<'a> {
             rise: 0.0,
             font: None,
             font_face: None,
+            glyph_w: None,
         }
     }
 }
@@ -240,14 +242,14 @@ impl<'a> PdfCanvas<'a> {
             text_state.rise,                  // ty
         );
 
-        let mut text_rendering_matrix = font_matrix.clone();
-        text_rendering_matrix.concat(&font_size_matrix); // S * FontMatrix
-        text_rendering_matrix.concat(&text_state.matrix); // Tm * (S * FontMatrix)
-        text_rendering_matrix.concat(&self.current_state()?.transform); // CTM * (Tm * S * FontMatrix)
-
         // For each character code, we will render its glyph.
         let mut iter = text.iter();
         while let Some(char_code_byte) = iter.next() {
+            let mut text_rendering_matrix = font_matrix.clone();
+            text_rendering_matrix.concat(&font_size_matrix); // S * FontMatrix
+            text_rendering_matrix.concat(&self.current_state()?.text_state.matrix); // Tm * (S * FontMatrix)
+            text_rendering_matrix.concat(&self.current_state()?.transform); // CTM * (Tm * S * FontMatrix)
+
             // Step 1: Map character code to glyph name using the font's encoding.
             let glyph_name = type3_font
                 .encoding
@@ -267,6 +269,7 @@ impl<'a> PdfCanvas<'a> {
                         op.call(self)?;
                     }
 
+                    let gw = self.current_state_mut()?.text_state.glyph_w;
                     // Step 5: Restore the original graphics state.
                     self.restore();
 
@@ -274,6 +277,13 @@ impl<'a> PdfCanvas<'a> {
                     // The width is set by the 'd1' operator within the char_procs stream.
                     // This backend needs to capture that width and use it here to update
                     // self.current_state_mut()?.text_state.matrix for the next character.
+                    if let Some(width) = gw {
+                        let advance = width * text_state.font_size / 1000.0;
+                        self.current_state_mut()?
+                            .text_state
+                            .matrix
+                            .translate(advance, 0.0);
+                    }
                 }
                 // If the glyph name is not in CharProcs, nothing is drawn.
             }
