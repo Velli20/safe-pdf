@@ -1,11 +1,10 @@
 use pdf_content_stream::graphics_state_operators::{LineCap, LineJoin};
 use pdf_font::font::Font;
 use pdf_page::page::PdfPage;
-use ttf_parser::Face;
 
 use crate::{
-    CanvasBackend, PaintMode, PathFillType, color::Color, error::PdfCanvasError, pdf_path::PdfPath,
-    transform::Transform,
+    PaintMode, PathFillType, canvas::Canvas, canvas_backend::CanvasBackend, color::Color,
+    error::PdfCanvasError, pdf_path::PdfPath, transform::Transform,
 };
 
 /// Encapsulates text-specific state parameters.
@@ -27,9 +26,6 @@ pub(crate) struct TextState<'a> {
     pub(crate) rise: f32,
     /// The current font resource.
     pub(crate) font: Option<&'a Font>,
-    /// The current font face object.
-    pub(crate) font_face: Option<Face<'a>>,
-    pub(crate) glyph_w: Option<f32>,
 }
 
 impl<'a> Default for TextState<'a> {
@@ -43,13 +39,11 @@ impl<'a> Default for TextState<'a> {
             word_spacing: 0.0,
             rise: 0.0,
             font: None,
-            font_face: None,
-            glyph_w: None,
         }
     }
 }
 
-#[derive(Clone)] // Not Copy due to TextState<'a>
+#[derive(Clone)]
 pub(crate) struct CanvasState<'a> {
     pub transform: Transform,
     pub stroke_color: Color,
@@ -95,6 +89,39 @@ pub struct PdfCanvas<'a> {
     pub(crate) page: &'a PdfPage,
     // Stores the graphics states, including text state.
     canvas_stack: Vec<CanvasState<'a>>,
+}
+
+impl Canvas for PdfCanvas<'_> {
+    fn save(&mut self) -> Result<(), PdfCanvasError> {
+        let state = self.current_state()?.clone();
+        self.canvas_stack.push(state);
+        Ok(())
+    }
+
+    fn restore(&mut self) -> Result<(), PdfCanvasError> {
+        let prev = self.canvas_stack.pop();
+        if let Some(state) = prev {
+            if state.clip_path.is_some() {
+                self.canvas.reset_clip();
+            }
+        }
+        Ok(())
+    }
+
+    fn set_matrix(&mut self, matrix: Transform) -> Result<(), PdfCanvasError> {
+        self.current_state_mut()?.transform = matrix;
+        Ok(())
+    }
+
+    fn translate(&mut self, tx: f32, ty: f32) -> Result<(), PdfCanvasError> {
+        todo!()
+    }
+
+    fn fill_path(&mut self, path: &PdfPath, fill_type: PathFillType) -> Result<(), PdfCanvasError> {
+        let fill_color = self.current_state()?.fill_color;
+        self.canvas.fill_path(path, fill_type, fill_color);
+        Ok(())
+    }
 }
 
 impl<'a> PdfCanvas<'a> {
@@ -165,23 +192,6 @@ impl<'a> PdfCanvas<'a> {
             .ok_or(PdfCanvasError::EmptyGraphicsStateStack)
     }
 
-    /// Saves a copy of the current graphics state onto the stack.
-    pub(crate) fn save(&mut self) -> Result<(), PdfCanvasError> {
-        let state = self.current_state()?.clone();
-        self.canvas_stack.push(state);
-        Ok(())
-    }
-
-    /// Restores the graphics state from the top of the stack.
-    pub(crate) fn restore(&mut self) {
-        let prev = self.canvas_stack.pop();
-        if let Some(state) = prev {
-            if state.clip_path.is_some() {
-                self.canvas.reset_clip();
-            }
-        }
-    }
-
     pub(crate) fn paint_taken_path(
         &mut self,
         mode: PaintMode,
@@ -203,92 +213,5 @@ impl<'a> PdfCanvas<'a> {
         } else {
             Err(PdfCanvasError::NoActivePath)
         }
-    }
-
-    /// Renders a text string using a Type 3 font.
-    ///
-    /// This method processes a sequence of character codes, looks up the corresponding
-    /// glyph procedures from the Type 3 font's `CharProcs` dictionary, and executes
-    /// them to draw the glyphs. It handles the specific transformation logic required
-    /// for Type 3 fonts, including the font matrix, font size, text matrix, and CTM.
-    pub(crate) fn show_type3_font_text(&mut self, text: &[u8]) -> Result<(), PdfCanvasError> {
-        let text_state = &self.current_state()?.text_state.clone();
-        let current_font = text_state.font.ok_or(PdfCanvasError::NoCurrentFont)?;
-
-        let type3_font = current_font
-            .type3_font
-            .as_ref()
-            .ok_or(PdfCanvasError::NoCurrentFont)?;
-
-        let font_matrix = if let [a, b, c, d, e, f] = type3_font.font_matrix.as_slice() {
-            Transform::from_row(*a, *b, *c, *d, *e, *f)
-        } else {
-            return Err(PdfCanvasError::InvalidFont(
-                "Invalid FontMatrix in Type3 font",
-            ));
-        };
-
-        // For Type 3 fonts, the final transformation for a glyph is CTM * Tm * S * FontMatrix,
-        // where S is a matrix for font size (Tfs), horizontal scaling (Th), and rise (Ts).
-        // S = [Tfs * Th 0 0 Tfs 0 Ts].
-        // We pre-calculate this combined matrix. `concat` performs pre-multiplication (other * self).
-        let th_factor = text_state.horizontal_scaling / 100.0;
-        let font_size_matrix = Transform::from_row(
-            text_state.font_size * th_factor, // sx
-            0.0,                              // ky
-            0.0,                              // kx
-            text_state.font_size,             // sy
-            0.0,                              // tx
-            text_state.rise,                  // ty
-        );
-
-        // For each character code, we will render its glyph.
-        let mut iter = text.iter();
-        while let Some(char_code_byte) = iter.next() {
-            let mut text_rendering_matrix = font_matrix.clone();
-            text_rendering_matrix.concat(&font_size_matrix); // S * FontMatrix
-            text_rendering_matrix.concat(&self.current_state()?.text_state.matrix); // Tm * (S * FontMatrix)
-            text_rendering_matrix.concat(&self.current_state()?.transform); // CTM * (Tm * S * FontMatrix)
-
-            // Step 1: Map character code to glyph name using the font's encoding.
-            let glyph_name = type3_font
-                .encoding
-                .as_ref()
-                .and_then(|enc| enc.differences.get(char_code_byte));
-
-            if let Some(glyph_name) = glyph_name {
-                // Step 2: Look up the glyph's content stream from the CharProcs dictionary.
-                if let Some(char_procs) = type3_font.char_procs.get(glyph_name) {
-                    // Step 3: Save graphics state before drawing the glyph.
-                    self.save()?;
-
-                    // Step 4: Set the transformation matrix for the glyph and execute its content stream.
-                    // The CTM is temporarily replaced with the computed text rendering matrix.
-                    self.current_state_mut()?.transform = text_rendering_matrix.clone();
-                    for op in char_procs {
-                        op.call(self)?;
-                    }
-
-                    let gw = self.current_state_mut()?.text_state.glyph_w;
-                    // Step 5: Restore the original graphics state.
-                    self.restore();
-
-                    // TODO: Step 6: Advance the text matrix (Tm) using the glyph width.
-                    // The width is set by the 'd1' operator within the char_procs stream.
-                    // This backend needs to capture that width and use it here to update
-                    // self.current_state_mut()?.text_state.matrix for the next character.
-                    if let Some(width) = gw {
-                        let advance = width * text_state.font_size / 1000.0;
-                        self.current_state_mut()?
-                            .text_state
-                            .matrix
-                            .translate(advance, 0.0);
-                    }
-                }
-                // If the glyph name is not in CharProcs, nothing is drawn.
-            }
-        }
-
-        Ok(())
     }
 }

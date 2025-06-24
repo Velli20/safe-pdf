@@ -6,11 +6,17 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SetCharWidthAndBoundingBox {
-    wx: f32,
+    /// The x-component of the character width vector.
+    pub wx: f32,
+    /// The y-component of the character width vector.
     wy: f32,
+    /// The x-coordinate of the lower-left corner of the character bounding box.
     llx: f32,
+    /// The y-coordinate of the lower-left corner of the character bounding box.
     lly: f32,
+    /// The x-coordinate of the upper-right corner of the character bounding box.
     urx: f32,
+    /// The y-coordinate of the upper-right corner of the character bounding box.
     ury: f32,
 }
 

@@ -12,16 +12,22 @@ use pdf_content_stream::{
 };
 use pdf_object::dictionary::Dictionary;
 use pdf_page::external_graphics_state::ExternalGraphicsStateKey;
-use pdf_path::PdfPath;
 use transform::Transform;
 
+use crate::canvas::Canvas;
+
+pub mod canvas;
+pub mod canvas_backend;
 pub mod canvas_path_ops;
 pub mod canvas_text_ops;
 pub mod color;
 pub mod error;
 pub mod pdf_canvas;
 pub mod pdf_path;
+pub mod text_renderer;
 pub mod transform;
+pub mod truetype_font_renderer;
+pub mod type3_font_renderer;
 
 #[derive(Default, Clone, PartialEq)]
 pub enum PaintMode {
@@ -38,20 +44,6 @@ pub enum PathFillType {
     Winding,
     /// Specifies that "inside" is computed by an odd number of edge crossings
     EvenOdd,
-}
-
-pub trait CanvasBackend {
-    fn fill_path(&mut self, path: &PdfPath, fill_type: PathFillType, color: Color);
-
-    fn stroke_path(&mut self, path: &PdfPath, color: Color, line_width: f32);
-
-    fn set_clip_region(&mut self, path: &PdfPath, mode: PathFillType);
-
-    fn width(&self) -> f32;
-
-    fn height(&self) -> f32;
-
-    fn reset_clip(&mut self);
 }
 
 impl<'a> PdfOperatorBackend for PdfCanvas<'a> {}
@@ -86,8 +78,7 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
     }
 
     fn restore_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
-        self.restore();
-        Ok(())
+        self.restore()
     }
 
     fn concat_matrix(
