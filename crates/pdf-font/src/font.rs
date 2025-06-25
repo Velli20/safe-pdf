@@ -104,7 +104,7 @@ pub struct Font {
     /// The PostScript name of the font. For Type0 fonts, this is the
     /// name of the Type0 font itself, not the CIDFont.
     pub base_font: String,
-    /// The font subtype. For Type0 fonts, this value must be `/Type0`.
+    /// The font subtype.
     pub subtype: FontSubType,
     /// A stream defining a CMap that maps character codes to Unicode values.
     pub cmap: Option<CharacterMap>,

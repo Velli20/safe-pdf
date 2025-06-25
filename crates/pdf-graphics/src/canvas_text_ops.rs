@@ -128,10 +128,9 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
         let text_state = &self.current_state()?.text_state.clone();
         let current_font = text_state.font.ok_or(PdfCanvasError::NoCurrentFont)?;
         if current_font.subtype == FontSubType::Type3 {
-            let type3_font = current_font
-                .type3_font
-                .as_ref()
-                .ok_or(PdfCanvasError::NoCurrentFont)?;
+            let type3_font = current_font.type3_font.as_ref().ok_or_else(|| {
+                PdfCanvasError::MissingType3FontData(current_font.base_font.clone())
+            })?;
 
             let mut renderer = Type3FontRenderer::new(
                 self,

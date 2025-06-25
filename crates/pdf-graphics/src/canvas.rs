@@ -3,7 +3,7 @@ use crate::{PathFillType, error::PdfCanvasError, pdf_path::PdfPath, transform::T
 /// A trait for high-level canvas operations, providing an interface for managing
 /// graphics state and transformations.
 ///
-/// This is used by components like `Type3FontRenderer` to interact with a generic
+/// This is used internally by this crate to interact with a generic
 /// canvas that can save/restore its state and manipulate its transformation matrix.
 pub(crate) trait Canvas {
     /// Saves the entire current graphics state onto a stack.

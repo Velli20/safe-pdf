@@ -198,7 +198,7 @@ impl<'a> PdfCanvas<'a> {
         fill_type: PathFillType,
     ) -> Result<(), PdfCanvasError> {
         if let Some(mut path) = self.current_path.take() {
-            path.transform(&self.current_state()?.transform)?;
+            path.transform(&self.current_state()?.transform);
             if mode == PaintMode::Fill {
                 self.canvas
                     .fill_path(&path, fill_type, self.current_state()?.fill_color);

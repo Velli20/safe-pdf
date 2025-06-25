@@ -51,7 +51,7 @@ impl<'a> PdfOperatorBackend for PdfCanvas<'a> {}
 impl<'a> ClippingPathOps for PdfCanvas<'a> {
     fn clip_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
         if let Some(mut path) = self.current_path.take() {
-            path.transform(&self.current_state()?.transform)?;
+            path.transform(&self.current_state()?.transform);
             self.canvas.set_clip_region(&path, PathFillType::Winding);
             self.current_state_mut()?.clip_path = Some(path);
             Ok(())
@@ -62,7 +62,7 @@ impl<'a> ClippingPathOps for PdfCanvas<'a> {
 
     fn clip_path_even_odd(&mut self) -> Result<(), Self::ErrorType> {
         if let Some(mut path) = self.current_path.take() {
-            path.transform(&self.current_state()?.transform)?;
+            path.transform(&self.current_state()?.transform);
             self.canvas.set_clip_region(&path, PathFillType::EvenOdd);
             self.current_state_mut()?.clip_path = Some(path);
             Ok(())
@@ -113,8 +113,9 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
         Ok(())
     }
 
-    fn set_miter_limit(&mut self, limit: f32) -> Result<(), Self::ErrorType> {
-        todo!()
+    fn set_miter_limit(&mut self, miter_limit: f32) -> Result<(), Self::ErrorType> {
+        self.current_state_mut()?.miter_limit = miter_limit;
+        Ok(())
     }
 
     fn set_dash_pattern(

@@ -1,5 +1,8 @@
 use thiserror::Error;
 
+use crate::truetype_font_renderer::TrueTypeFontRendererError;
+use crate::type3_font_renderer::Type3FontRendererError;
+
 /// Defines errors that can occur during PDF canvas operations.
 #[derive(Debug, Error)]
 pub enum PdfCanvasError {
@@ -15,6 +18,8 @@ pub enum PdfCanvasError {
     InvalidFont(&'static str),
     #[error("Font '{0}' not found")]
     FontNotFound(String),
+    #[error("Font '{0}' is a Type3 font but is missing its definition data")]
+    MissingType3FontData(String),
     #[error("No character map found for font '{0}'")]
     NoCharacterMapForFont(String),
     #[error(
@@ -23,4 +28,8 @@ pub enum PdfCanvasError {
     EmptyGraphicsStateStack,
     #[error("Cannot restore graphics state: stack underflow (no state to restore).")]
     GraphicsStateStackUnderflow,
+    #[error("TrueType font rendering error: {0}")]
+    TrueTypeFontError(#[from] TrueTypeFontRendererError),
+    #[error("Type3 font rendering error: {0}")]
+    Type3FontError(#[from] Type3FontRendererError),
 }

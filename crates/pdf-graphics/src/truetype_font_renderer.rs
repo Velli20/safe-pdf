@@ -1,12 +1,30 @@
 use pdf_content_stream::pdf_operator_backend::PdfOperatorBackend;
 use pdf_font::font::Font;
 use pdf_object::ObjectVariant;
+use thiserror::Error;
 
 use crate::{
     PathFillType, canvas::Canvas, error::PdfCanvasError, pdf_path::PdfPath,
     text_renderer::TextRenderer, transform::Transform,
 };
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
+
+/// Defines errors that can occur during TrueType font rendering.
+#[derive(Debug, Error)]
+pub enum TrueTypeFontRendererError {
+    /// The associated Type0 font is missing its descendant CIDFont.
+    #[error("The associated Type0 font is missing its descendant CIDFont")]
+    MissingCidFont,
+    /// The CIDFont descriptor is missing the font file stream.
+    #[error("The CIDFont descriptor is missing the font file stream")]
+    MissingFontFile,
+    /// The font file object is not a stream.
+    #[error("The font file object is not a stream, but a {found_type}")]
+    FontFileNotStream { found_type: &'static str },
+    /// Failed to parse the TrueType font file.
+    #[error("Failed to parse the TrueType font file: {0:?}")]
+    TtfParseError(ttf_parser::FaceParsingError),
+}
 
 /// A text renderer for TrueType-based fonts.
 pub(crate) struct TrueTypeFontRenderer<'a, T: PdfOperatorBackend + Canvas> {
@@ -58,18 +76,27 @@ impl<'a, T: PdfOperatorBackend + Canvas> TrueTypeFontRenderer<'a, T> {
 
 impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'a, T> {
     fn render_text(&mut self, text: &[u8]) -> Result<(), crate::error::PdfCanvasError> {
-        let Some(cid_font) = &self.font.cid_font else {
-            panic!()
-        };
+        let cid_font = self
+            .font
+            .cid_font
+            .as_ref()
+            .ok_or(TrueTypeFontRendererError::MissingCidFont)?;
 
-        let Some(font_file) = &cid_font.descriptor.font_file else {
-            panic!()
-        };
+        let font_file = cid_font
+            .descriptor
+            .font_file
+            .as_ref()
+            .ok_or(TrueTypeFontRendererError::MissingFontFile)?;
 
-        let face = if let ObjectVariant::Stream(s) = &font_file {
-            Face::parse(s.data.as_slice(), 0).expect("Failed to parse font face")
-        } else {
-            panic!()
+        let face = match font_file {
+            ObjectVariant::Stream(s) => Face::parse(s.data.as_slice(), 0)
+                .map_err(TrueTypeFontRendererError::TtfParseError)?,
+            other => {
+                return Err(TrueTypeFontRendererError::FontFileNotStream {
+                    found_type: other.name(),
+                }
+                .into());
+            }
         };
 
         // Extract font and text state parameters.
@@ -88,10 +115,7 @@ impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'
         // Th_factor: Horizontal scaling factor (Th / 100).
         let th_factor = self.horizontal_scaling / 100.0;
 
-        // Build the text rendering transform for this glyph:
-        // - sx: horizontal scale (font size, units per em, horizontal scaling)
-        // - sy: vertical scale (font size, units per em)
-        // - ty: vertical offset (text rise)
+        // Build the text rendering transform.
         let m_params = Transform::from_row(
             self.font_size * upe_inv * th_factor, // sx
             0.0,                                  // ky (skew)
@@ -101,11 +125,6 @@ impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'
             text_rise,                            // ty
         );
 
-        let mut iter = text.iter();
-        if self.font.encoding.is_some() {
-            let _ = iter.next();
-        }
-
         let cmap = self
             .font
             .cmap
@@ -114,15 +133,30 @@ impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'
                 self.font.base_font.clone(),
             ))?;
 
+        // Determine if the font uses a 2-byte encoding (e.g., /Identity-H for CID-keyed fonts).
+        let is_two_byte_encoding = self.font.encoding.is_some();
+        let mut iter = text.iter().copied();
+
         // Iterate over each character in the input text.
-        while let Some(char_code_byte) = iter.next() {
-            if self.font.encoding.is_some() {
-                let _ = iter.next();
-            }
+        while let Some(first_byte) = iter.next() {
+            let char_code = if is_two_byte_encoding {
+                // For 2-byte encodings, read the second byte.
+                if let Some(second_byte) = iter.next() {
+                    // Combine the two bytes into a single u16 character code.
+                    // PDF uses big-endian for 2-byte character codes.
+                    u16::from_be_bytes([first_byte, second_byte])
+                } else {
+                    // Incomplete 2-byte character at the end of the string. Skip it.
+                    // This can happen if the text string has an odd number of bytes
+                    // when a 2-byte encoding is expected. Skip this malformed character.
+                    continue;
+                }
+            } else {
+                // For 1-byte encodings, the character code is simply the byte itself.
+                first_byte as u16
+            };
 
-            let char_code = *char_code_byte;
-
-            let mut glyph_id = GlyphId(char_code as u16);
+            let mut glyph_id = GlyphId(char_code);
 
             // Compose the final transformation matrix for this glyph:
             // m_params -> text matrix -> current transformation matrix
@@ -133,7 +167,7 @@ impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'
             // Build the glyph outline using the composed transform.
             let mut builder = PdfGlyphOutline::new(glyph_matrix_for_char);
 
-            if let Some(a) = cmap.get_mapping(*char_code_byte as u32) {
+            if let Some(a) = cmap.get_mapping(char_code as u32) {
                 if let Some(x) = face.glyph_index(a) {
                     glyph_id = x;
                 }
@@ -150,7 +184,7 @@ impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'
                 .widths
                 .as_ref()
                 .and_then(|w_array| w_array.get_width(char_code as i64))
-                .unwrap_or_else(|| self.font.cid_font.as_ref().unwrap().default_width as f32);
+                .unwrap_or_else(|| cid_font.default_width);
 
             // Convert width from font units to ems.
             let w0_ems = w0_glyph_units / 1000.0;
@@ -195,28 +229,28 @@ impl PdfGlyphOutline {
 impl OutlineBuilder for PdfGlyphOutline {
     fn move_to(&mut self, x: f32, y: f32) {
         let (x, y) = self.transform.transform_point(x, y);
-        self.path.move_to(x, y).unwrap();
+        self.path.move_to(x, y);
     }
 
     fn line_to(&mut self, x: f32, y: f32) {
         let (x, y) = self.transform.transform_point(x, y);
-        self.path.line_to(x, y).unwrap();
+        self.path.line_to(x, y);
     }
 
     fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
         let (x1, y1) = self.transform.transform_point(x1, y1);
         let (x, y) = self.transform.transform_point(x, y);
-        self.path.quad_to(x1, y1, x, y).unwrap()
+        self.path.quad_to(x1, y1, x, y);
     }
 
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
         let (x1, y1) = self.transform.transform_point(x1, y1);
         let (x2, y2) = self.transform.transform_point(x2, y2);
         let (x, y) = self.transform.transform_point(x, y);
-        self.path.curve_to(x1, y1, x2, y2, x, y).unwrap();
+        self.path.curve_to(x1, y1, x2, y2, x, y);
     }
 
     fn close(&mut self) {
-        self.path.close().unwrap();
+        self.path.close();
     }
 }

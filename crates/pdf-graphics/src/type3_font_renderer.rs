@@ -2,11 +2,16 @@ use pdf_content_stream::{
     pdf_operator::PdfOperatorVariant, pdf_operator_backend::PdfOperatorBackend,
 };
 use pdf_font::type3_font::Type3Font;
+use thiserror::Error;
 
-use crate::{
-    canvas::Canvas, error::PdfCanvasError, text_renderer::TextRenderer, transform::Transform,
-};
+use crate::{canvas::Canvas, text_renderer::TextRenderer, transform::Transform};
 
+/// Defines errors that can occur during Type 3 font rendering.
+#[derive(Debug, Error)]
+pub enum Type3FontRendererError {
+    #[error("Invalid /FontMatrix. Expected an array of 6 numbers.")]
+    InvalidFontMatrix,
+}
 /// A renderer for Type 3 fonts, which defines glyphs using PDF content streams.
 pub(crate) struct Type3FontRenderer<'a, T: PdfOperatorBackend + Canvas> {
     /// The canvas backend where glyphs are drawn.
@@ -26,7 +31,7 @@ pub(crate) struct Type3FontRenderer<'a, T: PdfOperatorBackend + Canvas> {
 }
 
 impl<'a, T: PdfOperatorBackend + Canvas> Type3FontRenderer<'a, T> {
-    pub fn new(
+    pub(crate) fn new(
         canvas: &'a mut T,
         font_size: f32,
         horizontal_scaling: f32,
@@ -34,13 +39,11 @@ impl<'a, T: PdfOperatorBackend + Canvas> Type3FontRenderer<'a, T> {
         current_transform: Transform,
         text_matrix: Transform,
         type3_font: &'a Type3Font,
-    ) -> Result<Self, PdfCanvasError> {
+    ) -> Result<Self, Type3FontRendererError> {
         let font_matrix = if let [a, b, c, d, e, f] = type3_font.font_matrix.as_slice() {
             Transform::from_row(*a, *b, *c, *d, *e, *f)
         } else {
-            return Err(PdfCanvasError::InvalidFont(
-                "Invalid FontMatrix in Type3 font",
-            ));
+            return Err(Type3FontRendererError::InvalidFontMatrix);
         };
 
         // For Type 3 fonts, each glyph's transformation is computed as CTM * Tm * S * FontMatrix
@@ -122,7 +125,6 @@ impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for Type3FontRenderer<'a, 
             self.canvas.restore()?;
 
             // 7. Advance the text matrix (Tm) to position the next glyph.
-
             if let Some(width) = glyph_width {
                 // The glyph width is given in glyph space. Scale it up by
                 // the font size and a conventional 1000-unit glyph space grid to
