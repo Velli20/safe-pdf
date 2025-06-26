@@ -729,33 +729,6 @@ pub trait TextShowingOps: PdfOperatorBackendError {
         char_spacing: f32,
         text: &[u8],
     ) -> Result<(), Self::ErrorType>;
-
-    /// Sets the glyph width and bounding box for a Type 3 font character.
-    ///
-    /// This operator (`d1`) is only used within the content stream of a Type 3 font's
-    /// character procedure. It sets the width and bounding box of the character
-    /// being defined. The backend is responsible for storing the width (`wx`, `wy`)
-    /// so it can be used to advance the text matrix after the glyph is painted.
-    ///
-    /// # Parameters
-    ///
-    /// - `wx`: The horizontal displacement in the glyph coordinate system.
-    /// - `wy`: The vertical displacement in the glyph coordinate system (must be 0).
-    /// - `llx`, `lly`: The lower-left corner of the glyph's bounding box.
-    /// - `urx`, `ury`: The upper-right corner of the glyph's bounding box.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` indicating success or an `ErrorType` on failure.
-    fn set_char_width_and_bounding_box(
-        &mut self,
-        wx: f32,
-        wy: f32,
-        llx: f32,
-        lly: f32,
-        urx: f32,
-        ury: f32,
-    ) -> Result<(), Self::ErrorType>;
 }
 
 /// Defines methods to handle PDF XObject operators.

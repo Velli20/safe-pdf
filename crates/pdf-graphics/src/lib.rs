@@ -12,16 +12,22 @@ use pdf_content_stream::{
 };
 use pdf_object::dictionary::Dictionary;
 use pdf_page::external_graphics_state::ExternalGraphicsStateKey;
-use pdf_path::PdfPath;
 use transform::Transform;
 
+use crate::canvas::Canvas;
+
+pub mod canvas;
+pub mod canvas_backend;
 pub mod canvas_path_ops;
 pub mod canvas_text_ops;
 pub mod color;
 pub mod error;
 pub mod pdf_canvas;
 pub mod pdf_path;
+pub mod text_renderer;
 pub mod transform;
+pub mod truetype_font_renderer;
+pub mod type3_font_renderer;
 
 #[derive(Default, Clone, PartialEq)]
 pub enum PaintMode {
@@ -40,26 +46,12 @@ pub enum PathFillType {
     EvenOdd,
 }
 
-pub trait CanvasBackend {
-    fn fill_path(&mut self, path: &PdfPath, fill_type: PathFillType, color: Color);
-
-    fn stroke_path(&mut self, path: &PdfPath, color: Color, line_width: f32);
-
-    fn set_clip_region(&mut self, path: &PdfPath, mode: PathFillType);
-
-    fn width(&self) -> f32;
-
-    fn height(&self) -> f32;
-
-    fn reset_clip(&mut self);
-}
-
 impl<'a> PdfOperatorBackend for PdfCanvas<'a> {}
 
 impl<'a> ClippingPathOps for PdfCanvas<'a> {
     fn clip_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
         if let Some(mut path) = self.current_path.take() {
-            path.transform(&self.current_state()?.transform)?;
+            path.transform(&self.current_state()?.transform);
             self.canvas.set_clip_region(&path, PathFillType::Winding);
             self.current_state_mut()?.clip_path = Some(path);
             Ok(())
@@ -70,7 +62,7 @@ impl<'a> ClippingPathOps for PdfCanvas<'a> {
 
     fn clip_path_even_odd(&mut self) -> Result<(), Self::ErrorType> {
         if let Some(mut path) = self.current_path.take() {
-            path.transform(&self.current_state()?.transform)?;
+            path.transform(&self.current_state()?.transform);
             self.canvas.set_clip_region(&path, PathFillType::EvenOdd);
             self.current_state_mut()?.clip_path = Some(path);
             Ok(())
@@ -86,8 +78,7 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
     }
 
     fn restore_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
-        self.restore();
-        Ok(())
+        self.restore()
     }
 
     fn concat_matrix(
@@ -122,8 +113,9 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
         Ok(())
     }
 
-    fn set_miter_limit(&mut self, limit: f32) -> Result<(), Self::ErrorType> {
-        todo!()
+    fn set_miter_limit(&mut self, miter_limit: f32) -> Result<(), Self::ErrorType> {
+        self.current_state_mut()?.miter_limit = miter_limit;
+        Ok(())
     }
 
     fn set_dash_pattern(
@@ -148,10 +140,20 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
             if let Some(states) = resources.external_graphics_states.get(dict_name) {
                 for state in &states.params {
                     match state {
-                        ExternalGraphicsStateKey::LineWidth(_) => todo!(),
-                        ExternalGraphicsStateKey::LineCap(_) => todo!(),
-                        ExternalGraphicsStateKey::LineJoin(_) => todo!(),
-                        ExternalGraphicsStateKey::MiterLimit(_) => todo!(),
+                        ExternalGraphicsStateKey::LineWidth(width) => {
+                            self.current_state_mut()?.line_width = *width
+                        }
+                        ExternalGraphicsStateKey::LineCap(cap) => {
+                            let cap = LineCap::from(*cap as u8);
+                            self.current_state_mut()?.line_cap = cap
+                        }
+                        ExternalGraphicsStateKey::LineJoin(join) => {
+                            let join = LineJoin::from(*join as u8);
+                            self.current_state_mut()?.line_join = join
+                        }
+                        ExternalGraphicsStateKey::MiterLimit(miter) => {
+                            self.current_state_mut()?.miter_limit = *miter;
+                        }
                         ExternalGraphicsStateKey::DashPattern(items, _) => todo!(),
                         ExternalGraphicsStateKey::RenderingIntent(_) => todo!(),
                         ExternalGraphicsStateKey::OverprintStroke(_) => todo!(),
@@ -182,15 +184,15 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
 
 impl<'a> ColorOps for PdfCanvas<'a> {
     fn set_stroking_color_space(&mut self, name: &str) -> Result<(), Self::ErrorType> {
-        todo!()
+        Ok(())
     }
 
     fn set_non_stroking_color_space(&mut self, name: &str) -> Result<(), Self::ErrorType> {
-        todo!()
+        Ok(())
     }
 
     fn set_stroking_color(&mut self, components: &[f32]) -> Result<(), Self::ErrorType> {
-        todo!()
+        Ok(())
     }
 
     fn set_stroking_color_extended(
@@ -198,11 +200,11 @@ impl<'a> ColorOps for PdfCanvas<'a> {
         components: &[f32],
         pattern_name: Option<&str>,
     ) -> Result<(), Self::ErrorType> {
-        todo!()
+        Ok(())
     }
 
     fn set_non_stroking_color(&mut self, components: &[f32]) -> Result<(), Self::ErrorType> {
-        todo!()
+        Ok(())
     }
 
     fn set_non_stroking_color_extended(

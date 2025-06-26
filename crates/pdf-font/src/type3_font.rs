@@ -18,15 +18,9 @@ use crate::font_descriptor::FontDescriptorError;
 /// support advanced typographic features like hinting.
 #[derive(Debug)]
 pub struct Type3Font {
-    /// A rectangle in the glyph coordinate system that encloses all glyphs in the font.
-    /// This is used to scale and position the font's glyphs correctly.
-    pub font_bounding_box: [f32; 4],
     /// A matrix that maps user space coordinates to glyph space coordinates.
     /// It is used to transform glyph outlines during rendering.
     pub font_matrix: [f32; 6],
-    /// A vector of glyph widths, corresponding to entries in `char_procs`.
-    /// If present, the number of widths should match the number of character procedures.
-    pub widths: Option<Vec<f32>>,
     /// A procedure defining any special actions to be taken before a character from this font is rendered.
     pub char_procs: HashMap<String, Vec<PdfOperatorVariant>>,
     /// The font's encoding, specifying the mapping from character codes to glyph names.
@@ -61,9 +55,6 @@ pub enum Type3FontError {
         err: pdf_object::error::ObjectError,
     },
 
-    #[error("Invalid FontBBox entry: expected an array of 4 numbers, found array of length {len}")]
-    InvalidFontBBoxArrayLength { len: usize },
-
     #[error("Failed to resolve /Resources dictionary object reference {obj_num}")]
     FailedResolveResourcesObjectReference { obj_num: i32 },
 
@@ -76,6 +67,17 @@ pub enum Type3FontError {
 
     #[error("Error parsing content stream operators: {0}")]
     ContentStreamError(#[from] PdfOperatorError),
+
+    #[error("Duplicate character name '{name}' found in /CharProcs dictionary")]
+    DuplicateCharProcName { name: String },
+
+    #[error(
+        "The object for character '{name}' in /CharProcs must be a Stream, but found {found_type}"
+    )]
+    InvalidCharProcObject {
+        name: String,
+        found_type: &'static str,
+    },
 }
 
 impl FromDictionary for Type3Font {
@@ -87,35 +89,6 @@ impl FromDictionary for Type3Font {
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        let font_bounding_box =
-            dictionary
-                .get_array("FontBBox")
-                .ok_or(Type3FontError::MissingEntry {
-                    entry_name: "FontBBox",
-                })?;
-
-        let convert_bbox_entry =
-            |value: &ObjectVariant, coord_name: &'static str| -> Result<f32, Type3FontError> {
-                value
-                    .as_number::<f32>()
-                    .map_err(|source| Type3FontError::NumericConversionError {
-                        entry_description: coord_name,
-                        err: source,
-                    })
-            };
-
-        let font_bounding_box = match font_bounding_box.as_slice() {
-            [llx, lly, urx, ury] => [
-                convert_bbox_entry(llx, "FontBBox llx")?,
-                convert_bbox_entry(lly, "FontBBox lly")?,
-                convert_bbox_entry(urx, "FontBBox urx")?,
-                convert_bbox_entry(ury, "FontBBox ury")?,
-            ],
-            arr => {
-                return Err(Type3FontError::InvalidFontBBoxArrayLength { len: arr.len() });
-            }
-        };
-
         let font_matrix =
             dictionary
                 .get_array("FontMatrix")
@@ -191,8 +164,8 @@ impl FromDictionary for Type3Font {
         for (name, value) in char_proc_dictionary.dictionary.iter() {
             let Some(number) = value.as_reference() else {
                 return Err(Type3FontError::InvalidEntryType {
-                    entry_name: "Fixme",
-                    expected_type: "number",
+                    entry_name: "CharProcs",
+                    expected_type: "Reference",
                     found_type: value.name(),
                 });
             };
@@ -203,22 +176,24 @@ impl FromDictionary for Type3Font {
 
             match content_stream_obj {
                 ObjectVariant::Stream(stream) => {
-                    let prev = char_procs.insert(
-                        name.to_owned(),
-                        PdfOperatorVariant::from(stream.data.as_slice())?,
-                    );
+                    let operators = PdfOperatorVariant::from(stream.data.as_slice())?;
+                    let prev = char_procs.insert(name.to_owned(), operators);
                     if prev.is_some() {
-                        panic!()
+                        return Err(Type3FontError::DuplicateCharProcName {
+                            name: name.to_owned(),
+                        });
                     }
                 }
-                _ => {
-                    panic!()
+                other => {
+                    return Err(Type3FontError::InvalidCharProcObject {
+                        name: name.to_owned(),
+                        found_type: other.name(),
+                    });
                 }
             }
         }
 
         Ok(Type3Font {
-            font_bounding_box,
             font_matrix: [
                 font_matrix[0],
                 font_matrix[1],
@@ -227,7 +202,6 @@ impl FromDictionary for Type3Font {
                 font_matrix[4],
                 font_matrix[5],
             ],
-            widths: None,
             char_procs,
             encoding,
         })
@@ -246,8 +220,6 @@ pub enum EncodingError {
 }
 
 /// Represents a font encoding dictionary, used to map character codes to glyph names.
-///
-/// See PDF 1.7 Specification, Section 9.6.6, "Font Encoding Dictionaries".
 #[derive(Debug)]
 pub struct FontEncodingDictionary {
     /// The base encoding, which can be a predefined name like `/StandardEncoding`
@@ -259,9 +231,9 @@ pub struct FontEncodingDictionary {
 }
 
 impl FromDictionary for FontEncodingDictionary {
-    const KEY: &'static str = "Encoding"; // This is the key in the Font dictionary
+    const KEY: &'static str = "Encoding";
     type ResultType = Self;
-    type ErrorType = EncodingError; // Use the new error type
+    type ErrorType = EncodingError;
 
     fn from_dictionary(
         dictionary: &Dictionary,

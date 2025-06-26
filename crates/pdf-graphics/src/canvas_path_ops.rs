@@ -8,13 +8,15 @@ impl<'a> PathConstructionOps for PdfCanvas<'a> {
     fn move_to(&mut self, x: f32, y: f32) -> Result<(), Self::ErrorType> {
         self.current_path
             .get_or_insert(PdfPath::default())
-            .move_to(x, y)
+            .move_to(x, y);
+        Ok(())
     }
 
     fn line_to(&mut self, x: f32, y: f32) -> Result<(), Self::ErrorType> {
         self.current_path
             .get_or_insert(PdfPath::default())
-            .line_to(x, y)
+            .line_to(x, y);
+        Ok(())
     }
 
     fn curve_to(
@@ -28,13 +30,15 @@ impl<'a> PathConstructionOps for PdfCanvas<'a> {
     ) -> Result<(), Self::ErrorType> {
         self.current_path
             .get_or_insert(PdfPath::default())
-            .curve_to(x1, y1, x2, y2, x3, y3)
+            .curve_to(x1, y1, x2, y2, x3, y3);
+        Ok(())
     }
 
     fn curve_to_v(&mut self, x2: f32, y2: f32, x3: f32, y3: f32) -> Result<(), Self::ErrorType> {
         let path = self.current_path.get_or_insert(PdfPath::default());
         if let Some((x, y)) = path.current_point() {
-            path.curve_to(x, y, x2, y2, x3, y3)
+            path.curve_to(x, y, x2, y2, x3, y3);
+            Ok(())
         } else {
             Err(PdfCanvasError::NoCurrentPoint)
         }
@@ -43,11 +47,13 @@ impl<'a> PathConstructionOps for PdfCanvas<'a> {
     fn curve_to_y(&mut self, x1: f32, y1: f32, x3: f32, y3: f32) -> Result<(), Self::ErrorType> {
         self.current_path
             .get_or_insert(PdfPath::default())
-            .curve_to(x1, y1, x3, y3, x3, y3)
+            .curve_to(x1, y1, x3, y3, x3, y3);
+        Ok(())
     }
 
     fn close_path(&mut self) -> Result<(), Self::ErrorType> {
-        self.current_path.get_or_insert(PdfPath::default()).close()
+        self.current_path.get_or_insert(PdfPath::default()).close();
+        Ok(())
     }
 
     fn rectangle(
@@ -59,11 +65,12 @@ impl<'a> PathConstructionOps for PdfCanvas<'a> {
     ) -> Result<(), Self::ErrorType> {
         let path = self.current_path.get_or_insert(PdfPath::default());
 
-        path.move_to(x, y)?;
-        path.line_to(x + width, y)?;
-        path.line_to(x + width, y + height)?;
-        path.line_to(x, y + height)?;
-        path.close()
+        path.move_to(x, y);
+        path.line_to(x + width, y);
+        path.line_to(x + width, y + height);
+        path.line_to(x, y + height);
+        path.close();
+        Ok(())
     }
 }
 

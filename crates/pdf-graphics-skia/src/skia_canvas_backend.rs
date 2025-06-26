@@ -1,7 +1,8 @@
 use skia_safe::{ClipOp, Color4f, Paint, Path as SkiaPath, PathFillType as SkiaPathFillType};
 
 use pdf_graphics::{
-    CanvasBackend, PathFillType as PdfPathFillType,
+    PathFillType as PdfPathFillType,
+    canvas_backend::CanvasBackend,
     color::Color as PdfColor,
     pdf_path::{PathVerb, PdfPath as PdfGraphicsPath},
 };

@@ -1,4 +1,4 @@
-use crate::{error::PdfCanvasError, transform::Transform};
+use crate::transform::Transform;
 
 /// Represents a single operation in a graphics path.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -65,12 +65,10 @@ impl PdfPath {
     /// # Arguments
     ///
     /// - `x`, `y`: The coordinates to move to.
-    pub fn move_to(&mut self, x: f32, y: f32) -> Result<(), PdfCanvasError> {
+    pub fn move_to(&mut self, x: f32, y: f32) {
         self.current_x = x;
         self.current_y = y;
         self.verbs.push(PathVerb::MoveTo { x, y });
-
-        Ok(())
     }
 
     /// Appends a `LineTo` verb to the path, updating the current point.
@@ -78,11 +76,10 @@ impl PdfPath {
     /// # Arguments
     ///
     /// - `x`, `y`: The coordinates to draw a line to from the current point.
-    pub fn line_to(&mut self, x: f32, y: f32) -> Result<(), PdfCanvasError> {
+    pub fn line_to(&mut self, x: f32, y: f32) {
         self.current_x = x;
         self.current_y = y;
         self.verbs.push(PathVerb::LineTo { x, y });
-        Ok(())
     }
 
     /// Appends a `CubicTo` verb to the path, updating the current point to (`x3`, `y3`).
@@ -92,15 +89,7 @@ impl PdfPath {
     /// - `x1`, `y1`: Coordinates of the first Bézier control point.
     /// - `x2`, `y2`: Coordinates of the second Bézier control point.
     /// - `x3`, `y3`: Coordinates of the end point of the curve.
-    pub fn curve_to(
-        &mut self,
-        x1: f32,
-        y1: f32,
-        x2: f32,
-        y2: f32,
-        x3: f32,
-        y3: f32,
-    ) -> Result<(), PdfCanvasError> {
+    pub fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32) {
         self.current_x = x3;
         self.current_y = y3;
 
@@ -112,8 +101,6 @@ impl PdfPath {
             x3,
             y3,
         });
-
-        Ok(())
     }
 
     /// Appends a `QuadTo` verb to the path, updating the current point to (`x2`, `y2`).
@@ -122,22 +109,19 @@ impl PdfPath {
     ///
     /// - `x1`, `y1`: Coordinates of the Bézier control point.
     /// - `x2`, `y2`: Coordinates of the end point of the curve.
-    pub fn quad_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32) -> Result<(), PdfCanvasError> {
+    pub fn quad_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32) {
         self.current_x = x2;
         self.current_y = y2;
 
         self.verbs.push(PathVerb::QuadTo { x1, y1, x2, y2 });
-
-        Ok(())
     }
 
     /// Appends a `Close` verb to the path.
-    pub fn close(&mut self) -> Result<(), PdfCanvasError> {
+    pub fn close(&mut self) {
         self.verbs.push(PathVerb::Close);
-        Ok(())
     }
 
-    pub fn transform(&mut self, transform: &Transform) -> Result<(), PdfCanvasError> {
+    pub fn transform(&mut self, transform: &Transform) {
         for verb in &mut self.verbs {
             match verb {
                 PathVerb::MoveTo { x, y } => {
@@ -179,6 +163,5 @@ impl PdfPath {
                 PathVerb::Close => {}
             }
         }
-        Ok(())
     }
 }

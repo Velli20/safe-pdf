@@ -1,6 +1,9 @@
 use femtovg::{Canvas, Color, FillRule, Paint, Path};
-use pdf_graphics::pdf_path::{PathVerb, PdfPath};
-use pdf_graphics::{CanvasBackend, PathFillType};
+use pdf_graphics::canvas_backend::CanvasBackend;
+use pdf_graphics::{
+    PathFillType,
+    pdf_path::{PathVerb, PdfPath},
+};
 
 fn to_femtovg_path(pdf_path: &PdfPath) -> Path {
     let mut path = Path::new();
