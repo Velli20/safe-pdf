@@ -7,11 +7,15 @@ use pdf_object::{
 };
 use thiserror::Error;
 
-use crate::external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateError};
+use crate::{
+    external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateError},
+    image::{ImageXObjectError, XObject},
+};
 
 pub struct Resources {
     pub fonts: HashMap<String, Font>,
     pub external_graphics_states: HashMap<String, ExternalGraphicsState>,
+    pub xobjects: HashMap<String, XObject>,
 }
 
 /// Defines errors that can occur while reading Resources object.
@@ -53,6 +57,9 @@ pub enum ResourcesError {
 
     #[error("External Graphics State parsing error: {0}")]
     ExternalGraphicsStateError(#[from] ExternalGraphicsStateError),
+
+    #[error("Image XObject parsing error: {0}")]
+    ImageXObjectError(#[from] ImageXObjectError),
 }
 
 impl FromDictionary for Resources {
@@ -140,9 +147,46 @@ impl FromDictionary for Resources {
             }
         }
 
+        let mut xobjects = HashMap::new();
+
+        // Process `/XObject` entries
+        if let Some(xobject_dict) = resources.get_dictionary("XObject") {
+            for (name, v) in &xobject_dict.dictionary {
+                let (obj_dict, stream_data) = match v.as_ref() {
+                    ObjectVariant::Reference(number) => {
+                        let resolved_obj = objects.get(*number).ok_or_else(|| {
+                            ResourcesError::FailedResolveResourcesObjectReference {
+                                obj_num: *number,
+                            }
+                        })?;
+                        match resolved_obj {
+                            ObjectVariant::Stream(s) => (s.dictionary.clone(), s.data.clone()),
+                            _ => {
+                                return Err(ResourcesError::UnexpectedObjectTypeInFonts {
+                                    found_type: resolved_obj.name(),
+                                });
+                            }
+                        }
+                    }
+                    ObjectVariant::Stream(s) => (s.dictionary.clone(), s.data.clone()),
+                    _ => {
+                        return Err(ResourcesError::UnexpectedObjectTypeInFonts {
+                            found_type: v.name(),
+                        });
+                    }
+                };
+
+                xobjects.insert(
+                    name.to_owned(),
+                    XObject::from_dictionary_and_stream(&obj_dict, stream_data, objects)?,
+                );
+            }
+        }
+
         Ok(Some(Self {
             fonts,
             external_graphics_states,
+            xobjects,
         }))
     }
 }

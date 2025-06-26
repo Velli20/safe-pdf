@@ -1,4 +1,4 @@
-use crate::{PathFillType, color::Color, pdf_path::PdfPath};
+use crate::{PathFillType, color::Color, pdf_path::PdfPath, transform::Transform};
 
 /// A low-level drawing backend for rendering PDF graphics.
 ///
@@ -37,4 +37,14 @@ pub trait CanvasBackend {
 
     /// Resets the clipping region to the entire canvas area.
     fn reset_clip(&mut self);
+
+    fn draw_image(
+        &mut self,
+        image: &[u8],
+        is_jpeg: bool,
+        width: f32,
+        height: f32,
+        bits_per_component: u32,
+        transform: &Transform,
+    );
 }

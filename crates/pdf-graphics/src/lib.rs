@@ -11,7 +11,10 @@ use pdf_content_stream::{
     },
 };
 use pdf_object::dictionary::Dictionary;
-use pdf_page::external_graphics_state::ExternalGraphicsStateKey;
+use pdf_page::{
+    external_graphics_state::ExternalGraphicsStateKey,
+    image::{ImageFilter, XObject},
+};
 use transform::Transform;
 
 use crate::canvas::Canvas;
@@ -253,6 +256,29 @@ impl<'a> ColorOps for PdfCanvas<'a> {
 impl<'a> XObjectOps for PdfCanvas<'a> {
     fn invoke_xobject(&mut self, xobject_name: &str) -> Result<(), Self::ErrorType> {
         println!("Invoke xobject {:?}", xobject_name);
+
+        let resources = self
+            .page
+            .resources
+            .as_ref()
+            .ok_or(PdfCanvasError::MissingPageResources)?;
+
+        if let Some(XObject::Image(image)) = resources.xobjects.get(xobject_name) {
+            if image.data.is_empty() {
+                panic!()
+            }
+
+            let mat = self.current_state()?.transform.clone();
+
+            self.canvas.draw_image(
+                &image.data,
+                image.filter == Some(ImageFilter::DCTDecode),
+                image.width as f32,
+                image.height as f32,
+                image.bits_per_component as u32,
+                &mat,
+            );
+        }
         Ok(())
     }
 }

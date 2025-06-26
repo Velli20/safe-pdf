@@ -144,12 +144,12 @@ impl<'a> StreamParser for PdfParser<'a> {
 
                 return Ok(s);
             } else if decode == "DCTDecode" {
-                let mut decoder = zune_jpeg::JpegDecoder::new(stream_data.as_slice());
-                let s = decoder
-                    .decode()
-                    .map_err(|source| StreamParsingError::DecompressionError(source.to_string()))?;
+                // let mut decoder = zune_jpeg::JpegDecoder::new(stream_data.as_slice());
+                // let s = decoder
+                //     .decode()
+                //     .map_err(|source| StreamParsingError::DecompressionError(source.to_string()))?;
 
-                return Ok(s);
+                return Ok(stream_data.to_vec());
             }
 
             return Err(StreamParsingError::UsupportedFilter(decode.to_string()));

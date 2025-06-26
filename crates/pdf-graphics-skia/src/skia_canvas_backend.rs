@@ -1,10 +1,13 @@
-use skia_safe::{ClipOp, Color4f, Paint, Path as SkiaPath, PathFillType as SkiaPathFillType};
-
 use pdf_graphics::{
     PathFillType as PdfPathFillType,
     canvas_backend::CanvasBackend,
     color::Color as PdfColor,
     pdf_path::{PathVerb, PdfPath as PdfGraphicsPath},
+    transform::Transform,
+};
+use skia_safe::{
+    AlphaType, ClipOp, Color, Color4f, ColorType, Data, ImageInfo, Matrix, Paint, Path as SkiaPath,
+    PathFillType as SkiaPathFillType, Rect, image::Image as SkiaImage,
 };
 
 pub struct SkiaCanvasBackend<'a> {
@@ -32,6 +35,20 @@ fn to_skia_path(pdf_path: &PdfGraphicsPath) -> SkiaPath {
         };
     }
     path
+}
+
+fn to_skia_matrix(transform: &Transform) -> Matrix {
+    Matrix::new_all(
+        transform.sx,
+        transform.kx,
+        transform.tx,
+        transform.ky,
+        transform.sy,
+        transform.ty,
+        0.0,
+        0.0,
+        1.0,
+    )
 }
 
 impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
@@ -85,5 +102,82 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
 
     fn reset_clip(&mut self) {
         self.canvas.restore();
+    }
+
+    fn draw_image(
+        &mut self,
+        image: &[u8],
+        is_jpeg: bool,
+        width: f32,
+        height: f32,
+        bits_per_component: u32,
+        transform: &Transform,
+    ) {
+        let skia_image = if is_jpeg {
+            // Data is JPEG encoded, use from_encoded
+            SkiaImage::from_encoded(Data::new_copy(&image))
+        } else {
+            // Assume raw pixel data (e.g., after FlateDecode or no filter)
+            if width == 0.0 || height == 0.0 {
+                return;
+            }
+
+            // A robust implementation needs to inspect the PDF's ColorSpace entry.
+            // Here, we deduce it from the number of components, assuming 8 bits per component.
+            if bits_per_component != 8 {
+                eprintln!(
+                    "Unsupported bits per component for raw image: {}",
+                    bits_per_component
+                );
+                return;
+            }
+
+            let num_components = image.len() / (width as usize * height as usize);
+
+            let (color_type, pixel_data) = match num_components {
+                4 => (ColorType::RGBA8888, Data::new_copy(&image)),
+                3 => {
+                    // Skia doesn't have a direct 24-bit RGB format. We convert to 32-bit RGBA.
+                    let mut padded_data = Vec::with_capacity(width as usize * height as usize * 4);
+                    for rgb in image.chunks_exact(3) {
+                        padded_data.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 0xFF]);
+                    }
+                    (ColorType::RGBA8888, Data::new_copy(&padded_data))
+                }
+                1 => (ColorType::Gray8, Data::new_copy(&image)),
+                _ => {
+                    eprintln!(
+                        "Unsupported number of components for raw image: {}",
+                        num_components
+                    );
+                    return;
+                }
+            };
+
+            let image_info = ImageInfo::new(
+                (width as i32, height as i32),
+                color_type,
+                AlphaType::Unpremul, // PDF images are typically unpremultiplied
+                None,
+            );
+
+            let row_bytes = width as usize * image_info.bytes_per_pixel();
+
+            skia_safe::images::raster_from_data(&image_info, pixel_data, row_bytes)
+        };
+
+        if let Some(skia_image) = skia_image {
+            let skia_matrix = to_skia_matrix(transform);
+            let paint = Paint::default();
+            self.canvas.save();
+            self.canvas.concat(&skia_matrix);
+            // The image is defined in a 1x1 unit square in user space.
+            let dest_rect = Rect::from_xywh(0.0, 0.0, 1.0, 1.0);
+            self.canvas
+                .draw_image_rect(&skia_image, None, dest_rect, &paint);
+            self.canvas.restore();
+        } else {
+            eprintln!("Failed to create Skia image from image XObject data");
+        }
     }
 }
