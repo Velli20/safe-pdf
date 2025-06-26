@@ -33,16 +33,6 @@ impl PdfOperator for SetCharWidthAndBoundingBox {
         let urx = operands.get_f32()?;
         let ury = operands.get_f32()?;
 
-        if wy != 0.0 {
-            // return Err(PdfOperatorError::InvalidOperandValue {
-            //     operator: Self::NAME,
-            //     operand_index: 1, // wy is the second operand (index 1)
-            //     expected: "0".to_string(),
-            //     found: wy.to_string(),
-            // });
-            panic!();
-        }
-
         Ok(PdfOperatorVariant::SetCharWidthAndBoundingBox(Self {
             wx,
             wy,
@@ -53,9 +43,7 @@ impl PdfOperator for SetCharWidthAndBoundingBox {
         }))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        backend.set_char_width_and_bounding_box(
-            self.wx, self.wy, self.llx, self.lly, self.urx, self.ury,
-        )
+    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), T::ErrorType> {
+        todo!()
     }
 }

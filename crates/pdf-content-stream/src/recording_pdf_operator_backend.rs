@@ -685,18 +685,6 @@ impl TextShowingOps for RecordingBackend {
             });
         Ok(())
     }
-
-    fn set_char_width_and_bounding_box(
-        &mut self,
-        _wx: f32,
-        _wy: f32,
-        _llx: f32,
-        _lly: f32,
-        _urx: f32,
-        _ury: f32,
-    ) -> Result<(), Self::ErrorType> {
-        todo!()
-    }
 }
 
 impl XObjectOps for RecordingBackend {

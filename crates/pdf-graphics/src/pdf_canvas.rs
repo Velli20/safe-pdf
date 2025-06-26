@@ -128,12 +128,9 @@ impl<'a> PdfCanvas<'a> {
     pub fn new(backend: &'a mut dyn CanvasBackend, page: &'a PdfPage) -> Self {
         let media_box = &page.media_box;
 
-        // Use descriptive names and ensure f32 type for PDF dimensions.
-        // The `as f32` cast assumes media_box.width/height might return non-f32 types.
         let pdf_media_width = media_box.as_ref().unwrap().width() as f32;
         let pdf_media_height = media_box.as_ref().unwrap().height() as f32;
 
-        // Backend dimensions are already f32 as per CanvasBackend trait.
         let backend_canvas_width = backend.width();
         let backend_canvas_height = backend.height();
 

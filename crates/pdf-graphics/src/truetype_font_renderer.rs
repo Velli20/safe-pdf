@@ -12,16 +12,12 @@ use ttf_parser::{Face, GlyphId, OutlineBuilder};
 /// Defines errors that can occur during TrueType font rendering.
 #[derive(Debug, Error)]
 pub enum TrueTypeFontRendererError {
-    /// The associated Type0 font is missing its descendant CIDFont.
     #[error("The associated Type0 font is missing its descendant CIDFont")]
     MissingCidFont,
-    /// The CIDFont descriptor is missing the font file stream.
     #[error("The CIDFont descriptor is missing the font file stream")]
     MissingFontFile,
-    /// The font file object is not a stream.
     #[error("The font file object is not a stream, but a {found_type}")]
     FontFileNotStream { found_type: &'static str },
-    /// Failed to parse the TrueType font file.
     #[error("Failed to parse the TrueType font file: {0:?}")]
     TtfParseError(ttf_parser::FaceParsingError),
 }

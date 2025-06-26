@@ -12,6 +12,7 @@ pub enum Type3FontRendererError {
     #[error("Invalid /FontMatrix. Expected an array of 6 numbers.")]
     InvalidFontMatrix,
 }
+
 /// A renderer for Type 3 fonts, which defines glyphs using PDF content streams.
 pub(crate) struct Type3FontRenderer<'a, T: PdfOperatorBackend + Canvas> {
     /// The canvas backend where glyphs are drawn.
@@ -24,7 +25,7 @@ pub(crate) struct Type3FontRenderer<'a, T: PdfOperatorBackend + Canvas> {
     current_transform: Transform,
     /// The current text matrix (Tm), which positions the text.
     text_matrix: Transform,
-    /// The Type 3 font definition, containing glyph content streams (`CharProcs`).
+    /// The Type 3 font definition, containing glyph content streams.
     type3_font: &'a Type3Font,
     /// The font size.
     font_size: f32,
@@ -74,7 +75,7 @@ impl<'a, T: PdfOperatorBackend + Canvas> Type3FontRenderer<'a, T> {
 
 impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for Type3FontRenderer<'a, T> {
     fn render_text(&mut self, text: &[u8]) -> Result<(), crate::error::PdfCanvasError> {
-        // 1. Iterate through each character code in the input `text`
+        // 1. Iterate through each character code in the input text.
         let mut iter = text.iter();
         while let Some(char_code_byte) = iter.next() {
             let mut text_rendering_matrix = self.font_matrix.clone();
@@ -96,7 +97,7 @@ impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for Type3FontRenderer<'a, 
                 continue;
             };
 
-            // 3. Look up the glyph's content stream from the CharProcs dictionary.
+            // 3. Look up the glyph's content stream from the `CharProcs` map.
             let Some(char_procs) = self.type3_font.char_procs.get(glyph_name) else {
                 // If the character code does not map to a glyph name via the font's encoding,
                 // this character is skipped.
@@ -113,7 +114,11 @@ impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for Type3FontRenderer<'a, 
             self.canvas.set_matrix(text_rendering_matrix.clone())?;
 
             for op in char_procs {
-                // The glyph's width is specified by the 'd1' operator.
+                // Check if this the `d1` operator. The `d1` operator is only used within the
+                // content stream of a Type 3 font's character procedure. It sets the width
+                // and bounding box of the character being defined.
+                // The backend is responsible for storing the width (`wx`, `wy`)
+                // so it can be used to advance the text matrix after the glyph is painted.
                 if let PdfOperatorVariant::SetCharWidthAndBoundingBox(op) = op {
                     glyph_width = Some(op.wx);
                 } else {

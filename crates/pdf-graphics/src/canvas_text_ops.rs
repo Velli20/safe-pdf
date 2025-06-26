@@ -51,12 +51,12 @@ impl<'a> TextPositioningOps for PdfCanvas<'a> {
 
 impl<'a> TextObjectOps for PdfCanvas<'a> {
     fn begin_text_object(&mut self) -> Result<(), Self::ErrorType> {
+        self.current_state_mut()?.text_state.matrix = Transform::identity();
+        self.current_state_mut()?.text_state.line_matrix = Transform::identity();
         Ok(())
     }
 
     fn end_text_object(&mut self) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.text_state.matrix = Transform::identity();
-        self.current_state_mut()?.text_state.line_matrix = Transform::identity();
         Ok(())
     }
 }
@@ -111,19 +111,6 @@ impl<'a> TextStateOps for PdfCanvas<'a> {
 }
 
 impl<'a> TextShowingOps for PdfCanvas<'a> {
-    fn set_char_width_and_bounding_box(
-        &mut self,
-        wx: f32,
-        wy: f32,
-        llx: f32,
-        lly: f32,
-        urx: f32,
-        ury: f32,
-    ) -> Result<(), Self::ErrorType> {
-        let _ = (wx, wy, llx, lly, urx, ury);
-        Ok(())
-    }
-
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
         let text_state = &self.current_state()?.text_state.clone();
         let current_font = text_state.font.ok_or(PdfCanvasError::NoCurrentFont)?;
