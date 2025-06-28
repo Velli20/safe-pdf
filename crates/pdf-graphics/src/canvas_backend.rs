@@ -46,5 +46,6 @@ pub trait CanvasBackend {
         height: f32,
         bits_per_component: u32,
         transform: &Transform,
+        smask: Option<&[u8]>,
     );
 }

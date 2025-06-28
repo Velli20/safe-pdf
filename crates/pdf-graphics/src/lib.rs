@@ -268,6 +268,13 @@ impl<'a> XObjectOps for PdfCanvas<'a> {
                 panic!()
             }
 
+            let smask  = if let Some(m) = image.smask.as_ref() {
+                Some(m.data.as_slice())
+            } else {
+                None
+            };
+
+
             let mat = self.current_state()?.transform.clone();
 
             self.canvas.draw_image(
@@ -277,6 +284,7 @@ impl<'a> XObjectOps for PdfCanvas<'a> {
                 image.height as f32,
                 image.bits_per_component as u32,
                 &mat,
+                smask
             );
         }
         Ok(())

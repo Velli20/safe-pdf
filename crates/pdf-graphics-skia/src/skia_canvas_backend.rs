@@ -38,12 +38,23 @@ fn to_skia_path(pdf_path: &PdfGraphicsPath) -> SkiaPath {
 }
 
 fn to_skia_matrix(transform: &Transform) -> Matrix {
+    // Matrix::new_all(
+    //     transform.sx,
+    //     transform.kx,
+    //     transform.tx,
+    //     transform.ky,
+    //     transform.sy,
+    //     transform.ty,
+    //     0.0,
+    //     0.0,
+    //     1.0,
+    // )
     Matrix::new_all(
         transform.sx,
         transform.kx,
         transform.tx,
         transform.ky,
-        transform.sy,
+        -transform.sy,
         transform.ty,
         0.0,
         0.0,
@@ -112,7 +123,9 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
         height: f32,
         bits_per_component: u32,
         transform: &Transform,
+        smask: Option<&[u8]>,
     ) {
+        println!("Draw image is_jpeg {} width {} height {}", is_jpeg, width, height);
         let skia_image = if is_jpeg {
             // Data is JPEG encoded, use from_encoded
             SkiaImage::from_encoded(Data::new_copy(&image))
@@ -133,14 +146,15 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
             }
 
             let num_components = image.len() / (width as usize * height as usize);
-
             let (color_type, pixel_data) = match num_components {
                 4 => (ColorType::RGBA8888, Data::new_copy(&image)),
                 3 => {
+                    let mut it = smask.unwrap().iter();
                     // Skia doesn't have a direct 24-bit RGB format. We convert to 32-bit RGBA.
                     let mut padded_data = Vec::with_capacity(width as usize * height as usize * 4);
                     for rgb in image.chunks_exact(3) {
-                        padded_data.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 0xFF]);
+                        let alpha = it.next().unwrap();
+                        padded_data.extend_from_slice(&[rgb[0], rgb[1], rgb[2], *alpha]);
                     }
                     (ColorType::RGBA8888, Data::new_copy(&padded_data))
                 }
@@ -153,6 +167,9 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
                     return;
                 }
             };
+
+            println!("Num components {} color_type {:?} smask {}", num_components, color_type, smask.is_some());
+
 
             let image_info = ImageInfo::new(
                 (width as i32, height as i32),
@@ -172,7 +189,8 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
             self.canvas.save();
             self.canvas.concat(&skia_matrix);
             // The image is defined in a 1x1 unit square in user space.
-            let dest_rect = Rect::from_xywh(0.0, 0.0, 1.0, 1.0);
+            // let dest_rect = Rect::from_xywh(0.0, 0.0, 1.0, 1.0);
+            let dest_rect = Rect::from_xywh(0.0, -1.0, 1.0, 1.0);
             self.canvas
                 .draw_image_rect(&skia_image, None, dest_rect, &paint);
             self.canvas.restore();

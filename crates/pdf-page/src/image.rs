@@ -1,5 +1,6 @@
 use pdf_object::{
     dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
+    ObjectVariant,
 };
 use thiserror::Error;
 
@@ -25,6 +26,10 @@ pub enum ImageXObjectError {
     UnsupportedColorSpace { name: String },
     #[error("Unsupported Filter '{name}'")]
     UnsupportedFilter { name: String },
+    #[error("Failed to resolve object reference {obj_num} for entry '{entry_name}'")]
+    ResolveError { entry_name: &'static str, obj_num: i32 },
+    #[error("SMask must be an Image XObject, but it was not.")]
+    SMaskNotImage,
 }
 
 #[derive(Debug)]
@@ -74,6 +79,7 @@ pub struct ImageXObject {
     pub bits_per_component: u32,
     pub filter: Option<ImageFilter>,
     // pub decode_params: Option<Dictionary>, // TODO: Add support for DecodeParms
+    pub smask: Option<Box<ImageXObject>>,
     pub data: Vec<u8>,
 }
 
@@ -84,7 +90,7 @@ impl FromDictionary for ImageXObject {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        _objects: &ObjectCollection, // We assume the stream data is already available
+        objects: &ObjectCollection, // We assume the stream data is already available
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let width = dictionary
             .get_number("Width")
@@ -121,11 +127,63 @@ impl FromDictionary for ImageXObject {
             // return Err(ImageXObjectError::UnsupportedFilter { name: name.clone() });
         }
 
+        let smask = match dictionary.get("SMask") {
+            Some(smask_obj) => {
+                let smask_xobject = match smask_obj.as_ref() {
+                    ObjectVariant::Reference(obj_num) => {
+                        let resolved_obj =
+                            objects.get(*obj_num).ok_or(ImageXObjectError::ResolveError {
+                                entry_name: "SMask",
+                                obj_num: *obj_num,
+                            })?;
+
+                        match resolved_obj {
+                            ObjectVariant::Stream(s) => Some(
+                                XObject::from_dictionary_and_stream(
+                                    &s.dictionary,
+                                    s.data.clone(),
+                                    objects,
+                                )?,
+                            ),
+                            _ => {
+                                return Err(ImageXObjectError::InvalidEntryType {
+                                    entry_name: "SMask",
+                                    expected_type: "Stream or Reference to Stream",
+                                    found_type: resolved_obj.name(),
+                                })
+                            }
+                        }
+                    }
+                    ObjectVariant::Stream(s) => Some(XObject::from_dictionary_and_stream(
+                        &s.dictionary,
+                        s.data.clone(),
+                        objects,
+                    )?),
+                    ObjectVariant::Name(name) if name == "None" => None,
+                    other => {
+                        return Err(ImageXObjectError::InvalidEntryType {
+                            entry_name: "SMask",
+                            expected_type: "Stream, Reference, or Name 'None'",
+                            found_type: other.name(),
+                        });
+                    }
+                };
+
+                match smask_xobject {
+                    Some(XObject::Image(img)) => Some(Box::new(img)),
+                    Some(_) => return Err(ImageXObjectError::SMaskNotImage),
+                    None => None,
+                }
+            }
+            None => None,
+        };
+
         Ok(Self {
             width,
             height,
             bits_per_component,
             filter,
+            smask,
             data: Vec::new(), // This will be filled by the caller
         })
     }
