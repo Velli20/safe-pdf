@@ -28,17 +28,23 @@ impl ObjectCollection {
         None
     }
 
-    pub fn get_dictionary(&self, key: i32) -> Option<Rc<Dictionary>> {
-        if let Some(obj) = self.map.get(&key) {
-            if let ObjectVariant::IndirectObject(inner) = obj {
-                if let Some(ObjectVariant::Dictionary(dictionary)) = &inner.object {
-                    return Some(dictionary.clone());
+    pub fn get_dictionary(&self, v: &ObjectVariant) -> Option<Rc<Dictionary>> {
+        match v {
+            ObjectVariant::Dictionary(dict) => Some(dict.clone()),
+            ObjectVariant::Reference(object_number) => {
+                if let Some(obj) = self.map.get(object_number) {
+                    if let ObjectVariant::IndirectObject(inner) = obj {
+                        if let Some(ObjectVariant::Dictionary(dictionary)) = &inner.object {
+                            return Some(dictionary.clone());
+                        }
+                    }
+                    if let ObjectVariant::Reference(_) = obj {
+                        return self.get_dictionary(obj);
+                    }
                 }
+                None
             }
-            if let ObjectVariant::Reference(object_number) = obj {
-                return self.get_dictionary(*object_number);
-            }
+            _ => None,
         }
-        None
     }
 }

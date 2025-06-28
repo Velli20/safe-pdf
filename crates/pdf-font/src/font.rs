@@ -201,24 +201,14 @@ impl FromDictionary for Font {
             .first()
             .ok_or_else(|| FontError::InvalidDescendantFonts("Array is empty".to_string()))?;
 
-        let cid_font = match cid_font_ref_val {
-            ObjectVariant::Reference(num) => {
-                let dictionary = objects.get_dictionary(*num).ok_or_else(|| {
-                    FontError::InvalidDescendantFonts(format!(
-                        "Could not resolve CIDFont reference {} from /DescendantFonts",
-                        num
-                    ))
-                })?;
+        let cid_font = {
+            let dictionary = objects.get_dictionary(cid_font_ref_val).ok_or_else(|| {
+                FontError::InvalidDescendantFonts(format!(
+                    "Could not resolve CIDFont reference from /DescendantFonts",
+                ))
+            })?;
 
-                CharacterIdentifierFont::from_dictionary(dictionary.as_ref(), objects)?
-            }
-            other => {
-                return Err(FontError::InvalidEntryType {
-                    entry_name: "/DescendantFonts[0]",
-                    expected_type: "IndirectObject (Reference to Dictionary)",
-                    found_type: other.name(),
-                });
-            }
+            CharacterIdentifierFont::from_dictionary(dictionary.as_ref(), objects)?
         };
         Ok(Self {
             base_font,

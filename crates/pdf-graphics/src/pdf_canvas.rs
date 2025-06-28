@@ -1,6 +1,6 @@
 use pdf_content_stream::graphics_state_operators::{LineCap, LineJoin};
 use pdf_font::font::Font;
-use pdf_page::page::PdfPage;
+use pdf_page::{page::PdfPage, resources::Resources};
 
 use crate::{
     PaintMode, PathFillType, canvas::Canvas, canvas_backend::CanvasBackend, color::Color,
@@ -54,6 +54,8 @@ pub(crate) struct CanvasState<'a> {
     pub clip_path: Option<PdfPath>,
     pub line_cap: LineCap,
     pub line_join: LineJoin,
+    /// The current font resource.
+    pub resources: Option<&'a Resources>,
 }
 
 impl CanvasState<'_> {
@@ -77,6 +79,7 @@ impl<'a> Default for CanvasState<'a> {
             miter_limit: Self::DEFAULT_MITER_LIMIT,
             text_state: TextState::default(),
             clip_path: None,
+            resources: None,
             line_cap: LineCap::Butt,
             line_join: LineJoin::Miter,
         }

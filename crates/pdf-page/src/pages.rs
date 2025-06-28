@@ -73,7 +73,7 @@ impl FromDictionary for PdfPages {
             // Get the page object dictionary.
             let kid_dict =
                 objects
-                    .get_dictionary(kid_obj_num)
+                    .get_dictionary(kid_value)
                     .ok_or(PdfPagesError::PageObjectNotFound {
                         obj_num: kid_obj_num,
                     })?;

@@ -12,8 +12,7 @@ use pdf_content_stream::{
 };
 use pdf_object::dictionary::Dictionary;
 use pdf_page::{
-    external_graphics_state::ExternalGraphicsStateKey,
-    image::{ImageFilter, XObject},
+    external_graphics_state::ExternalGraphicsStateKey, image::ImageFilter, xobject::XObject,
 };
 use transform::Transform;
 
@@ -255,25 +254,21 @@ impl<'a> ColorOps for PdfCanvas<'a> {
 
 impl<'a> XObjectOps for PdfCanvas<'a> {
     fn invoke_xobject(&mut self, xobject_name: &str) -> Result<(), Self::ErrorType> {
-        println!("Invoke xobject {:?}", xobject_name);
-
-        let resources = self
-            .page
-            .resources
-            .as_ref()
-            .ok_or(PdfCanvasError::MissingPageResources)?;
+        let resources = if let Some(resources) = self.current_state()?.resources {
+            resources
+        } else {
+            self.page
+                .resources
+                .as_ref()
+                .ok_or(PdfCanvasError::MissingPageResources)?
+        };
 
         if let Some(XObject::Image(image)) = resources.xobjects.get(xobject_name) {
-            if image.data.is_empty() {
-                panic!()
-            }
-
-            let smask  = if let Some(m) = image.smask.as_ref() {
+            let smask = if let Some(m) = image.smask.as_ref() {
                 Some(m.data.as_slice())
             } else {
                 None
             };
-
 
             let mat = self.current_state()?.transform.clone();
 
@@ -284,8 +279,28 @@ impl<'a> XObjectOps for PdfCanvas<'a> {
                 image.height as f32,
                 image.bits_per_component as u32,
                 &mat,
-                smask
+                smask,
             );
+        } else if let Some(XObject::Form(form)) = resources.xobjects.get(xobject_name) {
+            let form_procs = &form.content_stream.operations;
+            self.save()?;
+
+            if let Some([a, b, c, d, e, f]) = &form.matrix {
+                let form_rendering_matrix = Transform::from_row(*a, *b, *c, *d, *e, *f);
+                self.set_matrix(form_rendering_matrix)?;
+            }
+
+            if let Some(resources) = &form.resources {
+                self.current_state_mut()?.resources = Some(resources);
+            }
+
+            for op in form_procs {
+                op.call(self)?;
+            }
+
+            self.restore()?;
+        } else {
+            println!("Unknown xobject {:?}", xobject_name);
         }
         Ok(())
     }

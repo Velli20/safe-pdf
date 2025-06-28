@@ -62,6 +62,55 @@ fn to_skia_matrix(transform: &Transform) -> Matrix {
     )
 }
 
+fn get_skia_image_data(
+    image: &[u8],
+    width: usize,
+    height: usize,
+    bits_per_component: u32,
+    smask: Option<&[u8]>,
+) -> Option<(ColorType, Data)> {
+    if bits_per_component != 8 {
+        eprintln!("Unsupported bits per component: {}", bits_per_component);
+        return None;
+    }
+    let num_pixels = width * height;
+    let num_components = image.len() / num_pixels;
+    match num_components {
+        4 => {
+            if let Some(smask_data) = smask {
+                let mut modified = Vec::with_capacity(image.len());
+                for (i, rgba) in image.chunks_exact(4).enumerate() {
+                    let smask_alpha = smask_data.get(i).copied().unwrap_or(255);
+                    let new_alpha = (u16::from(rgba[3]) * u16::from(smask_alpha) / 255) as u8;
+                    modified.extend_from_slice(&[rgba[0], rgba[1], rgba[2], new_alpha]);
+                }
+                Some((ColorType::RGBA8888, Data::new_copy(&modified)))
+            } else {
+                Some((ColorType::RGBA8888, Data::new_copy(image)))
+            }
+        }
+        3 => {
+            let mut padded = Vec::with_capacity(num_pixels * 4);
+            if let Some(smask_data) = smask {
+                for (i, rgb) in image.chunks_exact(3).enumerate() {
+                    let alpha = smask_data.get(i).copied().unwrap_or(255);
+                    padded.extend_from_slice(&[rgb[0], rgb[1], rgb[2], alpha]);
+                }
+            } else {
+                for rgb in image.chunks_exact(3) {
+                    padded.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+                }
+            }
+            Some((ColorType::RGBA8888, Data::new_copy(&padded)))
+        }
+        1 => Some((ColorType::Gray8, Data::new_copy(image))),
+        _ => {
+            eprintln!("Unsupported number of components: {}", num_components);
+            None
+        }
+    }
+}
+
 impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
     fn fill_path(&mut self, path: &PdfGraphicsPath, fill_type: PdfPathFillType, color: PdfColor) {
         let mut sk_path = to_skia_path(path);
@@ -125,61 +174,22 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
         transform: &Transform,
         smask: Option<&[u8]>,
     ) {
-        println!("Draw image is_jpeg {} width {} height {}", is_jpeg, width, height);
+        if width == 0.0 || height == 0.0 {
+            return;
+        }
+
         let skia_image = if is_jpeg {
-            // Data is JPEG encoded, use from_encoded
-            SkiaImage::from_encoded(Data::new_copy(&image))
+            SkiaImage::from_encoded(Data::new_copy(image))
         } else {
-            // Assume raw pixel data (e.g., after FlateDecode or no filter)
-            if width == 0.0 || height == 0.0 {
-                return;
-            }
-
-            // A robust implementation needs to inspect the PDF's ColorSpace entry.
-            // Here, we deduce it from the number of components, assuming 8 bits per component.
-            if bits_per_component != 8 {
-                eprintln!(
-                    "Unsupported bits per component for raw image: {}",
-                    bits_per_component
-                );
-                return;
-            }
-
-            let num_components = image.len() / (width as usize * height as usize);
-            let (color_type, pixel_data) = match num_components {
-                4 => (ColorType::RGBA8888, Data::new_copy(&image)),
-                3 => {
-                    let mut it = smask.unwrap().iter();
-                    // Skia doesn't have a direct 24-bit RGB format. We convert to 32-bit RGBA.
-                    let mut padded_data = Vec::with_capacity(width as usize * height as usize * 4);
-                    for rgb in image.chunks_exact(3) {
-                        let alpha = it.next().unwrap();
-                        padded_data.extend_from_slice(&[rgb[0], rgb[1], rgb[2], *alpha]);
-                    }
-                    (ColorType::RGBA8888, Data::new_copy(&padded_data))
-                }
-                1 => (ColorType::Gray8, Data::new_copy(&image)),
-                _ => {
-                    eprintln!(
-                        "Unsupported number of components for raw image: {}",
-                        num_components
-                    );
-                    return;
-                }
-            };
-
-            println!("Num components {} color_type {:?} smask {}", num_components, color_type, smask.is_some());
-
-
-            let image_info = ImageInfo::new(
-                (width as i32, height as i32),
-                color_type,
-                AlphaType::Unpremul, // PDF images are typically unpremultiplied
-                None,
-            );
-
-            let row_bytes = width as usize * image_info.bytes_per_pixel();
-
+            let (w, h) = (width as usize, height as usize);
+            let (color_type, pixel_data) =
+                match get_skia_image_data(image, w, h, bits_per_component, smask) {
+                    Some(data) => data,
+                    None => return,
+                };
+            let image_info =
+                ImageInfo::new((w as i32, h as i32), color_type, AlphaType::Unpremul, None);
+            let row_bytes = w * image_info.bytes_per_pixel();
             skia_safe::images::raster_from_data(&image_info, pixel_data, row_bytes)
         };
 
@@ -188,8 +198,6 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
             let paint = Paint::default();
             self.canvas.save();
             self.canvas.concat(&skia_matrix);
-            // The image is defined in a 1x1 unit square in user space.
-            // let dest_rect = Rect::from_xywh(0.0, 0.0, 1.0, 1.0);
             let dest_rect = Rect::from_xywh(0.0, -1.0, 1.0, 1.0);
             self.canvas
                 .draw_image_rect(&skia_image, None, dest_rect, &paint);

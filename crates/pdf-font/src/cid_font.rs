@@ -106,25 +106,18 @@ impl FromDictionary for CharacterIdentifierFont {
         }
 
         // FontDescriptor must be an indirect reference according to the PDF spec.
-        let descriptor = match dictionary.get("FontDescriptor") {
-            Some(obj_var_box) => match obj_var_box.as_ref() {
-                ObjectVariant::Reference(obj_num) => {
-                    let desc_dict = objects
-                        .get_dictionary(*obj_num)
-                        .ok_or_else(|| CidFontError::InvalidFontDescriptorReference(*obj_num))?;
-                    FontDescriptor::from_dictionary(desc_dict.as_ref(), objects)
-                        .map_err(CidFontError::FontDescriptorError)?
+        let descriptor = if let Some(obj) = dictionary.get("FontDescriptor") {
+            let desc_dict = objects.get_dictionary(obj.as_ref()).ok_or_else(|| {
+                CidFontError::InvalidEntryType {
+                    entry_name: "FontDescriptor",
+                    expected_type: "Indirect Reference",
+                    found_type: obj.name(),
                 }
-                other => {
-                    // FontDescriptor is present, but not an indirect reference as required.
-                    return Err(CidFontError::InvalidEntryType {
-                        entry_name: "FontDescriptor",
-                        expected_type: "Indirect Reference",
-                        found_type: other.name(),
-                    });
-                }
-            },
-            None => return Err(CidFontError::MissingFontDescriptor),
+            })?;
+            FontDescriptor::from_dictionary(desc_dict.as_ref(), objects)
+                .map_err(CidFontError::FontDescriptorError)?
+        } else {
+            return Err(CidFontError::MissingFontDescriptor);
         };
 
         Ok(Self {

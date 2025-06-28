@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::{
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateError},
-    image::{ImageXObjectError, XObject},
+    xobject::{XObject, XObjectError, XObjectReader},
 };
 
 pub struct Resources {
@@ -58,8 +58,8 @@ pub enum ResourcesError {
     #[error("External Graphics State parsing error: {0}")]
     ExternalGraphicsStateError(#[from] ExternalGraphicsStateError),
 
-    #[error("Image XObject parsing error: {0}")]
-    ImageXObjectError(#[from] ImageXObjectError),
+    #[error("XObject parsing error: {0}")]
+    XObjectError(#[from] XObjectError),
 }
 
 impl FromDictionary for Resources {
@@ -75,38 +75,17 @@ impl FromDictionary for Resources {
             return Ok(None);
         };
 
-        let resources = match resources.as_ref() {
-            ObjectVariant::Dictionary(dict) => dict.clone(),
-            ObjectVariant::Reference(num) => {
-                let dict = objects.get_dictionary(*num).ok_or_else(|| {
-                    ResourcesError::FailedResolveResourcesObjectReference { obj_num: *num }
-                })?;
-                dict
-            }
-            _ => return Ok(None),
-        };
+        let resources = objects
+            .get_dictionary(resources.as_ref())
+            .ok_or_else(|| ResourcesError::FailedResolveResourcesObjectReference { obj_num: 0 })?;
 
         let mut fonts = HashMap::new();
 
         // Process `/Font` entries.
         if let Some(font_dictionary) = resources.get_dictionary(Font::KEY) {
             for (name, v) in &font_dictionary.dictionary {
-                // According to PDF spec, font resource entries must be indirect references.
-                let font_obj_num = match v.as_ref() {
-                    ObjectVariant::Reference(num) => *num,
-                    other => {
-                        return Err(ResourcesError::UnexpectedFontEntryType {
-                            font_name: name.clone(),
-                            expected_type: "IndirectObjectReference",
-                            found_type: other.name(),
-                        });
-                    }
-                };
-
-                let font_dict = objects.get_dictionary(font_obj_num).ok_or_else(|| {
-                    ResourcesError::FailedResolveFontObjectReference {
-                        obj_num: font_obj_num,
-                    }
+                let font_dict = objects.get_dictionary(v).ok_or_else(|| {
+                    ResourcesError::FailedResolveFontObjectReference { obj_num: 0 }
                 })?;
 
                 fonts.insert(
@@ -122,23 +101,9 @@ impl FromDictionary for Resources {
         if let Some(eg) = resources.get_dictionary("ExtGState") {
             for (name, v) in &eg.dictionary {
                 // Value can be a direct dictionary or an indirect reference to one.
-                let v = match v.as_ref() {
-                    ObjectVariant::Reference(number) => {
-                        objects.get_dictionary(*number).ok_or_else(|| {
-                            ResourcesError::FailedResolveExternalGraphicsStateObjectReference {
-                                obj_num: *number,
-                            }
-                        })?
-                    }
-                    ObjectVariant::Dictionary(obj) => obj.clone(),
-                    other => {
-                        return Err(ResourcesError::UnexpectedExtGStateEntryType {
-                            entry_name: name.clone(),
-                            expected_type: "Dictionary or IndirectObjectReference",
-                            found_type: other.name(),
-                        });
-                    }
-                };
+                let v = objects.get_dictionary(v.as_ref()).ok_or_else(|| {
+                    ResourcesError::FailedResolveExternalGraphicsStateObjectReference { obj_num: 0 }
+                })?;
 
                 external_graphics_states.insert(
                     name.to_owned(),
@@ -178,7 +143,7 @@ impl FromDictionary for Resources {
 
                 xobjects.insert(
                     name.to_owned(),
-                    XObject::from_dictionary_and_stream(&obj_dict, stream_data, objects)?,
+                    XObject::read_xobject(&obj_dict, stream_data.as_slice(), objects)?,
                 );
             }
         }
