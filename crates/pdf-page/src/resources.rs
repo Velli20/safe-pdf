@@ -2,8 +2,7 @@ use std::collections::HashMap;
 
 use pdf_font::font::{Font, FontError};
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection,
-    traits::FromDictionary,
+    dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
 };
 use thiserror::Error;
 
@@ -21,53 +20,20 @@ pub struct Resources {
 /// Defines errors that can occur while reading Resources object.
 #[derive(Debug, Error)]
 pub enum ResourcesError {
-    #[error(
-        "Unexpected object type in `/Fonts` dictionary: expected 'Object' or 'ObjectReference', found '{found_type}'"
-    )]
-    UnexpectedObjectTypeInFonts { found_type: &'static str },
-
-    #[error(
-        "Unexpected object type in `/Fonts` dictionary: expected 'Object' or 'ObjectReference', found '{found_type}'"
-    )]
-    UnexpectedFontEntryType {
-        font_name: String,
-        expected_type: &'static str,
-        found_type: &'static str,
-    },
-    #[error(
-        "Unexpected type for ExtGState entry '{entry_name}': expected {expected_type}, found {found_type}"
-    )]
-    UnexpectedExtGStateEntryType {
-        entry_name: String,
-        expected_type: &'static str,
-        found_type: &'static str,
-    },
-
     #[error("Failed to resolve /Resources dictionary object reference")]
     FailedResolveResourcesObjectReference,
-
-    #[error("Failed to resolve font object reference {obj_num}")]
-    FailedResolveFontObjectReference { obj_num: i32 },
-
-    #[error("Failed to resolve stream object reference {obj_num}")]
-    FailedResolveStreamObjectReference { obj_num: i32 },
-
+    #[error("Failed to resolve font object reference for font '{font_name}' (object {obj_num})")]
+    FailedResolveFontObjectReference { font_name: String, obj_num: i32 },
+    #[error("Failed to resolve stream object reference ")]
+    FailedResolveStreamObjectReference,
     #[error("Failed to resolve external graphics state object reference {obj_num}")]
     FailedResolveExternalGraphicsStateObjectReference { obj_num: i32 },
-
     #[error("Error processing font: {0}")]
     FontError(#[from] FontError),
-
     #[error("External Graphics State parsing error: {0}")]
     ExternalGraphicsStateError(#[from] ExternalGraphicsStateError),
-
     #[error("XObject parsing error: {0}")]
     XObjectError(#[from] XObjectError),
-
-    #[error(
-        "Invalid entry in `/Resources` dictionary: expected an indirect object reference, found {found_type}"
-    )]
-    InvalidEntryType { found_type: &'static str },
 }
 
 impl FromDictionary for Resources {
@@ -85,7 +51,7 @@ impl FromDictionary for Resources {
 
         // Resolve the actual `/Resources` dictionary.
         let resources = objects
-            .get_dictionary(resources.as_ref())
+            .resolve_dictionary(resources.as_ref())
             .ok_or_else(|| ResourcesError::FailedResolveResourcesObjectReference)?;
 
         let mut fonts = HashMap::new();
@@ -94,15 +60,15 @@ impl FromDictionary for Resources {
         if let Some(font_dictionary) = resources.get_dictionary(Font::KEY) {
             for (name, v) in &font_dictionary.dictionary {
                 // Each font value should be a dictionary or reference to one.
-                let font_dict = objects.get_dictionary(v).ok_or_else(|| {
-                    ResourcesError::FailedResolveFontObjectReference { obj_num: 0 }
+                let font_dict = objects.resolve_dictionary(v).ok_or_else(|| {
+                    ResourcesError::FailedResolveFontObjectReference {
+                        font_name: name.clone(),
+                        obj_num: v.as_object_number().unwrap_or(0),
+                    }
                 })?;
 
                 // Parse the font and insert it into the fonts map.
-                fonts.insert(
-                    name.to_owned(),
-                    Font::from_dictionary(font_dict.as_ref(), objects)?,
-                );
+                fonts.insert(name.to_owned(), Font::from_dictionary(font_dict, objects)?);
             }
         }
 
@@ -112,13 +78,15 @@ impl FromDictionary for Resources {
         if let Some(eg) = resources.get_dictionary("ExtGState") {
             for (name, v) in &eg.dictionary {
                 // Each value can be a direct dictionary or an indirect reference to one.
-                let v = objects.get_dictionary(v.as_ref()).ok_or_else(|| {
-                    ResourcesError::FailedResolveExternalGraphicsStateObjectReference { obj_num: 0 }
+                let dictionary = objects.resolve_dictionary(v.as_ref()).ok_or_else(|| {
+                    ResourcesError::FailedResolveExternalGraphicsStateObjectReference {
+                        obj_num: v.as_object_number().unwrap_or(0),
+                    }
                 })?;
                 // Parse the external graphics state and insert it into the map.
                 external_graphics_states.insert(
                     name.to_owned(),
-                    ExternalGraphicsState::from_dictionary(v.as_ref(), objects)?,
+                    ExternalGraphicsState::from_dictionary(dictionary, objects)?,
                 );
             }
         }
@@ -128,32 +96,18 @@ impl FromDictionary for Resources {
         // Process `/XObject` entries
         if let Some(xobject_dict) = resources.get_dictionary("XObject") {
             for (name, v) in &xobject_dict.dictionary {
-                let (obj_dict, stream_data) = match v.as_ref() {
-                    ObjectVariant::Reference(number) => {
-                        let resolved_obj = objects.get(*number).ok_or_else(|| {
-                            ResourcesError::FailedResolveStreamObjectReference { obj_num: *number }
-                        })?;
-                        match resolved_obj {
-                            ObjectVariant::Stream(s) => (s.dictionary.clone(), s.data.clone()),
-                            _ => {
-                                return Err(ResourcesError::UnexpectedObjectTypeInFonts {
-                                    found_type: resolved_obj.name(),
-                                });
-                            }
-                        }
-                    }
-                    ObjectVariant::Stream(s) => (s.dictionary.clone(), s.data.clone()),
-                    _ => {
-                        return Err(ResourcesError::UnexpectedObjectTypeInFonts {
-                            found_type: v.name(),
-                        });
-                    }
-                };
+                let stream_object = objects
+                    .resolve_stream(v.as_ref())
+                    .ok_or(ResourcesError::FailedResolveStreamObjectReference)?;
 
                 // Parse the XObject and insert it into the map.
                 xobjects.insert(
                     name.to_owned(),
-                    XObject::read_xobject(&obj_dict, stream_data.as_slice(), objects)?,
+                    XObject::read_xobject(
+                        &stream_object.dictionary,
+                        &stream_object.data.as_slice(),
+                        objects,
+                    )?,
                 );
             }
         }

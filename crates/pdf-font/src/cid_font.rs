@@ -1,5 +1,5 @@
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     traits::FromDictionary,
 };
 
@@ -53,12 +53,10 @@ pub enum CidFontError {
         expected_type: &'static str,
         found_type: &'static str,
     },
-    /// Indicates that a specific CIDFont subtype is not supported by the parser.
     #[error(
         "Unsupported CIDFont subtype '{subtype}': Only /CIDFontType2 (TrueType-based) is supported. /CIDFontType0 (Type1-based) is not supported."
     )]
     UnsupportedCidFontSubtype { subtype: String },
-    /// Error converting a PDF value to a number.
     #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
     NumericConversionError {
         entry_description: &'static str,
@@ -107,14 +105,14 @@ impl FromDictionary for CharacterIdentifierFont {
 
         // FontDescriptor must be an indirect reference according to the PDF spec.
         let descriptor = if let Some(obj) = dictionary.get("FontDescriptor") {
-            let desc_dict = objects.get_dictionary(obj.as_ref()).ok_or_else(|| {
+            let desc_dict = objects.resolve_dictionary(obj.as_ref()).ok_or_else(|| {
                 CidFontError::InvalidEntryType {
                     entry_name: "FontDescriptor",
                     expected_type: "Indirect Reference",
                     found_type: obj.name(),
                 }
             })?;
-            FontDescriptor::from_dictionary(desc_dict.as_ref(), objects)
+            FontDescriptor::from_dictionary(desc_dict, objects)
                 .map_err(CidFontError::FontDescriptorError)?
         } else {
             return Err(CidFontError::MissingFontDescriptor);

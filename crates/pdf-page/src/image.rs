@@ -116,6 +116,8 @@ impl XObjectReader for ImageXObject {
         stream_data: &[u8],
         objects: &ObjectCollection,
     ) -> Result<Self, Self::ErrorType> {
+        // Helper closure to extract a required u32 value from the dictionary,
+        // returning a descriptive error if the key is missing or not a valid number.
         let get_required_u32 = |key: &'static str| -> Result<u32, ImageXObjectError> {
             dictionary
                 .get(key)
@@ -127,68 +129,44 @@ impl XObjectReader for ImageXObject {
                 })
         };
 
+        // Extract required image properties from the dictionary.
         let width = get_required_u32("Width")?;
         let height = get_required_u32("Height")?;
         let bits_per_component = get_required_u32("BitsPerComponent")?;
 
+        // Parse the optional `/Filter` entry, if present, and check for unsupported filters.
         let filter = dictionary.get_string("Filter").map(ImageFilter::from_name);
         if let Some(ImageFilter::Unsupported(name)) = &filter {
-            eprintln!("Warning: Unsupported Filter for ImageXObject: {}", name);
-            // return Err(ImageXObjectError::UnsupportedFilter { name: name.clone() });
+            return Err(ImageXObjectError::UnsupportedFilter { name: name.clone() });
         }
 
-        let smask = match dictionary.get("SMask") {
-            Some(smask_obj) => {
-                let smask_xobject = match smask_obj.as_ref() {
-                    ObjectVariant::Reference(obj_num) => {
-                        let resolved_obj =
-                            objects
-                                .get(*obj_num)
-                                .ok_or(ImageXObjectError::ResolveError {
-                                    entry_name: "SMask",
-                                    obj_num: *obj_num,
-                                })?;
+        // Handle the optional `/SMask` entry, which provides a soft mask for transparency.
+        // If present, resolve the referenced object and ensure it is an Image XObject.
+        let smask = if let Some(smask_obj) = dictionary.get("SMask") {
+            let smask_xobject =
+                objects
+                    .resolve_stream(&smask_obj)
+                    .ok_or(ImageXObjectError::ResolveError {
+                        entry_name: "SMask",
+                        obj_num: 0,
+                    })?;
 
-                        match resolved_obj {
-                            ObjectVariant::Stream(s) => Some(
-                                XObject::read_xobject(&s.dictionary, s.data.as_slice(), objects)
-                                    .map_err(|e| ImageXObjectError::SMaskReadError {
-                                        source: Box::new(e),
-                                    })?,
-                            ),
-                            _ => {
-                                return Err(ImageXObjectError::InvalidEntryType {
-                                    entry_name: "SMask",
-                                    expected_type: "Stream or Reference to Stream",
-                                    found_type: resolved_obj.name(),
-                                });
-                            }
-                        }
-                    }
-                    ObjectVariant::Stream(s) => Some(
-                        XObject::read_xobject(&s.dictionary, s.data.as_slice(), objects).map_err(
-                            |e| ImageXObjectError::SMaskReadError {
-                                source: Box::new(e),
-                            },
-                        )?,
-                    ),
-                    ObjectVariant::Name(name) if name == "None" => None,
-                    other => {
-                        return Err(ImageXObjectError::InvalidEntryType {
-                            entry_name: "SMask",
-                            expected_type: "Stream, Reference, or Name 'None'",
-                            found_type: other.name(),
-                        });
-                    }
-                };
-
-                match smask_xobject {
-                    Some(XObject::Image(img)) => Some(Box::new(img)),
-                    Some(_) => return Err(ImageXObjectError::SMaskNotImage),
-                    None => None,
-                }
+            // Recursively read the SMask as an XObject.
+            let smask = XObject::read_xobject(
+                &smask_xobject.dictionary,
+                smask_xobject.data.as_slice(),
+                objects,
+            )
+            .map_err(|e| ImageXObjectError::SMaskReadError {
+                source: Box::new(e),
+            })?;
+            // Ensure the SMask is actually an image.
+            match smask {
+                XObject::Image(img) => Some(Box::new(img)),
+                _ => return Err(ImageXObjectError::SMaskNotImage),
             }
-            None => None,
+        } else {
+            None
         };
 
         Ok(Self {

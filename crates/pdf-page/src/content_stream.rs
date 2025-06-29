@@ -39,29 +39,12 @@ fn process_content_stream_array(
 ) -> Result<Vec<PdfOperatorVariant>, ContentStreamReadError> {
     let mut concatenated_ops = Vec::new();
     for value_in_array in array.iter() {
-        let stream_ops = match value_in_array {
-            ObjectVariant::Reference(indirect_ref) => {
-                let stream_obj = objects.get(*indirect_ref).ok_or_else(|| {
-                    ContentStreamReadError::FailedToResolveReference {
-                        obj_num: *indirect_ref,
-                    }
-                })?;
-                // Expect this resolved object to be a stream
-                if let ObjectVariant::Stream(s) = stream_obj {
-                    PdfOperatorVariant::from(s.data.as_slice())?
-                } else {
-                    return Err(ContentStreamReadError::ExpectedStreamInArray);
-                }
-            }
-            ObjectVariant::Stream(direct_stream_val) => {
-                PdfOperatorVariant::from(direct_stream_val.data.as_slice())?
-            }
-            other => {
-                return Err(ContentStreamReadError::UnsupportedEntryTypeInArray {
-                    found_type: other.name(),
-                });
-            }
-        };
+        let stream = objects.resolve_stream(value_in_array).ok_or(
+            ContentStreamReadError::FailedToResolveReference {
+                obj_num: value_in_array.to_object_number().unwrap_or(0),
+            },
+        )?;
+        let stream_ops = PdfOperatorVariant::from(stream.data.as_slice())?;
         concatenated_ops.extend(stream_ops);
     }
     Ok(concatenated_ops)

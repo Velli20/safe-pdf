@@ -48,6 +48,15 @@ impl ObjectVariant {
         }
     }
 
+    pub fn to_object_number(&self) -> Option<i32> {
+        match self {
+            ObjectVariant::IndirectObject(o) => Some(o.object_number),
+            ObjectVariant::Reference(o) => Some(*o),
+            ObjectVariant::Stream(o) => Some(o.object_number),
+            _ => None,
+        }
+    }
+
     pub fn as_dictionary(&self) -> Option<&Rc<Dictionary>> {
         match self {
             ObjectVariant::Dictionary(value) => Some(value),
@@ -81,15 +90,6 @@ impl ObjectVariant {
     pub fn as_boolean(&self) -> Option<bool> {
         match self {
             ObjectVariant::Boolean(value) => Some(*value),
-            _ => None,
-        }
-    }
-
-    pub fn to_object_number(&self) -> Option<i32> {
-        match self {
-            ObjectVariant::IndirectObject(o) => Some(o.object_number),
-            ObjectVariant::Reference(o) => Some(*o),
-            ObjectVariant::Stream(o) => Some(o.object_number),
             _ => None,
         }
     }

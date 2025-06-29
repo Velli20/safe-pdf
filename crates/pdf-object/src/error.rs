@@ -15,4 +15,6 @@ pub enum ObjectError {
     /// to a different numeric type (e.g., when `TryFrom` fails).
     #[error("Failed to convert number to the requested type")]
     NumberConversionError,
+    #[error("Failed to resolve an object reference {obj_num}")]
+    FailedResolveObjectReference { obj_num: i32 },
 }

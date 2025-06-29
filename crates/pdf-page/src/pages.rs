@@ -8,31 +8,20 @@ use thiserror::Error;
 /// Errors that can occur during parsing of a PDF Pages object.
 #[derive(Error, Debug)]
 pub enum PdfPagesError {
-    /// Missing required `/Kids` array.
     #[error("Missing required `/Kids` array in Pages object")]
     MissingKidsArray,
-
-    /// An entry in the `/Kids` array was not an indirect object reference as expected.
     #[error(
         "Invalid entry in `/Kids` array: expected an indirect object reference, found {found_type}"
     )]
     InvalidKidEntry { found_type: &'static str },
-
-    /// A page object referenced in `/Kids` array could not be found or is not a dictionary.
     #[error("Page object with number {obj_num} not found or is not a dictionary")]
     PageObjectNotFound { obj_num: i32 },
-
-    /// A page or pages dictionary within the `/Kids` array is missing the required `/Type` entry.
     #[error("Missing required `/Type` entry in dictionary for object {obj_num}")]
     MissingTypeEntryInKid { obj_num: i32 },
-
-    /// An object referenced in `/Kids` array has an unexpected `/Type`.
     #[error(
         "Unexpected object type in `/Kids` array for object {obj_num}: expected 'Page' or 'Pages', found '{found_type}'"
     )]
     UnexpectedObjectTypeInKids { obj_num: i32, found_type: String },
-
-    /// An error occurred while processing a child `PdfPage` object.
     #[error("Error processing child Page object (obj {obj_num}): {source}")]
     PageProcessingError {
         obj_num: i32,
@@ -78,7 +67,7 @@ impl FromDictionary for PdfPages {
 
             // Resolve the indirect reference to get the child's dictionary.
             let kid_dict = objects
-                .get_dictionary(value)
+                .resolve_dictionary(value)
                 .ok_or(PdfPagesError::PageObjectNotFound { obj_num })?;
 
             // Determine the type of the child object by reading its `/Type` entry.
@@ -88,7 +77,7 @@ impl FromDictionary for PdfPages {
 
             // If the child is a leaf node (`/Type /Page`), parse it as a `PdfPage`.
             if object_type == PdfPage::KEY {
-                let page = PdfPage::from_dictionary(kid_dict.as_ref(), objects).map_err(|err| {
+                let page = PdfPage::from_dictionary(kid_dict, objects).map_err(|err| {
                     PdfPagesError::PageProcessingError {
                         obj_num,
                         source: err,
@@ -98,7 +87,7 @@ impl FromDictionary for PdfPages {
             } else if object_type == Self::KEY {
                 // If the child is another branch node (`/Type /Pages`), recursively call this
                 // function to process its children and extend our list of pages.
-                let pages_obj = PdfPages::from_dictionary(kid_dict.as_ref(), objects)?;
+                let pages_obj = PdfPages::from_dictionary(kid_dict, objects)?;
                 pages.extend(pages_obj.pages);
             } else {
                 // If the child has an unexpected type, return an error.
