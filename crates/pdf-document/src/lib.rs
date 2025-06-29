@@ -62,18 +62,19 @@ impl PdfDocument {
             .get("Root")
             .ok_or(PdfError::MissingRoot)?;
 
-        // Get the catalog.
+        // Get the catalog. TODO: Err
         let catalog = objects
             .resolve_dictionary(root)
-            .ok_or(PdfError::MissingCatalog)?
+            .map_err(|_| PdfError::MissingCatalog)?
             .clone();
 
         // Get the `Pages` object reference from the catalog, which defines the order of the pages in the document.
         let pages_num = catalog.get("Pages").unwrap();
 
+        // TODO: Err
         let pages_dict = objects
             .resolve_dictionary(pages_num)
-            .ok_or(PdfError::MissingPages)?
+            .map_err(|_| PdfError::MissingPages)?
             .clone();
 
         let pages = PdfPages::from_dictionary(&pages_dict, &objects).unwrap();

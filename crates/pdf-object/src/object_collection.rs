@@ -32,9 +32,9 @@ impl ObjectCollection {
 
     pub fn resolve_object<'a>(
         &'a self,
-        v: &'a ObjectVariant,
+        obj: &'a ObjectVariant,
     ) -> Result<&'a ObjectVariant, ObjectError> {
-        let mut current_obj = v;
+        let mut current_obj = obj;
 
         for _ in 0..Self::MAX_DEREF {
             match current_obj {
@@ -47,31 +47,50 @@ impl ObjectCollection {
                         });
                     }
                 }
+
                 other => return Ok(other),
             }
         }
 
-        Ok(v)
+        Ok(obj)
     }
 
-    pub fn resolve_dictionary<'a>(&'a self, v: &'a ObjectVariant) -> Option<&'a Dictionary> {
-        let mut current_obj = v;
-
-        for _ in 0..Self::MAX_DEREF {
-            match current_obj {
-                ObjectVariant::Dictionary(dict) => return Some(dict.as_ref()),
-                ObjectVariant::Reference(object_number) => {
-                    current_obj = self.map.get(object_number)?;
+    /// Resolves a PDF object to a `Dictionary`.
+    ///
+    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
+    /// into a `Dictionary`.
+    ///
+    /// # Arguments
+    ///
+    /// - `obj`: A reference to the `ObjectVariant` to resolve.
+    ///
+    /// # Returns
+    ///
+    /// `Dictionary` if the object can be successfully resolved to a stream
+    /// or `Err` if the object is not a stream or if an indirect reference cannot be
+    /// resolved.
+    pub fn resolve_dictionary<'a>(
+        &'a self,
+        obj: &'a ObjectVariant,
+    ) -> Result<&'a Dictionary, ObjectError> {
+        match self.resolve_object(obj)? {
+            ObjectVariant::Dictionary(dict) => return Ok(dict.as_ref()),
+            ObjectVariant::Stream(s) => return Ok(s.dictionary.as_ref()),
+            ObjectVariant::IndirectObject(inner) => {
+                if let Some(ObjectVariant::Dictionary(obj)) = inner.object.as_ref() {
+                    return Ok(obj.as_ref());
+                } else {
+                    return Err(ObjectError::FailedResolveDictionaryObject {
+                        resolved_type: "IndirectObject",
+                    });
                 }
-                ObjectVariant::IndirectObject(inner) => {
-                    current_obj = inner.object.as_ref()?;
-                }
-                ObjectVariant::Stream(s) => return Some(s.dictionary.as_ref()),
-                _ => return None,
+            }
+            other => {
+                return Err(ObjectError::FailedResolveDictionaryObject {
+                    resolved_type: other.name(),
+                });
             }
         }
-
-        None
     }
 
     /// Resolves a PDF object to a `StreamObject`.
@@ -79,31 +98,35 @@ impl ObjectCollection {
     /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
     /// into a `StreamObject`.
     ///
-    /// To prevent infinite loops from circular references, the function will only
-    /// dereference up to a fixed limit (`MAX_DEREF`).
-    ///
     /// # Arguments
     ///
-    /// - `v`: A reference to the `ObjectVariant` to resolve.
+    /// - `obj`: A reference to the `ObjectVariant` to resolve.
     ///
     /// # Returns
     ///
     /// `StreamObject` if the object can be successfully resolved to a stream
-    /// or `None` if the object is not a stream, if an indirect reference cannot be
+    /// or `Err` if the object is not a stream or if an indirect reference cannot be
     /// resolved.
-    pub fn resolve_stream<'a>(&'a self, v: &'a ObjectVariant) -> Option<&'a StreamObject> {
-        let mut current_obj = v;
-
-        for _ in 0..Self::MAX_DEREF {
-            match current_obj {
-                ObjectVariant::Reference(object_number) => {
-                    current_obj = self.map.get(object_number)?;
+    pub fn resolve_stream<'a>(
+        &'a self,
+        obj: &'a ObjectVariant,
+    ) -> Result<&'a StreamObject, ObjectError> {
+        match self.resolve_object(obj)? {
+            ObjectVariant::Stream(s) => return Ok(s.as_ref()),
+            ObjectVariant::IndirectObject(inner) => {
+                if let Some(ObjectVariant::Stream(s)) = inner.object.as_ref() {
+                    return Ok(s.as_ref());
+                } else {
+                    return Err(ObjectError::FailedResolveStreamObject {
+                        resolved_type: "IndirectObject",
+                    });
                 }
-                ObjectVariant::Stream(s) => return Some(s.as_ref()),
-                _ => return None,
+            }
+            other => {
+                return Err(ObjectError::FailedResolveStreamObject {
+                    resolved_type: other.name(),
+                });
             }
         }
-
-        None
     }
 }

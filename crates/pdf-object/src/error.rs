@@ -17,4 +17,8 @@ pub enum ObjectError {
     NumberConversionError,
     #[error("Failed to resolve an object reference {obj_num}")]
     FailedResolveObjectReference { obj_num: i32 },
+    #[error("Failed to resolve an object to a dictionary, but found type '{resolved_type}'")]
+    FailedResolveDictionaryObject { resolved_type: &'static str },
+    #[error("Failed to resolve an object to a stream, but found type '{resolved_type}'")]
+    FailedResolveStreamObject { resolved_type: &'static str },
 }

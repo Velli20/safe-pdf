@@ -1,4 +1,4 @@
-use pdf_object::{ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection};
+use pdf_object::{dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection};
 use thiserror::Error;
 
 use crate::xobject::{XObject, XObjectError, XObjectReader};
@@ -37,6 +37,8 @@ pub enum ImageXObjectError {
         #[from]
         source: Box<XObjectError>,
     },
+    #[error("Object error: {0}")]
+    ObjectError(#[from] ObjectError),
 }
 
 #[derive(Debug)]
@@ -143,13 +145,7 @@ impl XObjectReader for ImageXObject {
         // Handle the optional `/SMask` entry, which provides a soft mask for transparency.
         // If present, resolve the referenced object and ensure it is an Image XObject.
         let smask = if let Some(smask_obj) = dictionary.get("SMask") {
-            let smask_xobject =
-                objects
-                    .resolve_stream(&smask_obj)
-                    .ok_or(ImageXObjectError::ResolveError {
-                        entry_name: "SMask",
-                        obj_num: 0,
-                    })?;
+            let smask_xobject = objects.resolve_stream(&smask_obj)?;
 
             // Recursively read the SMask as an XObject.
             let smask = XObject::read_xobject(

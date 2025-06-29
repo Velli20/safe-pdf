@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use pdf_font::font::{Font, FontError};
 use pdf_object::{
-    dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
+    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    traits::FromDictionary,
 };
 use thiserror::Error;
 
@@ -20,20 +21,14 @@ pub struct Resources {
 /// Defines errors that can occur while reading Resources object.
 #[derive(Debug, Error)]
 pub enum ResourcesError {
-    #[error("Failed to resolve /Resources dictionary object reference")]
-    FailedResolveResourcesObjectReference,
-    #[error("Failed to resolve font object reference for font '{font_name}' (object {obj_num})")]
-    FailedResolveFontObjectReference { font_name: String, obj_num: i32 },
-    #[error("Failed to resolve stream object reference ")]
-    FailedResolveStreamObjectReference,
-    #[error("Failed to resolve external graphics state object reference {obj_num}")]
-    FailedResolveExternalGraphicsStateObjectReference { obj_num: i32 },
     #[error("Error processing font: {0}")]
     FontError(#[from] FontError),
     #[error("External Graphics State parsing error: {0}")]
     ExternalGraphicsStateError(#[from] ExternalGraphicsStateError),
     #[error("XObject parsing error: {0}")]
     XObjectError(#[from] XObjectError),
+    #[error("{0}")]
+    ObjectError(#[from] ObjectError),
 }
 
 impl FromDictionary for Resources {
@@ -50,9 +45,7 @@ impl FromDictionary for Resources {
         };
 
         // Resolve the actual `/Resources` dictionary.
-        let resources = objects
-            .resolve_dictionary(resources.as_ref())
-            .ok_or_else(|| ResourcesError::FailedResolveResourcesObjectReference)?;
+        let resources = objects.resolve_dictionary(resources.as_ref())?;
 
         let mut fonts = HashMap::new();
 
@@ -60,12 +53,7 @@ impl FromDictionary for Resources {
         if let Some(font_dictionary) = resources.get_dictionary(Font::KEY) {
             for (name, v) in &font_dictionary.dictionary {
                 // Each font value should be a dictionary or reference to one.
-                let font_dict = objects.resolve_dictionary(v).ok_or_else(|| {
-                    ResourcesError::FailedResolveFontObjectReference {
-                        font_name: name.clone(),
-                        obj_num: v.as_object_number().unwrap_or(0),
-                    }
-                })?;
+                let font_dict = objects.resolve_dictionary(v)?;
 
                 // Parse the font and insert it into the fonts map.
                 fonts.insert(name.to_owned(), Font::from_dictionary(font_dict, objects)?);
@@ -78,11 +66,7 @@ impl FromDictionary for Resources {
         if let Some(eg) = resources.get_dictionary("ExtGState") {
             for (name, v) in &eg.dictionary {
                 // Each value can be a direct dictionary or an indirect reference to one.
-                let dictionary = objects.resolve_dictionary(v.as_ref()).ok_or_else(|| {
-                    ResourcesError::FailedResolveExternalGraphicsStateObjectReference {
-                        obj_num: v.as_object_number().unwrap_or(0),
-                    }
-                })?;
+                let dictionary = objects.resolve_dictionary(v.as_ref())?;
                 // Parse the external graphics state and insert it into the map.
                 external_graphics_states.insert(
                     name.to_owned(),
@@ -96,9 +80,7 @@ impl FromDictionary for Resources {
         // Process `/XObject` entries
         if let Some(xobject_dict) = resources.get_dictionary("XObject") {
             for (name, v) in &xobject_dict.dictionary {
-                let stream_object = objects
-                    .resolve_stream(v.as_ref())
-                    .ok_or(ResourcesError::FailedResolveStreamObjectReference)?;
+                let stream_object = objects.resolve_stream(v.as_ref())?;
 
                 // Parse the XObject and insert it into the map.
                 xobjects.insert(

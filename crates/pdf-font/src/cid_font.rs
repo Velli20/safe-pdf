@@ -37,6 +37,8 @@ pub enum CidFontError {
     MissingFontDescriptor,
     #[error("FontDescriptor parsing error: {0}")]
     FontDescriptorError(#[from] FontDescriptorError),
+    #[error("{0}")]
+    ObjectError(#[from] ObjectError),
     #[error("GlyphWidthsMap parsing error: {0}")]
     GlyphWidthsMapError(#[from] GlyphWidthsMapError),
     #[error("Missing /Subtype entry in CIDFont dictionary")]
@@ -105,13 +107,8 @@ impl FromDictionary for CharacterIdentifierFont {
 
         // FontDescriptor must be an indirect reference according to the PDF spec.
         let descriptor = if let Some(obj) = dictionary.get("FontDescriptor") {
-            let desc_dict = objects.resolve_dictionary(obj.as_ref()).ok_or_else(|| {
-                CidFontError::InvalidEntryType {
-                    entry_name: "FontDescriptor",
-                    expected_type: "Indirect Reference",
-                    found_type: obj.name(),
-                }
-            })?;
+            let desc_dict = objects.resolve_dictionary(obj.as_ref())?;
+            // TODO: Err
             FontDescriptor::from_dictionary(desc_dict, objects)
                 .map_err(CidFontError::FontDescriptorError)?
         } else {

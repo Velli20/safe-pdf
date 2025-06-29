@@ -1,6 +1,6 @@
 use pdf_content_stream::{error::PdfOperatorError, pdf_operator::PdfOperatorVariant};
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     traits::FromDictionary,
 };
 use thiserror::Error;
@@ -16,6 +16,8 @@ pub enum ContentStreamReadError {
     FailedToResolveReference { obj_num: i32 },
     #[error("Error parsing content stream operators: {0}")]
     ContentStreamError(#[from] PdfOperatorError),
+    #[error("{0}")]
+    ObjectError(#[from] ObjectError),
     #[error("Unsupported entry type in Content Stream array: '{found_type}'")]
     UnsupportedEntryTypeInArray { found_type: &'static str },
     #[error("Expected a Stream object in Content Stream array, found other type")]
@@ -39,11 +41,7 @@ fn process_content_stream_array(
 ) -> Result<Vec<PdfOperatorVariant>, ContentStreamReadError> {
     let mut concatenated_ops = Vec::new();
     for value_in_array in array.iter() {
-        let stream = objects.resolve_stream(value_in_array).ok_or(
-            ContentStreamReadError::FailedToResolveReference {
-                obj_num: value_in_array.to_object_number().unwrap_or(0),
-            },
-        )?;
+        let stream = objects.resolve_stream(value_in_array)?;
         let stream_ops = PdfOperatorVariant::from(stream.data.as_slice())?;
         concatenated_ops.extend(stream_ops);
     }

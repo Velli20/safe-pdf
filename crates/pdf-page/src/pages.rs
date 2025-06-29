@@ -1,6 +1,7 @@
-use crate::page::{PdfPage, PdfPageError}; // Import PdfPageError
+use crate::page::{PdfPage, PdfPageError};
 use pdf_object::{
-    dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
+    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    traits::FromDictionary,
 };
 
 use thiserror::Error;
@@ -28,6 +29,8 @@ pub enum PdfPagesError {
         #[source]
         source: PdfPageError,
     },
+    #[error("{0}")]
+    ObjectError(#[from] ObjectError),
 }
 
 pub struct PdfPages {
@@ -66,9 +69,7 @@ impl FromDictionary for PdfPages {
                 })?;
 
             // Resolve the indirect reference to get the child's dictionary.
-            let kid_dict = objects
-                .resolve_dictionary(value)
-                .ok_or(PdfPagesError::PageObjectNotFound { obj_num })?;
+            let kid_dict = objects.resolve_dictionary(value)?;
 
             // Determine the type of the child object by reading its `/Type` entry.
             let object_type = kid_dict
