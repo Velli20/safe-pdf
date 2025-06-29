@@ -29,22 +29,23 @@ impl ObjectCollection {
     }
 
     pub fn get_dictionary(&self, v: &ObjectVariant) -> Option<Rc<Dictionary>> {
-        match v {
-            ObjectVariant::Dictionary(dict) => Some(dict.clone()),
-            ObjectVariant::Reference(object_number) => {
-                if let Some(obj) = self.map.get(object_number) {
-                    if let ObjectVariant::IndirectObject(inner) = obj {
-                        if let Some(ObjectVariant::Dictionary(dictionary)) = &inner.object {
-                            return Some(dictionary.clone());
-                        }
-                    }
-                    if let ObjectVariant::Reference(_) = obj {
-                        return self.get_dictionary(obj);
-                    }
+        let mut current_obj = v;
+        // Set a limit to prevent infinite loops with circular references.
+        const MAX_DEREF: usize = 16;
+        for _ in 0..MAX_DEREF {
+            match current_obj {
+                ObjectVariant::Dictionary(dict) => return Some(dict.clone()),
+                ObjectVariant::Reference(object_number) => {
+                    current_obj = self.map.get(object_number)?;
                 }
-                None
+                ObjectVariant::IndirectObject(inner) => {
+                    current_obj = inner.object.as_ref()?;
+                }
+                ObjectVariant::Stream(s) => return Some(s.dictionary.clone()),
+                _ => return None,
             }
-            _ => None,
         }
+
+        None // Dereference limit reached
     }
 }

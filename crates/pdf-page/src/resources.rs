@@ -43,11 +43,14 @@ pub enum ResourcesError {
         found_type: &'static str,
     },
 
-    #[error("Failed to resolve /Resources dictionary object reference {obj_num}")]
-    FailedResolveResourcesObjectReference { obj_num: i32 },
+    #[error("Failed to resolve /Resources dictionary object reference")]
+    FailedResolveResourcesObjectReference,
 
     #[error("Failed to resolve font object reference {obj_num}")]
     FailedResolveFontObjectReference { obj_num: i32 },
+
+    #[error("Failed to resolve stream object reference {obj_num}")]
+    FailedResolveStreamObjectReference { obj_num: i32 },
 
     #[error("Failed to resolve external graphics state object reference {obj_num}")]
     FailedResolveExternalGraphicsStateObjectReference { obj_num: i32 },
@@ -60,6 +63,11 @@ pub enum ResourcesError {
 
     #[error("XObject parsing error: {0}")]
     XObjectError(#[from] XObjectError),
+
+    #[error(
+        "Invalid entry in `/Resources` dictionary: expected an indirect object reference, found {found_type}"
+    )]
+    InvalidEntryType { found_type: &'static str },
 }
 
 impl FromDictionary for Resources {
@@ -75,19 +83,22 @@ impl FromDictionary for Resources {
             return Ok(None);
         };
 
+        // Resolve the actual `/Resources` dictionary.
         let resources = objects
             .get_dictionary(resources.as_ref())
-            .ok_or_else(|| ResourcesError::FailedResolveResourcesObjectReference { obj_num: 0 })?;
+            .ok_or_else(|| ResourcesError::FailedResolveResourcesObjectReference)?;
 
         let mut fonts = HashMap::new();
 
         // Process `/Font` entries.
         if let Some(font_dictionary) = resources.get_dictionary(Font::KEY) {
             for (name, v) in &font_dictionary.dictionary {
+                // Each font value should be a dictionary or reference to one.
                 let font_dict = objects.get_dictionary(v).ok_or_else(|| {
                     ResourcesError::FailedResolveFontObjectReference { obj_num: 0 }
                 })?;
 
+                // Parse the font and insert it into the fonts map.
                 fonts.insert(
                     name.to_owned(),
                     Font::from_dictionary(font_dict.as_ref(), objects)?,
@@ -100,11 +111,11 @@ impl FromDictionary for Resources {
         // Process `/ExtGState` entries
         if let Some(eg) = resources.get_dictionary("ExtGState") {
             for (name, v) in &eg.dictionary {
-                // Value can be a direct dictionary or an indirect reference to one.
+                // Each value can be a direct dictionary or an indirect reference to one.
                 let v = objects.get_dictionary(v.as_ref()).ok_or_else(|| {
                     ResourcesError::FailedResolveExternalGraphicsStateObjectReference { obj_num: 0 }
                 })?;
-
+                // Parse the external graphics state and insert it into the map.
                 external_graphics_states.insert(
                     name.to_owned(),
                     ExternalGraphicsState::from_dictionary(v.as_ref(), objects)?,
@@ -120,9 +131,7 @@ impl FromDictionary for Resources {
                 let (obj_dict, stream_data) = match v.as_ref() {
                     ObjectVariant::Reference(number) => {
                         let resolved_obj = objects.get(*number).ok_or_else(|| {
-                            ResourcesError::FailedResolveResourcesObjectReference {
-                                obj_num: *number,
-                            }
+                            ResourcesError::FailedResolveStreamObjectReference { obj_num: *number }
                         })?;
                         match resolved_obj {
                             ObjectVariant::Stream(s) => (s.dictionary.clone(), s.data.clone()),
@@ -141,6 +150,7 @@ impl FromDictionary for Resources {
                     }
                 };
 
+                // Parse the XObject and insert it into the map.
                 xobjects.insert(
                     name.to_owned(),
                     XObject::read_xobject(&obj_dict, stream_data.as_slice(), objects)?,

@@ -60,11 +60,17 @@ impl ColorSpace {
     }
 }
 
+/// Represents the compression filter applied to an image's stream data.
+///
+/// This corresponds to the `/Filter` entry in a PDF Image XObject's dictionary.
+/// The filter specifies the algorithm used to decompress the raw image data.
 #[derive(Debug, PartialEq)]
 pub enum ImageFilter {
+    /// The DCT (Discrete Cosine Transform) filter, used for JPEG-compressed images.
     DCTDecode,
+    /// The Flate (zlib/deflate) filter, a lossless compression algorithm.
     FlateDecode,
-    // Add more as needed
+    /// A filter that is not currently supported.
     Unsupported(String),
 }
 
@@ -78,15 +84,27 @@ impl ImageFilter {
     }
 }
 
+/// Represents a PDF Image XObject, which is a self-contained raster image.
+///
+/// An Image XObject is a type of external object (XObject) used to embed raster images
+/// within a PDF document. It consists of a dictionary of metadata and a stream of image data.
+/// This struct holds the parsed information from the image's dictionary and its raw data.
 #[derive(Debug)]
 pub struct ImageXObject {
+    /// The width of the image in pixels. Corresponds to the `/Width` entry.
     pub width: u32,
+    /// The height of the image in pixels. Corresponds to the `/Height` entry.
     pub height: u32,
-    // pub color_space: ColorSpace,
+    /// The number of bits used to represent each color component.
+    /// For example, 8 for a standard RGB image. Corresponds to the `/BitsPerComponent` entry.
     pub bits_per_component: u32,
+    /// The filter(s) used to decompress the image data, such as `DCTDecode` (JPEG)
+    /// or `FlateDecode`. Corresponds to the `/Filter` entry.
     pub filter: Option<ImageFilter>,
-    // pub decode_params: Option<Dictionary>, // TODO: Add support for DecodeParms
+    /// An optional soft mask, which is another `ImageXObject` used for transparency.
+    /// Corresponds to the `/SMask` entry.
     pub smask: Option<Box<ImageXObject>>,
+    /// The raw, potentially compressed, byte data of the image stream.
     pub data: Vec<u8>,
 }
 

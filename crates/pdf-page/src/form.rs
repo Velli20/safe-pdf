@@ -21,9 +21,6 @@ pub enum FormXObjectError {
     },
     #[error("Error parsing /Resources: {source}")]
     ResourcesError { source: Box<ResourcesError> },
-
-    #[error("Error parsing /FormType: {0}")]
-    InvalidFormType(String),
     #[error("Error parsing /Matrix: {0}")]
     InvalidMatrix(String),
     #[error("Error parsing content stream: {0}")]
@@ -51,13 +48,7 @@ impl XObjectReader for FormXObject {
         stream_data: &[u8],
         objects: &ObjectCollection,
     ) -> Result<Self, FormXObjectError> {
-        // /FormType (required, should be 1)
-        let form_type = dictionary.get_number("FormType").unwrap_or(1) as i32;
-        if form_type != 1 {
-            return Err(FormXObjectError::InvalidFormType(form_type.to_string()));
-        }
-
-        // /BBox (required)
+        // Retrieve the `/BBox` entry, which must be an array of 4 numbers.
         let bbox = if let Some(matrix_obj) = dictionary.get("BBox") {
             let arr = matrix_obj
                 .as_array()
@@ -66,6 +57,8 @@ impl XObjectReader for FormXObject {
                     expected_type: "Array",
                     found_type: matrix_obj.name(),
                 })?;
+
+            // `/BBox` must have exactly 4 elements.
             if arr.len() != 4 {
                 return Err(FormXObjectError::InvalidMatrix(format!(
                     "Expected 4 elements, got {}",
@@ -87,7 +80,7 @@ impl XObjectReader for FormXObject {
             return Err(FormXObjectError::MissingEntry { entry_name: "BBox" });
         };
 
-        // /Matrix (optional)
+        // Retrieve the `/Matrix` entry if present; must be an array of 6 numbers.
         let matrix = if let Some(matrix_obj) = dictionary.get("Matrix") {
             let arr = matrix_obj
                 .as_array()
@@ -96,6 +89,7 @@ impl XObjectReader for FormXObject {
                     expected_type: "Array",
                     found_type: matrix_obj.name(),
                 })?;
+            // `/Matrix` must have exactly 6 elements if present.
             if arr.len() != 6 {
                 return Err(FormXObjectError::InvalidMatrix(format!(
                     "Expected 6 elements, got {}",
@@ -117,14 +111,14 @@ impl XObjectReader for FormXObject {
             None
         };
 
-        // /Resources (optional)
+        // Parse the `/Resources` entry if present, mapping any errors.
         let resources = Resources::from_dictionary(dictionary, objects).map_err(|err| {
             FormXObjectError::ResourcesError {
                 source: Box::new(err),
             }
         })?;
 
-        // Content stream
+        // Parse the content stream data.
         let content_stream = ContentStream {
             operations: pdf_content_stream::pdf_operator::PdfOperatorVariant::from(&stream_data)?,
         };

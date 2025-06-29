@@ -6,7 +6,7 @@ use pdf_graphics::{
     transform::Transform,
 };
 use skia_safe::{
-    AlphaType, ClipOp, Color, Color4f, ColorType, Data, ImageInfo, Matrix, Paint, Path as SkiaPath,
+    AlphaType, ClipOp, Color4f, ColorType, Data, ImageInfo, Matrix, Paint, Path as SkiaPath,
     PathFillType as SkiaPathFillType, Rect, image::Image as SkiaImage,
 };
 
@@ -38,17 +38,6 @@ fn to_skia_path(pdf_path: &PdfGraphicsPath) -> SkiaPath {
 }
 
 fn to_skia_matrix(transform: &Transform) -> Matrix {
-    // Matrix::new_all(
-    //     transform.sx,
-    //     transform.kx,
-    //     transform.tx,
-    //     transform.ky,
-    //     transform.sy,
-    //     transform.ty,
-    //     0.0,
-    //     0.0,
-    //     1.0,
-    // )
     Matrix::new_all(
         transform.sx,
         transform.kx,
