@@ -26,6 +26,10 @@ impl PdfOperator for ShowText {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let text = operands.get_str()?;
+        if text.is_empty() {
+            println!("Tj: Empty text string");
+            //return Err(PdfOperatorError::EmptyText);
+        }
         Ok(PdfOperatorVariant::ShowText(Self::new(text)))
     }
 

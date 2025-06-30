@@ -20,6 +20,8 @@ pub enum TrueTypeFontRendererError {
     FontFileNotStream { found_type: &'static str },
     #[error("Failed to parse the TrueType font file: {0:?}")]
     TtfParseError(ttf_parser::FaceParsingError),
+    #[error("No character map found for font '{0}'")]
+    NoCharacterMapForFont(String),
 }
 
 /// A text renderer for TrueType-based fonts.
@@ -121,13 +123,13 @@ impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'
             text_rise,                            // ty
         );
 
-        let cmap = self
-            .font
-            .cmap
-            .as_ref()
-            .ok_or(PdfCanvasError::NoCharacterMapForFont(
-                self.font.base_font.clone(),
-            ))?;
+        let cmap =
+            self.font
+                .cmap
+                .as_ref()
+                .ok_or(TrueTypeFontRendererError::NoCharacterMapForFont(
+                    self.font.base_font.clone(),
+                ))?;
 
         // Determine if the font uses a 2-byte encoding (e.g., /Identity-H for CID-keyed fonts).
         let is_two_byte_encoding = self.font.encoding.is_some();
@@ -145,7 +147,7 @@ impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'
                     // Incomplete 2-byte character at the end of the string. Skip it.
                     // This can happen if the text string has an odd number of bytes
                     // when a 2-byte encoding is expected. Skip this malformed character.
-                    continue;
+                    panic!("Incomplete 2-byte character at the end of the string");
                 }
             } else {
                 // For 1-byte encodings, the character code is simply the byte itself.

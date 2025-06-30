@@ -25,6 +25,7 @@ pub struct Type3Font {
     pub char_procs: HashMap<String, Vec<PdfOperatorVariant>>,
     /// The font's encoding, specifying the mapping from character codes to glyph names.
     pub encoding: Option<FontEncodingDictionary>,
+    pub first_char_code: u8,
 }
 
 /// Defines errors that can occur while parsing a Type 3 font object.
@@ -80,6 +81,18 @@ impl FromDictionary for Type3Font {
                 .ok_or(Type3FontError::MissingEntry {
                     entry_name: "CharProcs",
                 })?;
+
+        let first_char_code = dictionary
+            .get("FirstChar")
+            .ok_or(Type3FontError::MissingEntry {
+                entry_name: "FirstChar",
+            })?
+            .as_number::<u8>()
+            .map_err(|_| Type3FontError::InvalidEntryType {
+                entry_name: "FirstChar",
+                expected_type: "Integer",
+                found_type: "Reference",
+            })?;
 
         // Parse optional `/Encoding` entry
         let encoding = if let Some(encoding_obj) = dictionary.get("Encoding") {
@@ -140,6 +153,7 @@ impl FromDictionary for Type3Font {
                 font_matrix[4],
                 font_matrix[5],
             ],
+            first_char_code,
             char_procs,
             encoding,
         })

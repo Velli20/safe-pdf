@@ -25,7 +25,6 @@ pub enum XObjectError {
     ImageReadError(#[from] ImageXObjectError),
     #[error("Error parsing Form XObject: {0}")]
     FormReadError(#[from] FormXObjectError),
-
     #[error("Unsupported XObject type: '{subtype}'")]
     UnsupportedXObjectType { subtype: String },
 }

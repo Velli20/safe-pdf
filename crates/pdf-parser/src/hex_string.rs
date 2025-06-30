@@ -68,7 +68,7 @@ impl HexStringParser for PdfParser<'_> {
         self.tokenizer.expect(PdfToken::RightAngleBracket)?;
 
         // Convert hex string to bytes
-        let hex_string = filtered
+        let bytes = filtered
             .chunks(2)
             .map(|chunk| {
                 let hex = String::from_utf8_lossy(chunk);
@@ -76,7 +76,8 @@ impl HexStringParser for PdfParser<'_> {
             })
             .collect::<Vec<u8>>();
 
-        Ok(String::from_utf8(hex_string).unwrap_or_default())
+        // Fixme: Ok(String::from_utf8_lossy(&bytes).into_owned())
+        Ok(String::from_utf8(bytes).unwrap_or_default())
     }
 }
 
@@ -108,6 +109,11 @@ mod tests {
             (
                 b"<4E6F762073686D6F7A206B6120706F702E\x0C>",
                 "Nov shmoz ka pop.",
+            ),
+            (b"<01>", "\u{1}"),
+            (
+                b"<E2BAA9>", // UTF-8 for U+2EA9
+                "\u{2EA9}",  // "⺩"
             ),
         ];
 

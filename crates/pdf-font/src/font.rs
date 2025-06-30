@@ -115,6 +115,18 @@ impl FromDictionary for Font {
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let base_font = dictionary.get_string("BaseFont").unwrap_or("").to_owned();
 
+        // Attempt to extract the `/Encoding` entry, if present, and convert it to a `FontEncoding`.
+        let encoding = dictionary.get_string("Encoding").map(FontEncoding::from);
+
+        // Attempt to resolve the optional `/ToUnicode` CMap stream, which maps character codes to Unicode.
+        // If present, parse it into a `CharacterMap`. If not present, set cmap to None.
+        let cmap = if let Some(obj) = dictionary.get("ToUnicode") {
+            let stream = objects.resolve_stream(obj.as_ref())?;
+            Some(CharacterMap::from_stream_object(&stream)?)
+        } else {
+            None
+        };
+
         // Determine the font subtype from the dictionary.
         let subtype = match dictionary.get_string("Subtype") {
             Some("Type0") => FontSubType::Type0,
@@ -134,10 +146,10 @@ impl FromDictionary for Font {
             return Ok(Self {
                 base_font,
                 subtype,
-                cmap: None,
+                cmap,
                 cid_font: None,
                 type3_font: Some(type3_font),
-                encoding: None,
+                encoding,
             });
         }
 
@@ -148,18 +160,6 @@ impl FromDictionary for Font {
                 font_type: "Type0",
             });
         }
-
-        // Attempt to resolve the optional `/ToUnicode` CMap stream, which maps character codes to Unicode.
-        // If present, parse it into a `CharacterMap`. If not present, set cmap to None.
-        let cmap = if let Some(obj) = dictionary.get("ToUnicode") {
-            let stream = objects.resolve_stream(obj.as_ref())?;
-            Some(CharacterMap::from_stream_object(&stream)?)
-        } else {
-            None
-        };
-
-        // Attempt to extract the `/Encoding` entry, if present, and convert it to a `FontEncoding`.
-        let encoding = dictionary.get_string("Encoding").map(FontEncoding::from);
 
         // The `/DescendantFonts` array is required for Type0 fonts. Return an error if missing.
         let descendant_fonts_array = dictionary
