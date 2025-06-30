@@ -1,10 +1,13 @@
-use skia_safe::{ClipOp, Color4f, Paint, Path as SkiaPath, PathFillType as SkiaPathFillType};
-
 use pdf_graphics::{
     PathFillType as PdfPathFillType,
     canvas_backend::CanvasBackend,
     color::Color as PdfColor,
     pdf_path::{PathVerb, PdfPath as PdfGraphicsPath},
+    transform::Transform,
+};
+use skia_safe::{
+    AlphaType, ClipOp, Color4f, ColorType, Data, ImageInfo, Matrix, Paint, Path as SkiaPath,
+    PathFillType as SkiaPathFillType, Rect, image::Image as SkiaImage,
 };
 
 pub struct SkiaCanvasBackend<'a> {
@@ -32,6 +35,69 @@ fn to_skia_path(pdf_path: &PdfGraphicsPath) -> SkiaPath {
         };
     }
     path
+}
+
+fn to_skia_matrix(transform: &Transform) -> Matrix {
+    Matrix::new_all(
+        transform.sx,
+        transform.kx,
+        transform.tx,
+        transform.ky,
+        -transform.sy,
+        transform.ty,
+        0.0,
+        0.0,
+        1.0,
+    )
+}
+
+fn get_skia_image_data(
+    image: &[u8],
+    width: usize,
+    height: usize,
+    bits_per_component: u32,
+    smask: Option<&[u8]>,
+) -> Option<(ColorType, Data)> {
+    if bits_per_component != 8 {
+        eprintln!("Unsupported bits per component: {}", bits_per_component);
+        return None;
+    }
+    let num_pixels = width * height;
+    let num_components = image.len() / num_pixels;
+    match num_components {
+        4 => {
+            if let Some(smask_data) = smask {
+                let mut modified = Vec::with_capacity(image.len());
+                for (i, rgba) in image.chunks_exact(4).enumerate() {
+                    let smask_alpha = smask_data.get(i).copied().unwrap_or(255);
+                    let new_alpha = (u16::from(rgba[3]) * u16::from(smask_alpha) / 255) as u8;
+                    modified.extend_from_slice(&[rgba[0], rgba[1], rgba[2], new_alpha]);
+                }
+                Some((ColorType::RGBA8888, Data::new_copy(&modified)))
+            } else {
+                Some((ColorType::RGBA8888, Data::new_copy(image)))
+            }
+        }
+        3 => {
+            let mut padded = Vec::with_capacity(num_pixels * 4);
+            if let Some(smask_data) = smask {
+                for (i, rgb) in image.chunks_exact(3).enumerate() {
+                    let alpha = smask_data.get(i).copied().unwrap_or(255);
+                    padded.extend_from_slice(&[rgb[0], rgb[1], rgb[2], alpha]);
+                }
+            } else {
+                for rgb in image.chunks_exact(3) {
+                    padded.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+                }
+            }
+            Some((ColorType::RGBA8888, Data::new_copy(&padded)))
+        }
+        1 => Some((ColorType::Gray8, Data::new_copy(image))),
+        _ => {
+            eprintln!("Unsupported number of components: {}", num_components);
+            None
+        }
+    }
 }
 
 impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
@@ -85,5 +151,48 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
 
     fn reset_clip(&mut self) {
         self.canvas.restore();
+    }
+
+    fn draw_image(
+        &mut self,
+        image: &[u8],
+        is_jpeg: bool,
+        width: f32,
+        height: f32,
+        bits_per_component: u32,
+        transform: &Transform,
+        smask: Option<&[u8]>,
+    ) {
+        if width == 0.0 || height == 0.0 {
+            return;
+        }
+
+        let skia_image = if is_jpeg {
+            SkiaImage::from_encoded(Data::new_copy(image))
+        } else {
+            let (w, h) = (width as usize, height as usize);
+            let (color_type, pixel_data) =
+                match get_skia_image_data(image, w, h, bits_per_component, smask) {
+                    Some(data) => data,
+                    None => return,
+                };
+            let image_info =
+                ImageInfo::new((w as i32, h as i32), color_type, AlphaType::Unpremul, None);
+            let row_bytes = w * image_info.bytes_per_pixel();
+            skia_safe::images::raster_from_data(&image_info, pixel_data, row_bytes)
+        };
+
+        if let Some(skia_image) = skia_image {
+            let skia_matrix = to_skia_matrix(transform);
+            let paint = Paint::default();
+            self.canvas.save();
+            self.canvas.concat(&skia_matrix);
+            let dest_rect = Rect::from_xywh(0.0, -1.0, 1.0, 1.0);
+            self.canvas
+                .draw_image_rect(&skia_image, None, dest_rect, &paint);
+            self.canvas.restore();
+        } else {
+            eprintln!("Failed to create Skia image from image XObject data");
+        }
     }
 }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use pdf_content_stream::{error::PdfOperatorError, pdf_operator::PdfOperatorVariant};
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     traits::FromDictionary,
 };
 use thiserror::Error;
@@ -25,16 +25,14 @@ pub struct Type3Font {
     pub char_procs: HashMap<String, Vec<PdfOperatorVariant>>,
     /// The font's encoding, specifying the mapping from character codes to glyph names.
     pub encoding: Option<FontEncodingDictionary>,
+    pub first_char_code: u8,
 }
 
 /// Defines errors that can occur while parsing a Type 3 font object.
 #[derive(Debug, Error, PartialEq)]
 pub enum Type3FontError {
-    /// A required dictionary entry was missing.
     #[error("Missing required entry '{entry_name}' in Type 3 Font dictionary")]
     MissingEntry { entry_name: &'static str },
-
-    /// A dictionary entry had an unexpected type.
     #[error(
         "Entry '{entry_name}' in Type 3 Font dictionary has invalid type: expected {expected_type}, found {found_type}"
     )]
@@ -43,41 +41,16 @@ pub enum Type3FontError {
         expected_type: &'static str,
         found_type: &'static str,
     },
-
     #[error("FontDescriptor parsing error: {0}")]
     FontDescriptorError(#[from] FontDescriptorError),
-
-    /// Error converting a PDF value to a number.
-    #[error("Failed to convert PDF value to number for '{entry_description}': {err}")]
-    NumericConversionError {
-        entry_description: &'static str,
-        #[source]
-        err: pdf_object::error::ObjectError,
-    },
-
-    #[error("Failed to resolve /Resources dictionary object reference {obj_num}")]
-    FailedResolveResourcesObjectReference { obj_num: i32 },
-
-    /// Failed to resolve an object reference.
-    #[error("Failed to resolve object reference {obj_num}")]
-    FailedToResolveReference { obj_num: i32 },
-
     #[error("Encoding dictionary parsing error: {0}")]
     EncodingError(#[from] EncodingError),
-
+    #[error("Object error: {0}")]
+    ObjectError(#[from] ObjectError),
     #[error("Error parsing content stream operators: {0}")]
     ContentStreamError(#[from] PdfOperatorError),
-
     #[error("Duplicate character name '{name}' found in /CharProcs dictionary")]
     DuplicateCharProcName { name: String },
-
-    #[error(
-        "The object for character '{name}' in /CharProcs must be a Stream, but found {found_type}"
-    )]
-    InvalidCharProcObject {
-        name: String,
-        found_type: &'static str,
-    },
 }
 
 impl FromDictionary for Type3Font {
@@ -109,14 +82,26 @@ impl FromDictionary for Type3Font {
                     entry_name: "CharProcs",
                 })?;
 
-        // Parse optional /Encoding entry
+        let first_char_code = dictionary
+            .get("FirstChar")
+            .ok_or(Type3FontError::MissingEntry {
+                entry_name: "FirstChar",
+            })?
+            .as_number::<u8>()
+            .map_err(|_| Type3FontError::InvalidEntryType {
+                entry_name: "FirstChar",
+                expected_type: "Integer",
+                found_type: "Reference",
+            })?;
+
+        // Parse optional `/Encoding` entry
         let encoding = if let Some(encoding_obj) = dictionary.get("Encoding") {
-            match encoding_obj.as_ref() {
+            match objects.resolve_object(encoding_obj.as_ref())? {
                 ObjectVariant::Name(name) => {
                     // Named encoding like /StandardEncoding
                     Some(FontEncodingDictionary {
                         base_encoding: Some(name.clone()),
-                        differences: HashMap::new(), // No differences specified inline
+                        differences: HashMap::new(),
                     })
                 }
                 ObjectVariant::Dictionary(dict) => {
@@ -125,25 +110,6 @@ impl FromDictionary for Type3Font {
                         dict.as_ref(),
                         objects,
                     )?)
-                }
-                ObjectVariant::Reference(obj_num) => {
-                    // Reference to an encoding dictionary
-                    let resolved_obj = objects.get(*obj_num).ok_or_else(|| {
-                        Type3FontError::FailedToResolveReference { obj_num: *obj_num }
-                    })?;
-                    match resolved_obj.as_dictionary() {
-                        Some(dict) => Some(FontEncodingDictionary::from_dictionary(
-                            dict.as_ref(),
-                            objects,
-                        )?),
-                        _ => {
-                            return Err(Type3FontError::InvalidEntryType {
-                                entry_name: "Encoding (resolved)",
-                                expected_type: "Dictionary",
-                                found_type: resolved_obj.name(),
-                            });
-                        }
-                    }
                 }
                 _ => {
                     // Invalid type for /Encoding
@@ -155,41 +121,26 @@ impl FromDictionary for Type3Font {
                 }
             }
         } else {
-            // /Encoding is optional
             None
         };
 
         let mut char_procs = HashMap::new();
 
+        // Iterate over each entry in the `/CharProcs` dictionary.
+        // Each entry associates a glyph name with a reference to a content stream object.
         for (name, value) in char_proc_dictionary.dictionary.iter() {
-            let Some(number) = value.as_reference() else {
-                return Err(Type3FontError::InvalidEntryType {
-                    entry_name: "CharProcs",
-                    expected_type: "Reference",
-                    found_type: value.name(),
+            // Resolve the referenced content stream object from the PDF's object collection.
+            // If the reference cannot be resolved, return an error with the object number.
+            let content_stream_obj = objects.resolve_stream(&value)?;
+            // Parse the content stream data into a sequence of PDF operators.
+            let operators = PdfOperatorVariant::from(content_stream_obj.data.as_slice())?;
+            // Insert the parsed operators into the char_procs map under the glyph name.
+            // If a duplicate glyph name is found, return an error to prevent overwriting.
+            let prev = char_procs.insert(name.to_owned(), operators);
+            if prev.is_some() {
+                return Err(Type3FontError::DuplicateCharProcName {
+                    name: name.to_owned(),
                 });
-            };
-
-            let content_stream_obj = objects
-                .get(number)
-                .ok_or(Type3FontError::FailedResolveResourcesObjectReference { obj_num: number })?;
-
-            match content_stream_obj {
-                ObjectVariant::Stream(stream) => {
-                    let operators = PdfOperatorVariant::from(stream.data.as_slice())?;
-                    let prev = char_procs.insert(name.to_owned(), operators);
-                    if prev.is_some() {
-                        return Err(Type3FontError::DuplicateCharProcName {
-                            name: name.to_owned(),
-                        });
-                    }
-                }
-                other => {
-                    return Err(Type3FontError::InvalidCharProcObject {
-                        name: name.to_owned(),
-                        found_type: other.name(),
-                    });
-                }
             }
         }
 
@@ -202,6 +153,7 @@ impl FromDictionary for Type3Font {
                 font_matrix[4],
                 font_matrix[5],
             ],
+            first_char_code,
             char_procs,
             encoding,
         })

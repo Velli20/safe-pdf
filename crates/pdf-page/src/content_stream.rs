@@ -1,6 +1,6 @@
 use pdf_content_stream::{error::PdfOperatorError, pdf_operator::PdfOperatorVariant};
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     traits::FromDictionary,
 };
 use thiserror::Error;
@@ -16,6 +16,8 @@ pub enum ContentStreamReadError {
     FailedToResolveReference { obj_num: i32 },
     #[error("Error parsing content stream operators: {0}")]
     ContentStreamError(#[from] PdfOperatorError),
+    #[error("{0}")]
+    ObjectError(#[from] ObjectError),
     #[error("Unsupported entry type in Content Stream array: '{found_type}'")]
     UnsupportedEntryTypeInArray { found_type: &'static str },
     #[error("Expected a Stream object in Content Stream array, found other type")]
@@ -39,29 +41,8 @@ fn process_content_stream_array(
 ) -> Result<Vec<PdfOperatorVariant>, ContentStreamReadError> {
     let mut concatenated_ops = Vec::new();
     for value_in_array in array.iter() {
-        let stream_ops = match value_in_array {
-            ObjectVariant::Reference(indirect_ref) => {
-                let stream_obj = objects.get(*indirect_ref).ok_or_else(|| {
-                    ContentStreamReadError::FailedToResolveReference {
-                        obj_num: *indirect_ref,
-                    }
-                })?;
-                // Expect this resolved object to be a stream
-                if let ObjectVariant::Stream(s) = stream_obj {
-                    PdfOperatorVariant::from(s.data.as_slice())?
-                } else {
-                    return Err(ContentStreamReadError::ExpectedStreamInArray);
-                }
-            }
-            ObjectVariant::Stream(direct_stream_val) => {
-                PdfOperatorVariant::from(direct_stream_val.data.as_slice())?
-            }
-            other => {
-                return Err(ContentStreamReadError::UnsupportedEntryTypeInArray {
-                    found_type: other.name(),
-                });
-            }
-        };
+        let stream = objects.resolve_stream(value_in_array)?;
+        let stream_ops = PdfOperatorVariant::from(stream.data.as_slice())?;
         concatenated_ops.extend(stream_ops);
     }
     Ok(concatenated_ops)

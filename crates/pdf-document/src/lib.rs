@@ -59,21 +59,22 @@ impl PdfDocument {
         // Get the `Root` object reference.
         let root = trailer
             .dictionary
-            .get_object_reference("Root")
+            .get("Root")
             .ok_or(PdfError::MissingRoot)?;
 
-        // Get the catalog.
+        // Get the catalog. TODO: Err
         let catalog = objects
-            .get_dictionary(root)
-            .ok_or(PdfError::MissingCatalog)?
+            .resolve_dictionary(root)
+            .map_err(|_| PdfError::MissingCatalog)?
             .clone();
 
         // Get the `Pages` object reference from the catalog, which defines the order of the pages in the document.
-        let pages_num = catalog.get_object_reference("Pages").unwrap();
+        let pages_num = catalog.get("Pages").unwrap();
 
+        // TODO: Err
         let pages_dict = objects
-            .get_dictionary(pages_num)
-            .ok_or(PdfError::MissingPages)?
+            .resolve_dictionary(pages_num)
+            .map_err(|_| PdfError::MissingPages)?
             .clone();
 
         let pages = PdfPages::from_dictionary(&pages_dict, &objects).unwrap();

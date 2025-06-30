@@ -1,5 +1,5 @@
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     traits::FromDictionary,
 };
 
@@ -37,6 +37,8 @@ pub enum CidFontError {
     MissingFontDescriptor,
     #[error("FontDescriptor parsing error: {0}")]
     FontDescriptorError(#[from] FontDescriptorError),
+    #[error("{0}")]
+    ObjectError(#[from] ObjectError),
     #[error("GlyphWidthsMap parsing error: {0}")]
     GlyphWidthsMapError(#[from] GlyphWidthsMapError),
     #[error("Missing /Subtype entry in CIDFont dictionary")]
@@ -53,12 +55,10 @@ pub enum CidFontError {
         expected_type: &'static str,
         found_type: &'static str,
     },
-    /// Indicates that a specific CIDFont subtype is not supported by the parser.
     #[error(
         "Unsupported CIDFont subtype '{subtype}': Only /CIDFontType2 (TrueType-based) is supported. /CIDFontType0 (Type1-based) is not supported."
     )]
     UnsupportedCidFontSubtype { subtype: String },
-    /// Error converting a PDF value to a number.
     #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
     NumericConversionError {
         entry_description: &'static str,
@@ -106,25 +106,13 @@ impl FromDictionary for CharacterIdentifierFont {
         }
 
         // FontDescriptor must be an indirect reference according to the PDF spec.
-        let descriptor = match dictionary.get("FontDescriptor") {
-            Some(obj_var_box) => match obj_var_box.as_ref() {
-                ObjectVariant::Reference(obj_num) => {
-                    let desc_dict = objects
-                        .get_dictionary(*obj_num)
-                        .ok_or_else(|| CidFontError::InvalidFontDescriptorReference(*obj_num))?;
-                    FontDescriptor::from_dictionary(desc_dict.as_ref(), objects)
-                        .map_err(CidFontError::FontDescriptorError)?
-                }
-                other => {
-                    // FontDescriptor is present, but not an indirect reference as required.
-                    return Err(CidFontError::InvalidEntryType {
-                        entry_name: "FontDescriptor",
-                        expected_type: "Indirect Reference",
-                        found_type: other.name(),
-                    });
-                }
-            },
-            None => return Err(CidFontError::MissingFontDescriptor),
+        let descriptor = if let Some(obj) = dictionary.get("FontDescriptor") {
+            let desc_dict = objects.resolve_dictionary(obj.as_ref())?;
+            // TODO: Err
+            FontDescriptor::from_dictionary(desc_dict, objects)
+                .map_err(CidFontError::FontDescriptorError)?
+        } else {
+            return Err(CidFontError::MissingFontDescriptor);
         };
 
         Ok(Self {

@@ -47,7 +47,7 @@ pub trait PdfOperator {
     }
 }
 
-pub struct Operands<'a>(&'a [ObjectVariant]);
+pub struct Operands<'a>(pub &'a [ObjectVariant]);
 
 impl Operands<'_> {
     pub fn get_f32(&mut self) -> Result<f32, PdfOperatorError> {

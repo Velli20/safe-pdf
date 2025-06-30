@@ -1,6 +1,6 @@
 use pdf_object::{
-    ObjectVariant,
     dictionary::Dictionary,
+    error::ObjectError,
     object_collection::ObjectCollection,
     traits::{FromDictionary, FromStreamObject},
 };
@@ -36,14 +36,11 @@ impl From<&str> for FontEncoding {
 /// Defines errors that can occur while reading a font object.
 #[derive(Debug, Error, PartialEq)]
 pub enum FontError {
-    /// A required dictionary entry was missing.
     #[error("Missing required entry '{entry_name}' in {dictionary_type} dictionary")]
     MissingEntry {
         entry_name: &'static str,
         dictionary_type: &'static str,
     },
-
-    /// A dictionary entry had an unexpected type.
     #[error(
         "Entry '{entry_name}' in Type0 Font dictionary has invalid type: expected {expected_type}, found {found_type}"
     )]
@@ -52,26 +49,18 @@ pub enum FontError {
         expected_type: &'static str,
         found_type: &'static str,
     },
-
-    /// Indicates that the required `/DescendantFonts` entry is missing in a Type0 font dictionary.
     #[error("Missing /DescendantFonts entry in Type0 font")]
     MissingDescendantFonts,
-    /// The `/DescendantFonts` array in a Type0 font is empty or invalid.
     #[error("Invalid /DescendantFonts entry in Type0 font: {0}")]
     InvalidDescendantFonts(String),
-    /// Failed to resolve or parse the descendant CIDFont from a Type0 font.
     #[error("Error processing descendant CIDFont for Type0 font")]
     DescendantCIDFontError(#[from] CidFontError),
-    /// Error related to the `/ToUnicode` CMap processing (e.g., reference resolution).
-    #[error("Error processing /ToUnicode CMap: {0}")]
-    ToUnicodeResolution(String),
-    /// Indicates an error occurred while parsing a Character Map (CMap) stream.
     #[error("CMap parsing error: {0}")]
     CMapParse(#[from] CMapError),
-    /// Indicates an error occurred while processing a Type3 font.
+    #[error("{0}")]
+    ObjectError(#[from] ObjectError),
     #[error("Error processing Type3 font: {0}")]
     Type3FontError(#[from] Type3FontError),
-    /// The font subtype is unsupported or invalid for the current parsing context.
     #[error("Unsupported or invalid font subtype '{subtype}' for {font_type} font")]
     UnsupportedFontSubtype {
         subtype: FontSubType,
@@ -126,6 +115,19 @@ impl FromDictionary for Font {
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let base_font = dictionary.get_string("BaseFont").unwrap_or("").to_owned();
 
+        // Attempt to extract the `/Encoding` entry, if present, and convert it to a `FontEncoding`.
+        let encoding = dictionary.get_string("Encoding").map(FontEncoding::from);
+
+        // Attempt to resolve the optional `/ToUnicode` CMap stream, which maps character codes to Unicode.
+        // If present, parse it into a `CharacterMap`. If not present, set cmap to None.
+        let cmap = if let Some(obj) = dictionary.get("ToUnicode") {
+            let stream = objects.resolve_stream(obj.as_ref())?;
+            Some(CharacterMap::from_stream_object(&stream)?)
+        } else {
+            None
+        };
+
+        // Determine the font subtype from the dictionary.
         let subtype = match dictionary.get_string("Subtype") {
             Some("Type0") => FontSubType::Type0,
             Some("Type1") => FontSubType::Type1,
@@ -138,18 +140,20 @@ impl FromDictionary for Font {
             }
         };
 
+        // If the font is a Type3 font, delegate parsing to the Type3Font handler and return early.
         if subtype == FontSubType::Type3 {
             let type3_font = Type3Font::from_dictionary(dictionary, objects)?;
             return Ok(Self {
                 base_font,
                 subtype,
-                cmap: None,
+                cmap,
                 cid_font: None,
                 type3_font: Some(type3_font),
-                encoding: None,
+                encoding,
             });
         }
 
+        // Only Type0 fonts are supported beyond this point. If not Type0, return an error.
         if subtype != FontSubType::Type0 {
             return Err(FontError::UnsupportedFontSubtype {
                 subtype,
@@ -157,68 +161,21 @@ impl FromDictionary for Font {
             });
         }
 
-        let cmap = if let Some(obj) = dictionary.get("ToUnicode") {
-            match obj.as_ref() {
-                ObjectVariant::Reference(num) => {
-                    let resolved_obj = objects.get(*num).ok_or_else(|| {
-                        FontError::ToUnicodeResolution(format!(
-                            "Could not resolve /ToUnicode reference: {}",
-                            num
-                        ))
-                    })?;
-
-                    match resolved_obj {
-                        ObjectVariant::Stream(s) => Some(CharacterMap::from_stream_object(&s)?),
-                        other => {
-                            return Err(FontError::InvalidEntryType {
-                                entry_name: "/ToUnicode (resolved)",
-                                expected_type: "Stream",
-                                found_type: other.name(),
-                            });
-                        }
-                    }
-                }
-                ObjectVariant::Stream(s) => Some(CharacterMap::from_stream_object(s)?),
-                other => {
-                    return Err(FontError::InvalidEntryType {
-                        entry_name: "/ToUnicode",
-                        expected_type: "Reference or Stream",
-                        found_type: other.name(),
-                    });
-                }
-            }
-        } else {
-            None
-        };
-
-        let encoding = dictionary.get_string("Encoding").map(FontEncoding::from);
-
+        // The `/DescendantFonts` array is required for Type0 fonts. Return an error if missing.
         let descendant_fonts_array = dictionary
             .get_array("DescendantFonts")
             .ok_or(FontError::MissingDescendantFonts)?;
 
+        // The array must not be empty. Get the first element, which should reference the CIDFont dictionary.
         let cid_font_ref_val = descendant_fonts_array
             .first()
             .ok_or_else(|| FontError::InvalidDescendantFonts("Array is empty".to_string()))?;
 
-        let cid_font = match cid_font_ref_val {
-            ObjectVariant::Reference(num) => {
-                let dictionary = objects.get_dictionary(*num).ok_or_else(|| {
-                    FontError::InvalidDescendantFonts(format!(
-                        "Could not resolve CIDFont reference {} from /DescendantFonts",
-                        num
-                    ))
-                })?;
+        // Resolve the CIDFont dictionary from the reference and parse it into a `CharacterIdentifierFont`.
+        let cid_font = {
+            let dictionary = objects.resolve_dictionary(cid_font_ref_val)?;
 
-                CharacterIdentifierFont::from_dictionary(dictionary.as_ref(), objects)?
-            }
-            other => {
-                return Err(FontError::InvalidEntryType {
-                    entry_name: "/DescendantFonts[0]",
-                    expected_type: "IndirectObject (Reference to Dictionary)",
-                    found_type: other.name(),
-                });
-            }
+            CharacterIdentifierFont::from_dictionary(dictionary, objects)?
         };
         Ok(Self {
             base_font,

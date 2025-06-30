@@ -91,13 +91,16 @@ impl FromStreamObject for CharacterMap {
 
                     let src_code = parse_hex_to_u32(src_hex)?;
                     let dst_u32 = parse_hex_to_u32(dst_hex)?;
-
                     let dst_char =
                         char::from_u32(dst_u32).ok_or_else(|| CMapError::InvalidUnicodeScalar {
                             hex_value: dst_hex.to_string(),
                             u32_value: dst_u32,
-                        })?;
-
+                        });
+                    if dst_char.is_err() {
+                        println!("src_code: {src_code}, dst_char err fixme");
+                        continue;
+                    }
+                    let dst_char = dst_char.unwrap();
                     bfchar_mappings.insert(src_code, dst_char);
                 }
             }

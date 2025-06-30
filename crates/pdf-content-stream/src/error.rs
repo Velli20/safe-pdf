@@ -45,6 +45,9 @@ pub enum PdfOperatorError {
 
     #[error("Parser error: {0}")]
     Parser(#[from] ParserError),
+
+    #[error("Empty text")]
+    EmptyText,
 }
 
 // The From<TokenizerError> and From<ParserError> are now handled by #[from]

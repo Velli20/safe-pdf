@@ -20,8 +20,7 @@ pub enum PdfCanvasError {
     FontNotFound(String),
     #[error("Font '{0}' is a Type3 font but is missing its definition data")]
     MissingType3FontData(String),
-    #[error("No character map found for font '{0}'")]
-    NoCharacterMapForFont(String),
+
     #[error(
         "Graphics state stack is empty, cannot access current state. This indicates an internal error."
     )]
