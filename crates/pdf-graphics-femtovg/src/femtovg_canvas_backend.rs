@@ -84,4 +84,17 @@ impl CanvasBackend for CanvasImpl<'_> {
     }
 
     fn reset_clip(&mut self) {}
+
+    fn draw_image(
+        &mut self,
+        _image: &[u8],
+        _is_jpeg: bool,
+        _width: f32,
+        _height: f32,
+        _bits_per_component: u32,
+        _transform: &pdf_graphics::transform::Transform,
+        _smask: Option<&[u8]>,
+    ) {
+        todo!()
+    }
 }

@@ -8,7 +8,7 @@ pub mod trailer;
 pub mod traits;
 pub mod version;
 
-use std::rc::Rc;
+use std::{borrow::Cow, rc::Rc};
 
 use cross_reference_table::CrossReferenceTable;
 use dictionary::Dictionary;
@@ -29,7 +29,7 @@ pub enum ObjectVariant {
     Real(f64),
     Boolean(bool),
     Null,
-    HexString(String),
+    HexString(Vec<u8>),
     Comment(String),
     Trailer(Trailer),
     CrossReferenceTable(CrossReferenceTable),
@@ -78,11 +78,20 @@ impl ObjectVariant {
         }
     }
 
-    pub fn as_str(&self) -> Option<&str> {
+    pub fn as_str<'a>(&'a self) -> Option<Cow<'a, str>> {
         match self {
-            ObjectVariant::LiteralString(s)
-            | ObjectVariant::HexString(s)
-            | ObjectVariant::Name(s) => Some(s),
+            ObjectVariant::HexString(s) => {
+                let s = String::from_utf8_lossy(s);
+                Some(s)
+            }
+            ObjectVariant::LiteralString(s) | ObjectVariant::Name(s) => Some(Cow::Borrowed(&s)),
+            _ => None,
+        }
+    }
+
+    pub fn as_bytes<'a>(&'a self) -> Option<&'a [u8]> {
+        match self {
+            ObjectVariant::HexString(s) => Some(s),
             _ => None,
         }
     }

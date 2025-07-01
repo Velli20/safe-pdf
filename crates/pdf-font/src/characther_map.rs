@@ -5,17 +5,14 @@ use thiserror::Error;
 /// Errors that can occur during CMap parsing.
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum CMapError {
-    /// The hexadecimal string has an odd number of characters, making it invalid.
     #[error("Hex string '{0}' has an odd number of characters")]
     OddHexLength(String),
-    /// The string contains an invalid hexadecimal sequence.
     #[error("Invalid hex sequence '{original_hex}' in CMap: {source}")]
     InvalidHexSequence {
         original_hex: String,
         #[source]
         source: std::num::ParseIntError,
     },
-    /// The parsed u32 value from a hex string is not a valid Unicode scalar value.
     #[error(
         "Hex value <{hex_value}> ({u32_value}) is not a valid Unicode scalar value for a CMap character"
     )]

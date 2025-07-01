@@ -99,6 +99,22 @@ impl Operands<'_> {
         }
     }
 
+    pub fn get_bytes<'a>(&'a mut self) -> Result<&'a [u8], PdfOperatorError> {
+        if let Some((value, rest)) = self.0.split_first() {
+            self.0 = rest;
+            value
+                .as_bytes()
+                .ok_or_else(|| PdfOperatorError::InvalidOperandType {
+                    expected_type: "Vec<u8>",
+                    found_type: value.name(),
+                })
+        } else {
+            Err(PdfOperatorError::MissingOperand {
+                expected_type: "Vec<u8>",
+            })
+        }
+    }
+
     pub fn get_name(&mut self) -> Result<String, PdfOperatorError> {
         if let Some((value, rest)) = self.0.split_first() {
             self.0 = rest;

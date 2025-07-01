@@ -121,7 +121,6 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
 
             let mut renderer = Type3FontRenderer::new(
                 self,
-                current_font,
                 text_state.font_size,
                 text_state.horizontal_scaling,
                 text_state.rise,

@@ -36,7 +36,7 @@ impl HexStringParser for PdfParser<'_> {
     ///
     /// `String` containing the decoded string value or an error if invalid format
     /// or characters are encountered.
-    fn parse_hex_string(&mut self) -> Result<String, Self::ErrorType> {
+    fn parse_hex_string(&mut self) -> Result<Vec<u8>, Self::ErrorType> {
         self.tokenizer.expect(PdfToken::LeftAngleBracket)?;
 
         // 1. Read until the closing `>` of the hex string.
@@ -76,8 +76,7 @@ impl HexStringParser for PdfParser<'_> {
             })
             .collect::<Vec<u8>>();
 
-        // Fixme: Ok(String::from_utf8_lossy(&bytes).into_owned())
-        Ok(String::from_utf8(bytes).unwrap_or_default())
+        Ok(bytes)
     }
 }
 
@@ -120,6 +119,7 @@ mod tests {
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
             let result = parser.parse_hex_string().unwrap();
+            let result = String::from_utf8(result).unwrap();
             assert_eq!(result, expected);
         }
     }

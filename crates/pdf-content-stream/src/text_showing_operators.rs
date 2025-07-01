@@ -9,12 +9,13 @@ use crate::{
 /// Shows a text string.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShowText {
-    /// The text string to be shown. The string is typically encoded according to the font's encoding.
-    text: String,
+    /// An arry of bytes of the text string to be shown. The string is typically encoded
+    /// according to the font's encoding.
+    text: Vec<u8>,
 }
 
 impl ShowText {
-    pub fn new(text: String) -> Self {
+    pub fn new(text: Vec<u8>) -> Self {
         Self { text }
     }
 }
@@ -25,16 +26,12 @@ impl PdfOperator for ShowText {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let text = operands.get_str()?;
-        if text.is_empty() {
-            println!("Tj: Empty text string");
-            //return Err(PdfOperatorError::EmptyText);
-        }
-        Ok(PdfOperatorVariant::ShowText(Self::new(text)))
+        let text = operands.get_bytes()?;
+        Ok(PdfOperatorVariant::ShowText(Self::new(text.to_vec())))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        backend.show_text(self.text.as_bytes())
+        backend.show_text(&self.text)
     }
 }
 
@@ -42,11 +39,11 @@ impl PdfOperator for ShowText {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MoveNextLineShowText {
     /// The text string to be shown.
-    text: String,
+    text: Vec<u8>,
 }
 
 impl MoveNextLineShowText {
-    pub fn new(text: String) -> Self {
+    pub fn new(text: Vec<u8>) -> Self {
         Self { text }
     }
 }
@@ -57,12 +54,14 @@ impl PdfOperator for MoveNextLineShowText {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let text = operands.get_str()?;
-        Ok(PdfOperatorVariant::MoveNextLineShowText(Self::new(text)))
+        let text = operands.get_bytes()?;
+        Ok(PdfOperatorVariant::MoveNextLineShowText(Self::new(
+            text.to_vec(),
+        )))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        backend.move_to_next_line_and_show_text(self.text.as_bytes())
+        backend.move_to_next_line_and_show_text(&self.text)
     }
 }
 
@@ -75,11 +74,11 @@ pub struct SetSpacingMoveShowText {
     /// The new character spacing to set before showing the text.
     char_spacing: f32,
     /// The text string to be shown.
-    text: String,
+    text: Vec<u8>,
 }
 
 impl SetSpacingMoveShowText {
-    pub fn new(word_spacing: f32, char_spacing: f32, text: String) -> Self {
+    pub fn new(word_spacing: f32, char_spacing: f32, text: Vec<u8>) -> Self {
         Self {
             word_spacing,
             char_spacing,
@@ -96,20 +95,17 @@ impl PdfOperator for SetSpacingMoveShowText {
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let word_spacing = operands.get_f32()?;
         let char_spacing = operands.get_f32()?;
-        let text = operands.get_str()?;
+        let text = operands.get_bytes()?;
+
         Ok(PdfOperatorVariant::SetSpacingMoveShowText(Self::new(
             word_spacing,
             char_spacing,
-            text,
+            text.to_vec(),
         )))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        backend.set_spacing_and_show_text(
-            self.word_spacing,
-            self.char_spacing,
-            self.text.as_bytes(),
-        )
+        backend.set_spacing_and_show_text(self.word_spacing, self.char_spacing, &self.text)
     }
 }
 

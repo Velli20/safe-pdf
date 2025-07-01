@@ -1,7 +1,7 @@
 use pdf_content_stream::{
     pdf_operator::PdfOperatorVariant, pdf_operator_backend::PdfOperatorBackend,
 };
-use pdf_font::{font::Font, type3_font::Type3Font};
+use pdf_font::type3_font::Type3Font;
 use thiserror::Error;
 
 use crate::{canvas::Canvas, text_renderer::TextRenderer, transform::Transform};
@@ -21,8 +21,6 @@ pub enum Type3FontRendererError {
 pub(crate) struct Type3FontRenderer<'a, T: PdfOperatorBackend + Canvas> {
     /// The canvas backend where glyphs are drawn.
     canvas: &'a mut T,
-    /// The font definition, containing glyph data, metrics, and character maps.
-    font: &'a Font,
     /// The font matrix from the Type 3 font dictionary, mapping glyph space to text space.
     font_matrix: Transform,
     /// A matrix encoding font size, horizontal scaling, and text rise.
@@ -40,7 +38,6 @@ pub(crate) struct Type3FontRenderer<'a, T: PdfOperatorBackend + Canvas> {
 impl<'a, T: PdfOperatorBackend + Canvas> Type3FontRenderer<'a, T> {
     pub(crate) fn new(
         canvas: &'a mut T,
-        font: &'a Font,
         font_size: f32,
         horizontal_scaling: f32,
         text_rise: f32,
@@ -70,7 +67,6 @@ impl<'a, T: PdfOperatorBackend + Canvas> Type3FontRenderer<'a, T> {
 
         Ok(Self {
             canvas,
-            font,
             font_matrix,
             font_size_matrix,
             current_transform,
