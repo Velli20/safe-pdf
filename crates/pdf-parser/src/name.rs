@@ -16,8 +16,6 @@ pub enum NameObjectError {
         "Invalid hex escape in name object: Could not parse hex string '{hex_pair}'. Reason: {reason}"
     )]
     HexRadixError { hex_pair: String, reason: String },
-
-    // Existing errors
     #[error("Invalid token in name object (e.g., empty name after '/')")]
     InvalidToken,
     #[error("Tokenizer error: {0}")]

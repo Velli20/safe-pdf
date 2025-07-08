@@ -16,7 +16,7 @@ use pdf_page::{
 };
 use transform::Transform;
 
-use crate::canvas::Canvas;
+use crate::{canvas::Canvas, canvas_backend::CanvasBackend};
 
 pub mod canvas;
 pub mod canvas_backend;
@@ -48,9 +48,9 @@ pub enum PathFillType {
     EvenOdd,
 }
 
-impl<'a> PdfOperatorBackend for PdfCanvas<'a> {}
+impl<'a, T: CanvasBackend> PdfOperatorBackend for PdfCanvas<'a, T> {}
 
-impl<'a> ClippingPathOps for PdfCanvas<'a> {
+impl<'a, T: CanvasBackend> ClippingPathOps for PdfCanvas<'a, T> {
     fn clip_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
         if let Some(mut path) = self.current_path.take() {
             path.transform(&self.current_state()?.transform);
@@ -74,7 +74,7 @@ impl<'a> ClippingPathOps for PdfCanvas<'a> {
     }
 }
 
-impl<'a> GraphicsStateOps for PdfCanvas<'a> {
+impl<'a, T: CanvasBackend> GraphicsStateOps for PdfCanvas<'a, T> {
     fn save_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
         self.save()
     }
@@ -138,53 +138,83 @@ impl<'a> GraphicsStateOps for PdfCanvas<'a> {
     }
 
     fn set_graphics_state_from_dict(&mut self, dict_name: &str) -> Result<(), Self::ErrorType> {
-        if let Some(resources) = self.page.resources.as_ref() {
-            if let Some(states) = resources.external_graphics_states.get(dict_name) {
-                for state in &states.params {
-                    match state {
-                        ExternalGraphicsStateKey::LineWidth(width) => {
-                            self.current_state_mut()?.line_width = *width
+        let resources = self.get_resources()?;
+
+        let states = resources
+            .external_graphics_states
+            .get(dict_name)
+            .ok_or_else(|| PdfCanvasError::GraphicsStateNotFound(dict_name.to_string()))?;
+
+        for state in &states.params {
+            match state {
+                ExternalGraphicsStateKey::LineWidth(width) => {
+                    self.current_state_mut()?.line_width = *width
+                }
+                ExternalGraphicsStateKey::LineCap(cap) => {
+                    self.current_state_mut()?.line_cap = LineCap::from(*cap as u8)
+                }
+                ExternalGraphicsStateKey::LineJoin(join) => {
+                    self.current_state_mut()?.line_join = LineJoin::from(*join as u8)
+                }
+                ExternalGraphicsStateKey::MiterLimit(miter) => {
+                    self.current_state_mut()?.miter_limit = *miter;
+                }
+                ExternalGraphicsStateKey::DashPattern(..) => todo!(),
+                ExternalGraphicsStateKey::RenderingIntent(_) => todo!(),
+                ExternalGraphicsStateKey::OverprintStroke(_) => todo!(),
+                ExternalGraphicsStateKey::OverprintFill(_) => todo!(),
+                ExternalGraphicsStateKey::OverprintMode(_) => todo!(),
+                ExternalGraphicsStateKey::Font(..) => todo!(),
+                ExternalGraphicsStateKey::BlendMode(_) => {
+                    // println!("Blend mode {:?}", items);
+                }
+                ExternalGraphicsStateKey::SoftMask(smask) => {
+                    if let Some(smask) = smask {
+                        if let XObject::Image(shape) = &smask.shape {
+                            println!("smaks image width {} height {}", shape.width, shape.height);
+                            panic!()
+                        } else if let XObject::Form(form) = &smask.shape {
+                            println!(
+                                "smaks form bb left {} top {} right {} bottom {}",
+                                form.bbox[0], form.bbox[1], form.bbox[2], form.bbox[3]
+                            );
+
+                            let mut mask = self.canvas.create_mask(
+                                form.bbox[2] - form.bbox[0],
+                                form.bbox[3] - form.bbox[1],
+                            );
+
+                            let mut other = PdfCanvas::new(
+                                mask.as_mut(),
+                                self.page,
+                                Some(&form.bbox), /* None */
+                            );
+                            other.render_form_xobject(form)?;
+
+                            let ss = self.current_state()?.transform.clone();
+                            self.canvas.enable_mask(mask.as_mut(), &ss);
+                            self.mask = Some(mask);
                         }
-                        ExternalGraphicsStateKey::LineCap(cap) => {
-                            let cap = LineCap::from(*cap as u8);
-                            self.current_state_mut()?.line_cap = cap
-                        }
-                        ExternalGraphicsStateKey::LineJoin(join) => {
-                            let join = LineJoin::from(*join as u8);
-                            self.current_state_mut()?.line_join = join
-                        }
-                        ExternalGraphicsStateKey::MiterLimit(miter) => {
-                            self.current_state_mut()?.miter_limit = *miter;
-                        }
-                        ExternalGraphicsStateKey::DashPattern(items, _) => todo!(),
-                        ExternalGraphicsStateKey::RenderingIntent(_) => todo!(),
-                        ExternalGraphicsStateKey::OverprintStroke(_) => todo!(),
-                        ExternalGraphicsStateKey::OverprintFill(_) => todo!(),
-                        ExternalGraphicsStateKey::OverprintMode(_) => todo!(),
-                        ExternalGraphicsStateKey::Font(_, _) => todo!(),
-                        ExternalGraphicsStateKey::BlendMode(items) => {
-                            // println!("Blend mode {:?}", items);
-                        }
-                        ExternalGraphicsStateKey::SoftMask(dictionary) => todo!(),
-                        ExternalGraphicsStateKey::StrokingAlpha(alpha) => {
-                            self.current_state_mut()?.stroke_color.a = *alpha
-                        }
-                        ExternalGraphicsStateKey::NonStrokingAlpha(alpha) => {
-                            self.current_state_mut()?.fill_color.a = *alpha
+                    } else {
+                        if let Some(mut mask) = self.mask.take() {
+                            let ss = self.current_state()?.transform.clone();
+                            self.canvas.finish_mask(mask.as_mut(), &ss);
                         }
                     }
                 }
-            } else {
-                panic!()
+                ExternalGraphicsStateKey::StrokingAlpha(alpha) => {
+                    self.current_state_mut()?.stroke_color.a = *alpha
+                }
+                ExternalGraphicsStateKey::NonStrokingAlpha(alpha) => {
+                    self.current_state_mut()?.fill_color.a = *alpha
+                }
             }
-        } else {
-            // panic!()
         }
         Ok(())
     }
 }
 
-impl<'a> ColorOps for PdfCanvas<'a> {
+impl<'a, T: CanvasBackend> ColorOps for PdfCanvas<'a, T> {
     fn set_stroking_color_space(&mut self, name: &str) -> Result<(), Self::ErrorType> {
         Ok(())
     }
@@ -252,16 +282,9 @@ impl<'a> ColorOps for PdfCanvas<'a> {
     }
 }
 
-impl<'a> XObjectOps for PdfCanvas<'a> {
+impl<'a, T: CanvasBackend> XObjectOps for PdfCanvas<'a, T> {
     fn invoke_xobject(&mut self, xobject_name: &str) -> Result<(), Self::ErrorType> {
-        let resources = if let Some(resources) = self.current_state()?.resources {
-            resources
-        } else {
-            self.page
-                .resources
-                .as_ref()
-                .ok_or(PdfCanvasError::MissingPageResources)?
-        };
+        let resources = self.get_resources()?;
 
         if let Some(XObject::Image(image)) = resources.xobjects.get(xobject_name) {
             let smask = if let Some(m) = image.smask.as_ref() {
@@ -282,38 +305,22 @@ impl<'a> XObjectOps for PdfCanvas<'a> {
                 smask,
             );
         } else if let Some(XObject::Form(form)) = resources.xobjects.get(xobject_name) {
-            let form_procs = &form.content_stream.operations;
-            self.save()?;
-
-            if let Some([a, b, c, d, e, f]) = &form.matrix {
-                let form_rendering_matrix = Transform::from_row(*a, *b, *c, *d, *e, *f);
-                self.set_matrix(form_rendering_matrix)?;
-            }
-
-            if let Some(resources) = &form.resources {
-                self.current_state_mut()?.resources = Some(resources);
-            }
-
-            for op in form_procs {
-                op.call(self)?;
-            }
-
-            self.restore()?;
+            self.render_form_xobject(form)?;
         } else {
-            println!("Unknown xobject {:?}", xobject_name);
+            return Err(PdfCanvasError::XObjectNotFound(xobject_name.to_string()));
         }
         Ok(())
     }
 }
 
-impl<'a> ShadingOps for PdfCanvas<'a> {
+impl<'a, T: CanvasBackend> ShadingOps for PdfCanvas<'a, T> {
     fn paint_shading(&mut self, shading_name: &str) -> Result<(), Self::ErrorType> {
         println!("Paint shading {:?}", shading_name);
         Ok(())
     }
 }
 
-impl<'a> MarkedContentOps for PdfCanvas<'a> {
+impl<'a, T: CanvasBackend> MarkedContentOps for PdfCanvas<'a, T> {
     fn mark_point(&mut self, tag: &str) -> Result<(), Self::ErrorType> {
         todo!()
     }
@@ -343,6 +350,6 @@ impl<'a> MarkedContentOps for PdfCanvas<'a> {
     }
 }
 
-impl PdfOperatorBackendError for PdfCanvas<'_> {
+impl<T> PdfOperatorBackendError for PdfCanvas<'_, T> {
     type ErrorType = PdfCanvasError;
 }

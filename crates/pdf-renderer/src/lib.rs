@@ -1,20 +1,20 @@
 use pdf_document::PdfDocument;
 use pdf_graphics::{canvas_backend::CanvasBackend, pdf_canvas::PdfCanvas};
 
-pub struct PdfRenderer<'a, 'b> {
+pub struct PdfRenderer<'a, 'b, T> {
     document: &'b PdfDocument,
-    canvas: &'a mut dyn CanvasBackend,
+    canvas: &'a mut dyn CanvasBackend<MaskType = T>,
 }
 
-impl<'a, 'b> PdfRenderer<'a, 'b> {
-    pub fn new(document: &'b PdfDocument, canvas: &'a mut dyn CanvasBackend) -> Self {
+impl<'a, 'b, T: CanvasBackend> PdfRenderer<'a, 'b, T> {
+    pub fn new(document: &'b PdfDocument, canvas: &'a mut dyn CanvasBackend<MaskType = T>) -> Self {
         Self { document, canvas }
     }
 
     pub fn render(&mut self, pages: &[usize]) {
         for index in pages {
             if let Some(p) = self.document.pages.get(*index) {
-                let mut canvas = PdfCanvas::new(self.canvas, p);
+                let mut canvas = PdfCanvas::new(self.canvas, p, None);
                 if let Some(cs) = &p.contents {
                     for op in &cs.operations {
                         op.call(&mut canvas).unwrap();

@@ -1,6 +1,6 @@
 use pdf_content_stream::graphics_state_operators::{LineCap, LineJoin};
 use pdf_font::font::Font;
-use pdf_page::{page::PdfPage, resources::Resources};
+use pdf_page::{form::FormXObject, page::PdfPage, resources::Resources};
 
 use crate::{
     PaintMode, PathFillType, canvas::Canvas, canvas_backend::CanvasBackend, color::Color,
@@ -86,17 +86,20 @@ impl<'a> Default for CanvasState<'a> {
     }
 }
 
-pub struct PdfCanvas<'a> {
+pub struct PdfCanvas<'a, T> {
     pub(crate) current_path: Option<PdfPath>,
-    pub(crate) canvas: &'a mut dyn CanvasBackend,
+    pub(crate) canvas: &'a mut dyn CanvasBackend<MaskType = T>,
+    pub(crate) mask: Option<Box<T>>,
     pub(crate) page: &'a PdfPage,
     // Stores the graphics states, including text state.
-    canvas_stack: Vec<CanvasState<'a>>,
+    pub(crate) canvas_stack: Vec<CanvasState<'a>>,
 }
 
-impl Canvas for PdfCanvas<'_> {
+impl<T: CanvasBackend> Canvas for PdfCanvas<'_, T> {
     fn save(&mut self) -> Result<(), PdfCanvasError> {
-        let state = self.current_state()?.clone();
+        let mut state = self.current_state()?.clone();
+        state.clip_path = None;
+
         self.canvas_stack.push(state);
         Ok(())
     }
@@ -127,12 +130,27 @@ impl Canvas for PdfCanvas<'_> {
     }
 }
 
-impl<'a> PdfCanvas<'a> {
-    pub fn new(backend: &'a mut dyn CanvasBackend, page: &'a PdfPage) -> Self {
+impl<'a, T: CanvasBackend> PdfCanvas<'a, T>
+where
+    T: 'a,
+{
+    pub fn new(
+        backend: &'a mut dyn CanvasBackend<MaskType = T>,
+        page: &'a PdfPage,
+        bb: Option<&[f32; 4]>,
+    ) -> Self {
         let media_box = &page.media_box;
 
-        let pdf_media_width = media_box.as_ref().unwrap().width() as f32;
-        let pdf_media_height = media_box.as_ref().unwrap().height() as f32;
+        let pdf_media_width = if let Some(bb) = bb {
+            bb[2] - bb[0]
+        } else {
+            media_box.as_ref().unwrap().width() as f32
+        };
+        let pdf_media_height = if let Some(bb) = bb {
+            bb[3] - bb[1]
+        } else {
+            media_box.as_ref().unwrap().height() as f32
+        };
 
         let backend_canvas_width = backend.width();
         let backend_canvas_height = backend.height();
@@ -173,6 +191,7 @@ impl<'a> PdfCanvas<'a> {
         Self {
             current_path: None,
             canvas: backend,
+            mask: None,
             page,
             canvas_stack,
         }
@@ -213,5 +232,40 @@ impl<'a> PdfCanvas<'a> {
         } else {
             Err(PdfCanvasError::NoActivePath)
         }
+    }
+
+    pub(crate) fn get_resources(&self) -> Result<&'a Resources, PdfCanvasError> {
+        if let Some(resources) = self.current_state()?.resources {
+            Ok(resources)
+        } else {
+            self.page
+                .resources
+                .as_ref()
+                .ok_or(PdfCanvasError::MissingPageResources)
+        }
+    }
+
+    pub(crate) fn render_form_xobject(
+        &mut self,
+        form: &'a FormXObject,
+    ) -> Result<(), PdfCanvasError> {
+        let form_procs = &form.content_stream.operations;
+        self.save()?;
+
+        if let Some([a, b, c, d, e, f]) = &form.matrix {
+            let form_rendering_matrix = Transform::from_row(*a, *b, *c, *d, *e, *f);
+            self.set_matrix(form_rendering_matrix)?;
+        }
+
+        if let Some(resources) = &form.resources {
+            self.current_state_mut()?.resources = Some(resources);
+        }
+
+        for op in form_procs {
+            op.call(self)?;
+        }
+
+        self.restore()?;
+        Ok(())
     }
 }
