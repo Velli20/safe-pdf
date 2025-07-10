@@ -119,10 +119,6 @@ impl<T: CanvasBackend> Canvas for PdfCanvas<'_, T> {
         Ok(())
     }
 
-    fn translate(&mut self, tx: f32, ty: f32) -> Result<(), PdfCanvasError> {
-        todo!()
-    }
-
     fn fill_path(&mut self, path: &PdfPath, fill_type: PathFillType) -> Result<(), PdfCanvasError> {
         let fill_color = self.current_state()?.fill_color;
         self.canvas.fill_path(path, fill_type, fill_color);
@@ -265,7 +261,6 @@ where
             op.call(self)?;
         }
 
-        self.restore()?;
-        Ok(())
+        self.restore()
     }
 }

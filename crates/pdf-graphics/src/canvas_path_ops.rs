@@ -112,8 +112,10 @@ impl<'a, T: CanvasBackend> PathPaintingOps for PdfCanvas<'a, T> {
     }
 
     fn end_path_no_op(&mut self) -> Result<(), Self::ErrorType> {
-        // Discard the current path, making it undefined.
         self.current_path.take();
+        if self.current_state_mut()?.clip_path.take().is_some() {
+            self.canvas.reset_clip();
+        }
         Ok(())
     }
 }

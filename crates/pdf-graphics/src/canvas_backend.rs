@@ -53,7 +53,7 @@ pub trait CanvasBackend {
 
     fn create_mask(&mut self, width: f32, height: f32) -> Box<Self::MaskType>;
 
-    fn enable_mask(&mut self, mask: &mut Self::MaskType, transform: &Transform);
+    fn enable_mask(&mut self, mask: &mut Self::MaskType);
 
     fn finish_mask(&mut self, mask: &mut Self::MaskType, transform: &Transform);
 }
