@@ -1,15 +1,15 @@
-use crate::error::PdfCanvasError;
 use crate::pdf_canvas::PdfCanvas;
 use crate::text_renderer::TextRenderer;
 use crate::transform::Transform;
 use crate::truetype_font_renderer::TrueTypeFontRenderer;
 use crate::type3_font_renderer::Type3FontRenderer;
+use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError};
 use pdf_content_stream::pdf_operator_backend::{
     TextObjectOps, TextPositioningOps, TextShowingOps, TextStateOps,
 };
 use pdf_font::font::FontSubType;
 
-impl<'a> TextPositioningOps for PdfCanvas<'a> {
+impl<'a, T: CanvasBackend> TextPositioningOps for PdfCanvas<'a, T> {
     fn move_text_position(&mut self, tx: f32, ty: f32) -> Result<(), Self::ErrorType> {
         let mat = Transform::from_translate(tx, ty);
         self.current_state_mut()?
@@ -49,7 +49,7 @@ impl<'a> TextPositioningOps for PdfCanvas<'a> {
     }
 }
 
-impl<'a> TextObjectOps for PdfCanvas<'a> {
+impl<'a, T: CanvasBackend> TextObjectOps for PdfCanvas<'a, T> {
     fn begin_text_object(&mut self) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.text_state.matrix = Transform::identity();
         self.current_state_mut()?.text_state.line_matrix = Transform::identity();
@@ -61,7 +61,7 @@ impl<'a> TextObjectOps for PdfCanvas<'a> {
     }
 }
 
-impl<'a> TextStateOps for PdfCanvas<'a> {
+impl<'a, T: CanvasBackend> TextStateOps for PdfCanvas<'a, T> {
     fn set_character_spacing(&mut self, spacing: f32) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.text_state.character_spacing = spacing;
         Ok(())
@@ -110,7 +110,7 @@ impl<'a> TextStateOps for PdfCanvas<'a> {
     }
 }
 
-impl<'a> TextShowingOps for PdfCanvas<'a> {
+impl<'a, T: CanvasBackend> TextShowingOps for PdfCanvas<'a, T> {
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
         let text_state = &self.current_state()?.text_state.clone();
         let current_font = text_state.font.ok_or(PdfCanvasError::NoCurrentFont)?;
@@ -150,8 +150,7 @@ impl<'a> TextShowingOps for PdfCanvas<'a> {
         &mut self,
         elements: &[pdf_content_stream::TextElement],
     ) -> Result<(), Self::ErrorType> {
-        println!("Implement TJ operator: {:?}", elements);
-        Ok(())
+        todo!("Implement TJ operator: {:?}", elements);
     }
 
     fn move_to_next_line_and_show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {

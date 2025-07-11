@@ -1,13 +1,9 @@
 use pdf_graphics::{
-    PathFillType as PdfPathFillType,
+    PathFillType,
     canvas_backend::CanvasBackend,
-    color::Color as PdfColor,
-    pdf_path::{PathVerb, PdfPath as PdfGraphicsPath},
+    color::Color,
+    pdf_path::{PathVerb, PdfPath},
     transform::Transform,
-};
-use skia_safe::{
-    AlphaType, ClipOp, Color4f, ColorType, Data, ImageInfo, Matrix, Paint, Path as SkiaPath,
-    PathFillType as SkiaPathFillType, Rect, image::Image as SkiaImage,
 };
 
 pub struct SkiaCanvasBackend<'a> {
@@ -16,8 +12,16 @@ pub struct SkiaCanvasBackend<'a> {
     pub height: f32,
 }
 
-fn to_skia_path(pdf_path: &PdfGraphicsPath) -> SkiaPath {
-    let mut path = SkiaPath::new();
+pub struct SkiaMaskCanvas {
+    surface: skia_safe::Surface,
+    width: f32,
+    height: f32,
+    mask_image: Option<skia_safe::Image>,
+}
+
+/// Converts a PdfPath to a Skia Path.
+fn to_skia_path(pdf_path: &PdfPath) -> skia_safe::Path {
+    let mut path = skia_safe::Path::new();
     for verb in &pdf_path.verbs {
         match verb {
             PathVerb::MoveTo { x, y } => path.move_to((*x, *y)),
@@ -37,8 +41,9 @@ fn to_skia_path(pdf_path: &PdfGraphicsPath) -> SkiaPath {
     path
 }
 
-fn to_skia_matrix(transform: &Transform) -> Matrix {
-    Matrix::new_all(
+/// Converts a PDF Transform to a Skia Matrix.
+fn to_skia_matrix(transform: &Transform) -> skia_safe::Matrix {
+    skia_safe::Matrix::new_all(
         transform.sx,
         transform.kx,
         transform.tx,
@@ -51,13 +56,40 @@ fn to_skia_matrix(transform: &Transform) -> Matrix {
     )
 }
 
+/// Converts a PDF fill type to a Skia fill type.
+fn to_skia_fill_type(fill_type: PathFillType) -> skia_safe::PathFillType {
+    match fill_type {
+        PathFillType::Winding => skia_safe::PathFillType::Winding,
+        PathFillType::EvenOdd => skia_safe::PathFillType::EvenOdd,
+    }
+}
+
+/// Creates a Skia Paint object for a given color and style.
+fn make_paint(
+    color: Color,
+    style: skia_safe::paint::Style,
+    width: Option<f32>,
+) -> skia_safe::Paint {
+    let mut paint = skia_safe::Paint::new(
+        skia_safe::Color4f::new(color.r, color.g, color.b, color.a),
+        None,
+    );
+    paint.set_anti_alias(true);
+    paint.set_style(style);
+    if let Some(w) = width {
+        paint.set_stroke_width(w);
+    }
+    paint
+}
+
+/// Converts image data to Skia's expected format.
 fn get_skia_image_data(
     image: &[u8],
     width: usize,
     height: usize,
     bits_per_component: u32,
     smask: Option<&[u8]>,
-) -> Option<(ColorType, Data)> {
+) -> Option<(skia_safe::ColorType, skia_safe::Data)> {
     if bits_per_component != 8 {
         eprintln!("Unsupported bits per component: {}", bits_per_component);
         return None;
@@ -73,9 +105,15 @@ fn get_skia_image_data(
                     let new_alpha = (u16::from(rgba[3]) * u16::from(smask_alpha) / 255) as u8;
                     modified.extend_from_slice(&[rgba[0], rgba[1], rgba[2], new_alpha]);
                 }
-                Some((ColorType::RGBA8888, Data::new_copy(&modified)))
+                Some((
+                    skia_safe::ColorType::RGBA8888,
+                    skia_safe::Data::new_copy(&modified),
+                ))
             } else {
-                Some((ColorType::RGBA8888, Data::new_copy(image)))
+                Some((
+                    skia_safe::ColorType::RGBA8888,
+                    skia_safe::Data::new_copy(image),
+                ))
             }
         }
         3 => {
@@ -90,9 +128,15 @@ fn get_skia_image_data(
                     padded.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
                 }
             }
-            Some((ColorType::RGBA8888, Data::new_copy(&padded)))
+            Some((
+                skia_safe::ColorType::RGBA8888,
+                skia_safe::Data::new_copy(&padded),
+            ))
         }
-        1 => Some((ColorType::Gray8, Data::new_copy(image))),
+        1 => Some((
+            skia_safe::ColorType::Gray8,
+            skia_safe::Data::new_copy(image),
+        )),
         _ => {
             eprintln!("Unsupported number of components: {}", num_components);
             None
@@ -101,31 +145,24 @@ fn get_skia_image_data(
 }
 
 impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
-    fn fill_path(&mut self, path: &PdfGraphicsPath, fill_type: PdfPathFillType, color: PdfColor) {
+    type MaskType = SkiaMaskCanvas;
+
+    fn fill_path(&mut self, path: &PdfPath, fill_type: PathFillType, color: Color) {
         let mut sk_path = to_skia_path(path);
-        let sk_color = Color4f::new(color.r, color.g, color.b, color.a);
-        let mut paint = Paint::new(sk_color, None);
-        paint.set_anti_alias(true);
-        paint.set_style(skia_safe::paint::Style::Fill);
+        sk_path.set_fill_type(to_skia_fill_type(fill_type));
 
-        let sk_fill_type = match fill_type {
-            PdfPathFillType::Winding => SkiaPathFillType::Winding,
-            PdfPathFillType::EvenOdd => SkiaPathFillType::EvenOdd,
-        };
-        sk_path.set_fill_type(sk_fill_type);
-
-        self.canvas.draw_path(&sk_path, &paint);
+        self.canvas.draw_path(
+            &sk_path,
+            &make_paint(color, skia_safe::paint::Style::Fill, None),
+        );
     }
 
-    fn stroke_path(&mut self, path: &PdfGraphicsPath, color: PdfColor, line_width: f32) {
+    fn stroke_path(&mut self, path: &PdfPath, color: Color, line_width: f32) {
         let sk_path = to_skia_path(path);
-        let sk_color = Color4f::new(color.r, color.g, color.b, color.a);
-        let mut paint = Paint::new(sk_color, None);
-        paint.set_anti_alias(true);
-        paint.set_style(skia_safe::paint::Style::Stroke);
-        paint.set_stroke_width(line_width);
-
-        self.canvas.draw_path(&sk_path, &paint);
+        self.canvas.draw_path(
+            &sk_path,
+            &make_paint(color, skia_safe::paint::Style::Stroke, Some(line_width)),
+        );
     }
 
     fn width(&self) -> f32 {
@@ -136,17 +173,13 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
         self.height
     }
 
-    fn set_clip_region(&mut self, path: &PdfGraphicsPath, mode: PdfPathFillType) {
+    fn set_clip_region(&mut self, path: &PdfPath, mode: PathFillType) {
         let mut sk_path = to_skia_path(path);
-        let sk_fill_type = match mode {
-            PdfPathFillType::Winding => SkiaPathFillType::Winding,
-            PdfPathFillType::EvenOdd => SkiaPathFillType::EvenOdd,
-        };
-        // self.stroke_path(path,  PdfColor::from_rgba(0.7, 0.5, 0.3, 1.0),2.0);
-        sk_path.set_fill_type(sk_fill_type);
+        sk_path.set_fill_type(to_skia_fill_type(mode));
+        // self.stroke_path(path,  Color::from_rgba(0.7, 0.5, 0.3, 1.0),2.0);
         self.canvas.save();
         self.canvas
-            .clip_path(&sk_path, ClipOp::Intersect, Some(true));
+            .clip_path(&sk_path, skia_safe::ClipOp::Intersect, Some(true));
     }
 
     fn reset_clip(&mut self) {
@@ -168,7 +201,7 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
         }
 
         let skia_image = if is_jpeg {
-            SkiaImage::from_encoded(Data::new_copy(image))
+            skia_safe::Image::from_encoded(skia_safe::Data::new_copy(image))
         } else {
             let (w, h) = (width as usize, height as usize);
             let (color_type, pixel_data) =
@@ -176,23 +209,193 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
                     Some(data) => data,
                     None => return,
                 };
-            let image_info =
-                ImageInfo::new((w as i32, h as i32), color_type, AlphaType::Unpremul, None);
+            let image_info = skia_safe::ImageInfo::new(
+                (w as i32, h as i32),
+                color_type,
+                skia_safe::AlphaType::Unpremul,
+                None,
+            );
             let row_bytes = w * image_info.bytes_per_pixel();
             skia_safe::images::raster_from_data(&image_info, pixel_data, row_bytes)
         };
 
         if let Some(skia_image) = skia_image {
             let skia_matrix = to_skia_matrix(transform);
-            let paint = Paint::default();
+            let paint = skia_safe::Paint::default();
             self.canvas.save();
             self.canvas.concat(&skia_matrix);
-            let dest_rect = Rect::from_xywh(0.0, -1.0, 1.0, 1.0);
+            let dest_rect = skia_safe::Rect::from_xywh(0.0, -1.0, 1.0, 1.0);
             self.canvas
                 .draw_image_rect(&skia_image, None, dest_rect, &paint);
             self.canvas.restore();
         } else {
             eprintln!("Failed to create Skia image from image XObject data");
         }
+    }
+
+    fn create_mask(&mut self, width: f32, height: f32) -> Box<Self::MaskType> {
+        // Create an ImageInfo describing the bitmap's properties for A8.
+        let image_info = skia_safe::ImageInfo::new(
+            (width as i32, height as i32),
+            skia_safe::ColorType::Alpha8,
+            skia_safe::AlphaType::Premul,
+            Some(skia_safe::ColorSpace::new_srgb()),
+        );
+
+        // Create a new surface to draw your mask onto.
+        let mut surface = skia_safe::surfaces::raster(&image_info, None, None).unwrap();
+        let canvas = surface.canvas();
+
+        // Clear the canvas to fully transparent (alpha 0)
+        canvas.clear(skia_safe::Color::TRANSPARENT);
+
+        let mask_canvas = SkiaMaskCanvas {
+            surface,
+            width,
+            height,
+            mask_image: None,
+        };
+
+        Box::new(mask_canvas)
+    }
+
+    fn enable_mask(&mut self, mask: &mut Self::MaskType) {
+        let mask_image = mask.surface.image_snapshot();
+        // let data = mask_image
+        //     .encode(None, skia_safe::EncodedImageFormat::PNG, 100)
+        //     .unwrap();
+        // std::fs::write("masked_draw.png", data.as_bytes()).unwrap();
+
+        mask.mask_image = Some(mask_image);
+        self.canvas.clear(skia_safe::Color::WHITE);
+        let rec = skia_safe::canvas::SaveLayerRec::default();
+        self.canvas.save_layer(&rec);
+    }
+
+    fn finish_mask(&mut self, mask: &mut Self::MaskType, transform: &Transform) {
+        let mat = to_skia_matrix(transform);
+        self.canvas.concat(&mat);
+        let mut paint = skia_safe::Paint::default();
+        paint.set_blend_mode(skia_safe::BlendMode::DstIn);
+        let mask_image = mask.mask_image.take().unwrap();
+        let height = -mask_image.height() as f32;
+        self.canvas
+            .draw_image(mask_image, (0.0, height), Some(&paint));
+        self.canvas.restore();
+    }
+}
+
+impl<'a> CanvasBackend for SkiaMaskCanvas {
+    type MaskType = SkiaMaskCanvas;
+
+    fn fill_path(&mut self, path: &PdfPath, fill_type: PathFillType, color: Color) {
+        let mut sk_path = to_skia_path(path);
+        let sk_color = skia_safe::Color4f::new(color.r, color.g, color.b, color.a);
+        let mut paint = skia_safe::Paint::new(sk_color, None);
+        paint.set_anti_alias(true);
+        paint.set_style(skia_safe::paint::Style::Fill);
+
+        let sk_fill_type = match fill_type {
+            PathFillType::Winding => skia_safe::PathFillType::Winding,
+            PathFillType::EvenOdd => skia_safe::PathFillType::EvenOdd,
+        };
+        sk_path.set_fill_type(sk_fill_type);
+
+        self.surface.canvas().draw_path(&sk_path, &paint);
+    }
+
+    fn stroke_path(&mut self, path: &PdfPath, color: Color, line_width: f32) {
+        let sk_path = to_skia_path(path);
+        let sk_color = skia_safe::Color4f::new(color.r, color.g, color.b, color.a);
+        let mut paint = skia_safe::Paint::new(sk_color, None);
+        paint.set_anti_alias(true);
+        paint.set_style(skia_safe::paint::Style::Stroke);
+        paint.set_stroke_width(line_width);
+
+        self.surface.canvas().draw_path(&sk_path, &paint);
+    }
+
+    fn set_clip_region(&mut self, path: &PdfPath, mode: PathFillType) {
+        let mut sk_path = to_skia_path(path);
+        let sk_fill_type = match mode {
+            PathFillType::Winding => skia_safe::PathFillType::Winding,
+            PathFillType::EvenOdd => skia_safe::PathFillType::EvenOdd,
+        };
+        // self.stroke_path(path,  Color::from_rgba(0.7, 0.5, 0.3, 1.0),2.0);
+        sk_path.set_fill_type(sk_fill_type);
+        self.surface.canvas().save();
+        self.surface
+            .canvas()
+            .clip_path(&sk_path, skia_safe::ClipOp::Intersect, Some(true));
+    }
+
+    fn width(&self) -> f32 {
+        self.width
+    }
+
+    fn height(&self) -> f32 {
+        self.height
+    }
+
+    fn reset_clip(&mut self) {
+        self.surface.canvas().restore();
+    }
+
+    fn draw_image(
+        &mut self,
+        image: &[u8],
+        is_jpeg: bool,
+        width: f32,
+        height: f32,
+        bits_per_component: u32,
+        transform: &Transform,
+        smask: Option<&[u8]>,
+    ) {
+        if width == 0.0 || height == 0.0 {
+            return;
+        }
+
+        let skia_image = if is_jpeg {
+            skia_safe::Image::from_encoded(skia_safe::Data::new_copy(image))
+        } else {
+            let (w, h) = (width as usize, height as usize);
+            let (color_type, pixel_data) =
+                match get_skia_image_data(image, w, h, bits_per_component, smask) {
+                    Some(data) => data,
+                    None => return,
+                };
+            let image_info = skia_safe::ImageInfo::new(
+                (w as i32, h as i32),
+                color_type,
+                skia_safe::AlphaType::Unpremul,
+                None,
+            );
+            let row_bytes = w * image_info.bytes_per_pixel();
+            skia_safe::images::raster_from_data(&image_info, pixel_data, row_bytes)
+        };
+
+        if let Some(skia_image) = skia_image {
+            let skia_matrix = to_skia_matrix(transform);
+            let paint = skia_safe::Paint::default();
+            self.surface.canvas().save();
+            self.surface.canvas().concat(&skia_matrix);
+            let dest_rect = skia_safe::Rect::from_xywh(0.0, -1.0, 1.0, 1.0);
+            self.surface
+                .canvas()
+                .draw_image_rect(&skia_image, None, dest_rect, &paint);
+            self.surface.canvas().restore();
+        } else {
+            eprintln!("Failed to create Skia image from image XObject data");
+        }
+    }
+
+    fn create_mask(&mut self, _width: f32, _height: f32) -> Box<Self::MaskType> {
+        unimplemented!("Nested masks are not supported for SkiaMaskCanvas");
+    }
+    fn enable_mask(&mut self, _mask: &mut Self::MaskType) {
+        unimplemented!("Nested masks are not supported for SkiaMaskCanvas");
+    }
+    fn finish_mask(&mut self, _mask: &mut Self::MaskType, _transform: &Transform) {
+        unimplemented!("Nested masks are not supported for SkiaMaskCanvas");
     }
 }

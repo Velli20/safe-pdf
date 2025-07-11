@@ -1,10 +1,11 @@
 use pdf_content_stream::pdf_operator_backend::{PathConstructionOps, PathPaintingOps};
 
 use crate::{
-    PaintMode, PathFillType, error::PdfCanvasError, pdf_canvas::PdfCanvas, pdf_path::PdfPath,
+    PaintMode, PathFillType, canvas_backend::CanvasBackend, error::PdfCanvasError,
+    pdf_canvas::PdfCanvas, pdf_path::PdfPath,
 };
 
-impl<'a> PathConstructionOps for PdfCanvas<'a> {
+impl<'a, T: CanvasBackend> PathConstructionOps for PdfCanvas<'a, T> {
     fn move_to(&mut self, x: f32, y: f32) -> Result<(), Self::ErrorType> {
         self.current_path
             .get_or_insert(PdfPath::default())
@@ -74,7 +75,7 @@ impl<'a> PathConstructionOps for PdfCanvas<'a> {
     }
 }
 
-impl<'a> PathPaintingOps for PdfCanvas<'a> {
+impl<'a, T: CanvasBackend> PathPaintingOps for PdfCanvas<'a, T> {
     fn stroke_path(&mut self) -> Result<(), Self::ErrorType> {
         self.paint_taken_path(PaintMode::Stroke, PathFillType::default())
     }
@@ -111,8 +112,10 @@ impl<'a> PathPaintingOps for PdfCanvas<'a> {
     }
 
     fn end_path_no_op(&mut self) -> Result<(), Self::ErrorType> {
-        // Discard the current path, making it undefined.
         self.current_path.take();
+        if self.current_state_mut()?.clip_path.take().is_some() {
+            self.canvas.reset_clip();
+        }
         Ok(())
     }
 }

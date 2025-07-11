@@ -6,6 +6,8 @@ use crate::{PathFillType, color::Color, pdf_path::PdfPath, transform::Transform}
 /// to render content. Implementors of this trait act as the target surface,
 /// such as a raster image buffer, a window, or an SVG file.
 pub trait CanvasBackend {
+    type MaskType: CanvasBackend;
+
     /// Fills the given path with the specified color and fill rule.
     ///
     /// # Parameters
@@ -48,4 +50,10 @@ pub trait CanvasBackend {
         transform: &Transform,
         smask: Option<&[u8]>,
     );
+
+    fn create_mask(&mut self, width: f32, height: f32) -> Box<Self::MaskType>;
+
+    fn enable_mask(&mut self, mask: &mut Self::MaskType);
+
+    fn finish_mask(&mut self, mask: &mut Self::MaskType, transform: &Transform);
 }

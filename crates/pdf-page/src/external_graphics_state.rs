@@ -1,11 +1,13 @@
 use std::str::FromStr;
 
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     traits::FromDictionary,
 };
 
 use thiserror::Error;
+
+use crate::xobject::{XObject, XObjectError, XObjectReader};
 
 /// Errors that can occur during parsing of an External Graphics State dictionary.
 #[derive(Error, Debug)]
@@ -37,13 +39,23 @@ pub enum ExternalGraphicsStateError {
         expected_type: &'static str,
         found_type: String,
     },
-    /// Error converting a PDF value to a number.
     #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
     NumericConversionError {
         entry_description: &'static str,
         #[source]
         source: ObjectError,
     },
+
+    #[error("Error reading Soft Mask XObject: {0}")]
+    SMaskReadError(#[from] XObjectError),
+
+    #[error("Object error: {0}")]
+    ObjectError(#[from] ObjectError),
+}
+
+pub enum MaskType {
+    Luminosity,
+    Alpha,
 }
 
 /// Represents the standard blend modes allowed in PDF.
@@ -110,13 +122,17 @@ impl FromStr for BlendMode {
     }
 }
 
+pub struct SoftMask {
+    pub mask_type: MaskType,
+    pub shape: XObject,
+}
+
 /// Represents a key-value pair from a PDF External Graphics State dictionary (`ExtGState`).
 ///
 /// An `ExtGState` dictionary contains parameters that control the graphics state,
 /// such as line styles, color rendering, and alpha transparency. This enum
 /// enumerates the possible keys (parameters) found in such a dictionary and
 /// holds the corresponding parsed value.
-#[derive(Debug, PartialEq)]
 pub enum ExternalGraphicsStateKey {
     /// Line width (`LW`). A number specifying the thickness of stroked lines.
     LineWidth(f32),
@@ -149,9 +165,7 @@ pub enum ExternalGraphicsStateKey {
     /// when compositing objects.
     BlendMode(Vec<BlendMode>),
     /// Soft mask (`SMask`). A dictionary specifying the soft mask to be used, or the name `None`.
-    /// The dictionary itself is complex and defines the mask's properties (type, subtype, etc.).
-    /// Represented here as an optional `Dictionary`.
-    SoftMask(Option<Dictionary>),
+    SoftMask(Option<SoftMask>),
     /// Stroking alpha constant (`CA`). A number in the range 0.0 to 1.0 specifying the constant
     /// opacity value to be used for stroking operations.
     StrokingAlpha(f32),
@@ -173,214 +187,285 @@ impl FromDictionary for ExternalGraphicsState {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        _objects: &ObjectCollection,
+        objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let mut params: Vec<ExternalGraphicsStateKey> = Vec::new();
 
         for (name, value) in &dictionary.dictionary {
-            let key_variant =
-                match name.as_str() {
-                    "LW" => ExternalGraphicsStateKey::LineWidth(value.as_number::<f32>().map_err(
-                        |e| ExternalGraphicsStateError::NumericConversionError {
+            let key_variant = match name.as_str() {
+                "LW" => {
+                    ExternalGraphicsStateKey::LineWidth(value.as_number::<f32>().map_err(|e| {
+                        ExternalGraphicsStateError::NumericConversionError {
                             entry_description: "LW",
                             source: e,
-                        },
-                    )?),
-                    "LC" => ExternalGraphicsStateKey::LineCap(value.as_number::<i32>().map_err(
-                        |e| ExternalGraphicsStateError::NumericConversionError {
+                        }
+                    })?)
+                }
+                "LC" => {
+                    ExternalGraphicsStateKey::LineCap(value.as_number::<i32>().map_err(|e| {
+                        ExternalGraphicsStateError::NumericConversionError {
                             entry_description: "LC",
                             source: e,
-                        },
-                    )?),
-                    "LJ" => ExternalGraphicsStateKey::LineJoin(value.as_number::<i32>().map_err(
-                        |e| ExternalGraphicsStateError::NumericConversionError {
+                        }
+                    })?)
+                }
+                "LJ" => {
+                    ExternalGraphicsStateKey::LineJoin(value.as_number::<i32>().map_err(|e| {
+                        ExternalGraphicsStateError::NumericConversionError {
                             entry_description: "LJ",
                             source: e,
-                        },
-                    )?),
-                    "ML" => {
-                        ExternalGraphicsStateKey::MiterLimit(value.as_number::<f32>().map_err(
-                            |e| ExternalGraphicsStateError::NumericConversionError {
-                                entry_description: "ML",
-                                source: e,
-                            },
-                        )?)
-                    }
-                    "D" => {
-                        let arr = value.as_array().ok_or(
-                            ExternalGraphicsStateError::UnsupportedTypeError {
-                                key_name: name.clone(),
-                                expected_type: "Array",
-                                found_type: format!("{:?}", value),
-                            },
-                        )?;
-                        if arr.len() != 2 {
-                            return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
-                                key_name: name.clone(),
-                                expected_desc: "array with 2 elements",
-                                actual_desc: format!("array with {} elements", arr.len()),
-                            });
                         }
-                        let dash_array_obj = arr[0].as_array().ok_or(
-                            ExternalGraphicsStateError::UnsupportedTypeError {
+                    })?)
+                }
+                "ML" => {
+                    ExternalGraphicsStateKey::MiterLimit(value.as_number::<f32>().map_err(|e| {
+                        ExternalGraphicsStateError::NumericConversionError {
+                            entry_description: "ML",
+                            source: e,
+                        }
+                    })?)
+                }
+                "D" => {
+                    let arr = value.as_array().ok_or(
+                        ExternalGraphicsStateError::UnsupportedTypeError {
+                            key_name: name.clone(),
+                            expected_type: "Array",
+                            found_type: format!("{:?}", value),
+                        },
+                    )?;
+                    if arr.len() != 2 {
+                        return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
+                            key_name: name.clone(),
+                            expected_desc: "array with 2 elements",
+                            actual_desc: format!("array with {} elements", arr.len()),
+                        });
+                    }
+                    let dash_array_obj = arr[0].as_array().ok_or(
+                        ExternalGraphicsStateError::UnsupportedTypeError {
+                            key_name: name.clone(),
+                            expected_type: "Array",
+                            found_type: format!("{:?}", arr[0]),
+                        },
+                    )?;
+                    let dash_array_f32 = dash_array_obj
+                        .iter()
+                        .map(|obj| {
+                            obj.as_number::<f32>().map_err(|e| {
+                                ExternalGraphicsStateError::NumericConversionError {
+                                    entry_description: "Dash array",
+                                    source: e,
+                                }
+                            })
+                        })
+                        .collect::<Result<Vec<f32>, _>>()?;
+
+                    let dash_phase = arr[1].as_number::<f32>().map_err(|e| {
+                        ExternalGraphicsStateError::NumericConversionError {
+                            entry_description: "Dash phase",
+                            source: e,
+                        }
+                    })?;
+                    ExternalGraphicsStateKey::DashPattern(dash_array_f32, dash_phase)
+                }
+                "RI" => ExternalGraphicsStateKey::RenderingIntent(
+                    value
+                        .as_str()
+                        .ok_or(ExternalGraphicsStateError::UnsupportedTypeError {
+                            key_name: name.clone(),
+                            expected_type: "String",
+                            found_type: format!("{:?}", value),
+                        })?
+                        .to_string(),
+                ),
+                "OP" => ExternalGraphicsStateKey::OverprintStroke(value.as_boolean().ok_or(
+                    ExternalGraphicsStateError::UnsupportedTypeError {
+                        key_name: name.clone(),
+                        expected_type: "Boolean",
+                        found_type: format!("{:?}", value),
+                    },
+                )?),
+                "op" => ExternalGraphicsStateKey::OverprintFill(value.as_boolean().ok_or(
+                    ExternalGraphicsStateError::UnsupportedTypeError {
+                        key_name: name.clone(),
+                        expected_type: "Boolean",
+                        found_type: format!("{:?}", value),
+                    },
+                )?),
+                "OPM" => {
+                    ExternalGraphicsStateKey::OverprintMode(value.as_number::<i32>().map_err(
+                        |e| ExternalGraphicsStateError::NumericConversionError {
+                            entry_description: "OPM",
+                            source: e,
+                        },
+                    )?)
+                }
+                "Font" => {
+                    let arr = value.as_array().ok_or(
+                        ExternalGraphicsStateError::UnsupportedTypeError {
+                            key_name: name.clone(),
+                            expected_type: "Array",
+                            found_type: format!("{:?}", value),
+                        },
+                    )?;
+                    if arr.len() != 2 {
+                        return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
+                            key_name: name.clone(),
+                            expected_desc: "array with 2 elements",
+                            actual_desc: format!("array with {} elements", arr.len()),
+                        });
+                    }
+                    let font_ref = arr[0].as_reference().ok_or(
+                        ExternalGraphicsStateError::UnsupportedTypeError {
+                            key_name: name.clone(),
+                            expected_type: "Object",
+                            found_type: format!("{:?}", arr[0]),
+                        },
+                    )?;
+                    let font_size = arr[1].as_number::<f32>().map_err(|e| {
+                        ExternalGraphicsStateError::NumericConversionError {
+                            entry_description: "Font size",
+                            source: e,
+                        }
+                    })?;
+                    ExternalGraphicsStateKey::Font(font_ref, font_size)
+                }
+                "BM" => {
+                    let blend_modes_vec: Vec<BlendMode>;
+                    if let Some(name_str) = value.as_str() {
+                        let mode = name_str.parse::<BlendMode>().map_err(|e| {
+                            ExternalGraphicsStateError::BlendModeParseError {
                                 key_name: name.clone(),
-                                expected_type: "Array",
-                                found_type: format!("{:?}", arr[0]),
-                            },
-                        )?;
-                        let dash_array_f32 = dash_array_obj
+                                value: name_str.to_string(),
+                                source: e,
+                            }
+                        })?;
+                        blend_modes_vec = vec![mode];
+                    } else if let Some(pdf_array) = value.as_array() {
+                        blend_modes_vec = pdf_array
                             .iter()
                             .map(|obj| {
-                                obj.as_number::<f32>().map_err(|e| {
-                                    ExternalGraphicsStateError::NumericConversionError {
-                                        entry_description: "Dash array",
+                                let name_str = obj.as_str().ok_or(
+                                    ExternalGraphicsStateError::UnsupportedTypeError {
+                                        key_name: name.clone(),
+                                        expected_type: "String",
+                                        found_type: format!("{:?}", obj),
+                                    },
+                                )?;
+                                name_str.parse::<BlendMode>().map_err(|e| {
+                                    ExternalGraphicsStateError::BlendModeParseError {
+                                        key_name: name.clone(),
+                                        value: name_str.to_string(),
                                         source: e,
                                     }
                                 })
                             })
-                            .collect::<Result<Vec<f32>, _>>()?;
-
-                        let dash_phase = arr[1].as_number::<f32>().map_err(|e| {
-                            ExternalGraphicsStateError::NumericConversionError {
-                                entry_description: "Dash phase",
-                                source: e,
-                            }
-                        })?;
-                        ExternalGraphicsStateKey::DashPattern(dash_array_f32, dash_phase)
-                    }
-                    "RI" => ExternalGraphicsStateKey::RenderingIntent(
-                        value
-                            .as_str()
-                            .ok_or(ExternalGraphicsStateError::UnsupportedTypeError {
-                                key_name: name.clone(),
-                                expected_type: "String",
-                                found_type: format!("{:?}", value),
-                            })?
-                            .to_string(),
-                    ),
-                    "OP" => ExternalGraphicsStateKey::OverprintStroke(value.as_boolean().ok_or(
-                        ExternalGraphicsStateError::UnsupportedTypeError {
-                            key_name: name.clone(),
-                            expected_type: "Boolean",
-                            found_type: format!("{:?}", value),
-                        },
-                    )?),
-                    "op" => ExternalGraphicsStateKey::OverprintFill(value.as_boolean().ok_or(
-                        ExternalGraphicsStateError::UnsupportedTypeError {
-                            key_name: name.clone(),
-                            expected_type: "Boolean",
-                            found_type: format!("{:?}", value),
-                        },
-                    )?),
-                    "OPM" => {
-                        ExternalGraphicsStateKey::OverprintMode(value.as_number::<i32>().map_err(
-                            |e| ExternalGraphicsStateError::NumericConversionError {
-                                entry_description: "OPM",
-                                source: e,
-                            },
-                        )?)
-                    }
-                    "Font" => {
-                        let arr = value.as_array().ok_or(
-                            ExternalGraphicsStateError::UnsupportedTypeError {
-                                key_name: name.clone(),
-                                expected_type: "Array",
-                                found_type: format!("{:?}", value),
-                            },
-                        )?;
-                        if arr.len() != 2 {
-                            return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
-                                key_name: name.clone(),
-                                expected_desc: "array with 2 elements",
-                                actual_desc: format!("array with {} elements", arr.len()),
-                            });
-                        }
-                        let font_ref = arr[0].as_reference().ok_or(
-                            ExternalGraphicsStateError::UnsupportedTypeError {
-                                key_name: name.clone(),
-                                expected_type: "Object",
-                                found_type: format!("{:?}", arr[0]),
-                            },
-                        )?;
-                        let font_size = arr[1].as_number::<f32>().map_err(|e| {
-                            ExternalGraphicsStateError::NumericConversionError {
-                                entry_description: "Font size",
-                                source: e,
-                            }
-                        })?;
-                        ExternalGraphicsStateKey::Font(font_ref, font_size)
-                    }
-                    "BM" => {
-                        let blend_modes_vec: Vec<BlendMode>;
-                        if let Some(name_str) = value.as_str() {
-                            let mode = name_str.parse::<BlendMode>().map_err(|e| {
-                                ExternalGraphicsStateError::BlendModeParseError {
-                                    key_name: name.clone(),
-                                    value: name_str.to_string(),
-                                    source: e,
-                                }
-                            })?;
-                            blend_modes_vec = vec![mode];
-                        } else if let Some(pdf_array) = value.as_array() {
-                            blend_modes_vec = pdf_array
-                                .iter()
-                                .map(|obj| {
-                                    let name_str = obj.as_str().ok_or(
-                                        ExternalGraphicsStateError::UnsupportedTypeError {
-                                            key_name: name.clone(),
-                                            expected_type: "String",
-                                            found_type: format!("{:?}", obj),
-                                        },
-                                    )?;
-                                    name_str.parse::<BlendMode>().map_err(|e| {
-                                        ExternalGraphicsStateError::BlendModeParseError {
-                                            key_name: name.clone(),
-                                            value: name_str.to_string(),
-                                            source: e,
-                                        }
-                                    })
-                                })
-                                .collect::<Result<Vec<BlendMode>, _>>()?;
-                        } else {
-                            return Err(ExternalGraphicsStateError::UnsupportedTypeError {
-                                key_name: name.clone(),
-                                expected_type: "Name or Array of Names",
-                                found_type: format!("{:?}", value),
-                            });
-                        }
-                        ExternalGraphicsStateKey::BlendMode(blend_modes_vec)
-                    }
-                    "SMask" => {
+                            .collect::<Result<Vec<BlendMode>, _>>()?;
+                    } else {
                         return Err(ExternalGraphicsStateError::UnsupportedTypeError {
                             key_name: name.clone(),
-                            expected_type: "Dictionary or Name",
+                            expected_type: "Name or Array of Names",
                             found_type: format!("{:?}", value),
                         });
                     }
-                    "CA" => {
-                        ExternalGraphicsStateKey::StrokingAlpha(value.as_number::<f32>().map_err(
-                            |e| ExternalGraphicsStateError::NumericConversionError {
-                                entry_description: "CA",
-                                source: e,
-                            },
-                        )?)
-                    }
-                    "ca" => ExternalGraphicsStateKey::NonStrokingAlpha(
-                        value.as_number::<f32>().map_err(|e| {
-                            ExternalGraphicsStateError::NumericConversionError {
-                                entry_description: "ca",
-                                source: e,
+                    ExternalGraphicsStateKey::BlendMode(blend_modes_vec)
+                }
+                "SMask" => {
+                    let smask = match value.as_ref() {
+                        ObjectVariant::Dictionary(dict) => {
+                            let mask_type_str = dict
+                                .get("S")
+                                .ok_or(ExternalGraphicsStateError::InvalidValueError {
+                                    key_name: name.clone(),
+                                    description: "SMask must be 'None'".to_string(),
+                                })?
+                                .as_str()
+                                .ok_or(ExternalGraphicsStateError::UnsupportedTypeError {
+                                    key_name: name.clone(),
+                                    expected_type: "Name or Array of Names",
+                                    found_type: format!("{:?}", value),
+                                })?;
+
+                            let mask_type = match mask_type_str.as_ref() {
+                                "Luminosity" => MaskType::Luminosity,
+                                "Alpha" => MaskType::Alpha,
+                                other => {
+                                    return Err(ExternalGraphicsStateError::InvalidValueError {
+                                        key_name: name.clone(),
+                                        description: format!("Unknown SMask type '{}'", other),
+                                    });
+                                }
+                            };
+
+                            // Parse the "G" key for the XObject (required)
+                            let shape_obj = dict.get("G").ok_or(
+                                ExternalGraphicsStateError::InvalidValueError {
+                                    key_name: name.clone(),
+                                    description: "SMask dictionary missing 'G' key".to_string(),
+                                },
+                            )?;
+
+                            let smask_xobject = objects.resolve_stream(&shape_obj)?;
+
+                            // You may need to resolve the XObject from the object collection.
+                            // Here we assume XObject::from_object exists and takes the object and collection.
+                            let shape = XObject::read_xobject(
+                                &smask_xobject.dictionary,
+                                smask_xobject.data.as_slice(),
+                                objects,
+                            )
+                            .map_err(|e| {
+                                ExternalGraphicsStateError::InvalidValueError {
+                                    key_name: name.clone(),
+                                    description: format!("Failed to parse SMask XObject: {:?}", e),
+                                }
+                            })?;
+
+                            Some(SoftMask { mask_type, shape })
+                        }
+                        other => {
+                            if let Some(name_str) = other.as_str() {
+                                if name_str == "None" {
+                                    None
+                                } else {
+                                    return Err(ExternalGraphicsStateError::InvalidValueError {
+                                        key_name: name.clone(),
+                                        description: "SMask must be 'None'".to_string(),
+                                    });
+                                }
+                            } else {
+                                return Err(ExternalGraphicsStateError::UnsupportedTypeError {
+                                    key_name: name.clone(),
+                                    expected_type: "Name or Dictionary",
+                                    found_type: format!("{:?}", value),
+                                });
                             }
-                        })?,
-                    ),
-                    unknown_key => {
-                        eprintln!(
-                            "Warning: Unknown ExtGState parameter encountered: {}",
-                            unknown_key
-                        );
-                        continue;
-                    }
-                };
+                        }
+                    };
+
+                    ExternalGraphicsStateKey::SoftMask(smask)
+                }
+                "CA" => ExternalGraphicsStateKey::StrokingAlpha(value.as_number::<f32>().map_err(
+                    |e| ExternalGraphicsStateError::NumericConversionError {
+                        entry_description: "CA",
+                        source: e,
+                    },
+                )?),
+                "ca" => {
+                    ExternalGraphicsStateKey::NonStrokingAlpha(value.as_number::<f32>().map_err(
+                        |e| ExternalGraphicsStateError::NumericConversionError {
+                            entry_description: "ca",
+                            source: e,
+                        },
+                    )?)
+                }
+                unknown_key => {
+                    eprintln!(
+                        "Warning: Unknown ExtGState parameter encountered: {}",
+                        unknown_key
+                    );
+                    continue;
+                }
+            };
             params.push(key_variant);
         }
 

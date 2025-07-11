@@ -22,11 +22,6 @@ pub(crate) trait Canvas {
     /// This sets the complete transformation from user space to device space.
     fn set_matrix(&mut self, matrix: Transform) -> Result<(), PdfCanvasError>;
 
-    /// Applies a translation to the current transformation matrix.
-    ///
-    /// This is equivalent to pre-multiplying the CTM with a translation matrix.
-    fn translate(&mut self, tx: f32, ty: f32) -> Result<(), PdfCanvasError>;
-
     /// Fills the given path with using a currently set color.
     ///
     /// # Parameters
