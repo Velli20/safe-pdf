@@ -64,11 +64,11 @@ impl<'a, T: CanvasBackend> GraphicsStateOps for PdfCanvas<'a, T> {
         Ok(())
     }
 
-    fn set_rendering_intent(&mut self, intent: &str) -> Result<(), Self::ErrorType> {
+    fn set_rendering_intent(&mut self, _intent: &str) -> Result<(), Self::ErrorType> {
         todo!()
     }
 
-    fn set_flatness_tolerance(&mut self, tolerance: f32) -> Result<(), Self::ErrorType> {
+    fn set_flatness_tolerance(&mut self, _tolerance: f32) -> Result<(), Self::ErrorType> {
         todo!()
     }
 
@@ -104,27 +104,42 @@ impl<'a, T: CanvasBackend> GraphicsStateOps for PdfCanvas<'a, T> {
                     // println!("Blend mode {:?}", items);
                 }
                 ExternalGraphicsStateKey::SoftMask(smask) => {
+                    // Handle the `/SMask`` entry from an `ExtGState` dictionary.
                     if let Some(smask) = smask {
                         if let XObject::Image(_) = &smask.shape {
                             panic!()
                         } else if let XObject::Form(form) = &smask.shape {
+                            // The soft mask is defined by a Form XObject.
+                            // We need to render this form's content into a separate mask surface.
+
+                            // Create a new mask surface from the backend, sized to the form's bounding box.
                             let mut mask = self.canvas.create_mask(
                                 form.bbox[2] - form.bbox[0],
                                 form.bbox[3] - form.bbox[1],
                             );
 
+                            // Create a temporary `PdfCanvas` that draws into our new mask surface.
+                            // This allows us to reuse the rendering logic for the form's content stream.
                             let mut other =
                                 PdfCanvas::new(mask.as_mut(), self.page, Some(&form.bbox));
+
+                            // 3. Render the form's content stream into the mask canvas.
                             other.render_form_xobject(form)?;
 
+                            // 4. Enable the mask on the main canvas. Subsequent drawing operations
+                            // will be modulated by this mask.
                             self.canvas.enable_mask(mask.as_mut());
+
+                            // 5. Store the mask in the current canvas state to be used until it's finished.
                             self.mask = Some(mask);
                         }
-                    } else {
-                        if let Some(mut mask) = self.mask.take() {
-                            let transform = self.current_state()?.transform.clone();
-                            self.canvas.finish_mask(mask.as_mut(), &transform);
-                        }
+                    } else if let Some(mut mask) = self.mask.take() {
+                        // This branch handles the case where `/SMask` is set to `/None` in the `ExtGState`,
+                        // which signals the end of the current soft mask application.
+                        let transform = self.current_state()?.transform.clone();
+                        // Finalize the masking operation on the backend, which typically involves
+                        // compositing the masked content.
+                        self.canvas.finish_mask(mask.as_mut(), &transform);
                     }
                 }
                 ExternalGraphicsStateKey::StrokingAlpha(alpha) => {

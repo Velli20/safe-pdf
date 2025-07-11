@@ -332,6 +332,6 @@ impl PdfOperator for SetNonStrokingColor {
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        backend.set_stroking_color(&self.components)
+        backend.set_non_stroking_color(&self.components)
     }
 }

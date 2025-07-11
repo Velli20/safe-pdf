@@ -150,8 +150,7 @@ impl<'a, T: CanvasBackend> TextShowingOps for PdfCanvas<'a, T> {
         &mut self,
         elements: &[pdf_content_stream::TextElement],
     ) -> Result<(), Self::ErrorType> {
-        println!("Implement TJ operator: {:?}", elements);
-        Ok(())
+        todo!("Implement TJ operator: {:?}", elements);
     }
 
     fn move_to_next_line_and_show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
