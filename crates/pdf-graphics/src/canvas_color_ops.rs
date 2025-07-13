@@ -18,9 +18,14 @@ impl<'a, T: CanvasBackend> ColorOps for PdfCanvas<'a, T> {
 
     fn set_stroking_color_extended(
         &mut self,
-        _components: &[f32],
-        _pattern_name: Option<&str>,
+        components: &[f32],
+        pattern_name: Option<&str>,
     ) -> Result<(), Self::ErrorType> {
+        println!(
+            "set_stroking_color_extended {:?} {:?}",
+            components, pattern_name
+        );
+
         Ok(())
     }
 
@@ -30,10 +35,14 @@ impl<'a, T: CanvasBackend> ColorOps for PdfCanvas<'a, T> {
 
     fn set_non_stroking_color_extended(
         &mut self,
-        _components: &[f32],
-        _pattern_name: Option<&str>,
+        components: &[f32],
+        pattern_name: Option<&str>,
     ) -> Result<(), Self::ErrorType> {
-        todo!()
+        println!(
+            "set_non_stroking_color_extended {:?} {:?}",
+            components, pattern_name
+        );
+        Ok(())
     }
 
     fn set_stroking_gray(&mut self, gray: f32) -> Result<(), Self::ErrorType> {

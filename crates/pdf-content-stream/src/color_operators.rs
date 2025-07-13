@@ -270,11 +270,16 @@ impl PdfOperator for SetNonStrokingColorSpace {
 pub struct SetStrokingColor {
     /// Color component values.
     components: Vec<f32>,
+    /// An optional name of a pattern.
+    pattern: Option<String>,
 }
 
 impl SetStrokingColor {
-    pub fn new(components: Vec<f32>) -> Self {
-        Self { components }
+    pub fn new(components: Vec<f32>, pattern: Option<String>) -> Self {
+        Self {
+            components,
+            pattern,
+        }
     }
 }
 
@@ -284,6 +289,8 @@ impl PdfOperator for SetStrokingColor {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let mut values = vec![];
+
+        let pattern = operands.get_str().ok();
         loop {
             if let Ok(value) = operands.get_f32() {
                 values.push(value);
@@ -292,11 +299,17 @@ impl PdfOperator for SetStrokingColor {
             }
         }
 
-        Ok(PdfOperatorVariant::SetStrokingColor(Self::new(values)))
+        Ok(PdfOperatorVariant::SetStrokingColor(Self::new(
+            values, pattern,
+        )))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        backend.set_stroking_color(&self.components)
+        if let Some(pattern) = &self.pattern {
+            backend.set_stroking_color_extended(&self.components, Some(pattern))
+        } else {
+            backend.set_stroking_color(&self.components)
+        }
     }
 }
 
@@ -306,11 +319,16 @@ impl PdfOperator for SetStrokingColor {
 pub struct SetNonStrokingColor {
     /// Color component values.
     components: Vec<f32>,
+    /// An optional name of a pattern.
+    pattern: Option<String>,
 }
 
 impl SetNonStrokingColor {
-    pub fn new(components: Vec<f32>) -> Self {
-        Self { components }
+    pub fn new(components: Vec<f32>, pattern: Option<String>) -> Self {
+        Self {
+            components,
+            pattern,
+        }
     }
 }
 
@@ -320,6 +338,8 @@ impl PdfOperator for SetNonStrokingColor {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let mut values = vec![];
+
+        let pattern = operands.get_str().ok();
         loop {
             if let Ok(value) = operands.get_f32() {
                 values.push(value);
@@ -328,10 +348,16 @@ impl PdfOperator for SetNonStrokingColor {
             }
         }
 
-        Ok(PdfOperatorVariant::SetNonStrokingColor(Self::new(values)))
+        Ok(PdfOperatorVariant::SetNonStrokingColor(Self::new(
+            values, pattern,
+        )))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        backend.set_non_stroking_color(&self.components)
+        if let Some(pattern) = &self.pattern {
+            backend.set_non_stroking_color_extended(&self.components, Some(pattern))
+        } else {
+            backend.set_non_stroking_color(&self.components)
+        }
     }
 }

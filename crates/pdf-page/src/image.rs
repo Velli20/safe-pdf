@@ -7,29 +7,14 @@ use crate::xobject::{XObject, XObjectError, XObjectReader};
 pub enum ImageXObjectError {
     #[error("Missing required entry '{entry_name}' in Image XObject dictionary")]
     MissingEntry { entry_name: &'static str },
-    #[error(
-        "Entry '{entry_name}' in Image XObject dictionary has invalid type: expected {expected_type}, found {found_type}"
-    )]
-    InvalidEntryType {
-        entry_name: &'static str,
-        expected_type: &'static str,
-        found_type: &'static str,
-    },
     #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
     NumericConversionError {
         entry_description: &'static str,
         #[source]
         source: pdf_object::error::ObjectError,
     },
-    #[error("Unsupported ColorSpace '{name}'")]
-    UnsupportedColorSpace { name: String },
     #[error("Unsupported Filter '{name}'")]
     UnsupportedFilter { name: String },
-    #[error("Failed to resolve object reference {obj_num} for entry '{entry_name}'")]
-    ResolveError {
-        entry_name: &'static str,
-        obj_num: i32,
-    },
     #[error("SMask must be an Image XObject, but it was not.")]
     SMaskNotImage,
     #[error("Error reading Image SMask XObject: {source}")]
@@ -39,27 +24,6 @@ pub enum ImageXObjectError {
     },
     #[error("Object error: {0}")]
     ObjectError(#[from] ObjectError),
-}
-
-#[derive(Debug)]
-pub enum ColorSpace {
-    DeviceGray,
-    DeviceRGB,
-    DeviceCMYK,
-    Indexed,
-    // Add more as needed
-    Unsupported(String),
-}
-
-impl ColorSpace {
-    pub fn from_name(name: &str) -> Self {
-        match name {
-            "DeviceGray" => ColorSpace::DeviceGray,
-            "DeviceRGB" => ColorSpace::DeviceRGB,
-            "DeviceCMYK" => ColorSpace::DeviceCMYK,
-            _ => ColorSpace::Unsupported(name.to_string()),
-        }
-    }
 }
 
 /// Represents the compression filter applied to an image's stream data.

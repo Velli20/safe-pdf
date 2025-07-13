@@ -9,6 +9,7 @@ use thiserror::Error;
 
 use crate::{
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateError},
+    pattern::{Pattern, PatternError},
     xobject::{XObject, XObjectError, XObjectReader},
 };
 
@@ -27,6 +28,8 @@ pub enum ResourcesError {
     ExternalGraphicsStateError(#[from] ExternalGraphicsStateError),
     #[error("XObject parsing error: {0}")]
     XObjectError(#[from] XObjectError),
+    #[error("Pattern parsing error: {0}")]
+    PatternError(#[from] PatternError),
     #[error("{0}")]
     ObjectError(#[from] ObjectError),
 }
@@ -72,6 +75,16 @@ impl FromDictionary for Resources {
                     name.to_owned(),
                     ExternalGraphicsState::from_dictionary(dictionary, objects)?,
                 );
+            }
+        }
+
+        // Process `/Pattern` entries
+        if let Some(eg) = resources.get_dictionary("Pattern") {
+            for (name, v) in &eg.dictionary {
+                // Each value can be a direct dictionary or an indirect reference to one.
+                let dictionary = objects.resolve_dictionary(v.as_ref())?;
+
+                let pattern = Pattern::from_dictionary(dictionary, objects)?;
             }
         }
 

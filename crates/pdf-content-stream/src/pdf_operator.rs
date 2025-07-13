@@ -47,12 +47,14 @@ pub trait PdfOperator {
     }
 }
 
-pub struct Operands<'a>(pub &'a [ObjectVariant]);
+pub struct Operands<'a> {
+    pub values: &'a [ObjectVariant],
+}
 
 impl Operands<'_> {
     pub fn get_f32(&mut self) -> Result<f32, PdfOperatorError> {
-        if let Some((value, rest)) = self.0.split_first() {
-            self.0 = rest;
+        if let Some((value, rest)) = self.values.split_first() {
+            self.values = rest;
             value.as_number::<f32>().map_err(|err| {
                 PdfOperatorError::OperandNumericConversionError {
                     expected_type: "Number (f32)",
@@ -67,8 +69,8 @@ impl Operands<'_> {
     }
 
     pub fn get_dictionary(&mut self) -> Result<Rc<Dictionary>, PdfOperatorError> {
-        if let Some((value, rest)) = self.0.split_first() {
-            self.0 = rest;
+        if let Some((value, rest)) = self.values.split_first() {
+            self.values = rest;
             match value {
                 ObjectVariant::Dictionary(dict) => Ok(dict.clone()),
                 _ => Err(PdfOperatorError::InvalidOperandType {
@@ -84,8 +86,8 @@ impl Operands<'_> {
     }
 
     pub fn get_str(&mut self) -> Result<String, PdfOperatorError> {
-        if let Some((value, rest)) = self.0.split_first() {
-            self.0 = rest;
+        if let Some((value, rest)) = self.values.split_first() {
+            self.values = rest;
             value.as_str().map(|s| s.to_string()).ok_or_else(|| {
                 PdfOperatorError::InvalidOperandType {
                     expected_type: "String",
@@ -100,8 +102,8 @@ impl Operands<'_> {
     }
 
     pub fn get_bytes<'a>(&'a mut self) -> Result<&'a [u8], PdfOperatorError> {
-        if let Some((value, rest)) = self.0.split_first() {
-            self.0 = rest;
+        if let Some((value, rest)) = self.values.split_first() {
+            self.values = rest;
             value
                 .as_bytes()
                 .ok_or_else(|| PdfOperatorError::InvalidOperandType {
@@ -116,8 +118,8 @@ impl Operands<'_> {
     }
 
     pub fn get_name(&mut self) -> Result<String, PdfOperatorError> {
-        if let Some((value, rest)) = self.0.split_first() {
-            self.0 = rest;
+        if let Some((value, rest)) = self.values.split_first() {
+            self.values = rest;
             match value {
                 ObjectVariant::Name(name) => Ok(name.clone()),
                 _ => Err(PdfOperatorError::InvalidOperandType {
@@ -133,8 +135,8 @@ impl Operands<'_> {
     }
 
     pub fn get_u8(&mut self) -> Result<u8, PdfOperatorError> {
-        if let Some((value, rest)) = self.0.split_first() {
-            self.0 = rest;
+        if let Some((value, rest)) = self.values.split_first() {
+            self.values = rest;
             value
                 .as_number::<u8>()
                 .map_err(|err| PdfOperatorError::OperandNumericConversionError {
@@ -149,8 +151,8 @@ impl Operands<'_> {
     }
 
     pub fn get_text_element_array(&mut self) -> Result<Vec<TextElement>, PdfOperatorError> {
-        if let Some((first_operand, rest_operands)) = self.0.split_first() {
-            self.0 = rest_operands;
+        if let Some((first_operand, rest_operands)) = self.values.split_first() {
+            self.values = rest_operands;
             if let ObjectVariant::Array(array_values) = first_operand {
                 let mut elements = Vec::with_capacity(array_values.len());
                 for val_obj in array_values {
@@ -191,8 +193,8 @@ impl Operands<'_> {
     }
 
     pub fn get_f32_array(&mut self) -> Result<Vec<f32>, PdfOperatorError> {
-        if let Some((first_operand, rest_operands)) = self.0.split_first() {
-            self.0 = rest_operands;
+        if let Some((first_operand, rest_operands)) = self.values.split_first() {
+            self.values = rest_operands;
             if let ObjectVariant::Array(array_values) = first_operand {
                 let mut numbers = Vec::with_capacity(array_values.len());
                 for val_obj in array_values {
@@ -344,7 +346,9 @@ impl PdfOperatorVariant {
                             _ => {} // No fixed operand count or count matches
                         }
 
-                        let mut ops = Operands(operands.as_slice());
+                        let mut ops = Operands {
+                            values: &operands.as_slice(),
+                        };
                         let operator = (operation.parser)(&mut ops)?;
                         operators.push(operator);
                         handled = true;
