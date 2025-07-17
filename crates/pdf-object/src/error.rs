@@ -21,4 +21,6 @@ pub enum ObjectError {
     FailedResolveDictionaryObject { resolved_type: &'static str },
     #[error("Failed to resolve an object to a stream, but found type '{resolved_type}'")]
     FailedResolveStreamObject { resolved_type: &'static str },
+    #[error("Invalid array length: expected {expected}, but found {found}")]
+    InvalidArrayLength { expected: usize, found: usize },
 }

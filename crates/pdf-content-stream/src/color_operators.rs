@@ -306,7 +306,7 @@ impl PdfOperator for SetStrokingColor {
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
         if let Some(pattern) = &self.pattern {
-            backend.set_stroking_color_extended(&self.components, Some(pattern))
+            backend.set_stroking_color_extended(&self.components, pattern)
         } else {
             backend.set_stroking_color(&self.components)
         }
@@ -355,7 +355,7 @@ impl PdfOperator for SetNonStrokingColor {
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
         if let Some(pattern) = &self.pattern {
-            backend.set_non_stroking_color_extended(&self.components, Some(pattern))
+            backend.set_non_stroking_color_extended(&self.components, pattern)
         } else {
             backend.set_non_stroking_color(&self.components)
         }

@@ -4,10 +4,14 @@ use crate::{canvas_backend::CanvasBackend, color::Color, pdf_canvas::PdfCanvas};
 
 impl<'a, T: CanvasBackend> ColorOps for PdfCanvas<'a, T> {
     fn set_stroking_color_space(&mut self, _name: &str) -> Result<(), Self::ErrorType> {
+        self.current_state_mut()?.pattern = None;
+
         Ok(())
     }
 
     fn set_non_stroking_color_space(&mut self, _name: &str) -> Result<(), Self::ErrorType> {
+        self.current_state_mut()?.pattern = None;
+
         Ok(())
     }
 
@@ -19,12 +23,23 @@ impl<'a, T: CanvasBackend> ColorOps for PdfCanvas<'a, T> {
     fn set_stroking_color_extended(
         &mut self,
         components: &[f32],
-        pattern_name: Option<&str>,
+        pattern_name: &str,
     ) -> Result<(), Self::ErrorType> {
+        let Some(pattern) = self
+            .page
+            .resources
+            .as_ref()
+            .and_then(|r| r.patterns.get(pattern_name))
+        else {
+            println!("Pattern not found {:?}", pattern_name);
+            panic!()
+        };
+
         println!(
             "set_stroking_color_extended {:?} {:?}",
             components, pattern_name
         );
+        self.current_state_mut()?.pattern = Some(pattern);
 
         Ok(())
     }
@@ -36,12 +51,22 @@ impl<'a, T: CanvasBackend> ColorOps for PdfCanvas<'a, T> {
     fn set_non_stroking_color_extended(
         &mut self,
         components: &[f32],
-        pattern_name: Option<&str>,
+        pattern_name: &str,
     ) -> Result<(), Self::ErrorType> {
+        let Some(pattern) = self
+            .page
+            .resources
+            .as_ref()
+            .and_then(|r| r.patterns.get(pattern_name))
+        else {
+            println!("Pattern not found {:?}", pattern_name);
+            panic!()
+        };
         println!(
             "set_non_stroking_color_extended {:?} {:?}",
             components, pattern_name
         );
+        self.current_state_mut()?.pattern = Some(pattern);
         Ok(())
     }
 
@@ -57,11 +82,15 @@ impl<'a, T: CanvasBackend> ColorOps for PdfCanvas<'a, T> {
 
     fn set_stroking_rgb(&mut self, r: f32, g: f32, b: f32) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.stroke_color = Color::from_rgb(r, g, b);
+        self.current_state_mut()?.pattern = None;
+
         Ok(())
     }
 
     fn set_non_stroking_rgb(&mut self, r: f32, g: f32, b: f32) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.fill_color = Color::from_rgb(r, g, b);
+        self.current_state_mut()?.pattern = None;
+
         Ok(())
     }
 

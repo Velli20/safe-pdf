@@ -1,6 +1,6 @@
 use pdf_graphics::{
     PathFillType,
-    canvas_backend::CanvasBackend,
+    canvas_backend::{CanvasBackend, Shader},
     color::Color,
     pdf_path::{PathVerb, PdfPath},
     transform::Transform,
@@ -61,6 +61,68 @@ fn to_skia_fill_type(fill_type: PathFillType) -> skia_safe::PathFillType {
     match fill_type {
         PathFillType::Winding => skia_safe::PathFillType::Winding,
         PathFillType::EvenOdd => skia_safe::PathFillType::EvenOdd,
+    }
+}
+
+fn to_skia_shader(shader: &Shader) -> Option<skia_safe::Shader> {
+    match shader {
+        Shader::LinearGradient {
+            x0,
+            y0,
+            x1,
+            y1,
+            stops,
+        } => {
+            // Prepare colors and positions for Skia
+            let mut colors = Vec::with_capacity(stops.len());
+            let mut positions: Vec<f32> = Vec::with_capacity(stops.len());
+            for (color, pos) in stops {
+                colors.push(skia_safe::Color4f::new(color.r, color.g, color.b, color.a).to_color());
+                positions.push(*pos);
+            }
+
+            // Create the Skia gradient shader
+            skia_safe::Shader::linear_gradient(
+                (
+                    skia_safe::Point::new(*x0, *y0),
+                    skia_safe::Point::new(*x1, *y1),
+                ),
+                skia_safe::gradient_shader::GradientShaderColors::Colors(&colors),
+                Some(positions.as_slice()),
+                skia_safe::TileMode::Clamp,
+                None,
+                None,
+            )
+        }
+        Shader::RadialGradient {
+            cx,
+            cy,
+            fx,
+            fy,
+            stops,
+        } => {
+            println!("Skia RadialGradient");
+            // Prepare colors and positions for Skia
+            let mut colors = Vec::with_capacity(stops.len());
+            let mut positions: Vec<f32> = Vec::with_capacity(stops.len());
+            for (color, pos) in stops {
+                colors.push(skia_safe::Color4f::new(color.r, color.g, color.b, color.a).to_color());
+                positions.push(*pos);
+            }
+
+            // Create the Skia gradient shader
+            skia_safe::Shader::two_point_conical_gradient(
+                skia_safe::Point::new(*cx, *cy),
+                0.0,
+                skia_safe::Point::new(*fx, *fy),
+                1.0,
+                skia_safe::gradient_shader::GradientShaderColors::Colors(&colors),
+                Some(positions.as_slice()),
+                skia_safe::TileMode::Clamp,
+                None,
+                None,
+            )
+        }
     }
 }
 
@@ -147,22 +209,41 @@ fn get_skia_image_data(
 impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
     type MaskType = SkiaMaskCanvas;
 
-    fn fill_path(&mut self, path: &PdfPath, fill_type: PathFillType, color: Color) {
+    fn fill_path(
+        &mut self,
+        path: &PdfPath,
+        fill_type: PathFillType,
+        color: Color,
+        shader: &Option<Shader>,
+    ) {
         let mut sk_path = to_skia_path(path);
         sk_path.set_fill_type(to_skia_fill_type(fill_type));
+        let mut paint = make_paint(color, skia_safe::paint::Style::Fill, None);
+        if let Some(shader) = shader {
+            if let Some(shader) = to_skia_shader(shader) {
+                paint.set_shader(shader);
+            }
+        }
 
-        self.canvas.draw_path(
-            &sk_path,
-            &make_paint(color, skia_safe::paint::Style::Fill, None),
-        );
+        self.canvas.draw_path(&sk_path, &paint);
     }
 
-    fn stroke_path(&mut self, path: &PdfPath, color: Color, line_width: f32) {
+    fn stroke_path(
+        &mut self,
+        path: &PdfPath,
+        color: Color,
+        line_width: f32,
+        shader: &Option<Shader>,
+    ) {
         let sk_path = to_skia_path(path);
-        self.canvas.draw_path(
-            &sk_path,
-            &make_paint(color, skia_safe::paint::Style::Stroke, Some(line_width)),
-        );
+        let mut paint = make_paint(color, skia_safe::paint::Style::Stroke, Some(line_width));
+        if let Some(shader) = shader {
+            if let Some(shader) = to_skia_shader(shader) {
+                paint.set_shader(shader);
+            }
+        }
+
+        self.canvas.draw_path(&sk_path, &paint);
     }
 
     fn width(&self) -> f32 {
@@ -288,12 +369,24 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
 impl<'a> CanvasBackend for SkiaMaskCanvas {
     type MaskType = SkiaMaskCanvas;
 
-    fn fill_path(&mut self, path: &PdfPath, fill_type: PathFillType, color: Color) {
+    fn fill_path(
+        &mut self,
+        path: &PdfPath,
+        fill_type: PathFillType,
+        color: Color,
+        shader: &Option<Shader>,
+    ) {
         let mut sk_path = to_skia_path(path);
         let sk_color = skia_safe::Color4f::new(color.r, color.g, color.b, color.a);
         let mut paint = skia_safe::Paint::new(sk_color, None);
         paint.set_anti_alias(true);
         paint.set_style(skia_safe::paint::Style::Fill);
+
+        if let Some(shader) = shader {
+            if let Some(shader) = to_skia_shader(shader) {
+                paint.set_shader(shader);
+            }
+        }
 
         let sk_fill_type = match fill_type {
             PathFillType::Winding => skia_safe::PathFillType::Winding,
@@ -304,14 +397,24 @@ impl<'a> CanvasBackend for SkiaMaskCanvas {
         self.surface.canvas().draw_path(&sk_path, &paint);
     }
 
-    fn stroke_path(&mut self, path: &PdfPath, color: Color, line_width: f32) {
+    fn stroke_path(
+        &mut self,
+        path: &PdfPath,
+        color: Color,
+        line_width: f32,
+        shader: &Option<Shader>,
+    ) {
         let sk_path = to_skia_path(path);
         let sk_color = skia_safe::Color4f::new(color.r, color.g, color.b, color.a);
         let mut paint = skia_safe::Paint::new(sk_color, None);
         paint.set_anti_alias(true);
         paint.set_style(skia_safe::paint::Style::Stroke);
         paint.set_stroke_width(line_width);
-
+        if let Some(shader) = shader {
+            if let Some(shader) = to_skia_shader(shader) {
+                paint.set_shader(shader);
+            }
+        }
         self.surface.canvas().draw_path(&sk_path, &paint);
     }
 

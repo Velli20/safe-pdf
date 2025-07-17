@@ -6,23 +6,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum BBoxReadError {
-    #[error("Missing required entry '{entry_name}' in Form XObject dictionary")]
-    MissingEntry { entry_name: &'static str },
-    #[error("Invalid type for entry '{entry_name}': expected {expected_type}, found {found_type}")]
-    InvalidEntryType {
-        entry_name: &'static str,
-        expected_type: &'static str,
-        found_type: &'static str,
-    },
-    #[error("Error parsing /BBox array: Expected 4 elements, got {count}")]
-    InvalidElementCount { count: usize },
-
-    #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
-    NumericConversionError {
-        entry_description: &'static str,
-        #[source]
-        source: ObjectError,
-    },
+    #[error("Error parsing Dictionary: {0}")]
+    ObjectError(#[from] ObjectError),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -30,25 +15,7 @@ pub struct BBox(pub [f32; 4]);
 
 impl BBox {
     fn from(obj: &ObjectVariant) -> Result<Self, BBoxReadError> {
-        let arr = obj.as_array().ok_or(BBoxReadError::InvalidEntryType {
-            entry_name: "BBox",
-            expected_type: "Array",
-            found_type: obj.name(),
-        })?;
-
-        // `/BBox` must have exactly 4 elements.
-        if arr.len() != 4 {
-            return Err(BBoxReadError::InvalidElementCount { count: arr.len() });
-        }
-        let mut vals = [0.0f32; 4];
-        for (i, obj) in arr.iter().enumerate() {
-            vals[i] =
-                obj.as_number::<f32>()
-                    .map_err(|e| BBoxReadError::NumericConversionError {
-                        entry_description: "width in [w1...wn] array",
-                        source: e,
-                    })?;
-        }
+        let vals = obj.as_array_of::<f32, 4>()?;
         Ok(BBox(vals))
     }
 }

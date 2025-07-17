@@ -118,7 +118,7 @@ pub enum Pattern {
 
 impl FromDictionary for Pattern {
     const KEY: &'static str = "Pattern";
-    type ResultType = Option<Pattern>;
+    type ResultType = Pattern;
     type ErrorType = PatternError;
 
     fn from_dictionary(
@@ -148,7 +148,7 @@ impl FromDictionary for Pattern {
                 let resources = Resources::from_dictionary(dictionary, objects)
                     .map_err(|err| PatternError::ResourcesParse { err: Box::new(err) })?;
 
-                Ok(Some(Pattern::Tiling {
+                Ok(Pattern::Tiling {
                     paint_type,
                     tiling_type,
                     bbox,
@@ -156,7 +156,7 @@ impl FromDictionary for Pattern {
                     y_step,
                     matrix,
                     resources,
-                }))
+                })
             }
             ObjectVariant::Integer(2) => {
                 // Shading pattern
@@ -174,11 +174,11 @@ impl FromDictionary for Pattern {
                     None
                 };
 
-                Ok(Some(Pattern::Shading {
+                Ok(Pattern::Shading {
                     shading,
                     matrix,
                     ext_g_state,
-                }))
+                })
             }
             _ => Err(PatternError::InvalidPatternType),
         }

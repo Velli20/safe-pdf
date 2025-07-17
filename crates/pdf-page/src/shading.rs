@@ -41,6 +41,8 @@ pub enum ShadingError {
 
     #[error("Error parsing Function: {0}")]
     FunctionReadError(#[from] FunctionReadError),
+    #[error("Error parsing Dictionary: {0}")]
+    ObjectError(#[from] ObjectError),
 }
 
 /// ShadingType as defined in PDF 1.7 Table 106
@@ -86,20 +88,20 @@ pub enum Shading {
         // background: Option<Vec<f32>>,
         // bbox: Option<Vec<f32>>,
         // anti_alias: Option<bool>,
-        coords: Option<[f32; 4]>,
+        coords: [f32; 4],
         // domain: Option<[f32; 2]>,
         function: Function,
         // extend: Option<[bool; 2]>,
     },
     Radial {
-        color_space: Option<String>,
-        background: Option<Vec<f32>>,
-        bbox: Option<Vec<f32>>,
-        anti_alias: Option<bool>,
-        coords: Option<[f32; 6]>,
-        domain: Option<[f32; 2]>,
-        functions: Option<Vec<i32>>, // Should be Function objects, simplified here
-        extend: Option<[bool; 2]>,
+        color_space: Option<ColorSpace>,
+        coords: [f32; 6],
+        function: Function,
+        // TODO background: Option<Vec<f32>>,
+        // TODO bbox: Option<Vec<f32>>,
+        // TODO anti_alias: Option<bool>,
+        // TODO domain: Option<[f32; 2]>,
+        // TODO extend: Option<[bool; 2]>,
     },
 }
 
@@ -130,25 +132,7 @@ impl FromDictionary for Shading {
                     .get("Coords")
                     .ok_or(ShadingError::InvalidShadingType)?;
 
-                let arr = coords.as_array().ok_or(ShadingError::InvalidEntryType {
-                    entry_name: "Coords",
-                    expected_type: "Array",
-                    found_type: coords.name(),
-                })?;
-
-                // `/Coords` must have exactly 4 elements.
-                if arr.len() != 4 {
-                    return Err(ShadingError::InvalidElementCount { count: arr.len() });
-                }
-                let mut coords = [0.0f32; 4];
-                for (i, obj) in arr.iter().enumerate() {
-                    coords[i] = obj.as_number::<f32>().map_err(|e| {
-                        ShadingError::NumericConversionError {
-                            entry_description: "width in [w1...wn] array",
-                            source: e,
-                        }
-                    })?;
-                }
+                let coords = coords.as_array_of::<f32, 4>()?;
 
                 let color_space = if let Some(obj) = dictionary.get("ColorSpace") {
                     Some(ColorSpace::from(obj.as_ref()))
@@ -163,8 +147,8 @@ impl FromDictionary for Shading {
                     println!("Domain: {bg:?}");
                 }
 
-                let function = if let Some(dictionary) = dictionary.get_dictionary("Function") {
-                    Function::from_dictionary(dictionary, objects)?
+                let function = if let Some(f) = dictionary.get_dictionary("Function") {
+                    Function::from_dictionary(f, objects)?
                 } else {
                     panic!("No function found");
                 };
@@ -172,12 +156,35 @@ impl FromDictionary for Shading {
                 Ok(Shading::Axial {
                     color_space,
                     function,
-                    coords: Some(coords),
+                    coords,
                 })
             }
             Some(ShadingType::Radial) => {
-                // Parse fields for Radial shading as needed
-                todo!()
+                println!("Radial {:?}", dictionary);
+
+                let coords = dictionary
+                    .get("Coords")
+                    .ok_or(ShadingError::InvalidShadingType)?;
+
+                let coords = coords.as_array_of::<f32, 6>()?;
+
+                let color_space = if let Some(obj) = dictionary.get("ColorSpace") {
+                    Some(ColorSpace::from(obj.as_ref()))
+                } else {
+                    None
+                };
+
+                let function = if let Some(dictionary) = dictionary.get_dictionary("Function") {
+                    Function::from_dictionary(dictionary, objects)?
+                } else {
+                    panic!("No function found");
+                };
+
+                Ok(Shading::Radial {
+                    color_space,
+                    function,
+                    coords,
+                })
             }
             _ => Err(ShadingError::InvalidShadingType),
         }

@@ -17,6 +17,7 @@ pub struct Resources {
     pub fonts: HashMap<String, Font>,
     pub external_graphics_states: HashMap<String, ExternalGraphicsState>,
     pub xobjects: HashMap<String, XObject>,
+    pub patterns: HashMap<String, Pattern>,
 }
 
 /// Defines errors that can occur while reading Resources object.
@@ -77,14 +78,18 @@ impl FromDictionary for Resources {
                 );
             }
         }
+        let mut patterns = HashMap::new();
 
         // Process `/Pattern` entries
         if let Some(eg) = resources.get_dictionary("Pattern") {
             for (name, v) in &eg.dictionary {
                 // Each value can be a direct dictionary or an indirect reference to one.
                 let dictionary = objects.resolve_dictionary(v.as_ref())?;
-
-                let pattern = Pattern::from_dictionary(dictionary, objects)?;
+                // Parse the pattern and insert it into the map.
+                patterns.insert(
+                    name.to_owned(),
+                    Pattern::from_dictionary(dictionary, objects)?,
+                );
             }
         }
 
@@ -111,6 +116,7 @@ impl FromDictionary for Resources {
             fonts,
             external_graphics_states,
             xobjects,
+            patterns,
         }))
     }
 }

@@ -1,10 +1,15 @@
 use pdf_content_stream::graphics_state_operators::{LineCap, LineJoin};
 use pdf_font::font::Font;
-use pdf_page::{form::FormXObject, page::PdfPage, resources::Resources};
+use pdf_page::{form::FormXObject, page::PdfPage, pattern::Pattern, resources::Resources};
 
 use crate::{
-    PaintMode, PathFillType, canvas::Canvas, canvas_backend::CanvasBackend, color::Color,
-    error::PdfCanvasError, pdf_path::PdfPath, transform::Transform,
+    PaintMode, PathFillType,
+    canvas::Canvas,
+    canvas_backend::{CanvasBackend, Shader},
+    color::Color,
+    error::PdfCanvasError,
+    pdf_path::PdfPath,
+    transform::Transform,
 };
 
 /// Encapsulates text-specific state parameters.
@@ -56,6 +61,7 @@ pub(crate) struct CanvasState<'a> {
     pub line_join: LineJoin,
     /// The current font resource.
     pub resources: Option<&'a Resources>,
+    pub pattern: Option<&'a Pattern>,
 }
 
 impl CanvasState<'_> {
@@ -80,6 +86,7 @@ impl<'a> Default for CanvasState<'a> {
             text_state: TextState::default(),
             clip_path: None,
             resources: None,
+            pattern: None,
             line_cap: LineCap::Butt,
             line_join: LineJoin::Miter,
         }
@@ -121,7 +128,7 @@ impl<T: CanvasBackend> Canvas for PdfCanvas<'_, T> {
 
     fn fill_path(&mut self, path: &PdfPath, fill_type: PathFillType) -> Result<(), PdfCanvasError> {
         let fill_color = self.current_state()?.fill_color;
-        self.canvas.fill_path(path, fill_type, fill_color);
+        self.canvas.fill_path(path, fill_type, fill_color, &None);
         Ok(())
     }
 }
@@ -214,14 +221,121 @@ where
     ) -> Result<(), PdfCanvasError> {
         if let Some(mut path) = self.current_path.take() {
             path.transform(&self.current_state()?.transform);
+            let shader = if let Some(pattern) = &self.current_state()?.pattern {
+                use pdf_page::pattern::Pattern;
+                use pdf_page::shading::Shading;
+
+                if let Pattern::Shading {
+                    shading: Some(shading),
+                    ..
+                } = pattern
+                {
+                    match shading {
+                        Shading::Axial {
+                            coords: [x0, y0, x1, y1],
+                            function,
+                            ..
+                        } => {
+                            // Construct a LinearShader (or Shader::LinearGradient) using coords and function
+                            Some(Shader::LinearGradient {
+                                x0: *x0,
+                                y0: *y0,
+                                x1: *x1,
+                                y1: *y1,
+                                // You may want to generate stops using the function here.
+                                stops: {
+                                    println!("Axial");
+                                    // Number of stops to sample (increase for smoother gradients)
+                                    let num_stops = 16;
+                                    let mut stops = Vec::with_capacity(num_stops + 1);
+                                    for i in 0..=num_stops {
+                                        let t = i as f32 / num_stops as f32; // t in [0, 1]
+                                        // Map t to the function's domain
+                                        let x = function.domain()[0]
+                                            + t * (function.domain()[1] - function.domain()[0]);
+                                        // Evaluate the function
+                                        let color_components = function
+                                            .interpolate(x)
+                                            .unwrap_or_else(|_| vec![0.0, 0.0, 0.0]);
+                                        // Convert to Color (assuming RGB, adjust if needed)
+                                        let color = crate::color::Color::from_rgb(
+                                            color_components.get(0).copied().unwrap_or(0.0),
+                                            color_components.get(1).copied().unwrap_or(0.0),
+                                            color_components.get(2).copied().unwrap_or(0.0),
+                                        );
+                                        stops.push((color, t));
+                                    }
+                                    stops
+                                },
+                            })
+                        }
+                        Shading::Radial {
+                            coords: [x0, y0, r0, x1, y1, r1],
+                            function,
+                            ..
+                        } => {
+                            // For radial gradients in PDF, the focal point (fx, fy) and a radius (r)
+                            // are specified.  We'll map x0, y0 to the center (cx, cy) and x1, y1 to the focal point (fx, fy).
+                            // The radii r0 and r1 determine the start and end radius of the gradient.
+                            // In this implementation, we will only support the case where r0 = 0 and r1 > 0, meaning the gradient
+                            // starts from a point and expands to a circle.  If r0 != 0, it means the gradient is a conical gradient
+                            // between two circles, which is not supported by Skia's two_point_conical_gradient.
+                            if *r0 != 0.0 {
+                                panic!(
+                                    "Warning: Radial gradient with r0 != 0 is not supported, fallback to no shader."
+                                );
+                            }
+
+                            Some(Shader::RadialGradient {
+                                cx: *x0,
+                                cy: *y0,
+                                fx: *x1,
+                                fy: *y1,
+                                //stops: vec![(Color::from_rgb(1.0, 0.0, 0.0), 0.0), (Color::from_rgb(0.0, 0.0, 1.0), 1.0)]
+                                stops: {
+                                    println!("RadialGradient");
+                                    // Number of stops to sample (increase for smoother gradients)
+                                    let num_stops = 16;
+                                    let mut stops = Vec::with_capacity(num_stops + 1);
+                                    for i in 0..=num_stops {
+                                        let t = i as f32 / num_stops as f32; // t in [0, 1]
+                                        // Map t to the function's domain
+                                        let x = function.domain()[0]
+                                            + t * (function.domain()[1] - function.domain()[0]);
+                                        // Evaluate the function
+                                        let color_components = function
+                                            .interpolate(x)
+                                            .unwrap_or_else(|_| vec![0.0, 0.0, 0.0]);
+                                        // Convert to Color (assuming RGB, adjust if needed)
+                                        let color = crate::color::Color::from_rgb(
+                                            color_components.get(0).copied().unwrap_or(0.0),
+                                            color_components.get(1).copied().unwrap_or(0.0),
+                                            color_components.get(2).copied().unwrap_or(0.0),
+                                        );
+                                        stops.push((color, t));
+                                    }
+                                    stops
+                                },
+                            })
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             if mode == PaintMode::Fill {
                 self.canvas
-                    .fill_path(&path, fill_type, self.current_state()?.fill_color);
+                    .fill_path(&path, fill_type, self.current_state()?.fill_color, &shader);
             } else {
                 self.canvas.stroke_path(
                     &path,
                     self.current_state()?.stroke_color,
                     self.current_state()?.line_width,
+                    &shader,
                 );
             }
             Ok(())

@@ -392,7 +392,7 @@ pub trait ColorOps: PdfOperatorBackendError {
     /// # Parameters
     ///
     /// - `components`: A slice of color components.
-    /// - `pattern_name`: An optional name of a pattern, if a Pattern color space is active.
+    /// - `pattern_name`: A name of a pattern,.
     ///
     /// # Returns
     ///
@@ -400,7 +400,7 @@ pub trait ColorOps: PdfOperatorBackendError {
     fn set_stroking_color_extended(
         &mut self,
         components: &[f32],
-        pattern_name: Option<&str>,
+        pattern_name: &str,
     ) -> Result<(), Self::ErrorType>;
 
     /// Sets the color for subsequent non-stroking (fill) operations, using the current non-stroking color space.
@@ -421,7 +421,7 @@ pub trait ColorOps: PdfOperatorBackendError {
     /// # Parameters
     ///
     /// - `components`: A slice of color components.
-    /// - `pattern_name`: An optional name of a pattern, if a Pattern color space is active.
+    /// - `pattern_name`: A name of a pattern.
     ///
     /// # Returns
     ///
@@ -429,7 +429,7 @@ pub trait ColorOps: PdfOperatorBackendError {
     fn set_non_stroking_color_extended(
         &mut self,
         components: &[f32],
-        pattern_name: Option<&str>,
+        pattern_name: &str,
     ) -> Result<(), Self::ErrorType>;
 
     /// Sets the stroking color to a grayscale value.
