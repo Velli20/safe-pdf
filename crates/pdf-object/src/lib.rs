@@ -71,6 +71,13 @@ impl ObjectVariant {
         }
     }
 
+    pub fn is_array(&self) -> bool {
+        match self {
+            ObjectVariant::Array(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn as_array_of<T, const N: usize>(&self) -> Result<[T; N], ObjectError>
     where
         T: FromPrimitive + Copy + Default,
@@ -89,6 +96,22 @@ impl ObjectVariant {
         let mut result = [T::default(); N];
         for (i, v) in values.iter().enumerate() {
             result[i] = v.as_number()?;
+        }
+
+        Ok(result)
+    }
+
+    pub fn as_vec_of<T>(&self) -> Result<Vec<T>, ObjectError>
+    where
+        T: FromPrimitive + Copy + Default,
+    {
+        let values = self
+            .as_array()
+            .ok_or_else(|| ObjectError::TypeMismatch("Array", self.name()))?;
+
+        let mut result: Vec<T> = Vec::new();
+        for v in values.iter() {
+            result.push(v.as_number()?);
         }
 
         Ok(result)

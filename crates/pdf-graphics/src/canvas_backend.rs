@@ -9,11 +9,14 @@ pub enum Shader {
         stops: Vec<(Color, f32)>,
     },
     RadialGradient {
-        cx: f32,
-        cy: f32,
-        fx: f32,
-        fy: f32,
+        start_x: f32,
+        start_y: f32,
+        start_r: f32,
+        end_x: f32,
+        end_y: f32,
+        end_r: f32,
         stops: Vec<(Color, f32)>,
+        transform: Option<Transform>,
     },
 }
 

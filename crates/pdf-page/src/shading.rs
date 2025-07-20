@@ -1,5 +1,5 @@
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     traits::FromDictionary,
 };
 use thiserror::Error;
@@ -78,30 +78,20 @@ pub enum Shading {
     FunctionBased {
         color_space: Option<String>,
         background: Option<Vec<f32>>,
-        bbox: Option<Vec<f32>>,
+        bbox: Option<[f32; 4]>,
         anti_alias: Option<bool>,
         domain: Option<Vec<f32>>,
-        functions: Option<Vec<i32>>, // Should be Function objects, simplified here
+        functions: Option<Vec<Function>>,
     },
     Axial {
         color_space: Option<ColorSpace>,
-        // background: Option<Vec<f32>>,
-        // bbox: Option<Vec<f32>>,
-        // anti_alias: Option<bool>,
         coords: [f32; 4],
-        // domain: Option<[f32; 2]>,
         function: Function,
-        // extend: Option<[bool; 2]>,
     },
     Radial {
         color_space: Option<ColorSpace>,
         coords: [f32; 6],
         function: Function,
-        // TODO background: Option<Vec<f32>>,
-        // TODO bbox: Option<Vec<f32>>,
-        // TODO anti_alias: Option<bool>,
-        // TODO domain: Option<[f32; 2]>,
-        // TODO extend: Option<[bool; 2]>,
     },
 }
 
@@ -121,11 +111,108 @@ impl FromDictionary for Shading {
         let shading_type_int = shading_type
             .as_number::<i32>()
             .map_err(|_| ShadingError::InvalidShadingType)?;
-
+        println!("ShadingType: {shading_type_int:?}");
         match ShadingType::from_i32(shading_type_int) {
             Some(ShadingType::FunctionBased) => {
-                // Parse fields for FunctionBased shading as needed
-                todo!()
+                // Parse /ColorSpace (optional, as String for now)
+                let color_space = dictionary
+                    .get("ColorSpace")
+                    .and_then(|obj| obj.as_str().map(|s| s.to_string()));
+
+                // Parse /Background (optional, array of numbers)
+                let background = dictionary
+                    .get("Background")
+                    .and_then(|obj| obj.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_number::<f32>().ok())
+                            .collect::<Vec<_>>()
+                    });
+
+                // Parse /BBox (optional, array of 4 numbers)
+                let bbox = if let Some(obj) = dictionary.get("BBox") {
+                    Some(obj.as_array_of::<f32, 4>()?)
+                } else {
+                    None
+                };
+
+                // Parse /AntiAlias (optional, bool)
+                // let anti_alias = dictionary
+                //     .get("AntiAlias")
+                //     .and_then(|obj| obj.as_bool().ok());
+
+                // Parse /Domain (optional, array of numbers)
+                let domain = dictionary
+                    .get("Domain")
+                    .and_then(|obj| obj.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_number::<f32>().ok())
+                            .collect::<Vec<_>>()
+                    });
+
+                if let Some(fun) = dictionary.get("Function") {
+                    println!("Function: {fun:?}");
+                }
+
+                // Parse /Function (required, can be a reference or array of references)
+                let functions = match dictionary.get("Function") {
+                    Some(obj) if obj.is_array() => {
+                        let mut functions = Vec::new();
+                        if let Some(obj) = obj.as_array() {
+                            for value in obj.iter() {
+                                match objects.resolve_object(value)? {
+                                    ObjectVariant::Dictionary(dictionary) => {
+                                        functions.push(Function::from_dictionary(
+                                            dictionary, objects, None,
+                                        )?);
+                                    }
+                                    ObjectVariant::Stream(stream) => {
+                                        functions.push(Function::from_dictionary(
+                                            &stream.dictionary,
+                                            objects,
+                                            Some(&stream.data),
+                                        )?);
+                                    }
+                                    _ => {
+                                        return Err(ShadingError::InvalidValue(
+                                            "Function".to_string(),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        Some(functions)
+                    }
+                    Some(obj) => {
+                        let value = objects.resolve_dictionary(obj.as_ref())?;
+                        let function = match objects.resolve_object(obj)? {
+                            ObjectVariant::Dictionary(dictionary) => {
+                                Function::from_dictionary(dictionary, objects, None)?
+                            }
+                            ObjectVariant::Stream(stream) => Function::from_dictionary(
+                                &stream.dictionary,
+                                objects,
+                                Some(&stream.data),
+                            )?,
+                            _ => {
+                                return Err(ShadingError::InvalidValue("Function".to_string()));
+                            }
+                        };
+
+                        Some(vec![function])
+                    }
+                    None => None,
+                };
+
+                Ok(Shading::FunctionBased {
+                    color_space,
+                    background,
+                    bbox,
+                    anti_alias: None,
+                    domain,
+                    functions,
+                })
             }
             Some(ShadingType::Axial) => {
                 let coords = dictionary
@@ -148,7 +235,7 @@ impl FromDictionary for Shading {
                 }
 
                 let function = if let Some(f) = dictionary.get_dictionary("Function") {
-                    Function::from_dictionary(f, objects)?
+                    Function::from_dictionary(f, objects, None)?
                 } else {
                     panic!("No function found");
                 };
@@ -175,7 +262,7 @@ impl FromDictionary for Shading {
                 };
 
                 let function = if let Some(dictionary) = dictionary.get_dictionary("Function") {
-                    Function::from_dictionary(dictionary, objects)?
+                    Function::from_dictionary(dictionary, objects, None)?
                 } else {
                     panic!("No function found");
                 };

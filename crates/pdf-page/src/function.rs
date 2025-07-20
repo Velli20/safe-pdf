@@ -1,14 +1,16 @@
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
-    traits::FromDictionary,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    stream, traits::FromDictionary,
 };
 
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum FunctionReadError {
-    #[error("Missing /FunctionType key")]
+    #[error("Missing /FunctionType entry")]
     MissingFunctionType,
+    #[error("Missing /Domain entry")]
+    MissingDomain,
     #[error("Invalid /FunctionType value")]
     InvalidFunctionType,
     #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
@@ -17,6 +19,14 @@ pub enum FunctionReadError {
         #[source]
         source: ObjectError,
     },
+    #[error("Failed to read function value for '{entry_description}': {source}")]
+    EntryReadError {
+        entry_description: &'static str,
+        #[source]
+        source: ObjectError,
+    },
+    #[error("Domain parsing error: {0}")]
+    DomainParsingError(#[from] ObjectError),
 }
 
 #[derive(Debug, Error)]
@@ -79,37 +89,20 @@ pub struct Function {
 }
 
 impl Function {
-    pub fn domain(&self) -> [f32; 2] {
+    pub fn domain(&self) -> &[f32; 2] {
         match &self.data {
-            FunctionData::Exponential { domain, .. } => *domain,
-            FunctionData::Stitching { domain, .. } => *domain,
+            FunctionData::Exponential { domain, .. } => domain,
+            FunctionData::Stitching { domain, .. } => domain,
         }
     }
 
     /// Interpolates an input value `x` according to the function's definition.
-    ///
-    /// As per PDF 1.7 spec, section 7.10.3, for a given input `x`, the output `y_j` for
-    /// each component `j` is calculated as:
-    /// `y_j = C0_j + normalized_x^N * (C1_j - C0_j)`
-    ///
-    /// where `normalized_x` is the input `x` clipped to the function's `domain` and then
-    /// mapped to the interval [0, 1].
-    ///
-    /// # Parameters
-    ///
-    /// - `x`: The input value to the function.
     ///
     /// # Returns
     ///
     /// A `Result` containing a `Vec<f32>` of the output values on success, or a
     /// `FunctionInterpolationError` on failure.
     pub fn interpolate(&self, x: f32) -> Result<Vec<f32>, FunctionInterpolationError> {
-        if self.function_type != FunctionType::ExponentialInterpolation {
-            return Err(FunctionInterpolationError::UnsupportedFunctionType(
-                self.function_type,
-            ));
-        }
-
         if let FunctionData::Exponential {
             c0,
             c1,
@@ -117,6 +110,12 @@ impl Function {
             domain,
         } = &self.data
         {
+            if self.function_type != FunctionType::ExponentialInterpolation {
+                return Err(FunctionInterpolationError::UnsupportedFunctionType(
+                    self.function_type,
+                ));
+            }
+
             if c0.len() != c1.len() {
                 return Err(FunctionInterpolationError::MismatchedC0C1Length);
             }
@@ -139,6 +138,37 @@ impl Function {
                 .collect();
 
             Ok(result)
+        } else if let FunctionData::Stitching {
+            functions,
+            bounds,
+            encode,
+            domain,
+        } = &self.data
+        {
+            let x_clamped = x.clamp(domain[0], domain[1]);
+
+            // Determine which sub-function applies
+            let mut index = 0;
+            while index < bounds.len() && x_clamped >= bounds[index] {
+                index += 1;
+            }
+
+            // Determine mapping range
+            let (b0, b1) = if index == 0 {
+                (domain[0], bounds[0])
+            } else if index == bounds.len() {
+                (bounds[index - 1], domain[1])
+            } else {
+                (bounds[index - 1], bounds[index])
+            };
+
+            let e0 = encode[2 * index];
+            let e1 = encode[2 * index + 1];
+
+            let t = (x_clamped - b0) / (b1 - b0);
+            let x_mapped = e0 + t * (e1 - e0);
+
+            functions[index].interpolate(x_mapped)
         } else {
             Err(FunctionInterpolationError::UnsupportedFunctionType(
                 self.function_type,
@@ -147,17 +177,12 @@ impl Function {
     }
 }
 
-impl FromDictionary for Function {
-    const KEY: &'static str = "Function";
-    type ResultType = Self;
-    type ErrorType = FunctionReadError;
-
-    fn from_dictionary(
+impl Function {
+    pub(crate) fn from_dictionary(
         dictionary: &Dictionary,
         objects: &ObjectCollection,
-    ) -> Result<Self::ResultType, Self::ErrorType> {
-        println!("Read function dictionary: {dictionary:?}");
-
+        stream: Option<&[u8]>,
+    ) -> Result<Function, FunctionReadError> {
         let function_type_val = dictionary
             .get("FunctionType")
             .ok_or(FunctionReadError::MissingFunctionType)?;
@@ -171,27 +196,30 @@ impl FromDictionary for Function {
 
         match function_type {
             FunctionType::ExponentialInterpolation => {
-                let mut c0 = vec![];
-                for obj in dictionary.get_array("C0").unwrap().iter() {
-                    let value = obj.as_number::<f32>().map_err(|e| {
-                        FunctionReadError::NumericConversionError {
-                            entry_description: "C0",
-                            source: e,
-                        }
-                    })?;
-                    c0.push(value);
-                }
+                let domain = if let Some(obj) = dictionary.get("Domain") {
+                    obj.as_array_of::<f32, 2>()
+                        .map_err(|err| FunctionReadError::DomainParsingError(err))?
+                } else {
+                    return Err(FunctionReadError::MissingDomain);
+                };
 
-                let mut c1 = vec![];
-                for obj in dictionary.get_array("C1").unwrap().iter() {
-                    let value = obj.as_number::<f32>().map_err(|e| {
-                        FunctionReadError::NumericConversionError {
-                            entry_description: "C1",
-                            source: e,
-                        }
+                let c0 = dictionary
+                    .get("C0")
+                    .unwrap()
+                    .as_vec_of::<f32>()
+                    .map_err(|e| FunctionReadError::EntryReadError {
+                        entry_description: "C0",
+                        source: e,
                     })?;
-                    c1.push(value);
-                }
+
+                let c1 = dictionary
+                    .get("C1")
+                    .unwrap()
+                    .as_vec_of::<f32>()
+                    .map_err(|e| FunctionReadError::EntryReadError {
+                        entry_description: "C1",
+                        source: e,
+                    })?;
 
                 let exponent = dictionary
                     .get("N")
@@ -201,26 +229,6 @@ impl FromDictionary for Function {
                         entry_description: "N",
                         source: e,
                     })?;
-
-                let mut domain = [0.0_f32, 1.0_f32];
-                if let Some(obj) = dictionary.get("Domain") {
-                    let arr = obj
-                        .as_array()
-                        .ok_or(FunctionReadError::InvalidFunctionType)?;
-                    if arr.len() != 2 {
-                        return Err(FunctionReadError::InvalidFunctionType);
-                    }
-                    for (i, obj) in arr.iter().enumerate() {
-                        domain[i] = obj.as_number::<f32>().map_err(|e| {
-                            FunctionReadError::NumericConversionError {
-                                entry_description: "Domain",
-                                source: e,
-                            }
-                        })?;
-                    }
-                } else {
-                    return Err(FunctionReadError::InvalidFunctionType);
-                }
 
                 Ok(Function {
                     function_type,
@@ -233,6 +241,13 @@ impl FromDictionary for Function {
                 })
             }
             FunctionType::Stitching => {
+                let domain = if let Some(obj) = dictionary.get("Domain") {
+                    obj.as_array_of::<f32, 2>()
+                        .map_err(|err| FunctionReadError::DomainParsingError(err))?
+                } else {
+                    return Err(FunctionReadError::MissingDomain);
+                };
+
                 // Parse Functions array
                 let functions_arr = dictionary
                     .get_array("Functions")
@@ -242,60 +257,29 @@ impl FromDictionary for Function {
                     let dict = obj
                         .as_dictionary()
                         .ok_or(FunctionReadError::InvalidFunctionType)?;
-                    let func = Function::from_dictionary(dict, objects)?;
+                    let func = Function::from_dictionary(dict, objects, None)?;
                     functions.push(func);
                 }
 
                 // Parse Bounds array
-                let bounds_arr = dictionary
-                    .get_array("Bounds")
-                    .ok_or(FunctionReadError::InvalidFunctionType)?;
-                let mut bounds = Vec::new();
-                for obj in bounds_arr.iter() {
-                    let value = obj.as_number::<f32>().map_err(|e| {
-                        FunctionReadError::NumericConversionError {
-                            entry_description: "Bounds",
-                            source: e,
-                        }
+                let bounds = dictionary
+                    .get("Bounds")
+                    .unwrap()
+                    .as_vec_of::<f32>()
+                    .map_err(|e| FunctionReadError::EntryReadError {
+                        entry_description: "Bounds",
+                        source: e,
                     })?;
-                    bounds.push(value);
-                }
 
                 // Parse Encode array
-                let encode_arr = dictionary
-                    .get_array("Encode")
-                    .ok_or(FunctionReadError::InvalidFunctionType)?;
-                let mut encode = Vec::new();
-                for obj in encode_arr.iter() {
-                    let value = obj.as_number::<f32>().map_err(|e| {
-                        FunctionReadError::NumericConversionError {
-                            entry_description: "Encode",
-                            source: e,
-                        }
+                let encode = dictionary
+                    .get("Encode")
+                    .unwrap()
+                    .as_vec_of::<f32>()
+                    .map_err(|e| FunctionReadError::EntryReadError {
+                        entry_description: "Encode",
+                        source: e,
                     })?;
-                    encode.push(value);
-                }
-
-                // Parse Domain array
-                let mut domain = [0.0_f32, 1.0_f32];
-                if let Some(obj) = dictionary.get("Domain") {
-                    let arr = obj
-                        .as_array()
-                        .ok_or(FunctionReadError::InvalidFunctionType)?;
-                    if arr.len() != 2 {
-                        return Err(FunctionReadError::InvalidFunctionType);
-                    }
-                    for (i, obj) in arr.iter().enumerate() {
-                        domain[i] = obj.as_number::<f32>().map_err(|e| {
-                            FunctionReadError::NumericConversionError {
-                                entry_description: "Domain",
-                                source: e,
-                            }
-                        })?;
-                    }
-                } else {
-                    return Err(FunctionReadError::InvalidFunctionType);
-                }
 
                 Ok(Function {
                     function_type,
@@ -306,6 +290,12 @@ impl FromDictionary for Function {
                         domain,
                     },
                 })
+            }
+            FunctionType::PostScriptCalculator => {
+                let stream = stream.ok_or(FunctionReadError::InvalidFunctionType)?;
+                println!("PostScriptCalculator: {}", String::from_utf8_lossy(stream));
+
+                todo!()
             }
             _ => Err(FunctionReadError::InvalidFunctionType),
         }

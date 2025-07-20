@@ -95,33 +95,79 @@ fn to_skia_shader(shader: &Shader) -> Option<skia_safe::Shader> {
             )
         }
         Shader::RadialGradient {
-            cx,
-            cy,
-            fx,
-            fy,
+            start_x,
+            start_y,
+            start_r,
+            end_x,
+            end_y,
+            end_r,
+
             stops,
+            transform,
         } => {
-            println!("Skia RadialGradient");
+            println!("SkRadial");
             // Prepare colors and positions for Skia
             let mut colors = Vec::with_capacity(stops.len());
             let mut positions: Vec<f32> = Vec::with_capacity(stops.len());
             for (color, pos) in stops {
+                println!("pos {} color {:?}", pos, color);
                 colors.push(skia_safe::Color4f::new(color.r, color.g, color.b, color.a).to_color());
                 positions.push(*pos);
             }
 
+            println!(
+                "start_x {} start_y {} start_r {} end_x {} end_y {} end_r {}",
+                start_x, start_y, start_r, end_x, end_y, end_r
+            );
+
+            let mut mat = if let Some(m) = transform {
+                to_skia_matrix(m)
+            } else {
+                skia_safe::Matrix::new_identity()
+            };
+            let center = skia_safe::Point::new(*start_x, *start_y);
+
             // Create the Skia gradient shader
+            // skia_safe::gradient_shader::radial(
+            //     center,
+            //     radius,
+            //     colors.as_slice(),
+            //     positions.as_slice(),
+            //     skia_safe::TileMode::Clamp, // Default behavior for SVG gradients
+            //     None,
+            //     Some(&mat),
+            // )
+
+            let start = skia_safe::Point::new(*start_x, *start_y);
+            let end = skia_safe::Point::new(*end_x, *end_y);
+
+            println!(
+                "start_x {} start_y {} end_x {} end_y {}",
+                start.x, start.y, end.x, end.y
+            );
+
             skia_safe::Shader::two_point_conical_gradient(
-                skia_safe::Point::new(*cx, *cy),
-                0.0,
-                skia_safe::Point::new(*fx, *fy),
-                1.0,
+                start,
+                *start_r,
+                end,
+                *end_r,
                 skia_safe::gradient_shader::GradientShaderColors::Colors(&colors),
                 Some(positions.as_slice()),
                 skia_safe::TileMode::Clamp,
                 None,
-                None,
+                Some(&mat),
             )
+            // skia_safe::Shader::two_point_conical_gradient(
+            //     skia_safe::Point::new(*start_x + 10.0, *start_y + 10.0),
+            //     *start_r,
+            //     skia_safe::Point::new(*end_x + 10.0, *end_y + 10.0),
+            //     *end_r * 40.0,
+            //     skia_safe::gradient_shader::GradientShaderColors::Colors(&colors),
+            //     Some(positions.as_slice()),
+            //     skia_safe::TileMode::Clamp,
+            //     None,
+            //     None,
+            // )
         }
     }
 }
@@ -218,14 +264,22 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
     ) {
         let mut sk_path = to_skia_path(path);
         sk_path.set_fill_type(to_skia_fill_type(fill_type));
+        let mut blaah = false;
         let mut paint = make_paint(color, skia_safe::paint::Style::Fill, None);
         if let Some(shader) = shader {
             if let Some(shader) = to_skia_shader(shader) {
                 paint.set_shader(shader);
+                blaah = true;
             }
         }
 
         self.canvas.draw_path(&sk_path, &paint);
+        if blaah {
+            // self.canvas.draw_rect(
+            //     skia_safe::Rect::from_xywh(0.0, 0.0, self.width, self.height),
+            //     &paint,
+            // );
+        }
     }
 
     fn stroke_path(
