@@ -226,9 +226,7 @@ where
                 use pdf_page::shading::Shading;
 
                 if let Pattern::Shading {
-                    shading: Some(shading),
-                    matrix,
-                    ..
+                    shading, matrix, ..
                 } = pattern
                 {
                     match shading {
@@ -243,10 +241,8 @@ where
                                 y0: *y0,
                                 x1: *x1,
                                 y1: *y1,
-                                // You may want to generate stops using the function here.
                                 stops: {
-                                    println!("Axial");
-                                    // Number of stops to sample (increase for smoother gradients)
+                                    // Number of stops to sample.
                                     let num_stops = 16;
                                     let mut stops = Vec::with_capacity(num_stops + 1);
                                     for i in 0..=num_stops {
@@ -275,31 +271,17 @@ where
                             function,
                             ..
                         } => {
-                            // For radial gradients in PDF, the focal point (fx, fy) and a radius (r)
-                            // are specified.  We'll map x0, y0 to the center (cx, cy) and x1, y1 to the focal point (fx, fy).
-                            // The radii r0 and r1 determine the start and end radius of the gradient.
-                            // In this implementation, we will only support the case where r0 = 0 and r1 > 0, meaning the gradient
-                            // starts from a point and expands to a circle.  If r0 != 0, it means the gradient is a conical gradient
-                            // between two circles, which is not supported by Skia's two_point_conical_gradient.
-                            // if *r0 != 0.0 {
-                            //     panic!(
-                            //         "Warning: Radial gradient with r0 != 0 is not supported, fallback to no shader."
-                            //     );
-                            // }
-
                             let transform = if let Some(mat) = matrix {
                                 // FIXME: Converting matrix to the device userspace. The rendering backend expects an
                                 // origin at the top-left, with the Y-axis pointing downwards, so we apply canvas height - ty.
-                                let m = Transform::from_row(
+                                Some(Transform::from_row(
                                     mat.0[0],
                                     mat.0[1],
                                     mat.0[2],
                                     mat.0[3],
                                     mat.0[4],
                                     self.canvas.height() - mat.0[5],
-                                );
-
-                                Some(m)
+                                ))
                             } else {
                                 None
                             };
@@ -312,13 +294,12 @@ where
                                 end_y: *end_y,
                                 end_r: *end_r,
                                 transform,
-                                //stops: vec![(Color::from_rgb(1.0, 0.0, 0.0), 0.0), (Color::from_rgb(0.0, 0.0, 1.0), 1.0)]
                                 stops: {
-                                    // Number of stops to sample (increase for smoother gradients)
+                                    // Number of stops to sample
                                     let num_stops = 16;
                                     let mut stops = Vec::with_capacity(num_stops + 1);
                                     for i in 0..num_stops {
-                                        let t = i as f32 / num_stops as f32; // t in [0, 1]
+                                        let t = i as f32 / num_stops as f32;
                                         // Map t to the function's domain
                                         let x = function.domain()[0]
                                             + t * (function.domain()[1] - function.domain()[0]);

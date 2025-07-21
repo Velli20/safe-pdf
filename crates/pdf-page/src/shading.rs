@@ -14,38 +14,25 @@ use crate::{
 pub enum ShadingError {
     #[error("Missing /ShadingType key")]
     MissingShadingType,
-    #[error("Invalid /ShadingType value")]
-    InvalidShadingType,
-    #[error("Invalid value for key: {0}")]
-    InvalidValue(String),
+    #[error("Unsupported /ShadingType value: {0}")]
+    UnsupportedShadingType(ShadingType),
+    #[error("Unknown /ShadingType value: {0}")]
+    InvalidShadingType(i32),
     #[error("Invalid type for entry '{entry_name}': expected {expected_type}, found {found_type}")]
     InvalidEntryType {
         entry_name: &'static str,
         expected_type: &'static str,
         found_type: &'static str,
     },
-    #[error("Missing required key: {0}")]
-    MissingKey(&'static str),
-    #[error("Other error: {0}")]
-    Other(String),
-
-    #[error("Error parsing /BBox array: Expected 4 elements, got {count}")]
-    InvalidElementCount { count: usize },
-
-    #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
-    NumericConversionError {
-        entry_description: &'static str,
-        #[source]
-        source: ObjectError,
-    },
-
+    #[error("Missing required entry in Shading: /{0}")]
+    MissingRequiredEntry(&'static str),
     #[error("Error parsing Function: {0}")]
     FunctionReadError(#[from] FunctionReadError),
     #[error("Error parsing Dictionary: {0}")]
     ObjectError(#[from] ObjectError),
 }
 
-/// ShadingType as defined in PDF 1.7 Table 106
+/// Represents the `/ShadingType` entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShadingType {
     FunctionBased = 1,
@@ -57,7 +44,23 @@ pub enum ShadingType {
     TensorProductPatchMesh = 7,
 }
 
+impl std::fmt::Display for ShadingType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ShadingType::FunctionBased => write!(f, "FunctionBased"),
+            ShadingType::Axial => write!(f, "Axial"),
+            ShadingType::Radial => write!(f, "Radial"),
+            ShadingType::FreeFormTriangleMesh => write!(f, "FreeFormTriangleMesh"),
+            ShadingType::LatticeFormTriangleMesh => write!(f, "LatticeFormTriangleMesh"),
+            ShadingType::CoonsPatchMesh => write!(f, "CoonsPatchMesh"),
+            ShadingType::TensorProductPatchMesh => write!(f, "TensorProductPatchMesh"),
+        }
+    }
+}
+
 impl ShadingType {
+    /// Attempts to create a `ShadingType` from an integer value, returning `None` if the
+    /// value is not a valid tiling type.
     pub fn from_i32(val: i32) -> Option<Self> {
         match val {
             1 => Some(ShadingType::FunctionBased),
@@ -72,25 +75,48 @@ impl ShadingType {
     }
 }
 
-/// Represents a Shading object.
+/// Represents a PDF Shading object, which defines a smooth transition between colors
+/// across an area, used for creating gradient fills.
 #[derive(Debug)]
 pub enum Shading {
+    /// A function-based shading, where the color at every point is defined
+    /// by a mathematical function of its coordinates.
     FunctionBased {
-        color_space: Option<String>,
-        background: Option<Vec<f32>>,
-        bbox: Option<[f32; 4]>,
-        anti_alias: Option<bool>,
-        domain: Option<Vec<f32>>,
-        functions: Option<Vec<Function>>,
-    },
-    Axial {
+        /// The color space in which the function's results are interpreted.
         color_space: Option<ColorSpace>,
+        /// An array of color components specifying a background color.
+        background: Option<Vec<f32>>,
+        /// A rectangle specifying the domain of the shading.
+        bbox: Option<[f32; 4]>,
+        /// A flag indicating whether to apply anti-aliasing.
+        anti_alias: Option<bool>,
+        /// The domain of the function(s).
+        domain: Option<Vec<f32>>,
+        /// A 2-in, n-out function or an array of n 2-in, 1-out functions
+        /// that define the color at each point.
+        functions: Vec<Function>,
+    },
+    /// An axial shading, where color transitions along a line between
+    /// two points, extending infinitely perpendicular to that line.
+    Axial {
+        /// The color space in which color values are expressed.
+        color_space: ColorSpace,
+        /// An array of four numbers `[x0, y0, x1, y1]` specifying the
+        /// starting and ending coordinates of the axis.
         coords: [f32; 4],
+        /// A 1-in, n-out function that maps a parameter `t` (from 0.0 to 1.0)
+        /// along the axis to a color.
         function: Function,
     },
+    /// A radial shading, where color transitions between two circles.
     Radial {
-        color_space: Option<ColorSpace>,
+        /// The color space in which color values are expressed.
+        color_space: ColorSpace,
+        /// An array of six numbers `[x0, y0, r0, x1, y1, r1]` specifying
+        /// the centers and radii of the starting and ending circles.
         coords: [f32; 6],
+        /// A 1-in, n-out function that maps a parameter `t` (from 0.0 to 1.0)
+        /// between the circles to a color.
         function: Function,
     },
 }
@@ -104,59 +130,45 @@ impl FromDictionary for Shading {
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, ShadingError> {
+        // Extract the required `/ShadingType` entry.
         let shading_type = dictionary
             .get("ShadingType")
-            .ok_or(ShadingError::MissingShadingType)?;
+            .ok_or(ShadingError::MissingShadingType)?
+            .as_number::<i32>()?;
 
-        let shading_type_int = shading_type
-            .as_number::<i32>()
-            .map_err(|_| ShadingError::InvalidShadingType)?;
-        println!("ShadingType: {shading_type_int:?}");
-        match ShadingType::from_i32(shading_type_int) {
+        match ShadingType::from_i32(shading_type) {
             Some(ShadingType::FunctionBased) => {
-                // Parse /ColorSpace (optional, as String for now)
-                let color_space = dictionary
-                    .get("ColorSpace")
-                    .and_then(|obj| obj.as_str().map(|s| s.to_string()));
+                // Read optional `/ColorSpace` entry, which defines the color space for the shading.
+                let color_space = if let Some(obj) = dictionary.get("ColorSpace") {
+                    Some(ColorSpace::from(obj.as_ref()))
+                } else {
+                    None
+                };
 
-                // Parse /Background (optional, array of numbers)
-                let background = dictionary
-                    .get("Background")
-                    .and_then(|obj| obj.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_number::<f32>().ok())
-                            .collect::<Vec<_>>()
-                    });
+                // Read optional `/Background` entry, specifying a background color as an array of numbers.
+                let background = if let Some(obj) = dictionary.get("Background") {
+                    Some(obj.as_vec_of::<f32>()?)
+                } else {
+                    None
+                };
 
-                // Parse /BBox (optional, array of 4 numbers)
+                // Read optional `/BBox` entry, which defines the bounding box for the shading.
                 let bbox = if let Some(obj) = dictionary.get("BBox") {
                     Some(obj.as_array_of::<f32, 4>()?)
                 } else {
                     None
                 };
 
-                // Parse /AntiAlias (optional, bool)
-                // let anti_alias = dictionary
-                //     .get("AntiAlias")
-                //     .and_then(|obj| obj.as_bool().ok());
+                // Read optional `/Domain` entry, specifying the valid input range for the function(s).
+                let domain = if let Some(obj) = dictionary.get("Domain") {
+                    Some(obj.as_vec_of::<f32>()?)
+                } else {
+                    None
+                };
 
-                // Parse /Domain (optional, array of numbers)
-                let domain = dictionary
-                    .get("Domain")
-                    .and_then(|obj| obj.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_number::<f32>().ok())
-                            .collect::<Vec<_>>()
-                    });
-
-                if let Some(fun) = dictionary.get("Function") {
-                    println!("Function: {fun:?}");
-                }
-
-                // Parse /Function (required, can be a reference or array of references)
+                // Read required `/Function` entry, which may be a single function or an array of functions.
                 let functions = match dictionary.get("Function") {
+                    // If the `/Function` is an array, read each function object.
                     Some(obj) if obj.is_array() => {
                         let mut functions = Vec::new();
                         if let Some(obj) = obj.as_array() {
@@ -174,18 +186,20 @@ impl FromDictionary for Shading {
                                             Some(&stream.data),
                                         )?);
                                     }
-                                    _ => {
-                                        return Err(ShadingError::InvalidValue(
-                                            "Function".to_string(),
-                                        ));
+                                    obj => {
+                                        return Err(ShadingError::InvalidEntryType {
+                                            entry_name: "Function",
+                                            expected_type: "Dictionary or Stream",
+                                            found_type: obj.name(),
+                                        });
                                     }
                                 }
                             }
                         }
-                        Some(functions)
+                        functions
                     }
+                    // If `/Function` is a single object, read it directly.
                     Some(obj) => {
-                        let value = objects.resolve_dictionary(obj.as_ref())?;
                         let function = match objects.resolve_object(obj)? {
                             ObjectVariant::Dictionary(dictionary) => {
                                 Function::from_dictionary(dictionary, objects, None)?
@@ -195,14 +209,18 @@ impl FromDictionary for Shading {
                                 objects,
                                 Some(&stream.data),
                             )?,
-                            _ => {
-                                return Err(ShadingError::InvalidValue("Function".to_string()));
+                            obj => {
+                                return Err(ShadingError::InvalidEntryType {
+                                    entry_name: "Function",
+                                    expected_type: "Dictionary or Stream",
+                                    found_type: obj.name(),
+                                });
                             }
                         };
-
-                        Some(vec![function])
+                        vec![function]
                     }
-                    None => None,
+                    // `/Function` entry is required for FunctionBased shading.
+                    None => return Err(ShadingError::MissingRequiredEntry("Function")),
                 };
 
                 Ok(Shading::FunctionBased {
@@ -215,29 +233,24 @@ impl FromDictionary for Shading {
                 })
             }
             Some(ShadingType::Axial) => {
+                // Read required `/Coords` entry, which defines the axis for the gradient.
                 let coords = dictionary
                     .get("Coords")
-                    .ok_or(ShadingError::InvalidShadingType)?;
+                    .ok_or(ShadingError::MissingRequiredEntry("Coords"))?;
 
                 let coords = coords.as_array_of::<f32, 4>()?;
 
-                let color_space = if let Some(obj) = dictionary.get("ColorSpace") {
-                    Some(ColorSpace::from(obj.as_ref()))
-                } else {
-                    None
-                };
+                // Read required `/ColorSpace` entry.
+                let color_space = dictionary
+                    .get("ColorSpace")
+                    .ok_or(ShadingError::MissingRequiredEntry("ColorSpace"))
+                    .map(|obj| ColorSpace::from(obj.as_ref()))?;
 
-                if let Some(bg) = dictionary.get("Background") {
-                    println!("Background: {bg:?}");
-                }
-                if let Some(bg) = dictionary.get("Domain") {
-                    println!("Domain: {bg:?}");
-                }
-
+                // Read required `/Function` entry as a dictionary.
                 let function = if let Some(f) = dictionary.get_dictionary("Function") {
                     Function::from_dictionary(f, objects, None)?
                 } else {
-                    panic!("No function found");
+                    return Err(ShadingError::MissingRequiredEntry("Function"));
                 };
 
                 Ok(Shading::Axial {
@@ -247,24 +260,24 @@ impl FromDictionary for Shading {
                 })
             }
             Some(ShadingType::Radial) => {
-                println!("Radial {:?}", dictionary);
-
+                // Read required `/Coords` entry, which defines the two circles for the radial gradient.
                 let coords = dictionary
                     .get("Coords")
-                    .ok_or(ShadingError::InvalidShadingType)?;
+                    .ok_or(ShadingError::MissingRequiredEntry("Coords"))?;
 
                 let coords = coords.as_array_of::<f32, 6>()?;
 
-                let color_space = if let Some(obj) = dictionary.get("ColorSpace") {
-                    Some(ColorSpace::from(obj.as_ref()))
-                } else {
-                    None
-                };
+                // Read required `/ColorSpace` entry.
+                let color_space = dictionary
+                    .get("ColorSpace")
+                    .ok_or(ShadingError::MissingRequiredEntry("ColorSpace"))
+                    .map(|obj| ColorSpace::from(obj.as_ref()))?;
 
+                // Read required `/Function` entry as a dictionary.
                 let function = if let Some(dictionary) = dictionary.get_dictionary("Function") {
                     Function::from_dictionary(dictionary, objects, None)?
                 } else {
-                    panic!("No function found");
+                    return Err(ShadingError::MissingRequiredEntry("Function"));
                 };
 
                 Ok(Shading::Radial {
@@ -273,7 +286,8 @@ impl FromDictionary for Shading {
                     coords,
                 })
             }
-            _ => Err(ShadingError::InvalidShadingType),
+            // If the shading type is not recognized, return an error.
+            _ => Err(ShadingError::InvalidShadingType(shading_type)),
         }
     }
 }

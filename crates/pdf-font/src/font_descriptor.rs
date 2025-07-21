@@ -42,6 +42,8 @@ pub enum FontDescriptorError {
     MissingFontBoundingBox,
     #[error("Missing /FontName entry")]
     MissingFontName,
+    #[error("Object error: {0}")]
+    ObjectError(#[from] ObjectError),
     /// Error converting a PDF value to a number.
     #[error("Failed to convert PDF value to number for '{entry_description}': {err}")]
     FontBoundingBoxNumericConversionError {
@@ -49,10 +51,8 @@ pub enum FontDescriptorError {
         #[source]
         err: ObjectError,
     },
-
     #[error("Missing required entry in FontDescriptor: /{0}")]
     MissingRequiredEntry(&'static str),
-
     #[error(
         "Invalid type for FontDescriptor entry /{entry_name}: expected {expected_type}, found {found_type}"
     )]
@@ -61,9 +61,6 @@ pub enum FontDescriptorError {
         expected_type: &'static str,
         found_type: &'static str, // Assumes ObjectVariant::name() -> &'static str
     },
-
-    #[error("Invalid FontBBox entry: expected an array of 4 numbers, found array of length {len}")]
-    InvalidFontBBoxArrayLength { len: usize },
 
     #[error(
         "Failed to convert PDF value to number for FontDescriptor entry /{entry_description}: {source}"
@@ -165,32 +162,9 @@ impl FromDictionary for FontDescriptor {
         let flags = FontDescriptorFlags::from_bits_truncate(flags_val);
 
         let font_bounding_box = dictionary
-            .get_array("FontBBox")
-            .ok_or(FontDescriptorError::MissingRequiredEntry("FontBBox"))?;
-
-        // Helper closure to convert a PDF Value to i32 for FontBBox entries
-        // and map errors appropriately.
-        let convert_bbox_entry =
-            |value: &ObjectVariant, coord_name: &'static str| -> Result<f32, FontDescriptorError> {
-                value.as_number::<f32>().map_err(|source| {
-                    FontDescriptorError::NumericConversionError {
-                        entry_description: coord_name, // e.g., "FontBBox[0] (llx)"
-                        source,
-                    }
-                })
-            };
-        let font_bounding_box = match font_bounding_box.as_slice() {
-            // Pattern match for exactly 4 elements in the slice.
-            [l, t, r, b] => [
-                convert_bbox_entry(l, "FontBBox llx")?,
-                convert_bbox_entry(t, "FontBBox lly")?,
-                convert_bbox_entry(r, "FontBBox urx")?,
-                convert_bbox_entry(b, "FontBBox ury")?,
-            ],
-            arr => {
-                return Err(FontDescriptorError::InvalidFontBBoxArrayLength { len: arr.len() });
-            }
-        };
+            .get("FontBBox")
+            .ok_or(FontDescriptorError::MissingRequiredEntry("FontBBox"))?
+            .as_array_of::<f32, 4>()?;
 
         let font_family = if let Some(font_family) = dictionary.get_string("FontFamily") {
             Some(font_family.to_owned())

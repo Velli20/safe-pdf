@@ -25,7 +25,6 @@ pub struct Type3Font {
     pub char_procs: HashMap<String, Vec<PdfOperatorVariant>>,
     /// The font's encoding, specifying the mapping from character codes to glyph names.
     pub encoding: Option<FontEncodingDictionary>,
-    pub first_char_code: u8,
 }
 
 /// Defines errors that can occur while parsing a Type 3 font object.
@@ -62,18 +61,12 @@ impl FromDictionary for Type3Font {
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        let font_matrix =
-            dictionary
-                .get_array("FontMatrix")
-                .ok_or(Type3FontError::MissingEntry {
-                    entry_name: "FontMatrix",
-                })?;
-
-        // Assuming FontMatrix is an array of 6 numbers.
-        let font_matrix = font_matrix
-            .iter()
-            .map(|o| o.as_number::<f32>().unwrap_or(0.0))
-            .collect::<Vec<f32>>();
+        let font_matrix = dictionary
+            .get("FontMatrix")
+            .ok_or(Type3FontError::MissingEntry {
+                entry_name: "FontMatrix",
+            })?
+            .as_array_of::<f32, 6>()?;
 
         let char_proc_dictionary =
             dictionary
@@ -81,18 +74,6 @@ impl FromDictionary for Type3Font {
                 .ok_or(Type3FontError::MissingEntry {
                     entry_name: "CharProcs",
                 })?;
-
-        let first_char_code = dictionary
-            .get("FirstChar")
-            .ok_or(Type3FontError::MissingEntry {
-                entry_name: "FirstChar",
-            })?
-            .as_number::<u8>()
-            .map_err(|_| Type3FontError::InvalidEntryType {
-                entry_name: "FirstChar",
-                expected_type: "Integer",
-                found_type: "Reference",
-            })?;
 
         // Parse optional `/Encoding` entry
         let encoding = if let Some(encoding_obj) = dictionary.get("Encoding") {
@@ -145,15 +126,7 @@ impl FromDictionary for Type3Font {
         }
 
         Ok(Type3Font {
-            font_matrix: [
-                font_matrix[0],
-                font_matrix[1],
-                font_matrix[2],
-                font_matrix[3],
-                font_matrix[4],
-                font_matrix[5],
-            ],
-            first_char_code,
+            font_matrix,
             char_procs,
             encoding,
         })

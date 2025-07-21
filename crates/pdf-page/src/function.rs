@@ -1,7 +1,4 @@
-use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
-    stream, traits::FromDictionary,
-};
+use pdf_object::{dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection};
 
 use thiserror::Error;
 
@@ -11,6 +8,8 @@ pub enum FunctionReadError {
     MissingFunctionType,
     #[error("Missing /Domain entry")]
     MissingDomain,
+    #[error("Missing required entry in Function: /{0}")]
+    MissingRequiredEntry(&'static str),
     #[error("Invalid /FunctionType value")]
     InvalidFunctionType,
     #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
@@ -18,6 +17,14 @@ pub enum FunctionReadError {
         entry_description: &'static str,
         #[source]
         source: ObjectError,
+    },
+    #[error(
+        "Entry '{entry_name}' in Shading dictionary has invalid type: expected {expected_type}, found {found_type}"
+    )]
+    InvalidEntryType {
+        entry_name: &'static str,
+        expected_type: &'static str,
+        found_type: &'static str,
     },
     #[error("Failed to read function value for '{entry_description}': {source}")]
     EntryReadError {
@@ -39,16 +46,16 @@ pub enum FunctionInterpolationError {
     InvalidDomain,
 }
 
-/// Represents the type of a PDF Function object, as defined in PDF 1.7, Table 38.
+/// Represents the type of a PDF Function object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FunctionType {
-    /// Type 0, a sampled function that uses a table of sample values to define the function.
+    /// A sampled function that uses a table of sample values to define the function.
     Sampled = 0,
-    /// Type 2, an exponential interpolation function.
+    /// An exponential interpolation function.
     ExponentialInterpolation = 2,
-    /// Type 3, a stitching function that combines several other functions into a single function.
+    /// A stitching function that combines several other functions into a single function.
     Stitching = 3,
-    /// Type 4, a PostScript calculator function that uses a small subset of the PostScript language
+    /// A PostScript calculator function that uses a small subset of the PostScript language
     /// to describe the function.
     PostScriptCalculator = 4,
 }
@@ -75,7 +82,7 @@ pub enum FunctionData {
         domain: [f32; 2],
     },
     Stitching {
-        functions: Vec<Function>, // Or Vec<Ref>, depending on your object model
+        functions: Vec<Function>,
         bounds: Vec<f32>,
         encode: Vec<f32>,
         domain: [f32; 2],
@@ -145,29 +152,49 @@ impl Function {
             domain,
         } = &self.data
         {
+            // 1. Clamp the input value `x` to the function's domain.
             let x_clamped = x.clamp(domain[0], domain[1]);
 
-            // Determine which sub-function applies
+            // 2. Find which subfunction to use based on the `bounds` array.
+            // The `bounds` array divides the domain into sub-domains, each corresponding
+            // to a function in the `functions` array.
             let mut index = 0;
             while index < bounds.len() && x_clamped >= bounds[index] {
                 index += 1;
             }
 
-            // Determine mapping range
+            // 3. Determine the input range (sub-domain) for the selected subfunction.
+            // This is the interval [b0, b1] that contains `x_clamped`.
             let (b0, b1) = if index == 0 {
+                // First sub-domain: from the start of the main domain to the first bound.
                 (domain[0], bounds[0])
             } else if index == bounds.len() {
+                // Last sub-domain: from the last bound to the end of the main domain.
                 (bounds[index - 1], domain[1])
             } else {
+                // Intermediate sub-domain: between two bounds.
                 (bounds[index - 1], bounds[index])
             };
 
+            // 4. Get the encoding values for the selected subfunction.
+            // The `encode` array defines how to map the value from the sub-domain [b0, b1]
+            // to the subfunction's own input domain [e0, e1].
             let e0 = encode[2 * index];
             let e1 = encode[2 * index + 1];
 
-            let t = (x_clamped - b0) / (b1 - b0);
+            // 5. Linearly interpolate the clamped input value from the sub-domain [b0, b1]
+            // to the subfunction's domain [e0, e1].
+            // First, calculate the normalized position `t` of `x_clamped` within [b0, b1].
+            // Handle potential division by zero if the sub-domain has zero width.
+            let t = if (b1 - b0).abs() < f32::EPSILON {
+                0.0
+            } else {
+                (x_clamped - b0) / (b1 - b0)
+            };
+            // Then, map `t` to the target range [e0, e1].
             let x_mapped = e0 + t * (e1 - e0);
 
+            // 6. Call the selected subfunction with the mapped input value.
             functions[index].interpolate(x_mapped)
         } else {
             Err(FunctionInterpolationError::UnsupportedFunctionType(
@@ -183,13 +210,10 @@ impl Function {
         objects: &ObjectCollection,
         stream: Option<&[u8]>,
     ) -> Result<Function, FunctionReadError> {
-        let function_type_val = dictionary
+        let function_type_int = dictionary
             .get("FunctionType")
-            .ok_or(FunctionReadError::MissingFunctionType)?;
-
-        let function_type_int = function_type_val
-            .as_number::<i32>()
-            .map_err(|_| FunctionReadError::InvalidFunctionType)?;
+            .ok_or(FunctionReadError::MissingFunctionType)?
+            .as_number::<i32>()?;
 
         let function_type = FunctionType::from_i32(function_type_int)
             .ok_or(FunctionReadError::InvalidFunctionType)?;
@@ -203,27 +227,32 @@ impl Function {
                     return Err(FunctionReadError::MissingDomain);
                 };
 
-                let c0 = dictionary
-                    .get("C0")
-                    .unwrap()
-                    .as_vec_of::<f32>()
-                    .map_err(|e| FunctionReadError::EntryReadError {
-                        entry_description: "C0",
-                        source: e,
-                    })?;
+                // Parse /C0, the function's output for domain[0]. Defaults to [0.0] if not present.
+                let c0 = if let Some(obj) = dictionary.get("C0") {
+                    obj.as_vec_of::<f32>()
+                        .map_err(|e| FunctionReadError::EntryReadError {
+                            entry_description: "C0",
+                            source: e,
+                        })?
+                } else {
+                    vec![0.0]
+                };
 
-                let c1 = dictionary
-                    .get("C1")
-                    .unwrap()
-                    .as_vec_of::<f32>()
-                    .map_err(|e| FunctionReadError::EntryReadError {
-                        entry_description: "C1",
-                        source: e,
-                    })?;
+                // Parse /C1, the function's output for domain[1]. Defaults to [1.0] if not present.
+                let c1 = if let Some(obj) = dictionary.get("C1") {
+                    obj.as_vec_of::<f32>()
+                        .map_err(|e| FunctionReadError::EntryReadError {
+                            entry_description: "C1",
+                            source: e,
+                        })?
+                } else {
+                    vec![1.0]
+                };
 
+                // Parse /N, the interpolation exponent (required).
                 let exponent = dictionary
                     .get("N")
-                    .ok_or(FunctionReadError::InvalidFunctionType)?
+                    .ok_or(FunctionReadError::MissingRequiredEntry("N"))?
                     .as_number::<f32>()
                     .map_err(|e| FunctionReadError::NumericConversionError {
                         entry_description: "N",
@@ -251,14 +280,18 @@ impl Function {
                 // Parse Functions array
                 let functions_arr = dictionary
                     .get_array("Functions")
-                    .ok_or(FunctionReadError::InvalidFunctionType)?;
+                    .ok_or(FunctionReadError::MissingRequiredEntry("Functions"))?;
+
                 let mut functions = Vec::new();
                 for obj in functions_arr.iter() {
                     let dict = obj
                         .as_dictionary()
-                        .ok_or(FunctionReadError::InvalidFunctionType)?;
-                    let func = Function::from_dictionary(dict, objects, None)?;
-                    functions.push(func);
+                        .ok_or(FunctionReadError::InvalidEntryType {
+                            entry_name: "Functions",
+                            expected_type: "Dictionary",
+                            found_type: &obj.name(),
+                        })?;
+                    functions.push(Function::from_dictionary(dict, objects, None)?);
                 }
 
                 // Parse Bounds array
