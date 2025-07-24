@@ -1,3 +1,4 @@
+use pdf_graphics::transform::Transform;
 use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     traits::FromDictionary,
@@ -10,12 +11,11 @@ pub enum MatrixReadError {
     ObjectError(#[from] ObjectError),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Matrix(pub [f32; 6]);
+pub struct Matrix;
 
 impl FromDictionary for Matrix {
     const KEY: &'static str = "Matrix";
-    type ResultType = Option<Matrix>;
+    type ResultType = Option<Transform>;
     type ErrorType = MatrixReadError;
 
     fn from_dictionary(
@@ -23,8 +23,11 @@ impl FromDictionary for Matrix {
         _objects: &ObjectCollection,
     ) -> Result<Self::ResultType, MatrixReadError> {
         if let Some(matrix_obj) = dictionary.get("Matrix") {
-            let arr = matrix_obj.as_array_of::<f32, 6>()?;
-            Ok(Some(Matrix(arr)))
+            let mat = matrix_obj.as_array_of::<f32, 6>()?;
+
+            Ok(Some(Transform::from_row(
+                mat[0], mat[1], mat[2], mat[3], mat[4], mat[5],
+            )))
         } else {
             Ok(None)
         }

@@ -1,3 +1,4 @@
+use pdf_graphics::color::Color;
 use pdf_object::{
     ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     traits::FromDictionary,
@@ -6,7 +7,7 @@ use thiserror::Error;
 
 use crate::{
     color_space::ColorSpace,
-    function::{Function, FunctionReadError},
+    function::{self, Function, FunctionReadError},
 };
 
 /// Errors that can occur while parsing a Shading object.
@@ -75,6 +76,38 @@ impl ShadingType {
     }
 }
 
+pub struct ColorStops {
+    pub colors: Vec<Color>,
+    pub positions: Vec<f32>,
+}
+
+impl ColorStops {
+    pub fn from(function: &Function) -> Self {
+        // Number of stops to sample
+        let num_stops = 16;
+        let mut positions = vec![];
+        let mut colors = vec![];
+        for i in 0..num_stops {
+            let t = i as f32 / num_stops as f32;
+            // Map t to the function's domain
+            let x = function.domain()[0] + t * (function.domain()[1] - function.domain()[0]);
+            // Evaluate the function
+            let color_components = function
+                .interpolate(x)
+                .unwrap_or_else(|_| vec![0.0, 0.0, 0.0]);
+            // Convert to Color.
+            let color = Color::from_rgb(
+                color_components.get(0).copied().unwrap_or(0.0),
+                color_components.get(1).copied().unwrap_or(0.0),
+                color_components.get(2).copied().unwrap_or(0.0),
+            );
+            positions.push(t);
+            colors.push(color);
+        }
+        Self { colors, positions }
+    }
+}
+
 /// Represents a PDF Shading object, which defines a smooth transition between colors
 /// across an area, used for creating gradient fills.
 #[derive(Debug)]
@@ -107,6 +140,8 @@ pub enum Shading {
         /// A 1-in, n-out function that maps a parameter `t` (from 0.0 to 1.0)
         /// along the axis to a color.
         function: Function,
+        colors: Vec<Color>,
+        positions: Vec<f32>,
     },
     /// A radial shading, where color transitions between two circles.
     Radial {
@@ -118,6 +153,8 @@ pub enum Shading {
         /// A 1-in, n-out function that maps a parameter `t` (from 0.0 to 1.0)
         /// between the circles to a color.
         function: Function,
+        colors: Vec<Color>,
+        positions: Vec<f32>,
     },
 }
 
@@ -253,10 +290,14 @@ impl FromDictionary for Shading {
                     return Err(ShadingError::MissingRequiredEntry("Function"));
                 };
 
+                let ColorStops { colors, positions } = ColorStops::from(&function);
+
                 Ok(Shading::Axial {
                     color_space,
                     function,
                     coords,
+                    colors,
+                    positions,
                 })
             }
             Some(ShadingType::Radial) => {
@@ -280,10 +321,14 @@ impl FromDictionary for Shading {
                     return Err(ShadingError::MissingRequiredEntry("Function"));
                 };
 
+                let ColorStops { colors, positions } = ColorStops::from(&function);
+
                 Ok(Shading::Radial {
                     color_space,
                     function,
                     coords,
+                    colors,
+                    positions,
                 })
             }
             // If the shading type is not recognized, return an error.

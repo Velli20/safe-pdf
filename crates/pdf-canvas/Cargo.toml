@@ -1,11 +1,13 @@
 [package]
-name = "pdf-page"
+name = "pdf-canvas"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-pdf-object = { path = "../pdf-object" }
 pdf-content-stream = { path = "../pdf-content-stream" }
+pdf-page = { path = "../pdf-page" }
 pdf-font = { path = "../pdf-font" }
+pdf-object = { path = "../pdf-object" }
 pdf-graphics = { path = "../pdf-graphics" }
+ttf-parser = { version = "0.25.1" }
 thiserror = "2.0.12"

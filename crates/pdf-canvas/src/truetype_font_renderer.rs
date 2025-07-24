@@ -1,11 +1,12 @@
 use pdf_content_stream::pdf_operator_backend::PdfOperatorBackend;
 use pdf_font::font::Font;
+use pdf_graphics::transform::Transform;
 use pdf_object::ObjectVariant;
 use thiserror::Error;
 
 use crate::{
     PathFillType, canvas::Canvas, error::PdfCanvasError, pdf_path::PdfPath,
-    text_renderer::TextRenderer, transform::Transform,
+    text_renderer::TextRenderer,
 };
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
 

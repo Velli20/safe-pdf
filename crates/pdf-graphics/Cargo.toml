@@ -4,9 +4,3 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-pdf-content-stream = { path = "../pdf-content-stream" }
-pdf-page = { path = "../pdf-page" }
-pdf-font = { path = "../pdf-font" }
-pdf-object = { path = "../pdf-object" }
-ttf-parser = { version = "0.25.1" }
-thiserror = "2.0.12"

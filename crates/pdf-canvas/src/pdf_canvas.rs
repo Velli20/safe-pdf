@@ -1,15 +1,14 @@
 use pdf_content_stream::graphics_state_operators::{LineCap, LineJoin};
 use pdf_font::font::Font;
+use pdf_graphics::{color::Color, transform::Transform};
 use pdf_page::{form::FormXObject, page::PdfPage, pattern::Pattern, resources::Resources};
 
 use crate::{
     PaintMode, PathFillType,
     canvas::Canvas,
     canvas_backend::{CanvasBackend, Shader},
-    color::Color,
     error::PdfCanvasError,
     pdf_path::PdfPath,
-    transform::Transform,
 };
 
 /// Encapsulates text-specific state parameters.
@@ -221,7 +220,7 @@ where
     ) -> Result<(), PdfCanvasError> {
         if let Some(mut path) = self.current_path.take() {
             path.transform(&self.current_state()?.transform);
-            let shader = if let Some(pattern) = &self.current_state()?.pattern {
+            let shader = if let Some(pattern) = self.current_state()?.pattern {
                 use pdf_page::pattern::Pattern;
                 use pdf_page::shading::Shading;
 
@@ -232,7 +231,8 @@ where
                     match shading {
                         Shading::Axial {
                             coords: [x0, y0, x1, y1],
-                            function,
+                            positions,
+                            colors,
                             ..
                         } => {
                             // Construct a LinearShader (or Shader::LinearGradient) using coords and function
@@ -241,47 +241,21 @@ where
                                 y0: *y0,
                                 x1: *x1,
                                 y1: *y1,
-                                stops: {
-                                    // Number of stops to sample.
-                                    let num_stops = 16;
-                                    let mut stops = Vec::with_capacity(num_stops + 1);
-                                    for i in 0..=num_stops {
-                                        let t = i as f32 / num_stops as f32; // t in [0, 1]
-                                        // Map t to the function's domain
-                                        let x = function.domain()[0]
-                                            + t * (function.domain()[1] - function.domain()[0]);
-                                        // Evaluate the function
-                                        let color_components = function
-                                            .interpolate(x)
-                                            .unwrap_or_else(|_| vec![0.0, 0.0, 0.0]);
-                                        // Convert to Color (assuming RGB, adjust if needed)
-                                        let color = crate::color::Color::from_rgb(
-                                            color_components.get(0).copied().unwrap_or(0.0),
-                                            color_components.get(1).copied().unwrap_or(0.0),
-                                            color_components.get(2).copied().unwrap_or(0.0),
-                                        );
-                                        stops.push((color, t));
-                                    }
-                                    stops
-                                },
+                                colors: colors.clone(),
+                                positions: positions.clone(),
                             })
                         }
                         Shading::Radial {
                             coords: [start_x, start_y, start_r, end_x, end_y, end_r],
-                            function,
+                            positions,
+                            colors,
                             ..
                         } => {
-                            let transform = if let Some(mat) = matrix {
+                            let transform = if let Some(mut mat) = matrix.clone() {
                                 // FIXME: Converting matrix to the device userspace. The rendering backend expects an
                                 // origin at the top-left, with the Y-axis pointing downwards, so we apply canvas height - ty.
-                                Some(Transform::from_row(
-                                    mat.0[0],
-                                    mat.0[1],
-                                    mat.0[2],
-                                    mat.0[3],
-                                    mat.0[4],
-                                    self.canvas.height() - mat.0[5],
-                                ))
+                                mat.ty = self.canvas.height() - mat.ty;
+                                Some(mat)
                             } else {
                                 None
                             };
@@ -294,29 +268,8 @@ where
                                 end_y: *end_y,
                                 end_r: *end_r,
                                 transform,
-                                stops: {
-                                    // Number of stops to sample
-                                    let num_stops = 16;
-                                    let mut stops = Vec::with_capacity(num_stops + 1);
-                                    for i in 0..num_stops {
-                                        let t = i as f32 / num_stops as f32;
-                                        // Map t to the function's domain
-                                        let x = function.domain()[0]
-                                            + t * (function.domain()[1] - function.domain()[0]);
-                                        // Evaluate the function
-                                        let color_components = function
-                                            .interpolate(x)
-                                            .unwrap_or_else(|_| vec![0.0, 0.0, 0.0]);
-                                        // Convert to Color (assuming RGB, adjust if needed)
-                                        let color = crate::color::Color::from_rgb(
-                                            color_components.get(0).copied().unwrap_or(0.0),
-                                            color_components.get(1).copied().unwrap_or(0.0),
-                                            color_components.get(2).copied().unwrap_or(0.0),
-                                        );
-                                        stops.push((color, t));
-                                    }
-                                    stops
-                                },
+                                colors: colors.clone(),
+                                positions: positions.clone(),
                             })
                         }
                         _ => None,
@@ -363,9 +316,8 @@ where
         let form_procs = &form.content_stream.operations;
         self.save()?;
 
-        if let Some([a, b, c, d, e, f]) = &form.matrix {
-            let form_rendering_matrix = Transform::from_row(*a, *b, *c, *d, *e, *f);
-            self.set_matrix(form_rendering_matrix)?;
+        if let Some(mat) = &form.matrix {
+            self.set_matrix(mat.clone())?;
         }
 
         if let Some(resources) = &form.resources {

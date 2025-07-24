@@ -1,10 +1,9 @@
-use pdf_graphics::{
+use pdf_canvas::{
     PathFillType,
     canvas_backend::{CanvasBackend, Shader},
-    color::Color,
     pdf_path::{PathVerb, PdfPath},
-    transform::Transform,
 };
+use pdf_graphics::{color::Color, transform::Transform};
 
 pub struct SkiaCanvasBackend<'a> {
     pub canvas: &'a skia_safe::Canvas,
@@ -71,15 +70,14 @@ fn to_skia_shader(shader: &Shader) -> Option<skia_safe::Shader> {
             y0,
             x1,
             y1,
-            stops,
+            positions,
+            colors,
         } => {
             // Prepare colors and positions for Skia
-            let mut colors = Vec::with_capacity(stops.len());
-            let mut positions: Vec<f32> = Vec::with_capacity(stops.len());
-            for (color, pos) in stops {
-                colors.push(skia_safe::Color4f::new(color.r, color.g, color.b, color.a).to_color());
-                positions.push(*pos);
-            }
+            let colors: Vec<skia_safe::Color> = colors
+                .iter()
+                .map(|color| skia_safe::Color4f::new(color.r, color.g, color.b, color.a).to_color())
+                .collect();
 
             // Create the Skia gradient shader
             skia_safe::Shader::linear_gradient(
@@ -101,17 +99,15 @@ fn to_skia_shader(shader: &Shader) -> Option<skia_safe::Shader> {
             end_x,
             end_y,
             end_r,
-
-            stops,
+            positions,
+            colors,
             transform,
         } => {
             // Prepare colors and positions for Skia
-            let mut colors = Vec::with_capacity(stops.len());
-            let mut positions: Vec<f32> = Vec::with_capacity(stops.len());
-            for (color, pos) in stops {
-                colors.push(skia_safe::Color4f::new(color.r, color.g, color.b, color.a).to_color());
-                positions.push(*pos);
-            }
+            let colors: Vec<skia_safe::Color> = colors
+                .iter()
+                .map(|color| skia_safe::Color4f::new(color.r, color.g, color.b, color.a).to_color())
+                .collect();
 
             let mat = if let Some(m) = transform {
                 to_skia_matrix(m)

@@ -1,4 +1,5 @@
-use crate::{PathFillType, color::Color, pdf_path::PdfPath, transform::Transform};
+use crate::{PathFillType, pdf_path::PdfPath};
+use pdf_graphics::{color::Color, transform::Transform};
 
 pub enum Shader {
     LinearGradient {
@@ -6,7 +7,8 @@ pub enum Shader {
         y0: f32,
         x1: f32,
         y1: f32,
-        stops: Vec<(Color, f32)>,
+        colors: Vec<Color>,
+        positions: Vec<f32>,
     },
     RadialGradient {
         start_x: f32,
@@ -15,7 +17,8 @@ pub enum Shader {
         end_x: f32,
         end_y: f32,
         end_r: f32,
-        stops: Vec<(Color, f32)>,
+        colors: Vec<Color>,
+        positions: Vec<f32>,
         transform: Option<Transform>,
     },
 }

@@ -1,12 +1,12 @@
-# pdf-graphics
+# pdf-canvas
 
-**`pdf-graphics` is a Rust crate for constructing and rendering 2D vector graphics, primarily designed for PDF document generation.**
+**`pdf-canvas` is a Rust crate for constructing and rendering 2D vector graphics, primarily designed for PDF document generation.**
 
-It offers a stateful API for defining paths (lines, curves, shapes) and then painting them (stroking, filling) onto a canvas. The crate abstracts the low-level drawing commands by delegating the actual rendering to a `CanvasBackend`. This design makes `pdf-graphics` flexible and allows it to be used with different PDF generation backends or potentially other rendering targets.
+It offers a stateful API for defining paths (lines, curves, shapes) and then painting them (stroking, filling) onto a canvas. The crate abstracts the low-level drawing commands by delegating the actual rendering to a `CanvasBackend`. This design makes `pdf-canvas` flexible and allows it to be used with different PDF generation backends or potentially other rendering targets.
 
 ## Overview
 
-The central component of `pdf-graphics` is the `PdfCanvas` struct. It acts as the main interface for all drawing operations and maintains the state of the current path being constructed. Path construction methods (e.g., `move_to`, `line_to`, `rectangle`) build up this internal path. When a painting operation (e.g., `stroke_path`, `fill_path_nonzero_winding`) is called, `PdfCanvas` instructs the provided `CanvasBackend` to render the accumulated path, and then typically clears the current path for new operations.
+The central component of `pdf-canvas` is the `PdfCanvas` struct. It acts as the main interface for all drawing operations and maintains the state of the current path being constructed. Path construction methods (e.g., `move_to`, `line_to`, `rectangle`) build up this internal path. When a painting operation (e.g., `stroke_path`, `fill_path_nonzero_winding`) is called, `PdfCanvas` instructs the provided `CanvasBackend` to render the accumulated path, and then typically clears the current path for new operations.
 
 ## Core Concepts
 

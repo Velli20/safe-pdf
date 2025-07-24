@@ -1,4 +1,5 @@
 use pdf_content_stream::error::PdfOperatorError;
+use pdf_graphics::transform::Transform;
 use pdf_object::{
     dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
 };
@@ -38,7 +39,7 @@ pub struct FormXObject {
     /// The bounding box of the form.
     pub bbox: [f32; 4],
     /// Optional transformation matrix.
-    pub matrix: Option<[f32; 6]>,
+    pub matrix: Option<Transform>,
     /// Resources used by the form.
     pub resources: Option<Resources>,
     /// The content stream (operators).
@@ -60,7 +61,7 @@ impl XObjectReader for FormXObject {
             .0;
 
         // Retrieve the `/Matrix` entry if present.
-        let matrix = Matrix::from_dictionary(dictionary, objects)?.map_or(None, |m| Some(m.0));
+        let matrix = Matrix::from_dictionary(dictionary, objects)?;
 
         // Parse the `/Resources` entry if present, mapping any errors.
         let resources = Resources::from_dictionary(dictionary, objects).map_err(|err| {

@@ -5,5 +5,6 @@ edition = "2024"
 
 [dependencies]
 pdf-document = { path = "../pdf-document" }
+pdf-canvas = { path = "../pdf-canvas" }
 pdf-graphics = { path = "../pdf-graphics" }
 skia-safe = { version = "0.86.0" }

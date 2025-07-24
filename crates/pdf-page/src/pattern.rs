@@ -1,3 +1,4 @@
+use pdf_graphics::transform::Transform;
 use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     traits::FromDictionary,
@@ -129,7 +130,7 @@ pub enum Pattern {
         /// The vertical spacing between adjacent tiles.
         y_step: f32,
         /// An optional transformation matrix to be applied to the pattern.
-        matrix: Option<Matrix>,
+        matrix: Option<Transform>,
         /// A dictionary of resources required by the pattern's content stream.
         resources: Resources,
     },
@@ -138,7 +139,7 @@ pub enum Pattern {
         /// The shading object that defines the gradient fill.
         shading: Shading,
         /// An optional transformation matrix to be applied to the pattern.
-        matrix: Option<Matrix>,
+        matrix: Option<Transform>,
         /// An optional external graphics state to apply when painting the pattern.
         ext_g_state: Option<ExternalGraphicsState>,
     },
