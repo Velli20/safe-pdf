@@ -45,6 +45,8 @@ pub enum ExternalGraphicsStateError {
         #[source]
         source: ObjectError,
     },
+    #[error("Error parsing Dash Array: {0}")]
+    DashArrayParsingError(#[source] ObjectError),
 
     #[error("Error reading Soft Mask XObject: {0}")]
     SMaskReadError(#[from] XObjectError),
@@ -240,24 +242,9 @@ impl FromDictionary for ExternalGraphicsState {
                             actual_desc: format!("array with {} elements", arr.len()),
                         });
                     }
-                    let dash_array_obj = arr[0].as_array().ok_or(
-                        ExternalGraphicsStateError::UnsupportedTypeError {
-                            key_name: name.clone(),
-                            expected_type: "Array",
-                            found_type: format!("{:?}", arr[0]),
-                        },
-                    )?;
-                    let dash_array_f32 = dash_array_obj
-                        .iter()
-                        .map(|obj| {
-                            obj.as_number::<f32>().map_err(|e| {
-                                ExternalGraphicsStateError::NumericConversionError {
-                                    entry_description: "Dash array",
-                                    source: e,
-                                }
-                            })
-                        })
-                        .collect::<Result<Vec<f32>, _>>()?;
+                    let dash_array_f32 = arr[0]
+                        .as_vec_of::<f32>()
+                        .map_err(|err| ExternalGraphicsStateError::DashArrayParsingError(err))?;
 
                     let dash_phase = arr[1].as_number::<f32>().map_err(|e| {
                         ExternalGraphicsStateError::NumericConversionError {

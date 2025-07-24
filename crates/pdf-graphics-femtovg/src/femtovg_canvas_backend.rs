@@ -1,6 +1,6 @@
 use femtovg::{Canvas, Color, FillRule, Paint, Path};
-use pdf_graphics::canvas_backend::CanvasBackend;
-use pdf_graphics::{
+use pdf_canvas::canvas_backend::CanvasBackend;
+use pdf_canvas::{
     PathFillType,
     pdf_path::{PathVerb, PdfPath},
 };
@@ -45,7 +45,7 @@ impl CanvasBackend for CanvasImpl<'_> {
         &mut self,
         path: &PdfPath,
         fill_type: PathFillType,
-        color: pdf_graphics::color::Color,
+        color: pdf_canvas::color::Color,
     ) {
         let mut path = to_femtovg_path(path);
 
@@ -58,7 +58,7 @@ impl CanvasBackend for CanvasImpl<'_> {
         self.canvas.fill_path(&mut path, &fill_paint)
     }
 
-    fn stroke_path(&mut self, path: &PdfPath, color: pdf_graphics::color::Color, line_width: f32) {
+    fn stroke_path(&mut self, path: &PdfPath, color: pdf_canvas::color::Color, line_width: f32) {
         let mut path = to_femtovg_path(path);
 
         let mut stroke_paint = Paint::color(Color::rgbf(color.r, color.g, color.b));
@@ -92,7 +92,7 @@ impl CanvasBackend for CanvasImpl<'_> {
         _width: f32,
         _height: f32,
         _bits_per_component: u32,
-        _transform: &pdf_graphics::transform::Transform,
+        _transform: &pdf_canvas::transform::Transform,
         _smask: Option<&[u8]>,
     ) {
         todo!()

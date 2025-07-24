@@ -1,4 +1,27 @@
-use crate::{PathFillType, color::Color, pdf_path::PdfPath, transform::Transform};
+use crate::{PathFillType, pdf_path::PdfPath};
+use pdf_graphics::{color::Color, transform::Transform};
+
+pub enum Shader {
+    LinearGradient {
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        colors: Vec<Color>,
+        positions: Vec<f32>,
+    },
+    RadialGradient {
+        start_x: f32,
+        start_y: f32,
+        start_r: f32,
+        end_x: f32,
+        end_y: f32,
+        end_r: f32,
+        colors: Vec<Color>,
+        positions: Vec<f32>,
+        transform: Option<Transform>,
+    },
+}
 
 /// A low-level drawing backend for rendering PDF graphics.
 ///
@@ -15,7 +38,13 @@ pub trait CanvasBackend {
     /// - `path`: The path to fill. The coordinates are in the backend's device space.
     /// - `fill_type`: The rule (winding or even-odd) to determine what is "inside" the path.
     /// - `color`: The color to use for filling the path.
-    fn fill_path(&mut self, path: &PdfPath, fill_type: PathFillType, color: Color);
+    fn fill_path(
+        &mut self,
+        path: &PdfPath,
+        fill_type: PathFillType,
+        color: Color,
+        shader: &Option<Shader>,
+    );
 
     /// Strokes the given path with the specified color and line width.
     ///
@@ -24,7 +53,13 @@ pub trait CanvasBackend {
     /// - `path`: The path to stroke. The coordinates are in the backend's device space.
     /// - `color`: The color of the stroke.
     /// - `line_width`: The width of the stroke in device units.
-    fn stroke_path(&mut self, path: &PdfPath, color: Color, line_width: f32);
+    fn stroke_path(
+        &mut self,
+        path: &PdfPath,
+        color: Color,
+        line_width: f32,
+        shader: &Option<Shader>,
+    );
 
     /// Sets the clipping region by intersecting the current clip path with the given path.
     ///

@@ -1,6 +1,5 @@
 use crate::pdf_canvas::PdfCanvas;
 use crate::text_renderer::TextRenderer;
-use crate::transform::Transform;
 use crate::truetype_font_renderer::TrueTypeFontRenderer;
 use crate::type3_font_renderer::Type3FontRenderer;
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError};
@@ -8,6 +7,7 @@ use pdf_content_stream::pdf_operator_backend::{
     TextObjectOps, TextPositioningOps, TextShowingOps, TextStateOps,
 };
 use pdf_font::font::FontSubType;
+use pdf_graphics::transform::Transform;
 
 impl<'a, T: CanvasBackend> TextPositioningOps for PdfCanvas<'a, T> {
     fn move_text_position(&mut self, tx: f32, ty: f32) -> Result<(), Self::ErrorType> {

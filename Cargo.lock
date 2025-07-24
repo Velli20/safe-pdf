@@ -484,10 +484,10 @@ dependencies = [
  "gl",
  "glutin",
  "glutin-winit",
+ "pdf-canvas",
  "pdf-content-stream",
  "pdf-document",
  "pdf-font",
- "pdf-graphics",
  "pdf-graphics-femtovg",
  "pdf-graphics-skia",
  "pdf-object",
@@ -1532,6 +1532,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
+name = "pdf-canvas"
+version = "0.1.0"
+dependencies = [
+ "pdf-content-stream",
+ "pdf-font",
+ "pdf-graphics",
+ "pdf-object",
+ "pdf-page",
+ "thiserror 2.0.12",
+ "ttf-parser",
+]
+
+[[package]]
 name = "pdf-content-stream"
 version = "0.1.0"
 dependencies = [
@@ -1564,28 +1577,21 @@ dependencies = [
 [[package]]
 name = "pdf-graphics"
 version = "0.1.0"
-dependencies = [
- "pdf-content-stream",
- "pdf-font",
- "pdf-object",
- "pdf-page",
- "thiserror 2.0.12",
- "ttf-parser",
-]
 
 [[package]]
 name = "pdf-graphics-femtovg"
 version = "0.1.0"
 dependencies = [
  "femtovg",
+ "pdf-canvas",
  "pdf-document",
- "pdf-graphics",
 ]
 
 [[package]]
 name = "pdf-graphics-skia"
 version = "0.1.0"
 dependencies = [
+ "pdf-canvas",
  "pdf-document",
  "pdf-graphics",
  "skia-safe",
@@ -1605,6 +1611,7 @@ version = "0.1.0"
 dependencies = [
  "pdf-content-stream",
  "pdf-font",
+ "pdf-graphics",
  "pdf-object",
  "thiserror 2.0.12",
 ]
@@ -1623,9 +1630,9 @@ dependencies = [
 name = "pdf-renderer"
 version = "0.1.0"
 dependencies = [
+ "pdf-canvas",
  "pdf-content-stream",
  "pdf-document",
- "pdf-graphics",
  "pdf-page",
 ]
 

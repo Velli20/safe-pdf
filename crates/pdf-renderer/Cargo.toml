@@ -7,4 +7,4 @@ edition = "2024"
 pdf-content-stream = { path = "../pdf-content-stream" }
 pdf-page = { path = "../pdf-page" }
 pdf-document = { path = "../pdf-document" }
-pdf-graphics = { path = "../pdf-graphics" }
+pdf-canvas = { path = "../pdf-canvas" }

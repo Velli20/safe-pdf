@@ -25,7 +25,7 @@ pdf-parser           = { path = "../crates/pdf-parser" }
 pdf-tokenizer        = { path = "../crates/pdf-tokenizer" }
 pdf-font             = { path = "../crates/pdf-font" }
 pdf-renderer         = { path = "../crates/pdf-renderer" }
-pdf-graphics         = { path = "../crates/pdf-graphics" }
+pdf-canvas         = { path = "../crates/pdf-canvas" }
 pdf-graphics-femtovg = { path = "../crates/pdf-graphics-femtovg", optional = true  }
 pdf-graphics-skia    = { path = "../crates/pdf-graphics-skia", optional = true  }
 

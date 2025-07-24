@@ -1,4 +1,6 @@
-use crate::{PathFillType, error::PdfCanvasError, pdf_path::PdfPath, transform::Transform};
+use pdf_graphics::transform::Transform;
+
+use crate::{PathFillType, error::PdfCanvasError, pdf_path::PdfPath};
 
 /// A trait for high-level canvas operations, providing an interface for managing
 /// graphics state and transformations.

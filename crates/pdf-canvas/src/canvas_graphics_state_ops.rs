@@ -2,11 +2,11 @@ use pdf_content_stream::{
     graphics_state_operators::{LineCap, LineJoin},
     pdf_operator_backend::GraphicsStateOps,
 };
+use pdf_graphics::transform::Transform;
 use pdf_page::{external_graphics_state::ExternalGraphicsStateKey, xobject::XObject};
 
 use crate::{
     canvas::Canvas, canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
-    transform::Transform,
 };
 
 impl<'a, T: CanvasBackend> GraphicsStateOps for PdfCanvas<'a, T> {

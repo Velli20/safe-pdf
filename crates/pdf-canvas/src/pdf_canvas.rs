@@ -1,10 +1,14 @@
 use pdf_content_stream::graphics_state_operators::{LineCap, LineJoin};
 use pdf_font::font::Font;
-use pdf_page::{form::FormXObject, page::PdfPage, resources::Resources};
+use pdf_graphics::{color::Color, transform::Transform};
+use pdf_page::{form::FormXObject, page::PdfPage, pattern::Pattern, resources::Resources};
 
 use crate::{
-    PaintMode, PathFillType, canvas::Canvas, canvas_backend::CanvasBackend, color::Color,
-    error::PdfCanvasError, pdf_path::PdfPath, transform::Transform,
+    PaintMode, PathFillType,
+    canvas::Canvas,
+    canvas_backend::{CanvasBackend, Shader},
+    error::PdfCanvasError,
+    pdf_path::PdfPath,
 };
 
 /// Encapsulates text-specific state parameters.
@@ -56,6 +60,7 @@ pub(crate) struct CanvasState<'a> {
     pub line_join: LineJoin,
     /// The current font resource.
     pub resources: Option<&'a Resources>,
+    pub pattern: Option<&'a Pattern>,
 }
 
 impl CanvasState<'_> {
@@ -80,6 +85,7 @@ impl<'a> Default for CanvasState<'a> {
             text_state: TextState::default(),
             clip_path: None,
             resources: None,
+            pattern: None,
             line_cap: LineCap::Butt,
             line_join: LineJoin::Miter,
         }
@@ -121,7 +127,7 @@ impl<T: CanvasBackend> Canvas for PdfCanvas<'_, T> {
 
     fn fill_path(&mut self, path: &PdfPath, fill_type: PathFillType) -> Result<(), PdfCanvasError> {
         let fill_color = self.current_state()?.fill_color;
-        self.canvas.fill_path(path, fill_type, fill_color);
+        self.canvas.fill_path(path, fill_type, fill_color, &None);
         Ok(())
     }
 }
@@ -214,14 +220,76 @@ where
     ) -> Result<(), PdfCanvasError> {
         if let Some(mut path) = self.current_path.take() {
             path.transform(&self.current_state()?.transform);
+            let shader = if let Some(pattern) = self.current_state()?.pattern {
+                use pdf_page::pattern::Pattern;
+                use pdf_page::shading::Shading;
+
+                if let Pattern::Shading {
+                    shading, matrix, ..
+                } = pattern
+                {
+                    match shading {
+                        Shading::Axial {
+                            coords: [x0, y0, x1, y1],
+                            positions,
+                            colors,
+                            ..
+                        } => {
+                            // Construct a LinearShader (or Shader::LinearGradient) using coords and function
+                            Some(Shader::LinearGradient {
+                                x0: *x0,
+                                y0: *y0,
+                                x1: *x1,
+                                y1: *y1,
+                                colors: colors.clone(),
+                                positions: positions.clone(),
+                            })
+                        }
+                        Shading::Radial {
+                            coords: [start_x, start_y, start_r, end_x, end_y, end_r],
+                            positions,
+                            colors,
+                            ..
+                        } => {
+                            let transform = if let Some(mut mat) = matrix.clone() {
+                                // FIXME: Converting matrix to the device userspace. The rendering backend expects an
+                                // origin at the top-left, with the Y-axis pointing downwards, so we apply canvas height - ty.
+                                mat.ty = self.canvas.height() - mat.ty;
+                                Some(mat)
+                            } else {
+                                None
+                            };
+
+                            Some(Shader::RadialGradient {
+                                start_x: *start_x,
+                                start_y: *start_y,
+                                start_r: *start_r,
+                                end_x: *end_x,
+                                end_y: *end_y,
+                                end_r: *end_r,
+                                transform,
+                                colors: colors.clone(),
+                                positions: positions.clone(),
+                            })
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             if mode == PaintMode::Fill {
                 self.canvas
-                    .fill_path(&path, fill_type, self.current_state()?.fill_color);
+                    .fill_path(&path, fill_type, self.current_state()?.fill_color, &shader);
             } else {
                 self.canvas.stroke_path(
                     &path,
                     self.current_state()?.stroke_color,
                     self.current_state()?.line_width,
+                    &shader,
                 );
             }
             Ok(())
@@ -248,9 +316,8 @@ where
         let form_procs = &form.content_stream.operations;
         self.save()?;
 
-        if let Some([a, b, c, d, e, f]) = &form.matrix {
-            let form_rendering_matrix = Transform::from_row(*a, *b, *c, *d, *e, *f);
-            self.set_matrix(form_rendering_matrix)?;
+        if let Some(mat) = &form.matrix {
+            self.set_matrix(mat.clone())?;
         }
 
         if let Some(resources) = &form.resources {

@@ -1,10 +1,13 @@
 use pdf_content_stream::error::PdfOperatorError;
+use pdf_graphics::transform::Transform;
 use pdf_object::{
     dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
 };
 use thiserror::Error;
 
+use crate::bbox::{BBox, BBoxReadError};
 use crate::content_stream::ContentStream;
+use crate::matrix::{Matrix, MatrixReadError};
 use crate::resources::{Resources, ResourcesError};
 use crate::xobject::XObjectReader;
 
@@ -25,6 +28,10 @@ pub enum FormXObjectError {
     InvalidMatrix(String),
     #[error("Error parsing content stream: {0}")]
     ContentStreamError(#[from] PdfOperatorError),
+    #[error("Error parsing BBox: {0}")]
+    BBoxReadError(#[from] BBoxReadError),
+    #[error("Error parsing BBox: {0}")]
+    MatrixReadError(#[from] MatrixReadError),
 }
 
 /// Represents a PDF Form XObject.
@@ -32,7 +39,7 @@ pub struct FormXObject {
     /// The bounding box of the form.
     pub bbox: [f32; 4],
     /// Optional transformation matrix.
-    pub matrix: Option<[f32; 6]>,
+    pub matrix: Option<Transform>,
     /// Resources used by the form.
     pub resources: Option<Resources>,
     /// The content stream (operators).
@@ -48,68 +55,13 @@ impl XObjectReader for FormXObject {
         stream_data: &[u8],
         objects: &ObjectCollection,
     ) -> Result<Self, FormXObjectError> {
-        // Retrieve the `/BBox` entry, which must be an array of 4 numbers.
-        let bbox = if let Some(matrix_obj) = dictionary.get("BBox") {
-            let arr = matrix_obj
-                .as_array()
-                .ok_or(FormXObjectError::InvalidEntryType {
-                    entry_name: "BBox",
-                    expected_type: "Array",
-                    found_type: matrix_obj.name(),
-                })?;
+        // Retrieve the `/BBox` entry,.
+        let bbox = BBox::from_dictionary(dictionary, objects)?
+            .ok_or(FormXObjectError::MissingEntry { entry_name: "BBox" })?
+            .0;
 
-            // `/BBox` must have exactly 4 elements.
-            if arr.len() != 4 {
-                return Err(FormXObjectError::InvalidMatrix(format!(
-                    "Expected 4 elements, got {}",
-                    arr.len()
-                )));
-            }
-            let mut vals = [0.0f32; 4];
-            for (i, obj) in arr.iter().enumerate() {
-                vals[i] = obj.as_number::<f32>().map_err(|_| {
-                    FormXObjectError::InvalidMatrix(format!(
-                        "Element {} is not a number (found {})",
-                        i,
-                        obj.name()
-                    ))
-                })?;
-            }
-            vals
-        } else {
-            return Err(FormXObjectError::MissingEntry { entry_name: "BBox" });
-        };
-
-        // Retrieve the `/Matrix` entry if present; must be an array of 6 numbers.
-        let matrix = if let Some(matrix_obj) = dictionary.get("Matrix") {
-            let arr = matrix_obj
-                .as_array()
-                .ok_or(FormXObjectError::InvalidEntryType {
-                    entry_name: "Matrix",
-                    expected_type: "Array",
-                    found_type: matrix_obj.name(),
-                })?;
-            // `/Matrix` must have exactly 6 elements if present.
-            if arr.len() != 6 {
-                return Err(FormXObjectError::InvalidMatrix(format!(
-                    "Expected 6 elements, got {}",
-                    arr.len()
-                )));
-            }
-            let mut vals = [0.0f32; 6];
-            for (i, obj) in arr.iter().enumerate() {
-                vals[i] = obj.as_number::<f32>().map_err(|_| {
-                    FormXObjectError::InvalidMatrix(format!(
-                        "Element {} is not a number (found {})",
-                        i,
-                        obj.name()
-                    ))
-                })?;
-            }
-            Some(vals)
-        } else {
-            None
-        };
+        // Retrieve the `/Matrix` entry if present.
+        let matrix = Matrix::from_dictionary(dictionary, objects)?;
 
         // Parse the `/Resources` entry if present, mapping any errors.
         let resources = Resources::from_dictionary(dictionary, objects).map_err(|err| {

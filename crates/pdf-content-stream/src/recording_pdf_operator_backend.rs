@@ -102,14 +102,14 @@ pub enum RecordedOperation {
     },
     SetStrokingColorExtended {
         components: Vec<f32>,
-        pattern_name: Option<String>,
+        pattern_name: String,
     },
     SetNonStrokingColor {
         components: Vec<f32>,
     },
     SetNonStrokingColorExtended {
         components: Vec<f32>,
-        pattern_name: Option<String>,
+        pattern_name: String,
     },
     SetStrokingGray {
         gray: f32,
@@ -474,12 +474,12 @@ impl ColorOps for RecordingBackend {
     fn set_stroking_color_extended(
         &mut self,
         components: &[f32],
-        pattern_name: Option<&str>,
+        pattern_name: &str,
     ) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::SetStrokingColorExtended {
                 components: components.to_vec(),
-                pattern_name: pattern_name.map(|s| s.to_string()),
+                pattern_name: pattern_name.to_string(),
             });
         Ok(())
     }
@@ -495,12 +495,12 @@ impl ColorOps for RecordingBackend {
     fn set_non_stroking_color_extended(
         &mut self,
         components: &[f32],
-        pattern_name: Option<&str>,
+        pattern_name: &str,
     ) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::SetNonStrokingColorExtended {
                 components: components.to_vec(),
-                pattern_name: pattern_name.map(|s| s.to_string()),
+                pattern_name: pattern_name.to_string(),
             });
         Ok(())
     }

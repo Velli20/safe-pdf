@@ -2,9 +2,10 @@ use pdf_content_stream::{
     pdf_operator::PdfOperatorVariant, pdf_operator_backend::PdfOperatorBackend,
 };
 use pdf_font::type3_font::Type3Font;
+use pdf_graphics::transform::Transform;
 use thiserror::Error;
 
-use crate::{canvas::Canvas, text_renderer::TextRenderer, transform::Transform};
+use crate::{canvas::Canvas, text_renderer::TextRenderer};
 
 /// Defines errors that can occur during Type 3 font rendering.
 #[derive(Debug, Error)]
