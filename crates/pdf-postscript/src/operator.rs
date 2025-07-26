@@ -1,0 +1,22 @@
+#[derive(Debug, PartialEq, Clone)]
+pub enum Operator {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Dup,
+    Exch,
+    Pop,
+    Eq,
+    Ne,
+    Gt,
+    Lt,
+    Ge,
+    Le,
+    And,
+    Or,
+    Not,
+    If(Vec<Operator>),
+    IfElse(Vec<Operator>, Vec<Operator>),
+    Number(f64),
+}

@@ -191,7 +191,7 @@ fn main() {
 
     // Load PDF Document (using the same example PDF as femtovg-impl.rs)
     const INPUT: &[u8] =
-        include_bytes!("/Users/viktore/safe-pdf/crates/pdf-document/tests/assets/webgl.pdf");
+        include_bytes!("/Users/viktore/safe-pdf/crates/pdf-document/tests/assets/Gradients.pdf");
     let pdf_document = Arc::new(PdfDocument::from(INPUT).unwrap());
 
     let mut pdf_logic = PdfPageRendererLogic::new();

@@ -8,4 +8,5 @@ pdf-object = { path = "../pdf-object" }
 pdf-content-stream = { path = "../pdf-content-stream" }
 pdf-font = { path = "../pdf-font" }
 pdf-graphics = { path = "../pdf-graphics" }
+pdf-postscript = { path = "../pdf-postscript" }
 thiserror = "2.0.12"
