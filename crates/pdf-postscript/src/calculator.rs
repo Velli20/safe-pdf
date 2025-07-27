@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use crate::operator::Operator;
 
-fn parse_tokens(tokens: &[&str]) -> Vec<Operator> {
+pub fn parse_tokens(tokens: &[&str]) -> Vec<Operator> {
     let mut i = 0;
     let mut block_stack: Vec<Vec<Operator>> = vec![vec![]];
     while i < tokens.len() {
@@ -30,27 +30,38 @@ fn parse_tokens(tokens: &[&str]) -> Vec<Operator> {
             "ifelse" => {
                 let block1 = block_stack.pop().unwrap();
                 let block2 = block_stack.pop().unwrap();
-                block_stack.last_mut().unwrap().push(Operator::IfElse(block2, block1));
+                block_stack
+                    .last_mut()
+                    .unwrap()
+                    .push(Operator::IfElse(block2, block1));
             }
             "{" => {
-                println!("Try parse block");
                 block_stack.push(vec![]);
             }
-            "}" => {
-            }
+            "}" => {}
+            "copy" => block_stack.last_mut().unwrap().push(Operator::Copy),
+            "roll" => block_stack.last_mut().unwrap().push(Operator::Roll),
+            "sqrt" => block_stack.last_mut().unwrap().push(Operator::Sqrt),
+            "cvi" => block_stack.last_mut().unwrap().push(Operator::Cvi),
+            "mod" => block_stack.last_mut().unwrap().push(Operator::Mod),
 
+            "truncate" => block_stack.last_mut().unwrap().push(Operator::Truncate),
+            "abs" => block_stack.last_mut().unwrap().push(Operator::Abs),
 
-            t => {
-                block_stack.last_mut().unwrap().push(Operator::Number(t.parse::<f64>().expect("Invalid number")))
-            },
+            "true" => block_stack.last_mut().unwrap().push(Operator::Number(1.0)),
+            "false" => block_stack.last_mut().unwrap().push(Operator::Number(0.0)),
+            t => block_stack
+                .last_mut()
+                .unwrap()
+                .push(Operator::Number(t.parse::<f64>().expect("Invalid number"))),
         }
         i += 1;
     }
-    assert!(block_stack.len() == 1, "Invalid number of blocks");
+
     block_stack.pop().unwrap()
 }
 
-fn execute(input_stack: &[f64], ops: &[Operator]) -> Vec<f64> {
+pub fn execute(input_stack: &[f64], ops: &[Operator]) -> Vec<f64> {
     let mut stack: VecDeque<f64> = input_stack.iter().cloned().collect();
 
     for op in ops {
@@ -154,6 +165,60 @@ fn execute(input_stack: &[f64], ops: &[Operator]) -> Vec<f64> {
                     stack.push_back(v);
                 }
             }
+            Operator::Copy => {
+                let n = stack.pop_back().unwrap();
+                let n = n as usize;
+                assert!(n <= stack.len(), "Not enough elements for copy");
+                let len = stack.len();
+                let mut to_copy = Vec::with_capacity(n);
+                for i in 0..n {
+                    to_copy.push(stack[len - n + i]);
+                }
+                for v in &to_copy {
+                    stack.push_back(*v);
+                }
+            }
+            Operator::Sqrt => {
+                let a = stack.pop_back().unwrap();
+                stack.push_back(a.sqrt());
+            }
+            Operator::Mod => {
+                let b = stack.pop_back().unwrap();
+                let a = stack.pop_back().unwrap();
+                stack.push_back(a % b);
+            }
+            Operator::Cvi => {
+                let a = stack.pop_back().unwrap();
+                stack.push_back(a.trunc());
+            }
+            Operator::Abs => {
+                let a = stack.pop_back().unwrap();
+                stack.push_back(a.abs());
+            }
+            Operator::Roll => {
+                // PostScript: n m roll
+                // Pops m and n, rolls the top n elements by m positions
+                let m = stack.pop_back().unwrap() as isize;
+                let n = stack.pop_back().unwrap() as usize;
+                assert!(n <= stack.len(), "Not enough elements for roll");
+                if n == 0 {
+                    continue;
+                }
+                let len = stack.len();
+                // Extract the top n elements
+                let mut slice: Vec<f64> = stack.drain(len - n..).collect();
+                // Normalize m to [0, n)
+                let m = ((m % n as isize) + n as isize) % n as isize;
+                slice.rotate_right(m as usize);
+                // Push back the rotated elements
+                for v in slice {
+                    stack.push_back(v);
+                }
+            }
+            Operator::Truncate => {
+                let a = stack.pop_back().unwrap();
+                stack.push_back(a.trunc());
+            }
             Operator::Number(num) => stack.push_back(*num),
         }
     }
@@ -161,11 +226,9 @@ fn execute(input_stack: &[f64], ops: &[Operator]) -> Vec<f64> {
     stack.into()
 }
 
-fn evaluate_postscript(input_stack: &[f64], code: &str) -> Vec<f64> {
+pub fn evaluate_postscript(input_stack: &[f64], code: &str) -> Vec<f64> {
     // Add whitespace before and after '{' and '}'
-    let code = code
-        .replace("{", " { ")
-        .replace("}", " } ");
+    let code = code.replace("{", " { ").replace("}", " } ");
     let ops = parse_tokens(&code.split_whitespace().collect::<Vec<_>>());
 
     execute(input_stack, &ops)
@@ -181,12 +244,7 @@ mod tests {
         let ops = parse_tokens(&tokens);
         assert_eq!(
             ops,
-            vec![
-                Operator::Add,
-                Operator::Sub,
-                Operator::Mul,
-                Operator::Div
-            ]
+            vec![Operator::Add, Operator::Sub, Operator::Mul, Operator::Div]
         );
     }
 
@@ -221,31 +279,21 @@ mod tests {
     #[test]
     fn test_parse_ifelse_block() {
         let tokens = vec![
-            "{", "2", "3", "add", "}", "{", "4", "5", "add", "}", "ifelse"
+            "{", "2", "3", "add", "}", "{", "4", "5", "add", "}", "ifelse",
         ];
         let ops = parse_tokens(&tokens);
         assert_eq!(
             ops,
             vec![Operator::IfElse(
-                vec![
-                    Operator::Number(2.0),
-                    Operator::Number(3.0),
-                    Operator::Add
-                ],
-                vec![
-                    Operator::Number(4.0),
-                    Operator::Number(5.0),
-                    Operator::Add
-                ]
+                vec![Operator::Number(2.0), Operator::Number(3.0), Operator::Add],
+                vec![Operator::Number(4.0), Operator::Number(5.0), Operator::Add]
             )]
         );
     }
 
     #[test]
     fn test_parse_nested_blocks() {
-        let tokens = vec![
-            "{", "1", "{", "2", "3", "add", "}", "if", "}", "if"
-        ];
+        let tokens = vec!["{", "1", "{", "2", "3", "add", "}", "if", "}", "if"];
         let ops = parse_tokens(&tokens);
         assert_eq!(
             ops,
@@ -440,5 +488,77 @@ mod tests {
         let result = evaluate_postscript(&[2.0, 3.0, 4.0], "add mul");
         // (3 + 4) = 7, 2 * 7 = 14
         assert_eq!(result, vec![14.0]);
+    }
+
+    #[test]
+    fn test_copy() {
+        let result = evaluate_postscript(&[1.0, 2.0, 3.0], "2 copy");
+        // Stack: [1.0, 2.0, 3.0] -> pop 2, copy top 2: [2.0, 3.0], push: [1.0, 2.0, 3.0, 2.0, 3.0]
+        assert_eq!(result, vec![1.0, 2.0, 3.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn test_roll() {
+        // [1 2 3 4 5] 3 1 roll -> [1 2 5 3 4]
+        let result = evaluate_postscript(&[1.0, 2.0, 3.0, 4.0, 5.0], "3 1 roll");
+        assert_eq!(result, vec![1.0, 2.0, 5.0, 3.0, 4.0]);
+        // [1 2 3 4 5] 4 -2 roll -> [1 4 5 2 3]
+        let result = evaluate_postscript(&[1.0, 2.0, 3.0, 4.0, 5.0], "4 -2 roll");
+        assert_eq!(result, vec![1.0, 4.0, 5.0, 2.0, 3.0]);
+        // [1 2 3 4 5] 0 7 roll -> [1 2 3 4 5] (no change)
+        let result = evaluate_postscript(&[1.0, 2.0, 3.0, 4.0, 5.0], "0 7 roll");
+        assert_eq!(result, vec![1.0, 2.0, 3.0, 4.0, 5.0]);
+    }
+
+    #[test]
+    fn test_sqrt() {
+        let result = evaluate_postscript(&[9.0], "sqrt");
+        assert_eq!(result, vec![3.0]);
+        let result = evaluate_postscript(&[2.25], "sqrt");
+        assert_eq!(result, vec![1.5]);
+    }
+
+    #[test]
+    fn test_truncate() {
+        let result = evaluate_postscript(&[3.7], "truncate");
+        assert_eq!(result, vec![3.0]);
+        let result = evaluate_postscript(&[-2.9], "truncate");
+        assert_eq!(result, vec![-2.0]);
+        let result = evaluate_postscript(&[0.0], "truncate");
+        assert_eq!(result, vec![0.0]);
+    }
+
+    #[test]
+    fn test_abs() {
+        let result = evaluate_postscript(&[-5.0], "abs");
+        assert_eq!(result, vec![5.0]);
+        let result = evaluate_postscript(&[3.2], "abs");
+        assert_eq!(result, vec![3.2]);
+        let result = evaluate_postscript(&[0.0], "abs");
+        assert_eq!(result, vec![0.0]);
+    }
+
+    #[test]
+    fn test_cvi() {
+        let result = evaluate_postscript(&[3.7], "cvi");
+        assert_eq!(result, vec![3.0]);
+        let result = evaluate_postscript(&[-2.9], "cvi");
+        assert_eq!(result, vec![-2.0]);
+        let result = evaluate_postscript(&[0.0], "cvi");
+        assert_eq!(result, vec![0.0]);
+        let result = evaluate_postscript(&[5.0], "cvi");
+        assert_eq!(result, vec![5.0]);
+    }
+
+    #[test]
+    fn test_mod() {
+        let result = evaluate_postscript(&[10.0, 3.0], "mod");
+        assert_eq!(result, vec![1.0]);
+        let result = evaluate_postscript(&[-10.0, 3.0], "mod");
+        assert_eq!(result, vec![-1.0]);
+        let result = evaluate_postscript(&[10.0, -3.0], "mod");
+        assert_eq!(result, vec![1.0]);
+        let result = evaluate_postscript(&[0.0, 3.0], "mod");
+        assert_eq!(result, vec![0.0]);
     }
 }

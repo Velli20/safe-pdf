@@ -228,6 +228,7 @@ where
                     shading, matrix, ..
                 } = pattern
                 {
+                    println!("pattern");
                     match shading {
                         Shading::Axial {
                             coords: [x0, y0, x1, y1],
@@ -272,9 +273,20 @@ where
                                 positions: positions.clone(),
                             })
                         }
-                        _ => None,
+                        Shading::FunctionBased {
+                            color_space,
+                            background,
+                            bbox,
+                            anti_alias,
+                            domain,
+                            functions,
+                        } => {
+                            println!("FunctionBased");
+                            todo!()
+                        }
                     }
                 } else {
+                    println!("No shading");
                     None
                 }
             } else {

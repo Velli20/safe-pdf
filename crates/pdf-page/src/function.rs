@@ -1,5 +1,6 @@
 use pdf_object::{dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection};
 
+use pdf_postscript::operator::Operator;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -8,6 +9,8 @@ pub enum FunctionReadError {
     MissingFunctionType,
     #[error("Missing /Domain entry")]
     MissingDomain,
+    #[error("Missing /Range entry")]
+    MissingRange,
     #[error("Missing required entry in Function: /{0}")]
     MissingRequiredEntry(&'static str),
     #[error("Invalid /FunctionType value")]
@@ -74,7 +77,7 @@ impl FunctionType {
 }
 
 #[derive(Debug)]
-pub enum FunctionData {
+enum FunctionData {
     Exponential {
         c0: Vec<f32>,
         c1: Vec<f32>,
@@ -87,12 +90,17 @@ pub enum FunctionData {
         encode: Vec<f32>,
         domain: [f32; 2],
     },
+    PostScriptCalculator {
+        operators: Vec<Operator>,
+        domain: Vec<f32>,
+        range: Vec<f32>,
+    },
 }
 
 #[derive(Debug)]
 pub struct Function {
     pub function_type: FunctionType,
-    pub data: FunctionData,
+    data: FunctionData,
 }
 
 impl Function {
@@ -100,6 +108,7 @@ impl Function {
         match &self.data {
             FunctionData::Exponential { domain, .. } => domain,
             FunctionData::Stitching { domain, .. } => domain,
+            FunctionData::PostScriptCalculator { .. } => todo!(),
         }
     }
 
@@ -196,10 +205,49 @@ impl Function {
 
             // 6. Call the selected subfunction with the mapped input value.
             functions[index].interpolate(x_mapped)
+        } else if let FunctionData::PostScriptCalculator {
+            operators,
+            domain,
+            range,
+        } = &self.data
+        {
+            // 1. Clip input to domain
+            let mut stack = Vec::new();
+            let input_count = domain.len() / 2;
+            if input_count == 1 {
+                let x_clipped = x.max(domain[0]).min(domain[1]);
+                stack.push(x_clipped as f64);
+            } else {
+                // If you want to support multi-input, change interpolate signature to accept &[f32]
+                // For now, treat x as the first input and fill others with domain min
+                for i in 0..input_count {
+                    let val = if i == 0 {
+                        x.max(domain[0]).min(domain[1])
+                    } else {
+                        domain[2 * i].max(domain[2 * i]).min(domain[2 * i + 1])
+                    };
+                    stack.push(val as f64);
+                }
+            }
+
+            // 2. Evaluate PostScript operators
+            let result_stack = pdf_postscript::calculator::execute(&stack, operators);
+
+            // 3. Clip outputs to range
+            let mut outputs = Vec::new();
+            let output_count = range.len() / 2;
+            for i in 0..output_count {
+                let val = result_stack.get(i).ok_or(
+                    FunctionInterpolationError::UnsupportedFunctionType(self.function_type),
+                )?;
+                let min = range[2 * i];
+                let max = range[2 * i + 1];
+                outputs.push((*val as f32).max(min).min(max));
+            }
+            panic!();
+            Ok(outputs)
         } else {
-            Err(FunctionInterpolationError::UnsupportedFunctionType(
-                self.function_type,
-            ))
+            unreachable!();
         }
     }
 }
@@ -325,10 +373,33 @@ impl Function {
                 })
             }
             FunctionType::PostScriptCalculator => {
-                let stream = stream.ok_or(FunctionReadError::InvalidFunctionType)?;
-                println!("PostScriptCalculator: {}", String::from_utf8_lossy(stream));
+                let domain = if let Some(obj) = dictionary.get("Domain") {
+                    obj.as_vec_of::<f32>()
+                        .map_err(|err| FunctionReadError::DomainParsingError(err))?
+                } else {
+                    return Err(FunctionReadError::MissingDomain);
+                };
 
-                todo!()
+                let range = if let Some(obj) = dictionary.get("Range") {
+                    obj.as_vec_of::<f32>()
+                        .map_err(|err| FunctionReadError::DomainParsingError(err))?
+                } else {
+                    return Err(FunctionReadError::MissingRange);
+                };
+
+                let stream = stream.ok_or(FunctionReadError::InvalidFunctionType)?;
+                let a = String::from_utf8_lossy(stream);
+                let code = a.replace("{", " { ").replace("}", " } ");
+                Ok(Function {
+                    function_type,
+                    data: FunctionData::PostScriptCalculator {
+                        operators: pdf_postscript::calculator::parse_tokens(
+                            &code.split_whitespace().collect::<Vec<_>>(),
+                        ),
+                        domain,
+                        range,
+                    },
+                })
             }
             _ => Err(FunctionReadError::InvalidFunctionType),
         }

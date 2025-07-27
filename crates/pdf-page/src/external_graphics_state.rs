@@ -445,7 +445,11 @@ impl FromDictionary for ExternalGraphicsState {
                         },
                     )?)
                 }
+                "Type" => {
+                    continue;
+                }
                 unknown_key => {
+                    println!("ExtGState: {:?}", dictionary);
                     eprintln!(
                         "Warning: Unknown ExtGState parameter encountered: {}",
                         unknown_key
