@@ -1,0 +1,36 @@
+name: Clippy Lint
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Run Clippy (allow warnings for now)
+        run: cargo clippy --all --all-features --workspace
+
+      - name: Clippy (fail on warnings opt-in)
+        if: ${{ false }} # flip to true later when codebase is clean
+        run: cargo clippy --all --all-features --workspace -- -D warnings
