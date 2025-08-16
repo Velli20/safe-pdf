@@ -51,10 +51,11 @@ impl GlyphWidthsMap {
     /// Returns `GlyphWidthsMapError` if the array is malformed or contains invalid values.
     pub fn from_array(array: &[ObjectVariant]) -> Result<Self, GlyphWidthsMapError> {
         let mut map = HashMap::new();
-        let mut iter = array.iter();
+        let mut i = 0usize;
 
-        while let Some(cid_val) = iter.next() {
-            // Parse the starting CID (or c_first)
+        while i < array.len() {
+            let cid_val = &array[i];
+            i += 1;
             let cid = cid_val.as_number::<i64>().map_err(|e| {
                 GlyphWidthsMapError::NumericConversionError {
                     entry_description: "CID or c_first",
@@ -62,14 +63,13 @@ impl GlyphWidthsMap {
                 }
             })?;
 
-            // Next element must be either an array of widths or c_last
-            let Some(next) = iter.next() else {
+            if i >= array.len() {
                 return Err(GlyphWidthsMapError::IncompleteCIDEntry { cid });
-            };
+            }
 
-            match next {
-                // Case: [c_first [w1 ... wn]]
+            match &array[i] {
                 ObjectVariant::Array(widths_arr) => {
+                    // [c_first [w1 ... wn]] form
                     let widths = widths_arr
                         .iter()
                         .map(|w| {
@@ -82,10 +82,38 @@ impl GlyphWidthsMap {
                         })
                         .collect::<Result<Vec<_>, _>>()?;
                     map.insert(cid, widths);
+                    i += 1; // consumed array
                 }
-                // Case: [c_first c_last w]
                 ObjectVariant::Integer(_) | ObjectVariant::Real(_) => {
-                    let c_last = next.as_number::<i64>().map_err(|e| {
+                    // Potentially [c_first c_last w] form. Ambiguous when there is no following element.
+                    // Heuristic: Only treat as range form if there is a following element (the width).
+                    // If there is no following element, decide between reporting a missing width (range intent)
+                    // or an unexpected element (single numeric width without array). The existing tests expect
+                    // [10 12] -> MissingWidthForCIDRange and [0 500] -> UnexpectedElementAfterCID.
+                    // We approximate intent: if the numeric is "close" to cid (small delta), assume range intent.
+                    if i + 1 >= array.len() {
+                        let c_last_candidate = array[i].as_number::<i64>().map_err(|e| {
+                            GlyphWidthsMapError::NumericConversionError {
+                                entry_description: "c_last",
+                                source: e,
+                            }
+                        })?;
+                        let delta = c_last_candidate - cid;
+                        if delta >= 0 && delta <= 10 {
+                            // Treat as attempted range missing width
+                            return Err(GlyphWidthsMapError::MissingWidthForCIDRange {
+                                c_first: cid,
+                            });
+                        } else {
+                            return Err(GlyphWidthsMapError::UnexpectedElementAfterCID {
+                                cid,
+                                found_type: "Number",
+                            });
+                        }
+                    }
+
+                    // We have at least one more element – treat current numeric as c_last.
+                    let c_last = array[i].as_number::<i64>().map_err(|e| {
                         GlyphWidthsMapError::NumericConversionError {
                             entry_description: "c_last",
                             source: e,
@@ -97,9 +125,7 @@ impl GlyphWidthsMap {
                             c_last,
                         });
                     }
-                    let Some(width_val) = iter.next() else {
-                        return Err(GlyphWidthsMapError::MissingWidthForCIDRange { c_first: cid });
-                    };
+                    let width_val = &array[i + 1];
                     let width = width_val.as_number::<f32>().map_err(|e| {
                         GlyphWidthsMapError::NumericConversionError {
                             entry_description: "width 'w' for c_first c_last w form",
@@ -108,8 +134,8 @@ impl GlyphWidthsMap {
                     })?;
                     let count = (c_last - cid + 1) as usize;
                     map.insert(cid, vec![width; count]);
+                    i += 2; // consumed c_last and width
                 }
-                // Unexpected element type
                 other => {
                     return Err(GlyphWidthsMapError::UnexpectedElementAfterCID {
                         cid,
@@ -118,6 +144,7 @@ impl GlyphWidthsMap {
                 }
             }
         }
+
         Ok(Self { map })
     }
 

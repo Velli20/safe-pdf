@@ -1585,6 +1585,7 @@ dependencies = [
  "femtovg",
  "pdf-canvas",
  "pdf-document",
+ "pdf-graphics",
 ]
 
 [[package]]
@@ -1613,6 +1614,7 @@ dependencies = [
  "pdf-font",
  "pdf-graphics",
  "pdf-object",
+ "pdf-postscript",
  "thiserror 2.0.12",
 ]
 
@@ -1623,6 +1625,13 @@ dependencies = [
  "flate2",
  "pdf-object",
  "pdf-tokenizer",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "pdf-postscript"
+version = "0.1.0"
+dependencies = [
  "thiserror 2.0.12",
 ]
 

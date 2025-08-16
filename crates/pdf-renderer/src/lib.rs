@@ -1,13 +1,16 @@
 use pdf_canvas::{canvas_backend::CanvasBackend, pdf_canvas::PdfCanvas};
 use pdf_document::PdfDocument;
 
-pub struct PdfRenderer<'a, 'b, T> {
+pub struct PdfRenderer<'a, 'b, T, U> {
     document: &'b PdfDocument,
-    canvas: &'a mut dyn CanvasBackend<MaskType = T>,
+    canvas: &'a mut dyn CanvasBackend<MaskType = T, ImageType = U>,
 }
 
-impl<'a, 'b, T: CanvasBackend> PdfRenderer<'a, 'b, T> {
-    pub fn new(document: &'b PdfDocument, canvas: &'a mut dyn CanvasBackend<MaskType = T>) -> Self {
+impl<'a, 'b, U, T: CanvasBackend<ImageType = U>> PdfRenderer<'a, 'b, T, U> {
+    pub fn new(
+        document: &'b PdfDocument,
+        canvas: &'a mut dyn CanvasBackend<MaskType = T, ImageType = U>,
+    ) -> Self {
         Self { document, canvas }
     }
 

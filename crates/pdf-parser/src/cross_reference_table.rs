@@ -110,7 +110,7 @@ impl CrossReferenceTableParser for PdfParser<'_> {
             // Read the number of objects.
             let number_of_objects = self
                 .read_number::<u32>(true)
-                .map_err(|err| CrossReferenceTableError::MissingTableEntryCount)?;
+                .map_err(|_| CrossReferenceTableError::MissingTableEntryCount)?;
 
             // Read the entries.
             for _ in 0..number_of_objects {
@@ -119,12 +119,12 @@ impl CrossReferenceTableParser for PdfParser<'_> {
                 // Read the object number.
                 let object_number = self
                     .read_number::<u32>(true)
-                    .map_err(|err| CrossReferenceTableError::MissingObjectNumber)?;
+                    .map_err(|_| CrossReferenceTableError::MissingObjectNumber)?;
 
                 // Read the generation number.
                 let generation_number = self
                     .read_number::<u16>(true)
-                    .map_err(|err| CrossReferenceTableError::MissingGenerationNumber)?;
+                    .map_err(|_| CrossReferenceTableError::MissingGenerationNumber)?;
 
                 // Read the status.
                 if let Some(PdfToken::Alphabetic(e)) = self.tokenizer.read() {

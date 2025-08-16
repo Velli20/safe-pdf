@@ -9,7 +9,7 @@ use crate::{
     canvas::Canvas, canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
 };
 
-impl<'a, T: CanvasBackend> GraphicsStateOps for PdfCanvas<'a, T> {
+impl<'a, U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'a, T, U> {
     fn save_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
         self.save()
     }
@@ -124,7 +124,11 @@ impl<'a, T: CanvasBackend> GraphicsStateOps for PdfCanvas<'a, T> {
                                 PdfCanvas::new(mask.as_mut(), self.page, Some(&form.bbox));
 
                             // 3. Render the form's content stream into the mask canvas.
-                            other.render_form_xobject(form)?;
+                            other.render_content_stream(
+                                &form.content_stream.operations,
+                                form.matrix.clone(),
+                                form.resources.as_ref().map_or(None, |r| Some(r)),
+                            )?;
 
                             // 4. Enable the mask on the main canvas. Subsequent drawing operations
                             // will be modulated by this mask.

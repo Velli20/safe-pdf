@@ -29,7 +29,8 @@ pub enum Shader {
 /// to render content. Implementors of this trait act as the target surface,
 /// such as a raster image buffer, a window, or an SVG file.
 pub trait CanvasBackend {
-    type MaskType: CanvasBackend;
+    type MaskType: CanvasBackend<ImageType = Self::ImageType>;
+    type ImageType;
 
     /// Fills the given path with the specified color and fill rule.
     ///
@@ -44,6 +45,7 @@ pub trait CanvasBackend {
         fill_type: PathFillType,
         color: Color,
         shader: &Option<Shader>,
+        pattern_image: Option<Self::ImageType>,
     );
 
     /// Strokes the given path with the specified color and line width.
@@ -59,6 +61,7 @@ pub trait CanvasBackend {
         color: Color,
         line_width: f32,
         shader: &Option<Shader>,
+        pattern_image: Option<Self::ImageType>,
     );
 
     /// Sets the clipping region by intersecting the current clip path with the given path.
@@ -91,4 +94,6 @@ pub trait CanvasBackend {
     fn enable_mask(&mut self, mask: &mut Self::MaskType);
 
     fn finish_mask(&mut self, mask: &mut Self::MaskType, transform: &Transform);
+
+    fn image_snapshot(&mut self) -> Self::ImageType;
 }

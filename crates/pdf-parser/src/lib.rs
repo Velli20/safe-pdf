@@ -216,10 +216,6 @@ impl<'a> PdfParser<'a> {
                     } else if t == b'x' {
                         ObjectVariant::CrossReferenceTable(self.parse_cross_reference_table()?)
                     } else {
-                        println!(
-                            "Front {}",
-                            &String::from_utf8_lossy(self.tokenizer.data())[..20]
-                        );
                         return Err(ParserError::InvalidToken(t as char));
                     }
                 }

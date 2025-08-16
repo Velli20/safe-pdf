@@ -17,6 +17,11 @@ pub struct SkiaMaskCanvas {
     height: f32,
     mask_image: Option<skia_safe::Image>,
 }
+pub struct SkiaImageSnapshot {
+    width: f32,
+    height: f32,
+    image: skia_safe::Image,
+}
 
 /// Converts a PdfPath to a Skia Path.
 fn to_skia_path(pdf_path: &PdfPath) -> skia_safe::Path {
@@ -212,6 +217,7 @@ fn get_skia_image_data(
 
 impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
     type MaskType = SkiaMaskCanvas;
+    type ImageType = SkiaImageSnapshot;
 
     fn fill_path(
         &mut self,
@@ -219,12 +225,23 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
         fill_type: PathFillType,
         color: Color,
         shader: &Option<Shader>,
+        pattern_image: Option<Self::ImageType>,
     ) {
         let mut sk_path = to_skia_path(path);
         sk_path.set_fill_type(to_skia_fill_type(fill_type));
         let mut paint = make_paint(color, skia_safe::paint::Style::Fill, None);
         if let Some(shader) = shader {
             if let Some(shader) = to_skia_shader(shader) {
+                paint.set_shader(shader);
+            }
+        } else if let Some(image) = pattern_image {
+            println!("Pattern image provided h {}", image.image.height());
+            // If a pattern image is provided, we can use it as a shader
+            if let Some(shader) = image.image.to_shader(
+                (skia_safe::TileMode::Repeat, skia_safe::TileMode::Repeat),
+                skia_safe::SamplingOptions::default(),
+                None,
+            ) {
                 paint.set_shader(shader);
             }
         }
@@ -238,11 +255,21 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
         color: Color,
         line_width: f32,
         shader: &Option<Shader>,
+        pattern_image: Option<Self::ImageType>,
     ) {
         let sk_path = to_skia_path(path);
         let mut paint = make_paint(color, skia_safe::paint::Style::Stroke, Some(line_width));
         if let Some(shader) = shader {
             if let Some(shader) = to_skia_shader(shader) {
+                paint.set_shader(shader);
+            }
+        } else if let Some(image) = pattern_image {
+            // If a pattern image is provided, we can use it as a shader
+            if let Some(shader) = image.image.to_shader(
+                (skia_safe::TileMode::Repeat, skia_safe::TileMode::Repeat),
+                skia_safe::SamplingOptions::default(),
+                None,
+            ) {
                 paint.set_shader(shader);
             }
         }
@@ -368,10 +395,20 @@ impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
             .draw_image(mask_image, (0.0, height), Some(&paint));
         self.canvas.restore();
     }
+
+    fn image_snapshot(&mut self) -> Self::ImageType {
+        let image = unsafe { self.canvas.surface().unwrap().image_snapshot() };
+        SkiaImageSnapshot {
+            width: self.width,
+            height: self.height,
+            image,
+        }
+    }
 }
 
 impl<'a> CanvasBackend for SkiaMaskCanvas {
     type MaskType = SkiaMaskCanvas;
+    type ImageType = SkiaImageSnapshot;
 
     fn fill_path(
         &mut self,
@@ -379,6 +416,7 @@ impl<'a> CanvasBackend for SkiaMaskCanvas {
         fill_type: PathFillType,
         color: Color,
         shader: &Option<Shader>,
+        _pattern_image: Option<Self::ImageType>,
     ) {
         let mut sk_path = to_skia_path(path);
         let sk_color = skia_safe::Color4f::new(color.r, color.g, color.b, color.a);
@@ -407,6 +445,7 @@ impl<'a> CanvasBackend for SkiaMaskCanvas {
         color: Color,
         line_width: f32,
         shader: &Option<Shader>,
+        _pattern_image: Option<Self::ImageType>,
     ) {
         let sk_path = to_skia_path(path);
         let sk_color = skia_safe::Color4f::new(color.r, color.g, color.b, color.a);
@@ -504,5 +543,18 @@ impl<'a> CanvasBackend for SkiaMaskCanvas {
     }
     fn finish_mask(&mut self, _mask: &mut Self::MaskType, _transform: &Transform) {
         unimplemented!("Nested masks are not supported for SkiaMaskCanvas");
+    }
+    fn image_snapshot(&mut self) -> Self::ImageType {
+        let image = self.surface.image_snapshot();
+        //let data = image
+        //    .encode(None, skia_safe::EncodedImageFormat::PNG, 100)
+        //    .unwrap();
+        //std::fs::write("canvas_snapshot.png", data.as_bytes()).unwrap();
+
+        SkiaImageSnapshot {
+            width: self.width,
+            height: self.height,
+            image,
+        }
     }
 }

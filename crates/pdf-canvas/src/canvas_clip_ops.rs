@@ -4,7 +4,7 @@ use crate::{
     PathFillType, canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
 };
 
-impl<'a, T: CanvasBackend> ClippingPathOps for PdfCanvas<'a, T> {
+impl<'a, U, T: CanvasBackend<ImageType = U>> ClippingPathOps for PdfCanvas<'a, T, U> {
     fn clip_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
         if let Some(mut path) = self.current_path.take() {
             path.transform(&self.current_state()?.transform);

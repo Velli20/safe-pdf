@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use crate::{
     bbox::{BBox, BBoxReadError},
+    content_stream::ContentStream,
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateError},
     matrix::{Matrix, MatrixReadError},
     resources::{Resources, ResourcesError},
@@ -40,6 +41,8 @@ pub enum PatternError {
     ExternalGraphicsStateError(#[from] ExternalGraphicsStateError),
     #[error("Shading parsing error: {0}")]
     ShadingError(#[from] ShadingError),
+    #[error("Error parsing content stream: {0}")]
+    ContentStreamError(#[from] pdf_content_stream::error::PdfOperatorError),
     #[error("{0}")]
     ObjectError(#[from] ObjectError),
 }
@@ -133,6 +136,8 @@ pub enum Pattern {
         matrix: Option<Transform>,
         /// A dictionary of resources required by the pattern's content stream.
         resources: Resources,
+        /// The content stream that defines the graphics of the pattern cell.
+        content_stream: ContentStream,
     },
     /// A shading pattern, which defines a smooth transition between colors across an area.
     Shading {
@@ -145,15 +150,12 @@ pub enum Pattern {
     },
 }
 
-impl FromDictionary for Pattern {
-    const KEY: &'static str = "Pattern";
-    type ResultType = Pattern;
-    type ErrorType = PatternError;
-
-    fn from_dictionary(
+impl Pattern {
+    pub(crate) fn from_dictionary(
         dictionary: &Dictionary,
         objects: &ObjectCollection,
-    ) -> Result<Self::ResultType, PatternError> {
+        stream: Option<&[u8]>,
+    ) -> Result<Pattern, PatternError> {
         let pattern_type = dictionary
             .get("PatternType")
             .ok_or(PatternError::MissingPatternType)?
@@ -226,6 +228,15 @@ impl FromDictionary for Pattern {
                     .map_err(|err| PatternError::ResourcesParse { err: Box::new(err) })?
                     .ok_or(PatternError::MissingRequiredEntry("Resources"))?;
 
+                let stream_data = stream.ok_or(PatternError::MissingRequiredEntry(
+                    "Stream data for Tiling Pattern",
+                ))?;
+
+                let content_stream = ContentStream {
+                    operations: pdf_content_stream::pdf_operator::PdfOperatorVariant::from(
+                        stream_data,
+                    )?,
+                };
                 Ok(Pattern::Tiling {
                     paint_type,
                     tiling_type,
@@ -234,6 +245,7 @@ impl FromDictionary for Pattern {
                     y_step,
                     matrix,
                     resources,
+                    content_stream,
                 })
             }
             Some(PatternType::Shading) => {
