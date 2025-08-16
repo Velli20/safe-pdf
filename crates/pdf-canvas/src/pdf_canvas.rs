@@ -1,7 +1,10 @@
-use pdf_content_stream::graphics_state_operators::{LineCap, LineJoin};
+use pdf_content_stream::{
+    graphics_state_operators::{LineCap, LineJoin},
+    pdf_operator::PdfOperatorVariant,
+};
 use pdf_font::font::Font;
 use pdf_graphics::{color::Color, transform::Transform};
-use pdf_page::{form::FormXObject, page::PdfPage, pattern::Pattern, resources::Resources};
+use pdf_page::{page::PdfPage, pattern::Pattern, resources::Resources};
 
 use crate::{
     PaintMode, PathFillType,
@@ -92,16 +95,16 @@ impl<'a> Default for CanvasState<'a> {
     }
 }
 
-pub struct PdfCanvas<'a, T> {
+pub struct PdfCanvas<'a, T, U> {
     pub(crate) current_path: Option<PdfPath>,
-    pub(crate) canvas: &'a mut dyn CanvasBackend<MaskType = T>,
+    pub(crate) canvas: &'a mut dyn CanvasBackend<MaskType = T, ImageType = U>,
     pub(crate) mask: Option<Box<T>>,
     pub(crate) page: &'a PdfPage,
     // Stores the graphics states, including text state.
     pub(crate) canvas_stack: Vec<CanvasState<'a>>,
 }
 
-impl<T: CanvasBackend> Canvas for PdfCanvas<'_, T> {
+impl<'a, U, T: CanvasBackend<ImageType = U>> Canvas for PdfCanvas<'_, T, U> {
     fn save(&mut self) -> Result<(), PdfCanvasError> {
         let mut state = self.current_state()?.clone();
         state.clip_path = None;
@@ -126,18 +129,22 @@ impl<T: CanvasBackend> Canvas for PdfCanvas<'_, T> {
     }
 
     fn fill_path(&mut self, path: &PdfPath, fill_type: PathFillType) -> Result<(), PdfCanvasError> {
+        if self.current_state()?.pattern.is_some() {
+            println!("Pattern fill is not supported yet.");
+        }
         let fill_color = self.current_state()?.fill_color;
-        self.canvas.fill_path(path, fill_type, fill_color, &None);
+        self.canvas
+            .fill_path(path, fill_type, fill_color, &None, None);
         Ok(())
     }
 }
 
-impl<'a, T: CanvasBackend> PdfCanvas<'a, T>
+impl<'a, U, T: CanvasBackend<ImageType = U>> PdfCanvas<'a, T, U>
 where
     T: 'a,
 {
     pub fn new(
-        backend: &'a mut dyn CanvasBackend<MaskType = T>,
+        backend: &'a mut dyn CanvasBackend<MaskType = T, ImageType = U>,
         page: &'a PdfPage,
         bb: Option<&[f32; 4]>,
     ) -> Self {
@@ -213,6 +220,102 @@ where
             .ok_or(PdfCanvasError::EmptyGraphicsStateStack)
     }
 
+    /// Builds a shader from a shading pattern definition (Axial / Radial / FunctionBased).
+    /// Returns `None` when the shading type isn't yet supported or not applicable.
+    fn build_shading_shader(
+        &mut self,
+        shading: &pdf_page::shading::Shading,
+        matrix: &Option<pdf_graphics::transform::Transform>,
+    ) -> Option<Shader> {
+        use pdf_page::shading::Shading;
+
+        match shading {
+            Shading::Axial {
+                coords: [x0, y0, x1, y1],
+                positions,
+                colors,
+                ..
+            } => Some(Shader::LinearGradient {
+                x0: *x0,
+                y0: *y0,
+                x1: *x1,
+                y1: *y1,
+                colors: colors.clone(),
+                positions: positions.clone(),
+            }),
+            Shading::Radial {
+                coords: [start_x, start_y, start_r, end_x, end_y, end_r],
+                positions,
+                colors,
+                ..
+            } => {
+                // Apply transform adjustments if a matrix is provided.
+                let transform = if let Some(mut mat) = matrix.clone() {
+                    // FIXME: Converting matrix to the device userspace. The rendering backend expects an
+                    // origin at the top-left, with the Y-axis pointing downwards, so we apply canvas height - ty.
+                    mat.ty = self.canvas.height() - mat.ty;
+                    Some(mat)
+                } else {
+                    None
+                };
+
+                Some(Shader::RadialGradient {
+                    start_x: *start_x,
+                    start_y: *start_y,
+                    start_r: *start_r,
+                    end_x: *end_x,
+                    end_y: *end_y,
+                    end_r: *end_r,
+                    transform,
+                    colors: colors.clone(),
+                    positions: positions.clone(),
+                })
+            }
+            Shading::FunctionBased { .. } => {
+                println!("FunctionBased shading not implemented");
+                None
+            }
+        }
+    }
+
+    /// Computes the shader and (optional) pattern image based on the current pattern in state.
+    /// Returns a tuple of (shader, pattern_image).
+    fn compute_shader_and_pattern_image(
+        &mut self,
+    ) -> Result<(Option<Shader>, Option<U>), PdfCanvasError> {
+        use pdf_page::pattern::Pattern;
+
+        let Some(pattern) = self.current_state()?.pattern else {
+            return Ok((None, None));
+        };
+
+        match pattern {
+            Pattern::Shading {
+                shading, matrix, ..
+            } => {
+                let shader = self.build_shading_shader(shading, matrix);
+                Ok((shader, None))
+            }
+            Pattern::Tiling {
+                bbox,
+                resources,
+                content_stream,
+                ..
+            } => {
+                // Create a new mask surface from the backend, sized to the form's bounding box.
+                let mut mask = self
+                    .canvas
+                    .create_mask(bbox.0[2] - bbox.0[0], bbox.0[3] - bbox.0[1]);
+
+                // Render the tiling content into a temporary canvas.
+                let mut other = PdfCanvas::new(mask.as_mut(), self.page, Some(&bbox.0));
+                other.render_content_stream(&content_stream.operations, None, Some(resources))?;
+                let image = other.canvas.image_snapshot();
+                Ok((None, Some(image)))
+            }
+        }
+    }
+
     pub(crate) fn paint_taken_path(
         &mut self,
         mode: PaintMode,
@@ -220,88 +323,23 @@ where
     ) -> Result<(), PdfCanvasError> {
         if let Some(mut path) = self.current_path.take() {
             path.transform(&self.current_state()?.transform);
-            let shader = if let Some(pattern) = self.current_state()?.pattern {
-                use pdf_page::pattern::Pattern;
-                use pdf_page::shading::Shading;
-
-                if let Pattern::Shading {
-                    shading, matrix, ..
-                } = pattern
-                {
-                    println!("pattern");
-                    match shading {
-                        Shading::Axial {
-                            coords: [x0, y0, x1, y1],
-                            positions,
-                            colors,
-                            ..
-                        } => {
-                            // Construct a LinearShader (or Shader::LinearGradient) using coords and function
-                            Some(Shader::LinearGradient {
-                                x0: *x0,
-                                y0: *y0,
-                                x1: *x1,
-                                y1: *y1,
-                                colors: colors.clone(),
-                                positions: positions.clone(),
-                            })
-                        }
-                        Shading::Radial {
-                            coords: [start_x, start_y, start_r, end_x, end_y, end_r],
-                            positions,
-                            colors,
-                            ..
-                        } => {
-                            let transform = if let Some(mut mat) = matrix.clone() {
-                                // FIXME: Converting matrix to the device userspace. The rendering backend expects an
-                                // origin at the top-left, with the Y-axis pointing downwards, so we apply canvas height - ty.
-                                mat.ty = self.canvas.height() - mat.ty;
-                                Some(mat)
-                            } else {
-                                None
-                            };
-
-                            Some(Shader::RadialGradient {
-                                start_x: *start_x,
-                                start_y: *start_y,
-                                start_r: *start_r,
-                                end_x: *end_x,
-                                end_y: *end_y,
-                                end_r: *end_r,
-                                transform,
-                                colors: colors.clone(),
-                                positions: positions.clone(),
-                            })
-                        }
-                        Shading::FunctionBased {
-                            color_space,
-                            background,
-                            bbox,
-                            anti_alias,
-                            domain,
-                            functions,
-                        } => {
-                            println!("FunctionBased");
-                            todo!()
-                        }
-                    }
-                } else {
-                    println!("No shading");
-                    None
-                }
-            } else {
-                None
-            };
+            let (shader, pattern_image) = self.compute_shader_and_pattern_image()?;
 
             if mode == PaintMode::Fill {
-                self.canvas
-                    .fill_path(&path, fill_type, self.current_state()?.fill_color, &shader);
+                self.canvas.fill_path(
+                    &path,
+                    fill_type,
+                    self.current_state()?.fill_color,
+                    &shader,
+                    pattern_image,
+                );
             } else {
                 self.canvas.stroke_path(
                     &path,
                     self.current_state()?.stroke_color,
                     self.current_state()?.line_width,
                     &shader,
+                    pattern_image,
                 );
             }
             Ok(())
@@ -321,22 +359,23 @@ where
         }
     }
 
-    pub(crate) fn render_form_xobject(
+    pub(crate) fn render_content_stream(
         &mut self,
-        form: &'a FormXObject,
+        operations: &[PdfOperatorVariant],
+        mat: Option<Transform>,
+        resources: Option<&'a Resources>,
     ) -> Result<(), PdfCanvasError> {
-        let form_procs = &form.content_stream.operations;
         self.save()?;
 
-        if let Some(mat) = &form.matrix {
-            self.set_matrix(mat.clone())?;
+        if let Some(mat) = mat {
+            self.set_matrix(mat)?;
         }
 
-        if let Some(resources) = &form.resources {
+        if let Some(resources) = resources {
             self.current_state_mut()?.resources = Some(resources);
         }
 
-        for op in form_procs {
+        for op in operations {
             op.call(self)?;
         }
 

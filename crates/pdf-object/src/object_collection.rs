@@ -48,6 +48,16 @@ impl ObjectCollection {
                     }
                 }
 
+                ObjectVariant::IndirectObject(inner) => {
+                    if let Some(obj) = inner.object.as_ref() {
+                        return Ok(obj);
+                    } else {
+                        return Err(ObjectError::FailedResolveDictionaryObject {
+                            resolved_type: "IndirectObject",
+                        });
+                    }
+                }
+
                 other => return Ok(other),
             }
         }

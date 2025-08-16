@@ -3,7 +3,7 @@ use pdf_page::{image::ImageFilter, xobject::XObject};
 
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
-impl<'a, T: CanvasBackend> XObjectOps for PdfCanvas<'a, T> {
+impl<'a, U, T: CanvasBackend<ImageType = U>> XObjectOps for PdfCanvas<'a, T, U> {
     fn invoke_xobject(&mut self, xobject_name: &str) -> Result<(), Self::ErrorType> {
         let resources = self.get_resources()?;
 
@@ -26,7 +26,11 @@ impl<'a, T: CanvasBackend> XObjectOps for PdfCanvas<'a, T> {
                 smask,
             );
         } else if let Some(XObject::Form(form)) = resources.xobjects.get(xobject_name) {
-            self.render_form_xobject(form)?;
+            self.render_content_stream(
+                &form.content_stream.operations,
+                form.matrix.clone(),
+                form.resources.as_ref().map_or(None, |r| Some(r)),
+            )?;
         } else {
             return Err(PdfCanvasError::XObjectNotFound(xobject_name.to_string()));
         }

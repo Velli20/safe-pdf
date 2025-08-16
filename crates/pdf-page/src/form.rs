@@ -42,7 +42,7 @@ pub struct FormXObject {
     pub matrix: Option<Transform>,
     /// Resources used by the form.
     pub resources: Option<Resources>,
-    /// The content stream (operators).
+    /// The content stream that defines the graphics of the pattern cell.
     pub content_stream: ContentStream,
 }
 

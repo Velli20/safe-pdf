@@ -39,15 +39,15 @@ pub enum PathFillType {
     EvenOdd,
 }
 
-impl<'a, T: CanvasBackend> PdfOperatorBackend for PdfCanvas<'a, T> {}
+impl<'a, U, T: CanvasBackend<ImageType = U>> PdfOperatorBackend for PdfCanvas<'a, T, U> {}
 
-impl<'a, T: CanvasBackend> ShadingOps for PdfCanvas<'a, T> {
+impl<'a, U, T: CanvasBackend<ImageType = U>> ShadingOps for PdfCanvas<'a, T, U> {
     fn paint_shading(&mut self, shading_name: &str) -> Result<(), Self::ErrorType> {
         println!("Paint shading {:?}", shading_name);
         Ok(())
     }
 }
 
-impl<T> PdfOperatorBackendError for PdfCanvas<'_, T> {
+impl<T, U> PdfOperatorBackendError for PdfCanvas<'_, T, U> {
     type ErrorType = PdfCanvasError;
 }

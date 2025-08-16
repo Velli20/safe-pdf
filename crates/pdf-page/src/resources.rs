@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use pdf_font::font::{Font, FontError};
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     traits::FromDictionary,
 };
 use thiserror::Error;
@@ -33,6 +33,12 @@ pub enum ResourcesError {
     PatternError(#[from] PatternError),
     #[error("{0}")]
     ObjectError(#[from] ObjectError),
+    #[error("Invalid type for entry '{entry_name}': expected {expected_type}, found {found_type}")]
+    InvalidEntryType {
+        entry_name: &'static str,
+        expected_type: &'static str,
+        found_type: &'static str,
+    },
 }
 
 impl FromDictionary for Resources {
@@ -83,13 +89,32 @@ impl FromDictionary for Resources {
         // Process `/Pattern` entries
         if let Some(eg) = resources.get_dictionary("Pattern") {
             for (name, v) in &eg.dictionary {
-                // Each value can be a direct dictionary or an indirect reference to one.
-                let dictionary = objects.resolve_dictionary(v.as_ref())?;
                 // Parse the pattern and insert it into the map.
-                patterns.insert(
-                    name.to_owned(),
-                    Pattern::from_dictionary(dictionary, objects)?,
-                );
+                match objects.resolve_object(v)? {
+                    ObjectVariant::Dictionary(dictionary) => {
+                        patterns.insert(
+                            name.to_owned(),
+                            Pattern::from_dictionary(dictionary, objects, None)?,
+                        );
+                    }
+                    ObjectVariant::Stream(stream) => {
+                        patterns.insert(
+                            name.to_owned(),
+                            Pattern::from_dictionary(
+                                &stream.dictionary,
+                                objects,
+                                Some(&stream.data),
+                            )?,
+                        );
+                    }
+                    obj => {
+                        return Err(ResourcesError::InvalidEntryType {
+                            entry_name: "Pattern",
+                            expected_type: "Dictionary or Stream",
+                            found_type: obj.name(),
+                        });
+                    }
+                }
             }
         }
 
