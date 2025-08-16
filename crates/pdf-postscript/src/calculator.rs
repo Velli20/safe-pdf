@@ -336,7 +336,7 @@ pub fn execute(input_stack: &[f64], ops: &[Operator]) -> Result<Vec<f64>, CalcEr
                 })?;
                 if cond != 0.0 {
                     let mut inner_stack: VecDeque<f64> = stack.clone();
-                    let result = execute(&inner_stack.make_contiguous(), &block)?;
+                    let result = execute(inner_stack.make_contiguous(), block)?;
                     stack.clear();
                     for v in result {
                         stack.push_back(v);
@@ -350,7 +350,7 @@ pub fn execute(input_stack: &[f64], ops: &[Operator]) -> Result<Vec<f64>, CalcEr
                 })?;
                 let mut inner_stack: VecDeque<f64> = stack.clone();
                 let block = if cond != 0.0 { &block1 } else { &block2 };
-                let result = execute(&inner_stack.make_contiguous(), block)?;
+                let result = execute(inner_stack.make_contiguous(), block)?;
                 stack.clear();
                 for v in result {
                     stack.push_back(v);

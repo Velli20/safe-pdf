@@ -149,9 +149,8 @@ mod tests {
             let mut parser = PdfParser::from(input);
             let result = parser.parse_dictionary();
 
-            assert_eq!(
+            assert!(
                 result.is_err(),
-                true,
                 "Expected Err for input '{}', got {:?}",
                 String::from_utf8_lossy(input),
                 result

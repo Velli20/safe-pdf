@@ -14,7 +14,7 @@ impl PdfOperator for StrokePath {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::StrokePath(Self::default()))
+        Ok(PdfOperatorVariant::StrokePath(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
@@ -33,7 +33,7 @@ impl PdfOperator for CloseStrokePath {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::CloseStrokePath(Self::default()))
+        Ok(PdfOperatorVariant::CloseStrokePath(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
@@ -51,7 +51,7 @@ impl PdfOperator for FillPathNonZero {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::FillPathNonZero(Self::default()))
+        Ok(PdfOperatorVariant::FillPathNonZero(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
@@ -69,7 +69,7 @@ impl PdfOperator for FillPathEvenOdd {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::FillPathEvenOdd(Self::default()))
+        Ok(PdfOperatorVariant::FillPathEvenOdd(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
@@ -88,7 +88,7 @@ impl PdfOperator for FillAndStrokePathNonZero {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::FillAndStrokePathNonZero(Self::default()))
+        Ok(PdfOperatorVariant::FillAndStrokePathNonZero(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
@@ -107,7 +107,7 @@ impl PdfOperator for FillAndStrokePathEvenOdd {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::FillAndStrokePathEvenOdd(Self::default()))
+        Ok(PdfOperatorVariant::FillAndStrokePathEvenOdd(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
@@ -127,7 +127,7 @@ impl PdfOperator for CloseFillAndStrokePathNonZero {
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::CloseFillAndStrokePathNonZero(
-            Self::default(),
+            Self,
         ))
     }
 
@@ -148,7 +148,7 @@ impl PdfOperator for CloseFillAndStrokePathEvenOdd {
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         Ok(PdfOperatorVariant::CloseFillAndStrokePathEvenOdd(
-            Self::default(),
+            Self,
         ))
     }
 
@@ -168,7 +168,7 @@ impl PdfOperator for EndPath {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::EndPath(Self::default()))
+        Ok(PdfOperatorVariant::EndPath(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {

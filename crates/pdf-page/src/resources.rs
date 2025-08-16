@@ -130,7 +130,7 @@ impl FromDictionary for Resources {
                     name.to_owned(),
                     XObject::read_xobject(
                         &stream_object.dictionary,
-                        &stream_object.data.as_slice(),
+                        stream_object.data.as_slice(),
                         objects,
                     )?,
                 );

@@ -1,3 +1,9 @@
+#![deny(clippy::unwrap_used)]
+#![warn(clippy::expect_used)]
+#![warn(clippy::panic)]
+#![warn(clippy::todo)]
+#![warn(clippy::large_enum_variant)]
+
 pub mod bbox;
 pub mod color_space;
 pub mod content_stream;

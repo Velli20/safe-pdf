@@ -36,7 +36,7 @@ impl OpDescriptor {
     }
 }
 
-pub(crate) const READ_MAP: &'static [OpDescriptor] = &[
+pub(crate) const READ_MAP: &[OpDescriptor] = &[
     OpDescriptor::from::<ClipNonZero>(),
     OpDescriptor::from::<ClipEvenOdd>(),
     OpDescriptor::from::<SetGrayFill>(),

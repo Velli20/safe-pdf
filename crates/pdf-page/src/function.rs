@@ -274,7 +274,7 @@ impl Function {
             FunctionType::ExponentialInterpolation => {
                 let domain = if let Some(obj) = dictionary.get("Domain") {
                     obj.as_array_of::<f32, 2>()
-                        .map_err(|err| FunctionReadError::DomainParsingError(err))?
+                        .map_err(FunctionReadError::DomainParsingError)?
                 } else {
                     return Err(FunctionReadError::MissingDomain);
                 };
@@ -324,7 +324,7 @@ impl Function {
             FunctionType::Stitching => {
                 let domain = if let Some(obj) = dictionary.get("Domain") {
                     obj.as_array_of::<f32, 2>()
-                        .map_err(|err| FunctionReadError::DomainParsingError(err))?
+                        .map_err(FunctionReadError::DomainParsingError)?
                 } else {
                     return Err(FunctionReadError::MissingDomain);
                 };
@@ -341,7 +341,7 @@ impl Function {
                         .ok_or(FunctionReadError::InvalidEntryType {
                             entry_name: "Functions",
                             expected_type: "Dictionary",
-                            found_type: &obj.name(),
+                            found_type: obj.name(),
                         })?;
                     functions.push(Function::from_dictionary(dict, objects, None)?);
                 }
@@ -379,14 +379,14 @@ impl Function {
             FunctionType::PostScriptCalculator => {
                 let domain = if let Some(obj) = dictionary.get("Domain") {
                     obj.as_vec_of::<f32>()
-                        .map_err(|err| FunctionReadError::DomainParsingError(err))?
+                        .map_err(FunctionReadError::DomainParsingError)?
                 } else {
                     return Err(FunctionReadError::MissingDomain);
                 };
 
                 let range = if let Some(obj) = dictionary.get("Range") {
                     obj.as_vec_of::<f32>()
-                        .map_err(|err| FunctionReadError::DomainParsingError(err))?
+                        .map_err(FunctionReadError::DomainParsingError)?
                 } else {
                     return Err(FunctionReadError::MissingRange);
                 };

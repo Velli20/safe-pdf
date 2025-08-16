@@ -69,7 +69,7 @@ impl LiteralStringParser for PdfParser<'_> {
         loop {
             let content = self.tokenizer.read_while_u8(|b| b != b')' && b != b'(');
             if !content.is_empty() {
-                characthers.extend_from_slice(&content);
+                characthers.extend_from_slice(content);
             }
             if let Some(token) = self.tokenizer.read() {
                 match token {

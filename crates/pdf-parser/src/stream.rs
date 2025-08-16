@@ -41,7 +41,7 @@ pub enum StreamParsingError {
     ParserError(#[from] ParserError),
 }
 
-impl<'a> StreamParser for PdfParser<'a> {
+impl StreamParser for PdfParser<'_> {
     type ErrorType = StreamParsingError;
 
     /// Parses a PDF stream object from the input, using a pre-parsed dictionary.

@@ -132,7 +132,7 @@ impl PdfOperator for MoveToNextLine {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::MoveToNextLine(Self::default()))
+        Ok(PdfOperatorVariant::MoveToNextLine(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {

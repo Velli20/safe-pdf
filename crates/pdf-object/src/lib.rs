@@ -124,18 +124,18 @@ impl ObjectVariant {
         }
     }
 
-    pub fn as_str<'a>(&'a self) -> Option<Cow<'a, str>> {
+    pub fn as_str(&self) -> Option<Cow<'_, str>> {
         match self {
             ObjectVariant::HexString(s) => {
                 let s = String::from_utf8_lossy(s);
                 Some(s)
             }
-            ObjectVariant::LiteralString(s) | ObjectVariant::Name(s) => Some(Cow::Borrowed(&s)),
+            ObjectVariant::LiteralString(s) | ObjectVariant::Name(s) => Some(Cow::Borrowed(s)),
             _ => None,
         }
     }
 
-    pub fn as_bytes<'a>(&'a self) -> Option<&'a [u8]> {
+    pub fn as_bytes(&self) -> Option<&[u8]> {
         match self {
             ObjectVariant::HexString(s) => Some(s),
             _ => None,

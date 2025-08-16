@@ -78,12 +78,12 @@ impl<'a, T: PdfOperatorBackend + Canvas> Type3FontRenderer<'a, T> {
     }
 }
 
-impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for Type3FontRenderer<'a, T> {
+impl<T: PdfOperatorBackend + Canvas> TextRenderer for Type3FontRenderer<'_, T> {
     fn render_text(&mut self, text: &[u8]) -> Result<(), crate::error::PdfCanvasError> {
         // 1. Iterate through each character code in the input text.
-        let mut iter = text.iter().copied();
-        while let Some(char_code_byte) = iter.next() {
-            let mut text_rendering_matrix = self.font_matrix.clone();
+        let iter = text.iter().copied();
+        for char_code_byte in iter {
+            let mut text_rendering_matrix = self.font_matrix;
             // Multiply by the font size, horizontal scaling, and rise matrix (S).
             text_rendering_matrix.concat(&self.font_size_matrix);
             // Multiply by the current text matrix (Tm).
@@ -116,7 +116,7 @@ impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for Type3FontRenderer<'a, 
 
             // 5. Set the transformation matrix for the glyph and execute its content stream.
             // The CTM is temporarily replaced with the computed text rendering matrix.
-            self.canvas.set_matrix(text_rendering_matrix.clone())?;
+            self.canvas.set_matrix(text_rendering_matrix)?;
 
             for op in char_procs {
                 // Check if this the `d1` operator. The `d1` operator is only used within the

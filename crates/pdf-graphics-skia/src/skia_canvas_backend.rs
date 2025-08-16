@@ -215,7 +215,7 @@ fn get_skia_image_data(
     }
 }
 
-impl<'a> CanvasBackend for SkiaCanvasBackend<'a> {
+impl CanvasBackend for SkiaCanvasBackend<'_> {
     type MaskType = SkiaMaskCanvas;
     type ImageType = SkiaImageSnapshot;
 

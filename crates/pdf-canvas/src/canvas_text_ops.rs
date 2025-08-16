@@ -9,7 +9,7 @@ use pdf_content_stream::pdf_operator_backend::{
 use pdf_font::font::FontSubType;
 use pdf_graphics::transform::Transform;
 
-impl<'a, U, T: CanvasBackend<ImageType = U>> TextPositioningOps for PdfCanvas<'a, T, U> {
+impl<U, T: CanvasBackend<ImageType = U>> TextPositioningOps for PdfCanvas<'_, T, U> {
     fn move_text_position(&mut self, tx: f32, ty: f32) -> Result<(), Self::ErrorType> {
         let mat = Transform::from_translate(tx, ty);
         self.current_state_mut()?
@@ -17,7 +17,7 @@ impl<'a, U, T: CanvasBackend<ImageType = U>> TextPositioningOps for PdfCanvas<'a
             .line_matrix
             .concat(&mat);
         self.current_state_mut()?.text_state.matrix =
-            self.current_state()?.text_state.line_matrix.clone();
+            self.current_state()?.text_state.line_matrix;
         Ok(())
     }
 
@@ -39,7 +39,7 @@ impl<'a, U, T: CanvasBackend<ImageType = U>> TextPositioningOps for PdfCanvas<'a
         f: f32,
     ) -> Result<(), Self::ErrorType> {
         let mat = Transform::from_row(a, b, c, d, e, f);
-        self.current_state_mut()?.text_state.line_matrix = mat.clone();
+        self.current_state_mut()?.text_state.line_matrix = mat;
         self.current_state_mut()?.text_state.matrix = mat;
         Ok(())
     }
@@ -49,7 +49,7 @@ impl<'a, U, T: CanvasBackend<ImageType = U>> TextPositioningOps for PdfCanvas<'a
     }
 }
 
-impl<'a, U, T: CanvasBackend<ImageType = U>> TextObjectOps for PdfCanvas<'a, T, U> {
+impl<U, T: CanvasBackend<ImageType = U>> TextObjectOps for PdfCanvas<'_, T, U> {
     fn begin_text_object(&mut self) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.text_state.matrix = Transform::identity();
         self.current_state_mut()?.text_state.line_matrix = Transform::identity();
@@ -61,7 +61,7 @@ impl<'a, U, T: CanvasBackend<ImageType = U>> TextObjectOps for PdfCanvas<'a, T, 
     }
 }
 
-impl<'a, U, T: CanvasBackend<ImageType = U>> TextStateOps for PdfCanvas<'a, T, U> {
+impl<U, T: CanvasBackend<ImageType = U>> TextStateOps for PdfCanvas<'_, T, U> {
     fn set_character_spacing(&mut self, spacing: f32) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.text_state.character_spacing = spacing;
         Ok(())
@@ -110,7 +110,7 @@ impl<'a, U, T: CanvasBackend<ImageType = U>> TextStateOps for PdfCanvas<'a, T, U
     }
 }
 
-impl<'a, U, T: CanvasBackend<ImageType = U>> TextShowingOps for PdfCanvas<'a, T, U> {
+impl<U, T: CanvasBackend<ImageType = U>> TextShowingOps for PdfCanvas<'_, T, U> {
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
         let text_state = &self.current_state()?.text_state.clone();
         let current_font = text_state.font.ok_or(PdfCanvasError::NoCurrentFont)?;
@@ -124,8 +124,8 @@ impl<'a, U, T: CanvasBackend<ImageType = U>> TextShowingOps for PdfCanvas<'a, T,
                 text_state.font_size,
                 text_state.horizontal_scaling,
                 text_state.rise,
-                self.current_state()?.transform.clone(),
-                text_state.matrix.clone(),
+                self.current_state()?.transform,
+                text_state.matrix,
                 type3_font,
             )?;
 
@@ -136,14 +136,14 @@ impl<'a, U, T: CanvasBackend<ImageType = U>> TextShowingOps for PdfCanvas<'a, T,
             current_font,
             text_state.font_size,
             text_state.horizontal_scaling,
-            text_state.matrix.clone(),
-            self.current_state()?.transform.clone(),
+            text_state.matrix,
+            self.current_state()?.transform,
             text_state.rise,
             text_state.word_spacing,
             text_state.character_spacing,
         )?;
 
-        return renderer.render_text(text);
+        renderer.render_text(text)
     }
 
     fn show_text_with_glyph_positioning(

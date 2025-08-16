@@ -155,9 +155,9 @@ impl IndirectObjectParser for PdfParser<'_> {
         self.read_keyword(ENDOBJ_KEYWORD)
             .map_err(|source| IndirectObjectError::InvalidEndObjKeyword { source })?;
 
-        return Ok(Some(ObjectVariant::IndirectObject(Rc::new(
+        Ok(Some(ObjectVariant::IndirectObject(Rc::new(
             IndirectObject::new(object_number, generation_number, Some(object)),
-        ))));
+        ))))
     }
 }
 

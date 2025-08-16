@@ -61,7 +61,7 @@ impl HexStringParser for PdfParser<'_> {
         // "If the string contains an odd number of hexadecimal digits, the last digit
         // shall be assumed to be 0."
         if filtered.len() % 2 != 0 {
-            filtered.push('0' as u8);
+            filtered.push(b'0');
         }
 
         // Consume the closing `>` of the hex string.

@@ -82,7 +82,7 @@ impl PdfOperator for EndMarkedContent {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::EndMarkedContent(Self::default()))
+        Ok(PdfOperatorVariant::EndMarkedContent(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {

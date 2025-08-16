@@ -78,12 +78,10 @@ impl FromDictionary for CharacterIdentifierFont {
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let default_width = if let Some(default_width) = dictionary.get("DW") {
-            default_width.as_number::<f32>().or_else(|err| {
-                Err(CidFontError::NumericConversionError {
+            default_width.as_number::<f32>().map_err(|err| CidFontError::NumericConversionError {
                     entry_description: "DW",
                     source: err,
-                })
-            })?
+                })?
         } else {
             Self::DEFAULT_WIDTH
         };

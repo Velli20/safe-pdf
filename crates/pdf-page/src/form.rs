@@ -72,7 +72,7 @@ impl XObjectReader for FormXObject {
 
         // Parse the content stream data.
         let content_stream = ContentStream {
-            operations: pdf_content_stream::pdf_operator::PdfOperatorVariant::from(&stream_data)?,
+            operations: pdf_content_stream::pdf_operator::PdfOperatorVariant::from(stream_data)?,
         };
 
         Ok(FormXObject {

@@ -212,7 +212,7 @@ impl PdfOperator for ClosePath {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::ClosePath(Self::default()))
+        Ok(PdfOperatorVariant::ClosePath(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {

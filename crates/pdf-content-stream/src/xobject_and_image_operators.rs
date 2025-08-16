@@ -50,7 +50,7 @@ impl PdfOperator for BeginInlineImage {
         // A full parser would need to enter a special state here to parse those pairs,
         // then the ID operator, then image data, then EI.
         // This function merely constructs the BeginInlineImage marker.
-        Ok(PdfOperatorVariant::BeginInlineImage(Self::default()))
+        Ok(PdfOperatorVariant::BeginInlineImage(Self))
     }
 }
 
@@ -92,6 +92,6 @@ impl PdfOperator for EndInlineImage {
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         // The EI operator does not take any operands from the stack.
         // It simply marks the end of the inline image data.
-        Ok(PdfOperatorVariant::EndInlineImage(Self::default()))
+        Ok(PdfOperatorVariant::EndInlineImage(Self))
     }
 }

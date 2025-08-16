@@ -15,7 +15,7 @@ impl PdfOperator for BeginText {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::BeginText(Self::default()))
+        Ok(PdfOperatorVariant::BeginText(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
@@ -33,7 +33,7 @@ impl PdfOperator for EndText {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::EndText(Self::default()))
+        Ok(PdfOperatorVariant::EndText(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {

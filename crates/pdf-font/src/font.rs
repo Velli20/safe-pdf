@@ -122,7 +122,7 @@ impl FromDictionary for Font {
         // If present, parse it into a `CharacterMap`. If not present, set cmap to None.
         let cmap = if let Some(obj) = dictionary.get("ToUnicode") {
             let stream = objects.resolve_stream(obj.as_ref())?;
-            Some(CharacterMap::from_stream_object(&stream)?)
+            Some(CharacterMap::from_stream_object(stream)?)
         } else {
             None
         };

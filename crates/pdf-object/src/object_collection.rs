@@ -84,21 +84,21 @@ impl ObjectCollection {
         obj: &'a ObjectVariant,
     ) -> Result<&'a Dictionary, ObjectError> {
         match self.resolve_object(obj)? {
-            ObjectVariant::Dictionary(dict) => return Ok(dict.as_ref()),
-            ObjectVariant::Stream(s) => return Ok(s.dictionary.as_ref()),
+            ObjectVariant::Dictionary(dict) => Ok(dict.as_ref()),
+            ObjectVariant::Stream(s) => Ok(s.dictionary.as_ref()),
             ObjectVariant::IndirectObject(inner) => {
                 if let Some(ObjectVariant::Dictionary(obj)) = inner.object.as_ref() {
-                    return Ok(obj.as_ref());
+                    Ok(obj.as_ref())
                 } else {
-                    return Err(ObjectError::FailedResolveDictionaryObject {
+                    Err(ObjectError::FailedResolveDictionaryObject {
                         resolved_type: "IndirectObject",
-                    });
+                    })
                 }
             }
             other => {
-                return Err(ObjectError::FailedResolveDictionaryObject {
+                Err(ObjectError::FailedResolveDictionaryObject {
                     resolved_type: other.name(),
-                });
+                })
             }
         }
     }
@@ -122,20 +122,20 @@ impl ObjectCollection {
         obj: &'a ObjectVariant,
     ) -> Result<&'a StreamObject, ObjectError> {
         match self.resolve_object(obj)? {
-            ObjectVariant::Stream(s) => return Ok(s.as_ref()),
+            ObjectVariant::Stream(s) => Ok(s.as_ref()),
             ObjectVariant::IndirectObject(inner) => {
                 if let Some(ObjectVariant::Stream(s)) = inner.object.as_ref() {
-                    return Ok(s.as_ref());
+                    Ok(s.as_ref())
                 } else {
-                    return Err(ObjectError::FailedResolveStreamObject {
+                    Err(ObjectError::FailedResolveStreamObject {
                         resolved_type: "IndirectObject",
-                    });
+                    })
                 }
             }
             other => {
-                return Err(ObjectError::FailedResolveStreamObject {
+                Err(ObjectError::FailedResolveStreamObject {
                     resolved_type: other.name(),
-                });
+                })
             }
         }
     }

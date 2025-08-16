@@ -73,7 +73,7 @@ impl<'a, T: PdfOperatorBackend + Canvas> TrueTypeFontRenderer<'a, T> {
     }
 }
 
-impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'a, T> {
+impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T> {
     fn render_text(&mut self, text: &[u8]) -> Result<(), crate::error::PdfCanvasError> {
         let cid_font = self
             .font
@@ -159,7 +159,7 @@ impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'
 
             // Compose the final transformation matrix for this glyph:
             // m_params -> text matrix -> current transformation matrix
-            let mut glyph_matrix_for_char = m_params.clone();
+            let mut glyph_matrix_for_char = m_params;
             glyph_matrix_for_char.concat(&self.text_matrix);
             glyph_matrix_for_char.concat(&self.current_transform);
 
@@ -183,7 +183,7 @@ impl<'a, T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'
                 .widths
                 .as_ref()
                 .and_then(|w_array| w_array.get_width(char_code as i64))
-                .unwrap_or_else(|| cid_font.default_width);
+                .unwrap_or(cid_font.default_width);
 
             // Convert width from font units to ems.
             let w0_ems = w0_glyph_units / 1000.0;

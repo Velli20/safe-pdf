@@ -244,7 +244,7 @@ impl FromDictionary for ExternalGraphicsState {
                     }
                     let dash_array_f32 = arr[0]
                         .as_vec_of::<f32>()
-                        .map_err(|err| ExternalGraphicsStateError::DashArrayParsingError(err))?;
+                        .map_err(ExternalGraphicsStateError::DashArrayParsingError)?;
 
                     let dash_phase = arr[1].as_number::<f32>().map_err(|e| {
                         ExternalGraphicsStateError::NumericConversionError {
@@ -391,7 +391,7 @@ impl FromDictionary for ExternalGraphicsState {
                                 },
                             )?;
 
-                            let smask_xobject = objects.resolve_stream(&shape_obj)?;
+                            let smask_xobject = objects.resolve_stream(shape_obj)?;
 
                             // You may need to resolve the XObject from the object collection.
                             // Here we assume XObject::from_object exists and takes the object and collection.

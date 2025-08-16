@@ -1,3 +1,8 @@
+#![warn(clippy::unwrap_used)]
+#![warn(clippy::expect_used)]
+#![warn(clippy::panic)]
+#![warn(clippy::todo)]
+
 use error::PdfCanvasError;
 use pdf_canvas::PdfCanvas;
 use pdf_content_stream::pdf_operator_backend::{
@@ -39,9 +44,9 @@ pub enum PathFillType {
     EvenOdd,
 }
 
-impl<'a, U, T: CanvasBackend<ImageType = U>> PdfOperatorBackend for PdfCanvas<'a, T, U> {}
+impl<U, T: CanvasBackend<ImageType = U>> PdfOperatorBackend for PdfCanvas<'_, T, U> {}
 
-impl<'a, U, T: CanvasBackend<ImageType = U>> ShadingOps for PdfCanvas<'a, T, U> {
+impl<U, T: CanvasBackend<ImageType = U>> ShadingOps for PdfCanvas<'_, T, U> {
     fn paint_shading(&mut self, shading_name: &str) -> Result<(), Self::ErrorType> {
         println!("Paint shading {:?}", shading_name);
         Ok(())

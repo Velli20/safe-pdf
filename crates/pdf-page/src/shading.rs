@@ -97,7 +97,7 @@ impl ColorStops {
                 .unwrap_or_else(|_| vec![0.0, 0.0, 0.0]);
             // Convert to Color.
             let color = Color::from_rgb(
-                color_components.get(0).copied().unwrap_or(0.0),
+                color_components.first().copied().unwrap_or(0.0),
                 color_components.get(1).copied().unwrap_or(0.0),
                 color_components.get(2).copied().unwrap_or(0.0),
             );
@@ -176,11 +176,7 @@ impl FromDictionary for Shading {
         match ShadingType::from_i32(shading_type) {
             Some(ShadingType::FunctionBased) => {
                 // Read optional `/ColorSpace` entry, which defines the color space for the shading.
-                let color_space = if let Some(obj) = dictionary.get("ColorSpace") {
-                    Some(ColorSpace::from(obj.as_ref()))
-                } else {
-                    None
-                };
+                let color_space = dictionary.get("ColorSpace").map(|obj| ColorSpace::from(obj.as_ref()));
 
                 // Read optional `/Background` entry, specifying a background color as an array of numbers.
                 let background = if let Some(obj) = dictionary.get("Background") {

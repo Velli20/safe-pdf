@@ -101,7 +101,7 @@ impl Operands<'_> {
         }
     }
 
-    pub fn get_bytes<'a>(&'a mut self) -> Result<&'a [u8], PdfOperatorError> {
+    pub fn get_bytes(&mut self) -> Result<&[u8], PdfOperatorError> {
         if let Some((value, rest)) = self.values.split_first() {
             self.values = rest;
             value
@@ -347,7 +347,7 @@ impl PdfOperatorVariant {
                         }
 
                         let mut ops = Operands {
-                            values: &operands.as_slice(),
+                            values: operands.as_slice(),
                         };
                         let operator = (operation.parser)(&mut ops)?;
                         operators.push(operator);
@@ -501,7 +501,7 @@ mod tests {
                     PdfOperatorVariant::MoveTo(MoveTo::new(10.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 50.0)),
-                    PdfOperatorVariant::ClosePath(ClosePath::default()),
+                    PdfOperatorVariant::ClosePath(ClosePath),
                 ],
             },
             TestCase {
@@ -545,7 +545,7 @@ mod tests {
                     PdfOperatorVariant::MoveTo(MoveTo::new(10.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(20.0, 20.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(30.0, 30.0)),
-                    PdfOperatorVariant::ClosePath(ClosePath::default()),
+                    PdfOperatorVariant::ClosePath(ClosePath),
                 ],
             },
             TestCase {
@@ -573,7 +573,7 @@ mod tests {
                 expected_ops: vec![
                     PdfOperatorVariant::MoveTo(MoveTo::new(10.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(100.0, 100.0)),
-                    PdfOperatorVariant::StrokePath(StrokePath::default()),
+                    PdfOperatorVariant::StrokePath(StrokePath),
                 ],
             },
             TestCase {
@@ -584,8 +584,8 @@ mod tests {
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 50.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(10.0, 50.0)),
-                    PdfOperatorVariant::ClosePath(ClosePath::default()),
-                    PdfOperatorVariant::FillPathNonZero(FillPathNonZero::default()),
+                    PdfOperatorVariant::ClosePath(ClosePath),
+                    PdfOperatorVariant::FillPathNonZero(FillPathNonZero),
                 ],
             },
             TestCase {
@@ -596,8 +596,8 @@ mod tests {
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 50.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(10.0, 50.0)),
-                    PdfOperatorVariant::ClosePath(ClosePath::default()),
-                    PdfOperatorVariant::FillPathEvenOdd(FillPathEvenOdd::default()),
+                    PdfOperatorVariant::ClosePath(ClosePath),
+                    PdfOperatorVariant::FillPathEvenOdd(FillPathEvenOdd),
                 ],
             },
             TestCase {
@@ -607,7 +607,7 @@ mod tests {
                     PdfOperatorVariant::MoveTo(MoveTo::new(10.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 50.0)),
-                    PdfOperatorVariant::CloseStrokePath(CloseStrokePath::default()),
+                    PdfOperatorVariant::CloseStrokePath(CloseStrokePath),
                 ],
             },
             TestCase {
@@ -616,7 +616,7 @@ mod tests {
                 expected_ops: vec![
                     PdfOperatorVariant::Rectangle(Rectangle::new(10.0, 10.0, 100.0, 50.0)),
                     PdfOperatorVariant::FillAndStrokePathNonZero(
-                        FillAndStrokePathNonZero::default(),
+                        FillAndStrokePathNonZero,
                     ),
                 ],
             },
@@ -626,7 +626,7 @@ mod tests {
                 expected_ops: vec![
                     PdfOperatorVariant::Rectangle(Rectangle::new(10.0, 10.0, 100.0, 50.0)),
                     PdfOperatorVariant::FillAndStrokePathEvenOdd(
-                        FillAndStrokePathEvenOdd::default(),
+                        FillAndStrokePathEvenOdd,
                     ),
                 ],
             },
@@ -638,7 +638,7 @@ mod tests {
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 50.0)),
                     PdfOperatorVariant::CloseFillAndStrokePathNonZero(
-                        CloseFillAndStrokePathNonZero::default(),
+                        CloseFillAndStrokePathNonZero,
                     ),
                 ],
             },
@@ -650,7 +650,7 @@ mod tests {
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 50.0)),
                     PdfOperatorVariant::CloseFillAndStrokePathEvenOdd(
-                        CloseFillAndStrokePathEvenOdd::default(),
+                        CloseFillAndStrokePathEvenOdd,
                     ),
                 ],
             },
@@ -660,7 +660,7 @@ mod tests {
                 expected_ops: vec![
                     PdfOperatorVariant::MoveTo(MoveTo::new(10.0, 10.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(100.0, 100.0)),
-                    PdfOperatorVariant::EndPath(EndPath::default()),
+                    PdfOperatorVariant::EndPath(EndPath),
                 ],
             },
             TestCase {
@@ -671,7 +671,7 @@ mod tests {
                     PdfOperatorVariant::LineTo(LineTo::new(50.0, 100.0)),
                     PdfOperatorVariant::CurveTo(CurveTo::new(100.0, 0.0, 150.0, 100.0, 200.0, 0.0)),
                     PdfOperatorVariant::CurveToY(CurveToY::new(250.0, -50.0, 300.0, 0.0)),
-                    PdfOperatorVariant::ClosePath(ClosePath::default()),
+                    PdfOperatorVariant::ClosePath(ClosePath),
                 ],
             },
             TestCase {
@@ -682,7 +682,7 @@ mod tests {
                     PdfOperatorVariant::LineTo(LineTo::new(100.0, 100.0)),
                     PdfOperatorVariant::MoveTo(MoveTo::new(200.0, 200.0)),
                     PdfOperatorVariant::LineTo(LineTo::new(300.0, 300.0)),
-                    PdfOperatorVariant::StrokePath(StrokePath::default()),
+                    PdfOperatorVariant::StrokePath(StrokePath),
                 ],
             },
         ];

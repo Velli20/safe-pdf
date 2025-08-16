@@ -51,7 +51,7 @@ pub trait ParseObject<T> {
     fn parse(&mut self) -> Result<T, ParserError>;
 }
 
-impl<'a> PdfParser<'a> {
+impl PdfParser<'_> {
     /// Checks if a character is a whitespace according to PDF 1.7 spec (Section 7.2.2).
     /// Whitespace characters are defined as:
     /// - Null (NUL) - `0x00` (`b'\0'`)
@@ -87,6 +87,7 @@ impl<'a> PdfParser<'a> {
     /// - A carriage return (`\r`) followed by a line feed (`\n`).
     /// - A line feed (`\n`) alone.
     /// - A carriage return (`\r`) alone is not valid.
+    ///
     /// This function will consume the end of line marker from the input stream.
     /// If the end of line marker is not found, it will return an error.
     fn read_end_of_line_marker(&mut self) -> Result<(), ParserError> {
@@ -100,7 +101,7 @@ impl<'a> PdfParser<'a> {
     }
 
     pub fn skip_whitespace(&mut self) {
-        let _ = self.tokenizer.read_while_u8(|b| Self::id_pdf_whitespace(b));
+        let _ = self.tokenizer.read_while_u8(Self::id_pdf_whitespace);
     }
 
     /// Reads and parses a number from the PDF input stream.
@@ -132,7 +133,7 @@ impl<'a> PdfParser<'a> {
 
         // Check that the following character after the number is a valid delimiter
         // or a dot (potential decimal number).
-        if let Some(d) = self.tokenizer.data().get(0).copied() {
+        if let Some(d) = self.tokenizer.data().first().copied() {
             if !Self::is_pdf_delimiter(d) && d != b'.' {
                 return Err(ParserError::MissingDelimiterAfterKeyword(d));
             }
@@ -170,7 +171,7 @@ impl<'a> PdfParser<'a> {
             ));
         }
 
-        if let Some(d) = self.tokenizer.data().get(0).copied() {
+        if let Some(d) = self.tokenizer.data().first().copied() {
             if !Self::is_pdf_delimiter(d) {
                 return Err(ParserError::MissingDelimiterAfterKeyword(d));
             }
@@ -250,6 +251,6 @@ impl<'a> PdfParser<'a> {
 
             return Ok(value);
         }
-        Err(ParserError::InvalidToken('0' as char))
+        Err(ParserError::InvalidToken('0'))
     }
 }

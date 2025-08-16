@@ -9,7 +9,7 @@ use crate::{
     canvas::Canvas, canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
 };
 
-impl<'a, U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'a, T, U> {
+impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U> {
     fn save_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
         self.save()
     }
@@ -28,7 +28,7 @@ impl<'a, U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'a, 
         f: f32,
     ) -> Result<(), Self::ErrorType> {
         let mat = Transform::from_row(a, b, c, d, e, f);
-        let ctm_old = self.current_state()?.transform.clone();
+        let ctm_old = self.current_state()?.transform;
         let mut ctm_new = mat;
         ctm_new.concat(&ctm_old);
         self.current_state_mut()?.transform = ctm_new;
@@ -126,8 +126,8 @@ impl<'a, U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'a, 
                             // 3. Render the form's content stream into the mask canvas.
                             other.render_content_stream(
                                 &form.content_stream.operations,
-                                form.matrix.clone(),
-                                form.resources.as_ref().map_or(None, |r| Some(r)),
+                                form.matrix,
+                                form.resources.as_ref(),
                             )?;
 
                             // 4. Enable the mask on the main canvas. Subsequent drawing operations
@@ -140,7 +140,7 @@ impl<'a, U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'a, 
                     } else if let Some(mut mask) = self.mask.take() {
                         // This branch handles the case where `/SMask` is set to `/None` in the `ExtGState`,
                         // which signals the end of the current soft mask application.
-                        let transform = self.current_state()?.transform.clone();
+                        let transform = self.current_state()?.transform;
                         // Finalize the masking operation on the backend, which typically involves
                         // compositing the masked content.
                         self.canvas.finish_mask(mask.as_mut(), &transform);

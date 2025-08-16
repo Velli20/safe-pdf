@@ -112,7 +112,7 @@ impl FromDictionary for Type3Font {
         for (name, value) in char_proc_dictionary.dictionary.iter() {
             // Resolve the referenced content stream object from the PDF's object collection.
             // If the reference cannot be resolved, return an error with the object number.
-            let content_stream_obj = objects.resolve_stream(&value)?;
+            let content_stream_obj = objects.resolve_stream(value)?;
             // Parse the content stream data into a sequence of PDF operators.
             let operators = PdfOperatorVariant::from(content_stream_obj.data.as_slice())?;
             // Insert the parsed operators into the char_procs map under the glyph name.
@@ -164,19 +164,15 @@ impl FromDictionary for FontEncodingDictionary {
         dictionary: &Dictionary,
         _objects: &ObjectCollection, // No need for objects here based on spec
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        let base_encoding = if let Some(base_encoding) = dictionary.get_string("BaseEncoding") {
-            Some(base_encoding.to_owned())
-        } else {
-            None
-        };
+        let base_encoding = dictionary.get_string("BaseEncoding").map(|base_encoding| base_encoding.to_owned());
 
         let mut differences = HashMap::new();
 
         if let Some(diff_array) = dictionary.get_array("Differences") {
             let mut current_code = 0;
-            let mut iter = diff_array.iter();
+            let iter = diff_array.iter();
 
-            while let Some(entry) = iter.next() {
+            for entry in iter {
                 match entry {
                     ObjectVariant::Integer(code) => {
                         // This is a 'firstCode'

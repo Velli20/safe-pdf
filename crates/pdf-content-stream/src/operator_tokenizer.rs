@@ -30,7 +30,7 @@ impl<'a> OperatorReader<'a> for PdfParser<'a> {
             return Ok(Cow::Borrowed(""));
         }
 
-        Ok(String::from_utf8_lossy(&name_bytes))
+        Ok(String::from_utf8_lossy(name_bytes))
     }
 
     fn skip_whitespace_and_comments(&mut self) -> Result<(), PdfOperatorError> {

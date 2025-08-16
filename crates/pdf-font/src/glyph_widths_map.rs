@@ -99,7 +99,7 @@ impl GlyphWidthsMap {
                             }
                         })?;
                         let delta = c_last_candidate - cid;
-                        if delta >= 0 && delta <= 10 {
+                        if (0..=10).contains(&delta) {
                             // Treat as attempted range missing width
                             return Err(GlyphWidthsMapError::MissingWidthForCIDRange {
                                 c_first: cid,

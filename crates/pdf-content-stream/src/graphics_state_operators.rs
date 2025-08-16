@@ -198,7 +198,7 @@ impl PdfOperator for SaveGraphicsState {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::SaveGraphicsState(Self::default()))
+        Ok(PdfOperatorVariant::SaveGraphicsState(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
@@ -216,7 +216,7 @@ impl PdfOperator for RestoreGraphicsState {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::RestoreGraphicsState(Self::default()))
+        Ok(PdfOperatorVariant::RestoreGraphicsState(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {

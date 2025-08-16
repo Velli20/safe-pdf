@@ -35,7 +35,7 @@ pub(crate) struct TextState<'a> {
     pub(crate) font: Option<&'a Font>,
 }
 
-impl<'a> Default for TextState<'a> {
+impl Default for TextState<'_> {
     fn default() -> Self {
         Self {
             matrix: Transform::identity(),
@@ -77,7 +77,7 @@ impl CanvasState<'_> {
     const DEFAULT_MITER_LIMIT: f32 = 0.0;
 }
 
-impl<'a> Default for CanvasState<'a> {
+impl Default for CanvasState<'_> {
     fn default() -> Self {
         Self {
             transform: Transform::identity(),
@@ -250,7 +250,7 @@ where
                 ..
             } => {
                 // Apply transform adjustments if a matrix is provided.
-                let transform = if let Some(mut mat) = matrix.clone() {
+                let transform = if let Some(mut mat) = *matrix {
                     // FIXME: Converting matrix to the device userspace. The rendering backend expects an
                     // origin at the top-left, with the Y-axis pointing downwards, so we apply canvas height - ty.
                     mat.ty = self.canvas.height() - mat.ty;

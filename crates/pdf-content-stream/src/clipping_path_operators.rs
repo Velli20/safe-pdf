@@ -14,7 +14,7 @@ impl PdfOperator for ClipNonZero {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::ClipNonZero(Self::default()))
+        Ok(PdfOperatorVariant::ClipNonZero(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
@@ -32,7 +32,7 @@ impl PdfOperator for ClipEvenOdd {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::ClipEvenOdd(Self::default()))
+        Ok(PdfOperatorVariant::ClipEvenOdd(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
