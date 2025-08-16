@@ -1,5 +1,5 @@
 use femtovg::{Canvas, Color, FillRule, Paint, Path};
-use pdf_canvas::canvas_backend::CanvasBackend;
+use pdf_canvas::canvas_backend::{CanvasBackend, Shader};
 use pdf_canvas::{
     PathFillType,
     pdf_path::{PathVerb, PdfPath},
@@ -41,11 +41,16 @@ pub struct CanvasImpl<'a> {
 }
 
 impl CanvasBackend for CanvasImpl<'_> {
+    type MaskType = CanvasImpl<'static>;
+    type ImageType = ();
+
     fn fill_path(
         &mut self,
         path: &PdfPath,
         fill_type: PathFillType,
-        color: pdf_canvas::color::Color,
+        color: pdf_graphics::color::Color,
+        _shader: &Option<Shader>,
+        _pattern_image: Option<Self::ImageType>,
     ) {
         let mut path = to_femtovg_path(path);
 
@@ -58,7 +63,14 @@ impl CanvasBackend for CanvasImpl<'_> {
         self.canvas.fill_path(&mut path, &fill_paint)
     }
 
-    fn stroke_path(&mut self, path: &PdfPath, color: pdf_canvas::color::Color, line_width: f32) {
+    fn stroke_path(
+        &mut self,
+        path: &PdfPath,
+        color: pdf_graphics::color::Color,
+        line_width: f32,
+        _shader: &Option<Shader>,
+        _pattern_image: Option<Self::ImageType>,
+    ) {
         let mut path = to_femtovg_path(path);
 
         let mut stroke_paint = Paint::color(Color::rgbf(color.r, color.g, color.b));
@@ -92,9 +104,29 @@ impl CanvasBackend for CanvasImpl<'_> {
         _width: f32,
         _height: f32,
         _bits_per_component: u32,
-        _transform: &pdf_canvas::transform::Transform,
+        _transform: &pdf_graphics::transform::Transform,
         _smask: Option<&[u8]>,
     ) {
+        todo!()
+    }
+
+    fn create_mask(&mut self, width: f32, height: f32) -> Box<Self::MaskType> {
+        todo!()
+    }
+
+    fn enable_mask(&mut self, mask: &mut Self::MaskType) {
+        todo!()
+    }
+
+    fn finish_mask(
+        &mut self,
+        mask: &mut Self::MaskType,
+        transform: &pdf_graphics::transform::Transform,
+    ) {
+        todo!()
+    }
+
+    fn image_snapshot(&mut self) -> Self::ImageType {
         todo!()
     }
 }

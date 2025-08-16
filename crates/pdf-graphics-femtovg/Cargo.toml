@@ -8,3 +8,4 @@ edition = "2024"
 femtovg = { version = "0.14.0", features = ["wgpu"] }
 pdf-document = { path = "../pdf-document" }
 pdf-canvas = { path = "../pdf-canvas" }
+pdf-graphics = { path = "../pdf-graphics" }

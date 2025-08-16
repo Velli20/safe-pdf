@@ -1585,6 +1585,7 @@ dependencies = [
  "femtovg",
  "pdf-canvas",
  "pdf-document",
+ "pdf-graphics",
 ]
 
 [[package]]
