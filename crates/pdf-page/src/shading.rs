@@ -7,7 +7,7 @@ use thiserror::Error;
 
 use crate::{
     color_space::ColorSpace,
-    function::{self, Function, FunctionReadError},
+    function::{Function, FunctionReadError},
 };
 
 /// Errors that can occur while parsing a Shading object.

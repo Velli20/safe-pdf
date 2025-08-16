@@ -1,6 +1,6 @@
 use pdf_object::{dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection};
 
-use pdf_postscript::operator::Operator;
+use pdf_postscript::{calculator::CalcError, operator::Operator};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -37,6 +37,8 @@ pub enum FunctionReadError {
     },
     #[error("Domain parsing error: {0}")]
     DomainParsingError(#[from] ObjectError),
+    #[error("PostScript calculator error: {0}")]
+    PostScriptCalculatorError(#[from] CalcError),
 }
 
 #[derive(Debug, Error)]
@@ -47,6 +49,8 @@ pub enum FunctionInterpolationError {
     MismatchedC0C1Length,
     #[error("Domain must be an increasing interval (domain[0] < domain[1])")]
     InvalidDomain,
+    #[error("PostScript calculator error: {0}")]
+    PostScriptCalculatorError(#[from] CalcError),
 }
 
 /// Represents the type of a PDF Function object.
@@ -231,7 +235,7 @@ impl Function {
             }
 
             // 2. Evaluate PostScript operators
-            let result_stack = pdf_postscript::calculator::execute(&stack, operators);
+            let result_stack = pdf_postscript::calculator::execute(&stack, operators)?;
 
             // 3. Clip outputs to range
             let mut outputs = Vec::new();
@@ -395,7 +399,7 @@ impl Function {
                     data: FunctionData::PostScriptCalculator {
                         operators: pdf_postscript::calculator::parse_tokens(
                             &code.split_whitespace().collect::<Vec<_>>(),
-                        ),
+                        )?,
                         domain,
                         range,
                     },
