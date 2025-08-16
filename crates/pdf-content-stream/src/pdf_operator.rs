@@ -615,9 +615,7 @@ mod tests {
                 input: b"10 10 100 50 re B",
                 expected_ops: vec![
                     PdfOperatorVariant::Rectangle(Rectangle::new(10.0, 10.0, 100.0, 50.0)),
-                    PdfOperatorVariant::FillAndStrokePathNonZero(
-                        FillAndStrokePathNonZero,
-                    ),
+                    PdfOperatorVariant::FillAndStrokePathNonZero(FillAndStrokePathNonZero),
                 ],
             },
             TestCase {
@@ -625,9 +623,7 @@ mod tests {
                 input: b"10 10 100 50 re B*",
                 expected_ops: vec![
                     PdfOperatorVariant::Rectangle(Rectangle::new(10.0, 10.0, 100.0, 50.0)),
-                    PdfOperatorVariant::FillAndStrokePathEvenOdd(
-                        FillAndStrokePathEvenOdd,
-                    ),
+                    PdfOperatorVariant::FillAndStrokePathEvenOdd(FillAndStrokePathEvenOdd),
                 ],
             },
             TestCase {

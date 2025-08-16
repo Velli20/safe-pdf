@@ -42,6 +42,9 @@ cargo test
 # Type-check all crates
 cargo check
 
+# Run Clippy lints
+cargo clippy --all --workspace
+
 # Build example app with Skia backend
 cargo build --example skia --features "skia"
 

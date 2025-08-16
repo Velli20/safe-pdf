@@ -161,6 +161,7 @@ mod tests {
         let valid_inputs: Vec<(&[u8], f64)> = vec![
             (b"123.456 ", 123.456),
             (b"-0.789 ", -0.789),
+            #[allow(clippy::approx_constant)]
             (b"+3.14 ", 3.14),
             (b"0.0 ", 0.0),
             (b".00048828125", 0.00048828125),

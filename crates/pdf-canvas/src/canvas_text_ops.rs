@@ -16,8 +16,7 @@ impl<U, T: CanvasBackend<ImageType = U>> TextPositioningOps for PdfCanvas<'_, T,
             .text_state
             .line_matrix
             .concat(&mat);
-        self.current_state_mut()?.text_state.matrix =
-            self.current_state()?.text_state.line_matrix;
+        self.current_state_mut()?.text_state.matrix = self.current_state()?.text_state.line_matrix;
         Ok(())
     }
 

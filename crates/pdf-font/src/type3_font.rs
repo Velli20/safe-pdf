@@ -77,7 +77,7 @@ impl FromDictionary for Type3Font {
 
         // Parse optional `/Encoding` entry
         let encoding = if let Some(encoding_obj) = dictionary.get("Encoding") {
-            match objects.resolve_object(encoding_obj.as_ref())? {
+            match objects.resolve_object(encoding_obj)? {
                 ObjectVariant::Name(name) => {
                     // Named encoding like /StandardEncoding
                     Some(FontEncodingDictionary {
@@ -164,7 +164,9 @@ impl FromDictionary for FontEncodingDictionary {
         dictionary: &Dictionary,
         _objects: &ObjectCollection, // No need for objects here based on spec
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        let base_encoding = dictionary.get_string("BaseEncoding").map(|base_encoding| base_encoding.to_owned());
+        let base_encoding = dictionary
+            .get_string("BaseEncoding")
+            .map(|base_encoding| base_encoding.to_owned());
 
         let mut differences = HashMap::new();
 

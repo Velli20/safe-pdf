@@ -18,13 +18,15 @@ pub enum ColorSpace {
 
 impl ColorSpace {
     pub fn from(obj: &ObjectVariant) -> Self {
-        let name = obj.as_str().unwrap();
-
-        match name.as_ref() {
-            "DeviceGray" => ColorSpace::DeviceGray,
-            "DeviceRGB" => ColorSpace::DeviceRGB,
-            "DeviceCMYK" => ColorSpace::DeviceCMYK,
-            _ => ColorSpace::Unsupported(name.to_string()),
+        if let Some(name) = obj.as_str() {
+            match name.as_ref() {
+                "DeviceGray" => ColorSpace::DeviceGray,
+                "DeviceRGB" => ColorSpace::DeviceRGB,
+                "DeviceCMYK" => ColorSpace::DeviceCMYK,
+                _ => ColorSpace::Unsupported(name.to_string()),
+            }
+        } else {
+            ColorSpace::Unsupported("<non-name color space>".to_string())
         }
     }
 }

@@ -29,7 +29,7 @@ pub enum PdfPageError {
 pub struct PdfPage {
     /// The page object dictionary containing all page-specific information.
     /// Reference to the parent page tree node.
-    parent: Option<IndirectObject>,
+    _parent: Option<IndirectObject>,
     /// The contents of the page, which can be a single stream object or
     /// an array of streams.
     pub contents: Option<ContentStream>,
@@ -53,7 +53,7 @@ impl FromDictionary for PdfPage {
         let resources = Resources::from_dictionary(dictionary, objects)?;
 
         Ok(Self {
-            parent: None,
+            _parent: None,
             contents,
             media_box,
             resources,

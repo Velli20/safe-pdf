@@ -166,16 +166,16 @@ impl FromDictionary for FontDescriptor {
             .ok_or(FontDescriptorError::MissingRequiredEntry("FontBBox"))?
             .as_array_of::<f32, 4>()?;
 
-        let font_family = dictionary.get_string("FontFamily").map(|font_family| font_family.to_owned());
+        let font_family = dictionary
+            .get_string("FontFamily")
+            .map(|font_family| font_family.to_owned());
 
         let resolve_font_file_stream = |key: &str| -> Option<ObjectVariant> {
-            dictionary
-                .get(key)
-                .and_then(|obj_box| match obj_box.as_ref() {
-                    ObjectVariant::Reference(id) => objects.get(*id),
-                    ObjectVariant::Stream(s) => Some(ObjectVariant::Stream(s.clone())),
-                    _ => None,
-                })
+            dictionary.get(key).and_then(|obj| match obj {
+                ObjectVariant::Reference(id) => objects.get(*id),
+                ObjectVariant::Stream(s) => Some(ObjectVariant::Stream(s.clone())),
+                _ => None,
+            })
         };
 
         let font_file = resolve_font_file_stream("FontFile2")

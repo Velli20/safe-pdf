@@ -72,10 +72,7 @@ impl ObjectVariant {
     }
 
     pub fn is_array(&self) -> bool {
-        match self {
-            ObjectVariant::Array(_) => true,
-            _ => false,
-        }
+        matches!(self, ObjectVariant::Array(_))
     }
 
     pub fn as_array_of<T, const N: usize>(&self) -> Result<[T; N], ObjectError>

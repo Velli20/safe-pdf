@@ -95,11 +95,9 @@ impl ObjectCollection {
                     })
                 }
             }
-            other => {
-                Err(ObjectError::FailedResolveDictionaryObject {
-                    resolved_type: other.name(),
-                })
-            }
+            other => Err(ObjectError::FailedResolveDictionaryObject {
+                resolved_type: other.name(),
+            }),
         }
     }
 
@@ -132,11 +130,9 @@ impl ObjectCollection {
                     })
                 }
             }
-            other => {
-                Err(ObjectError::FailedResolveStreamObject {
-                    resolved_type: other.name(),
-                })
-            }
+            other => Err(ObjectError::FailedResolveStreamObject {
+                resolved_type: other.name(),
+            }),
         }
     }
 }

@@ -78,10 +78,12 @@ impl FromDictionary for CharacterIdentifierFont {
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let default_width = if let Some(default_width) = dictionary.get("DW") {
-            default_width.as_number::<f32>().map_err(|err| CidFontError::NumericConversionError {
+            default_width.as_number::<f32>().map_err(|err| {
+                CidFontError::NumericConversionError {
                     entry_description: "DW",
                     source: err,
-                })?
+                }
+            })?
         } else {
             Self::DEFAULT_WIDTH
         };
@@ -105,7 +107,7 @@ impl FromDictionary for CharacterIdentifierFont {
 
         // FontDescriptor must be an indirect reference according to the PDF spec.
         let descriptor = if let Some(obj) = dictionary.get("FontDescriptor") {
-            let desc_dict = objects.resolve_dictionary(obj.as_ref())?;
+            let desc_dict = objects.resolve_dictionary(obj)?;
             // TODO: Err
             FontDescriptor::from_dictionary(desc_dict, objects)
                 .map_err(CidFontError::FontDescriptorError)?

@@ -270,7 +270,7 @@ pub trait GraphicsStateOps: PdfOperatorBackendError {
     /// # Parameters
     ///
     /// - `cap_style`: An integer representing the cap style (e.g., 0 for butt, 1 for
-    ///    round, 2 for projecting square).
+    ///   round, 2 for projecting square).
     ///
     /// # Returns
     ///
@@ -805,7 +805,7 @@ pub trait MarkedContentOps: PdfOperatorBackendError {
     ///
     /// - `tag`: The tag for the marked-content sequence.
     /// - `properties_name_or_dict`: The name of a property list in the resource
-    /// dictionary or an inline dictionary.
+    ///   dictionary or an inline dictionary.
     ///
     /// # Returns
     ///

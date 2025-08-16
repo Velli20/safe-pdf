@@ -126,9 +126,7 @@ impl PdfOperator for CloseFillAndStrokePathNonZero {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::CloseFillAndStrokePathNonZero(
-            Self,
-        ))
+        Ok(PdfOperatorVariant::CloseFillAndStrokePathNonZero(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
@@ -147,9 +145,7 @@ impl PdfOperator for CloseFillAndStrokePathEvenOdd {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::CloseFillAndStrokePathEvenOdd(
-            Self,
-        ))
+        Ok(PdfOperatorVariant::CloseFillAndStrokePathEvenOdd(Self))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {

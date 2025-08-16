@@ -63,14 +63,14 @@ impl FromDictionary for ContentStream {
         };
 
         // Resolve the /Contents entry if it's an indirect reference.
-        let contents = match contents.as_ref() {
+        let contents = match contents {
             ObjectVariant::Reference(num) => {
                 // The object is an indirect reference; resolve it from the `objects` collection.
                 objects.get(*num).ok_or(
                     ContentStreamReadError::FailedResolveFontObjectReference { obj_num: *num },
                 )?
             }
-            _ => contents.as_ref().clone(),
+            _ => contents.clone(),
         };
 
         // Process the resolved /Contents object.

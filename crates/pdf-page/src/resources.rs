@@ -55,7 +55,7 @@ impl FromDictionary for Resources {
         };
 
         // Resolve the actual `/Resources` dictionary.
-        let resources = objects.resolve_dictionary(resources.as_ref())?;
+        let resources = objects.resolve_dictionary(resources)?;
 
         let mut fonts = HashMap::new();
 
@@ -76,7 +76,7 @@ impl FromDictionary for Resources {
         if let Some(eg) = resources.get_dictionary("ExtGState") {
             for (name, v) in &eg.dictionary {
                 // Each value can be a direct dictionary or an indirect reference to one.
-                let dictionary = objects.resolve_dictionary(v.as_ref())?;
+                let dictionary = objects.resolve_dictionary(v)?;
                 // Parse the external graphics state and insert it into the map.
                 external_graphics_states.insert(
                     name.to_owned(),
@@ -123,7 +123,7 @@ impl FromDictionary for Resources {
         // Process `/XObject` entries
         if let Some(xobject_dict) = resources.get_dictionary("XObject") {
             for (name, v) in &xobject_dict.dictionary {
-                let stream_object = objects.resolve_stream(v.as_ref())?;
+                let stream_object = objects.resolve_stream(v)?;
 
                 // Parse the XObject and insert it into the map.
                 xobjects.insert(

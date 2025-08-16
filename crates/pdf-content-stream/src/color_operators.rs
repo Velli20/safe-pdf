@@ -291,12 +291,8 @@ impl PdfOperator for SetStrokingColor {
         let mut values = vec![];
 
         let pattern = operands.get_str().ok();
-        loop {
-            if let Ok(value) = operands.get_f32() {
-                values.push(value);
-            } else {
-                break;
-            }
+        while let Ok(value) = operands.get_f32() {
+            values.push(value);
         }
 
         Ok(PdfOperatorVariant::SetStrokingColor(Self::new(
@@ -340,12 +336,8 @@ impl PdfOperator for SetNonStrokingColor {
         let mut values = vec![];
 
         let pattern = operands.get_str().ok();
-        loop {
-            if let Ok(value) = operands.get_f32() {
-                values.push(value);
-            } else {
-                break;
-            }
+        while let Ok(value) = operands.get_f32() {
+            values.push(value);
         }
 
         Ok(PdfOperatorVariant::SetNonStrokingColor(Self::new(

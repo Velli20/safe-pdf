@@ -12,8 +12,8 @@ impl Dictionary {
         Dictionary { dictionary }
     }
 
-    pub fn get(&self, key: &str) -> Option<&Box<ObjectVariant>> {
-        self.dictionary.get(key)
+    pub fn get(&self, key: &str) -> Option<&ObjectVariant> {
+        self.dictionary.get(key).map(|b| b.as_ref())
     }
 
     pub fn get_number(&self, key: &str) -> Option<i64> {

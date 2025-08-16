@@ -90,7 +90,8 @@ impl ColorStops {
         for i in 0..num_stops {
             let t = i as f32 / num_stops as f32;
             // Map t to the function's domain
-            let x = function.domain()[0] + t * (function.domain()[1] - function.domain()[0]);
+            let domain = function.domain().unwrap_or([0.0, 1.0]);
+            let x = domain[0] + t * (domain[1] - domain[0]);
             // Evaluate the function
             let color_components = function
                 .interpolate(x)
@@ -176,7 +177,7 @@ impl FromDictionary for Shading {
         match ShadingType::from_i32(shading_type) {
             Some(ShadingType::FunctionBased) => {
                 // Read optional `/ColorSpace` entry, which defines the color space for the shading.
-                let color_space = dictionary.get("ColorSpace").map(|obj| ColorSpace::from(obj.as_ref()));
+                let color_space = dictionary.get("ColorSpace").map(ColorSpace::from);
 
                 // Read optional `/Background` entry, specifying a background color as an array of numbers.
                 let background = if let Some(obj) = dictionary.get("Background") {
@@ -277,7 +278,7 @@ impl FromDictionary for Shading {
                 let color_space = dictionary
                     .get("ColorSpace")
                     .ok_or(ShadingError::MissingRequiredEntry("ColorSpace"))
-                    .map(|obj| ColorSpace::from(obj.as_ref()))?;
+                    .map(ColorSpace::from)?;
 
                 // Read required `/Function` entry as a dictionary.
                 let function = if let Some(f) = dictionary.get_dictionary("Function") {
@@ -308,7 +309,7 @@ impl FromDictionary for Shading {
                 let color_space = dictionary
                     .get("ColorSpace")
                     .ok_or(ShadingError::MissingRequiredEntry("ColorSpace"))
-                    .map(|obj| ColorSpace::from(obj.as_ref()))?;
+                    .map(ColorSpace::from)?;
 
                 // Read required `/Function` entry as a dictionary.
                 let function = if let Some(dictionary) = dictionary.get_dictionary("Function") {

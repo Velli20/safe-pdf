@@ -108,11 +108,17 @@ pub struct Function {
 }
 
 impl Function {
-    pub fn domain(&self) -> &[f32; 2] {
+    pub fn domain(&self) -> Option<[f32; 2]> {
         match &self.data {
-            FunctionData::Exponential { domain, .. } => domain,
-            FunctionData::Stitching { domain, .. } => domain,
-            FunctionData::PostScriptCalculator { .. } => todo!(),
+            FunctionData::Exponential { domain, .. } => Some(*domain),
+            FunctionData::Stitching { domain, .. } => Some(*domain),
+            FunctionData::PostScriptCalculator { domain, .. } => {
+                if domain.len() >= 2 {
+                    Some([domain[0], domain[1]])
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -248,7 +254,6 @@ impl Function {
                 let max = range[2 * i + 1];
                 outputs.push((*val as f32).max(min).min(max));
             }
-            panic!();
             Ok(outputs)
         } else {
             unreachable!();
@@ -259,7 +264,7 @@ impl Function {
 impl Function {
     pub(crate) fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        _objects: &ObjectCollection,
         stream: Option<&[u8]>,
     ) -> Result<Function, FunctionReadError> {
         let function_type_int = dictionary
@@ -343,13 +348,13 @@ impl Function {
                             expected_type: "Dictionary",
                             found_type: obj.name(),
                         })?;
-                    functions.push(Function::from_dictionary(dict, objects, None)?);
+                    functions.push(Function::from_dictionary(dict, _objects, None)?);
                 }
 
                 // Parse Bounds array
                 let bounds = dictionary
                     .get("Bounds")
-                    .unwrap()
+                    .ok_or(FunctionReadError::MissingRequiredEntry("Bounds"))?
                     .as_vec_of::<f32>()
                     .map_err(|e| FunctionReadError::EntryReadError {
                         entry_description: "Bounds",
@@ -359,7 +364,7 @@ impl Function {
                 // Parse Encode array
                 let encode = dictionary
                     .get("Encode")
-                    .unwrap()
+                    .ok_or(FunctionReadError::MissingRequiredEntry("Encode"))?
                     .as_vec_of::<f32>()
                     .map_err(|e| FunctionReadError::EntryReadError {
                         entry_description: "Encode",

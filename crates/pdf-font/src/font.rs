@@ -121,7 +121,7 @@ impl FromDictionary for Font {
         // Attempt to resolve the optional `/ToUnicode` CMap stream, which maps character codes to Unicode.
         // If present, parse it into a `CharacterMap`. If not present, set cmap to None.
         let cmap = if let Some(obj) = dictionary.get("ToUnicode") {
-            let stream = objects.resolve_stream(obj.as_ref())?;
+            let stream = objects.resolve_stream(obj)?;
             Some(CharacterMap::from_stream_object(stream)?)
         } else {
             None

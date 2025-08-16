@@ -14,7 +14,7 @@ pub enum XObject {
     Image(ImageXObject),
     /// A form XObject, which is a self-contained sequence of graphics objects
     /// that can be painted as a single unit.
-    Form(FormXObject),
+    Form(Box<FormXObject>),
 }
 
 #[derive(Debug, Error)]
@@ -80,7 +80,7 @@ impl XObjectReader for XObject {
             }
             "Form" => {
                 let form_xobject = FormXObject::read_xobject(dictionary, stream_data, objects)?;
-                Ok(XObject::Form(form_xobject))
+                Ok(XObject::Form(Box::new(form_xobject)))
             }
             other => Err(XObjectError::UnsupportedXObjectType {
                 subtype: other.to_string(),
