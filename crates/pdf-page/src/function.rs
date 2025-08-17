@@ -51,6 +51,18 @@ pub enum FunctionInterpolationError {
     InvalidDomain,
     #[error("PostScript calculator error: {0}")]
     PostScriptCalculatorError(#[from] CalcError),
+    #[error("Encode array length must be exactly 2 * number of functions")]
+    InvalidEncodeLength,
+    #[error("Bounds array length must be number of functions - 1")]
+    InvalidBoundsLength,
+    #[error("Index calculation overflow or out-of-bounds during encode access")]
+    EncodeIndexError,
+    #[error("Result stack does not contain enough values for declared range")]
+    InsufficientResultStack,
+    #[error("Negative exponent with zero normalized input produces undefined result")]
+    NegativeExponentAtZero,
+    #[error("Input value is NaN")]
+    InputIsNaN,
 }
 
 /// Represents the type of a PDF Function object.
@@ -122,6 +134,25 @@ impl Function {
         }
     }
 
+    #[inline]
+    fn safe_f64_to_f32(val: f64) -> f32 {
+        // Avoid direct casts in comparisons flagged by clippy; manual clamping then single cast.
+        if val.is_nan() {
+            return f32::NAN;
+        }
+        const F32_MAX_F64: f64 = 3.4028234663852886e38_f64; // f32::MAX as f64
+        const F32_MIN_F64: f64 = -3.4028234663852886e38_f64; // f32::MIN as f64
+        let clamped = val.clamp(F32_MIN_F64, F32_MAX_F64);
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_precision_loss,
+            clippy::as_conversions
+        )]
+        {
+            clamped as f32
+        }
+    }
+
     /// Interpolates an input value `x` according to the function's definition.
     ///
     /// # Returns
@@ -129,6 +160,9 @@ impl Function {
     /// A `Result` containing a `Vec<f32>` of the output values on success, or a
     /// `FunctionInterpolationError` on failure.
     pub fn interpolate(&self, x: f32) -> Result<Vec<f32>, FunctionInterpolationError> {
+        if x.is_nan() {
+            return Err(FunctionInterpolationError::InputIsNaN);
+        }
         if let FunctionData::Exponential {
             c0,
             c1,
@@ -152,15 +186,22 @@ impl Function {
 
             // 1. Clip the input value `x` to the function's domain.
             let x_clipped = x.max(domain[0]).min(domain[1]);
+            // 2. Normalize the clipped value to the interval [0, 1]. (explicit safe arithmetic)
+            let denom = domain[1] - domain[0];
+            debug_assert!(denom > 0.0);
+            let x_normalized = (x_clipped - domain[0]) / denom;
 
-            // 2. Normalize the clipped value to the interval [0, 1].
-            let x_normalized = (x_clipped - domain[0]) / (domain[1] - domain[0]);
+            // Guard: if exponent is negative and x_normalized == 0 => undefined (division by zero)
+            if *exponent < 0.0 && x_normalized == 0.0 {
+                return Err(FunctionInterpolationError::NegativeExponentAtZero);
+            }
 
-            // 3. Apply the interpolation formula for each component.
+            // 3. Apply the interpolation formula for each component using checked powf.
+            let pow = x_normalized.powf(*exponent); // For f32 this won't panic, guard above handles undefined case.
             let result = c0
                 .iter()
                 .zip(c1.iter())
-                .map(|(&c0_i, &c1_i)| c0_i + x_normalized.powf(*exponent) * (c1_i - c0_i))
+                .map(|(&c0_i, &c1_i)| c0_i + pow * (c1_i - c0_i))
                 .collect();
 
             Ok(result)
@@ -174,32 +215,68 @@ impl Function {
             // 1. Clamp the input value `x` to the function's domain.
             let x_clamped = x.clamp(domain[0], domain[1]);
 
+            // Validate structural invariants once (could be done at construction but cheap here)
+            if functions.len().checked_sub(1) != Some(bounds.len()) {
+                return Err(FunctionInterpolationError::InvalidBoundsLength);
+            }
+            if functions.len().checked_mul(2).map(|v| v == encode.len()) != Some(true) {
+                return Err(FunctionInterpolationError::InvalidEncodeLength);
+            }
+
             // 2. Find which subfunction to use based on the `bounds` array.
             // The `bounds` array divides the domain into sub-domains, each corresponding
             // to a function in the `functions` array.
-            let mut index = 0;
-            while index < bounds.len() && x_clamped >= bounds[index] {
-                index += 1;
-            }
+            // Use binary search for clearer intent & performance.
+            use core::cmp::Ordering;
+            let index = match bounds.binary_search_by(|b| {
+                // Treat NaN as Less to keep index at 0 (already guarded earlier for x NaN)
+                b.partial_cmp(&x_clamped).unwrap_or(Ordering::Less)
+            }) {
+                Ok(pos) => pos.saturating_add(1), // If exactly equal to a bound, move to the next segment
+                Err(pos) => pos,
+            };
 
             // 3. Determine the input range (sub-domain) for the selected subfunction.
             // This is the interval [b0, b1] that contains `x_clamped`.
             let (b0, b1) = if index == 0 {
-                // First sub-domain: from the start of the main domain to the first bound.
                 (domain[0], bounds[0])
             } else if index == bounds.len() {
-                // Last sub-domain: from the last bound to the end of the main domain.
-                (bounds[index - 1], domain[1])
+                let prev_index = index
+                    .checked_sub(1)
+                    .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                let prev = *bounds
+                    .get(prev_index)
+                    .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                (prev, domain[1])
             } else {
-                // Intermediate sub-domain: between two bounds.
-                (bounds[index - 1], bounds[index])
+                let prev_index = index
+                    .checked_sub(1)
+                    .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                let prev = *bounds
+                    .get(prev_index)
+                    .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                let current = *bounds
+                    .get(index)
+                    .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                (prev, current)
             };
 
             // 4. Get the encoding values for the selected subfunction.
             // The `encode` array defines how to map the value from the sub-domain [b0, b1]
             // to the subfunction's own input domain [e0, e1].
-            let e0 = encode[2 * index];
-            let e1 = encode[2 * index + 1];
+            let enc_base = index
+                .checked_mul(2)
+                .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+            let e0 = *encode
+                .get(enc_base)
+                .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+            let e1 = *encode
+                .get(
+                    enc_base
+                        .checked_add(1)
+                        .ok_or(FunctionInterpolationError::EncodeIndexError)?,
+                )
+                .ok_or(FunctionInterpolationError::EncodeIndexError)?;
 
             // 5. Linearly interpolate the clamped input value from the sub-domain [b0, b1]
             // to the subfunction's domain [e0, e1].
@@ -226,7 +303,7 @@ impl Function {
             let input_count = domain.len() / 2;
             if input_count == 1 {
                 let x_clipped = x.max(domain[0]).min(domain[1]);
-                stack.push(x_clipped as f64);
+                stack.push(f64::from(x_clipped));
             } else {
                 // If you want to support multi-input, change interpolate signature to accept &[f32]
                 // For now, treat x as the first input and fill others with domain min
@@ -234,9 +311,22 @@ impl Function {
                     let val = if i == 0 {
                         x.max(domain[0]).min(domain[1])
                     } else {
-                        domain[2 * i].max(domain[2 * i]).min(domain[2 * i + 1])
+                        let pair_index = i
+                            .checked_mul(2)
+                            .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                        let start = *domain
+                            .get(pair_index)
+                            .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                        let end = *domain
+                            .get(
+                                pair_index
+                                    .checked_add(1)
+                                    .ok_or(FunctionInterpolationError::EncodeIndexError)?,
+                            )
+                            .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                        start.max(start).min(end)
                     };
-                    stack.push(val as f64);
+                    stack.push(f64::from(val));
                 }
             }
 
@@ -247,12 +337,25 @@ impl Function {
             let mut outputs = Vec::new();
             let output_count = range.len() / 2;
             for i in 0..output_count {
-                let val = result_stack.get(i).ok_or(
-                    FunctionInterpolationError::UnsupportedFunctionType(self.function_type),
-                )?;
-                let min = range[2 * i];
-                let max = range[2 * i + 1];
-                outputs.push((*val as f32).max(min).min(max));
+                let val = result_stack
+                    .get(i)
+                    .ok_or(FunctionInterpolationError::InsufficientResultStack)?;
+                let base = i
+                    .checked_mul(2)
+                    .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                let min = *range
+                    .get(base)
+                    .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                let max = *range
+                    .get(
+                        base.checked_add(1)
+                            .ok_or(FunctionInterpolationError::EncodeIndexError)?,
+                    )
+                    .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                let v_f64 = *val;
+                let mut v_f32 = Self::safe_f64_to_f32(v_f64);
+                v_f32 = v_f32.max(min).min(max);
+                outputs.push(v_f32);
             }
             Ok(outputs)
         } else {
@@ -370,6 +473,18 @@ impl Function {
                         entry_description: "Encode",
                         source: e,
                     })?;
+
+                // Validate relationships to avoid later arithmetic surprises
+                if functions.len().checked_sub(1) != Some(bounds.len()) {
+                    return Err(FunctionReadError::MissingRequiredEntry(
+                        "Bounds / Functions length mismatch",
+                    ));
+                }
+                if functions.len().checked_mul(2).map(|v| v == encode.len()) != Some(true) {
+                    return Err(FunctionReadError::MissingRequiredEntry(
+                        "Encode length invalid",
+                    ));
+                }
 
                 Ok(Function {
                     function_type,

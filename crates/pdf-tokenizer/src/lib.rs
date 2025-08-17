@@ -57,6 +57,45 @@ impl<'a> Tokenizer<'a> {
         Tokenizer { input, position: 0 }
     }
 
+    /// Safely advance the internal cursor by `n` bytes.
+    /// Returns `true` if the advance succeeded, `false` if it would move past the end.
+    #[inline]
+    fn advance(&mut self, n: usize) -> bool {
+        if n == 0 {
+            return true;
+        }
+        match self.position.checked_add(n) {
+            Some(new_pos) if new_pos <= self.input.len() => {
+                self.position = new_pos;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Peek the current byte without consuming it.
+    #[inline]
+    fn peek_byte(&self) -> Option<u8> {
+        self.input.get(self.position).copied()
+    }
+
+    /// Consume and return the next byte.
+    #[inline]
+    fn next_byte(&mut self) -> Option<u8> {
+        let b = self.peek_byte()?;
+        let _ = self.advance(1); // safe advance after peek
+        Some(b)
+    }
+
+    /// If the next byte matches `expected`, consume it and return true.
+    #[inline]
+    fn match_next(&mut self, expected: u8) -> bool {
+        matches!(self.peek_byte(), Some(b) if b == expected) && {
+            // safe to advance by 1; advance() returns false only if out-of-bounds
+            self.advance(1)
+        }
+    }
+
     pub fn expect(&mut self, expected: PdfToken) -> Result<(), TokenizerError> {
         match self.read() {
             Some(token) if token == expected => Ok(()),
@@ -74,91 +113,50 @@ impl<'a> Tokenizer<'a> {
 
     /// Reads the next token from the input.
     pub fn read(&mut self) -> Option<PdfToken> {
-        if self.position >= self.input.len() {
-            return None;
-        }
-        let byte = self.input[self.position];
-
-        match byte {
-            b'\n' => {
-                self.position += 1;
-                Some(PdfToken::NewLine)
-            }
-            b'\r' => {
-                self.position += 1;
-                Some(PdfToken::CarriageReturn)
-            }
-            b' ' => {
-                self.position += 1;
-                Some(PdfToken::Space)
-            }
+        let byte = self.next_byte()?;
+        use PdfToken::*;
+        Some(match byte {
+            b'\n' => NewLine,
+            b'\r' => CarriageReturn,
+            b' ' => Space,
             b'%' => {
-                self.position += 1;
-                if let Some(b'%') = self.input.get(self.position) {
-                    self.position += 1;
-                    return Some(PdfToken::DoublePercent);
+                if self.match_next(b'%') {
+                    DoublePercent
+                } else {
+                    Percent
                 }
-                Some(PdfToken::Percent)
             }
-            b'-' => {
-                self.position += 1;
-                Some(PdfToken::Minus)
-            }
-            b'+' => {
-                self.position += 1;
-                Some(PdfToken::Plus)
-            }
-            b'.' => {
-                self.position += 1;
-                Some(PdfToken::Period)
-            }
-            b'/' => {
-                self.position += 1;
-                Some(PdfToken::Solidus)
-            }
+            b'-' => Minus,
+            b'+' => Plus,
+            b'.' => Period,
+            b'/' => Solidus,
             b'<' => {
-                self.position += 1;
-                if let Some(b'<') = self.input.get(self.position) {
-                    self.position += 1;
-                    return Some(PdfToken::DoubleLeftAngleBracket);
+                if self.match_next(b'<') {
+                    DoubleLeftAngleBracket
+                } else {
+                    LeftAngleBracket
                 }
-                Some(PdfToken::LeftAngleBracket)
             }
             b'>' => {
-                self.position += 1;
-                if let Some(b'>') = self.input.get(self.position) {
-                    self.position += 1;
-                    return Some(PdfToken::DoubleRightAngleBracket);
+                if self.match_next(b'>') {
+                    DoubleRightAngleBracket
+                } else {
+                    RightAngleBracket
                 }
-                Some(PdfToken::RightAngleBracket)
             }
-            b'[' => {
-                self.position += 1;
-                Some(PdfToken::LeftSquareBracket)
-            }
-            b']' => {
-                self.position += 1;
-                Some(PdfToken::RightSquareBracket)
-            }
-            b'(' => {
-                self.position += 1;
-                Some(PdfToken::LeftParenthesis)
-            }
-            b')' => {
-                self.position += 1;
-                Some(PdfToken::RightParenthesis)
-            }
+            b'[' => LeftSquareBracket,
+            b']' => RightSquareBracket,
+            b'(' => LeftParenthesis,
+            b')' => RightParenthesis,
             b'0'..=b'9' => {
-                self.position += 1;
-                Some(PdfToken::Number((byte - b'0') as i32))
+                // Safe because of the pattern match restricting range.
+                // Using checked_sub then unwrap_or is fine because match arm ensures byte >= b'0'.
+                let digit = byte.saturating_sub(b'0');
+                Number(i32::from(digit))
             }
-            b'A'..=b'Z' | b'a'..=b'z' => {
-                self.position += 1;
-                Some(PdfToken::Alphabetic(byte))
-            }
-
-            _ => None,
-        }
+            b'A'..=b'Z' | b'a'..=b'z' => Alphabetic(byte),
+            _ => return None,
+        })
     }
 
     pub fn data(&self) -> &[u8] {
@@ -166,15 +164,19 @@ impl<'a> Tokenizer<'a> {
     }
 
     pub fn read_excactly(&mut self, length: usize) -> Result<&[u8], TokenizerError> {
-        if self.position + length > self.input.len() {
-            return Err(TokenizerError::UnexpectedEndOfFile(
-                length,
-                self.input.len() - self.position,
-            ));
+        let available = self.input.len().saturating_sub(self.position);
+        if length > available {
+            return Err(TokenizerError::UnexpectedEndOfFile(length, available));
         }
-        let result = &self.input[self.position..self.position + length];
-        self.position += length;
-        Ok(result)
+        // Safe: validated above length <= available.
+        // checked_add cannot fail due to previous bounds validation.
+        let end = match self.position.checked_add(length) {
+            Some(e) => e,
+            None => return Ok(&[]),
+        };
+        let slice = &self.input[self.position..end];
+        self.position = end;
+        Ok(slice)
     }
 
     pub fn read_while_u8<F>(&mut self, condition: F) -> &'a [u8]
@@ -182,8 +184,12 @@ impl<'a> Tokenizer<'a> {
         F: Fn(u8) -> bool,
     {
         let start = self.position;
-        while self.position < self.input.len() && condition(self.input[self.position]) {
-            self.position += 1;
+        while let Some(&b) = self.input.get(self.position) {
+            if condition(b) {
+                let _ = self.advance(1);
+            } else {
+                break;
+            }
         }
         &self.input[start..self.position]
     }
