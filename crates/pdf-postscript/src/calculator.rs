@@ -459,6 +459,7 @@ pub fn evaluate_postscript(input_stack: &[f64], code: &str) -> Result<Vec<f64>, 
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

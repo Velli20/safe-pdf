@@ -153,12 +153,20 @@ where
         let pdf_media_width = if let Some(bb) = bb {
             bb[2] - bb[0]
         } else {
-            media_box.as_ref().unwrap().width() as f32
+            #[allow(clippy::as_conversions)]
+            match *media_box {
+                Some(ref mb) => mb.width() as f32,
+                None => 0.0,
+            }
         };
         let pdf_media_height = if let Some(bb) = bb {
             bb[3] - bb[1]
         } else {
-            media_box.as_ref().unwrap().height() as f32
+            #[allow(clippy::as_conversions)]
+            match *media_box {
+                Some(ref mb) => mb.height() as f32,
+                None => 0.0,
+            }
         };
 
         let backend_canvas_width = backend.width();

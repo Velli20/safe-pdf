@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use pdf_object::ObjectVariant;
 use pdf_parser::PdfParser;
 

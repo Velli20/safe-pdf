@@ -168,6 +168,7 @@ impl GlyphWidthsMap {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use pdf_object::ObjectVariant;
@@ -179,7 +180,7 @@ mod tests {
 
     // Helper to create a pdf_object::Value::Number for f32
     fn num_f32(n: f32) -> ObjectVariant {
-        ObjectVariant::Real(n as f64)
+        ObjectVariant::Real(f64::from(n))
     }
 
     // Helper to create a pdf_object::Value::Array

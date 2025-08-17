@@ -267,6 +267,7 @@ impl PdfOperator for Rectangle {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use crate::recording_pdf_operator_backend::RecordingBackend;
 

@@ -741,7 +741,7 @@ impl MarkedContentOps for RecordingBackend {
         self.operations
             .push(RecordedOperation::BeginMarkedContentWithProperties {
                 tag: tag.to_string(),
-                properties_name_or_dict: properties_name_or_dict.clone(),
+                properties_name_or_dict: std::rc::Rc::clone(properties_name_or_dict),
             });
         Ok(())
     }

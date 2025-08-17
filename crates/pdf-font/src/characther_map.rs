@@ -97,8 +97,12 @@ impl FromStreamObject for CharacterMap {
                         println!("src_code: {src_code}, dst_char err fixme");
                         continue;
                     }
-                    let dst_char = dst_char.unwrap();
-                    bfchar_mappings.insert(src_code, dst_char);
+                    if let Ok(dst_char) = dst_char {
+                        bfchar_mappings.insert(src_code, dst_char);
+                    } else {
+                        // Skip invalid Unicode scalar without panicking.
+                        continue;
+                    }
                 }
             }
         }
@@ -107,6 +111,7 @@ impl FromStreamObject for CharacterMap {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use pdf_object::dictionary::Dictionary;
@@ -119,7 +124,11 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::new());
         let stream = StreamObject::new(0, 0, Rc::new(dictionary), input_data);
 
-        let cmap = CharacterMap::from_stream_object(&stream).expect("CMap parsing failed");
+        let cmap_res = CharacterMap::from_stream_object(&stream);
+        let cmap = match cmap_res {
+            Ok(c) => c,
+            Err(e) => panic!("CMap parsing failed: {e}"),
+        };
 
         assert_eq!(
             cmap.bfchar_mappings.len(),

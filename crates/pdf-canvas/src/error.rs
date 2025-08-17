@@ -34,4 +34,6 @@ pub enum PdfCanvasError {
     Type3FontError(#[from] Type3FontRendererError),
     #[error("Extrenal object '{0}' not found in resources")]
     XObjectNotFound(String),
+    #[error("Page missing media box")]
+    MissingMediaBox,
 }

@@ -72,7 +72,7 @@ impl Operands<'_> {
         if let Some((value, rest)) = self.values.split_first() {
             self.values = rest;
             match value {
-                ObjectVariant::Dictionary(dict) => Ok(dict.clone()),
+                ObjectVariant::Dictionary(dict) => Ok(std::rc::Rc::clone(dict)),
                 _ => Err(PdfOperatorError::InvalidOperandType {
                     expected_type: "Dictionary",
                     found_type: value.name(),
@@ -317,7 +317,8 @@ impl PdfOperatorVariant {
             parser.skip_whitespace();
 
             if let Some(PdfToken::Percent) = parser.tokenizer.peek() {
-                let _comment = parser.parse_comment().unwrap();
+                // Ignore comments; propagate any parse error via the dedicated variant.
+                parser.parse_comment()?;
                 continue;
             }
 
@@ -441,6 +442,7 @@ impl PdfOperatorVariant {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

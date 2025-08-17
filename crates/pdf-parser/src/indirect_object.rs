@@ -143,7 +143,7 @@ impl IndirectObjectParser for PdfParser<'_> {
                 return Ok(Some(ObjectVariant::Stream(Rc::new(StreamObject::new(
                     object_number,
                     generation_number,
-                    dictionary.clone(),
+                    Rc::clone(dictionary),
                     stream,
                 )))));
             } else {
@@ -162,6 +162,7 @@ impl IndirectObjectParser for PdfParser<'_> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use pdf_object::ObjectVariant;
 
