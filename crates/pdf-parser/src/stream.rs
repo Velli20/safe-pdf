@@ -24,7 +24,7 @@ pub enum StreamParsingError {
     },
     /// Indicates that there was an error while parsing the stream.
     #[error("Error while parsing stream: {0}")]
-    StreamParsingError(String),
+    StreamParsingError(&'static str),
     /// Indicates that the stream dictionary is missing the /Length entry.
     #[error("Stream dictionary missing /Length entry")]
     MissingLength,
@@ -119,7 +119,10 @@ impl StreamParser for PdfParser<'_> {
         let decode = dictionary.get_string("Filter");
 
         // Read the stream data
-        let stream_data = self.tokenizer.read_excactly(length as usize)?.to_vec();
+        let length_usize = usize::try_from(length).map_err(|_| {
+            StreamParsingError::StreamParsingError("Stream length does not fit in usize")
+        })?;
+        let stream_data = self.tokenizer.read_excactly(length_usize)?.to_vec();
 
         // There should be an end-of-line marker after the data and before `endstream`.
         if let Some(PdfToken::CarriageReturn) = self.tokenizer.peek() {

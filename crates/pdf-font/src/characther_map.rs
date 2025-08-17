@@ -75,33 +75,23 @@ impl FromStreamObject for CharacterMap {
 
             if in_bfchar_block {
                 let parts: Vec<&str> = trimmed_line.split_whitespace().collect();
-                if parts.len() == 2
-                    && parts[0].starts_with('<')
-                    && parts[0].ends_with('>')
-                    && parts[0].len() > 2
-                    && parts[1].starts_with('<')
-                    && parts[1].ends_with('>')
-                    && parts[1].len() > 2
-                {
-                    let src_hex = &parts[0][1..parts[0].len() - 1];
-                    let dst_hex = &parts[1][1..parts[1].len() - 1];
+                if parts.len() == 2 {
+                    let src_hex_opt = parts[0]
+                        .strip_prefix('<')
+                        .and_then(|s| s.strip_suffix('>'))
+                        .filter(|s| !s.is_empty());
+                    let dst_hex_opt = parts[1]
+                        .strip_prefix('<')
+                        .and_then(|s| s.strip_suffix('>'))
+                        .filter(|s| !s.is_empty());
 
-                    let src_code = parse_hex_to_u32(src_hex)?;
-                    let dst_u32 = parse_hex_to_u32(dst_hex)?;
-                    let dst_char =
-                        char::from_u32(dst_u32).ok_or_else(|| CMapError::InvalidUnicodeScalar {
-                            hex_value: dst_hex.to_string(),
-                            u32_value: dst_u32,
-                        });
-                    if dst_char.is_err() {
-                        println!("src_code: {src_code}, dst_char err fixme");
-                        continue;
-                    }
-                    if let Ok(dst_char) = dst_char {
-                        bfchar_mappings.insert(src_code, dst_char);
-                    } else {
-                        // Skip invalid Unicode scalar without panicking.
-                        continue;
+                    if let (Some(src_hex), Some(dst_hex)) = (src_hex_opt, dst_hex_opt) {
+                        let src_code = parse_hex_to_u32(src_hex)?;
+                        let dst_u32 = parse_hex_to_u32(dst_hex)?;
+                        if let Some(dst_char) = char::from_u32(dst_u32) {
+                            bfchar_mappings.insert(src_code, dst_char);
+                        }
+                        // If invalid Unicode scalar, skip silently TODO: Return error.
                     }
                 }
             }

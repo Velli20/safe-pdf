@@ -116,7 +116,7 @@ impl NumberParser for PdfParser<'_> {
             if let Some(d) = self.tokenizer.data().first().copied() {
                 if !Self::is_pdf_delimiter(d) {
                     return Err(NumberError::FractionalPartError {
-                        err: format!("Missing delimiter after number, found '{}'", d as char),
+                        err: format!("Missing delimiter after number, found '{}'", char::from(d)),
                     });
                 }
             }

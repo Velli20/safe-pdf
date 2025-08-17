@@ -10,7 +10,7 @@ use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
     event::WindowEvent,
-    event_loop::{ControlFlow, EventLoop},
+    event_loop::EventLoop,
     window::{Window, WindowAttributes},
 };
 
@@ -189,7 +189,7 @@ impl AppRenderer for Renderer2 {
         canvas.clear_rect(0, 0, 595, 842, Color::rgbf(1.0, 1.0, 1.0));
         canvas.save();
 
-        let mut canvas_impl = CanvasImpl { canvas: canvas };
+        let mut canvas_impl = CanvasImpl { canvas };
         let mut renderer = PdfRenderer::new(document, &mut canvas_impl);
         renderer.render(&[6]);
         canvas.restore();

@@ -95,8 +95,8 @@ fn escape(input: &[u8]) -> Result<String, NameObjectError> {
                     None => return Err(NameObjectError::IncompleteHexEscape),
                 };
 
-                let h1_char = h1_byte as char;
-                let h2_char = h2_byte as char;
+                let h1_char = char::from(h1_byte);
+                let h2_char = char::from(h2_byte);
 
                 if !h1_char.is_ascii_hexdigit() {
                     return Err(NameObjectError::NonHexDigitInEscape(h1_char));
@@ -112,9 +112,9 @@ fn escape(input: &[u8]) -> Result<String, NameObjectError> {
                         reason: e.to_string(),
                     }
                 })?;
-                result.push(byte_val as char);
+                result.push(char::from(byte_val));
             }
-            _ => result.push(*byte as char),
+            _ => result.push(char::from(*byte)),
         }
     }
     Ok(result)

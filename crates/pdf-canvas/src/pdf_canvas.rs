@@ -104,7 +104,7 @@ pub struct PdfCanvas<'a, T, U> {
     pub(crate) canvas_stack: Vec<CanvasState<'a>>,
 }
 
-impl<'a, U, T: CanvasBackend<ImageType = U>> Canvas for PdfCanvas<'_, T, U> {
+impl<U, T: CanvasBackend<ImageType = U>> Canvas for PdfCanvas<'_, T, U> {
     fn save(&mut self) -> Result<(), PdfCanvasError> {
         let mut state = self.current_state()?.clone();
         state.clip_path = None;

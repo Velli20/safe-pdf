@@ -51,7 +51,7 @@ impl HexStringParser for PdfParser<'_> {
 
             // 2. Check if the character is a valid hex digit (0-9, a-f, A-F)
             if !b.is_ascii_hexdigit() {
-                return Err(HexStringError::NotHexDecimal(*b as char));
+                return Err(HexStringError::NotHexDecimal(char::from(*b)));
             }
             // 3. Append hex digits to the hex string.
             filtered.push(*b);

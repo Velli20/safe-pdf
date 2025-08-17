@@ -314,7 +314,7 @@ fn main() {
                     if self.modifiers.super_key()
                         && logical_key
                             .to_text()
-                            .map_or(false, |text| text.eq_ignore_ascii_case("q"))
+                            .is_some_and(|text| text.eq_ignore_ascii_case("q"))
                     {
                         event_loop.exit();
                     }

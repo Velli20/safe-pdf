@@ -128,9 +128,9 @@ impl CrossReferenceTableParser for PdfParser<'_> {
 
                 // Read the status.
                 if let Some(PdfToken::Alphabetic(e)) = self.tokenizer.read() {
-                    let status = CrossReferenceStatus::from_byte(e).ok_or(
-                        CrossReferenceTableError::InvalidCrossReferenceStatus(e as char),
-                    )?;
+                    let status = CrossReferenceStatus::from_byte(e).ok_or_else(|| {
+                        CrossReferenceTableError::InvalidCrossReferenceStatus(char::from(e))
+                    })?;
                     entries.push(CrossReferenceEntry::new(
                         object_number,
                         generation_number,
@@ -144,9 +144,9 @@ impl CrossReferenceTableParser for PdfParser<'_> {
 
             // If the next token is not a number, we are done reading entries.
             if !matches!(self.tokenizer.peek(), Some(PdfToken::Number(_))) {
-                if entries.len() != total_number_of_entries as usize {
+                if entries.len() != usize::try_from(total_number_of_entries).unwrap_or(usize::MAX) {
                     return Err(CrossReferenceTableError::MissigTableEntries(
-                        total_number_of_entries as usize,
+                        usize::try_from(total_number_of_entries).unwrap_or(usize::MAX),
                         entries.len(),
                     ));
                 }
@@ -155,9 +155,12 @@ impl CrossReferenceTableParser for PdfParser<'_> {
         }
 
         // Create a new cross-reference table.
+        let first_object_number_u32 =
+            u32::try_from(first_object_number.unwrap_or(0_i32)).unwrap_or(0);
+        let total_entries_u32 = u32::try_from(total_number_of_entries).unwrap_or(0);
         Ok(CrossReferenceTable::new(
-            first_object_number.unwrap_or(0_i32) as u32,
-            total_number_of_entries as u32,
+            first_object_number_u32,
+            total_entries_u32,
             entries,
         ))
     }
