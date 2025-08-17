@@ -48,6 +48,7 @@ pub(crate) struct TrueTypeFontRenderer<'a, T: PdfOperatorBackend + Canvas> {
 }
 
 impl<'a, T: PdfOperatorBackend + Canvas> TrueTypeFontRenderer<'a, T> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         canvas: &'a mut T,
         font: &'a Font,
@@ -124,13 +125,9 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
             text_rise,                            // ty
         );
 
-        let cmap =
-            self.font
-                .cmap
-                .as_ref()
-                .ok_or(TrueTypeFontRendererError::NoCharacterMapForFont(
-                    self.font.base_font.clone(),
-                ))?;
+        let cmap = self.font.cmap.as_ref().ok_or_else(|| {
+            TrueTypeFontRendererError::NoCharacterMapForFont(self.font.base_font.clone())
+        })?;
 
         // Determine if the font uses a 2-byte encoding (e.g., /Identity-H for CID-keyed fonts).
         let is_two_byte_encoding = self.font.encoding.is_some();

@@ -62,11 +62,12 @@ impl FromDictionary for PdfPages {
         for value in kids_array {
             // Each entry must be an indirect reference. We extract its object number
             // for use in error messages.
-            let obj_num = value
-                .as_object_number()
-                .ok_or(PdfPagesError::InvalidKidEntry {
-                    found_type: value.name(),
-                })?;
+            let obj_num =
+                value
+                    .as_object_number()
+                    .ok_or_else(|| PdfPagesError::InvalidKidEntry {
+                        found_type: value.name(),
+                    })?;
 
             // Resolve the indirect reference to get the child's dictionary.
             let kid_dict = objects.resolve_dictionary(value)?;

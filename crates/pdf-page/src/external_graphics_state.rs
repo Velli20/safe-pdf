@@ -228,13 +228,13 @@ impl FromDictionary for ExternalGraphicsState {
                     })?)
                 }
                 "D" => {
-                    let arr = value.as_array().ok_or(
+                    let arr = value.as_array().ok_or_else(|| {
                         ExternalGraphicsStateError::UnsupportedTypeError {
                             key_name: name.clone(),
                             expected_type: "Array",
                             found_type: format!("{:?}", value),
-                        },
-                    )?;
+                        }
+                    })?;
                     if arr.len() != 2 {
                         return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
                             key_name: name.clone(),
@@ -257,22 +257,22 @@ impl FromDictionary for ExternalGraphicsState {
                 "RI" => ExternalGraphicsStateKey::RenderingIntent(
                     value
                         .as_str()
-                        .ok_or(ExternalGraphicsStateError::UnsupportedTypeError {
+                        .ok_or_else(|| ExternalGraphicsStateError::UnsupportedTypeError {
                             key_name: name.clone(),
                             expected_type: "String",
                             found_type: format!("{:?}", value),
                         })?
                         .to_string(),
                 ),
-                "OP" => ExternalGraphicsStateKey::OverprintStroke(value.as_boolean().ok_or(
-                    ExternalGraphicsStateError::UnsupportedTypeError {
+                "OP" => ExternalGraphicsStateKey::OverprintStroke(value.as_boolean().ok_or_else(
+                    || ExternalGraphicsStateError::UnsupportedTypeError {
                         key_name: name.clone(),
                         expected_type: "Boolean",
                         found_type: format!("{:?}", value),
                     },
                 )?),
-                "op" => ExternalGraphicsStateKey::OverprintFill(value.as_boolean().ok_or(
-                    ExternalGraphicsStateError::UnsupportedTypeError {
+                "op" => ExternalGraphicsStateKey::OverprintFill(value.as_boolean().ok_or_else(
+                    || ExternalGraphicsStateError::UnsupportedTypeError {
                         key_name: name.clone(),
                         expected_type: "Boolean",
                         found_type: format!("{:?}", value),
@@ -287,13 +287,13 @@ impl FromDictionary for ExternalGraphicsState {
                     )?)
                 }
                 "Font" => {
-                    let arr = value.as_array().ok_or(
+                    let arr = value.as_array().ok_or_else(|| {
                         ExternalGraphicsStateError::UnsupportedTypeError {
                             key_name: name.clone(),
                             expected_type: "Array",
                             found_type: format!("{:?}", value),
-                        },
-                    )?;
+                        }
+                    })?;
                     if arr.len() != 2 {
                         return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
                             key_name: name.clone(),
@@ -301,13 +301,13 @@ impl FromDictionary for ExternalGraphicsState {
                             actual_desc: format!("array with {} elements", arr.len()),
                         });
                     }
-                    let font_ref = arr[0].as_reference().ok_or(
+                    let font_ref = arr[0].as_reference().ok_or_else(|| {
                         ExternalGraphicsStateError::UnsupportedTypeError {
                             key_name: name.clone(),
                             expected_type: "Object",
                             found_type: format!("{:?}", arr[0]),
-                        },
-                    )?;
+                        }
+                    })?;
                     let font_size = arr[1].as_number::<f32>().map_err(|e| {
                         ExternalGraphicsStateError::NumericConversionError {
                             entry_description: "Font size",
@@ -331,13 +331,13 @@ impl FromDictionary for ExternalGraphicsState {
                         blend_modes_vec = pdf_array
                             .iter()
                             .map(|obj| {
-                                let name_str = obj.as_str().ok_or(
+                                let name_str = obj.as_str().ok_or_else(|| {
                                     ExternalGraphicsStateError::UnsupportedTypeError {
                                         key_name: name.clone(),
                                         expected_type: "String",
                                         found_type: format!("{:?}", obj),
-                                    },
-                                )?;
+                                    }
+                                })?;
                                 name_str.parse::<BlendMode>().map_err(|e| {
                                     ExternalGraphicsStateError::BlendModeParseError {
                                         key_name: name.clone(),
@@ -361,15 +361,17 @@ impl FromDictionary for ExternalGraphicsState {
                         ObjectVariant::Dictionary(dict) => {
                             let mask_type_str = dict
                                 .get("S")
-                                .ok_or(ExternalGraphicsStateError::InvalidValueError {
+                                .ok_or_else(|| ExternalGraphicsStateError::InvalidValueError {
                                     key_name: name.clone(),
                                     description: "SMask must be 'None'".to_string(),
                                 })?
                                 .as_str()
-                                .ok_or(ExternalGraphicsStateError::UnsupportedTypeError {
-                                    key_name: name.clone(),
-                                    expected_type: "Name or Array of Names",
-                                    found_type: format!("{:?}", value),
+                                .ok_or_else(|| {
+                                    ExternalGraphicsStateError::UnsupportedTypeError {
+                                        key_name: name.clone(),
+                                        expected_type: "Name or Array of Names",
+                                        found_type: format!("{:?}", value),
+                                    }
                                 })?;
 
                             let mask_type = match mask_type_str.as_ref() {
@@ -384,12 +386,12 @@ impl FromDictionary for ExternalGraphicsState {
                             };
 
                             // Parse the "G" key for the XObject (required)
-                            let shape_obj = dict.get("G").ok_or(
+                            let shape_obj = dict.get("G").ok_or_else(|| {
                                 ExternalGraphicsStateError::InvalidValueError {
                                     key_name: name.clone(),
                                     description: "SMask dictionary missing 'G' key".to_string(),
-                                },
-                            )?;
+                                }
+                            })?;
 
                             let smask_xobject = objects.resolve_stream(shape_obj)?;
 

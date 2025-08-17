@@ -78,6 +78,7 @@ pub trait CanvasBackend {
     /// Resets the clipping region to the entire canvas area.
     fn reset_clip(&mut self);
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_image(
         &mut self,
         image: &[u8],

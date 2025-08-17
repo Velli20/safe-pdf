@@ -341,13 +341,13 @@ impl Function {
 
                 let mut functions = Vec::new();
                 for obj in functions_arr.iter() {
-                    let dict = obj
-                        .as_dictionary()
-                        .ok_or(FunctionReadError::InvalidEntryType {
-                            entry_name: "Functions",
-                            expected_type: "Dictionary",
-                            found_type: obj.name(),
-                        })?;
+                    let dict =
+                        obj.as_dictionary()
+                            .ok_or_else(|| FunctionReadError::InvalidEntryType {
+                                entry_name: "Functions",
+                                expected_type: "Dictionary",
+                                found_type: obj.name(),
+                            })?;
                     functions.push(Function::from_dictionary(dict, _objects, None)?);
                 }
 
