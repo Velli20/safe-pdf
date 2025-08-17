@@ -3,6 +3,10 @@ name = "pdf-content-stream"
 version = "0.1.0"
 edition = "2024"
 
+# Inherit all lint configurations from the workspace root
+[lints]
+workspace = true
+
 [dependencies]
 pdf-parser = { path = "../pdf-parser" }
 pdf-tokenizer = { path = "../pdf-tokenizer" }

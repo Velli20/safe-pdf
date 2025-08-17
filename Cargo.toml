@@ -2,3 +2,19 @@
 resolver = "2"
 members = ["crates/*", "examples"]
 default-members = ["crates/*", "examples"]
+
+[workspace.lints.clippy]
+unwrap_used = "deny"              # Prohibit using .unwrap(), which can cause panics. Use proper error handling instead.
+expect_used = "deny"              # Prohibit using .expect(), which can also panic. Prefer handling Results/Options gracefully.
+arithmetic_side_effects = "warn"  # Warn on integer arithmetic that can overflow or panic (e.g., +, *, <<).
+or_fun_call = "warn"              # Warns on usages like `opt.or(Some(expensive_call()))`, which eagerly evaluates `expensive_call()`. Suggests `or_else(|| ...)` for lazy evaluation.
+mut_mut = "warn"                  # Warns on taking a mutable reference to a mutable reference (`&mut &mut T`), which is usually unnecessary.
+eq_op = "warn"                    # Checks for manual `PartialEq` implementations that could be derived automatically.
+absurd_extreme_comparisons = "warn" # Catches comparisons against type limits that are always true or false, like `x >= 0` for a `u32`.
+as_conversions = "warn"           # Warns on `as` keyword conversions, which can truncate values silently. Suggests safer `From` or `try_from` alternatives.
+large_enum_variant = "deny"       # Disallow enum variants that are significantly larger than others, which can hurt memory usage and performance.
+map_clone = "warn"                # Suggests using `.cloned()` instead of the more verbose `.map(|x| x.clone())`.
+unnecessary_to_owned = "warn"     # Catches calls to `.to_owned()` (like `to_string()`) where a borrow would suffice.
+inefficient_to_string = "warn"    # Warns when `.to_string()` is used on a type that has a more direct way to create a String (e.g., on a `String` itself).
+clone_on_ref_ptr = "warn"         # Finds inefficient code like `&x.clone()` and suggests borrowing directly with `x.borrow()` or just `&x`.
+cmp_owned = "warn"                # Warns when a value is converted to an owned type just for a comparison, like `s.to_string() == "foo"`. Suggests comparing with a borrow instead.

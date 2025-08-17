@@ -1,8 +1,3 @@
-#![warn(clippy::unwrap_used)]
-#![warn(clippy::expect_used)]
-#![warn(clippy::panic)]
-#![warn(clippy::todo)]
-
 use error::PdfCanvasError;
 use pdf_canvas::PdfCanvas;
 use pdf_content_stream::pdf_operator_backend::{

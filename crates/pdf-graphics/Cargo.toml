@@ -3,4 +3,8 @@ name = "pdf-graphics"
 version = "0.1.0"
 edition = "2024"
 
+# Inherit all lint configurations from the workspace root
+[lints]
+workspace = true
+
 [dependencies]
