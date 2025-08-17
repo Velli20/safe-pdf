@@ -32,10 +32,18 @@ impl MediaBox {
     }
 
     pub fn width(&self) -> u32 {
+        debug_assert!(
+            self.right >= self.left,
+            "Right must be greater than or equal to left"
+        );
         self.right - self.left
     }
 
     pub fn height(&self) -> u32 {
+        debug_assert!(
+            self.top >= self.bottom,
+            "Top must be greater than or equal to bottom"
+        );
         self.top - self.bottom
     }
 }

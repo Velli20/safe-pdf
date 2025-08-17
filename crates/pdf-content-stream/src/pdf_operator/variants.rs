@@ -1,11 +1,8 @@
-use std::rc::Rc;
-
-use pdf_object::{ObjectVariant, dictionary::Dictionary};
 use pdf_parser::{PdfParser, traits::CommentParser};
 use pdf_tokenizer::PdfToken;
 
 use crate::{
-    TextElement, clipping_path_operators::*, color_operators::*, error::PdfOperatorError,
+    clipping_path_operators::*, color_operators::*, error::PdfOperatorError,
     graphics_state_operators::*, marked_content_operators::*, operation_map::READ_MAP,
     operator_tokenizer::OperatorReader, path_operators::*, path_paint_operators::*,
     pdf_operator_backend::PdfOperatorBackend, shadings_operators::PaintShading,
@@ -14,232 +11,8 @@ use crate::{
     xobject_and_image_operators::*,
 };
 
-/// Represents a PDF content stream operator.
-///
-/// This trait provides metadata about a PDF operator, such as its name
-/// (the string representation used in PDF content streams) and the number
-/// of operands it expects.
-///
-/// Implementors of this trait are typically structs that represent specific
-/// PDF operators (e.g., `MoveTo`, `SetLineWidth`).
-pub trait PdfOperator {
-    /// The string representation of the PDF operator (e.g., "m", "BT", "rg").
-    const NAME: &'static str;
+use super::{Operands, PdfOperator};
 
-    /// The number of operands this operator consumes from the operand stack.
-    const OPERAND_COUNT: Option<usize>;
-
-    /// Reads and consumes the necessary operands from the provided `Operands`
-    /// slice and constructs the specific `PdfOperatorVariant`.
-    ///
-    /// # Parameters
-    ///
-    /// - `operands`: A sequence of `Value`s that are potential operands for this operator.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing the constructed `PdfOperatorVariant`,
-    /// or a `PdfOperatorError` on an error.
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError>;
-
-    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), T::ErrorType> {
-        todo!("Unimplemented operator {}", Self::NAME)
-    }
-}
-
-pub struct Operands<'a> {
-    pub values: &'a [ObjectVariant],
-}
-
-impl Operands<'_> {
-    pub fn get_f32(&mut self) -> Result<f32, PdfOperatorError> {
-        if let Some((value, rest)) = self.values.split_first() {
-            self.values = rest;
-            value.as_number::<f32>().map_err(|err| {
-                PdfOperatorError::OperandNumericConversionError {
-                    expected_type: "Number (f32)",
-                    source: err,
-                }
-            })
-        } else {
-            Err(PdfOperatorError::MissingOperand {
-                expected_type: "Number (f32)",
-            })
-        }
-    }
-
-    pub fn get_dictionary(&mut self) -> Result<Rc<Dictionary>, PdfOperatorError> {
-        if let Some((value, rest)) = self.values.split_first() {
-            self.values = rest;
-            match value {
-                ObjectVariant::Dictionary(dict) => Ok(std::rc::Rc::clone(dict)),
-                _ => Err(PdfOperatorError::InvalidOperandType {
-                    expected_type: "Dictionary",
-                    found_type: value.name(),
-                }),
-            }
-        } else {
-            Err(PdfOperatorError::MissingOperand {
-                expected_type: "Dictionary",
-            })
-        }
-    }
-
-    pub fn get_str(&mut self) -> Result<String, PdfOperatorError> {
-        if let Some((value, rest)) = self.values.split_first() {
-            self.values = rest;
-            value.as_str().map(|s| s.to_string()).ok_or_else(|| {
-                PdfOperatorError::InvalidOperandType {
-                    expected_type: "String",
-                    found_type: value.name(),
-                }
-            })
-        } else {
-            Err(PdfOperatorError::MissingOperand {
-                expected_type: "String",
-            })
-        }
-    }
-
-    pub fn get_bytes(&mut self) -> Result<&[u8], PdfOperatorError> {
-        if let Some((value, rest)) = self.values.split_first() {
-            self.values = rest;
-            value
-                .as_bytes()
-                .ok_or_else(|| PdfOperatorError::InvalidOperandType {
-                    expected_type: "Vec<u8>",
-                    found_type: value.name(),
-                })
-        } else {
-            Err(PdfOperatorError::MissingOperand {
-                expected_type: "Vec<u8>",
-            })
-        }
-    }
-
-    pub fn get_name(&mut self) -> Result<String, PdfOperatorError> {
-        if let Some((value, rest)) = self.values.split_first() {
-            self.values = rest;
-            match value {
-                ObjectVariant::Name(name) => Ok(name.clone()),
-                _ => Err(PdfOperatorError::InvalidOperandType {
-                    expected_type: "Name",
-                    found_type: value.name(),
-                }),
-            }
-        } else {
-            Err(PdfOperatorError::MissingOperand {
-                expected_type: "Name",
-            })
-        }
-    }
-
-    pub fn get_u8(&mut self) -> Result<u8, PdfOperatorError> {
-        if let Some((value, rest)) = self.values.split_first() {
-            self.values = rest;
-            value
-                .as_number::<u8>()
-                .map_err(|err| PdfOperatorError::OperandNumericConversionError {
-                    expected_type: "Number (u8)",
-                    source: err,
-                })
-        } else {
-            Err(PdfOperatorError::MissingOperand {
-                expected_type: "Number (u8)",
-            })
-        }
-    }
-
-    pub fn get_text_element_array(&mut self) -> Result<Vec<TextElement>, PdfOperatorError> {
-        if let Some((first_operand, rest_operands)) = self.values.split_first() {
-            self.values = rest_operands;
-            if let ObjectVariant::Array(array_values) = first_operand {
-                let mut elements = Vec::with_capacity(array_values.len());
-                for val_obj in array_values {
-                    match val_obj {
-                        ObjectVariant::LiteralString(s) => {
-                            elements.push(TextElement::Text { value: s.clone() });
-                        }
-                        ObjectVariant::Integer(_) | ObjectVariant::Real(_) => {
-                            if let Ok(amount) = val_obj.as_number::<f32>() {
-                                elements.push(TextElement::Adjustment { amount });
-                            } else {
-                                return Err(PdfOperatorError::InvalidOperandType {
-                                    expected_type: "Number (f32 convertible) in array",
-                                    found_type: val_obj.name(),
-                                });
-                            }
-                        }
-                        _ => {
-                            return Err(PdfOperatorError::InvalidOperandType {
-                                expected_type: "LiteralString or Number in array",
-                                found_type: val_obj.name(),
-                            });
-                        }
-                    }
-                }
-                Ok(elements)
-            } else {
-                Err(PdfOperatorError::InvalidOperandType {
-                    expected_type: "Array",
-                    found_type: first_operand.name(),
-                })
-            }
-        } else {
-            Err(PdfOperatorError::MissingOperand {
-                expected_type: "Array for TextElement",
-            })
-        }
-    }
-
-    pub fn get_f32_array(&mut self) -> Result<Vec<f32>, PdfOperatorError> {
-        if let Some((first_operand, rest_operands)) = self.values.split_first() {
-            self.values = rest_operands;
-            if let ObjectVariant::Array(array_values) = first_operand {
-                let mut numbers = Vec::with_capacity(array_values.len());
-                for val_obj in array_values {
-                    match val_obj {
-                        ObjectVariant::Integer(_) | ObjectVariant::Real(_) => {
-                            if let Ok(num_f32) = val_obj.as_number::<f32>() {
-                                numbers.push(num_f32);
-                            } else {
-                                return Err(PdfOperatorError::InvalidOperandType {
-                                    expected_type: "Number (f32 convertible) in array",
-                                    found_type: val_obj.name(),
-                                });
-                            }
-                        }
-                        _ => {
-                            return Err(PdfOperatorError::InvalidOperandType {
-                                expected_type: "Number in array",
-                                found_type: val_obj.name(),
-                            });
-                        }
-                    }
-                }
-                Ok(numbers)
-            } else {
-                Err(PdfOperatorError::InvalidOperandType {
-                    expected_type: "Array",
-                    found_type: first_operand.name(),
-                })
-            }
-        } else {
-            Err(PdfOperatorError::MissingOperand {
-                expected_type: "Array for f32",
-            })
-        }
-    }
-}
-
-/// Represents all possible PDF content stream operators defined within this crate.
-///
-/// This enum acts as a sum type, allowing for type-safe handling of various
-/// PDF operators. Each variant holds the specific operator struct, which in turn
-/// contains its operands and associated methods.
-///
-/// Each operator performs a specific function, such as
-/// drawing a line, displaying text, or setting a color.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PdfOperatorVariant {
     LineTo(LineTo),
@@ -317,7 +90,6 @@ impl PdfOperatorVariant {
             parser.skip_whitespace();
 
             if let Some(PdfToken::Percent) = parser.tokenizer.peek() {
-                // Ignore comments; propagate any parse error via the dedicated variant.
                 parser.parse_comment()?;
                 continue;
             }
@@ -344,7 +116,7 @@ impl PdfOperatorVariant {
                                     expected: required_count,
                                 });
                             }
-                            _ => {} // No fixed operand count or count matches
+                            _ => {}
                         }
 
                         let mut ops = Operands {
@@ -353,8 +125,6 @@ impl PdfOperatorVariant {
                         let operator = (operation.parser)(&mut ops)?;
                         operators.push(operator);
                         handled = true;
-
-                        // Clear operands after they've been consumed.
                         operands.clear();
                         break;
                     }
@@ -457,8 +227,7 @@ mod tests {
         let test_cases = vec![
             TestCase {
                 description: "0. ConcatMatrix(cm)",
-                input: b"
-.17576218 0 0 .17576218 2227.4995 159.375 cm",
+                input: b"\n.17576218 0 0 .17576218 2227.4995 159.375 cm",
                 expected_ops: vec![PdfOperatorVariant::ConcatMatrix(ConcatMatrix::new([
                     0.17576218, 0.0, 0.0, 0.17576218, 2227.4995, 159.375,
                 ]))],
