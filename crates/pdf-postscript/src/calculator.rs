@@ -1,7 +1,7 @@
-use crate::operator::Operator;
-use std::collections::VecDeque;
+use crate::{operator::Operator, parser::parse_tokens, stack::CalculatorStack};
 use thiserror::Error;
 
+/// Errors that can occur while executing a PostScript-like calculator program.
 #[derive(Debug, Error, PartialEq)]
 pub enum CalcError {
     #[error("unexpected end of block stack")]
@@ -20,347 +20,120 @@ pub enum CalcError {
     CopyCountTooLarge { n: usize, size: usize },
 }
 
-pub fn parse_tokens(tokens: &[&str]) -> Result<Vec<Operator>, CalcError> {
-    let mut i = 0;
-    let mut block_stack: Vec<Vec<Operator>> = vec![vec![]];
-    while i < tokens.len() {
-        match tokens[i] {
-            "add" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Add),
-            "sub" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Sub),
-            "mul" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Mul),
-            "div" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Div),
-            "dup" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Dup),
-            "exch" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Exch),
-            "pop" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Pop),
-            "eq" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Eq),
-            "ne" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Ne),
-            "gt" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Gt),
-            "lt" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Lt),
-            "ge" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Ge),
-            "le" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Le),
-            "and" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::And),
-            "or" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Or),
-            "not" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Not),
-            "if" => {
-                let block1 = block_stack.pop().ok_or(CalcError::EmptyBlockStack)?;
-                block_stack
-                    .last_mut()
-                    .ok_or(CalcError::EmptyBlockStack)?
-                    .push(Operator::If(block1));
-            }
-            "ifelse" => {
-                let block1 = block_stack.pop().ok_or(CalcError::EmptyBlockStack)?;
-                let block2 = block_stack.pop().ok_or(CalcError::EmptyBlockStack)?;
-                block_stack
-                    .last_mut()
-                    .ok_or(CalcError::EmptyBlockStack)?
-                    .push(Operator::IfElse(block2, block1));
-            }
-            "{" => {
-                block_stack.push(vec![]);
-            }
-            "}" => {}
-            "copy" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Copy),
-            "roll" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Roll),
-            "sqrt" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Sqrt),
-            "cvi" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Cvi),
-            "mod" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Mod),
-            "truncate" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Truncate),
-            "abs" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Abs),
-            "true" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Number(1.0)),
-            "false" => block_stack
-                .last_mut()
-                .ok_or(CalcError::EmptyBlockStack)?
-                .push(Operator::Number(0.0)),
-            t => {
-                let num = t
-                    .parse::<f64>()
-                    .map_err(|_| CalcError::InvalidNumber(t.to_string()))?;
-                block_stack
-                    .last_mut()
-                    .ok_or(CalcError::EmptyBlockStack)?
-                    .push(Operator::Number(num));
-            }
-        }
-        i += 1;
-    }
-
-    block_stack.pop().ok_or(CalcError::EmptyBlockStack)
-}
-
+/// Executes a sequence of pre-parsed `Operator`s starting with `input_stack`.
+///
+/// The interpreter uses a simple operand stack of `f64` values. Procedures
+/// (blocks for `if` / `ifelse`) are represented as nested `Vec<Operator>` and
+/// are executed recursively with a cloned snapshot of the current stack.
+///
+/// Returned is the final stack contents (bottom-to-top order) on success.
+///
+/// Errors include stack underflow, division by zero, square root of a negative
+/// number, and invalid counts for `roll` / `copy`.
 pub fn execute(input_stack: &[f64], ops: &[Operator]) -> Result<Vec<f64>, CalcError> {
-    let mut stack: VecDeque<f64> = input_stack.iter().cloned().collect();
+    let mut stack = CalculatorStack::from(input_stack);
 
     for op in ops {
         match op {
             Operator::Add => {
-                let b = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 1,
-                })?;
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 0,
-                })?;
-                stack.push_back(a + b);
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(a + b);
             }
             Operator::Sub => {
-                let b = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 1,
-                })?;
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 0,
-                })?;
-                stack.push_back(a - b);
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(a - b);
             }
             Operator::Mul => {
-                let b = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 1,
-                })?;
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 0,
-                })?;
-                stack.push_back(a * b);
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(a * b);
             }
             Operator::Div => {
-                let b = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 1,
-                })?;
+                let b = stack.pop()?;
                 if b == 0.0 {
                     return Err(CalcError::DivisionByZero);
                 }
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 0,
-                })?;
-                stack.push_back(a / b);
+                let a = stack.pop()?;
+                stack.push(a / b);
             }
             Operator::Dup => {
-                let a = *stack.back().ok_or(CalcError::StackUnderflow {
-                    needed: 1,
-                    found: 0,
-                })?;
-                stack.push_back(a);
+                let a = stack.back()?;
+                stack.push(a);
             }
             Operator::Exch => {
-                let b = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 1,
-                })?;
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 0,
-                })?;
-                stack.push_back(b);
-                stack.push_back(a);
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(b);
+                stack.push(a);
             }
             Operator::Pop => {
-                stack.pop_back();
+                stack.pop()?;
             }
             Operator::Eq => {
-                let b = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 1,
-                })?;
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 0,
-                })?;
-                stack.push_back(if a == b { 1.0 } else { 0.0 });
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(if a == b { 1.0 } else { 0.0 });
             }
             Operator::Ne => {
-                let b = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 1,
-                })?;
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 0,
-                })?;
-                stack.push_back(if a != b { 1.0 } else { 0.0 });
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(if a != b { 1.0 } else { 0.0 });
             }
             Operator::Gt => {
-                let b = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 1,
-                })?;
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 0,
-                })?;
-                stack.push_back(if a > b { 1.0 } else { 0.0 });
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(if a > b { 1.0 } else { 0.0 });
             }
             Operator::Lt => {
-                let b = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 1,
-                })?;
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 0,
-                })?;
-                stack.push_back(if a < b { 1.0 } else { 0.0 });
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(if a < b { 1.0 } else { 0.0 });
             }
             Operator::Ge => {
-                let b = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 1,
-                })?;
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 0,
-                })?;
-                stack.push_back(if a >= b { 1.0 } else { 0.0 });
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(if a >= b { 1.0 } else { 0.0 });
             }
             Operator::Le => {
-                let b = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 1,
-                })?;
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 0,
-                })?;
-                stack.push_back(if a <= b { 1.0 } else { 0.0 });
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(if a <= b { 1.0 } else { 0.0 });
             }
             Operator::And => {
-                let b = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 1,
-                })?;
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 0,
-                })?;
-                stack.push_back(if a != 0.0 && b != 0.0 { 1.0 } else { 0.0 });
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(if a != 0.0 && b != 0.0 { 1.0 } else { 0.0 });
             }
             Operator::Or => {
-                let b = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 1,
-                })?;
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 0,
-                })?;
-                stack.push_back(if a != 0.0 || b != 0.0 { 1.0 } else { 0.0 });
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(if a != 0.0 || b != 0.0 { 1.0 } else { 0.0 });
             }
             Operator::Not => {
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 1,
-                    found: 0,
-                })?;
-                stack.push_back(if a == 0.0 { 1.0 } else { 0.0 });
+                let a = stack.pop()?;
+                stack.push(if a == 0.0 { 1.0 } else { 0.0 });
             }
             Operator::If(block) => {
-                let cond = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 1,
-                    found: 0,
-                })?;
+                let cond = stack.pop()?;
                 if cond != 0.0 {
-                    let mut inner_stack: VecDeque<f64> = stack.clone();
-                    let result = execute(inner_stack.make_contiguous(), block)?;
-                    stack.clear();
-                    for v in result {
-                        stack.push_back(v);
-                    }
+                    let inner_stack: Vec<f64> = stack.0.clone();
+                    let result = execute(&inner_stack, block)?;
+                    stack.0.clear();
+                    stack.0.extend(result);
                 }
             }
             Operator::IfElse(block1, block2) => {
-                let cond = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 1,
-                    found: 0,
-                })?;
-                let mut inner_stack: VecDeque<f64> = stack.clone();
+                let cond = stack.pop()?;
+                let inner_stack: Vec<f64> = stack.0.clone();
                 let block = if cond != 0.0 { &block1 } else { &block2 };
-                let result = execute(inner_stack.make_contiguous(), block)?;
-                stack.clear();
-                for v in result {
-                    stack.push_back(v);
-                }
+                let result = execute(&inner_stack, block)?;
+                stack.0.clear();
+                stack.0.extend(result);
             }
             Operator::Copy => {
-                let n = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 1,
-                    found: 0,
-                })?;
+                let n = stack.pop()?;
                 let n = n as usize;
                 if n > stack.len() {
                     return Err(CalcError::CopyCountTooLarge {
@@ -371,56 +144,35 @@ pub fn execute(input_stack: &[f64], ops: &[Operator]) -> Result<Vec<f64>, CalcEr
                 let len = stack.len();
                 let mut to_copy = Vec::with_capacity(n);
                 for i in 0..n {
-                    to_copy.push(stack[len - n + i]);
+                    to_copy.push(stack.0[len - n + i]);
                 }
                 for v in &to_copy {
-                    stack.push_back(*v);
+                    stack.push(*v);
                 }
             }
             Operator::Sqrt => {
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 1,
-                    found: 0,
-                })?;
+                let a = stack.pop()?;
                 if a < 0.0 {
                     return Err(CalcError::NegativeSqrt);
                 }
-                stack.push_back(a.sqrt());
+                stack.push(a.sqrt());
             }
             Operator::Mod => {
-                let b = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 1,
-                })?;
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 0,
-                })?;
-                stack.push_back(a % b);
+                let b = stack.pop()?;
+                let a = stack.pop()?;
+                stack.push(a % b);
             }
             Operator::Cvi => {
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 1,
-                    found: 0,
-                })?;
-                stack.push_back(a.trunc());
+                let a = stack.pop()?;
+                stack.push(a.trunc());
             }
             Operator::Abs => {
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 1,
-                    found: 0,
-                })?;
-                stack.push_back(a.abs());
+                let a = stack.pop()?;
+                stack.push(a.abs());
             }
             Operator::Roll => {
-                let m = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 1,
-                })? as isize;
-                let n = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 2,
-                    found: 0,
-                })? as usize;
+                let m = stack.pop()? as isize;
+                let n = stack.pop()? as usize;
                 if n > stack.len() {
                     return Err(CalcError::RollCountTooLarge {
                         n,
@@ -431,27 +183,28 @@ pub fn execute(input_stack: &[f64], ops: &[Operator]) -> Result<Vec<f64>, CalcEr
                     continue;
                 }
                 let len = stack.len();
-                let mut slice: Vec<f64> = stack.drain(len - n..).collect();
-                let m = ((m % n as isize) + n as isize) % n as isize;
+                let mut slice: Vec<f64> = stack.0.drain(len - n..).collect();
+                let m = ((m % n as isize) + n as isize) % n as isize; // normalize
                 slice.rotate_right(m as usize);
-                for v in slice {
-                    stack.push_back(v);
-                }
+                stack.0.extend(slice);
             }
             Operator::Truncate => {
-                let a = stack.pop_back().ok_or(CalcError::StackUnderflow {
-                    needed: 1,
-                    found: 0,
-                })?;
-                stack.push_back(a.trunc());
+                let a = stack.pop()?;
+                stack.push(a.trunc());
             }
-            Operator::Number(num) => stack.push_back(*num),
+            Operator::Number(num) => stack.push(*num),
         }
     }
 
-    Ok(stack.into())
+    Ok(stack.0)
 }
 
+/// Convenience helper that tokenizes & parses a PostScript-like `code` string
+/// and then invokes [`execute`].
+///
+/// The `input_stack` supplies initial operands (in bottom-to-top order). The
+/// `code` string can contain numeric literals, the supported operators, and
+/// procedure blocks delimited by `{` and `}` used by `if` / `ifelse`.
 pub fn evaluate_postscript(input_stack: &[f64], code: &str) -> Result<Vec<f64>, CalcError> {
     let code = code.replace("{", " { ").replace("}", " } ");
     let ops = parse_tokens(&code.split_whitespace().collect::<Vec<_>>())?;

@@ -517,7 +517,7 @@ impl Function {
                 Ok(Function {
                     function_type,
                     data: FunctionData::PostScriptCalculator {
-                        operators: pdf_postscript::calculator::parse_tokens(
+                        operators: pdf_postscript::parser::parse_tokens(
                             &code.split_whitespace().collect::<Vec<_>>(),
                         )?,
                         domain,
