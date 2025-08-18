@@ -6,6 +6,10 @@ use thiserror::Error;
 pub enum CalcError {
     #[error("unexpected end of block stack")]
     EmptyBlockStack,
+    #[error("missing procedure block before 'if' operator")]
+    MissingIfBlock,
+    #[error("missing two procedure blocks before 'ifelse' operator")]
+    MissingIfElseBlocks,
     #[error("invalid number literal: {0}")]
     InvalidNumber(String),
     #[error("stack underflow: needed {needed} elements, found {found}")]
@@ -18,6 +22,8 @@ pub enum CalcError {
     RollCountTooLarge { n: usize, size: usize },
     #[error("invalid copy count n={n} larger than stack size {size}")]
     CopyCountTooLarge { n: usize, size: usize },
+    #[error("token index overflow while parsing")]
+    TokenIndexOverflow,
 }
 
 /// Executes a sequence of pre-parsed `Operator`s starting with `input_stack`.
