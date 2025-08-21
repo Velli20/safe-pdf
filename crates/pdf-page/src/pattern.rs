@@ -6,7 +6,6 @@ use pdf_object::{
 use thiserror::Error;
 
 use crate::{
-    bbox::{BBox, BBoxReadError},
     content_stream::ContentStream,
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateError},
     matrix::{Matrix, MatrixReadError},
@@ -33,8 +32,6 @@ pub enum PatternError {
     InvalidValue { key: &'static str, value: String },
     #[error("Error parsing /Matrix: {0}")]
     InvalidMatrix(#[from] MatrixReadError),
-    #[error("Error parsing /BBox: {0}")]
-    InvalidBBox(#[from] BBoxReadError),
     #[error("Failed to parse resources for page: {err}")]
     ResourcesParse { err: Box<ResourcesError> },
     #[error("External Graphics State parsing error: {0}")]
@@ -127,7 +124,7 @@ pub enum Pattern {
         /// Controls how the spacing of tiles is adjusted.
         tiling_type: TilingType,
         /// The bounding box of the pattern cell, defining its size.
-        bbox: BBox,
+        bbox: [f32; 4],
         /// The horizontal spacing between adjacent tiles.
         x_step: f32,
         /// The vertical spacing between adjacent tiles.
@@ -200,8 +197,10 @@ impl Pattern {
                 })?;
 
                 // Read the `/BBox` entry.
-                let bbox = BBox::from_dictionary(dictionary, objects)?
-                    .ok_or(PatternError::MissingRequiredEntry("BBox"))?;
+                let bbox = dictionary
+                    .get("BBox")
+                    .ok_or(PatternError::MissingRequiredEntry("BBox"))?
+                    .as_array_of::<f32, 4>()?;
 
                 // Read the `/XStep` entry.
                 let x_step = dictionary

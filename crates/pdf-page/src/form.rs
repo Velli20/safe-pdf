@@ -1,11 +1,11 @@
 use pdf_content_stream::error::PdfOperatorError;
 use pdf_graphics::transform::Transform;
+use pdf_object::error::ObjectError;
 use pdf_object::{
     dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
 };
 use thiserror::Error;
 
-use crate::bbox::{BBox, BBoxReadError};
 use crate::content_stream::ContentStream;
 use crate::matrix::{Matrix, MatrixReadError};
 use crate::resources::{Resources, ResourcesError};
@@ -24,14 +24,12 @@ pub enum FormXObjectError {
     },
     #[error("Error parsing /Resources: {source}")]
     ResourcesError { source: Box<ResourcesError> },
-    #[error("Error parsing /Matrix: {0}")]
-    InvalidMatrix(String),
     #[error("Error parsing content stream: {0}")]
     ContentStreamError(#[from] PdfOperatorError),
-    #[error("Error parsing BBox: {0}")]
-    BBoxReadError(#[from] BBoxReadError),
-    #[error("Error parsing BBox: {0}")]
+    #[error("Error parsing /Matrix: {0}")]
     MatrixReadError(#[from] MatrixReadError),
+    #[error("{0}")]
+    ObjectError(#[from] ObjectError),
 }
 
 /// Represents a PDF Form XObject.
@@ -55,10 +53,11 @@ impl XObjectReader for FormXObject {
         stream_data: &[u8],
         objects: &ObjectCollection,
     ) -> Result<Self, FormXObjectError> {
-        // Retrieve the `/BBox` entry,.
-        let bbox = BBox::from_dictionary(dictionary, objects)?
+        // Retrieve the `/BBox` entry.
+        let bbox = dictionary
+            .get("BBox")
             .ok_or(FormXObjectError::MissingEntry { entry_name: "BBox" })?
-            .0;
+            .as_array_of::<f32, 4>()?;
 
         // Retrieve the `/Matrix` entry if present.
         let matrix = Matrix::from_dictionary(dictionary, objects)?;

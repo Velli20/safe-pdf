@@ -1,4 +1,3 @@
-pub mod bbox;
 pub mod color_space;
 pub mod content_stream;
 pub mod error;

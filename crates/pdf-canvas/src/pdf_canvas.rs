@@ -313,10 +313,10 @@ where
                 // Create a new mask surface from the backend, sized to the form's bounding box.
                 let mut mask = self
                     .canvas
-                    .create_mask(bbox.0[2] - bbox.0[0], bbox.0[3] - bbox.0[1]);
+                    .create_mask(bbox[2] - bbox[0], bbox[3] - bbox[1]);
 
                 // Render the tiling content into a temporary canvas.
-                let mut other = PdfCanvas::new(mask.as_mut(), self.page, Some(&bbox.0));
+                let mut other = PdfCanvas::new(mask.as_mut(), self.page, Some(bbox));
                 other.render_content_stream(&content_stream.operations, None, Some(resources))?;
                 let image = other.canvas.image_snapshot();
                 Ok((None, Some(image)))
