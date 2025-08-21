@@ -16,4 +16,3 @@
 pub mod calculator;
 pub mod operator;
 pub mod parser;
-mod stack;

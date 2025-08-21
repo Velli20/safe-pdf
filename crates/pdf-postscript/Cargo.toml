@@ -9,3 +9,4 @@ workspace = true
 
 [dependencies]
 thiserror = "2.0.12"
+num-traits = "0.2.19"

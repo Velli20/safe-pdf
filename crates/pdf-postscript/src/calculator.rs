@@ -1,4 +1,5 @@
-use crate::{operator::Operator, parser::parse_tokens, stack::CalculatorStack};
+use crate::{operator::Operator, parser::parse_tokens};
+use num_traits::ToPrimitive;
 use thiserror::Error;
 
 /// Errors that can occur while executing a PostScript-like calculator program.
@@ -24,13 +25,69 @@ pub enum CalcError {
     CopyCountTooLarge { n: usize, size: usize },
     #[error("token index overflow while parsing")]
     TokenIndexOverflow,
+    #[error("arithmetic overflow in {op} operation")]
+    ArithmeticOverflow { op: &'static str },
+    #[error("operand for {op} must be an integer (no fraction) within valid range, got {value}")]
+    InvalidIntegerOperand { op: &'static str, value: f64 },
+    #[error("operand for {op} must be a non-negative integer, got {value}")]
+    NegativeIntegerOperand { op: &'static str, value: f64 },
 }
 
 // An explicit frame stack eliminates recursion for executing nested procedure blocks.
 struct Frame<'a> {
     ops: &'a [Operator],
     ip: usize,
-    stack: CalculatorStack,
+    stack: Vec<f64>,
+}
+
+impl<'a> Frame<'a> {
+    /// Handles completion of a frame: propagates result to parent or returns if root.
+    /// Returns Some(final_stack) if execution should return, or None to continue.
+    fn complete_frame(frames: &mut Vec<Frame<'a>>) -> Option<Vec<f64>> {
+        let finished = frames.pop()?;
+        if let Some(parent) = frames.last_mut() {
+            parent.stack.clear();
+            parent.stack.extend(finished.stack);
+            None
+        } else {
+            Some(finished.stack)
+        }
+    }
+}
+
+impl Frame<'_> {
+    /// Pushes a value onto the top of the stack.
+    fn push(&mut self, value: f64) -> Result<(), CalcError> {
+        if value.is_finite() {
+            self.stack.push(value);
+            Ok(())
+        } else {
+            Err(CalcError::ArithmeticOverflow { op: "push" })
+        }
+    }
+
+    /// Pops a value from the top of the stack.
+    /// Returns an error if the stack is empty.
+    pub fn pop(&mut self) -> Result<f64, CalcError> {
+        self.stack.pop().ok_or(CalcError::StackUnderflow {
+            needed: 1,
+            found: 0,
+        })
+    }
+
+    /// Returns the number of elements in the stack.
+    pub fn len(&self) -> usize {
+        self.stack.len()
+    }
+
+    /// Returns the value at the top of the stack without removing it.
+    /// Returns an error if the stack is empty.
+    pub fn back(&self) -> Result<f64, CalcError> {
+        self.stack.last().copied().ok_or(CalcError::StackUnderflow {
+            needed: 1,
+            found: 0,
+        })
+    }
 }
 
 /// Executes a sequence of pre-parsed `Operator`s starting with `input_stack`.
@@ -48,195 +105,207 @@ pub fn execute(input_stack: &[f64], ops: &[Operator]) -> Result<Vec<f64>, CalcEr
     frames.push(Frame {
         ops,
         ip: 0,
-        stack: CalculatorStack::from(input_stack),
+        stack: Vec::from(input_stack),
     });
 
     while let Some(frame) = frames.last_mut() {
         if frame.ip >= frame.ops.len() {
-            // Frame finished; propagate result to parent or return if root.
-            let Some(finished) = frames.pop() else {
-                return Ok(Vec::new());
-            };
-            if let Some(parent) = frames.last_mut() {
-                parent.stack.0.clear();
-                parent.stack.0.extend(finished.stack.0);
-                continue;
+            if let Some(final_stack) = Frame::complete_frame(&mut frames) {
+                return Ok(final_stack);
             } else {
-                return Ok(finished.stack.0);
+                continue;
             }
         }
 
         let op = &frame.ops[frame.ip];
         // Advance before executing (important for pushing child frames)
-        frame.ip += 1;
+        frame.ip = frame
+            .ip
+            .checked_add(1)
+            .ok_or(CalcError::ArithmeticOverflow { op: "ip_inc" })?;
         match op {
             Operator::Add => {
-                let b = frame.stack.pop()?;
-                let a = frame.stack.pop()?;
-                frame.stack.push(a + b);
+                let b = frame.pop()?;
+                let a = frame.pop()?;
+                frame.push(a + b)?;
             }
             Operator::Sub => {
-                let b = frame.stack.pop()?;
-                let a = frame.stack.pop()?;
-                frame.stack.push(a - b);
+                let b = frame.pop()?;
+                let a = frame.pop()?;
+                frame.push(a - b)?;
             }
             Operator::Mul => {
-                let b = frame.stack.pop()?;
-                let a = frame.stack.pop()?;
-                frame.stack.push(a * b);
+                let b = frame.pop()?;
+                let a = frame.pop()?;
+                frame.push(a * b)?;
             }
             Operator::Div => {
-                let b = frame.stack.pop()?;
+                let b = frame.pop()?;
                 if b == 0.0 {
                     return Err(CalcError::DivisionByZero);
                 }
-                let a = frame.stack.pop()?;
-                frame.stack.push(a / b);
+                let a = frame.pop()?;
+                frame.push(a / b)?;
             }
             Operator::Dup => {
-                let a = frame.stack.back()?;
-                frame.stack.push(a);
+                let a = frame.back()?;
+                frame.push(a)?;
             }
             Operator::Exch => {
-                let b = frame.stack.pop()?;
-                let a = frame.stack.pop()?;
-                frame.stack.push(b);
-                frame.stack.push(a);
+                let b = frame.pop()?;
+                let a = frame.pop()?;
+                frame.push(b)?;
+                frame.push(a)?;
             }
             Operator::Pop => {
-                frame.stack.pop()?;
+                frame.pop()?;
             }
             Operator::Eq => {
-                let b = frame.stack.pop()?;
-                let a = frame.stack.pop()?;
-                frame.stack.push(if a == b { 1.0 } else { 0.0 });
+                let b = frame.pop()?;
+                let a = frame.pop()?;
+                frame.push(if a == b { 1.0 } else { 0.0 })?;
             }
             Operator::Ne => {
-                let b = frame.stack.pop()?;
-                let a = frame.stack.pop()?;
-                frame.stack.push(if a != b { 1.0 } else { 0.0 });
+                let b = frame.pop()?;
+                let a = frame.pop()?;
+                frame.push(if a != b { 1.0 } else { 0.0 })?;
             }
             Operator::Gt => {
-                let b = frame.stack.pop()?;
-                let a = frame.stack.pop()?;
-                frame.stack.push(if a > b { 1.0 } else { 0.0 });
+                let b = frame.pop()?;
+                let a = frame.pop()?;
+                frame.push(if a > b { 1.0 } else { 0.0 })?;
             }
             Operator::Lt => {
-                let b = frame.stack.pop()?;
-                let a = frame.stack.pop()?;
-                frame.stack.push(if a < b { 1.0 } else { 0.0 });
+                let b = frame.pop()?;
+                let a = frame.pop()?;
+                frame.push(if a < b { 1.0 } else { 0.0 })?;
             }
             Operator::Ge => {
-                let b = frame.stack.pop()?;
-                let a = frame.stack.pop()?;
-                frame.stack.push(if a >= b { 1.0 } else { 0.0 });
+                let b = frame.pop()?;
+                let a = frame.pop()?;
+                frame.push(if a >= b { 1.0 } else { 0.0 })?;
             }
             Operator::Le => {
-                let b = frame.stack.pop()?;
-                let a = frame.stack.pop()?;
-                frame.stack.push(if a <= b { 1.0 } else { 0.0 });
+                let b = frame.pop()?;
+                let a = frame.pop()?;
+                frame.push(if a <= b { 1.0 } else { 0.0 })?;
             }
             Operator::And => {
-                let b = frame.stack.pop()?;
-                let a = frame.stack.pop()?;
-                frame
-                    .stack
-                    .push(if a != 0.0 && b != 0.0 { 1.0 } else { 0.0 });
+                let b = frame.pop()?;
+                let a = frame.pop()?;
+                frame.push(if a != 0.0 && b != 0.0 { 1.0 } else { 0.0 })?;
             }
             Operator::Or => {
-                let b = frame.stack.pop()?;
-                let a = frame.stack.pop()?;
-                frame
-                    .stack
-                    .push(if a != 0.0 || b != 0.0 { 1.0 } else { 0.0 });
+                let b = frame.pop()?;
+                let a = frame.pop()?;
+                frame.push(if a != 0.0 || b != 0.0 { 1.0 } else { 0.0 })?;
             }
             Operator::Not => {
-                let a = frame.stack.pop()?;
-                frame.stack.push(if a == 0.0 { 1.0 } else { 0.0 });
+                let a = frame.pop()?;
+                frame.push(if a == 0.0 { 1.0 } else { 0.0 })?;
             }
             Operator::If(block) => {
-                let cond = frame.stack.pop()?;
+                let cond = frame.pop()?;
                 if cond != 0.0 {
                     // Push new frame with a cloned snapshot of current stack
-                    let snapshot = frame.stack.0.clone();
+                    let snapshot = frame.stack.clone();
                     frames.push(Frame {
                         ops: block,
                         ip: 0,
-                        stack: CalculatorStack::from(snapshot.as_slice()),
+                        stack: snapshot,
                     });
                 }
             }
             Operator::IfElse(block1, block2) => {
-                let cond = frame.stack.pop()?;
+                let cond = frame.pop()?;
                 let chosen = if cond != 0.0 { block1 } else { block2 };
-                let snapshot = frame.stack.0.clone();
+                let snapshot = frame.stack.clone();
                 frames.push(Frame {
                     ops: chosen,
                     ip: 0,
-                    stack: CalculatorStack::from(snapshot.as_slice()),
+                    stack: snapshot,
                 });
             }
             Operator::Copy => {
-                let n = frame.stack.pop()? as usize;
-                if n > frame.stack.len() {
-                    return Err(CalcError::CopyCountTooLarge {
-                        n,
-                        size: frame.stack.len(),
-                    });
-                }
-                let len = frame.stack.len();
-                // copy the last n elements preserving order
-                let mut to_copy = Vec::with_capacity(n);
-                for i in 0..n {
-                    to_copy.push(frame.stack.0[len - n + i]);
-                }
-                for v in &to_copy {
-                    frame.stack.push(*v);
+                let n_val = frame.pop()?;
+                let n = n_val.to_usize().ok_or(CalcError::InvalidIntegerOperand {
+                    op: "copy",
+                    value: n_val,
+                })?;
+
+                let len = frame.len();
+                let start = len
+                    .checked_sub(n)
+                    .ok_or(CalcError::ArithmeticOverflow { op: "copy_index" })?;
+                let to_copy: Vec<f64> = frame.stack[start..].to_vec();
+                for v in to_copy {
+                    frame.push(v)?;
                 }
             }
             Operator::Sqrt => {
-                let a = frame.stack.pop()?;
+                let a = frame.pop()?;
                 if a < 0.0 {
                     return Err(CalcError::NegativeSqrt);
                 }
-                frame.stack.push(a.sqrt());
+                frame.push(a.sqrt())?;
             }
             Operator::Mod => {
-                let b = frame.stack.pop()?;
-                let a = frame.stack.pop()?;
-                frame.stack.push(a % b);
+                let b = frame.pop()?;
+                if b == 0.0 {
+                    return Err(CalcError::DivisionByZero);
+                }
+                let a = frame.pop()?;
+                frame.push(a % b)?;
             }
             Operator::Cvi => {
-                let a = frame.stack.pop()?;
-                frame.stack.push(a.trunc());
+                let a = frame.pop()?;
+                frame.push(a.trunc())?;
             }
             Operator::Abs => {
-                let a = frame.stack.pop()?;
-                frame.stack.push(a.abs());
+                let a = frame.pop()?;
+                frame.push(a.abs())?;
             }
             Operator::Roll => {
-                let m = frame.stack.pop()? as isize;
-                let n = frame.stack.pop()? as usize;
-                if n > frame.stack.len() {
+                let m_val = frame.pop()?;
+                let n_val = frame.pop()?;
+                let m = m_val.to_isize().ok_or(CalcError::NegativeIntegerOperand {
+                    op: "roll",
+                    value: m_val,
+                })?;
+                let n = n_val.to_usize().ok_or(CalcError::InvalidIntegerOperand {
+                    op: "roll",
+                    value: n_val,
+                })?;
+                if n > frame.len() {
                     return Err(CalcError::RollCountTooLarge {
                         n,
-                        size: frame.stack.len(),
+                        size: frame.len(),
                     });
                 }
                 if n == 0 {
+                    // Nothing to rotate.
                     continue;
                 }
-                let len = frame.stack.len();
-                let mut slice: Vec<f64> = frame.stack.0.drain(len - n..).collect();
-                let m = ((m % n as isize) + n as isize) % n as isize; // normalize rotation
-                slice.rotate_right(m as usize);
-                frame.stack.0.extend(slice);
+                let start = frame
+                    .len()
+                    .checked_sub(n)
+                    .ok_or(CalcError::ArithmeticOverflow { op: "roll_index" })?;
+                let n_isize =
+                    isize::try_from(n).map_err(|_| CalcError::ArithmeticOverflow { op: "roll" })?;
+                // Normalize m into [0, n) using `rem_euclid` to handle negatives & large |m|.
+                let m_norm = m.rem_euclid(n_isize);
+                let m_norm_usize = usize::try_from(m_norm)
+                    .map_err(|_| CalcError::ArithmeticOverflow { op: "roll" })?;
+                if m_norm_usize != 0 {
+                    // Rotate only if there's an actual shift.
+                    frame.stack[start..].rotate_right(m_norm_usize);
+                }
             }
             Operator::Truncate => {
-                let a = frame.stack.pop()?;
-                frame.stack.push(a.trunc());
+                let a = frame.pop()?;
+                frame.push(a.trunc())?;
             }
-            Operator::Number(num) => frame.stack.push(*num),
+            Operator::Number(num) => frame.push(*num)?,
         }
     }
 
