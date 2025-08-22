@@ -1,9 +1,6 @@
-use pdf_content_stream::{
-    graphics_state_operators::{LineCap, LineJoin},
-    pdf_operator::PdfOperatorVariant,
-};
+use pdf_content_stream::pdf_operator::PdfOperatorVariant;
 use pdf_font::font::Font;
-use pdf_graphics::{color::Color, transform::Transform};
+use pdf_graphics::{LineCap, LineJoin, color::Color, transform::Transform};
 use pdf_page::{page::PdfPage, pattern::Pattern, resources::Resources};
 
 use crate::{

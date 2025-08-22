@@ -1185,6 +1185,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-derive"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed3955f1a9c7c0c15e092f9c887db08b1fc683305fdf6eb6684f22555355e202"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1548,6 +1559,8 @@ dependencies = [
 name = "pdf-content-stream"
 version = "0.1.0"
 dependencies = [
+ "num-traits",
+ "pdf-graphics",
  "pdf-object",
  "pdf-parser",
  "pdf-tokenizer",
@@ -1577,6 +1590,10 @@ dependencies = [
 [[package]]
 name = "pdf-graphics"
 version = "0.1.0"
+dependencies = [
+ "num-derive",
+ "num-traits",
+]
 
 [[package]]
 name = "pdf-graphics-femtovg"
@@ -1610,6 +1627,7 @@ dependencies = [
 name = "pdf-page"
 version = "0.1.0"
 dependencies = [
+ "num-traits",
  "pdf-content-stream",
  "pdf-font",
  "pdf-graphics",

@@ -1,10 +1,10 @@
 use std::rc::Rc;
 
+use pdf_graphics::LineCap;
+use pdf_graphics::LineJoin;
 use pdf_object::dictionary::Dictionary;
 
 use crate::TextElement;
-use crate::graphics_state_operators::LineCap;
-use crate::graphics_state_operators::LineJoin;
 use crate::pdf_operator_backend::*;
 
 /// Represents a recorded operation with its parameters.

@@ -406,7 +406,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
     }
 }
 
-impl<'a> CanvasBackend for SkiaMaskCanvas {
+impl CanvasBackend for SkiaMaskCanvas {
     type MaskType = SkiaMaskCanvas;
     type ImageType = SkiaImageSnapshot;
 

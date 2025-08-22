@@ -1,8 +1,5 @@
-use pdf_content_stream::{
-    graphics_state_operators::{LineCap, LineJoin},
-    pdf_operator_backend::GraphicsStateOps,
-};
-use pdf_graphics::transform::Transform;
+use pdf_content_stream::pdf_operator_backend::GraphicsStateOps;
+use pdf_graphics::{LineCap, LineJoin, transform::Transform};
 use pdf_page::{external_graphics_state::ExternalGraphicsStateKey, xobject::XObject};
 
 use crate::{
@@ -86,10 +83,10 @@ impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U
                     self.current_state_mut()?.line_width = *width
                 }
                 ExternalGraphicsStateKey::LineCap(cap) => {
-                    self.current_state_mut()?.line_cap = LineCap::from(*cap as u8)
+                    self.current_state_mut()?.line_cap = *cap;
                 }
                 ExternalGraphicsStateKey::LineJoin(join) => {
-                    self.current_state_mut()?.line_join = LineJoin::from(*join as u8)
+                    self.current_state_mut()?.line_join = *join;
                 }
                 ExternalGraphicsStateKey::MiterLimit(miter) => {
                     self.current_state_mut()?.miter_limit = *miter;
@@ -151,6 +148,10 @@ impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U
                 }
                 ExternalGraphicsStateKey::NonStrokingAlpha(alpha) => {
                     self.current_state_mut()?.fill_color.a = *alpha
+                }
+                ExternalGraphicsStateKey::StrokeAdjustment(_enabled) => {
+                    // TODO: Wire stroke adjustment into backend/state when supported.
+                    // For now, ignore to keep rendering stable.
                 }
             }
         }

@@ -11,4 +11,6 @@ workspace = true
 pdf-parser = { path = "../pdf-parser" }
 pdf-tokenizer = { path = "../pdf-tokenizer" }
 pdf-object = { path = "../pdf-object" }
+pdf-graphics = { path = "../pdf-graphics" }
 thiserror = "2.0.12"
+num-traits = "0.2.19"

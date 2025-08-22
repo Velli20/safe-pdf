@@ -14,3 +14,4 @@ pdf-font = { path = "../pdf-font" }
 pdf-graphics = { path = "../pdf-graphics" }
 pdf-postscript = { path = "../pdf-postscript" }
 thiserror = "2.0.12"
+num-traits = "0.2.19"

@@ -1,3 +1,6 @@
+use num_traits::FromPrimitive;
+use pdf_graphics::{LineCap, LineJoin};
+
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
@@ -32,42 +35,6 @@ impl PdfOperator for SetLineWidth {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum LineCap {
-    Butt = 0,
-    Round = 1,
-    Square = 2,
-}
-
-impl From<u8> for LineCap {
-    fn from(value: u8) -> Self {
-        match value {
-            0 => LineCap::Butt,
-            1 => LineCap::Round,
-            2 => LineCap::Square,
-            _ => LineCap::Butt,
-        }
-    }
-}
-
-impl From<u8> for LineJoin {
-    fn from(value: u8) -> Self {
-        match value {
-            0 => LineJoin::Miter,
-            1 => LineJoin::Round,
-            2 => LineJoin::Bevel,
-            _ => LineJoin::Miter,
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum LineJoin {
-    Miter = 0,
-    Round = 1,
-    Bevel = 2,
-}
-
 /// Sets the line cap style for path stroking.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetLineCapStyle {
@@ -76,9 +43,13 @@ pub struct SetLineCapStyle {
 }
 
 impl SetLineCapStyle {
-    pub fn new(style: u8) -> Self {
-        Self {
-            style: LineCap::from(style),
+    pub fn new(style: u8) -> Result<Self, PdfOperatorError> {
+        match LineCap::from_u8(style) {
+            Some(style_enum) => Ok(Self { style: style_enum }),
+            None => Err(PdfOperatorError::InvalidOperandValue {
+                expected: "line cap style (0 butt, 1 round, 2 projecting square)",
+                value: style.to_string(),
+            }),
         }
     }
 }
@@ -90,7 +61,7 @@ impl PdfOperator for SetLineCapStyle {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let style = operands.get_u8()?;
-        Ok(PdfOperatorVariant::SetLineCapStyle(Self::new(style)))
+        Ok(PdfOperatorVariant::SetLineCapStyle(Self::new(style)?))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
@@ -106,9 +77,13 @@ pub struct SetLineJoinStyle {
 }
 
 impl SetLineJoinStyle {
-    pub fn new(style: u8) -> Self {
-        Self {
-            style: LineJoin::from(style),
+    pub fn new(style: u8) -> Result<Self, PdfOperatorError> {
+        match LineJoin::from_u8(style) {
+            Some(style_enum) => Ok(Self { style: style_enum }),
+            None => Err(PdfOperatorError::InvalidOperandValue {
+                expected: "line join style (0 miter, 1 round, 2 bevel)",
+                value: style.to_string(),
+            }),
         }
     }
 }
@@ -120,7 +95,7 @@ impl PdfOperator for SetLineJoinStyle {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let style = operands.get_u8()?;
-        Ok(PdfOperatorVariant::SetLineJoinStyle(Self::new(style)))
+        Ok(PdfOperatorVariant::SetLineJoinStyle(Self::new(style)?))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {

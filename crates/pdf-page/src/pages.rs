@@ -15,8 +15,6 @@ pub enum PdfPagesError {
         "Invalid entry in `/Kids` array: expected an indirect object reference, found {found_type}"
     )]
     InvalidKidEntry { found_type: &'static str },
-    #[error("Page object with number {obj_num} not found or is not a dictionary")]
-    PageObjectNotFound { obj_num: i32 },
     #[error("Missing required `/Type` entry in dictionary for object {obj_num}")]
     MissingTypeEntryInKid { obj_num: i32 },
     #[error(

@@ -44,10 +44,6 @@ pub enum CidFontError {
     #[error("Missing /Subtype entry in CIDFont dictionary")]
     MissingSubType,
     #[error(
-        "Invalid /FontDescriptor reference in CIDFont dictionary: object {0} could not be resolved to a dictionary"
-    )]
-    InvalidFontDescriptorReference(i32),
-    #[error(
         "Invalid type for CIDFont entry /{entry_name}: expected {expected_type}, found {found_type}"
     )]
     InvalidEntryType {

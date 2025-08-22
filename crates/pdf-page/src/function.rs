@@ -1,5 +1,6 @@
 use pdf_object::{dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection};
 
+use num_traits::ToPrimitive;
 use pdf_postscript::{calculator::CalcError, operator::Operator};
 use thiserror::Error;
 
@@ -131,25 +132,6 @@ impl Function {
                     None
                 }
             }
-        }
-    }
-
-    #[inline]
-    fn safe_f64_to_f32(val: f64) -> f32 {
-        // Avoid direct casts in comparisons flagged by clippy; manual clamping then single cast.
-        if val.is_nan() {
-            return f32::NAN;
-        }
-        const F32_MAX_F64: f64 = 3.4028234663852886e38_f64; // f32::MAX as f64
-        const F32_MIN_F64: f64 = -3.4028234663852886e38_f64; // f32::MIN as f64
-        let clamped = val.clamp(F32_MIN_F64, F32_MAX_F64);
-        #[allow(
-            clippy::cast_possible_truncation,
-            clippy::cast_precision_loss,
-            clippy::as_conversions
-        )]
-        {
-            clamped as f32
         }
     }
 
@@ -353,9 +335,15 @@ impl Function {
                     )
                     .ok_or(FunctionInterpolationError::EncodeIndexError)?;
                 let v_f64 = *val;
-                let mut v_f32 = Self::safe_f64_to_f32(v_f64);
-                v_f32 = v_f32.max(min).min(max);
-                outputs.push(v_f32);
+
+                match v_f64.to_f32() {
+                    Some(v_f32) => {
+                        outputs.push(v_f32.max(min).min(max));
+                    }
+                    None => {
+                        return Err(FunctionInterpolationError::InputIsNaN);
+                    }
+                }
             }
             Ok(outputs)
         } else {

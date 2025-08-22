@@ -17,6 +17,11 @@ pub enum PdfOperatorError {
         expected_type: &'static str,
         found_type: &'static str,
     },
+    #[error("Invalid operand value: expected {expected}, found {value}")]
+    InvalidOperandValue {
+        expected: &'static str,
+        value: String,
+    },
     #[error("Failed to convert a PDF value to number of type '{expected_type}': {source}")]
     OperandNumericConversionError {
         expected_type: &'static str,

@@ -92,7 +92,7 @@ impl<U, T: CanvasBackend<ImageType = U>> TextStateOps for PdfCanvas<'_, T, U> {
         let font = resources
             .fonts
             .get(font_name)
-            .ok_or(PdfCanvasError::FontNotFound(font_name.to_string()))?;
+            .ok_or_else(|| PdfCanvasError::FontNotFound(font_name.to_string()))?;
 
         self.current_state_mut()?.text_state.font = Some(font);
         Ok(())
