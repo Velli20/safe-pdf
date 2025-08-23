@@ -10,5 +10,3 @@ pub mod traits;
 pub mod version;
 
 pub use object_variant::ObjectVariant;
-
-// Note: ObjectVariant implementation moved to `object_variant.rs`.
