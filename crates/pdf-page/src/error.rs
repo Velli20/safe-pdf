@@ -3,90 +3,40 @@ use pdf_font::font::FontError;
 use pdf_object::error::ObjectError;
 
 use crate::{content_stream::ContentStreamReadError, resources::ResourcesError};
+use thiserror::Error;
 
 /// Defines errors that can occur when interpreting a PDF page object.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Error)]
 pub enum PageError {
     /// The page dictionary is missing `/Contents` entry.
+    #[error("Missing /Contents entry in page dictionary")]
     MissingContent,
+
     /// The `/MediaBox` entry in the page dictionary is invalid.
+    #[error("Invalid /MediaBox entry: {0}")]
     InvalidMediaBox(&'static str),
-    /// Wraps an error message from an `ObjectError`
-    /// encountered while processing a PDF object related to the page.
-    ObjectError(String),
-    /// Wraps an error message from a `PdfPainterError`
-    PdfOperatorError(String),
-    /// Wraps an error message from a `FontError`.
-    FontResourceError(String),
-    PageResourcesError(String),
-    ContentStreamReadError(String),
+
+    /// Error originating from PDF object handling.
+    #[error(transparent)]
+    ObjectError(#[from] ObjectError),
+
+    /// Error originating from content stream operators processing.
+    #[error("Content stream operator error: {0}")]
+    PdfOperatorError(#[from] PdfOperatorError),
+
+    /// Error originating from font resources.
+    #[error("Font resource error: {0}")]
+    FontResourceError(#[from] FontError),
+
+    /// Error originating from the page /Resources dictionary.
+    #[error("Page /Resources error: {0}")]
+    PageResourcesError(#[from] ResourcesError),
+
+    /// Error while reading or interpreting the page content stream.
+    #[error("Content stream read error: {0}")]
+    ContentStreamReadError(#[from] ContentStreamReadError),
+
+    /// Expected a dictionary for a named entry but found a different type.
+    #[error("Expected a Dictionary object for {0}")]
     NotDictionary(&'static str),
-}
-
-impl From<ObjectError> for PageError {
-    fn from(err: ObjectError) -> Self {
-        Self::ObjectError(err.to_string())
-    }
-}
-
-impl From<PdfOperatorError> for PageError {
-    fn from(err: PdfOperatorError) -> Self {
-        Self::PdfOperatorError(err.to_string())
-    }
-}
-
-impl From<FontError> for PageError {
-    fn from(err: FontError) -> Self {
-        Self::FontResourceError(err.to_string())
-    }
-}
-
-impl From<ResourcesError> for PageError {
-    fn from(err: ResourcesError) -> Self {
-        Self::PageResourcesError(err.to_string())
-    }
-}
-impl From<ContentStreamReadError> for PageError {
-    fn from(err: ContentStreamReadError) -> Self {
-        Self::ContentStreamReadError(err.to_string())
-    }
-}
-
-impl std::fmt::Display for PageError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PageError::MissingContent => {
-                write!(f, "Missing `/Contents` entry")
-            }
-            PageError::InvalidMediaBox(err) => {
-                write!(f, "Invalid `/MediaBox` entry: {}", err)
-            }
-            PageError::ObjectError(err) => {
-                write!(
-                    f,
-                    "Failed to process a PDF object related to the page: {}",
-                    err
-                )
-            }
-            PageError::PdfOperatorError(err) => {
-                write!(
-                    f,
-                    "Failed to process a PDF object related to the page: {}",
-                    err
-                )
-            }
-            PageError::FontResourceError(err) => {
-                write!(f, "Error loading font resource: {}", err)
-            }
-            PageError::PageResourcesError(err) => {
-                write!(f, "Error loading page resources: {}", err)
-            }
-            PageError::ContentStreamReadError(err) => {
-                write!(f, "Error reading content stream: {}", err)
-            }
-            PageError::NotDictionary(name) => {
-                write!(f, "Expected a Dictionary object for {}", name)
-            }
-        }
-    }
 }
