@@ -19,7 +19,9 @@ impl ObjectCollection {
                 Ok(())
             }
         } else {
-            Err(ObjectError::TypeMismatch("Fixme", "Fixme"))
+            Err(ObjectError::ObjectMissingNumber {
+                found_type: obj.name(),
+            })
         }
     }
 

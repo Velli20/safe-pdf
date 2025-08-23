@@ -23,4 +23,9 @@ pub enum ObjectError {
     FailedResolveStreamObject { resolved_type: &'static str },
     #[error("Invalid array length: expected {expected}, but found {found}")]
     InvalidArrayLength { expected: usize, found: usize },
+    /// Indicates that an attempt was made to insert an object into a collection
+    /// but the object does not have an associated object number (is not a reference,
+    /// indirect object, or stream with object number).
+    #[error("Object does not have an object number; found type '{found_type}'")]
+    ObjectMissingNumber { found_type: &'static str },
 }
