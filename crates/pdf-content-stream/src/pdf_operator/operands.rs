@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
-use pdf_object::{dictionary::Dictionary, ObjectVariant};
+use pdf_object::{ObjectVariant, dictionary::Dictionary};
 
-use crate::{error::PdfOperatorError, TextElement};
+use crate::{TextElement, error::PdfOperatorError};
 
 pub struct Operands<'a> {
     pub values: &'a [ObjectVariant],
@@ -140,7 +140,8 @@ impl<'a> Operands<'a> {
                     elements.push(TextElement::Text { value: s.clone() })
                 }
                 _ => {
-                    let amount = Self::as_f32_for_array(val_obj, "LiteralString or Number in array")?;
+                    let amount =
+                        Self::as_f32_for_array(val_obj, "LiteralString or Number in array")?;
                     elements.push(TextElement::Adjustment { amount });
                 }
             }

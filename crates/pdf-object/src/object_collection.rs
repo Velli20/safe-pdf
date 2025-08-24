@@ -25,9 +25,9 @@ impl ObjectCollection {
         }
     }
 
-    pub fn get(&self, key: i32) -> Option<ObjectVariant> {
+    pub fn get(&self, key: i32) -> Option<&ObjectVariant> {
         if let Some(obj) = self.map.get(&key) {
-            return Some(obj.clone());
+            return Some(obj);
         }
         None
     }

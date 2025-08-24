@@ -8,3 +8,4 @@ pdf-object = { path = "../pdf-object" }
 pdf-parser = { path = "../pdf-parser" }
 pdf-page = { path = "../pdf-page" }
 pdf-font = { path = "../pdf-font" }
+thiserror = "2.0.12"

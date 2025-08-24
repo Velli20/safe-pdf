@@ -70,7 +70,7 @@ impl FromDictionary for ContentStream {
                     ContentStreamReadError::FailedResolveFontObjectReference { obj_num: *num },
                 )?
             }
-            _ => contents.clone(),
+            _ => contents,
         };
 
         // Process the resolved /Contents object.

@@ -31,7 +31,7 @@ impl PdfDocument {
 
     pub fn from(input: &[u8]) -> Result<Self, PdfError> {
         let mut parser = PdfParser::from(input);
-        let version = parser.parse_header().unwrap();
+        let version = parser.parse_header()?;
 
         let mut trailer = None;
         let mut objects = ObjectCollection::default();
@@ -42,9 +42,7 @@ impl PdfDocument {
                 ObjectVariant::EndOfFile => break,
                 ObjectVariant::IndirectObject(_)
                 | ObjectVariant::Reference(_)
-                | ObjectVariant::Stream(_) => {
-                    objects.insert(object).unwrap();
-                }
+                | ObjectVariant::Stream(_) => objects.insert(object)?,
 
                 ObjectVariant::Trailer(t) => {
                     trailer = Some(t);
@@ -62,22 +60,18 @@ impl PdfDocument {
             .get("Root")
             .ok_or(PdfError::MissingRoot)?;
 
-        // Get the catalog. TODO: Err
-        let catalog = objects
-            .resolve_dictionary(root)
-            .map_err(|_| PdfError::MissingCatalog)?
-            .clone();
+        // Get the catalog.
+        let catalog = objects.resolve_dictionary(root)?;
 
         // Get the `Pages` object reference from the catalog, which defines the order of the pages in the document.
-        let pages_num = catalog.get("Pages").unwrap();
+        let pages_num = match catalog.get("Pages") {
+            Some(p) => p,
+            None => return Err(PdfError::MissingPages),
+        };
 
-        // TODO: Err
-        let pages_dict = objects
-            .resolve_dictionary(pages_num)
-            .map_err(|_| PdfError::MissingPages)?
-            .clone();
+        let pages_dict = objects.resolve_dictionary(pages_num)?;
 
-        let pages = PdfPages::from_dictionary(&pages_dict, &objects).unwrap();
+        let pages = PdfPages::from_dictionary(pages_dict, &objects)?;
 
         Ok(PdfDocument {
             version,
