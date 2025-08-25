@@ -28,4 +28,7 @@ pub enum ObjectError {
     /// indirect object, or stream with object number).
     #[error("Object does not have an object number; found type '{found_type}'")]
     ObjectMissingNumber { found_type: &'static str },
+    /// Indicates that a required key was not found in a dictionary
+    #[error("Required key '{key}' not found in dictionary")]
+    MissingRequiredKey { key: String },
 }

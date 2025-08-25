@@ -36,32 +36,8 @@ bitflags! {
 /// Defines errors that can occur while reading or processing font-related PDF objects.
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum FontDescriptorError {
-    #[error("Invalid data for /FontBBox entry")]
-    InvalidFontBoundingBox,
-    #[error("Missing /FontBBox entry")]
-    MissingFontBoundingBox,
-    #[error("Missing /FontName entry")]
-    MissingFontName,
     #[error("Object error: {0}")]
     ObjectError(#[from] ObjectError),
-    /// Error converting a PDF value to a number.
-    #[error("Failed to convert PDF value to number for '{entry_description}': {err}")]
-    FontBoundingBoxNumericConversionError {
-        entry_description: &'static str,
-        #[source]
-        err: ObjectError,
-    },
-    #[error("Missing required entry in FontDescriptor: /{0}")]
-    MissingRequiredEntry(&'static str),
-    #[error(
-        "Invalid type for FontDescriptor entry /{entry_name}: expected {expected_type}, found {found_type}"
-    )]
-    InvalidEntryType {
-        entry_name: &'static str,
-        expected_type: &'static str,
-        found_type: &'static str, // Assumes ObjectVariant::name() -> &'static str
-    },
-
     #[error(
         "Failed to convert PDF value to number for FontDescriptor entry /{entry_description}: {source}"
     )]
@@ -70,7 +46,6 @@ pub enum FontDescriptorError {
         #[source]
         source: ObjectError,
     },
-
     #[error("FontName is required but was an empty string")]
     EmptyFontName,
 }
@@ -101,8 +76,6 @@ pub struct FontDescriptor {
     pub font_file: Option<ObjectVariant>,
     /// The PostScript name of the font.
     font_name: String,
-    /// The weight (thickness) of the font's strokes.
-    font_weight: Option<i64>,
     /// The angle, in degrees counterclockwise from the vertical, of the dominant vertical strokes of the font.
     italic_angle: f32,
     /// The width to use for glyphs not found in the font's encoding.
@@ -125,8 +98,7 @@ impl FromDictionary for FontDescriptor {
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let get_required_number_field = |key: &'static str| -> Result<f32, FontDescriptorError> {
             dictionary
-                .get(key)
-                .ok_or(FontDescriptorError::MissingRequiredEntry(key))?
+                .get_or_err(key)?
                 .as_number::<f32>()
                 .map_err(|source| FontDescriptorError::NumericConversionError {
                     entry_description: key,
@@ -152,8 +124,7 @@ impl FromDictionary for FontDescriptor {
         let cap_height = get_required_number_field("CapHeight")?;
 
         let flags_val = dictionary
-            .get("Flags")
-            .ok_or(FontDescriptorError::MissingRequiredEntry("Flags"))?
+            .get_or_err("Flags")?
             .as_number::<u32>()
             .map_err(|source| FontDescriptorError::NumericConversionError {
                 entry_description: "Flags",
@@ -161,10 +132,7 @@ impl FromDictionary for FontDescriptor {
             })?;
         let flags = FontDescriptorFlags::from_bits_truncate(flags_val);
 
-        let font_bounding_box = dictionary
-            .get("FontBBox")
-            .ok_or(FontDescriptorError::MissingRequiredEntry("FontBBox"))?
-            .as_array_of::<f32, 4>()?;
+        let font_bounding_box = dictionary.get_or_err("FontBBox")?.as_array_of::<f32, 4>()?;
 
         let font_family = dictionary
             .get_string("FontFamily")
@@ -182,16 +150,11 @@ impl FromDictionary for FontDescriptor {
             .or_else(|| resolve_font_file_stream("FontFile3"))
             .or_else(|| resolve_font_file_stream("FontFile"));
 
-        let font_name = dictionary
-            .get_string("FontName")
-            .ok_or(FontDescriptorError::MissingRequiredEntry("FontName"))?
-            .to_owned();
-
+        let font_name = dictionary.get_or_err("FontName")?.try_str()?.to_string();
         if font_name.is_empty() {
             return Err(FontDescriptorError::EmptyFontName);
         }
 
-        let font_weight = dictionary.get_number("FontWeight");
         let italic_angle = get_required_number_field("ItalicAngle")?;
         let missing_width = get_optional_number_field("MissingWidth")?.unwrap_or(0.0);
         let max_width = get_optional_number_field("MaxWidth")?;
@@ -206,7 +169,6 @@ impl FromDictionary for FontDescriptor {
             font_family,
             font_file,
             font_name,
-            font_weight,
             italic_angle,
             missing_width,
             max_width,

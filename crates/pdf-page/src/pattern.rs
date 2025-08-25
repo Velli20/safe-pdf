@@ -16,8 +16,6 @@ use crate::{
 /// Defines errors that can occur while parsing a Pattern.
 #[derive(Debug, Error)]
 pub enum PatternError {
-    #[error("Missing /PatternType key")]
-    MissingPatternType,
     #[error("Missing required entry in Pattern: /{0}")]
     MissingRequiredEntry(&'static str),
     #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
@@ -153,10 +151,7 @@ impl Pattern {
         objects: &ObjectCollection,
         stream: Option<&[u8]>,
     ) -> Result<Pattern, PatternError> {
-        let pattern_type = dictionary
-            .get("PatternType")
-            .ok_or(PatternError::MissingPatternType)?
-            .as_number::<i32>()?;
+        let pattern_type = dictionary.get_or_err("PatternType")?.as_number::<i32>()?;
 
         // Read the transformation matrix for the pattern. Defaults to identity.
         let matrix = Matrix::from_dictionary(dictionary, objects)?;
@@ -165,8 +160,7 @@ impl Pattern {
             Some(PatternType::Tiling) => {
                 // Read the `/PaintType` entry.
                 let paint_type_int = dictionary
-                    .get("PaintType")
-                    .ok_or(PatternError::MissingRequiredEntry("PaintType"))?
+                    .get_or_err("PaintType")?
                     .as_number::<i32>()
                     .map_err(|e| PatternError::NumericConversionError {
                         entry_description: "PaintType",
@@ -182,8 +176,7 @@ impl Pattern {
 
                 // Read the `/TilingType` entry.
                 let tiling_type_int = dictionary
-                    .get("TilingType")
-                    .ok_or(PatternError::MissingRequiredEntry("TilingType"))?
+                    .get_or_err("TilingType")?
                     .as_number::<i32>()
                     .map_err(|e| PatternError::NumericConversionError {
                         entry_description: "TilingType",
@@ -197,15 +190,11 @@ impl Pattern {
                 })?;
 
                 // Read the `/BBox` entry.
-                let bbox = dictionary
-                    .get("BBox")
-                    .ok_or(PatternError::MissingRequiredEntry("BBox"))?
-                    .as_array_of::<f32, 4>()?;
+                let bbox = dictionary.get_or_err("BBox")?.as_array_of::<f32, 4>()?;
 
                 // Read the `/XStep` entry.
                 let x_step = dictionary
-                    .get("XStep")
-                    .ok_or(PatternError::MissingRequiredEntry("XStep"))?
+                    .get_or_err("XStep")?
                     .as_number::<f32>()
                     .map_err(|e| PatternError::NumericConversionError {
                         entry_description: "XStep",
@@ -214,8 +203,7 @@ impl Pattern {
 
                 // Read the `/YStep` entry.
                 let y_step = dictionary
-                    .get("YStep")
-                    .ok_or(PatternError::MissingRequiredEntry("YStep"))?
+                    .get_or_err("YStep")?
                     .as_number::<f32>()
                     .map_err(|e| PatternError::NumericConversionError {
                         entry_description: "YStep",

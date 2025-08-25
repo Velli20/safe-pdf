@@ -41,14 +41,6 @@ pub enum FontError {
         entry_name: &'static str,
         dictionary_type: &'static str,
     },
-    #[error(
-        "Entry '{entry_name}' in Type0 Font dictionary has invalid type: expected {expected_type}, found {found_type}"
-    )]
-    InvalidEntryType {
-        entry_name: &'static str,
-        expected_type: &'static str,
-        found_type: &'static str,
-    },
     #[error("Missing /DescendantFonts entry in Type0 font")]
     MissingDescendantFonts,
     #[error("Invalid /DescendantFonts entry in Type0 font: {0}")]
@@ -162,9 +154,7 @@ impl FromDictionary for Font {
         }
 
         // The `/DescendantFonts` array is required for Type0 fonts. Return an error if missing.
-        let descendant_fonts_array = dictionary
-            .get_array("DescendantFonts")
-            .ok_or(FontError::MissingDescendantFonts)?;
+        let descendant_fonts_array = dictionary.get_or_err("DescendantFonts")?.try_array()?;
 
         // The array must not be empty. Get the first element, which should reference the CIDFont dictionary.
         let cid_font_ref_val = descendant_fonts_array

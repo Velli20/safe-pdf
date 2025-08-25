@@ -9,12 +9,6 @@ use thiserror::Error;
 /// Errors that can occur during parsing of a PDF Pages object.
 #[derive(Error, Debug)]
 pub enum PdfPagesError {
-    #[error("Missing required `/Kids` array in Pages object")]
-    MissingKidsArray,
-    #[error(
-        "Invalid entry in `/Kids` array: expected an indirect object reference, found {found_type}"
-    )]
-    InvalidKidEntry { found_type: &'static str },
     #[error("Missing required `/Type` entry in dictionary for object {obj_num}")]
     MissingTypeEntryInKid { obj_num: i32 },
     #[error(
@@ -48,9 +42,7 @@ impl FromDictionary for PdfPages {
         // The `/Kids` array is a required entry in a Pages dictionary. It contains
         // indirect references to child objects, which can be either other Pages nodes
         // or leaf Page nodes.
-        let kids_array = dictionary
-            .get_array("Kids")
-            .ok_or(PdfPagesError::MissingKidsArray)?;
+        let kids_array = dictionary.get_or_err("Kids")?.try_array()?;
 
         // This vector will store the flattened list of all leaf `PdfPage` objects
         // found by traversing the page tree.
@@ -60,12 +52,7 @@ impl FromDictionary for PdfPages {
         for value in kids_array {
             // Each entry must be an indirect reference. We extract its object number
             // for use in error messages.
-            let obj_num =
-                value
-                    .as_object_number()
-                    .ok_or_else(|| PdfPagesError::InvalidKidEntry {
-                        found_type: value.name(),
-                    })?;
+            let obj_num = value.try_object_number()?;
 
             // Resolve the indirect reference to get the child's dictionary.
             let kid_dict = objects.resolve_dictionary(value)?;

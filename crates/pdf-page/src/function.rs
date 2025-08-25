@@ -12,23 +12,17 @@ pub enum FunctionReadError {
     MissingDomain,
     #[error("Missing /Range entry")]
     MissingRange,
-    #[error("Missing required entry in Function: /{0}")]
-    MissingRequiredEntry(&'static str),
     #[error("Invalid /FunctionType value")]
     InvalidFunctionType,
+    #[error("Encode array length must be exactly 2 * number of functions")]
+    InvalidEncodeLength,
+    #[error("Bounds array length must be number of functions - 1")]
+    InvalidBoundsLength,
     #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
     NumericConversionError {
         entry_description: &'static str,
         #[source]
         source: ObjectError,
-    },
-    #[error(
-        "Entry '{entry_name}' in Shading dictionary has invalid type: expected {expected_type}, found {found_type}"
-    )]
-    InvalidEntryType {
-        entry_name: &'static str,
-        expected_type: &'static str,
-        found_type: &'static str,
     },
     #[error("Failed to read function value for '{entry_description}': {source}")]
     EntryReadError {
@@ -179,7 +173,7 @@ impl Function {
             }
 
             // 3. Apply the interpolation formula for each component using checked powf.
-            let pow = x_normalized.powf(*exponent); // For f32 this won't panic, guard above handles undefined case.
+            let pow = x_normalized.powf(*exponent);
             let result = c0
                 .iter()
                 .zip(c1.iter())
@@ -358,22 +352,17 @@ impl Function {
         _objects: &ObjectCollection,
         stream: Option<&[u8]>,
     ) -> Result<Function, FunctionReadError> {
-        let function_type_int = dictionary
-            .get("FunctionType")
-            .ok_or(FunctionReadError::MissingFunctionType)?
-            .as_number::<i32>()?;
+        let function_type_int = dictionary.get_or_err("FunctionType")?.as_number::<i32>()?;
 
         let function_type = FunctionType::from_i32(function_type_int)
             .ok_or(FunctionReadError::InvalidFunctionType)?;
 
         match function_type {
             FunctionType::ExponentialInterpolation => {
-                let domain = if let Some(obj) = dictionary.get("Domain") {
-                    obj.as_array_of::<f32, 2>()
-                        .map_err(FunctionReadError::DomainParsingError)?
-                } else {
-                    return Err(FunctionReadError::MissingDomain);
-                };
+                let domain = dictionary
+                    .get_or_err("Domain")?
+                    .as_array_of::<f32, 2>()
+                    .map_err(FunctionReadError::DomainParsingError)?;
 
                 // Parse /C0, the function's output for domain[0]. Defaults to [0.0] if not present.
                 let c0 = if let Some(obj) = dictionary.get("C0") {
@@ -399,8 +388,7 @@ impl Function {
 
                 // Parse /N, the interpolation exponent (required).
                 let exponent = dictionary
-                    .get("N")
-                    .ok_or(FunctionReadError::MissingRequiredEntry("N"))?
+                    .get_or_err("N")?
                     .as_number::<f32>()
                     .map_err(|e| FunctionReadError::NumericConversionError {
                         entry_description: "N",
@@ -418,34 +406,23 @@ impl Function {
                 })
             }
             FunctionType::Stitching => {
-                let domain = if let Some(obj) = dictionary.get("Domain") {
-                    obj.as_array_of::<f32, 2>()
-                        .map_err(FunctionReadError::DomainParsingError)?
-                } else {
-                    return Err(FunctionReadError::MissingDomain);
-                };
-
-                // Parse Functions array
-                let functions_arr = dictionary
-                    .get_array("Functions")
-                    .ok_or(FunctionReadError::MissingRequiredEntry("Functions"))?;
+                let domain = dictionary
+                    .get_or_err("Domain")?
+                    .as_array_of::<f32, 2>()
+                    .map_err(FunctionReadError::DomainParsingError)?;
 
                 let mut functions = Vec::new();
+
+                // Parse Functions array
+                let functions_arr = dictionary.get_or_err("Functions")?.try_array()?;
                 for obj in functions_arr.iter() {
-                    let dict =
-                        obj.as_dictionary()
-                            .ok_or_else(|| FunctionReadError::InvalidEntryType {
-                                entry_name: "Functions",
-                                expected_type: "Dictionary",
-                                found_type: obj.name(),
-                            })?;
+                    let dict = obj.try_dictionary()?;
                     functions.push(Function::from_dictionary(dict, _objects, None)?);
                 }
 
                 // Parse Bounds array
                 let bounds = dictionary
-                    .get("Bounds")
-                    .ok_or(FunctionReadError::MissingRequiredEntry("Bounds"))?
+                    .get_or_err("Bounds")?
                     .as_vec_of::<f32>()
                     .map_err(|e| FunctionReadError::EntryReadError {
                         entry_description: "Bounds",
@@ -454,8 +431,7 @@ impl Function {
 
                 // Parse Encode array
                 let encode = dictionary
-                    .get("Encode")
-                    .ok_or(FunctionReadError::MissingRequiredEntry("Encode"))?
+                    .get_or_err("Encode")?
                     .as_vec_of::<f32>()
                     .map_err(|e| FunctionReadError::EntryReadError {
                         entry_description: "Encode",
@@ -464,14 +440,10 @@ impl Function {
 
                 // Validate relationships to avoid later arithmetic surprises
                 if functions.len().checked_sub(1) != Some(bounds.len()) {
-                    return Err(FunctionReadError::MissingRequiredEntry(
-                        "Bounds / Functions length mismatch",
-                    ));
+                    return Err(FunctionReadError::InvalidBoundsLength);
                 }
                 if functions.len().checked_mul(2).map(|v| v == encode.len()) != Some(true) {
-                    return Err(FunctionReadError::MissingRequiredEntry(
-                        "Encode length invalid",
-                    ));
+                    return Err(FunctionReadError::InvalidEncodeLength);
                 }
 
                 Ok(Function {
@@ -485,19 +457,15 @@ impl Function {
                 })
             }
             FunctionType::PostScriptCalculator => {
-                let domain = if let Some(obj) = dictionary.get("Domain") {
-                    obj.as_vec_of::<f32>()
-                        .map_err(FunctionReadError::DomainParsingError)?
-                } else {
-                    return Err(FunctionReadError::MissingDomain);
-                };
+                let domain = dictionary
+                    .get_or_err("Domain")?
+                    .as_vec_of::<f32>()
+                    .map_err(FunctionReadError::DomainParsingError)?;
 
-                let range = if let Some(obj) = dictionary.get("Range") {
-                    obj.as_vec_of::<f32>()
-                        .map_err(FunctionReadError::DomainParsingError)?
-                } else {
-                    return Err(FunctionReadError::MissingRange);
-                };
+                let range = dictionary
+                    .get_or_err("Range")?
+                    .as_vec_of::<f32>()
+                    .map_err(FunctionReadError::DomainParsingError)?;
 
                 let stream = stream.ok_or(FunctionReadError::InvalidFunctionType)?;
                 let a = String::from_utf8_lossy(stream);

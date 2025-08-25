@@ -62,10 +62,7 @@ impl FromDictionary for Type3Font {
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let font_matrix = dictionary
-            .get("FontMatrix")
-            .ok_or(Type3FontError::MissingEntry {
-                entry_name: "FontMatrix",
-            })?
+            .get_or_err("FontMatrix")?
             .as_array_of::<f32, 6>()?;
 
         let char_proc_dictionary =
@@ -138,8 +135,14 @@ impl FromDictionary for Type3Font {
 pub enum EncodingError {
     #[error("Invalid entry in /Differences array: expected Integer or Name, found {found_type}")]
     InvalidDifferencesEntryType { found_type: &'static str },
+    #[error("Invalid type for /Differences: expected Array, found {found_type}")]
+    InvalidDifferencesType { found_type: &'static str },
     #[error("Invalid character code in /Differences array: expected 0-255, found {code}")]
     InvalidDifferenceCharCode { code: i64 },
+    #[error(
+        "Character code overflow in /Differences array while incrementing after code {last_code}"
+    )]
+    DifferencesCodeOverflow { last_code: u8 },
     #[error("Missing required entry '{entry_name}' in Encoding dictionary")]
     MissingEntry { entry_name: &'static str },
 }
@@ -170,26 +173,32 @@ impl FromDictionary for FontEncodingDictionary {
 
         let mut differences = HashMap::new();
 
-        if let Some(diff_array) = dictionary.get_array("Differences") {
-            let mut current_code = 0;
-            let iter = diff_array.iter();
+        if let Some(diff_array) = dictionary.get("Differences") {
+            let diff_array =
+                diff_array
+                    .as_array()
+                    .ok_or_else(|| EncodingError::InvalidDifferencesType {
+                        found_type: diff_array.name(),
+                    })?;
 
-            for entry in iter {
+            let mut current_code: u8 = 0;
+            for entry in diff_array.iter() {
                 match entry {
                     ObjectVariant::Integer(code) => {
-                        // This is a 'firstCode'
-                        if *code < 0 || *code > 255 {
-                            return Err(EncodingError::InvalidDifferenceCharCode { code: *code });
-                        }
-                        current_code = *code as u8;
+                        let code_i64 = *code;
+                        current_code = u8::try_from(code_i64).map_err(|_| {
+                            EncodingError::InvalidDifferenceCharCode { code: code_i64 }
+                        })?;
                     }
                     ObjectVariant::Name(name) => {
-                        // This is a glyph name
                         differences.insert(current_code, name.clone());
-                        current_code += 1;
+                        current_code = current_code.checked_add(1).ok_or(
+                            EncodingError::DifferencesCodeOverflow {
+                                last_code: current_code,
+                            },
+                        )?;
                     }
                     _ => {
-                        // Invalid entry type in Differences array
                         return Err(EncodingError::InvalidDifferencesEntryType {
                             found_type: entry.name(),
                         });

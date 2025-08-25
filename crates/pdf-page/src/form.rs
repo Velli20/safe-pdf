@@ -14,8 +14,6 @@ use crate::xobject::XObjectReader;
 /// Errors that can occur during parsing of a Form XObject.
 #[derive(Debug, Error)]
 pub enum FormXObjectError {
-    #[error("Missing required entry '{entry_name}' in Form XObject dictionary")]
-    MissingEntry { entry_name: &'static str },
     #[error("Invalid type for entry '{entry_name}': expected {expected_type}, found {found_type}")]
     InvalidEntryType {
         entry_name: &'static str,
@@ -54,10 +52,7 @@ impl XObjectReader for FormXObject {
         objects: &ObjectCollection,
     ) -> Result<Self, FormXObjectError> {
         // Retrieve the `/BBox` entry.
-        let bbox = dictionary
-            .get("BBox")
-            .ok_or(FormXObjectError::MissingEntry { entry_name: "BBox" })?
-            .as_array_of::<f32, 4>()?;
+        let bbox = dictionary.get_or_err("BBox")?.as_array_of::<f32, 4>()?;
 
         // Retrieve the `/Matrix` entry if present.
         let matrix = Matrix::from_dictionary(dictionary, objects)?;

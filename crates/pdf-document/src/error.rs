@@ -12,12 +12,6 @@ pub enum PdfError {
     /// The PDF document trailer dictionary could not be found or is malformed.
     #[error("missing trailer")]
     MissingTrailer,
-    /// The `/Root` entry in the trailer, which points to the document catalog, is missing or invalid.
-    #[error("missing root")]
-    MissingRoot,
-    /// The `/Pages` entry in the document catalog is missing or invalid.
-    #[error("missing pages")]
-    MissingPages,
     /// The `Pages` entry in the document catalog is missing or invalid.
     #[error("missing page tree")]
     MissingPageTree,

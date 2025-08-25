@@ -60,6 +60,12 @@ impl ObjectVariant {
         }
     }
 
+    /// Like [`as_object_number`], but returns an error on mismatch.
+    pub fn try_object_number(&self) -> Result<i32, ObjectError> {
+        self.as_object_number()
+            .ok_or_else(|| ObjectError::TypeMismatch("ObjectNumber", self.name()))
+    }
+
     /// Converts this value into its object number if applicable.
     ///
     /// Unlike [`as_object_number`], this also returns the object number for
@@ -82,12 +88,24 @@ impl ObjectVariant {
         }
     }
 
+    /// Like [`as_dictionary`], but returns an error on mismatch.
+    pub fn try_dictionary(&self) -> Result<&Rc<Dictionary>, ObjectError> {
+        self.as_dictionary()
+            .ok_or_else(|| ObjectError::TypeMismatch("Dictionary", self.name()))
+    }
+
     /// Returns a slice view into the inner array if this is an `Array` variant.
     pub fn as_array(&self) -> Option<&[ObjectVariant]> {
         match self {
             ObjectVariant::Array(value) => Some(value),
             _ => None,
         }
+    }
+
+    /// Like [`as_array`], but returns an error on mismatch.
+    pub fn try_array(&self) -> Result<&[ObjectVariant], ObjectError> {
+        self.as_array()
+            .ok_or_else(|| ObjectError::TypeMismatch("Array", self.name()))
     }
 
     /// Returns `true` if this value is an `Array`.
@@ -156,6 +174,12 @@ impl ObjectVariant {
         }
     }
 
+    /// Like [`as_reference`], but returns an error on mismatch.
+    pub fn try_reference(&self) -> Result<i32, ObjectError> {
+        self.as_reference()
+            .ok_or_else(|| ObjectError::TypeMismatch("Reference", self.name()))
+    }
+
     /// Returns a string view if this is a string-like type.
     ///
     /// For `HexString`, a lossy UTF-8 conversion is performed and returned.
@@ -171,6 +195,12 @@ impl ObjectVariant {
         }
     }
 
+    /// Like [`as_str`], but returns an error on mismatch.
+    pub fn try_str(&self) -> Result<Cow<'_, str>, ObjectError> {
+        self.as_str()
+            .ok_or_else(|| ObjectError::TypeMismatch("String", self.name()))
+    }
+
     /// Returns the raw bytes if this is a `HexString`.
     pub fn as_bytes(&self) -> Option<&[u8]> {
         match self {
@@ -179,12 +209,24 @@ impl ObjectVariant {
         }
     }
 
+    /// Like [`as_bytes`], but returns an error on mismatch.
+    pub fn try_bytes(&self) -> Result<&[u8], ObjectError> {
+        self.as_bytes()
+            .ok_or_else(|| ObjectError::TypeMismatch("HexString", self.name()))
+    }
+
     /// Returns the boolean value if this is a `Boolean`, otherwise `None`.
     pub fn as_boolean(&self) -> Option<bool> {
         match self {
             ObjectVariant::Boolean(value) => Some(*value),
             _ => None,
         }
+    }
+
+    /// Like [`as_boolean`], but returns an error on mismatch.
+    pub fn try_boolean(&self) -> Result<bool, ObjectError> {
+        self.as_boolean()
+            .ok_or_else(|| ObjectError::TypeMismatch("Boolean", self.name()))
     }
 
     /// Attempts to convert this value into a numeric type `T`.

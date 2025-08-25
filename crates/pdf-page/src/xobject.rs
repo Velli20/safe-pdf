@@ -2,7 +2,7 @@ use crate::{
     form::{FormXObject, FormXObjectError},
     image::{ImageXObject, ImageXObjectError},
 };
-use pdf_object::{dictionary::Dictionary, object_collection::ObjectCollection};
+use pdf_object::{dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection};
 use thiserror::Error;
 
 /// Represents a PDF External Object (XObject).
@@ -19,14 +19,14 @@ pub enum XObject {
 
 #[derive(Debug, Error)]
 pub enum XObjectError {
-    #[error("Missing required entry '{entry_name}' in XObject dictionary")]
-    MissingEntry { entry_name: &'static str },
     #[error("Error parsing Image XObject: {0}")]
     ImageReadError(#[from] ImageXObjectError),
     #[error("Error parsing Form XObject: {0}")]
     FormReadError(#[from] FormXObjectError),
     #[error("Unsupported XObject type: '{subtype}'")]
     UnsupportedXObjectType { subtype: String },
+    #[error("{0}")]
+    ObjectError(#[from] ObjectError),
 }
 
 /// A trait for parsing specific types of XObjects from their dictionary and stream data.
@@ -67,13 +67,9 @@ impl XObjectReader for XObject {
         stream_data: &[u8],
         objects: &ObjectCollection,
     ) -> Result<Self, Self::ErrorType> {
-        let subtype = dictionary
-            .get_string("Subtype")
-            .ok_or(XObjectError::MissingEntry {
-                entry_name: "Subtype",
-            })?;
+        let subtype = dictionary.get_or_err("Subtype")?.try_str()?;
 
-        match subtype {
+        match subtype.as_ref() {
             "Image" => {
                 let image_xobject = ImageXObject::read_xobject(dictionary, stream_data, objects)?;
                 Ok(XObject::Image(image_xobject))

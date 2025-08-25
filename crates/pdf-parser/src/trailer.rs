@@ -107,8 +107,9 @@ mod tests {
         let mut parser = PdfParser::from(input.as_slice());
 
         let trailer = parser.parse_trailer().unwrap();
-
-        assert_eq!(trailer.dictionary.get_number("Size").unwrap(), 22);
-        // assert_eq!(trailer.dictionary.get("Root").unwrap(), &Value::Reference(1, 0));
+        assert_eq!(
+            trailer.dictionary.get("Root").unwrap(),
+            &ObjectVariant::Reference(1)
+        );
     }
 }

@@ -55,20 +55,12 @@ impl PdfDocument {
         let trailer = trailer.ok_or(PdfError::MissingTrailer)?;
 
         // Get the `Root` object reference.
-        let root = trailer
-            .dictionary
-            .get("Root")
-            .ok_or(PdfError::MissingRoot)?;
-
+        let root = trailer.dictionary.get_or_err("Root")?;
         // Get the catalog.
         let catalog = objects.resolve_dictionary(root)?;
 
         // Get the `Pages` object reference from the catalog, which defines the order of the pages in the document.
-        let pages_num = match catalog.get("Pages") {
-            Some(p) => p,
-            None => return Err(PdfError::MissingPages),
-        };
-
+        let pages_num = catalog.get_or_err("Pages")?;
         let pages_dict = objects.resolve_dictionary(pages_num)?;
 
         let pages = PdfPages::from_dictionary(pages_dict, &objects)?;

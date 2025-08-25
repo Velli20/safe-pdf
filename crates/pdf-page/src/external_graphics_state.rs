@@ -253,13 +253,7 @@ fn parse_dash_pattern(
     key_name: &str,
     value: &ObjectVariant,
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
-    let arr = value
-        .as_array()
-        .ok_or_else(|| ExternalGraphicsStateError::UnsupportedTypeError {
-            key_name: key_name.to_string(),
-            expected_type: "Array",
-            found_type: format!("{:?}", value),
-        })?;
+    let arr = value.try_array()?;
     if arr.len() != 2 {
         return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
             key_name: key_name.to_string(),
@@ -283,13 +277,7 @@ fn parse_font(
     key_name: &str,
     value: &ObjectVariant,
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
-    let arr = value
-        .as_array()
-        .ok_or_else(|| ExternalGraphicsStateError::UnsupportedTypeError {
-            key_name: key_name.to_string(),
-            expected_type: "Array",
-            found_type: format!("{:?}", value),
-        })?;
+    let arr = value.try_array()?;
     if arr.len() != 2 {
         return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
             key_name: key_name.to_string(),
@@ -297,14 +285,7 @@ fn parse_font(
             actual_desc: format!("array with {} elements", arr.len()),
         });
     }
-    let font_ref =
-        arr[0]
-            .as_reference()
-            .ok_or_else(|| ExternalGraphicsStateError::UnsupportedTypeError {
-                key_name: key_name.to_string(),
-                expected_type: "Object",
-                found_type: format!("{:?}", arr[0]),
-            })?;
+    let font_ref = arr[0].try_reference()?;
     let font_size = f32_or_err(&arr[1], "Font size")?;
     Ok(ExternalGraphicsStateKey::Font(font_ref, font_size))
 }
@@ -327,13 +308,7 @@ fn parse_blend_mode(
         pdf_array
             .iter()
             .map(|obj| {
-                let name_str = obj.as_str().ok_or_else(|| {
-                    ExternalGraphicsStateError::UnsupportedTypeError {
-                        key_name: key_name.to_string(),
-                        expected_type: "String",
-                        found_type: format!("{:?}", obj),
-                    }
-                })?;
+                let name_str = obj.try_str()?;
                 name_str.parse::<BlendMode>().map_err(|e| {
                     ExternalGraphicsStateError::BlendModeParseError {
                         key_name: key_name.to_string(),
@@ -367,12 +342,7 @@ fn parse_soft_mask(
                     key_name: key_name.to_string(),
                     description: "SMask must be 'None'".to_string(),
                 })?
-                .as_str()
-                .ok_or_else(|| ExternalGraphicsStateError::UnsupportedTypeError {
-                    key_name: key_name.to_string(),
-                    expected_type: "Name or Array of Names",
-                    found_type: format!("{:?}", value),
-                })?;
+                .try_str()?;
 
             let mask_type = match mask_type_str.as_ref() {
                 "Luminosity" => MaskType::Luminosity,
@@ -468,34 +438,15 @@ fn parse_entry(
 
         // Color rendering
         "RI" => Some(ExternalGraphicsStateKey::RenderingIntent(
-            value
-                .as_str()
-                .ok_or_else(|| ExternalGraphicsStateError::UnsupportedTypeError {
-                    key_name: name.to_string(),
-                    expected_type: "String",
-                    found_type: format!("{:?}", value),
-                })?
-                .to_string(),
+            value.try_str()?.to_string(),
         )),
 
         // Overprint
         "OP" => Some(ExternalGraphicsStateKey::OverprintStroke(
-            value
-                .as_boolean()
-                .ok_or_else(|| ExternalGraphicsStateError::UnsupportedTypeError {
-                    key_name: name.to_string(),
-                    expected_type: "Boolean",
-                    found_type: format!("{:?}", value),
-                })?,
+            value.try_boolean()?,
         )),
         "op" => Some(ExternalGraphicsStateKey::OverprintFill(
-            value
-                .as_boolean()
-                .ok_or_else(|| ExternalGraphicsStateError::UnsupportedTypeError {
-                    key_name: name.to_string(),
-                    expected_type: "Boolean",
-                    found_type: format!("{:?}", value),
-                })?,
+            value.try_boolean()?,
         )),
         "OPM" => Some(ExternalGraphicsStateKey::OverprintMode(i32_or_err(
             value, "OPM",
@@ -517,13 +468,7 @@ fn parse_entry(
         )?)),
         // Stroke adjustment
         "SA" => Some(ExternalGraphicsStateKey::StrokeAdjustment(
-            value
-                .as_boolean()
-                .ok_or_else(|| ExternalGraphicsStateError::UnsupportedTypeError {
-                    key_name: name.to_string(),
-                    expected_type: "Boolean",
-                    found_type: format!("{:?}", value),
-                })?,
+            value.try_boolean()?,
         )),
 
         // Meta

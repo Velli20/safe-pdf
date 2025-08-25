@@ -1,7 +1,7 @@
 use std::io::Read;
 
 use flate2::bufread::ZlibDecoder;
-use pdf_object::dictionary::Dictionary;
+use pdf_object::{dictionary::Dictionary, error::ObjectError};
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
@@ -39,6 +39,8 @@ pub enum StreamParsingError {
     TokenizerError(#[from] TokenizerError),
     #[error("Parser error: {0}")]
     ParserError(#[from] ParserError),
+    #[error("{0}")]
+    ObjectError(#[from] ObjectError),
 }
 
 impl StreamParser for PdfParser<'_> {
@@ -111,18 +113,13 @@ impl StreamParser for PdfParser<'_> {
             .map_err(|source| StreamParsingError::InvalidStreamKeyword { source })?;
 
         // Find the length of the stream.
-        let length = dictionary
-            .get_number("Length")
-            .ok_or(StreamParsingError::MissingLength)?;
+        let length = dictionary.get_or_err("Length")?.as_number::<usize>()?;
 
         // Find the decode type of the stream.
         let decode = dictionary.get_string("Filter");
 
         // Read the stream data
-        let length_usize = usize::try_from(length).map_err(|_| {
-            StreamParsingError::StreamParsingError("Stream length does not fit in usize")
-        })?;
-        let stream_data = self.tokenizer.read_excactly(length_usize)?.to_vec();
+        let stream_data = self.tokenizer.read_excactly(length)?.to_vec();
 
         // There should be an end-of-line marker after the data and before `endstream`.
         if let Some(PdfToken::CarriageReturn) = self.tokenizer.peek() {

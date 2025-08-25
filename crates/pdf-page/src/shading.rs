@@ -169,10 +169,7 @@ impl FromDictionary for Shading {
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, ShadingError> {
         // Extract the required `/ShadingType` entry.
-        let shading_type = dictionary
-            .get("ShadingType")
-            .ok_or(ShadingError::MissingShadingType)?
-            .as_number::<i32>()?;
+        let shading_type = dictionary.get_or_err("ShadingType")?.as_number::<i32>()?;
 
         match ShadingType::from_i32(shading_type) {
             Some(ShadingType::FunctionBased) => {
@@ -180,25 +177,22 @@ impl FromDictionary for Shading {
                 let color_space = dictionary.get("ColorSpace").map(ColorSpace::from);
 
                 // Read optional `/Background` entry, specifying a background color as an array of numbers.
-                let background = if let Some(obj) = dictionary.get("Background") {
-                    Some(obj.as_vec_of::<f32>()?)
-                } else {
-                    None
-                };
+                let background = dictionary
+                    .get("Background")
+                    .map(|obj| obj.as_vec_of::<f32>())
+                    .transpose()?;
 
                 // Read optional `/BBox` entry, which defines the bounding box for the shading.
-                let bbox = if let Some(obj) = dictionary.get("BBox") {
-                    Some(obj.as_array_of::<f32, 4>()?)
-                } else {
-                    None
-                };
+                let bbox = dictionary
+                    .get("BBox")
+                    .map(|obj| obj.as_array_of::<f32, 4>())
+                    .transpose()?;
 
                 // Read optional `/Domain` entry, specifying the valid input range for the function(s).
-                let domain = if let Some(obj) = dictionary.get("Domain") {
-                    Some(obj.as_vec_of::<f32>()?)
-                } else {
-                    None
-                };
+                let domain = dictionary
+                    .get("Domain")
+                    .map(|obj| obj.as_vec_of::<f32>())
+                    .transpose()?;
 
                 // Read required `/Function` entry, which may be a single function or an array of functions.
                 let functions = match dictionary.get("Function") {
@@ -268,9 +262,7 @@ impl FromDictionary for Shading {
             }
             Some(ShadingType::Axial) => {
                 // Read required `/Coords` entry, which defines the axis for the gradient.
-                let coords = dictionary
-                    .get("Coords")
-                    .ok_or(ShadingError::MissingRequiredEntry("Coords"))?;
+                let coords = dictionary.get_or_err("Coords")?;
 
                 let coords = coords.as_array_of::<f32, 4>()?;
 
