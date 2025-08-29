@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use pdf_object::{dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection};
 use thiserror::Error;
 
@@ -7,12 +9,6 @@ use crate::xobject::{XObject, XObjectError, XObjectReader};
 pub enum ImageXObjectError {
     #[error("Missing required entry '{entry_name}' in Image XObject dictionary")]
     MissingEntry { entry_name: &'static str },
-    #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
-    NumericConversionError {
-        entry_description: &'static str,
-        #[source]
-        source: pdf_object::error::ObjectError,
-    },
     #[error("Unsupported Filter '{name}'")]
     UnsupportedFilter { name: String },
     #[error("SMask must be an Image XObject, but it was not.")]
@@ -40,9 +36,9 @@ pub enum ImageFilter {
     Unsupported(String),
 }
 
-impl ImageFilter {
-    pub fn from_name(name: &str) -> Self {
-        match name {
+impl From<Cow<'_, str>> for ImageFilter {
+    fn from(name: Cow<'_, str>) -> Self {
+        match name.as_ref() {
             "DCTDecode" => ImageFilter::DCTDecode,
             "FlateDecode" => ImageFilter::FlateDecode,
             _ => ImageFilter::Unsupported(name.to_string()),
@@ -82,26 +78,19 @@ impl XObjectReader for ImageXObject {
         stream_data: &[u8],
         objects: &ObjectCollection,
     ) -> Result<Self, Self::ErrorType> {
-        // Helper closure to extract a required u32 value from the dictionary,
-        // returning a descriptive error if the key is missing or not a valid number.
-        let get_required_u32 = |key: &'static str| -> Result<u32, ImageXObjectError> {
-            dictionary
-                .get(key)
-                .ok_or(ImageXObjectError::MissingEntry { entry_name: key })?
-                .as_number::<u32>()
-                .map_err(|e| ImageXObjectError::NumericConversionError {
-                    entry_description: key,
-                    source: e,
-                })
-        };
-
         // Extract required image properties from the dictionary.
-        let width = get_required_u32("Width")?;
-        let height = get_required_u32("Height")?;
-        let bits_per_component = get_required_u32("BitsPerComponent")?;
+        let width = dictionary.get_or_err("Width")?.as_number::<u32>()?;
+        let height = dictionary.get_or_err("Height")?.as_number::<u32>()?;
+        let bits_per_component = dictionary
+            .get_or_err("BitsPerComponent")?
+            .as_number::<u32>()?;
 
         // Parse the optional `/Filter` entry, if present, and check for unsupported filters.
-        let filter = dictionary.get_string("Filter").map(ImageFilter::from_name);
+        let filter = dictionary
+            .get("Filter")
+            .and_then(|v| v.as_str())
+            .map(ImageFilter::from);
+
         if let Some(ImageFilter::Unsupported(name)) = &filter {
             return Err(ImageXObjectError::UnsupportedFilter { name: name.clone() });
         }

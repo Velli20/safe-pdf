@@ -116,7 +116,7 @@ impl StreamParser for PdfParser<'_> {
         let length = dictionary.get_or_err("Length")?.as_number::<usize>()?;
 
         // Find the decode type of the stream.
-        let decode = dictionary.get_string("Filter");
+        let decode = dictionary.get("Filter").and_then(|v| v.as_str());
 
         // Read the stream data
         let stream_data = self.tokenizer.read_excactly(length)?.to_vec();

@@ -273,7 +273,11 @@ impl FromDictionary for Shading {
                     .map(ColorSpace::from)?;
 
                 // Read required `/Function` entry as a dictionary.
-                let function = if let Some(f) = dictionary.get_dictionary("Function") {
+                let function = if let Some(f) = dictionary
+                    .get("Function")
+                    .map(|d| d.try_dictionary())
+                    .transpose()?
+                {
                     Function::from_dictionary(f, objects, None)?
                 } else {
                     return Err(ShadingError::MissingRequiredEntry("Function"));
@@ -304,7 +308,11 @@ impl FromDictionary for Shading {
                     .map(ColorSpace::from)?;
 
                 // Read required `/Function` entry as a dictionary.
-                let function = if let Some(dictionary) = dictionary.get_dictionary("Function") {
+                let function = if let Some(dictionary) = dictionary
+                    .get("Function")
+                    .map(|d| d.try_dictionary())
+                    .transpose()?
+                {
                     Function::from_dictionary(dictionary, objects, None)?
                 } else {
                     return Err(ShadingError::MissingRequiredEntry("Function"));

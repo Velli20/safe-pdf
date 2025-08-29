@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use pdf_object::{
     dictionary::Dictionary,
     error::ObjectError,
@@ -21,8 +23,8 @@ pub enum FontEncoding {
     Unknown(String),
 }
 
-impl From<&str> for FontEncoding {
-    fn from(s: &str) -> Self {
+impl From<Cow<'_, str>> for FontEncoding {
+    fn from(s: Cow<'_, str>) -> Self {
         if s == "Identity-H" {
             FontEncoding::IdentityHorizontal
         } else if s == "Identity-V" {
@@ -36,13 +38,6 @@ impl From<&str> for FontEncoding {
 /// Defines errors that can occur while reading a font object.
 #[derive(Debug, Error, PartialEq)]
 pub enum FontError {
-    #[error("Missing required entry '{entry_name}' in {dictionary_type} dictionary")]
-    MissingEntry {
-        entry_name: &'static str,
-        dictionary_type: &'static str,
-    },
-    #[error("Missing /DescendantFonts entry in Type0 font")]
-    MissingDescendantFonts,
     #[error("Invalid /DescendantFonts entry in Type0 font: {0}")]
     InvalidDescendantFonts(String),
     #[error("Error processing descendant CIDFont for Type0 font")]
@@ -58,6 +53,8 @@ pub enum FontError {
         subtype: FontSubType,
         font_type: &'static str,
     },
+    #[error("Unsupported or invalid font subtype '{0}'")]
+    InvalidFontSubtype(String),
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -65,6 +62,17 @@ pub enum FontSubType {
     Type0,
     Type1,
     Type3,
+}
+
+impl From<Cow<'_, str>> for FontSubType {
+    fn from(s: Cow<'_, str>) -> Self {
+        match s.as_ref() {
+            "Type0" => FontSubType::Type0,
+            "Type1" => FontSubType::Type1,
+            "Type3" => FontSubType::Type3,
+            _ => FontSubType::Type1,
+        }
+    }
 }
 
 impl std::fmt::Display for FontSubType {
@@ -105,32 +113,31 @@ impl FromDictionary for Font {
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        let base_font = dictionary.get_string("BaseFont").unwrap_or("").to_owned();
+        let base_font = dictionary
+            .get("BaseFont")
+            .and_then(|v| v.as_str().map(|s| s.into_owned()))
+            .unwrap_or_default();
 
         // Attempt to extract the `/Encoding` entry, if present, and convert it to a `FontEncoding`.
-        let encoding = dictionary.get_string("Encoding").map(FontEncoding::from);
+        let encoding = dictionary
+            .get("Encoding")
+            .and_then(|v| v.as_str())
+            .map(FontEncoding::from);
 
         // Attempt to resolve the optional `/ToUnicode` CMap stream, which maps character codes to Unicode.
         // If present, parse it into a `CharacterMap`. If not present, set cmap to None.
-        let cmap = if let Some(obj) = dictionary.get("ToUnicode") {
-            let stream = objects.resolve_stream(obj)?;
-            Some(CharacterMap::from_stream_object(stream)?)
-        } else {
-            None
-        };
+        let cmap = dictionary
+            .get("ToUnicode")
+            .map(|obj| objects.resolve_stream(obj))
+            .transpose()?
+            .map(CharacterMap::from_stream_object)
+            .transpose()?;
 
         // Determine the font subtype from the dictionary.
-        let subtype = match dictionary.get_string("Subtype") {
-            Some("Type0") => FontSubType::Type0,
-            Some("Type1") => FontSubType::Type1,
-            Some("Type3") => FontSubType::Type3,
-            _ => {
-                return Err(FontError::MissingEntry {
-                    entry_name: "Subtype",
-                    dictionary_type: "Type0 Font",
-                });
-            }
-        };
+        let subtype = dictionary
+            .get_or_err("Subtype")?
+            .try_str()
+            .map(FontSubType::from)?;
 
         // If the font is a Type3 font, delegate parsing to the Type3Font handler and return early.
         if subtype == FontSubType::Type3 {

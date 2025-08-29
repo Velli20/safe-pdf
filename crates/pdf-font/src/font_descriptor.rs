@@ -135,8 +135,9 @@ impl FromDictionary for FontDescriptor {
         let font_bounding_box = dictionary.get_or_err("FontBBox")?.as_array_of::<f32, 4>()?;
 
         let font_family = dictionary
-            .get_string("FontFamily")
-            .map(|font_family| font_family.to_owned());
+            .get("FontFamily")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         let resolve_font_file_stream = |key: &str| -> Option<ObjectVariant> {
             dictionary.get(key).and_then(|obj| match obj {

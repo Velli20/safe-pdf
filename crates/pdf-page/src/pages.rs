@@ -58,9 +58,7 @@ impl FromDictionary for PdfPages {
             let kid_dict = objects.resolve_dictionary(value)?;
 
             // Determine the type of the child object by reading its `/Type` entry.
-            let object_type = kid_dict
-                .get_string("Type")
-                .ok_or(PdfPagesError::MissingTypeEntryInKid { obj_num })?;
+            let object_type = kid_dict.get_or_err("Type")?.try_str()?;
 
             // If the child is a leaf node (`/Type /Page`), parse it as a `PdfPage`.
             if object_type == PdfPage::KEY {

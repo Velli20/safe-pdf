@@ -22,14 +22,13 @@ impl FromDictionary for Matrix {
         dictionary: &Dictionary,
         _objects: &ObjectCollection,
     ) -> Result<Self::ResultType, MatrixReadError> {
-        if let Some(matrix_obj) = dictionary.get("Matrix") {
-            let mat = matrix_obj.as_array_of::<f32, 6>()?;
+        let Some(matrix_obj) = dictionary.get("Matrix") else {
+            return Ok(None);
+        };
+        let mat = matrix_obj.as_array_of::<f32, 6>()?;
 
-            Ok(Some(Transform::from_row(
-                mat[0], mat[1], mat[2], mat[3], mat[4], mat[5],
-            )))
-        } else {
-            Ok(None)
-        }
+        Ok(Some(Transform::from_row(
+            mat[0], mat[1], mat[2], mat[3], mat[4], mat[5],
+        )))
     }
 }

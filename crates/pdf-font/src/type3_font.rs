@@ -30,8 +30,6 @@ pub struct Type3Font {
 /// Defines errors that can occur while parsing a Type 3 font object.
 #[derive(Debug, Error, PartialEq)]
 pub enum Type3FontError {
-    #[error("Missing required entry '{entry_name}' in Type 3 Font dictionary")]
-    MissingEntry { entry_name: &'static str },
     #[error(
         "Entry '{entry_name}' in Type 3 Font dictionary has invalid type: expected {expected_type}, found {found_type}"
     )]
@@ -65,12 +63,7 @@ impl FromDictionary for Type3Font {
             .get_or_err("FontMatrix")?
             .as_array_of::<f32, 6>()?;
 
-        let char_proc_dictionary =
-            dictionary
-                .get_dictionary("CharProcs")
-                .ok_or(Type3FontError::MissingEntry {
-                    entry_name: "CharProcs",
-                })?;
+        let char_proc_dictionary = dictionary.get_or_err("CharProcs")?.try_dictionary()?;
 
         // Parse optional `/Encoding` entry
         let encoding = if let Some(encoding_obj) = dictionary.get("Encoding") {
@@ -143,8 +136,6 @@ pub enum EncodingError {
         "Character code overflow in /Differences array while incrementing after code {last_code}"
     )]
     DifferencesCodeOverflow { last_code: u8 },
-    #[error("Missing required entry '{entry_name}' in Encoding dictionary")]
-    MissingEntry { entry_name: &'static str },
 }
 
 /// Represents a font encoding dictionary, used to map character codes to glyph names.
@@ -168,8 +159,9 @@ impl FromDictionary for FontEncodingDictionary {
         _objects: &ObjectCollection, // No need for objects here based on spec
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let base_encoding = dictionary
-            .get_string("BaseEncoding")
-            .map(|base_encoding| base_encoding.to_owned());
+            .get("BaseEncoding")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         let mut differences = HashMap::new();
 

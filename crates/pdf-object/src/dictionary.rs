@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, rc::Rc};
+use std::collections::BTreeMap;
 
 use crate::{ObjectVariant, error::ObjectError};
 
@@ -32,24 +32,6 @@ impl Dictionary {
         self.get(key)
             .ok_or_else(|| ObjectError::MissingRequiredKey {
                 key: key.to_string(),
-            })
-    }
-
-    pub fn get_string(&self, key: &str) -> Option<&str> {
-        self.dictionary
-            .get(key)
-            .and_then(|value| match value.as_ref() {
-                ObjectVariant::Name(name) => Some(name.as_ref()),
-                _ => None,
-            })
-    }
-
-    pub fn get_dictionary(&self, key: &str) -> Option<&Rc<Dictionary>> {
-        self.dictionary
-            .get(key)
-            .and_then(|value| match value.as_ref() {
-                ObjectVariant::Dictionary(obj) => Some(obj),
-                _ => None,
             })
     }
 }

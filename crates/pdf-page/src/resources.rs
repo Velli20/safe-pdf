@@ -60,7 +60,11 @@ impl FromDictionary for Resources {
         let mut fonts = HashMap::new();
 
         // Process `/Font` entries.
-        if let Some(font_dictionary) = resources.get_dictionary(Font::KEY) {
+        if let Some(font_dictionary) = resources
+            .get(Font::KEY)
+            .map(|d| d.try_dictionary())
+            .transpose()?
+        {
             for (name, v) in &font_dictionary.dictionary {
                 // Each font value should be a dictionary or reference to one.
                 let font_dict = objects.resolve_dictionary(v)?;
@@ -73,7 +77,11 @@ impl FromDictionary for Resources {
         let mut external_graphics_states = HashMap::new();
 
         // Process `/ExtGState` entries
-        if let Some(eg) = resources.get_dictionary("ExtGState") {
+        if let Some(eg) = resources
+            .get("ExtGState")
+            .map(|d| d.try_dictionary())
+            .transpose()?
+        {
             for (name, v) in &eg.dictionary {
                 // Each value can be a direct dictionary or an indirect reference to one.
                 let dictionary = objects.resolve_dictionary(v)?;
@@ -87,7 +95,11 @@ impl FromDictionary for Resources {
         let mut patterns = HashMap::new();
 
         // Process `/Pattern` entries
-        if let Some(eg) = resources.get_dictionary("Pattern") {
+        if let Some(eg) = resources
+            .get("Pattern")
+            .map(|d| d.try_dictionary())
+            .transpose()?
+        {
             for (name, v) in &eg.dictionary {
                 // Parse the pattern and insert it into the map.
                 match objects.resolve_object(v)? {
@@ -121,7 +133,11 @@ impl FromDictionary for Resources {
         let mut xobjects = HashMap::new();
 
         // Process `/XObject` entries
-        if let Some(xobject_dict) = resources.get_dictionary("XObject") {
+        if let Some(xobject_dict) = resources
+            .get("XObject")
+            .map(|d| d.try_dictionary())
+            .transpose()?
+        {
             for (name, v) in &xobject_dict.dictionary {
                 let stream_object = objects.resolve_stream(v)?;
 
