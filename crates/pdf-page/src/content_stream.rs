@@ -11,23 +11,10 @@ pub enum ContentStreamReadError {
     FailedResolveFontObjectReference { obj_num: i32 },
     #[error("Unsupported entry type for Content Stream: '{found_type}'")]
     UnsupportedEntryType { found_type: &'static str },
-
-    #[error("Failed to resolve content stream object reference {obj_num}")]
-    FailedToResolveReference { obj_num: i32 },
     #[error("Error parsing content stream operators: {0}")]
     ContentStreamError(#[from] PdfOperatorError),
     #[error("{0}")]
     ObjectError(#[from] ObjectError),
-    #[error("Unsupported entry type in Content Stream array: '{found_type}'")]
-    UnsupportedEntryTypeInArray { found_type: &'static str },
-    #[error("Expected a Stream object in Content Stream array, found other type")]
-    ExpectedStreamInArray,
-    #[error(
-        "Expected a Stream object after resolving an indirect reference from an IndirectObject payload, found '{found_type}'"
-    )]
-    ExpectedStreamAfterIndirectReference { found_type: &'static str },
-    #[error("Unsupported type in IndirectObject payload for Content Stream: '{found_type}'")]
-    UnsupportedTypeInIndirectObjectPayload { found_type: &'static str },
 }
 
 pub struct ContentStream {
@@ -63,15 +50,7 @@ impl FromDictionary for ContentStream {
         };
 
         // Resolve the /Contents entry if it's an indirect reference.
-        let contents = match contents {
-            ObjectVariant::Reference(num) => {
-                // The object is an indirect reference; resolve it from the `objects` collection.
-                objects.get(*num).ok_or(
-                    ContentStreamReadError::FailedResolveFontObjectReference { obj_num: *num },
-                )?
-            }
-            _ => contents,
-        };
+        let contents = objects.resolve_object(contents)?;
 
         // Process the resolved /Contents object.
         // It should be a Stream, an Array, or an IndirectObject whose payload is one of these.

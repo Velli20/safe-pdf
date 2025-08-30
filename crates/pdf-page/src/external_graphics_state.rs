@@ -1,8 +1,8 @@
-use std::str::FromStr;
+use std::{borrow::Cow, str::FromStr};
 
 use pdf_object::{
     ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
-    traits::FromDictionary,
+    stream::StreamObject, traits::FromDictionary,
 };
 
 use thiserror::Error;
@@ -41,17 +41,11 @@ pub enum ExternalGraphicsStateError {
         expected_type: &'static str,
         found_type: String,
     },
-    #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
-    NumericConversionError {
-        entry_description: &'static str,
-        #[source]
-        source: ObjectError,
-    },
     #[error("Error parsing Dash Array: {0}")]
     DashArrayParsingError(#[source] ObjectError),
     #[error("Error reading Soft Mask XObject: {0}")]
     SMaskReadError(#[from] XObjectError),
-    #[error("Object error: {0}")]
+    #[error("{0}")]
     ObjectError(#[from] ObjectError),
 }
 
@@ -69,6 +63,19 @@ pub enum MaskType {
     /// transparency group. The group's color is ignored; only its opacity
     /// contributes to the mask.
     Alpha,
+}
+
+impl MaskType {
+    fn from(value: Cow<'_, str>) -> Result<Self, ExternalGraphicsStateError> {
+        match value.as_ref() {
+            "Luminosity" => Ok(MaskType::Luminosity),
+            "Alpha" => Ok(MaskType::Alpha),
+            other => Err(ExternalGraphicsStateError::InvalidValueError {
+                key_name: "MaskType".to_string(),
+                description: format!("Unknown SMask type '{}'", other),
+            }),
+        }
+    }
 }
 
 /// Represents the standard blend modes allowed in PDF.
@@ -214,38 +221,12 @@ impl FromDictionary for ExternalGraphicsState {
         for (name, value) in &dictionary.dictionary {
             match parse_entry(name, value, objects)? {
                 Some(key) => params.push(key),
-                None => continue, // known-skipped (e.g., Type) or unknown already logged
+                None => continue,
             }
         }
 
         Ok(ExternalGraphicsState { params })
     }
-}
-
-/// Small helper to map numeric conversion errors to a tagged error.
-fn f32_or_err(
-    value: &ObjectVariant,
-    entry: &'static str,
-) -> Result<f32, ExternalGraphicsStateError> {
-    value
-        .as_number::<f32>()
-        .map_err(|e| ExternalGraphicsStateError::NumericConversionError {
-            entry_description: entry,
-            source: e,
-        })
-}
-
-/// Small helper to map numeric conversion errors to a tagged error.
-fn i32_or_err(
-    value: &ObjectVariant,
-    entry: &'static str,
-) -> Result<i32, ExternalGraphicsStateError> {
-    value
-        .as_number::<i32>()
-        .map_err(|e| ExternalGraphicsStateError::NumericConversionError {
-            entry_description: entry,
-            source: e,
-        })
 }
 
 /// Parse the dash pattern array `D` -> DashPattern(Vec<f32>, phase)
@@ -265,7 +246,7 @@ fn parse_dash_pattern(
     let dash_array_f32 = arr[0]
         .as_vec_of::<f32>()
         .map_err(ExternalGraphicsStateError::DashArrayParsingError)?;
-    let dash_phase = f32_or_err(&arr[1], "Dash phase")?;
+    let dash_phase = arr[1].as_number::<f32>()?;
     Ok(ExternalGraphicsStateKey::DashPattern(
         dash_array_f32,
         dash_phase,
@@ -286,7 +267,7 @@ fn parse_font(
         });
     }
     let font_ref = arr[0].try_reference()?;
-    let font_size = f32_or_err(&arr[1], "Font size")?;
+    let font_size = arr[1].as_number::<f32>()?;
     Ok(ExternalGraphicsStateKey::Font(font_ref, font_size))
 }
 
@@ -336,65 +317,33 @@ fn parse_soft_mask(
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
     let smask = match value {
         ObjectVariant::Dictionary(dict) => {
-            let mask_type_str = dict
-                .get("S")
-                .ok_or_else(|| ExternalGraphicsStateError::InvalidValueError {
-                    key_name: key_name.to_string(),
-                    description: "SMask must be 'None'".to_string(),
-                })?
-                .try_str()?;
+            let mask_type = MaskType::from(dict.get_or_err("S")?.try_str()?)?;
 
-            let mask_type = match mask_type_str.as_ref() {
-                "Luminosity" => MaskType::Luminosity,
-                "Alpha" => MaskType::Alpha,
-                other => {
-                    return Err(ExternalGraphicsStateError::InvalidValueError {
-                        key_name: key_name.to_string(),
-                        description: format!("Unknown SMask type '{}'", other),
-                    });
-                }
-            };
+            // Parse the "G" key for the `XObject`
+            let StreamObject {
+                dictionary, data, ..
+            } = objects.resolve_stream(dict.get_or_err("G")?)?;
 
-            // Parse the "G" key for the XObject (required)
-            let shape_obj =
-                dict.get("G")
-                    .ok_or_else(|| ExternalGraphicsStateError::InvalidValueError {
-                        key_name: key_name.to_string(),
-                        description: "SMask dictionary missing 'G' key".to_string(),
-                    })?;
-
-            let smask_xobject = objects.resolve_stream(shape_obj)?;
-
-            let shape = XObject::read_xobject(
-                &smask_xobject.dictionary,
-                smask_xobject.data.as_slice(),
-                objects,
-            )
-            .map_err(|e| ExternalGraphicsStateError::InvalidValueError {
-                key_name: key_name.to_string(),
-                description: format!("Failed to parse SMask XObject: {:?}", e),
-            })?;
+            let shape = XObject::read_xobject(dictionary, data.as_slice(), objects)?;
 
             Some(SoftMask { mask_type, shape })
         }
-        other => {
-            if let Some(name_str) = other.as_str() {
-                if name_str == "None" {
-                    None
-                } else {
-                    return Err(ExternalGraphicsStateError::InvalidValueError {
-                        key_name: key_name.to_string(),
-                        description: "SMask must be 'None'".to_string(),
-                    });
-                }
-            } else {
+        other => match other.as_str() {
+            Some(name) if name.as_ref() == "None" => None,
+            Some(_) => {
+                return Err(ExternalGraphicsStateError::InvalidValueError {
+                    key_name: key_name.to_string(),
+                    description: "SMask must be 'None'".to_string(),
+                });
+            }
+            None => {
                 return Err(ExternalGraphicsStateError::UnsupportedTypeError {
                     key_name: key_name.to_string(),
                     expected_type: "Name or Dictionary",
-                    found_type: format!("{:?}", value),
+                    found_type: format!("{:?}", other),
                 });
             }
-        }
+        },
     };
 
     Ok(ExternalGraphicsStateKey::SoftMask(smask))
@@ -408,11 +357,11 @@ fn parse_entry(
 ) -> Result<Option<ExternalGraphicsStateKey>, ExternalGraphicsStateError> {
     let parsed = match name {
         // Stroke/Fill geometry
-        "LW" => Some(ExternalGraphicsStateKey::LineWidth(f32_or_err(
-            value, "LW",
-        )?)),
+        "LW" => Some(ExternalGraphicsStateKey::LineWidth(
+            value.as_number_entry::<f32>("LW")?,
+        )),
         "LC" => {
-            let cap_val = i32_or_err(value, "LC")?;
+            let cap_val = value.as_number_entry::<i32>("LC")?;
             let cap = LineCap::from_i32(cap_val).ok_or_else(|| {
                 ExternalGraphicsStateError::InvalidValueError {
                     key_name: name.to_string(),
@@ -422,7 +371,7 @@ fn parse_entry(
             Some(ExternalGraphicsStateKey::LineCap(cap))
         }
         "LJ" => {
-            let join_val = i32_or_err(value, "LJ")?;
+            let join_val = value.as_number_entry::<i32>("LJ")?;
             let join = LineJoin::from_i32(join_val).ok_or_else(|| {
                 ExternalGraphicsStateError::InvalidValueError {
                     key_name: name.to_string(),
@@ -431,50 +380,35 @@ fn parse_entry(
             })?;
             Some(ExternalGraphicsStateKey::LineJoin(join))
         }
-        "ML" => Some(ExternalGraphicsStateKey::MiterLimit(f32_or_err(
-            value, "ML",
-        )?)),
+        "ML" => Some(ExternalGraphicsStateKey::MiterLimit(
+            value.as_number_entry::<f32>("ML")?,
+        )),
         "D" => Some(parse_dash_pattern(name, value)?),
-
-        // Color rendering
         "RI" => Some(ExternalGraphicsStateKey::RenderingIntent(
             value.try_str()?.to_string(),
         )),
-
-        // Overprint
         "OP" => Some(ExternalGraphicsStateKey::OverprintStroke(
             value.try_boolean()?,
         )),
         "op" => Some(ExternalGraphicsStateKey::OverprintFill(
             value.try_boolean()?,
         )),
-        "OPM" => Some(ExternalGraphicsStateKey::OverprintMode(i32_or_err(
-            value, "OPM",
-        )?)),
-
-        // Font
+        "OPM" => Some(ExternalGraphicsStateKey::OverprintMode(
+            value.as_number_entry::<i32>("OPM")?,
+        )),
         "Font" => Some(parse_font(name, value)?),
-
-        // Compositing
         "BM" => Some(parse_blend_mode(name, value)?),
         "SMask" => Some(parse_soft_mask(name, value, objects)?),
-
-        // Transparency
-        "CA" => Some(ExternalGraphicsStateKey::StrokingAlpha(f32_or_err(
-            value, "CA",
-        )?)),
-        "ca" => Some(ExternalGraphicsStateKey::NonStrokingAlpha(f32_or_err(
-            value, "ca",
-        )?)),
-        // Stroke adjustment
+        "CA" => Some(ExternalGraphicsStateKey::StrokingAlpha(
+            value.as_number_entry::<f32>("CA")?,
+        )),
+        "ca" => Some(ExternalGraphicsStateKey::NonStrokingAlpha(
+            value.as_number_entry::<f32>("ca")?,
+        )),
         "SA" => Some(ExternalGraphicsStateKey::StrokeAdjustment(
             value.try_boolean()?,
         )),
-
-        // Meta
         "Type" => None,
-
-        // Unknown keys: treat as an error to surface malformed/unsupported content
         _ => {
             return Err(ExternalGraphicsStateError::InvalidValueError {
                 key_name: name.to_string(),

@@ -1,6 +1,9 @@
 use std::borrow::Cow;
 
-use pdf_object::{dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection};
+use pdf_object::{
+    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    stream::StreamObject,
+};
 use thiserror::Error;
 
 use crate::xobject::{XObject, XObjectError, XObjectReader};
@@ -98,17 +101,17 @@ impl XObjectReader for ImageXObject {
         // Handle the optional `/SMask` entry, which provides a soft mask for transparency.
         // If present, resolve the referenced object and ensure it is an Image XObject.
         let smask = if let Some(smask_obj) = dictionary.get("SMask") {
-            let smask_xobject = objects.resolve_stream(smask_obj)?;
+            let StreamObject {
+                dictionary, data, ..
+            } = objects.resolve_stream(smask_obj)?;
 
             // Recursively read the SMask as an XObject.
-            let smask = XObject::read_xobject(
-                &smask_xobject.dictionary,
-                smask_xobject.data.as_slice(),
-                objects,
-            )
-            .map_err(|e| ImageXObjectError::SMaskReadError {
-                source: Box::new(e),
-            })?;
+            let smask =
+                XObject::read_xobject(dictionary, data.as_slice(), objects).map_err(|e| {
+                    ImageXObjectError::SMaskReadError {
+                        source: Box::new(e),
+                    }
+                })?;
             // Ensure the SMask is actually an image.
             match smask {
                 XObject::Image(img) => Some(Box::new(img)),

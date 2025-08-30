@@ -18,12 +18,6 @@ use crate::{
 pub enum PatternError {
     #[error("Missing required entry in Pattern: /{0}")]
     MissingRequiredEntry(&'static str),
-    #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
-    NumericConversionError {
-        entry_description: &'static str,
-        #[source]
-        source: pdf_object::error::ObjectError,
-    },
     #[error("Invalid integer value for /PatternType value: {0}")]
     InvalidPatternType(i32),
     #[error("Invalid value for key '{key}': {value}")]
@@ -161,11 +155,7 @@ impl Pattern {
                 // Read the `/PaintType` entry.
                 let paint_type_int = dictionary
                     .get_or_err("PaintType")?
-                    .as_number::<i32>()
-                    .map_err(|e| PatternError::NumericConversionError {
-                        entry_description: "PaintType",
-                        source: e,
-                    })?;
+                    .as_number_entry::<i32>("PaintType")?;
 
                 let paint_type = PaintType::from_i32(paint_type_int).ok_or_else(|| {
                     PatternError::InvalidValue {
@@ -177,11 +167,7 @@ impl Pattern {
                 // Read the `/TilingType` entry.
                 let tiling_type_int = dictionary
                     .get_or_err("TilingType")?
-                    .as_number::<i32>()
-                    .map_err(|e| PatternError::NumericConversionError {
-                        entry_description: "TilingType",
-                        source: e,
-                    })?;
+                    .as_number_entry::<i32>("TilingType")?;
                 let tiling_type = TilingType::from_i32(tiling_type_int).ok_or_else(|| {
                     PatternError::InvalidValue {
                         key: "TilingType",
@@ -195,20 +181,12 @@ impl Pattern {
                 // Read the `/XStep` entry.
                 let x_step = dictionary
                     .get_or_err("XStep")?
-                    .as_number::<f32>()
-                    .map_err(|e| PatternError::NumericConversionError {
-                        entry_description: "XStep",
-                        source: e,
-                    })?;
+                    .as_number_entry::<f32>("XStep")?;
 
                 // Read the `/YStep` entry.
                 let y_step = dictionary
                     .get_or_err("YStep")?
-                    .as_number::<f32>()
-                    .map_err(|e| PatternError::NumericConversionError {
-                        entry_description: "YStep",
-                        source: e,
-                    })?;
+                    .as_number_entry::<f32>("YStep")?;
 
                 // Read the `/Resources` entry. Needed by the pattern's content stream.
                 let resources = Resources::from_dictionary(dictionary, objects)

@@ -25,8 +25,6 @@ pub enum ShadingError {
         expected_type: &'static str,
         found_type: &'static str,
     },
-    #[error("Missing required entry in Shading: /{0}")]
-    MissingRequiredEntry(&'static str),
     #[error("Error parsing Function: {0}")]
     FunctionReadError(#[from] FunctionReadError),
     #[error("Error parsing Dictionary: {0}")]
@@ -195,9 +193,9 @@ impl FromDictionary for Shading {
                     .transpose()?;
 
                 // Read required `/Function` entry, which may be a single function or an array of functions.
-                let functions = match dictionary.get("Function") {
+                let functions = match dictionary.get_or_err("Function")? {
                     // If the `/Function` is an array, read each function object.
-                    Some(obj) if obj.is_array() => {
+                    obj if obj.is_array() => {
                         let mut functions = Vec::new();
                         if let Some(obj) = obj.as_array() {
                             for value in obj.iter() {
@@ -227,7 +225,7 @@ impl FromDictionary for Shading {
                         functions
                     }
                     // If `/Function` is a single object, read it directly.
-                    Some(obj) => {
+                    obj => {
                         let function = match objects.resolve_object(obj)? {
                             ObjectVariant::Dictionary(dictionary) => {
                                 Function::from_dictionary(dictionary, objects, None)?
@@ -247,8 +245,6 @@ impl FromDictionary for Shading {
                         };
                         vec![function]
                     }
-                    // `/Function` entry is required for FunctionBased shading.
-                    None => return Err(ShadingError::MissingRequiredEntry("Function")),
                 };
 
                 Ok(Shading::FunctionBased {
@@ -262,26 +258,17 @@ impl FromDictionary for Shading {
             }
             Some(ShadingType::Axial) => {
                 // Read required `/Coords` entry, which defines the axis for the gradient.
-                let coords = dictionary.get_or_err("Coords")?;
-
-                let coords = coords.as_array_of::<f32, 4>()?;
+                let coords = dictionary.get_or_err("Coords")?.as_array_of::<f32, 4>()?;
 
                 // Read required `/ColorSpace` entry.
-                let color_space = dictionary
-                    .get("ColorSpace")
-                    .ok_or(ShadingError::MissingRequiredEntry("ColorSpace"))
-                    .map(ColorSpace::from)?;
+                let color_space = ColorSpace::from(dictionary.get_or_err("ColorSpace")?);
 
                 // Read required `/Function` entry as a dictionary.
-                let function = if let Some(f) = dictionary
-                    .get("Function")
-                    .map(|d| d.try_dictionary())
-                    .transpose()?
-                {
-                    Function::from_dictionary(f, objects, None)?
-                } else {
-                    return Err(ShadingError::MissingRequiredEntry("Function"));
-                };
+                let function = Function::from_dictionary(
+                    dictionary.get_or_err("Function")?.try_dictionary()?,
+                    objects,
+                    None,
+                )?;
 
                 let ColorStops { colors, positions } = ColorStops::from(&function);
 
@@ -295,28 +282,17 @@ impl FromDictionary for Shading {
             }
             Some(ShadingType::Radial) => {
                 // Read required `/Coords` entry, which defines the two circles for the radial gradient.
-                let coords = dictionary
-                    .get("Coords")
-                    .ok_or(ShadingError::MissingRequiredEntry("Coords"))?;
-
-                let coords = coords.as_array_of::<f32, 6>()?;
+                let coords = dictionary.get_or_err("Coords")?.as_array_of::<f32, 6>()?;
 
                 // Read required `/ColorSpace` entry.
-                let color_space = dictionary
-                    .get("ColorSpace")
-                    .ok_or(ShadingError::MissingRequiredEntry("ColorSpace"))
-                    .map(ColorSpace::from)?;
+                let color_space = ColorSpace::from(dictionary.get_or_err("ColorSpace")?);
 
                 // Read required `/Function` entry as a dictionary.
-                let function = if let Some(dictionary) = dictionary
-                    .get("Function")
-                    .map(|d| d.try_dictionary())
-                    .transpose()?
-                {
-                    Function::from_dictionary(dictionary, objects, None)?
-                } else {
-                    return Err(ShadingError::MissingRequiredEntry("Function"));
-                };
+                let function = Function::from_dictionary(
+                    dictionary.get_or_err("Function")?.try_dictionary()?,
+                    objects,
+                    None,
+                )?;
 
                 let ColorStops { colors, positions } = ColorStops::from(&function);
 

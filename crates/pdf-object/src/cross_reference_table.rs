@@ -24,7 +24,7 @@ pub struct CrossReferenceTable {
     pub first_object_number: u32,
     /// The number of entries in this subsection.
     pub number_of_entries: u32,
-
+    /// The list of cross-reference entries.
     pub entries: Vec<CrossReferenceEntry>,
 }
 

@@ -6,24 +6,13 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum FunctionReadError {
-    #[error("Missing /FunctionType entry")]
-    MissingFunctionType,
-    #[error("Missing /Domain entry")]
-    MissingDomain,
-    #[error("Missing /Range entry")]
-    MissingRange,
     #[error("Invalid /FunctionType value")]
     InvalidFunctionType,
     #[error("Encode array length must be exactly 2 * number of functions")]
     InvalidEncodeLength,
     #[error("Bounds array length must be number of functions - 1")]
     InvalidBoundsLength,
-    #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
-    NumericConversionError {
-        entry_description: &'static str,
-        #[source]
-        source: ObjectError,
-    },
+
     #[error("Failed to read function value for '{entry_description}': {source}")]
     EntryReadError {
         entry_description: &'static str,
@@ -387,13 +376,7 @@ impl Function {
                 };
 
                 // Parse /N, the interpolation exponent (required).
-                let exponent = dictionary
-                    .get_or_err("N")?
-                    .as_number::<f32>()
-                    .map_err(|e| FunctionReadError::NumericConversionError {
-                        entry_description: "N",
-                        source: e,
-                    })?;
+                let exponent = dictionary.get_or_err("N")?.as_number::<f32>()?;
 
                 Ok(Function {
                     function_type,

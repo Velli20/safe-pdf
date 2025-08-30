@@ -250,6 +250,19 @@ impl ObjectVariant {
         }
     }
 
+    pub fn as_number_entry<T>(&self, entry_description: &'static str) -> Result<T, ObjectError>
+    where
+        T: FromPrimitive,
+    {
+        if let ObjectVariant::Integer(value) = self {
+            T::from_i64(*value).ok_or(ObjectError::NumericConversionError { entry_description })
+        } else if let ObjectVariant::Real(value) = self {
+            T::from_f64(*value).ok_or(ObjectError::NumericConversionError { entry_description })
+        } else {
+            Err(ObjectError::TypeMismatch("Number", self.name()))
+        }
+    }
+
     /// Returns the variant name as a static string, useful in error messages.
     pub const fn name(&self) -> &'static str {
         match self {

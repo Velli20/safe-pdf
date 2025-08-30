@@ -38,14 +38,6 @@ bitflags! {
 pub enum FontDescriptorError {
     #[error("Object error: {0}")]
     ObjectError(#[from] ObjectError),
-    #[error(
-        "Failed to convert PDF value to number for FontDescriptor entry /{entry_description}: {source}"
-    )]
-    NumericConversionError {
-        entry_description: &'static str,
-        #[source]
-        source: ObjectError,
-    },
     #[error("FontName is required but was an empty string")]
     EmptyFontName,
 }
@@ -96,40 +88,21 @@ impl FromDictionary for FontDescriptor {
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        let get_required_number_field = |key: &'static str| -> Result<f32, FontDescriptorError> {
-            dictionary
-                .get_or_err(key)?
-                .as_number::<f32>()
-                .map_err(|source| FontDescriptorError::NumericConversionError {
-                    entry_description: key,
-                    source,
-                })
-        };
-
-        let get_optional_number_field =
-            |key: &'static str| -> Result<Option<f32>, FontDescriptorError> {
-                match dictionary.get(key) {
-                    Some(val) => val.as_number::<f32>().map(Some).map_err(|source| {
-                        FontDescriptorError::NumericConversionError {
-                            entry_description: key,
-                            source,
-                        }
-                    }),
-                    None => Ok(None),
-                }
-            };
-
-        let ascent = get_required_number_field("Ascent")?;
-        let descent = get_required_number_field("Descent")?;
-        let cap_height = get_required_number_field("CapHeight")?;
+        // Required numeric fields
+        let ascent = dictionary
+            .get_or_err("Ascent")?
+            .as_number_entry::<f32>("Ascent")?;
+        let descent = dictionary
+            .get_or_err("Descent")?
+            .as_number_entry::<f32>("Descent")?;
+        let cap_height = dictionary
+            .get_or_err("CapHeight")?
+            .as_number_entry::<f32>("CapHeight")?;
 
         let flags_val = dictionary
             .get_or_err("Flags")?
-            .as_number::<u32>()
-            .map_err(|source| FontDescriptorError::NumericConversionError {
-                entry_description: "Flags",
-                source,
-            })?;
+            .as_number_entry::<u32>("Flags")?;
+
         let flags = FontDescriptorFlags::from_bits_truncate(flags_val);
 
         let font_bounding_box = dictionary.get_or_err("FontBBox")?.as_array_of::<f32, 4>()?;
@@ -138,6 +111,7 @@ impl FromDictionary for FontDescriptor {
             .get("FontFamily")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+
 
         let resolve_font_file_stream = |key: &str| -> Option<ObjectVariant> {
             dictionary.get(key).and_then(|obj| match obj {
@@ -156,10 +130,25 @@ impl FromDictionary for FontDescriptor {
             return Err(FontDescriptorError::EmptyFontName);
         }
 
-        let italic_angle = get_required_number_field("ItalicAngle")?;
-        let missing_width = get_optional_number_field("MissingWidth")?.unwrap_or(0.0);
-        let max_width = get_optional_number_field("MaxWidth")?;
-        let stem_v = get_required_number_field("StemV")?;
+        let italic_angle = dictionary
+            .get_or_err("ItalicAngle")?
+            .as_number_entry::<f32>("ItalicAngle")?;
+
+        // Optional numeric fields
+        let missing_width = dictionary
+            .get("MissingWidth")
+            .map(ObjectVariant::as_number::<f32>)
+            .transpose()?
+            .unwrap_or(0.0);
+
+        let max_width = dictionary
+            .get("MaxWidth")
+            .map(ObjectVariant::as_number::<f32>)
+            .transpose()?;
+
+        let stem_v = dictionary
+            .get_or_err("StemV")?
+            .as_number_entry::<f32>("StemV")?;
 
         Ok(Self {
             ascent,

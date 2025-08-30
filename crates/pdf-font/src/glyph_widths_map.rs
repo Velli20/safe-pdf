@@ -5,13 +5,6 @@ use thiserror::Error;
 /// Errors that can occur during GlyphWidthsMap parsing from a /W array.
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum GlyphWidthsMapError {
-    /// Error converting a PDF value to a number.
-    #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
-    NumericConversionError {
-        entry_description: &'static str,
-        #[source]
-        source: ObjectError,
-    },
     /// The end of a CID range is less than the start.
     #[error("Invalid CID range: c_last ({c_last}) < c_first ({c_first})")]
     InvalidCIDRange { c_first: i64, c_last: i64 },
@@ -24,6 +17,8 @@ pub enum GlyphWidthsMapError {
     /// CID entry is incomplete.
     #[error("CID {cid} found without a corresponding width array or c_last value")]
     IncompleteCIDEntry { cid: i64 },
+    #[error("{0}")]
+    ObjectError(#[from] ObjectError),
 }
 
 /// Stores glyph widths for CIDs, parsed from the /W array.
@@ -56,12 +51,7 @@ impl GlyphWidthsMap {
         while i < array.len() {
             let cid_val = &array[i];
             i += 1;
-            let cid = cid_val.as_number::<i64>().map_err(|e| {
-                GlyphWidthsMapError::NumericConversionError {
-                    entry_description: "CID or c_first",
-                    source: e,
-                }
-            })?;
+            let cid = cid_val.as_number::<i64>()?;
 
             if i >= array.len() {
                 return Err(GlyphWidthsMapError::IncompleteCIDEntry { cid });
@@ -72,14 +62,7 @@ impl GlyphWidthsMap {
                     // [c_first [w1 ... wn]] form
                     let widths = widths_arr
                         .iter()
-                        .map(|w| {
-                            w.as_number::<f32>().map_err(|e| {
-                                GlyphWidthsMapError::NumericConversionError {
-                                    entry_description: "width in [w1...wn] array",
-                                    source: e,
-                                }
-                            })
-                        })
+                        .map(ObjectVariant::as_number::<f32>)
                         .collect::<Result<Vec<_>, _>>()?;
                     map.insert(cid, widths);
                     i += 1; // consumed array
@@ -92,12 +75,7 @@ impl GlyphWidthsMap {
                     // [10 12] -> MissingWidthForCIDRange and [0 500] -> UnexpectedElementAfterCID.
                     // We approximate intent: if the numeric is "close" to cid (small delta), assume range intent.
                     if i + 1 >= array.len() {
-                        let c_last_candidate = array[i].as_number::<i64>().map_err(|e| {
-                            GlyphWidthsMapError::NumericConversionError {
-                                entry_description: "c_last",
-                                source: e,
-                            }
-                        })?;
+                        let c_last_candidate = array[i].as_number::<i64>()?;
                         let delta = c_last_candidate - cid;
                         if (0..=10).contains(&delta) {
                             // Treat as attempted range missing width
@@ -113,12 +91,7 @@ impl GlyphWidthsMap {
                     }
 
                     // We have at least one more element – treat current numeric as c_last.
-                    let c_last = array[i].as_number::<i64>().map_err(|e| {
-                        GlyphWidthsMapError::NumericConversionError {
-                            entry_description: "c_last",
-                            source: e,
-                        }
-                    })?;
+                    let c_last = array[i].as_number::<i64>()?;
                     if c_last < cid {
                         return Err(GlyphWidthsMapError::InvalidCIDRange {
                             c_first: cid,
@@ -126,12 +99,7 @@ impl GlyphWidthsMap {
                         });
                     }
                     let width_val = &array[i + 1];
-                    let width = width_val.as_number::<f32>().map_err(|e| {
-                        GlyphWidthsMapError::NumericConversionError {
-                            entry_description: "width 'w' for c_first c_last w form",
-                            source: e,
-                        }
-                    })?;
+                    let width = width_val.as_number::<f32>()?;
                     let count = (c_last - cid + 1) as usize;
                     map.insert(cid, vec![width; count]);
                     i += 2; // consumed c_last and width
@@ -231,7 +199,9 @@ mod tests {
         let result = GlyphWidthsMap::from_array(&input_array);
         assert!(matches!(
             result,
-            Err(GlyphWidthsMapError::NumericConversionError { .. })
+            Err(GlyphWidthsMapError::ObjectError(
+                ObjectError::NumberConversionError
+            ))
         ));
     }
 
@@ -428,7 +398,9 @@ mod tests {
         let result = GlyphWidthsMap::from_array(&input_array);
         assert!(matches!(
             result,
-            Err(GlyphWidthsMapError::NumericConversionError { .. })
+            Err(GlyphWidthsMapError::ObjectError(
+                ObjectError::NumberConversionError
+            ))
         ));
     }
 

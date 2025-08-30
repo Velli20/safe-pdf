@@ -33,8 +33,6 @@ impl CharacterIdentifierFont {
 /// Defines errors that can occur while reading a PDF objects.
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum CidFontError {
-    #[error("Missing /FontDescriptor entry in CIDFont dictionary")]
-    MissingFontDescriptor,
     #[error("FontDescriptor parsing error: {0}")]
     FontDescriptorError(#[from] FontDescriptorError),
     #[error("{0}")]
@@ -47,12 +45,6 @@ pub enum CidFontError {
         "Unsupported CIDFont subtype '{subtype}': Only /CIDFontType2 (TrueType-based) is supported. /CIDFontType0 (Type1-based) is not supported."
     )]
     UnsupportedCidFontSubtype { subtype: String },
-    #[error("Failed to convert PDF value to number for '{entry_description}': {source}")]
-    NumericConversionError {
-        entry_description: &'static str,
-        #[source]
-        source: ObjectError,
-    },
 }
 
 impl FromDictionary for CharacterIdentifierFont {
@@ -65,16 +57,11 @@ impl FromDictionary for CharacterIdentifierFont {
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        let default_width = if let Some(default_width) = dictionary.get("DW") {
-            default_width.as_number::<f32>().map_err(|err| {
-                CidFontError::NumericConversionError {
-                    entry_description: "DW",
-                    source: err,
-                }
-            })?
-        } else {
-            Self::DEFAULT_WIDTH
-        };
+        let default_width = dictionary
+            .get("DW")
+            .map(|dw| dw.as_number::<f32>())
+            .transpose()?
+            .unwrap_or(Self::DEFAULT_WIDTH);
 
         let widths_map = dictionary
             .get("W")
@@ -98,14 +85,8 @@ impl FromDictionary for CharacterIdentifierFont {
         }
 
         // FontDescriptor must be an indirect reference according to the PDF spec.
-        let descriptor = if let Some(obj) = dictionary.get("FontDescriptor") {
-            let desc_dict = objects.resolve_dictionary(obj)?;
-            // TODO: Err
-            FontDescriptor::from_dictionary(desc_dict, objects)
-                .map_err(CidFontError::FontDescriptorError)?
-        } else {
-            return Err(CidFontError::MissingFontDescriptor);
-        };
+        let desc_dict = objects.resolve_dictionary(dictionary.get_or_err("FontDescriptor")?)?;
+        let descriptor = FontDescriptor::from_dictionary(desc_dict, objects)?;
 
         Ok(Self {
             default_width,

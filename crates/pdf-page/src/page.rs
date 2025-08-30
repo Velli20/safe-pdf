@@ -1,25 +1,10 @@
 use crate::{
-    content_stream::{ContentStream, ContentStreamReadError},
-    media_box::{MediaBox, MediaBoxError},
-    resources::{Resources, ResourcesError},
+    content_stream::ContentStream, media_box::MediaBox, pages::PdfPagesError, resources::Resources,
 };
 use pdf_object::{
     dictionary::Dictionary, indirect_object::IndirectObject, object_collection::ObjectCollection,
     traits::FromDictionary,
 };
-use thiserror::Error;
-
-/// Errors that can occur during parsing of a PDF Page object.
-#[derive(Error, Debug)]
-pub enum PdfPageError {
-    #[error("Failed to parse content stream for page: {0}")]
-    ContentStreamParse(#[from] ContentStreamReadError),
-
-    #[error("Failed to parse media box for page: {0}")]
-    MediaBoxParse(#[from] MediaBoxError),
-    #[error("Failed to parse resources for page: {0}")]
-    ResourcesParse(#[from] ResourcesError),
-}
 
 /// Represents a single page in a PDF document.
 ///
@@ -35,6 +20,7 @@ pub struct PdfPage {
     pub contents: Option<ContentStream>,
     /// `/MediaBox` attribute which defines the page boundaries.
     pub media_box: Option<MediaBox>,
+    /// `/Resources` attribute which defines the resources used by the page.
     pub resources: Option<Resources>,
 }
 
@@ -42,7 +28,7 @@ impl FromDictionary for PdfPage {
     const KEY: &'static str = "Page";
 
     type ResultType = Self;
-    type ErrorType = PdfPageError;
+    type ErrorType = PdfPagesError;
 
     fn from_dictionary(
         dictionary: &Dictionary,
