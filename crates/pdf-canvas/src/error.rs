@@ -38,6 +38,8 @@ pub enum PdfCanvasError {
     XObjectNotFound(String),
     #[error("Page missing media box")]
     MissingMediaBox,
+    #[error("Failed numeric conversion: {0}")]
+    NumericConversionError(&'static str),
     #[error("Not implemented: {0}")]
     NotImplemented(String),
 }

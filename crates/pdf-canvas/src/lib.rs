@@ -42,9 +42,8 @@ pub enum PathFillType {
 impl<U, T: CanvasBackend<ImageType = U>> PdfOperatorBackend for PdfCanvas<'_, T, U> {}
 
 impl<U, T: CanvasBackend<ImageType = U>> ShadingOps for PdfCanvas<'_, T, U> {
-    fn paint_shading(&mut self, shading_name: &str) -> Result<(), Self::ErrorType> {
-        println!("Paint shading {:?}", shading_name);
-        Ok(())
+    fn paint_shading(&mut self, _shading_name: &str) -> Result<(), Self::ErrorType> {
+        Err(PdfCanvasError::NotImplemented("paint_shading".into()))
     }
 }
 

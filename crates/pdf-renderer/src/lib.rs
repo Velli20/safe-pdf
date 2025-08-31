@@ -17,10 +17,16 @@ impl<'a, 'b, U, T: CanvasBackend<ImageType = U>> PdfRenderer<'a, 'b, T, U> {
     pub fn render(&mut self, pages: &[usize]) {
         for index in pages {
             if let Some(p) = self.document.pages.get(*index) {
-                let mut canvas = PdfCanvas::new(self.canvas, p, None);
-                if let Some(cs) = &p.contents {
-                    for op in &cs.operations {
-                        op.call(&mut canvas).unwrap();
+                match PdfCanvas::new(self.canvas, p, None) {
+                    Ok(mut canvas) => {
+                        if let Some(cs) = &p.contents {
+                            for op in &cs.operations {
+                                op.call(&mut canvas).unwrap();
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to create PdfCanvas for page {}: {}", index, e);
                     }
                 }
             }

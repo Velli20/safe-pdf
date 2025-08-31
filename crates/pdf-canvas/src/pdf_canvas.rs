@@ -1,3 +1,4 @@
+use num_traits::FromPrimitive;
 use pdf_content_stream::pdf_operator::PdfOperatorVariant;
 use pdf_font::font::Font;
 use pdf_graphics::{LineCap, LineJoin, color::Color, transform::Transform};
@@ -127,7 +128,9 @@ impl<U, T: CanvasBackend<ImageType = U>> Canvas for PdfCanvas<'_, T, U> {
 
     fn fill_path(&mut self, path: &PdfPath, fill_type: PathFillType) -> Result<(), PdfCanvasError> {
         if self.current_state()?.pattern.is_some() {
-            println!("Pattern fill is not supported yet.");
+            return Err(PdfCanvasError::NotImplemented(
+                "Pattern filling is not supported yet in the fill_path function.".into(),
+            ));
         }
         let fill_color = self.current_state()?.fill_color;
         self.canvas
@@ -144,26 +147,20 @@ where
         backend: &'a mut dyn CanvasBackend<MaskType = T, ImageType = U>,
         page: &'a PdfPage,
         bb: Option<&[f32; 4]>,
-    ) -> Self {
+    ) -> Result<Self, PdfCanvasError> {
         let media_box = &page.media_box;
 
-        let pdf_media_width = if let Some(bb) = bb {
-            bb[2] - bb[0]
+        let (pdf_media_width, pdf_media_height) = if let Some(bb) = bb {
+            (bb[2] - bb[0], bb[3] - bb[1])
+        } else if let Some(mb) = media_box.as_ref() {
+            (
+                f32::from_u32(mb.width())
+                    .ok_or(PdfCanvasError::NumericConversionError("u32 to f32 width"))?,
+                f32::from_u32(mb.height())
+                    .ok_or(PdfCanvasError::NumericConversionError("u32 to f32 height"))?,
+            )
         } else {
-            #[allow(clippy::as_conversions)]
-            match *media_box {
-                Some(ref mb) => mb.width() as f32,
-                None => 0.0,
-            }
-        };
-        let pdf_media_height = if let Some(bb) = bb {
-            bb[3] - bb[1]
-        } else {
-            #[allow(clippy::as_conversions)]
-            match *media_box {
-                Some(ref mb) => mb.height() as f32,
-                None => 0.0,
-            }
+            (0.0, 0.0)
         };
 
         let backend_canvas_width = backend.width();
@@ -202,13 +199,13 @@ where
             ..Default::default()
         }];
 
-        Self {
+        Ok(Self {
             current_path: None,
             canvas: backend,
             mask: None,
             page,
             canvas_stack,
-        }
+        })
     }
 
     /// Returns a reference to the current graphics state.
@@ -313,7 +310,7 @@ where
                     .create_mask(bbox[2] - bbox[0], bbox[3] - bbox[1]);
 
                 // Render the tiling content into a temporary canvas.
-                let mut other = PdfCanvas::new(mask.as_mut(), self.page, Some(bbox));
+                let mut other = PdfCanvas::new(mask.as_mut(), self.page, Some(bbox))?;
                 other.render_content_stream(&content_stream.operations, None, Some(resources))?;
                 let image = other.canvas.image_snapshot();
                 Ok((None, Some(image)))

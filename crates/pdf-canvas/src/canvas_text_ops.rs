@@ -106,9 +106,10 @@ impl<U, T: CanvasBackend<ImageType = U>> TextStateOps for PdfCanvas<'_, T, U> {
         Ok(())
     }
 
-    fn set_text_rendering_mode(&mut self, mode: i32) -> Result<(), Self::ErrorType> {
-        println!("Implement text rendering mode Tr: {}", mode);
-        Ok(())
+    fn set_text_rendering_mode(&mut self, _mode: i32) -> Result<(), Self::ErrorType> {
+        Err(PdfCanvasError::NotImplemented(
+            "set_text_rendering_mode".into(),
+        ))
     }
 
     fn set_text_rise(&mut self, rise: f32) -> Result<(), Self::ErrorType> {

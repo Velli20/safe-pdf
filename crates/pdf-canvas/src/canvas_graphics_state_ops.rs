@@ -24,11 +24,20 @@ impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U
         e: f32,
         f: f32,
     ) -> Result<(), Self::ErrorType> {
-        let mat = Transform::from_row(a, b, c, d, e, f);
-        let ctm_old = self.current_state()?.transform;
-        let mut ctm_new = mat;
-        ctm_new.concat(&ctm_old);
-        self.current_state_mut()?.transform = ctm_new;
+        // PDF 'cm' operator: Update the current transformation matrix (CTM) by
+        // left-multiplying it with the provided matrix [a b c d e f].
+        // New CTM = M_incoming × CTM_old
+        // Build the incoming transform from row values.
+        let mut incoming = Transform::from_row(a, b, c, d, e, f);
+
+        // Access current state once; copy out the old CTM (Transform is small/Copy).
+        let state = self.current_state_mut()?;
+
+        // Concatenate in the correct order per PDF spec (left-multiply).
+        incoming.concat(&state.transform);
+
+        // Store the updated CTM back into state.
+        state.transform = incoming;
         Ok(())
     }
 
@@ -57,9 +66,7 @@ impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U
         _dash_array: &[f32],
         _dash_phase: f32,
     ) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented(
-            "set_dash_pattern".into(),
-        ))
+        Err(PdfCanvasError::NotImplemented("set_dash_pattern".into()))
     }
 
     fn set_rendering_intent(&mut self, _intent: &str) -> Result<(), Self::ErrorType> {
@@ -127,7 +134,7 @@ impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U
                     return Err(PdfCanvasError::NotImplemented("ExtGState: Font".into()));
                 }
                 ExternalGraphicsStateKey::BlendMode(_) => {
-                    // println!("Blend mode {:?}", items);
+                    // return Err(PdfCanvasError::NotImplemented("ExtGState: BlendMode".into()));
                 }
                 ExternalGraphicsStateKey::SoftMask(smask) => {
                     // Handle the `/SMask`` entry from an `ExtGState` dictionary.
@@ -149,7 +156,7 @@ impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U
                             // Create a temporary `PdfCanvas` that draws into our new mask surface.
                             // This allows us to reuse the rendering logic for the form's content stream.
                             let mut other =
-                                PdfCanvas::new(mask.as_mut(), self.page, Some(&form.bbox));
+                                PdfCanvas::new(mask.as_mut(), self.page, Some(&form.bbox))?;
 
                             // 3. Render the form's content stream into the mask canvas.
                             other.render_content_stream(
