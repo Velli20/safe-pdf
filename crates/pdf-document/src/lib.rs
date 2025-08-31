@@ -60,8 +60,7 @@ impl PdfDocument {
         let catalog = objects.resolve_dictionary(root)?;
 
         // Get the `Pages` object reference from the catalog, which defines the order of the pages in the document.
-        let pages_num = catalog.get_or_err("Pages")?;
-        let pages_dict = objects.resolve_dictionary(pages_num)?;
+        let pages_dict = objects.resolve_dictionary(catalog.get_or_err("Pages")?)?;
 
         let pages = PdfPages::from_dictionary(pages_dict, &objects)?;
 

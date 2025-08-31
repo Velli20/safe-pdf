@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use pdf_font::font::{Font, FontError};
 use pdf_object::{
     ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
-    traits::FromDictionary,
+    stream::StreamObject, traits::FromDictionary,
 };
 use thiserror::Error;
 
@@ -139,16 +139,14 @@ impl FromDictionary for Resources {
             .transpose()?
         {
             for (name, v) in &xobject_dict.dictionary {
-                let stream_object = objects.resolve_stream(v)?;
+                let StreamObject {
+                    dictionary, data, ..
+                } = objects.resolve_stream(v)?;
 
                 // Parse the XObject and insert it into the map.
                 xobjects.insert(
                     name.to_owned(),
-                    XObject::read_xobject(
-                        &stream_object.dictionary,
-                        stream_object.data.as_slice(),
-                        objects,
-                    )?,
+                    XObject::read_xobject(dictionary, data.as_slice(), objects)?,
                 );
             }
         }

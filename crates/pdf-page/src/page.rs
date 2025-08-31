@@ -12,9 +12,6 @@ use pdf_object::{
 /// It contains references to the page's contents (the text, graphics, and images),
 /// its resources, and other attributes according to PDF 1.7 specification.
 pub struct PdfPage {
-    /// The page object dictionary containing all page-specific information.
-    /// Reference to the parent page tree node.
-    _parent: Option<IndirectObject>,
     /// The contents of the page, which can be a single stream object or
     /// an array of streams.
     pub contents: Option<ContentStream>,
@@ -39,7 +36,6 @@ impl FromDictionary for PdfPage {
         let resources = Resources::from_dictionary(dictionary, objects)?;
 
         Ok(Self {
-            _parent: None,
             contents,
             media_box,
             resources,

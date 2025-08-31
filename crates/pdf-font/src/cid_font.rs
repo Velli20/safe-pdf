@@ -39,8 +39,6 @@ pub enum CidFontError {
     ObjectError(#[from] ObjectError),
     #[error("GlyphWidthsMap parsing error: {0}")]
     GlyphWidthsMapError(#[from] GlyphWidthsMapError),
-    #[error("Missing /Subtype entry in CIDFont dictionary")]
-    MissingSubType,
     #[error(
         "Unsupported CIDFont subtype '{subtype}': Only /CIDFontType2 (TrueType-based) is supported. /CIDFontType0 (Type1-based) is not supported."
     )]
@@ -71,10 +69,7 @@ impl FromDictionary for CharacterIdentifierFont {
             })
             .transpose()?;
 
-        let subtype = dictionary
-            .get("Subtype")
-            .ok_or(CidFontError::MissingSubType)?
-            .try_str()?;
+        let subtype = dictionary.get_or_err("Subtype")?.try_str()?;
 
         // CIDFont subtypes can be /CIDFontType0 or /CIDFontType2.
         // This parser currently only supports /CIDFontType2 (TrueType-based).

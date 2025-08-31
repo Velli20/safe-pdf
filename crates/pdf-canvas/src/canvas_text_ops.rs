@@ -25,7 +25,10 @@ impl<U, T: CanvasBackend<ImageType = U>> TextPositioningOps for PdfCanvas<'_, T,
         tx: f32,
         ty: f32,
     ) -> Result<(), Self::ErrorType> {
-        todo!("Implement TD operator: tx={}, ty={}", tx, ty)
+        Err(PdfCanvasError::NotImplemented(format!(
+            "move_text_position_and_set_leading TD: tx={}, ty={}",
+            tx, ty
+        )))
     }
 
     fn set_text_matrix(
@@ -44,7 +47,9 @@ impl<U, T: CanvasBackend<ImageType = U>> TextPositioningOps for PdfCanvas<'_, T,
     }
 
     fn move_to_start_of_next_line(&mut self) -> Result<(), Self::ErrorType> {
-        todo!("Implement T* operator")
+        Err(PdfCanvasError::NotImplemented(
+            "move_to_start_of_next_line T*".into(),
+        ))
     }
 }
 
@@ -77,7 +82,10 @@ impl<U, T: CanvasBackend<ImageType = U>> TextStateOps for PdfCanvas<'_, T, U> {
     }
 
     fn set_text_leading(&mut self, leading: f32) -> Result<(), Self::ErrorType> {
-        todo!("Implement text leading TL: {}", leading)
+        Err(PdfCanvasError::NotImplemented(format!(
+            "set_text_leading TL: {}",
+            leading
+        )))
     }
 
     fn set_font_and_size(&mut self, font_name: &str, size: f32) -> Result<(), Self::ErrorType> {
@@ -149,11 +157,17 @@ impl<U, T: CanvasBackend<ImageType = U>> TextShowingOps for PdfCanvas<'_, T, U> 
         &mut self,
         elements: &[pdf_content_stream::TextElement],
     ) -> Result<(), Self::ErrorType> {
-        todo!("Implement TJ operator: {:?}", elements);
+        Err(PdfCanvasError::NotImplemented(format!(
+            "show_text_with_glyph_positioning TJ (elements_len={})",
+            elements.len()
+        )))
     }
 
     fn move_to_next_line_and_show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
-        todo!("Implement ' operator: {:?}", text)
+        Err(PdfCanvasError::NotImplemented(format!(
+            "move_to_next_line_and_show_text ' (text_len={})",
+            text.len()
+        )))
     }
 
     fn set_spacing_and_show_text(
@@ -162,11 +176,11 @@ impl<U, T: CanvasBackend<ImageType = U>> TextShowingOps for PdfCanvas<'_, T, U> 
         char_spacing: f32,
         text: &[u8],
     ) -> Result<(), Self::ErrorType> {
-        todo!(
-            "Implement \" operator: word_spacing={}, char_spacing={}, text={:?}",
+        Err(PdfCanvasError::NotImplemented(format!(
+            "set_spacing_and_show_text \" : word_spacing={}, char_spacing={}, text_len={}",
             word_spacing,
             char_spacing,
-            text
-        )
+            text.len()
+        )))
     }
 }

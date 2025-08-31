@@ -112,7 +112,6 @@ impl FromDictionary for FontDescriptor {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-
         let resolve_font_file_stream = |key: &str| -> Option<ObjectVariant> {
             dictionary.get(key).and_then(|obj| match obj {
                 ObjectVariant::Reference(id) => objects.get(*id).cloned(),

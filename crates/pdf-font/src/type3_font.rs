@@ -128,14 +128,14 @@ impl FromDictionary for Type3Font {
 pub enum EncodingError {
     #[error("Invalid entry in /Differences array: expected Integer or Name, found {found_type}")]
     InvalidDifferencesEntryType { found_type: &'static str },
-    #[error("Invalid type for /Differences: expected Array, found {found_type}")]
-    InvalidDifferencesType { found_type: &'static str },
     #[error("Invalid character code in /Differences array: expected 0-255, found {code}")]
     InvalidDifferenceCharCode { code: i64 },
     #[error(
         "Character code overflow in /Differences array while incrementing after code {last_code}"
     )]
     DifferencesCodeOverflow { last_code: u8 },
+    #[error("{0}")]
+    ObjectError(#[from] ObjectError),
 }
 
 /// Represents a font encoding dictionary, used to map character codes to glyph names.
@@ -166,15 +166,8 @@ impl FromDictionary for FontEncodingDictionary {
         let mut differences = HashMap::new();
 
         if let Some(diff_array) = dictionary.get("Differences") {
-            let diff_array =
-                diff_array
-                    .as_array()
-                    .ok_or_else(|| EncodingError::InvalidDifferencesType {
-                        found_type: diff_array.name(),
-                    })?;
-
             let mut current_code: u8 = 0;
-            for entry in diff_array.iter() {
+            for entry in diff_array.try_array()?.iter() {
                 match entry {
                     ObjectVariant::Integer(code) => {
                         let code_i64 = *code;

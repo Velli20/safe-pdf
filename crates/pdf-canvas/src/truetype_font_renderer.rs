@@ -23,6 +23,8 @@ pub enum TrueTypeFontRendererError {
     TtfParseError(ttf_parser::FaceParsingError),
     #[error("No character map found for font '{0}'")]
     NoCharacterMapForFont(String),
+    #[error("Incomplete 2-byte character at the end of the string")]
+    IncompleteTwoByteCharacter,
 }
 
 /// A text renderer for TrueType-based fonts.
@@ -142,10 +144,8 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
                     // PDF uses big-endian for 2-byte character codes.
                     u16::from_be_bytes([first_byte, second_byte])
                 } else {
-                    // Incomplete 2-byte character at the end of the string. Skip it.
-                    // This can happen if the text string has an odd number of bytes
-                    // when a 2-byte encoding is expected. Skip this malformed character.
-                    panic!("Incomplete 2-byte character at the end of the string");
+                    // Incomplete 2-byte character at the end of the string. Return an error.
+                    return Err(TrueTypeFontRendererError::IncompleteTwoByteCharacter.into());
                 }
             } else {
                 // For 1-byte encodings, the character code is simply the byte itself.

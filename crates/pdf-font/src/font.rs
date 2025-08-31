@@ -39,7 +39,7 @@ impl From<Cow<'_, str>> for FontEncoding {
 #[derive(Debug, Error, PartialEq)]
 pub enum FontError {
     #[error("Invalid /DescendantFonts entry in Type0 font: {0}")]
-    InvalidDescendantFonts(String),
+    InvalidDescendantFonts(&'static str),
     #[error("Error processing descendant CIDFont for Type0 font")]
     DescendantCIDFontError(#[from] CidFontError),
     #[error("CMap parsing error: {0}")]
@@ -166,7 +166,7 @@ impl FromDictionary for Font {
         // The array must not be empty. Get the first element, which should reference the CIDFont dictionary.
         let cid_font_ref_val = descendant_fonts_array
             .first()
-            .ok_or_else(|| FontError::InvalidDescendantFonts("Array is empty".to_string()))?;
+            .ok_or(FontError::InvalidDescendantFonts("Array is empty"))?;
 
         // Resolve the CIDFont dictionary from the reference and parse it into a `CharacterIdentifierFont`.
         let cid_font = {

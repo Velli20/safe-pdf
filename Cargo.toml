@@ -18,3 +18,6 @@ unnecessary_to_owned = "warn"     # Catches calls to `.to_owned()` (like `to_str
 inefficient_to_string = "warn"    # Warns when `.to_string()` is used on a type that has a more direct way to create a String (e.g., on a `String` itself).
 clone_on_ref_ptr = "warn"         # Finds inefficient code like `&x.clone()` and suggests borrowing directly with `x.borrow()` or just `&x`.
 cmp_owned = "warn"                # Warns when a value is converted to an owned type just for a comparison, like `s.to_string() == "foo"`. Suggests comparing with a borrow instead.
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

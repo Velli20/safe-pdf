@@ -57,16 +57,23 @@ impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U
         _dash_array: &[f32],
         _dash_phase: f32,
     ) -> Result<(), Self::ErrorType> {
-        println!("Dash pattern");
-        Ok(())
+        Err(PdfCanvasError::NotImplemented(
+            "set_dash_pattern".into(),
+        ))
     }
 
     fn set_rendering_intent(&mut self, _intent: &str) -> Result<(), Self::ErrorType> {
-        todo!()
+        // Rendering intent handling is currently not supported.
+        Err(PdfCanvasError::NotImplemented(
+            "set_rendering_intent".into(),
+        ))
     }
 
     fn set_flatness_tolerance(&mut self, _tolerance: f32) -> Result<(), Self::ErrorType> {
-        todo!()
+        // Flatness tolerance is advisory for renderers; not supported.
+        Err(PdfCanvasError::NotImplemented(
+            "set_flatness_tolerance".into(),
+        ))
     }
 
     fn set_graphics_state_from_dict(&mut self, dict_name: &str) -> Result<(), Self::ErrorType> {
@@ -91,12 +98,34 @@ impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U
                 ExternalGraphicsStateKey::MiterLimit(miter) => {
                     self.current_state_mut()?.miter_limit = *miter;
                 }
-                ExternalGraphicsStateKey::DashPattern(..) => todo!(),
-                ExternalGraphicsStateKey::RenderingIntent(_) => todo!(),
-                ExternalGraphicsStateKey::OverprintStroke(_) => todo!(),
-                ExternalGraphicsStateKey::OverprintFill(_) => todo!(),
-                ExternalGraphicsStateKey::OverprintMode(_) => todo!(),
-                ExternalGraphicsStateKey::Font(..) => todo!(),
+                ExternalGraphicsStateKey::DashPattern(..) => {
+                    return Err(PdfCanvasError::NotImplemented(
+                        "ExtGState: DashPattern".into(),
+                    ));
+                }
+                ExternalGraphicsStateKey::RenderingIntent(_) => {
+                    return Err(PdfCanvasError::NotImplemented(
+                        "ExtGState: RenderingIntent".into(),
+                    ));
+                }
+                ExternalGraphicsStateKey::OverprintStroke(_) => {
+                    return Err(PdfCanvasError::NotImplemented(
+                        "ExtGState: OverprintStroke".into(),
+                    ));
+                }
+                ExternalGraphicsStateKey::OverprintFill(_) => {
+                    return Err(PdfCanvasError::NotImplemented(
+                        "ExtGState: OverprintFill".into(),
+                    ));
+                }
+                ExternalGraphicsStateKey::OverprintMode(_) => {
+                    return Err(PdfCanvasError::NotImplemented(
+                        "ExtGState: OverprintMode".into(),
+                    ));
+                }
+                ExternalGraphicsStateKey::Font(..) => {
+                    return Err(PdfCanvasError::NotImplemented("ExtGState: Font".into()));
+                }
                 ExternalGraphicsStateKey::BlendMode(_) => {
                     // println!("Blend mode {:?}", items);
                 }
@@ -104,7 +133,9 @@ impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U
                     // Handle the `/SMask`` entry from an `ExtGState` dictionary.
                     if let Some(smask) = smask {
                         if let XObject::Image(_) = &smask.shape {
-                            panic!()
+                            return Err(PdfCanvasError::NotImplemented(
+                                "SoftMask with Image shape".into(),
+                            ));
                         } else if let XObject::Form(form) = &smask.shape {
                             // The soft mask is defined by a Form XObject.
                             // We need to render this form's content into a separate mask surface.

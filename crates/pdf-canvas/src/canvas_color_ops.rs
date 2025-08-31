@@ -1,6 +1,6 @@
 use pdf_content_stream::pdf_operator_backend::ColorOps;
 
-use crate::{canvas_backend::CanvasBackend, pdf_canvas::PdfCanvas};
+use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 use pdf_graphics::color::Color;
 
 impl<U, T: CanvasBackend<ImageType = U>> ColorOps for PdfCanvas<'_, T, U> {
@@ -33,7 +33,7 @@ impl<U, T: CanvasBackend<ImageType = U>> ColorOps for PdfCanvas<'_, T, U> {
             .and_then(|r| r.patterns.get(pattern_name))
         else {
             println!("Pattern not found {:?}", pattern_name);
-            panic!()
+            return Err(PdfCanvasError::PatternNotFound(pattern_name.to_string()));
         };
 
         println!(
@@ -61,7 +61,7 @@ impl<U, T: CanvasBackend<ImageType = U>> ColorOps for PdfCanvas<'_, T, U> {
             .and_then(|r| r.patterns.get(pattern_name))
         else {
             println!("Pattern not found {:?}", pattern_name);
-            panic!()
+            return Err(PdfCanvasError::PatternNotFound(pattern_name.to_string()));
         };
         println!(
             "set_non_stroking_color_extended {:?} {:?}",
@@ -102,7 +102,7 @@ impl<U, T: CanvasBackend<ImageType = U>> ColorOps for PdfCanvas<'_, T, U> {
         _y: f32,
         _k: f32,
     ) -> Result<(), Self::ErrorType> {
-        todo!()
+        Err(PdfCanvasError::NotImplemented("set_stroking_cmyk".into()))
     }
 
     fn set_non_stroking_cmyk(
@@ -112,6 +112,8 @@ impl<U, T: CanvasBackend<ImageType = U>> ColorOps for PdfCanvas<'_, T, U> {
         _y: f32,
         _k: f32,
     ) -> Result<(), Self::ErrorType> {
-        todo!()
+        Err(PdfCanvasError::NotImplemented(
+            "set_non_stroking_cmyk".into(),
+        ))
     }
 }
