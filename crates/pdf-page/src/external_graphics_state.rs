@@ -1,4 +1,4 @@
-use std::{borrow::Cow, str::FromStr};
+use std::borrow::Cow;
 
 use pdf_object::{
     ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
@@ -9,28 +9,22 @@ use thiserror::Error;
 
 use crate::xobject::{XObject, XObjectError, XObjectReader};
 use num_traits::FromPrimitive;
-use pdf_graphics::{LineCap, LineJoin};
+use pdf_graphics::{BlendMode, LineCap, LineJoin};
 
 /// Errors that can occur during parsing of an External Graphics State dictionary.
 #[derive(Error, Debug)]
 pub enum ExternalGraphicsStateError {
-    #[error("Failed to parse blend mode string '{value}' for key '{key_name}': {source}")]
-    BlendModeParseError {
-        key_name: String,
-        value: String,
-        source: ParseBlendModeError,
-    },
     #[error(
         "Invalid array structure for key '{key_name}': expected {expected_desc}, found {actual_desc}"
     )]
     InvalidArrayStructureError {
-        key_name: String,
+        key_name: Cow<'static, str>,
         expected_desc: &'static str,
         actual_desc: String,
     },
     #[error("Invalid value for key '{key_name}': {description}")]
     InvalidValueError {
-        key_name: String,
+        key_name: Cow<'static, str>,
         description: String,
     },
     #[error(
@@ -39,10 +33,8 @@ pub enum ExternalGraphicsStateError {
     UnsupportedTypeError {
         key_name: String,
         expected_type: &'static str,
-        found_type: String,
+        found_type: &'static str,
     },
-    #[error("Error parsing Dash Array: {0}")]
-    DashArrayParsingError(#[source] ObjectError),
     #[error("Error reading Soft Mask XObject: {0}")]
     SMaskReadError(#[from] XObjectError),
     #[error("{0}")]
@@ -71,79 +63,20 @@ impl MaskType {
             "Luminosity" => Ok(MaskType::Luminosity),
             "Alpha" => Ok(MaskType::Alpha),
             other => Err(ExternalGraphicsStateError::InvalidValueError {
-                key_name: "MaskType".to_string(),
+                key_name: Cow::Borrowed("MaskType"),
                 description: format!("Unknown SMask type '{}'", other),
             }),
         }
     }
 }
 
-/// Represents the standard blend modes allowed in PDF.
-#[derive(Debug, PartialEq, Clone)]
-pub enum BlendMode {
-    // Standard separable blend modes
-    Normal,
-    Multiply,
-    Screen,
-    Overlay,
-    Darken,
-    Lighten,
-    ColorDodge,
-    ColorBurn,
-    HardLight,
-    SoftLight,
-    Difference,
-    Exclusion,
-    // Standard nonseparable blend modes
-    Hue,
-    Saturation,
-    Color,
-    Luminosity,
-}
-
-/// Error type for blend mode parsing.
-#[derive(Debug, PartialEq)]
-pub struct ParseBlendModeError {
-    invalid_value: String,
-}
-
-impl std::fmt::Display for ParseBlendModeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "unknown blend mode: '{}'", self.invalid_value)
-    }
-}
-impl std::error::Error for ParseBlendModeError {}
-
-impl FromStr for BlendMode {
-    type Err = ParseBlendModeError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "Normal" => Ok(BlendMode::Normal),
-            "Multiply" => Ok(BlendMode::Multiply),
-            "Screen" => Ok(BlendMode::Screen),
-            "Overlay" => Ok(BlendMode::Overlay),
-            "Darken" => Ok(BlendMode::Darken),
-            "Lighten" => Ok(BlendMode::Lighten),
-            "ColorDodge" => Ok(BlendMode::ColorDodge),
-            "ColorBurn" => Ok(BlendMode::ColorBurn),
-            "HardLight" => Ok(BlendMode::HardLight),
-            "SoftLight" => Ok(BlendMode::SoftLight),
-            "Difference" => Ok(BlendMode::Difference),
-            "Exclusion" => Ok(BlendMode::Exclusion),
-            "Hue" => Ok(BlendMode::Hue),
-            "Saturation" => Ok(BlendMode::Saturation),
-            "Color" => Ok(BlendMode::Color),
-            "Luminosity" => Ok(BlendMode::Luminosity),
-            _ => Err(ParseBlendModeError {
-                invalid_value: s.to_string(),
-            }),
-        }
-    }
-}
-
+/// Soft mask extracted from an ExtGState `SMask` entry.
 pub struct SoftMask {
+    /// How the mask is derived from the transparency group output: from color
+    /// luminance (`Luminosity`) or from alpha/shape (`Alpha`).
     pub mask_type: MaskType,
+    /// The transparency group XObject (`G`) whose rendered result provides the
+    /// input used to compute the soft mask.
     pub shape: XObject,
 }
 
@@ -219,10 +152,13 @@ impl FromDictionary for ExternalGraphicsState {
         let mut params: Vec<ExternalGraphicsStateKey> = Vec::new();
 
         for (name, value) in &dictionary.dictionary {
-            match parse_entry(name, value, objects)? {
-                Some(key) => params.push(key),
-                None => continue,
+            if name == "Type" {
+                // The "Type" entry is optional and, if present, must be "ExtGState".
+                // We can safely ignore it during parsing.
+                continue;
             }
+            let entry = parse_entry(name, value, objects)?;
+            params.push(entry)
         }
 
         Ok(ExternalGraphicsState { params })
@@ -237,15 +173,13 @@ fn parse_dash_pattern(
     let arr = value.try_array()?;
     if arr.len() != 2 {
         return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
-            key_name: key_name.to_string(),
+            key_name: Cow::Owned(key_name.to_string()),
             expected_desc: "array with 2 elements",
             actual_desc: format!("array with {} elements", arr.len()),
         });
     }
 
-    let dash_array_f32 = arr[0]
-        .as_vec_of::<f32>()
-        .map_err(ExternalGraphicsStateError::DashArrayParsingError)?;
+    let dash_array_f32 = arr[0].as_vec_of::<f32>()?;
     let dash_phase = arr[1].as_number::<f32>()?;
     Ok(ExternalGraphicsStateKey::DashPattern(
         dash_array_f32,
@@ -261,7 +195,7 @@ fn parse_font(
     let arr = value.try_array()?;
     if arr.len() != 2 {
         return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
-            key_name: key_name.to_string(),
+            key_name: Cow::Owned(key_name.to_string()),
             expected_desc: "array with 2 elements",
             actual_desc: format!("array with {} elements", arr.len()),
         });
@@ -271,39 +205,49 @@ fn parse_font(
     Ok(ExternalGraphicsStateKey::Font(font_ref, font_size))
 }
 
+fn to_blend_mode(s: &str) -> Result<BlendMode, ExternalGraphicsStateError> {
+    match s {
+        "Normal" => Ok(BlendMode::Normal),
+        "Multiply" => Ok(BlendMode::Multiply),
+        "Screen" => Ok(BlendMode::Screen),
+        "Overlay" => Ok(BlendMode::Overlay),
+        "Darken" => Ok(BlendMode::Darken),
+        "Lighten" => Ok(BlendMode::Lighten),
+        "ColorDodge" => Ok(BlendMode::ColorDodge),
+        "ColorBurn" => Ok(BlendMode::ColorBurn),
+        "HardLight" => Ok(BlendMode::HardLight),
+        "SoftLight" => Ok(BlendMode::SoftLight),
+        "Difference" => Ok(BlendMode::Difference),
+        "Exclusion" => Ok(BlendMode::Exclusion),
+        "Hue" => Ok(BlendMode::Hue),
+        "Saturation" => Ok(BlendMode::Saturation),
+        "Color" => Ok(BlendMode::Color),
+        "Luminosity" => Ok(BlendMode::Luminosity),
+        _ => Err(ExternalGraphicsStateError::InvalidValueError {
+            key_name: Cow::Borrowed("BM"),
+            description: format!("Unknown blend mode '{}'", s),
+        }),
+    }
+}
+
 /// Parse blend modes `BM` -> BlendMode(Vec<BlendMode>)
 fn parse_blend_mode(
     key_name: &str,
     value: &ObjectVariant,
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
     let blend_modes_vec: Vec<BlendMode> = if let Some(name_str) = value.as_str() {
-        let mode = name_str.parse::<BlendMode>().map_err(|e| {
-            ExternalGraphicsStateError::BlendModeParseError {
-                key_name: key_name.to_string(),
-                value: name_str.to_string(),
-                source: e,
-            }
-        })?;
+        let mode = to_blend_mode(name_str.as_ref())?;
         vec![mode]
     } else if let Some(pdf_array) = value.as_array() {
         pdf_array
             .iter()
-            .map(|obj| {
-                let name_str = obj.try_str()?;
-                name_str.parse::<BlendMode>().map_err(|e| {
-                    ExternalGraphicsStateError::BlendModeParseError {
-                        key_name: key_name.to_string(),
-                        value: name_str.to_string(),
-                        source: e,
-                    }
-                })
-            })
+            .map(|obj| to_blend_mode(obj.try_str()?.as_ref()))
             .collect::<Result<Vec<BlendMode>, _>>()?
     } else {
         return Err(ExternalGraphicsStateError::UnsupportedTypeError {
             key_name: key_name.to_string(),
             expected_type: "Name or Array of Names",
-            found_type: format!("{:?}", value),
+            found_type: value.name(),
         });
     };
     Ok(ExternalGraphicsStateKey::BlendMode(blend_modes_vec))
@@ -332,7 +276,7 @@ fn parse_soft_mask(
             Some(name) if name.as_ref() == "None" => None,
             Some(_) => {
                 return Err(ExternalGraphicsStateError::InvalidValueError {
-                    key_name: key_name.to_string(),
+                    key_name: Cow::Owned(key_name.to_string()),
                     description: "SMask must be 'None'".to_string(),
                 });
             }
@@ -340,7 +284,7 @@ fn parse_soft_mask(
                 return Err(ExternalGraphicsStateError::UnsupportedTypeError {
                     key_name: key_name.to_string(),
                     expected_type: "Name or Dictionary",
-                    found_type: format!("{:?}", other),
+                    found_type: other.name(),
                 });
             }
         },
@@ -354,64 +298,44 @@ fn parse_entry(
     name: &str,
     value: &ObjectVariant,
     objects: &ObjectCollection,
-) -> Result<Option<ExternalGraphicsStateKey>, ExternalGraphicsStateError> {
+) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
     let parsed = match name {
-        // Stroke/Fill geometry
-        "LW" => Some(ExternalGraphicsStateKey::LineWidth(
-            value.as_number_entry::<f32>("LW")?,
-        )),
+        "LW" => ExternalGraphicsStateKey::LineWidth(value.as_number_entry::<f32>("LW")?),
         "LC" => {
             let cap_val = value.as_number_entry::<i32>("LC")?;
             let cap = LineCap::from_i32(cap_val).ok_or_else(|| {
                 ExternalGraphicsStateError::InvalidValueError {
-                    key_name: name.to_string(),
+                    key_name: Cow::Owned(name.to_string()),
                     description: format!("Invalid LineCap value: {}", cap_val),
                 }
             })?;
-            Some(ExternalGraphicsStateKey::LineCap(cap))
+            ExternalGraphicsStateKey::LineCap(cap)
         }
         "LJ" => {
             let join_val = value.as_number_entry::<i32>("LJ")?;
             let join = LineJoin::from_i32(join_val).ok_or_else(|| {
                 ExternalGraphicsStateError::InvalidValueError {
-                    key_name: name.to_string(),
+                    key_name: Cow::Owned(name.to_string()),
                     description: format!("Invalid LineJoin value: {}", join_val),
                 }
             })?;
-            Some(ExternalGraphicsStateKey::LineJoin(join))
+            ExternalGraphicsStateKey::LineJoin(join)
         }
-        "ML" => Some(ExternalGraphicsStateKey::MiterLimit(
-            value.as_number_entry::<f32>("ML")?,
-        )),
-        "D" => Some(parse_dash_pattern(name, value)?),
-        "RI" => Some(ExternalGraphicsStateKey::RenderingIntent(
-            value.try_str()?.to_string(),
-        )),
-        "OP" => Some(ExternalGraphicsStateKey::OverprintStroke(
-            value.try_boolean()?,
-        )),
-        "op" => Some(ExternalGraphicsStateKey::OverprintFill(
-            value.try_boolean()?,
-        )),
-        "OPM" => Some(ExternalGraphicsStateKey::OverprintMode(
-            value.as_number_entry::<i32>("OPM")?,
-        )),
-        "Font" => Some(parse_font(name, value)?),
-        "BM" => Some(parse_blend_mode(name, value)?),
-        "SMask" => Some(parse_soft_mask(name, value, objects)?),
-        "CA" => Some(ExternalGraphicsStateKey::StrokingAlpha(
-            value.as_number_entry::<f32>("CA")?,
-        )),
-        "ca" => Some(ExternalGraphicsStateKey::NonStrokingAlpha(
-            value.as_number_entry::<f32>("ca")?,
-        )),
-        "SA" => Some(ExternalGraphicsStateKey::StrokeAdjustment(
-            value.try_boolean()?,
-        )),
-        "Type" => None,
+        "ML" => ExternalGraphicsStateKey::MiterLimit(value.as_number_entry::<f32>("ML")?),
+        "D" => parse_dash_pattern(name, value)?,
+        "RI" => ExternalGraphicsStateKey::RenderingIntent(value.try_str()?.to_string()),
+        "OP" => ExternalGraphicsStateKey::OverprintStroke(value.try_boolean()?),
+        "op" => ExternalGraphicsStateKey::OverprintFill(value.try_boolean()?),
+        "OPM" => ExternalGraphicsStateKey::OverprintMode(value.as_number_entry::<i32>("OPM")?),
+        "Font" => parse_font(name, value)?,
+        "BM" => parse_blend_mode(name, value)?,
+        "SMask" => parse_soft_mask(name, value, objects)?,
+        "CA" => ExternalGraphicsStateKey::StrokingAlpha(value.as_number_entry::<f32>("CA")?),
+        "ca" => ExternalGraphicsStateKey::NonStrokingAlpha(value.as_number_entry::<f32>("ca")?),
+        "SA" => ExternalGraphicsStateKey::StrokeAdjustment(value.try_boolean()?),
         _ => {
             return Err(ExternalGraphicsStateError::InvalidValueError {
-                key_name: name.to_string(),
+                key_name: Cow::Owned(name.to_string()),
                 description: format!("Unknown ExtGState parameter '{}'", name),
             });
         }

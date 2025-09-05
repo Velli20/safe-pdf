@@ -1,7 +1,7 @@
 use num_traits::FromPrimitive;
 use pdf_content_stream::pdf_operator::PdfOperatorVariant;
 use pdf_font::font::Font;
-use pdf_graphics::{LineCap, LineJoin, color::Color, transform::Transform};
+use pdf_graphics::{BlendMode, LineCap, LineJoin, color::Color, transform::Transform};
 use pdf_page::{page::PdfPage, pattern::Pattern, resources::Resources};
 
 use crate::{
@@ -62,6 +62,8 @@ pub(crate) struct CanvasState<'a> {
     /// The current font resource.
     pub resources: Option<&'a Resources>,
     pub pattern: Option<&'a Pattern>,
+    /// The current blend mode (from ExtGState BM)
+    pub blend_mode: Option<BlendMode>,
 }
 
 impl CanvasState<'_> {
@@ -89,6 +91,7 @@ impl Default for CanvasState<'_> {
             pattern: None,
             line_cap: LineCap::Butt,
             line_join: LineJoin::Miter,
+            blend_mode: None,
         }
     }
 }
@@ -132,9 +135,12 @@ impl<U, T: CanvasBackend<ImageType = U>> Canvas for PdfCanvas<'_, T, U> {
                 "Pattern filling is not supported yet in the fill_path function.".into(),
             ));
         }
-        let fill_color = self.current_state()?.fill_color;
+        let (fill_color, blend_mode) = {
+            let state = self.current_state()?;
+            (state.fill_color, state.blend_mode.clone())
+        };
         self.canvas
-            .fill_path(path, fill_type, fill_color, &None, None);
+            .fill_path(path, fill_type, fill_color, &None, None, blend_mode);
         Ok(())
     }
 }
@@ -327,6 +333,7 @@ where
             path.transform(&self.current_state()?.transform);
             let (shader, pattern_image) = self.compute_shader_and_pattern_image()?;
 
+            let blend_mode = self.current_state()?.blend_mode.clone();
             if mode == PaintMode::Fill {
                 self.canvas.fill_path(
                     &path,
@@ -334,6 +341,7 @@ where
                     self.current_state()?.fill_color,
                     &shader,
                     pattern_image,
+                    blend_mode.clone(),
                 );
             } else {
                 self.canvas.stroke_path(
@@ -342,12 +350,27 @@ where
                     self.current_state()?.line_width,
                     &shader,
                     pattern_image,
+                    blend_mode.clone(),
                 );
             }
             Ok(())
         } else {
             Err(PdfCanvasError::NoActivePath)
         }
+    }
+
+    pub(crate) fn set_pattern(&mut self, pattern_name: &str) -> Result<(), PdfCanvasError> {
+        let Some(pattern) = self
+            .page
+            .resources
+            .as_ref()
+            .and_then(|r| r.patterns.get(pattern_name))
+        else {
+            return Err(PdfCanvasError::PatternNotFound(pattern_name.to_string()));
+        };
+
+        self.current_state_mut()?.pattern = Some(pattern);
+        Ok(())
     }
 
     pub(crate) fn get_resources(&self) -> Result<&'a Resources, PdfCanvasError> {

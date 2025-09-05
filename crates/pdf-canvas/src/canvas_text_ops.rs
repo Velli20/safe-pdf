@@ -97,13 +97,19 @@ impl<U, T: CanvasBackend<ImageType = U>> TextStateOps for PdfCanvas<'_, T, U> {
             .as_ref()
             .ok_or(PdfCanvasError::MissingPageResources)?;
 
-        let font = resources
-            .fonts
-            .get(font_name)
-            .ok_or_else(|| PdfCanvasError::FontNotFound(font_name.to_string()))?;
+        if let Some(font) = resources.fonts.get(font_name) {
+            self.current_state_mut()?.text_state.font = Some(font);
+            return Ok(());
+        }
 
-        self.current_state_mut()?.text_state.font = Some(font);
-        Ok(())
+        if let Some(resources) = self.current_state()?.resources {
+            if let Some(font) = resources.fonts.get(font_name) {
+                self.current_state_mut()?.text_state.font = Some(font);
+                return Ok(());
+            }
+        }
+
+        Err(PdfCanvasError::FontNotFound(font_name.to_string()))
     }
 
     fn set_text_rendering_mode(&mut self, _mode: i32) -> Result<(), Self::ErrorType> {

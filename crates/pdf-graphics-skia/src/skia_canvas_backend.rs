@@ -3,7 +3,7 @@ use pdf_canvas::{
     canvas_backend::{CanvasBackend, Shader},
     pdf_path::{PathVerb, PdfPath},
 };
-use pdf_graphics::{color::Color, transform::Transform};
+use pdf_graphics::{BlendMode, color::Color, transform::Transform};
 
 pub struct SkiaCanvasBackend<'a> {
     pub canvas: &'a skia_safe::Canvas,
@@ -65,6 +65,28 @@ fn to_skia_fill_type(fill_type: PathFillType) -> skia_safe::PathFillType {
     match fill_type {
         PathFillType::Winding => skia_safe::PathFillType::Winding,
         PathFillType::EvenOdd => skia_safe::PathFillType::EvenOdd,
+    }
+}
+
+/// Maps PDF BlendMode to Skia BlendMode
+fn to_skia_blend_mode(mode: BlendMode) -> skia_safe::BlendMode {
+    match mode {
+        BlendMode::Normal => skia_safe::BlendMode::SrcOver,
+        BlendMode::Multiply => skia_safe::BlendMode::Multiply,
+        BlendMode::Screen => skia_safe::BlendMode::Screen,
+        BlendMode::Overlay => skia_safe::BlendMode::Overlay,
+        BlendMode::Darken => skia_safe::BlendMode::Darken,
+        BlendMode::Lighten => skia_safe::BlendMode::Lighten,
+        BlendMode::ColorDodge => skia_safe::BlendMode::ColorDodge,
+        BlendMode::ColorBurn => skia_safe::BlendMode::ColorBurn,
+        BlendMode::HardLight => skia_safe::BlendMode::HardLight,
+        BlendMode::SoftLight => skia_safe::BlendMode::SoftLight,
+        BlendMode::Difference => skia_safe::BlendMode::Difference,
+        BlendMode::Exclusion => skia_safe::BlendMode::Exclusion,
+        BlendMode::Hue => skia_safe::BlendMode::Hue,
+        BlendMode::Saturation => skia_safe::BlendMode::Saturation,
+        BlendMode::Color => skia_safe::BlendMode::Color,
+        BlendMode::Luminosity => skia_safe::BlendMode::Luminosity,
     }
 }
 
@@ -226,10 +248,14 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         color: Color,
         shader: &Option<Shader>,
         pattern_image: Option<Self::ImageType>,
+        blend_mode: Option<BlendMode>,
     ) {
         let mut sk_path = to_skia_path(path);
         sk_path.set_fill_type(to_skia_fill_type(fill_type));
         let mut paint = make_paint(color, skia_safe::paint::Style::Fill, None);
+        if let Some(mode) = blend_mode {
+            paint.set_blend_mode(to_skia_blend_mode(mode));
+        }
         if let Some(shader) = shader {
             if let Some(shader) = to_skia_shader(shader) {
                 paint.set_shader(shader);
@@ -256,9 +282,14 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         line_width: f32,
         shader: &Option<Shader>,
         pattern_image: Option<Self::ImageType>,
+        blend_mode: Option<BlendMode>,
     ) {
         let sk_path = to_skia_path(path);
         let mut paint = make_paint(color, skia_safe::paint::Style::Stroke, Some(line_width));
+        if let Some(mode) = blend_mode {
+            paint.set_blend_mode(to_skia_blend_mode(mode));
+        }
+
         if let Some(shader) = shader {
             if let Some(shader) = to_skia_shader(shader) {
                 paint.set_shader(shader);
@@ -417,6 +448,7 @@ impl CanvasBackend for SkiaMaskCanvas {
         color: Color,
         shader: &Option<Shader>,
         _pattern_image: Option<Self::ImageType>,
+        _blend_mode: Option<BlendMode>,
     ) {
         let mut sk_path = to_skia_path(path);
         let sk_color = skia_safe::Color4f::new(color.r, color.g, color.b, color.a);
@@ -446,6 +478,7 @@ impl CanvasBackend for SkiaMaskCanvas {
         line_width: f32,
         shader: &Option<Shader>,
         _pattern_image: Option<Self::ImageType>,
+        _blend_mode: Option<BlendMode>,
     ) {
         let sk_path = to_skia_path(path);
         let sk_color = skia_safe::Color4f::new(color.r, color.g, color.b, color.a);

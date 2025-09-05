@@ -1,13 +1,13 @@
+use crate::{
+    PathFillType, canvas::Canvas, error::PdfCanvasError, pdf_path::PdfPath,
+    text_renderer::TextRenderer,
+};
+use num_traits::FromPrimitive;
 use pdf_content_stream::pdf_operator_backend::PdfOperatorBackend;
 use pdf_font::font::Font;
 use pdf_graphics::transform::Transform;
 use pdf_object::ObjectVariant;
 use thiserror::Error;
-
-use crate::{
-    PathFillType, canvas::Canvas, error::PdfCanvasError, pdf_path::PdfPath,
-    text_renderer::TextRenderer,
-};
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
 
 /// Defines errors that can occur during TrueType font rendering.
@@ -102,14 +102,15 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
         };
 
         // Extract font and text state parameters.
-        let units_per_em_f32 = face.units_per_em() as f32;
+        let units_per_em = face.units_per_em();
         let char_spacing = self.char_spacing;
         let word_spacing = self.word_spacing;
         let text_rise = self.rise;
 
         // Compute the inverse of units per em for scaling.
-        let upe_inv = if units_per_em_f32 != 0.0 {
-            1.0 / units_per_em_f32
+        let upe_inv = if units_per_em != 0 {
+            1.0 / f32::from_u16(units_per_em)
+                .ok_or(PdfCanvasError::NumericConversionError("units_per_em"))?
         } else {
             0.0
         };
@@ -149,7 +150,8 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
                 }
             } else {
                 // For 1-byte encodings, the character code is simply the byte itself.
-                first_byte as u16
+                u16::from_u8(first_byte)
+                    .ok_or(PdfCanvasError::NumericConversionError("first_byte"))?
             };
 
             let mut glyph_id = GlyphId(char_code);

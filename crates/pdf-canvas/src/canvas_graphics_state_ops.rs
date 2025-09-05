@@ -133,8 +133,13 @@ impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U
                 ExternalGraphicsStateKey::Font(..) => {
                     return Err(PdfCanvasError::NotImplemented("ExtGState: Font".into()));
                 }
-                ExternalGraphicsStateKey::BlendMode(_) => {
-                    // return Err(PdfCanvasError::NotImplemented("ExtGState: BlendMode".into()));
+                ExternalGraphicsStateKey::BlendMode(modes) => {
+                    // Store the blend mode(s) in the current graphics state.
+                    // PDF spec: If multiple blend modes are specified, use the first one supported.
+                    // We only support the first for now.
+                    if let Some(mode) = modes.first() {
+                        self.current_state_mut()?.blend_mode = Some(mode.clone());
+                    }
                 }
                 ExternalGraphicsStateKey::SoftMask(smask) => {
                     // Handle the `/SMask`` entry from an `ExtGState` dictionary.

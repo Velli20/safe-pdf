@@ -2,8 +2,7 @@ use crate::{
     content_stream::ContentStream, media_box::MediaBox, pages::PdfPagesError, resources::Resources,
 };
 use pdf_object::{
-    dictionary::Dictionary, indirect_object::IndirectObject, object_collection::ObjectCollection,
-    traits::FromDictionary,
+    dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
 };
 
 /// Represents a single page in a PDF document.

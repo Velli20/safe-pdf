@@ -1,5 +1,5 @@
 use crate::{PathFillType, pdf_path::PdfPath};
-use pdf_graphics::{color::Color, transform::Transform};
+use pdf_graphics::{BlendMode, color::Color, transform::Transform};
 
 pub enum Shader {
     LinearGradient {
@@ -46,6 +46,7 @@ pub trait CanvasBackend {
         color: Color,
         shader: &Option<Shader>,
         pattern_image: Option<Self::ImageType>,
+        blend_mode: Option<BlendMode>,
     );
 
     /// Strokes the given path with the specified color and line width.
@@ -62,6 +63,7 @@ pub trait CanvasBackend {
         line_width: f32,
         shader: &Option<Shader>,
         pattern_image: Option<Self::ImageType>,
+        blend_mode: Option<BlendMode>,
     );
 
     /// Sets the clipping region by intersecting the current clip path with the given path.

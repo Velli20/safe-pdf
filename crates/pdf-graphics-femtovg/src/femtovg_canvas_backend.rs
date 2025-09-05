@@ -51,6 +51,7 @@ impl CanvasBackend for CanvasImpl<'_> {
         color: pdf_graphics::color::Color,
         _shader: &Option<Shader>,
         _pattern_image: Option<Self::ImageType>,
+        _blend_mode: Option<pdf_graphics::BlendMode>,
     ) {
         let mut path = to_femtovg_path(path);
 
@@ -70,6 +71,7 @@ impl CanvasBackend for CanvasImpl<'_> {
         line_width: f32,
         _shader: &Option<Shader>,
         _pattern_image: Option<Self::ImageType>,
+        _blend_mode: Option<pdf_graphics::BlendMode>,
     ) {
         let mut path = to_femtovg_path(path);
 
