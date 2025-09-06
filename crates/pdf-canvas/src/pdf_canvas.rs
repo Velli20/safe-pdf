@@ -1,107 +1,26 @@
 use num_traits::FromPrimitive;
 use pdf_content_stream::pdf_operator::PdfOperatorVariant;
-use pdf_font::font::Font;
-use pdf_graphics::{BlendMode, LineCap, LineJoin, color::Color, transform::Transform};
-use pdf_page::{page::PdfPage, pattern::Pattern, resources::Resources};
+use pdf_graphics::{PaintMode, PathFillType, pdf_path::PdfPath, transform::Transform};
+use pdf_page::{page::PdfPage, pattern::Pattern, resources::Resources, shading::Shading};
 
 use crate::{
-    PaintMode, PathFillType,
     canvas::Canvas,
     canvas_backend::{CanvasBackend, Shader},
+    canvas_state::CanvasState,
     error::PdfCanvasError,
-    pdf_path::PdfPath,
+    text_state::TextState,
 };
 
-/// Encapsulates text-specific state parameters.
-#[derive(Clone)]
-pub(crate) struct TextState<'a> {
-    /// The text matrix (Tm), transforming text space to user space.
-    pub(crate) matrix: Transform,
-    /// The text line matrix (Tlm), tracking the start of the current line.
-    pub(crate) line_matrix: Transform,
-    /// Horizontal scaling of text (Th), as a percentage (default: 100.0).
-    pub(crate) horizontal_scaling: f32,
-    /// Font size (Tfs), in user space units.
-    pub(crate) font_size: f32,
-    /// Character spacing (Tc), in unscaled text space units.
-    pub(crate) character_spacing: f32,
-    /// Word spacing (Tw), in unscaled text space units.
-    pub(crate) word_spacing: f32,
-    /// Text rise (Ts), a vertical offset from the baseline, in unscaled text space units.
-    pub(crate) rise: f32,
-    /// The current font resource.
-    pub(crate) font: Option<&'a Font>,
-}
-
-impl Default for TextState<'_> {
-    fn default() -> Self {
-        Self {
-            matrix: Transform::identity(),
-            line_matrix: Transform::identity(),
-            horizontal_scaling: 100.0,
-            font_size: 0.0,
-            character_spacing: 0.0,
-            word_spacing: 0.0,
-            rise: 0.0,
-            font: None,
-        }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct CanvasState<'a> {
-    pub transform: Transform,
-    pub stroke_color: Color,
-    pub fill_color: Color,
-    pub line_width: f32,
-    pub miter_limit: f32,
-    pub text_state: TextState<'a>,
-    pub clip_path: Option<PdfPath>,
-    pub line_cap: LineCap,
-    pub line_join: LineJoin,
-    /// The current font resource.
-    pub resources: Option<&'a Resources>,
-    pub pattern: Option<&'a Pattern>,
-    /// The current blend mode (from ExtGState BM)
-    pub blend_mode: Option<BlendMode>,
-}
-
-impl CanvasState<'_> {
-    /// Default line width in user space units.
-    const DEFAULT_LINE_WIDTH: f32 = 1.0;
-    /// Default fill color.
-    const DEFAULT_FILL_COLOR: Color = Color::from_rgb(0.0, 0.0, 0.0);
-    /// Default stroke color.
-    const DEFAULT_STROKE_COLOR: Color = Color::from_rgb(0.0, 0.0, 0.0);
-    /// Default miter limit.
-    const DEFAULT_MITER_LIMIT: f32 = 0.0;
-}
-
-impl Default for CanvasState<'_> {
-    fn default() -> Self {
-        Self {
-            transform: Transform::identity(),
-            stroke_color: Self::DEFAULT_STROKE_COLOR,
-            fill_color: Self::DEFAULT_FILL_COLOR,
-            line_width: Self::DEFAULT_LINE_WIDTH,
-            miter_limit: Self::DEFAULT_MITER_LIMIT,
-            text_state: TextState::default(),
-            clip_path: None,
-            resources: None,
-            pattern: None,
-            line_cap: LineCap::Butt,
-            line_join: LineJoin::Miter,
-            blend_mode: None,
-        }
-    }
-}
-
 pub struct PdfCanvas<'a, T, U> {
+    /// The current path being constructed or drawn, if any.
     pub(crate) current_path: Option<PdfPath>,
+    /// The drawing backend implementing `CanvasBackend` for rendering operations.
     pub(crate) canvas: &'a mut dyn CanvasBackend<MaskType = T, ImageType = U>,
+    /// An optional mask surface for advanced compositing or clipping.
     pub(crate) mask: Option<Box<T>>,
+    /// The PDF page associated with this canvas.
     pub(crate) page: &'a PdfPage,
-    // Stores the graphics states, including text state.
+    /// The stack of graphics states, supporting save/restore semantics.
     pub(crate) canvas_stack: Vec<CanvasState<'a>>,
 }
 
@@ -130,18 +49,7 @@ impl<U, T: CanvasBackend<ImageType = U>> Canvas for PdfCanvas<'_, T, U> {
     }
 
     fn fill_path(&mut self, path: &PdfPath, fill_type: PathFillType) -> Result<(), PdfCanvasError> {
-        if self.current_state()?.pattern.is_some() {
-            return Err(PdfCanvasError::NotImplemented(
-                "Pattern filling is not supported yet in the fill_path function.".into(),
-            ));
-        }
-        let (fill_color, blend_mode) = {
-            let state = self.current_state()?;
-            (state.fill_color, state.blend_mode.clone())
-        };
-        self.canvas
-            .fill_path(path, fill_type, fill_color, &None, None, blend_mode);
-        Ok(())
+        self.draw_path(path, PaintMode::Fill, fill_type)
     }
 }
 
@@ -149,6 +57,17 @@ impl<'a, U, T: CanvasBackend<ImageType = U>> PdfCanvas<'a, T, U>
 where
     T: 'a,
 {
+    /// Creates a new `PdfCanvas` for rendering PDF graphics onto a backend surface.
+    ///
+    /// # Parameters
+    ///
+    /// - `backend`: The drawing backend implementing `CanvasBackend`.
+    /// - `page`: The PDF page to render.
+    /// - `bb`: Optional bounding box to override the page's media box.
+    ///
+    /// # Returns
+    ///
+    /// A new `PdfCanvas` instance or an error if the page dimensions are invalid.
     pub fn new(
         backend: &'a mut dyn CanvasBackend<MaskType = T, ImageType = U>,
         page: &'a PdfPage,
@@ -214,14 +133,22 @@ where
         })
     }
 
-    /// Returns a reference to the current graphics state.
+    /// Returns a reference to the current graphics state on the stack.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the graphics state stack is empty.
     pub(crate) fn current_state(&self) -> Result<&CanvasState<'a>, PdfCanvasError> {
         self.canvas_stack
             .last()
             .ok_or(PdfCanvasError::EmptyGraphicsStateStack)
     }
 
-    /// Returns a mutable reference to the current graphics state.
+    /// Returns a mutable reference to the current graphics state on the stack.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the graphics state stack is empty.
     pub(crate) fn current_state_mut(&mut self) -> Result<&mut CanvasState<'a>, PdfCanvasError> {
         self.canvas_stack
             .last_mut()
@@ -230,26 +157,34 @@ where
 
     /// Builds a shader from a shading pattern definition (Axial / Radial / FunctionBased).
     /// Returns `None` when the shading type isn't yet supported or not applicable.
-    fn build_shading_shader(
+    /// Builds a `Shader` from a PDF shading pattern definition (Axial, Radial, or FunctionBased).
+    ///
+    /// # Parameters
+    ///
+    /// - `shading`: The shading pattern definition.
+    /// - `matrix`: Optional transformation matrix for the shading.
+    ///
+    /// # Returns
+    ///
+    /// An appropriate `Shader` if supported, or an error if not implemented.
+    fn build_shading_shader<'b>(
         &mut self,
-        shading: &pdf_page::shading::Shading,
-        matrix: &Option<pdf_graphics::transform::Transform>,
-    ) -> Option<Shader> {
-        use pdf_page::shading::Shading;
-
+        shading: &'b Shading,
+        matrix: &Option<Transform>,
+    ) -> Result<Shader<'b>, PdfCanvasError> {
         match shading {
             Shading::Axial {
                 coords: [x0, y0, x1, y1],
                 positions,
                 colors,
                 ..
-            } => Some(Shader::LinearGradient {
+            } => Ok(Shader::LinearGradient {
                 x0: *x0,
                 y0: *y0,
                 x1: *x1,
                 y1: *y1,
-                colors: colors.clone(),
-                positions: positions.clone(),
+                colors,
+                positions,
             }),
             Shading::Radial {
                 coords: [start_x, start_y, start_r, end_x, end_y, end_r],
@@ -257,17 +192,11 @@ where
                 colors,
                 ..
             } => {
-                // Apply transform adjustments if a matrix is provided.
-                let transform = if let Some(mut mat) = *matrix {
-                    // FIXME: Converting matrix to the device userspace. The rendering backend expects an
-                    // origin at the top-left, with the Y-axis pointing downwards, so we apply canvas height - ty.
+                let transform = matrix.map(|mut mat| {
                     mat.ty = self.canvas.height() - mat.ty;
-                    Some(mat)
-                } else {
-                    None
-                };
-
-                Some(Shader::RadialGradient {
+                    mat
+                });
+                Ok(Shader::RadialGradient {
                     start_x: *start_x,
                     start_y: *start_y,
                     start_r: *start_r,
@@ -275,24 +204,29 @@ where
                     end_y: *end_y,
                     end_r: *end_r,
                     transform,
-                    colors: colors.clone(),
-                    positions: positions.clone(),
+                    colors,
+                    positions,
                 })
             }
             Shading::FunctionBased { .. } => {
-                println!("FunctionBased shading not implemented");
-                None
+                Err(PdfCanvasError::NotImplemented(
+                    "FunctionBased shading not implemented".into()
+                ))
             }
         }
     }
 
     /// Computes the shader and (optional) pattern image based on the current pattern in state.
     /// Returns a tuple of (shader, pattern_image).
+    /// Computes the current shader and optional pattern image based on the active pattern.
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing an optional `Shader` and an optional pattern image.
+    /// Returns an error if pattern rendering fails.
     fn compute_shader_and_pattern_image(
         &mut self,
-    ) -> Result<(Option<Shader>, Option<U>), PdfCanvasError> {
-        use pdf_page::pattern::Pattern;
-
+    ) -> Result<(Option<Shader<'a>>, Option<U>), PdfCanvasError> {
         let Some(pattern) = self.current_state()?.pattern else {
             return Ok((None, None));
         };
@@ -301,8 +235,8 @@ where
             Pattern::Shading {
                 shading, matrix, ..
             } => {
-                let shader = self.build_shading_shader(shading, matrix);
-                Ok((shader, None))
+                let shader = self.build_shading_shader(shading, matrix)?;
+                Ok((Some(shader), None))
             }
             Pattern::Tiling {
                 bbox,
@@ -324,41 +258,111 @@ where
         }
     }
 
+    /// Draws a path using the specified paint mode and fill type, applying any active shader or pattern.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: The path to draw.
+    /// - `mode`: The paint mode (fill, stroke, or fill and stroke).
+    /// - `fill_type`: The fill rule to use.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the paint mode is not implemented or if pattern computation fails.
+    fn draw_path(
+        &mut self,
+        path: &PdfPath,
+        mode: PaintMode,
+        fill_type: PathFillType,
+    ) -> Result<(), PdfCanvasError> {
+        let (shader, pattern_image) = self.compute_shader_and_pattern_image()?;
+
+        match mode {
+            PaintMode::Fill => {
+                self.canvas.fill_path(
+                    path,
+                    fill_type,
+                    self.current_state()?.fill_color,
+                    &shader,
+                    pattern_image,
+                    self.current_state()?.blend_mode,
+                );
+            }
+            PaintMode::Stroke => {
+                self.canvas.stroke_path(
+                    path,
+                    self.current_state()?.stroke_color,
+                    self.current_state()?.line_width,
+                    &shader,
+                    pattern_image,
+                    self.current_state()?.blend_mode,
+                );
+            }
+            PaintMode::FillAndStroke => {
+                return Err(PdfCanvasError::NotImplemented(
+                    "FillAndStroke mode is not implemented".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Paints the current path (if any) using the specified paint mode and fill type, then clears the path.
+    ///
+    /// # Parameters
+    ///
+    /// - `mode`: The paint mode (fill, stroke, or fill and stroke).
+    /// - `fill_type`: The fill rule to use.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if there is no active path or if drawing fails.
     pub(crate) fn paint_taken_path(
         &mut self,
         mode: PaintMode,
         fill_type: PathFillType,
     ) -> Result<(), PdfCanvasError> {
-        if let Some(mut path) = self.current_path.take() {
-            path.transform(&self.current_state()?.transform);
-            let (shader, pattern_image) = self.compute_shader_and_pattern_image()?;
-
-            let blend_mode = self.current_state()?.blend_mode.clone();
-            if mode == PaintMode::Fill {
-                self.canvas.fill_path(
-                    &path,
-                    fill_type,
-                    self.current_state()?.fill_color,
-                    &shader,
-                    pattern_image,
-                    blend_mode.clone(),
-                );
-            } else {
-                self.canvas.stroke_path(
-                    &path,
-                    self.current_state()?.stroke_color,
-                    self.current_state()?.line_width,
-                    &shader,
-                    pattern_image,
-                    blend_mode.clone(),
-                );
-            }
-            Ok(())
-        } else {
-            Err(PdfCanvasError::NoActivePath)
-        }
+        let Some(mut path) = self.current_path.take() else {
+            return Err(PdfCanvasError::NoActivePath);
+        };
+        path.transform(&self.current_state()?.transform);
+        self.draw_path(&path, mode, fill_type)
     }
 
+    /// Sets the clipping path for subsequent drawing operations.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: The path to use as the new clipping region.
+    /// - `mode`: The fill rule for the clipping path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the graphics state is invalid.
+    pub(crate) fn set_clip_path(
+        &mut self,
+        mut path: PdfPath,
+        mode: PathFillType,
+    ) -> Result<(), PdfCanvasError> {
+        path.transform(&self.current_state()?.transform);
+        if self.current_state()?.clip_path.is_some() {
+            self.canvas.reset_clip();
+        }
+
+        self.canvas.set_clip_region(&path, mode);
+        self.current_state_mut()?.clip_path = Some(path);
+        Ok(())
+    }
+
+    /// Sets the current pattern by name from the page resources.
+    ///
+    /// # Parameters
+    ///
+    /// - `pattern_name`: The name of the pattern to activate.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the pattern is not found in the resources.
     pub(crate) fn set_pattern(&mut self, pattern_name: &str) -> Result<(), PdfCanvasError> {
         let Some(pattern) = self
             .page
@@ -373,6 +377,11 @@ where
         Ok(())
     }
 
+    /// Returns the current resource dictionary, or the page's resources if not overridden.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no resources are available.
     pub(crate) fn get_resources(&self) -> Result<&'a Resources, PdfCanvasError> {
         if let Some(resources) = self.current_state()?.resources {
             Ok(resources)
@@ -384,6 +393,17 @@ where
         }
     }
 
+    /// Renders a sequence of PDF content stream operations onto the canvas.
+    ///
+    /// # Parameters
+    ///
+    /// - `operations`: The list of PDF operators to execute.
+    /// - `mat`: Optional transformation matrix to apply.
+    /// - `resources`: Optional resource dictionary to use for rendering.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any operation fails or if the graphics state is invalid.
     pub(crate) fn render_content_stream(
         &mut self,
         operations: &[PdfOperatorVariant],

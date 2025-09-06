@@ -1,5 +1,5 @@
 /// An affine transformation matrix.
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq)]
 pub struct Transform {
     pub sx: f32,
     pub kx: f32,

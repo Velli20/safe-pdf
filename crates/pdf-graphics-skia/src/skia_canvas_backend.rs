@@ -1,9 +1,10 @@
-use pdf_canvas::{
-    PathFillType,
-    canvas_backend::{CanvasBackend, Shader},
+use pdf_canvas::canvas_backend::{CanvasBackend, Shader};
+use pdf_graphics::{
+    BlendMode, PathFillType,
+    color::Color,
     pdf_path::{PathVerb, PdfPath},
+    transform::Transform,
 };
-use pdf_graphics::{BlendMode, color::Color, transform::Transform};
 
 pub struct SkiaCanvasBackend<'a> {
     pub canvas: &'a skia_safe::Canvas,
@@ -91,7 +92,7 @@ fn to_skia_blend_mode(mode: BlendMode) -> skia_safe::BlendMode {
 }
 
 fn to_skia_shader(shader: &Shader) -> Option<skia_safe::Shader> {
-    match shader {
+    match *shader {
         Shader::LinearGradient {
             x0,
             y0,
@@ -108,12 +109,9 @@ fn to_skia_shader(shader: &Shader) -> Option<skia_safe::Shader> {
 
             // Create the Skia gradient shader
             skia_safe::Shader::linear_gradient(
-                (
-                    skia_safe::Point::new(*x0, *y0),
-                    skia_safe::Point::new(*x1, *y1),
-                ),
+                (skia_safe::Point::new(x0, y0), skia_safe::Point::new(x1, y1)),
                 skia_safe::gradient_shader::GradientShaderColors::Colors(&colors),
-                Some(positions.as_slice()),
+                Some(positions),
                 skia_safe::TileMode::Clamp,
                 None,
                 None,
@@ -137,18 +135,18 @@ fn to_skia_shader(shader: &Shader) -> Option<skia_safe::Shader> {
                 .collect();
 
             let mat = if let Some(m) = transform {
-                to_skia_matrix(m)
+                to_skia_matrix(&m)
             } else {
                 skia_safe::Matrix::new_identity()
             };
 
             skia_safe::Shader::two_point_conical_gradient(
-                skia_safe::Point::new(*start_x, *start_y),
-                *start_r,
-                skia_safe::Point::new(*end_x, *end_y),
-                *end_r,
+                skia_safe::Point::new(start_x, start_y),
+                start_r,
+                skia_safe::Point::new(end_x, end_y),
+                end_r,
                 skia_safe::gradient_shader::GradientShaderColors::Colors(&colors),
-                Some(positions.as_slice()),
+                Some(positions),
                 skia_safe::TileMode::Clamp,
                 None,
                 Some(&mat),
@@ -261,7 +259,6 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
                 paint.set_shader(shader);
             }
         } else if let Some(image) = pattern_image {
-            println!("Pattern image provided h {}", image.image.height());
             // If a pattern image is provided, we can use it as a shader
             if let Some(shader) = image.image.to_shader(
                 (skia_safe::TileMode::Repeat, skia_safe::TileMode::Repeat),

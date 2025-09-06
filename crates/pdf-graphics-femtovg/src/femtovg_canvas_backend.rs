@@ -1,6 +1,6 @@
 use femtovg::{Canvas, Color, FillRule, Paint, Path};
 use pdf_canvas::canvas_backend::{CanvasBackend, Shader};
-use pdf_canvas::{
+use pdf_graphics::{
     PathFillType,
     pdf_path::{PathVerb, PdfPath},
 };

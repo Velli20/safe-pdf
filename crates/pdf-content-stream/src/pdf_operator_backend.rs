@@ -12,7 +12,7 @@ use crate::TextElement;
 
 pub trait PdfOperatorBackendError {
     /// The error type that can be returned by operator handling methods.
-    type ErrorType;
+    type ErrorType: std::fmt::Debug + std::fmt::Display;
 }
 
 /// Defines methods for handling PDF path construction operators.

@@ -128,8 +128,8 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for Type3FontRenderer<'_, T> {
                     glyph_width = Some(op.wx);
                 } else {
                     op.call(self.canvas)
-                        .map_err(|_| Type3FontRendererError::CharProcError {
-                            err: "FIXME".to_string(),
+                        .map_err(|err| Type3FontRendererError::CharProcError {
+                            err: format!("Error calling operator: {:?}", err),
                         })?;
                 }
             }

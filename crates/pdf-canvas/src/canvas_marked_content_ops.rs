@@ -31,6 +31,9 @@ impl<U, T: CanvasBackend<ImageType = U>> MarkedContentOps for PdfCanvas<'_, T, U
         _tag: &str,
         _properties: &Rc<Dictionary>,
     ) -> Result<(), Self::ErrorType> {
+        // Err(PdfCanvasError::NotImplemented(
+        //     "begin_marked_content_with_properties".into(),
+        // ))
         Ok(())
     }
 

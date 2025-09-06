@@ -1,24 +1,44 @@
-use crate::{PathFillType, pdf_path::PdfPath};
-use pdf_graphics::{BlendMode, color::Color, transform::Transform};
+use pdf_graphics::{
+    BlendMode, PathFillType, color::Color, pdf_path::PdfPath, transform::Transform,
+};
 
-pub enum Shader {
+pub enum Shader<'a> {
+    /// Represents a color shader for filling or stroking paths with gradients.
+    ///
+    /// Used to define how colors are interpolated across a region, such as a linear or radial gradient.
     LinearGradient {
+        /// The starting x-coordinate of the gradient line.
         x0: f32,
+        /// The starting y-coordinate of the gradient line.
         y0: f32,
+        /// The ending x-coordinate of the gradient line.
         x1: f32,
+        /// The ending y-coordinate of the gradient line.
         y1: f32,
-        colors: Vec<Color>,
-        positions: Vec<f32>,
+        /// The array of colors to be used in the gradient.
+        colors: &'a [Color],
+        /// The positions of each color stop, specified as values between 0.0 and 1.0.
+        positions: &'a [f32],
     },
+    /// A radial gradient shader, interpolating colors between two circles.
     RadialGradient {
+        /// The x-coordinate of the start circle's center.
         start_x: f32,
+        /// The y-coordinate of the start circle's center.
         start_y: f32,
+        /// The radius of the start circle.
         start_r: f32,
+        /// The x-coordinate of the end circle's center.
         end_x: f32,
+        /// The y-coordinate of the end circle's center.
         end_y: f32,
+        /// The radius of the end circle.
         end_r: f32,
-        colors: Vec<Color>,
-        positions: Vec<f32>,
+        /// The array of colors to be used in the gradient.
+        colors: &'a [Color],
+        /// The positions of each color stop, specified as values between 0.0 and 1.0.
+        positions: &'a [f32],
+        /// An optional transformation to apply to the gradient.
         transform: Option<Transform>,
     },
 }

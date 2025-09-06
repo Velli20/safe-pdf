@@ -126,7 +126,7 @@ impl<U, T: CanvasBackend<ImageType = U>> TextStateOps for PdfCanvas<'_, T, U> {
 
 impl<U, T: CanvasBackend<ImageType = U>> TextShowingOps for PdfCanvas<'_, T, U> {
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
-        let text_state = &self.current_state()?.text_state.clone();
+        let text_state = &self.current_state()?.text_state;
         let current_font = text_state.font.ok_or(PdfCanvasError::NoCurrentFont)?;
         if current_font.subtype == FontSubType::Type3 {
             let type3_font = current_font.type3_font.as_ref().ok_or_else(|| {

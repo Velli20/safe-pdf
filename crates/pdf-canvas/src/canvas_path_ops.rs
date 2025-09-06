@@ -1,9 +1,7 @@
 use pdf_content_stream::pdf_operator_backend::{PathConstructionOps, PathPaintingOps};
+use pdf_graphics::{PaintMode, PathFillType, pdf_path::PdfPath};
 
-use crate::{
-    PaintMode, PathFillType, canvas_backend::CanvasBackend, error::PdfCanvasError,
-    pdf_canvas::PdfCanvas, pdf_path::PdfPath,
-};
+use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
 impl<U, T: CanvasBackend<ImageType = U>> PathConstructionOps for PdfCanvas<'_, T, U> {
     fn move_to(&mut self, x: f32, y: f32) -> Result<(), Self::ErrorType> {
@@ -82,7 +80,7 @@ impl<U, T: CanvasBackend<ImageType = U>> PathPaintingOps for PdfCanvas<'_, T, U>
 
     fn close_and_stroke_path(&mut self) -> Result<(), Self::ErrorType> {
         self.close_path()?;
-        self.stroke_path()
+        PathPaintingOps::stroke_path(self)
     }
 
     fn fill_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {

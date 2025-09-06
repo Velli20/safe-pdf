@@ -3,6 +3,7 @@ use std::rc::Rc;
 use pdf_graphics::LineCap;
 use pdf_graphics::LineJoin;
 use pdf_object::dictionary::Dictionary;
+use thiserror::Error;
 
 use crate::TextElement;
 use crate::pdf_operator_backend::*;
@@ -229,8 +230,13 @@ impl RecordingBackend {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum PdfRecordingCanvasError {
+
+}
+
 impl PdfOperatorBackendError for RecordingBackend {
-    type ErrorType = ();
+    type ErrorType = PdfRecordingCanvasError;
 }
 
 impl PathConstructionOps for RecordingBackend {
