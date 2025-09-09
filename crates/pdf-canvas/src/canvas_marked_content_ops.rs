@@ -5,7 +5,7 @@ use pdf_object::dictionary::Dictionary;
 
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
-impl<U, T: CanvasBackend<ImageType = U>> MarkedContentOps for PdfCanvas<'_, T, U> {
+impl<T: CanvasBackend> MarkedContentOps for PdfCanvas<'_, T> {
     fn mark_point(&mut self, _tag: &str) -> Result<(), Self::ErrorType> {
         Err(PdfCanvasError::NotImplemented("mark_point".into()))
     }

@@ -6,7 +6,7 @@ use crate::{
     canvas::Canvas, canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
 };
 
-impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U> {
+impl<T: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, T> {
     fn save_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
         self.save()
     }
@@ -137,8 +137,13 @@ impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U
                     // Store the blend mode(s) in the current graphics state.
                     // PDF spec: If multiple blend modes are specified, use the first one supported.
                     // We only support the first for now.
+                    if modes.len() > 1 {
+                        return Err(PdfCanvasError::NotImplemented(
+                            "ExtGState: Only one blend mode is supported".into(),
+                        ));
+                    }
                     if let Some(mode) = modes.first() {
-                        self.current_state_mut()?.blend_mode = Some(mode.clone());
+                        self.current_state_mut()?.blend_mode = Some(*mode);
                     }
                 }
                 ExternalGraphicsStateKey::SoftMask(smask) => {
@@ -153,7 +158,7 @@ impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U
                             // We need to render this form's content into a separate mask surface.
 
                             // Create a new mask surface from the backend, sized to the form's bounding box.
-                            let mut mask = self.canvas.create_mask(
+                            let mut mask = self.canvas.new_mask_layer(
                                 form.bbox[2] - form.bbox[0],
                                 form.bbox[3] - form.bbox[1],
                             );
@@ -172,7 +177,7 @@ impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U
 
                             // 4. Enable the mask on the main canvas. Subsequent drawing operations
                             // will be modulated by this mask.
-                            self.canvas.enable_mask(mask.as_mut());
+                            self.canvas.begin_mask_layer(mask.as_mut());
 
                             // 5. Store the mask in the current canvas state to be used until it's finished.
                             self.mask = Some(mask);
@@ -183,7 +188,7 @@ impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U
                         let transform = self.current_state()?.transform;
                         // Finalize the masking operation on the backend, which typically involves
                         // compositing the masked content.
-                        self.canvas.finish_mask(mask.as_mut(), &transform);
+                        self.canvas.end_mask_layer(mask.as_mut(), &transform);
                     }
                 }
                 ExternalGraphicsStateKey::StrokingAlpha(alpha) => {
@@ -193,8 +198,9 @@ impl<U, T: CanvasBackend<ImageType = U>> GraphicsStateOps for PdfCanvas<'_, T, U
                     self.current_state_mut()?.fill_color.a = *alpha
                 }
                 ExternalGraphicsStateKey::StrokeAdjustment(_enabled) => {
-                    // TODO: Wire stroke adjustment into backend/state when supported.
-                    // For now, ignore to keep rendering stable.
+                    //return Err(PdfCanvasError::NotImplemented(
+                    //    "ExtGState: StrokeAdjustment".into(),
+                    //));
                 }
             }
         }

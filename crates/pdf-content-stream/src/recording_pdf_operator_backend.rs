@@ -231,9 +231,7 @@ impl RecordingBackend {
 }
 
 #[derive(Debug, Error)]
-pub enum PdfRecordingCanvasError {
-
-}
+pub enum PdfRecordingCanvasError {}
 
 impl PdfOperatorBackendError for RecordingBackend {
     type ErrorType = PdfRecordingCanvasError;

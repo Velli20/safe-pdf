@@ -15,8 +15,8 @@ use glutin::{
     surface::{Surface as GlutinSurface, SurfaceAttributesBuilder, WindowSurface},
 };
 use glutin_winit::DisplayBuilder;
-
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
+use pdf_graphics_skia::skia_canvas_backend::SurfaceContainer;
 #[allow(deprecated)]
 use raw_window_handle::HasRawWindowHandle;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
@@ -392,11 +392,10 @@ fn run(settings: AppSettings) {
                     }
                 }
                 WindowEvent::RedrawRequested => {
-                    let canvas = self.env.surface.canvas();
                     let size = self.env.window.inner_size();
                     self.previous_frame_start = Instant::now();
                     self.env.pdf_logic.on_render(
-                        canvas,
+                        &mut self.env.surface,
                         &self.env.pdf_document,
                         size.width as f32,
                         size.height as f32,
@@ -424,7 +423,7 @@ pub trait AppRenderer<C> {
     fn on_init(&mut self);
     fn on_render(
         &mut self,
-        canvas: &C,
+        canvas: &mut C,
         document: &PdfDocument,
         width: f32,
         height: f32,
@@ -441,20 +440,20 @@ impl PdfPageRendererLogic {
     }
 }
 
-impl AppRenderer<skia_safe::Canvas> for PdfPageRendererLogic {
+impl AppRenderer<skia_safe::Surface> for PdfPageRendererLogic {
     fn on_init(&mut self) {
         self.current_page = 0;
     }
 
     fn on_render(
         &mut self,
-        main_canvas: &skia_safe::Canvas,
+        surface: &mut skia_safe::Surface,
         document: &PdfDocument,
         width: f32,
         height: f32,
         _gr_context: &mut DirectContext, // Could be used for caching to an offscreen surface
     ) {
-        main_canvas.clear(SkiaColor::WHITE);
+        surface.canvas().clear(SkiaColor::WHITE);
         if document.page_count() == 0 {
             return;
         }
@@ -462,10 +461,10 @@ impl AppRenderer<skia_safe::Canvas> for PdfPageRendererLogic {
 
         // Example: Draw PDF content directly.
         // For more complex scenarios or caching, you might render to an offscreen surface first.
-        main_canvas.save();
+        surface.canvas().save();
 
         let mut skia_backend = SkiaCanvasBackend {
-            canvas: main_canvas,
+            surface: SurfaceContainer::Borrowed(surface),
             width,
             height,
         };
@@ -473,6 +472,6 @@ impl AppRenderer<skia_safe::Canvas> for PdfPageRendererLogic {
         let mut pdf_renderer = PdfRenderer::new(document, &mut skia_backend);
         pdf_renderer.render(&[page_index]);
 
-        main_canvas.restore();
+        surface.canvas().restore();
     }
 }

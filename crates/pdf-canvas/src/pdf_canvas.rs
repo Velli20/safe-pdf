@@ -11,11 +11,11 @@ use crate::{
     text_state::TextState,
 };
 
-pub struct PdfCanvas<'a, T, U> {
+pub struct PdfCanvas<'a, T> {
     /// The current path being constructed or drawn, if any.
     pub(crate) current_path: Option<PdfPath>,
     /// The drawing backend implementing `CanvasBackend` for rendering operations.
-    pub(crate) canvas: &'a mut dyn CanvasBackend<MaskType = T, ImageType = U>,
+    pub(crate) canvas: &'a mut dyn CanvasBackend<MaskType = T>,
     /// An optional mask surface for advanced compositing or clipping.
     pub(crate) mask: Option<Box<T>>,
     /// The PDF page associated with this canvas.
@@ -24,7 +24,7 @@ pub struct PdfCanvas<'a, T, U> {
     pub(crate) canvas_stack: Vec<CanvasState<'a>>,
 }
 
-impl<U, T: CanvasBackend<ImageType = U>> Canvas for PdfCanvas<'_, T, U> {
+impl<T: CanvasBackend> Canvas for PdfCanvas<'_, T> {
     fn save(&mut self) -> Result<(), PdfCanvasError> {
         let mut state = self.current_state()?.clone();
         state.clip_path = None;
@@ -53,7 +53,7 @@ impl<U, T: CanvasBackend<ImageType = U>> Canvas for PdfCanvas<'_, T, U> {
     }
 }
 
-impl<'a, U, T: CanvasBackend<ImageType = U>> PdfCanvas<'a, T, U>
+impl<'a, T: CanvasBackend> PdfCanvas<'a, T>
 where
     T: 'a,
 {
@@ -69,7 +69,7 @@ where
     ///
     /// A new `PdfCanvas` instance or an error if the page dimensions are invalid.
     pub fn new(
-        backend: &'a mut dyn CanvasBackend<MaskType = T, ImageType = U>,
+        backend: &'a mut dyn CanvasBackend<MaskType = T>,
         page: &'a PdfPage,
         bb: Option<&[f32; 4]>,
     ) -> Result<Self, PdfCanvasError> {
@@ -208,27 +208,20 @@ where
                     positions,
                 })
             }
-            Shading::FunctionBased { .. } => {
-                Err(PdfCanvasError::NotImplemented(
-                    "FunctionBased shading not implemented".into()
-                ))
-            }
+            Shading::FunctionBased { .. } => Err(PdfCanvasError::NotImplemented(
+                "FunctionBased shading not implemented".into(),
+            )),
         }
     }
 
-    /// Computes the shader and (optional) pattern image based on the current pattern in state.
-    /// Returns a tuple of (shader, pattern_image).
-    /// Computes the current shader and optional pattern image based on the active pattern.
+    /// Computes the current shader based on the active pattern.
     ///
     /// # Returns
     ///
-    /// A tuple containing an optional `Shader` and an optional pattern image.
-    /// Returns an error if pattern rendering fails.
-    fn compute_shader_and_pattern_image(
-        &mut self,
-    ) -> Result<(Option<Shader<'a>>, Option<U>), PdfCanvasError> {
+    /// An optional `Shader` or an error if pattern rendering fails.
+    fn compute_shader(&mut self) -> Result<Option<Shader<'a>>, PdfCanvasError> {
         let Some(pattern) = self.current_state()?.pattern else {
-            return Ok((None, None));
+            return Ok(None);
         };
 
         match pattern {
@@ -236,7 +229,7 @@ where
                 shading, matrix, ..
             } => {
                 let shader = self.build_shading_shader(shading, matrix)?;
-                Ok((Some(shader), None))
+                Ok(Some(shader))
             }
             Pattern::Tiling {
                 bbox,
@@ -247,13 +240,19 @@ where
                 // Create a new mask surface from the backend, sized to the form's bounding box.
                 let mut mask = self
                     .canvas
-                    .create_mask(bbox[2] - bbox[0], bbox[3] - bbox[1]);
+                    .new_mask_layer(bbox[2] - bbox[0], bbox[3] - bbox[1]);
 
                 // Render the tiling content into a temporary canvas.
                 let mut other = PdfCanvas::new(mask.as_mut(), self.page, Some(bbox))?;
                 other.render_content_stream(&content_stream.operations, None, Some(resources))?;
                 let image = other.canvas.image_snapshot();
-                Ok((None, Some(image)))
+                let shader = Shader::TilingPatternImage {
+                    image,
+                    transform: None,
+                    x_step: bbox[2] - bbox[0],
+                    y_step: bbox[3] - bbox[1],
+                };
+                Ok(Some(shader))
             }
         }
     }
@@ -275,7 +274,7 @@ where
         mode: PaintMode,
         fill_type: PathFillType,
     ) -> Result<(), PdfCanvasError> {
-        let (shader, pattern_image) = self.compute_shader_and_pattern_image()?;
+        let shader = self.compute_shader()?;
 
         match mode {
             PaintMode::Fill => {
@@ -284,7 +283,6 @@ where
                     fill_type,
                     self.current_state()?.fill_color,
                     &shader,
-                    pattern_image,
                     self.current_state()?.blend_mode,
                 );
             }
@@ -294,7 +292,6 @@ where
                     self.current_state()?.stroke_color,
                     self.current_state()?.line_width,
                     &shader,
-                    pattern_image,
                     self.current_state()?.blend_mode,
                 );
             }

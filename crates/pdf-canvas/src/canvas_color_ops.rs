@@ -3,7 +3,7 @@ use pdf_content_stream::pdf_operator_backend::ColorOps;
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 use pdf_graphics::color::Color;
 
-impl<U, T: CanvasBackend<ImageType = U>> ColorOps for PdfCanvas<'_, T, U> {
+impl<T: CanvasBackend> ColorOps for PdfCanvas<'_, T> {
     fn set_stroking_color_space(&mut self, _name: &str) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.pattern = None;
         Ok(())

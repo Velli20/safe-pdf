@@ -48,6 +48,7 @@ pub enum BlendMode {
     Saturation,
     Color,
     Luminosity,
+    DestinationIn,
 }
 
 /// Specifies how a path should be painted in PDF graphics operations.

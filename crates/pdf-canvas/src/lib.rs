@@ -23,14 +23,14 @@ mod text_state;
 mod truetype_font_renderer;
 mod type3_font_renderer;
 
-impl<U, T: CanvasBackend<ImageType = U>> PdfOperatorBackend for PdfCanvas<'_, T, U> {}
+impl<T: CanvasBackend> PdfOperatorBackend for PdfCanvas<'_, T> {}
 
-impl<U, T: CanvasBackend<ImageType = U>> ShadingOps for PdfCanvas<'_, T, U> {
+impl<T: CanvasBackend> ShadingOps for PdfCanvas<'_, T> {
     fn paint_shading(&mut self, _shading_name: &str) -> Result<(), Self::ErrorType> {
         Err(PdfCanvasError::NotImplemented("paint_shading".into()))
     }
 }
 
-impl<T, U> PdfOperatorBackendError for PdfCanvas<'_, T, U> {
+impl<T> PdfOperatorBackendError for PdfCanvas<'_, T> {
     type ErrorType = PdfCanvasError;
 }

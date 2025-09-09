@@ -9,7 +9,7 @@ use pdf_content_stream::pdf_operator_backend::{
 use pdf_font::font::FontSubType;
 use pdf_graphics::transform::Transform;
 
-impl<U, T: CanvasBackend<ImageType = U>> TextPositioningOps for PdfCanvas<'_, T, U> {
+impl<T: CanvasBackend> TextPositioningOps for PdfCanvas<'_, T> {
     fn move_text_position(&mut self, tx: f32, ty: f32) -> Result<(), Self::ErrorType> {
         let mat = Transform::from_translate(tx, ty);
         self.current_state_mut()?
@@ -53,7 +53,7 @@ impl<U, T: CanvasBackend<ImageType = U>> TextPositioningOps for PdfCanvas<'_, T,
     }
 }
 
-impl<U, T: CanvasBackend<ImageType = U>> TextObjectOps for PdfCanvas<'_, T, U> {
+impl<T: CanvasBackend> TextObjectOps for PdfCanvas<'_, T> {
     fn begin_text_object(&mut self) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.text_state.matrix = Transform::identity();
         self.current_state_mut()?.text_state.line_matrix = Transform::identity();
@@ -65,7 +65,7 @@ impl<U, T: CanvasBackend<ImageType = U>> TextObjectOps for PdfCanvas<'_, T, U> {
     }
 }
 
-impl<U, T: CanvasBackend<ImageType = U>> TextStateOps for PdfCanvas<'_, T, U> {
+impl<T: CanvasBackend> TextStateOps for PdfCanvas<'_, T> {
     fn set_character_spacing(&mut self, spacing: f32) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.text_state.character_spacing = spacing;
         Ok(())
@@ -124,7 +124,7 @@ impl<U, T: CanvasBackend<ImageType = U>> TextStateOps for PdfCanvas<'_, T, U> {
     }
 }
 
-impl<U, T: CanvasBackend<ImageType = U>> TextShowingOps for PdfCanvas<'_, T, U> {
+impl<T: CanvasBackend> TextShowingOps for PdfCanvas<'_, T> {
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
         let text_state = &self.current_state()?.text_state;
         let current_font = text_state.font.ok_or(PdfCanvasError::NoCurrentFont)?;
