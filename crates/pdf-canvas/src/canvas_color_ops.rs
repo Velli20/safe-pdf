@@ -74,25 +74,21 @@ impl<T: CanvasBackend> ColorOps for PdfCanvas<'_, T> {
         Ok(())
     }
 
-    fn set_stroking_cmyk(
-        &mut self,
-        _c: f32,
-        _m: f32,
-        _y: f32,
-        _k: f32,
-    ) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented("set_stroking_cmyk".into()))
+    fn set_stroking_cmyk(&mut self, c: f32, m: f32, y: f32, k: f32) -> Result<(), Self::ErrorType> {
+        self.current_state_mut()?.stroke_color = Color::from_cmyk(c, m, y, k);
+        self.current_state_mut()?.pattern = None;
+        Ok(())
     }
 
     fn set_non_stroking_cmyk(
         &mut self,
-        _c: f32,
-        _m: f32,
-        _y: f32,
-        _k: f32,
+        c: f32,
+        m: f32,
+        y: f32,
+        k: f32,
     ) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented(
-            "set_non_stroking_cmyk".into(),
-        ))
+        self.current_state_mut()?.fill_color = Color::from_cmyk(c, m, y, k);
+        self.current_state_mut()?.pattern = None;
+        Ok(())
     }
 }

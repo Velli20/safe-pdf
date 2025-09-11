@@ -23,4 +23,46 @@ impl Color {
     pub const fn from_rgb(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b, a: 1.0 }
     }
+
+    /// Returns color value from CMYK component values.
+    ///
+    /// All component values should be in the range [0.0, 1.0]. Conversion uses
+    /// the standard formula: r = (1 - c) * (1 - k), g = (1 - m) * (1 - k),
+    /// b = (1 - y) * (1 - k).
+    /// Alpha defaults to 1.0 (opaque).
+    pub const fn from_cmyk(c: f32, m: f32, y: f32, k: f32) -> Self {
+        let r = (1.0 - c) * (1.0 - k);
+        let g = (1.0 - m) * (1.0 - k);
+        let b = (1.0 - y) * (1.0 - k);
+        Self { r, g, b, a: 1.0 }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Color;
+
+    fn approx_eq(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-6
+    }
+
+    #[test]
+    fn cmyk_white_black_primaries() {
+        let white = Color::from_cmyk(0.0, 0.0, 0.0, 0.0);
+        assert!(approx_eq(white.r, 1.0) && approx_eq(white.g, 1.0) && approx_eq(white.b, 1.0));
+
+        let black = Color::from_cmyk(0.0, 0.0, 0.0, 1.0);
+        assert!(approx_eq(black.r, 0.0) && approx_eq(black.g, 0.0) && approx_eq(black.b, 0.0));
+
+        let cyan = Color::from_cmyk(1.0, 0.0, 0.0, 0.0);
+        assert!(approx_eq(cyan.r, 0.0) && approx_eq(cyan.g, 1.0) && approx_eq(cyan.b, 1.0));
+
+        let magenta = Color::from_cmyk(0.0, 1.0, 0.0, 0.0);
+        assert!(
+            approx_eq(magenta.r, 1.0) && approx_eq(magenta.g, 0.0) && approx_eq(magenta.b, 1.0)
+        );
+
+        let yellow = Color::from_cmyk(0.0, 0.0, 1.0, 0.0);
+        assert!(approx_eq(yellow.r, 1.0) && approx_eq(yellow.g, 1.0) && approx_eq(yellow.b, 0.0));
+    }
 }
