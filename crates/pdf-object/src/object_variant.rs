@@ -205,6 +205,8 @@ impl ObjectVariant {
     pub fn as_bytes(&self) -> Option<&[u8]> {
         match self {
             ObjectVariant::HexString(s) => Some(s),
+            ObjectVariant::Name(s) => Some(s.as_bytes()),
+            ObjectVariant::LiteralString(s) => Some(s.as_bytes()),
             _ => None,
         }
     }
