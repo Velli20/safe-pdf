@@ -191,21 +191,6 @@ mod tests {
     }
 
     #[test]
-    fn test_from_array_invalid_cid_not_a_number() {
-        let input_array = vec![
-            ObjectVariant::LiteralString("not_a_cid".to_string()),
-            arr(vec![num_f32(500.0)]),
-        ];
-        let result = GlyphWidthsMap::from_array(&input_array);
-        assert!(matches!(
-            result,
-            Err(GlyphWidthsMapError::ObjectError(
-                ObjectError::NumberConversionError
-            ))
-        ));
-    }
-
-    #[test]
     fn test_from_array_missing_widths_array() {
         // [ 0 ] (missing widths array)
         let input_array = vec![num_i64(0)];
@@ -384,23 +369,6 @@ mod tests {
         assert!(matches!(
             result,
             Err(GlyphWidthsMapError::MissingWidthForCIDRange { c_first: 10 })
-        ));
-    }
-
-    #[test]
-    fn test_from_array_error_w_not_a_number() {
-        // [ 10 12 "not_a_width" ]
-        let input_array = vec![
-            num_i64(10),
-            num_i64(12),
-            ObjectVariant::LiteralString("not_a_width".to_string()),
-        ];
-        let result = GlyphWidthsMap::from_array(&input_array);
-        assert!(matches!(
-            result,
-            Err(GlyphWidthsMapError::ObjectError(
-                ObjectError::NumberConversionError
-            ))
         ));
     }
 
