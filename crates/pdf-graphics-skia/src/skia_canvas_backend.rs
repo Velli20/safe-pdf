@@ -356,7 +356,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
             return;
         }
 
-        let Some(skia_image) =  to_skia_image(image) else {
+        let Some(skia_image) = to_skia_image(image) else {
             eprintln!("Failed to create Skia image from image XObject data");
             return;
         };

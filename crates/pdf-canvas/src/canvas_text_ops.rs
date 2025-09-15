@@ -1,12 +1,15 @@
 use crate::pdf_canvas::PdfCanvas;
 use crate::text_renderer::TextRenderer;
 use crate::truetype_font_renderer::TrueTypeFontRenderer;
+use crate::type1_font_renderer::Type1FontRenderer;
 use crate::type3_font_renderer::Type3FontRenderer;
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError};
 use pdf_content_stream::pdf_operator_backend::{
     TextObjectOps, TextPositioningOps, TextShowingOps, TextStateOps,
 };
+use pdf_font::cid_font::CidFontSubType;
 use pdf_font::font::FontSubType;
+use pdf_graphics::TextRenderingMode;
 use pdf_graphics::transform::Transform;
 
 impl<T: CanvasBackend> TextPositioningOps for PdfCanvas<'_, T> {
@@ -112,7 +115,7 @@ impl<T: CanvasBackend> TextStateOps for PdfCanvas<'_, T> {
         Err(PdfCanvasError::FontNotFound(font_name.to_string()))
     }
 
-    fn set_text_rendering_mode(&mut self, _mode: i32) -> Result<(), Self::ErrorType> {
+    fn set_text_rendering_mode(&mut self, _mode: TextRenderingMode) -> Result<(), Self::ErrorType> {
         Err(PdfCanvasError::NotImplemented(
             "set_text_rendering_mode".into(),
         ))
@@ -128,36 +131,61 @@ impl<T: CanvasBackend> TextShowingOps for PdfCanvas<'_, T> {
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
         let text_state = &self.current_state()?.text_state;
         let current_font = text_state.font.ok_or(PdfCanvasError::NoCurrentFont)?;
-        if current_font.subtype == FontSubType::Type3 {
-            let type3_font = current_font.type3_font.as_ref().ok_or_else(|| {
-                PdfCanvasError::MissingType3FontData(current_font.base_font.clone())
-            })?;
-
-            let mut renderer = Type3FontRenderer::new(
-                self,
-                text_state.font_size,
-                text_state.horizontal_scaling,
-                text_state.rise,
-                self.current_state()?.transform,
-                text_state.matrix,
-                type3_font,
-            )?;
-
-            return renderer.render_text(text);
+        match current_font.subtype {
+            FontSubType::Type3 => {
+                let type3_font = current_font.type3_font.as_ref().ok_or_else(|| {
+                    PdfCanvasError::MissingType3FontData(current_font.base_font.clone())
+                })?;
+                let mut renderer = Type3FontRenderer::new(
+                    self,
+                    text_state.font_size,
+                    text_state.horizontal_scaling,
+                    text_state.rise,
+                    self.current_state()?.transform,
+                    text_state.matrix,
+                    type3_font,
+                )?;
+                renderer.render_text(text)
+            }
+            FontSubType::Type1 => {
+                // Minimal stub: just call the Type1FontRenderer stub for now
+                if let Some(type1_font) = current_font.type1_font.as_ref() {
+                    let mut renderer = Type1FontRenderer::new(self, type1_font);
+                    renderer.render_text(text)
+                } else {
+                    Err(PdfCanvasError::NotImplemented(
+                        "Type1 font data missing".to_string(),
+                    ))
+                }
+            }
+            _ => {
+                if let Some(cid_font) = &current_font.cid_font {
+                    if cid_font.subtype != CidFontSubType::Type2 {
+                        //return Err(PdfCanvasError::NotImplemented(
+                        //    "Only CIDFont-based fonts are supported in show_text".to_string(),
+                        //));
+                        return Ok(());
+                    }
+                } else {
+                    // return Err(PdfCanvasError::NotImplemented(
+                    //     "Only CIDFont-based fonts are supported in show_text".to_string(),
+                    // ));
+                    return Ok(());
+                }
+                let mut renderer = TrueTypeFontRenderer::new(
+                    self,
+                    current_font,
+                    text_state.font_size,
+                    text_state.horizontal_scaling,
+                    text_state.matrix,
+                    self.current_state()?.transform,
+                    text_state.rise,
+                    text_state.word_spacing,
+                    text_state.character_spacing,
+                )?;
+                renderer.render_text(text)
+            }
         }
-        let mut renderer = TrueTypeFontRenderer::new(
-            self,
-            current_font,
-            text_state.font_size,
-            text_state.horizontal_scaling,
-            text_state.matrix,
-            self.current_state()?.transform,
-            text_state.rise,
-            text_state.word_spacing,
-            text_state.character_spacing,
-        )?;
-
-        renderer.render_text(text)
     }
 
     fn show_text_with_glyph_positioning(

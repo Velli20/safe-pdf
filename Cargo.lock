@@ -1584,6 +1584,8 @@ name = "pdf-font"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.9.1",
+ "num-derive",
+ "num-traits",
  "pdf-content-stream",
  "pdf-object",
  "thiserror 2.0.12",

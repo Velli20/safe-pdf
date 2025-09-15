@@ -72,3 +72,16 @@ pub enum PathFillType {
     /// Even-odd rule: "inside" is computed by an odd number of edge crossings.
     EvenOdd,
 }
+
+#[derive(Clone, Copy, Default, PartialEq, FromPrimitive, Debug)]
+pub enum TextRenderingMode {
+    #[default]
+    Fill,
+    Stroke,
+    FillAndStroke,
+    Invisible,
+    FillClip,
+    StrokeClip,
+    FillStrokeClip,
+    Clip,
+}

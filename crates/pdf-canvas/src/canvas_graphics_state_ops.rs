@@ -115,21 +115,9 @@ impl<T: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, T> {
                         "ExtGState: RenderingIntent".into(),
                     ));
                 }
-                ExternalGraphicsStateKey::OverprintStroke(_) => {
-                    return Err(PdfCanvasError::NotImplemented(
-                        "ExtGState: OverprintStroke".into(),
-                    ));
-                }
-                ExternalGraphicsStateKey::OverprintFill(_) => {
-                    return Err(PdfCanvasError::NotImplemented(
-                        "ExtGState: OverprintFill".into(),
-                    ));
-                }
-                ExternalGraphicsStateKey::OverprintMode(_) => {
-                    return Err(PdfCanvasError::NotImplemented(
-                        "ExtGState: OverprintMode".into(),
-                    ));
-                }
+                ExternalGraphicsStateKey::OverprintStroke(_) => {}
+                ExternalGraphicsStateKey::OverprintFill(_) => {}
+                ExternalGraphicsStateKey::OverprintMode(_) => {}
                 ExternalGraphicsStateKey::Font(..) => {
                     return Err(PdfCanvasError::NotImplemented("ExtGState: Font".into()));
                 }
@@ -197,11 +185,7 @@ impl<T: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, T> {
                 ExternalGraphicsStateKey::NonStrokingAlpha(alpha) => {
                     self.current_state_mut()?.fill_color.a = *alpha
                 }
-                ExternalGraphicsStateKey::StrokeAdjustment(_enabled) => {
-                    //return Err(PdfCanvasError::NotImplemented(
-                    //    "ExtGState: StrokeAdjustment".into(),
-                    //));
-                }
+                ExternalGraphicsStateKey::StrokeAdjustment(_) => {}
             }
         }
         Ok(())

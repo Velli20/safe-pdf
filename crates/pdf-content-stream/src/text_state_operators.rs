@@ -3,6 +3,8 @@ use crate::{
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
     pdf_operator_backend::PdfOperatorBackend,
 };
+use num_traits::FromPrimitive;
+use pdf_graphics::TextRenderingMode;
 
 /// Sets the character spacing, `Tc`, which is a number expressed in unscaled text space units.
 #[derive(Debug, Clone, PartialEq)]
@@ -156,20 +158,18 @@ impl PdfOperator for SetFont {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetRenderingMode {
     /// The rendering mode.
-    /// 0: Fill text.
-    /// 1: Stroke text.
-    /// 2: Fill, then stroke text.
-    /// 3: Neither fill nor stroke text (invisible).
-    /// 4: Fill text and add to path for clipping.
-    /// 5: Stroke text and add to path for clipping.
-    /// 6: Fill, then stroke text and add to path for clipping.
-    /// 7: Add text to path for clipping.
-    mode: u8,
+    mode: TextRenderingMode,
 }
 
 impl SetRenderingMode {
-    pub fn new(mode: u8) -> Self {
-        Self { mode }
+    pub fn new(mode: u8) -> Result<Self, PdfOperatorError> {
+        match TextRenderingMode::from_u8(mode) {
+            Some(mode) => Ok(Self { mode }),
+            None => Err(PdfOperatorError::InvalidOperandValue {
+                expected: "One of the valid text rendering modes (0-7)",
+                value: mode.to_string(),
+            }),
+        }
     }
 }
 
@@ -180,11 +180,11 @@ impl PdfOperator for SetRenderingMode {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let mode = operands.get_u8()?;
-        Ok(PdfOperatorVariant::SetRenderingMode(Self::new(mode)))
+        Ok(PdfOperatorVariant::SetRenderingMode(Self::new(mode)?))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        backend.set_text_rendering_mode(self.mode as i32)
+        backend.set_text_rendering_mode(self.mode)
     }
 }
 

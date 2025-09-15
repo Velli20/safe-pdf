@@ -11,6 +11,7 @@ use thiserror::Error;
 use crate::{
     characther_map::{CMapError, CharacterMap},
     cid_font::{CharacterIdentifierFont, CidFontError},
+    type1_font::{Type1Font, Type1FontError},
     type3_font::{Type3Font, Type3FontError},
 };
 
@@ -48,6 +49,8 @@ pub enum FontError {
     ObjectError(#[from] ObjectError),
     #[error("Error processing Type3 font: {0}")]
     Type3FontError(#[from] Type3FontError),
+    #[error("Error processing Type1 font: {0}")]
+    Type1FontError(#[from] Type1FontError),
     #[error("Unsupported or invalid font subtype '{subtype}' for {font_type} font")]
     UnsupportedFontSubtype {
         subtype: FontSubType,
@@ -100,6 +103,7 @@ pub struct Font {
     /// (Required for Type0 fonts) The CIDFont dictionary that is the descendant of this Type0 font.
     /// This CIDFont provides the actual glyph descriptions.
     pub cid_font: Option<CharacterIdentifierFont>,
+    pub type1_font: Option<Type1Font>,
     pub type3_font: Option<Type3Font>,
     pub encoding: Option<FontEncoding>,
 }
@@ -147,12 +151,28 @@ impl FromDictionary for Font {
                 subtype,
                 cmap,
                 cid_font: None,
+                type1_font: None,
                 type3_font: Some(type3_font),
                 encoding,
             });
         }
 
-        // Only Type0 fonts are supported beyond this point. If not Type0, return an error.
+        // Handle Type1 fonts
+        if subtype == FontSubType::Type1 {
+            let type1_font = Type1Font::from_dictionary(dictionary, objects)?;
+            return Ok(Self {
+                base_font,
+                subtype,
+                cmap,
+                cid_font: None,
+                type1_font: Some(type1_font),
+                type3_font: None,
+                encoding,
+            });
+        }
+
+        // Only Type0 fonts are supported beyond this point.
+        // If not Type0, return an error.
         if subtype != FontSubType::Type0 {
             return Err(FontError::UnsupportedFontSubtype {
                 subtype,
@@ -179,6 +199,7 @@ impl FromDictionary for Font {
             subtype,
             cmap,
             cid_font: Some(cid_font),
+            type1_font: None,
             type3_font: None,
             encoding,
         })

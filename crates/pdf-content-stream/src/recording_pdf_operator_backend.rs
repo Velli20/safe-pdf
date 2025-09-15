@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use pdf_graphics::LineCap;
 use pdf_graphics::LineJoin;
+use pdf_graphics::TextRenderingMode;
 use pdf_object::dictionary::Dictionary;
 use thiserror::Error;
 
@@ -159,7 +160,7 @@ pub enum RecordedOperation {
         size: f32,
     },
     SetTextRenderingMode {
-        mode: i32,
+        mode: TextRenderingMode,
     },
     SetTextRise {
         rise: f32,
@@ -597,7 +598,7 @@ impl TextStateOps for RecordingBackend {
         Ok(())
     }
 
-    fn set_text_rendering_mode(&mut self, mode: i32) -> Result<(), Self::ErrorType> {
+    fn set_text_rendering_mode(&mut self, mode: TextRenderingMode) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::SetTextRenderingMode { mode });
         Ok(())
