@@ -18,7 +18,6 @@ fn read_be_int(bytes: &[u8]) -> Result<usize, CompactFontFormatError> {
         .map_err(|_| CompactFontFormatError::InvalidData("read_be_int: value out of range"))
 }
 
-
 pub fn parse_index<'a>(cur: &mut Cursor<'a>) -> Result<Vec<&'a [u8]>, CompactFontFormatError> {
     let count = cur.read_u16()?;
     if count == 0 {
@@ -96,7 +95,6 @@ pub(crate) enum DictToken {
     Real(String),
     Operator(u16),
 }
-
 
 pub(crate) fn parse_dict(data: &[u8]) -> Result<Vec<DictToken>, CompactFontFormatError> {
     let mut cur = Cursor::new(data);

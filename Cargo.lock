@@ -1587,6 +1587,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "pdf-content-stream",
+ "pdf-graphics",
  "pdf-object",
  "thiserror 2.0.12",
 ]

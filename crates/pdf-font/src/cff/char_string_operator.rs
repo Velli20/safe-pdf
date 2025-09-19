@@ -10,10 +10,18 @@
 //! - The special-case width operand in CharStrings is handled by the caller and not counted here.
 //! - Hint mask operators also read mask bytes from the stream; only stack operands are counted.
 
+use pdf_graphics::pdf_path::PdfPath;
+
 use crate::cff::{cursor::Cursor, error::CompactFontFormatError};
 
-pub(crate) trait CharStringOperatorTrait {
-    fn call(&self) {}
+pub trait CharStringOperatorTrait {
+    fn call(&self, path: &mut PdfPath);
+}
+
+#[inline]
+#[allow(clippy::as_conversions)]
+fn f32_from_i32(v: i32) -> f32 {
+    v as f32
 }
 
 trait CharStringOperator {
@@ -48,7 +56,7 @@ impl CharStringOperator for HStemOp {
 }
 
 impl CharStringOperatorTrait for HStemOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -72,7 +80,7 @@ impl CharStringOperator for VStemOp {
 }
 
 impl CharStringOperatorTrait for VStemOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -96,8 +104,14 @@ impl CharStringOperator for VMoveToOp {
 }
 
 impl CharStringOperatorTrait for VMoveToOp {
-    fn call(&self) {
+    fn call(&self, path: &mut PdfPath) {
         println!("{:?}", self);
+        let dy = if self.operands.len() == 2 {
+            self.operands[1]
+        } else {
+            self.operands[0]
+        };
+        path.move_rel(0.0, f32_from_i32(dy));
     }
 }
 
@@ -120,8 +134,14 @@ impl CharStringOperator for RLineToOp {
 }
 
 impl CharStringOperatorTrait for RLineToOp {
-    fn call(&self) {
+    fn call(&self, path: &mut PdfPath) {
         println!("{:?}", self);
+        let mut it = self.operands.chunks_exact(2);
+        for pair in &mut it {
+            let dx = f32_from_i32(pair[0]);
+            let dy = f32_from_i32(pair[1]);
+            path.line_rel(dx, dy);
+        }
     }
 }
 
@@ -144,8 +164,17 @@ impl CharStringOperator for HLineToOp {
 }
 
 impl CharStringOperatorTrait for HLineToOp {
-    fn call(&self) {
+    fn call(&self, path: &mut PdfPath) {
         println!("{:?}", self);
+        let mut horizontal = true;
+        for &d in &self.operands {
+            if horizontal {
+                path.line_rel(f32_from_i32(d), 0.0);
+            } else {
+                path.line_rel(0.0, f32_from_i32(d));
+            }
+            horizontal = !horizontal;
+        }
     }
 }
 
@@ -168,8 +197,17 @@ impl CharStringOperator for VLineToOp {
 }
 
 impl CharStringOperatorTrait for VLineToOp {
-    fn call(&self) {
+    fn call(&self, path: &mut PdfPath) {
         println!("{:?}", self);
+        let mut vertical = true;
+        for &d in &self.operands {
+            if vertical {
+                path.line_rel(0.0, f32_from_i32(d));
+            } else {
+                path.line_rel(f32_from_i32(d), 0.0);
+            }
+            vertical = !vertical;
+        }
     }
 }
 
@@ -192,8 +230,18 @@ impl CharStringOperator for RRCurveToOp {
 }
 
 impl CharStringOperatorTrait for RRCurveToOp {
-    fn call(&self) {
+    fn call(&self, path: &mut PdfPath) {
         println!("{:?}", self);
+        for chunk in self.operands.chunks_exact(6) {
+            path.curve_rel(
+                f32_from_i32(chunk[0]),
+                f32_from_i32(chunk[1]),
+                f32_from_i32(chunk[2]),
+                f32_from_i32(chunk[3]),
+                f32_from_i32(chunk[4]),
+                f32_from_i32(chunk[5]),
+            );
+        }
     }
 }
 
@@ -216,7 +264,7 @@ impl CharStringOperator for CallSubroutineOp {
 }
 
 impl CharStringOperatorTrait for CallSubroutineOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -235,7 +283,7 @@ impl CharStringOperator for ReturnOp {
 }
 
 impl CharStringOperatorTrait for ReturnOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -254,8 +302,9 @@ impl CharStringOperator for EndCharOp {
 }
 
 impl CharStringOperatorTrait for EndCharOp {
-    fn call(&self) {
+    fn call(&self, path: &mut PdfPath) {
         println!("{:?}", self);
+        path.close();
     }
 }
 
@@ -278,7 +327,7 @@ impl CharStringOperator for HStemHmOp {
 }
 
 impl CharStringOperatorTrait for HStemHmOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -302,7 +351,7 @@ impl CharStringOperator for HintMaskOp {
 }
 
 impl CharStringOperatorTrait for HintMaskOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -326,7 +375,7 @@ impl CharStringOperator for CntrMaskOp {
 }
 
 impl CharStringOperatorTrait for CntrMaskOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -350,8 +399,16 @@ impl CharStringOperator for RMoveToOp {
 }
 
 impl CharStringOperatorTrait for RMoveToOp {
-    fn call(&self) {
+    fn call(&self, path: &mut PdfPath) {
         println!("{:?}", self);
+        let (dx, dy) = match self.operands.as_slice() {
+            // width, dx, dy
+            [_, dx, dy] => (*dx, *dy),
+            // dx, dy
+            [dx, dy] => (*dx, *dy),
+            _ => (0, 0),
+        };
+        path.move_rel(f32_from_i32(dx), f32_from_i32(dy));
     }
 }
 
@@ -374,8 +431,14 @@ impl CharStringOperator for HMoveToOp {
 }
 
 impl CharStringOperatorTrait for HMoveToOp {
-    fn call(&self) {
+    fn call(&self, path: &mut PdfPath) {
         println!("{:?}", self);
+        let dx = if self.operands.len() == 2 {
+            self.operands[1]
+        } else {
+            self.operands[0]
+        };
+        path.move_rel(f32_from_i32(dx), 0.0);
     }
 }
 
@@ -398,7 +461,7 @@ impl CharStringOperator for VStemHmOp {
 }
 
 impl CharStringOperatorTrait for VStemHmOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -422,7 +485,7 @@ impl CharStringOperator for RCurveLineOp {
 }
 
 impl CharStringOperatorTrait for RCurveLineOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -446,7 +509,7 @@ impl CharStringOperator for RLineCurveOp {
 }
 
 impl CharStringOperatorTrait for RLineCurveOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -476,7 +539,7 @@ impl CharStringOperator for VVCurveToOp {
 }
 
 impl CharStringOperatorTrait for VVCurveToOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -506,7 +569,7 @@ impl CharStringOperator for HHCurveToOp {
 }
 
 impl CharStringOperatorTrait for HHCurveToOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -530,7 +593,7 @@ impl CharStringOperator for ShortIntOp {
 }
 
 impl CharStringOperatorTrait for ShortIntOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -554,7 +617,7 @@ impl CharStringOperator for CallGSubrOp {
 }
 
 impl CharStringOperatorTrait for CallGSubrOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -578,8 +641,27 @@ impl CharStringOperator for VHCurveToOp {
 }
 
 impl CharStringOperatorTrait for VHCurveToOp {
-    fn call(&self) {
+    fn call(&self, path: &mut PdfPath) {
         println!("{:?}", self);
+        let mut rem: &[i32] = &self.operands;
+        while rem.len() >= 4 {
+            if rem.len() == 5 {
+                let dy1 = f32_from_i32(rem[0]);
+                let dx2 = f32_from_i32(rem[1]);
+                let dy2 = f32_from_i32(rem[2]);
+                let dx3 = f32_from_i32(rem[3]);
+                let dy3 = f32_from_i32(rem[4]);
+                path.curve_rel(0.0, dy1, dx2, dy2, dx3, dy3);
+                rem = &rem[5..];
+            } else {
+                let dy1 = f32_from_i32(rem[0]);
+                let dx2 = f32_from_i32(rem[1]);
+                let dy2 = f32_from_i32(rem[2]);
+                let dx3 = f32_from_i32(rem[3]);
+                path.curve_rel(0.0, dy1, dx2, dy2, dx3, 0.0);
+                rem = &rem[4..];
+            }
+        }
     }
 }
 
@@ -602,8 +684,27 @@ impl CharStringOperator for HVCurveToOp {
 }
 
 impl CharStringOperatorTrait for HVCurveToOp {
-    fn call(&self) {
+    fn call(&self, path: &mut PdfPath) {
         println!("{:?}", self);
+        let mut rem: &[i32] = &self.operands;
+        while rem.len() >= 4 {
+            if rem.len() == 5 {
+                let dx1 = f32_from_i32(rem[0]);
+                let dx2 = f32_from_i32(rem[1]);
+                let dy2 = f32_from_i32(rem[2]);
+                let dy3 = f32_from_i32(rem[3]);
+                let dx3 = f32_from_i32(rem[4]);
+                path.curve_rel(dx1, 0.0, dx2, dy2, dx3, dy3);
+                rem = &rem[5..];
+            } else {
+                let dx1 = f32_from_i32(rem[0]);
+                let dx2 = f32_from_i32(rem[1]);
+                let dy2 = f32_from_i32(rem[2]);
+                let dy3 = f32_from_i32(rem[3]);
+                path.curve_rel(dx1, 0.0, dx2, dy2, 0.0, dy3);
+                rem = &rem[4..];
+            }
+        }
     }
 }
 
@@ -626,7 +727,7 @@ impl CharStringOperator for DotSectionOp {
 }
 
 impl CharStringOperatorTrait for DotSectionOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -650,7 +751,7 @@ impl CharStringOperator for AndOp {
 }
 
 impl CharStringOperatorTrait for AndOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -674,7 +775,7 @@ impl CharStringOperator for OrOp {
 }
 
 impl CharStringOperatorTrait for OrOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -698,7 +799,7 @@ impl CharStringOperator for NotOp {
 }
 
 impl CharStringOperatorTrait for NotOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -722,7 +823,7 @@ impl CharStringOperator for AbsOp {
 }
 
 impl CharStringOperatorTrait for AbsOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -746,7 +847,7 @@ impl CharStringOperator for AddOp {
 }
 
 impl CharStringOperatorTrait for AddOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -770,7 +871,7 @@ impl CharStringOperator for SubOp {
 }
 
 impl CharStringOperatorTrait for SubOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -794,7 +895,7 @@ impl CharStringOperator for DivOp {
 }
 
 impl CharStringOperatorTrait for DivOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -817,7 +918,11 @@ impl CharStringOperator for NegOp {
     }
 }
 
-impl CharStringOperatorTrait for NegOp {}
+impl CharStringOperatorTrait for NegOp {
+    fn call(&self, _path: &mut PdfPath) {
+        println!("{:?}", self);
+    }
+}
 
 /// Equality test: pops two numbers, pushes 1 if equal, else 0.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -838,7 +943,7 @@ impl CharStringOperator for EqOp {
 }
 
 impl CharStringOperatorTrait for EqOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -862,7 +967,7 @@ impl CharStringOperator for DropOp {
 }
 
 impl CharStringOperatorTrait for DropOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -886,7 +991,7 @@ impl CharStringOperator for PutOp {
 }
 
 impl CharStringOperatorTrait for PutOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -910,7 +1015,7 @@ impl CharStringOperator for GetOp {
 }
 
 impl CharStringOperatorTrait for GetOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -934,7 +1039,7 @@ impl CharStringOperator for IfElseOp {
 }
 
 impl CharStringOperatorTrait for IfElseOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -954,7 +1059,7 @@ impl CharStringOperator for RandomOp {
 }
 
 impl CharStringOperatorTrait for RandomOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -978,7 +1083,7 @@ impl CharStringOperator for MulOp {
 }
 
 impl CharStringOperatorTrait for MulOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -1002,7 +1107,7 @@ impl CharStringOperator for SqrtOp {
 }
 
 impl CharStringOperatorTrait for SqrtOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -1026,7 +1131,7 @@ impl CharStringOperator for DupOp {
 }
 
 impl CharStringOperatorTrait for DupOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -1050,7 +1155,7 @@ impl CharStringOperator for ExchOp {
 }
 
 impl CharStringOperatorTrait for ExchOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -1074,7 +1179,7 @@ impl CharStringOperator for IndexOp {
 }
 
 impl CharStringOperatorTrait for IndexOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -1098,7 +1203,7 @@ impl CharStringOperator for RollOp {
 }
 
 impl CharStringOperatorTrait for RollOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -1122,7 +1227,7 @@ impl CharStringOperator for HFlexOp {
 }
 
 impl CharStringOperatorTrait for HFlexOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -1146,7 +1251,7 @@ impl CharStringOperator for FlexOp {
 }
 
 impl CharStringOperatorTrait for FlexOp {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -1170,7 +1275,7 @@ impl CharStringOperator for HFlex1Op {
 }
 
 impl CharStringOperatorTrait for HFlex1Op {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }
@@ -1194,7 +1299,7 @@ impl CharStringOperator for Flex1Op {
 }
 
 impl CharStringOperatorTrait for Flex1Op {
-    fn call(&self) {
+    fn call(&self, _path: &mut PdfPath) {
         println!("{:?}", self);
     }
 }

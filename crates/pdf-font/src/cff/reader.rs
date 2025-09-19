@@ -3,8 +3,23 @@ use crate::cff::{
     cursor::Cursor,
     error::CompactFontFormatError,
     parser::{parse_dict, parse_index},
+    standard_strings::STANDARD_STRINGS,
     top_dictionary_operator::TopDictEntry,
 };
+
+/// Represents a String Identifier (SID) in CFF fonts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SID(pub u16);
+#[derive(Debug, Clone, PartialEq)]
+pub enum Charset {
+    IsoAdobe,
+    Expert,
+    ExpertSubset,
+    /// Format 0: Sequential list of SIDs
+    SID(Vec<SID>),
+    /// Format 1/2: Range-based encoding
+    SIDRange(Vec<(SID, u16)>),
+}
 
 pub struct CffFontReader<'a> {
     cursor: Cursor<'a>,
@@ -16,7 +31,8 @@ pub struct CffFontProgram<'a> {
     pub top_dict_index: Vec<&'a [u8]>,
     pub string_index: Vec<&'a [u8]>,
     pub global_subr_index: Vec<&'a [u8]>,
-    char_string_operators: Vec<Vec<Box<dyn CharStringOperatorTrait>>>,
+    pub char_string_operators: Vec<Vec<Box<dyn CharStringOperatorTrait>>>,
+    pub charset: Charset,
 }
 
 #[derive(Debug)]
@@ -25,6 +41,41 @@ pub struct CffHeader {
     pub minor: u8,
     pub header_size: u8,
     pub offset_size: u8,
+}
+
+pub(crate) fn parse_charset<'a>(
+    cur: &mut Cursor<'a>,
+    number_of_glyphs: usize,
+) -> Result<Charset, CompactFontFormatError> {
+    let format = cur.read_u8()?;
+    match format {
+        0 => {
+            // Format 0: Sequential list of SIDs
+            let mut sids = Vec::new();
+            for _ in 0..number_of_glyphs {
+                let sid = cur.read_u16()?;
+                sids.push(SID(sid));
+            }
+            Ok(Charset::SID(sids))
+        }
+        1 | 2 => {
+            // Format 1 or 2: Range-based encoding
+            let mut ranges = Vec::new();
+            for _ in 0..number_of_glyphs {
+                let first_sid = cur.read_u16()?;
+                let n_left = if format == 1 {
+                    u16::from(cur.read_u8()?)
+                } else {
+                    cur.read_u16()?
+                };
+                ranges.push((SID(first_sid), n_left));
+            }
+            Ok(Charset::SIDRange(ranges))
+        }
+        _ => Err(CompactFontFormatError::InvalidData(
+            "invalid charset format",
+        )),
+    }
 }
 
 impl<'a> CffFontReader<'a> {
@@ -65,8 +116,8 @@ impl<'a> CffFontReader<'a> {
             // No Top DICT present; return empty operators for robustness
             Vec::new()
         };
-
         let dict = TopDictEntry::from_dictionary_tokens(&operators);
+
         let char_strings_offset =
             dict.char_strings_offset
                 .ok_or(CompactFontFormatError::InvalidData(
@@ -82,6 +133,21 @@ impl<'a> CffFontReader<'a> {
             char_string_operators.push(ops);
         }
 
+        // 'The number of glyphs is the value of the count field in the CharStrings INDEX.'
+        let number_of_glyphs = u16::try_from(char_string_operators.len())
+            .map_err(|_| CompactFontFormatError::InvalidData("todo"))?;
+
+        let charset = match dict.charset_offset {
+            Some(0) => Charset::IsoAdobe,
+            Some(1) => Charset::Expert,
+            Some(2) => Charset::ExpertSubset,
+            Some(offset) => {
+                self.cursor.set_pos(usize::from(offset));
+                parse_charset(&mut self.cursor, usize::from(number_of_glyphs))?
+            }
+            None => Charset::IsoAdobe, // default
+        };
+
         Ok(CffFontProgram {
             header: CffHeader {
                 major,
@@ -94,30 +160,27 @@ impl<'a> CffFontReader<'a> {
             string_index,
             global_subr_index,
             char_string_operators,
+            charset,
         })
     }
 }
 
 impl CffFontProgram<'_> {
-    /// Returns the parsed CharString operators for a given glyph ID (GID).
-    ///
-    /// Notes:
-    /// - In CFF, GID 0 is usually .notdef.
-    /// - If you have a character code (from text) rather than a GID, you must first map
-    ///   code -> SID via the font Encoding, then SID -> GID via the font charset. This
-    ///   reader currently exposes the raw CharStrings in order; consumers can add
-    ///   Encoding/charset parsing and call this with the resolved GID.
-    pub(crate) fn charstring_ops_for_gid(
-        &self,
-        gid: u8,
-    ) -> Option<&[Box<dyn CharStringOperatorTrait>]> {
-        self.char_string_operators
-            .get(usize::from(gid))
-            .map(|ops| ops.as_slice())
-    }
-
-    /// Convenient accessor for total number of CharStrings (glyphs) available.
-    pub fn glyph_count(&self) -> usize {
-        self.char_string_operators.len()
-    }
+    // pub fn glyph_name(&self, glyph_id: u16) -> Option<&'a str> {
+    //     // match self.kind {
+    //     //     FontKind::SID(_) => {
+    //             let sid = self.charset.gid_to_sid(glyph_id)?;
+    //             let sid = usize::from(sid.0);
+    //             match STANDARD_STRINGS.get(sid) {
+    //                 Some(name) => Some(name),
+    //                 None => {
+    //                     panic!()
+    //                     // let idx = u32::try_from(sid - STANDARD_STRINGS.len()).ok()?;
+    //                     // let name = self.strings.get(idx)?;
+    //                     // core::str::from_utf8(name).ok()
+    //                 }
+    //             }
+    //     //     FontKind::CID(_) => None,
+    //     // }
+    // }
 }
