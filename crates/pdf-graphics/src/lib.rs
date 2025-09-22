@@ -1,5 +1,6 @@
 pub mod color;
 pub mod pdf_path;
+pub mod point;
 pub mod transform;
 use num_derive::FromPrimitive;
 

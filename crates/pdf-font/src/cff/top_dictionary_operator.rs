@@ -47,6 +47,7 @@ enum TopDictOperator {
 pub(crate) struct TopDictEntry {
     pub char_strings_offset: Option<u16>,
     pub charset_offset: Option<u16>,
+    pub encoding: Option<u16>,
 }
 
 impl TopDictEntry {
@@ -59,12 +60,23 @@ impl TopDictEntry {
                 DictToken::Operator(b) => {
                     if let Some(op) = TopDictOperator::from_u16(*b) {
                         match op {
+                            TopDictOperator::Encoding => {
+                                if let Some(DictToken::Number(offset)) = stack.pop() {
+                                    // Charset offset is relative to the start of the top dict data
+                                    top_dictionary.encoding = Some(offset as u16);
+                                } else {
+                                    panic!()
+                                }
+                            }
+
                             TopDictOperator::Charset => {
                                 if let Some(DictToken::Number(offset)) = stack.pop() {
                                     // Charset offset is relative to the start of the top dict data
                                     if offset >= 0 && offset <= u16::MAX as i32 {
                                         top_dictionary.charset_offset = Some(offset as u16);
                                     }
+                                } else {
+                                    panic!()
                                 }
                             }
 
@@ -74,6 +86,8 @@ impl TopDictEntry {
                                     if offset >= 0 && offset <= u16::MAX as i32 {
                                         top_dictionary.char_strings_offset = Some(offset as u16);
                                     }
+                                } else {
+                                    panic!()
                                 }
                             }
                             _ => {}

@@ -22,4 +22,6 @@ pub enum CompactFontFormatError {
     InvalidOperandCount { expected: String, found: usize },
     #[error("Operand overflow during checked arithmetic")]
     OperandOverflow,
+    #[error("Stack underflow")]
+    StackUnderflow,
 }

@@ -82,32 +82,6 @@ impl PdfPath {
         self.verbs.push(PathVerb::LineTo { x, y });
     }
 
-    /// Appends a relative `MoveTo` by offsetting from the current point.
-    ///
-    /// If the path has no current point yet, the origin (0, 0) is used.
-    ///
-    /// # Arguments
-    ///
-    /// - `dx`, `dy`: The offsets to add to the current point.
-    pub fn move_rel(&mut self, dx: f32, dy: f32) {
-        let x = self.current_x + dx;
-        let y = self.current_y + dy;
-        self.move_to(x, y);
-    }
-
-    /// Appends a relative `LineTo` by offsetting from the current point.
-    ///
-    /// If the path has no current point yet, the origin (0, 0) is used.
-    ///
-    /// # Arguments
-    ///
-    /// - `dx`, `dy`: The offsets to add to the current point.
-    pub fn line_rel(&mut self, dx: f32, dy: f32) {
-        let x = self.current_x + dx;
-        let y = self.current_y + dy;
-        self.line_to(x, y);
-    }
-
     /// Appends a `CubicTo` verb to the path, updating the current point to (`x3`, `y3`).
     ///
     /// # Arguments
@@ -129,28 +103,6 @@ impl PdfPath {
         });
     }
 
-    /// Appends a relative cubic Bézier curve (`CubicTo`) updating the current point.
-    ///
-    /// Control points and the end point are specified relative to the current point,
-    /// and accumulate as in PostScript/CFF `rrcurveto`:
-    ///
-    /// - P1 = P0 + (dx1, dy1)
-    /// - P2 = P1 + (dx2, dy2)
-    /// - P3 = P2 + (dx3, dy3)
-    pub fn curve_rel(&mut self, dx1: f32, dy1: f32, dx2: f32, dy2: f32, dx3: f32, dy3: f32) {
-        let x0 = self.current_x;
-        let y0 = self.current_y;
-
-        let x1 = x0 + dx1;
-        let y1 = y0 + dy1;
-        let x2 = x1 + dx2;
-        let y2 = y1 + dy2;
-        let x3 = x2 + dx3;
-        let y3 = y2 + dy3;
-
-        self.curve_to(x1, y1, x2, y2, x3, y3);
-    }
-
     /// Appends a `QuadTo` verb to the path, updating the current point to (`x2`, `y2`).
     ///
     /// # Arguments
@@ -162,23 +114,6 @@ impl PdfPath {
         self.current_y = y2;
 
         self.verbs.push(PathVerb::QuadTo { x1, y1, x2, y2 });
-    }
-
-    /// Appends a relative quadratic Bézier curve (`QuadTo`) updating the current point.
-    ///
-    /// Control point and end point are specified relative to the current point:
-    /// - Q1 = P0 + (dx1, dy1)
-    /// - Q2 = Q1 + (dx2, dy2)
-    pub fn quad_rel(&mut self, dx1: f32, dy1: f32, dx2: f32, dy2: f32) {
-        let x0 = self.current_x;
-        let y0 = self.current_y;
-
-        let x1 = x0 + dx1;
-        let y1 = y0 + dy1;
-        let x2 = x1 + dx2;
-        let y2 = y1 + dy2;
-
-        self.quad_to(x1, y1, x2, y2);
     }
 
     /// Appends a `Close` verb to the path.
@@ -232,61 +167,4 @@ impl PdfPath {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{PathVerb, PdfPath};
-
-    #[test]
-    fn test_move_rel_from_origin() {
-        let mut p = PdfPath::default();
-        assert!(p.current_point().is_none());
-        p.move_rel(10.0, 5.0);
-        assert_eq!(p.current_point(), Some((10.0, 5.0)));
-        assert!(matches!(p.verbs[0], PathVerb::MoveTo { x: 10.0, y: 5.0 }));
-    }
-
-    #[test]
-    fn test_line_rel() {
-        let mut p = PdfPath::default();
-        p.move_to(2.0, 3.0);
-        p.line_rel(3.0, -2.0);
-        assert_eq!(p.current_point(), Some((5.0, 1.0)));
-        assert!(matches!(p.verbs[1], PathVerb::LineTo { x: 5.0, y: 1.0 }));
-    }
-
-    #[test]
-    fn test_curve_rel() {
-        let mut p = PdfPath::default();
-        p.move_to(0.0, 0.0);
-        p.curve_rel(10.0, 0.0, 0.0, 10.0, -5.0, -5.0);
-        // P1 = (10,0), P2 = (10,10), P3 = (5,5)
-        assert_eq!(p.current_point(), Some((5.0, 5.0)));
-        match p.verbs[1] {
-            PathVerb::CubicTo {
-                x1,
-                y1,
-                x2,
-                y2,
-                x3,
-                y3,
-            } => {
-                assert_eq!((x1, y1, x2, y2, x3, y3), (10.0, 0.0, 10.0, 10.0, 5.0, 5.0));
-            }
-            _ => panic!("expected CubicTo"),
-        }
-    }
-
-    #[test]
-    fn test_quad_rel() {
-        let mut p = PdfPath::default();
-        p.move_to(1.0, 1.0);
-        p.quad_rel(2.0, 0.0, 3.0, 4.0);
-        // Q1 = (3,1), Q2 = (6,5)
-        assert_eq!(p.current_point(), Some((6.0, 5.0)));
-        match p.verbs[1] {
-            PathVerb::QuadTo { x1, y1, x2, y2 } => {
-                assert_eq!((x1, y1, x2, y2), (3.0, 1.0, 6.0, 5.0));
-            }
-            _ => panic!("expected QuadTo"),
-        }
-    }
-}
+mod tests {}

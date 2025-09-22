@@ -1,3 +1,5 @@
+use core::panic;
+
 use crate::cff::{
     char_string_operator::{CharStringOperatorTrait, char_strings_from},
     cursor::Cursor,
@@ -21,6 +23,37 @@ pub enum Charset {
     SIDRange(Vec<(SID, u16)>),
 }
 
+impl Charset {
+    pub(crate) fn sid_to_gid(&self, sid: u16) -> Option<u16> {
+        if sid == 0 {
+            return Some(0);
+        }
+
+        match self {
+            Charset::IsoAdobe | Charset::Expert | Charset::ExpertSubset => None,
+
+            Charset::SID(sids) => sids.iter().position(|n| n.0 == sid).map(|n| (n as u16 + 1)),
+            Charset::SIDRange(ranges) => {
+                let mut gid = 0u16;
+                for (first_sid, n_left) in ranges {
+                    let last_sid = first_sid.0 + n_left;
+                    if sid >= first_sid.0 && sid <= last_sid {
+                        return Some(gid + (sid - first_sid.0));
+                    }
+                    gid = gid.checked_add(n_left + 1)?;
+                }
+                panic!();
+                None
+            }
+        }
+    }
+}
+pub enum Encoding {
+    Standard,
+    Expert,
+    Custom(Vec<u8>),
+}
+
 pub struct CffFontReader<'a> {
     cursor: Cursor<'a>,
 }
@@ -33,6 +66,7 @@ pub struct CffFontProgram<'a> {
     pub global_subr_index: Vec<&'a [u8]>,
     pub char_string_operators: Vec<Vec<Box<dyn CharStringOperatorTrait>>>,
     pub charset: Charset,
+    pub encoding: Encoding,
 }
 
 #[derive(Debug)]
@@ -48,6 +82,13 @@ pub(crate) fn parse_charset<'a>(
     number_of_glyphs: usize,
 ) -> Result<Charset, CompactFontFormatError> {
     let format = cur.read_u8()?;
+    // The first high-bit in format indicates that a Supplemental encoding is present.
+    // Check it and clear.
+    let has_supplemental = format & 0x80 != 0;
+    let format = format & 0x7f;
+    if has_supplemental {
+        panic!("Supplemental encoding not supported");
+    }
     match format {
         0 => {
             // Format 0: Sequential list of SIDs
@@ -104,11 +145,6 @@ impl<'a> CffFontReader<'a> {
         // Read Global Subr INDEX
         let global_subr_index = parse_index(&mut self.cursor)?;
 
-        println!("Len Name INDEX: {}", name_index.len());
-        println!("Len Top DICT INDEX: {}", top_dict_index.len());
-        println!("Len String INDEX: {}", string_index.len());
-        println!("Len Global Subr INDEX: {}", global_subr_index.len());
-
         // Parse operators from the Top DICT table (use the first entry as the main Top DICT)
         let operators = if let Some(&top_dict_bytes) = top_dict_index.first() {
             parse_dict(top_dict_bytes)?
@@ -124,7 +160,6 @@ impl<'a> CffFontReader<'a> {
                     "missing CharStrings offset",
                 ))?;
         self.cursor.set_pos(usize::from(char_strings_offset));
-        println!(" CharStrings INDEX: '{}'", char_strings_offset);
         let char_strings_index = parse_index(&mut self.cursor)?;
 
         let mut char_string_operators = Vec::new();
@@ -148,6 +183,13 @@ impl<'a> CffFontReader<'a> {
             None => Charset::IsoAdobe, // default
         };
 
+        let encoding = match dict.encoding {
+            Some(0) => Encoding::Standard,
+            Some(1) => Encoding::Expert,
+            Some(_) => todo!("Custom Encoding"),
+            None => Encoding::Standard,
+        };
+
         Ok(CffFontProgram {
             header: CffHeader {
                 major,
@@ -161,11 +203,179 @@ impl<'a> CffFontReader<'a> {
             global_subr_index,
             char_string_operators,
             charset,
+            encoding,
         })
     }
 }
 
+/// The Standard Encoding as defined in the Adobe Technical Note #5176 Appendix B.
+#[rustfmt::skip]
+pub const STANDARD_ENCODING: [u8; 256] = [
+      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+      1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,  16,
+     17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  32,
+     33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  48,
+     49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  59,  60,  61,  62,  63,  64,
+     65,  66,  67,  68,  69,  70,  71,  72,  73,  74,  75,  76,  77,  78,  79,  80,
+     81,  82,  83,  84,  85,  86,  87,  88,  89,  90,  91,  92,  93,  94,  95,   0,
+      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+      0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+      0,  96,  97,  98,  99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110,
+      0, 111, 112, 113, 114,   0, 115, 116, 117, 118, 119, 120, 121, 122,   0, 123,
+      0, 124, 125, 126, 127, 128, 129, 130, 131,   0, 132, 133,   0, 134, 135, 136,
+    137,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
+      0, 138,   0, 139,   0,   0,   0,   0, 140, 141, 142, 143,   0,   0,   0,   0,
+      0, 144,   0,   0,   0, 145,   0,   0, 146, 147, 148, 149,   0,   0,   0,   0,
+];
+
 impl CffFontProgram<'_> {
+    pub fn code_to_gid(&self, code_point: u8) -> Option<u16> {
+        let index = usize::from(code_point);
+
+        match &self.encoding {
+            Encoding::Standard => {
+                let sid = u16::from(STANDARD_ENCODING[index]);
+                let gid = self.charset.sid_to_gid(sid);
+                if gid.is_some() {
+                    return gid;
+                }
+
+                // 1) PDF code -> glyph name (very rough StandardEncoding fallback).
+                // TODO: honor font.base_encoding and Encoding Differences when available.
+                let glyph_name = match code_point {
+                    b' ' => Some("space"),
+                    b'!' => Some("exclam"),
+                    b'"' => Some("quotedbl"),
+                    b'#' => Some("numbersign"),
+                    b'$' => Some("dollar"),
+                    b'%' => Some("percent"),
+                    b'&' => Some("ampersand"),
+                    b'\'' => Some("quoteright"),
+                    b'(' => Some("parenleft"),
+                    b')' => Some("parenright"),
+                    b'*' => Some("asterisk"),
+                    b'+' => Some("plus"),
+                    b',' => Some("comma"),
+                    b'-' => Some("hyphen"),
+                    b'.' => Some("period"),
+                    b'/' => Some("slash"),
+                    b'0' => Some("zero"),
+                    b'1' => Some("one"),
+                    b'2' => Some("two"),
+                    b'3' => Some("three"),
+                    b'4' => Some("four"),
+                    b'5' => Some("five"),
+                    b'6' => Some("six"),
+                    b'7' => Some("seven"),
+                    b'8' => Some("eight"),
+                    b'9' => Some("nine"),
+                    b':' => Some("colon"),
+                    b';' => Some("semicolon"),
+                    b'<' => Some("less"),
+                    b'=' => Some("equal"),
+                    b'>' => Some("greater"),
+                    b'?' => Some("question"),
+                    b'@' => Some("at"),
+                    b'A' => Some("A"),
+                    b'B' => Some("B"),
+                    b'C' => Some("C"),
+                    b'D' => Some("D"),
+                    b'E' => Some("E"),
+                    b'F' => Some("F"),
+                    b'G' => Some("G"),
+                    b'H' => Some("H"),
+                    b'I' => Some("I"),
+                    b'J' => Some("J"),
+                    b'K' => Some("K"),
+                    b'L' => Some("L"),
+                    b'M' => Some("M"),
+                    b'N' => Some("N"),
+                    b'O' => Some("O"),
+                    b'P' => Some("P"),
+                    b'Q' => Some("Q"),
+                    b'R' => Some("R"),
+                    b'S' => Some("S"),
+                    b'T' => Some("T"),
+                    b'U' => Some("U"),
+                    b'V' => Some("V"),
+                    b'W' => Some("W"),
+                    b'X' => Some("X"),
+                    b'Y' => Some("Y"),
+                    b'Z' => Some("Z"),
+                    b'a' => Some("a"),
+                    b'b' => Some("b"),
+                    b'c' => Some("c"),
+                    b'd' => Some("d"),
+                    b'e' => Some("e"),
+                    b'f' => Some("f"),
+                    b'g' => Some("g"),
+                    b'h' => Some("h"),
+                    b'i' => Some("i"),
+                    b'j' => Some("j"),
+                    b'k' => Some("k"),
+                    b'l' => Some("l"),
+                    b'm' => Some("m"),
+                    b'n' => Some("n"),
+                    b'o' => Some("o"),
+                    b'p' => Some("p"),
+                    b'q' => Some("q"),
+                    b'r' => Some("r"),
+                    b's' => Some("s"),
+                    b't' => Some("t"),
+                    b'u' => Some("u"),
+                    b'v' => Some("v"),
+                    b'w' => Some("w"),
+                    b'x' => Some("x"),
+                    b'y' => Some("y"),
+                    b'z' => Some("z"),
+                    b'\xE4' => Some("adieresis"),
+                    b'\xF6' => Some("odieresis"),
+                    b'\xFC' => Some("udieresis"),
+                    b'\xC4' => Some("Adieresis"),
+                    b'\xD6' => Some("Odieresis"),
+                    b'[' => Some("bracketleft"),
+                    b'\\' => Some("backslash"),
+                    b']' => Some("bracketright"),
+                    b'^' => Some("asciicircum"),
+                    b'_' => Some("underscore"),
+                    b'`' => Some("grave"),
+                    b'{' => Some("braceleft"),
+                    b'|' => Some("bar"),
+                    b'}' => Some("braceright"),
+                    b'~' => Some("asciitilde"),
+                    _ => None,
+                };
+
+                let Some(name) = glyph_name else {
+                    return None;
+                };
+
+                if let Some(pos) = STANDARD_STRINGS.iter().position(|n| *n == name) {
+                    let sid = u16::try_from(pos).unwrap();
+                    if let Some(gid) = self.charset.sid_to_gid(sid) {
+                        return Some(gid);
+                    }
+                }
+                let sid_base = 391u16;
+                let idx = self
+                    .string_index
+                    .iter()
+                    .position(|s| core::str::from_utf8(s).ok() == Some(name));
+
+                let a = idx
+                    .and_then(|i| u16::try_from(i).ok())
+                    .and_then(|i_u16| sid_base.checked_add(i_u16));
+                return a;
+            }
+            Encoding::Expert => {
+                panic!()
+            }
+            Encoding::Custom(_data) => {
+                panic!()
+            }
+        }
+    }
     // pub fn glyph_name(&self, glyph_id: u16) -> Option<&'a str> {
     //     // match self.kind {
     //     //     FontKind::SID(_) => {

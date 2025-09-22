@@ -148,11 +148,41 @@ impl<T: CanvasBackend> TextShowingOps for PdfCanvas<'_, T> {
                 renderer.render_text(text)
             }
             FontSubType::Type1 => {
-                // Minimal stub: just call the Type1FontRenderer stub for now
                 if let Some(type1_font) = current_font.type1_font.as_ref() {
-                    let mut renderer =
-                        Type1FontRenderer::new(self, type1_font, self.current_state()?.transform);
-                    renderer.render_text("3".as_bytes())
+                    // Limit immutable borrow by copying needed values into locals.
+                    let (
+                        font_size,
+                        hscale,
+                        tm,
+                        rise,
+                        word_spacing,
+                        char_spacing,
+                        current_transform,
+                    ) = {
+                        let st = &self.current_state()?.text_state;
+                        let transform = self.current_state()?.transform;
+                        (
+                            st.font_size,
+                            st.horizontal_scaling,
+                            st.matrix,
+                            st.rise,
+                            st.word_spacing,
+                            st.character_spacing,
+                            transform,
+                        )
+                    };
+
+                    let mut renderer = Type1FontRenderer::new(
+                        self,
+                        type1_font,
+                        font_size,
+                        hscale,
+                        tm,
+                        current_transform,
+                        rise,
+                    )
+                    .with_spacing(word_spacing, char_spacing);
+                    renderer.render_text(text)
                 } else {
                     Err(PdfCanvasError::NotImplemented(
                         "Type1 font data missing".to_string(),

@@ -18,6 +18,42 @@ fn read_be_int(bytes: &[u8]) -> Result<usize, CompactFontFormatError> {
         .map_err(|_| CompactFontFormatError::InvalidData("read_be_int: value out of range"))
 }
 
+pub fn parse_int(cursor: &mut Cursor, b0: u8) -> Result<i32, CompactFontFormatError> {
+    // Size   b0 range     Value range              Value calculation
+    //--------------------------------------------------------------------------------
+    // 1      32 to 246    -107 to +107             b0 - 139
+    // 2      247 to 250   +108 to +1131            (b0 - 247) * 256 + b1 + 108
+    // 2      251 to 254   -1131 to -108            -(b0 - 251) * 256 - b1 - 108
+    // 3      28           -32768 to +32767         b1 << 8 | b2
+    // 5      29           -(2^31) to +(2^31 - 1)   b1 << 24 | b2 << 16 | b3 << 8 | b4
+    // <https://learn.microsoft.com/en-us/typography/opentype/spec/cff2#table-3-operand-encoding>
+    Ok(match b0 {
+        32..=246 => b0 as i32 - 139,
+        247..=250 => (b0 as i32 - 247) * 256 + cursor.read_u8()? as i32 + 108,
+        251..=254 => -(b0 as i32 - 251) * 256 - cursor.read_u8()? as i32 - 108,
+        28 => cursor.read_u16()? as i32,
+        29 => {
+            let b1 = cursor.read_u8()? as u32;
+            let b2 = cursor.read_u8()? as u32;
+            let b3 = cursor.read_u8()? as u32;
+            let b4 = cursor.read_u8()? as u32;
+            let raw = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
+            // Convert to signed i32
+            if raw & 0x8000_0000 != 0 {
+                // Negative number in two's complement
+                let v = (!raw).wrapping_add(1);
+                -(v as i32)
+            } else {
+                // Positive number
+                raw as i32
+            }
+        }
+        _ => {
+            return Err(CompactFontFormatError::InvalidData("invalid offSize"));
+        }
+    })
+}
+
 pub fn parse_index<'a>(cur: &mut Cursor<'a>) -> Result<Vec<&'a [u8]>, CompactFontFormatError> {
     let count = cur.read_u16()?;
     if count == 0 {
