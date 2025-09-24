@@ -30,7 +30,16 @@ impl Charset {
         }
 
         match self {
-            Charset::IsoAdobe | Charset::Expert | Charset::ExpertSubset => None,
+            Charset::IsoAdobe => {
+                panic!()
+            }
+            Charset::Expert => {
+                panic!()
+            }
+
+            Charset::ExpertSubset => {
+                panic!()
+            },
 
             Charset::SID(sids) => sids.iter().position(|n| n.0 == sid).map(|n| (n as u16 + 1)),
             Charset::SIDRange(ranges) => {
@@ -152,6 +161,10 @@ impl<'a> CffFontReader<'a> {
             // No Top DICT present; return empty operators for robustness
             Vec::new()
         };
+
+        if top_dict_index.len() > 1 {
+            panic!()
+        }
         let dict = TopDictEntry::from_dictionary_tokens(&operators);
 
         let char_strings_offset =
@@ -208,7 +221,13 @@ impl<'a> CffFontReader<'a> {
     }
 }
 
-/// The Standard Encoding as defined in the Adobe Technical Note #5176 Appendix B.
+/// This maps font specific character codes to string ids in a charset.
+///
+/// See "Glyph Organization" at <https://adobe-type-tools.github.io/font-tech-notes/pdfs/5176.CFF.pdf#page=18>
+/// for an explanation of how charsets, encodings and glyphs are related.
+///
+/// See "Standard" encoding at <https://adobe-type-tools.github.io/font-tech-notes/pdfs/5176.CFF.pdf#page=37>
+/// for this particular mapping.
 #[rustfmt::skip]
 pub const STANDARD_ENCODING: [u8; 256] = [
       0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,   0,
@@ -236,137 +255,7 @@ impl CffFontProgram<'_> {
         match &self.encoding {
             Encoding::Standard => {
                 let sid = u16::from(STANDARD_ENCODING[index]);
-                let gid = self.charset.sid_to_gid(sid);
-                if gid.is_some() {
-                    return gid;
-                }
-
-                // 1) PDF code -> glyph name (very rough StandardEncoding fallback).
-                // TODO: honor font.base_encoding and Encoding Differences when available.
-                let glyph_name = match code_point {
-                    b' ' => Some("space"),
-                    b'!' => Some("exclam"),
-                    b'"' => Some("quotedbl"),
-                    b'#' => Some("numbersign"),
-                    b'$' => Some("dollar"),
-                    b'%' => Some("percent"),
-                    b'&' => Some("ampersand"),
-                    b'\'' => Some("quoteright"),
-                    b'(' => Some("parenleft"),
-                    b')' => Some("parenright"),
-                    b'*' => Some("asterisk"),
-                    b'+' => Some("plus"),
-                    b',' => Some("comma"),
-                    b'-' => Some("hyphen"),
-                    b'.' => Some("period"),
-                    b'/' => Some("slash"),
-                    b'0' => Some("zero"),
-                    b'1' => Some("one"),
-                    b'2' => Some("two"),
-                    b'3' => Some("three"),
-                    b'4' => Some("four"),
-                    b'5' => Some("five"),
-                    b'6' => Some("six"),
-                    b'7' => Some("seven"),
-                    b'8' => Some("eight"),
-                    b'9' => Some("nine"),
-                    b':' => Some("colon"),
-                    b';' => Some("semicolon"),
-                    b'<' => Some("less"),
-                    b'=' => Some("equal"),
-                    b'>' => Some("greater"),
-                    b'?' => Some("question"),
-                    b'@' => Some("at"),
-                    b'A' => Some("A"),
-                    b'B' => Some("B"),
-                    b'C' => Some("C"),
-                    b'D' => Some("D"),
-                    b'E' => Some("E"),
-                    b'F' => Some("F"),
-                    b'G' => Some("G"),
-                    b'H' => Some("H"),
-                    b'I' => Some("I"),
-                    b'J' => Some("J"),
-                    b'K' => Some("K"),
-                    b'L' => Some("L"),
-                    b'M' => Some("M"),
-                    b'N' => Some("N"),
-                    b'O' => Some("O"),
-                    b'P' => Some("P"),
-                    b'Q' => Some("Q"),
-                    b'R' => Some("R"),
-                    b'S' => Some("S"),
-                    b'T' => Some("T"),
-                    b'U' => Some("U"),
-                    b'V' => Some("V"),
-                    b'W' => Some("W"),
-                    b'X' => Some("X"),
-                    b'Y' => Some("Y"),
-                    b'Z' => Some("Z"),
-                    b'a' => Some("a"),
-                    b'b' => Some("b"),
-                    b'c' => Some("c"),
-                    b'd' => Some("d"),
-                    b'e' => Some("e"),
-                    b'f' => Some("f"),
-                    b'g' => Some("g"),
-                    b'h' => Some("h"),
-                    b'i' => Some("i"),
-                    b'j' => Some("j"),
-                    b'k' => Some("k"),
-                    b'l' => Some("l"),
-                    b'm' => Some("m"),
-                    b'n' => Some("n"),
-                    b'o' => Some("o"),
-                    b'p' => Some("p"),
-                    b'q' => Some("q"),
-                    b'r' => Some("r"),
-                    b's' => Some("s"),
-                    b't' => Some("t"),
-                    b'u' => Some("u"),
-                    b'v' => Some("v"),
-                    b'w' => Some("w"),
-                    b'x' => Some("x"),
-                    b'y' => Some("y"),
-                    b'z' => Some("z"),
-                    b'\xE4' => Some("adieresis"),
-                    b'\xF6' => Some("odieresis"),
-                    b'\xFC' => Some("udieresis"),
-                    b'\xC4' => Some("Adieresis"),
-                    b'\xD6' => Some("Odieresis"),
-                    b'[' => Some("bracketleft"),
-                    b'\\' => Some("backslash"),
-                    b']' => Some("bracketright"),
-                    b'^' => Some("asciicircum"),
-                    b'_' => Some("underscore"),
-                    b'`' => Some("grave"),
-                    b'{' => Some("braceleft"),
-                    b'|' => Some("bar"),
-                    b'}' => Some("braceright"),
-                    b'~' => Some("asciitilde"),
-                    _ => None,
-                };
-
-                let Some(name) = glyph_name else {
-                    return None;
-                };
-
-                if let Some(pos) = STANDARD_STRINGS.iter().position(|n| *n == name) {
-                    let sid = u16::try_from(pos).unwrap();
-                    if let Some(gid) = self.charset.sid_to_gid(sid) {
-                        return Some(gid);
-                    }
-                }
-                let sid_base = 391u16;
-                let idx = self
-                    .string_index
-                    .iter()
-                    .position(|s| core::str::from_utf8(s).ok() == Some(name));
-
-                let a = idx
-                    .and_then(|i| u16::try_from(i).ok())
-                    .and_then(|i_u16| sid_base.checked_add(i_u16));
-                return a;
+                self.charset.sid_to_gid(sid)
             }
             Encoding::Expert => {
                 panic!()
