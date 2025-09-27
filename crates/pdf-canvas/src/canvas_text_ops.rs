@@ -105,11 +105,11 @@ impl<T: CanvasBackend> TextStateOps for PdfCanvas<'_, T> {
             return Ok(());
         }
 
-        if let Some(resources) = self.current_state()?.resources {
-            if let Some(font) = resources.fonts.get(font_name) {
-                self.current_state_mut()?.text_state.font = Some(font);
-                return Ok(());
-            }
+        if let Some(resources) = self.current_state()?.resources
+            && let Some(font) = resources.fonts.get(font_name)
+        {
+            self.current_state_mut()?.text_state.font = Some(font);
+            return Ok(());
         }
 
         Err(PdfCanvasError::FontNotFound(font_name.to_string()))

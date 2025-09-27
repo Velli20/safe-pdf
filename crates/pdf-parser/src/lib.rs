@@ -133,10 +133,11 @@ impl PdfParser<'_> {
 
         // Check that the following character after the number is a valid delimiter
         // or a dot (potential decimal number).
-        if let Some(d) = self.tokenizer.data().first().copied() {
-            if !Self::is_pdf_delimiter(d) && d != b'.' {
-                return Err(ParserError::MissingDelimiterAfterKeyword(d));
-            }
+        if let Some(d) = self.tokenizer.data().first().copied()
+            && !Self::is_pdf_delimiter(d)
+            && d != b'.'
+        {
+            return Err(ParserError::MissingDelimiterAfterKeyword(d));
         }
 
         if skip_whitespace {
@@ -171,10 +172,10 @@ impl PdfParser<'_> {
             ));
         }
 
-        if let Some(d) = self.tokenizer.data().first().copied() {
-            if !Self::is_pdf_delimiter(d) {
-                return Err(ParserError::MissingDelimiterAfterKeyword(d));
-            }
+        if let Some(d) = self.tokenizer.data().first().copied()
+            && !Self::is_pdf_delimiter(d)
+        {
+            return Err(ParserError::MissingDelimiterAfterKeyword(d));
         }
 
         // Keyword literals are followed by an end-of-line marker.

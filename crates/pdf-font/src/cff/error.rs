@@ -16,12 +16,14 @@ pub enum CompactFontFormatError {
     UnexpectedDictByte(u8),
     #[error("Cursor read error: {0}")]
     CursorReadError(#[from] CursorReadError),
-    #[error("Insufficient operands: expected {expected}, found {found}")]
-    InsufficientOperands { expected: usize, found: usize },
-    #[error("Invalid operand count: expected {expected}, found {found}")]
-    InvalidOperandCount { expected: String, found: usize },
-    #[error("Operand overflow during checked arithmetic")]
-    OperandOverflow,
-    #[error("Stack underflow")]
-    StackUnderflow,
+    #[error("Unsupported real number format")]
+    UnsupportedRealNumber,
+    #[error("{0}")]
+    CharsetError(#[from] crate::cff::charset::CharsetError),
+    #[error("{0}")]
+    EncodingError(#[from] crate::cff::encoding::EncodingError),
+    #[error("{0}")]
+    TopDictReadError(#[from] crate::cff::top_dictionary_operator::TopDictReadError),
+    #[error("{0}")]
+    CharStringReadError(#[from] crate::cff::char_string_operator::CharStringReadError),
 }

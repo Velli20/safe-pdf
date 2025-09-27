@@ -1,4 +1,7 @@
-use crate::cff::{cursor::Cursor, error::CompactFontFormatError};
+use crate::cff::{
+    cursor::{Cursor, CursorReadError},
+    error::CompactFontFormatError,
+};
 
 /// Read a big-endian integer from 1..=4 bytes and return it as `usize`.
 fn read_be_int(bytes: &[u8]) -> Result<usize, CompactFontFormatError> {
@@ -18,7 +21,7 @@ fn read_be_int(bytes: &[u8]) -> Result<usize, CompactFontFormatError> {
         .map_err(|_| CompactFontFormatError::InvalidData("read_be_int: value out of range"))
 }
 
-pub fn parse_int(cursor: &mut Cursor, b0: u8) -> Result<i32, CompactFontFormatError> {
+pub fn parse_int(cursor: &mut Cursor, b0: u8) -> Result<i32, CursorReadError> {
     // Size   b0 range     Value range              Value calculation
     //--------------------------------------------------------------------------------
     // 1      32 to 246    -107 to +107             b0 - 139
@@ -49,7 +52,7 @@ pub fn parse_int(cursor: &mut Cursor, b0: u8) -> Result<i32, CompactFontFormatEr
             }
         }
         _ => {
-            return Err(CompactFontFormatError::InvalidData("invalid offSize"));
+            return Err(CursorReadError::EndOfData);
         }
     })
 }
@@ -128,7 +131,6 @@ pub fn parse_index<'a>(cur: &mut Cursor<'a>) -> Result<Vec<&'a [u8]>, CompactFon
 #[derive(Debug, Clone)]
 pub(crate) enum DictToken {
     Number(i32),
-    Real(String),
     Operator(u16),
 }
 
@@ -138,59 +140,32 @@ pub(crate) fn parse_dict(data: &[u8]) -> Result<Vec<DictToken>, CompactFontForma
 
     while cur.pos() < cur.len() {
         let b = cur.read_u8()?;
-        let token =
-            match b {
-                0..=21 => {
-                    // Operator byte
-                    if b == 12 {
-                        let b2 = cur.read_u8()?;
-                        DictToken::Operator(((u16::from(b)) << 8) | u16::from(b2))
-                    } else {
-                        DictToken::Operator(u16::from(b))
-                    }
+        let token = match b {
+            0..=21 => {
+                // Operator byte
+                if b == 12 {
+                    let b2 = cur.read_u8()?;
+                    DictToken::Operator(((u16::from(b)) << 8) | u16::from(b2))
+                } else {
+                    DictToken::Operator(u16::from(b))
                 }
-                28 | 32..=254 => {
-                    let v = parse_int(&mut cur, b)?;
-                    DictToken::Number(v)
-                }
+            }
+            28 | 32..=254 => {
+                let v = parse_int(&mut cur, b)?;
+                DictToken::Number(v)
+            }
 
-                29 => {
-                    // long int (4 bytes, big endian, signed)
-                    let s = cur.read_n(4)?;
-                    let val = i32::from_be_bytes([s[0], s[1], s[2], s[3]]);
-                    DictToken::Number(val)
-                }
-                30 => {
-                    // real number — ASCII nibble encoding. We'll parse to String.
-                    fn parse_real(cur: &mut Cursor) -> Result<String, CompactFontFormatError> {
-                        let mut chars = String::new();
-                        'outer: loop {
-                            let nibble_byte = cur.read_u8()?;
-                            for &n in &[nibble_byte >> 4, nibble_byte & 0x0f] {
-                                match n {
-                                    0..=9 => {
-                                        let d = b'0'.checked_add(n).ok_or(
-                                            CompactFontFormatError::InvalidData(
-                                                "digit nibble overflow",
-                                            ),
-                                        )?;
-                                        chars.push(char::from(d));
-                                    }
-                                    0xA => chars.push('.'),
-                                    0xB | 0xC => chars.push('E'),
-                                    0xD => chars.push('-'),
-                                    0xE => {}            // reserved
-                                    0xF => break 'outer, // terminator
-                                    _ => {}
-                                }
-                            }
-                        }
-                        Ok(chars)
-                    }
-                    DictToken::Real(parse_real(&mut cur)?)
-                }
-                _ => return Err(CompactFontFormatError::UnexpectedDictByte(b)),
-            };
+            29 => {
+                // long int (4 bytes, big endian, signed)
+                let s = cur.read_n(4)?;
+                let val = i32::from_be_bytes([s[0], s[1], s[2], s[3]]);
+                DictToken::Number(val)
+            }
+            30 => {
+                return Err(CompactFontFormatError::UnsupportedRealNumber);
+            }
+            _ => return Err(CompactFontFormatError::UnexpectedDictByte(b)),
+        };
         out.push(token);
     }
     Ok(out)

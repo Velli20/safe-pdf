@@ -35,10 +35,10 @@ impl<T: CanvasBackend> Canvas for PdfCanvas<'_, T> {
 
     fn restore(&mut self) -> Result<(), PdfCanvasError> {
         let prev = self.canvas_stack.pop();
-        if let Some(state) = prev {
-            if state.clip_path.is_some() {
-                self.canvas.reset_clip();
-            }
+        if let Some(state) = prev
+            && state.clip_path.is_some()
+        {
+            self.canvas.reset_clip();
         }
         Ok(())
     }

@@ -1,5 +1,9 @@
+mod char_string_interpreter;
+pub mod char_string_interpreter_stack;
 pub mod char_string_operator;
+mod charset;
 mod cursor;
+mod encoding;
 pub mod error;
 pub mod parser;
 pub mod reader;

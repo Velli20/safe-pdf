@@ -156,10 +156,10 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
             // Build the glyph outline using the composed transform.
             let mut builder = PdfGlyphOutline::new(glyph_matrix_for_char);
 
-            if let Some(a) = cmap.get_mapping(char_code as u32) {
-                if let Some(x) = face.glyph_index(a) {
-                    glyph_id = x;
-                }
+            if let Some(a) = cmap.get_mapping(char_code as u32)
+                && let Some(x) = face.glyph_index(a)
+            {
+                glyph_id = x;
             }
 
             face.outline_glyph(glyph_id, &mut builder);

@@ -3,8 +3,8 @@
 
 use crate::{canvas::Canvas, error::PdfCanvasError, text_renderer::TextRenderer};
 use pdf_content_stream::pdf_operator_backend::PdfOperatorBackend;
-use pdf_font::cff::char_string_operator::CharStringStack;
-use pdf_font::cff::reader::{CffFontReader, Charset};
+use pdf_font::cff::char_string_interpreter_stack::CharStringStack;
+use pdf_font::cff::reader::CffFontReader;
 use pdf_font::type1_font::Type1Font;
 use pdf_graphics::PathFillType;
 use pdf_graphics::pdf_path::PdfPath;
