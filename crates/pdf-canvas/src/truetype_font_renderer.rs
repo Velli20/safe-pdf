@@ -81,11 +81,7 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
             .as_ref()
             .ok_or(TrueTypeFontRendererError::MissingCidFont)?;
 
-        let font_file = cid_font
-            .descriptor
-            .font_file
-            .as_ref()
-            .ok_or(TrueTypeFontRendererError::MissingFontFile)?;
+        let font_file = &cid_font.descriptor.font_file;
 
         let face = match font_file {
             ObjectVariant::Stream(s) => Face::parse(s.data.as_slice(), 0)
