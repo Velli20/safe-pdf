@@ -11,8 +11,6 @@ pub enum FontDescriptorError {
     MissingFontFile,
     #[error("Object error: {0}")]
     ObjectError(#[from] ObjectError),
-    #[error("FontName is required but was an empty string")]
-    EmptyFontName,
 }
 
 /// Represents a font descriptor, a dictionary that provides detailed information
@@ -46,7 +44,10 @@ impl FromDictionary for FontDescriptor {
             .or_else(|| resolve_font_file_stream("FontFile3"))
             .or_else(|| resolve_font_file_stream("FontFile"));
 
-        let font_file = font_file.ok_or(FontDescriptorError::MissingFontFile)?;
+        let Some(font_file) = font_file else {
+            return Err(FontDescriptorError::MissingFontFile);
+        };
+
         Ok(Self { font_file })
     }
 }
