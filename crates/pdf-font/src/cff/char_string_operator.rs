@@ -12,6 +12,8 @@
 
 use pdf_graphics::{pdf_path::PdfPath, point::Point};
 
+use thiserror::Error;
+
 use crate::cff::{cursor::Cursor, error::CompactFontFormatError, parser::parse_int};
 
 /// Specifies how point coordinates for a curve are computed.
@@ -20,8 +22,6 @@ enum PointMode {
     DxDy,
     XDy,
     DxY,
-    DxInitialY,
-    DLargerCoordDist,
     DxMaybeDy(bool),
     MaybeDxDy(bool),
 }
@@ -92,18 +92,28 @@ impl CharStringStack {
     }
 }
 
+// The arithmetic in this helper is limited to small index/offset adjustments based on
+// the operand stack pointer. These additions are safe in practice because the stack
+// length is bounded by the charstring operand encoding (far below usize::MAX). We
+// suppress Clippy's `arithmetic_side_effects` here to keep the code concise.
+#[allow(clippy::arithmetic_side_effects)]
 fn emit_curves<const N: usize>(
     stack: &mut CharStringStack,
     path: &mut PdfPath,
     modes: [PointMode; N],
 ) -> Result<(), CompactFontFormatError> {
-    use PointMode::*;
-    let initial_x = stack.x;
-    let initial_y = stack.y;
-    let mut count = 0;
-    let mut points = [Point::default(); 2];
-    for mode in modes {
-        let stack_used = match mode {
+    // In Type2 charstrings this helper is always used with 3 coordinate specs (two control
+    // points + final on-curve point). We keep it generic for clarity, but assert in debug
+    // builds to catch accidental misuse.
+    debug_assert!(
+        N == 3,
+        "emit_curves is expected to be called with exactly 3 point modes"
+    );
+
+    let mut control_points = [Point::default(); 2];
+
+    for (i, mode) in modes.into_iter().enumerate() {
+        let used = match mode {
             PointMode::DxDy => {
                 stack.x += stack.get_fixed(stack.stack_ix)?;
                 stack.y += stack.get_fixed(stack.stack_ix + 1)?;
@@ -117,26 +127,6 @@ fn emit_curves<const N: usize>(
                 stack.x += stack.get_fixed(stack.stack_ix)?;
                 1
             }
-            PointMode::DxInitialY => {
-                stack.x += stack.get_fixed(stack.stack_ix)?;
-                stack.y = initial_y;
-                1
-            }
-            // Emits a delta for the coordinate with the larger distance
-            // from the original value. Sets the other coordinate to the
-            // original value.
-            PointMode::DLargerCoordDist => {
-                let delta = stack.get_fixed(stack.stack_ix)?;
-                if (stack.x - initial_x).abs() > (stack.y - initial_y).abs() {
-                    stack.x += delta;
-                    stack.y = initial_y;
-                } else {
-                    stack.y += delta;
-                    stack.x = initial_x;
-                }
-                1
-            }
-            // Apply delta to y if `do_dy` is true.
             PointMode::DxMaybeDy(do_dy) => {
                 stack.x += stack.get_fixed(stack.stack_ix)?;
                 if do_dy {
@@ -146,7 +136,6 @@ fn emit_curves<const N: usize>(
                     1
                 }
             }
-            // Apply delta to x if `do_dx` is true.
             PointMode::MaybeDxDy(do_dx) => {
                 stack.y += stack.get_fixed(stack.stack_ix)?;
                 if do_dx {
@@ -157,27 +146,46 @@ fn emit_curves<const N: usize>(
                 }
             }
         };
-        stack.stack_ix += stack_used;
-        if count == 2 {
+        stack.stack_ix += used;
+
+        if i < N - 1 {
+            // First N-1 points are control points for the cubic.
+            control_points[i] = Point::new(stack.x, stack.y);
+        } else {
+            // Final point: emit the curve.
             path.curve_to(
-                points[0].x,
-                points[0].y,
-                points[1].x,
-                points[1].y,
+                control_points[0].x,
+                control_points[0].y,
+                control_points[1].x,
+                control_points[1].y,
                 stack.x,
                 stack.y,
             );
-            count = 0;
-        } else {
-            points[count] = Point::new(stack.x, stack.y);
-            count += 1;
         }
     }
     Ok(())
 }
 
+/// Error variants that may occur while evaluating a Type 2 CharString operator.
+#[derive(Debug, Error)]
+pub enum CharStringOpError {
+    /// Underlying compact font format parsing or stack error.
+    #[error("CFF error: {0}")]
+    Cff(#[from] CompactFontFormatError),
+    /// Attempt to read more operands than available (stack underflow) while executing an operator.
+    #[error("stack underflow while executing operator")]
+    StackUnderflow,
+    /// Attempt to execute an operator that is not yet implemented.
+    #[error("unimplemented charstring operator: {0}")]
+    Unimplemented(&'static str),
+}
+
 pub trait CharStringOperatorTrait {
-    fn call(&self, path: &mut PdfPath, stack: &mut CharStringStack);
+    fn call(
+        &self,
+        path: &mut PdfPath,
+        stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError>;
 }
 
 trait CharStringOperator {
@@ -204,8 +212,12 @@ impl CharStringOperator for HStemOp {
 }
 
 impl CharStringOperatorTrait for HStemOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("hstem"))
     }
 }
 
@@ -222,8 +234,12 @@ impl CharStringOperator for VStemOp {
 }
 
 impl CharStringOperatorTrait for VStemOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("vstem"))
     }
 }
 
@@ -240,7 +256,11 @@ impl CharStringOperator for VMoveToOp {
 }
 
 impl CharStringOperatorTrait for VMoveToOp {
-    fn call(&self, path: &mut PdfPath, stack: &mut CharStringStack) {
+    fn call(
+        &self,
+        path: &mut PdfPath,
+        stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
         let mut i = 0;
         if stack.len() == 2 && !stack.have_read_width {
             stack.have_read_width = true;
@@ -251,10 +271,13 @@ impl CharStringOperatorTrait for VMoveToOp {
         } else {
             path.close();
         }
-        let delta = stack.get_fixed(i).unwrap();
+        let delta = stack
+            .get_fixed(i)
+            .map_err(|_| CharStringOpError::StackUnderflow)?;
         stack.y += delta;
         path.move_to(stack.x, stack.y);
         stack.clear();
+        Ok(())
     }
 }
 
@@ -271,16 +294,23 @@ impl CharStringOperator for RLineToOp {
 }
 
 impl CharStringOperatorTrait for RLineToOp {
-    fn call(&self, path: &mut PdfPath, stack: &mut CharStringStack) {
+    fn call(
+        &self,
+        path: &mut PdfPath,
+        stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
         let mut i = 0;
         while i < stack.len() {
-            let [dx, dy] = stack.fixed_array::<2>(i).unwrap();
+            let [dx, dy] = stack
+                .fixed_array::<2>(i)
+                .map_err(|_| CharStringOpError::StackUnderflow)?;
             stack.x += dx;
             stack.y += dy;
             path.line_to(stack.x, stack.y);
             i += 2;
         }
         stack.clear();
+        Ok(())
     }
 }
 
@@ -297,10 +327,16 @@ impl CharStringOperator for HLineToOp {
 }
 
 impl CharStringOperatorTrait for HLineToOp {
-    fn call(&self, path: &mut PdfPath, stack: &mut CharStringStack) {
+    fn call(
+        &self,
+        path: &mut PdfPath,
+        stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
         let mut is_x = true;
         for i in 0..stack.len() {
-            let delta = stack.get_fixed(i).unwrap();
+            let delta = stack
+                .get_fixed(i)
+                .map_err(|_| CharStringOpError::StackUnderflow)?;
             if is_x {
                 stack.x += delta;
             } else {
@@ -310,6 +346,7 @@ impl CharStringOperatorTrait for HLineToOp {
             path.line_to(stack.x, stack.y);
         }
         stack.clear();
+        Ok(())
     }
 }
 
@@ -326,10 +363,16 @@ impl CharStringOperator for VLineToOp {
 }
 
 impl CharStringOperatorTrait for VLineToOp {
-    fn call(&self, path: &mut PdfPath, stack: &mut CharStringStack) {
+    fn call(
+        &self,
+        path: &mut PdfPath,
+        stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
         let mut is_x = false;
         for i in 0..stack.len() {
-            let delta = stack.get_fixed(i).unwrap();
+            let delta = stack
+                .get_fixed(i)
+                .map_err(|_| CharStringOpError::StackUnderflow)?;
             if is_x {
                 stack.x += delta;
             } else {
@@ -339,6 +382,7 @@ impl CharStringOperatorTrait for VLineToOp {
             path.line_to(stack.x, stack.y);
         }
         stack.clear();
+        Ok(())
     }
 }
 
@@ -355,11 +399,16 @@ impl CharStringOperator for RRCurveToOp {
 }
 
 impl CharStringOperatorTrait for RRCurveToOp {
-    fn call(&self, path: &mut PdfPath, stack: &mut CharStringStack) {
+    fn call(
+        &self,
+        path: &mut PdfPath,
+        stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
         while stack.coords_remaining() >= 6 {
-            emit_curves(stack, path, [PointMode::DxDy; 3]).unwrap();
+            emit_curves(stack, path, [PointMode::DxDy; 3])?;
         }
         stack.clear();
+        Ok(())
     }
 }
 
@@ -376,8 +425,12 @@ impl CharStringOperator for CallSubroutineOp {
 }
 
 impl CharStringOperatorTrait for CallSubroutineOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("callsubr"))
     }
 }
 
@@ -393,8 +446,12 @@ impl CharStringOperator for ReturnOp {
 }
 
 impl CharStringOperatorTrait for ReturnOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("return"))
     }
 }
 
@@ -410,9 +467,14 @@ impl CharStringOperator for EndCharOp {
 }
 
 impl CharStringOperatorTrait for EndCharOp {
-    fn call(&self, path: &mut PdfPath, stack: &mut CharStringStack) {
+    fn call(
+        &self,
+        path: &mut PdfPath,
+        stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
         path.close();
         stack.operands.clear();
+        Ok(())
     }
 }
 
@@ -429,8 +491,12 @@ impl CharStringOperator for HStemHmOp {
 }
 
 impl CharStringOperatorTrait for HStemHmOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("hstemhm"))
     }
 }
 
@@ -447,8 +513,12 @@ impl CharStringOperator for HintMaskOp {
 }
 
 impl CharStringOperatorTrait for HintMaskOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("hintmask"))
     }
 }
 
@@ -465,8 +535,12 @@ impl CharStringOperator for CntrMaskOp {
 }
 
 impl CharStringOperatorTrait for CntrMaskOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("cntrmask"))
     }
 }
 
@@ -483,7 +557,11 @@ impl CharStringOperator for RMoveToOp {
 }
 
 impl CharStringOperatorTrait for RMoveToOp {
-    fn call(&self, path: &mut PdfPath, stack: &mut CharStringStack) {
+    fn call(
+        &self,
+        path: &mut PdfPath,
+        stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
         let mut i = 0;
         if stack.len() == 3 && !stack.have_read_width {
             stack.have_read_width = true;
@@ -494,11 +572,14 @@ impl CharStringOperatorTrait for RMoveToOp {
         } else {
             path.close();
         }
-        let [dx, dy] = stack.fixed_array::<2>(i).unwrap();
+        let [dx, dy] = stack
+            .fixed_array::<2>(i)
+            .map_err(|_| CharStringOpError::StackUnderflow)?;
         stack.x += dx;
         stack.y += dy;
         path.move_to(stack.x, stack.y);
         stack.clear();
+        Ok(())
     }
 }
 
@@ -515,7 +596,11 @@ impl CharStringOperator for HMoveToOp {
 }
 
 impl CharStringOperatorTrait for HMoveToOp {
-    fn call(&self, path: &mut PdfPath, stack: &mut CharStringStack) {
+    fn call(
+        &self,
+        path: &mut PdfPath,
+        stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
         let mut i = 0;
         if stack.len() == 2 && !stack.have_read_width {
             stack.have_read_width = true;
@@ -526,11 +611,13 @@ impl CharStringOperatorTrait for HMoveToOp {
         } else {
             path.close();
         }
-        let delta = stack.get_fixed(i).unwrap();
+        let delta = stack
+            .get_fixed(i)
+            .map_err(|_| CharStringOpError::StackUnderflow)?;
         stack.x += delta;
-
         path.move_to(stack.x, stack.y);
         stack.clear();
+        Ok(())
     }
 }
 
@@ -547,8 +634,12 @@ impl CharStringOperator for VStemHmOp {
 }
 
 impl CharStringOperatorTrait for VStemHmOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("vstemhm"))
     }
 }
 
@@ -565,15 +656,22 @@ impl CharStringOperator for RCurveLineOp {
 }
 
 impl CharStringOperatorTrait for RCurveLineOp {
-    fn call(&self, path: &mut PdfPath, stack: &mut CharStringStack) {
+    fn call(
+        &self,
+        path: &mut PdfPath,
+        stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
         while stack.coords_remaining() >= 6 {
-            emit_curves(stack, path, [PointMode::DxDy; 3]).unwrap();
+            emit_curves(stack, path, [PointMode::DxDy; 3])?;
         }
-        let [dx, dy] = stack.fixed_array::<2>(stack.stack_ix).unwrap();
+        let [dx, dy] = stack
+            .fixed_array::<2>(stack.stack_ix)
+            .map_err(|_| CharStringOpError::StackUnderflow)?;
         stack.x += dx;
         stack.y += dy;
         path.line_to(stack.x, stack.y);
         stack.clear();
+        Ok(())
     }
 }
 
@@ -590,8 +688,12 @@ impl CharStringOperator for RLineCurveOp {
 }
 
 impl CharStringOperatorTrait for RLineCurveOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("rlinecurve"))
     }
 }
 
@@ -608,9 +710,16 @@ impl CharStringOperator for VVCurveToOp {
 }
 
 impl CharStringOperatorTrait for VVCurveToOp {
-    fn call(&self, path: &mut PdfPath, stack: &mut CharStringStack) {
+    fn call(
+        &self,
+        path: &mut PdfPath,
+        stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
         if stack.len_is_odd() {
-            stack.x += stack.get_fixed(0).unwrap();
+            let dx = stack
+                .get_fixed(0)
+                .map_err(|_| CharStringOpError::StackUnderflow)?;
+            stack.x += dx;
             stack.stack_ix = 1;
         }
         while stack.coords_remaining() > 0 {
@@ -618,10 +727,10 @@ impl CharStringOperatorTrait for VVCurveToOp {
                 stack,
                 path,
                 [PointMode::XDy, PointMode::DxDy, PointMode::XDy],
-            )
-            .unwrap();
+            )?;
         }
         stack.clear();
+        Ok(())
     }
 }
 
@@ -638,8 +747,12 @@ impl CharStringOperator for HHCurveToOp {
 }
 
 impl CharStringOperatorTrait for HHCurveToOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("hhcurveto"))
     }
 }
 
@@ -656,8 +769,12 @@ impl CharStringOperator for CallGSubrOp {
 }
 
 impl CharStringOperatorTrait for CallGSubrOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("callgsubr"))
     }
 }
 
@@ -674,7 +791,11 @@ impl CharStringOperator for VHCurveToOp {
 }
 
 impl CharStringOperatorTrait for VHCurveToOp {
-    fn call(&self, path: &mut PdfPath, stack: &mut CharStringStack) {
+    fn call(
+        &self,
+        path: &mut PdfPath,
+        stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
         let count1 = stack.len();
         let count = count1 & !2;
         let mut is_horizontal = false;
@@ -690,8 +811,7 @@ impl CharStringOperatorTrait for VHCurveToOp {
                         PointMode::DxDy,
                         PointMode::MaybeDxDy(do_last_delta),
                     ],
-                )
-                .unwrap();
+                )?;
             } else {
                 emit_curves(
                     stack,
@@ -701,12 +821,12 @@ impl CharStringOperatorTrait for VHCurveToOp {
                         PointMode::DxDy,
                         PointMode::DxMaybeDy(do_last_delta),
                     ],
-                )
-                .unwrap();
+                )?;
             }
             is_horizontal = !is_horizontal;
         }
         stack.clear();
+        Ok(())
     }
 }
 
@@ -723,7 +843,11 @@ impl CharStringOperator for HVCurveToOp {
 }
 
 impl CharStringOperatorTrait for HVCurveToOp {
-    fn call(&self, path: &mut PdfPath, stack: &mut CharStringStack) {
+    fn call(
+        &self,
+        path: &mut PdfPath,
+        stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
         let count1 = stack.len();
         let count = count1 & !2;
         let mut is_horizontal = true;
@@ -739,8 +863,7 @@ impl CharStringOperatorTrait for HVCurveToOp {
                         PointMode::DxDy,
                         PointMode::MaybeDxDy(do_last_delta),
                     ],
-                )
-                .unwrap();
+                )?;
             } else {
                 emit_curves(
                     stack,
@@ -750,12 +873,12 @@ impl CharStringOperatorTrait for HVCurveToOp {
                         PointMode::DxDy,
                         PointMode::DxMaybeDy(do_last_delta),
                     ],
-                )
-                .unwrap();
+                )?;
             }
             is_horizontal = !is_horizontal;
         }
         stack.clear();
+        Ok(())
     }
 }
 
@@ -772,8 +895,12 @@ impl CharStringOperator for DotSectionOp {
 }
 
 impl CharStringOperatorTrait for DotSectionOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("dotsection"))
     }
 }
 
@@ -790,8 +917,12 @@ impl CharStringOperator for AndOp {
 }
 
 impl CharStringOperatorTrait for AndOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("and"))
     }
 }
 
@@ -808,8 +939,12 @@ impl CharStringOperator for OrOp {
 }
 
 impl CharStringOperatorTrait for OrOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!()
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("or"))
     }
 }
 
@@ -826,8 +961,12 @@ impl CharStringOperator for NotOp {
 }
 
 impl CharStringOperatorTrait for NotOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("not"))
     }
 }
 
@@ -844,8 +983,12 @@ impl CharStringOperator for AbsOp {
 }
 
 impl CharStringOperatorTrait for AbsOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("abs"))
     }
 }
 
@@ -862,8 +1005,12 @@ impl CharStringOperator for AddOp {
 }
 
 impl CharStringOperatorTrait for AddOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("add"))
     }
 }
 
@@ -880,8 +1027,12 @@ impl CharStringOperator for SubOp {
 }
 
 impl CharStringOperatorTrait for SubOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("sub"))
     }
 }
 
@@ -898,8 +1049,12 @@ impl CharStringOperator for DivOp {
 }
 
 impl CharStringOperatorTrait for DivOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("div"))
     }
 }
 
@@ -916,8 +1071,12 @@ impl CharStringOperator for NegOp {
 }
 
 impl CharStringOperatorTrait for NegOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("neg"))
     }
 }
 
@@ -934,8 +1093,12 @@ impl CharStringOperator for EqOp {
 }
 
 impl CharStringOperatorTrait for EqOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("eq"))
     }
 }
 
@@ -952,8 +1115,12 @@ impl CharStringOperator for DropOp {
 }
 
 impl CharStringOperatorTrait for DropOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("drop"))
     }
 }
 
@@ -970,8 +1137,12 @@ impl CharStringOperator for PutOp {
 }
 
 impl CharStringOperatorTrait for PutOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("put"))
     }
 }
 
@@ -988,8 +1159,12 @@ impl CharStringOperator for GetOp {
 }
 
 impl CharStringOperatorTrait for GetOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("get"))
     }
 }
 
@@ -1006,8 +1181,12 @@ impl CharStringOperator for IfElseOp {
 }
 
 impl CharStringOperatorTrait for IfElseOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("ifelse"))
     }
 }
 
@@ -1024,8 +1203,12 @@ impl CharStringOperator for RandomOp {
 }
 
 impl CharStringOperatorTrait for RandomOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("random"))
     }
 }
 
@@ -1042,8 +1225,12 @@ impl CharStringOperator for MulOp {
 }
 
 impl CharStringOperatorTrait for MulOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("mul"))
     }
 }
 
@@ -1060,8 +1247,12 @@ impl CharStringOperator for SqrtOp {
 }
 
 impl CharStringOperatorTrait for SqrtOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("sqrt"))
     }
 }
 
@@ -1078,8 +1269,12 @@ impl CharStringOperator for DupOp {
 }
 
 impl CharStringOperatorTrait for DupOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("dup"))
     }
 }
 
@@ -1096,8 +1291,12 @@ impl CharStringOperator for ExchOp {
 }
 
 impl CharStringOperatorTrait for ExchOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("exch"))
     }
 }
 
@@ -1114,8 +1313,12 @@ impl CharStringOperator for IndexOp {
 }
 
 impl CharStringOperatorTrait for IndexOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("index"))
     }
 }
 
@@ -1132,8 +1335,12 @@ impl CharStringOperator for RollOp {
 }
 
 impl CharStringOperatorTrait for RollOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("roll"))
     }
 }
 
@@ -1150,8 +1357,12 @@ impl CharStringOperator for HFlexOp {
 }
 
 impl CharStringOperatorTrait for HFlexOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("hflex"))
     }
 }
 
@@ -1168,8 +1379,12 @@ impl CharStringOperator for FlexOp {
 }
 
 impl CharStringOperatorTrait for FlexOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("flex"))
     }
 }
 
@@ -1186,8 +1401,12 @@ impl CharStringOperator for HFlex1Op {
 }
 
 impl CharStringOperatorTrait for HFlex1Op {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("hflex1"))
     }
 }
 
@@ -1204,8 +1423,12 @@ impl CharStringOperator for Flex1Op {
 }
 
 impl CharStringOperatorTrait for Flex1Op {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
-        panic!("Uninplemented op: {:?}", self)
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        _stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
+        Err(CharStringOpError::Unimplemented("flex1"))
     }
 }
 
@@ -1215,14 +1438,14 @@ pub struct NumberOp {
 }
 
 impl CharStringOperatorTrait for NumberOp {
-    fn call(&self, _path: &mut PdfPath, stack: &mut CharStringStack) {
+    fn call(
+        &self,
+        _path: &mut PdfPath,
+        stack: &mut CharStringStack,
+    ) -> Result<(), CharStringOpError> {
         stack.operands.push(self.value);
+        Ok(())
     }
-}
-
-fn construct_op<T: CharStringOperator + CharStringOperatorTrait + 'static>()
--> Result<Box<dyn CharStringOperatorTrait>, CompactFontFormatError> {
-    Ok(Box::new(T::new()?))
 }
 
 pub fn char_strings_from(
@@ -1234,7 +1457,7 @@ pub fn char_strings_from(
     while !cur.is_empty() {
         let b0 = cur.read_u8()?;
         let b_u16 = u16::from(b0);
-        let op = match b_u16 {
+        let op: Box<dyn CharStringOperatorTrait> = match b_u16 {
             0 | 2 | 9 | 13 | 15 | 16 | 17 => {
                 // Reserved.
                 return Err(CompactFontFormatError::UnexpectedDictByte(b0));
@@ -1244,58 +1467,58 @@ pub fn char_strings_from(
                 Box::new(NumberOp { value: v })
             }
 
-            HStemOp::OPCODE => construct_op::<HStemOp>()?,
-            VStemOp::OPCODE => construct_op::<VStemOp>()?,
-            VMoveToOp::OPCODE => construct_op::<VMoveToOp>()?,
-            RLineToOp::OPCODE => construct_op::<RLineToOp>()?,
-            HLineToOp::OPCODE => construct_op::<HLineToOp>()?,
-            VLineToOp::OPCODE => construct_op::<VLineToOp>()?,
-            RRCurveToOp::OPCODE => construct_op::<RRCurveToOp>()?,
-            CallSubroutineOp::OPCODE => construct_op::<CallSubroutineOp>()?,
-            ReturnOp::OPCODE => construct_op::<ReturnOp>()?,
-            EndCharOp::OPCODE => construct_op::<EndCharOp>()?,
-            HStemHmOp::OPCODE => construct_op::<HStemHmOp>()?,
-            HintMaskOp::OPCODE => construct_op::<HintMaskOp>()?,
-            CntrMaskOp::OPCODE => construct_op::<CntrMaskOp>()?,
-            RMoveToOp::OPCODE => construct_op::<RMoveToOp>()?,
-            HMoveToOp::OPCODE => construct_op::<HMoveToOp>()?,
-            VStemHmOp::OPCODE => construct_op::<VStemHmOp>()?,
-            RCurveLineOp::OPCODE => construct_op::<RCurveLineOp>()?,
-            RLineCurveOp::OPCODE => construct_op::<RLineCurveOp>()?,
-            VVCurveToOp::OPCODE => construct_op::<VVCurveToOp>()?,
-            HHCurveToOp::OPCODE => construct_op::<HHCurveToOp>()?,
-            CallGSubrOp::OPCODE => construct_op::<CallGSubrOp>()?,
-            VHCurveToOp::OPCODE => construct_op::<VHCurveToOp>()?,
-            HVCurveToOp::OPCODE => construct_op::<HVCurveToOp>()?,
+            HStemOp::OPCODE => Box::new(HStemOp::new()?),
+            VStemOp::OPCODE => Box::new(VStemOp::new()?),
+            VMoveToOp::OPCODE => Box::new(VMoveToOp::new()?),
+            RLineToOp::OPCODE => Box::new(RLineToOp::new()?),
+            HLineToOp::OPCODE => Box::new(HLineToOp::new()?),
+            VLineToOp::OPCODE => Box::new(VLineToOp::new()?),
+            RRCurveToOp::OPCODE => Box::new(RRCurveToOp::new()?),
+            CallSubroutineOp::OPCODE => Box::new(CallSubroutineOp::new()?),
+            ReturnOp::OPCODE => Box::new(ReturnOp::new()?),
+            EndCharOp::OPCODE => Box::new(EndCharOp::new()?),
+            HStemHmOp::OPCODE => Box::new(HStemHmOp::new()?),
+            HintMaskOp::OPCODE => Box::new(HintMaskOp::new()?),
+            CntrMaskOp::OPCODE => Box::new(CntrMaskOp::new()?),
+            RMoveToOp::OPCODE => Box::new(RMoveToOp::new()?),
+            HMoveToOp::OPCODE => Box::new(HMoveToOp::new()?),
+            VStemHmOp::OPCODE => Box::new(VStemHmOp::new()?),
+            RCurveLineOp::OPCODE => Box::new(RCurveLineOp::new()?),
+            RLineCurveOp::OPCODE => Box::new(RLineCurveOp::new()?),
+            VVCurveToOp::OPCODE => Box::new(VVCurveToOp::new()?),
+            HHCurveToOp::OPCODE => Box::new(HHCurveToOp::new()?),
+            CallGSubrOp::OPCODE => Box::new(CallGSubrOp::new()?),
+            VHCurveToOp::OPCODE => Box::new(VHCurveToOp::new()?),
+            HVCurveToOp::OPCODE => Box::new(HVCurveToOp::new()?),
             12 => {
                 let b2 = cur.read_u8()?;
                 let b2_u16 = u16::from(b2) << 8;
                 match b2_u16 {
-                    DotSectionOp::OPCODE => construct_op::<DotSectionOp>()?,
-                    AndOp::OPCODE => construct_op::<AndOp>()?,
-                    OrOp::OPCODE => construct_op::<OrOp>()?,
-                    NotOp::OPCODE => construct_op::<NotOp>()?,
-                    AbsOp::OPCODE => construct_op::<AbsOp>()?,
-                    AddOp::OPCODE => construct_op::<AddOp>()?,
-                    SubOp::OPCODE => construct_op::<SubOp>()?,
-                    DivOp::OPCODE => construct_op::<DivOp>()?,
-                    NegOp::OPCODE => construct_op::<NegOp>()?,
-                    EqOp::OPCODE => construct_op::<EqOp>()?,
-                    DropOp::OPCODE => construct_op::<DropOp>()?,
-                    PutOp::OPCODE => construct_op::<PutOp>()?,
-                    GetOp::OPCODE => construct_op::<GetOp>()?,
-                    IfElseOp::OPCODE => construct_op::<IfElseOp>()?,
-                    RandomOp::OPCODE => construct_op::<RandomOp>()?,
-                    MulOp::OPCODE => construct_op::<MulOp>()?,
-                    SqrtOp::OPCODE => construct_op::<SqrtOp>()?,
-                    DupOp::OPCODE => construct_op::<DupOp>()?,
-                    ExchOp::OPCODE => construct_op::<ExchOp>()?,
-                    IndexOp::OPCODE => construct_op::<IndexOp>()?,
-                    RollOp::OPCODE => construct_op::<RollOp>()?,
-                    HFlexOp::OPCODE => construct_op::<HFlexOp>()?,
-                    FlexOp::OPCODE => construct_op::<FlexOp>()?,
-                    HFlex1Op::OPCODE => construct_op::<HFlex1Op>()?,
-                    Flex1Op::OPCODE => construct_op::<Flex1Op>()?,
+                    DotSectionOp::OPCODE => Box::new(DotSectionOp::new()?),
+                    AndOp::OPCODE => Box::new(AndOp::new()?),
+                    OrOp::OPCODE => Box::new(OrOp::new()?),
+                    NotOp::OPCODE => Box::new(NotOp::new()?),
+                    AbsOp::OPCODE => Box::new(AbsOp::new()?),
+                    AddOp::OPCODE => Box::new(AddOp::new()?),
+                    SubOp::OPCODE => Box::new(SubOp::new()?),
+                    DivOp::OPCODE => Box::new(DivOp::new()?),
+                    NegOp::OPCODE => Box::new(NegOp::new()?),
+                    EqOp::OPCODE => Box::new(EqOp::new()?),
+                    DropOp::OPCODE => Box::new(DropOp::new()?),
+                    PutOp::OPCODE => Box::new(PutOp::new()?),
+                    GetOp::OPCODE => Box::new(GetOp::new()?),
+                    IfElseOp::OPCODE => Box::new(IfElseOp::new()?),
+                    RandomOp::OPCODE => Box::new(RandomOp::new()?),
+                    MulOp::OPCODE => Box::new(MulOp::new()?),
+                    SqrtOp::OPCODE => Box::new(SqrtOp::new()?),
+                    DupOp::OPCODE => Box::new(DupOp::new()?),
+                    ExchOp::OPCODE => Box::new(ExchOp::new()?),
+                    IndexOp::OPCODE => Box::new(IndexOp::new()?),
+                    RollOp::OPCODE => Box::new(RollOp::new()?),
+                    HFlexOp::OPCODE => Box::new(HFlexOp::new()?),
+                    FlexOp::OPCODE => Box::new(FlexOp::new()?),
+                    HFlex1Op::OPCODE => Box::new(HFlex1Op::new()?),
+                    Flex1Op::OPCODE => Box::new(Flex1Op::new()?),
                     _ => return Err(CompactFontFormatError::UnexpectedDictByte(0)),
                 }
             }

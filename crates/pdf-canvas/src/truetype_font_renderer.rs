@@ -12,8 +12,6 @@ use ttf_parser::{Face, GlyphId, OutlineBuilder};
 pub enum TrueTypeFontRendererError {
     #[error("The associated Type0 font is missing its descendant CIDFont")]
     MissingCidFont,
-    #[error("The CIDFont descriptor is missing the font file stream")]
-    MissingFontFile,
     #[error("The font file object is not a stream, but a {found_type}")]
     FontFileNotStream { found_type: &'static str },
     #[error("Failed to parse the TrueType font file: {0:?}")]
@@ -81,11 +79,7 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
             .as_ref()
             .ok_or(TrueTypeFontRendererError::MissingCidFont)?;
 
-        let font_file = cid_font
-            .descriptor
-            .font_file
-            .as_ref()
-            .ok_or(TrueTypeFontRendererError::MissingFontFile)?;
+        let font_file = &cid_font.descriptor.font_file;
 
         let face = match font_file {
             ObjectVariant::Stream(s) => Face::parse(s.data.as_slice(), 0)

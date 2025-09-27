@@ -75,6 +75,7 @@ impl FromDictionary for Type1Font {
             .map(pdf_object::ObjectVariant::as_number::<i64>)
             .transpose()?
             .and_then(|i| u8::try_from(i).ok());
+
         let last_char = dictionary
             .get("LastChar")
             .map(pdf_object::ObjectVariant::as_number::<i64>)

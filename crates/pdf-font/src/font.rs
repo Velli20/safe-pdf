@@ -93,8 +93,7 @@ impl std::fmt::Display for FontSubType {
 /// Type0 fonts are used to organize fonts that have a large number of characters,
 /// such as those for East Asian languages (Chinese, Japanese, Korean).
 pub struct Font {
-    /// The PostScript name of the font. For Type0 fonts, this is the
-    /// name of the Type0 font itself, not the CIDFont.
+    /// The PostScript name of the font.
     pub base_font: String,
     /// The font subtype.
     pub subtype: FontSubType,
@@ -183,6 +182,12 @@ impl FromDictionary for Font {
         // The `/DescendantFonts` array is required for Type0 fonts. Return an error if missing.
         let descendant_fonts_array = dictionary.get_or_err("DescendantFonts")?.try_array()?;
 
+        if descendant_fonts_array.len() != 1 {
+            return Err(FontError::InvalidDescendantFonts(
+                "Only single CIDFont descendant is supported",
+            ));
+        }
+
         // The array must not be empty. Get the first element, which should reference the CIDFont dictionary.
         let cid_font_ref_val = descendant_fonts_array
             .first()
@@ -191,9 +196,9 @@ impl FromDictionary for Font {
         // Resolve the CIDFont dictionary from the reference and parse it into a `CharacterIdentifierFont`.
         let cid_font = {
             let dictionary = objects.resolve_dictionary(cid_font_ref_val)?;
-
             CharacterIdentifierFont::from_dictionary(dictionary, objects)?
         };
+
         Ok(Self {
             base_font,
             subtype,

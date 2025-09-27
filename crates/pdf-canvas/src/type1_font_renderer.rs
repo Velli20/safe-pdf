@@ -5,7 +5,6 @@ use crate::{canvas::Canvas, error::PdfCanvasError, text_renderer::TextRenderer};
 use pdf_content_stream::pdf_operator_backend::PdfOperatorBackend;
 use pdf_font::cff::char_string_operator::CharStringStack;
 use pdf_font::cff::reader::{CffFontReader, Charset};
-use pdf_font::cff::standard_strings::STANDARD_STRINGS;
 use pdf_font::type1_font::Type1Font;
 use pdf_graphics::PathFillType;
 use pdf_graphics::pdf_path::PdfPath;
@@ -15,7 +14,7 @@ use pdf_object::ObjectVariant;
 pub(crate) struct Type1FontRenderer<'a, T: PdfOperatorBackend + Canvas> {
     /// The canvas backend where glyphs are drawn.
     canvas: &'a mut T,
-    pub font: &'a Type1Font,
+    font: &'a Type1Font,
     /// The current text matrix (Tm), which positions the text.
     text_matrix: Transform,
     /// The Current Transformation Matrix (CTM) at the time of rendering.
@@ -72,15 +71,8 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for Type1FontRenderer<'_, T> {
             );
             return Ok(());
         };
-        let Some(font_file_obj) = fd.font_file.as_ref() else {
-            println!(
-                "Type1FontRenderer: Missing FontFile in FontDescriptor for '{}'",
-                self.font.base_font
-            );
-            return Ok(());
-        };
 
-        let ObjectVariant::Stream(s) = font_file_obj else {
+        let ObjectVariant::Stream(s) = &fd.font_file else {
             return Ok(());
         };
 
@@ -95,7 +87,7 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for Type1FontRenderer<'_, T> {
             scale * th_factor, // sx with horizontal scaling
             0.0,               // ky (skew)
             0.0,               // kx (skew)
-            -scale,            // sy
+            scale,             // sy
             0.0,               // tx
             self.rise,         // ty
         );
@@ -117,7 +109,13 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for Type1FontRenderer<'_, T> {
                     let mut path = PdfPath::default();
                     let mut eval_stack = CharStringStack::default();
                     for (i, op) in glyph_ops.iter().enumerate() {
-                        op.call(&mut path, &mut eval_stack);
+                        if let Err(e) = op.call(&mut path, &mut eval_stack) {
+                            eprintln!(
+                                "CharString op {} failed for gid {} in font {}: {}",
+                                i, gid, self.font.base_font, e
+                            );
+                            break;
+                        }
                     }
                     path.transform(&glyph_matrix_for_char);
                     self.canvas.fill_path(&path, PathFillType::Winding)?;
@@ -129,9 +127,11 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for Type1FontRenderer<'_, T> {
                     );
                 }
             } else {
+                // Glyph ID not found for character code.
+                // Use the missing width from the FontDescriptor to advance the text position.
                 println!(
-                    "Type1FontRenderer: GID not found for char code {} char '{}'",
-                    char_code, ch
+                    "Type1FontRenderer: No GID for char code {} ('{}') in font '{}'",
+                    char_code, ch, self.font.base_font
                 );
             }
 

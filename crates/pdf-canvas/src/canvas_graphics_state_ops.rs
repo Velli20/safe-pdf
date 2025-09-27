@@ -70,14 +70,12 @@ impl<T: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, T> {
     }
 
     fn set_rendering_intent(&mut self, _intent: &str) -> Result<(), Self::ErrorType> {
-        // Rendering intent handling is currently not supported.
         Err(PdfCanvasError::NotImplemented(
             "set_rendering_intent".into(),
         ))
     }
 
     fn set_flatness_tolerance(&mut self, _tolerance: f32) -> Result<(), Self::ErrorType> {
-        // Flatness tolerance is advisory for renderers; not supported.
         Err(PdfCanvasError::NotImplemented(
             "set_flatness_tolerance".into(),
         ))

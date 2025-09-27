@@ -1,11 +1,11 @@
 use core::panic;
+use std::collections::HashMap;
 
 use crate::cff::{
     char_string_operator::{CharStringOperatorTrait, char_strings_from},
     cursor::Cursor,
     error::CompactFontFormatError,
     parser::{parse_dict, parse_index},
-    standard_strings::STANDARD_STRINGS,
     top_dictionary_operator::TopDictEntry,
 };
 
@@ -14,76 +14,54 @@ use crate::cff::{
 pub struct SID(pub u16);
 #[derive(Debug, Clone, PartialEq)]
 pub enum Charset {
-    IsoAdobe,
-    Expert,
-    ExpertSubset,
     /// Format 0: Sequential list of SIDs
     SID(Vec<SID>),
-    /// Format 1/2: Range-based encoding
-    SIDRange(Vec<(SID, u16)>),
 }
 
 impl Charset {
-    pub(crate) fn sid_to_gid(&self, sid: u16) -> Option<u16> {
-        if sid == 0 {
-            return Some(0);
-        }
-
+    /// Build a direct SID -> GID map for faster repeated lookups.
+    /// GID is the index into the CharStrings INDEX; SID is the String Identifier.
+    pub(crate) fn build_sid_gid_map(&self) -> HashMap<u16, u16> {
         match self {
-            Charset::IsoAdobe => {
-                panic!()
-            }
-            Charset::Expert => {
-                panic!()
-            }
-
-            Charset::ExpertSubset => {
-                panic!()
-            },
-
-            Charset::SID(sids) => sids.iter().position(|n| n.0 == sid).map(|n| (n as u16 + 1)),
-            Charset::SIDRange(ranges) => {
-                let mut gid = 0u16;
-                for (first_sid, n_left) in ranges {
-                    let last_sid = first_sid.0 + n_left;
-                    if sid >= first_sid.0 && sid <= last_sid {
-                        return Some(gid + (sid - first_sid.0));
-                    }
-                    gid = gid.checked_add(n_left + 1)?;
-                }
-                panic!();
-                None
-            }
+            Charset::SID(sids) => sids
+                .iter()
+                .enumerate()
+                .filter_map(|(gid, sid)| u16::try_from(gid).ok().map(|g| (sid.0, g)))
+                .collect(),
         }
     }
 }
 pub enum Encoding {
-    Standard,
-    Expert,
-    Custom(Vec<u8>),
+    Standard(HashMap<u16, u16>),
+}
+
+impl Encoding {
+    /// Construct a Standard encoding map (code point -> GID) given a charset.
+    ///
+    /// For each 0..=255 code point we look up its Standard Encoding SID and map it
+    /// to a GID via the charset. If the SID isn't present (common in subset fonts)
+    /// it falls back to GID 0 (.notdef) per the CFF specification.
+    pub fn from_charset(charset: &Charset) -> Self {
+        let mut mapping = HashMap::new();
+        let sid_gid = charset.build_sid_gid_map();
+        let notdef_gid = 0u16; // Per spec .notdef is always GID 0
+        for code_point in 0u16..=255 {
+            let sid = STANDARD_ENCODING[usize::from(code_point)];
+            let gid = sid_gid.get(&u16::from(sid)).cloned().unwrap_or(notdef_gid);
+            mapping.insert(code_point, gid);
+        }
+        Encoding::Standard(mapping)
+    }
 }
 
 pub struct CffFontReader<'a> {
     cursor: Cursor<'a>,
 }
 
-pub struct CffFontProgram<'a> {
-    pub header: CffHeader,
-    pub name_index: Vec<&'a [u8]>,
-    pub top_dict_index: Vec<&'a [u8]>,
-    pub string_index: Vec<&'a [u8]>,
-    pub global_subr_index: Vec<&'a [u8]>,
+pub struct CffFontProgram {
     pub char_string_operators: Vec<Vec<Box<dyn CharStringOperatorTrait>>>,
     pub charset: Charset,
     pub encoding: Encoding,
-}
-
-#[derive(Debug)]
-pub struct CffHeader {
-    pub major: u8,
-    pub minor: u8,
-    pub header_size: u8,
-    pub offset_size: u8,
 }
 
 pub(crate) fn parse_charset<'a>(
@@ -102,26 +80,14 @@ pub(crate) fn parse_charset<'a>(
         0 => {
             // Format 0: Sequential list of SIDs
             let mut sids = Vec::new();
-            for _ in 0..number_of_glyphs {
+            sids.push(SID(0)); // .notdef
+            for _ in 1..number_of_glyphs {
                 let sid = cur.read_u16()?;
                 sids.push(SID(sid));
             }
             Ok(Charset::SID(sids))
         }
-        1 | 2 => {
-            // Format 1 or 2: Range-based encoding
-            let mut ranges = Vec::new();
-            for _ in 0..number_of_glyphs {
-                let first_sid = cur.read_u16()?;
-                let n_left = if format == 1 {
-                    u16::from(cur.read_u8()?)
-                } else {
-                    cur.read_u16()?
-                };
-                ranges.push((SID(first_sid), n_left));
-            }
-            Ok(Charset::SIDRange(ranges))
-        }
+
         _ => Err(CompactFontFormatError::InvalidData(
             "invalid charset format",
         )),
@@ -135,24 +101,19 @@ impl<'a> CffFontReader<'a> {
         }
     }
 
-    pub fn read_font_program(&mut self) -> Result<CffFontProgram<'a>, CompactFontFormatError> {
+    pub fn read_font_program(&mut self) -> Result<CffFontProgram, CompactFontFormatError> {
         // Read header
-        let major = self.cursor.read_u8()?;
-        let minor = self.cursor.read_u8()?;
+        let _major = self.cursor.read_u8()?;
+        let _minor = self.cursor.read_u8()?;
         let header_size = self.cursor.read_u8()?;
-        let offset_size = self.cursor.read_u8()?;
 
         // Skip to end of header
         self.cursor.set_pos(usize::from(header_size));
 
         // Read Name INDEX
-        let name_index = parse_index(&mut self.cursor)?;
+        let _ = parse_index(&mut self.cursor)?;
         // Read Top DICT INDEX
         let top_dict_index = parse_index(&mut self.cursor)?;
-        // Read String INDEX
-        let string_index = parse_index(&mut self.cursor)?;
-        // Read Global Subr INDEX
-        let global_subr_index = parse_index(&mut self.cursor)?;
 
         // Parse operators from the Top DICT table (use the first entry as the main Top DICT)
         let operators = if let Some(&top_dict_bytes) = top_dict_index.first() {
@@ -162,9 +123,6 @@ impl<'a> CffFontReader<'a> {
             Vec::new()
         };
 
-        if top_dict_index.len() > 1 {
-            panic!()
-        }
         let dict = TopDictEntry::from_dictionary_tokens(&operators);
 
         let char_strings_offset =
@@ -172,6 +130,7 @@ impl<'a> CffFontReader<'a> {
                 .ok_or(CompactFontFormatError::InvalidData(
                     "missing CharStrings offset",
                 ))?;
+
         self.cursor.set_pos(usize::from(char_strings_offset));
         let char_strings_index = parse_index(&mut self.cursor)?;
 
@@ -186,34 +145,22 @@ impl<'a> CffFontReader<'a> {
             .map_err(|_| CompactFontFormatError::InvalidData("todo"))?;
 
         let charset = match dict.charset_offset {
-            Some(0) => Charset::IsoAdobe,
-            Some(1) => Charset::Expert,
-            Some(2) => Charset::ExpertSubset,
             Some(offset) => {
+                // If the offset is greater than 2, we have to parse the charset table.
                 self.cursor.set_pos(usize::from(offset));
                 parse_charset(&mut self.cursor, usize::from(number_of_glyphs))?
             }
-            None => Charset::IsoAdobe, // default
+            None => panic!(),
         };
 
-        let encoding = match dict.encoding {
-            Some(0) => Encoding::Standard,
-            Some(1) => Encoding::Expert,
-            Some(_) => todo!("Custom Encoding"),
-            None => Encoding::Standard,
+        match dict.encoding {
+            Some(0) | None => Encoding::Standard,
+            d => panic!("Unsupported encoding: {:?}", d),
         };
+
+        let encoding = Encoding::from_charset(&charset);
 
         Ok(CffFontProgram {
-            header: CffHeader {
-                major,
-                minor,
-                header_size,
-                offset_size,
-            },
-            name_index,
-            top_dict_index,
-            string_index,
-            global_subr_index,
             char_string_operators,
             charset,
             encoding,
@@ -248,38 +195,13 @@ pub const STANDARD_ENCODING: [u8; 256] = [
       0, 144,   0,   0,   0, 145,   0,   0, 146, 147, 148, 149,   0,   0,   0,   0,
 ];
 
-impl CffFontProgram<'_> {
+impl CffFontProgram {
     pub fn code_to_gid(&self, code_point: u8) -> Option<u16> {
-        let index = usize::from(code_point);
-
         match &self.encoding {
-            Encoding::Standard => {
-                let sid = u16::from(STANDARD_ENCODING[index]);
-                self.charset.sid_to_gid(sid)
-            }
-            Encoding::Expert => {
-                panic!()
-            }
-            Encoding::Custom(_data) => {
-                panic!()
+            Encoding::Standard(mapping) => {
+                let code_point = u16::from(code_point);
+                mapping.get(&code_point).cloned()
             }
         }
     }
-    // pub fn glyph_name(&self, glyph_id: u16) -> Option<&'a str> {
-    //     // match self.kind {
-    //     //     FontKind::SID(_) => {
-    //             let sid = self.charset.gid_to_sid(glyph_id)?;
-    //             let sid = usize::from(sid.0);
-    //             match STANDARD_STRINGS.get(sid) {
-    //                 Some(name) => Some(name),
-    //                 None => {
-    //                     panic!()
-    //                     // let idx = u32::try_from(sid - STANDARD_STRINGS.len()).ok()?;
-    //                     // let name = self.strings.get(idx)?;
-    //                     // core::str::from_utf8(name).ok()
-    //                 }
-    //             }
-    //     //     FontKind::CID(_) => None,
-    //     // }
-    // }
 }

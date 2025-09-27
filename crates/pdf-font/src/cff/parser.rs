@@ -149,12 +149,11 @@ pub(crate) fn parse_dict(data: &[u8]) -> Result<Vec<DictToken>, CompactFontForma
                         DictToken::Operator(u16::from(b))
                     }
                 }
-                28 => {
-                    // short int (2 bytes, big endian, signed)
-                    let s = cur.read_n(2)?;
-                    let val = i32::from(i16::from_be_bytes([s[0], s[1]]));
-                    DictToken::Number(val)
+                28 | 32..=254 => {
+                    let v = parse_int(&mut cur, b)?;
+                    DictToken::Number(v)
                 }
+
                 29 => {
                     // long int (4 bytes, big endian, signed)
                     let s = cur.read_n(4)?;
@@ -189,49 +188,6 @@ pub(crate) fn parse_dict(data: &[u8]) -> Result<Vec<DictToken>, CompactFontForma
                         Ok(chars)
                     }
                     DictToken::Real(parse_real(&mut cur)?)
-                }
-                32..=246 => {
-                    let val = i32::from(b).checked_add(-139).ok_or(
-                        CompactFontFormatError::InvalidData("integer overflow in DICT operand"),
-                    )?;
-                    DictToken::Number(val)
-                }
-                247..=250 => {
-                    let b2 = cur.read_u8()?;
-                    let high = (i32::from(b))
-                        .checked_sub(247)
-                        .and_then(|v| v.checked_mul(256))
-                        .ok_or(CompactFontFormatError::InvalidData(
-                            "integer overflow in DICT operand",
-                        ))?;
-                    let val = high
-                        .checked_add(i32::from(b2))
-                        .and_then(|v| v.checked_add(108))
-                        .ok_or(CompactFontFormatError::InvalidData(
-                            "integer overflow in DICT operand",
-                        ))?;
-                    DictToken::Number(val)
-                }
-                251..=254 => {
-                    let b2 = cur.read_u8()?;
-                    let high = (i32::from(b))
-                        .checked_sub(251)
-                        .and_then(|v| v.checked_mul(256))
-                        .ok_or(CompactFontFormatError::InvalidData(
-                            "integer overflow in DICT operand",
-                        ))?;
-                    let neg = high
-                        .checked_add(i32::from(b2))
-                        .and_then(|v| v.checked_add(108))
-                        .ok_or(CompactFontFormatError::InvalidData(
-                            "integer overflow in DICT operand",
-                        ))?;
-                    let val = 0i32
-                        .checked_sub(neg)
-                        .ok_or(CompactFontFormatError::InvalidData(
-                            "integer overflow in DICT operand",
-                        ))?;
-                    DictToken::Number(val)
                 }
                 _ => return Err(CompactFontFormatError::UnexpectedDictByte(b)),
             };
