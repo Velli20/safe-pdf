@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [stable]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache cargo registry + git + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Show cargo version
+        run: cargo --version --verbose
+
+      - name: Fetch dependencies
+        run: cargo fetch
+
+      - name: Build (check) workspace
+        run: cargo check --workspace --all-features
+
+      - name: Run tests
+        run: cargo test --workspace --all-features --no-fail-fast
+
+      - name: Run clippy (lints)
+        run: cargo clippy --workspace --all-features -- -D warnings
+
+      - name: Rustfmt check
+        run: |
+          if ! cargo fmt --all -- --check; then
+            echo "::error ::Code is not formatted. Run 'cargo fmt'";
+            exit 1;
+          fi
+
+  minimal:
+    name: Minimal feature build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-min-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-min-
+      - name: Build default feature set
+        run: cargo build --workspace
