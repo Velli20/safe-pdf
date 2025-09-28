@@ -218,7 +218,7 @@ impl PdfParser<'_> {
                     } else if t == b'x' {
                         ObjectVariant::CrossReferenceTable(self.parse_cross_reference_table()?)
                     } else {
-                        return Err(ParserError::InvalidToken(t as char));
+                        return Err(ParserError::InvalidToken(char::from(t)));
                     }
                 }
                 PdfToken::DoubleLeftAngleBracket => {

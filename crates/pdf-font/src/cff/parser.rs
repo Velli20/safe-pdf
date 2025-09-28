@@ -56,17 +56,34 @@ pub fn read_encoded_int(cursor: &mut Cursor, b0: u8) -> Result<i32, CursorReadEr
     let b0 = i32::from(b0);
 
     Ok(match b0 {
-        32..=246 => b0 - 139,
-        247..=250 => (b0 - 247) * 256 + i32::from(cursor.read_u8()?) + 108,
-        251..=254 => -(b0 - 251) * 256 - i32::from(cursor.read_u8()?) - 108,
-        // Next two bytes form a SIGNED big-endian i16
+        32..=246 => {
+            // 32..=246 => b0 - 139 (guaranteed not to overflow because b0 in range)
+            // Use wrapping_sub to silence arithmetic_side_effects while preserving semantics.
+            b0.wrapping_sub(139)
+        }
+        247..=250 => {
+            // 247..=250 => (b0 - 247) * 256 + b1 + 108
+            let hi = b0.wrapping_sub(247);
+            let b1 = i32::from(cursor.read_u8()?);
+            hi.wrapping_mul(256).wrapping_add(b1).wrapping_add(108)
+        }
+        251..=254 => {
+            // 251..=254 => -(b0 - 251) * 256 - b1 - 108
+            let hi = b0.wrapping_sub(251);
+            let b1 = i32::from(cursor.read_u8()?);
+            hi.wrapping_mul(256)
+                .wrapping_add(b1)
+                .wrapping_add(108)
+                .wrapping_neg()
+        }
         28 => {
-            let v = cursor.read_u16()?; // big-endian order already
+            // Next two bytes form a SIGNED big-endian i16
+            let v = cursor.read_u16()?;
             let signed = i16::from_be_bytes(v.to_be_bytes());
             i32::from(signed)
         }
-        // Next four bytes form a SIGNED big-endian i32
         29 => {
+            // Next four bytes form a SIGNED big-endian i32
             let mut buf = [0u8; 4];
             for b in &mut buf {
                 *b = cursor.read_u8()?;

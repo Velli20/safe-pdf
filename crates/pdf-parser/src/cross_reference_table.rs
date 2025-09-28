@@ -31,6 +31,8 @@ pub enum CrossReferenceTableError {
     TokenizerError(#[from] TokenizerError),
     #[error("Parser error: {err}")]
     ParserError { err: String },
+    #[error("Too many entries in cross-reference table")]
+    TooManyEntries,
 }
 
 impl CrossReferenceTableParser for PdfParser<'_> {
@@ -89,7 +91,7 @@ impl CrossReferenceTableParser for PdfParser<'_> {
                 err: err.to_string(),
             })?;
 
-        let mut total_number_of_entries = 0;
+        let mut total_number_of_entries = 0_i32;
         let mut first_object_number = None;
 
         let mut entries = Vec::new();
@@ -114,7 +116,9 @@ impl CrossReferenceTableParser for PdfParser<'_> {
 
             // Read the entries.
             for _ in 0..number_of_objects {
-                total_number_of_entries += 1;
+                total_number_of_entries = total_number_of_entries
+                    .checked_add(1)
+                    .ok_or(CrossReferenceTableError::TooManyEntries)?;
 
                 // Read the object number.
                 let object_number = self

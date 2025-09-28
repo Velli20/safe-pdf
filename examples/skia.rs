@@ -267,7 +267,7 @@ fn run(settings: AppSettings) {
         gl_surface,
         gl_context,
         fb_info,
-        mut gr_context,
+        gr_context,
         surface,
         num_samples,
         stencil_size,
