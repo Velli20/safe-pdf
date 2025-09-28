@@ -165,3 +165,6 @@ impl PdfPath {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {}

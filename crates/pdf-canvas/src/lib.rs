@@ -16,11 +16,12 @@ mod canvas_marked_content_ops;
 mod canvas_path_ops;
 mod canvas_state;
 mod canvas_text_ops;
-mod error;
+pub mod error;
 pub mod pdf_canvas;
 mod text_renderer;
 mod text_state;
 mod truetype_font_renderer;
+pub mod type1_font_renderer;
 mod type3_font_renderer;
 
 impl<T: CanvasBackend> PdfOperatorBackend for PdfCanvas<'_, T> {}

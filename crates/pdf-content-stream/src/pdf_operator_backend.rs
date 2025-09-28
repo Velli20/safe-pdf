@@ -5,7 +5,7 @@
 
 use std::rc::Rc;
 
-use pdf_graphics::{LineCap, LineJoin};
+use pdf_graphics::{LineCap, LineJoin, TextRenderingMode};
 use pdf_object::dictionary::Dictionary;
 
 use crate::TextElement;
@@ -603,7 +603,7 @@ pub trait TextStateOps: PdfOperatorBackendError {
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn set_text_rendering_mode(&mut self, mode: i32) -> Result<(), Self::ErrorType>;
+    fn set_text_rendering_mode(&mut self, mode: TextRenderingMode) -> Result<(), Self::ErrorType>;
 
     /// Sets the text rise (vertical baseline offset).
     ///

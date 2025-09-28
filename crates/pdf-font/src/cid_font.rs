@@ -18,6 +18,8 @@ pub struct CharacterIdentifierFont {
     /// The default width for glyphs in the font.
     /// This is the `/DW` entry in the CIDFont dictionary.
     pub default_width: f32,
+    /// The CIDFont subtype (CIDFontType0 or CIDFontType2).
+    pub subtype: CidFontSubType,
     /// The font descriptor for this font, providing detailed metrics and style information.
     pub descriptor: FontDescriptor,
     /// A map of individual glyph widths, overriding the default width for specific CIDs.
@@ -30,6 +32,24 @@ impl CharacterIdentifierFont {
     const DEFAULT_WIDTH: f32 = 1000.0;
 }
 
+/// CIDFont subtypes supported by the parser.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CidFontSubType {
+    /// Type 1/CFF based CID-keyed font
+    Type0,
+    /// TrueType based CID-keyed font
+    Type2,
+}
+
+impl std::fmt::Display for CidFontSubType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CidFontSubType::Type0 => write!(f, "/CIDFontType0"),
+            CidFontSubType::Type2 => write!(f, "/CIDFontType2"),
+        }
+    }
+}
+
 /// Defines errors that can occur while reading a PDF objects.
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum CidFontError {
@@ -39,9 +59,7 @@ pub enum CidFontError {
     ObjectError(#[from] ObjectError),
     #[error("GlyphWidthsMap parsing error: {0}")]
     GlyphWidthsMapError(#[from] GlyphWidthsMapError),
-    #[error(
-        "Unsupported CIDFont subtype '{subtype}': Only /CIDFontType2 (TrueType-based) is supported. /CIDFontType0 (Type1-based) is not supported."
-    )]
+    #[error("Unsupported CIDFont subtype '{subtype}'")]
     UnsupportedCidFontSubtype { subtype: String },
 }
 
@@ -69,15 +87,15 @@ impl FromDictionary for CharacterIdentifierFont {
             })
             .transpose()?;
 
-        let subtype = dictionary.get_or_err("Subtype")?.try_str()?;
-
-        // CIDFont subtypes can be /CIDFontType0 or /CIDFontType2.
-        // This parser currently only supports /CIDFontType2 (TrueType-based).
-        if subtype != "CIDFontType2" {
-            return Err(CidFontError::UnsupportedCidFontSubtype {
-                subtype: subtype.to_string(),
-            });
-        }
+        let subtype = match dictionary.get_or_err("Subtype")?.try_str()?.as_ref() {
+            "CIDFontType0" => CidFontSubType::Type0,
+            "CIDFontType2" => CidFontSubType::Type2,
+            other => {
+                return Err(CidFontError::UnsupportedCidFontSubtype {
+                    subtype: other.to_string(),
+                });
+            }
+        };
 
         // FontDescriptor must be an indirect reference according to the PDF spec.
         let desc_dict = objects.resolve_dictionary(dictionary.get_or_err("FontDescriptor")?)?;
@@ -85,8 +103,82 @@ impl FromDictionary for CharacterIdentifierFont {
 
         Ok(Self {
             default_width,
+            subtype,
             descriptor,
             widths: widths_map,
         })
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use pdf_object::ObjectVariant;
+
+    use super::*;
+
+    fn make_min_font_descriptor_dict() -> Dictionary {
+        let mut d = BTreeMap::new();
+        d.insert("Ascent".into(), Box::new(ObjectVariant::Integer(800)));
+        d.insert("Descent".into(), Box::new(ObjectVariant::Integer(-200)));
+        d.insert("CapHeight".into(), Box::new(ObjectVariant::Integer(700)));
+        d.insert("Flags".into(), Box::new(ObjectVariant::Integer(32)));
+        d.insert(
+            "FontBBox".into(),
+            Box::new(ObjectVariant::Array(vec![
+                ObjectVariant::Integer(-50),
+                ObjectVariant::Integer(-200),
+                ObjectVariant::Integer(1000),
+                ObjectVariant::Integer(900),
+            ])),
+        );
+        d.insert(
+            "FontName".into(),
+            Box::new(ObjectVariant::Name("TestFont".into())),
+        );
+        d.insert("ItalicAngle".into(), Box::new(ObjectVariant::Integer(0)));
+        d.insert("StemV".into(), Box::new(ObjectVariant::Integer(80)));
+        Dictionary::new(d)
+    }
+
+    fn make_cidfont_dict(subtype: &str) -> Dictionary {
+        let mut d = BTreeMap::new();
+        d.insert(
+            "Subtype".into(),
+            Box::new(ObjectVariant::Name(subtype.into())),
+        );
+        d.insert("DW".into(), Box::new(ObjectVariant::Integer(1000)));
+        // Simple W map: 0 [500 600]
+        d.insert(
+            "W".into(),
+            Box::new(ObjectVariant::Array(vec![
+                ObjectVariant::Integer(0),
+                ObjectVariant::Array(vec![
+                    ObjectVariant::Integer(500),
+                    ObjectVariant::Integer(600),
+                ]),
+            ])),
+        );
+        // Inline FontDescriptor dictionary
+        d.insert(
+            "FontDescriptor".into(),
+            Box::new(ObjectVariant::Dictionary(std::rc::Rc::new(
+                make_min_font_descriptor_dict(),
+            ))),
+        );
+        Dictionary::new(d)
+    }
+
+    #[test]
+    fn rejects_unknown_cidfont_subtype() {
+        let dict = make_cidfont_dict("CIDFontType9");
+        let objects = ObjectCollection::default();
+        let res = CharacterIdentifierFont::from_dictionary(&dict, &objects);
+        assert!(matches!(
+            res,
+            Err(CidFontError::UnsupportedCidFontSubtype { .. })
+        ));
     }
 }

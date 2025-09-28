@@ -12,8 +12,6 @@ use ttf_parser::{Face, GlyphId, OutlineBuilder};
 pub enum TrueTypeFontRendererError {
     #[error("The associated Type0 font is missing its descendant CIDFont")]
     MissingCidFont,
-    #[error("The CIDFont descriptor is missing the font file stream")]
-    MissingFontFile,
     #[error("The font file object is not a stream, but a {found_type}")]
     FontFileNotStream { found_type: &'static str },
     #[error("Failed to parse the TrueType font file: {0:?}")]
@@ -83,16 +81,8 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
 
         let font_file = &cid_font.descriptor.font_file;
 
-        let face = match font_file {
-            ObjectVariant::Stream(s) => Face::parse(s.data.as_slice(), 0)
-                .map_err(TrueTypeFontRendererError::TtfParseError)?,
-            other => {
-                return Err(TrueTypeFontRendererError::FontFileNotStream {
-                    found_type: other.name(),
-                }
-                .into());
-            }
-        };
+        let face = Face::parse(font_file.data.as_slice(), 0)
+            .map_err(TrueTypeFontRendererError::TtfParseError)?;
 
         // Extract font and text state parameters.
         let units_per_em = face.units_per_em();
@@ -158,10 +148,10 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
             // Build the glyph outline using the composed transform.
             let mut builder = PdfGlyphOutline::new(glyph_matrix_for_char);
 
-            if let Some(a) = cmap.get_mapping(char_code as u32) {
-                if let Some(x) = face.glyph_index(a) {
-                    glyph_id = x;
-                }
+            if let Some(a) = cmap.get_mapping(char_code as u32)
+                && let Some(x) = face.glyph_index(a)
+            {
+                glyph_id = x;
             }
 
             face.outline_glyph(glyph_id, &mut builder);

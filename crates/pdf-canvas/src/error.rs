@@ -1,3 +1,4 @@
+use pdf_font::cff::error::CompactFontFormatError;
 use thiserror::Error;
 
 use crate::truetype_font_renderer::TrueTypeFontRendererError;
@@ -42,4 +43,6 @@ pub enum PdfCanvasError {
     NumericConversionError(&'static str),
     #[error("Not implemented: {0}")]
     NotImplemented(String),
+    #[error("Compact font format parsing error: {0}")]
+    CompactFontFormatError(#[from] CompactFontFormatError),
 }

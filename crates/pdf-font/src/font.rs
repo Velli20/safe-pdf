@@ -11,6 +11,7 @@ use thiserror::Error;
 use crate::{
     characther_map::{CMapError, CharacterMap},
     cid_font::{CharacterIdentifierFont, CidFontError},
+    type1_font::{Type1Font, Type1FontError},
     type3_font::{Type3Font, Type3FontError},
 };
 
@@ -48,6 +49,8 @@ pub enum FontError {
     ObjectError(#[from] ObjectError),
     #[error("Error processing Type3 font: {0}")]
     Type3FontError(#[from] Type3FontError),
+    #[error("Error processing Type1 font: {0}")]
+    Type1FontError(#[from] Type1FontError),
     #[error("Unsupported or invalid font subtype '{subtype}' for {font_type} font")]
     UnsupportedFontSubtype {
         subtype: FontSubType,
@@ -90,8 +93,7 @@ impl std::fmt::Display for FontSubType {
 /// Type0 fonts are used to organize fonts that have a large number of characters,
 /// such as those for East Asian languages (Chinese, Japanese, Korean).
 pub struct Font {
-    /// The PostScript name of the font. For Type0 fonts, this is the
-    /// name of the Type0 font itself, not the CIDFont.
+    /// The PostScript name of the font.
     pub base_font: String,
     /// The font subtype.
     pub subtype: FontSubType,
@@ -100,6 +102,7 @@ pub struct Font {
     /// (Required for Type0 fonts) The CIDFont dictionary that is the descendant of this Type0 font.
     /// This CIDFont provides the actual glyph descriptions.
     pub cid_font: Option<CharacterIdentifierFont>,
+    pub type1_font: Option<Type1Font>,
     pub type3_font: Option<Type3Font>,
     pub encoding: Option<FontEncoding>,
 }
@@ -147,12 +150,28 @@ impl FromDictionary for Font {
                 subtype,
                 cmap,
                 cid_font: None,
+                type1_font: None,
                 type3_font: Some(type3_font),
                 encoding,
             });
         }
 
-        // Only Type0 fonts are supported beyond this point. If not Type0, return an error.
+        // Handle Type1 fonts
+        if subtype == FontSubType::Type1 {
+            let type1_font = Type1Font::from_dictionary(dictionary, objects)?;
+            return Ok(Self {
+                base_font,
+                subtype,
+                cmap,
+                cid_font: None,
+                type1_font: Some(type1_font),
+                type3_font: None,
+                encoding,
+            });
+        }
+
+        // Only Type0 fonts are supported beyond this point.
+        // If not Type0, return an error.
         if subtype != FontSubType::Type0 {
             return Err(FontError::UnsupportedFontSubtype {
                 subtype,
@@ -163,6 +182,12 @@ impl FromDictionary for Font {
         // The `/DescendantFonts` array is required for Type0 fonts. Return an error if missing.
         let descendant_fonts_array = dictionary.get_or_err("DescendantFonts")?.try_array()?;
 
+        if descendant_fonts_array.len() != 1 {
+            return Err(FontError::InvalidDescendantFonts(
+                "Only single CIDFont descendant is supported",
+            ));
+        }
+
         // The array must not be empty. Get the first element, which should reference the CIDFont dictionary.
         let cid_font_ref_val = descendant_fonts_array
             .first()
@@ -171,14 +196,15 @@ impl FromDictionary for Font {
         // Resolve the CIDFont dictionary from the reference and parse it into a `CharacterIdentifierFont`.
         let cid_font = {
             let dictionary = objects.resolve_dictionary(cid_font_ref_val)?;
-
             CharacterIdentifierFont::from_dictionary(dictionary, objects)?
         };
+
         Ok(Self {
             base_font,
             subtype,
             cmap,
             cid_font: Some(cid_font),
+            type1_font: None,
             type3_font: None,
             encoding,
         })

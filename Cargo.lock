@@ -1584,7 +1584,10 @@ name = "pdf-font"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.9.1",
+ "num-derive",
+ "num-traits",
  "pdf-content-stream",
+ "pdf-graphics",
  "pdf-object",
  "thiserror 2.0.12",
 ]
@@ -1664,6 +1667,7 @@ dependencies = [
  "pdf-content-stream",
  "pdf-document",
  "pdf-page",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -2067,9 +2071,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.15.0"
+version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8917285742e9f3e1683f0a9c4e6b57960b7314d0b08d30d1ecd426713ee2eee9"
+checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smithay-client-toolkit"

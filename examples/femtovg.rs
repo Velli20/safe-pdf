@@ -191,7 +191,7 @@ impl AppRenderer for Renderer2 {
 
         let mut canvas_impl = CanvasImpl { canvas };
         let mut renderer = PdfRenderer::new(document, &mut canvas_impl);
-        renderer.render(&[6]);
+        renderer.render(0);
         canvas.restore();
     }
 }

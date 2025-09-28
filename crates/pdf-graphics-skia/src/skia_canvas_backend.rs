@@ -296,10 +296,10 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         let mut sk_path = to_skia_path(path);
         sk_path.set_fill_type(to_skia_fill_type(fill_type));
         let mut paint = make_paint(color, skia_safe::paint::Style::Fill, None, blend_mode);
-        if let Some(shader) = shader {
-            if let Some(shader) = to_skia_shader(shader) {
-                paint.set_shader(shader);
-            }
+        if let Some(shader) = shader
+            && let Some(shader) = to_skia_shader(shader)
+        {
+            paint.set_shader(shader);
         }
 
         self.surface.canvas().draw_path(&sk_path, &paint);
@@ -320,10 +320,10 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
             Some(line_width),
             blend_mode,
         );
-        if let Some(shader) = shader {
-            if let Some(shader) = to_skia_shader(shader) {
-                paint.set_shader(shader);
-            }
+        if let Some(shader) = shader
+            && let Some(shader) = to_skia_shader(shader)
+        {
+            paint.set_shader(shader);
         }
 
         self.surface.canvas().draw_path(&sk_path, &paint);

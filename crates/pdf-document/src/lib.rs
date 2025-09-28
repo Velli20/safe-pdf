@@ -14,7 +14,7 @@ pub struct PdfDocument {
     pub version: Version,
     /// The objects in the PDF document.
     pub objects: ObjectCollection,
-
+    /// The pages in the PDF document.
     pub pages: Vec<PdfPage>,
     /// The trailer of the PDF document.
     trailer: Trailer,
