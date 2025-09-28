@@ -3,7 +3,6 @@ use num_traits::FromPrimitive;
 use pdf_content_stream::pdf_operator_backend::PdfOperatorBackend;
 use pdf_font::font::Font;
 use pdf_graphics::{PathFillType, pdf_path::PdfPath, transform::Transform};
-use pdf_object::ObjectVariant;
 use thiserror::Error;
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
 

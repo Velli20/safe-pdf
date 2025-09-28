@@ -7,7 +7,6 @@ use pdf_font::cff::reader::CffFontReader;
 use pdf_font::type1_font::Type1Font;
 use pdf_graphics::PathFillType;
 use pdf_graphics::transform::Transform;
-use pdf_object::ObjectVariant;
 
 pub(crate) struct Type1FontRenderer<'a, T: PdfOperatorBackend + Canvas> {
     /// The canvas backend where glyphs are drawn.
