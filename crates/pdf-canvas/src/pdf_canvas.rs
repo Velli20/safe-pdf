@@ -401,7 +401,7 @@ where
     /// # Errors
     ///
     /// Returns an error if any operation fails or if the graphics state is invalid.
-    pub(crate) fn render_content_stream(
+    pub fn render_content_stream(
         &mut self,
         operations: &[PdfOperatorVariant],
         mat: Option<Transform>,

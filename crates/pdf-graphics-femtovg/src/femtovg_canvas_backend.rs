@@ -104,7 +104,7 @@ impl CanvasBackend for CanvasImpl<'_> {
         todo!()
     }
 
-    fn begin_mask_layer(&mut self, mask: &mut Self::MaskType) {
+    fn begin_mask_layer(&mut self, _mask: &mut Self::MaskType) {
         todo!()
     }
 

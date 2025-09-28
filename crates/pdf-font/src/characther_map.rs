@@ -11,6 +11,8 @@ pub enum CMapError {
         #[source]
         source: std::num::ParseIntError,
     },
+    #[error("Invalid Unicode code point: {original_code}")]
+    InvalidUnicode { original_code: u32 },
 }
 
 /// Parses a hexadecimal string representation into a u32 value.
@@ -84,8 +86,11 @@ impl FromStreamObject for CharacterMap {
                         let dst_u32 = parse_hex_to_u32(dst_hex)?;
                         if let Some(dst_char) = char::from_u32(dst_u32) {
                             bfchar_mappings.insert(src_code, dst_char);
+                        } else {
+                            // return Err(CMapError::InvalidUnicode {
+                            //     original_code: dst_u32,
+                            // });
                         }
-                        // If invalid Unicode scalar, skip silently TODO: Return error.
                     }
                 }
             }

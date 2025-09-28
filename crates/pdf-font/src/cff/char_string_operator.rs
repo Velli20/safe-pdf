@@ -1,7 +1,47 @@
+//! Type 2 CharString operator decoding utilities.
+//!
+//! This module parses a CFF Type 2 CharString byte sequence into a flat
+//! `Vec<CharStringOperator>` comprised of either immediate numbers (operands)
+//! or callable operator function pointers. The decoding logic follows the
+//! Adobe Technical Note #5177 (Type 2 Charstring Format) with a focus on:
+//!
+//! - Distinguishing single–byte and escaped (two–byte) operators.
+//! - Decoding integers in the compact number encodings plus the special
+//!   0xFF 32‑bit 16.16 fixed‑point form (truncating the fractional part for now).
+//! - Emitting numbers eagerly so that higher‑level interpreters can perform
+//!   simple stack construction without re‑examining the original byte stream.
+//! - Mapping each operator to a zero-sized struct whose associated `call`
+//!   function implements `CharStringOperatorTrait`. This keeps opcode dispatch
+//!   table‑driven and allows the higher level interpreter to remain agnostic
+//!   about raw numeric opcodes.
+//!
+//! The 0xFF opcode introduces a 32‑bit signed 16.16 fixed‑point number in the
+//! Type 2 spec. For the current needs of the project we truncate (shift right
+//! 16) to produce an `i32` integer operand. Future enhancements may want to
+//! preserve the fractional portion (e.g. storing numbers as `f32` or a custom
+//! fixed type) once higher precision is required for hinting or variation
+//! support.
+//!
+//! ## Relationship to fontations
+//!
+//! Some code in this module is inspired by the open-source `fontations`
+//! project.
+//!
+//! ## Future Work
+//!
+//! - Implement remaining Type 2 operators (if any are still missing for full
+//!   glyph coverage).
+//! - Support width handling & stem hint accumulation at this layer (currently
+//!   deferred to the interpreter logic).
+//! - Preserve fractional precision of 16.16 numbers.
+//! - Add fuzz tests for malformed or adversarial charstrings.
+
 use thiserror::Error;
 
 use crate::cff::{
-    char_string_interpreter::CharStringOperatorTrait, cursor::Cursor, parser::parse_int,
+    char_string_interpreter::{CharStringOperator, CharStringOperatorTrait},
+    cursor::Cursor,
+    parser::read_encoded_int,
 };
 
 /// Mask to identify two-byte operators (first byte is 12).
@@ -399,81 +439,73 @@ impl Flex1Op {
     const OPCODE: u16 = TWO_BYTE_OP_MASK | 37;
 }
 
-#[derive(Default)]
-pub struct NumberOp {
-    pub value: i32,
-}
-
-pub fn char_strings_from(
-    data: &[u8],
-) -> Result<Vec<Box<dyn CharStringOperatorTrait>>, CharStringReadError> {
+pub fn char_strings_from(data: &[u8]) -> Result<Vec<CharStringOperator>, CharStringReadError> {
     let mut ops = Vec::new();
     let mut cur = Cursor::new(data);
 
     while !cur.is_empty() {
         let b0 = cur.read_u8()?;
         let b_u16 = u16::from(b0);
-        let op: Box<dyn CharStringOperatorTrait> = match b_u16 {
+        let op = match b_u16 {
             0 | 2 | 9 | 13 | 15 | 16 | 17 => {
                 return Err(CharStringReadError::UnexpectedOperator(b0));
             }
             28 | 32..=254 => {
-                let v = parse_int(&mut cur, b0)?;
-                Box::new(NumberOp { value: v })
+                let v = read_encoded_int(&mut cur, b0)?;
+                CharStringOperator::Number(v)
             }
-
-            HStemOp::OPCODE => Box::new(HStemOp),
-            VStemOp::OPCODE => Box::new(VStemOp),
-            VMoveToOp::OPCODE => Box::new(VMoveToOp),
-            RLineToOp::OPCODE => Box::new(RLineToOp),
-            HLineToOp::OPCODE => Box::new(HLineToOp),
-            VLineToOp::OPCODE => Box::new(VLineToOp),
-            RRCurveToOp::OPCODE => Box::new(RRCurveToOp),
-            CallSubroutineOp::OPCODE => Box::new(CallSubroutineOp),
-            ReturnOp::OPCODE => Box::new(ReturnOp),
-            EndCharOp::OPCODE => Box::new(EndCharOp),
-            HStemHmOp::OPCODE => Box::new(HStemHmOp),
-            HintMaskOp::OPCODE => Box::new(HintMaskOp),
-            CntrMaskOp::OPCODE => Box::new(CntrMaskOp),
-            RMoveToOp::OPCODE => Box::new(RMoveToOp),
-            HMoveToOp::OPCODE => Box::new(HMoveToOp),
-            VStemHmOp::OPCODE => Box::new(VStemHmOp),
-            RCurveLineOp::OPCODE => Box::new(RCurveLineOp),
-            RLineCurveOp::OPCODE => Box::new(RLineCurveOp),
-            VVCurveToOp::OPCODE => Box::new(VVCurveToOp),
-            HHCurveToOp::OPCODE => Box::new(HHCurveToOp),
-            CallGSubrOp::OPCODE => Box::new(CallGSubrOp),
-            VHCurveToOp::OPCODE => Box::new(VHCurveToOp),
-            HVCurveToOp::OPCODE => Box::new(HVCurveToOp),
+            HStemOp::OPCODE => CharStringOperator::Function(HStemOp::call),
+            VStemOp::OPCODE => CharStringOperator::Function(VStemOp::call),
+            VMoveToOp::OPCODE => CharStringOperator::Function(VMoveToOp::call),
+            RLineToOp::OPCODE => CharStringOperator::Function(RLineToOp::call),
+            HLineToOp::OPCODE => CharStringOperator::Function(HLineToOp::call),
+            VLineToOp::OPCODE => CharStringOperator::Function(VLineToOp::call),
+            RRCurveToOp::OPCODE => CharStringOperator::Function(RRCurveToOp::call),
+            CallSubroutineOp::OPCODE => CharStringOperator::Function(CallSubroutineOp::call),
+            ReturnOp::OPCODE => CharStringOperator::Function(ReturnOp::call),
+            EndCharOp::OPCODE => CharStringOperator::Function(EndCharOp::call),
+            HStemHmOp::OPCODE => CharStringOperator::Function(HStemHmOp::call),
+            HintMaskOp::OPCODE => CharStringOperator::Function(HintMaskOp::call),
+            CntrMaskOp::OPCODE => CharStringOperator::Function(CntrMaskOp::call),
+            RMoveToOp::OPCODE => CharStringOperator::Function(RMoveToOp::call),
+            HMoveToOp::OPCODE => CharStringOperator::Function(HMoveToOp::call),
+            VStemHmOp::OPCODE => CharStringOperator::Function(VStemHmOp::call),
+            RCurveLineOp::OPCODE => CharStringOperator::Function(RCurveLineOp::call),
+            RLineCurveOp::OPCODE => CharStringOperator::Function(RLineCurveOp::call),
+            VVCurveToOp::OPCODE => CharStringOperator::Function(VVCurveToOp::call),
+            HHCurveToOp::OPCODE => CharStringOperator::Function(HHCurveToOp::call),
+            CallGSubrOp::OPCODE => CharStringOperator::Function(CallGSubrOp::call),
+            VHCurveToOp::OPCODE => CharStringOperator::Function(VHCurveToOp::call),
+            HVCurveToOp::OPCODE => CharStringOperator::Function(HVCurveToOp::call),
             12 => {
                 let b2 = cur.read_u8()?;
                 let b2_u16 = u16::from(b2) << 8;
                 match b2_u16 {
-                    DotSectionOp::OPCODE => Box::new(DotSectionOp),
-                    AndOp::OPCODE => Box::new(AndOp),
-                    OrOp::OPCODE => Box::new(OrOp),
-                    NotOp::OPCODE => Box::new(NotOp),
-                    AbsOp::OPCODE => Box::new(AbsOp),
-                    AddOp::OPCODE => Box::new(AddOp),
-                    SubOp::OPCODE => Box::new(SubOp),
-                    DivOp::OPCODE => Box::new(DivOp),
-                    NegOp::OPCODE => Box::new(NegOp),
-                    EqOp::OPCODE => Box::new(EqOp),
-                    DropOp::OPCODE => Box::new(DropOp),
-                    PutOp::OPCODE => Box::new(PutOp),
-                    GetOp::OPCODE => Box::new(GetOp),
-                    IfElseOp::OPCODE => Box::new(IfElseOp),
-                    RandomOp::OPCODE => Box::new(RandomOp),
-                    MulOp::OPCODE => Box::new(MulOp),
-                    SqrtOp::OPCODE => Box::new(SqrtOp),
-                    DupOp::OPCODE => Box::new(DupOp),
-                    ExchOp::OPCODE => Box::new(ExchOp),
-                    IndexOp::OPCODE => Box::new(IndexOp),
-                    RollOp::OPCODE => Box::new(RollOp),
-                    HFlexOp::OPCODE => Box::new(HFlexOp),
-                    FlexOp::OPCODE => Box::new(FlexOp),
-                    HFlex1Op::OPCODE => Box::new(HFlex1Op),
-                    Flex1Op::OPCODE => Box::new(Flex1Op),
+                    DotSectionOp::OPCODE => CharStringOperator::Function(DotSectionOp::call),
+                    AndOp::OPCODE => CharStringOperator::Function(AndOp::call),
+                    OrOp::OPCODE => CharStringOperator::Function(OrOp::call),
+                    NotOp::OPCODE => CharStringOperator::Function(NotOp::call),
+                    AbsOp::OPCODE => CharStringOperator::Function(AbsOp::call),
+                    AddOp::OPCODE => CharStringOperator::Function(AddOp::call),
+                    SubOp::OPCODE => CharStringOperator::Function(SubOp::call),
+                    DivOp::OPCODE => CharStringOperator::Function(DivOp::call),
+                    NegOp::OPCODE => CharStringOperator::Function(NegOp::call),
+                    EqOp::OPCODE => CharStringOperator::Function(EqOp::call),
+                    DropOp::OPCODE => CharStringOperator::Function(DropOp::call),
+                    PutOp::OPCODE => CharStringOperator::Function(PutOp::call),
+                    GetOp::OPCODE => CharStringOperator::Function(GetOp::call),
+                    IfElseOp::OPCODE => CharStringOperator::Function(IfElseOp::call),
+                    RandomOp::OPCODE => CharStringOperator::Function(RandomOp::call),
+                    MulOp::OPCODE => CharStringOperator::Function(MulOp::call),
+                    SqrtOp::OPCODE => CharStringOperator::Function(SqrtOp::call),
+                    DupOp::OPCODE => CharStringOperator::Function(DupOp::call),
+                    ExchOp::OPCODE => CharStringOperator::Function(ExchOp::call),
+                    IndexOp::OPCODE => CharStringOperator::Function(IndexOp::call),
+                    RollOp::OPCODE => CharStringOperator::Function(RollOp::call),
+                    HFlexOp::OPCODE => CharStringOperator::Function(HFlexOp::call),
+                    FlexOp::OPCODE => CharStringOperator::Function(FlexOp::call),
+                    HFlex1Op::OPCODE => CharStringOperator::Function(HFlex1Op::call),
+                    Flex1Op::OPCODE => CharStringOperator::Function(Flex1Op::call),
                     _ => return Err(CharStringReadError::UnexpectedTwoByteOperator(b2)),
                 }
             }
@@ -489,7 +521,7 @@ pub fn char_strings_from(
                 let raw = i32::from_be_bytes([b1, b2, b3, b4]);
                 // Truncate 16.16 fixed to integer.
                 let v = raw >> 16;
-                Box::new(NumberOp { value: v })
+                CharStringOperator::Number(v)
             }
             _ => {
                 return Err(CharStringReadError::UnexpectedOperator(b0));

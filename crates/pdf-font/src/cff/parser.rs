@@ -21,25 +21,50 @@ fn read_be_int(bytes: &[u8]) -> Result<usize, CompactFontFormatError> {
         .map_err(|_| CompactFontFormatError::InvalidData("read_be_int: value out of range"))
 }
 
-pub fn parse_int(cursor: &mut Cursor, b0: u8) -> Result<i32, CursorReadError> {
-    // Size   b0 range     Value range              Value calculation
-    //--------------------------------------------------------------------------------
-    // 1      32 to 246    -107 to +107             b0 - 139
-    // 2      247 to 250   +108 to +1131            (b0 - 247) * 256 + b1 + 108
-    // 2      251 to 254   -1131 to -108            -(b0 - 251) * 256 - b1 - 108
-    // 3      28           -32768 to +32767         b1 << 8 | b2
-    // 5      29           -(2^31) to +(2^31 - 1)   b1 << 24 | b2 << 16 | b3 << 8 | b4
-    // <https://learn.microsoft.com/en-us/typography/opentype/spec/cff2#table-3-operand-encoding>
+/// Decode a CFF / CFF2 DICT encoded integer operand.
+///
+/// The Compact Font Format encodes integer operands in a variable-length form
+/// determined by the first byte (`b0`). This function is called after the
+/// first byte has already been read. It consumes the remaining bytes (if any)
+/// from the provided [`Cursor`] and returns the decoded signed 32‑bit value.
+///
+/// Encoding summary (see Adobe CFF / OpenType CFF2 spec – operand encoding):
+///
+/// * `32..=246`  – single byte: value = `b0 as i32 - 139` (range: -107 ..= 107)
+/// * `247..=250` – two bytes: value = `(b0 - 247) * 256 + b1 + 108` (108 ..= 1131)
+/// * `251..=254` – two bytes: value = `-(b0 - 251) * 256 - b1 - 108` (-1131 ..= -108)
+/// * `28`        – three bytes total: next two bytes form a signed big‑endian i16
+/// * `29`        – five bytes total: next four bytes form a signed big‑endian i32
+///
+/// Reference: <https://learn.microsoft.com/en-us/typography/opentype/spec/cff2#table-3-operand-encoding>
+///
+/// # Parameters
+///
+/// - `cursor` – cursor positioned immediately after `b0`; additional bytes
+///   required by the encoding will be read from it.
+/// - `b0` – the first (already read) opcode/operand byte that selects the
+///   integer encoding form.
+///
+/// # Returns
+///
+/// The decoded signed 32‑bit integer or an `CursorReadError` if there is not enough data
+/// to read the remaining bytes of the encoded integer, or if `b0` does not designate a
+/// valid integer encoding (in which case `CursorReadError::EndOfData` is
+/// returned to signal an unexpected byte for this context).
+///
+pub fn read_encoded_int(cursor: &mut Cursor, b0: u8) -> Result<i32, CursorReadError> {
+    let b0 = i32::from(b0);
+
     Ok(match b0 {
-        32..=246 => b0 as i32 - 139,
-        247..=250 => (b0 as i32 - 247) * 256 + cursor.read_u8()? as i32 + 108,
-        251..=254 => -(b0 as i32 - 251) * 256 - cursor.read_u8()? as i32 - 108,
-        28 => cursor.read_u16()? as i32,
+        32..=246 => b0 - 139,
+        247..=250 => (b0 - 247) * 256 + i32::from(cursor.read_u8()?) + 108,
+        251..=254 => -(b0 - 251) * 256 - i32::from(cursor.read_u8()?) - 108,
+        28 => i32::from(cursor.read_u16()?),
         29 => {
-            let b1 = cursor.read_u8()? as u32;
-            let b2 = cursor.read_u8()? as u32;
-            let b3 = cursor.read_u8()? as u32;
-            let b4 = cursor.read_u8()? as u32;
+            let b1 = u32::from(cursor.read_u8()?);
+            let b2 = u32::from(cursor.read_u8()?);
+            let b3 = u32::from(cursor.read_u8()?);
+            let b4 = u32::from(cursor.read_u8()?);
             let raw = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
             // Convert to signed i32
             if raw & 0x8000_0000 != 0 {
@@ -57,6 +82,30 @@ pub fn parse_int(cursor: &mut Cursor, b0: u8) -> Result<i32, CursorReadError> {
     })
 }
 
+/// Parses a CFF INDEX data structure.
+///
+/// An INDEX is a collection of variable-sized data objects. It consists of a
+/// header, an array of 1-based offsets, and a data block containing the objects
+/// themselves. The offsets specify the start and end of each object within the
+/// data block.
+///
+/// The structure is as follows:
+///
+/// 1. `count` (u16): The number of objects in the INDEX. If 0, the INDEX is empty.
+/// 2. `offSize` (u8): The size of the offsets in bytes (1 to 4).
+/// 3. `offset` (array of `count + 1` entries): The offset array. Each entry is
+///    an `offSize`-byte integer. The first offset is always 1.
+/// 4. `data` (array of bytes): The object data. The total size of this block is
+///    `offset[count] - 1`.
+///
+/// # Parameters
+///
+/// - `cur`: A `Cursor` positioned at the start of the INDEX data.
+///
+/// # Returns
+///
+/// A `Vec` containing byte slices (`&'a [u8]`) for each object in the INDEX,
+/// or a `CompactFontFormatError` if the data is malformed.
 pub fn parse_index<'a>(cur: &mut Cursor<'a>) -> Result<Vec<&'a [u8]>, CompactFontFormatError> {
     let count = cur.read_u16()?;
     if count == 0 {
@@ -107,7 +156,6 @@ pub fn parse_index<'a>(cur: &mut Cursor<'a>) -> Result<Vec<&'a [u8]>, CompactFon
     let mut objects = Vec::with_capacity(count);
 
     for pair in offsets.windows(2) {
-        // windows(2) always yields 2-length slices
         let start = pair[0];
         let end = pair[1];
         if start < 1 || end < start {
@@ -125,48 +173,4 @@ pub fn parse_index<'a>(cur: &mut Cursor<'a>) -> Result<Vec<&'a [u8]>, CompactFon
         objects.push(&block[start..end]);
     }
     Ok(objects)
-}
-
-/// CFF DICT token: either a number or an operator (op).
-#[derive(Debug, Clone)]
-pub(crate) enum DictToken {
-    Number(i32),
-    Operator(u16),
-}
-
-pub(crate) fn parse_dict(data: &[u8]) -> Result<Vec<DictToken>, CompactFontFormatError> {
-    let mut cur = Cursor::new(data);
-    let mut out = Vec::new();
-
-    while cur.pos() < cur.len() {
-        let b = cur.read_u8()?;
-        let token = match b {
-            0..=21 => {
-                // Operator byte
-                if b == 12 {
-                    let b2 = cur.read_u8()?;
-                    DictToken::Operator(((u16::from(b)) << 8) | u16::from(b2))
-                } else {
-                    DictToken::Operator(u16::from(b))
-                }
-            }
-            28 | 32..=254 => {
-                let v = parse_int(&mut cur, b)?;
-                DictToken::Number(v)
-            }
-
-            29 => {
-                // long int (4 bytes, big endian, signed)
-                let s = cur.read_n(4)?;
-                let val = i32::from_be_bytes([s[0], s[1], s[2], s[3]]);
-                DictToken::Number(val)
-            }
-            30 => {
-                return Err(CompactFontFormatError::UnsupportedRealNumber);
-            }
-            _ => return Err(CompactFontFormatError::UnexpectedDictByte(b)),
-        };
-        out.push(token);
-    }
-    Ok(out)
 }

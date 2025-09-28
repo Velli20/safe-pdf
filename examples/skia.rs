@@ -461,7 +461,6 @@ impl AppRenderer<skia_safe::Surface> for PdfPageRendererLogic {
 
         // Example: Draw PDF content directly.
         // For more complex scenarios or caching, you might render to an offscreen surface first.
-        surface.canvas().save();
 
         let mut skia_backend = SkiaCanvasBackend {
             surface: SurfaceContainer::Borrowed(surface),
@@ -470,8 +469,6 @@ impl AppRenderer<skia_safe::Surface> for PdfPageRendererLogic {
         };
 
         let mut pdf_renderer = PdfRenderer::new(document, &mut skia_backend);
-        pdf_renderer.render(&[page_index]);
-
-        surface.canvas().restore();
+        pdf_renderer.render(page_index);
     }
 }

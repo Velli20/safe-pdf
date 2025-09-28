@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
-    traits::FromDictionary,
+    stream::StreamObject, traits::FromDictionary,
 };
 use thiserror::Error;
 
@@ -16,8 +16,8 @@ use crate::font_descriptor::{FontDescriptor, FontDescriptorError};
 pub struct Type1Font {
     /// PostScript base font name (e.g., /Helvetica)
     pub base_font: String,
-    /// Optional font descriptor providing metrics and font file info
-    pub font_descriptor: Option<FontDescriptor>,
+    /// A stream containing the font program.
+    pub font_file: StreamObject,
     /// Optional encoding name (e.g., /WinAnsiEncoding) or custom encoding via Differences
     /// For now we capture only the base encoding name for quick wiring; differences can be
     /// expanded later similarly to Type3.
@@ -55,13 +55,10 @@ impl FromDictionary for Type1Font {
             .and_then(|v| v.as_str().map(|s| s.into_owned()))
             .unwrap_or_default();
 
-        // Optional FontDescriptor
-        let font_descriptor = if let Some(fd) = dictionary.get("FontDescriptor") {
-            let dict = objects.resolve_dictionary(fd)?;
-            Some(FontDescriptor::from_dictionary(dict, objects)?)
-        } else {
-            None
-        };
+        // Read '/FontDescriptor’.
+        let fd = dictionary.get_or_err("FontDescriptor")?;
+        let FontDescriptor { font_file } =
+            FontDescriptor::from_dictionary(objects.resolve_dictionary(fd)?, objects)?;
 
         // Encoding may be a name or a dictionary. For initial support, record only base name.
         let base_encoding = dictionary
@@ -111,7 +108,7 @@ impl FromDictionary for Type1Font {
 
         Ok(Self {
             base_font,
-            font_descriptor,
+            font_file,
             base_encoding,
             widths,
             first_char,

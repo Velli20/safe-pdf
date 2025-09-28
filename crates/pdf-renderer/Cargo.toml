@@ -8,3 +8,4 @@ pdf-content-stream = { path = "../pdf-content-stream" }
 pdf-page = { path = "../pdf-page" }
 pdf-document = { path = "../pdf-document" }
 pdf-canvas = { path = "../pdf-canvas" }
+thiserror = "2.0.12"

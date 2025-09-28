@@ -15,16 +15,16 @@ impl<'a> Cursor<'a> {
     pub fn new(data: &'a [u8]) -> Self {
         Cursor { data, pos: 0 }
     }
+
     pub fn len(&self) -> usize {
         self.data.len()
     }
+
     pub fn is_empty(&self) -> bool {
         self.pos >= self.data.len()
     }
-    pub fn remaining(&self) -> usize {
-        self.data.len().saturating_sub(self.pos)
-    }
-    pub fn advance(&mut self) -> Result<(), CursorReadError> {
+
+    fn advance(&mut self) -> Result<(), CursorReadError> {
         if self.pos >= self.data.len() {
             return Err(CursorReadError::EndOfData);
         }
@@ -33,34 +33,11 @@ impl<'a> Cursor<'a> {
         Ok(())
     }
 
-    pub fn read_u8(&mut self) -> Result<u8, CursorReadError> {
-        if self.pos < self.data.len() {
-            let b = self.data[self.pos];
-            self.advance()?;
-            Ok(b)
-        } else {
-            Err(CursorReadError::EndOfData)
-        }
-    }
     /// Reads a big-endian u16 from the current position, advancing by 2 bytes if possible.
     pub fn read_u16(&mut self) -> Result<u16, CursorReadError> {
-        let end = self.pos.saturating_add(2);
-        if end <= self.data.len() {
-            let b0 = self
-                .data
-                .get(self.pos)
-                .copied()
-                .ok_or(CursorReadError::EndOfData)?;
-            let b1 = self
-                .data
-                .get(self.pos.saturating_add(1))
-                .copied()
-                .ok_or(CursorReadError::EndOfData)?;
-            self.pos = end;
-            Ok(u16::from_be_bytes([b0, b1]))
-        } else {
-            Err(CursorReadError::EndOfData)
-        }
+        let b0 = self.read_u8()?;
+        let b1 = self.read_u8()?;
+        Ok(u16::from_be_bytes([b0, b1]))
     }
 
     pub fn peek_u8(&self) -> Result<u8, CursorReadError> {
@@ -68,6 +45,14 @@ impl<'a> Cursor<'a> {
             .get(self.pos)
             .copied()
             .ok_or(CursorReadError::EndOfData)
+    }
+
+    pub fn read_u8(&mut self) -> Result<u8, CursorReadError> {
+        let Ok(b) = self.peek_u8() else {
+            return Err(CursorReadError::EndOfData);
+        };
+        self.advance()?;
+        Ok(b)
     }
 
     pub fn read_n(&mut self, n: usize) -> Result<&'a [u8], CursorReadError> {
@@ -80,9 +65,11 @@ impl<'a> Cursor<'a> {
             Err(CursorReadError::EndOfData)
         }
     }
+
     pub fn set_pos(&mut self, p: usize) {
         self.pos = p.min(self.data.len());
     }
+
     pub fn pos(&self) -> usize {
         self.pos
     }

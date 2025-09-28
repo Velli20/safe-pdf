@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::cff::{
     cursor::{Cursor, CursorReadError},
-    parser::parse_int,
+    parser::read_encoded_int,
 };
 
 /// Represents a parsed Top DICT entry from a CFF font.
@@ -23,80 +23,74 @@ pub(crate) struct TopDictEntry {
 /// Top DICT operators defined by the Compact Font Format (CFF) specification.
 #[derive(Clone, Copy, PartialEq, Debug, FromPrimitive)]
 enum TopDictOperator {
-    /// 0 — name of the font in the source font program (not necessarily the
-    /// PostScript name). Rarely needed for rendering.
+    /// Name of the font in the source font program.
     Version = 0,
-    /// 1 — trademark / legal notice string.
+    /// Trademark / legal notice string.
     Notice,
-    /// 2 — full PostScript font name (e.g. "MyFont-Bold").
+    /// Full PostScript font name.
     FullName,
-    /// 3 — family name portion (e.g. "MyFont").
+    /// Family name portion.
     FamilyName,
-    /// 4 — weight descriptor (e.g. "Bold").
+    /// Weight descriptor.
     Weight,
-    /// 5 — font bounding box: four numbers (llx, lly, urx, ury). We only care
-    /// about the presence of this operator at this stage; operands are handled
-    /// elsewhere.
+    /// Font bounding box.
     FontBBox,
-    /// 13 — UniqueID (deprecated, may be absent). Historically used for font
-    /// caching; modern workflows often ignore it.
+    /// UniqueID
     UniqueID = 13,
-    /// 14 — XUID array (optional, rarely present). Helps avoid name clashes in
-    /// some workflows; safe to ignore for pure rendering.
+    /// XUID array.
     Xuid,
-    /// 15 — Offset to the charset table (or 0 / 1 / 2 for predefined charsets).
+    /// Offset to the charset table (or 0 / 1 / 2 for predefined charsets).
     Charset = 15,
-    /// 16 — Offset to the encoding table (or 0 / 1 for predefined encodings).
+    /// Offset to the encoding table (or 0 / 1 for predefined encodings).
     Encoding,
-    /// 17 — Offset to the CharStrings INDEX (glyph programs).
+    /// Offset to the CharStrings INDEX (glyph programs).
     CharStrings,
-    /// 18 — (size, offset) pair pointing to the Private DICT data.
+    /// (size, offset) pair pointing to the Private DICT data.
     Private,
-    /// 12 0 — Copyright notice (escaped operator).
+    /// Copyright notice (escaped operator).
     Copyright = (12 << 8),
-    /// 12 1 — Boolean (0 / 1) indicating fixed / monospaced advance widths.
+    /// Boolean (0 / 1) indicating fixed / monospaced advance widths.
     IsFixedPitch,
-    /// 12 2 — Italic angle in degrees counter‑clockwise from the vertical.
+    /// Italic angle in degrees counter‑clockwise from the vertical.
     ItalicAngle,
-    /// 12 3 — Underline position (baseline offset, typically negative).
+    /// Underline position (baseline offset, typically negative).
     UnderlinePosition,
-    /// 12 4 — Underline thickness.
+    /// Underline thickness.
     UnderlineThickness,
-    /// 12 5 — Paint type (0 = filled, 1 = stroked) for Type 1 compatibility.
+    /// Paint type (0 = filled, 1 = stroked) for Type 1 compatibility.
     PaintType,
-    /// 12 6 — CharstringType (1 for Type 1 style charstrings, 2 for CFF2).
+    /// CharstringType (1 for Type 1 style charstrings, 2 for CFF2).
     CharstringType,
-    /// 12 7 — Font transformation matrix (array of 6 numbers) mapping font
+    /// Font transformation matrix (array of 6 numbers) mapping font
     /// units to user space. Usually omitted (defaults to identity * 0.001).
     FontMatrix,
-    /// 12 8 — Stroke width (only meaningful for stroked / PaintType=1 fonts).
+    /// Stroke width (only meaningful for stroked / PaintType=1 fonts).
     StrokeWidth,
-    /// 12 20 — Synthetic base font index (used for synthetic fonts). Rare.
+    /// Synthetic base font index (used for synthetic fonts). Rare.
     SyntheticBase = (12 << 8 | 20),
-    /// 12 21 — PostScript language source (string) for CID / synthetic fonts.
+    /// PostScript language source (string) for CID / synthetic fonts.
     PostScript,
-    /// 12 22 — Base font name used in synthetic blending contexts.
+    /// Base font name used in synthetic blending contexts.
     BaseFontName,
-    /// 12 23 — Base font blend data (array) for multiple-master style blending.
+    /// Base font blend data (array) for multiple-master style blending.
     BaseFontBlend,
-    /// 12 30 — ROS (Registry, Ordering, Supplement) triple for CID-keyed fonts.
+    /// ROS (Registry, Ordering, Supplement) triple for CID-keyed fonts.
     RegistryOrderingSupplement = (12 << 8 | 30),
-    /// 12 31 — CIDFontVersion value.
+    /// CIDFontVersion value.
     CIDFontVersion,
-    /// 12 32 — CIDFontRevision value.
+    /// CIDFontRevision value.
     CIDFontRevision,
-    /// 12 33 — CIDFontType (e.g. 0 = Type 0, 2 = CID-keyed Type 2 charstrings).
+    /// CIDFontType (e.g. 0 = Type 0, 2 = CID-keyed Type 2 charstrings).
     CIDFontType,
-    /// 12 34 — CIDCount (upper bound on CID values defined in the font).
+    /// CIDCount (upper bound on CID values defined in the font).
     CIDCount,
-    /// 12 35 — UIDBase for constructing unique identifiers (optional).
+    /// UIDBase for constructing unique identifiers (optional).
     UIDBase,
-    /// 12 36 — Offset to FDArray INDEX (required for CID-keyed fonts).
+    /// Offset to FDArray INDEX (required for CID-keyed fonts).
     FDArray,
-    /// 12 37 — Offset to FDSelect data (maps glyphs to Font DICTs).
+    /// Offset to FDSelect data (maps glyphs to Font DICTs).
     FDSelect,
-    /// 12 38 — PostScript FontName (for CID-keyed fonts providing a top-level
-    /// name distinct from ROS components).
+    /// PostScript FontName.
     FontName,
 }
 
@@ -126,14 +120,13 @@ pub enum TopDictReadError {
     CursorReadError(#[from] CursorReadError),
 }
 
-pub(crate) fn parse_dict(cur: &mut Cursor) -> Result<Vec<DictToken>, TopDictReadError> {
+fn parse_dict(cur: &mut Cursor) -> Result<Vec<DictToken>, TopDictReadError> {
     let mut out = Vec::new();
 
     while cur.pos() < cur.len() {
         let b = cur.read_u8()?;
         let token = match b {
             0..=21 => {
-                // Operator byte
                 if b == 12 {
                     let b2 = cur.read_u8()?;
                     DictToken::Operator(((u16::from(b)) << 8) | u16::from(b2))
@@ -142,12 +135,10 @@ pub(crate) fn parse_dict(cur: &mut Cursor) -> Result<Vec<DictToken>, TopDictRead
                 }
             }
             28 | 32..=254 => {
-                let v = parse_int(cur, b)?;
+                let v = read_encoded_int(cur, b)?;
                 DictToken::Number(v)
             }
-
             29 => {
-                // long int (4 bytes, big endian, signed)
                 let s = cur.read_n(4)?;
                 let val = i32::from_be_bytes([s[0], s[1], s[2], s[3]]);
                 DictToken::Number(val)

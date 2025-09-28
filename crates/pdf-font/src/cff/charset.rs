@@ -1,32 +1,3 @@
-//! CFF (Compact Font Format) charset parsing.
-//!
-//! A CFF font uses a *charset* table to map glyph indices (GIDs) to
-//! String Identifiers (SIDs). The SID space references entries in the
-//! CFF String INDEX (standard + local strings). The relationship is:
-//!
-//! ```text
-//! GID 0  -> implicit .notdef (SID 0)
-//! GID 1  -> first glyph after .notdef
-//! GID n  -> nth glyph as defined by the charset data
-//! ```
-//!
-//! This module currently implements only charset Format 0 as defined in the
-//! CFF specification (Adobe Technical Note #5176 / OpenType CFF table). Format 0
-//! stores an explicit 2‑byte SID for every glyph after GID 0.
-//!
-//! Supplemental encodings (high-bit set in the format byte) and Formats 1 & 2
-//! (range based encodings) are not yet supported. Attempting to read such data
-//! results in an error (or a panic for supplemental encodings until a dedicated
-//! error variant is added).
-//!
-//! The `Charset` structure produced here is a reverse lookup map from SID → GID.
-//! This direction is convenient when resolving a glyph by its String ID while
-//! interpreting CharStrings. If a future need arises we can add a forward map
-//! or derive it on demand.
-//!
-//! # Future Work
-//! - Support formats 1 & 2 (range encodings) to reduce memory for contiguous SIDs.
-
 use crate::cff::cursor::{Cursor, CursorReadError};
 use std::collections::HashMap;
 use thiserror::Error;
@@ -82,7 +53,6 @@ impl Charset {
                 // Map .notdef (SID 0) to GID 0
                 sids.insert(0, 0);
                 for i in 1..number_of_glyphs {
-                    // Each SID is stored as a big-endian u16
                     let sid = cur.read_u16()?;
                     sids.insert(sid, i);
                 }

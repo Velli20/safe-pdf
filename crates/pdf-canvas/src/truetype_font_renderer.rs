@@ -81,16 +81,8 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
 
         let font_file = &cid_font.descriptor.font_file;
 
-        let face = match font_file {
-            ObjectVariant::Stream(s) => Face::parse(s.data.as_slice(), 0)
-                .map_err(TrueTypeFontRendererError::TtfParseError)?,
-            other => {
-                return Err(TrueTypeFontRendererError::FontFileNotStream {
-                    found_type: other.name(),
-                }
-                .into());
-            }
-        };
+        let face = Face::parse(font_file.data.as_slice(), 0)
+            .map_err(TrueTypeFontRendererError::TtfParseError)?;
 
         // Extract font and text state parameters.
         let units_per_em = face.units_per_em();

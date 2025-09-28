@@ -1,6 +1,6 @@
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
-    traits::FromDictionary,
+    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    stream::StreamObject, traits::FromDictionary,
 };
 use thiserror::Error;
 
@@ -19,7 +19,7 @@ pub enum FontDescriptorError {
 pub struct FontDescriptor {
     /// A stream containing the font program.
     /// This can be FontFile, FontFile2, or FontFile3 depending on the font type.
-    pub font_file: ObjectVariant,
+    pub font_file: StreamObject,
 }
 
 impl FromDictionary for FontDescriptor {
@@ -32,19 +32,15 @@ impl FromDictionary for FontDescriptor {
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        let resolve_font_file_stream = |key: &str| -> Option<ObjectVariant> {
-            dictionary.get(key).and_then(|obj| match obj {
-                ObjectVariant::Reference(id) => objects.get(*id).cloned(),
-                ObjectVariant::Stream(s) => Some(ObjectVariant::Stream(std::rc::Rc::clone(s))),
-                _ => None,
-            })
+        let resolve_font_file_stream = |key: &str| -> Option<&StreamObject> {
+            objects.resolve_stream(dictionary.get(key)?).ok()
         };
 
         let font_file = resolve_font_file_stream("FontFile2")
             .or_else(|| resolve_font_file_stream("FontFile3"))
             .or_else(|| resolve_font_file_stream("FontFile"));
 
-        let Some(font_file) = font_file else {
+        let Some(font_file) = font_file.cloned() else {
             return Err(FontDescriptorError::MissingFontFile);
         };
 

@@ -1,10 +1,11 @@
 mod char_string_interpreter;
-pub mod char_string_interpreter_stack;
-pub mod char_string_operator;
+mod char_string_interpreter_stack;
+mod char_string_operator;
 mod charset;
 mod cursor;
 mod encoding;
 pub mod error;
-pub mod parser;
+mod parser;
+pub mod program;
 pub mod reader;
-mod top_dictionary_operator;
+mod top_dictionary_entry;
