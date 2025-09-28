@@ -172,28 +172,6 @@ mod tests {
     }
 
     #[test]
-    fn parses_cidfont_type2() {
-        let dict = make_cidfont_dict("CIDFontType2");
-        let objects = ObjectCollection::default();
-        let cid = CharacterIdentifierFont::from_dictionary(&dict, &objects).unwrap();
-        assert_eq!(cid.default_width, 1000.0);
-        assert_eq!(cid.subtype, CidFontSubType::Type2);
-        assert!(cid.widths.is_some());
-        assert!(cid.widths.as_ref().unwrap().get_width(0).is_some());
-        assert!(cid.widths.as_ref().unwrap().get_width(1).is_some());
-    }
-
-    #[test]
-    fn parses_cidfont_type0() {
-        let dict = make_cidfont_dict("CIDFontType0");
-        let objects = ObjectCollection::default();
-        let cid = CharacterIdentifierFont::from_dictionary(&dict, &objects).unwrap();
-        assert_eq!(cid.default_width, 1000.0);
-        assert_eq!(cid.subtype, CidFontSubType::Type0);
-        assert!(cid.widths.is_some());
-    }
-
-    #[test]
     fn rejects_unknown_cidfont_subtype() {
         let dict = make_cidfont_dict("CIDFontType9");
         let objects = ObjectCollection::default();

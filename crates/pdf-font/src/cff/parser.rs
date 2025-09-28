@@ -59,22 +59,19 @@ pub fn read_encoded_int(cursor: &mut Cursor, b0: u8) -> Result<i32, CursorReadEr
         32..=246 => b0 - 139,
         247..=250 => (b0 - 247) * 256 + i32::from(cursor.read_u8()?) + 108,
         251..=254 => -(b0 - 251) * 256 - i32::from(cursor.read_u8()?) - 108,
-        28 => i32::from(cursor.read_u16()?),
+        // Next two bytes form a SIGNED big-endian i16
+        28 => {
+            let v = cursor.read_u16()?; // big-endian order already
+            let signed = i16::from_be_bytes(v.to_be_bytes());
+            i32::from(signed)
+        }
+        // Next four bytes form a SIGNED big-endian i32
         29 => {
-            let b1 = u32::from(cursor.read_u8()?);
-            let b2 = u32::from(cursor.read_u8()?);
-            let b3 = u32::from(cursor.read_u8()?);
-            let b4 = u32::from(cursor.read_u8()?);
-            let raw = (b1 << 24) | (b2 << 16) | (b3 << 8) | b4;
-            // Convert to signed i32
-            if raw & 0x8000_0000 != 0 {
-                // Negative number in two's complement
-                let v = (!raw).wrapping_add(1);
-                -(v as i32)
-            } else {
-                // Positive number
-                raw as i32
+            let mut buf = [0u8; 4];
+            for b in &mut buf {
+                *b = cursor.read_u8()?;
             }
+            i32::from_be_bytes(buf)
         }
         _ => {
             return Err(CursorReadError::EndOfData);
@@ -173,4 +170,95 @@ pub fn parse_index<'a>(cur: &mut Cursor<'a>) -> Result<Vec<&'a [u8]>, CompactFon
         objects.push(&block[start..end]);
     }
     Ok(objects)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_encoded_int;
+    use crate::cff::cursor::{Cursor, CursorReadError};
+
+    // Helper to run decoding with provided first byte and remaining bytes
+    fn decode(rest: &[u8], b0: u8) -> Result<i32, CursorReadError> {
+        let mut c = Cursor::new(rest);
+        read_encoded_int(&mut c, b0)
+    }
+
+    #[test]
+    fn single_byte_range_boundaries() {
+        assert_eq!(decode(&[], 32).unwrap(), -107); // lowest
+        assert_eq!(decode(&[], 139).unwrap(), 0); // center
+        assert_eq!(decode(&[], 246).unwrap(), 107); // highest
+    }
+
+    #[test]
+    fn positive_two_byte_range() {
+        // 247..=250 => (b0-247)*256 + b1 + 108
+        assert_eq!(decode(&[0], 247).unwrap(), 108); // min
+        assert_eq!(decode(&[255], 247).unwrap(), 363);
+        assert_eq!(decode(&[255], 250).unwrap(), 1131); // max
+    }
+
+    #[test]
+    fn negative_two_byte_range() {
+        // 251..=254 => -(b0-251)*256 - b1 - 108
+        assert_eq!(decode(&[0], 251).unwrap(), -108); // min magnitude
+        assert_eq!(decode(&[255], 251).unwrap(), -363);
+        assert_eq!(decode(&[255], 254).unwrap(), -1131); // max magnitude
+    }
+
+    #[test]
+    fn signed_i16_encoding() {
+        // 28 => next two bytes signed big-endian i16
+        assert_eq!(decode(&[0x12, 0x34], 28).unwrap(), 0x1234); // 4660
+        assert_eq!(decode(&[0xFF, 0x9C], 28).unwrap(), -100);
+        // extremes
+        assert_eq!(decode(&[0x7F, 0xFF], 28).unwrap(), i32::from(i16::MAX));
+        assert_eq!(decode(&[0x80, 0x00], 28).unwrap(), i32::from(i16::MIN));
+    }
+
+    #[test]
+    fn signed_i32_encoding() {
+        // 29 => next four bytes signed big-endian i32
+        assert_eq!(decode(&[0, 0, 1, 0], 29).unwrap(), 256);
+        assert_eq!(decode(&[0xFF, 0xFF, 0xFE, 0x00], 29).unwrap(), -512);
+        assert_eq!(decode(&[0x7F, 0xFF, 0xFF, 0xFF], 29).unwrap(), i32::MAX);
+        assert_eq!(decode(&[0x80, 0x00, 0x00, 0x00], 29).unwrap(), i32::MIN);
+    }
+
+    #[test]
+    fn insufficient_data_errors() {
+        // Need 1 more byte for 247..=250 forms
+        assert!(matches!(decode(&[], 247), Err(CursorReadError::EndOfData)));
+        // Need 2 bytes for 28
+        assert!(matches!(
+            decode(&[0x12], 28),
+            Err(CursorReadError::EndOfData)
+        ));
+        // Need 4 bytes for 29
+        assert!(matches!(
+            decode(&[0, 0, 0], 29),
+            Err(CursorReadError::EndOfData)
+        ));
+    }
+
+    #[test]
+    fn invalid_first_byte() {
+        assert!(matches!(decode(&[], 0), Err(CursorReadError::EndOfData)));
+        assert!(matches!(decode(&[], 255), Err(CursorReadError::EndOfData)));
+    }
+
+    #[test]
+    fn cursor_position_advancement() {
+        // For 28 should advance exactly 2 bytes
+        let mut c = Cursor::new(&[0x01, 0x02, 0xAA]);
+        let v = read_encoded_int(&mut c, 28).unwrap();
+        assert_eq!(v, i32::from(i16::from_be_bytes([0x01, 0x02])));
+        assert_eq!(c.pos(), 2); // only consumed the two operand bytes
+
+        // For 29 should advance exactly 4 bytes
+        let mut c2 = Cursor::new(&[0, 0, 0, 1, 0xBB]);
+        let v2 = read_encoded_int(&mut c2, 29).unwrap();
+        assert_eq!(v2, 1);
+        assert_eq!(c2.pos(), 4);
+    }
 }
