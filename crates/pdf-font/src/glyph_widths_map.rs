@@ -50,7 +50,7 @@ impl GlyphWidthsMap {
 
         while i < array.len() {
             let cid_val = &array[i];
-            i += 1;
+            i = i.saturating_add(1);
             let cid = cid_val.as_number::<i64>()?;
 
             if i >= array.len() {
@@ -65,7 +65,7 @@ impl GlyphWidthsMap {
                         .map(ObjectVariant::as_number::<f32>)
                         .collect::<Result<Vec<_>, _>>()?;
                     map.insert(cid, widths);
-                    i += 1; // consumed array
+                    i = i.saturating_add(1); // consumed array
                 }
                 ObjectVariant::Integer(_) | ObjectVariant::Real(_) => {
                     // Potentially [c_first c_last w] form. Ambiguous when there is no following element.
@@ -74,10 +74,25 @@ impl GlyphWidthsMap {
                     // or an unexpected element (single numeric width without array). The existing tests expect
                     // [10 12] -> MissingWidthForCIDRange and [0 500] -> UnexpectedElementAfterCID.
                     // We approximate intent: if the numeric is "close" to cid (small delta), assume range intent.
-                    if i + 1 >= array.len() {
+                    if let Some(next) = i.checked_add(1) {
+                        if next >= array.len() {
+                            let c_last_candidate = array[i].as_number::<i64>()?;
+                            let delta = c_last_candidate.saturating_sub(cid);
+                            if delta <= 10 {
+                                return Err(GlyphWidthsMapError::MissingWidthForCIDRange {
+                                    c_first: cid,
+                                });
+                            } else {
+                                return Err(GlyphWidthsMapError::UnexpectedElementAfterCID {
+                                    cid,
+                                    found_type: "Number",
+                                });
+                            }
+                        }
+                    } else {
                         let c_last_candidate = array[i].as_number::<i64>()?;
-                        let delta = c_last_candidate - cid;
-                        if (0..=10).contains(&delta) {
+                        let delta = c_last_candidate.saturating_sub(cid);
+                        if delta <= 10 {
                             // Treat as attempted range missing width
                             return Err(GlyphWidthsMapError::MissingWidthForCIDRange {
                                 c_first: cid,
@@ -98,11 +113,26 @@ impl GlyphWidthsMap {
                             c_last,
                         });
                     }
-                    let width_val = &array[i + 1];
+                    let width_idx = i
+                        .checked_add(1)
+                        .ok_or(GlyphWidthsMapError::MissingWidthForCIDRange { c_first: cid })?;
+                    let width_val = &array[width_idx];
                     let width = width_val.as_number::<f32>()?;
-                    let count = (c_last - cid + 1) as usize;
+                    let span = c_last
+                        .checked_sub(cid)
+                        .and_then(|d| d.checked_add(1))
+                        .ok_or(GlyphWidthsMapError::InvalidCIDRange {
+                            c_first: cid,
+                            c_last,
+                        })?;
+                    let count: usize =
+                        span.try_into()
+                            .map_err(|_| GlyphWidthsMapError::InvalidCIDRange {
+                                c_first: cid,
+                                c_last,
+                            })?;
                     map.insert(cid, vec![width; count]);
-                    i += 2; // consumed c_last and width
+                    i = i.saturating_add(2); // consumed c_last and width
                 }
                 other => {
                     return Err(GlyphWidthsMapError::UnexpectedElementAfterCID {
@@ -119,18 +149,17 @@ impl GlyphWidthsMap {
     /// Returns the width for a given CID (character ID), if present.
     ///
     /// # Arguments
-    /// * `character_id` - The CID to look up.
+    ///
+    /// - `character_id` - The CID to look up.
     ///
     /// # Returns
-    /// * `Some(width)` if the width is found, or `None` if not present.
+    ///
+    /// `Some(width)` if the width is found, or `None` if not present.
     pub fn get_width(&self, character_id: i64) -> Option<f32> {
         self.map.iter().find_map(|(&start, widths)| {
-            let offset = character_id - start;
-            if offset >= 0 && (offset as usize) < widths.len() {
-                Some(widths[offset as usize])
-            } else {
-                None
-            }
+            let offset = character_id.saturating_sub(start);
+            let offset = usize::try_from(offset).ok()?;
+            widths.get(offset).copied()
         })
     }
 }

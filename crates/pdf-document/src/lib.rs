@@ -1,7 +1,6 @@
 use error::PdfError;
 use pdf_object::{
-    ObjectVariant, object_collection::ObjectCollection, trailer::Trailer, traits::FromDictionary,
-    version::Version,
+    ObjectVariant, object_collection::ObjectCollection, traits::FromDictionary, version::Version,
 };
 use pdf_page::{page::PdfPage, pages::PdfPages};
 use pdf_parser::{PdfParser, traits::HeaderParser};
@@ -16,8 +15,6 @@ pub struct PdfDocument {
     pub objects: ObjectCollection,
     /// The pages in the PDF document.
     pub pages: Vec<PdfPage>,
-    /// The trailer of the PDF document.
-    trailer: Trailer,
 }
 
 impl PdfDocument {
@@ -68,7 +65,6 @@ impl PdfDocument {
             version,
             objects,
             pages: pages.pages,
-            trailer,
         })
     }
 }

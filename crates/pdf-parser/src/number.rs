@@ -18,6 +18,8 @@ pub enum NumberError {
         #[source]
         source: std::num::ParseFloatError,
     },
+    #[error("Numeric value overflow")]
+    NumericValueOverflow,
 }
 
 impl NumberParser for PdfParser<'_> {
@@ -79,7 +81,7 @@ impl NumberParser for PdfParser<'_> {
         }
 
         // 2. Parse leading digits (integral part).
-        let digits = if let Some(PdfToken::Period) = self.tokenizer.peek() {
+        let mut digits = if let Some(PdfToken::Period) = self.tokenizer.peek() {
             0
         } else {
             self.read_number::<i64>(false)
@@ -126,10 +128,11 @@ impl NumberParser for PdfParser<'_> {
             // 7. No decimal point, parse as integer.
             self.skip_whitespace();
             if has_minus {
-                Ok(ObjectVariant::Integer(-digits))
-            } else {
-                Ok(ObjectVariant::Integer(digits))
+                digits = digits
+                    .checked_neg()
+                    .ok_or(NumberError::NumericValueOverflow)?;
             }
+            Ok(ObjectVariant::Integer(digits))
         }
     }
 }

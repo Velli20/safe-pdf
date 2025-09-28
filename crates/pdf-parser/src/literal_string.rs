@@ -14,6 +14,8 @@ pub enum LiteralStringObjectError {
     UnbalancedParentheses,
     #[error("Tokenizer error: {0}")]
     TokenizerError(#[from] TokenizerError),
+    #[error("Too many opening parentheses in literal string")]
+    TooManyOpeningParentheses,
 }
 
 impl LiteralStringParser for PdfParser<'_> {
@@ -75,18 +77,21 @@ impl LiteralStringParser for PdfParser<'_> {
                 match token {
                     PdfToken::LeftParenthesis => {
                         // Nested parenthesis, increment depth.
-                        depth += 1;
+                        depth = depth
+                            .checked_add(1)
+                            .ok_or(LiteralStringObjectError::TooManyOpeningParentheses)?;
                         characthers.push(b'(');
                         continue;
                     }
                     PdfToken::RightParenthesis => {
                         if depth == 0 {
                             // End of a literal string
-
                             return Ok(String::from_utf8_lossy(&characthers).to_string());
                         } else {
                             // Nested parenthesis
-                            depth -= 1;
+                            depth = depth
+                                .checked_sub(1)
+                                .ok_or(LiteralStringObjectError::UnbalancedParentheses)?;
                             characthers.push(b')');
                             continue;
                         }

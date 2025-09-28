@@ -82,15 +82,16 @@ pub struct ColorStops {
 impl ColorStops {
     pub fn from(function: &Function) -> Self {
         // Number of stops to sample
-        let num_stops = 16;
+        const NUM_OF_STOPS: u16 = 16;
+
+        let domain = function.domain().unwrap_or([0.0, 1.0]);
         let mut positions = vec![];
         let mut colors = vec![];
-        for i in 0..num_stops {
-            let t = i as f32 / num_stops as f32;
-            // Map t to the function's domain
-            let domain = function.domain().unwrap_or([0.0, 1.0]);
+
+        for i in 0..NUM_OF_STOPS {
+            let t = f32::from(i) / f32::from(NUM_OF_STOPS);
             let x = domain[0] + t * (domain[1] - domain[0]);
-            // Evaluate the function
+            // Evaluate function at x to get color components.
             let color_components = function
                 .interpolate(x)
                 .unwrap_or_else(|_| vec![0.0, 0.0, 0.0]);

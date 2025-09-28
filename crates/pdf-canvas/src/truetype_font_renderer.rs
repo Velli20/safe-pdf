@@ -147,7 +147,7 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
             // Build the glyph outline using the composed transform.
             let mut builder = PdfGlyphOutline::new(glyph_matrix_for_char);
 
-            if let Some(a) = cmap.get_mapping(char_code as u32)
+            if let Some(a) = cmap.get_mapping(u32::from(char_code))
                 && let Some(x) = face.glyph_index(a)
             {
                 glyph_id = x;
@@ -163,7 +163,7 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
             let w0_glyph_units = cid_font
                 .widths
                 .as_ref()
-                .and_then(|w_array| w_array.get_width(char_code as i64))
+                .and_then(|w_array| w_array.get_width(i64::from(char_code)))
                 .unwrap_or(cid_font.default_width);
 
             // Convert width from font units to ems.

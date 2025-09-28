@@ -91,9 +91,12 @@ impl HeaderParser for PdfParser<'_> {
 
         // Now that we've parsed the version, consume the EOL from the original line.
         // Reset position to where EOL reading should start.
-        self.tokenizer.position = current_pos + line_bytes.len();
+        self.tokenizer.position = current_pos
+            .checked_add(line_bytes.len())
+            .ok_or(HeaderError::MissingEOL)?;
+
         self.read_end_of_line_marker()
-            .map_err(|_| HeaderError::MissingEOL)?;
+            .or(Err(HeaderError::MissingEOL))?;
 
         Ok(Version::new(major, minor))
     }
