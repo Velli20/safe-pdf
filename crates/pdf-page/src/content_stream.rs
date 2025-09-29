@@ -17,7 +17,10 @@ pub enum ContentStreamReadError {
     ObjectError(#[from] ObjectError),
 }
 
+/// Represents the content stream of a PDF page, containing a sequence
+/// of drawing operators.
 pub struct ContentStream {
+    /// Flat, ordered list of all PDF content stream operators that belong to a page.
     pub operations: Vec<PdfOperatorVariant>,
 }
 

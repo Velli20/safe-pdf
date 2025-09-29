@@ -1,6 +1,6 @@
 # safe-pdf
 
-[![Build Status](https://img.shields.io/github/actions/workflow/status/Velli20/safe-pdf/ci.yml?branch=main)](https://github.com/Velli20/safe-pdf/actions)
+[![CI](https://github.com/Velli20/safe-pdf/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Velli20/safe-pdf/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 
