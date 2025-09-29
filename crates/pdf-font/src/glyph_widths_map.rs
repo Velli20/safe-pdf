@@ -7,37 +7,29 @@ use thiserror::Error;
 pub enum GlyphWidthsMapError {
     /// The end of a CID range is less than the start.
     #[error("Invalid CID range: c_last ({c_last}) < c_first ({c_first})")]
-    InvalidCIDRange { c_first: i64, c_last: i64 },
+    InvalidCIDRange { c_first: u16, c_last: u16 },
     /// Missing width value after a CID range.
     #[error("Missing width after c_last for range starting at CID {c_first}")]
-    MissingWidthForCIDRange { c_first: i64 },
-    /// Unexpected element type after a CID.
-    #[error("Expected array or c_last after CID {cid}, found {found_type}")]
-    UnexpectedElementAfterCID { cid: i64, found_type: &'static str },
+    MissingWidthForCIDRange { c_first: u16 },
     /// CID entry is incomplete.
     #[error("CID {cid} found without a corresponding width array or c_last value")]
-    IncompleteCIDEntry { cid: i64 },
-    /// Negative CIDs are not valid according to the specification.
-    #[error("Negative CID encountered: {cid}")]
-    NegativeCID { cid: i64 },
+    IncompleteCIDEntry { cid: u16 },
     /// Duplicate starting CID segment definition.
     #[error("Duplicate CID segment start encountered: {cid}")]
-    DuplicateCIDStart { cid: i64 },
+    DuplicateCIDStart { cid: u16 },
     /// Overlapping CID segment definition.
     #[error("Overlapping CID segment starting at {cid}")]
-    OverlappingRange { cid: i64 },
+    OverlappingRange { cid: u16 },
     /// Explicit widths array was empty.
     #[error("Empty widths array for starting CID {cid}")]
-    EmptyWidthsArray { cid: i64 },
+    EmptyWidthsArray { cid: u16 },
     /// Range length was excessively large (possible malformed file / resource exhaustion risk).
-    #[error("Range from {c_first} to {c_last} is too large ({length} entries)")]
-    RangeTooLarge {
-        c_first: i64,
-        c_last: i64,
-        length: u64,
-    },
+    #[error("Range from {cid} to `u16::MAX` is too large ({length} entries)")]
+    RangeTooLarge { cid: u16, length: usize },
     #[error("{0}")]
     ObjectError(#[from] ObjectError),
+    #[error("Missing CID")]
+    MissingCID,
 }
 
 /// Stores glyph widths for CIDs, parsed from the /W array.
@@ -50,13 +42,14 @@ pub enum GlyphWidthsMapError {
 enum WidthRun {
     /// Explicit widths: `[c_first [w1 ... wn]]` form.
     Explicit(Vec<f32>),
-    /// Uniform width for a continuous range: `[c_first c_last w]` form.
-    Uniform { width: f32, len: u32 },
+    /// Uniform width for a continuous range: `[c_first c_last w]` (inclusive end CID).
+    Uniform { width: f32, end: u16 },
 }
 
+#[derive(Default)]
 pub struct GlyphWidthsMap {
     /// Ordered mapping from starting CID -> width run segment.
-    runs: BTreeMap<i64, WidthRun>,
+    runs: BTreeMap<u16, WidthRun>,
 }
 
 impl GlyphWidthsMap {
@@ -74,43 +67,41 @@ impl GlyphWidthsMap {
     ///
     /// Returns `GlyphWidthsMapError` if the array is malformed or contains invalid values.
     pub fn from_array(array: &[ObjectVariant]) -> Result<Self, GlyphWidthsMapError> {
-        // High-level parser: iterates the raw /W array and delegates to helper
-        // routines to insert explicit or uniform width runs. The logic here is
-        // intentionally minimalist; validation & overlap checks live in helpers.
-        let mut map = GlyphWidthsMap {
-            runs: BTreeMap::new(),
-        };
+        // Iterates the raw `/W` array and delegates to helper routines to insert explicit
+        // or uniform width runs.
+        let mut map = GlyphWidthsMap::default();
         let mut i = 0usize;
         while i < array.len() {
-            let cid = array[i].as_number::<i64>()?;
-            if cid < 0 {
-                return Err(GlyphWidthsMapError::NegativeCID { cid });
-            }
+            let cid = array
+                .get(i)
+                .ok_or(GlyphWidthsMapError::MissingCID)?
+                .as_number::<u16>()?;
+
+            // Advance past CID.
             i = i.saturating_add(1);
-            if i >= array.len() {
-                return Err(GlyphWidthsMapError::IncompleteCIDEntry { cid });
-            }
-            match &array[i] {
-                ObjectVariant::Array(widths_arr) => {
+
+            match array.get(i) {
+                Some(ObjectVariant::Array(widths_arr)) => {
                     map.insert_explicit(cid, widths_arr)?;
                     i = i.saturating_add(1);
                 }
-                ObjectVariant::Integer(_) | ObjectVariant::Real(_) => {
+                Some(other) => {
                     // Need c_last and width
-                    let c_last = array[i].as_number::<i64>()?;
+                    let c_last = other.as_number::<u16>()?;
+
                     let width_idx = i.saturating_add(1);
-                    if width_idx >= array.len() {
-                        return Err(GlyphWidthsMapError::MissingWidthForCIDRange { c_first: cid });
-                    }
-                    let width = array[width_idx].as_number::<f32>()?;
+                    let width = array
+                        .get(width_idx)
+                        .ok_or(GlyphWidthsMapError::MissingWidthForCIDRange { c_first: cid })?;
+
+                    let width = width.as_number::<f32>()?;
                     map.insert_uniform(cid, c_last, width)?;
-                    i = i.saturating_add(2); // consumed c_last + width
+                    // Advance past c_last and width (2 elements).
+                    i = i.saturating_add(2);
                 }
-                other => {
-                    return Err(GlyphWidthsMapError::UnexpectedElementAfterCID {
-                        cid,
-                        found_type: other.name(),
-                    });
+                None => {
+                    // No more elements after CID; incomplete entry.
+                    return Err(GlyphWidthsMapError::IncompleteCIDEntry { cid });
                 }
             }
         }
@@ -120,7 +111,7 @@ impl GlyphWidthsMap {
     /// Insert an explicit widths run starting at `cid` with the provided object array.
     fn insert_explicit(
         &mut self,
-        cid: i64,
+        cid: u16,
         widths_arr: &[ObjectVariant],
     ) -> Result<(), GlyphWidthsMapError> {
         if widths_arr.is_empty() {
@@ -133,8 +124,30 @@ impl GlyphWidthsMap {
             .iter()
             .map(ObjectVariant::as_number::<f32>)
             .collect::<Result<Vec<_>, _>>()?;
-        let len_i64 = i64::try_from(widths.len()).unwrap_or(i64::MAX);
-        self.check_overlap(cid, len_i64)?;
+
+        let length = widths.len();
+        // Ensure explicit run does not exceed CID space.
+        if length == 0 {
+            return Err(GlyphWidthsMapError::EmptyWidthsArray { cid });
+        }
+        if length > usize::from(u16::MAX) {
+            // More widths than total CID space.
+            return Err(GlyphWidthsMapError::RangeTooLarge { cid, length });
+        }
+        // Compute inclusive end CID; ensure it does not overflow the 16-bit space.
+        let len_minus_one = match length.checked_sub(1) {
+            Some(v) => v,
+            None => return Err(GlyphWidthsMapError::EmptyWidthsArray { cid }),
+        };
+
+        let span_minus_one_u16: u16 = u16::try_from(len_minus_one)
+            .map_err(|_| GlyphWidthsMapError::RangeTooLarge { cid, length })?;
+
+        let end = cid
+            .checked_add(span_minus_one_u16)
+            .ok_or(GlyphWidthsMapError::RangeTooLarge { cid, length })?;
+
+        self.check_overlap(cid, end)?;
         self.runs.insert(cid, WidthRun::Explicit(widths));
         Ok(())
     }
@@ -142,8 +155,8 @@ impl GlyphWidthsMap {
     /// Insert a uniform run [cid ..= c_last] with constant `width`.
     fn insert_uniform(
         &mut self,
-        cid: i64,
-        c_last: i64,
+        cid: u16,
+        c_last: u16,
         width: f32,
     ) -> Result<(), GlyphWidthsMapError> {
         if c_last < cid {
@@ -157,85 +170,35 @@ impl GlyphWidthsMap {
             return Err(GlyphWidthsMapError::DuplicateCIDStart { cid });
         }
 
-        // Convert range boundaries to u64 for safe arithmetic.
-        let c_last_u = u64::try_from(c_last).map_err(|_| GlyphWidthsMapError::InvalidCIDRange {
-            c_first: cid,
-            c_last,
-        })?;
-        let cid_u = u64::try_from(cid).map_err(|_| GlyphWidthsMapError::InvalidCIDRange {
-            c_first: cid,
-            c_last,
-        })?;
-
-        // Calculate the number of CIDs in the range [c_first, c_last] inclusively.
-        // `checked_sub` and `checked_add` prevent overflow on large ranges.
-        // The length is `c_last - c_first + 1`.
-        let length_u64 = c_last_u
-            .checked_sub(cid_u)
-            .and_then(|d| d.checked_add(1))
-            .ok_or(GlyphWidthsMapError::InvalidCIDRange {
-                c_first: cid,
-                c_last,
-            })?;
-        const MAX_RANGE: u64 = 1 << 20; // 1,048,576 cap
-        if length_u64 > MAX_RANGE {
-            return Err(GlyphWidthsMapError::RangeTooLarge {
-                c_first: cid,
-                c_last,
-                length: length_u64,
-            });
-        }
-        let len_u32 =
-            u32::try_from(length_u64).map_err(|_| GlyphWidthsMapError::RangeTooLarge {
-                c_first: cid,
-                c_last,
-                length: length_u64,
-            })?;
-        self.check_overlap(cid, i64::from(len_u32))?;
-        self.runs.insert(
-            cid,
-            WidthRun::Uniform {
-                width,
-                len: len_u32,
-            },
-        );
+        // For uniform runs, just store inclusive end (c_last) and check overlap.
+        // Length (for error reporting) is (c_last - cid + 1) and fits in u32.
+        self.check_overlap(cid, c_last)?;
+        self.runs
+            .insert(cid, WidthRun::Uniform { width, end: c_last });
         Ok(())
     }
 
-    /// Overlap checker formerly implemented as an inline closure inside `from_array`.
-    /// Ensures new run [start, start+len_i64-1] does not intersect any existing run.
-    fn check_overlap(&self, start: i64, len_i64: i64) -> Result<(), GlyphWidthsMapError> {
-        if len_i64 <= 0 {
-            return Ok(());
-        }
-        let len_u64 = u64::try_from(len_i64).map_err(|_| GlyphWidthsMapError::RangeTooLarge {
-            c_first: start,
-            c_last: i64::MAX,
-            length: u64::MAX,
-        })?;
-        let start_u = u64::try_from(start).map_err(|_| GlyphWidthsMapError::RangeTooLarge {
-            c_first: start,
-            c_last: i64::MAX,
-            length: len_u64,
-        })?;
-        let end_u = start_u.checked_add(len_u64.saturating_sub(1)).ok_or(
-            GlyphWidthsMapError::RangeTooLarge {
+    /// Ensures new run [start, end] does not intersect any existing run.
+    fn check_overlap(&self, start: u16, end: u16) -> Result<(), GlyphWidthsMapError> {
+        if start > end {
+            return Err(GlyphWidthsMapError::InvalidCIDRange {
                 c_first: start,
-                c_last: i64::MAX,
-                length: len_u64,
-            },
-        )?;
-        let end: i64 = i64::try_from(end_u).map_err(|_| GlyphWidthsMapError::RangeTooLarge {
-            c_first: start,
-            c_last: i64::MAX,
-            length: len_u64,
-        })?;
+                c_last: end,
+            });
+        }
         if let Some((&prev_start, prev_run)) = self.runs.range(..start).next_back() {
-            let prev_len: i64 = match prev_run {
-                WidthRun::Explicit(v) => i64::try_from(v.len()).unwrap_or(i64::MAX),
-                WidthRun::Uniform { len, .. } => i64::from(*len),
+            let prev_end = match prev_run {
+                WidthRun::Explicit(v) => {
+                    if v.is_empty() {
+                        prev_start
+                    } else {
+                        let len_minus_one = v.len().saturating_sub(1);
+                        let span_minus_one = u16::try_from(len_minus_one).unwrap_or(u16::MAX);
+                        prev_start.saturating_add(span_minus_one)
+                    }
+                }
+                WidthRun::Uniform { end, .. } => *end,
             };
-            let prev_end = prev_start.saturating_add(prev_len.saturating_sub(1));
             if prev_end >= start {
                 return Err(GlyphWidthsMapError::OverlappingRange { cid: start });
             }
@@ -257,28 +220,13 @@ impl GlyphWidthsMap {
     /// # Returns
     ///
     /// `Some(width)` if the width is found, or `None` if not present.
-    pub fn get_width(&self, character_id: i64) -> Option<f32> {
+    pub fn get_width(&self, character_id: u16) -> Option<f32> {
         let (start, run) = self.runs.range(..=character_id).next_back()?;
-        let offset = character_id.saturating_sub(*start);
-        if offset < 0 {
-            return None;
-        }
+        let offset = character_id.checked_sub(*start)?;
         match run {
-            WidthRun::Explicit(widths) => widths.get(usize::try_from(offset).ok()?).copied(),
-            WidthRun::Uniform { width, len } => {
-                let off_u64 = u64::try_from(offset).ok()?;
-                if off_u64 < u64::from(*len) {
-                    Some(*width)
-                } else {
-                    None
-                }
-            }
+            WidthRun::Explicit(widths) => widths.get(usize::from(offset)).copied(),
+            WidthRun::Uniform { width, end } => (character_id <= *end).then_some(*width),
         }
-    }
-
-    /// Returns the width for a CID, or the provided default if missing.
-    pub fn get_width_or_default(&self, character_id: i64, default: f32) -> f32 {
-        self.get_width(character_id).unwrap_or(default)
     }
 }
 
@@ -439,21 +387,7 @@ mod tests {
         assert_eq!(glyph_widths_map.get_width(52), None); // After second range
     }
 
-    #[test]
-    fn test_get_width_cid_negative_if_supported_by_map_keys() {
-        // While PDF CIDs are typically non-negative, i64 allows it.
-        let mut runs = BTreeMap::new();
-        runs.insert(-5, WidthRun::Explicit(vec![200.0, 210.0]));
-        runs.insert(0, WidthRun::Explicit(vec![300.0]));
-        let glyph_widths_map = GlyphWidthsMap { runs };
-
-        assert_eq!(glyph_widths_map.get_width(-5), Some(200.0));
-        assert_eq!(glyph_widths_map.get_width(-4), Some(210.0));
-        assert_eq!(glyph_widths_map.get_width(-6), None);
-        assert_eq!(glyph_widths_map.get_width(-3), None);
-        assert_eq!(glyph_widths_map.get_width(0), Some(300.0));
-    }
-
+    // Removed negative CID test since CIDs are now strictly u16.
     #[test]
     fn test_from_array_c_first_c_last_w_form_single_entry() {
         // [ 10 12 600 ] -> CIDs 10, 11, 12 have width 600
@@ -557,29 +491,6 @@ mod tests {
     }
 
     #[test]
-    fn test_from_array_error_negative_cid() {
-        // [ -1 [500] ]
-        let input_array = vec![num_i64(-1), arr(vec![num_f32(500.0)])];
-        let result = GlyphWidthsMap::from_array(&input_array);
-        assert!(matches!(
-            result,
-            Err(GlyphWidthsMapError::NegativeCID { cid: -1 })
-        ));
-    }
-
-    #[test]
-    fn test_from_array_error_range_too_large() {
-        // choose range exceeding limit (MAX_RANGE = 1<<20) -> need > 1_048_576 length
-        let start = 0i64;
-        let end = (1i64 << 20) + 5; // length = 1_048_582
-        let input_array = vec![num_i64(start), num_i64(end), num_f32(600.0)];
-        let result = GlyphWidthsMap::from_array(&input_array);
-        assert!(
-            matches!(result, Err(GlyphWidthsMapError::RangeTooLarge { c_first: 0, c_last, .. }) if c_last == end)
-        );
-    }
-
-    #[test]
     fn test_uniform_range_lookup() {
         // [ 10 12 600 ]
         let input_array = vec![num_i64(10), num_i64(12), num_f32(600.0)];
@@ -612,24 +523,6 @@ mod tests {
         assert!(matches!(
             result,
             Err(GlyphWidthsMapError::MissingWidthForCIDRange { c_first: 10 })
-        ));
-    }
-
-    #[test]
-    fn test_from_array_error_c_last_not_a_number() {
-        // [ 10 "not_c_last" 600 ]
-        let input_array = vec![
-            num_i64(10),
-            ObjectVariant::LiteralString("not_c_last".to_string()),
-            num_f32(600.0),
-        ];
-        let result = GlyphWidthsMap::from_array(&input_array);
-        assert!(matches!(
-            result,
-            Err(GlyphWidthsMapError::UnexpectedElementAfterCID {
-                cid: 10,
-                found_type: "LiteralString"
-            })
         ));
     }
 }
