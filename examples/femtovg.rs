@@ -197,9 +197,7 @@ impl AppRenderer for Renderer2 {
 }
 
 fn main() {
-    const INPUT: &[u8] = include_bytes!(
-        "/Users/viktore/safe-pdf/crates/pdf-document/tests/assets/dd5cf1a7d6d190f94a28201777f11bf4.pdf"
-    );
+    const INPUT: &[u8] = include_bytes!("assets/dd5cf1a7d6d190f94a28201777f11bf4.pdf");
     let document = PdfDocument::from(INPUT).unwrap();
 
     let mut app = App::new(595, 842, true, document);

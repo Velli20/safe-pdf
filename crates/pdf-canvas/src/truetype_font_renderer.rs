@@ -163,7 +163,7 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
             let w0_glyph_units = cid_font
                 .widths
                 .as_ref()
-                .and_then(|w_array| w_array.get_width(i64::from(char_code)))
+                .and_then(|w_array| w_array.get_width(char_code))
                 .unwrap_or(cid_font.default_width);
 
             // Convert width from font units to ems.
