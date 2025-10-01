@@ -12,6 +12,7 @@ use crate::{
     character_map::{CMapError, CharacterMap},
     cid_font::{CharacterIdentifierFont, CidFontError},
     type1_font::{Type1Font, Type1FontError},
+    true_type_font::{TrueTypeFont, TrueTypeFontError},
     type3_font::{Type3Font, Type3FontError},
 };
 
@@ -51,6 +52,8 @@ pub enum FontError {
     Type3FontError(#[from] Type3FontError),
     #[error("Error processing Type1 font: {0}")]
     Type1FontError(#[from] Type1FontError),
+    #[error("Error processing TrueType font: {0}")]
+    TrueTypeFontError(#[from] TrueTypeFontError),
     #[error("Unsupported or invalid font subtype '{subtype}' for {font_type} font")]
     UnsupportedFontSubtype {
         subtype: FontSubType,
@@ -65,6 +68,7 @@ pub enum FontSubType {
     Type0,
     Type1,
     Type3,
+    TrueType,
 }
 
 impl From<Cow<'_, str>> for FontSubType {
@@ -73,6 +77,7 @@ impl From<Cow<'_, str>> for FontSubType {
             "Type0" => FontSubType::Type0,
             "Type1" => FontSubType::Type1,
             "Type3" => FontSubType::Type3,
+            "TrueType" => FontSubType::TrueType,
             _ => FontSubType::Type1,
         }
     }
@@ -84,6 +89,7 @@ impl std::fmt::Display for FontSubType {
             FontSubType::Type0 => write!(f, "/Type0"),
             FontSubType::Type1 => write!(f, "/Type1"),
             FontSubType::Type3 => write!(f, "/Type3"),
+            FontSubType::TrueType => write!(f, "/TrueType"),
         }
     }
 }
@@ -104,6 +110,7 @@ pub struct Font {
     pub cid_font: Option<CharacterIdentifierFont>,
     pub type1_font: Option<Type1Font>,
     pub type3_font: Option<Type3Font>,
+    pub true_type_font: Option<TrueTypeFont>,
     pub encoding: Option<FontEncoding>,
 }
 
@@ -152,6 +159,7 @@ impl FromDictionary for Font {
                 cid_font: None,
                 type1_font: None,
                 type3_font: Some(type3_font),
+                true_type_font: None,
                 encoding,
             });
         }
@@ -166,6 +174,22 @@ impl FromDictionary for Font {
                 cid_font: None,
                 type1_font: Some(type1_font),
                 type3_font: None,
+                true_type_font: None,
+                encoding,
+            });
+        }
+
+        // TrueType simple font support
+        if subtype == FontSubType::TrueType {
+            let tt_font = TrueTypeFont::from_dictionary(dictionary, objects)?;
+            return Ok(Self {
+                base_font,
+                subtype,
+                cmap,
+                cid_font: None,
+                type1_font: None,
+                type3_font: None,
+                true_type_font: Some(tt_font),
                 encoding,
             });
         }
@@ -206,6 +230,7 @@ impl FromDictionary for Font {
             cid_font: Some(cid_font),
             type1_font: None,
             type3_font: None,
+            true_type_font: None,
             encoding,
         })
     }

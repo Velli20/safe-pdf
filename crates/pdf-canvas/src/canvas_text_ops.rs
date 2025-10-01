@@ -189,6 +189,20 @@ impl<T: CanvasBackend> TextShowingOps for PdfCanvas<'_, T> {
                     ))
                 }
             }
+            FontSubType::TrueType => {
+                let mut renderer = TrueTypeFontRenderer::new(
+                    self,
+                    current_font,
+                    text_state.font_size,
+                    text_state.horizontal_scaling,
+                    text_state.matrix,
+                    self.current_state()?.transform,
+                    text_state.rise,
+                    text_state.word_spacing,
+                    text_state.character_spacing,
+                )?;
+                renderer.render_text(text)
+            }
             _ => {
                 if let Some(cid_font) = &current_font.cid_font {
                     if cid_font.subtype != CidFontSubType::Type2 {
