@@ -163,6 +163,39 @@ impl PdfOperator for SetDashPattern {
     }
 }
 
+/// Sets the flatness tolerance, controlling the accuracy with which curves
+/// are approximated. (PDF operator `i`)
+///
+/// PDF 1.7 Specification, Section 8.4.3.4 "Flatness Tolerance".
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetFlatnessTolerance {
+    /// The flatness tolerance value. Typical values range from 1 to 100.
+    tolerance: f32,
+}
+
+impl SetFlatnessTolerance {
+    pub fn new(tolerance: f32) -> Self {
+        Self { tolerance }
+    }
+}
+
+impl PdfOperator for SetFlatnessTolerance {
+    const NAME: &'static str = "i";
+
+    const OPERAND_COUNT: Option<usize> = Some(1);
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        let tolerance = operands.get_f32()?;
+        Ok(PdfOperatorVariant::SetFlatnessTolerance(Self::new(
+            tolerance,
+        )))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_flatness_tolerance(self.tolerance)
+    }
+}
+
 /// Saves the current graphics state on the graphics state stack.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SaveGraphicsState;

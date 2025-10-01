@@ -82,8 +82,8 @@ impl FromDictionary for CharacterIdentifierFont {
         let widths_map = dictionary
             .get("W")
             .map(|obj| -> Result<GlyphWidthsMap, CidFontError> {
-                let arr = obj.try_array()?;
-                GlyphWidthsMap::from_array(arr).map_err(CidFontError::from)
+                let resolved_obj = objects.resolve_object(obj)?.try_array()?;
+                GlyphWidthsMap::from_array(resolved_obj).map_err(CidFontError::from)
             })
             .transpose()?;
 

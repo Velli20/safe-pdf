@@ -136,6 +136,9 @@ impl<'a> Operands<'a> {
         let mut elements = Vec::with_capacity(array_values.len());
         for val_obj in array_values {
             match val_obj {
+                ObjectVariant::HexString(s) => {
+                    elements.push(TextElement::HexString { value: s.clone() })
+                }
                 ObjectVariant::LiteralString(s) => {
                     elements.push(TextElement::Text { value: s.clone() })
                 }

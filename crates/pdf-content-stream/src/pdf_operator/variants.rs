@@ -44,6 +44,7 @@ pub enum PdfOperatorVariant {
     SetLineJoinStyle(SetLineJoinStyle),
     SetMiterLimit(SetMiterLimit),
     SetDashPattern(SetDashPattern),
+    SetFlatnessTolerance(SetFlatnessTolerance),
     SetGraphicsStateFromDict(SetGraphicsStateFromDict),
     SaveGraphicsState(SaveGraphicsState),
     RestoreGraphicsState(RestoreGraphicsState),
@@ -173,6 +174,7 @@ impl PdfOperatorVariant {
             PdfOperatorVariant::SetLineJoinStyle(op) => op.call(backend),
             PdfOperatorVariant::SetMiterLimit(op) => op.call(backend),
             PdfOperatorVariant::SetDashPattern(op) => op.call(backend),
+            PdfOperatorVariant::SetFlatnessTolerance(op) => op.call(backend),
             PdfOperatorVariant::SetGraphicsStateFromDict(op) => op.call(backend),
             PdfOperatorVariant::SaveGraphicsState(op) => op.call(backend),
             PdfOperatorVariant::RestoreGraphicsState(op) => op.call(backend),
@@ -231,6 +233,13 @@ mod tests {
                 expected_ops: vec![PdfOperatorVariant::ConcatMatrix(ConcatMatrix::new([
                     0.17576218, 0.0, 0.0, 0.17576218, 2227.4995, 159.375,
                 ]))],
+            },
+            TestCase {
+                description: "0b. Set flatness tolerance (i)",
+                input: b"5 i",
+                expected_ops: vec![PdfOperatorVariant::SetFlatnessTolerance(
+                    SetFlatnessTolerance::new(5.0),
+                )],
             },
             TestCase {
                 description: "1. Simple moveto (m)",

@@ -23,6 +23,7 @@ extern crate alloc;
 // TextElement enum for ShowTextArray operator
 #[derive(Debug, Clone, PartialEq)]
 pub enum TextElement {
+    HexString { value: Vec<u8> },
     Text { value: String },
     Adjustment { amount: f32 },
 }

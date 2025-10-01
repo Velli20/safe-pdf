@@ -90,10 +90,10 @@ impl CrossReferenceTableParser for PdfParser<'_> {
             .map_err(|err| CrossReferenceTableError::ParserError {
                 err: err.to_string(),
             })?;
+        self.skip_whitespace();
 
         let mut total_number_of_entries = 0_i32;
         let mut first_object_number = None;
-
         let mut entries = Vec::new();
         loop {
             // Read the first object number.
