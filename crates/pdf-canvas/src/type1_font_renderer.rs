@@ -61,7 +61,17 @@ impl<'a, T: PdfOperatorBackend + Canvas> Type1FontRenderer<'a, T> {
 
 impl<T: PdfOperatorBackend + Canvas> TextRenderer for Type1FontRenderer<'_, T> {
     fn render_text(&mut self, text: &[u8]) -> Result<(), PdfCanvasError> {
-        let program = CffFontReader::new(&self.font.font_file.data).read_font_program()?;
+        let program = CffFontReader::new(
+            &self
+                .font
+                .font_file
+                .as_ref()
+                .ok_or(PdfCanvasError::InvalidFont(
+                    "Missing font file for Type1 font",
+                ))?
+                .data,
+        )
+        .read_font_program()?;
 
         // Build the text rendering transform.
         // CFF/Type 1 glyph outlines are expressed in a 1000 units-per-em coordinate system.

@@ -50,6 +50,7 @@ pub(crate) const READ_MAP: &[OpDescriptor] = &[
     OpDescriptor::from::<SetLineJoinStyle>(),
     OpDescriptor::from::<SetMiterLimit>(),
     OpDescriptor::from::<SetDashPattern>(),
+    OpDescriptor::from::<SetFlatnessTolerance>(),
     OpDescriptor::from::<SetGraphicsStateFromDict>(),
     OpDescriptor::from::<SaveGraphicsState>(),
     OpDescriptor::from::<RestoreGraphicsState>(),

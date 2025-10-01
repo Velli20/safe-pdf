@@ -19,7 +19,7 @@ pub enum FontDescriptorError {
 pub struct FontDescriptor {
     /// A stream containing the font program.
     /// This can be FontFile, FontFile2, or FontFile3 depending on the font type.
-    pub font_file: StreamObject,
+    pub font_file: Option<StreamObject>,
 }
 
 impl FromDictionary for FontDescriptor {
@@ -41,9 +41,11 @@ impl FromDictionary for FontDescriptor {
             .or_else(|| resolve_font_file_stream("FontFile"));
 
         let Some(font_file) = font_file.cloned() else {
-            return Err(FontDescriptorError::MissingFontFile);
+            return Ok(Self { font_file: None });
         };
 
-        Ok(Self { font_file })
+        Ok(Self {
+            font_file: Some(font_file),
+        })
     }
 }

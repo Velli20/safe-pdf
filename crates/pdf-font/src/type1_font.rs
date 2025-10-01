@@ -17,7 +17,7 @@ pub struct Type1Font {
     /// PostScript base font name (e.g., /Helvetica)
     pub base_font: String,
     /// A stream containing the font program.
-    pub font_file: StreamObject,
+    pub font_file: Option<StreamObject>,
     /// Optional encoding name (e.g., /WinAnsiEncoding) or custom encoding via Differences
     /// For now we capture only the base encoding name for quick wiring; differences can be
     /// expanded later similarly to Type3.
