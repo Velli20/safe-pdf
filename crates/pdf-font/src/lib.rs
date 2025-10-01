@@ -1,5 +1,5 @@
 pub mod cff;
-pub mod characther_map;
+pub mod character_map;
 pub mod cid_font;
 pub mod font;
 pub mod font_descriptor;

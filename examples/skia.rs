@@ -394,6 +394,7 @@ fn run(settings: AppSettings) {
                 WindowEvent::RedrawRequested => {
                     let size = self.env.window.inner_size();
                     self.previous_frame_start = Instant::now();
+                    self.env.surface.canvas().restore_to_count(0);
                     self.env.pdf_logic.on_render(
                         &mut self.env.surface,
                         &self.env.pdf_document,

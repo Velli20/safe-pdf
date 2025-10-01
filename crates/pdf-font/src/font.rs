@@ -9,7 +9,7 @@ use pdf_object::{
 use thiserror::Error;
 
 use crate::{
-    characther_map::{CMapError, CharacterMap},
+    character_map::{CMapError, CharacterMap},
     cid_font::{CharacterIdentifierFont, CidFontError},
     type1_font::{Type1Font, Type1FontError},
     type3_font::{Type3Font, Type3FontError},
