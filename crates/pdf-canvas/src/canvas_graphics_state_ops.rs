@@ -66,8 +66,7 @@ impl<T: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, T> {
         _dash_array: &[f32],
         _dash_phase: f32,
     ) -> Result<(), Self::ErrorType> {
-        // Err(PdfCanvasError::NotImplemented("set_dash_pattern".into()))
-        Ok(())
+        Err(PdfCanvasError::NotImplemented("set_dash_pattern".into()))
     }
 
     fn set_rendering_intent(&mut self, _intent: &str) -> Result<(), Self::ErrorType> {
@@ -77,9 +76,6 @@ impl<T: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, T> {
     }
 
     fn set_flatness_tolerance(&mut self, _tolerance: f32) -> Result<(), Self::ErrorType> {
-        // Err(PdfCanvasError::NotImplemented(
-        //     "set_flatness_tolerance".into(),
-        // ))
         Ok(())
     }
 
