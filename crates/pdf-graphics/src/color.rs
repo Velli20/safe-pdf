@@ -24,6 +24,23 @@ impl Color {
         Self { r, g, b, a: 1.0 }
     }
 
+    /// Returns a grayscale color from a single luminance value.
+    ///
+    /// # Arguments
+    ///
+    /// - `gray`: The gray level, a value between 0.0 (black) and 1.0 (white).
+    ///
+    /// Alpha defaults to 1.0 (opaque). This does not clamp the input; callers
+    /// should ensure the value is within the valid range.
+    pub const fn from_gray(gray: f32) -> Self {
+        Self {
+            r: gray,
+            g: gray,
+            b: gray,
+            a: 1.0,
+        }
+    }
+
     /// Returns color value from CMYK component values.
     ///
     /// All component values should be in the range [0.0, 1.0]. Conversion uses
@@ -64,5 +81,17 @@ mod tests {
 
         let yellow = Color::from_cmyk(0.0, 0.0, 1.0, 0.0);
         assert!(approx_eq(yellow.r, 1.0) && approx_eq(yellow.g, 1.0) && approx_eq(yellow.b, 0.0));
+    }
+
+    #[test]
+    fn gray_levels() {
+        let black = Color::from_gray(0.0);
+        assert!(approx_eq(black.r, 0.0) && approx_eq(black.g, 0.0) && approx_eq(black.b, 0.0));
+
+        let mid = Color::from_gray(0.5);
+        assert!(approx_eq(mid.r, 0.5) && approx_eq(mid.g, 0.5) && approx_eq(mid.b, 0.5));
+
+        let white = Color::from_gray(1.0);
+        assert!(approx_eq(white.r, 1.0) && approx_eq(white.g, 1.0) && approx_eq(white.b, 1.0));
     }
 }
