@@ -7,7 +7,7 @@ use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError};
 use pdf_content_stream::pdf_operator_backend::{
     TextObjectOps, TextPositioningOps, TextShowingOps, TextStateOps,
 };
-use pdf_font::cid_font::CidFontSubType;
+use pdf_content_stream::TextElement;
 use pdf_font::font::FontSubType;
 use pdf_graphics::TextRenderingMode;
 use pdf_graphics::transform::Transform;
@@ -189,34 +189,7 @@ impl<T: CanvasBackend> TextShowingOps for PdfCanvas<'_, T> {
                     ))
                 }
             }
-            FontSubType::TrueType => {
-                let mut renderer = TrueTypeFontRenderer::new(
-                    self,
-                    current_font,
-                    text_state.font_size,
-                    text_state.horizontal_scaling,
-                    text_state.matrix,
-                    self.current_state()?.transform,
-                    text_state.rise,
-                    text_state.word_spacing,
-                    text_state.character_spacing,
-                )?;
-                renderer.render_text(text)
-            }
             _ => {
-                if let Some(cid_font) = &current_font.cid_font {
-                    if cid_font.subtype != CidFontSubType::Type2 {
-                        //return Err(PdfCanvasError::NotImplemented(
-                        //    "Only CIDFont-based fonts are supported in show_text".to_string(),
-                        //));
-                        return Ok(());
-                    }
-                } else {
-                    // return Err(PdfCanvasError::NotImplemented(
-                    //     "Only CIDFont-based fonts are supported in show_text".to_string(),
-                    // ));
-                    return Ok(());
-                }
                 let mut renderer = TrueTypeFontRenderer::new(
                     self,
                     current_font,
@@ -228,7 +201,8 @@ impl<T: CanvasBackend> TextShowingOps for PdfCanvas<'_, T> {
                     text_state.word_spacing,
                     text_state.character_spacing,
                 )?;
-                renderer.render_text(text)
+                renderer.render_text(text);
+                Ok(())
             }
         }
     }
@@ -237,10 +211,27 @@ impl<T: CanvasBackend> TextShowingOps for PdfCanvas<'_, T> {
         &mut self,
         elements: &[pdf_content_stream::TextElement],
     ) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented(format!(
-            "show_text_with_glyph_positioning TJ (elements_len={})",
-            elements.len()
-        )))
+        for element in elements {
+            match element {
+                TextElement::Text { value } => {
+                    self.show_text(value.as_bytes())?;
+                    println!("Text: {}", value);
+                }
+                TextElement::Adjustment { amount }=> {
+                    let amount = (*amount) / 1000.0;
+                    let state = self.current_state_mut()?;
+                    let tx = - amount * state.text_state.font_size * state.text_state.horizontal_scaling;
+                    state.text_state.matrix.translate(tx, 0.0);
+                    println!("Adjustment: {}", amount);
+                }
+                TextElement::HexString { value } => {
+                    println!("HexString: {}", String::from_utf8_lossy(value));
+                    self.show_text(value)?;
+                }
+
+            }
+        }
+        Ok(())
     }
 
     fn move_to_next_line_and_show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
