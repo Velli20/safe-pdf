@@ -53,13 +53,15 @@ impl<T: CanvasBackend> ColorOps for PdfCanvas<'_, T> {
     }
 
     fn set_stroking_gray(&mut self, _gray: f32) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented("set_stroking_gray".into()))
+        self.current_state_mut()?.stroke_color = Color::from_gray(_gray);
+        self.current_state_mut()?.pattern = None;
+        Ok(())
     }
 
     fn set_non_stroking_gray(&mut self, _gray: f32) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented(
-            "set_non_stroking_gray".into(),
-        ))
+        self.current_state_mut()?.fill_color = Color::from_gray(_gray);
+        self.current_state_mut()?.pattern = None;
+        Ok(())
     }
 
     fn set_stroking_rgb(&mut self, r: f32, g: f32, b: f32) -> Result<(), Self::ErrorType> {
