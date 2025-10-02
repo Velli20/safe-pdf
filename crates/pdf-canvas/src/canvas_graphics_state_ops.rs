@@ -76,9 +76,7 @@ impl<T: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, T> {
     }
 
     fn set_flatness_tolerance(&mut self, _tolerance: f32) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented(
-            "set_flatness_tolerance".into(),
-        ))
+        Ok(())
     }
 
     fn set_graphics_state_from_dict(&mut self, dict_name: &str) -> Result<(), Self::ErrorType> {

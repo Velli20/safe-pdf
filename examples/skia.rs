@@ -470,6 +470,6 @@ impl AppRenderer<skia_safe::Surface> for PdfPageRendererLogic {
         };
 
         let mut pdf_renderer = PdfRenderer::new(document, &mut skia_backend);
-        pdf_renderer.render(page_index);
+        pdf_renderer.render(page_index).unwrap();
     }
 }

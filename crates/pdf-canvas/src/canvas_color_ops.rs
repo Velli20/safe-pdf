@@ -53,30 +53,37 @@ impl<T: CanvasBackend> ColorOps for PdfCanvas<'_, T> {
     }
 
     fn set_stroking_gray(&mut self, _gray: f32) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented("set_stroking_gray".into()))
+        let state = self.current_state_mut()?;
+        state.stroke_color = Color::from_gray(_gray);
+        state.pattern = None;
+        Ok(())
     }
 
     fn set_non_stroking_gray(&mut self, _gray: f32) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented(
-            "set_non_stroking_gray".into(),
-        ))
+        let state = self.current_state_mut()?;
+        state.fill_color = Color::from_gray(_gray);
+        state.pattern = None;
+        Ok(())
     }
 
     fn set_stroking_rgb(&mut self, r: f32, g: f32, b: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.stroke_color = Color::from_rgb(r, g, b);
-        self.current_state_mut()?.pattern = None;
+        let state = self.current_state_mut()?;
+        state.stroke_color = Color::from_rgb(r, g, b);
+        state.pattern = None;
         Ok(())
     }
 
     fn set_non_stroking_rgb(&mut self, r: f32, g: f32, b: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.fill_color = Color::from_rgb(r, g, b);
-        self.current_state_mut()?.pattern = None;
+        let state = self.current_state_mut()?;
+        state.fill_color = Color::from_rgb(r, g, b);
+        state.pattern = None;
         Ok(())
     }
 
     fn set_stroking_cmyk(&mut self, c: f32, m: f32, y: f32, k: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.stroke_color = Color::from_cmyk(c, m, y, k);
-        self.current_state_mut()?.pattern = None;
+        let state = self.current_state_mut()?;
+        state.stroke_color = Color::from_cmyk(c, m, y, k);
+        state.pattern = None;
         Ok(())
     }
 
@@ -87,8 +94,9 @@ impl<T: CanvasBackend> ColorOps for PdfCanvas<'_, T> {
         y: f32,
         k: f32,
     ) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.fill_color = Color::from_cmyk(c, m, y, k);
-        self.current_state_mut()?.pattern = None;
+        let state = self.current_state_mut()?;
+        state.fill_color = Color::from_cmyk(c, m, y, k);
+        state.pattern = None;
         Ok(())
     }
 }
