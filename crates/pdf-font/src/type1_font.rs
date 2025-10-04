@@ -1,18 +1,18 @@
-use std::collections::HashMap;
-
 use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     stream::StreamObject, traits::FromDictionary,
 };
 use thiserror::Error;
 
-use crate::font_descriptor::{FontDescriptor, FontDescriptorError};
+use crate::{
+    font_descriptor::{FontDescriptor, FontDescriptorError},
+    simple_font_glyph_map::{SimpleFontGlyphWidthsMap, SimpleFontGlyphWidthsMapError},
+};
 
 /// Minimal, initial representation of a PDF Type1 font.
 ///
 /// This focuses on dictionary-level metadata needed by higher layers
 /// and defers actual glyph rendering or embedded program parsing.
-#[derive(Debug)]
 pub struct Type1Font {
     /// PostScript base font name (e.g., /Helvetica)
     pub base_font: String,
@@ -22,13 +22,8 @@ pub struct Type1Font {
     /// For now we capture only the base encoding name for quick wiring; differences can be
     /// expanded later similarly to Type3.
     pub base_encoding: Option<String>,
-    /// Widths for character codes 0..=255 if provided via /Widths.
-    /// Index is the character code, value is the width.
-    pub widths: Option<HashMap<u8, f32>>, // simple map for now; may be replaced by a compact Vec
-    /// First character code in widths array
-    pub first_char: Option<u8>,
-    /// Last character code in widths array
-    pub last_char: Option<u8>,
+    /// Widths map for character codes.
+    pub widths: SimpleFontGlyphWidthsMap,
 }
 
 /// Errors that can occur while parsing a Type1 font dictionary.
@@ -38,6 +33,8 @@ pub enum Type1FontError {
     ObjectError(#[from] ObjectError),
     #[error("FontDescriptor error: {0}")]
     FontDescriptor(#[from] FontDescriptorError),
+    #[error("SimpleFontGlyphWidthsMap parsing error: {0}")]
+    SimpleFontGlyphWidthsMapError(#[from] SimpleFontGlyphWidthsMapError),
 }
 
 impl FromDictionary for Type1Font {
@@ -66,53 +63,14 @@ impl FromDictionary for Type1Font {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        // Parse optional widths: /FirstChar, /LastChar, /Widths [ ... ]
-        let first_char = dictionary
-            .get("FirstChar")
-            .map(pdf_object::ObjectVariant::as_number::<i64>)
-            .transpose()?
-            .and_then(|i| u8::try_from(i).ok());
-
-        let last_char = dictionary
-            .get("LastChar")
-            .map(pdf_object::ObjectVariant::as_number::<i64>)
-            .transpose()?
-            .and_then(|i| u8::try_from(i).ok());
-
-        let widths = if let (Some(fc), Some(lc)) = (first_char, last_char) {
-            if let Some(widths_obj) = dictionary.get("Widths") {
-                let arr = widths_obj.try_array()?;
-                // Map sequentially: widths[i] corresponds to code (fc + i)
-                let mut map = HashMap::new();
-                for (i, w) in arr.iter().enumerate() {
-                    let Some(i_u16) = u16::try_from(i).ok() else {
-                        break;
-                    };
-                    let code_u16 = u16::from(fc).saturating_add(i_u16);
-                    let Ok(code) = u8::try_from(code_u16) else {
-                        break;
-                    };
-                    if code > lc {
-                        break;
-                    }
-                    let width = w.as_number::<f32>()?;
-                    map.insert(code, width);
-                }
-                Some(map)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        // Read the `/Widths` entry.
+        let widths = SimpleFontGlyphWidthsMap::from_dictionary(dictionary, objects)?;
 
         Ok(Self {
             base_font,
             font_file,
             base_encoding,
             widths,
-            first_char,
-            last_char,
         })
     }
 }

@@ -66,7 +66,7 @@ impl<T: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, T> {
         _dash_array: &[f32],
         _dash_phase: f32,
     ) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented("set_dash_pattern".into()))
+        Ok(())
     }
 
     fn set_rendering_intent(&mut self, _intent: &str) -> Result<(), Self::ErrorType> {

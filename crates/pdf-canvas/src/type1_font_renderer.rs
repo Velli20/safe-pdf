@@ -38,6 +38,8 @@ impl<'a, T: PdfOperatorBackend + Canvas> Type1FontRenderer<'a, T> {
         text_matrix: Transform,
         current_transform: Transform,
         rise: f32,
+        word_spacing: f32,
+        char_spacing: f32,
     ) -> Self {
         Type1FontRenderer {
             canvas,
@@ -47,15 +49,9 @@ impl<'a, T: PdfOperatorBackend + Canvas> Type1FontRenderer<'a, T> {
             font_size,
             rise,
             horizontal_scaling,
-            word_spacing: 0.0,
-            char_spacing: 0.0,
+            word_spacing,
+            char_spacing,
         }
-    }
-
-    pub fn with_spacing(mut self, word_spacing: f32, char_spacing: f32) -> Self {
-        self.word_spacing = word_spacing;
-        self.char_spacing = char_spacing;
-        self
     }
 }
 
@@ -114,9 +110,9 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for Type1FontRenderer<'_, T> {
             let w0_units = self
                 .font
                 .widths
-                .as_ref()
-                .and_then(|m| m.get(&char_code).copied())
+                .get_width(u16::from(char_code))
                 .unwrap_or(0.0);
+
             let w0_ems = w0_units / 1000.0;
             let glyph_width_tfs_scaled = w0_ems * self.font_size;
             let word_spacing_for_char = if char_code == 32 {

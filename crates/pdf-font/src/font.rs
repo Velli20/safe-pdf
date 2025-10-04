@@ -1,18 +1,16 @@
 use std::borrow::Cow;
 
 use pdf_object::{
-    dictionary::Dictionary,
-    error::ObjectError,
-    object_collection::ObjectCollection,
-    traits::{FromDictionary, FromStreamObject},
+    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    traits::FromDictionary,
 };
 use thiserror::Error;
 
 use crate::{
-    character_map::{CMapError, CharacterMap},
-    cid_font::{CharacterIdentifierFont, CidFontError},
-    type1_font::{Type1Font, Type1FontError},
+    character_map::CMapError,
     true_type_font::{TrueTypeFont, TrueTypeFontError},
+    type0_font::{Type0Font, Type0FontError},
+    type1_font::{Type1Font, Type1FontError},
     type3_font::{Type3Font, Type3FontError},
 };
 
@@ -40,10 +38,8 @@ impl From<Cow<'_, str>> for FontEncoding {
 /// Defines errors that can occur while reading a font object.
 #[derive(Debug, Error, PartialEq)]
 pub enum FontError {
-    #[error("Invalid /DescendantFonts entry in Type0 font: {0}")]
-    InvalidDescendantFonts(&'static str),
     #[error("Error processing descendant CIDFont for Type0 font")]
-    DescendantCIDFontError(#[from] CidFontError),
+    DescendantCIDFontError(#[from] Type0FontError),
     #[error("CMap parsing error: {0}")]
     CMapParse(#[from] CMapError),
     #[error("{0}")]
@@ -54,64 +50,22 @@ pub enum FontError {
     Type1FontError(#[from] Type1FontError),
     #[error("Error processing TrueType font: {0}")]
     TrueTypeFontError(#[from] TrueTypeFontError),
-    #[error("Unsupported or invalid font subtype '{subtype}' for {font_type} font")]
-    UnsupportedFontSubtype {
-        subtype: FontSubType,
-        font_type: &'static str,
-    },
+    #[error("Unsupported or invalid font subtype '{subtype}'")]
+    UnsupportedFontSubtype { subtype: String },
     #[error("Unsupported or invalid font subtype '{0}'")]
     InvalidFontSubtype(String),
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum FontSubType {
-    Type0,
-    Type1,
-    Type3,
-    TrueType,
-}
-
-impl From<Cow<'_, str>> for FontSubType {
-    fn from(s: Cow<'_, str>) -> Self {
-        match s.as_ref() {
-            "Type0" => FontSubType::Type0,
-            "Type1" => FontSubType::Type1,
-            "Type3" => FontSubType::Type3,
-            "TrueType" => FontSubType::TrueType,
-            _ => FontSubType::Type1,
-        }
-    }
-}
-
-impl std::fmt::Display for FontSubType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FontSubType::Type0 => write!(f, "/Type0"),
-            FontSubType::Type1 => write!(f, "/Type1"),
-            FontSubType::Type3 => write!(f, "/Type3"),
-            FontSubType::TrueType => write!(f, "/TrueType"),
-        }
-    }
-}
-
-/// Represents a Type0 font, a composite font type in PDF.
-///
-/// Type0 fonts are used to organize fonts that have a large number of characters,
-/// such as those for East Asian languages (Chinese, Japanese, Korean).
-pub struct Font {
-    /// The PostScript name of the font.
-    pub base_font: String,
-    /// The font subtype.
-    pub subtype: FontSubType,
-    /// A stream defining a CMap that maps character codes to Unicode values.
-    pub cmap: Option<CharacterMap>,
-    /// (Required for Type0 fonts) The CIDFont dictionary that is the descendant of this Type0 font.
-    /// This CIDFont provides the actual glyph descriptions.
-    pub cid_font: Option<CharacterIdentifierFont>,
-    pub type1_font: Option<Type1Font>,
-    pub type3_font: Option<Type3Font>,
-    pub true_type_font: Option<TrueTypeFont>,
-    pub encoding: Option<FontEncoding>,
+/// Represents a font object in a PDF document.
+pub enum Font {
+    /// A CIDFont used as a descendant font in a Type0 font.
+    Type0(Type0Font),
+    /// A classic PostScript font.
+    Type1(Type1Font),
+    /// A type 3 font with glyphs defined by PDF content streams.
+    Type3(Type3Font),
+    /// A TrueType font.
+    TrueType(TrueTypeFont),
 }
 
 impl FromDictionary for Font {
@@ -123,115 +77,34 @@ impl FromDictionary for Font {
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        let base_font = dictionary
-            .get("BaseFont")
-            .and_then(|v| v.as_str().map(|s| s.into_owned()))
-            .unwrap_or_default();
-
-        // Attempt to extract the `/Encoding` entry, if present, and convert it to a `FontEncoding`.
-        let encoding = dictionary
-            .get("Encoding")
-            .and_then(|v| v.as_str())
-            .map(FontEncoding::from);
-
-        // Attempt to resolve the optional `/ToUnicode` CMap stream, which maps character codes to Unicode.
-        // If present, parse it into a `CharacterMap`. If not present, set cmap to None.
-        let cmap = dictionary
-            .get("ToUnicode")
-            .map(|obj| objects.resolve_stream(obj))
-            .transpose()?
-            .map(CharacterMap::from_stream_object)
-            .transpose()?;
-
         // Determine the font subtype from the dictionary.
-        let subtype = dictionary
-            .get_or_err("Subtype")?
-            .try_str()
-            .map(FontSubType::from)?;
+        let subtype = dictionary.get_or_err("Subtype")?.try_str()?;
 
-        // If the font is a Type3 font, delegate parsing to the Type3Font handler and return early.
-        if subtype == FontSubType::Type3 {
-            let type3_font = Type3Font::from_dictionary(dictionary, objects)?;
-            return Ok(Self {
-                base_font,
-                subtype,
-                cmap,
-                cid_font: None,
-                type1_font: None,
-                type3_font: Some(type3_font),
-                true_type_font: None,
-                encoding,
-            });
+        match subtype.as_ref() {
+            "Type0" => {
+                let type0_font = Type0Font::from_dictionary(dictionary, objects)
+                    .map_err(FontError::DescendantCIDFontError)?;
+                Ok(Font::Type0(type0_font))
+            }
+            "Type1" => {
+                let type1_font = Type1Font::from_dictionary(dictionary, objects)
+                    .map_err(FontError::Type1FontError)?;
+                Ok(Font::Type1(type1_font))
+            }
+            "Type3" => {
+                let type3_font = Type3Font::from_dictionary(dictionary, objects)
+                    .map_err(FontError::Type3FontError)?;
+                Ok(Font::Type3(type3_font))
+            }
+            "TrueType" => {
+                let tt_font = TrueTypeFont::from_dictionary(dictionary, objects)
+                    .map_err(FontError::TrueTypeFontError)?;
+                Ok(Font::TrueType(tt_font))
+            }
+
+            other => Err(FontError::UnsupportedFontSubtype {
+                subtype: other.to_string(),
+            }),
         }
-
-        // Handle Type1 fonts
-        if subtype == FontSubType::Type1 {
-            let type1_font = Type1Font::from_dictionary(dictionary, objects)?;
-            return Ok(Self {
-                base_font,
-                subtype,
-                cmap,
-                cid_font: None,
-                type1_font: Some(type1_font),
-                type3_font: None,
-                true_type_font: None,
-                encoding,
-            });
-        }
-
-        // TrueType simple font support
-        if subtype == FontSubType::TrueType {
-            let tt_font = TrueTypeFont::from_dictionary(dictionary, objects)?;
-            return Ok(Self {
-                base_font,
-                subtype,
-                cmap,
-                cid_font: None,
-                type1_font: None,
-                type3_font: None,
-                true_type_font: Some(tt_font),
-                encoding,
-            });
-        }
-
-        // Only Type0 fonts are supported beyond this point.
-        // If not Type0, return an error.
-        if subtype != FontSubType::Type0 {
-            return Err(FontError::UnsupportedFontSubtype {
-                subtype,
-                font_type: "Type0",
-            });
-        }
-
-        // The `/DescendantFonts` array is required for Type0 fonts. Return an error if missing.
-        let descendant_fonts_array = dictionary.get_or_err("DescendantFonts")?.try_array()?;
-
-        if descendant_fonts_array.len() != 1 {
-            return Err(FontError::InvalidDescendantFonts(
-                "Only single CIDFont descendant is supported",
-            ));
-        }
-
-        // The array must not be empty. Get the first element, which should reference the CIDFont dictionary.
-        let cid_font_ref_val = descendant_fonts_array
-            .first()
-            .ok_or(FontError::InvalidDescendantFonts("Array is empty"))?;
-
-        // Resolve the CIDFont dictionary from the reference and parse it into a `CharacterIdentifierFont`.
-        let cid_font = {
-            let dictionary = objects.resolve_dictionary(cid_font_ref_val)?;
-            CharacterIdentifierFont::from_dictionary(dictionary, objects)?
-        };
-
-        Ok(Self {
-            base_font,
-            subtype,
-            cmap,
-            cid_font: Some(cid_font),
-            type1_font: None,
-            type3_font: None,
-            true_type_font: None,
-            encoding,
-        })
     }
 }

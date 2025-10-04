@@ -46,6 +46,9 @@ enum WidthRun {
     Uniform { width: f32, end: u16 },
 }
 
+/// Represents a glyph widths map parsed from a PDF `/W` array. This
+/// applies to CID-keyed fonts `/CIDFontType0` and `/CIDFontType2`
+/// (descendants of /Type0).
 #[derive(Default)]
 pub struct GlyphWidthsMap {
     /// Ordered mapping from starting CID -> width run segment.

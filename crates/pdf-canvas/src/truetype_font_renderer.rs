@@ -1,7 +1,12 @@
 use crate::{canvas::Canvas, error::PdfCanvasError, text_renderer::TextRenderer};
 use num_traits::FromPrimitive;
 use pdf_content_stream::pdf_operator_backend::PdfOperatorBackend;
-use pdf_font::font::Font;
+use pdf_font::{
+    font::{Font, FontEncoding},
+    glyph_widths_map::GlyphWidthsMap,
+    simple_font_glyph_map::SimpleFontGlyphWidthsMap,
+    type0_font::CidFontSubType,
+};
 use pdf_graphics::{PathFillType, pdf_path::PdfPath, transform::Transform};
 use thiserror::Error;
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
@@ -9,8 +14,6 @@ use ttf_parser::{Face, GlyphId, OutlineBuilder};
 /// Defines errors that can occur during TrueType font rendering.
 #[derive(Debug, Error)]
 pub enum TrueTypeFontRendererError {
-    #[error("The associated Type0 font is missing its descendant CIDFont")]
-    MissingCidFont,
     #[error("The font file object is not a stream, but a {found_type}")]
     FontFileNotStream { found_type: &'static str },
     #[error("Failed to parse the TrueType font file: {0:?}")]
@@ -19,14 +22,28 @@ pub enum TrueTypeFontRendererError {
     NoCharacterMapForFont(String),
     #[error("Incomplete 2-byte character at the end of the string")]
     IncompleteTwoByteCharacter,
+    #[error("Missing font file stream for TrueType font")]
+    MissingFontFile,
+    #[error("Not implemented")]
+    NotImplemented,
 }
 
 /// A text renderer for TrueType-based fonts.
 pub(crate) struct TrueTypeFontRenderer<'a, T: PdfOperatorBackend + Canvas> {
     /// The canvas backend where glyphs are drawn.
     canvas: &'a mut T,
-    /// The font definition, containing glyph data, metrics, and character maps.
-    font: &'a Font,
+    /// The underlying TrueType font file stream, if available.
+    object_stream: Option<&'a pdf_object::stream::StreamObject>,
+    /// Optional character map for mapping character codes to Unicode values.
+    cmap: Option<&'a pdf_font::character_map::CharacterMap>,
+    /// Optional encoding for simple fonts (Type1, TrueType).
+    encoding: Option<&'a FontEncoding>,
+    /// Optional glyph widths map for CID-keyed fonts.
+    widths: Option<&'a GlyphWidthsMap>,
+    /// Optional width map for simple fonts (Type1, TrueType).
+    w: Option<&'a SimpleFontGlyphWidthsMap>,
+    /// The default glyph width for the font, used if specific widths are not provided.
+    default_width: f32,
     /// The current text matrix (Tm), which positions the text.
     text_matrix: Transform,
     /// The Current Transformation Matrix (CTM) at the time of rendering.
@@ -56,42 +73,76 @@ impl<'a, T: PdfOperatorBackend + Canvas> TrueTypeFontRenderer<'a, T> {
         word_spacing: f32,
         char_spacing: f32,
     ) -> Result<Self, PdfCanvasError> {
-        Ok(Self {
-            canvas,
-            font,
-            text_matrix,
-            current_transform,
-            font_size,
-            rise,
-            word_spacing,
-            char_spacing,
-            horizontal_scaling,
-        })
+        match font {
+            Font::TrueType(tt_font) => {
+                let object_stream = tt_font.font_file.as_ref();
+                let cmap = tt_font.cmap.as_ref();
+                let encoding = tt_font.encoding.as_ref();
+                let w = Some(&tt_font.widths);
+
+                Ok(Self {
+                    canvas,
+                    object_stream,
+                    cmap,
+                    encoding,
+                    widths: None,
+                    w,
+                    default_width: 0.0,
+                    text_matrix,
+                    current_transform,
+                    font_size,
+                    rise,
+                    word_spacing,
+                    char_spacing,
+                    horizontal_scaling,
+                })
+            }
+            Font::Type0(type0_font) => {
+                // Ensure the CIDFont is a TrueType-based font (CIDFontType2).
+                let cid_font = match &type0_font.subtype {
+                    CidFontSubType::Type2 => type0_font,
+                    _ => {
+                        return Err(TrueTypeFontRendererError::NotImplemented.into());
+                    }
+                };
+
+                let object_stream = cid_font.font_file.as_ref();
+                let cmap = cid_font.cmap.as_ref();
+                let encoding = cid_font.encoding.as_ref();
+                let widths = cid_font.widths.as_ref();
+                let default_width = cid_font.default_width;
+
+                Ok(Self {
+                    canvas,
+                    object_stream,
+                    cmap,
+                    encoding,
+                    widths,
+                    w: None,
+                    default_width,
+                    text_matrix,
+                    current_transform,
+                    font_size,
+                    rise,
+                    word_spacing,
+                    char_spacing,
+                    horizontal_scaling,
+                })
+            }
+            _ => Err(TrueTypeFontRendererError::NotImplemented.into()),
+        }
     }
 }
 
 impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T> {
     fn render_text(&mut self, text: &[u8]) -> Result<(), crate::error::PdfCanvasError> {
-        // Support both CIDFontType2 descendant fonts and simple TrueType fonts.
-        // Prefer CID descendant if present; otherwise use simple TrueType font data.
-        let (face, cid_font_opt) = if let Some(cid_font) = self.font.cid_font.as_ref() {
-            let font_file = cid_font.descriptor.font_file.as_ref().ok_or(
-                TrueTypeFontRendererError::MissingCidFont,
-            )?;
-            let face = Face::parse(font_file.data.as_slice(), 0)
-                .map_err(TrueTypeFontRendererError::TtfParseError)?;
-            (face, Some(cid_font))
-        } else if let Some(simple_tt) = self.font.true_type_font.as_ref() {
-            let ff = simple_tt
-                .font_file
-                .as_ref()
-                .ok_or(TrueTypeFontRendererError::MissingCidFont)?;
-            let face = Face::parse(ff.data.as_slice(), 0)
-                .map_err(TrueTypeFontRendererError::TtfParseError)?;
-            (face, None)
-        } else {
-            return Err(TrueTypeFontRendererError::MissingCidFont.into());
+        let Some(object_stream) = self.object_stream else {
+            // TODO: Use BaseName from FontDescriptor to load a system font?
+            return Ok(());
         };
+
+        let face = Face::parse(object_stream.data.as_slice(), 0)
+            .map_err(TrueTypeFontRendererError::TtfParseError)?;
 
         // Extract font and text state parameters.
         let units_per_em = face.units_per_em();
@@ -120,12 +171,8 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
             text_rise,                            // ty
         );
 
-        let cmap = self.font.cmap.as_ref().ok_or_else(|| {
-            TrueTypeFontRendererError::NoCharacterMapForFont(self.font.base_font.clone())
-        })?;
-
         // Determine if the font uses a 2-byte encoding (e.g., /Identity-H for CID-keyed fonts).
-        let is_two_byte_encoding = self.font.encoding.is_some();
+        let is_two_byte_encoding = self.encoding.is_some();
         let mut iter = text.iter().copied();
 
         // Iterate over each character in the input text.
@@ -157,7 +204,9 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
             // Build the glyph outline using the composed transform.
             let mut builder = PdfGlyphOutline::new(glyph_matrix_for_char);
 
-            if let Some(a) = cmap.get_mapping(u32::from(char_code))
+            // Map character code to glyph ID using the font's cmap if available.
+            if let Some(cmap) = self.cmap
+                && let Some(a) = cmap.get_mapping(u32::from(char_code))
                 && let Some(x) = face.glyph_index(a)
             {
                 glyph_id = x;
@@ -171,21 +220,12 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
 
             // Determine the glyph's advance width in font units.
             // Determine width source: CID descendant map or simple font widths (in glyph space 1000 units)
-            let w0_glyph_units = if let Some(cid_font) = cid_font_opt {
-                cid_font
-                    .widths
-                    .as_ref()
-                    .and_then(|w_array| w_array.get_width(char_code))
-                    .unwrap_or(cid_font.default_width)
-            } else if let Some(simple_tt) = self.font.true_type_font.as_ref() {
-                let code_u8 = u8::try_from(char_code).ok();
-                simple_tt
-                    .widths
-                    .as_ref()
-                    .and_then(|m| code_u8.and_then(|c| m.get(&c).copied()))
-                    .unwrap_or(0.0)
+            let w0_glyph_units = if let Some(widths) = self.widths {
+                widths.get_width(char_code).unwrap_or(self.default_width)
+            } else if let Some(widths) = self.w {
+                widths.get_width(char_code).unwrap_or(self.default_width)
             } else {
-                0.0
+                self.default_width
             };
 
             // Convert width from font units to ems.
