@@ -1,14 +1,15 @@
 use crate::pdf_canvas::PdfCanvas;
 use crate::text_renderer::TextRenderer;
+use crate::text_state::TextState;
 use crate::truetype_font_renderer::TrueTypeFontRenderer;
 use crate::type1_font_renderer::Type1FontRenderer;
 use crate::type3_font_renderer::Type3FontRenderer;
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError};
+use pdf_content_stream::TextElement;
 use pdf_content_stream::pdf_operator_backend::{
     TextObjectOps, TextPositioningOps, TextShowingOps, TextStateOps,
 };
-use pdf_font::cid_font::CidFontSubType;
-use pdf_font::font::FontSubType;
+use pdf_font::font::Font;
 use pdf_graphics::TextRenderingMode;
 use pdf_graphics::transform::Transform;
 
@@ -129,90 +130,59 @@ impl<T: CanvasBackend> TextStateOps for PdfCanvas<'_, T> {
 
 impl<T: CanvasBackend> TextShowingOps for PdfCanvas<'_, T> {
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
-        let text_state = &self.current_state()?.text_state;
-        let current_font = text_state.font.ok_or(PdfCanvasError::NoCurrentFont)?;
-        match current_font.subtype {
-            FontSubType::Type3 => {
-                let type3_font = current_font.type3_font.as_ref().ok_or_else(|| {
-                    PdfCanvasError::MissingType3FontData(current_font.base_font.clone())
-                })?;
+        // Extract text state parameters for rendering.
+        let TextState {
+            matrix,
+            horizontal_scaling,
+            font_size,
+            character_spacing,
+            word_spacing,
+            rise,
+            font: ref current_font,
+            ..
+        } = self.current_state()?.text_state.clone();
+
+        let current_transform = self.current_state()?.transform;
+        let current_font = current_font.ok_or(PdfCanvasError::NoCurrentFont)?;
+
+        match current_font {
+            Font::Type3(type3_font) => {
                 let mut renderer = Type3FontRenderer::new(
                     self,
-                    text_state.font_size,
-                    text_state.horizontal_scaling,
-                    text_state.rise,
-                    self.current_state()?.transform,
-                    text_state.matrix,
+                    font_size,
+                    horizontal_scaling,
+                    rise,
+                    current_transform,
+                    matrix,
                     type3_font,
                 )?;
                 renderer.render_text(text)
             }
-            FontSubType::Type1 => {
-                if let Some(type1_font) = current_font.type1_font.as_ref() {
-                    // Limit immutable borrow by copying needed values into locals.
-                    let (
-                        font_size,
-                        hscale,
-                        tm,
-                        rise,
-                        word_spacing,
-                        char_spacing,
-                        current_transform,
-                    ) = {
-                        let st = &self.current_state()?.text_state;
-                        let transform = self.current_state()?.transform;
-                        (
-                            st.font_size,
-                            st.horizontal_scaling,
-                            st.matrix,
-                            st.rise,
-                            st.word_spacing,
-                            st.character_spacing,
-                            transform,
-                        )
-                    };
-
-                    let mut renderer = Type1FontRenderer::new(
-                        self,
-                        type1_font,
-                        font_size,
-                        hscale,
-                        tm,
-                        current_transform,
-                        rise,
-                    )
-                    .with_spacing(word_spacing, char_spacing);
-                    renderer.render_text(text)
-                } else {
-                    Err(PdfCanvasError::NotImplemented(
-                        "Type1 font data missing".to_string(),
-                    ))
-                }
+            Font::Type1(type1_font) => {
+                let mut renderer = Type1FontRenderer::new(
+                    self,
+                    type1_font,
+                    font_size,
+                    horizontal_scaling,
+                    matrix,
+                    current_transform,
+                    rise,
+                    word_spacing,
+                    character_spacing,
+                );
+                renderer.render_text(text)
             }
-            _ => {
-                if let Some(cid_font) = &current_font.cid_font {
-                    if cid_font.subtype != CidFontSubType::Type2 {
-                        //return Err(PdfCanvasError::NotImplemented(
-                        //    "Only CIDFont-based fonts are supported in show_text".to_string(),
-                        //));
-                        return Ok(());
-                    }
-                } else {
-                    // return Err(PdfCanvasError::NotImplemented(
-                    //     "Only CIDFont-based fonts are supported in show_text".to_string(),
-                    // ));
-                    return Ok(());
-                }
+            Font::TrueType(_) | Font::Type0(_) => {
                 let mut renderer = TrueTypeFontRenderer::new(
                     self,
                     current_font,
-                    text_state.font_size,
-                    text_state.horizontal_scaling,
-                    text_state.matrix,
-                    self.current_state()?.transform,
-                    text_state.rise,
-                    text_state.word_spacing,
-                    text_state.character_spacing,
+                    font_size,
+                    horizontal_scaling,
+                    matrix,
+                    current_transform,
+                    rise,
+                    word_spacing,
+                    character_spacing,
                 )?;
                 renderer.render_text(text)
             }
@@ -223,10 +193,24 @@ impl<T: CanvasBackend> TextShowingOps for PdfCanvas<'_, T> {
         &mut self,
         elements: &[pdf_content_stream::TextElement],
     ) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented(format!(
-            "show_text_with_glyph_positioning TJ (elements_len={})",
-            elements.len()
-        )))
+        for element in elements {
+            match element {
+                TextElement::Text { value } => {
+                    self.show_text(value.as_bytes())?;
+                }
+                TextElement::Adjustment { amount } => {
+                    let amount = (*amount) / 1000.0;
+                    let state = self.current_state_mut()?;
+                    let tx =
+                        -amount * state.text_state.font_size * state.text_state.horizontal_scaling;
+                    state.text_state.matrix.translate(tx, 0.0);
+                }
+                TextElement::HexString { value } => {
+                    self.show_text(value)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn move_to_next_line_and_show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {

@@ -1,8 +1,10 @@
 pub mod cff;
 pub mod character_map;
-pub mod cid_font;
 pub mod font;
 pub mod font_descriptor;
 pub mod glyph_widths_map;
+pub mod simple_font_glyph_map;
+pub mod true_type_font;
+pub mod type0_font;
 pub mod type1_font;
 pub mod type3_font;
