@@ -49,7 +49,6 @@ impl<'a, 'b, T: std::error::Error> PdfRenderer<'a, 'b, T> {
             return Err(PdfRendererError::PageNotFound(page_index));
         };
         let mut canvas = PdfCanvas::new(self.canvas, p, None)?;
-        println!("Rendering page {}", page_index + 1);
         if let Some(cs) = &p.contents {
             canvas.render_content_stream(&cs.operations, None, None)?;
         }
