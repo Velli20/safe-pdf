@@ -16,7 +16,6 @@ use glutin::{
 };
 use glutin_winit::DisplayBuilder;
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
-use pdf_graphics_skia::skia_canvas_backend::SurfaceContainer;
 #[allow(deprecated)]
 use raw_window_handle::HasRawWindowHandle;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
@@ -464,7 +463,7 @@ impl AppRenderer<skia_safe::Surface> for PdfPageRendererLogic {
         // For more complex scenarios or caching, you might render to an offscreen surface first.
 
         let mut skia_backend = SkiaCanvasBackend {
-            surface: SurfaceContainer::Borrowed(surface),
+            surface,
             width,
             height,
         };

@@ -1,9 +1,9 @@
 use pdf_content_stream::pdf_operator_backend::ColorOps;
 
-use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
+use crate::{error::PdfCanvasError, pdf_canvas::PdfCanvas};
 use pdf_graphics::color::Color;
 
-impl<T: CanvasBackend> ColorOps for PdfCanvas<'_, T> {
+impl<T: std::error::Error> ColorOps for PdfCanvas<'_, T> {
     fn set_stroking_color_space(&mut self, _name: &str) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.pattern = None;
         Ok(())

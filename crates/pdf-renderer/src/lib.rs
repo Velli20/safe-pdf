@@ -18,16 +18,19 @@ pub enum PdfRendererError {
 /// - `T` – Mask type associated with the concrete `CanvasBackend` implementation.
 pub struct PdfRenderer<'a, 'b, T> {
     document: &'b PdfDocument,
-    canvas: &'a mut dyn CanvasBackend<MaskType = T>,
+    canvas: &'a mut dyn CanvasBackend<ErrorType = T>,
 }
 
-impl<'a, 'b, T: CanvasBackend> PdfRenderer<'a, 'b, T> {
+impl<'a, 'b, T: std::error::Error> PdfRenderer<'a, 'b, T> {
     /// Creates a new renderer over the given PDF `document` and `canvas` backend.
     ///
     /// The caller retains ownership of the canvas; the renderer only holds a
     /// mutable borrow for the duration of its lifetime. Multiple pages can be
     /// rendered sequentially by repeatedly calling [`render`].
-    pub fn new(document: &'b PdfDocument, canvas: &'a mut dyn CanvasBackend<MaskType = T>) -> Self {
+    pub fn new(
+        document: &'b PdfDocument,
+        canvas: &'a mut dyn CanvasBackend<ErrorType = T>,
+    ) -> Self {
         Self { document, canvas }
     }
 
@@ -46,7 +49,7 @@ impl<'a, 'b, T: CanvasBackend> PdfRenderer<'a, 'b, T> {
             return Err(PdfRendererError::PageNotFound(page_index));
         };
         let mut canvas = PdfCanvas::new(self.canvas, p, None)?;
-
+        println!("Rendering page {}", page_index + 1);
         if let Some(cs) = &p.contents {
             canvas.render_content_stream(&cs.operations, None, None)?;
         }

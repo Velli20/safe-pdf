@@ -7,4 +7,5 @@ edition = "2024"
 pdf-document = { path = "../pdf-document" }
 pdf-canvas = { path = "../pdf-canvas" }
 pdf-graphics = { path = "../pdf-graphics" }
-skia-safe = { version = "0.86.0" }
+skia-safe = { version = "0.89.0" }
+thiserror = "2.0.12"

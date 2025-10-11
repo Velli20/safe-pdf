@@ -86,3 +86,21 @@ pub enum TextRenderingMode {
     FillStrokeClip,
     Clip,
 }
+
+/// Specifies the mode for applying a soft mask in PDF graphics.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MaskMode {
+    /// The soft mask is applied to the alpha channel only.
+    Alpha,
+    /// The soft mask is applied to the luminosity channel.
+    Luminosity,
+}
+
+/// Specifies the encoding of an image in a PDF.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ImageEncoding {
+    /// JPEG encoding.
+    Jpeg,
+    /// Raw, uncompressed pixel data.
+    Uncompressed,
+}

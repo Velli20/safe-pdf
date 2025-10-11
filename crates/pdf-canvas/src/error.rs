@@ -45,4 +45,6 @@ pub enum PdfCanvasError {
     NotImplemented(String),
     #[error("Compact font format parsing error: {0}")]
     CompactFontFormatError(#[from] CompactFontFormatError),
+    #[error("Canvas backend error: {0}")]
+    BackendError(String),
 }
