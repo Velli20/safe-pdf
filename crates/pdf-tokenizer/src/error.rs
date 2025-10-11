@@ -46,15 +46,3 @@ impl std::fmt::Display for PdfToken {
         }
     }
 }
-
-impl std::fmt::Debug for PdfToken {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Number(arg0) => f.debug_tuple("Number").field(arg0).finish(),
-            Self::Alphabetic(arg0) => write!(f, "Alphabetic({})", char::from(*arg0)),
-            Self::Unknown(arg0) => f.debug_tuple("Unknown").field(arg0).finish(),
-
-            _ => std::fmt::Display::fmt(self, f),
-        }
-    }
-}

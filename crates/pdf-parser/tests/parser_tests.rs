@@ -4,6 +4,7 @@ use pdf_object::ObjectVariant;
 use pdf_parser::PdfParser;
 
 #[test]
+#[allow(clippy::panic)]
 fn works() {
     const INPUT: &[u8] = b"3 0 obj<</Type/Pages/Count 1/Kids[ 4 0 R]>>\nendobj\n";
     let mut parser = PdfParser::from(INPUT);

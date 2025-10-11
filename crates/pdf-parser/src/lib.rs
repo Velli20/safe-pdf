@@ -183,75 +183,97 @@ impl PdfParser<'_> {
     }
 
     pub fn parse_object(&mut self) -> Result<ObjectVariant, ParserError> {
-        if let Some(token) = self.tokenizer.peek() {
-            let value = match token {
-                PdfToken::Percent => ObjectVariant::Comment(self.parse_comment()?),
-                PdfToken::DoublePercent => {
-                    self.tokenizer.read();
-                    const EOF_KEYWORD: &[u8] = b"EOF";
+        let Some(token) = self.tokenizer.peek() else {
+            return Err(ParserError::UnexpectedEndOfFile);
+        };
 
-                    // Read the keyword `EOF`.
-                    let literal = self.tokenizer.read_excactly(EOF_KEYWORD.len())?;
-                    if literal != EOF_KEYWORD {
-                        return Err(ParserError::InvalidKeyword(
-                            "EOF".to_string(),
-                            String::from_utf8_lossy(literal).to_string(),
-                        ));
-                    }
-                    return Ok(ObjectVariant::EndOfFile);
-                }
-                PdfToken::Alphabetic(t) => {
-                    if t == b't' {
-                        let start = self.tokenizer.position;
-                        let value = self.parse_trailer();
-                        if let Ok(o) = value {
-                            return Ok(ObjectVariant::Trailer(o));
-                        }
-                        self.tokenizer.position = start;
+        let value = match token {
+            PdfToken::Percent => ObjectVariant::Comment(self.parse_comment()?),
+            PdfToken::DoublePercent => {
+                self.tokenizer.read();
+                const EOF_KEYWORD: &[u8] = b"EOF";
 
-                        ObjectVariant::Boolean(self.parse_boolean()?)
-                    } else if t == b'f' {
-                        ObjectVariant::Boolean(self.parse_boolean()?)
-                    } else if t == b'n' {
-                        self.parse_null_object()?;
-                        ObjectVariant::Null
-                    } else if t == b'x' {
-                        ObjectVariant::CrossReferenceTable(self.parse_cross_reference_table()?)
-                    } else {
-                        return Err(ParserError::InvalidToken(char::from(t)));
-                    }
+                // Read the keyword `EOF`.
+                let literal = self.tokenizer.read_excactly(EOF_KEYWORD.len())?;
+                if literal != EOF_KEYWORD {
+                    return Err(ParserError::InvalidKeyword(
+                        "EOF".to_string(),
+                        String::from_utf8_lossy(literal).to_string(),
+                    ));
                 }
-                PdfToken::DoubleLeftAngleBracket => {
-                    ObjectVariant::Dictionary(Rc::new(self.parse_dictionary()?))
-                }
-                PdfToken::LeftAngleBracket => ObjectVariant::HexString(self.parse_hex_string()?),
-                PdfToken::Solidus => ObjectVariant::Name(self.parse_name()?),
-                PdfToken::Number(_) => {
+                return Ok(ObjectVariant::EndOfFile);
+            }
+            PdfToken::Alphabetic(t) => {
+                if t == b't' {
                     let start = self.tokenizer.position;
-                    if let Some(o) = self
-                        .parse_indirect_object()
-                        .map_err(|err| ParserError::IndirectObjectError(Box::new(err)))?
-                    {
-                        return Ok(o);
+                    let value = self.parse_trailer();
+                    if let Ok(o) = value {
+                        return Ok(ObjectVariant::Trailer(o));
                     }
-
                     self.tokenizer.position = start;
-                    self.parse_number()?
-                }
-                PdfToken::Minus => self.parse_number()?,
-                PdfToken::Plus => self.parse_number()?,
-                PdfToken::Period => self.parse_number()?,
-                PdfToken::LeftSquareBracket => ObjectVariant::Array(self.parse_array()?),
-                PdfToken::LeftParenthesis => {
-                    ObjectVariant::LiteralString(self.parse_literal_string()?)
-                }
-                r => {
-                    panic!("Unexpected token: {:?}", r);
-                }
-            };
 
-            return Ok(value);
-        }
-        Err(ParserError::InvalidToken('0'))
+                    ObjectVariant::Boolean(self.parse_boolean()?)
+                } else if t == b'f' {
+                    ObjectVariant::Boolean(self.parse_boolean()?)
+                } else if t == b'n' {
+                    self.parse_null_object()?;
+                    ObjectVariant::Null
+                } else if t == b'x' {
+                    ObjectVariant::CrossReferenceTable(self.parse_cross_reference_table()?)
+                } else {
+                    return Err(ParserError::InvalidToken(char::from(t)));
+                }
+            }
+            PdfToken::DoubleLeftAngleBracket => {
+                ObjectVariant::Dictionary(Rc::new(self.parse_dictionary()?))
+            }
+            PdfToken::LeftAngleBracket => ObjectVariant::HexString(self.parse_hex_string()?),
+            PdfToken::Solidus => ObjectVariant::Name(self.parse_name()?),
+            PdfToken::Number(_) => {
+                // Numbers are ambiguous: could be an indirect object,
+                // an indirect reference, or a plain number.
+                let mark = self.tokenizer.position;
+
+                // Try parsing as an indirect object first.
+                if let Some(o) = self
+                    .parse_indirect_object()
+                    .map_err(|err| ParserError::IndirectObjectError(Box::new(err)))?
+                {
+                    return Ok(o);
+                }
+                // If that fails, reset and try parsing as a number.
+                self.tokenizer.position = mark;
+                self.parse_number()?
+            }
+            PdfToken::Minus => self.parse_number()?,
+            PdfToken::Plus => self.parse_number()?,
+            PdfToken::Period => self.parse_number()?,
+            PdfToken::LeftSquareBracket => ObjectVariant::Array(self.parse_array()?),
+            PdfToken::LeftParenthesis => ObjectVariant::LiteralString(self.parse_literal_string()?),
+            token => {
+                return Err(ParserError::UnexpectedTokenAt {
+                    token: format!("{:?}", token),
+                    position: self.tokenizer.position,
+                });
+            }
+        };
+
+        Ok(value)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_unexpected_token() {
+        let input = b"%PDF-1.3
+ ";
+        let mut parser = PdfParser::from(input.as_slice());
+
+        let result = parser.parse_object();
+        assert!(result.is_ok());
     }
 }

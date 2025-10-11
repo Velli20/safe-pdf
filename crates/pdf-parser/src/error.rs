@@ -49,6 +49,8 @@ pub enum ParserError {
     InvalidKeyword(String, String),
     #[error("Expected delimiter after keyword, found: {0:?}")]
     MissingDelimiterAfterKeyword(u8),
+    #[error("Unexpected token '{token}' at position {position}")]
+    UnexpectedTokenAt { token: String, position: usize },
 }
 
 impl From<TryFromIntError> for ParserError {
