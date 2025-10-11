@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::xobject::{XObject, XObjectError, XObjectReader};
 use num_traits::FromPrimitive;
-use pdf_graphics::{BlendMode, LineCap, LineJoin};
+use pdf_graphics::{BlendMode, LineCap, LineJoin, MaskMode};
 
 /// Errors that can occur during parsing of an External Graphics State dictionary.
 #[derive(Error, Debug)]
@@ -41,40 +41,11 @@ pub enum ExternalGraphicsStateError {
     ObjectError(#[from] ObjectError),
 }
 
-/// Type of soft mask specified by an ExtGState `SMask` dictionary.
-///
-/// This corresponds to the value of the `S` entry in the soft mask
-/// dictionary (PDF 1.4+, Transparency). It determines how the mask is
-/// derived from the associated `G` transparency group XObject.
-pub enum MaskType {
-    /// Derive the mask from the luminance (perceived brightness) of the
-    /// transparency group's colors. The color components are converted to a
-    /// single grayscale value; the group's alpha is ignored.
-    Luminosity,
-    /// Derive the mask from the alpha (shape/opacity) values of the
-    /// transparency group. The group's color is ignored; only its opacity
-    /// contributes to the mask.
-    Alpha,
-}
-
-impl MaskType {
-    fn from(value: Cow<'_, str>) -> Result<Self, ExternalGraphicsStateError> {
-        match value.as_ref() {
-            "Luminosity" => Ok(MaskType::Luminosity),
-            "Alpha" => Ok(MaskType::Alpha),
-            other => Err(ExternalGraphicsStateError::InvalidValueError {
-                key_name: Cow::Borrowed("MaskType"),
-                description: format!("Unknown SMask type '{}'", other),
-            }),
-        }
-    }
-}
-
 /// Soft mask extracted from an ExtGState `SMask` entry.
 pub struct SoftMask {
     /// How the mask is derived from the transparency group output: from color
     /// luminance (`Luminosity`) or from alpha/shape (`Alpha`).
-    pub mask_type: MaskType,
+    pub mask_type: MaskMode,
     /// The transparency group XObject (`G`) whose rendered result provides the
     /// input used to compute the soft mask.
     pub shape: XObject,
@@ -162,6 +133,18 @@ impl FromDictionary for ExternalGraphicsState {
         }
 
         Ok(ExternalGraphicsState { params })
+    }
+}
+
+/// Parse the mask mode from a string value.
+fn parse_mask_mode(value: Cow<'_, str>) -> Result<MaskMode, ExternalGraphicsStateError> {
+    match value.as_ref() {
+        "Luminosity" => Ok(MaskMode::Luminosity),
+        "Alpha" => Ok(MaskMode::Alpha),
+        other => Err(ExternalGraphicsStateError::InvalidValueError {
+            key_name: Cow::Borrowed("MaskMode"),
+            description: format!("Unknown SMask type '{}'", other),
+        }),
     }
 }
 
@@ -261,7 +244,7 @@ fn parse_soft_mask(
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
     let smask = match value {
         ObjectVariant::Dictionary(dict) => {
-            let mask_type = MaskType::from(dict.get_or_err("S")?.try_str()?)?;
+            let mask_type = parse_mask_mode(dict.get_or_err("S")?.try_str()?)?;
 
             // Parse the "G" key for the `XObject`
             let StreamObject {

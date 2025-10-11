@@ -1,8 +1,11 @@
 use std::borrow::Cow;
 
 use pdf_graphics::{
-    BlendMode, PathFillType, color::Color, pdf_path::PdfPath, transform::Transform,
+    BlendMode, ImageEncoding, MaskMode, PathFillType, color::Color, pdf_path::PdfPath,
+    transform::Transform,
 };
+
+use crate::recording_canvas::RecordingCanvas;
 
 /// Represents a shader used for advanced fill and stroke operations in PDF rendering.
 ///
@@ -31,8 +34,8 @@ pub enum Shader<'a> {
     ///
     /// Used to define how an image is tiled across a region, with optional transformation and spacing.
     TilingPatternImage {
-        /// The image to be used as the pattern tile.
-        image: Image<'a>,
+        /// A recording canvas containing the tiling pattern content.
+        image: Box<RecordingCanvas>,
         /// The transformation to apply to the pattern tile.
         transform: Option<Transform>,
         /// The horizontal spacing between tiles.
@@ -77,7 +80,7 @@ pub struct Image<'a> {
     /// The bits per pixel (color depth) of the image.
     pub bytes_per_pixel: Option<u32>,
     /// The image encoding (e.g., "jpeg", "png").
-    pub encoding: Option<String>,
+    pub encoding: ImageEncoding,
     /// A transformation matrix to apply to the image.
     pub transform: Transform,
     /// An optional alpha mask to apply to the image.
@@ -90,12 +93,8 @@ pub struct Image<'a> {
 /// to render content. Implementors of this trait act as the target surface,
 /// such as a raster image buffer, a window, or an SVG file.
 pub trait CanvasBackend {
-    /// The associated type representing a mask layer backend.
-    ///
-    /// This type is used for creating and manipulating mask layers, which are offscreen surfaces
-    /// that can be drawn into and later composited onto the main canvas. Implementors should provide
-    /// a concrete type that also implements `CanvasBackend`, allowing recursive composition of mask layers.
-    type MaskType: CanvasBackend;
+    /// The error type returned by backend operations.
+    type ErrorType: std::error::Error;
 
     /// Fills the given path with the specified color and fill rule.
     ///
@@ -113,7 +112,7 @@ pub trait CanvasBackend {
         color: Color,
         shader: &Option<Shader>,
         blend_mode: Option<BlendMode>,
-    );
+    ) -> Result<(), Self::ErrorType>;
 
     /// Strokes the given path with the specified color and line width.
     ///
@@ -131,7 +130,7 @@ pub trait CanvasBackend {
         line_width: f32,
         shader: &Option<Shader>,
         blend_mode: Option<BlendMode>,
-    );
+    ) -> Result<(), Self::ErrorType>;
 
     /// Sets the clipping region by intersecting the current clip path with the given path.
     ///
@@ -141,7 +140,11 @@ pub trait CanvasBackend {
     ///
     /// - `path`: The path to use for clipping.
     /// - `mode`: The fill type to determine the clipping region.
-    fn set_clip_region(&mut self, path: &PdfPath, mode: PathFillType);
+    fn set_clip_region(
+        &mut self,
+        path: &PdfPath,
+        mode: PathFillType,
+    ) -> Result<(), Self::ErrorType>;
 
     /// Returns the width of the canvas in device units.
     fn width(&self) -> f32;
@@ -150,7 +153,7 @@ pub trait CanvasBackend {
     fn height(&self) -> f32;
 
     /// Resets the clipping region to the entire canvas area.
-    fn reset_clip(&mut self);
+    fn reset_clip(&mut self) -> Result<(), Self::ErrorType>;
 
     /// Draws an image onto the canvas at the current transformation.
     ///
@@ -158,19 +161,11 @@ pub trait CanvasBackend {
     ///
     /// - `image`: The image to draw.
     /// - `blend_mode`: Optional blend mode to use when compositing the image.
-    fn draw_image(&mut self, image: &Image<'_>, blend_mode: Option<BlendMode>);
-
-    /// Creates a new mask layer with the specified dimensions.
-    ///
-    /// # Parameters
-    ///
-    /// - `width`: The width of the mask layer in device units.
-    /// - `height`: The height of the mask layer in device units.
-    ///
-    /// # Returns
-    ///
-    /// A boxed mask layer backend.
-    fn new_mask_layer(&mut self, width: f32, height: f32) -> Box<Self::MaskType>;
+    fn draw_image(
+        &mut self,
+        image: &Image<'_>,
+        blend_mode: Option<BlendMode>,
+    ) -> Result<(), Self::ErrorType>;
 
     /// Begins drawing into the specified mask layer.
     ///
@@ -179,7 +174,12 @@ pub trait CanvasBackend {
     /// # Parameters
     ///
     /// - `mask`: The mask layer to begin drawing into.
-    fn begin_mask_layer(&mut self, mask: &mut Self::MaskType);
+    fn begin_mask_layer(
+        &mut self,
+        mask: &RecordingCanvas,
+        transform: &Transform,
+        mask_mode: MaskMode,
+    ) -> Result<(), Self::ErrorType>;
 
     /// Ends drawing into the specified mask layer and applies it to the canvas.
     ///
@@ -187,12 +187,10 @@ pub trait CanvasBackend {
     ///
     /// - `mask`: The mask layer to end and apply.
     /// - `transform`: The transformation to apply to the mask when compositing.
-    fn end_mask_layer(&mut self, mask: &mut Self::MaskType, transform: &Transform);
-
-    /// Returns a snapshot of the current canvas as an image.
-    ///
-    /// # Returns
-    ///
-    /// An image representing the current state of the canvas.
-    fn image_snapshot(&mut self) -> Image<'static>;
+    fn end_mask_layer(
+        &mut self,
+        mask: &RecordingCanvas,
+        transform: &Transform,
+        mask_mode: MaskMode,
+    ) -> Result<(), Self::ErrorType>;
 }

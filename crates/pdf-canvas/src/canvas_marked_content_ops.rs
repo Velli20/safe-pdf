@@ -3,9 +3,9 @@ use std::rc::Rc;
 use pdf_content_stream::pdf_operator_backend::MarkedContentOps;
 use pdf_object::dictionary::Dictionary;
 
-use crate::{canvas_backend::CanvasBackend, pdf_canvas::PdfCanvas};
+use crate::pdf_canvas::PdfCanvas;
 
-impl<T: CanvasBackend> MarkedContentOps for PdfCanvas<'_, T> {
+impl<T: std::error::Error> MarkedContentOps for PdfCanvas<'_, T> {
     fn mark_point(&mut self, _tag: &str) -> Result<(), Self::ErrorType> {
         Ok(())
     }

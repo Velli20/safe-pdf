@@ -1,6 +1,6 @@
 use num_traits::FromPrimitive;
 use pdf_content_stream::pdf_operator::PdfOperatorVariant;
-use pdf_graphics::{PaintMode, PathFillType, pdf_path::PdfPath, transform::Transform};
+use pdf_graphics::{MaskMode, PaintMode, PathFillType, pdf_path::PdfPath, transform::Transform};
 use pdf_page::{page::PdfPage, pattern::Pattern, resources::Resources, shading::Shading};
 
 use crate::{
@@ -8,6 +8,7 @@ use crate::{
     canvas_backend::{CanvasBackend, Shader},
     canvas_state::CanvasState,
     error::PdfCanvasError,
+    recording_canvas::RecordingCanvas,
     text_state::TextState,
 };
 
@@ -15,16 +16,16 @@ pub struct PdfCanvas<'a, T> {
     /// The current path being constructed or drawn, if any.
     pub(crate) current_path: Option<PdfPath>,
     /// The drawing backend implementing `CanvasBackend` for rendering operations.
-    pub(crate) canvas: &'a mut dyn CanvasBackend<MaskType = T>,
+    pub(crate) canvas: &'a mut dyn CanvasBackend<ErrorType = T>,
     /// An optional mask surface for advanced compositing or clipping.
-    pub(crate) mask: Option<Box<T>>,
+    pub(crate) mask: Option<(Box<RecordingCanvas>, MaskMode)>,
     /// The PDF page associated with this canvas.
     pub(crate) page: &'a PdfPage,
     /// The stack of graphics states, supporting save/restore semantics.
     pub(crate) canvas_stack: Vec<CanvasState<'a>>,
 }
 
-impl<T: CanvasBackend> Canvas for PdfCanvas<'_, T> {
+impl<T: std::error::Error> Canvas for PdfCanvas<'_, T> {
     fn save(&mut self) -> Result<(), PdfCanvasError> {
         let mut state = self.current_state()?.clone();
         state.clip_path = None;
@@ -38,7 +39,9 @@ impl<T: CanvasBackend> Canvas for PdfCanvas<'_, T> {
         if let Some(state) = prev
             && state.clip_path.is_some()
         {
-            self.canvas.reset_clip();
+            self.canvas
+                .reset_clip()
+                .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
         }
         Ok(())
     }
@@ -53,7 +56,7 @@ impl<T: CanvasBackend> Canvas for PdfCanvas<'_, T> {
     }
 }
 
-impl<'a, T: CanvasBackend> PdfCanvas<'a, T>
+impl<'a, T: std::error::Error> PdfCanvas<'a, T>
 where
     T: 'a,
 {
@@ -69,7 +72,7 @@ where
     ///
     /// A new `PdfCanvas` instance or an error if the page dimensions are invalid.
     pub fn new(
-        backend: &'a mut dyn CanvasBackend<MaskType = T>,
+        backend: &'a mut dyn CanvasBackend<ErrorType = T>,
         page: &'a PdfPage,
         bb: Option<&[f32; 4]>,
     ) -> Result<Self, PdfCanvasError> {
@@ -237,17 +240,15 @@ where
                 content_stream,
                 ..
             } => {
-                // Create a new mask surface from the backend, sized to the form's bounding box.
-                let mut mask = self
-                    .canvas
-                    .new_mask_layer(bbox[2] - bbox[0], bbox[3] - bbox[1]);
+                // Create a recording canvas to render the tiling pattern.
+                let mut recording_canvas =
+                    RecordingCanvas::new(bbox[2] - bbox[0], bbox[3] - bbox[1]);
 
                 // Render the tiling content into a temporary canvas.
-                let mut other = PdfCanvas::new(mask.as_mut(), self.page, Some(bbox))?;
+                let mut other = PdfCanvas::new(&mut recording_canvas, self.page, Some(bbox))?;
                 other.render_content_stream(&content_stream.operations, None, Some(resources))?;
-                let image = other.canvas.image_snapshot();
                 let shader = Shader::TilingPatternImage {
-                    image,
+                    image: Box::new(recording_canvas),
                     transform: None,
                     x_step: bbox[2] - bbox[0],
                     y_step: bbox[3] - bbox[1],
@@ -278,22 +279,26 @@ where
 
         match mode {
             PaintMode::Fill => {
-                self.canvas.fill_path(
-                    path,
-                    fill_type,
-                    self.current_state()?.fill_color,
-                    &shader,
-                    self.current_state()?.blend_mode,
-                );
+                self.canvas
+                    .fill_path(
+                        path,
+                        fill_type,
+                        self.current_state()?.fill_color,
+                        &shader,
+                        self.current_state()?.blend_mode,
+                    )
+                    .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
             }
             PaintMode::Stroke => {
-                self.canvas.stroke_path(
-                    path,
-                    self.current_state()?.stroke_color,
-                    self.current_state()?.line_width,
-                    &shader,
-                    self.current_state()?.blend_mode,
-                );
+                self.canvas
+                    .stroke_path(
+                        path,
+                        self.current_state()?.stroke_color,
+                        self.current_state()?.line_width,
+                        &shader,
+                        self.current_state()?.blend_mode,
+                    )
+                    .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
             }
             PaintMode::FillAndStroke => {
                 return Err(PdfCanvasError::NotImplemented(
@@ -343,10 +348,14 @@ where
     ) -> Result<(), PdfCanvasError> {
         path.transform(&self.current_state()?.transform);
         if self.current_state()?.clip_path.is_some() {
-            self.canvas.reset_clip();
+            self.canvas
+                .reset_clip()
+                .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
         }
 
-        self.canvas.set_clip_region(&path, mode);
+        self.canvas
+            .set_clip_region(&path, mode)
+            .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
         self.current_state_mut()?.clip_path = Some(path);
         Ok(())
     }
@@ -367,6 +376,14 @@ where
             .as_ref()
             .and_then(|r| r.patterns.get(pattern_name))
         else {
+            if let Some(pattern) = self
+                .current_state()?
+                .resources
+                .and_then(|r| r.patterns.get(pattern_name))
+            {
+                self.current_state_mut()?.pattern = Some(pattern);
+                return Ok(());
+            }
             return Err(PdfCanvasError::PatternNotFound(pattern_name.to_string()));
         };
 
