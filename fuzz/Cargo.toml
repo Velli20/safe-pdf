@@ -1,0 +1,24 @@
+[package]
+name = "safe-pdf-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.pdf-parser]
+path = "../crates/pdf-parser"
+
+[[bin]]
+name = "parse_object"
+path = "fuzz_targets/parse_object.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+

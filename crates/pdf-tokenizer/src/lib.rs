@@ -8,7 +8,7 @@ pub struct Tokenizer<'a> {
 }
 
 /// Represents the possible tokens in a PDF file.
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum PdfToken {
     /// Represents the '%' token.
     Percent,
