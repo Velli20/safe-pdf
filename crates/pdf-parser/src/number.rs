@@ -2,7 +2,7 @@ use pdf_object::ObjectVariant;
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
-use crate::{PdfParser, traits::NumberParser};
+use crate::{parser::PdfParser, traits::NumberParser};
 
 #[derive(Debug, PartialEq, Error)]
 pub enum NumberError {

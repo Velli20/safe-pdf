@@ -1,7 +1,7 @@
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
-use crate::{PdfParser, traits::LiteralStringParser};
+use crate::{parser::PdfParser, traits::LiteralStringParser};
 
 /// Represents an error that can occur while parsing a literal string object.
 #[derive(Debug, PartialEq, Error)]

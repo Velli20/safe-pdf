@@ -5,8 +5,8 @@ use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
 use crate::{
-    PdfParser,
     error::ParserError,
+    parser::PdfParser,
     stream::StreamParsingError,
     traits::{IndirectObjectParser, StreamParser},
 };

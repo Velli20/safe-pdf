@@ -1,5 +1,5 @@
 use alloc::borrow::Cow;
-use pdf_parser::{PdfParser, traits::CommentParser};
+use pdf_parser::{parser::PdfParser, traits::CommentParser};
 use pdf_tokenizer::PdfToken;
 
 use crate::error::PdfOperatorError;

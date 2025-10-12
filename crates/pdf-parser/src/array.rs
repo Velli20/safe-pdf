@@ -2,7 +2,7 @@ use pdf_object::ObjectVariant;
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
-use crate::{PdfParser, traits::ArrayParser};
+use crate::{parser::PdfParser, traits::ArrayParser};
 
 /// Represents an error that can occur while parsing an array object.
 #[derive(Debug, PartialEq, Error)]

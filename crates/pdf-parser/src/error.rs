@@ -51,6 +51,8 @@ pub enum ParserError {
     MissingDelimiterAfterKeyword(u8),
     #[error("Unexpected token '{token}' at position {position}")]
     UnexpectedTokenAt { token: String, position: usize },
+    #[error("Nesting depth exceeded")]
+    NestingDepthExceeded,
 }
 
 impl From<TryFromIntError> for ParserError {

@@ -1,4 +1,4 @@
-use crate::{PdfParser, error::ParserError, traits::NullObjectParser};
+use crate::{error::ParserError, parser::PdfParser, traits::NullObjectParser};
 
 impl NullObjectParser for PdfParser<'_> {
     type ErrorType = ParserError;

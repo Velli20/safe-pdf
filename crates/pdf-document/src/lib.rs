@@ -3,7 +3,7 @@ use pdf_object::{
     ObjectVariant, object_collection::ObjectCollection, traits::FromDictionary, version::Version,
 };
 use pdf_page::{page::PdfPage, pages::PdfPages};
-use pdf_parser::{PdfParser, traits::HeaderParser};
+use pdf_parser::{parser::PdfParser, traits::HeaderParser};
 
 pub mod error;
 
@@ -11,7 +11,7 @@ pub mod error;
 pub struct PdfDocument {
     /// The version of the PDF document.
     pub version: Version,
-    /// The objects in the PDF document.
+    /// The collection of all objects in the PDF document.
     pub objects: ObjectCollection,
     /// The pages in the PDF document.
     pub pages: Vec<PdfPage>,

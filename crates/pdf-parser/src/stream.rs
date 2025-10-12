@@ -5,7 +5,7 @@ use pdf_object::{dictionary::Dictionary, error::ObjectError};
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
-use crate::{PdfParser, error::ParserError, traits::StreamParser};
+use crate::{error::ParserError, parser::PdfParser, traits::StreamParser};
 
 /// Represents an error that can occur while parsing an indirect object or an object reference.
 #[derive(Debug, PartialEq, Error)]
@@ -22,9 +22,6 @@ pub enum StreamParsingError {
         #[source]
         source: ParserError,
     },
-    /// Indicates that there was an error while parsing the stream.
-    #[error("Error while parsing stream: {0}")]
-    StreamParsingError(&'static str),
     /// Indicates that the stream dictionary is missing the /Length entry.
     #[error("Stream dictionary missing /Length entry")]
     MissingLength,
@@ -144,11 +141,6 @@ impl StreamParser for PdfParser<'_> {
 
                 return Ok(s);
             } else if decode == "DCTDecode" {
-                // let mut decoder = zune_jpeg::JpegDecoder::new(stream_data.as_slice());
-                // let s = decoder
-                //     .decode()
-                //     .map_err(|source| StreamParsingError::DecompressionError(source.to_string()))?;
-
                 return Ok(stream_data.to_vec());
             }
 
