@@ -5,7 +5,7 @@ use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
 use crate::{
-    PdfParser,
+    parser::PdfParser,
     traits::{DictionaryParser, NameParser},
 };
 
@@ -99,7 +99,7 @@ impl DictionaryParser for PdfParser<'_> {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
 
-    use crate::{PdfParser, traits::DictionaryParser};
+    use crate::{parser::PdfParser, traits::DictionaryParser};
 
     #[test]
     fn test_dictionary_valid() {

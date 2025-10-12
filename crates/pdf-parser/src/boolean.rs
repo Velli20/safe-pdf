@@ -1,7 +1,7 @@
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
-use crate::{PdfParser, traits::BooleanParser};
+use crate::{parser::PdfParser, traits::BooleanParser};
 
 #[derive(Debug, PartialEq, Error)]
 pub enum BooleanError {

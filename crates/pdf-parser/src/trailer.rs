@@ -1,4 +1,4 @@
-use crate::{PdfParser, error::ParserError, traits::TrailerParser};
+use crate::{error::ParserError, parser::PdfParser, traits::TrailerParser};
 use pdf_object::{ObjectVariant, trailer::Trailer};
 use thiserror::Error;
 

@@ -4,7 +4,7 @@ use pdf_object::cross_reference_table::{
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
-use crate::{PdfParser, traits::CrossReferenceTableParser};
+use crate::{parser::PdfParser, traits::CrossReferenceTableParser};
 
 /// Represents an error that can occur while parsing a cross-reference table.
 #[derive(Debug, PartialEq, Error)]

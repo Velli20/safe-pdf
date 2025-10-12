@@ -1,7 +1,7 @@
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
-use crate::{PdfParser, traits::HexStringParser};
+use crate::{parser::PdfParser, traits::HexStringParser};
 
 /// Represents an error that can occur while parsing a hex string object.
 #[derive(Debug, PartialEq, Error)]
@@ -45,7 +45,7 @@ impl HexStringParser for PdfParser<'_> {
         let mut filtered = Vec::new();
         // 2. Filter out whitespace characters.
         for b in hex_string {
-            if Self::id_pdf_whitespace(*b) {
+            if Self::is_pdf_whitespace(*b) {
                 continue;
             }
 

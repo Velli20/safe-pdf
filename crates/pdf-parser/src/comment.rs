@@ -1,7 +1,7 @@
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
-use crate::{PdfParser, traits::CommentParser};
+use crate::{parser::PdfParser, traits::CommentParser};
 
 #[derive(Debug, PartialEq, Error)]
 pub enum CommentError {
@@ -10,6 +10,7 @@ pub enum CommentError {
     #[error("Failed to read end-of-line marker after comment: {err}")]
     MissingEOL { err: String },
 }
+
 impl CommentParser for PdfParser<'_> {
     type ErrorType = CommentError;
 

@@ -2,7 +2,7 @@ use pdf_object::version::Version;
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
-use crate::{PdfParser, traits::HeaderParser};
+use crate::{parser::PdfParser, traits::HeaderParser};
 
 #[derive(Debug, PartialEq, Error)]
 pub enum HeaderError {

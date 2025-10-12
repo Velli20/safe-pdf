@@ -1,7 +1,7 @@
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
-use crate::{PdfParser, traits::NameParser};
+use crate::{parser::PdfParser, traits::NameParser};
 
 /// Represents an error that can occur while parsing a Name object.
 #[derive(Debug, PartialEq, Error)]

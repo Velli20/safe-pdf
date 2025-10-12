@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use pdf_object::ObjectVariant;
-use pdf_parser::PdfParser;
+use pdf_parser::parser::PdfParser;
 
 #[test]
 #[allow(clippy::panic)]
