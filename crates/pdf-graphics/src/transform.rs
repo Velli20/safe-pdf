@@ -169,6 +169,63 @@ impl Transform {
         self
     }
 
+    /// Post-multiplies this transform by another `Transform` (self = self * other).
+    ///
+    /// This applies the existing transformation first, then the `other` transformation.
+    /// Useful when updating a current transform by appending an operation in the
+    /// coordinate space of the current transform (e.g., PDF text matrix updates).
+    pub fn post_concat(&mut self, other: &Transform) -> &mut Self {
+        // Let current transform be S (self) and the matrix to concatenate be O (other).
+        // We want to compute S_new = S * O.
+        // S = [ sx  kx  tx ]
+        //     [ ky  sy  ty ]
+        //     [ 0   0   1  ]
+        //
+        // O = [ o.sx  o.kx  o.tx ]
+        //     [ o.ky  o.sy  o.ty ]
+        //     [  0     0     1   ]
+        //
+        // S_new.sx = sx * o.sx + kx * o.ky
+        // S_new.kx = sx * o.kx + kx * o.sy
+        // S_new.tx = sx * o.tx + kx * o.ty + tx
+        //
+        // S_new.ky = ky * o.sx + sy * o.ky
+        // S_new.sy = ky * o.kx + sy * o.sy
+        // S_new.ty = ky * o.tx + sy * o.ty + ty
+
+        let s_sx = self.sx;
+        let s_kx = self.kx;
+        let s_tx = self.tx;
+        let s_ky = self.ky;
+        let s_sy = self.sy;
+        let s_ty = self.ty;
+
+        self.sx = s_sx * other.sx + s_kx * other.ky;
+        self.kx = s_sx * other.kx + s_kx * other.sy;
+        self.tx = s_sx * other.tx + s_kx * other.ty + s_tx;
+
+        self.ky = s_ky * other.sx + s_sy * other.ky;
+        self.sy = s_ky * other.kx + s_sy * other.sy;
+        self.ty = s_ky * other.tx + s_sy * other.ty + s_ty;
+
+        self
+    }
+
+    /// Post-multiplies this transform by a translation (self = self * T(tx, ty)).
+    ///
+    /// Unlike `translate`, which pre-multiplies, this applies the translation in the
+    /// local space of the current transform. For a current transform S, the new
+    /// translation components become:
+    ///   tx' = sx*tx + kx*ty + tx
+    ///   ty' = ky*tx + sy*ty + ty
+    pub fn post_translate(&mut self, tx: f32, ty: f32) -> &mut Self {
+        let new_tx = self.sx * tx + self.kx * ty + self.tx;
+        let new_ty = self.ky * tx + self.sy * ty + self.ty;
+        self.tx = new_tx;
+        self.ty = new_ty;
+        self
+    }
+
     /// Transforms a 2D point `(x, y)` using this transform.
     ///
     /// The transformation is applied as follows:
