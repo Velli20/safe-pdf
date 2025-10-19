@@ -58,10 +58,13 @@ impl ArrayParser for PdfParser<'_> {
                 break;
             }
 
-            values.push(
-                self.parse_object()
-                    .map_err(|e| ArrayError::ObjectParseError { err: e.to_string() })?,
-            );
+            let value = self.parse_object();
+            match value {
+                Ok(value) => values.push(value),
+                Err(e) => {
+                    return Err(ArrayError::ObjectParseError { err: e.to_string() });
+                }
+            }
 
             if let Some(PdfToken::RightSquareBracket) = self.tokenizer.peek() {
                 break;
