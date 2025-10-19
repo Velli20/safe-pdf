@@ -196,6 +196,36 @@ impl PdfOperator for SetFlatnessTolerance {
     }
 }
 
+/// Sets the rendering intent for color reproduction. (PDF operator `ri`)
+///
+/// The operand is a name object indicating the intent, e.g.,
+/// /AbsoluteColorimetric, /RelativeColorimetric, /Saturation, /Perceptual.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetRenderingIntent {
+    intent: String,
+}
+
+impl SetRenderingIntent {
+    pub fn new(intent: String) -> Self {
+        Self { intent }
+    }
+}
+
+impl PdfOperator for SetRenderingIntent {
+    const NAME: &'static str = "ri";
+
+    const OPERAND_COUNT: Option<usize> = Some(1);
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        let intent = operands.get_name()?;
+        Ok(PdfOperatorVariant::SetRenderingIntent(Self::new(intent)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+        backend.set_rendering_intent(&self.intent)
+    }
+}
+
 /// Saves the current graphics state on the graphics state stack.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SaveGraphicsState;

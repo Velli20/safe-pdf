@@ -75,6 +75,7 @@ pub enum PdfOperatorVariant {
     EndInlineImage(EndInlineImage),
     PaintShading(PaintShading),
     SetCharWidthAndBoundingBox(SetCharWidthAndBoundingBox),
+    SetRenderingIntent(SetRenderingIntent),
     SetStrokeColorSpace(SetStrokeColorSpace),
     SetNonStrokingColorSpace(SetNonStrokingColorSpace),
     SetStrokingColor(SetStrokingColor),
@@ -205,6 +206,7 @@ impl PdfOperatorVariant {
             PdfOperatorVariant::EndInlineImage(op) => op.call(backend),
             PdfOperatorVariant::PaintShading(op) => op.call(backend),
             PdfOperatorVariant::SetCharWidthAndBoundingBox(op) => op.call(backend),
+            PdfOperatorVariant::SetRenderingIntent(op) => op.call(backend),
             PdfOperatorVariant::SetStrokeColorSpace(op) => op.call(backend),
             PdfOperatorVariant::SetNonStrokingColorSpace(op) => op.call(backend),
             PdfOperatorVariant::SetStrokingColor(op) => op.call(backend),
@@ -217,6 +219,14 @@ impl PdfOperatorVariant {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_bug_727() {
+        let input = b"[ (2.) 1 (0) 1 (!)\n2 (3) 1 (4) 1 (4) 1 (0) 1 (0) 1 (#) 2 (%) 2 (%) 2 (.) 1 (\\)) 2 (4) ]  TJ";
+        let result = PdfOperatorVariant::from(input);
+        println!("test_bug_727 result: {:?}", result);
+        assert!(result.is_ok());
+    }
 
     #[test]
     fn test_simple() {
@@ -460,6 +470,20 @@ mod tests {
                     PdfOperatorVariant::LineTo(LineTo::new(300.0, 300.0)),
                     PdfOperatorVariant::StrokePath(StrokePath),
                 ],
+            },
+            TestCase {
+                description: "25. Set non-stroking color (sc) with 3 components",
+                input: b"0.1 0.2 0.3 sc",
+                expected_ops: vec![PdfOperatorVariant::SetNonStrokingColor(
+                    SetNonStrokingColor::new(vec![0.1, 0.2, 0.3], None),
+                )],
+            },
+            TestCase {
+                description: "26. Set rendering intent (ri)",
+                input: b"/RelativeColorimetric ri",
+                expected_ops: vec![PdfOperatorVariant::SetRenderingIntent(
+                    SetRenderingIntent::new("RelativeColorimetric".to_string()),
+                )],
             },
         ];
 
