@@ -64,49 +64,56 @@ impl LiteralStringParser for PdfParser<'_> {
         // Expect the opening parenthesis `(`.
         self.tokenizer.expect(PdfToken::LeftParenthesis)?;
 
-        let mut characthers = Vec::new();
+        let mut characters = Vec::new();
         let mut depth = 0_usize;
+        let mut escaped = false;
 
-        // Read the content of the literal string until the closing parenthesis `)`.
+        // Read bytes until we find the matching, unescaped closing ')'.
+        // We handle the following minimal behaviors:
+        // - Balanced parentheses using a depth counter for nested parens
+        // - A backslash '\\' escapes the very next character, including '(' and ')'
+        //   so that an escaped ')' does not terminate the string
+        // We intentionally do not interpret escape sequences (e.g. \n) beyond
+        // treating the backslash as an escape for the next byte; content is kept literal.
         loop {
-            let content = self.tokenizer.read_while_u8(|b| b != b')' && b != b'(');
-            if !content.is_empty() {
-                characthers.extend_from_slice(content);
-            }
-            if let Some(token) = self.tokenizer.read() {
-                match token {
-                    PdfToken::LeftParenthesis => {
-                        // Nested parenthesis, increment depth.
-                        depth = depth
-                            .checked_add(1)
-                            .ok_or(LiteralStringObjectError::TooManyOpeningParentheses)?;
-                        characthers.push(b'(');
-                        continue;
-                    }
-                    PdfToken::RightParenthesis => {
-                        if depth == 0 {
-                            // End of a literal string
-                            return Ok(String::from_utf8_lossy(&characthers).to_string());
-                        } else {
-                            // Nested parenthesis
-                            depth = depth
-                                .checked_sub(1)
-                                .ok_or(LiteralStringObjectError::UnbalancedParentheses)?;
-                            characthers.push(b')');
-                            continue;
-                        }
-                    }
-                    _ => {
-                        // Invalid token for a literal string
-                        return Err(LiteralStringObjectError::UnbalancedParentheses);
-                    }
-                }
-            }
-            break;
-        }
+            // Read exactly one byte; reaching EOF without closing means unbalanced parentheses
+            let b = match self.tokenizer.read_excactly(1) {
+                Ok(bytes) if !bytes.is_empty() => bytes[0],
+                _ => return Err(LiteralStringObjectError::UnbalancedParentheses),
+            };
 
-        // If we reach here, it means we have an unbalanced parenthesis.
-        Err(LiteralStringObjectError::UnbalancedParentheses)
+            match (escaped, b) {
+                // Previous char was a backslash: take this byte literally and clear escape state
+                (true, byte) => {
+                    characters.push(byte);
+                    escaped = false;
+                }
+                // Start escape sequence; we keep the backslash literally
+                (false, b'\\') => {
+                    characters.push(b'\\');
+                    escaped = true;
+                }
+                // Nested opening parenthesis
+                (false, b'(') => {
+                    depth = depth
+                        .checked_add(1)
+                        .ok_or(LiteralStringObjectError::TooManyOpeningParentheses)?;
+                    characters.push(b'(');
+                }
+                // Possible closing of the literal or a nested close
+                (false, b')') if depth == 0 => {
+                    return Ok(String::from_utf8_lossy(&characters).to_string());
+                }
+                (false, b')') => {
+                    depth = depth
+                        .checked_sub(1)
+                        .ok_or(LiteralStringObjectError::UnbalancedParentheses)?;
+                    characters.push(b')');
+                }
+                // Regular byte
+                (false, byte) => characters.push(byte),
+            }
+        }
     }
 }
 
@@ -148,6 +155,35 @@ mod tests {
                 "Expected error for invalid input `{}`",
                 String::from_utf8_lossy(input)
             );
+        }
+    }
+
+    #[test]
+    fn test_parse_literal_string_with_escapes() {
+        let cases: Vec<(&[u8], &str)> = vec![
+            // Escaped right parenthesis should be taken literally and not terminate the string
+            (b"(\\))", "\\)"),
+            // Escaped left parenthesis should be taken literally
+            (b"(\\())", "\\("),
+            // Escaped parentheses inside text remain literal; no nesting occurs due to escapes
+            (b"(foo \\(bar\\) baz)", "foo \\(bar\\) baz"),
+            // Mix of real nested parens and an escaped right paren inside
+            (
+                b"(outer (inner \\) still inner) end)",
+                "outer (inner \\) still inner) end",
+            ),
+            // Escaped backslash results in a literal backslash character in output
+            (b"(\\\\)", "\\\\"),
+            // Escape sequence like \n is kept as backslash + 'n', not a newline
+            (b"(\\n)", "\\n"),
+            // Escaped parens around content
+            (b"(\\(nested\\))", "\\(nested\\)"),
+        ];
+
+        for (input, expected) in cases {
+            let mut parser = PdfParser::from(input);
+            let result = parser.parse_literal_string().unwrap();
+            assert_eq!(result, expected, "input: {:?}", input);
         }
     }
 }
