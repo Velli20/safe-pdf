@@ -29,22 +29,31 @@ pub(crate) struct Type3FontRenderer<'a, T: PdfOperatorBackend + Canvas> {
     /// The Current Transformation Matrix (CTM) at the time of rendering.
     current_transform: Transform,
     /// The current text matrix (Tm), which positions the text.
-    text_matrix: Transform,
+    text_matrix: &'a mut Transform,
     /// The Type 3 font definition, containing glyph content streams.
     type3_font: &'a Type3Font,
     /// The font size.
     font_size: f32,
+    /// Word spacing (Tw)
+    word_spacing: f32,
+    /// Character spacing (Tc)
+    char_spacing: f32,
+    /// Horizontal scaling factor (Th), expressed as a percentage.
+    horizontal_scaling: f32,
 }
 
 impl<'a, T: PdfOperatorBackend + Canvas> Type3FontRenderer<'a, T> {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         canvas: &'a mut T,
         font_size: f32,
         horizontal_scaling: f32,
         text_rise: f32,
         current_transform: Transform,
-        text_matrix: Transform,
+        text_matrix: &'a mut Transform,
         type3_font: &'a Type3Font,
+        word_spacing: f32,
+        char_spacing: f32,
     ) -> Result<Self, Type3FontRendererError> {
         let font_matrix = if let [a, b, c, d, e, f] = type3_font.font_matrix.as_slice() {
             Transform::from_row(*a, *b, *c, *d, *e, *f)
@@ -74,6 +83,9 @@ impl<'a, T: PdfOperatorBackend + Canvas> Type3FontRenderer<'a, T> {
             text_matrix,
             type3_font,
             font_size,
+            word_spacing,
+            char_spacing,
+            horizontal_scaling,
         })
     }
 }
@@ -87,7 +99,7 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for Type3FontRenderer<'_, T> {
             // Multiply by the font size, horizontal scaling, and rise matrix (S).
             text_rendering_matrix.concat(&self.font_size_matrix);
             // Multiply by the current text matrix (Tm).
-            text_rendering_matrix.concat(&self.text_matrix);
+            text_rendering_matrix.concat(self.text_matrix);
             // Multiply by the current transformation matrix (CTM).
             text_rendering_matrix.concat(&self.current_transform);
 
@@ -139,11 +151,24 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for Type3FontRenderer<'_, T> {
 
             // 7. Advance the text matrix (Tm) to position the next glyph.
             if let Some(width) = glyph_width {
-                // The glyph width is given in glyph space. Scale it up by
-                // the font size and a conventional 1000-unit glyph space grid to
-                // calculate the final horizontal displacement in text space.
-                let advance = width * self.font_size / 1000.0;
-                self.text_matrix.translate(advance, 0.0);
+                // Compute displacement vector in text space for (width, 0) in glyph space
+                let (x1, y1) = self.font_matrix.transform_point(width, 0.0);
+                let (x0, y0) = self.font_matrix.transform_point(0.0, 0.0);
+                let (wx_ts, wy_ts) = (x1 - x0, y1 - y0);
+
+                let th = self.horizontal_scaling / 100.0;
+                let base_adv_x = wx_ts * self.font_size;
+                let base_adv_y = wy_ts * self.font_size;
+
+                let word_spacing_for_char = if char_code_byte == 32 {
+                    self.word_spacing
+                } else {
+                    0.0
+                };
+                let advance_x = (base_adv_x + self.char_spacing + word_spacing_for_char) * th;
+                let advance_y = base_adv_y;
+
+                self.text_matrix.post_translate(advance_x, advance_y);
             }
         }
 

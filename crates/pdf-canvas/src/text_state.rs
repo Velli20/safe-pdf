@@ -18,6 +18,8 @@ pub(crate) struct TextState<'a> {
     pub(crate) word_spacing: f32,
     /// Text rise (Ts), a vertical offset from the baseline, in unscaled text space units.
     pub(crate) rise: f32,
+    /// Text leading (Tl), the vertical distance between baselines.
+    pub(crate) leading: f32,
     /// The current font resource.
     pub(crate) font: Option<&'a Font>,
 }
@@ -32,6 +34,7 @@ impl Default for TextState<'_> {
             character_spacing: 0.0,
             word_spacing: 0.0,
             rise: 0.0,
+            leading: 0.0,
             font: None,
         }
     }

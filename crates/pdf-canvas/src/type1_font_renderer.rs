@@ -13,7 +13,7 @@ pub(crate) struct Type1FontRenderer<'a, T: PdfOperatorBackend + Canvas> {
     canvas: &'a mut T,
     font: &'a Type1Font,
     /// The current text matrix (Tm), which positions the text.
-    text_matrix: Transform,
+    text_matrix: &'a mut Transform,
     /// The Current Transformation Matrix (CTM) at the time of rendering.
     current_transform: Transform,
     /// The font size in user space units.
@@ -35,7 +35,7 @@ impl<'a, T: PdfOperatorBackend + Canvas> Type1FontRenderer<'a, T> {
         font: &'a Type1Font,
         font_size: f32,
         horizontal_scaling: f32,
-        text_matrix: Transform,
+        text_matrix: &'a mut Transform,
         current_transform: Transform,
         rise: f32,
         word_spacing: f32,
@@ -87,7 +87,7 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for Type1FontRenderer<'_, T> {
             // Compose the final transformation matrix for this glyph:
             // m_params -> text matrix -> current transformation matrix
             let mut glyph_matrix_for_char = m_params;
-            glyph_matrix_for_char.concat(&self.text_matrix);
+            glyph_matrix_for_char.concat(self.text_matrix);
             glyph_matrix_for_char.concat(&self.current_transform);
 
             let char_code = *u;
@@ -122,7 +122,7 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for Type1FontRenderer<'_, T> {
             };
             let advance_x =
                 (glyph_width_tfs_scaled + self.char_spacing + word_spacing_for_char) * th_factor;
-            self.text_matrix.translate(advance_x, 0.0);
+            self.text_matrix.post_translate(advance_x, 0.0);
         }
 
         Ok(())

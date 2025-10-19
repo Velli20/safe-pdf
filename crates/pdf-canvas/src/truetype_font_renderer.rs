@@ -45,7 +45,7 @@ pub(crate) struct TrueTypeFontRenderer<'a, T: PdfOperatorBackend + Canvas> {
     /// The default glyph width for the font, used if specific widths are not provided.
     default_width: f32,
     /// The current text matrix (Tm), which positions the text.
-    text_matrix: Transform,
+    text_matrix: &'a mut Transform,
     /// The Current Transformation Matrix (CTM) at the time of rendering.
     current_transform: Transform,
     /// The font size in user space units.
@@ -67,7 +67,7 @@ impl<'a, T: PdfOperatorBackend + Canvas> TrueTypeFontRenderer<'a, T> {
         font: &'a Font,
         font_size: f32,
         horizontal_scaling: f32,
-        text_matrix: Transform,
+        text_matrix: &'a mut Transform,
         current_transform: Transform,
         rise: f32,
         word_spacing: f32,
@@ -198,7 +198,7 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
             // Compose the final transformation matrix for this glyph:
             // m_params -> text matrix -> current transformation matrix
             let mut glyph_matrix_for_char = m_params;
-            glyph_matrix_for_char.concat(&self.text_matrix);
+            glyph_matrix_for_char.concat(self.text_matrix);
             glyph_matrix_for_char.concat(&self.current_transform);
 
             // Build the glyph outline using the composed transform.
@@ -241,8 +241,8 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
             let advance_x =
                 (glyph_width_tfs_scaled + char_spacing + word_spacing_for_char) * th_factor;
 
-            // Advance the text matrix for the next glyph.
-            self.text_matrix.translate(advance_x, 0.0);
+            // Advance the text matrix for the next glyph using post-multiplication.
+            self.text_matrix.post_translate(advance_x, 0.0);
         }
 
         Ok(())
