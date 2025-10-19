@@ -99,6 +99,11 @@ pub enum ExternalGraphicsStateKey {
     /// Stroke adjustment (`SA`). A boolean that specifies whether to adjust stroke endpoints
     /// and joins to the device pixel grid to produce thinner or more consistent strokes.
     StrokeAdjustment(bool),
+    /// Apple-specific anti-aliasing flag (`AAPL:AA`).
+    ///
+    /// This is a Quartz PDF (Apple) extension, used to control anti-aliasing
+    /// in Apple-generated PDFs.
+    AppleAntiAliasing(bool),
 }
 
 pub struct ExternalGraphicsState {
@@ -316,6 +321,7 @@ fn parse_entry(
         "CA" => ExternalGraphicsStateKey::StrokingAlpha(value.as_number_entry::<f32>("CA")?),
         "ca" => ExternalGraphicsStateKey::NonStrokingAlpha(value.as_number_entry::<f32>("ca")?),
         "SA" => ExternalGraphicsStateKey::StrokeAdjustment(value.try_boolean()?),
+        "AAPL:AA" => ExternalGraphicsStateKey::AppleAntiAliasing(value.try_boolean()?),
         _ => {
             return Err(ExternalGraphicsStateError::InvalidValueError {
                 key_name: Cow::Owned(name.to_string()),

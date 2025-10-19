@@ -187,6 +187,7 @@ impl<T: std::error::Error> GraphicsStateOps for PdfCanvas<'_, T> {
                     self.current_state_mut()?.fill_color.a = *alpha
                 }
                 ExternalGraphicsStateKey::StrokeAdjustment(_) => {}
+                ExternalGraphicsStateKey::AppleAntiAliasing(_) => {}
             }
         }
         Ok(())
