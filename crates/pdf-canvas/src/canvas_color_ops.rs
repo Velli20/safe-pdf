@@ -14,8 +14,58 @@ impl<T: std::error::Error> ColorOps for PdfCanvas<'_, T> {
         Ok(())
     }
 
-    fn set_stroking_color(&mut self, _components: &[f32]) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented("set_stroking_color".into()))
+    fn set_stroking_color(&mut self, components: &[f32]) -> Result<(), Self::ErrorType> {
+        // Map component arrays to a concrete color in the current graphics state.
+        // Supported forms (per current backend support):
+        // - 1 component: Gray (g)
+        // - 3 components: RGB (r g b)
+        // - 4 components: CMYK (c m y k)
+        // Any time an explicit color is set, clear an active pattern.
+        let state = self.current_state_mut()?;
+        match *components {
+            [g] => {
+                state.stroke_color = Color::from_gray(g);
+            }
+            [r, g, b] => {
+                state.stroke_color = Color::from_rgb(r, g, b);
+            }
+            [c, m, y, k] => {
+                state.stroke_color = Color::from_cmyk(c, m, y, k);
+            }
+            _ => {
+                return Err(PdfCanvasError::NotImplemented(format!(
+                    "set_stroking_color expects 1 (Gray), 3 (RGB), or 4 (CMYK) components; got {:?}",
+                    components
+                )));
+            }
+        }
+        state.pattern = None;
+        Ok(())
+    }
+
+    fn set_non_stroking_color(&mut self, components: &[f32]) -> Result<(), Self::ErrorType> {
+        // Same component mapping as set_stroking_color for the fill color.
+        // Explicit color selection disables any active pattern.
+        let state = self.current_state_mut()?;
+        match *components {
+            [g] => {
+                state.fill_color = Color::from_gray(g);
+            }
+            [r, g, b] => {
+                state.fill_color = Color::from_rgb(r, g, b);
+            }
+            [c, m, y, k] => {
+                state.fill_color = Color::from_cmyk(c, m, y, k);
+            }
+            _ => {
+                return Err(PdfCanvasError::NotImplemented(format!(
+                    "set_non_stroking_color expects 1 (Gray), 3 (RGB), or 4 (CMYK) components; got {:?}",
+                    components
+                )));
+            }
+        }
+        state.pattern = None;
+        Ok(())
     }
 
     fn set_non_stroking_color_extended(
@@ -44,12 +94,6 @@ impl<T: std::error::Error> ColorOps for PdfCanvas<'_, T> {
         }
 
         self.set_pattern(pattern_name)
-    }
-
-    fn set_non_stroking_color(&mut self, _components: &[f32]) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented(
-            "set_non_stroking_color".into(),
-        ))
     }
 
     fn set_stroking_gray(&mut self, gray: f32) -> Result<(), Self::ErrorType> {
