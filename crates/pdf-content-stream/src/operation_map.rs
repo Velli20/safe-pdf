@@ -51,6 +51,7 @@ pub(crate) const READ_MAP: &[OpDescriptor] = &[
     OpDescriptor::from::<SetMiterLimit>(),
     OpDescriptor::from::<SetDashPattern>(),
     OpDescriptor::from::<SetFlatnessTolerance>(),
+    OpDescriptor::from::<SetRenderingIntent>(),
     OpDescriptor::from::<SetGraphicsStateFromDict>(),
     OpDescriptor::from::<SaveGraphicsState>(),
     OpDescriptor::from::<RestoreGraphicsState>(),
@@ -100,6 +101,8 @@ pub(crate) const READ_MAP: &[OpDescriptor] = &[
     OpDescriptor::from::<SetStrokeColorSpace>(),
     OpDescriptor::from::<SetNonStrokingColorSpace>(),
     OpDescriptor::from::<SetStrokingColor>(),
+    OpDescriptor::from::<SetStrokingColorSc>(),
+    OpDescriptor::from::<SetNonStrokingColorSc>(),
     OpDescriptor::from::<SetNonStrokingColor>(),
 ];
 

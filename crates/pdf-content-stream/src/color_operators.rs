@@ -353,3 +353,63 @@ impl PdfOperator for SetNonStrokingColor {
         }
     }
 }
+
+/// Sets the non-stroking color when the color space requires
+/// multiple color components, without pattern support.
+/// This handles the "sc" operator and maps to `SetNonStrokingColor` internally.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetNonStrokingColorSc;
+
+impl PdfOperator for SetNonStrokingColorSc {
+    const NAME: &'static str = "sc";
+    const OPERAND_COUNT: Option<usize> = None;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        let mut values = vec![];
+        while let Ok(value) = operands.get_f32() {
+            values.push(value);
+        }
+
+        if values.is_empty() {
+            return Err(PdfOperatorError::IncorrectOperandCount {
+                op_name: Self::NAME,
+                expected: 1,
+                got: 0,
+            });
+        }
+
+        Ok(PdfOperatorVariant::SetNonStrokingColor(
+            SetNonStrokingColor::new(values, None),
+        ))
+    }
+}
+
+/// Sets the stroking color when the color space requires
+/// multiple color components, without pattern support.
+/// This handles the "SC" operator and maps to `SetStrokingColor` internally.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetStrokingColorSc;
+
+impl PdfOperator for SetStrokingColorSc {
+    const NAME: &'static str = "SC";
+    const OPERAND_COUNT: Option<usize> = None;
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        let mut values = vec![];
+        while let Ok(value) = operands.get_f32() {
+            values.push(value);
+        }
+
+        if values.is_empty() {
+            return Err(PdfOperatorError::IncorrectOperandCount {
+                op_name: Self::NAME,
+                expected: 1,
+                got: 0,
+            });
+        }
+
+        Ok(PdfOperatorVariant::SetStrokingColor(SetStrokingColor::new(
+            values, None,
+        )))
+    }
+}
