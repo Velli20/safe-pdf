@@ -16,11 +16,14 @@ use pdf_graphics::transform::Transform;
 impl<T: std::error::Error> TextPositioningOps for PdfCanvas<'_, T> {
     fn move_text_position(&mut self, tx: f32, ty: f32) -> Result<(), Self::ErrorType> {
         let mat = Transform::from_translate(tx, ty);
+        // PDF 1.7 (Tj and text positioning): Td updates Tlm = Tlm * T(tx, ty), then Tm = Tlm.
+        // Use post-multiplication to move in text space coordinates.
         self.current_state_mut()?
             .text_state
             .line_matrix
-            .concat(&mat);
-        self.current_state_mut()?.text_state.matrix = self.current_state()?.text_state.line_matrix;
+            .post_concat(&mat);
+        let lm = self.current_state()?.text_state.line_matrix;
+        self.current_state_mut()?.text_state.matrix = lm;
         Ok(())
     }
 
@@ -29,10 +32,10 @@ impl<T: std::error::Error> TextPositioningOps for PdfCanvas<'_, T> {
         tx: f32,
         ty: f32,
     ) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented(format!(
-            "move_text_position_and_set_leading TD: tx={}, ty={}",
-            tx, ty
-        )))
+        // TD: Set leading to -ty, then perform Td(tx, ty)
+        let neg_ty = -ty;
+        self.current_state_mut()?.text_state.leading = neg_ty;
+        self.move_text_position(tx, ty)
     }
 
     fn set_text_matrix(
@@ -45,15 +48,23 @@ impl<T: std::error::Error> TextPositioningOps for PdfCanvas<'_, T> {
         f: f32,
     ) -> Result<(), Self::ErrorType> {
         let mat = Transform::from_row(a, b, c, d, e, f);
+        // Tm operator sets both Tm and Tlm to the same matrix.
         self.current_state_mut()?.text_state.line_matrix = mat;
         self.current_state_mut()?.text_state.matrix = mat;
         Ok(())
     }
 
     fn move_to_start_of_next_line(&mut self) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented(
-            "move_to_start_of_next_line T*".into(),
-        ))
+        // T*: Move to start of next line using current leading: Tlm = Tlm * T(0, -Tl); Tm = Tlm.
+        let leading = self.current_state()?.text_state.leading;
+        let mat = Transform::from_translate(0.0, -leading);
+        self.current_state_mut()?
+            .text_state
+            .line_matrix
+            .post_concat(&mat);
+        let lm = self.current_state()?.text_state.line_matrix;
+        self.current_state_mut()?.text_state.matrix = lm;
+        Ok(())
     }
 }
 
@@ -86,10 +97,9 @@ impl<T: std::error::Error> TextStateOps for PdfCanvas<'_, T> {
     }
 
     fn set_text_leading(&mut self, leading: f32) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented(format!(
-            "set_text_leading TL: {}",
-            leading
-        )))
+        // TL sets the text leading parameter
+        self.current_state_mut()?.text_state.leading = leading;
+        Ok(())
     }
 
     fn set_font_and_size(&mut self, font_name: &str, size: f32) -> Result<(), Self::ErrorType> {
@@ -116,10 +126,9 @@ impl<T: std::error::Error> TextStateOps for PdfCanvas<'_, T> {
         Err(PdfCanvasError::FontNotFound(font_name.to_string()))
     }
 
-    fn set_text_rendering_mode(&mut self, _mode: TextRenderingMode) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented(
-            "set_text_rendering_mode".into(),
-        ))
+    fn set_text_rendering_mode(&mut self, mode: TextRenderingMode) -> Result<(), Self::ErrorType> {
+        self.current_state_mut()?.rendering_mode = Some(mode);
+        Ok(())
     }
 
     fn set_text_rise(&mut self, rise: f32) -> Result<(), Self::ErrorType> {
@@ -132,7 +141,7 @@ impl<T: std::error::Error> TextShowingOps for PdfCanvas<'_, T> {
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
         // Extract text state parameters for rendering.
         let TextState {
-            matrix,
+            mut matrix,
             horizontal_scaling,
             font_size,
             character_spacing,
@@ -153,10 +162,15 @@ impl<T: std::error::Error> TextShowingOps for PdfCanvas<'_, T> {
                     horizontal_scaling,
                     rise,
                     current_transform,
-                    matrix,
+                    &mut matrix,
                     type3_font,
+                    word_spacing,
+                    character_spacing,
                 )?;
-                renderer.render_text(text)
+                renderer.render_text(text)?;
+                // Persist the updated Tm
+                self.current_state_mut()?.text_state.matrix = matrix;
+                Ok(())
             }
             Font::Type1(type1_font) => {
                 let mut renderer = Type1FontRenderer::new(
@@ -164,13 +178,16 @@ impl<T: std::error::Error> TextShowingOps for PdfCanvas<'_, T> {
                     type1_font,
                     font_size,
                     horizontal_scaling,
-                    matrix,
+                    &mut matrix,
                     current_transform,
                     rise,
                     word_spacing,
                     character_spacing,
                 );
-                renderer.render_text(text)
+                renderer.render_text(text)?;
+                // Persist the updated Tm
+                self.current_state_mut()?.text_state.matrix = matrix;
+                Ok(())
             }
             Font::TrueType(_) | Font::Type0(_) => {
                 let mut renderer = TrueTypeFontRenderer::new(
@@ -178,13 +195,15 @@ impl<T: std::error::Error> TextShowingOps for PdfCanvas<'_, T> {
                     current_font,
                     font_size,
                     horizontal_scaling,
-                    matrix,
+                    &mut matrix,
                     current_transform,
                     rise,
                     word_spacing,
                     character_spacing,
                 )?;
-                renderer.render_text(text)
+                renderer.render_text(text)?;
+                self.current_state_mut()?.text_state.matrix = matrix;
+                Ok(())
             }
         }
     }
@@ -199,11 +218,12 @@ impl<T: std::error::Error> TextShowingOps for PdfCanvas<'_, T> {
                     self.show_text(value.as_bytes())?;
                 }
                 TextElement::Adjustment { amount } => {
+                    // TJ adjustment: Tm = Tm * T( -amount/1000 * Tfs * Th, 0 )
                     let amount = (*amount) / 1000.0;
                     let state = self.current_state_mut()?;
-                    let tx =
-                        -amount * state.text_state.font_size * state.text_state.horizontal_scaling;
-                    state.text_state.matrix.translate(tx, 0.0);
+                    let th = state.text_state.horizontal_scaling / 100.0;
+                    let tx = -amount * state.text_state.font_size * th;
+                    state.text_state.matrix.post_translate(tx, 0.0);
                 }
                 TextElement::HexString { value } => {
                     self.show_text(value)?;

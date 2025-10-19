@@ -1,5 +1,6 @@
 use pdf_graphics::{
-    BlendMode, LineCap, LineJoin, color::Color, pdf_path::PdfPath, transform::Transform,
+    BlendMode, LineCap, LineJoin, TextRenderingMode, color::Color, pdf_path::PdfPath,
+    transform::Transform,
 };
 use pdf_page::{pattern::Pattern, resources::Resources};
 
@@ -33,6 +34,8 @@ pub(crate) struct CanvasState<'a> {
     pub pattern: Option<&'a Pattern>,
     /// The current blend mode, controlling compositing behavior.
     pub blend_mode: Option<BlendMode>,
+    /// The current text rendering mode.
+    pub rendering_mode: Option<TextRenderingMode>,
 }
 
 impl CanvasState<'_> {
@@ -61,6 +64,7 @@ impl Default for CanvasState<'_> {
             line_cap: LineCap::Butt,
             line_join: LineJoin::Miter,
             blend_mode: None,
+            rendering_mode: None,
         }
     }
 }
