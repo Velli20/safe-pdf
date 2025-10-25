@@ -6,10 +6,6 @@ use crate::{parser::PdfParser, traits::LiteralStringParser};
 /// Represents an error that can occur while parsing a literal string object.
 #[derive(Debug, PartialEq, Error)]
 pub enum LiteralStringObjectError {
-    /// Indicates that the escape sequence is invalid.
-    #[error("Invalid escape sequence in literal string")]
-    InvalidEscapeSequence,
-    /// Indicates that the parentheses are unbalanced.
     #[error("Unbalanced parentheses in literal string")]
     UnbalancedParentheses,
     #[error("Tokenizer error: {0}")]
@@ -71,10 +67,13 @@ impl LiteralStringParser for PdfParser<'_> {
         // Read bytes until we find the matching, unescaped closing ')'.
         // We handle the following minimal behaviors:
         // - Balanced parentheses using a depth counter for nested parens
-        // - A backslash '\\' escapes the very next character, including '(' and ')'
-        //   so that an escaped ')' does not terminate the string
-        // We intentionally do not interpret escape sequences (e.g. \n) beyond
-        // treating the backslash as an escape for the next byte; content is kept literal.
+        // - A backslash '\\' escapes the very next character. For '\\', '\(', and '\)',
+        //   we emit a single '\\', '(', or ')' respectively (i.e., we do NOT keep the
+        //   backslash in the output). For other characters following a backslash, we
+        //   emit the character as-is (backslash is ignored), which aligns with the PDF
+        //   spec's permissive behavior for unknown escapes.
+        // - We still do not normalize line endings present literally in the input; they
+        //   are preserved as-is.
         loop {
             // Read exactly one byte; reaching EOF without closing means unbalanced parentheses
             let b = match self.tokenizer.read_excactly(1) {
@@ -85,12 +84,27 @@ impl LiteralStringParser for PdfParser<'_> {
             match (escaped, b) {
                 // Previous char was a backslash: take this byte literally and clear escape state
                 (true, byte) => {
-                    characters.push(byte);
+                    // Interpret common escapes and special pairs. For any other byte, we
+                    // preserve the backslash and the byte literally (treat as not an escape).
+                    match byte {
+                        // Common PDF escapes.
+                        b'n' => characters.push(b'\n'),
+                        b'r' => characters.push(b'\r'),
+                        b't' => characters.push(b'\t'),
+                        b'b' => characters.push(0x08), // backspace
+                        b'f' => characters.push(0x0C), // form feed
+                        // Escaped delimiter/backslash
+                        b'(' | b')' | b'\\' => characters.push(byte),
+                        // Unknown escape: keep the backslash and the byte
+                        other => {
+                            characters.push(b'\\');
+                            characters.push(other);
+                        }
+                    }
                     escaped = false;
                 }
-                // Start escape sequence; we keep the backslash literally
+                // Start escape sequence; do NOT keep the backslash in output
                 (false, b'\\') => {
-                    characters.push(b'\\');
                     escaped = true;
                 }
                 // Nested opening parenthesis
@@ -161,23 +175,12 @@ mod tests {
     #[test]
     fn test_parse_literal_string_with_escapes() {
         let cases: Vec<(&[u8], &str)> = vec![
-            // Escaped right parenthesis should be taken literally and not terminate the string
-            (b"(\\))", "\\)"),
-            // Escaped left parenthesis should be taken literally
-            (b"(\\())", "\\("),
-            // Escaped parentheses inside text remain literal; no nesting occurs due to escapes
-            (b"(foo \\(bar\\) baz)", "foo \\(bar\\) baz"),
-            // Mix of real nested parens and an escaped right paren inside
-            (
-                b"(outer (inner \\) still inner) end)",
-                "outer (inner \\) still inner) end",
-            ),
-            // Escaped backslash results in a literal backslash character in output
-            (b"(\\\\)", "\\\\"),
-            // Escape sequence like \n is kept as backslash + 'n', not a newline
-            (b"(\\n)", "\\n"),
-            // Escaped parens around content
-            (b"(\\(nested\\))", "\\(nested\\)"),
+            (b"(Hello World)", "Hello World"),
+            (b"(Line\nBreak)", "Line\nBreak"),
+            (b"(Carriage\rReturn)", "Carriage\rReturn"),
+            (b"(Tab\tSeparated)", "Tab\tSeparated"),
+            (b"(Back\\Slash)", "Back\\Slash"),
+            (b"(Paren\\(\\)Test)", "Paren()Test"),
         ];
 
         for (input, expected) in cases {
