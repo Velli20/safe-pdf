@@ -1,42 +1,26 @@
 use pdf_object::cross_reference_table::{
     CrossReferenceEntry, CrossReferenceStatus, CrossReferenceTable,
 };
-use pdf_tokenizer::{PdfToken, error::TokenizerError};
+use pdf_tokenizer::PdfToken;
 use thiserror::Error;
 
-use crate::{parser::PdfParser, traits::CrossReferenceTableParser};
+use crate::{error::ParserError, parser::PdfParser, traits::CrossReferenceTableParser};
 
 /// Represents an error that can occur while parsing a cross-reference table.
 #[derive(Debug, PartialEq, Error)]
 pub enum CrossReferenceTableError {
-    /// Indicates that the status character in a cross-reference entry is invalid.
-    #[error("Invalid cross-reference status charachter: '{0}'")]
+    #[error("Invalid cross-reference status character: '{0}'")]
     InvalidCrossReferenceStatus(char),
-    /// Indicates that the entry count in a cross-reference table is missing.
-    #[error("Missing entry count in cross-reference table")]
-    MissingTableEntryCount,
-    /// Indicates that the object number in a cross-reference entry is missing.
-    #[error("Missing object number in cross-reference entry")]
-    MissingObjectNumber,
-    /// Indicates that the generation number in a cross-reference entry is missing.
-    #[error("Missing generation number in cross-reference entry")]
-    MissingGenerationNumber,
-    /// Indicates that the status in a cross-reference entry is missing.
     #[error("Missing status in cross-reference entry")]
     MissingStatus,
-    /// Indicates that number of entries read does not match the expected count.
     #[error("Missing one or more table entries. Expected {0} entries, but found {1}")]
-    MissigTableEntries(usize, usize),
-    #[error("Tokenizer error: {0}")]
-    TokenizerError(#[from] TokenizerError),
-    #[error("Parser error: {err}")]
-    ParserError { err: String },
+    MissingTableEntries(usize, usize),
     #[error("Too many entries in cross-reference table")]
     TooManyEntries,
 }
 
 impl CrossReferenceTableParser for PdfParser<'_> {
-    type ErrorType = CrossReferenceTableError;
+    type ErrorType = ParserError;
 
     /// Parses a cross-reference (xref) table from a PDF 1.7 document.
     ///
@@ -86,33 +70,23 @@ impl CrossReferenceTableParser for PdfParser<'_> {
         const XREF_KEYWORD: &[u8] = b"xref";
 
         // Expect the `xref` keyword.
-        self.read_keyword(XREF_KEYWORD)
-            .map_err(|err| CrossReferenceTableError::ParserError {
-                err: err.to_string(),
-            })?;
+        self.read_keyword(XREF_KEYWORD)?;
         self.skip_whitespace();
 
-        let mut total_number_of_entries = 0_i32;
+        let mut total_number_of_entries = 0_usize;
         let mut first_object_number = None;
         let mut entries = Vec::new();
         loop {
             // Read the first object number.
             if let Some(PdfToken::Number(_)) = self.tokenizer.peek() {
-                let first_object_number_in_section =
-                    self.read_number::<i32>(true).map_err(|err| {
-                        CrossReferenceTableError::ParserError {
-                            err: err.to_string(),
-                        }
-                    })?;
+                let first_object_number_in_section = self.read_number::<usize>(true)?;
                 if first_object_number.is_none() {
                     first_object_number = Some(first_object_number_in_section);
                 }
             }
 
             // Read the number of objects.
-            let number_of_objects = self
-                .read_number::<u32>(true)
-                .map_err(|_| CrossReferenceTableError::MissingTableEntryCount)?;
+            let number_of_objects = self.read_number::<u32>(true)?;
 
             // Read the entries.
             for _ in 0..number_of_objects {
@@ -120,15 +94,11 @@ impl CrossReferenceTableParser for PdfParser<'_> {
                     .checked_add(1)
                     .ok_or(CrossReferenceTableError::TooManyEntries)?;
 
-                // Read the object number.
-                let object_number = self
-                    .read_number::<u32>(true)
-                    .map_err(|_| CrossReferenceTableError::MissingObjectNumber)?;
+                // Read the byte offset.
+                let byte_offset = self.read_number::<usize>(true)?;
 
                 // Read the generation number.
-                let generation_number = self
-                    .read_number::<u16>(true)
-                    .map_err(|_| CrossReferenceTableError::MissingGenerationNumber)?;
+                let generation_number = self.read_number::<usize>(true)?;
 
                 // Read the status.
                 if let Some(PdfToken::Alphabetic(e)) = self.tokenizer.read() {
@@ -136,35 +106,32 @@ impl CrossReferenceTableParser for PdfParser<'_> {
                         CrossReferenceTableError::InvalidCrossReferenceStatus(char::from(e))
                     })?;
                     entries.push(CrossReferenceEntry::new(
-                        object_number,
+                        byte_offset,
                         generation_number,
                         status,
                     ));
                 } else {
-                    return Err(CrossReferenceTableError::MissingStatus);
+                    return Err(CrossReferenceTableError::MissingStatus.into());
                 }
                 self.skip_whitespace();
             }
 
             // If the next token is not a number, we are done reading entries.
             if !matches!(self.tokenizer.peek(), Some(PdfToken::Number(_))) {
-                if entries.len() != usize::try_from(total_number_of_entries).unwrap_or(usize::MAX) {
-                    return Err(CrossReferenceTableError::MissigTableEntries(
-                        usize::try_from(total_number_of_entries).unwrap_or(usize::MAX),
+                if entries.len() != total_number_of_entries {
+                    return Err(CrossReferenceTableError::MissingTableEntries(
+                        total_number_of_entries,
                         entries.len(),
-                    ));
+                    )
+                    .into());
                 }
                 break;
             }
         }
 
-        // Create a new cross-reference table.
-        let first_object_number_u32 =
-            u32::try_from(first_object_number.unwrap_or(0_i32)).unwrap_or(0);
-        let total_entries_u32 = u32::try_from(total_number_of_entries).unwrap_or(0);
         Ok(CrossReferenceTable::new(
-            first_object_number_u32,
-            total_entries_u32,
+            first_object_number.unwrap_or(0),
+            total_number_of_entries,
             entries,
         ))
     }
@@ -211,8 +178,7 @@ mod tests {
         let data = b"xref\n0 0\n";
         let mut parser = PdfParser::from(data.as_slice());
 
-        let result: Result<CrossReferenceTable, CrossReferenceTableError> =
-            parser.parse_cross_reference_table();
+        let result = parser.parse_cross_reference_table();
         assert!(result.is_ok());
 
         let table = result.unwrap();
@@ -233,8 +199,7 @@ mod tests {
 
         let mut parser = PdfParser::from(data.as_slice());
 
-        let result: Result<CrossReferenceTable, CrossReferenceTableError> =
-            parser.parse_cross_reference_table();
+        let result = parser.parse_cross_reference_table();
         assert!(result.is_ok());
 
         let table = result.unwrap();

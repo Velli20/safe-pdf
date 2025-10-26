@@ -1,63 +1,24 @@
 use std::rc::Rc;
 
 use pdf_object::{ObjectVariant, indirect_object::IndirectObject, stream::StreamObject};
-use pdf_tokenizer::{PdfToken, error::TokenizerError};
+use pdf_tokenizer::PdfToken;
 use thiserror::Error;
 
 use crate::{
     error::ParserError,
     parser::PdfParser,
-    stream::StreamParsingError,
     traits::{IndirectObjectParser, StreamParser},
 };
 
 /// Represents an error that can occur while parsing an indirect object or an object reference.
 #[derive(Error, Debug, PartialEq)]
 pub enum IndirectObjectError {
-    /// Indicates that there was an error while parsing the object within the indirect object.
-    #[error("Error while parsing object within indirect object: {source}")]
-    InvalidObject {
-        #[source]
-        source: ParserError,
-    },
-    /// Indicates that the object number is missing.
-    #[error("Missing object number in indirect object: {source}")]
-    MissingObjectNumber {
-        #[source]
-        source: ParserError,
-    },
-    /// Indicates that the generation number is missing.
-    #[error("Missing generation number in indirect object: {source}")]
-    MissingGenerationNumber {
-        #[source]
-        source: ParserError,
-    },
-    /// Indicates that a stream object was encountered without a preceding dictionary.
     #[error("Stream object found without a preceding dictionary")]
     StreamObjectWithoutDictionary,
-    /// Propagates errors from stream parsing.
-    #[error("Stream parsing error: {0}")]
-    StreamError(#[from] StreamParsingError),
-    /// Indicates an error while parsing the 'obj' keyword.
-    #[error("Failed to parse 'obj' keyword: {source}")]
-    InvalidObjKeyword {
-        #[source]
-        source: ParserError,
-    },
-    /// Indicates an error while parsing the 'endobj' keyword.
-    #[error("Failed to parse 'endobj' keyword: {source}")]
-    InvalidEndObjKeyword {
-        #[source]
-        source: ParserError,
-    },
-    #[error("Tokenizer error: {0}")]
-    TokenizerError(#[from] TokenizerError),
-    #[error("Parser error: {0}")]
-    ParserError(#[from] ParserError),
 }
 
 impl IndirectObjectParser for PdfParser<'_> {
-    type ErrorType = IndirectObjectError;
+    type ErrorType = ParserError;
 
     /// Parses an indirect object or an object reference from the current position in the input stream.
     ///
@@ -126,9 +87,7 @@ impl IndirectObjectParser for PdfParser<'_> {
         };
 
         // Parse the object.
-        let object = self
-            .parse_object()
-            .map_err(|source| IndirectObjectError::InvalidObject { source })?;
+        let object = self.parse_object()?;
 
         self.skip_whitespace();
 
@@ -137,8 +96,7 @@ impl IndirectObjectParser for PdfParser<'_> {
                 let stream = self.parse_stream(dictionary)?;
 
                 // Read the keyword `endobj`.
-                self.read_keyword(ENDOBJ_KEYWORD)
-                    .map_err(|source| IndirectObjectError::InvalidEndObjKeyword { source })?;
+                self.read_keyword(ENDOBJ_KEYWORD)?;
 
                 return Ok(Some(ObjectVariant::Stream(Rc::new(StreamObject::new(
                     object_number,
@@ -147,13 +105,12 @@ impl IndirectObjectParser for PdfParser<'_> {
                     stream,
                 )))));
             } else {
-                return Err(IndirectObjectError::StreamObjectWithoutDictionary);
+                return Err(IndirectObjectError::StreamObjectWithoutDictionary.into());
             }
         }
 
         // Read the keyword `endobj`.
-        self.read_keyword(ENDOBJ_KEYWORD)
-            .map_err(|source| IndirectObjectError::InvalidEndObjKeyword { source })?;
+        self.read_keyword(ENDOBJ_KEYWORD)?;
 
         Ok(Some(ObjectVariant::IndirectObject(Rc::new(
             IndirectObject::new(object_number, generation_number, Some(object)),

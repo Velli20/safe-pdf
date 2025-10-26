@@ -14,11 +14,11 @@ pub struct Trailer {
     /// The byte offset from the beginning of the file to the start of
     /// the cross-reference table (`xref` section), used for locating
     /// objects within the PDF.
-    pub offset: u32,
+    pub offset: usize,
 }
 
 impl Trailer {
-    pub fn new(dictionary: Rc<Dictionary>, offset: u32) -> Self {
+    pub fn new(dictionary: Rc<Dictionary>, offset: usize) -> Self {
         Trailer { dictionary, offset }
     }
 }

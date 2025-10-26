@@ -11,9 +11,9 @@ use crate::dictionary::Dictionary;
 #[derive(Debug, PartialEq, Clone)]
 pub struct StreamObject {
     /// The object number, identifying this stream as an indirect object.
-    pub object_number: i32,
+    pub object_number: usize,
     /// The generation number, used for PDF incremental updates.
-    pub generation_number: i32,
+    pub generation_number: usize,
     /// The dictionary associated with this stream.
     pub dictionary: Rc<Dictionary>,
     /// The raw, uncompressed, byte data of the stream.
@@ -22,8 +22,8 @@ pub struct StreamObject {
 
 impl StreamObject {
     pub fn new(
-        object_number: i32,
-        generation_number: i32,
+        object_number: usize,
+        generation_number: usize,
         dictionary: Rc<Dictionary>,
         data: Vec<u8>,
     ) -> Self {

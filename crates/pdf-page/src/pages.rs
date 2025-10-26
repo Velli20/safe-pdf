@@ -15,7 +15,7 @@ pub enum PdfPagesError {
     #[error(
         "Unexpected object type in `/Kids` array for object {obj_num}: expected 'Page' or 'Pages', found '{found_type}'"
     )]
-    UnexpectedObjectTypeInKids { obj_num: i32, found_type: String },
+    UnexpectedObjectTypeInKids { obj_num: usize, found_type: String },
     #[error("{0}")]
     ObjectError(#[from] ObjectError),
     #[error("Failed to parse content stream for page: {0}")]

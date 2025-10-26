@@ -1,7 +1,7 @@
 use std::io::Read;
 
 use flate2::bufread::ZlibDecoder;
-use pdf_object::{dictionary::Dictionary, error::ObjectError};
+use pdf_object::{ObjectVariant, dictionary::Dictionary};
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
@@ -10,38 +10,18 @@ use crate::{error::ParserError, parser::PdfParser, traits::StreamParser};
 /// Represents an error that can occur while parsing an indirect object or an object reference.
 #[derive(Debug, PartialEq, Error)]
 pub enum StreamParsingError {
-    /// Indicates an error while parsing the 'stream' keyword.
-    #[error("Failed to parse 'stream' keyword: {source}")]
-    InvalidStreamKeyword {
-        #[source]
-        source: ParserError,
-    },
-    /// Indicates an error while parsing the 'endstream' keyword.
-    #[error("Failed to parse 'endstream' keyword: {source}")]
-    InvalidEndStreamKeyword {
-        #[source]
-        source: ParserError,
-    },
-    /// Indicates that the stream dictionary is missing the /Length entry.
     #[error("Stream dictionary missing /Length entry")]
     MissingLength,
-    /// Indicates that the stream compression algorithm specified in the
-    /// stream dictionary is not supported by the parser.
     #[error("Unsupported stream filter: {0}")]
-    UsupportedFilter(String),
-    /// Indicates that there was an error while decoding the stream data.
+    UnsupportedFilter(String),
     #[error("Error while decoding stream: {0}")]
     DecompressionError(String),
     #[error("Tokenizer error: {0}")]
     TokenizerError(#[from] TokenizerError),
-    #[error("Parser error: {0}")]
-    ParserError(#[from] ParserError),
-    #[error("{0}")]
-    ObjectError(#[from] ObjectError),
 }
 
 impl StreamParser for PdfParser<'_> {
-    type ErrorType = StreamParsingError;
+    type ErrorType = ParserError;
 
     /// Parses a PDF stream object from the input, using a pre-parsed dictionary.
     ///
@@ -106,11 +86,16 @@ impl StreamParser for PdfParser<'_> {
         const STREAM_END: &[u8] = b"endstream";
 
         // Read the `stream` keyword .
-        self.read_keyword(STREAM_START)
-            .map_err(|source| StreamParsingError::InvalidStreamKeyword { source })?;
+        self.read_keyword(STREAM_START)?;
 
         // Find the length of the stream.
-        let length = dictionary.get_or_err("Length")?.as_number::<usize>()?;
+        let length = match dictionary.get_or_err("Length")? {
+            &ObjectVariant::Reference(object_number) => {
+                let resolved = self.resolve_object_reference(object_number)?;
+                resolved.as_number::<usize>()?
+            }
+            other => other.as_number::<usize>()?,
+        };
 
         // Find the decode type of the stream.
         let decode = dictionary.get("Filter").and_then(|v| v.as_str());
@@ -126,26 +111,25 @@ impl StreamParser for PdfParser<'_> {
         self.read_end_of_line_marker()?;
 
         // Read the `endstream` keyword .
-        self.read_keyword(STREAM_END)
-            .map_err(|source| StreamParsingError::InvalidEndStreamKeyword { source })?;
+        self.read_keyword(STREAM_END)?;
 
-        // Check if the stream data is compressed using the FlateDecode (DEFLATE) algorithm.
-        if let Some(decode) = decode {
-            if decode == "FlateDecode" {
+        let stream_data = match decode.as_deref() {
+            Some("FlateDecode") => {
                 let mut d = ZlibDecoder::new(stream_data.as_slice());
                 let mut s = Vec::new();
 
                 if let Err(e) = d.read_to_end(&mut s) {
-                    return Err(StreamParsingError::DecompressionError(e.to_string()));
+                    return Err(StreamParsingError::DecompressionError(e.to_string()).into());
                 }
-
-                return Ok(s);
-            } else if decode == "DCTDecode" {
-                return Ok(stream_data.to_vec());
+                s
             }
+            Some("DCTDecode") => stream_data,
+            Some(other) => {
+                return Err(StreamParsingError::UnsupportedFilter(other.to_string()).into());
+            }
+            None => stream_data,
+        };
 
-            return Err(StreamParsingError::UsupportedFilter(decode.to_string()));
-        }
         Ok(stream_data)
     }
 }

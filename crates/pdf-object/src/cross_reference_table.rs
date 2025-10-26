@@ -21,17 +21,17 @@
 #[derive(Debug, PartialEq, Clone)]
 pub struct CrossReferenceTable {
     /// The object number of the first entry in this subsection.
-    pub first_object_number: u32,
+    pub first_object_number: usize,
     /// The number of entries in this subsection.
-    pub number_of_entries: u32,
+    pub number_of_entries: usize,
     /// The list of cross-reference entries.
     pub entries: Vec<CrossReferenceEntry>,
 }
 
 impl CrossReferenceTable {
     pub fn new(
-        first_object_number: u32,
-        number_of_entries: u32,
+        first_object_number: usize,
+        number_of_entries: usize,
         entries: Vec<CrossReferenceEntry>,
     ) -> Self {
         CrossReferenceTable {
@@ -48,17 +48,13 @@ pub struct CrossReferenceEntry {
     /// Padded with leading zeros if necessary. For free objects, this
     /// is the object number of the next free object in a linked list.
     /// For object 0, it's always 0. nnnnnnnnnn (10 digits):
-    pub byte_offset: u32,
+    pub byte_offset: usize,
     /// The generation number of the object. This is a 5-digit number
     /// that is incremented each time the object is modified. It is
     /// used to determine if the object is still valid or if it has
     /// been replaced by a newer version. nnnnn (5 digits):
-    pub generation_number: u16,
-    /// The status of the object. This can be one of the following:
-    /// - "n" (normal): The object is present and valid.
-    /// - "f" (free): The object is free and can be reused.
-    /// - "o" (old): The object is no longer valid and has been replaced
-    ///   by a newer version.
+    pub generation_number: usize,
+    /// The status of the object.
     pub status: CrossReferenceStatus,
 }
 
@@ -75,7 +71,7 @@ impl CrossReferenceEntry {
     /// # Returns
     ///
     /// A new `CrossReferenceEntry`.
-    pub fn new(byte_offset: u32, generation_number: u16, status: CrossReferenceStatus) -> Self {
+    pub fn new(byte_offset: usize, generation_number: usize, status: CrossReferenceStatus) -> Self {
         CrossReferenceEntry {
             byte_offset,
             generation_number,

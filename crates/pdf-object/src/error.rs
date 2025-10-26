@@ -6,7 +6,7 @@ pub enum ObjectError {
     /// Indicates that an attempt was made to insert an object into an `ObjectCollection`
     /// with an object number that already exists in the collection.
     #[error("Object with the given key {0} already exists in collection")]
-    DuplicateKeyInObjectCollection(i32),
+    DuplicateKeyInObjectCollection(usize),
     /// Indicates a mismatch between the expected type and the actual type of a `Value`.
     /// This can occur when trying to interpret a `Value` as a specific concrete type.
     #[error("Type mismatch: expected type '{0}', but found type '{1}'")]
@@ -16,7 +16,7 @@ pub enum ObjectError {
     #[error("Failed to convert number to the requested type")]
     NumberConversionError,
     #[error("Failed to resolve an object reference {obj_num}")]
-    FailedResolveObjectReference { obj_num: i32 },
+    FailedResolveObjectReference { obj_num: usize },
     #[error("Failed to resolve an object to a dictionary, but found type '{resolved_type}'")]
     FailedResolveDictionaryObject { resolved_type: &'static str },
     #[error("Failed to resolve an object to a stream, but found type '{resolved_type}'")]

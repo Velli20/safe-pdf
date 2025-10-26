@@ -1,29 +1,16 @@
 use std::collections::BTreeMap;
 
 use pdf_object::dictionary::Dictionary;
-use pdf_tokenizer::{PdfToken, error::TokenizerError};
-use thiserror::Error;
+use pdf_tokenizer::PdfToken;
 
 use crate::{
+    error::ParserError,
     parser::PdfParser,
     traits::{DictionaryParser, NameParser},
 };
 
-/// Represents an error that can occur while parsing an array object.
-#[derive(Debug, PartialEq, Error)]
-pub enum DictionaryError {
-    /// Indicates that there was an error while parsing a key within dictionary object.
-    #[error("Error while parsing dictionary key: '{0}'")]
-    InvalidKey(String),
-    /// Indicates that there was an error while parsing a value within dictionary object.
-    #[error("Error while parsing dictionary value: {0}")]
-    InvalidValue(String),
-    #[error("Tokenizer error: {0}")]
-    TokenizerError(#[from] TokenizerError),
-}
-
 impl DictionaryParser for PdfParser<'_> {
-    type ErrorType = DictionaryError;
+    type ErrorType = ParserError;
 
     /// Parses a PDF dictionary object from the current position in the input stream.
     ///
@@ -73,16 +60,12 @@ impl DictionaryParser for PdfParser<'_> {
             self.skip_whitespace();
 
             // Parse key.
-            let key = self
-                .parse_name()
-                .map_err(|e| DictionaryError::InvalidKey(e.to_string()))?;
+            let key = self.parse_name()?;
 
             self.skip_whitespace();
 
             // Parse value.
-            let value = self
-                .parse_object()
-                .map_err(|e| DictionaryError::InvalidValue(e.to_string()))?;
+            let value = self.parse_object()?;
 
             dictionary.insert(key, Box::new(value));
             self.skip_whitespace();

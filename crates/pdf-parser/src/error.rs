@@ -1,20 +1,21 @@
 use std::num::TryFromIntError;
 
+use pdf_object::error::ObjectError;
 use pdf_tokenizer::error::TokenizerError;
 use thiserror::Error;
 
 use crate::{
     array::ArrayError, boolean::BooleanError, comment::CommentError,
-    cross_reference_table::CrossReferenceTableError, dictionary::DictionaryError,
-    header::HeaderError, hex_string::HexStringError, indirect_object::IndirectObjectError,
+    cross_reference_table::CrossReferenceTableError, header::HeaderError,
+    hex_string::HexStringError, indirect_object::IndirectObjectError,
     literal_string::LiteralStringObjectError, name::NameObjectError, number::NumberError,
+    stream::StreamParsingError,
 };
 
 #[derive(Error, Debug, PartialEq)]
 pub enum ParserError {
     #[error("Invalid token {0}")]
     InvalidToken(char),
-
     #[error("Invalid number object")]
     InvalidNumber,
     #[error("Unexpected end of file")]
@@ -31,14 +32,10 @@ pub enum ParserError {
     NumberError(#[from] NumberError),
     #[error("Boolean error: {0}")]
     BooleanError(#[from] BooleanError),
-    #[error("Dictionary error: {0}")]
-    DictionaryError(#[from] DictionaryError),
     #[error("Name object error: {0}")]
     NameObjectError(#[from] NameObjectError),
     #[error("Error while parsing Comment: {0}")]
     CommentError(#[from] CommentError),
-    #[error("Error while indirect object: {0}")]
-    IndirectObjectError(#[from] Box<IndirectObjectError>),
     #[error("Literal string object error: {0}")]
     LiteralStringObjectError(#[from] LiteralStringObjectError),
     #[error("Header parsing error: {0}")]
@@ -53,6 +50,18 @@ pub enum ParserError {
     UnexpectedTokenAt { token: String, position: usize },
     #[error("Nesting depth exceeded")]
     NestingDepthExceeded,
+    #[error("Initialization error: {0}")]
+    InitializationError(String),
+    #[error("Missing cross-reference table; call build_xref_index() before resolving references")]
+    MissingXrefTable,
+    #[error("Missing cross-reference entry for object number {object_number}")]
+    MissingXrefEntry { object_number: usize },
+    #[error("Stream parsing error: {0}")]
+    StreamParsingError(#[from] StreamParsingError),
+    #[error("Object error: {0}")]
+    ObjectError(#[from] ObjectError),
+    #[error("Indirect object error: {0}")]
+    IndirectObjectError(#[from] IndirectObjectError),
 }
 
 impl From<TryFromIntError> for ParserError {

@@ -1,7 +1,7 @@
 use std::{rc::Rc, str::FromStr};
 
-use crate::error::ParserError;
-use pdf_object::ObjectVariant;
+use crate::{error::ParserError, traits::HeaderParser};
+use pdf_object::{ObjectVariant, cross_reference_table::CrossReferenceTable};
 use pdf_tokenizer::{PdfToken, Tokenizer};
 
 use crate::traits::{
@@ -18,6 +18,8 @@ pub struct PdfParser<'a> {
     /// Current nesting depth of PDF objects being parsed.
     /// This is used to prevent excessive recursion and potential stack overflows.
     pub current_nesting_depth: usize,
+    /// Optional cross-reference table parsed from the document, if available.
+    pub xref_table: Option<CrossReferenceTable>,
 }
 
 impl<'a> From<&'a [u8]> for PdfParser<'a> {
@@ -25,6 +27,7 @@ impl<'a> From<&'a [u8]> for PdfParser<'a> {
         PdfParser {
             tokenizer: Tokenizer::new(input),
             current_nesting_depth: 0,
+            xref_table: None,
         }
     }
 }
@@ -83,6 +86,103 @@ impl PdfParser<'_> {
 
     pub fn skip_whitespace(&mut self) {
         let _ = self.tokenizer.read_while_u8(Self::is_pdf_whitespace);
+    }
+
+    /// Preloads the cross-reference (xref) table for classic (table-based) PDFs without
+    /// advancing the parser state.
+    ///
+    /// This method parses the header to determine the PDF version and, for documents that
+    /// use traditional cross-reference tables (PDF 1.x), scans for the final `trailer` at the
+    /// end of the file. Using the trailer's `startxref` offset, it seeks to and parses the
+    /// xref table, storing it in `self.xref_table`. The tokenizer position is restored to the
+    /// point immediately after the header, so subsequent parsing proceeds unaffected.
+    ///
+    /// Why: Many PDF objects are referenced indirectly. Loading the xref early allows the
+    /// parser to resolve indirect references when needed to correctly parse certain objects.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success or a `ParserError` if initialization fails in a fatal way.
+    pub fn build_xref_index(&mut self) -> Result<(), ParserError> {
+        let version = self.parse_header()?;
+
+        if version.major() != 1 {
+            return Ok(());
+        }
+
+        // Save the current position (right after header) to restore later.
+        let after_header_pos = self.tokenizer.position;
+
+        let bytes = self.tokenizer.input;
+
+        const TRAILER_KEYWORD: &[u8] = b"trailer";
+
+        if let Some(trailer_pos) = bytes
+            .windows(TRAILER_KEYWORD.len())
+            .rposition(|w| w == TRAILER_KEYWORD)
+        {
+            self.tokenizer.position = trailer_pos;
+            let trailer = self
+                .parse_trailer()
+                .map_err(|err| ParserError::InitializationError(err.to_string()))?;
+            self.tokenizer.position = trailer.offset;
+
+            if let Ok(xref) = self.parse_cross_reference_table() {
+                self.xref_table = Some(xref);
+            }
+        }
+        self.tokenizer.position = after_header_pos;
+
+        Ok(())
+    }
+
+    /// Resolves an indirect object by its object number using the prebuilt cross-reference table.
+    ///
+    /// This method temporarily seeks to the byte offset recorded in the xref table,
+    /// parses the referenced object, and then restores the tokenizer position so the
+    /// parser state is unchanged for the caller.
+    ///
+    /// Requirements:
+    /// - `build_xref_index` must have been called successfully beforehand so that
+    ///   `self.xref_table` is populated.
+    ///
+    /// Notes:
+    /// - Generation numbers are currently not considered; the lookup is performed by
+    ///   object number only.
+    /// - The referenced object is parsed fresh on each call (no caching).
+    ///
+    /// # Parameters
+    ///
+    /// - `object_number`: The numeric identifier of the indirect object to resolve.
+    ///
+    /// # Returns
+    ///
+    /// The parsed [`ObjectVariant`] corresponding to the given object number.
+    ///
+    /// # Errors
+    /// Returns a [`ParserError`] if:
+    /// - No cross-reference table is available (`MissingXrefTable`).
+    /// - The xref entry for `object_number` is missing (`MissingXrefEntry`).
+    /// - The provided `object_number` cannot be converted to a valid index.
+    /// - Parsing the referenced object fails for any reason.
+    pub(crate) fn resolve_object_reference(
+        &mut self,
+        object_number: usize,
+    ) -> Result<ObjectVariant, ParserError> {
+        let Some(xref) = &self.xref_table else {
+            return Err(ParserError::MissingXrefTable);
+        };
+
+        let Some(entry) = xref.entries.get(object_number) else {
+            return Err(ParserError::MissingXrefEntry { object_number });
+        };
+
+        let mark = self.tokenizer.position;
+        self.tokenizer.position = entry.byte_offset;
+        let object = self.parse_object()?;
+        self.tokenizer.position = mark;
+
+        Ok(object)
     }
 
     /// Reads and parses a number from the PDF input stream.
@@ -221,10 +321,7 @@ impl PdfParser<'_> {
                 let mark = self.tokenizer.position;
 
                 // Try parsing as an indirect object first.
-                if let Some(o) = self
-                    .parse_indirect_object()
-                    .map_err(|err| ParserError::IndirectObjectError(Box::new(err)))?
-                {
+                if let Some(o) = self.parse_indirect_object()? {
                     return Ok(o);
                 }
                 // If that fails, reset and try parsing as a number.
