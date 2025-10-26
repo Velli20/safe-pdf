@@ -5,15 +5,19 @@ use crate::ObjectVariant;
 #[derive(Debug, PartialEq, Clone)]
 pub struct IndirectObject {
     /// The object number, identifying this stream as an indirect object.
-    pub object_number: i32,
+    pub object_number: usize,
     /// The generation number, used for PDF incremental updates.
-    pub generation_number: i32,
+    pub generation_number: usize,
     /// The object associated with this indirect object.
     pub object: Option<ObjectVariant>,
 }
 
 impl IndirectObject {
-    pub fn new(object_number: i32, generation_number: i32, object: Option<ObjectVariant>) -> Self {
+    pub fn new(
+        object_number: usize,
+        generation_number: usize,
+        object: Option<ObjectVariant>,
+    ) -> Self {
         IndirectObject {
             object_number,
             generation_number,

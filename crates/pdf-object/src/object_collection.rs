@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct ObjectCollection {
-    pub map: HashMap<i32, ObjectVariant>,
+    pub map: HashMap<usize, ObjectVariant>,
 }
 
 impl ObjectCollection {
@@ -25,7 +25,7 @@ impl ObjectCollection {
         }
     }
 
-    pub fn get(&self, key: i32) -> Option<&ObjectVariant> {
+    pub fn get(&self, key: usize) -> Option<&ObjectVariant> {
         if let Some(obj) = self.map.get(&key) {
             return Some(obj);
         }

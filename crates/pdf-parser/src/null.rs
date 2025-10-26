@@ -29,9 +29,7 @@ impl NullObjectParser for PdfParser<'_> {
     fn parse_null_object(&mut self) -> Result<(), Self::ErrorType> {
         const NULL_LITERAL: &[u8] = b"null";
 
-        self.read_keyword(NULL_LITERAL)?;
-
-        Ok(())
+        self.read_keyword(NULL_LITERAL)
     }
 }
 

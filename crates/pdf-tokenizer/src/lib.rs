@@ -3,7 +3,7 @@ pub mod error;
 use error::TokenizerError;
 
 pub struct Tokenizer<'a> {
-    input: &'a [u8],
+    pub input: &'a [u8],
     pub position: usize,
 }
 

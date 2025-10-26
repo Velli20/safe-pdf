@@ -84,7 +84,7 @@ pub enum ExternalGraphicsStateKey {
     OverprintMode(i32),
     /// Font (`Font`). An array containing a font dictionary or stream and a font size.
     /// Represented here as the object number of the font resource and the font size.
-    Font(i32, f32),
+    Font(usize, f32),
     /// Blend mode (`BM`). A name or array of names specifying the blend mode to be used
     /// when compositing objects.
     BlendMode(Vec<BlendMode>),

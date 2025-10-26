@@ -1,16 +1,12 @@
 use error::PdfError;
-use pdf_object::{
-    ObjectVariant, object_collection::ObjectCollection, traits::FromDictionary, version::Version,
-};
+use pdf_object::{ObjectVariant, object_collection::ObjectCollection, traits::FromDictionary};
 use pdf_page::{page::PdfPage, pages::PdfPages};
-use pdf_parser::{parser::PdfParser, traits::HeaderParser};
+use pdf_parser::parser::PdfParser;
 
 pub mod error;
 
 /// Represents a PDF document.
 pub struct PdfDocument {
-    /// The version of the PDF document.
-    pub version: Version,
     /// The collection of all objects in the PDF document.
     pub objects: ObjectCollection,
     /// The pages in the PDF document.
@@ -28,7 +24,7 @@ impl PdfDocument {
 
     pub fn from(input: &[u8]) -> Result<Self, PdfError> {
         let mut parser = PdfParser::from(input);
-        let version = parser.parse_header()?;
+        parser.build_xref_index()?;
 
         let mut trailer = None;
         let mut objects = ObjectCollection::default();
@@ -53,6 +49,7 @@ impl PdfDocument {
 
         // Get the `Root` object reference.
         let root = trailer.dictionary.get_or_err("Root")?;
+
         // Get the catalog.
         let catalog = objects.resolve_dictionary(root)?;
 
@@ -62,7 +59,6 @@ impl PdfDocument {
         let pages = PdfPages::from_dictionary(pages_dict, &objects)?;
 
         Ok(PdfDocument {
-            version,
             objects,
             pages: pages.pages,
         })

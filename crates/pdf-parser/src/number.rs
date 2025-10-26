@@ -1,13 +1,11 @@
 use pdf_object::ObjectVariant;
-use pdf_tokenizer::{PdfToken, error::TokenizerError};
+use pdf_tokenizer::PdfToken;
 use thiserror::Error;
 
-use crate::{parser::PdfParser, traits::NumberParser};
+use crate::{error::ParserError, parser::PdfParser, traits::NumberParser};
 
 #[derive(Debug, PartialEq, Error)]
 pub enum NumberError {
-    #[error("Tokenizer error: {0}")]
-    TokenizerError(#[from] TokenizerError),
     #[error("Failed to parse integral part of number: {err}")]
     IntegralPartError { err: String },
     #[error("Failed to parse fractional part of number: {err}")]
@@ -23,7 +21,7 @@ pub enum NumberError {
 }
 
 impl NumberParser for PdfParser<'_> {
-    type ErrorType = NumberError;
+    type ErrorType = ParserError;
 
     /// Parses a PDF numeric object (integer or real) from the current position in the input stream.
     ///
@@ -69,7 +67,7 @@ impl NumberParser for PdfParser<'_> {
     /// A `Number` object containing the parsed integer (`i64`) or real (`f64`) value,
     /// or a `ParserError` if the input is malformed (e.g., invalid characters,
     /// missing digits after a sign or decimal point).
-    fn parse_number(&mut self) -> Result<ObjectVariant, NumberError> {
+    fn parse_number(&mut self) -> Result<ObjectVariant, Self::ErrorType> {
         let mut has_minus = false;
 
         // 1. Check for optional sign.
@@ -84,10 +82,7 @@ impl NumberParser for PdfParser<'_> {
         let mut digits = if let Some(PdfToken::Period) = self.tokenizer.peek() {
             0
         } else {
-            self.read_number::<i64>(false)
-                .map_err(|source| NumberError::IntegralPartError {
-                    err: source.to_string(),
-                })?
+            self.read_number::<i64>(false)?
         };
 
         // 3. Check for decimal point
@@ -101,7 +96,8 @@ impl NumberParser for PdfParser<'_> {
             if digits == 0 && fraction_str.is_empty() {
                 return Err(NumberError::FractionalPartError {
                     err: "Invalid real number: missing digits after decimal point.".to_string(),
-                });
+                }
+                .into());
             }
 
             // 5. Combine integral and fractional parts.
@@ -110,6 +106,7 @@ impl NumberParser for PdfParser<'_> {
             } else {
                 format!("{}.{}", digits, fraction_str)
             };
+
             // 6. Convert to f64.
             let number = number_str
                 .parse::<f64>()
@@ -120,7 +117,8 @@ impl NumberParser for PdfParser<'_> {
             {
                 return Err(NumberError::FractionalPartError {
                     err: format!("Missing delimiter after number, found '{}'", char::from(d)),
-                });
+                }
+                .into());
             }
             self.skip_whitespace();
             Ok(ObjectVariant::Real(number))

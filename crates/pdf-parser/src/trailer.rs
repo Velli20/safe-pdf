@@ -1,25 +1,8 @@
 use crate::{error::ParserError, parser::PdfParser, traits::TrailerParser};
-use pdf_object::{ObjectVariant, trailer::Trailer};
-use thiserror::Error;
-
-#[derive(Debug, PartialEq, Error)]
-pub enum TrailerError {
-    #[error("Failed to parse 'trailer' keyword: {source}")]
-    FailedToParseTrailerKeyword { source: ParserError },
-    #[error("Failed to parse 'startxref' keyword: {source}")]
-    FailedToParseStartXrefKeyword { source: ParserError },
-    #[error("Error while reading offset in trailer: {source}")]
-    OffsetReadError { source: ParserError },
-    #[error("Missing EOL marker after trailer dictionary: {source}")]
-    MissingEOLAfterDictionary { source: ParserError },
-    #[error("Failed to parse dictionary object in trailer: {source}")]
-    FailedToParseDictionary { source: ParserError },
-    #[error("Missing dictionary object in trailer")]
-    MissingDictionary,
-}
+use pdf_object::trailer::Trailer;
 
 impl TrailerParser for PdfParser<'_> {
-    type ErrorType = TrailerError;
+    type ErrorType = ParserError;
 
     /// Parses the PDF file trailer from the current position in the input stream.
     ///
@@ -68,29 +51,18 @@ impl TrailerParser for PdfParser<'_> {
         const START_XREF_KEYWORD: &[u8] = b"startxref";
 
         // Expect the `trailer` keyword.
-        self.read_keyword(TRAILER_KEYWORD)
-            .map_err(|source| TrailerError::FailedToParseTrailerKeyword { source })?;
+        self.read_keyword(TRAILER_KEYWORD)?;
 
         // Try parse dictionary object.
-        let dictionary = match self.parse_object() {
-            Ok(ObjectVariant::Dictionary(dict)) => dict,
-            Ok(_) => return Err(TrailerError::MissingDictionary),
-            Err(source) => {
-                return Err(TrailerError::FailedToParseDictionary { source });
-            }
-        };
+        let dictionary = self.parse_object()?.try_dictionary()?.to_owned();
 
-        self.read_end_of_line_marker()
-            .map_err(|source| TrailerError::MissingEOLAfterDictionary { source })?;
+        self.read_end_of_line_marker()?;
 
         // Read the `startxref` keyword.
-        self.read_keyword(START_XREF_KEYWORD)
-            .map_err(|source| TrailerError::FailedToParseStartXrefKeyword { source })?;
+        self.read_keyword(START_XREF_KEYWORD)?;
 
         // Read the offset of the xref section.
-        let offset = self
-            .read_number::<u32>(true)
-            .map_err(|source| TrailerError::OffsetReadError { source })?;
+        let offset = self.read_number::<usize>(true)?;
 
         Ok(Trailer::new(dictionary, offset))
     }
@@ -99,6 +71,8 @@ impl TrailerParser for PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+    use pdf_object::ObjectVariant;
+
     use super::*;
 
     #[test]

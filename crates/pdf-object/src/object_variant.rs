@@ -44,7 +44,7 @@ pub enum ObjectVariant {
     /// An indirect object with its object number and generation.
     IndirectObject(Rc<IndirectObject>),
     /// An indirect reference pointing to an object number.
-    Reference(i32),
+    Reference(usize),
     /// A stream object, which may have associated dictionary and data.
     Stream(Rc<StreamObject>),
 }
@@ -52,7 +52,7 @@ pub enum ObjectVariant {
 impl ObjectVariant {
     /// Returns the object number if this value represents an indirect object
     /// or a reference; otherwise returns `None`.
-    pub fn as_object_number(&self) -> Option<i32> {
+    pub fn as_object_number(&self) -> Option<usize> {
         match self {
             ObjectVariant::IndirectObject(o) => Some(o.object_number),
             ObjectVariant::Reference(o) => Some(*o),
@@ -61,7 +61,7 @@ impl ObjectVariant {
     }
 
     /// Like [`as_object_number`], but returns an error on mismatch.
-    pub fn try_object_number(&self) -> Result<i32, ObjectError> {
+    pub fn try_object_number(&self) -> Result<usize, ObjectError> {
         self.as_object_number()
             .ok_or_else(|| ObjectError::TypeMismatch("ObjectNumber", self.name()))
     }
@@ -70,7 +70,7 @@ impl ObjectVariant {
     ///
     /// Unlike [`as_object_number`], this also returns the object number for
     /// stream objects, since streams are always indirect in PDFs.
-    pub fn to_object_number(&self) -> Option<i32> {
+    pub fn to_object_number(&self) -> Option<usize> {
         match self {
             ObjectVariant::IndirectObject(o) => Some(o.object_number),
             ObjectVariant::Reference(o) => Some(*o),
@@ -167,7 +167,7 @@ impl ObjectVariant {
     }
 
     /// Returns the object number if this is a `Reference`, otherwise `None`.
-    pub fn as_reference(&self) -> Option<i32> {
+    pub fn as_reference(&self) -> Option<usize> {
         match self {
             ObjectVariant::Reference(value) => Some(*value),
             _ => None,
@@ -175,7 +175,7 @@ impl ObjectVariant {
     }
 
     /// Like [`as_reference`], but returns an error on mismatch.
-    pub fn try_reference(&self) -> Result<i32, ObjectError> {
+    pub fn try_reference(&self) -> Result<usize, ObjectError> {
         self.as_reference()
             .ok_or_else(|| ObjectError::TypeMismatch("Reference", self.name()))
     }
@@ -243,12 +243,18 @@ impl ObjectVariant {
     where
         T: FromPrimitive,
     {
-        if let ObjectVariant::Integer(value) = self {
-            T::from_i64(*value).ok_or(ObjectError::NumberConversionError)
-        } else if let ObjectVariant::Real(value) = self {
-            T::from_f64(*value).ok_or(ObjectError::NumberConversionError)
-        } else {
-            Err(ObjectError::TypeMismatch("Number", self.name()))
+        match self {
+            ObjectVariant::Integer(value) => {
+                T::from_i64(*value).ok_or(ObjectError::NumberConversionError)
+            }
+            ObjectVariant::Real(value) => {
+                T::from_f64(*value).ok_or(ObjectError::NumberConversionError)
+            }
+            ObjectVariant::IndirectObject(value) => value.object.as_ref().map_or_else(
+                || Err(ObjectError::TypeMismatch("Number", self.name())),
+                |obj| obj.as_number(),
+            ),
+            _ => Err(ObjectError::TypeMismatch("Number", self.name())),
         }
     }
 
