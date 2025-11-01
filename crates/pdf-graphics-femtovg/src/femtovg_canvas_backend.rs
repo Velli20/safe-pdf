@@ -111,10 +111,12 @@ impl CanvasBackend for CanvasImpl<'_> {
         Ok(())
     }
 
-    fn draw_image(
+    fn draw_image_rect(
         &mut self,
         _image: &Image<'_>,
         _blend_mode: Option<BlendMode>,
+        _dest_rect: pdf_graphics::rect::Rect,
+        _image_rotation: Option<f32>,
     ) -> Result<(), Self::ErrorType> {
         // Not yet implemented in femtovg backend
         Ok(())

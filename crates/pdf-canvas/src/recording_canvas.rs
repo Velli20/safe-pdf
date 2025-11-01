@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use crate::canvas_backend::{CanvasBackend, Image as BackendImage, Shader};
 use pdf_graphics::{
-    BlendMode, ImageEncoding, MaskMode, PathFillType, color::Color, pdf_path::PdfPath,
+    BlendMode, ImageEncoding, MaskMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
     transform::Transform,
 };
 use thiserror::Error;
@@ -24,7 +24,6 @@ struct RecordedImage {
     pub height: u32,
     pub bytes_per_pixel: Option<u32>,
     pub encoding: ImageEncoding,
-    pub transform: Transform,
     pub mask: Option<Vec<u8>>,
 }
 
@@ -34,9 +33,8 @@ impl From<&BackendImage<'_>> for RecordedImage {
             data: img.data.clone().into_owned(),
             width: img.width,
             height: img.height,
-            bytes_per_pixel: img.bytes_per_pixel,
+            bytes_per_pixel: img.bits_per_component,
             encoding: img.encoding,
-            transform: img.transform,
             mask: img.mask.as_ref().map(|m| m.clone().into_owned()),
         }
     }
@@ -151,6 +149,8 @@ enum RecordingCommand {
     DrawImage {
         image: RecordedImage,
         blend_mode: Option<BlendMode>,
+        dest_rect: Rect,
+        image_rotation: Option<f32>,
     },
     BeginMaskLayer {
         mask: Box<RecordingCanvas>,
@@ -327,17 +327,26 @@ impl RecordingCanvas {
                 }
                 SetClipRegion { path, mode } => backend.set_clip_region(path, *mode)?,
                 ResetClip => backend.reset_clip()?,
-                DrawImage { image, blend_mode } => {
+                DrawImage {
+                    image,
+                    blend_mode,
+                    dest_rect,
+                    image_rotation,
+                } => {
                     let backend_img = BackendImage {
                         data: Cow::Owned(image.data.clone()),
                         width: image.width,
                         height: image.height,
-                        bytes_per_pixel: image.bytes_per_pixel,
+                        bits_per_component: image.bytes_per_pixel,
                         encoding: image.encoding,
-                        transform: image.transform,
                         mask: image.mask.as_ref().map(|m| Cow::Owned(m.clone())),
                     };
-                    backend.draw_image(&backend_img, *blend_mode)?;
+                    backend.draw_image_rect(
+                        &backend_img,
+                        *blend_mode,
+                        *dest_rect,
+                        *image_rotation,
+                    )?;
                 }
                 BeginMaskLayer {
                     transform,
@@ -413,6 +422,7 @@ impl CanvasBackend for RecordingCanvas {
     fn width(&self) -> f32 {
         self.width
     }
+
     fn height(&self) -> f32 {
         self.height
     }
@@ -422,14 +432,18 @@ impl CanvasBackend for RecordingCanvas {
         Ok(())
     }
 
-    fn draw_image(
+    fn draw_image_rect(
         &mut self,
         image: &BackendImage<'_>,
         blend_mode: Option<BlendMode>,
+        dest_rect: Rect,
+        image_rotation: Option<f32>,
     ) -> Result<(), Self::ErrorType> {
         self.commands.push(RecordingCommand::DrawImage {
             image: image.into(),
             blend_mode,
+            dest_rect,
+            image_rotation,
         });
         Ok(())
     }
