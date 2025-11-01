@@ -1,5 +1,7 @@
 pub mod cff;
 pub mod character_map;
+pub mod encoding;
+pub mod flags;
 pub mod font;
 pub mod font_descriptor;
 pub mod glyph_widths_map;
