@@ -1,5 +1,7 @@
+use crate::rect::Rect;
+
 /// An affine transformation matrix.
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Transform {
     pub sx: f32,
     pub kx: f32,
@@ -116,6 +118,45 @@ impl Transform {
         self
     }
 
+    /// Applies a rotation (in radians) to this transform by pre-multiplying
+    /// with a rotation matrix R(theta).
+    ///
+    /// Using column-vector notation, the rotation matrix is:
+    /// [ cosθ  -sinθ  0 ]
+    /// [ sinθ   cosθ  0 ]
+    /// [  0      0    1 ]
+    ///
+    /// This updates self as: self <- R(theta) * self
+    ///
+    /// # Arguments
+    /// * `radians`: Rotation angle in radians (counter-clockwise).
+    ///
+    /// # Returns
+    /// A mutable reference to `self` for chaining.
+    pub fn rotate(&mut self, radians: f32) -> &mut Self {
+        let c = radians.cos();
+        let s = radians.sin();
+
+        // Preserve current components
+        let s_sx = self.sx;
+        let s_kx = self.kx;
+        let s_tx = self.tx;
+        let s_ky = self.ky;
+        let s_sy = self.sy;
+        let s_ty = self.ty;
+
+        // Pre-multiply by rotation: S_new = R * S
+        self.sx = c * s_sx - s * s_ky;
+        self.kx = c * s_kx - s * s_sy;
+        self.tx = c * s_tx - s * s_ty;
+
+        self.ky = s * s_sx + c * s_ky;
+        self.sy = s * s_kx + c * s_sy;
+        self.ty = s * s_tx + c * s_ty;
+
+        self
+    }
+
     /// Pre-multiplies this transform by another `Transform`.
     ///
     /// If the current transform is `M_self` and the `other` transform is `M_other`,
@@ -226,6 +267,40 @@ impl Transform {
         self
     }
 
+    /// Post-multiplies this transform by a rotation R(theta) (self = self * R(theta)).
+    ///
+    /// Using column-vector notation, the rotation matrix is:
+    /// [ cosθ  -sinθ  0 ]
+    /// [ sinθ   cosθ  0 ]
+    /// [  0      0    1 ]
+    ///
+    /// This applies the existing transformation first, then the rotation in the
+    /// local space of the current transform. The translation (tx, ty) remains unchanged.
+    ///
+    /// Updates are:
+    ///   sx' =  sx*cosθ + kx*sinθ
+    ///   kx' = -sx*sinθ + kx*cosθ
+    ///   ky' =  ky*cosθ + sy*sinθ
+    ///   sy' = -ky*sinθ + sy*cosθ
+    pub fn post_rotate(&mut self, radians: f32) -> &mut Self {
+        let c = radians.cos();
+        let s = radians.sin();
+
+        let s_sx = self.sx;
+        let s_kx = self.kx;
+        let s_ky = self.ky;
+        let s_sy = self.sy;
+
+        self.sx = s_sx * c + s_kx * s;
+        self.kx = -s_sx * s + s_kx * c;
+
+        self.ky = s_ky * c + s_sy * s;
+        self.sy = -s_ky * s + s_sy * c;
+
+        // tx and ty remain unchanged when post-multiplying by a pure rotation.
+        self
+    }
+
     /// Transforms a 2D point `(x, y)` using this transform.
     ///
     /// The transformation is applied as follows:
@@ -244,5 +319,94 @@ impl Transform {
         let new_x = self.sx * x + self.kx * y + self.tx;
         let new_y = self.ky * x + self.sy * y + self.ty;
         (new_x, new_y)
+    }
+
+    /// Transforms a rectangle using this transform.
+    ///
+    /// # Arguments
+    ///
+    /// * `rect`: The rectangle to transform.
+    ///
+    /// # Returns
+    ///
+    /// A new `Rect` representing the transformed rectangle.
+    pub fn map_rect(&self, rect: &Rect) -> Rect {
+        let (x0, y0) = self.transform_point(rect.left, rect.top);
+        let (x1, y1) = self.transform_point(rect.right, rect.top);
+        let (x2, y2) = self.transform_point(rect.left, rect.bottom);
+        let (x3, y3) = self.transform_point(rect.right, rect.bottom);
+
+        let min_x = x0.min(x1).min(x2).min(x3);
+        let max_x = x0.max(x1).max(x2).max(x3);
+        let min_y = y0.min(y1).min(y2).min(y3);
+        let max_y = y0.max(y1).max(y2).max(y3);
+
+        Rect {
+            left: min_x,
+            top: min_y,
+            right: max_x,
+            bottom: max_y,
+        }
+    }
+
+    /// Returns the rotation angle (in degrees, counter-clockwise) encoded by the
+    /// linear part of this affine transform.
+    ///
+    /// The transform is represented as the 3x3 matrix using column-vectors:
+    /// [ sx  kx  tx ]
+    /// [ ky  sy  ty ]
+    /// [  0   0   1 ]
+    ///
+    /// The rotation is extracted from the orientation of the transformed X-axis,
+    /// i.e., the first column vector `(sx, ky)`. This is robust against uniform
+    /// or non-uniform scaling and shear. If the first column is degenerate
+    /// (zero length), it falls back to using the second column `(kx, sy)` with
+    /// `atan2(-kx, sy)`. If both columns are degenerate, it returns `0.0`.
+    pub fn rotation_degrees(&self) -> f32 {
+        let x_len = (self.sx * self.sx + self.ky * self.ky).sqrt();
+        if x_len > 0.0 {
+            self.ky.atan2(self.sx).to_degrees()
+        } else {
+            let y_len = (self.kx * self.kx + self.sy * self.sy).sqrt();
+            if y_len > 0.0 {
+                (-self.kx).atan2(self.sy).to_degrees()
+            } else {
+                // Degenerate linear transform: no meaningful rotation.
+                0.0
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn approx_eq(a: f32, b: f32, eps: f32) -> bool {
+        (a - b).abs() <= eps
+    }
+
+    #[test]
+    fn rotation_degrees_identity_is_zero() {
+        let t = Transform::identity();
+        assert!(approx_eq(t.rotation_degrees(), 0.0, 1e-4));
+    }
+
+    #[test]
+    fn rotation_degrees_ninety_ccw() {
+        let mut t = Transform::identity();
+        t.rotate(std::f32::consts::FRAC_PI_2);
+        let angle = t.rotation_degrees();
+        assert!(approx_eq(angle, 90.0, 1e-3));
+    }
+
+    #[test]
+    fn rotation_degrees_with_scaling() {
+        let mut t = Transform::identity();
+        // Apply some scaling and rotation; extraction should still be ~45 deg.
+        t.scale(2.0, 3.0);
+        t.rotate(std::f32::consts::FRAC_PI_4);
+        let angle = t.rotation_degrees();
+        assert!(approx_eq(angle, 45.0, 1e-2));
     }
 }
