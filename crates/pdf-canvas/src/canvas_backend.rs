@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use pdf_graphics::{
-    BlendMode, ImageEncoding, MaskMode, PathFillType, color::Color, pdf_path::PdfPath,
+    BlendMode, ImageEncoding, MaskMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
     transform::Transform,
 };
 
@@ -78,11 +78,9 @@ pub struct Image<'a> {
     /// The height of the image in pixels.
     pub height: u32,
     /// The bits per pixel (color depth) of the image.
-    pub bytes_per_pixel: Option<u32>,
+    pub bits_per_component: Option<u32>,
     /// The image encoding (e.g., "jpeg", "png").
     pub encoding: ImageEncoding,
-    /// A transformation matrix to apply to the image.
-    pub transform: Transform,
     /// An optional alpha mask to apply to the image.
     pub mask: Option<Cow<'a, [u8]>>,
 }
@@ -161,10 +159,14 @@ pub trait CanvasBackend {
     ///
     /// - `image`: The image to draw.
     /// - `blend_mode`: Optional blend mode to use when compositing the image.
-    fn draw_image(
+    /// - `dest_rect`: The destination rectangle on the canvas where the image should be drawn.
+    /// - `image_rotation`: An optional rotation (in degrees) to apply to the image.
+    fn draw_image_rect(
         &mut self,
         image: &Image<'_>,
         blend_mode: Option<BlendMode>,
+        dest_rect: Rect,
+        image_rotation: Option<f32>,
     ) -> Result<(), Self::ErrorType>;
 
     /// Begins drawing into the specified mask layer.

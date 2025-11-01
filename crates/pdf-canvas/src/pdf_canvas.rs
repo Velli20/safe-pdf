@@ -276,27 +276,23 @@ where
         fill_type: PathFillType,
     ) -> Result<(), PdfCanvasError> {
         let shader = self.compute_shader()?;
+        let state = self.current_state()?;
 
         match mode {
             PaintMode::Fill => {
                 self.canvas
-                    .fill_path(
-                        path,
-                        fill_type,
-                        self.current_state()?.fill_color,
-                        &shader,
-                        self.current_state()?.blend_mode,
-                    )
+                    .fill_path(path, fill_type, state.fill_color, &shader, state.blend_mode)
                     .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
             }
             PaintMode::Stroke => {
+                let line_width = state.line_width * state.transform.sx;
                 self.canvas
                     .stroke_path(
                         path,
-                        self.current_state()?.stroke_color,
-                        self.current_state()?.line_width,
+                        state.stroke_color,
+                        line_width,
                         &shader,
-                        self.current_state()?.blend_mode,
+                        state.blend_mode,
                     )
                     .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
             }

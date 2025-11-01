@@ -419,10 +419,12 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         Ok(())
     }
 
-    fn draw_image(
+    fn draw_image_rect(
         &mut self,
         image: &Image<'_>,
         blend_mode: Option<BlendMode>,
+        dest_rect: pdf_graphics::rect::Rect,
+        image_rotation: Option<f32>,
     ) -> Result<(), Self::ErrorType> {
         if image.width == 0 || image.height == 0 {
             return Err(SkiaCanvasBackendError::InvalidImageDimensions {
@@ -433,17 +435,40 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
 
         let skia_image = to_skia_image(image)?;
 
-        let skia_matrix = to_skia_matrix(&image.transform);
         let mut paint = skia_safe::Paint::default();
         if let Some(mode) = blend_mode {
             paint.set_blend_mode(to_skia_blend_mode(mode));
         }
+
+        let sk_rect = skia_safe::Rect::from_ltrb(
+            dest_rect.left,
+            dest_rect.top,
+            dest_rect.right,
+            dest_rect.bottom,
+        );
+
         self.surface.canvas().save();
-        self.surface.canvas().concat(&skia_matrix);
-        let dest_rect = skia_safe::Rect::from_xywh(0.0, -1.0, 1.0, 1.0);
-        self.surface
-            .canvas()
-            .draw_image_rect(&skia_image, None, dest_rect, &paint);
+        if let Some(angle) = image_rotation {
+            self.surface.canvas().rotate(
+                angle,
+                Some(skia_safe::Point {
+                    x: sk_rect.center_x(),
+                    y: sk_rect.center_y(),
+                }),
+            );
+        }
+
+        let sampling = skia_safe::SamplingOptions::new(
+            skia_safe::FilterMode::Linear,
+            skia_safe::MipmapMode::Nearest,
+        );
+        self.surface.canvas().draw_image_rect_with_sampling_options(
+            &skia_image,
+            None,
+            sk_rect,
+            sampling,
+            &paint,
+        );
         self.surface.canvas().restore();
         Ok(())
     }

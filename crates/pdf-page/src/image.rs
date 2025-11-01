@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use pdf_graphics::color_space::ColorSpace;
 use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     stream::StreamObject,
@@ -10,8 +11,6 @@ use crate::xobject::{XObject, XObjectError, XObjectReader};
 
 #[derive(Debug, Error)]
 pub enum ImageXObjectError {
-    #[error("Missing required entry '{entry_name}' in Image XObject dictionary")]
-    MissingEntry { entry_name: &'static str },
     #[error("Unsupported Filter '{name}'")]
     UnsupportedFilter { name: String },
     #[error("SMask must be an Image XObject, but it was not.")]
@@ -71,6 +70,8 @@ pub struct ImageXObject {
     pub smask: Option<Box<ImageXObject>>,
     /// The raw, potentially compressed, byte data of the image stream.
     pub data: Vec<u8>,
+    /// The color space of the image. Corresponds to the `/ColorSpace` entry.
+    pub color_space: Option<ColorSpace>,
 }
 
 impl XObjectReader for ImageXObject {
@@ -87,6 +88,12 @@ impl XObjectReader for ImageXObject {
         let bits_per_component = dictionary
             .get_or_err("BitsPerComponent")?
             .as_number::<u32>()?;
+
+        // Parse the optional `/ColorSpace` entry, if present.
+        let color_space = dictionary
+            .get("ColorSpace")
+            .and_then(|v| v.as_str())
+            .map(ColorSpace::from);
 
         // Parse the optional `/Filter` entry, if present, and check for unsupported filters.
         let filter = dictionary
@@ -128,6 +135,7 @@ impl XObjectReader for ImageXObject {
             filter,
             smask,
             data: stream_data.to_vec(),
+            color_space,
         })
     }
 }
