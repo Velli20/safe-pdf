@@ -1,5 +1,6 @@
 pub mod clipping_path_operators;
 pub mod color_operators;
+pub mod compatibility_operators;
 pub mod error;
 pub mod graphics_state_operators;
 pub mod marked_content_operators;
