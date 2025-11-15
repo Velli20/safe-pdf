@@ -70,9 +70,7 @@ impl<T: std::error::Error> GraphicsStateOps for PdfCanvas<'_, T> {
     }
 
     fn set_rendering_intent(&mut self, _intent: &str) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented(
-            "set_rendering_intent".into(),
-        ))
+        Ok(())
     }
 
     fn set_flatness_tolerance(&mut self, _tolerance: f32) -> Result<(), Self::ErrorType> {
@@ -188,6 +186,7 @@ impl<T: std::error::Error> GraphicsStateOps for PdfCanvas<'_, T> {
                 }
                 ExternalGraphicsStateKey::StrokeAdjustment(_) => {}
                 ExternalGraphicsStateKey::AppleAntiAliasing(_) => {}
+                ExternalGraphicsStateKey::AlphaIsShape(_) => {}
             }
         }
         Ok(())
