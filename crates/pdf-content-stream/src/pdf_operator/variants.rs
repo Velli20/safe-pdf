@@ -1,6 +1,7 @@
 use pdf_parser::{parser::PdfParser, traits::CommentParser};
 use pdf_tokenizer::PdfToken;
 
+use crate::compatibility_operators::{BeginCompatibility, EndCompatibility};
 use crate::{
     clipping_path_operators::*, color_operators::*, error::PdfOperatorError,
     graphics_state_operators::*, marked_content_operators::*, operation_map::READ_MAP,
@@ -70,9 +71,11 @@ pub enum PdfOperatorVariant {
     SetRenderingMode(SetRenderingMode),
     SetTextRise(SetTextRise),
     InvokeXObject(InvokeXObject),
+    BeginCompatibility(BeginCompatibility),
     BeginInlineImage(BeginInlineImage),
     InlineImageData(InlineImageData),
     EndInlineImage(EndInlineImage),
+    EndCompatibility(EndCompatibility),
     PaintShading(PaintShading),
     SetCharWidthAndBoundingBox(SetCharWidthAndBoundingBox),
     SetRenderingIntent(SetRenderingIntent),
@@ -201,9 +204,11 @@ impl PdfOperatorVariant {
             PdfOperatorVariant::SetRenderingMode(op) => op.call(backend),
             PdfOperatorVariant::SetTextRise(op) => op.call(backend),
             PdfOperatorVariant::InvokeXObject(op) => op.call(backend),
+            PdfOperatorVariant::BeginCompatibility(op) => op.call(backend),
             PdfOperatorVariant::BeginInlineImage(op) => op.call(backend),
             PdfOperatorVariant::InlineImageData(op) => op.call(backend),
             PdfOperatorVariant::EndInlineImage(op) => op.call(backend),
+            PdfOperatorVariant::EndCompatibility(op) => op.call(backend),
             PdfOperatorVariant::PaintShading(op) => op.call(backend),
             PdfOperatorVariant::SetCharWidthAndBoundingBox(op) => op.call(backend),
             PdfOperatorVariant::SetRenderingIntent(op) => op.call(backend),
@@ -237,6 +242,14 @@ mod tests {
         }
 
         let test_cases = vec![
+            TestCase {
+                description: "-1. Begin/End compatibility (BX/EX)",
+                input: b"BX EX",
+                expected_ops: vec![
+                    PdfOperatorVariant::BeginCompatibility(BeginCompatibility),
+                    PdfOperatorVariant::EndCompatibility(EndCompatibility),
+                ],
+            },
             TestCase {
                 description: "0. ConcatMatrix(cm)",
                 input: b"\n.17576218 0 0 .17576218 2227.4995 159.375 cm",

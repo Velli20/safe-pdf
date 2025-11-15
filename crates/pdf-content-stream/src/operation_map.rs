@@ -1,6 +1,7 @@
 use crate::{
     clipping_path_operators::*,
     color_operators::*,
+    compatibility_operators::*,
     error::PdfOperatorError,
     graphics_state_operators::*,
     marked_content_operators::*,
@@ -37,6 +38,7 @@ impl OpDescriptor {
 }
 
 pub(crate) const READ_MAP: &[OpDescriptor] = &[
+    OpDescriptor::from::<BeginCompatibility>(),
     OpDescriptor::from::<ClipNonZero>(),
     OpDescriptor::from::<ClipEvenOdd>(),
     OpDescriptor::from::<SetGrayFill>(),
@@ -96,6 +98,7 @@ pub(crate) const READ_MAP: &[OpDescriptor] = &[
     OpDescriptor::from::<BeginInlineImage>(),
     OpDescriptor::from::<InlineImageData>(),
     OpDescriptor::from::<EndInlineImage>(),
+    OpDescriptor::from::<EndCompatibility>(),
     OpDescriptor::from::<PaintShading>(),
     OpDescriptor::from::<SetCharWidthAndBoundingBox>(),
     OpDescriptor::from::<SetStrokeColorSpace>(),
