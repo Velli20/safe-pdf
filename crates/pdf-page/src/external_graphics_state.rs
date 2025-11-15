@@ -104,6 +104,9 @@ pub enum ExternalGraphicsStateKey {
     /// This is a Quartz PDF (Apple) extension, used to control anti-aliasing
     /// in Apple-generated PDFs.
     AppleAntiAliasing(bool),
+    /// Indicates whether the alpha or shape of the current painting operation
+    /// is used when computing a soft mask.
+    AlphaIsShape(bool),
 }
 
 pub struct ExternalGraphicsState {
@@ -133,8 +136,12 @@ impl FromDictionary for ExternalGraphicsState {
                 // We can safely ignore it during parsing.
                 continue;
             }
-            let entry = parse_entry(name, value, objects)?;
-            params.push(entry)
+            // Resolve reference (if any).
+            let resolved = match value.as_ref() {
+                ObjectVariant::Reference(_) => objects.resolve_object(value)?,
+                _ => value,
+            };
+            params.push(parse_entry(name, resolved, objects)?);
         }
 
         Ok(ExternalGraphicsState { params })
@@ -220,24 +227,19 @@ fn to_blend_mode(s: &str) -> Result<BlendMode, ExternalGraphicsStateError> {
 
 /// Parse blend modes `BM` -> BlendMode(Vec<BlendMode>)
 fn parse_blend_mode(
-    key_name: &str,
     value: &ObjectVariant,
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
     let blend_modes_vec: Vec<BlendMode> = if let Some(name_str) = value.as_str() {
         let mode = to_blend_mode(name_str.as_ref())?;
         vec![mode]
-    } else if let Some(pdf_array) = value.as_array() {
-        pdf_array
+    } else {
+        value
+            .try_array()?
             .iter()
             .map(|obj| to_blend_mode(obj.try_str()?.as_ref()))
             .collect::<Result<Vec<BlendMode>, _>>()?
-    } else {
-        return Err(ExternalGraphicsStateError::UnsupportedTypeError {
-            key_name: key_name.to_string(),
-            expected_type: "Name or Array of Names",
-            found_type: value.name(),
-        });
     };
+
     Ok(ExternalGraphicsStateKey::BlendMode(blend_modes_vec))
 }
 
@@ -316,12 +318,13 @@ fn parse_entry(
         "op" => ExternalGraphicsStateKey::OverprintFill(value.try_boolean()?),
         "OPM" => ExternalGraphicsStateKey::OverprintMode(value.as_number_entry::<i32>("OPM")?),
         "Font" => parse_font(name, value)?,
-        "BM" => parse_blend_mode(name, value)?,
+        "BM" => parse_blend_mode(value)?,
         "SMask" => parse_soft_mask(name, value, objects)?,
         "CA" => ExternalGraphicsStateKey::StrokingAlpha(value.as_number_entry::<f32>("CA")?),
         "ca" => ExternalGraphicsStateKey::NonStrokingAlpha(value.as_number_entry::<f32>("ca")?),
         "SA" => ExternalGraphicsStateKey::StrokeAdjustment(value.try_boolean()?),
         "AAPL:AA" => ExternalGraphicsStateKey::AppleAntiAliasing(value.try_boolean()?),
+        "AIS" => ExternalGraphicsStateKey::AlphaIsShape(value.try_boolean()?),
         _ => {
             return Err(ExternalGraphicsStateError::InvalidValueError {
                 key_name: Cow::Owned(name.to_string()),
