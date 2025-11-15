@@ -267,6 +267,8 @@ impl PdfParser<'_> {
     }
 
     fn parse_object_internal(&mut self) -> Result<ObjectVariant, ParserError> {
+        self.skip_whitespace();
+
         let Some(token) = self.tokenizer.peek() else {
             return Err(ParserError::UnexpectedEndOfFile);
         };
