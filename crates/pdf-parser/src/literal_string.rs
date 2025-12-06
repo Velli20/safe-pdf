@@ -93,6 +93,33 @@ impl LiteralStringParser for PdfParser<'_> {
                         b't' => characters.push(b'\t'),
                         b'b' => characters.push(0x08), // backspace
                         b'f' => characters.push(0x0C), // form feed
+                        // Octal escape: up to three octal digits (0-7)
+                        b'0'..=b'7' => {
+                            // We've already consumed one octal digit in `byte`.
+                            let mut value = u32::from(byte.saturating_sub(b'0'));
+
+                            // Look ahead without consuming: take up to two additional octal digits.
+                            let lookahead = self.tokenizer.data();
+                            let mut extra = 0usize;
+                            for &nb in lookahead.iter().take(2) {
+                                if matches!(nb, b'0'..=b'7') {
+                                    extra = extra.saturating_add(1);
+                                } else {
+                                    break;
+                                }
+                            }
+                            if extra > 0 {
+                                // Consume exactly `extra` digits now.
+                                let next_bytes = self.tokenizer.read_excactly(extra)?;
+                                for &nb in next_bytes {
+                                    value = value.saturating_mul(8)
+                                        | u32::from(nb.saturating_sub(b'0'));
+                                }
+                            }
+                            // Clamp to single byte and push.
+                            let out = u8::try_from(value & 0xFF).unwrap_or(0);
+                            characters.push(out);
+                        }
                         // Escaped delimiter/backslash
                         b'(' | b')' | b'\\' => characters.push(byte),
                         // Unknown escape: keep the backslash and the byte
@@ -188,5 +215,12 @@ mod tests {
             let result = parser.parse_literal_string().unwrap();
             assert_eq!(result, expected, "input: {:?}", input);
         }
+
+        // Octal escapes: (\000\035) => bytes [0x00, 0x1D]
+        let input: &[u8] = b"(\\000\\035)";
+        let mut parser = PdfParser::from(input);
+        let result = parser.parse_literal_string().unwrap();
+        let expected = String::from_utf8(vec![0x00, 0x1D]).unwrap();
+        assert_eq!(result, expected);
     }
 }
