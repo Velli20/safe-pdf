@@ -1,5 +1,4 @@
-pub mod cff;
-pub mod character_map;
+mod cff_builder;
 pub mod encoding;
 pub mod flags;
 pub mod font;

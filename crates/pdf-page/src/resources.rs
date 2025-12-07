@@ -62,7 +62,7 @@ impl FromDictionary for Resources {
         // Process `/Font` entries.
         if let Some(font_dictionary) = resources
             .get(Font::KEY)
-            .map(|d| d.try_dictionary())
+            .map(|d| d.try_dictionary(objects))
             .transpose()?
         {
             for (name, v) in &font_dictionary.dictionary {
@@ -79,7 +79,7 @@ impl FromDictionary for Resources {
         // Process `/ExtGState` entries
         if let Some(eg) = resources
             .get("ExtGState")
-            .map(|d| d.try_dictionary())
+            .map(|d| d.try_dictionary(objects))
             .transpose()?
         {
             for (name, v) in &eg.dictionary {
@@ -97,7 +97,7 @@ impl FromDictionary for Resources {
         // Process `/Pattern` entries
         if let Some(eg) = resources
             .get("Pattern")
-            .map(|d| d.try_dictionary())
+            .map(|d| d.try_dictionary(objects))
             .transpose()?
         {
             for (name, v) in &eg.dictionary {
@@ -135,7 +135,7 @@ impl FromDictionary for Resources {
         // Process `/XObject` entries
         if let Some(xobject_dict) = resources
             .get("XObject")
-            .map(|d| d.try_dictionary())
+            .map(|d| d.try_dictionary(objects))
             .transpose()?
         {
             for (name, v) in &xobject_dict.dictionary {

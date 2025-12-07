@@ -1,10 +1,13 @@
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
-    stream::StreamObject, traits::FromDictionary,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    traits::FromDictionary,
 };
 use thiserror::Error;
 
 use crate::{
+    cff_builder::build_cff_font,
+    encoding::{Encoding, FontEncoding},
+    font::FontError,
     font_descriptor::{FontDescriptor, FontDescriptorError},
     simple_font_glyph_map::{SimpleFontGlyphWidthsMap, SimpleFontGlyphWidthsMapError},
 };
@@ -14,16 +17,12 @@ use crate::{
 /// This focuses on dictionary-level metadata needed by higher layers
 /// and defers actual glyph rendering or embedded program parsing.
 pub struct Type1Font {
-    /// PostScript base font name (e.g., /Helvetica)
-    pub base_font: String,
     /// A stream containing the font program.
-    pub font_file: Option<StreamObject>,
-    /// Optional encoding name (e.g., /WinAnsiEncoding) or custom encoding via Differences
-    /// For now we capture only the base encoding name for quick wiring; differences can be
-    /// expanded later similarly to Type3.
-    pub base_encoding: Option<String>,
+    pub font_file: Vec<u8>,
     /// Widths map for character codes.
     pub widths: SimpleFontGlyphWidthsMap,
+    /// Optional encoding information.
+    pub encoding: Encoding,
 }
 
 /// Errors that can occur while parsing a Type1 font dictionary.
@@ -40,37 +39,45 @@ pub enum Type1FontError {
 impl FromDictionary for Type1Font {
     const KEY: &'static str = "Font";
     type ResultType = Self;
-    type ErrorType = Type1FontError;
+    type ErrorType = FontError;
 
     fn from_dictionary(
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        // BaseFont is recommended for Type1. Default to empty string if missing.
-        let base_font = dictionary
-            .get("BaseFont")
-            .and_then(|v| v.as_str().map(|s| s.into_owned()))
-            .unwrap_or_default();
-
         // Read '/FontDescriptor’.
-        let fd = dictionary.get_or_err("FontDescriptor")?;
-        let FontDescriptor { font_file } =
-            FontDescriptor::from_dictionary(objects.resolve_dictionary(fd)?, objects)?;
+        let descriptor = objects.resolve_dictionary(dictionary.get_or_err("FontDescriptor")?)?;
 
-        // Encoding may be a name or a dictionary. For initial support, record only base name.
-        let base_encoding = dictionary
-            .get("Encoding")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        let font_file = FontDescriptor::from_dictionary(descriptor, objects)?;
+
+        let font_file = font_file.data.as_slice();
+        let font_file = build_cff_font(font_file)?;
 
         // Read the `/Widths` entry.
         let widths = SimpleFontGlyphWidthsMap::from_dictionary(dictionary, objects)?;
 
+        // TODO: Handle `/FontMatrix`.
+
+        // Read optional `/Encoding` entry. This is either a name or a dictionary.
+        let encoding = if let Some(enc_obj) = dictionary.get("Encoding") {
+            let enc_obj = objects.resolve_object(enc_obj)?;
+            match enc_obj {
+                ObjectVariant::Dictionary(enc_dictionary) => {
+                    Encoding::from_dictionary(enc_dictionary, objects)?
+                }
+                _ => {
+                    let base = FontEncoding::from(enc_obj.try_str()?);
+                    Encoding::from_base_encoding(base)?
+                }
+            }
+        } else {
+            Encoding::default()
+        };
+
         Ok(Self {
-            base_font,
             font_file,
-            base_encoding,
             widths,
+            encoding,
         })
     }
 }

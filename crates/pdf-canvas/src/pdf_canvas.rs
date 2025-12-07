@@ -4,7 +4,6 @@ use pdf_graphics::{MaskMode, PaintMode, PathFillType, pdf_path::PdfPath, transfo
 use pdf_page::{page::PdfPage, pattern::Pattern, resources::Resources, shading::Shading};
 
 use crate::{
-    canvas::Canvas,
     canvas_backend::{CanvasBackend, Shader},
     canvas_state::CanvasState,
     error::PdfCanvasError,
@@ -23,37 +22,6 @@ pub struct PdfCanvas<'a, T> {
     pub(crate) page: &'a PdfPage,
     /// The stack of graphics states, supporting save/restore semantics.
     pub(crate) canvas_stack: Vec<CanvasState<'a>>,
-}
-
-impl<T: std::error::Error> Canvas for PdfCanvas<'_, T> {
-    fn save(&mut self) -> Result<(), PdfCanvasError> {
-        let mut state = self.current_state()?.clone();
-        state.clip_path = None;
-
-        self.canvas_stack.push(state);
-        Ok(())
-    }
-
-    fn restore(&mut self) -> Result<(), PdfCanvasError> {
-        let prev = self.canvas_stack.pop();
-        if let Some(state) = prev
-            && state.clip_path.is_some()
-        {
-            self.canvas
-                .reset_clip()
-                .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
-        }
-        Ok(())
-    }
-
-    fn set_matrix(&mut self, matrix: Transform) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.transform = matrix;
-        Ok(())
-    }
-
-    fn fill_path(&mut self, path: &PdfPath, fill_type: PathFillType) -> Result<(), PdfCanvasError> {
-        self.draw_path(path, PaintMode::Fill, fill_type)
-    }
 }
 
 impl<'a, T: std::error::Error> PdfCanvas<'a, T>
@@ -269,7 +237,7 @@ where
     /// # Errors
     ///
     /// Returns an error if the paint mode is not implemented or if pattern computation fails.
-    fn draw_path(
+    pub(crate) fn draw_path(
         &mut self,
         path: &PdfPath,
         mode: PaintMode,
@@ -387,22 +355,6 @@ where
         Ok(())
     }
 
-    /// Returns the current resource dictionary, or the page's resources if not overridden.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if no resources are available.
-    pub(crate) fn get_resources(&self) -> Result<&'a Resources, PdfCanvasError> {
-        if let Some(resources) = self.current_state()?.resources {
-            Ok(resources)
-        } else {
-            self.page
-                .resources
-                .as_ref()
-                .ok_or(PdfCanvasError::MissingPageResources)
-        }
-    }
-
     /// Renders a sequence of PDF content stream operations onto the canvas.
     ///
     /// # Parameters
@@ -441,5 +393,40 @@ where
         }
 
         self.restore()
+    }
+
+    /// Saves the entire current graphics state onto a stack.
+    ///
+    /// This includes the current transformation matrix, colors, line styles, and clipping path.
+    /// A corresponding call to `restore` is required to pop the state from the stack.
+    pub(crate) fn save(&mut self) -> Result<(), PdfCanvasError> {
+        let mut state = self.current_state()?.clone();
+        state.clip_path = None;
+
+        self.canvas_stack.push(state);
+        Ok(())
+    }
+
+    /// Restores the most recently saved graphics state from the stack.
+    ///
+    /// If the restored state included a clipping path, the clipping path is reset on the backend.
+    pub(crate) fn restore(&mut self) -> Result<(), PdfCanvasError> {
+        let prev = self.canvas_stack.pop();
+        if let Some(state) = prev
+            && state.clip_path.is_some()
+        {
+            self.canvas
+                .reset_clip()
+                .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Replaces the current transformation matrix (CTM) with the given matrix.
+    ///
+    /// This sets the complete transformation from user space to device space.
+    pub(crate) fn set_matrix(&mut self, matrix: Transform) -> Result<(), PdfCanvasError> {
+        self.current_state_mut()?.transform = matrix;
+        Ok(())
     }
 }

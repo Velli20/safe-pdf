@@ -43,7 +43,7 @@ impl FromDictionary for PdfPages {
         // The `/Kids` array is a required entry in a Pages dictionary. It contains
         // indirect references to child objects, which can be either other Pages nodes
         // or leaf Page nodes.
-        let kids_array = dictionary.get_or_err("Kids")?.try_array()?;
+        let kids_array = dictionary.get_or_err("Kids")?.try_array(objects)?;
 
         // This vector will store the flattened list of all leaf `PdfPage` objects
         // found by traversing the page tree.

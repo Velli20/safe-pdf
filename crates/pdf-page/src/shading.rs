@@ -194,7 +194,7 @@ impl FromDictionary for Shading {
                     .transpose()?;
 
                 // Read required `/Function` entry, which may be a single function or an array of functions.
-                let functions = match dictionary.get_or_err("Function")? {
+                let functions = match objects.resolve_object(dictionary.get_or_err("Function")?)? {
                     // If the `/Function` is an array, read each function object.
                     obj if obj.is_array() => {
                         let mut functions = Vec::new();
@@ -266,7 +266,7 @@ impl FromDictionary for Shading {
 
                 // Read required `/Function` entry as a dictionary.
                 let function = Function::from_dictionary(
-                    dictionary.get_or_err("Function")?.try_dictionary()?,
+                    dictionary.get_or_err("Function")?.try_dictionary(objects)?,
                     objects,
                     None,
                 )?;
@@ -290,7 +290,7 @@ impl FromDictionary for Shading {
 
                 // Read required `/Function` entry as a dictionary.
                 let function = Function::from_dictionary(
-                    dictionary.get_or_err("Function")?.try_dictionary()?,
+                    dictionary.get_or_err("Function")?.try_dictionary(objects)?,
                     objects,
                     None,
                 )?;

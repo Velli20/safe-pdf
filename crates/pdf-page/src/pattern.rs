@@ -214,17 +214,19 @@ impl Pattern {
                 })
             }
             Some(PatternType::Shading) => {
+                let shading_dict = objects.resolve_dictionary(dictionary.get_or_err("Shading")?)?;
                 // Read the shading object that defines the gradient fill.
-                let shading = Shading::from_dictionary(
-                    dictionary.get_or_err("Shading")?.try_dictionary()?,
-                    objects,
-                )?;
+                let shading = Shading::from_dictionary(shading_dict, objects)?;
 
                 // Read an external graphics state dictionary to apply when painting the pattern.
-                let ext_g_state = dictionary
-                    .get("ExtGState")
-                    .map(|d| d.try_dictionary())
-                    .transpose()?
+                let ext_g_state_dict = if let Some(ext_g_state_obj) = dictionary.get("ExtGState") {
+                    let dict = objects.resolve_dictionary(ext_g_state_obj)?;
+                    Some(dict)
+                } else {
+                    None
+                };
+
+                let ext_g_state = ext_g_state_dict
                     .map(|ext| ExternalGraphicsState::from_dictionary(ext, objects))
                     .transpose()?;
 

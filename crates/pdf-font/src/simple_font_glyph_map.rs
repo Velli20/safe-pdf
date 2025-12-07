@@ -18,8 +18,7 @@ pub enum SimpleFontGlyphWidthsMapError {
 /// Represents a simple font's glyph widths map parsed from a
 /// `/Type1`, `/TrueType`, or `/Type3` font.
 pub struct SimpleFontGlyphWidthsMap {
-    /// Widths for character codes 0..=255 if provided via /Widths.
-    /// Index is the character code, value is the width.
+    /// Character code to glyph width mapping.
     pub widths: Option<HashMap<u16, f32>>,
     /// First character code in widths array (/FirstChar).
     pub first_char: u16,
@@ -36,7 +35,7 @@ impl FromDictionary for SimpleFontGlyphWidthsMap {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        _objects: &ObjectCollection,
+        objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         // Read required fields /FirstChar and /LastChar fields.
         let first_char = dictionary.get_or_err("FirstChar")?.as_number::<u16>()?;
@@ -50,7 +49,7 @@ impl FromDictionary for SimpleFontGlyphWidthsMap {
             });
         };
 
-        let arr = widths_obj.try_array()?;
+        let arr = widths_obj.try_array(objects)?;
 
         // Map sequentially: widths[i] corresponds to code (fc + i)
         let mut widths = HashMap::new();
@@ -75,13 +74,9 @@ impl FromDictionary for SimpleFontGlyphWidthsMap {
 }
 
 impl SimpleFontGlyphWidthsMap {
-    /// Get the width for a given character code, if available.
-    /// Returns None if widths are not defined or the code is out of range.
-    pub fn get_width(&self, char_code: u16) -> Option<f32> {
-        if let Some(ref widths_map) = self.widths {
-            widths_map.get(&char_code).copied()
-        } else {
-            None
-        }
+    pub(crate) fn get_width(&self, char_code: u16) -> f32 {
+        self.widths.as_ref().map_or(0.0, |widths_map| {
+            widths_map.get(&char_code).copied().unwrap_or(0.0)
+        })
     }
 }

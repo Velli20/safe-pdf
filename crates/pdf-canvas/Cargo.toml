@@ -16,3 +16,5 @@ pdf-graphics = { path = "../pdf-graphics" }
 ttf-parser = { version = "0.25.1" }
 thiserror = "2.0.12"
 num-traits = "0.2.19"
+read-fonts = "0.36.0"
+skrifa =  "0.39.0"

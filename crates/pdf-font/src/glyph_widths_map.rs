@@ -73,6 +73,7 @@ impl GlyphWidthsMap {
         // Iterates the raw `/W` array and delegates to helper routines to insert explicit
         // or uniform width runs.
         let mut map = GlyphWidthsMap::default();
+
         let mut i = 0usize;
         while i < array.len() {
             let cid = array
@@ -223,7 +224,7 @@ impl GlyphWidthsMap {
     /// # Returns
     ///
     /// `Some(width)` if the width is found, or `None` if not present.
-    pub fn get_width(&self, character_id: u16) -> Option<f32> {
+    pub(crate) fn get_width(&self, character_id: u16) -> Option<f32> {
         let (start, run) = self.runs.range(..=character_id).next_back()?;
         let offset = character_id.checked_sub(*start)?;
         match run {
@@ -315,9 +316,7 @@ mod tests {
 
     #[test]
     fn test_get_width_empty_map() {
-        let glyph_widths_map = GlyphWidthsMap {
-            runs: BTreeMap::new(),
-        };
+        let glyph_widths_map = GlyphWidthsMap::default();
         assert_eq!(glyph_widths_map.get_width(0), None);
     }
 

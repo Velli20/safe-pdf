@@ -338,7 +338,7 @@ impl Function {
 impl Function {
     pub(crate) fn from_dictionary(
         dictionary: &Dictionary,
-        _objects: &ObjectCollection,
+        objects: &ObjectCollection,
         stream: Option<&[u8]>,
     ) -> Result<Function, FunctionReadError> {
         let function_type_int = dictionary.get_or_err("FunctionType")?.as_number::<i32>()?;
@@ -397,10 +397,10 @@ impl Function {
                 let mut functions = Vec::new();
 
                 // Parse Functions array
-                let functions_arr = dictionary.get_or_err("Functions")?.try_array()?;
+                let functions_arr = dictionary.get_or_err("Functions")?.try_array(objects)?;
                 for obj in functions_arr.iter() {
-                    let dict = obj.try_dictionary()?;
-                    functions.push(Function::from_dictionary(dict, _objects, None)?);
+                    let dict = obj.try_dictionary(objects)?;
+                    functions.push(Function::from_dictionary(dict, objects, None)?);
                 }
 
                 // Parse Bounds array

@@ -1,5 +1,5 @@
 use crate::{error::ParserError, parser::PdfParser, traits::TrailerParser};
-use pdf_object::trailer::Trailer;
+use pdf_object::{ObjectVariant, error::ObjectError, trailer::Trailer};
 
 impl TrailerParser for PdfParser<'_> {
     type ErrorType = ParserError;
@@ -54,7 +54,12 @@ impl TrailerParser for PdfParser<'_> {
         self.read_keyword(TRAILER_KEYWORD)?;
 
         // Try parse dictionary object.
-        let dictionary = self.parse_object()?.try_dictionary()?.to_owned();
+        let dictionary = self.parse_object()?;
+
+        let dictionary = match dictionary {
+            ObjectVariant::Dictionary(value) => value,
+            other => return Err(ObjectError::TypeMismatch("Dictionary", other.name()).into()),
+        };
 
         self.read_end_of_line_marker()?;
 

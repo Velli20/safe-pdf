@@ -164,8 +164,9 @@ fn parse_mask_mode(value: Cow<'_, str>) -> Result<MaskMode, ExternalGraphicsStat
 fn parse_dash_pattern(
     key_name: &str,
     value: &ObjectVariant,
+    objects: &ObjectCollection,
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
-    let arr = value.try_array()?;
+    let arr = value.try_array(objects)?;
     if arr.len() != 2 {
         return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
             key_name: Cow::Owned(key_name.to_string()),
@@ -186,8 +187,9 @@ fn parse_dash_pattern(
 fn parse_font(
     key_name: &str,
     value: &ObjectVariant,
+    objects: &ObjectCollection,
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
-    let arr = value.try_array()?;
+    let arr = value.try_array(objects)?;
     if arr.len() != 2 {
         return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
             key_name: Cow::Owned(key_name.to_string()),
@@ -228,13 +230,14 @@ fn to_blend_mode(s: &str) -> Result<BlendMode, ExternalGraphicsStateError> {
 /// Parse blend modes `BM` -> BlendMode(Vec<BlendMode>)
 fn parse_blend_mode(
     value: &ObjectVariant,
+    objects: &ObjectCollection,
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
     let blend_modes_vec: Vec<BlendMode> = if let Some(name_str) = value.as_str() {
         let mode = to_blend_mode(name_str.as_ref())?;
         vec![mode]
     } else {
         value
-            .try_array()?
+            .try_array(objects)?
             .iter()
             .map(|obj| to_blend_mode(obj.try_str()?.as_ref()))
             .collect::<Result<Vec<BlendMode>, _>>()?
@@ -312,13 +315,13 @@ fn parse_entry(
             ExternalGraphicsStateKey::LineJoin(join)
         }
         "ML" => ExternalGraphicsStateKey::MiterLimit(value.as_number_entry::<f32>("ML")?),
-        "D" => parse_dash_pattern(name, value)?,
+        "D" => parse_dash_pattern(name, value, objects)?,
         "RI" => ExternalGraphicsStateKey::RenderingIntent(value.try_str()?.to_string()),
         "OP" => ExternalGraphicsStateKey::OverprintStroke(value.try_boolean()?),
         "op" => ExternalGraphicsStateKey::OverprintFill(value.try_boolean()?),
         "OPM" => ExternalGraphicsStateKey::OverprintMode(value.as_number_entry::<i32>("OPM")?),
-        "Font" => parse_font(name, value)?,
-        "BM" => parse_blend_mode(value)?,
+        "Font" => parse_font(name, value, objects)?,
+        "BM" => parse_blend_mode(value, objects)?,
         "SMask" => parse_soft_mask(name, value, objects)?,
         "CA" => ExternalGraphicsStateKey::StrokingAlpha(value.as_number_entry::<f32>("CA")?),
         "ca" => ExternalGraphicsStateKey::NonStrokingAlpha(value.as_number_entry::<f32>("ca")?),

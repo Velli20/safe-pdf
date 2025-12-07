@@ -33,7 +33,10 @@ fn generate_image_orientation_matrix(mut ctm: Transform) -> Transform {
 
 impl<T: std::error::Error> XObjectOps for PdfCanvas<'_, T> {
     fn invoke_xobject(&mut self, xobject_name: &str) -> Result<(), Self::ErrorType> {
-        let resources = self.get_resources()?;
+        let resources = self
+            .current_state()?
+            .resources
+            .ok_or(PdfCanvasError::MissingPageResources)?;
 
         if let Some(XObject::Image(image)) = resources.xobjects.get(xobject_name) {
             let mask = image
@@ -77,10 +80,12 @@ impl<T: std::error::Error> XObjectOps for PdfCanvas<'_, T> {
             // bounding rectangle (AABB) that contains the transformed image.
             let mut dest_rect = transform.map_rect(&UNIT_RECT);
 
+            const ROTATION_TOLERANCE_DEGREES: f32 = 1e-3;
+
             // For right-angle rotations (±90°, ±270°), the mapped rect's
             // width/height are swapped. Preserve the center and swap extents.
             let angle_mod_180 = rotation_degrees.rem_euclid(180.0);
-            if (angle_mod_180 - 90.0).abs() <= 1e-3 {
+            if (angle_mod_180 - 90.0).abs() <= ROTATION_TOLERANCE_DEGREES {
                 let cx = (dest_rect.left + dest_rect.right) * 0.5;
                 let cy = (dest_rect.top + dest_rect.bottom) * 0.5;
                 let half_w = dest_rect.height() * 0.5;
