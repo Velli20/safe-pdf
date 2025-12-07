@@ -26,7 +26,7 @@ impl<'a, 'b, T: std::error::Error> PdfRenderer<'a, 'b, T> {
     ///
     /// The caller retains ownership of the canvas; the renderer only holds a
     /// mutable borrow for the duration of its lifetime. Multiple pages can be
-    /// rendered sequentially by repeatedly calling [`render`].
+    /// rendered sequentially by repeatedly calling [`PdfRenderer::render`].
     pub fn new(
         document: &'b PdfDocument,
         canvas: &'a mut dyn CanvasBackend<ErrorType = T>,
@@ -45,12 +45,12 @@ impl<'a, 'b, T: std::error::Error> PdfRenderer<'a, 'b, T> {
     /// Returns `Ok(())` if the page was rendered successfully, or an error if the
     /// page could not be found or if an error occurred during rendering.
     pub fn render(&mut self, page_index: usize) -> Result<(), PdfRendererError> {
-        let Some(p) = self.document.pages.get(page_index) else {
+        let Some(page) = self.document.pages.get(page_index) else {
             return Err(PdfRendererError::PageNotFound(page_index));
         };
-        let mut canvas = PdfCanvas::new(self.canvas, p, None)?;
-        if let Some(cs) = &p.contents {
-            canvas.render_content_stream(&cs.operations, None, None)?;
+        let mut canvas = PdfCanvas::new(self.canvas, page, None)?;
+        if let Some(cs) = &page.contents {
+            canvas.render_content_stream(&cs.operations, None, page.resources.as_ref())?;
         }
         Ok(())
     }

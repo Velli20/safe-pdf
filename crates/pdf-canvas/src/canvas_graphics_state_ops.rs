@@ -2,9 +2,7 @@ use pdf_content_stream::pdf_operator_backend::GraphicsStateOps;
 use pdf_graphics::{LineCap, LineJoin, transform::Transform};
 use pdf_page::{external_graphics_state::ExternalGraphicsStateKey, xobject::XObject};
 
-use crate::{
-    canvas::Canvas, error::PdfCanvasError, pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas,
-};
+use crate::{error::PdfCanvasError, pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas};
 
 impl<T: std::error::Error> GraphicsStateOps for PdfCanvas<'_, T> {
     fn save_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
@@ -78,7 +76,10 @@ impl<T: std::error::Error> GraphicsStateOps for PdfCanvas<'_, T> {
     }
 
     fn set_graphics_state_from_dict(&mut self, dict_name: &str) -> Result<(), Self::ErrorType> {
-        let resources = self.get_resources()?;
+        let resources = self
+            .current_state()?
+            .resources
+            .ok_or(PdfCanvasError::MissingPageResources)?;
 
         let states = resources
             .external_graphics_states

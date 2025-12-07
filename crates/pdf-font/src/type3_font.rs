@@ -7,7 +7,10 @@ use pdf_object::{
 };
 use thiserror::Error;
 
-use crate::font_descriptor::FontDescriptorError;
+use crate::{
+    encoding::{Encoding, EncodingReadError, FontEncoding},
+    font_descriptor::FontDescriptorError,
+};
 
 /// Represents a Type 3 font in a PDF document.
 ///
@@ -24,30 +27,22 @@ pub struct Type3Font {
     /// A procedure defining any special actions to be taken before a character from this font is rendered.
     pub char_procs: HashMap<String, Vec<PdfOperatorVariant>>,
     /// The font's encoding, specifying the mapping from character codes to glyph names.
-    pub encoding: Option<FontEncodingDictionary>,
+    pub encoding: Option<Encoding>,
 }
 
 /// Defines errors that can occur while parsing a Type 3 font object.
 #[derive(Debug, Error, PartialEq)]
 pub enum Type3FontError {
-    #[error(
-        "Entry '{entry_name}' in Type 3 Font dictionary has invalid type: expected {expected_type}, found {found_type}"
-    )]
-    InvalidEntryType {
-        entry_name: &'static str,
-        expected_type: &'static str,
-        found_type: &'static str,
-    },
     #[error("FontDescriptor parsing error: {0}")]
     FontDescriptorError(#[from] FontDescriptorError),
-    #[error("Encoding dictionary parsing error: {0}")]
-    EncodingError(#[from] EncodingError),
     #[error("Object error: {0}")]
     ObjectError(#[from] ObjectError),
     #[error("Error parsing content stream operators: {0}")]
     ContentStreamError(#[from] PdfOperatorError),
     #[error("Duplicate character name '{name}' found in /CharProcs dictionary")]
     DuplicateCharProcName { name: String },
+    #[error("Encoding read error: {0}")]
+    EncodingReadError(#[from] EncodingReadError),
 }
 
 impl FromDictionary for Type3Font {
@@ -63,42 +58,26 @@ impl FromDictionary for Type3Font {
             .get_or_err("FontMatrix")?
             .as_array_of::<f32, 6>()?;
 
-        let char_proc_dictionary = dictionary.get_or_err("CharProcs")?.try_dictionary()?;
+        // Read optional `/Encoding` entry. This is either a name or a dictionary.
+        let encoding = dictionary
+            .get("Encoding")
+            .map(|enc_obj| {
+                let enc_obj = objects.resolve_object(enc_obj)?;
+                match enc_obj {
+                    ObjectVariant::Dictionary(enc_dictionary) => {
+                        Encoding::from_dictionary(enc_dictionary, objects)
+                    }
+                    _ => Encoding::from_base_encoding(FontEncoding::from(enc_obj.try_str()?)),
+                }
+            })
+            .transpose()?;
 
-        // Parse optional `/Encoding` entry
-        let encoding = if let Some(encoding_obj) = dictionary.get("Encoding") {
-            match objects.resolve_object(encoding_obj)? {
-                ObjectVariant::Name(name) => {
-                    // Named encoding like /StandardEncoding
-                    Some(FontEncodingDictionary {
-                        base_encoding: Some(name.clone()),
-                        differences: HashMap::new(),
-                    })
-                }
-                ObjectVariant::Dictionary(dict) => {
-                    // Encoding dictionary
-                    Some(FontEncodingDictionary::from_dictionary(
-                        dict.as_ref(),
-                        objects,
-                    )?)
-                }
-                _ => {
-                    // Invalid type for /Encoding
-                    return Err(Type3FontError::InvalidEntryType {
-                        entry_name: "Encoding",
-                        expected_type: "Name, Dictionary, or Reference",
-                        found_type: encoding_obj.name(),
-                    });
-                }
-            }
-        } else {
-            None
-        };
-
-        let mut char_procs = HashMap::new();
+        let char_proc_dictionary =
+            objects.resolve_dictionary(dictionary.get_or_err("CharProcs")?)?;
 
         // Iterate over each entry in the `/CharProcs` dictionary.
         // Each entry associates a glyph name with a reference to a content stream object.
+        let mut char_procs = HashMap::new();
         for (name, value) in char_proc_dictionary.dictionary.iter() {
             // Resolve the referenced content stream object from the PDF's object collection.
             // If the reference cannot be resolved, return an error with the object number.
@@ -119,82 +98,6 @@ impl FromDictionary for Type3Font {
             font_matrix,
             char_procs,
             encoding,
-        })
-    }
-}
-
-/// Defines errors that can occur while parsing a font encoding dictionary.
-#[derive(Debug, Error, Clone, PartialEq)]
-pub enum EncodingError {
-    #[error("Invalid entry in /Differences array: expected Integer or Name, found {found_type}")]
-    InvalidDifferencesEntryType { found_type: &'static str },
-    #[error("Invalid character code in /Differences array: expected 0-255, found {code}")]
-    InvalidDifferenceCharCode { code: i64 },
-    #[error(
-        "Character code overflow in /Differences array while incrementing after code {last_code}"
-    )]
-    DifferencesCodeOverflow { last_code: u8 },
-    #[error("{0}")]
-    ObjectError(#[from] ObjectError),
-}
-
-/// Represents a font encoding dictionary, used to map character codes to glyph names.
-#[derive(Debug)]
-pub struct FontEncodingDictionary {
-    /// The base encoding, which can be a predefined name like `/StandardEncoding`
-    /// or `/MacRomanEncoding`.
-    pub base_encoding: Option<String>,
-    /// A dictionary of differences from the base encoding.
-    /// Maps character codes (0-255) to glyph names.
-    pub differences: HashMap<u8, String>,
-}
-
-impl FromDictionary for FontEncodingDictionary {
-    const KEY: &'static str = "Encoding";
-    type ResultType = Self;
-    type ErrorType = EncodingError;
-
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        _objects: &ObjectCollection, // No need for objects here based on spec
-    ) -> Result<Self::ResultType, Self::ErrorType> {
-        let base_encoding = dictionary
-            .get("BaseEncoding")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        let mut differences = HashMap::new();
-
-        if let Some(diff_array) = dictionary.get("Differences") {
-            let mut current_code: u8 = 0;
-            for entry in diff_array.try_array()?.iter() {
-                match entry {
-                    ObjectVariant::Integer(code) => {
-                        let code_i64 = *code;
-                        current_code = u8::try_from(code_i64).map_err(|_| {
-                            EncodingError::InvalidDifferenceCharCode { code: code_i64 }
-                        })?;
-                    }
-                    ObjectVariant::Name(name) => {
-                        differences.insert(current_code, name.clone());
-                        current_code = current_code.checked_add(1).ok_or(
-                            EncodingError::DifferencesCodeOverflow {
-                                last_code: current_code,
-                            },
-                        )?;
-                    }
-                    _ => {
-                        return Err(EncodingError::InvalidDifferencesEntryType {
-                            found_type: entry.name(),
-                        });
-                    }
-                }
-            }
-        }
-
-        Ok(FontEncodingDictionary {
-            base_encoding,
-            differences,
         })
     }
 }

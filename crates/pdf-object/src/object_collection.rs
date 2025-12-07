@@ -137,4 +137,31 @@ impl ObjectCollection {
             }),
         }
     }
+
+    /// Resolves a PDF object to an array slice (`&[ObjectVariant]`).
+    ///
+    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
+    /// into an array, returning a slice of its elements.
+    ///
+    /// - Follows indirect references via `Reference` up to `MAX_DEREF` using `resolve_object`.
+    /// - If the resolved value is an `Array`, returns a slice of its contents.
+    /// - If the resolved value is an `IndirectObject` that directly contains an `Array`,
+    ///   returns a slice of that array.
+    /// - Otherwise returns a `TypeMismatch("Array", found)` error.
+    pub fn resolve_array<'a>(
+        &'a self,
+        obj: &'a ObjectVariant,
+    ) -> Result<&'a [ObjectVariant], ObjectError> {
+        match self.resolve_object(obj)? {
+            ObjectVariant::Array(arr) => Ok(arr.as_slice()),
+            ObjectVariant::IndirectObject(inner) => {
+                if let Some(ObjectVariant::Array(arr)) = inner.object.as_ref() {
+                    Ok(arr.as_slice())
+                } else {
+                    Err(ObjectError::TypeMismatch("Array", "IndirectObject"))
+                }
+            }
+            other => Err(ObjectError::TypeMismatch("Array", other.name())),
+        }
+    }
 }

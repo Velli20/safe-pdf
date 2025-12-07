@@ -1,13 +1,9 @@
-use crate::{canvas::Canvas, error::PdfCanvasError, text_renderer::TextRenderer};
-use num_traits::FromPrimitive;
-use pdf_content_stream::pdf_operator_backend::PdfOperatorBackend;
-use pdf_font::{
-    font::{Font, FontEncoding},
-    glyph_widths_map::GlyphWidthsMap,
-    simple_font_glyph_map::SimpleFontGlyphWidthsMap,
-    type0_font::CidFontSubType,
+use crate::{
+    error::PdfCanvasError, pdf_canvas::PdfCanvas, text_renderer::TextRenderer,
+    text_state::TextState,
 };
-use pdf_graphics::{PathFillType, pdf_path::PdfPath, transform::Transform};
+use num_traits::FromPrimitive;
+use pdf_graphics::{PaintMode, PathFillType, pdf_path::PdfPath, transform::Transform};
 use thiserror::Error;
 use ttf_parser::{Face, GlyphId, OutlineBuilder};
 
@@ -18,137 +14,89 @@ pub enum TrueTypeFontRendererError {
     FontFileNotStream { found_type: &'static str },
     #[error("Failed to parse the TrueType font file: {0:?}")]
     TtfParseError(ttf_parser::FaceParsingError),
-    #[error("No character map found for font '{0}'")]
-    NoCharacterMapForFont(String),
     #[error("Incomplete 2-byte character at the end of the string")]
     IncompleteTwoByteCharacter,
-    #[error("Missing font file stream for TrueType font")]
-    MissingFontFile,
     #[error("Not implemented")]
     NotImplemented,
 }
 
 /// A text renderer for TrueType-based fonts.
-pub(crate) struct TrueTypeFontRenderer<'a, T: PdfOperatorBackend + Canvas> {
-    /// The canvas backend where glyphs are drawn.
-    canvas: &'a mut T,
-    /// The underlying TrueType font file stream, if available.
-    object_stream: Option<&'a pdf_object::stream::StreamObject>,
-    /// Optional character map for mapping character codes to Unicode values.
-    cmap: Option<&'a pdf_font::character_map::CharacterMap>,
-    /// Optional encoding for simple fonts (Type1, TrueType).
-    encoding: Option<&'a FontEncoding>,
-    /// Optional glyph widths map for CID-keyed fonts.
-    widths: Option<&'a GlyphWidthsMap>,
-    /// Optional width map for simple fonts (Type1, TrueType).
-    w: Option<&'a SimpleFontGlyphWidthsMap>,
-    /// The default glyph width for the font, used if specific widths are not provided.
-    default_width: f32,
-    /// The current text matrix (Tm), which positions the text.
-    text_matrix: &'a mut Transform,
-    /// The Current Transformation Matrix (CTM) at the time of rendering.
-    current_transform: Transform,
-    /// The font size in user space units.
-    font_size: f32,
-    /// The text rise (Ts), a vertical offset from the baseline.
-    rise: f32,
-    /// The spacing to add between words, applied to space characters.
-    word_spacing: f32,
-    /// The spacing to add between individual characters.
-    char_spacing: f32,
-    /// The horizontal scaling factor for glyphs, as a percentage [0-100].
-    horizontal_scaling: f32,
+/// A unified wrapper that delegates to specialized renderers for TrueType-based fonts.
+pub(crate) struct TrueTypeFontRenderer<'a, 'b, T> {
+    canvas: &'b mut PdfCanvas<'a, T>,
+    face: Face<'a>,
+    glyph_base_transform: Transform,
+    is_cid: bool,
 }
 
-impl<'a, T: PdfOperatorBackend + Canvas> TrueTypeFontRenderer<'a, T> {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        canvas: &'a mut T,
-        font: &'a Font,
-        font_size: f32,
-        horizontal_scaling: f32,
-        text_matrix: &'a mut Transform,
-        current_transform: Transform,
-        rise: f32,
-        word_spacing: f32,
-        char_spacing: f32,
-    ) -> Result<Self, PdfCanvasError> {
-        match font {
-            Font::TrueType(tt_font) => {
-                let object_stream = tt_font.font_file.as_ref();
-                let cmap = tt_font.cmap.as_ref();
-                let encoding = tt_font.encoding.as_ref();
-                let w = Some(&tt_font.widths);
+/// Resolve a TrueType `GlyphId` for a given encoded character code.
+///
+/// This helper probes the font’s `cmap` tables to translate a 1- or 2-byte
+/// character code (already decoded to `u16`) into the corresponding TrueType
+/// `GlyphId`.
+///
+/// # Parameters:
+///
+/// - `face`: Parsed TrueType `Face` providing access to `cmap` tables.
+/// - `char_code`: The PDF text stream’s character code.
+///
+/// # Returns:
+///
+/// The resolved `GlyphId` if a `cmap` entry is found, otherwise a fallback
+/// `GlyphId(char_code)`.
+fn glyph_id(face: &Face<'_>, char_code: u16) -> GlyphId {
+    // Try to resolve the glyph using the TrueType cmap (character-to-glyph mapping).
+    if let Some(cmap) = face.tables().cmap.as_ref() {
+        // We'll search all cmap subtables and stop at the first match, if any.
+        let mut resolved: Option<GlyphId> = None;
 
-                Ok(Self {
-                    canvas,
-                    object_stream,
-                    cmap,
-                    encoding,
-                    widths: None,
-                    w,
-                    default_width: 0.0,
-                    text_matrix,
-                    current_transform,
-                    font_size,
-                    rise,
-                    word_spacing,
-                    char_spacing,
-                    horizontal_scaling,
-                })
+        // Candidate character codes to probe in the cmap:
+        // - The literal Unicode scalar value (for Unicode cmaps).
+        // - 0xF000/0xF100 + code: common remappings used by symbol-encoded fonts
+        //   (e.g., Windows “Symbol” encoding) where glyphs live in private-use ranges.
+        let candidates = [
+            u32::from(char_code),
+            0xF000u32.saturating_add(u32::from(char_code)),
+            0xF100u32.saturating_add(u32::from(char_code)),
+        ];
+
+        'outer: for subtable in cmap.subtables {
+            for code in candidates {
+                if let Some(id) = subtable.glyph_index(code) {
+                    resolved = Some(id);
+                    break 'outer;
+                }
             }
-            Font::Type0(type0_font) => {
-                // Ensure the CIDFont is a TrueType-based font (CIDFontType2).
-                let cid_font = match &type0_font.subtype {
-                    CidFontSubType::Type2 => type0_font,
-                    _ => {
-                        return Err(TrueTypeFontRendererError::NotImplemented.into());
-                    }
-                };
+        }
 
-                let object_stream = cid_font.font_file.as_ref();
-                let cmap = cid_font.cmap.as_ref();
-                let encoding = cid_font.encoding.as_ref();
-                let widths = cid_font.widths.as_ref();
-                let default_width = cid_font.default_width;
-
-                Ok(Self {
-                    canvas,
-                    object_stream,
-                    cmap,
-                    encoding,
-                    widths,
-                    w: None,
-                    default_width,
-                    text_matrix,
-                    current_transform,
-                    font_size,
-                    rise,
-                    word_spacing,
-                    char_spacing,
-                    horizontal_scaling,
-                })
-            }
-            _ => Err(TrueTypeFontRendererError::NotImplemented.into()),
+        if let Some(id) = resolved {
+            return id;
         }
     }
+
+    GlyphId(char_code)
 }
 
-impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T> {
-    fn render_text(&mut self, text: &[u8]) -> Result<(), crate::error::PdfCanvasError> {
-        let Some(object_stream) = self.object_stream else {
-            // TODO: Use BaseName from FontDescriptor to load a system font?
-            return Ok(());
-        };
+impl<'a, 'b, T: std::error::Error> TrueTypeFontRenderer<'a, 'b, T> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        canvas: &'b mut PdfCanvas<'a, T>,
+        stream_object: &'a [u8],
+        is_cid: bool,
+    ) -> Result<Self, PdfCanvasError> {
+        // Extract text state parameters for rendering.
+        let TextState {
+            horizontal_scaling,
+            font_size,
+            rise,
+            ..
+        } = canvas.current_state()?.text_state.clone();
 
-        let face = Face::parse(object_stream.data.as_slice(), 0)
-            .map_err(TrueTypeFontRendererError::TtfParseError)?;
+        let face =
+            Face::parse(stream_object, 0).map_err(TrueTypeFontRendererError::TtfParseError)?;
 
         // Extract font and text state parameters.
         let units_per_em = face.units_per_em();
-        let char_spacing = self.char_spacing;
-        let word_spacing = self.word_spacing;
-        let text_rise = self.rise;
 
         // Compute the inverse of units per em for scaling.
         let upe_inv = if units_per_em != 0 {
@@ -158,93 +106,72 @@ impl<T: PdfOperatorBackend + Canvas> TextRenderer for TrueTypeFontRenderer<'_, T
             0.0
         };
 
-        // Th_factor: Horizontal scaling factor (Th / 100).
-        let th_factor = self.horizontal_scaling / 100.0;
-
         // Build the text rendering transform.
         let m_params = Transform::from_row(
-            self.font_size * upe_inv * th_factor, // sx
-            0.0,                                  // ky (skew)
-            0.0,                                  // kx (skew)
-            self.font_size * upe_inv,             // sy
-            0.0,                                  // tx
-            text_rise,                            // ty
+            font_size * upe_inv * horizontal_scaling, // sx
+            0.0,                                      // ky (skew)
+            0.0,                                      // kx (skew)
+            font_size * upe_inv,                      // sy
+            0.0,                                      // tx
+            rise,                                     // ty
         );
 
-        // Determine if the font uses a 2-byte encoding (e.g., /Identity-H for CID-keyed fonts).
-        let is_two_byte_encoding = self.encoding.is_some();
-        let mut iter = text.iter().copied();
+        Ok(Self {
+            face,
+            canvas,
+            glyph_base_transform: m_params,
+            is_cid,
+        })
+    }
+}
 
-        // Iterate over each character in the input text.
-        while let Some(first_byte) = iter.next() {
-            let char_code = if is_two_byte_encoding {
-                // For 2-byte encodings, read the second byte.
-                if let Some(second_byte) = iter.next() {
-                    // Combine the two bytes into a single u16 character code.
-                    // PDF uses big-endian for 2-byte character codes.
-                    u16::from_be_bytes([first_byte, second_byte])
-                } else {
-                    // Incomplete 2-byte character at the end of the string. Return an error.
-                    return Err(TrueTypeFontRendererError::IncompleteTwoByteCharacter.into());
-                }
-            } else {
-                // For 1-byte encodings, the character code is simply the byte itself.
-                u16::from_u8(first_byte)
-                    .ok_or(PdfCanvasError::NumericConversionError("first_byte"))?
-            };
+impl<T: std::error::Error> TextRenderer for TrueTypeFontRenderer<'_, '_, T> {
+    fn render_text(
+        &mut self,
+        text: &mut dyn Iterator<Item = u16>,
+    ) -> Result<(), crate::error::PdfCanvasError> {
+        // Extract text state parameters for rendering.
+        let TextState {
+            horizontal_scaling,
+            font_size,
+            character_spacing,
+            word_spacing,
+            ..
+        } = self.canvas.current_state()?.text_state.clone();
 
-            let mut glyph_id = GlyphId(char_code);
-
+        // Iterate over each character in the input text (1-byte encoding).
+        for char_code in text {
             // Compose the final transformation matrix for this glyph:
-            // m_params -> text matrix -> current transformation matrix
-            let mut glyph_matrix_for_char = m_params;
-            glyph_matrix_for_char.concat(self.text_matrix);
-            glyph_matrix_for_char.concat(&self.current_transform);
+            let mut glyph_matrix_for_char = self.glyph_base_transform;
+            glyph_matrix_for_char.concat(&self.canvas.current_state()?.text_state.matrix);
+            glyph_matrix_for_char.concat(&self.canvas.current_state()?.transform);
 
-            // Build the glyph outline using the composed transform.
+            // Build and fill the glyph outline.
             let mut builder = PdfGlyphOutline::new(glyph_matrix_for_char);
-
-            // Map character code to glyph ID using the font's cmap if available.
-            if let Some(cmap) = self.cmap
-                && let Some(a) = cmap.get_mapping(u32::from(char_code))
-                && let Some(x) = face.glyph_index(a)
-            {
-                glyph_id = x;
-            }
-
-            face.outline_glyph(glyph_id, &mut builder);
-
-            // Fill it on the canvas
-            self.canvas
-                .fill_path(&builder.path, PathFillType::Winding)?;
-
-            // Determine the glyph's advance width in font units.
-            // Determine width source: CID descendant map or simple font widths (in glyph space 1000 units)
-            let w0_glyph_units = if let Some(widths) = self.widths {
-                widths.get_width(char_code).unwrap_or(self.default_width)
-            } else if let Some(widths) = self.w {
-                widths.get_width(char_code).unwrap_or(self.default_width)
+            let glyph_id = if !self.is_cid {
+                glyph_id(&self.face, char_code)
             } else {
-                self.default_width
+                GlyphId(char_code)
             };
+            self.face.outline_glyph(glyph_id, &mut builder);
 
-            // Convert width from font units to ems.
-            let w0_ems = w0_glyph_units / 1000.0;
+            self.canvas
+                .draw_path(&builder.path, PaintMode::Fill, PathFillType::Winding)?;
 
-            // Scale the glyph width by the font size.
-            let glyph_width_tfs_scaled = w0_ems * self.font_size;
+            let text_state = &mut self.canvas.current_state_mut()?.text_state;
 
-            // Apply word spacing only to space characters.
+            // Convert width from font units to ems and scale
+            let w0_ems = text_state.glyph_width(char_code) / 1000.0;
+            let glyph_width_tfs_scaled = w0_ems * font_size;
+
+            // Apply word spacing only to space characters (0x20)
             let word_spacing_for_char = if char_code == 32 { word_spacing } else { 0.0 };
 
-            // Compute the horizontal advance for this glyph.
-            let advance_x =
-                (glyph_width_tfs_scaled + char_spacing + word_spacing_for_char) * th_factor;
-
-            // Advance the text matrix for the next glyph using post-multiplication.
-            self.text_matrix.post_translate(advance_x, 0.0);
+            // Compute and apply advance
+            let advance_x = (glyph_width_tfs_scaled + character_spacing + word_spacing_for_char)
+                * horizontal_scaling;
+            text_state.matrix.post_translate(advance_x, 0.0);
         }
-
         Ok(())
     }
 }

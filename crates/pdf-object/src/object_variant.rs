@@ -6,6 +6,7 @@ use crate::cross_reference_table::CrossReferenceTable;
 use crate::dictionary::Dictionary;
 use crate::error::ObjectError;
 use crate::indirect_object::IndirectObject;
+use crate::object_collection::ObjectCollection;
 use crate::stream::StreamObject;
 use crate::trailer::Trailer;
 
@@ -51,26 +52,20 @@ pub enum ObjectVariant {
 
 impl ObjectVariant {
     /// Returns the object number if this value represents an indirect object
-    /// or a reference; otherwise returns `None`.
-    pub fn as_object_number(&self) -> Option<usize> {
-        match self {
-            ObjectVariant::IndirectObject(o) => Some(o.object_number),
-            ObjectVariant::Reference(o) => Some(*o),
-            _ => None,
-        }
-    }
-
-    /// Like [`as_object_number`], but returns an error on mismatch.
+    /// or a reference; otherwise returns `Err`.
     pub fn try_object_number(&self) -> Result<usize, ObjectError> {
-        self.as_object_number()
-            .ok_or_else(|| ObjectError::TypeMismatch("ObjectNumber", self.name()))
+        match self {
+            ObjectVariant::IndirectObject(o) => Ok(o.object_number),
+            ObjectVariant::Reference(o) => Ok(*o),
+            _ => Err(ObjectError::TypeMismatch("ObjectNumber", self.name())),
+        }
     }
 
     /// Converts this value into its object number if applicable.
     ///
     /// Unlike [`as_object_number`], this also returns the object number for
     /// stream objects, since streams are always indirect in PDFs.
-    pub fn to_object_number(&self) -> Option<usize> {
+    pub(crate) fn to_object_number(&self) -> Option<usize> {
         match self {
             ObjectVariant::IndirectObject(o) => Some(o.object_number),
             ObjectVariant::Reference(o) => Some(*o),
@@ -79,19 +74,16 @@ impl ObjectVariant {
         }
     }
 
-    /// Returns a borrowed reference to the inner dictionary if this is a
-    /// `Dictionary` variant.
-    pub fn as_dictionary(&self) -> Option<&Rc<Dictionary>> {
-        match self {
-            ObjectVariant::Dictionary(value) => Some(value),
-            _ => None,
-        }
-    }
-
     /// Like [`as_dictionary`], but returns an error on mismatch.
-    pub fn try_dictionary(&self) -> Result<&Rc<Dictionary>, ObjectError> {
-        self.as_dictionary()
-            .ok_or_else(|| ObjectError::TypeMismatch("Dictionary", self.name()))
+    pub fn try_dictionary<'a>(
+        &'a self,
+        objects: &'a ObjectCollection,
+    ) -> Result<&'a Dictionary, ObjectError> {
+        match self {
+            ObjectVariant::Reference(_) => objects.resolve_dictionary(self),
+            ObjectVariant::Dictionary(dict) => Ok(dict.as_ref()),
+            _ => Err(ObjectError::TypeMismatch("Dictionary", self.name())),
+        }
     }
 
     /// Returns a slice view into the inner array if this is an `Array` variant.
@@ -102,10 +94,15 @@ impl ObjectVariant {
         }
     }
 
-    /// Like [`as_array`], but returns an error on mismatch.
-    pub fn try_array(&self) -> Result<&[ObjectVariant], ObjectError> {
-        self.as_array()
-            .ok_or_else(|| ObjectError::TypeMismatch("Array", self.name()))
+    pub fn try_array<'a>(
+        &'a self,
+        objects: &'a ObjectCollection,
+    ) -> Result<&'a [ObjectVariant], ObjectError> {
+        match self {
+            ObjectVariant::Reference(_) => objects.resolve_array(self),
+            ObjectVariant::Array(arr) => Ok(arr.as_slice()),
+            _ => Err(ObjectError::TypeMismatch("Array", self.name())),
+        }
     }
 
     /// Returns `true` if this value is an `Array`.

@@ -1,15 +1,16 @@
 use crate::error::PdfCanvasError;
 use crate::pdf_canvas::PdfCanvas;
 use crate::text_renderer::TextRenderer;
-use crate::text_state::TextState;
 use crate::truetype_font_renderer::TrueTypeFontRenderer;
 use crate::type1_font_renderer::Type1FontRenderer;
 use crate::type3_font_renderer::Type3FontRenderer;
+use num_traits::FromPrimitive;
 use pdf_content_stream::TextElement;
 use pdf_content_stream::pdf_operator_backend::{
     TextObjectOps, TextPositioningOps, TextShowingOps, TextStateOps,
 };
 use pdf_font::font::Font;
+use pdf_font::type0_font::CidFontSubType;
 use pdf_graphics::TextRenderingMode;
 use pdf_graphics::transform::Transform;
 
@@ -92,7 +93,7 @@ impl<T: std::error::Error> TextStateOps for PdfCanvas<'_, T> {
     }
 
     fn set_horizontal_text_scaling(&mut self, scale_percent: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.text_state.horizontal_scaling = scale_percent;
+        self.current_state_mut()?.text_state.horizontal_scaling = scale_percent / 100.0;
         Ok(())
     }
 
@@ -104,17 +105,6 @@ impl<T: std::error::Error> TextStateOps for PdfCanvas<'_, T> {
 
     fn set_font_and_size(&mut self, font_name: &str, size: f32) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.text_state.font_size = size;
-
-        let resources = self
-            .page
-            .resources
-            .as_ref()
-            .ok_or(PdfCanvasError::MissingPageResources)?;
-
-        if let Some(font) = resources.fonts.get(font_name) {
-            self.current_state_mut()?.text_state.font = Some(font);
-            return Ok(());
-        }
 
         if let Some(resources) = self.current_state()?.resources
             && let Some(font) = resources.fonts.get(font_name)
@@ -137,73 +127,61 @@ impl<T: std::error::Error> TextStateOps for PdfCanvas<'_, T> {
     }
 }
 
+/// Create an iterator over big-endian CID values from a byte slice.
+fn to_cid_char_iter<'a>(text: &'a [u8]) -> Box<dyn Iterator<Item = u16> + 'a> {
+    Box::new(text.chunks_exact(2).map(|pair| {
+        let first_byte = pair[0];
+        let second_byte = pair[1];
+        u16::from_be_bytes([first_byte, second_byte])
+    }))
+}
+
+/// Create an iterator over single-byte character codes as `u16`.
+fn to_char_iter<'a>(text: &'a [u8]) -> Box<dyn Iterator<Item = u16> + 'a> {
+    Box::new(text.iter().copied().map(|b| u16::from_u8(b).unwrap_or(0)))
+}
+
 impl<T: std::error::Error> TextShowingOps for PdfCanvas<'_, T> {
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
-        // Extract text state parameters for rendering.
-        let TextState {
-            mut matrix,
-            horizontal_scaling,
-            font_size,
-            character_spacing,
-            word_spacing,
-            rise,
-            font: ref current_font,
-            ..
-        } = self.current_state()?.text_state.clone();
-
-        let current_transform = self.current_state()?.transform;
-        let current_font = current_font.ok_or(PdfCanvasError::NoCurrentFont)?;
+        let current_font = self
+            .current_state()?
+            .text_state
+            .font
+            .ok_or(PdfCanvasError::NoCurrentFont)?;
 
         match current_font {
             Font::Type3(type3_font) => {
-                let mut renderer = Type3FontRenderer::new(
-                    self,
-                    font_size,
-                    horizontal_scaling,
-                    rise,
-                    current_transform,
-                    &mut matrix,
-                    type3_font,
-                    word_spacing,
-                    character_spacing,
-                )?;
-                renderer.render_text(text)?;
-                // Persist the updated Tm
-                self.current_state_mut()?.text_state.matrix = matrix;
-                Ok(())
+                let mut iter = to_char_iter(text);
+                let mut renderer = Type3FontRenderer::new(self, type3_font)?;
+                renderer.render_text(&mut iter)
             }
             Font::Type1(type1_font) => {
-                let mut renderer = Type1FontRenderer::new(
-                    self,
-                    type1_font,
-                    font_size,
-                    horizontal_scaling,
-                    &mut matrix,
-                    current_transform,
-                    rise,
-                    word_spacing,
-                    character_spacing,
-                );
-                renderer.render_text(text)?;
-                // Persist the updated Tm
-                self.current_state_mut()?.text_state.matrix = matrix;
-                Ok(())
+                let program = type1_font.font_file.as_slice();
+                let mut iter = to_char_iter(text);
+
+                let mut renderer = Type1FontRenderer::new(self, program)?;
+                renderer.render_text(&mut iter)
             }
-            Font::TrueType(_) | Font::Type0(_) => {
-                let mut renderer = TrueTypeFontRenderer::new(
-                    self,
-                    current_font,
-                    font_size,
-                    horizontal_scaling,
-                    &mut matrix,
-                    current_transform,
-                    rise,
-                    word_spacing,
-                    character_spacing,
-                )?;
-                renderer.render_text(text)?;
-                self.current_state_mut()?.text_state.matrix = matrix;
-                Ok(())
+            Font::TrueType(font) => {
+                let mut iter = to_char_iter(text);
+
+                let mut renderer = TrueTypeFontRenderer::new(self, &font.font_file.data, false)?;
+                renderer.render_text(&mut iter)
+            }
+            Font::Type0(font) => {
+                let mut iter = to_cid_char_iter(text);
+
+                match font.subtype {
+                    CidFontSubType::Type0 => {
+                        let program = font.font_file.as_slice();
+                        let mut renderer = Type1FontRenderer::new(self, program)?;
+                        renderer.render_text(&mut iter)
+                    }
+                    CidFontSubType::Type2 => {
+                        let mut renderer = TrueTypeFontRenderer::new(self, &font.font_file, true)?;
+                        renderer.render_text(&mut iter)
+                    }
+                }
             }
         }
     }
@@ -221,8 +199,8 @@ impl<T: std::error::Error> TextShowingOps for PdfCanvas<'_, T> {
                     // TJ adjustment: Tm = Tm * T( -amount/1000 * Tfs * Th, 0 )
                     let amount = (*amount) / 1000.0;
                     let state = self.current_state_mut()?;
-                    let th = state.text_state.horizontal_scaling / 100.0;
-                    let tx = -amount * state.text_state.font_size * th;
+                    let tx =
+                        -amount * state.text_state.font_size * state.text_state.horizontal_scaling;
                     state.text_state.matrix.post_translate(tx, 0.0);
                 }
                 TextElement::HexString { value } => {

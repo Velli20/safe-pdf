@@ -9,7 +9,7 @@ use crate::{
 /// Shows a text string.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShowText {
-    /// An arry of bytes of the text string to be shown. The string is typically encoded
+    /// An array of bytes of the text string to be shown. The string is typically encoded
     /// according to the font's encoding.
     text: Vec<u8>,
 }
