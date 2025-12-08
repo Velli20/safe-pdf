@@ -130,8 +130,9 @@ impl<T: std::error::Error> TextStateOps for PdfCanvas<'_, T> {
 /// Create an iterator over big-endian CID values from a byte slice.
 fn to_cid_char_iter<'a>(text: &'a [u8]) -> Box<dyn Iterator<Item = u16> + 'a> {
     Box::new(text.chunks_exact(2).map(|pair| {
-        let first_byte = pair[0];
-        let second_byte = pair[1];
+        let mut iter = pair.iter().copied();
+        let first_byte = iter.next().unwrap_or(0);
+        let second_byte = iter.next().unwrap_or(0);
         u16::from_be_bytes([first_byte, second_byte])
     }))
 }

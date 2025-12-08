@@ -69,17 +69,17 @@ impl HeaderParser for PdfParser<'_> {
             ));
         }
 
-        // Extract the version part (after "PDF-")
-        let version_str = String::from_utf8_lossy(&line_bytes[PDF_HEADER.len()..]);
+        // Extract the version part (after "PDF-").
+        let version_bytes = line_bytes.strip_prefix(PDF_HEADER).ok_or_else(|| {
+            HeaderError::InvalidPrefix(String::from_utf8_lossy(line_bytes).into_owned())
+        })?;
+        let version_str = String::from_utf8_lossy(version_bytes);
 
         // Split the version number into major and minor parts.
-        let parts: Vec<&str> = version_str.split('.').collect();
-        if parts.len() != 2 {
-            return Err(HeaderError::InvalidVersionFormat(version_str.into_owned()));
-        }
-
-        let major_str = parts[0];
-        let minor_str = parts[1];
+        let vs: &str = version_str.as_ref();
+        let (major_str, minor_str) = vs
+            .split_once('.')
+            .ok_or_else(|| HeaderError::InvalidVersionFormat(vs.to_string()))?;
 
         let major = major_str
             .parse::<u8>()

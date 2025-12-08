@@ -160,7 +160,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     pub fn data(&self) -> &[u8] {
-        &self.input[self.position..]
+        self.input.get(self.position..).unwrap_or(&[])
     }
 
     pub fn read_excactly(&mut self, length: usize) -> Result<&[u8], TokenizerError> {
@@ -174,7 +174,11 @@ impl<'a> Tokenizer<'a> {
             Some(e) => e,
             None => return Ok(&[]),
         };
-        let slice = &self.input[self.position..end];
+
+        let slice = self
+            .input
+            .get(self.position..end)
+            .ok_or(TokenizerError::UnexpectedEndOfFile(length, available))?;
         self.position = end;
         Ok(slice)
     }
@@ -191,7 +195,9 @@ impl<'a> Tokenizer<'a> {
                 break;
             }
         }
-        &self.input[start..self.position]
+        let slice = self.input.get(start..self.position);
+
+        slice.unwrap_or(&[])
     }
 }
 

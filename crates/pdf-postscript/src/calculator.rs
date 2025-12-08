@@ -31,6 +31,14 @@ pub enum CalcError {
     InvalidIntegerOperand { op: &'static str, value: f64 },
     #[error("operand for {op} must be a non-negative integer, got {value}")]
     NegativeIntegerOperand { op: &'static str, value: f64 },
+    #[error("instruction pointer overflow")]
+    InstructionPointerOverflow,
+    #[error("index out of bounds in {op} operation: length={length}, index={index}")]
+    IndexOutOfBounds {
+        op: &'static str,
+        length: usize,
+        index: usize,
+    },
 }
 
 // An explicit frame stack eliminates recursion for executing nested procedure blocks.
@@ -117,7 +125,11 @@ pub fn execute(input_stack: &[f64], ops: &[Operator]) -> Result<Vec<f64>, CalcEr
             }
         }
 
-        let op = &frame.ops[frame.ip];
+        let op = &frame
+            .ops
+            .get(frame.ip)
+            .ok_or(CalcError::InstructionPointerOverflow)?;
+
         // Advance before executing (important for pushing child frames)
         frame.ip = frame
             .ip
@@ -237,7 +249,15 @@ pub fn execute(input_stack: &[f64], ops: &[Operator]) -> Result<Vec<f64>, CalcEr
                 let start = len
                     .checked_sub(n)
                     .ok_or(CalcError::ArithmeticOverflow { op: "copy_index" })?;
-                let to_copy: Vec<f64> = frame.stack[start..].to_vec();
+                let to_copy = frame
+                    .stack
+                    .get(start..)
+                    .ok_or(CalcError::IndexOutOfBounds {
+                        op: "copy",
+                        length: frame.len(),
+                        index: start,
+                    })?
+                    .to_vec();
                 for v in to_copy {
                     frame.push(v)?;
                 }
@@ -297,8 +317,17 @@ pub fn execute(input_stack: &[f64], ops: &[Operator]) -> Result<Vec<f64>, CalcEr
                 let m_norm_usize = usize::try_from(m_norm)
                     .map_err(|_| CalcError::ArithmeticOverflow { op: "roll" })?;
                 if m_norm_usize != 0 {
+                    let length = frame.len();
                     // Rotate only if there's an actual shift.
-                    frame.stack[start..].rotate_right(m_norm_usize);
+                    let tail = frame
+                        .stack
+                        .get_mut(start..)
+                        .ok_or(CalcError::IndexOutOfBounds {
+                            op: "roll",
+                            length,
+                            index: start,
+                        })?;
+                    tail.rotate_right(m_norm_usize);
                 }
             }
             Operator::Truncate => {
