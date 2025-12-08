@@ -135,9 +135,13 @@ impl ObjectVariant {
         }
 
         let mut result = [T::default(); N];
-        for (i, v) in values.iter().enumerate() {
-            result[i] = v.as_number()?;
-        }
+        result
+            .iter_mut()
+            .zip(values.iter())
+            .try_for_each(|(out, v)| {
+                *out = v.as_number()?;
+                Ok(())
+            })?;
 
         Ok(result)
     }

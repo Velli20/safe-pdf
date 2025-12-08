@@ -46,7 +46,11 @@ pub fn parse_tokens(tokens: &[&str]) -> Result<Vec<Operator>, CalcError> {
     let mut i = 0;
     let mut block_stack = ProgramBlock::new();
     while i < tokens.len() {
-        match tokens[i] {
+        match tokens
+            .get(i)
+            .copied()
+            .ok_or(CalcError::TokenIndexOverflow)?
+        {
             "add" => block_stack.push(Operator::Add)?,
             "sub" => block_stack.push(Operator::Sub)?,
             "mul" => block_stack.push(Operator::Mul)?,

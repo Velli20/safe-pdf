@@ -76,10 +76,12 @@ impl LiteralStringParser for PdfParser<'_> {
         //   are preserved as-is.
         loop {
             // Read exactly one byte; reaching EOF without closing means unbalanced parentheses
-            let b = match self.tokenizer.read_excactly(1) {
-                Ok(bytes) if !bytes.is_empty() => bytes[0],
-                _ => return Err(LiteralStringObjectError::UnbalancedParentheses),
-            };
+            let b = self
+                .tokenizer
+                .read_excactly(1)?
+                .first()
+                .copied()
+                .ok_or(LiteralStringObjectError::UnbalancedParentheses)?;
 
             match (escaped, b) {
                 // Previous char was a backslash: take this byte literally and clear escape state

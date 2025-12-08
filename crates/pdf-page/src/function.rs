@@ -108,13 +108,7 @@ impl Function {
         match &self.data {
             FunctionData::Exponential { domain, .. } => Some(*domain),
             FunctionData::Stitching { domain, .. } => Some(*domain),
-            FunctionData::PostScriptCalculator { domain, .. } => {
-                if domain.len() >= 2 {
-                    Some([domain[0], domain[1]])
-                } else {
-                    None
-                }
-            }
+            FunctionData::PostScriptCalculator { domain, .. } => domain.as_slice().try_into().ok(),
         }
     }
 
@@ -204,7 +198,10 @@ impl Function {
             // 3. Determine the input range (sub-domain) for the selected subfunction.
             // This is the interval [b0, b1] that contains `x_clamped`.
             let (b0, b1) = if index == 0 {
-                (domain[0], bounds[0])
+                let first_bound = *bounds
+                    .first()
+                    .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                (domain[0], first_bound)
             } else if index == bounds.len() {
                 let prev_index = index
                     .checked_sub(1)
@@ -256,7 +253,10 @@ impl Function {
             let x_mapped = e0 + t * (e1 - e0);
 
             // 6. Call the selected subfunction with the mapped input value.
-            functions[index].interpolate(x_mapped)
+            let func = functions
+                .get(index)
+                .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+            func.interpolate(x_mapped)
         } else if let FunctionData::PostScriptCalculator {
             operators,
             domain,
@@ -267,14 +267,26 @@ impl Function {
             let mut stack = Vec::new();
             let input_count = domain.len() / 2;
             if input_count == 1 {
-                let x_clipped = x.max(domain[0]).min(domain[1]);
+                let start = *domain
+                    .first()
+                    .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                let end = *domain
+                    .get(1)
+                    .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                let x_clipped = x.max(start).min(end);
                 stack.push(f64::from(x_clipped));
             } else {
                 // If you want to support multi-input, change interpolate signature to accept &[f32]
                 // For now, treat x as the first input and fill others with domain min
                 for i in 0..input_count {
                     let val = if i == 0 {
-                        x.max(domain[0]).min(domain[1])
+                        let start = *domain
+                            .first()
+                            .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                        let end = *domain
+                            .get(1)
+                            .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                        x.max(start).min(end)
                     } else {
                         let pair_index = i
                             .checked_mul(2)
@@ -289,7 +301,7 @@ impl Function {
                                     .ok_or(FunctionInterpolationError::EncodeIndexError)?,
                             )
                             .ok_or(FunctionInterpolationError::EncodeIndexError)?;
-                        start.max(start).min(end)
+                        x.max(start).min(end)
                     };
                     stack.push(f64::from(val));
                 }

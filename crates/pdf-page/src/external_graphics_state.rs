@@ -167,16 +167,16 @@ fn parse_dash_pattern(
     objects: &ObjectCollection,
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
     let arr = value.try_array(objects)?;
-    if arr.len() != 2 {
+    let [dash_array, dash_phase] = arr else {
         return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
             key_name: Cow::Owned(key_name.to_string()),
             expected_desc: "array with 2 elements",
             actual_desc: format!("array with {} elements", arr.len()),
         });
-    }
+    };
 
-    let dash_array_f32 = arr[0].as_vec_of::<f32>()?;
-    let dash_phase = arr[1].as_number::<f32>()?;
+    let dash_array_f32 = dash_array.as_vec_of::<f32>()?;
+    let dash_phase = dash_phase.as_number::<f32>()?;
     Ok(ExternalGraphicsStateKey::DashPattern(
         dash_array_f32,
         dash_phase,
@@ -190,15 +190,15 @@ fn parse_font(
     objects: &ObjectCollection,
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
     let arr = value.try_array(objects)?;
-    if arr.len() != 2 {
+    let [font_ref, font_size] = arr else {
         return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
             key_name: Cow::Owned(key_name.to_string()),
             expected_desc: "array with 2 elements",
             actual_desc: format!("array with {} elements", arr.len()),
         });
-    }
-    let font_ref = arr[0].try_reference()?;
-    let font_size = arr[1].as_number::<f32>()?;
+    };
+    let font_ref = font_ref.try_reference()?;
+    let font_size = font_size.as_number::<f32>()?;
     Ok(ExternalGraphicsStateKey::Font(font_ref, font_size))
 }
 
