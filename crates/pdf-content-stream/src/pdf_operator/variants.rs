@@ -90,7 +90,6 @@ impl PdfOperatorVariant {
         let mut parser = PdfParser::from(input);
         let mut operators = Vec::new();
         let mut operands = Vec::new();
-
         loop {
             parser.skip_whitespace();
 
@@ -229,7 +228,6 @@ mod tests {
     fn test_bug_727() {
         let input = b"[ (2.) 1 (0) 1 (!)\n2 (3) 1 (4) 1 (4) 1 (0) 1 (0) 1 (#) 2 (%) 2 (%) 2 (.) 1 (\\)) 2 (4) ]  TJ";
         let result = PdfOperatorVariant::from(input);
-        println!("test_bug_727 result: {:?}", result);
         assert!(result.is_ok());
     }
 
@@ -492,7 +490,14 @@ mod tests {
                 )],
             },
             TestCase {
-                description: "26. Set rendering intent (ri)",
+                description: "26. Set non-stroking color (scn) with 3 components",
+                input: b"0.972549 0.9764706 0.98039216 scn",
+                expected_ops: vec![PdfOperatorVariant::SetNonStrokingColor(
+                    SetNonStrokingColor::new(vec![0.972549, 0.9764706, 0.98039216], None),
+                )],
+            },
+            TestCase {
+                description: "27. Set rendering intent (ri)",
                 input: b"/RelativeColorimetric ri",
                 expected_ops: vec![PdfOperatorVariant::SetRenderingIntent(
                     SetRenderingIntent::new("RelativeColorimetric".to_string()),

@@ -289,11 +289,19 @@ impl PdfOperator for SetStrokingColor {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let mut values = vec![];
-
-        let pattern = operands.get_str().ok();
-        while let Ok(value) = operands.get_f32() {
-            values.push(value);
+        while let Some(value) = operands.peek_next() {
+            if value.is_name() {
+                break;
+            }
+            let v = operands.get_f32()?;
+            values.push(v);
         }
+
+        // The pattern name should come last, after the numeric color components
+        let pattern = operands
+            .peek_next()
+            .filter(|obj| obj.is_name())
+            .and_then(|_| operands.get_str().ok());
 
         Ok(PdfOperatorVariant::SetStrokingColor(Self::new(
             values, pattern,
@@ -334,11 +342,19 @@ impl PdfOperator for SetNonStrokingColor {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let mut values = vec![];
-
-        let pattern = operands.get_str().ok();
-        while let Ok(value) = operands.get_f32() {
-            values.push(value);
+        while let Some(value) = operands.peek_next() {
+            if value.is_name() {
+                break;
+            }
+            let v = operands.get_f32()?;
+            values.push(v);
         }
+
+        // The pattern name should come last, after the numeric color components
+        let pattern = operands
+            .peek_next()
+            .filter(|obj| obj.is_name())
+            .and_then(|_| operands.get_str().ok());
 
         Ok(PdfOperatorVariant::SetNonStrokingColor(Self::new(
             values, pattern,
