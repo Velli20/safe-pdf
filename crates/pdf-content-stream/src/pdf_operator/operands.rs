@@ -9,6 +9,17 @@ pub struct Operands<'a> {
 }
 
 impl<'a> Operands<'a> {
+    /// Peeks at the next operand without consuming it.
+    ///
+    /// Unlike [`take_next`], this method does not advance the internal slice.
+    ///
+    /// # Returns
+    ///
+    /// `Some` with a reference to the next operand, or `None` if there are no more operands.
+    pub fn peek_next(&self) -> Option<&'a ObjectVariant> {
+        self.values.first()
+    }
+
     /// Pops and returns the next operand, advancing the internal slice.
     fn take_next(&mut self) -> Option<&'a ObjectVariant> {
         if let Some((value, rest)) = self.values.split_first() {

@@ -94,6 +94,11 @@ impl ObjectVariant {
         }
     }
 
+    /// Returns `true` if this value is a Name object.
+    pub fn is_name(&self) -> bool {
+        matches!(self, ObjectVariant::Name(_))
+    }
+
     pub fn try_array<'a>(
         &'a self,
         objects: &'a ObjectCollection,

@@ -32,9 +32,6 @@ impl<T: std::error::Error> ColorOps for PdfCanvas<'_, T> {
             [c, m, y, k] => {
                 state.stroke_color = Color::from_cmyk(c, m, y, k);
             }
-            [] => {
-                println!("Warning: set_stroking_color called with empty components array");
-            }
             _ => {
                 return Err(PdfCanvasError::NotImplemented(format!(
                     "set_stroking_color expects 1 (Gray), 3 (RGB), or 4 (CMYK) components; got {:?}",
@@ -59,9 +56,6 @@ impl<T: std::error::Error> ColorOps for PdfCanvas<'_, T> {
             }
             [c, m, y, k] => {
                 state.fill_color = Color::from_cmyk(c, m, y, k);
-            }
-            [] => {
-                println!("Warning: set_non_stroking_color called with empty components array");
             }
             _ => {
                 return Err(PdfCanvasError::NotImplemented(format!(
