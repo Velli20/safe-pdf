@@ -246,28 +246,32 @@ where
         let shader = self.compute_shader()?;
         let state = self.current_state()?;
 
+        let fill_color = state.fill_color;
+        let stroke_color = state.stroke_color;
+        let blend_mode = state.blend_mode;
+        let line_width = state.line_width * state.transform.sx;
+
         match mode {
             PaintMode::Fill => {
                 self.canvas
-                    .fill_path(path, fill_type, state.fill_color, &shader, state.blend_mode)
+                    .fill_path(path, fill_type, fill_color, &shader, blend_mode)
                     .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
             }
             PaintMode::Stroke => {
-                let line_width = state.line_width * state.transform.sx;
                 self.canvas
-                    .stroke_path(
-                        path,
-                        state.stroke_color,
-                        line_width,
-                        &shader,
-                        state.blend_mode,
-                    )
+                    .stroke_path(path, stroke_color, line_width, &shader, blend_mode)
                     .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
             }
             PaintMode::FillAndStroke => {
-                return Err(PdfCanvasError::NotImplemented(
-                    "FillAndStroke mode is not implemented".into(),
-                ));
+                // First fill the path using the current fill settings
+                self.canvas
+                    .fill_path(path, fill_type, fill_color, &shader, blend_mode)
+                    .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
+
+                // Then stroke the path using the current stroke settings
+                self.canvas
+                    .stroke_path(path, stroke_color, line_width, &shader, blend_mode)
+                    .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
             }
         }
         Ok(())
