@@ -379,13 +379,11 @@ where
         self.save()?;
 
         if let Some(mat) = mat {
-            // Concatenate the provided Form/XObject matrix with the current CTM.
+            // Concatenate the provided `XObject` matrix with the current CTM.
             // PDF spec: invoking a form XObject with its /Matrix entry performs a
             // concatenation like the 'cm' operator does. The operation is:
-            //   CTM' = FormMatrix * CTM
-            // Our Transform::concat(other) implements self = other * self (pre-multiply),
-            // so we just call concat with the form matrix.
-            self.current_state_mut()?.transform.concat(&mat);
+            //   CTM' = CTM * FormMatrix
+            self.current_state_mut()?.transform.post_concat(&mat);
         }
 
         if let Some(resources) = resources {
