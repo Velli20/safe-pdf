@@ -40,6 +40,8 @@ pub enum PdfCanvasError {
     MissingMediaBox,
     #[error("Failed numeric conversion: {0}")]
     NumericConversionError(&'static str),
+    #[error("Invalid image data: {0}")]
+    InvalidImageData(String),
     #[error("Not implemented: {0}")]
     NotImplemented(String),
     #[error("Canvas backend error: {0}")]

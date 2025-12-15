@@ -1,5 +1,4 @@
 pub mod color;
-pub mod color_space;
 pub mod pdf_path;
 pub mod point;
 pub mod rect;
