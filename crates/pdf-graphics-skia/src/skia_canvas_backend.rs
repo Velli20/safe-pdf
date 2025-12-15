@@ -26,11 +26,11 @@ pub enum SkiaCanvasBackendError {
         height: usize,
     },
     #[error("invalid image dimensions: {width}x{height}")]
-    InvalidImageDimensions { width: u32, height: u32 },
+    InvalidImageDimensions { width: usize, height: usize },
     #[error("failed to decode image with encoding: {encoding}")]
     ImageDecodeFailed { encoding: &'static str },
     #[error("failed to create skia raster image from data ({width}x{height})")]
-    RasterImageCreationFailed { width: u32, height: u32 },
+    RasterImageCreationFailed { width: usize, height: usize },
     #[error("failed to create shader: {shader}")]
     ShaderCreationFailed { shader: &'static str },
 }
@@ -89,16 +89,38 @@ fn to_skia_a8_mask_image(
 ///
 /// - A Skia `Image` ready to be drawn with `draw_image`/`draw_image_rect`.
 fn to_skia_image(image: &Image<'_>) -> Result<skia_safe::Image, SkiaCanvasBackendError> {
+    // If explicitly marked as JPEG, use Skia's decoder.
     if image.encoding == ImageEncoding::Jpeg {
         return skia_safe::Image::from_encoded(skia_safe::Data::new_copy(&image.data))
             .ok_or(SkiaCanvasBackendError::ImageDecodeFailed { encoding: "jpeg" });
     }
 
+    // Validate raw buffer length; if it doesn't match what a raw buffer would require,
+    // try to decode via Skia as an encoded image (e.g., JPEG without explicit flag).
+    let expected_len = image
+        .width
+        .checked_mul(image.height)
+        .and_then(|px| px.checked_mul(image.num_color_components))
+        .unwrap_or(usize::MAX);
+
+    let try_encoded = image.data.len() != expected_len
+        || image.num_color_components == 0
+        || image.width == 0
+        || image.height == 0;
+
+    if try_encoded
+        && let Some(img) = skia_safe::Image::from_encoded(skia_safe::Data::new_copy(&image.data))
+    {
+        return Ok(img);
+        // Fall through to raw path if decoder fails; will return a meaningful error later.
+    }
+
     let (color_type, pixel_data) = get_skia_image_data(
         &image.data,
-        image.width as usize,
-        image.height as usize,
+        image.width,
+        image.height,
         &image.mask,
+        image.num_color_components,
     )?;
 
     let image_info = skia_safe::ImageInfo::new(
@@ -108,7 +130,7 @@ fn to_skia_image(image: &Image<'_>) -> Result<skia_safe::Image, SkiaCanvasBacken
         None,
     );
 
-    let row_bytes = image.width as usize * image_info.bytes_per_pixel();
+    let row_bytes = image.width * image_info.bytes_per_pixel();
     skia_safe::images::raster_from_data(&image_info, pixel_data, row_bytes).ok_or(
         SkiaCanvasBackendError::RasterImageCreationFailed {
             width: image.width,
@@ -297,10 +319,14 @@ fn get_skia_image_data(
     width: usize,
     height: usize,
     smask: &Option<Cow<'_, [u8]>>,
+    num_color_components: usize,
 ) -> Result<(skia_safe::ColorType, skia_safe::Data), SkiaCanvasBackendError> {
     let num_pixels = width * height;
-    let num_components = image.len() / num_pixels;
-    match num_components {
+    // Sanity checks to avoid constructing invalid raster data.
+    if width == 0 || height == 0 {
+        return Err(SkiaCanvasBackendError::InvalidImageDimensions { width, height });
+    }
+    match num_color_components {
         // RGBA input. If no soft mask, we can pass-through without copying.
         4 if smask.is_none() => Ok((
             skia_safe::ColorType::RGBA8888,
@@ -321,6 +347,19 @@ fn get_skia_image_data(
         }
         // RGB input. Expand to RGBA, using soft mask alpha when present.
         3 => {
+            // Ensure the source buffer has enough data for raw RGB.
+            let required = num_pixels.checked_mul(3).ok_or(
+                SkiaCanvasBackendError::UnsupportedImageComponents {
+                    components: num_color_components,
+                    width,
+                    height,
+                },
+            )?;
+            if image.len() < required {
+                return Err(SkiaCanvasBackendError::ImageDecodeFailed {
+                    encoding: "raw-rgb-size",
+                });
+            }
             let mut out = Vec::with_capacity(num_pixels * 4);
             let smask_bytes = smask.as_ref().map(|s| s.as_ref());
             for (i, rgb) in image.chunks_exact(3).enumerate() {
@@ -338,7 +377,7 @@ fn get_skia_image_data(
             skia_safe::Data::new_copy(image),
         )),
         _ => Err(SkiaCanvasBackendError::UnsupportedImageComponents {
-            components: num_components,
+            components: num_color_components,
             width,
             height,
         }),

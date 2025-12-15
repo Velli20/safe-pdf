@@ -6,8 +6,9 @@ use pdf_object::{
 use thiserror::Error;
 
 use crate::{
-    color_space::ColorSpace,
-    function::{Function, FunctionReadError},
+    color_space::{ColorSpace, ColorSpaceError},
+    function::{Function, FunctionInterpolationError, FunctionReadError},
+    image::ImageXObjectError,
 };
 
 /// Errors that can occur while parsing a Shading object.
@@ -15,6 +16,8 @@ use crate::{
 pub enum ShadingError {
     #[error("Missing /ShadingType key")]
     MissingShadingType,
+    #[error("Missing required entry '{entry_name}'")]
+    MissingRequiredEntry { entry_name: &'static str },
     #[error("Unsupported /ShadingType value: {0}")]
     UnsupportedShadingType(ShadingType),
     #[error("Unknown /ShadingType value: {0}")]
@@ -27,8 +30,20 @@ pub enum ShadingError {
     },
     #[error("Error parsing Function: {0}")]
     FunctionReadError(#[from] FunctionReadError),
+    #[error("Error interpolating Function: {0}")]
+    FunctionInterpolationError(#[from] FunctionInterpolationError),
+    #[error(
+        "Invalid function output: expected at least {expected} color components, found {found}"
+    )]
+    InvalidFunctionOutputComponents { expected: usize, found: usize },
     #[error("Error parsing Dictionary: {0}")]
     ObjectError(#[from] ObjectError),
+
+    #[error("ColorSpace error: {0}")]
+    ColorSpaceError(#[from] ColorSpaceError),
+
+    #[error("Error parsing ImageXObject: {0}")]
+    ImageXObjectError(#[from] ImageXObjectError),
 }
 
 /// Represents the `/ShadingType` entry.
@@ -173,7 +188,7 @@ impl FromDictionary for Shading {
         match ShadingType::from_i32(shading_type) {
             Some(ShadingType::FunctionBased) => {
                 // Read optional `/ColorSpace` entry, which defines the color space for the shading.
-                let color_space = dictionary.get("ColorSpace").map(ColorSpace::from);
+                let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
 
                 // Read optional `/Background` entry, specifying a background color as an array of numbers.
                 let background = dictionary
@@ -262,7 +277,11 @@ impl FromDictionary for Shading {
                 let coords = dictionary.get_or_err("Coords")?.as_array_of::<f32, 4>()?;
 
                 // Read required `/ColorSpace` entry.
-                let color_space = ColorSpace::from(dictionary.get_or_err("ColorSpace")?);
+                let color_space = ColorSpace::from_dictionary(dictionary, objects)?.ok_or(
+                    ShadingError::MissingRequiredEntry {
+                        entry_name: "ColorSpace",
+                    },
+                )?;
 
                 // Read required `/Function` entry as a dictionary.
                 let function = Function::from_dictionary(
@@ -286,7 +305,11 @@ impl FromDictionary for Shading {
                 let coords = dictionary.get_or_err("Coords")?.as_array_of::<f32, 6>()?;
 
                 // Read required `/ColorSpace` entry.
-                let color_space = ColorSpace::from(dictionary.get_or_err("ColorSpace")?);
+                let color_space = ColorSpace::from_dictionary(dictionary, objects)?.ok_or(
+                    ShadingError::MissingRequiredEntry {
+                        entry_name: "ColorSpace",
+                    },
+                )?;
 
                 // Read required `/Function` entry as a dictionary.
                 let function = Function::from_dictionary(

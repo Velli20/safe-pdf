@@ -20,9 +20,8 @@ pub enum RecordingCanvasError {
 #[derive(Clone)]
 struct RecordedImage {
     pub data: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
-    pub bytes_per_pixel: Option<u32>,
+    pub width: usize,
+    pub height: usize,
     pub encoding: ImageEncoding,
     pub mask: Option<Vec<u8>>,
 }
@@ -33,7 +32,6 @@ impl From<&BackendImage<'_>> for RecordedImage {
             data: img.data.clone().into_owned(),
             width: img.width,
             height: img.height,
-            bytes_per_pixel: img.bits_per_component,
             encoding: img.encoding,
             mask: img.mask.as_ref().map(|m| m.clone().into_owned()),
         }
@@ -151,6 +149,7 @@ enum RecordingCommand {
         blend_mode: Option<BlendMode>,
         dest_rect: Rect,
         image_rotation: Option<f32>,
+        num_color_components: usize,
     },
     BeginMaskLayer {
         mask: Box<RecordingCanvas>,
@@ -332,13 +331,14 @@ impl RecordingCanvas {
                     blend_mode,
                     dest_rect,
                     image_rotation,
+                    num_color_components,
                 } => {
                     let backend_img = BackendImage {
                         data: Cow::Owned(image.data.clone()),
                         width: image.width,
                         height: image.height,
-                        bits_per_component: image.bytes_per_pixel,
                         encoding: image.encoding,
+                        num_color_components: *num_color_components,
                         mask: image.mask.as_ref().map(|m| Cow::Owned(m.clone())),
                     };
                     backend.draw_image_rect(
@@ -444,6 +444,7 @@ impl CanvasBackend for RecordingCanvas {
             blend_mode,
             dest_rect,
             image_rotation,
+            num_color_components: image.num_color_components,
         });
         Ok(())
     }

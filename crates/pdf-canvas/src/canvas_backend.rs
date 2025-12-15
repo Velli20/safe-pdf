@@ -74,15 +74,15 @@ pub struct Image<'a> {
     /// The raw image data.
     pub data: Cow<'a, [u8]>,
     /// The width of the image in pixels.
-    pub width: u32,
+    pub width: usize,
     /// The height of the image in pixels.
-    pub height: u32,
-    /// The bits per pixel (color depth) of the image.
-    pub bits_per_component: Option<u32>,
+    pub height: usize,
     /// The image encoding (e.g., "jpeg", "png").
     pub encoding: ImageEncoding,
     /// An optional alpha mask to apply to the image.
     pub mask: Option<Cow<'a, [u8]>>,
+    /// The number of color components in the image (e.g., 3 for RGB, 4 for CMYK).
+    pub num_color_components: usize,
 }
 
 /// A low-level drawing backend for rendering PDF graphics.
