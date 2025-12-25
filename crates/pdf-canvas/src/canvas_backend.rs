@@ -25,6 +25,10 @@ pub enum Shader<'a> {
         x1: f32,
         /// The ending y-coordinate of the gradient line.
         y1: f32,
+        /// An optional transformation to apply to the gradient.
+        ///
+        /// When present, this maps the gradient's local coordinate space into device space.
+        transform: Option<Transform>,
         /// The array of colors to be used in the gradient.
         colors: &'a [Color],
         /// The positions of each color stop, specified as values between 0.0 and 1.0.

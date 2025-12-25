@@ -1,9 +1,8 @@
 pub mod color_space;
+pub mod color_stops;
 pub mod content_stream;
-pub mod error;
 pub mod external_graphics_state;
 pub mod form;
-pub mod function;
 pub mod image;
 pub mod image_filter;
 pub mod matrix;
@@ -14,3 +13,5 @@ pub mod pattern;
 pub mod resources;
 pub mod shading;
 pub mod xobject;
+
+pub mod functions;

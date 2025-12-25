@@ -168,7 +168,7 @@ fn to_skia_matrix(transform: &Transform) -> skia_safe::Matrix {
         transform.kx,
         transform.tx,
         transform.ky,
-        -transform.sy,
+        transform.sy,
         transform.ty,
         0.0,
         0.0,
@@ -214,6 +214,7 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, SkiaCanvasBacken
             y0,
             x1,
             y1,
+            transform,
             positions,
             colors,
         } => {
@@ -222,13 +223,19 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, SkiaCanvasBacken
                 .map(|color| skia_safe::Color4f::new(color.r, color.g, color.b, color.a).to_color())
                 .collect();
 
+            let mat = if let Some(m) = transform {
+                to_skia_matrix(&m)
+            } else {
+                skia_safe::Matrix::new_identity()
+            };
+
             skia_safe::Shader::linear_gradient(
                 (skia_safe::Point::new(x0, y0), skia_safe::Point::new(x1, y1)),
                 skia_safe::gradient_shader::GradientShaderColors::Colors(&colors),
                 Some(positions),
                 skia_safe::TileMode::Clamp,
                 None,
-                None,
+                Some(&mat),
             )
             .ok_or(SkiaCanvasBackendError::ShaderCreationFailed {
                 shader: "linear_gradient",
@@ -273,16 +280,22 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, SkiaCanvasBacken
         }
         Shader::TilingPatternImage {
             image,
-            transform: _,
+            transform,
             x_step: _,
             y_step: _,
         } => {
+            let mat = if let Some(m) = transform {
+                to_skia_matrix(m)
+            } else {
+                skia_safe::Matrix::new_identity()
+            };
+
             let image = to_skia_a8_mask_image(image)?;
             image
                 .to_shader(
                     (skia_safe::TileMode::Repeat, skia_safe::TileMode::Repeat),
                     skia_safe::SamplingOptions::default(),
-                    None,
+                    Some(&mat),
                 )
                 .ok_or(SkiaCanvasBackendError::ShaderCreationFailed {
                     shader: "tiling_pattern_image",
@@ -520,7 +533,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
     ) -> Result<(), Self::ErrorType> {
         self.surface.canvas().save();
         let mat = to_skia_matrix(transform);
-        let rect = skia_safe::Rect::from_xywh(0.0, -mask.height(), mask.width(), mask.height());
+        let rect = skia_safe::Rect::from_xywh(0.0, 0.0, mask.width(), mask.height());
         let (rect, _) = mat.map_rect(rect);
 
         self.surface
@@ -581,10 +594,6 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         // Grab an image snapshot of the rendered mask content
         let mut mask_image = surface.image_snapshot();
 
-        // If PDF transform applies to the mask coordinate system, apply only for drawing mask.
-        let mat = to_skia_matrix(transform);
-        self.surface.canvas().concat(&mat);
-
         if mask_mode == MaskMode::Luminosity {
             // Convert RGBA to A8 using standard luminance coefficients.
             let w = mask_image.width();
@@ -639,15 +648,18 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
             }
         }
 
+        // If PDF transform applies to the mask coordinate system, apply only for drawing mask.
+        let mat = skia_safe::M44::from(to_skia_matrix(transform));
+        self.surface.canvas().set_matrix(&mat);
+
         // Apply mask: multiply destination alpha by mask alpha
         let mut paint = skia_safe::Paint::default();
         paint.set_blend_mode(skia_safe::BlendMode::DstIn);
 
         // Skia's coordinate system has the origin at the top-left, so we need to flip the mask vertically.
-        let height = -mask_image.height() as f32;
         self.surface
             .canvas()
-            .draw_image(mask_image, (0.0, height), Some(&paint));
+            .draw_image(mask_image, (0.0, 0.0), Some(&paint));
 
         // Pop the layer (masked content merges down).
         self.surface.canvas().restore();

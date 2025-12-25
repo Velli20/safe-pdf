@@ -16,7 +16,6 @@ pub enum ColorSpaceError {
     /// An error occurred while resolving PDF objects.
     #[error("Failed to resolve PDF object: {0}")]
     ObjectError(#[from] ObjectError),
-
     /// The color space definition is invalid or unsupported.
     #[error("Invalid or unsupported ColorSpace: {description}")]
     InvalidColorSpace { description: String },
@@ -34,13 +33,10 @@ pub enum ColorSpaceError {
 pub enum ColorSpace {
     /// Grayscale color space with a single component (0.0 = black, 1.0 = white).
     DeviceGray,
-
     /// RGB color space with three components (Red, Green, Blue).
     DeviceRGB,
-
     /// CMYK color space with four components (Cyan, Magenta, Yellow, Black).
     DeviceCMYK,
-
     /// Indexed (palette-based) color space.
     ///
     /// Maps integer indices to colors in a base color space via a lookup table.
@@ -53,7 +49,6 @@ pub enum ColorSpace {
         /// Raw lookup table bytes. Each entry contains `base.num_color_components()` bytes.
         lookup: Vec<u8>,
     },
-
     /// ICC profile-based color space.
     ///
     /// Uses an embedded ICC color profile for device-independent color.

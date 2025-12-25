@@ -141,39 +141,33 @@ impl<T: std::error::Error> GraphicsStateOps for PdfCanvas<'_, T> {
                             // We need to render this form's content into a separate mask surface.
 
                             // Create a recording canvas to act as the mask layer.
-                            let mut recording_canvas = RecordingCanvas::new(
-                                form.bbox[2] - form.bbox[0],
-                                form.bbox[3] - form.bbox[1],
-                            );
+                            let mut recording_canvas =
+                                RecordingCanvas::new(form.bbox.width(), form.bbox.height());
 
-                            // Create a temporary `PdfCanvas` that draws into our new mask surface.
-                            // This allows us to reuse the rendering logic for the form's content stream.
-                            let mut other =
-                                PdfCanvas::new(&mut recording_canvas, self.page, Some(&form.bbox))?;
-
-                            // 3. Render the form's content stream into the mask canvas.
-                            other.render_content_stream(
+                            // Render the form's content stream into the mask canvas.
+                            self.record_content_stream(
+                                &mut recording_canvas,
                                 &form.content_stream.operations,
                                 form.matrix,
+                                &form.bbox,
                                 form.resources.as_ref(),
                             )?;
 
                             let transform = self.current_state()?.transform;
-                            // 4. Enable the mask on the main canvas. Subsequent drawing operations
+
+                            // Enable the mask on the main canvas. Subsequent drawing operations
                             // will be modulated by this mask.
                             self.canvas
                                 .begin_mask_layer(&recording_canvas, &transform, smask.mask_type)
                                 .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
 
-                            // 5. Store the mask in the current canvas state to be used until it's finished.
-                            self.mask = Some((Box::new(recording_canvas), smask.mask_type));
+                            // Store the mask in the current canvas state to be used until it's finished.
+                            self.mask =
+                                Some((Box::new(recording_canvas), smask.mask_type, transform));
                         }
-                    } else if let Some((mask, mask_type)) = self.mask.take() {
+                    } else if let Some((mask, mask_type, transform)) = self.mask.take() {
                         // This branch handles the case where `/SMask` is set to `/None` in the `ExtGState`,
                         // which signals the end of the current soft mask application.
-                        let transform = self.current_state()?.transform;
-                        // Finalize the masking operation on the backend, which typically involves
-                        // compositing the masked content.
                         self.canvas
                             .end_mask_layer(mask.as_ref(), &transform, mask_type)
                             .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;

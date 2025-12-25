@@ -24,16 +24,6 @@ const RGB_COMPONENTS: usize = 3;
 /// Tolerance in degrees for detecting right-angle rotations.
 const ROTATION_TOLERANCE_DEGREES: f32 = 1e-3;
 
-/// The normalized unit square used as the source rectangle for image XObjects.
-///
-/// PDF images are defined in a `[0,1] × [0,1]` coordinate space.
-const UNIT_RECT: Rect = Rect {
-    left: 0.0,
-    top: 0.0,
-    right: 1.0,
-    bottom: 1.0,
-};
-
 /// Transformation matrix that flips the Y axis for image-space to user-space conversion.
 ///
 /// This matrix `[ 1 0 0 -1 0 1 ]` performs:
@@ -246,6 +236,7 @@ impl<T: std::error::Error> XObjectOps for PdfCanvas<'_, T> {
             Some(XObject::Form(form)) => self.render_content_stream(
                 &form.content_stream.operations,
                 form.matrix,
+                Some(&form.bbox),
                 form.resources.as_ref(),
             ),
             None => Err(PdfCanvasError::XObjectNotFound(xobject_name.to_string())),
@@ -329,7 +320,7 @@ impl<T: std::error::Error> PdfCanvas<'_, T> {
     /// Maps the normalized unit square through the transform and adjusts
     /// for right-angle rotations where width/height need to be swapped.
     fn compute_destination_rect(transform: &Transform, rotation_degrees: f32) -> Rect {
-        let mut dest_rect = transform.map_rect(&UNIT_RECT);
+        let mut dest_rect = transform.map_rect(&Rect::UNIT_RECT);
 
         // For right-angle rotations (±90°, ±270°), the mapped rect's
         // width/height are swapped. Preserve the center and swap extents.

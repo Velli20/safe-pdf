@@ -7,8 +7,6 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ContentStreamReadError {
-    #[error("Failed to resolve foncontent stream object reference {obj_num}")]
-    FailedResolveFontObjectReference { obj_num: i32 },
     #[error("Unsupported entry type for Content Stream: '{found_type}'")]
     UnsupportedEntryType { found_type: &'static str },
     #[error("Error parsing content stream operators: {0}")]

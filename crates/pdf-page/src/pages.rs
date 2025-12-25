@@ -1,7 +1,4 @@
-use crate::{
-    content_stream::ContentStreamReadError, media_box::MediaBoxError, page::PdfPage,
-    resources::ResourcesError,
-};
+use crate::{content_stream::ContentStreamReadError, page::PdfPage, resources::ResourcesError};
 use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     traits::FromDictionary,
@@ -20,8 +17,6 @@ pub enum PdfPagesError {
     ObjectError(#[from] ObjectError),
     #[error("Failed to parse content stream for page: {0}")]
     ContentStreamParse(#[from] ContentStreamReadError),
-    #[error("Failed to parse media box for page: {0}")]
-    MediaBoxParse(#[from] MediaBoxError),
     #[error("Failed to parse resources for page: {0}")]
     ResourcesParse(#[from] ResourcesError),
 }
