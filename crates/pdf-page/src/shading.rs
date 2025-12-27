@@ -1,4 +1,17 @@
-use pdf_graphics::color::Color;
+//! PDF Shading object parsing and representation.
+//!
+//! This module provides types and parsing logic for PDF shading objects,
+//! which define smooth color transitions (gradients) across areas.
+//!
+//! # Supported Shading Types
+//!
+//! - **Type 1 (FunctionBased)**: Color at every point defined by a mathematical function.
+//! - **Type 2 (Axial)**: Linear gradient between two points.
+//! - **Type 3 (Radial)**: Circular gradient between two circles.
+//!
+//! Types 4-7 (mesh-based shadings) are recognized but not yet fully supported.
+
+use pdf_graphics::rect::Rect;
 use pdf_object::{
     ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     traits::FromDictionary,
@@ -7,329 +20,342 @@ use thiserror::Error;
 
 use crate::{
     color_space::{ColorSpace, ColorSpaceError},
-    function::{Function, FunctionInterpolationError, FunctionReadError},
-    image::ImageXObjectError,
+    color_stops::ColorStops,
+    functions::{Function, FunctionImpl, FunctionInterpolationError, FunctionReadError},
 };
 
-/// Errors that can occur while parsing a Shading object.
+/// Errors that can occur while parsing or processing a Shading object.
 #[derive(Debug, Error)]
 pub enum ShadingError {
-    #[error("Missing /ShadingType key")]
-    MissingShadingType,
     #[error("Missing required entry '{entry_name}'")]
     MissingRequiredEntry { entry_name: &'static str },
     #[error("Unsupported /ShadingType value: {0}")]
     UnsupportedShadingType(ShadingType),
     #[error("Unknown /ShadingType value: {0}")]
     InvalidShadingType(i32),
-    #[error("Invalid type for entry '{entry_name}': expected {expected_type}, found {found_type}")]
-    InvalidEntryType {
-        entry_name: &'static str,
-        expected_type: &'static str,
-        found_type: &'static str,
-    },
     #[error("Error parsing Function: {0}")]
     FunctionReadError(#[from] FunctionReadError),
     #[error("Error interpolating Function: {0}")]
     FunctionInterpolationError(#[from] FunctionInterpolationError),
-    #[error(
-        "Invalid function output: expected at least {expected} color components, found {found}"
-    )]
-    InvalidFunctionOutputComponents { expected: usize, found: usize },
     #[error("Error parsing Dictionary: {0}")]
     ObjectError(#[from] ObjectError),
-
     #[error("ColorSpace error: {0}")]
     ColorSpaceError(#[from] ColorSpaceError),
-
-    #[error("Error parsing ImageXObject: {0}")]
-    ImageXObjectError(#[from] ImageXObjectError),
 }
 
-/// Represents the `/ShadingType` entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Represents the PDF `/ShadingType` entry value.
+///
+/// PDF supports seven shading types, each defining a different method
+/// for computing colors across an area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(i32)]
 pub enum ShadingType {
+    /// Type 1: Function-based shading. Color at each point is computed
+    /// by evaluating a function with the point's coordinates as input.
     FunctionBased = 1,
+    /// Type 2: Axial shading (linear gradient). Colors blend along a
+    /// line between two points.
     Axial = 2,
+    /// Type 3: Radial shading (circular gradient). Colors blend between
+    /// two circles, creating cone or cylinder effects.
     Radial = 3,
+    /// Type 4: Free-form Gouraud-shaded triangle mesh.
     FreeFormTriangleMesh = 4,
+    /// Type 5: Lattice-form Gouraud-shaded triangle mesh.
     LatticeFormTriangleMesh = 5,
+    /// Type 6: Coons patch mesh.
     CoonsPatchMesh = 6,
+    /// Type 7: Tensor-product patch mesh.
     TensorProductPatchMesh = 7,
 }
 
 impl std::fmt::Display for ShadingType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ShadingType::FunctionBased => write!(f, "FunctionBased"),
-            ShadingType::Axial => write!(f, "Axial"),
-            ShadingType::Radial => write!(f, "Radial"),
-            ShadingType::FreeFormTriangleMesh => write!(f, "FreeFormTriangleMesh"),
-            ShadingType::LatticeFormTriangleMesh => write!(f, "LatticeFormTriangleMesh"),
-            ShadingType::CoonsPatchMesh => write!(f, "CoonsPatchMesh"),
-            ShadingType::TensorProductPatchMesh => write!(f, "TensorProductPatchMesh"),
-        }
+        let name = match self {
+            Self::FunctionBased => "FunctionBased",
+            Self::Axial => "Axial",
+            Self::Radial => "Radial",
+            Self::FreeFormTriangleMesh => "FreeFormTriangleMesh",
+            Self::LatticeFormTriangleMesh => "LatticeFormTriangleMesh",
+            Self::CoonsPatchMesh => "CoonsPatchMesh",
+            Self::TensorProductPatchMesh => "TensorProductPatchMesh",
+        };
+        f.write_str(name)
     }
 }
 
-impl ShadingType {
-    /// Attempts to create a `ShadingType` from an integer value, returning `None` if the
-    /// value is not a valid tiling type.
-    pub fn from_i32(val: i32) -> Option<Self> {
-        match val {
-            1 => Some(ShadingType::FunctionBased),
-            2 => Some(ShadingType::Axial),
-            3 => Some(ShadingType::Radial),
-            4 => Some(ShadingType::FreeFormTriangleMesh),
-            5 => Some(ShadingType::LatticeFormTriangleMesh),
-            6 => Some(ShadingType::CoonsPatchMesh),
-            7 => Some(ShadingType::TensorProductPatchMesh),
-            _ => None,
+impl TryFrom<i32> for ShadingType {
+    type Error = ShadingError;
+
+    /// Attempts to convert an integer to a `ShadingType`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ShadingError::InvalidShadingType`] if the value is not in the range 1-7.
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::FunctionBased),
+            2 => Ok(Self::Axial),
+            3 => Ok(Self::Radial),
+            4 => Ok(Self::FreeFormTriangleMesh),
+            5 => Ok(Self::LatticeFormTriangleMesh),
+            6 => Ok(Self::CoonsPatchMesh),
+            7 => Ok(Self::TensorProductPatchMesh),
+            _ => Err(ShadingError::InvalidShadingType(value)),
         }
-    }
-}
-
-pub struct ColorStops {
-    pub colors: Vec<Color>,
-    pub positions: Vec<f32>,
-}
-
-impl ColorStops {
-    pub fn from(function: &Function) -> Self {
-        // Number of stops to sample
-        const NUM_OF_STOPS: u16 = 16;
-
-        let domain = function.domain().unwrap_or([0.0, 1.0]);
-        let mut positions = vec![];
-        let mut colors = vec![];
-
-        for i in 0..NUM_OF_STOPS {
-            let t = f32::from(i) / f32::from(NUM_OF_STOPS);
-            let x = domain[0] + t * (domain[1] - domain[0]);
-            // Evaluate function at x to get color components.
-            let color_components = function
-                .interpolate(x)
-                .unwrap_or_else(|_| vec![0.0, 0.0, 0.0]);
-            // Convert to Color.
-            let color = Color::from_rgb(
-                color_components.first().copied().unwrap_or(0.0),
-                color_components.get(1).copied().unwrap_or(0.0),
-                color_components.get(2).copied().unwrap_or(0.0),
-            );
-            positions.push(t);
-            colors.push(color);
-        }
-        Self { colors, positions }
     }
 }
 
 /// Represents a PDF Shading object, which defines a smooth transition between colors
 /// across an area, used for creating gradient fills.
-#[derive(Debug)]
+///
+/// Shadings are used in PDF to create smooth color transitions (gradients) and are
+/// commonly used with patterns or the `sh` operator for filling areas.
+#[derive(Debug, Clone)]
 pub enum Shading {
-    /// A function-based shading, where the color at every point is defined
-    /// by a mathematical function of its coordinates.
+    /// Type 1: Function-based shading.
+    ///
+    /// The color at every point in the shading domain is defined by evaluating
+    /// one or more mathematical functions with the point's coordinates as input.
+    /// This allows for arbitrary color distributions defined mathematically.
     FunctionBased {
-        /// The color space in which the function's results are interpreted.
+        /// The color space in which the function's output values are interpreted.
+        /// If `None`, the color space may be inherited from context.
         color_space: Option<ColorSpace>,
-        /// An array of color components specifying a background color.
+
+        /// Optional background color as an array of color components.
+        /// Used to fill areas outside the shading's bounding box.
         background: Option<Vec<f32>>,
-        /// A rectangle specifying the domain of the shading.
-        bbox: Option<[f32; 4]>,
-        /// A flag indicating whether to apply anti-aliasing.
+
+        /// Optional bounding box `[x_min, y_min, x_max, y_max]` in the shading's
+        /// target coordinate space. Clips the shading to this rectangle.
+        bbox: Option<Rect>,
+
+        /// Whether to apply anti-aliasing to reduce visual artifacts.
         anti_alias: Option<bool>,
-        /// The domain of the function(s).
+
+        /// The domain rectangle `[x_min, x_max, y_min, y_max]` specifying the
+        /// valid input range for the function(s). Defaults to `[0, 1, 0, 1]`.
         domain: Option<Vec<f32>>,
-        /// A 2-in, n-out function or an array of n 2-in, 1-out functions
-        /// that define the color at each point.
+
+        /// One or more functions that define the color at each point.
+        /// - Single 2-in, n-out function: takes (x, y), returns n color components.
+        /// - Array of n 2-in, 1-out functions: each returns one color component.
         functions: Vec<Function>,
     },
-    /// An axial shading, where color transitions along a line between
-    /// two points, extending infinitely perpendicular to that line.
+
+    /// Type 2: Axial shading (linear gradient).
+    ///
+    /// Colors blend smoothly along a line between two points. The gradient
+    /// extends infinitely perpendicular to the axis line, with constant color
+    /// at any given distance along the axis.
     Axial {
         /// The color space in which color values are expressed.
         color_space: ColorSpace,
-        /// An array of four numbers `[x0, y0, x1, y1]` specifying the
-        /// starting and ending coordinates of the axis.
+
+        /// Axis coordinates `[x0, y0, x1, y1]` defining the gradient line.
+        /// - `(x0, y0)`: Starting point (parameter t=0).
+        /// - `(x1, y1)`: Ending point (parameter t=1).
         coords: [f32; 4],
-        /// A 1-in, n-out function that maps a parameter `t` (from 0.0 to 1.0)
-        /// along the axis to a color.
-        function: Function,
-        colors: Vec<Color>,
-        positions: Vec<f32>,
+
+        /// Pre-computed color stops for efficient rendering.
+        /// Sampled from the function at regular intervals.
+        color_stops: ColorStops,
     },
-    /// A radial shading, where color transitions between two circles.
+
+    /// Type 3: Radial shading (circular gradient).
+    ///
+    /// Colors blend between two circles, creating effects like cones, cylinders,
+    /// or spherical highlights. The circles need not be concentric.
     Radial {
         /// The color space in which color values are expressed.
         color_space: ColorSpace,
-        /// An array of six numbers `[x0, y0, r0, x1, y1, r1]` specifying
-        /// the centers and radii of the starting and ending circles.
+
+        /// Circle coordinates `[x0, y0, r0, x1, y1, r1]` defining the gradient.
+        /// - `(x0, y0, r0)`: Center and radius of the starting circle (t=0).
+        /// - `(x1, y1, r1)`: Center and radius of the ending circle (t=1).
         coords: [f32; 6],
-        /// A 1-in, n-out function that maps a parameter `t` (from 0.0 to 1.0)
-        /// between the circles to a color.
-        function: Function,
-        colors: Vec<Color>,
-        positions: Vec<f32>,
+
+        /// Pre-computed color stops for efficient rendering.
+        /// Sampled from the function at regular intervals.
+        color_stops: ColorStops,
+
+        /// Optional bounding box `[x_min, y_min, x_max, y_max]` in the shading's
+        /// target coordinate space. Clips the shading to this rectangle.
+        bbox: Option<Rect>,
     },
 }
 
-impl FromDictionary for Shading {
-    const KEY: &'static str = "Shading";
-    type ResultType = Self;
-    type ErrorType = ShadingError;
+impl Shading {
+    /// Returns the color space used by this shading, if available.
+    pub fn color_space(&self) -> Option<&ColorSpace> {
+        match self {
+            Self::FunctionBased { color_space, .. } => color_space.as_ref(),
+            Self::Axial { color_space, .. } | Self::Radial { color_space, .. } => Some(color_space),
+        }
+    }
+}
 
-    fn from_dictionary(
+impl Shading {
+    pub fn from_dictionary(
+        object: &ObjectVariant,
+        objects: &ObjectCollection,
+    ) -> Result<Self, ShadingError> {
+        // Extract and validate the required `/ShadingType` entry.
+        let dictionary = object.try_dictionary(objects)?;
+        let shading_type_value = dictionary.get_or_err("ShadingType")?.as_number::<i32>()?;
+        let shading_type = ShadingType::try_from(shading_type_value)?;
+
+        match shading_type {
+            ShadingType::FunctionBased => Self::parse_function_based(dictionary, objects),
+            ShadingType::Axial => Self::parse_axial(object, objects),
+            ShadingType::Radial => Self::parse_radial(object, objects),
+            // Mesh-based shadings are recognized but not yet implemented.
+            unsupported => Err(ShadingError::UnsupportedShadingType(unsupported)),
+        }
+    }
+}
+
+impl Shading {
+    /// Parses a Type 1 (function-based) shading from a dictionary.
+    fn parse_function_based(
         dictionary: &Dictionary,
         objects: &ObjectCollection,
-    ) -> Result<Self::ResultType, ShadingError> {
-        // Extract the required `/ShadingType` entry.
-        let shading_type = dictionary.get_or_err("ShadingType")?.as_number::<i32>()?;
+    ) -> Result<Self, ShadingError> {
+        // Read optional `/ColorSpace` entry.
+        let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
 
-        match ShadingType::from_i32(shading_type) {
-            Some(ShadingType::FunctionBased) => {
-                // Read optional `/ColorSpace` entry, which defines the color space for the shading.
-                let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
+        // Read optional `/Background` entry (array of color components).
+        let background = dictionary
+            .get("Background")
+            .map(ObjectVariant::as_vec_of::<f32>)
+            .transpose()?;
 
-                // Read optional `/Background` entry, specifying a background color as an array of numbers.
-                let background = dictionary
-                    .get("Background")
-                    .map(|obj| obj.as_vec_of::<f32>())
-                    .transpose()?;
+        // Read optional `/BBox` entry (clipping rectangle).
+        let bbox = dictionary
+            .get("BBox")
+            .map(ObjectVariant::as_array_of::<f32, 4>)
+            .transpose()?
+            .map(Rect::from);
 
-                // Read optional `/BBox` entry, which defines the bounding box for the shading.
-                let bbox = dictionary
-                    .get("BBox")
-                    .map(|obj| obj.as_array_of::<f32, 4>())
-                    .transpose()?;
+        // Read optional `/Domain` entry (function input range).
+        let domain = dictionary
+            .get("Domain")
+            .map(ObjectVariant::as_vec_of::<f32>)
+            .transpose()?;
 
-                // Read optional `/Domain` entry, specifying the valid input range for the function(s).
-                let domain = dictionary
-                    .get("Domain")
-                    .map(|obj| obj.as_vec_of::<f32>())
-                    .transpose()?;
+        // Read required `/Function` entry.
+        let functions = Self::parse_functions(dictionary, objects)?;
 
-                // Read required `/Function` entry, which may be a single function or an array of functions.
-                let functions = match objects.resolve_object(dictionary.get_or_err("Function")?)? {
-                    // If the `/Function` is an array, read each function object.
-                    obj if obj.is_array() => {
-                        let mut functions = Vec::new();
-                        if let Some(obj) = obj.as_array() {
-                            for value in obj.iter() {
-                                match objects.resolve_object(value)? {
-                                    ObjectVariant::Dictionary(dictionary) => {
-                                        functions.push(Function::from_dictionary(
-                                            dictionary, objects, None,
-                                        )?);
-                                    }
-                                    ObjectVariant::Stream(stream) => {
-                                        functions.push(Function::from_dictionary(
-                                            &stream.dictionary,
-                                            objects,
-                                            Some(&stream.data),
-                                        )?);
-                                    }
-                                    obj => {
-                                        return Err(ShadingError::InvalidEntryType {
-                                            entry_name: "Function",
-                                            expected_type: "Dictionary or Stream",
-                                            found_type: obj.name(),
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                        functions
-                    }
-                    // If `/Function` is a single object, read it directly.
-                    obj => {
-                        let function = match objects.resolve_object(obj)? {
-                            ObjectVariant::Dictionary(dictionary) => {
-                                Function::from_dictionary(dictionary, objects, None)?
-                            }
-                            ObjectVariant::Stream(stream) => Function::from_dictionary(
-                                &stream.dictionary,
-                                objects,
-                                Some(&stream.data),
-                            )?,
-                            obj => {
-                                return Err(ShadingError::InvalidEntryType {
-                                    entry_name: "Function",
-                                    expected_type: "Dictionary or Stream",
-                                    found_type: obj.name(),
-                                });
-                            }
-                        };
-                        vec![function]
-                    }
-                };
+        Ok(Self::FunctionBased {
+            color_space,
+            background,
+            bbox,
+            anti_alias: None,
+            domain,
+            functions,
+        })
+    }
 
-                Ok(Shading::FunctionBased {
-                    color_space,
-                    background,
-                    bbox,
-                    anti_alias: None,
-                    domain,
-                    functions,
-                })
-            }
-            Some(ShadingType::Axial) => {
-                // Read required `/Coords` entry, which defines the axis for the gradient.
-                let coords = dictionary.get_or_err("Coords")?.as_array_of::<f32, 4>()?;
+    /// Parses a Type 2 (axial) shading from a dictionary.
+    fn parse_axial(
+        object: &ObjectVariant,
+        objects: &ObjectCollection,
+    ) -> Result<Self, ShadingError> {
+        // Read required `/Coords` entry defining the gradient axis.
+        let dictionary = object.try_dictionary(objects)?;
+        let coords = dictionary.get_or_err("Coords")?.as_array_of::<f32, 4>()?;
 
-                // Read required `/ColorSpace` entry.
-                let color_space = ColorSpace::from_dictionary(dictionary, objects)?.ok_or(
-                    ShadingError::MissingRequiredEntry {
-                        entry_name: "ColorSpace",
-                    },
-                )?;
+        // Read required `/ColorSpace` entry.
+        let color_space = ColorSpace::from_dictionary(dictionary, objects)?.ok_or(
+            ShadingError::MissingRequiredEntry {
+                entry_name: "ColorSpace",
+            },
+        )?;
 
-                // Read required `/Function` entry as a dictionary.
-                let function = Function::from_dictionary(
-                    dictionary.get_or_err("Function")?.try_dictionary(objects)?,
-                    objects,
-                    None,
-                )?;
+        // Read required `/Function` entry.
+        let object = dictionary.get_or_err("Function")?;
+        let function = Function::parse(object, objects)?;
 
-                let ColorStops { colors, positions } = ColorStops::from(&function);
+        // Pre-compute color stops for efficient rendering.
+        let color_stops = ColorStops::from_function(&function, &color_space)?;
 
-                Ok(Shading::Axial {
-                    color_space,
-                    function,
-                    coords,
-                    colors,
-                    positions,
-                })
-            }
-            Some(ShadingType::Radial) => {
-                // Read required `/Coords` entry, which defines the two circles for the radial gradient.
-                let coords = dictionary.get_or_err("Coords")?.as_array_of::<f32, 6>()?;
+        Ok(Self::Axial {
+            color_space,
+            coords,
+            color_stops,
+        })
+    }
 
-                // Read required `/ColorSpace` entry.
-                let color_space = ColorSpace::from_dictionary(dictionary, objects)?.ok_or(
-                    ShadingError::MissingRequiredEntry {
-                        entry_name: "ColorSpace",
-                    },
-                )?;
+    /// Parses a Type 3 (radial) shading from a dictionary.
+    fn parse_radial(
+        object: &ObjectVariant,
+        objects: &ObjectCollection,
+    ) -> Result<Self, ShadingError> {
+        // Read required `/Coords` entry defining the two circles.
+        let dictionary = object.try_dictionary(objects)?;
+        let coords = dictionary.get_or_err("Coords")?.as_array_of::<f32, 6>()?;
 
-                // Read required `/Function` entry as a dictionary.
-                let function = Function::from_dictionary(
-                    dictionary.get_or_err("Function")?.try_dictionary(objects)?,
-                    objects,
-                    None,
-                )?;
+        // Read required `/ColorSpace` entry.
+        let color_space = ColorSpace::from_dictionary(dictionary, objects)?.ok_or(
+            ShadingError::MissingRequiredEntry {
+                entry_name: "ColorSpace",
+            },
+        )?;
 
-                let ColorStops { colors, positions } = ColorStops::from(&function);
+        // Read optional `/BBox` entry.
+        let bbox = dictionary
+            .get("BBox")
+            .map(ObjectVariant::as_array_of::<f32, 4>)
+            .transpose()?
+            .map(Rect::from);
 
-                Ok(Shading::Radial {
-                    color_space,
-                    function,
-                    coords,
-                    colors,
-                    positions,
-                })
-            }
-            // If the shading type is not recognized, return an error.
-            _ => Err(ShadingError::InvalidShadingType(shading_type)),
+        // Read required `/Function` entry.
+        let object = dictionary.get_or_err("Function")?;
+        let function = Function::parse(object, objects)?;
+
+        // Pre-compute color stops for efficient rendering.
+        let color_stops = ColorStops::from_function(&function, &color_space)?;
+
+        Ok(Self::Radial {
+            color_space,
+            coords,
+            color_stops,
+            bbox,
+        })
+    }
+
+    /// Parses one or more functions from the `/Function` entry.
+    ///
+    /// The `/Function` entry may be either:
+    /// - A single function (dictionary or stream)
+    /// - An array of functions
+    fn parse_functions(
+        dictionary: &Dictionary,
+        objects: &ObjectCollection,
+    ) -> Result<Vec<Function>, ShadingError> {
+        let function_obj = objects.resolve_object(dictionary.get_or_err("Function")?)?;
+
+        if let ObjectVariant::Array(array) = function_obj {
+            // Parse array of functions.
+            array
+                .iter()
+                .map(|value| Function::parse(value, objects).map_err(ShadingError::from))
+                .collect()
+        } else {
+            // Parse single function.
+            let function = Function::parse(function_obj, objects)?;
+            Ok(vec![function])
+        }
+    }
+}
+
+impl Shading {
+    pub fn bbox(&self) -> Option<&Rect> {
+        match self {
+            Shading::FunctionBased { bbox, .. } => bbox.as_ref(),
+            Shading::Radial { bbox, .. } => bbox.as_ref(),
+            _ => None,
         }
     }
 }

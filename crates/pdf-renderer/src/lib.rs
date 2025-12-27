@@ -50,7 +50,7 @@ impl<'a, 'b, T: std::error::Error> PdfRenderer<'a, 'b, T> {
         };
         let mut canvas = PdfCanvas::new(self.canvas, page, None)?;
         if let Some(cs) = &page.contents {
-            canvas.render_content_stream(&cs.operations, None, page.resources.as_ref())?;
+            canvas.render_content_stream(&cs.operations, None, None, page.resources.as_ref())?;
         }
         Ok(())
     }

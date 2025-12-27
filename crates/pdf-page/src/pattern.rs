@@ -1,4 +1,4 @@
-use pdf_graphics::transform::Transform;
+use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     traits::FromDictionary,
@@ -8,7 +8,7 @@ use thiserror::Error;
 use crate::{
     content_stream::ContentStream,
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateError},
-    matrix::{Matrix, MatrixReadError},
+    matrix::Matrix,
     resources::{Resources, ResourcesError},
     shading::{Shading, ShadingError},
 };
@@ -22,8 +22,6 @@ pub enum PatternError {
     InvalidPatternType(i32),
     #[error("Invalid value for key '{key}': {value}")]
     InvalidValue { key: &'static str, value: String },
-    #[error("Error parsing /Matrix: {0}")]
-    InvalidMatrix(#[from] MatrixReadError),
     #[error("Failed to parse resources for page: {err}")]
     ResourcesParse { err: Box<ResourcesError> },
     #[error("External Graphics State parsing error: {0}")]
@@ -116,7 +114,7 @@ pub enum Pattern {
         /// Controls how the spacing of tiles is adjusted.
         tiling_type: TilingType,
         /// The bounding box of the pattern cell, defining its size.
-        bbox: [f32; 4],
+        bbox: Rect,
         /// The horizontal spacing between adjacent tiles.
         x_step: f32,
         /// The vertical spacing between adjacent tiles.
@@ -176,7 +174,10 @@ impl Pattern {
                 })?;
 
                 // Read the `/BBox` entry.
-                let bbox = dictionary.get_or_err("BBox")?.as_array_of::<f32, 4>()?;
+                let bbox = dictionary
+                    .get_or_err("BBox")?
+                    .as_array_of::<f32, 4>()?
+                    .into();
 
                 // Read the `/XStep` entry.
                 let x_step = dictionary
@@ -214,7 +215,7 @@ impl Pattern {
                 })
             }
             Some(PatternType::Shading) => {
-                let shading_dict = objects.resolve_dictionary(dictionary.get_or_err("Shading")?)?;
+                let shading_dict = objects.resolve_object(dictionary.get_or_err("Shading")?)?;
                 // Read the shading object that defines the gradient fill.
                 let shading = Shading::from_dictionary(shading_dict, objects)?;
 

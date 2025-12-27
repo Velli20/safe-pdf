@@ -2,7 +2,6 @@ use pdf_object::error::ObjectError;
 use pdf_object::{
     dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
 };
-use thiserror::Error;
 
 /// Defines the page boundaries within a PDF document.
 ///
@@ -12,63 +11,46 @@ use thiserror::Error;
 #[derive(Default, Debug, Clone)]
 pub struct MediaBox {
     /// The x-coordinate of the lower-left corner of the rectangle.
-    pub left: u32,
+    pub left: f32,
     /// The y-coordinate of the upper-right corner of the rectangle.
-    pub top: u32,
+    pub top: f32,
     /// The x-coordinate of the upper-right corner of the rectangle.
-    pub right: u32,
+    pub right: f32,
     /// The y-coordinate of the lower-left corner of the rectangle.
-    pub bottom: u32,
+    pub bottom: f32,
 }
 
 impl MediaBox {
-    pub fn new(left: u32, top: u32, right: u32, bottom: u32) -> Self {
-        MediaBox {
-            left,
-            top,
-            right,
-            bottom,
-        }
+    pub fn width(&self) -> f32 {
+        self.right - self.left
     }
 
-    pub fn width(&self) -> u32 {
-        self.right.saturating_sub(self.left)
+    pub fn height(&self) -> f32 {
+        self.top - self.bottom
     }
-
-    pub fn height(&self) -> u32 {
-        self.top.saturating_sub(self.bottom)
-    }
-}
-
-/// Defines errors that can occur while parsing a MediaBox.
-#[derive(Debug, Error, Clone, PartialEq)]
-pub enum MediaBoxError {
-    #[error("Error parsing MediaBox: {0}")]
-    ObjectError(#[from] ObjectError),
 }
 
 impl FromDictionary for MediaBox {
     const KEY: &'static str = "MediaBox";
     type ResultType = Option<MediaBox>;
-    type ErrorType = MediaBoxError;
+    type ErrorType = ObjectError;
 
     fn from_dictionary(
         dictionary: &Dictionary,
         _objects: &ObjectCollection,
-    ) -> Result<Self::ResultType, MediaBoxError> {
+    ) -> Result<Self::ResultType, Self::ErrorType> {
         let Some(media_box_obj) = dictionary.get(Self::KEY) else {
-            // MediaBox can be inherited; if not present directly, it's not an error here.
             return Ok(None);
         };
 
         // PDF MediaBox is an array of four numbers: [LLx, LLy, URx, URy]
-        let bounds = media_box_obj.as_array_of::<u32, 4>()?;
+        let [left, bottom, right, top] = media_box_obj.as_array_of::<f32, 4>()?;
 
-        let left = bounds[0];
-        let bottom = bounds[1];
-        let right = bounds[2];
-        let top = bounds[3];
-
-        Ok(Some(MediaBox::new(left, top, right, bottom)))
+        Ok(Some(MediaBox {
+            left,
+            top,
+            right,
+            bottom,
+        }))
     }
 }

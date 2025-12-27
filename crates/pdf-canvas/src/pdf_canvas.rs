@@ -1,13 +1,14 @@
-use num_traits::FromPrimitive;
 use pdf_content_stream::pdf_operator::PdfOperatorVariant;
-use pdf_graphics::{MaskMode, PaintMode, PathFillType, pdf_path::PdfPath, transform::Transform};
+use pdf_graphics::{
+    MaskMode, PaintMode, PathFillType, pdf_path::PdfPath, rect::Rect, transform::Transform,
+};
 use pdf_page::{page::PdfPage, pattern::Pattern, resources::Resources, shading::Shading};
 
 use crate::{
     canvas_backend::{CanvasBackend, Shader},
     canvas_state::CanvasState,
     error::PdfCanvasError,
-    recording_canvas::RecordingCanvas,
+    recording_canvas::{RecordingCanvas, RecordingCanvasError},
     text_state::TextState,
 };
 
@@ -17,7 +18,7 @@ pub struct PdfCanvas<'a, T> {
     /// The drawing backend implementing `CanvasBackend` for rendering operations.
     pub(crate) canvas: &'a mut dyn CanvasBackend<ErrorType = T>,
     /// An optional mask surface for advanced compositing or clipping.
-    pub(crate) mask: Option<(Box<RecordingCanvas>, MaskMode)>,
+    pub(crate) mask: Option<(Box<RecordingCanvas>, MaskMode, Transform)>,
     /// The PDF page associated with this canvas.
     pub(crate) page: &'a PdfPage,
     /// The stack of graphics states, supporting save/restore semantics.
@@ -42,19 +43,14 @@ where
     pub fn new(
         backend: &'a mut dyn CanvasBackend<ErrorType = T>,
         page: &'a PdfPage,
-        bb: Option<&[f32; 4]>,
+        bb: Option<&Rect>,
     ) -> Result<Self, PdfCanvasError> {
         let media_box = &page.media_box;
 
         let (pdf_media_width, pdf_media_height) = if let Some(bb) = bb {
-            (bb[2] - bb[0], bb[3] - bb[1])
+            (bb.width(), bb.height())
         } else if let Some(mb) = media_box.as_ref() {
-            (
-                f32::from_u32(mb.width())
-                    .ok_or(PdfCanvasError::NumericConversionError("u32 to f32 width"))?,
-                f32::from_u32(mb.height())
-                    .ok_or(PdfCanvasError::NumericConversionError("u32 to f32 height"))?,
-            )
+            (mb.width(), mb.height())
         } else {
             (0.0, 0.0)
         };
@@ -80,7 +76,7 @@ where
         // 1. Scales them: (px * scale_x, py * scale_y)
         // 2. Flips the Y-axis and translates it: Y_canvas = backend_canvas_height - (py * scale_y)
         // Resulting canvas coordinates: (px * scale_x, backend_canvas_height - py * scale_y)
-        let userspace_matrix = Transform::from_row(
+        let transform = Transform::from_row(
             scale_x,               // sx: Scale X
             0.0,                   // ky: Skew Y (none)
             0.0,                   // kx: Skew X (none)
@@ -90,7 +86,7 @@ where
         );
 
         let canvas_stack = vec![CanvasState {
-            transform: userspace_matrix,
+            transform,
             text_state: TextState::default(),
             ..Default::default()
         }];
@@ -102,6 +98,79 @@ where
             page,
             canvas_stack,
         })
+    }
+
+    /// Records a PDF content stream into an offscreen [`RecordingCanvas`].
+    ///
+    /// This helper is intended for rendering intermediate layers (e.g. pattern tiles or mask
+    /// layers) into a temporary surface that will later be consumed by a backend client.
+    ///
+    /// **Coordinate system**
+    ///
+    /// Unlike [`PdfCanvas::new`], which flips the Y axis to map PDF user space (origin at
+    /// bottom-left) into a typical device space, this method renders into a coordinate system
+    /// whose origin is the **top-left** (device-style, like Skia).
+    ///
+    /// Concretely, the initial transformation matrix is constructed to:
+    ///
+    /// - scale the form/pattern `bbox` to exactly fit `recording_canvas` (independently in X/Y)
+    /// - **not** apply a Y-axis flip
+    /// - start with no translation; clipping is applied by `render_content_stream` when `bbox`
+    ///   is provided
+    ///
+    /// This matches the expectation that the consumer of the resulting `RecordingCanvas`
+    /// (e.g. a shader/mask client in the backend) also uses a top-left-origin coordinate system.
+    ///
+    /// # Parameters
+    ///
+    /// - `recording_canvas`: Target offscreen canvas to record into.
+    /// - `operations`: Parsed operator list to execute.
+    /// - `mat`: Optional additional matrix (applied like a PDF `cm` / XObject `/Matrix`).
+    /// - `bbox`: The content-space bounding box to map to the recording surface.
+    /// - `resources`: Optional resource dictionary for resolving fonts, patterns, etc.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdfCanvasError`] if rendering fails or the stream contains unsupported
+    /// operations.
+    pub(crate) fn record_content_stream(
+        &self,
+        recording_canvas: &mut RecordingCanvas,
+        operations: &[PdfOperatorVariant],
+        mat: Option<Transform>,
+        bbox: &Rect,
+        resources: Option<&'a Resources>,
+    ) -> Result<(), PdfCanvasError> {
+        // Calculate scale factors.
+        let scale_x = recording_canvas.width() / bbox.width();
+        let scale_y = recording_canvas.height() / bbox.height();
+
+        // Directly construct the userspace transformation matrix.
+        let transform = Transform::from_row(
+            scale_x, // sx: Scale X
+            0.0,     // ky: Skew Y (none)
+            0.0,     // kx: Skew X (none)
+            scale_y, // sy: Scale Y
+            0.0,     // tx: Translate X (none)
+            0.0,     // ty: Translate Y (none)
+        );
+
+        let canvas_stack = vec![CanvasState {
+            transform,
+            text_state: TextState::default(),
+            ..Default::default()
+        }];
+
+        let mut other: PdfCanvas<'_, RecordingCanvasError> = PdfCanvas {
+            current_path: None,
+            canvas: recording_canvas,
+            mask: None,
+            page: self.page,
+            canvas_stack,
+        };
+
+        // Render the form's content stream into the mask canvas.
+        other.render_content_stream(operations, mat, Some(bbox), resources)
     }
 
     /// Returns a reference to the current graphics state on the stack.
@@ -127,8 +196,6 @@ where
     }
 
     /// Builds a shader from a shading pattern definition (Axial / Radial / FunctionBased).
-    /// Returns `None` when the shading type isn't yet supported or not applicable.
-    /// Builds a `Shader` from a PDF shading pattern definition (Axial, Radial, or FunctionBased).
     ///
     /// # Parameters
     ///
@@ -138,47 +205,40 @@ where
     /// # Returns
     ///
     /// An appropriate `Shader` if supported, or an error if not implemented.
-    fn build_shading_shader<'b>(
+    pub(crate) fn build_shading_shader<'b>(
         &mut self,
         shading: &'b Shading,
-        matrix: &Option<Transform>,
+        transform: &Option<Transform>,
     ) -> Result<Shader<'b>, PdfCanvasError> {
         match shading {
             Shading::Axial {
                 coords: [x0, y0, x1, y1],
-                positions,
-                colors,
+                color_stops,
                 ..
             } => Ok(Shader::LinearGradient {
                 x0: *x0,
                 y0: *y0,
                 x1: *x1,
                 y1: *y1,
-                colors,
-                positions,
+                colors: &color_stops.colors,
+                transform: *transform,
+                positions: &color_stops.positions,
             }),
             Shading::Radial {
                 coords: [start_x, start_y, start_r, end_x, end_y, end_r],
-                positions,
-                colors,
+                color_stops,
                 ..
-            } => {
-                let transform = matrix.map(|mut mat| {
-                    mat.ty = self.canvas.height() - mat.ty;
-                    mat
-                });
-                Ok(Shader::RadialGradient {
-                    start_x: *start_x,
-                    start_y: *start_y,
-                    start_r: *start_r,
-                    end_x: *end_x,
-                    end_y: *end_y,
-                    end_r: *end_r,
-                    transform,
-                    colors,
-                    positions,
-                })
-            }
+            } => Ok(Shader::RadialGradient {
+                start_x: *start_x,
+                start_y: *start_y,
+                start_r: *start_r,
+                end_x: *end_x,
+                end_y: *end_y,
+                end_r: *end_r,
+                transform: *transform,
+                colors: &color_stops.colors,
+                positions: &color_stops.positions,
+            }),
             Shading::FunctionBased { .. } => Err(PdfCanvasError::NotImplemented(
                 "FunctionBased shading not implemented".into(),
             )),
@@ -199,27 +259,52 @@ where
             Pattern::Shading {
                 shading, matrix, ..
             } => {
-                let shader = self.build_shading_shader(shading, matrix)?;
+                let device_height = self.canvas.height();
+                let mut shader_transform = Transform::from_row(
+                    1.0,           // sx: keep X scale
+                    0.0,           // ky: no skew
+                    0.0,           // kx: no skew
+                    -1.0,          // sy: flip Y (PDF up -> device down)
+                    0.0,           // tx: no translation in X
+                    device_height, // ty: translate after Y flip to keep content on-canvas
+                );
+
+                if let Some(pattern_matrix) = matrix {
+                    shader_transform.post_concat(pattern_matrix);
+                }
+
+                let shader = self.build_shading_shader(shading, &Some(shader_transform))?;
                 Ok(Some(shader))
             }
             Pattern::Tiling {
                 bbox,
                 resources,
                 content_stream,
+                matrix,
                 ..
             } => {
                 // Create a recording canvas to render the tiling pattern.
-                let mut recording_canvas =
-                    RecordingCanvas::new(bbox[2] - bbox[0], bbox[3] - bbox[1]);
+                let mut recording_canvas = RecordingCanvas::new(bbox.width(), bbox.height());
 
                 // Render the tiling content into a temporary canvas.
-                let mut other = PdfCanvas::new(&mut recording_canvas, self.page, Some(bbox))?;
-                other.render_content_stream(&content_stream.operations, None, Some(resources))?;
+                self.record_content_stream(
+                    &mut recording_canvas,
+                    &content_stream.operations,
+                    None,
+                    bbox,
+                    Some(resources),
+                )?;
+
+                // The tiling pattern's `/Matrix` maps pattern space -> user space.
+                // We pass it through unchanged and let the backend concatenate it with
+                // the current CTM when sampling the pattern.
+                let transform = *matrix;
+
                 let shader = Shader::TilingPatternImage {
                     image: Box::new(recording_canvas),
-                    transform: None,
-                    x_step: bbox[2] - bbox[0],
-                    y_step: bbox[3] - bbox[1],
+                    transform,
+                    x_step: bbox.width(),
+                    y_step: bbox.height(),
                 };
                 Ok(Some(shader))
             }
@@ -339,19 +424,10 @@ where
     /// Returns an error if the pattern is not found in the resources.
     pub(crate) fn set_pattern(&mut self, pattern_name: &str) -> Result<(), PdfCanvasError> {
         let Some(pattern) = self
-            .page
+            .current_state()?
             .resources
-            .as_ref()
             .and_then(|r| r.patterns.get(pattern_name))
         else {
-            if let Some(pattern) = self
-                .current_state()?
-                .resources
-                .and_then(|r| r.patterns.get(pattern_name))
-            {
-                self.current_state_mut()?.pattern = Some(pattern);
-                return Ok(());
-            }
             return Err(PdfCanvasError::PatternNotFound(pattern_name.to_string()));
         };
 
@@ -374,6 +450,7 @@ where
         &mut self,
         operations: &[PdfOperatorVariant],
         mat: Option<Transform>,
+        bbox: Option<&Rect>,
         resources: Option<&'a Resources>,
     ) -> Result<(), PdfCanvasError> {
         self.save()?;
@@ -384,6 +461,18 @@ where
             // concatenation like the 'cm' operator does. The operation is:
             //   CTM' = CTM * FormMatrix
             self.current_state_mut()?.transform.post_concat(&mat);
+        }
+
+        if let Some(bbox) = bbox {
+            // Set up a clipping path based on the bounding box.
+            let mut clip_path = PdfPath::default();
+            clip_path.move_to(bbox.left, bbox.top);
+            clip_path.line_to(bbox.right, bbox.top);
+            clip_path.line_to(bbox.right, bbox.bottom);
+            clip_path.line_to(bbox.left, bbox.bottom);
+            clip_path.close();
+
+            self.set_clip_path(clip_path, PathFillType::EvenOdd)?;
         }
 
         if let Some(resources) = resources {
@@ -413,10 +502,11 @@ where
     ///
     /// If the restored state included a clipping path, the clipping path is reset on the backend.
     pub(crate) fn restore(&mut self) -> Result<(), PdfCanvasError> {
-        let prev = self.canvas_stack.pop();
-        if let Some(state) = prev
-            && state.clip_path.is_some()
-        {
+        let Some(state) = self.canvas_stack.pop() else {
+            return Ok(());
+        };
+
+        if state.clip_path.is_some() {
             self.canvas
                 .reset_clip()
                 .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;

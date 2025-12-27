@@ -48,6 +48,7 @@ enum RecordedShader {
         y1: f32,
         colors: Vec<Color>,
         positions: Vec<f32>,
+        transform: Option<Transform>,
     },
     TilingPatternImage {
         image: Box<RecordingCanvas>,
@@ -78,6 +79,7 @@ impl From<&Shader<'_>> for RecordedShader {
                 y1,
                 colors,
                 positions,
+                transform,
             } => Self::LinearGradient {
                 x0: *x0,
                 y0: *y0,
@@ -85,6 +87,7 @@ impl From<&Shader<'_>> for RecordedShader {
                 y1: *y1,
                 colors: (*colors).to_vec(),
                 positions: (*positions).to_vec(),
+                transform: *transform,
             },
             Shader::TilingPatternImage {
                 image,
@@ -171,9 +174,9 @@ enum RecordingCommand {
 #[derive(Clone)]
 pub struct RecordingCanvas {
     /// Logical canvas width used for layout and coordinate space.
-    width: f32,
+    pub width: f32,
     /// Logical canvas height used for layout and coordinate space.
-    height: f32,
+    pub height: f32,
     /// Ordered list of recorded drawing commands.
     commands: Vec<RecordingCommand>,
 }
@@ -223,6 +226,7 @@ impl RecordingCanvas {
                             y1,
                             colors,
                             positions,
+                            transform,
                         } => Shader::LinearGradient {
                             x0: *x0,
                             y0: *y0,
@@ -230,6 +234,7 @@ impl RecordingCanvas {
                             y1: *y1,
                             colors,
                             positions,
+                            transform: *transform,
                         },
                         RecordedShader::TilingPatternImage {
                             image,
@@ -281,6 +286,7 @@ impl RecordingCanvas {
                             y1,
                             colors,
                             positions,
+                            transform,
                         } => Shader::LinearGradient {
                             x0: *x0,
                             y0: *y0,
@@ -288,6 +294,7 @@ impl RecordingCanvas {
                             y1: *y1,
                             colors,
                             positions,
+                            transform: *transform,
                         },
                         RecordedShader::TilingPatternImage {
                             image,

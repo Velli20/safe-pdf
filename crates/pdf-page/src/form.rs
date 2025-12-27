@@ -1,4 +1,5 @@
 use pdf_content_stream::error::PdfOperatorError;
+use pdf_graphics::rect::Rect;
 use pdf_graphics::transform::Transform;
 use pdf_object::error::ObjectError;
 use pdf_object::{
@@ -7,25 +8,17 @@ use pdf_object::{
 use thiserror::Error;
 
 use crate::content_stream::ContentStream;
-use crate::matrix::{Matrix, MatrixReadError};
+use crate::matrix::Matrix;
 use crate::resources::{Resources, ResourcesError};
 use crate::xobject::XObjectReader;
 
 /// Errors that can occur during parsing of a Form XObject.
 #[derive(Debug, Error)]
 pub enum FormXObjectError {
-    #[error("Invalid type for entry '{entry_name}': expected {expected_type}, found {found_type}")]
-    InvalidEntryType {
-        entry_name: &'static str,
-        expected_type: &'static str,
-        found_type: &'static str,
-    },
     #[error("Error parsing /Resources: {source}")]
     ResourcesError { source: Box<ResourcesError> },
     #[error("Error parsing content stream: {0}")]
     ContentStreamError(#[from] PdfOperatorError),
-    #[error("Error parsing /Matrix: {0}")]
-    MatrixReadError(#[from] MatrixReadError),
     #[error("{0}")]
     ObjectError(#[from] ObjectError),
 }
@@ -33,7 +26,7 @@ pub enum FormXObjectError {
 /// Represents a PDF Form XObject.
 pub struct FormXObject {
     /// The bounding box of the form.
-    pub bbox: [f32; 4],
+    pub bbox: Rect,
     /// Optional transformation matrix.
     pub matrix: Option<Transform>,
     /// Resources used by the form.
@@ -52,7 +45,7 @@ impl XObjectReader for FormXObject {
         objects: &ObjectCollection,
     ) -> Result<Self, FormXObjectError> {
         // Retrieve the `/BBox` entry.
-        let bbox = dictionary.get_or_err("BBox")?.as_array_of::<f32, 4>()?;
+        let bbox = Rect::from(dictionary.get_or_err("BBox")?.as_array_of::<f32, 4>()?);
 
         // Retrieve the `/Matrix` entry if present.
         let matrix = Matrix::from_dictionary(dictionary, objects)?;

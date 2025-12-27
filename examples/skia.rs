@@ -145,7 +145,7 @@ fn derive_initial_window_size(doc: &PdfDocument) -> (u32, u32) {
         None => return DEFAULT,
     };
     if let Some(mb) = &page.media_box {
-        (mb.width().max(1), mb.height().max(1))
+        (mb.width().max(1.0) as u32, mb.height().max(1.0) as u32)
     } else {
         DEFAULT
     }
@@ -281,7 +281,7 @@ fn run(settings: AppSettings) {
         pdf_document: Arc<PdfDocument>,
         pdf_logic: PdfPageRendererLogic,
     }
-    let mut pdf_logic = PdfPageRendererLogic::new();
+    let mut pdf_logic = PdfPageRendererLogic::default();
     pdf_logic.on_init();
     struct Application {
         env: Env,
@@ -431,13 +431,9 @@ pub trait AppRenderer<C> {
     );
 }
 
+#[derive(Default)]
 struct PdfPageRendererLogic {
     current_page: usize,
-}
-impl PdfPageRendererLogic {
-    fn new() -> Self {
-        Self { current_page: 0 }
-    }
 }
 
 impl AppRenderer<skia_safe::Surface> for PdfPageRendererLogic {
