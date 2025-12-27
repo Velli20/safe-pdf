@@ -5,7 +5,7 @@
 
 use std::rc::Rc;
 
-use pdf_graphics::{LineCap, LineJoin, TextRenderingMode};
+use pdf_graphics::{LineCap, LineJoin, TextRenderingMode, transform::Transform};
 use pdf_object::dictionary::Dictionary;
 
 use crate::TextElement;
@@ -232,25 +232,12 @@ pub trait GraphicsStateOps: PdfOperatorBackendError {
     ///
     /// # Parameters
     ///
-    /// - `a`: Horizontal scaling.
-    /// - `b`: Skewing factor; affects the y-coordinate based on the x-coordinate.
-    /// - `c`: Skewing factor; affects the x-coordinate based on the y-coordinate.
-    /// - `d`: Vertical scaling.
-    /// - `e`: Horizontal translation.
-    /// - `f`: Vertical translation.
+    /// - `transform`: The transformation matrix to concatenate with the current CTM.
     ///
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn concat_matrix(
-        &mut self,
-        a: f32,
-        b: f32,
-        c: f32,
-        d: f32,
-        e: f32,
-        f: f32,
-    ) -> Result<(), Self::ErrorType>;
+    fn concat_matrix(&mut self, transform: &Transform) -> Result<(), Self::ErrorType>;
 
     /// Sets the line width for path stroking.
     ///
@@ -649,20 +636,15 @@ pub trait TextPositioningOps: PdfOperatorBackendError {
     ) -> Result<(), Self::ErrorType>;
 
     /// Sets the text matrix and text line matrix.
-    /// The matrix is `[a b c d e f]`.
+    ///
+    /// # Parameters
+    ///
+    /// - `transform`: The transformation matrix to set as the text matrix and text line matrix.
     ///
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn set_text_matrix(
-        &mut self,
-        a: f32,
-        b: f32,
-        c: f32,
-        d: f32,
-        e: f32,
-        f: f32,
-    ) -> Result<(), Self::ErrorType>;
+    fn set_text_matrix(&mut self, transform: &Transform) -> Result<(), Self::ErrorType>;
 
     /// Moves to the start of the next text line, using the current text leading.
     ///

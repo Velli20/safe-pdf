@@ -13,29 +13,13 @@ impl<T: std::error::Error> GraphicsStateOps for PdfCanvas<'_, T> {
         self.restore()
     }
 
-    fn concat_matrix(
-        &mut self,
-        a: f32,
-        b: f32,
-        c: f32,
-        d: f32,
-        e: f32,
-        f: f32,
-    ) -> Result<(), Self::ErrorType> {
-        // PDF 'cm' operator: Update the current transformation matrix (CTM) by
-        // left-multiplying it with the provided matrix [a b c d e f].
-        // New CTM = M_incoming × CTM_old
-        // Build the incoming transform from row values.
-        let mut incoming = Transform::from_row(a, b, c, d, e, f);
-
-        // Access current state once; copy out the old CTM (Transform is small/Copy).
-        let state = self.current_state_mut()?;
-
-        // Concatenate in the correct order per PDF spec (left-multiply).
-        incoming.concat(&state.transform);
-
-        // Store the updated CTM back into state.
-        state.transform = incoming;
+    fn concat_matrix(&mut self, transform: &Transform) -> Result<(), Self::ErrorType> {
+        // PDF 'cm' operator: update the current transformation matrix (CTM) by
+        // concatenating the provided matrix [a b c d e f] onto the current CTM.
+        //
+        // With our `Transform` convention, `post_concat` performs a post-multiply:
+        //   CTM_new = CTM_old × M_incoming
+        self.current_state_mut()?.transform.post_concat(transform);
         Ok(())
     }
 

@@ -1,5 +1,5 @@
 use num_traits::FromPrimitive;
-use pdf_graphics::{LineCap, LineJoin};
+use pdf_graphics::{LineCap, LineJoin, transform::Transform};
 
 use crate::{
     error::PdfOperatorError,
@@ -266,13 +266,16 @@ impl PdfOperator for RestoreGraphicsState {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConcatMatrix {
     /// The matrix to concatenate with the CTM.
-    /// Represented as `[a, b, c, d, e, f]`.
-    matrix: [f32; 6],
+    matrix: Transform,
 }
 
 impl ConcatMatrix {
     pub fn new(matrix: [f32; 6]) -> Self {
-        Self { matrix }
+        Self {
+            matrix: Transform::from_row(
+                matrix[0], matrix[1], matrix[2], matrix[3], matrix[4], matrix[5],
+            ),
+        }
     }
 }
 
@@ -294,14 +297,7 @@ impl PdfOperator for ConcatMatrix {
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        backend.concat_matrix(
-            self.matrix[0],
-            self.matrix[1],
-            self.matrix[2],
-            self.matrix[3],
-            self.matrix[4],
-            self.matrix[5],
-        )
+        backend.concat_matrix(&self.matrix)
     }
 }
 
