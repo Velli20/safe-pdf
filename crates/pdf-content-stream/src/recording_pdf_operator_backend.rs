@@ -3,6 +3,7 @@ use std::rc::Rc;
 use pdf_graphics::LineCap;
 use pdf_graphics::LineJoin;
 use pdf_graphics::TextRenderingMode;
+use pdf_graphics::transform::Transform;
 use pdf_object::dictionary::Dictionary;
 use thiserror::Error;
 
@@ -61,12 +62,7 @@ pub enum RecordedOperation {
     SaveGraphicsState,
     RestoreGraphicsState,
     ConcatMatrix {
-        a: f32,
-        b: f32,
-        c: f32,
-        d: f32,
-        e: f32,
-        f: f32,
+        transform: Transform,
     },
     SetLineWidth {
         width: f32,
@@ -174,12 +170,7 @@ pub enum RecordedOperation {
         ty: f32,
     },
     SetTextMatrix {
-        a: f32,
-        b: f32,
-        c: f32,
-        d: f32,
-        e: f32,
-        f: f32,
+        transform: Transform,
     },
     MoveToStartOfNextLine,
     ShowText {
@@ -380,17 +371,10 @@ impl GraphicsStateOps for RecordingBackend {
         Ok(())
     }
 
-    fn concat_matrix(
-        &mut self,
-        a: f32,
-        b: f32,
-        c: f32,
-        d: f32,
-        e: f32,
-        f: f32,
-    ) -> Result<(), Self::ErrorType> {
-        self.operations
-            .push(RecordedOperation::ConcatMatrix { a, b, c, d, e, f });
+    fn concat_matrix(&mut self, transform: &Transform) -> Result<(), Self::ErrorType> {
+        self.operations.push(RecordedOperation::ConcatMatrix {
+            transform: *transform,
+        });
         Ok(())
     }
 
@@ -628,17 +612,10 @@ impl TextPositioningOps for RecordingBackend {
         Ok(())
     }
 
-    fn set_text_matrix(
-        &mut self,
-        a: f32,
-        b: f32,
-        c: f32,
-        d: f32,
-        e: f32,
-        f: f32,
-    ) -> Result<(), Self::ErrorType> {
-        self.operations
-            .push(RecordedOperation::SetTextMatrix { a, b, c, d, e, f });
+    fn set_text_matrix(&mut self, transform: &Transform) -> Result<(), Self::ErrorType> {
+        self.operations.push(RecordedOperation::SetTextMatrix {
+            transform: *transform,
+        });
         Ok(())
     }
 

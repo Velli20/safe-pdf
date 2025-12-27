@@ -39,19 +39,10 @@ impl<T: std::error::Error> TextPositioningOps for PdfCanvas<'_, T> {
         self.move_text_position(tx, ty)
     }
 
-    fn set_text_matrix(
-        &mut self,
-        a: f32,
-        b: f32,
-        c: f32,
-        d: f32,
-        e: f32,
-        f: f32,
-    ) -> Result<(), Self::ErrorType> {
-        let mat = Transform::from_row(a, b, c, d, e, f);
+    fn set_text_matrix(&mut self, transform: &Transform) -> Result<(), Self::ErrorType> {
         // Tm operator sets both Tm and Tlm to the same matrix.
-        self.current_state_mut()?.text_state.line_matrix = mat;
-        self.current_state_mut()?.text_state.matrix = mat;
+        self.current_state_mut()?.text_state.line_matrix = *transform;
+        self.current_state_mut()?.text_state.matrix = *transform;
         Ok(())
     }
 

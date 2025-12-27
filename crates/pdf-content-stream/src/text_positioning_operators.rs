@@ -1,3 +1,5 @@
+use pdf_graphics::transform::Transform;
+
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
@@ -74,20 +76,19 @@ impl PdfOperator for MoveTextPositionAndSetLeading {
 }
 
 /// Sets the text matrix, `Tm`, and the text line matrix, `Tlm`.
-/// The matrix is specified in the form `[a b c d e f]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetTextMatrix {
-    /// The 6-element array representing the text matrix.
-    /// `[a, b, c, d, e, f]` corresponds to the matrix:
-    /// `a b 0`
-    /// `c d 0`
-    /// `e f 1`
-    matrix: [f32; 6],
+    /// The text matrix.
+    matrix: Transform,
 }
 
 impl SetTextMatrix {
     pub fn new(matrix: [f32; 6]) -> Self {
-        Self { matrix }
+        Self {
+            matrix: Transform::from_row(
+                matrix[0], matrix[1], matrix[2], matrix[3], matrix[4], matrix[5],
+            ),
+        }
     }
 }
 
@@ -109,14 +110,7 @@ impl PdfOperator for SetTextMatrix {
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        backend.set_text_matrix(
-            self.matrix[0],
-            self.matrix[1],
-            self.matrix[2],
-            self.matrix[3],
-            self.matrix[4],
-            self.matrix[5],
-        )
+        backend.set_text_matrix(&self.matrix)
     }
 }
 
