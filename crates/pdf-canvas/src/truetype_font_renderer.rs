@@ -1,31 +1,43 @@
 use crate::{
-    error::PdfCanvasError, pdf_canvas::PdfCanvas, text_renderer::TextRenderer,
-    text_state::TextState,
+    error::PdfCanvasError, pdf_canvas::PdfCanvas, pdf_path_pen::PdfPathPen,
+    text_renderer::TextRenderer, text_state::TextState,
 };
-use num_traits::FromPrimitive;
-use pdf_graphics::{PaintMode, PathFillType, pdf_path::PdfPath, transform::Transform};
+use pdf_graphics::{PaintMode, PathFillType, transform::Transform};
+use read_fonts::TableProvider;
+use skrifa::{
+    FontRef, GlyphId, MetadataProvider,
+    instance::{LocationRef, Size},
+    outline::{DrawSettings, OutlineGlyphCollection},
+};
 use thiserror::Error;
-use ttf_parser::{Face, GlyphId, OutlineBuilder};
+
+const DEFAULT_UNITS_PER_EM: u16 = 1000;
 
 /// Defines errors that can occur during TrueType font rendering.
 #[derive(Debug, Error)]
 pub enum TrueTypeFontRendererError {
     #[error("The font file object is not a stream, but a {found_type}")]
     FontFileNotStream { found_type: &'static str },
-    #[error("Failed to parse the TrueType font file: {0:?}")]
-    TtfParseError(ttf_parser::FaceParsingError),
+    #[error("Failed to parse the TrueType font file: {0}")]
+    FontParseError(String),
     #[error("Incomplete 2-byte character at the end of the string")]
     IncompleteTwoByteCharacter,
-    #[error("Not implemented")]
-    NotImplemented,
 }
 
-/// A text renderer for TrueType-based fonts.
-/// A unified wrapper that delegates to specialized renderers for TrueType-based fonts.
+/// Handles the conversion of TrueType glyph outlines into PDF path
+/// operations, applying the appropriate transformations for font size,
+/// scaling, and text positioning.
 pub(crate) struct TrueTypeFontRenderer<'a, 'b, T> {
+    /// The canvas where glyphs are rendered.
     canvas: &'b mut PdfCanvas<'a, T>,
-    face: Face<'a>,
+    /// Parsed TrueType font reference providing access to font tables.
+    font_ref: FontRef<'a>,
+    /// Collection of outline glyphs extracted from the font.
+    outlines: OutlineGlyphCollection<'a>,
+    /// Base transformation matrix for glyph rendering, incorporating font size,
+    /// horizontal scaling, and text rise.
     glyph_base_transform: Transform,
+    /// Whether this font uses CID (Character Identifier) encoding.
     is_cid: bool,
 }
 
@@ -37,48 +49,43 @@ pub(crate) struct TrueTypeFontRenderer<'a, 'b, T> {
 ///
 /// # Parameters:
 ///
-/// - `face`: Parsed TrueType `Face` providing access to `cmap` tables.
+/// - `font`: Parsed TrueType `FontRef` providing access to `cmap` tables.
 /// - `char_code`: The PDF text stream’s character code.
 ///
 /// # Returns:
 ///
 /// The resolved `GlyphId` if a `cmap` entry is found, otherwise a fallback
 /// `GlyphId(char_code)`.
-fn glyph_id(face: &Face<'_>, char_code: u16) -> GlyphId {
-    // Try to resolve the glyph using the TrueType cmap (character-to-glyph mapping).
-    if let Some(cmap) = face.tables().cmap.as_ref() {
-        // We'll search all cmap subtables and stop at the first match, if any.
-        let mut resolved: Option<GlyphId> = None;
+fn resolve_glyph_id(font: &FontRef<'_>, char_code: u16) -> GlyphId {
+    // Candidate character codes to probe in the cmap:
+    // - The literal Unicode scalar value (for Unicode cmaps).
+    // - 0xF000/0xF100 + code: common remappings used by symbol-encoded fonts
+    //   (e.g., Windows “Symbol” encoding) where glyphs live in private-use ranges.
+    let candidates = [
+        u32::from(char_code),
+        0xF000u32.saturating_add(u32::from(char_code)),
+        0xF100u32.saturating_add(u32::from(char_code)),
+    ];
 
-        // Candidate character codes to probe in the cmap:
-        // - The literal Unicode scalar value (for Unicode cmaps).
-        // - 0xF000/0xF100 + code: common remappings used by symbol-encoded fonts
-        //   (e.g., Windows “Symbol” encoding) where glyphs live in private-use ranges.
-        let candidates = [
-            u32::from(char_code),
-            0xF000u32.saturating_add(u32::from(char_code)),
-            0xF100u32.saturating_add(u32::from(char_code)),
-        ];
+    let mut resolved: Option<GlyphId> = None;
 
-        'outer: for subtable in cmap.subtables {
-            for code in candidates {
-                if let Some(id) = subtable.glyph_index(code) {
-                    resolved = Some(id);
-                    break 'outer;
-                }
+    'outer: for subtable in font.cmap().iter() {
+        for code in candidates {
+            if let Some(id) = subtable.map_codepoint(code) {
+                resolved = Some(id);
+                break 'outer;
             }
-        }
-
-        if let Some(id) = resolved {
-            return id;
         }
     }
 
-    GlyphId(char_code)
+    if let Some(id) = resolved {
+        return id;
+    }
+
+    GlyphId::new(u32::from(char_code))
 }
 
 impl<'a, 'b, T: std::error::Error> TrueTypeFontRenderer<'a, 'b, T> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         canvas: &'b mut PdfCanvas<'a, T>,
         stream_object: &'a [u8],
@@ -92,22 +99,24 @@ impl<'a, 'b, T: std::error::Error> TrueTypeFontRenderer<'a, 'b, T> {
             ..
         } = canvas.current_state()?.text_state.clone();
 
-        let face =
-            Face::parse(stream_object, 0).map_err(TrueTypeFontRendererError::TtfParseError)?;
+        let font_ref = FontRef::new(stream_object)
+            .map_err(|e| TrueTypeFontRendererError::FontParseError(e.to_string()))?;
+
+        let outlines = font_ref.outline_glyphs();
 
         // Extract font and text state parameters.
-        let units_per_em = face.units_per_em();
+        let units_per_em = font_ref
+            .head()
+            .ok()
+            .map(|h| h.units_per_em())
+            .filter(|&upe| upe != 0)
+            .unwrap_or(DEFAULT_UNITS_PER_EM);
 
         // Compute the inverse of units per em for scaling.
-        let upe_inv = if units_per_em != 0 {
-            1.0 / f32::from_u16(units_per_em)
-                .ok_or(PdfCanvasError::NumericConversionError("units_per_em"))?
-        } else {
-            0.0
-        };
+        let upe_inv = 1.0 / f32::from(units_per_em);
 
         // Build the text rendering transform.
-        let m_params = Transform::from_row(
+        let glyph_base_transform = Transform::from_row(
             font_size * upe_inv * horizontal_scaling, // sx
             0.0,                                      // ky (skew)
             0.0,                                      // kx (skew)
@@ -117,9 +126,10 @@ impl<'a, 'b, T: std::error::Error> TrueTypeFontRenderer<'a, 'b, T> {
         );
 
         Ok(Self {
-            face,
+            font_ref,
             canvas,
-            glyph_base_transform: m_params,
+            outlines,
+            glyph_base_transform,
             is_cid,
         })
     }
@@ -147,16 +157,21 @@ impl<T: std::error::Error> TextRenderer for TrueTypeFontRenderer<'_, '_, T> {
             glyph_matrix_for_char.concat(&self.canvas.current_state()?.transform);
 
             // Build and fill the glyph outline.
-            let mut builder = PdfGlyphOutline::new(glyph_matrix_for_char);
             let glyph_id = if !self.is_cid {
-                glyph_id(&self.face, char_code)
+                resolve_glyph_id(&self.font_ref, char_code)
             } else {
-                GlyphId(char_code)
+                GlyphId::new(u32::from(char_code))
             };
-            self.face.outline_glyph(glyph_id, &mut builder);
 
-            self.canvas
-                .draw_path(&builder.path, PaintMode::Fill, PathFillType::Winding)?;
+            if let Some(outline_glyph) = self.outlines.get(glyph_id) {
+                let mut pen = PdfPathPen::default();
+                let settings = DrawSettings::from((Size::unscaled(), LocationRef::default()));
+                if outline_glyph.draw(settings, &mut pen).is_ok() {
+                    pen.path.transform(&glyph_matrix_for_char);
+                    self.canvas
+                        .draw_path(&pen.path, PaintMode::Fill, PathFillType::Winding)?;
+                }
+            }
 
             let text_state = &mut self.canvas.current_state_mut()?.text_state;
 
@@ -173,53 +188,5 @@ impl<T: std::error::Error> TextRenderer for TrueTypeFontRenderer<'_, '_, T> {
             text_state.matrix.post_translate(advance_x, 0.0);
         }
         Ok(())
-    }
-}
-
-/// An implementation of `ttf_parser::OutlineBuilder` that converts glyph outlines
-/// into a `PdfPath`.
-#[derive(Default)]
-pub struct PdfGlyphOutline {
-    /// The `PdfPath` being constructed from the glyph outline commands.
-    path: PdfPath,
-    /// The transformation matrix to apply to each point of the glyph outline.
-    transform: Transform,
-}
-
-impl PdfGlyphOutline {
-    pub fn new(transform: Transform) -> Self {
-        Self {
-            path: PdfPath::default(),
-            transform,
-        }
-    }
-}
-
-impl OutlineBuilder for PdfGlyphOutline {
-    fn move_to(&mut self, x: f32, y: f32) {
-        let (x, y) = self.transform.transform_point(x, y);
-        self.path.move_to(x, y);
-    }
-
-    fn line_to(&mut self, x: f32, y: f32) {
-        let (x, y) = self.transform.transform_point(x, y);
-        self.path.line_to(x, y);
-    }
-
-    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        let (x1, y1) = self.transform.transform_point(x1, y1);
-        let (x, y) = self.transform.transform_point(x, y);
-        self.path.quad_to(x1, y1, x, y);
-    }
-
-    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        let (x1, y1) = self.transform.transform_point(x1, y1);
-        let (x2, y2) = self.transform.transform_point(x2, y2);
-        let (x, y) = self.transform.transform_point(x, y);
-        self.path.curve_to(x1, y1, x2, y2, x, y);
-    }
-
-    fn close(&mut self) {
-        self.path.close();
     }
 }

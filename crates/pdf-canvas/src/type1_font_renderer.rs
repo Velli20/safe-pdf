@@ -1,11 +1,12 @@
 use crate::pdf_canvas::PdfCanvas;
+use crate::pdf_path_pen::PdfPathPen;
 use crate::text_state::TextState;
 use crate::{error::PdfCanvasError, text_renderer::TextRenderer};
 use pdf_graphics::transform::Transform;
-use pdf_graphics::{PaintMode, PathFillType, pdf_path::PdfPath};
+use pdf_graphics::{PaintMode, PathFillType};
 use read_fonts::TableProvider;
 use skrifa::instance::{LocationRef, Size};
-use skrifa::outline::{DrawSettings, OutlineGlyphCollection, OutlinePen};
+use skrifa::outline::{DrawSettings, OutlineGlyphCollection};
 use skrifa::{FontRef, GlyphId, MetadataProvider};
 
 pub(crate) struct Type1FontRenderer<'a, 'b, T: std::error::Error> {
@@ -77,7 +78,7 @@ impl<T: std::error::Error> TextRenderer for Type1FontRenderer<'_, '_, T> {
             };
 
             if let Some(outline_glyph) = self.outlines.get(gid) {
-                let mut pen = PdfPathPen::new();
+                let mut pen = PdfPathPen::default();
                 // Draw unhinted at requested font size.
                 let size = Size::new(1000.0);
                 let settings = DrawSettings::from((size, LocationRef::default()));
@@ -110,35 +111,5 @@ impl<T: std::error::Error> TextRenderer for Type1FontRenderer<'_, '_, T> {
             text_state.matrix.post_translate(advance_x, 0.0);
         }
         Ok(())
-    }
-}
-
-struct PdfPathPen {
-    path: PdfPath,
-}
-
-impl PdfPathPen {
-    fn new() -> Self {
-        Self {
-            path: PdfPath::default(),
-        }
-    }
-}
-
-impl OutlinePen for PdfPathPen {
-    fn move_to(&mut self, x: f32, y: f32) {
-        self.path.move_to(x, y);
-    }
-    fn line_to(&mut self, x: f32, y: f32) {
-        self.path.line_to(x, y);
-    }
-    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-        self.path.quad_to(x1, y1, x, y);
-    }
-    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
-        self.path.curve_to(x1, y1, x2, y2, x, y);
-    }
-    fn close(&mut self) {
-        self.path.close();
     }
 }
