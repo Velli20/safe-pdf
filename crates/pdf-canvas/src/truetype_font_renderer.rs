@@ -11,6 +11,18 @@ use skrifa::{
 };
 use thiserror::Error;
 
+/// Fallback value for a font's `units_per_em` (design units per em).
+///
+/// In OpenType/TrueType fonts this normally comes from the `head` table and is
+/// required to be in the range 16..=16384; a value of zero is invalid.
+///
+/// There is no universally correct fallback: many TrueType outlines use 2048
+/// units/em, while Type 1 and OpenType/CFF outlines commonly use 1000.
+///
+/// We use 1000 here as a stable, PDF-friendly default (PDF text space is
+/// conventionally scaled around 1000 units per em) that avoids division by zero
+/// and keeps glyph scaling reasonable when the actual value is missing or
+/// unusable.
 const DEFAULT_UNITS_PER_EM: u16 = 1000;
 
 /// Defines errors that can occur during TrueType font rendering.

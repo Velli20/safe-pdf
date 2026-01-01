@@ -135,6 +135,7 @@ impl<T: std::error::Error> GraphicsStateOps for PdfCanvas<'_, T> {
                                 form.matrix,
                                 &form.bbox,
                                 form.resources.as_ref(),
+                                None,
                             )?;
 
                             let transform = self.current_state()?.transform;

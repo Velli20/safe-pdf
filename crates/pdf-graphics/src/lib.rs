@@ -6,7 +6,7 @@ pub mod transform;
 use num_derive::FromPrimitive;
 
 /// Specifies the shape to be used at the end of open subpaths when they are stroked.
-#[derive(Clone, Copy, PartialEq, Debug, FromPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, FromPrimitive)]
 pub enum LineCap {
     /// The stroke ends exactly at the endpoint.
     Butt = 0,
@@ -17,7 +17,7 @@ pub enum LineCap {
 }
 
 /// Specifies the shape to be used at the corners of paths when they are stroked.
-#[derive(Clone, Copy, PartialEq, Debug, FromPrimitive)]
+#[derive(Debug, Clone, Copy, PartialEq, FromPrimitive)]
 pub enum LineJoin {
     /// Sharp corner or angled join.
     Miter = 0,
@@ -32,7 +32,7 @@ pub enum LineJoin {
 /// Blend modes determine how colors from different layers are combined:
 /// - `Normal`: No blending, just overlays the color.
 /// - `Multiply`, `Screen`, `Overlay`, etc.: Various blending effects as defined by the PDF specification.
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum BlendMode {
     Normal,
     Multiply,
@@ -54,7 +54,7 @@ pub enum BlendMode {
 }
 
 /// Specifies how a path should be painted in PDF graphics operations.
-#[derive(Default, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub enum PaintMode {
     /// Fill the interior of the path.
     #[default]
@@ -66,7 +66,7 @@ pub enum PaintMode {
 }
 
 /// Determines the rule used to define the "inside" region of a path for filling operations.
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum PathFillType {
     /// Non-zero winding number rule: "inside" is computed by a non-zero sum of signed edge crossings.
     #[default]
@@ -75,7 +75,7 @@ pub enum PathFillType {
     EvenOdd,
 }
 
-#[derive(Clone, Copy, Default, PartialEq, FromPrimitive, Debug)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, FromPrimitive)]
 pub enum TextRenderingMode {
     #[default]
     Fill,
@@ -89,7 +89,7 @@ pub enum TextRenderingMode {
 }
 
 /// Specifies the mode for applying a soft mask in PDF graphics.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MaskMode {
     /// The soft mask is applied to the alpha channel only.
     Alpha,
@@ -98,7 +98,7 @@ pub enum MaskMode {
 }
 
 /// Specifies the encoding of an image in a PDF.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageEncoding {
     /// JPEG encoding.
     Jpeg,

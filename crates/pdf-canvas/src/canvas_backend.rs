@@ -154,8 +154,11 @@ pub trait CanvasBackend {
     /// Returns the height of the canvas in device units.
     fn height(&self) -> f32;
 
-    /// Resets the clipping region to the entire canvas area.
-    fn reset_clip(&mut self) -> Result<(), Self::ErrorType>;
+    /// Saves the current graphics state (transform, clip, etc.).
+    fn save(&mut self) -> Result<(), Self::ErrorType>;
+
+    /// Restores the most recently saved graphics state.
+    fn restore(&mut self) -> Result<(), Self::ErrorType>;
 
     /// Draws an image onto the canvas at the current transformation.
     ///

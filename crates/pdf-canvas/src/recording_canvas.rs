@@ -146,7 +146,8 @@ enum RecordingCommand {
         path: PdfPath,
         mode: PathFillType,
     },
-    ResetClip,
+    Save,
+    Restore,
     DrawImage {
         image: RecordedImage,
         blend_mode: Option<BlendMode>,
@@ -332,7 +333,8 @@ impl RecordingCanvas {
                     backend.stroke_path(path, *color, *line_width, &shader_ref, *blend_mode)?;
                 }
                 SetClipRegion { path, mode } => backend.set_clip_region(path, *mode)?,
-                ResetClip => backend.reset_clip()?,
+                Save => backend.save()?,
+                Restore => backend.restore()?,
                 DrawImage {
                     image,
                     blend_mode,
@@ -434,8 +436,13 @@ impl CanvasBackend for RecordingCanvas {
         self.height
     }
 
-    fn reset_clip(&mut self) -> Result<(), Self::ErrorType> {
-        self.commands.push(RecordingCommand::ResetClip);
+    fn save(&mut self) -> Result<(), Self::ErrorType> {
+        self.commands.push(RecordingCommand::Save);
+        Ok(())
+    }
+
+    fn restore(&mut self) -> Result<(), Self::ErrorType> {
+        self.commands.push(RecordingCommand::Restore);
         Ok(())
     }
 

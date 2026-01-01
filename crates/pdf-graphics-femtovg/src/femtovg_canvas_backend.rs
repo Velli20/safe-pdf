@@ -107,7 +107,13 @@ impl CanvasBackend for CanvasImpl<'_> {
         Ok(())
     }
 
-    fn reset_clip(&mut self) -> Result<(), Self::ErrorType> {
+    fn save(&mut self) -> Result<(), Self::ErrorType> {
+        self.canvas.save();
+        Ok(())
+    }
+
+    fn restore(&mut self) -> Result<(), Self::ErrorType> {
+        self.canvas.restore();
         Ok(())
     }
 

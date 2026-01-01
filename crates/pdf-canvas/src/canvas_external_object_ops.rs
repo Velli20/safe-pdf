@@ -206,6 +206,7 @@ impl<T: std::error::Error> XObjectOps for PdfCanvas<'_, T> {
     /// This method handles two types of XObjects:
     ///
     /// ## Image XObjects
+    ///
     /// Raster images are rendered by:
     /// 1. Extracting image metadata (dimensions, color space, encoding)
     /// 2. Computing the destination rectangle via CTM transformation
@@ -214,17 +215,10 @@ impl<T: std::error::Error> XObjectOps for PdfCanvas<'_, T> {
     /// 5. Delegating actual drawing to the canvas backend
     ///
     /// ## Form XObjects
+    ///
     /// Form XObjects are self-contained content streams that can include
     /// their own resources. They are rendered by recursively processing
     /// the form's content stream with the form's transformation matrix.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - No resources are available ([`PdfCanvasError::MissingPageResources`])
-    /// - The named XObject doesn't exist ([`PdfCanvasError::XObjectNotFound`])
-    /// - An unsupported image filter is encountered ([`PdfCanvasError::NotImplemented`])
-    /// - Image data is malformed ([`PdfCanvasError::InvalidImageData`])
     fn invoke_xobject(&mut self, xobject_name: &str) -> Result<(), Self::ErrorType> {
         let resources = self
             .current_state()?
@@ -238,6 +232,7 @@ impl<T: std::error::Error> XObjectOps for PdfCanvas<'_, T> {
                 form.matrix,
                 Some(&form.bbox),
                 form.resources.as_ref(),
+                None,
             ),
             None => Err(PdfCanvasError::XObjectNotFound(xobject_name.to_string())),
         }

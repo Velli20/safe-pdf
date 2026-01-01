@@ -2,7 +2,12 @@ use pdf_content_stream::pdf_operator::PdfOperatorVariant;
 use pdf_graphics::{
     MaskMode, PaintMode, PathFillType, pdf_path::PdfPath, rect::Rect, transform::Transform,
 };
-use pdf_page::{page::PdfPage, pattern::Pattern, resources::Resources, shading::Shading};
+use pdf_page::{
+    page::PdfPage,
+    pattern::{PaintType, Pattern},
+    resources::Resources,
+    shading::Shading,
+};
 
 use crate::{
     canvas_backend::{CanvasBackend, Shader},
@@ -128,6 +133,7 @@ where
     /// - `mat`: Optional additional matrix (applied like a PDF `cm` / XObject `/Matrix`).
     /// - `bbox`: The content-space bounding box to map to the recording surface.
     /// - `resources`: Optional resource dictionary for resolving fonts, patterns, etc.
+    /// - `filter`: Optional filter function to skip certain operations.
     ///
     /// # Errors
     ///
@@ -140,6 +146,7 @@ where
         mat: Option<Transform>,
         bbox: &Rect,
         resources: Option<&'a Resources>,
+        filter: Option<&(dyn Fn(&PdfOperatorVariant) -> bool + '_)>,
     ) -> Result<(), PdfCanvasError> {
         // Calculate scale factors.
         let scale_x = recording_canvas.width() / bbox.width();
@@ -170,7 +177,7 @@ where
         };
 
         // Render the form's content stream into the mask canvas.
-        other.render_content_stream(operations, mat, Some(bbox), resources)
+        other.render_content_stream(operations, mat, Some(bbox), resources, filter)
     }
 
     /// Returns a reference to the current graphics state on the stack.
@@ -250,8 +257,15 @@ where
     /// # Returns
     ///
     /// An optional `Shader` or an error if pattern rendering fails.
-    fn compute_shader(&mut self) -> Result<Option<Shader<'a>>, PdfCanvasError> {
-        let Some(pattern) = self.current_state()?.pattern else {
+    fn compute_shader(&mut self, for_stroke: bool) -> Result<Option<Shader<'a>>, PdfCanvasError> {
+        let state: &CanvasState<'_> = self.current_state()?;
+        let pattern = if for_stroke {
+            &state.stroke_pattern
+        } else {
+            &state.fill_pattern
+        };
+
+        let Some(pattern) = pattern else {
             return Ok(None);
         };
 
@@ -281,8 +295,39 @@ where
                 resources,
                 content_stream,
                 matrix,
+                x_step,
+                y_step,
+                paint_type,
                 ..
             } => {
+                let bbox = *bbox;
+
+                // The tiling pattern's `/Matrix` maps pattern space -> user space.
+                // We pass it through unchanged and let the backend concatenate it with
+                // the current CTM when sampling the pattern.
+                let transform = *matrix;
+
+                // Uncolored patterns use the current color from the graphics state,
+                // so we filter out color-setting operators from the content stream.
+                const UNCOLORED_FILTER: fn(&PdfOperatorVariant) -> bool = |op| {
+                    matches!(
+                        op,
+                        PdfOperatorVariant::SetNonStrokingColor(_)
+                            | PdfOperatorVariant::SetStrokingColor(_)
+                            | PdfOperatorVariant::SetGrayFill(_)
+                            | PdfOperatorVariant::SetGrayStroke(_)
+                            | PdfOperatorVariant::SetRGBFill(_)
+                            | PdfOperatorVariant::SetRGBStroke(_)
+                            | PdfOperatorVariant::SetCMYKFill(_)
+                            | PdfOperatorVariant::SetCMYKStroke(_)
+                    )
+                };
+
+                let filter: Option<&dyn Fn(&PdfOperatorVariant) -> bool> = match paint_type {
+                    PaintType::Colored => None,
+                    PaintType::Uncolored => Some(&UNCOLORED_FILTER),
+                };
+
                 // Create a recording canvas to render the tiling pattern.
                 let mut recording_canvas = RecordingCanvas::new(bbox.width(), bbox.height());
 
@@ -291,20 +336,16 @@ where
                     &mut recording_canvas,
                     &content_stream.operations,
                     None,
-                    bbox,
+                    &bbox,
                     Some(resources),
+                    filter,
                 )?;
-
-                // The tiling pattern's `/Matrix` maps pattern space -> user space.
-                // We pass it through unchanged and let the backend concatenate it with
-                // the current CTM when sampling the pattern.
-                let transform = *matrix;
 
                 let shader = Shader::TilingPatternImage {
                     image: Box::new(recording_canvas),
                     transform,
-                    x_step: bbox.width(),
-                    y_step: bbox.height(),
+                    x_step: *x_step,
+                    y_step: *y_step,
                 };
                 Ok(Some(shader))
             }
@@ -328,7 +369,6 @@ where
         mode: PaintMode,
         fill_type: PathFillType,
     ) -> Result<(), PdfCanvasError> {
-        let shader = self.compute_shader()?;
         let state = self.current_state()?;
 
         let fill_color = state.fill_color;
@@ -338,24 +378,28 @@ where
 
         match mode {
             PaintMode::Fill => {
+                let shader = self.compute_shader(false)?;
                 self.canvas
                     .fill_path(path, fill_type, fill_color, &shader, blend_mode)
                     .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
             }
             PaintMode::Stroke => {
+                let shader = self.compute_shader(true)?;
                 self.canvas
                     .stroke_path(path, stroke_color, line_width, &shader, blend_mode)
                     .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
             }
             PaintMode::FillAndStroke => {
                 // First fill the path using the current fill settings
+                let fill_shader = self.compute_shader(false)?;
                 self.canvas
-                    .fill_path(path, fill_type, fill_color, &shader, blend_mode)
+                    .fill_path(path, fill_type, fill_color, &fill_shader, blend_mode)
                     .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
 
                 // Then stroke the path using the current stroke settings
+                let stroke_shader = self.compute_shader(true)?;
                 self.canvas
-                    .stroke_path(path, stroke_color, line_width, &shader, blend_mode)
+                    .stroke_path(path, stroke_color, line_width, &stroke_shader, blend_mode)
                     .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
             }
         }
@@ -378,7 +422,7 @@ where
         fill_type: PathFillType,
     ) -> Result<(), PdfCanvasError> {
         let Some(mut path) = self.current_path.take() else {
-            return Err(PdfCanvasError::NoActivePath);
+            return Ok(());
         };
         path.transform(&self.current_state()?.transform);
         self.draw_path(&path, mode, fill_type)
@@ -400,11 +444,6 @@ where
         mode: PathFillType,
     ) -> Result<(), PdfCanvasError> {
         path.transform(&self.current_state()?.transform);
-        if self.current_state()?.clip_path.is_some() {
-            self.canvas
-                .reset_clip()
-                .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
-        }
 
         self.canvas
             .set_clip_region(&path, mode)
@@ -413,7 +452,7 @@ where
         Ok(())
     }
 
-    /// Sets the current pattern by name from the page resources.
+    /// Sets the current fill pattern by name from the page resources.
     ///
     /// # Parameters
     ///
@@ -422,7 +461,7 @@ where
     /// # Errors
     ///
     /// Returns an error if the pattern is not found in the resources.
-    pub(crate) fn set_pattern(&mut self, pattern_name: &str) -> Result<(), PdfCanvasError> {
+    pub(crate) fn set_fill_pattern(&mut self, pattern_name: &str) -> Result<(), PdfCanvasError> {
         let Some(pattern) = self
             .current_state()?
             .resources
@@ -430,8 +469,28 @@ where
         else {
             return Err(PdfCanvasError::PatternNotFound(pattern_name.to_string()));
         };
+        self.current_state_mut()?.fill_pattern = Some(pattern);
+        Ok(())
+    }
 
-        self.current_state_mut()?.pattern = Some(pattern);
+    /// Sets the current stroke pattern by name from the page resources.
+    ///
+    /// # Parameters
+    ///
+    /// - `pattern_name`: The name of the pattern to activate.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the pattern is not found in the resources.
+    pub(crate) fn set_stroke_pattern(&mut self, pattern_name: &str) -> Result<(), PdfCanvasError> {
+        let Some(pattern) = self
+            .current_state()?
+            .resources
+            .and_then(|r| r.patterns.get(pattern_name))
+        else {
+            return Err(PdfCanvasError::PatternNotFound(pattern_name.to_string()));
+        };
+        self.current_state_mut()?.stroke_pattern = Some(pattern);
         Ok(())
     }
 
@@ -441,7 +500,9 @@ where
     ///
     /// - `operations`: The list of PDF operators to execute.
     /// - `mat`: Optional transformation matrix to apply.
+    /// - `bbox`: Optional bounding box to clip the rendering.
     /// - `resources`: Optional resource dictionary to use for rendering.
+    /// - `filter`: Optional filter function to skip certain operations.
     ///
     /// # Errors
     ///
@@ -452,6 +513,7 @@ where
         mat: Option<Transform>,
         bbox: Option<&Rect>,
         resources: Option<&'a Resources>,
+        filter: Option<&(dyn Fn(&PdfOperatorVariant) -> bool + '_)>,
     ) -> Result<(), PdfCanvasError> {
         self.save()?;
 
@@ -480,6 +542,9 @@ where
         }
 
         for op in operations {
+            if filter.is_some_and(|filter| filter(op)) {
+                continue;
+            }
             op.call(self)?;
         }
 
@@ -491,10 +556,11 @@ where
     /// This includes the current transformation matrix, colors, line styles, and clipping path.
     /// A corresponding call to `restore` is required to pop the state from the stack.
     pub(crate) fn save(&mut self) -> Result<(), PdfCanvasError> {
-        let mut state = self.current_state()?.clone();
-        state.clip_path = None;
-
+        let state = self.current_state()?.clone();
         self.canvas_stack.push(state);
+        self.canvas
+            .save()
+            .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
         Ok(())
     }
 
@@ -502,15 +568,10 @@ where
     ///
     /// If the restored state included a clipping path, the clipping path is reset on the backend.
     pub(crate) fn restore(&mut self) -> Result<(), PdfCanvasError> {
-        let Some(state) = self.canvas_stack.pop() else {
-            return Ok(());
-        };
-
-        if state.clip_path.is_some() {
-            self.canvas
-                .reset_clip()
-                .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
-        }
+        let _ = self.canvas_stack.pop();
+        self.canvas
+            .restore()
+            .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
         Ok(())
     }
 

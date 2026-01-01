@@ -113,11 +113,6 @@ impl<T: std::error::Error> PathPaintingOps for PdfCanvas<'_, T> {
 
     fn end_path_no_op(&mut self) -> Result<(), Self::ErrorType> {
         self.current_path.take();
-        if self.current_state_mut()?.clip_path.take().is_some() {
-            self.canvas
-                .reset_clip()
-                .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
-        }
         Ok(())
     }
 }
