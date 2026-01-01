@@ -51,15 +51,19 @@ pub struct SkiaCanvasBackend<'a> {
 fn to_skia_a8_mask_image(
     recording_canvas: &RecordingCanvas,
 ) -> Result<skia_safe::Image, SkiaCanvasBackendError> {
-    let info = skia_safe::ImageInfo::new_a8((
-        recording_canvas.width() as i32,
-        recording_canvas.height() as i32,
-    ));
+    let width = recording_canvas.width();
+    let height = recording_canvas.height();
+    let info = skia_safe::ImageInfo::new(
+        (width as i32, height as i32),
+        skia_safe::ColorType::RGBA8888,
+        skia_safe::AlphaType::Unpremul,
+        None,
+    );
     let Some(mut surface) = skia_safe::surfaces::raster(&info, None, None) else {
         return Err(SkiaCanvasBackendError::SurfaceAllocationFailed {
             kind: "mask",
-            width: recording_canvas.width() as u32,
-            height: recording_canvas.height() as u32,
+            width: width as u32,
+            height: height as u32,
         });
     };
 
@@ -69,7 +73,6 @@ fn to_skia_a8_mask_image(
         height: recording_canvas.height(),
     };
     recording_canvas.replay(&mut mask_backend)?;
-
     Ok(surface.image_snapshot())
 }
 
@@ -459,14 +462,16 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
     ) -> Result<(), Self::ErrorType> {
         let mut sk_path = to_skia_path(path);
         sk_path.set_fill_type(to_skia_fill_type(mode));
-        self.surface.canvas().save();
-        self.surface
-            .canvas()
-            .clip_path(&sk_path, skia_safe::ClipOp::Intersect, Some(true));
+        self.surface.canvas().clip_path(&sk_path, None, Some(true));
         Ok(())
     }
 
-    fn reset_clip(&mut self) -> Result<(), Self::ErrorType> {
+    fn save(&mut self) -> Result<(), Self::ErrorType> {
+        self.surface.canvas().save();
+        Ok(())
+    }
+
+    fn restore(&mut self) -> Result<(), Self::ErrorType> {
         self.surface.canvas().restore();
         Ok(())
     }

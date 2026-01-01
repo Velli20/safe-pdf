@@ -158,7 +158,7 @@ pub enum Shading {
         /// - `(x1, y1)`: Ending point (parameter t=1).
         coords: [f32; 4],
 
-        /// Pre-computed color stops for efficient rendering.
+        /// Pre-computed color stops.
         /// Sampled from the function at regular intervals.
         color_stops: ColorStops,
     },
@@ -176,7 +176,7 @@ pub enum Shading {
         /// - `(x1, y1, r1)`: Center and radius of the ending circle (t=1).
         coords: [f32; 6],
 
-        /// Pre-computed color stops for efficient rendering.
+        /// Pre-computed color stops.
         /// Sampled from the function at regular intervals.
         color_stops: ColorStops,
 
@@ -277,7 +277,7 @@ impl Shading {
         let object = dictionary.get_or_err("Function")?;
         let function = Function::parse(object, objects)?;
 
-        // Pre-compute color stops for efficient rendering.
+        // Pre-compute color stops.
         let color_stops = ColorStops::from_function(&function, &color_space)?;
 
         Ok(Self::Axial {
@@ -314,7 +314,7 @@ impl Shading {
         let object = dictionary.get_or_err("Function")?;
         let function = Function::parse(object, objects)?;
 
-        // Pre-compute color stops for efficient rendering.
+        // Pre-compute color stops.
         let color_stops = ColorStops::from_function(&function, &color_space)?;
 
         Ok(Self::Radial {

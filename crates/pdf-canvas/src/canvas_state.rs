@@ -30,8 +30,10 @@ pub(crate) struct CanvasState<'a> {
     pub line_join: LineJoin,
     /// The current resource dictionary, overriding the page's resources if set.
     pub resources: Option<&'a Resources>,
-    /// The current pattern (shading or tiling) used for filling or stroking.
-    pub pattern: Option<&'a Pattern>,
+    /// The current pattern used for filling.
+    pub fill_pattern: Option<&'a Pattern>,
+    /// The current pattern used for stroking.
+    pub stroke_pattern: Option<&'a Pattern>,
     /// The current blend mode, controlling compositing behavior.
     pub blend_mode: Option<BlendMode>,
     /// The current text rendering mode.
@@ -42,9 +44,9 @@ impl CanvasState<'_> {
     /// Default line width in user space units.
     const DEFAULT_LINE_WIDTH: f32 = 1.0;
     /// Default fill color.
-    const DEFAULT_FILL_COLOR: Color = Color::from_rgb(0.0, 0.0, 0.0);
+    pub const DEFAULT_FILL_COLOR: Color = Color::from_rgb(0.0, 0.0, 0.0);
     /// Default stroke color.
-    const DEFAULT_STROKE_COLOR: Color = Color::from_rgb(0.0, 0.0, 0.0);
+    pub const DEFAULT_STROKE_COLOR: Color = Color::from_rgb(0.0, 0.0, 0.0);
     /// Default miter limit.
     const DEFAULT_MITER_LIMIT: f32 = 0.0;
 }
@@ -60,7 +62,8 @@ impl Default for CanvasState<'_> {
             text_state: TextState::default(),
             clip_path: None,
             resources: None,
-            pattern: None,
+            fill_pattern: None,
+            stroke_pattern: None,
             line_cap: LineCap::Butt,
             line_join: LineJoin::Miter,
             blend_mode: None,
