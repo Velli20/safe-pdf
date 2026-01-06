@@ -1,5 +1,5 @@
 use pdf_canvas::{canvas_backend::CanvasBackend, pdf_canvas::PdfCanvas};
-use pdf_document::PdfDocument;
+use pdf_document::document::PdfDocument;
 use thiserror::Error;
 
 /// Errors that can occur while rendering a PDF document onto a canvas backend.

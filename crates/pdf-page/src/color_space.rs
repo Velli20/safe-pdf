@@ -102,7 +102,11 @@ impl FromDictionary for ColorSpace {
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        let color_space_obj = objects.resolve_object(dictionary.get_or_err(Self::KEY)?)?;
+        let Some(color_space_obj) = dictionary.get(Self::KEY) else {
+            return Ok(None);
+        };
+
+        let color_space_obj = objects.resolve_object(color_space_obj)?;
         parse_color_space_object(objects, color_space_obj, 0).map(Some)
     }
 }

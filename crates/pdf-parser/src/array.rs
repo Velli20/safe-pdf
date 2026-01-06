@@ -58,7 +58,7 @@ impl ArrayParser for PdfParser<'_> {
                 break;
             }
 
-            let value = self.parse_object();
+            let value = self.parse_object(None);
             match value {
                 Ok(value) => values.push(value),
                 Err(e) => {

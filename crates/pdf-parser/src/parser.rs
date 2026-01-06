@@ -1,7 +1,7 @@
 use std::{rc::Rc, str::FromStr};
 
-use crate::{error::ParserError, traits::HeaderParser};
-use pdf_object::{ObjectVariant, cross_reference_table::CrossReferenceTable};
+use crate::error::ParserError;
+use pdf_object::{ObjectVariant, object_collection::ObjectCollection};
 use pdf_tokenizer::{PdfToken, Tokenizer};
 
 use crate::traits::{
@@ -18,8 +18,6 @@ pub struct PdfParser<'a> {
     /// Current nesting depth of PDF objects being parsed.
     /// This is used to prevent excessive recursion and potential stack overflows.
     pub current_nesting_depth: usize,
-    /// Optional cross-reference table parsed from the document, if available.
-    pub xref_table: Option<CrossReferenceTable>,
 }
 
 impl<'a> From<&'a [u8]> for PdfParser<'a> {
@@ -27,7 +25,6 @@ impl<'a> From<&'a [u8]> for PdfParser<'a> {
         PdfParser {
             tokenizer: Tokenizer::new(input),
             current_nesting_depth: 0,
-            xref_table: None,
         }
     }
 }
@@ -88,98 +85,28 @@ impl PdfParser<'_> {
         let _ = self.tokenizer.read_while_u8(Self::is_pdf_whitespace);
     }
 
-    /// Preloads the cross-reference (xref) table for classic (table-based) PDFs without
-    /// advancing the parser state.
+    /// Parses a PDF object at a specific position in the input stream.
     ///
-    /// This method parses the header to determine the PDF version and, for documents that
-    /// use traditional cross-reference tables (PDF 1.x), scans for the final `trailer` at the
-    /// end of the file. Using the trailer's `startxref` offset, it seeks to and parses the
-    /// xref table, storing it in `self.xref_table`. The tokenizer position is restored to the
-    /// point immediately after the header, so subsequent parsing proceeds unaffected.
-    ///
-    /// Why: Many PDF objects are referenced indirectly. Loading the xref early allows the
-    /// parser to resolve indirect references when needed to correctly parse certain objects.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success or a `ParserError` if initialization fails in a fatal way.
-    pub fn build_xref_index(&mut self) -> Result<(), ParserError> {
-        let version = self.parse_header()?;
-
-        if version.major() != 1 {
-            return Ok(());
-        }
-
-        // Save the current position (right after header) to restore later.
-        let after_header_pos = self.tokenizer.position;
-
-        let bytes = self.tokenizer.input;
-
-        const TRAILER_KEYWORD: &[u8] = b"trailer";
-
-        if let Some(trailer_pos) = bytes
-            .windows(TRAILER_KEYWORD.len())
-            .rposition(|w| w == TRAILER_KEYWORD)
-        {
-            self.tokenizer.position = trailer_pos;
-            let trailer = self
-                .parse_trailer()
-                .map_err(|err| ParserError::InitializationError(err.to_string()))?;
-            self.tokenizer.position = trailer.offset;
-
-            if let Ok(xref) = self.parse_cross_reference_table() {
-                self.xref_table = Some(xref);
-            }
-        }
-        self.tokenizer.position = after_header_pos;
-
-        Ok(())
-    }
-
-    /// Resolves an indirect object by its object number using the prebuilt cross-reference table.
-    ///
-    /// This method temporarily seeks to the byte offset recorded in the xref table,
-    /// parses the referenced object, and then restores the tokenizer position so the
-    /// parser state is unchanged for the caller.
-    ///
-    /// Requirements:
-    /// - `build_xref_index` must have been called successfully beforehand so that
-    ///   `self.xref_table` is populated.
-    ///
-    /// Notes:
-    /// - Generation numbers are currently not considered; the lookup is performed by
-    ///   object number only.
-    /// - The referenced object is parsed fresh on each call (no caching).
+    /// This function temporarily moves the tokenizer to the specified `position`, parses the object
+    /// found there, and then restores the tokenizer to its original position. This is useful for
+    /// random access parsing (e.g., following cross-reference table entries).
     ///
     /// # Parameters
     ///
-    /// - `object_number`: The numeric identifier of the indirect object to resolve.
+    /// - `position`: The byte offset in the input stream where parsing should begin.
+    /// - `objects`: Optional reference to an `ObjectCollection` for resolving indirect objects.
     ///
     /// # Returns
     ///
-    /// The parsed [`ObjectVariant`] corresponding to the given object number.
-    ///
-    /// # Errors
-    /// Returns a [`ParserError`] if:
-    /// - No cross-reference table is available (`MissingXrefTable`).
-    /// - The xref entry for `object_number` is missing (`MissingXrefEntry`).
-    /// - The provided `object_number` cannot be converted to a valid index.
-    /// - Parsing the referenced object fails for any reason.
-    pub(crate) fn resolve_object_reference(
+    /// - `Result` containing the parsed `ObjectVariant` or a `ParserError`.
+    pub fn parse_object_at(
         &mut self,
-        object_number: usize,
+        position: usize,
+        objects: Option<&ObjectCollection>,
     ) -> Result<ObjectVariant, ParserError> {
-        let Some(xref) = &self.xref_table else {
-            return Err(ParserError::MissingXrefTable);
-        };
-
-        let Some(entry) = xref.entries.get(object_number) else {
-            return Err(ParserError::MissingXrefEntry { object_number });
-        };
-
         let mark = self.tokenizer.position;
-        self.tokenizer.position = entry.byte_offset;
-        let object = self.parse_object()?;
+        self.tokenizer.position = position;
+        let object = self.parse_object(objects)?;
         self.tokenizer.position = mark;
 
         Ok(object)
@@ -247,7 +174,7 @@ impl PdfParser<'_> {
     /// # Returns
     ///
     /// - `Result` indicating success or failure.
-    pub(crate) fn read_keyword(&mut self, keyword: &[u8]) -> Result<(), ParserError> {
+    pub fn read_keyword(&mut self, keyword: &[u8]) -> Result<(), ParserError> {
         let literal = self.tokenizer.read_excactly(keyword.len())?;
         if literal != keyword {
             return Err(ParserError::InvalidKeyword(
@@ -266,11 +193,14 @@ impl PdfParser<'_> {
         self.read_end_of_line_marker()
     }
 
-    fn parse_object_internal(&mut self) -> Result<ObjectVariant, ParserError> {
+    fn parse_object_internal(
+        &mut self,
+        objects: Option<&ObjectCollection>,
+    ) -> Result<ObjectVariant, ParserError> {
         self.skip_whitespace();
 
         let Some(token) = self.tokenizer.peek() else {
-            return Err(ParserError::UnexpectedEndOfFile);
+            return Ok(ObjectVariant::EndOfFile);
         };
 
         let value = match token {
@@ -323,7 +253,7 @@ impl PdfParser<'_> {
                 let mark = self.tokenizer.position;
 
                 // Try parsing as an indirect object first.
-                if let Some(o) = self.parse_indirect_object()? {
+                if let Some(o) = self.parse_indirect_object(objects)? {
                     return Ok(o);
                 }
                 // If that fails, reset and try parsing as a number.
@@ -346,13 +276,28 @@ impl PdfParser<'_> {
         Ok(value)
     }
 
-    pub fn parse_object(&mut self) -> Result<ObjectVariant, ParserError> {
+    /// Parses a single PDF object from the input stream at the current position.
+    ///
+    /// This is the main entry point for parsing PDF objects. It handles various object types
+    /// including booleans, numbers, strings, names, arrays, dictionaries, and indirect objects.
+    ///
+    /// # Parameters
+    ///
+    /// - `objects`: Optional reference to an `ObjectCollection` for resolving indirect objects.
+    ///
+    /// # Returns
+    ///
+    /// - `Result` containing the parsed `ObjectVariant` or a `ParserError`.
+    pub fn parse_object(
+        &mut self,
+        objects: Option<&ObjectCollection>,
+    ) -> Result<ObjectVariant, ParserError> {
         // Prevent excessive nesting depth.
         if self.current_nesting_depth >= Self::MAX_NESTING_DEPTH {
             return Err(ParserError::NestingDepthExceeded);
         }
         self.current_nesting_depth = self.current_nesting_depth.saturating_add(1);
-        let result = self.parse_object_internal();
+        let result = self.parse_object_internal(objects);
         self.current_nesting_depth = self.current_nesting_depth.saturating_sub(1);
         result
     }
@@ -369,7 +314,7 @@ mod tests {
  ";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_object();
+        let result = parser.parse_object(None);
         assert!(result.is_ok());
     }
 }

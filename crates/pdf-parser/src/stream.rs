@@ -1,7 +1,7 @@
 use std::io::Read;
 
 use flate2::bufread::ZlibDecoder;
-use pdf_object::{ObjectVariant, dictionary::Dictionary};
+use pdf_object::{ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection};
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
@@ -81,7 +81,11 @@ impl StreamParser for PdfParser<'_> {
     /// - `Err(ParserError)`: If keywords are missing/malformed, EOL markers are not
     ///   found where expected, required dictionary entries (`/Length`, `/Filter`) are
     ///   missing, the specified `/Filter` is unsupported, or a decompression error occurs.
-    fn parse_stream(&mut self, dictionary: &Dictionary) -> Result<Vec<u8>, Self::ErrorType> {
+    fn parse_stream(
+        &mut self,
+        dictionary: &Dictionary,
+        objects: Option<&ObjectCollection>,
+    ) -> Result<Vec<u8>, Self::ErrorType> {
         const STREAM_START: &[u8] = b"stream";
         const STREAM_END: &[u8] = b"endstream";
 
@@ -91,8 +95,12 @@ impl StreamParser for PdfParser<'_> {
         // Find the length of the stream.
         let length = match dictionary.get_or_err("Length")? {
             &ObjectVariant::Reference(object_number) => {
-                let resolved = self.resolve_object_reference(object_number)?;
-                resolved.as_number::<usize>()?
+                let objects = objects.ok_or(StreamParsingError::MissingLength)?;
+                let length_obj = objects
+                    .get(object_number)
+                    .ok_or(StreamParsingError::MissingLength)?;
+
+                length_obj.as_number::<usize>()?
             }
             other => other.as_number::<usize>()?,
         };
@@ -154,7 +162,7 @@ mod tests {
         let input = b"strm\nHello World\nendstream";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_stream(&dictionary);
+        let result = parser.parse_stream(&dictionary, None);
         assert!(result.is_err());
     }
 
@@ -169,7 +177,7 @@ mod tests {
         let input = b"stream\nHello World\nendstrm";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_stream(&dictionary);
+        let result = parser.parse_stream(&dictionary, None);
         assert!(result.is_err());
     }
 
@@ -180,7 +188,7 @@ mod tests {
         let input = b"stream\nHello World\nendstream";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_stream(&dictionary);
+        let result = parser.parse_stream(&dictionary, None);
         assert!(result.is_err());
     }
 
@@ -195,7 +203,7 @@ mod tests {
         let input = b"stream\nHello World\nendstream";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_stream(&dictionary);
+        let result = parser.parse_stream(&dictionary, None);
         assert!(result.is_err());
     }
 
@@ -210,7 +218,7 @@ mod tests {
         let input = b"stream\n   Hello World   \nendstream";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_stream(&dictionary);
+        let result = parser.parse_stream(&dictionary, None);
         assert!(result.is_err()); // Extra whitespace should cause an error
     }
 }

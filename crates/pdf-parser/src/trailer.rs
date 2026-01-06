@@ -54,7 +54,7 @@ impl TrailerParser for PdfParser<'_> {
         self.read_keyword(TRAILER_KEYWORD)?;
 
         // Try parse dictionary object.
-        let dictionary = self.parse_object()?;
+        let dictionary = self.parse_object(None)?;
 
         let dictionary = match dictionary {
             ObjectVariant::Dictionary(value) => value,

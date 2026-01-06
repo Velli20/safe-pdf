@@ -12,17 +12,12 @@ impl ObjectCollection {
 
     pub fn insert(&mut self, obj: ObjectVariant) -> Result<(), ObjectError> {
         let key = obj.to_object_number();
-        if let Some(num) = key {
-            if self.map.insert(num, obj).is_some() {
-                Err(ObjectError::DuplicateKeyInObjectCollection(num))
-            } else {
-                Ok(())
-            }
-        } else {
-            Err(ObjectError::ObjectMissingNumber {
-                found_type: obj.name(),
-            })
+        if let Some(num) = key
+            && self.map.insert(num, obj).is_some()
+        {
+            return Err(ObjectError::DuplicateKeyInObjectCollection(num));
         }
+        Ok(())
     }
 
     pub fn get(&self, key: usize) -> Option<&ObjectVariant> {
