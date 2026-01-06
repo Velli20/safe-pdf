@@ -167,6 +167,9 @@ impl<T: std::error::Error> GraphicsStateOps for PdfCanvas<'_, T> {
                 ExternalGraphicsStateKey::StrokeAdjustment(_) => {}
                 ExternalGraphicsStateKey::AppleAntiAliasing(_) => {}
                 ExternalGraphicsStateKey::AlphaIsShape(_) => {}
+                ExternalGraphicsStateKey::SmoothnessTolerance(_) => {}
+                ExternalGraphicsStateKey::TransferFunction => {}
+                ExternalGraphicsStateKey::TransferFunctionNew => {}
             }
         }
         Ok(())
