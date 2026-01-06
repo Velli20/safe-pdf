@@ -107,6 +107,14 @@ pub enum ExternalGraphicsStateKey {
     /// Indicates whether the alpha or shape of the current painting operation
     /// is used when computing a soft mask.
     AlphaIsShape(bool),
+    /// Smoothness tolerance (`SM`). Defines the tolerance used when rendering smooth curves.
+    SmoothnessTolerance(f32),
+    /// Transfer function (`TR`). A function that modifies the color values
+    /// of the current painting operation.
+    TransferFunction,
+    /// New transfer function (`TR2`). A more advanced function that modifies
+    /// the color values of the current painting operation.
+    TransferFunctionNew,
 }
 
 pub struct ExternalGraphicsState {
@@ -293,6 +301,9 @@ fn parse_entry(
     objects: &ObjectCollection,
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
     let parsed = match name {
+        "TR" => ExternalGraphicsStateKey::TransferFunction,
+        "TR2" => ExternalGraphicsStateKey::TransferFunctionNew,
+        "SM" => ExternalGraphicsStateKey::SmoothnessTolerance(value.as_number_entry::<f32>("SM")?),
         "LW" => ExternalGraphicsStateKey::LineWidth(value.as_number_entry::<f32>("LW")?),
         "LC" => {
             let cap_val = value.as_number_entry::<i32>("LC")?;
