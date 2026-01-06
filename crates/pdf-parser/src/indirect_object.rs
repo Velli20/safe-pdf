@@ -1,6 +1,9 @@
 use std::rc::Rc;
 
-use pdf_object::{ObjectVariant, indirect_object::IndirectObject, stream::StreamObject};
+use pdf_object::{
+    ObjectVariant, indirect_object::IndirectObject, object_collection::ObjectCollection,
+    stream::StreamObject,
+};
 use pdf_tokenizer::PdfToken;
 use thiserror::Error;
 
@@ -54,7 +57,10 @@ impl IndirectObjectParser for PdfParser<'_> {
     /// ```text
     /// 15 0 R
     /// ```
-    fn parse_indirect_object(&mut self) -> Result<Option<ObjectVariant>, Self::ErrorType> {
+    fn parse_indirect_object(
+        &mut self,
+        objects: Option<&ObjectCollection>,
+    ) -> Result<Option<ObjectVariant>, Self::ErrorType> {
         const OBJ_KEYWORD: &[u8] = b"obj";
         const ENDOBJ_KEYWORD: &[u8] = b"endobj";
 
@@ -87,13 +93,13 @@ impl IndirectObjectParser for PdfParser<'_> {
         };
 
         // Parse the object.
-        let object = self.parse_object()?;
+        let object = self.parse_object(objects)?;
 
         self.skip_whitespace();
 
         if let Some(PdfToken::Alphabetic(b's')) = self.tokenizer.peek() {
             if let ObjectVariant::Dictionary(dictionary) = &object {
-                let stream = self.parse_stream(dictionary)?;
+                let stream = self.parse_stream(dictionary, objects)?;
 
                 // Read the keyword `endobj`.
                 self.read_keyword(ENDOBJ_KEYWORD)?;
@@ -131,7 +137,7 @@ mod tests {
         let mut parser = PdfParser::from(input.as_slice());
 
         if let Some(ObjectVariant::IndirectObject(indirect_object)) =
-            parser.parse_indirect_object().unwrap()
+            parser.parse_indirect_object(None).unwrap()
         {
             let IndirectObject {
                 object_number,

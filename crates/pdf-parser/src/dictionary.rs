@@ -65,7 +65,7 @@ impl DictionaryParser for PdfParser<'_> {
             self.skip_whitespace();
 
             // Parse value.
-            let value = self.parse_object()?;
+            let value = self.parse_object(None)?;
 
             dictionary.insert(key, Box::new(value));
             self.skip_whitespace();

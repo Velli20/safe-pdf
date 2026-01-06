@@ -1,3 +1,7 @@
+use std::collections::BTreeMap;
+
+use crate::trailer::Trailer;
+
 /// Represents a cross-reference table in a PDF file.
 /// The cross-reference table is used to quickly locate objects in the PDF file
 /// without having to read the entire file. It is typically found at the end of
@@ -20,25 +24,15 @@
 /// the end of the PDF file, preceded by a trailer dictionary with metadata about the file.
 #[derive(Debug, PartialEq, Clone)]
 pub struct CrossReferenceTable {
-    /// The object number of the first entry in this subsection.
-    pub first_object_number: usize,
-    /// The number of entries in this subsection.
-    pub number_of_entries: usize,
-    /// The list of cross-reference entries.
-    pub entries: Vec<CrossReferenceEntry>,
+    /// The map of object numbers to cross-reference entries.
+    pub entries: BTreeMap<usize, CrossReferenceEntry>,
+    /// The trailer associated with this cross-reference table.
+    pub trailer: Trailer,
 }
 
 impl CrossReferenceTable {
-    pub fn new(
-        first_object_number: usize,
-        number_of_entries: usize,
-        entries: Vec<CrossReferenceEntry>,
-    ) -> Self {
-        CrossReferenceTable {
-            first_object_number,
-            number_of_entries,
-            entries,
-        }
+    pub fn new(entries: BTreeMap<usize, CrossReferenceEntry>, trailer: Trailer) -> Self {
+        CrossReferenceTable { entries, trailer }
     }
 }
 

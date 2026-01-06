@@ -1,6 +1,6 @@
 use pdf_object::{
     ObjectVariant, cross_reference_table::CrossReferenceTable, dictionary::Dictionary,
-    trailer::Trailer, version::Version,
+    object_collection::ObjectCollection, trailer::Trailer, version::Version,
 };
 
 pub trait ArrayParser {
@@ -12,7 +12,11 @@ pub trait ArrayParser {
 pub trait StreamParser {
     type ErrorType;
 
-    fn parse_stream(&mut self, dictionary: &Dictionary) -> Result<Vec<u8>, Self::ErrorType>;
+    fn parse_stream(
+        &mut self,
+        dictionary: &Dictionary,
+        objects: Option<&ObjectCollection>,
+    ) -> Result<Vec<u8>, Self::ErrorType>;
 }
 
 pub trait BooleanParser {
@@ -54,7 +58,10 @@ pub trait HexStringParser {
 pub trait IndirectObjectParser {
     type ErrorType;
 
-    fn parse_indirect_object(&mut self) -> Result<Option<ObjectVariant>, Self::ErrorType>;
+    fn parse_indirect_object(
+        &mut self,
+        objects: Option<&ObjectCollection>,
+    ) -> Result<Option<ObjectVariant>, Self::ErrorType>;
 }
 
 pub trait LiteralStringParser {

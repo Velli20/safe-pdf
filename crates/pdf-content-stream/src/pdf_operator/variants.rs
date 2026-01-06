@@ -139,7 +139,7 @@ impl PdfOperatorVariant {
                 continue;
             }
 
-            let value = parser.parse_object()?;
+            let value = parser.parse_object(None)?;
             operands.push(value);
         }
 
