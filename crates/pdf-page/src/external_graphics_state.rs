@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use pdf_object::{
     ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
-    stream::StreamObject, traits::FromDictionary,
+    traits::FromDictionary,
 };
 
 use thiserror::Error;
@@ -265,11 +265,9 @@ fn parse_soft_mask(
             let mask_type = parse_mask_mode(dict.get_or_err("S")?.try_str()?)?;
 
             // Parse the "G" key for the `XObject`
-            let StreamObject {
-                dictionary, data, ..
-            } = objects.resolve_stream(dict.get_or_err("G")?)?;
+            let stream = objects.resolve_stream(dict.get_or_err("G")?)?;
 
-            let shape = XObject::read_xobject(dictionary, data.as_slice(), objects)?;
+            let shape = XObject::read_xobject(&stream.dictionary, stream, objects)?;
 
             Some(SoftMask { mask_type, shape })
         }

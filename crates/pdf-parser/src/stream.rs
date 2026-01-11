@@ -1,8 +1,5 @@
-use std::io::Read;
-
-use flate2::bufread::ZlibDecoder;
 use pdf_object::{ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection};
-use pdf_tokenizer::{PdfToken, error::TokenizerError};
+use pdf_tokenizer::PdfToken;
 use thiserror::Error;
 
 use crate::{error::ParserError, parser::PdfParser, traits::StreamParser};
@@ -12,12 +9,6 @@ use crate::{error::ParserError, parser::PdfParser, traits::StreamParser};
 pub enum StreamParsingError {
     #[error("Stream dictionary missing /Length entry")]
     MissingLength,
-    #[error("Unsupported stream filter: {0}")]
-    UnsupportedFilter(String),
-    #[error("Error while decoding stream: {0}")]
-    DecompressionError(String),
-    #[error("Tokenizer error: {0}")]
-    TokenizerError(#[from] TokenizerError),
 }
 
 impl StreamParser for PdfParser<'_> {
@@ -105,9 +96,6 @@ impl StreamParser for PdfParser<'_> {
             other => other.as_number::<usize>()?,
         };
 
-        // Find the decode type of the stream.
-        let decode = dictionary.get("Filter").and_then(|v| v.as_str());
-
         // Read the stream data
         let stream_data = self.tokenizer.read_excactly(length)?.to_vec();
 
@@ -120,23 +108,6 @@ impl StreamParser for PdfParser<'_> {
 
         // Read the `endstream` keyword .
         self.read_keyword(STREAM_END)?;
-
-        let stream_data = match decode.as_deref() {
-            Some("FlateDecode") => {
-                let mut d = ZlibDecoder::new(stream_data.as_slice());
-                let mut s = Vec::new();
-
-                if let Err(e) = d.read_to_end(&mut s) {
-                    return Err(StreamParsingError::DecompressionError(e.to_string()).into());
-                }
-                s
-            }
-            Some("DCTDecode") => stream_data,
-            Some(other) => {
-                return Err(StreamParsingError::UnsupportedFilter(other.to_string()).into());
-            }
-            None => stream_data,
-        };
 
         Ok(stream_data)
     }

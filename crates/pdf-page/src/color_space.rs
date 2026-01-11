@@ -237,10 +237,11 @@ fn extract_lookup_table(
     objects: &ObjectCollection,
     lookup: &ObjectVariant,
 ) -> Result<Vec<u8>, ColorSpaceError> {
-    let resolved = objects.resolve_object(lookup)?;
-
-    match resolved {
-        ObjectVariant::Stream(stream) => Ok(stream.data.clone()),
-        _ => Ok(resolved.try_bytes()?.to_vec()),
+    if let Ok(data) = lookup.try_bytes() {
+        return Ok(data.to_vec());
     }
+    let resolved = objects.resolve_stream(lookup)?;
+
+    let data = resolved.data()?;
+    Ok(data.into_owned())
 }

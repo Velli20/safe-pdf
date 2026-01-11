@@ -30,7 +30,8 @@ fn process_content_stream_array(
     let mut concatenated_ops = Vec::new();
     for value_in_array in array.iter() {
         let stream = objects.resolve_stream(value_in_array)?;
-        let stream_ops = PdfOperatorVariant::from(stream.data.as_slice())?;
+        let data = stream.data()?;
+        let stream_ops = PdfOperatorVariant::from(&data)?;
         concatenated_ops.extend(stream_ops);
     }
     Ok(concatenated_ops)
@@ -56,14 +57,18 @@ impl FromDictionary for ContentStream {
         // Process the resolved /Contents object.
         // It should be a Stream, an Array, or an IndirectObject whose payload is one of these.
         let operations = match &contents {
-            ObjectVariant::Stream(s) => PdfOperatorVariant::from(s.data.as_slice())?,
+            ObjectVariant::Stream(stream) => {
+                let data = stream.data()?;
+                PdfOperatorVariant::from(&data)?
+            }
             ObjectVariant::Array(array_obj) => {
                 // The /Contents entry is an array of streams.
                 process_content_stream_array(array_obj, objects)?
             }
             ObjectVariant::IndirectObject(s) => match &s.object {
-                Some(ObjectVariant::Stream(stream_val)) => {
-                    PdfOperatorVariant::from(stream_val.data.as_slice())?
+                Some(ObjectVariant::Stream(stream)) => {
+                    let stream = stream.data()?;
+                    PdfOperatorVariant::from(&stream)?
                 }
                 Some(ObjectVariant::Array(array_val)) => {
                     process_content_stream_array(array_val, objects)?

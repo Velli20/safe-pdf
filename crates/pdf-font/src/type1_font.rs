@@ -50,8 +50,8 @@ impl FromDictionary for Type1Font {
 
         let font_file = FontDescriptor::from_dictionary(descriptor, objects)?;
 
-        let font_file = font_file.data.as_slice();
-        let font_file = build_cff_font(font_file)?;
+        let font_file = font_file.data()?;
+        let font_file = build_cff_font(&font_file)?;
 
         // Read the `/Widths` entry.
         let widths = SimpleFontGlyphWidthsMap::from_dictionary(dictionary, objects)?;

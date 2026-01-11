@@ -96,12 +96,3 @@ pub enum MaskMode {
     /// The soft mask is applied to the luminosity channel.
     Luminosity,
 }
-
-/// Specifies the encoding of an image in a PDF.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImageEncoding {
-    /// JPEG encoding.
-    Jpeg,
-    /// Raw, uncompressed pixel data.
-    Uncompressed,
-}

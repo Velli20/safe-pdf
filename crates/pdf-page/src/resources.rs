@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use pdf_font::font::{Font, FontError};
 use pdf_object::{
     ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
-    stream::StreamObject, traits::FromDictionary,
+    traits::FromDictionary,
 };
 use thiserror::Error;
 
@@ -151,7 +151,7 @@ impl Resources {
                         Pattern::from_dictionary(dict, objects, None)?
                     }
                     ObjectVariant::Stream(stream) => {
-                        Pattern::from_dictionary(&stream.dictionary, objects, Some(&stream.data))?
+                        Pattern::from_dictionary(&stream.dictionary, objects, Some(stream))?
                     }
                     other => {
                         return Err(ResourcesError::InvalidEntryType {
@@ -181,10 +181,8 @@ impl Resources {
             .dictionary
             .iter()
             .map(|(name, value)| {
-                let StreamObject {
-                    dictionary, data, ..
-                } = objects.resolve_stream(value)?;
-                let xobject = XObject::read_xobject(dictionary, data.as_slice(), objects)?;
+                let stream = objects.resolve_stream(value)?;
+                let xobject = XObject::read_xobject(&stream.dictionary, stream, objects)?;
                 Ok((name.clone(), xobject))
             })
             .collect()

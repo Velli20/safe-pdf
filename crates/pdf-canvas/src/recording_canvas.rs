@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use crate::canvas_backend::{CanvasBackend, Image as BackendImage, Shader};
 use pdf_graphics::{
-    BlendMode, ImageEncoding, MaskMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
+    BlendMode, MaskMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
     transform::Transform,
 };
 use thiserror::Error;
@@ -22,8 +22,6 @@ struct RecordedImage {
     pub data: Vec<u8>,
     pub width: usize,
     pub height: usize,
-    pub encoding: ImageEncoding,
-    pub mask: Option<Vec<u8>>,
 }
 
 impl From<&BackendImage<'_>> for RecordedImage {
@@ -32,8 +30,6 @@ impl From<&BackendImage<'_>> for RecordedImage {
             data: img.data.clone().into_owned(),
             width: img.width,
             height: img.height,
-            encoding: img.encoding,
-            mask: img.mask.as_ref().map(|m| m.clone().into_owned()),
         }
     }
 }
@@ -346,9 +342,7 @@ impl RecordingCanvas {
                         data: Cow::Owned(image.data.clone()),
                         width: image.width,
                         height: image.height,
-                        encoding: image.encoding,
                         num_color_components: *num_color_components,
-                        mask: image.mask.as_ref().map(|m| Cow::Owned(m.clone())),
                     };
                     backend.draw_image_rect(
                         &backend_img,

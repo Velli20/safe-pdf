@@ -11,10 +11,8 @@
 use std::borrow::Cow;
 
 use pdf_content_stream::pdf_operator_backend::XObjectOps;
-use pdf_graphics::{ImageEncoding, rect::Rect, transform::Transform};
-use pdf_page::{
-    color_space::ColorSpace, image::ImageXObject, image_filter::ImageFilter, xobject::XObject,
-};
+use pdf_graphics::{rect::Rect, transform::Transform};
+use pdf_page::{color_space::ColorSpace, image::ImageXObject, xobject::XObject};
 
 use crate::{canvas_backend::Image, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
@@ -245,12 +243,6 @@ impl<T: std::error::Error> PdfCanvas<'_, T> {
     /// Handles the complete image rendering pipeline including coordinate
     /// transformation, color space conversion, and backend delegation.
     fn render_image_xobject(&mut self, image: &ImageXObject) -> Result<(), PdfCanvasError> {
-        // Extract soft mask for alpha compositing
-        let mask = image
-            .smask
-            .as_ref()
-            .map(|m| Cow::Borrowed(m.data.as_slice()));
-
         let transform = self.current_state()?.transform;
         let rotation_degrees = transform.rotation_degrees();
 
@@ -260,18 +252,21 @@ impl<T: std::error::Error> PdfCanvas<'_, T> {
         // image render right-side up in user space.
         let transform = generate_image_orientation_matrix(transform);
 
-        // Determine image encoding based on the filter applied
-        let encoding = Self::resolve_image_encoding(&image.filter)?;
-
         // Map the unit square through the transform to compute an axis-aligned
         // bounding rectangle (AABB) that contains the transformed image
         let dest_rect = Self::compute_destination_rect(&transform, rotation_degrees);
 
-        // Resolve number of color components (default to RGB if unspecified)
-        let num_color_components = image
-            .color_space
-            .as_ref()
-            .map_or(RGB_COMPONENTS, |cs| cs.num_color_components());
+        // Resolve number of color components.
+        // If the image has alpha (from soft mask), it's RGBA (4 components).
+        // Otherwise, use the color space's component count (default to RGB).
+        let num_color_components = if image.has_alpha {
+            4 // RGBA
+        } else {
+            image
+                .color_space
+                .as_ref()
+                .map_or(RGB_COMPONENTS, |cs| cs.num_color_components())
+        };
 
         // Expand indexed color data to RGB if applicable
         let image_data = self.resolve_image_data(image)?;
@@ -281,8 +276,6 @@ impl<T: std::error::Error> PdfCanvas<'_, T> {
             width: image.width,
             height: image.height,
             num_color_components,
-            encoding,
-            mask,
         };
 
         let blend_mode = self.current_state()?.blend_mode;
@@ -294,20 +287,6 @@ impl<T: std::error::Error> PdfCanvas<'_, T> {
                 Some(rotation_degrees),
             )
             .map_err(|e| PdfCanvasError::BackendError(e.to_string()))
-    }
-
-    /// Resolves the image encoding from the PDF filter type.
-    fn resolve_image_encoding(
-        filter: &Option<ImageFilter>,
-    ) -> Result<ImageEncoding, PdfCanvasError> {
-        match filter {
-            Some(ImageFilter::DCTDecode) => Ok(ImageEncoding::Jpeg),
-            Some(ImageFilter::FlateDecode) | None => Ok(ImageEncoding::Uncompressed),
-            Some(other) => Err(PdfCanvasError::NotImplemented(format!(
-                "{:?} image filter",
-                other
-            ))),
-        }
     }
 
     /// Computes the destination rectangle for image rendering.

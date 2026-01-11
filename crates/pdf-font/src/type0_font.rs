@@ -133,14 +133,14 @@ impl FromDictionary for Type0Font {
         let descriptor = objects.resolve_dictionary(dictionary.get_or_err("FontDescriptor")?)?;
         let font_file = FontDescriptor::from_dictionary(descriptor, objects)?;
 
-        let font_file = font_file.data.as_slice();
+        let font_file = font_file.data()?;
 
         // Process the embedded font data based on the CIDFont subtype:
         // - Type0 (CFF): Rebuild as a standalone CFF font for rendering libraries.
         // - Type2 (TrueType): Use the raw TrueType data directly.
         let font_file = match subtype {
-            CidFontSubType::Type0 => build_cff_font(font_file)?,
-            CidFontSubType::Type2 => font_file.to_vec(),
+            CidFontSubType::Type0 => build_cff_font(&font_file)?,
+            CidFontSubType::Type2 => font_file.into_owned(),
         };
 
         Ok(Self {
