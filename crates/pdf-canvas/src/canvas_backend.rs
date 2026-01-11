@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use pdf_graphics::{
-    BlendMode, ImageEncoding, MaskMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
+    BlendMode, MaskMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
     transform::Transform,
 };
 
@@ -81,10 +81,6 @@ pub struct Image<'a> {
     pub width: usize,
     /// The height of the image in pixels.
     pub height: usize,
-    /// The image encoding (e.g., "jpeg", "png").
-    pub encoding: ImageEncoding,
-    /// An optional alpha mask to apply to the image.
-    pub mask: Option<Cow<'a, [u8]>>,
     /// The number of color components in the image (e.g., 3 for RGB, 4 for CMYK).
     pub num_color_components: usize,
 }

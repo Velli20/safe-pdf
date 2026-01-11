@@ -11,8 +11,6 @@ pub enum ObjectError {
     /// This can occur when trying to interpret a `Value` as a specific concrete type.
     #[error("Type mismatch: expected type '{0}', but found type '{1}'")]
     TypeMismatch(&'static str, &'static str),
-    /// Indicates an error occurred while attempting to convert a `Value::Number`
-    /// to a different numeric type (e.g., when `TryFrom` fails).
     #[error("Failed to convert number to the requested type")]
     NumberConversionError,
     #[error("Failed to resolve an object reference {obj_num}")]
@@ -31,7 +29,10 @@ pub enum ObjectError {
     /// Indicates that a required key was not found in a dictionary
     #[error("Required key '{key}' not found in dictionary")]
     MissingRequiredKey { key: String },
-
     #[error("Failed to convert PDF value to number for FontDescriptor entry /{entry_description}")]
     NumericConversionError { entry_description: &'static str },
+    #[error("Unsupported stream filter: {0}")]
+    UnsupportedFilter(String),
+    #[error("Error while decoding stream: {0}")]
+    DecompressionError(String),
 }

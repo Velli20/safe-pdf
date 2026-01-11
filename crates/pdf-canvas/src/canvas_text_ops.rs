@@ -157,7 +157,7 @@ impl<T: std::error::Error> TextShowingOps for PdfCanvas<'_, T> {
             Font::TrueType(font) => {
                 let mut iter = to_char_iter(text);
 
-                let mut renderer = TrueTypeFontRenderer::new(self, &font.font_file.data, false)?;
+                let mut renderer = TrueTypeFontRenderer::new(self, &font.font_file, false)?;
                 renderer.render_text(&mut iter)
             }
             Font::Type0(font) => {

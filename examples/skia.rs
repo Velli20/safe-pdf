@@ -58,7 +58,7 @@ fn create_surface(
     .expect("Could not create skia surface")
 }
 
-use pdf_document::PdfDocument;
+use pdf_document::{document::PdfDocument, reader::PdfReader};
 use pdf_renderer::PdfRenderer;
 
 // ------------------------------
@@ -108,8 +108,9 @@ impl AppSettings {
 // ------------------------------
 fn load_document(settings: &AppSettings) -> Arc<PdfDocument> {
     if let Some(path) = &settings.pdf_path {
+        let mut reader = PdfReader::default();
         match std::fs::read(path) {
-            Ok(bytes) => Arc::new(PdfDocument::from(&bytes).expect("Failed to parse PDF")),
+            Ok(bytes) => Arc::new(reader.read_from_bytes(&bytes).expect("Failed to parse PDF")),
             Err(e) => panic!("Failed to read PDF '{}': {e}", path.display()),
         }
     } else {

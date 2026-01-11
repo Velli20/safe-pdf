@@ -2,7 +2,10 @@ use crate::{
     form::{FormXObject, FormXObjectError},
     image::{ImageXObject, ImageXObjectError},
 };
-use pdf_object::{dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection};
+use pdf_object::{
+    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    stream::StreamObject,
+};
 use thiserror::Error;
 
 /// Represents a PDF External Object (XObject).
@@ -52,7 +55,7 @@ pub(crate) trait XObjectReader {
     /// or an error of type `Self::ErrorType` on failure.
     fn read_xobject(
         dictionary: &Dictionary,
-        stream_data: &[u8],
+        stream_data: &StreamObject,
         objects: &ObjectCollection,
     ) -> Result<Self, Self::ErrorType>
     where
@@ -64,7 +67,7 @@ impl XObjectReader for XObject {
 
     fn read_xobject(
         dictionary: &Dictionary,
-        stream_data: &[u8],
+        stream_data: &StreamObject,
         objects: &ObjectCollection,
     ) -> Result<Self, Self::ErrorType> {
         let subtype = dictionary.get_or_err("Subtype")?.try_str()?;

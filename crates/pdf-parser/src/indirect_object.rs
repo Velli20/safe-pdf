@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use pdf_object::{
-    ObjectVariant, indirect_object::IndirectObject, object_collection::ObjectCollection,
-    stream::StreamObject,
+    ObjectVariant, filter::Filter, indirect_object::IndirectObject,
+    object_collection::ObjectCollection, stream::StreamObject, traits::FromDictionary,
 };
 use pdf_tokenizer::PdfToken;
 use thiserror::Error;
@@ -18,6 +18,8 @@ use crate::{
 pub enum IndirectObjectError {
     #[error("Stream object found without a preceding dictionary")]
     StreamObjectWithoutDictionary,
+    #[error("Object collection is required to parse stream filters")]
+    MissingObjectCollection,
 }
 
 impl IndirectObjectParser for PdfParser<'_> {
@@ -88,7 +90,7 @@ impl IndirectObjectParser for PdfParser<'_> {
         }
 
         // Read the keyword `obj`.
-        let Some(()) = self.read_keyword(OBJ_KEYWORD).ok() else {
+        if self.read_keyword(OBJ_KEYWORD).is_err() {
             return Ok(None);
         };
 
@@ -98,21 +100,24 @@ impl IndirectObjectParser for PdfParser<'_> {
         self.skip_whitespace();
 
         if let Some(PdfToken::Alphabetic(b's')) = self.tokenizer.peek() {
-            if let ObjectVariant::Dictionary(dictionary) = &object {
-                let stream = self.parse_stream(dictionary, objects)?;
-
-                // Read the keyword `endobj`.
-                self.read_keyword(ENDOBJ_KEYWORD)?;
-
-                return Ok(Some(ObjectVariant::Stream(Rc::new(StreamObject::new(
-                    object_number,
-                    generation_number,
-                    Rc::clone(dictionary),
-                    stream,
-                )))));
-            } else {
+            let ObjectVariant::Dictionary(dictionary) = object else {
                 return Err(IndirectObjectError::StreamObjectWithoutDictionary.into());
-            }
+            };
+            let stream = self.parse_stream(&dictionary, objects)?;
+
+            // Read the keyword `endobj`.
+            self.read_keyword(ENDOBJ_KEYWORD)?;
+
+            let objects = objects.ok_or(IndirectObjectError::MissingObjectCollection)?;
+            let filters = Filter::from_dictionary(&dictionary, objects)?;
+
+            return Ok(Some(ObjectVariant::Stream(Rc::new(StreamObject::new(
+                object_number,
+                generation_number,
+                dictionary,
+                stream,
+                filters,
+            )))));
         }
 
         // Read the keyword `endobj`.

@@ -1,6 +1,7 @@
-use std::rc::Rc;
+use std::{borrow::Cow, rc::Rc};
 
-use crate::dictionary::Dictionary;
+use crate::error::ObjectError;
+use crate::{dictionary::Dictionary, filter::Filter};
 
 /// Represents a PDF stream object.
 ///
@@ -17,21 +18,65 @@ pub struct StreamObject {
     /// The dictionary associated with this stream.
     pub dictionary: Rc<Dictionary>,
     /// The raw, uncompressed, byte data of the stream.
-    pub data: Vec<u8>,
+    data: Vec<u8>,
+    /// The filters applied to the stream data.
+    filters: Option<Vec<Filter>>,
 }
 
 impl StreamObject {
+    /// Creates a new [`StreamObject`].
     pub fn new(
         object_number: usize,
         generation_number: usize,
         dictionary: Rc<Dictionary>,
         data: Vec<u8>,
+        filters: Option<Vec<Filter>>,
     ) -> Self {
         StreamObject {
             object_number,
             generation_number,
             dictionary,
             data,
+            filters,
         }
+    }
+
+    /// Returns the fully decoded stream bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if decompression fails or if the stream has unsupported
+    /// filter chains.
+    pub fn data(&self) -> Result<Cow<'_, [u8]>, ObjectError> {
+        let mut data: Cow<'_, [u8]> = Cow::Borrowed(&self.data);
+
+        let Some(filters) = &self.filters else {
+            return Ok(data);
+        };
+
+        for filter in filters {
+            match filter {
+                Filter::FlateDecode => {
+                    let decoded = Filter::decode_flate(&data)?;
+                    data = Cow::Owned(decoded);
+                }
+                Filter::JPXDecode => {
+                    let decoded = Filter::decode_jpeg2000(&data)?;
+                    data = Cow::Owned(decoded);
+                }
+                Filter::DCTDecode => {
+                    let decoded = Filter::decode_jpeg_baseline(&data)?;
+                    data = Cow::Owned(decoded);
+                }
+                _ => {
+                    println!(
+                        "Unsupported filter in data_with_remaining_filter: {:?}",
+                        filter
+                    );
+                    break;
+                }
+            }
+        }
+        Ok(data)
     }
 }

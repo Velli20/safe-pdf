@@ -2,6 +2,7 @@ use pdf_content_stream::error::PdfOperatorError;
 use pdf_graphics::rect::Rect;
 use pdf_graphics::transform::Transform;
 use pdf_object::error::ObjectError;
+use pdf_object::stream::StreamObject;
 use pdf_object::{
     dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
 };
@@ -41,7 +42,7 @@ impl XObjectReader for FormXObject {
     /// Parses a Form XObject from its dictionary and stream data.
     fn read_xobject(
         dictionary: &Dictionary,
-        stream_data: &[u8],
+        stream_data: &StreamObject,
         objects: &ObjectCollection,
     ) -> Result<Self, FormXObjectError> {
         // Retrieve the `/BBox` entry.
@@ -57,9 +58,10 @@ impl XObjectReader for FormXObject {
             }
         })?;
 
+        let stream_data = stream_data.data()?;
         // Parse the content stream data.
         let content_stream = ContentStream {
-            operations: pdf_content_stream::pdf_operator::PdfOperatorVariant::from(stream_data)?,
+            operations: pdf_content_stream::pdf_operator::PdfOperatorVariant::from(&stream_data)?,
         };
 
         Ok(FormXObject {

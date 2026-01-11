@@ -1,6 +1,6 @@
 use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
-    stream::StreamObject, traits::FromDictionary,
+    traits::FromDictionary,
 };
 use thiserror::Error;
 
@@ -12,7 +12,7 @@ use crate::{
 /// Minimal, initial representation of a PDF TrueType (simple) font.
 pub struct TrueTypeFont {
     /// Optional font file containing embedded TrueType program.
-    pub font_file: StreamObject,
+    pub font_file: Vec<u8>,
     /// Widths for character codes 0..=255 if provided via /Widths.
     pub widths: SimpleFontGlyphWidthsMap,
 }
@@ -40,6 +40,7 @@ impl FromDictionary for TrueTypeFont {
         let font_descriptor = dictionary.get_or_err("FontDescriptor")?;
         let font_file =
             FontDescriptor::from_dictionary(objects.resolve_dictionary(font_descriptor)?, objects)?;
+        let font_file = font_file.data()?.into_owned();
 
         // Read the `/Widths` entry.
         let widths = SimpleFontGlyphWidthsMap::from_dictionary(dictionary, objects)?;

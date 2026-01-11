@@ -1,7 +1,7 @@
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
-    traits::FromDictionary,
+    stream::StreamObject, traits::FromDictionary,
 };
 use thiserror::Error;
 
@@ -141,7 +141,7 @@ impl Pattern {
     pub(crate) fn from_dictionary(
         dictionary: &Dictionary,
         objects: &ObjectCollection,
-        stream: Option<&[u8]>,
+        stream: Option<&StreamObject>,
     ) -> Result<Pattern, PatternError> {
         let pattern_type = dictionary.get_or_err("PatternType")?.as_number::<i32>()?;
 
@@ -198,9 +198,11 @@ impl Pattern {
                     "Stream data for Tiling Pattern",
                 ))?;
 
+                let stream_data = stream_data.data()?;
+
                 let content_stream = ContentStream {
                     operations: pdf_content_stream::pdf_operator::PdfOperatorVariant::from(
-                        stream_data,
+                        &stream_data,
                     )?,
                 };
                 Ok(Pattern::Tiling {
