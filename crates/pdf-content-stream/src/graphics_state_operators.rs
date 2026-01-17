@@ -217,7 +217,7 @@ impl PdfOperator for SetRenderingIntent {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let intent = operands.get_name()?;
+        let intent = operands.get_str()?.into_owned();
         Ok(PdfOperatorVariant::SetRenderingIntent(Self::new(intent)))
     }
 
@@ -323,7 +323,7 @@ impl PdfOperator for SetGraphicsStateFromDict {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let dict_name = operands.get_name()?;
+        let dict_name = operands.get_str()?.into_owned();
         Ok(PdfOperatorVariant::SetGraphicsStateFromDict(Self::new(
             dict_name,
         )))

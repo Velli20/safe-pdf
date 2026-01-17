@@ -1,7 +1,6 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
-    pdf_operator_backend::PdfOperatorBackend,
 };
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -42,8 +41,25 @@ impl PdfOperator for SetCharWidthAndBoundingBox {
             ury,
         }))
     }
+}
 
-    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), T::ErrorType> {
-        todo!()
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SetCharWidth {
+    /// The x-component of the character width vector.
+    pub wx: f32,
+    /// The y-component of the character width vector.
+    wy: f32,
+}
+
+impl PdfOperator for SetCharWidth {
+    const NAME: &'static str = "d0";
+
+    const OPERAND_COUNT: Option<usize> = Some(2);
+
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        let wx = operands.get_f32()?;
+        let wy = operands.get_f32()?;
+
+        Ok(PdfOperatorVariant::SetCharWidth(Self { wx, wy }))
     }
 }

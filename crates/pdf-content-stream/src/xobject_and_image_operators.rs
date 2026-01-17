@@ -24,7 +24,7 @@ impl PdfOperator for InvokeXObject {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let name = operands.get_name()?;
+        let name = operands.get_str()?.into_owned();
         Ok(PdfOperatorVariant::InvokeXObject(Self::new(name)))
     }
 

@@ -117,6 +117,8 @@ impl<T: std::error::Error> TextRenderer for Type3FontRenderer<'_, '_, T> {
                 // so it can be used to advance the text matrix after the glyph is painted.
                 if let PdfOperatorVariant::SetCharWidthAndBoundingBox(op) = op {
                     glyph_width = Some(op.wx);
+                } else if let PdfOperatorVariant::SetCharWidth(op) = op {
+                    glyph_width = Some(op.wx);
                 } else {
                     op.call(self.canvas)
                         .map_err(|err| Type3FontRendererError::CharProcError {

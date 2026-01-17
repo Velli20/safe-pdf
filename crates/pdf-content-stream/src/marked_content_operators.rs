@@ -28,7 +28,7 @@ impl PdfOperator for BeginMarkedContent {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let tag = operands.get_str()?;
+        let tag = operands.get_str()?.into_owned();
         Ok(PdfOperatorVariant::BeginMarkedContent(Self::new(tag)))
     }
 
@@ -60,7 +60,7 @@ impl PdfOperator for BeginMarkedContentWithProps {
     const OPERAND_COUNT: Option<usize> = Some(2);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let tag = operands.get_str()?;
+        let tag = operands.get_str()?.into_owned();
         let properties = operands.get_dictionary()?;
         Ok(PdfOperatorVariant::BeginMarkedContentWithProps(Self::new(
             tag, properties,

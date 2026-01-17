@@ -13,7 +13,7 @@ use crate::{
     text_positioning_operators::*,
     text_showing_operators::*,
     text_state_operators::*,
-    type3_font_operators::SetCharWidthAndBoundingBox,
+    type3_font_operators::{SetCharWidth, SetCharWidthAndBoundingBox},
     xobject_and_image_operators::*,
 };
 
@@ -100,6 +100,7 @@ pub(crate) const READ_MAP: &[OpDescriptor] = &[
     OpDescriptor::from::<EndInlineImage>(),
     OpDescriptor::from::<EndCompatibility>(),
     OpDescriptor::from::<PaintShading>(),
+    OpDescriptor::from::<SetCharWidth>(),
     OpDescriptor::from::<SetCharWidthAndBoundingBox>(),
     OpDescriptor::from::<SetStrokeColorSpace>(),
     OpDescriptor::from::<SetNonStrokingColorSpace>(),

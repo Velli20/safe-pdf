@@ -2,14 +2,15 @@ use pdf_parser::{parser::PdfParser, traits::CommentParser};
 use pdf_tokenizer::PdfToken;
 
 use crate::compatibility_operators::{BeginCompatibility, EndCompatibility};
+use crate::type3_font_operators::SetCharWidth;
 use crate::{
     clipping_path_operators::*, color_operators::*, error::PdfOperatorError,
-    graphics_state_operators::*, marked_content_operators::*, operation_map::READ_MAP,
-    operator_tokenizer::OperatorReader, path_operators::*, path_paint_operators::*,
-    pdf_operator_backend::PdfOperatorBackend, shadings_operators::PaintShading,
-    text_object_operators::*, text_positioning_operators::*, text_showing_operators::*,
-    text_state_operators::*, type3_font_operators::SetCharWidthAndBoundingBox,
-    xobject_and_image_operators::*,
+    graphics_state_operators::*, marked_content_operators::*,
+    operation_map::get_operation_descriptor, operator_tokenizer::OperatorReader, path_operators::*,
+    path_paint_operators::*, pdf_operator_backend::PdfOperatorBackend,
+    shadings_operators::PaintShading, text_object_operators::*, text_positioning_operators::*,
+    text_showing_operators::*, text_state_operators::*,
+    type3_font_operators::SetCharWidthAndBoundingBox, xobject_and_image_operators::*,
 };
 
 use super::{Operands, PdfOperator};
@@ -78,6 +79,7 @@ pub enum PdfOperatorVariant {
     EndCompatibility(EndCompatibility),
     PaintShading(PaintShading),
     SetCharWidthAndBoundingBox(SetCharWidthAndBoundingBox),
+    SetCharWidth(SetCharWidth),
     SetRenderingIntent(SetRenderingIntent),
     SetStrokeColorSpace(SetStrokeColorSpace),
     SetNonStrokingColorSpace(SetNonStrokingColorSpace),
@@ -86,64 +88,93 @@ pub enum PdfOperatorVariant {
 }
 
 impl PdfOperatorVariant {
+    /// Parses a PDF content stream and returns a vector of operators.
+    ///
+    /// This method reads PDF content stream bytes and converts them into structured
+    /// operator variants. It handles operands, comments, and whitespace according
+    /// to the PDF specification.
+    ///
+    /// # Arguments
+    /// * `input` - Raw bytes of the PDF content stream
+    ///
+    /// # Returns
+    /// * `Ok(Vec<PdfOperatorVariant>)` - Successfully parsed operators
+    /// * `Err(PdfOperatorError)` - Parsing failed due to invalid syntax or unknown operators
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - An unknown operator is encountered
+    /// - An operator has an incorrect number of operands
+    /// - The content stream contains malformed data
     pub fn from(input: &[u8]) -> Result<Vec<PdfOperatorVariant>, PdfOperatorError> {
         let mut parser = PdfParser::from(input);
         let mut operators = Vec::new();
         let mut operands = Vec::new();
+
         loop {
             parser.skip_whitespace();
 
-            if let Some(PdfToken::Percent) = parser.tokenizer.peek() {
+            // Skip comments
+            if matches!(parser.tokenizer.peek(), Some(PdfToken::Percent)) {
                 parser.parse_comment()?;
                 continue;
             }
 
-            let peeked = parser.tokenizer.peek();
-            if peeked.is_none() {
+            // Check for end of input
+            let Some(token) = parser.tokenizer.peek() else {
                 break;
-            }
+            };
 
-            if let Some(PdfToken::Alphabetic(_)) = &peeked {
+            // Handle operator names
+            if let PdfToken::Alphabetic(_) = token {
                 let name = parser.read_operation_name()?;
                 if name.is_empty() {
                     break;
                 }
 
-                let mut handled = false;
-                for operation in READ_MAP {
-                    if name == operation.name {
-                        match operation.operand_count {
-                            Some(required_count) if operands.len() != required_count => {
-                                return Err(PdfOperatorError::IncorrectOperandCount {
-                                    op_name: operation.name,
-                                    got: operands.len(),
-                                    expected: required_count,
-                                });
-                            }
-                            _ => {}
-                        }
-
-                        let mut ops = Operands {
-                            values: operands.as_slice(),
-                        };
-                        let operator = (operation.parser)(&mut ops)?;
-                        operators.push(operator);
-                        handled = true;
-                        operands.clear();
-                        break;
-                    }
-                }
-                if !handled {
-                    return Err(PdfOperatorError::UnknownOperator(name.to_string()));
-                }
+                let operator = Self::parse_operator(&name, &mut operands)?;
+                operators.push(operator);
                 continue;
             }
 
+            // Parse operand value
             let value = parser.parse_object(None)?;
             operands.push(value);
         }
 
         Ok(operators)
+    }
+
+    /// Parses a single operator with its operands.
+    ///
+    /// Looks up the operator descriptor by name and validates the operand count
+    /// before parsing.
+    fn parse_operator(
+        name: &str,
+        operands: &mut Vec<pdf_object::ObjectVariant>,
+    ) -> Result<PdfOperatorVariant, PdfOperatorError> {
+        let Some(descriptor) = get_operation_descriptor(name) else {
+            return Err(PdfOperatorError::UnknownOperator(name.to_string()));
+        };
+
+        // Validate operand count if the operator has a fixed count requirement
+        if let Some(required_count) = descriptor.operand_count
+            && operands.len() != required_count
+        {
+            return Err(PdfOperatorError::IncorrectOperandCount {
+                op_name: descriptor.name,
+                got: operands.len(),
+                expected: required_count,
+            });
+        }
+
+        let mut ops = Operands {
+            values: operands.as_slice(),
+        };
+        let operator = (descriptor.parser)(&mut ops)?;
+        operands.clear();
+
+        Ok(operator)
     }
 
     pub fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
@@ -210,6 +241,7 @@ impl PdfOperatorVariant {
             PdfOperatorVariant::EndCompatibility(op) => op.call(backend),
             PdfOperatorVariant::PaintShading(op) => op.call(backend),
             PdfOperatorVariant::SetCharWidthAndBoundingBox(op) => op.call(backend),
+            PdfOperatorVariant::SetCharWidth(op) => op.call(backend),
             PdfOperatorVariant::SetRenderingIntent(op) => op.call(backend),
             PdfOperatorVariant::SetStrokeColorSpace(op) => op.call(backend),
             PdfOperatorVariant::SetNonStrokingColorSpace(op) => op.call(backend),

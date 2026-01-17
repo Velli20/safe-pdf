@@ -143,7 +143,7 @@ impl PdfOperator for SetFont {
     const OPERAND_COUNT: Option<usize> = Some(2);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let name = operands.get_name()?;
+        let name = operands.get_str()?.into_owned();
         let size = operands.get_f32()?;
         Ok(PdfOperatorVariant::SetFont(Self::new(name, size)))
     }
