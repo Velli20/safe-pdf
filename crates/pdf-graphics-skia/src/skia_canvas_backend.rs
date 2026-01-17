@@ -3,7 +3,7 @@ use pdf_canvas::{
     recording_canvas::RecordingCanvas,
 };
 use pdf_graphics::{
-    BlendMode, MaskMode, PathFillType,
+    BlendMode, MaskMode, PathFillType, PixelFormat,
     color::Color,
     pdf_path::{PathVerb, PdfPath},
     transform::Transform,
@@ -92,52 +92,15 @@ fn to_skia_a8_mask_image(
 fn to_skia_image(image: &Image<'_>) -> Result<skia_safe::Image, SkiaCanvasBackendError> {
     let width = image.width;
     let height = image.height;
-    let num_color_components = image.num_color_components;
+    let pixel_format = image.pixel_format;
 
     if width == 0 || height == 0 {
         return Err(SkiaCanvasBackendError::InvalidImageDimensions { width, height });
     }
 
-    let num_pixels = width * height;
-    let required_len = num_pixels
-        .checked_mul(num_color_components)
-        .ok_or(SkiaCanvasBackendError::InvalidImageDimensions { width, height })?;
-
-    if image.data.len() < required_len {
-        return Err(SkiaCanvasBackendError::ImageDecodeFailed {
-            encoding: "buffer-too-small",
-        });
-    }
-
-    let (color_type, pixel_data) = match num_color_components {
-        // RGBA input: pass through directly.
-        4 => (
-            skia_safe::ColorType::RGBA8888,
-            skia_safe::Data::new_copy(&image.data),
-        ),
-        // RGB input: expand to RGBA with full alpha.
-        3 => {
-            let mut out = Vec::with_capacity(num_pixels * 4);
-            for rgb in image.data.chunks_exact(3).take(num_pixels) {
-                out.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
-            }
-            (
-                skia_safe::ColorType::RGBA8888,
-                skia_safe::Data::new_copy(&out),
-            )
-        }
-        // Grayscale input: use Gray8 format.
-        1 => (
-            skia_safe::ColorType::Gray8,
-            skia_safe::Data::new_copy(&image.data),
-        ),
-        _ => {
-            return Err(SkiaCanvasBackendError::UnsupportedImageComponents {
-                components: num_color_components,
-                width,
-                height,
-            });
-        }
+    let color_type = match pixel_format {
+        PixelFormat::RGBA8888 => skia_safe::ColorType::RGBA8888,
+        PixelFormat::Alpha8 => skia_safe::ColorType::Gray8,
     };
 
     let image_info = skia_safe::ImageInfo::new(
@@ -146,6 +109,8 @@ fn to_skia_image(image: &Image<'_>) -> Result<skia_safe::Image, SkiaCanvasBacken
         skia_safe::AlphaType::Unpremul,
         None,
     );
+
+    let pixel_data = skia_safe::Data::new_copy(&image.data);
 
     let row_bytes = width * image_info.bytes_per_pixel();
     skia_safe::images::raster_from_data(&image_info, pixel_data, row_bytes)

@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use pdf_graphics::{
-    BlendMode, MaskMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
+    BlendMode, MaskMode, PathFillType, PixelFormat, color::Color, pdf_path::PdfPath, rect::Rect,
     transform::Transform,
 };
 
@@ -81,8 +81,8 @@ pub struct Image<'a> {
     pub width: usize,
     /// The height of the image in pixels.
     pub height: usize,
-    /// The number of color components in the image (e.g., 3 for RGB, 4 for CMYK).
-    pub num_color_components: usize,
+    /// The pixel format of the image data.
+    pub pixel_format: PixelFormat,
 }
 
 /// A low-level drawing backend for rendering PDF graphics.

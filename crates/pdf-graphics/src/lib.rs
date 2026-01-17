@@ -96,3 +96,12 @@ pub enum MaskMode {
     /// The soft mask is applied to the luminosity channel.
     Luminosity,
 }
+
+/// Represents the pixel format of image data in PDF graphics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PixelFormat {
+    /// 8-bit per channel RGBA format.
+    RGBA8888,
+    /// Alpha-only format with 8 bits per pixel.
+    Alpha8,
+}

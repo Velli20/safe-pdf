@@ -3,7 +3,8 @@ use std::sync::Arc;
 use femtovg::Canvas;
 use femtovg::{Color, renderer::WGPURenderer};
 
-use pdf_document::PdfDocument;
+use pdf_document::document::PdfDocument;
+use pdf_document::reader::PdfReader;
 use pdf_graphics_femtovg::femtovg_canvas_backend::CanvasImpl;
 use pdf_renderer::PdfRenderer;
 use winit::{
@@ -198,7 +199,7 @@ impl AppRenderer for Renderer2 {
 
 fn main() {
     const INPUT: &[u8] = include_bytes!("assets/dd5cf1a7d6d190f94a28201777f11bf4.pdf");
-    let document = PdfDocument::from(INPUT).unwrap();
+    let document = PdfReader::default().read_from_bytes(INPUT).unwrap();
 
     let mut app = App::new(595, 842, true, document);
     let rend = Renderer2 {};

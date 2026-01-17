@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use crate::canvas_backend::{CanvasBackend, Image as BackendImage, Shader};
 use pdf_graphics::{
-    BlendMode, MaskMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
+    BlendMode, MaskMode, PathFillType, PixelFormat, color::Color, pdf_path::PdfPath, rect::Rect,
     transform::Transform,
 };
 use thiserror::Error;
@@ -22,6 +22,7 @@ struct RecordedImage {
     pub data: Vec<u8>,
     pub width: usize,
     pub height: usize,
+    pub pixel_format: PixelFormat,
 }
 
 impl From<&BackendImage<'_>> for RecordedImage {
@@ -30,6 +31,7 @@ impl From<&BackendImage<'_>> for RecordedImage {
             data: img.data.clone().into_owned(),
             width: img.width,
             height: img.height,
+            pixel_format: img.pixel_format,
         }
     }
 }
@@ -149,7 +151,6 @@ enum RecordingCommand {
         blend_mode: Option<BlendMode>,
         dest_rect: Rect,
         image_rotation: Option<f32>,
-        num_color_components: usize,
     },
     BeginMaskLayer {
         mask: Box<RecordingCanvas>,
@@ -336,13 +337,12 @@ impl RecordingCanvas {
                     blend_mode,
                     dest_rect,
                     image_rotation,
-                    num_color_components,
                 } => {
                     let backend_img = BackendImage {
                         data: Cow::Owned(image.data.clone()),
                         width: image.width,
                         height: image.height,
-                        num_color_components: *num_color_components,
+                        pixel_format: image.pixel_format,
                     };
                     backend.draw_image_rect(
                         &backend_img,
@@ -452,7 +452,6 @@ impl CanvasBackend for RecordingCanvas {
             blend_mode,
             dest_rect,
             image_rotation,
-            num_color_components: image.num_color_components,
         });
         Ok(())
     }

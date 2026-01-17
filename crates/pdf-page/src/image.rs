@@ -11,6 +11,7 @@
 //!
 //! See PDF 32000-1:2008, Section 8.9 "Images" for the full specification.
 
+use pdf_graphics::PixelFormat;
 use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
     stream::StreamObject, traits::FromDictionary,
@@ -44,6 +45,10 @@ pub enum ImageXObjectError {
     /// An error occurred while resolving PDF objects.
     #[error("Object error: {0}")]
     ObjectError(#[from] ObjectError),
+    #[error("invalid image dimensions: {width}x{height}")]
+    InvalidImageDimensions { width: usize, height: usize },
+    #[error("failed to decode image: expected at least {expected} bytes, got {actual} bytes")]
+    ImageDecodeFailed { expected: usize, actual: usize },
 }
 
 /// Represents a PDF Image XObject, which is a self-contained raster image.
@@ -75,6 +80,8 @@ pub struct ImageXObject {
     /// with the alpha channel already composited. Otherwise, this is the original
     /// sample data which may still be compressed according to the stream filters.
     pub data: Vec<u8>,
+    /// The pixel format of the image data.
+    pub pixel_format: PixelFormat,
     /// The color space of the image samples.
     ///
     /// Defines how to interpret the sample data as colors. Common color spaces
@@ -83,11 +90,6 @@ pub struct ImageXObject {
     /// Note: If a soft mask was applied, grayscale images are expanded to RGB
     /// (with alpha), so this field reflects the original color space before expansion.
     pub color_space: Option<ColorSpace>,
-    /// Indicates whether this image has an alpha channel from a soft mask.
-    ///
-    /// When `true`, the `data` field contains RGBA data (4 components per pixel).
-    /// When `false`, the number of components is determined by `color_space`.
-    pub has_alpha: bool,
 }
 
 impl XObjectReader for ImageXObject {
@@ -133,30 +135,38 @@ impl XObjectReader for ImageXObject {
         // Start with a copy of the stream data; we may need to decompress it.
         let raw_data = stream_data.data()?;
 
-        // Determine the number of color components from the color space.
-        let num_color_components = color_space
-            .as_ref()
-            .map_or(3, |cs| cs.num_color_components());
+        // Determine the number of color components.
+        let num_pixels = width.saturating_mul(height);
+        let num_color_components = raw_data
+            .len()
+            .checked_div(num_pixels)
+            .ok_or(ImageXObjectError::InvalidImageDimensions { width, height })?;
 
-        // Parse the optional `/SMask` entry and apply it if present.
-        if let Some(smask) = Self::parse_smask(dictionary, objects)? {
-            let data = Self::apply_smask(&raw_data, width, height, num_color_components, &smask);
-            return Ok(Self {
-                width,
-                height,
-                bits_per_component,
-                data,
-                color_space,
-                has_alpha: true,
-            });
-        }
+        // Parse the optional `/SMask` entry and convert to RGBA if needed.
+        let smask = Self::parse_smask(dictionary, objects)?;
+
+        let (data, pixel_format) = if smask.is_some() || num_color_components == 3 {
+            (
+                Self::to_rgba(
+                    &raw_data,
+                    width,
+                    height,
+                    num_color_components,
+                    smask.as_deref(),
+                ),
+                PixelFormat::RGBA8888,
+            )
+        } else {
+            (raw_data.into_owned(), PixelFormat::Alpha8)
+        };
+
         Ok(Self {
             width,
             height,
             bits_per_component,
-            data: raw_data.into_owned(),
+            data,
+            pixel_format,
             color_space,
-            has_alpha: false,
         })
     }
 }
@@ -191,10 +201,10 @@ impl ImageXObject {
         }
     }
 
-    /// Applies a soft mask to image data, producing RGBA output.
+    /// Converts image data to RGBA format, optionally applying a soft mask.
     ///
-    /// The soft mask provides per-pixel alpha values. This function combines
-    /// the source image data with the mask to produce RGBA data.
+    /// If `smask` is `None`, full opacity (255) is used for the alpha channel.
+    /// The soft mask provides per-pixel alpha values when present.
     ///
     /// # Parameters
     ///
@@ -202,76 +212,66 @@ impl ImageXObject {
     /// - `width`: Image width in pixels.
     /// - `height`: Image height in pixels.
     /// - `num_color_components`: Number of color components (1 for gray, 3 for RGB, 4 for RGBA).
-    /// - `smask`: The soft mask image (should be grayscale).
+    /// - `smask`: Optional soft mask image (should be grayscale).
     ///
     /// # Returns
     ///
-    /// RGBA image data with alpha channel applied from the soft mask.
-    fn apply_smask(
+    /// RGBA image data with alpha channel from the soft mask (or 255 if no mask).
+    fn to_rgba(
         image_data: &[u8],
         width: usize,
         height: usize,
         num_color_components: usize,
-        smask: &ImageXObject,
+        smask: Option<&ImageXObject>,
     ) -> Vec<u8> {
         let num_pixels = width.saturating_mul(height);
-        let smask_data = &smask.data;
+        let smask_data = smask.map(|s| s.data.as_slice());
+
+        // Helper to get alpha value at index, defaulting to fully opaque.
+        let get_alpha =
+            |i: usize| -> u8 { smask_data.map_or(255, |data| data.get(i).copied().unwrap_or(255)) };
+
+        let mut out = Vec::with_capacity(num_pixels.saturating_mul(4));
 
         match num_color_components {
             // RGBA input: modulate existing alpha by soft mask.
             4 => {
-                let mut out = Vec::with_capacity(num_pixels.saturating_mul(4));
-                for (i, rgba) in image_data.chunks_exact(4).take(num_pixels).enumerate() {
-                    let sm = smask_data.get(i).copied().unwrap_or(255);
+                for (i, chunk) in image_data.chunks_exact(4).take(num_pixels).enumerate() {
+                    let &[r, g, b, a] = chunk else { continue };
+                    // Modulate alpha: (a * mask) / 255. Result is always <= 255.
+                    let mask = get_alpha(i);
+                    let alpha = u16::from(a)
+                        .saturating_mul(u16::from(mask))
+                        .saturating_div(255);
 
-                    let [r, g, b, a] = rgba else {
-                        continue;
-                    };
-
-                    // Calculate new alpha: (original_alpha * mask_value) / 255
-                    // The result is always <= 255, so truncation to u8 is safe.
-                    let a = a.saturating_mul(sm) / 255;
-
-                    out.extend_from_slice(&[*r, *g, *b, a]);
+                    let alpha = u8::try_from(alpha).unwrap_or(255);
+                    out.extend_from_slice(&[r, g, b, alpha]);
                 }
-                out
             }
-            // RGB input: expand to RGBA using soft mask as alpha.
+            // RGB input: expand to RGBA using soft mask (or 255) as alpha.
             3 => {
-                let mut out = Vec::with_capacity(num_pixels.saturating_mul(4));
-                for (i, rgb) in image_data.chunks_exact(3).take(num_pixels).enumerate() {
-                    let a = smask_data.get(i).copied().unwrap_or(255);
-                    let [r, g, b] = rgb else {
-                        continue;
-                    };
-                    out.extend_from_slice(&[*r, *g, *b, a]);
+                for (i, chunk) in image_data.chunks_exact(3).take(num_pixels).enumerate() {
+                    let &[r, g, b] = chunk else { continue };
+                    out.extend_from_slice(&[r, g, b, get_alpha(i)]);
                 }
-                out
             }
             // Grayscale input: expand to RGBA with soft mask as alpha.
             1 => {
-                let mut out = Vec::with_capacity(num_pixels.saturating_mul(4));
                 for (i, &gray) in image_data.iter().take(num_pixels).enumerate() {
-                    let a = smask_data.get(i).copied().unwrap_or(255);
-                    out.extend_from_slice(&[gray, gray, gray, a]);
+                    out.extend_from_slice(&[gray, gray, gray, get_alpha(i)]);
                 }
-                out
             }
-            // For other component counts, just copy data with full alpha.
+            // Fallback for other component counts: extract RGB-like data.
             _ => {
-                // Fallback: assume RGB-like data and expand to RGBA.
-                let mut out = Vec::with_capacity(num_pixels.saturating_mul(4));
                 for i in 0..num_pixels {
-                    let a = smask_data.get(i).copied().unwrap_or(255);
-                    // Use first 3 bytes or pad with zeros if not enough data.
                     let base = i.saturating_mul(num_color_components);
                     let r = image_data.get(base).copied().unwrap_or(0);
                     let g = image_data.get(base.saturating_add(1)).copied().unwrap_or(0);
                     let b = image_data.get(base.saturating_add(2)).copied().unwrap_or(0);
-                    out.extend_from_slice(&[r, g, b, a]);
+                    out.extend_from_slice(&[r, g, b, get_alpha(i)]);
                 }
-                out
             }
         }
+        out
     }
 }
