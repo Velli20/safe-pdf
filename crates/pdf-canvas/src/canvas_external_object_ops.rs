@@ -256,18 +256,6 @@ impl<T: std::error::Error> PdfCanvas<'_, T> {
         // bounding rectangle (AABB) that contains the transformed image
         let dest_rect = Self::compute_destination_rect(&transform, rotation_degrees);
 
-        // Resolve number of color components.
-        // If the image has alpha (from soft mask), it's RGBA (4 components).
-        // Otherwise, use the color space's component count (default to RGB).
-        let num_color_components = if image.has_alpha {
-            4 // RGBA
-        } else {
-            image
-                .color_space
-                .as_ref()
-                .map_or(RGB_COMPONENTS, |cs| cs.num_color_components())
-        };
-
         // Expand indexed color data to RGB if applicable
         let image_data = self.resolve_image_data(image)?;
 
@@ -275,7 +263,7 @@ impl<T: std::error::Error> PdfCanvas<'_, T> {
             data: image_data,
             width: image.width,
             height: image.height,
-            num_color_components,
+            pixel_format: image.pixel_format,
         };
 
         let blend_mode = self.current_state()?.blend_mode;
