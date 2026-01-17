@@ -42,4 +42,6 @@ pub enum PdfOperatorError {
     EmptyText,
     #[error("Comment parse error: {0}")]
     Comment(#[from] CommentError),
+    #[error("PDF Object error: {0}")]
+    ObjectError(#[from] ObjectError),
 }
