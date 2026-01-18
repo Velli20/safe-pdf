@@ -4,6 +4,8 @@ use pdf_object::{
 };
 use thiserror::Error;
 
+use crate::functions::{Function, FunctionImpl, FunctionReadError};
+
 /// Maximum nesting depth for color space definitions.
 ///
 /// Prevents stack overflow from maliciously crafted PDFs with deeply nested
@@ -19,6 +21,9 @@ pub enum ColorSpaceError {
     /// The color space definition is invalid or unsupported.
     #[error("Invalid or unsupported ColorSpace: {description}")]
     InvalidColorSpace { description: String },
+    /// Error parsing function for Separation/DeviceN color spaces.
+    #[error("Function parsing error: {0}")]
+    FunctionError(#[from] FunctionReadError),
 }
 
 /// Represents a PDF color space.
@@ -29,7 +34,7 @@ pub enum ColorSpaceError {
 /// - **Device color spaces**: Direct color specification (`DeviceGray`, `DeviceRGB`, `DeviceCMYK`)
 /// - **CIE-based color spaces**: Device-independent color (e.g., `ICCBased`)
 /// - **Special color spaces**: Indexed, Pattern, Separation, DeviceN
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum ColorSpace {
     /// Grayscale color space with a single component (0.0 = black, 1.0 = white).
     DeviceGray,
@@ -56,6 +61,19 @@ pub enum ColorSpace {
         /// Number of color components (1, 3, or 4 depending on profile).
         num_components: usize,
     },
+    /// Separation color space.
+    ///
+    /// Represents a single colorant (spot color) that is not one of the standard device colorants.
+    /// Includes a fallback `alternate_space` and a `tint_transform` function to convert tint values.
+    Separation {
+        /// The name of the colorant (e.g., `/All`, `/None`, or a custom name).
+        name: String,
+        /// The alternate color space to use if the separation is not supported.
+        alternate_space: Box<ColorSpace>,
+        /// The tint transform function (transforms tint 0.0-1.0 to alternate space).
+        /// Typically a Function object (Dictionary or Stream).
+        tint_transform: Function,
+    },
 }
 
 impl ColorSpace {
@@ -74,6 +92,7 @@ impl ColorSpace {
             Self::DeviceCMYK => 4,
             Self::Indexed { base, .. } => base.num_color_components(),
             Self::ICCBased { num_components } => *num_components,
+            Self::Separation { .. } => 1,
         }
     }
 
@@ -170,6 +189,7 @@ fn parse_color_space_array(
     match cs_type_name.as_ref() {
         "Indexed" => parse_indexed_color_space(objects, arr, depth),
         "ICCBased" => parse_icc_based_color_space(objects, arr),
+        "Separation" => parse_separation_color_space(objects, arr, depth),
         unknown => Err(ColorSpaceError::InvalidColorSpace {
             description: format!(
                 "unsupported color space type: /{unknown} (array with {} elements)",
@@ -177,6 +197,30 @@ fn parse_color_space_array(
             ),
         }),
     }
+}
+
+/// Parses a Separation color space: `[/Separation name alternateSpace tintTransform]`
+fn parse_separation_color_space(
+    objects: &ObjectCollection,
+    arr: &[ObjectVariant],
+    depth: usize,
+) -> Result<ColorSpace, ColorSpaceError> {
+    // Expected format: [/Separation name alternateSpace tintTransform]
+    let [_, name, alternate_space, tint_transform] = arr else {
+        return Err(ColorSpaceError::InvalidColorSpace {
+            description: format!("/Separation requires 4 elements, found {}", arr.len()),
+        });
+    };
+
+    let name = objects.resolve_object(name)?.try_str()?.to_string();
+    let alternate_space = parse_color_space_object(objects, alternate_space, depth)?;
+    let tint_transform = Function::parse(objects.resolve_object(tint_transform)?, objects)?;
+
+    Ok(ColorSpace::Separation {
+        name,
+        alternate_space: Box::new(alternate_space),
+        tint_transform,
+    })
 }
 
 /// Parses an Indexed color space: `[/Indexed base hival lookup]`

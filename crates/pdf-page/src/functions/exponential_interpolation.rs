@@ -16,6 +16,18 @@ pub struct ExponentialFunction {
     domain: [f32; 2],
 }
 
+impl ExponentialFunction {
+    #[allow(dead_code)]
+    pub(crate) fn new(c0: Vec<f32>, c1: Vec<f32>, exponent: f32, domain: [f32; 2]) -> Self {
+        Self {
+            c0,
+            c1,
+            exponent,
+            domain,
+        }
+    }
+}
+
 impl FunctionImpl for ExponentialFunction {
     /// Interpolates using exponential interpolation (Type 2 function).
     ///

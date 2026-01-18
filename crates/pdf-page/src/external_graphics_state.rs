@@ -57,6 +57,7 @@ pub struct SoftMask {
 /// such as line styles, color rendering, and alpha transparency. This enum
 /// enumerates the possible keys (parameters) found in such a dictionary and
 /// holds the corresponding parsed value.
+#[allow(clippy::large_enum_variant)]
 pub enum ExternalGraphicsStateKey {
     /// Line width (`LW`). A number specifying the thickness of stroked lines.
     LineWidth(f32),
