@@ -12,6 +12,7 @@ use thiserror::Error;
 ///
 /// XObjects are reusable resources within a PDF file. They can be images,
 /// self-contained graphical forms, or other types of external content.
+#[allow(clippy::large_enum_variant)]
 pub enum XObject {
     /// An image XObject, representing a raster image.
     Image(ImageXObject),

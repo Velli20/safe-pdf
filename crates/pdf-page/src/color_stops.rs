@@ -132,6 +132,20 @@ impl ColorStops {
                 4 => Self::components_to_color(&ColorSpace::DeviceCMYK, components),
                 _ => Self::components_to_color(&ColorSpace::DeviceRGB, components),
             },
+            ColorSpace::Separation {
+                alternate_space,
+                tint_transform,
+                ..
+            } => {
+                let Some(tint) = components.first().copied() else {
+                    return Err(FunctionInterpolationError::InsufficientColorComponents {
+                        required: 1,
+                        returned: components.len(),
+                    });
+                };
+                let output = tint_transform.interpolate(tint)?;
+                Self::components_to_color(alternate_space, &output)
+            }
             ColorSpace::Indexed { .. } => {
                 Err(FunctionInterpolationError::IndexedColorSpaceUnsupported)
             }
@@ -159,6 +173,28 @@ mod tests {
         // Magenta: C=0, M=1, Y=0, K=0 -> RGB=(1,0,1)
         let c = ColorStops::components_to_color(&ColorSpace::DeviceCMYK, &[0.0, 1.0, 0.0, 0.0])?;
         assert!(approx(c.r, 1.0) && approx(c.g, 0.0) && approx(c.b, 1.0));
+        Ok(())
+    }
+
+    #[test]
+    fn separation_transforms_and_converts() -> Result<(), FunctionInterpolationError> {
+        use crate::functions::exponential_interpolation::ExponentialFunction;
+
+        // Linear transform: Black (0,0,0) to Red (1,0,0)
+        let exp_func =
+            ExponentialFunction::new(vec![0.0, 0.0, 0.0], vec![1.0, 0.0, 0.0], 1.0, [0.0, 1.0]);
+        let function = Function::Exponential(exp_func);
+
+        let color_space = ColorSpace::Separation {
+            name: "MyRed".to_string(),
+            alternate_space: Box::new(ColorSpace::DeviceRGB),
+            tint_transform: function,
+        };
+
+        // Tint 0.5 -> Interpolates to (0.5, 0.0, 0.0) -> RGB
+        let c = ColorStops::components_to_color(&color_space, &[0.5])?;
+        assert!(approx(c.r, 0.5) && approx(c.g, 0.0) && approx(c.b, 0.0));
+
         Ok(())
     }
 }
