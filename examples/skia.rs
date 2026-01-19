@@ -110,7 +110,11 @@ fn load_document(settings: &AppSettings) -> Arc<PdfDocument> {
     if let Some(path) = &settings.pdf_path {
         let mut reader = PdfReader::default();
         match std::fs::read(path) {
-            Ok(bytes) => Arc::new(reader.read_from_bytes(&bytes).expect("Failed to parse PDF")),
+            Ok(bytes) => Arc::new(
+                reader
+                    .read_from_bytes(&bytes, None)
+                    .expect("Failed to parse PDF"),
+            ),
             Err(e) => panic!("Failed to read PDF '{}': {e}", path.display()),
         }
     } else {

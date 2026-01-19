@@ -1,11 +1,13 @@
 use std::collections::{BTreeMap, HashSet};
 
+use crate::decryption::{DecryptionError, DocumentDecryptor};
 use crate::document::PdfDocument;
 use pdf_object::{
     ObjectVariant,
     cross_reference_table::{CrossReferenceEntry, CrossReferenceStatus, CrossReferenceTable},
     error::ObjectError,
     object_collection::ObjectCollection,
+    stream::StreamObject,
     trailer::Trailer,
     traits::FromDictionary,
 };
@@ -14,6 +16,8 @@ use pdf_parser::{
     error::ParserError, header::HeaderError, parser::PdfParser, traits::HeaderParser,
 };
 use thiserror::Error;
+
+use crate::encryption::{EncryptDictionary, EncryptionError};
 
 /// Errors that can occur while reading a PDF document.
 #[derive(Debug, Error)]
@@ -34,10 +38,16 @@ pub enum PdfReaderError {
     UnsupportedVersion(u8, u8),
     #[error("invalid cross-reference table at offset {offset}")]
     InvalidXrefAtOffset { offset: usize },
+    #[error("encryption error: {0}")]
+    EncryptionError(#[from] EncryptionError),
+    #[error("decryption error: {0}")]
+    DecryptionError(#[from] DecryptionError),
+    #[error("missing document ID required for encryption")]
+    MissingDocumentId,
 }
 
 #[derive(Default)]
-pub struct PdfReader {}
+pub struct PdfReader;
 
 impl PdfReader {
     /// Reads and parses a PDF document from raw bytes.
@@ -45,17 +55,32 @@ impl PdfReader {
     /// This method performs the following steps:
     /// 1. Parses the PDF header and validates the version
     /// 2. Builds the cross-reference index to locate all objects
-    /// 3. Loads all objects referenced in the xref table
-    /// 4. Extracts the document catalog and page tree
+    /// 3. Checks for encryption and resolves the Encrypt dictionary first
+    /// 4. Loads all objects referenced in the xref table
+    /// 5. Extracts the document catalog and page tree
     ///
     /// # Arguments
     ///
     /// - `input`: Raw PDF file bytes
+    /// - `password`: The document password (user or owner password)
     ///
     /// # Returns
     ///
     /// Returns a `PdfDocument` containing the parsed objects and page structure.
-    pub fn read_from_bytes(&mut self, input: &[u8]) -> Result<PdfDocument, PdfReaderError> {
+    pub fn read_from_bytes(
+        &mut self,
+        input: &[u8],
+        password: Option<&[u8]>,
+    ) -> Result<PdfDocument, PdfReaderError> {
+        self.read_from_bytes_internal(input, password)
+    }
+
+    /// Internal implementation for reading PDF documents with optional password.
+    fn read_from_bytes_internal(
+        &mut self,
+        input: &[u8],
+        password: Option<&[u8]>,
+    ) -> Result<PdfDocument, PdfReaderError> {
         let mut parser = PdfParser::from(input);
 
         // Parse and validate PDF header
@@ -70,8 +95,30 @@ impl PdfReader {
         // Build the cross-reference index
         let CrossReferenceTable { entries, trailer } = build_xref_index(&mut parser)?;
 
-        // Load all objects from the xref table
-        let objects = load_objects(&entries, &mut parser)?;
+        // Check for encryption and handle it before loading other objects.
+        let decryptor = if let Some(encrypt_ref) = trailer.dictionary.get("Encrypt") {
+            // Load the encryption object first (it's unencrypted per PDF spec).
+            let encryption = load_encrypt_dictionary(encrypt_ref, &entries, &mut parser)?;
+
+            // Get the document ID from the trailer (required for encryption)
+            let document_id = extract_document_id(&trailer)?;
+
+            const EMPTY_PASSWORD: &[u8] = b"";
+
+            // Create the decryptor by authenticating with the password
+            let decryptor = DocumentDecryptor::new(
+                &encryption,
+                &document_id,
+                password.unwrap_or(EMPTY_PASSWORD),
+            )?;
+
+            Some(decryptor)
+        } else {
+            None
+        };
+
+        // Load all objects from the xref table, decrypting streams if needed
+        let objects = load_objects_with_decryption(&entries, &mut parser, decryptor.as_ref())?;
 
         // Extract catalog and page tree
         let pages = extract_page_tree(&trailer, &objects)?;
@@ -205,17 +252,131 @@ fn extract_page_tree(
     PdfPages::from_dictionary(pages_dict, objects).map_err(Into::into)
 }
 
-/// Loads all objects referenced in the cross-reference table.
+/// Loads and parses the encryption dictionary from the PDF.
 ///
-/// Only objects with "Normal" status are loaded. Free or compressed objects
-/// are skipped as they're handled differently.
+/// According to PDF specification, the encryption dictionary itself is NOT encrypted.
+/// This allows a reader to parse the encryption parameters needed to decrypt
+/// the rest of the document.
+///
+/// The `/Encrypt` entry in the trailer is typically an indirect reference, so we need
+/// to locate and parse that object first before we can understand how to decrypt
+/// other objects.
+///
+/// # Arguments
+///
+/// - `encrypt_ref`: The `/Encrypt` entry from the trailer (usually an indirect reference).
+/// - `entries`: The cross-reference table entries for locating objects.
+/// - `parser`: The PDF parser for reading object data.
 ///
 /// # Returns
 ///
-/// Returns an `ObjectCollection` containing all parsed objects.
-fn load_objects(
+/// Returns an `EncryptDictionary` containing the encryption parameters.
+fn load_encrypt_dictionary(
+    encrypt_ref: &ObjectVariant,
     entries: &BTreeMap<usize, CrossReferenceEntry>,
     parser: &mut PdfParser,
+) -> Result<EncryptDictionary, PdfReaderError> {
+    // If the Encrypt entry is an indirect reference, we need to load that object.
+    let encrypt_dict = match encrypt_ref {
+        ObjectVariant::Reference(obj_num) => {
+            // Look up the object in the xref table
+            let entry = entries
+                .get(obj_num)
+                .ok_or(ObjectError::FailedResolveObjectReference { obj_num: *obj_num })?;
+
+            if entry.status != CrossReferenceStatus::Normal {
+                return Err(ObjectError::FailedResolveObjectReference { obj_num: *obj_num }.into());
+            }
+
+            // Parse the encryption object at the specified offset
+            let object = parser.parse_object_at(entry.byte_offset, None)?;
+
+            // Extract the dictionary from the parsed object
+            match object {
+                ObjectVariant::Dictionary(dict) => dict,
+                ObjectVariant::IndirectObject(indirect) => match indirect.object.as_ref() {
+                    Some(ObjectVariant::Dictionary(dict)) => std::rc::Rc::clone(dict),
+                    _ => {
+                        return Err(ObjectError::FailedResolveDictionaryObject {
+                            resolved_type: "IndirectObject",
+                        }
+                        .into());
+                    }
+                },
+                other => {
+                    return Err(ObjectError::FailedResolveDictionaryObject {
+                        resolved_type: other.name(),
+                    }
+                    .into());
+                }
+            }
+        }
+        ObjectVariant::Dictionary(dict) => std::rc::Rc::clone(dict),
+        other => {
+            return Err(ObjectError::FailedResolveDictionaryObject {
+                resolved_type: other.name(),
+            }
+            .into());
+        }
+    };
+
+    // Parse the encryption dictionary
+    let objects = ObjectCollection::default();
+    EncryptDictionary::from_dictionary(&encrypt_dict, &objects).map_err(Into::into)
+}
+
+/// Extracts the document ID from the trailer's /ID array.
+///
+/// The /ID entry is an array of two byte strings that uniquely identify the document.
+/// The first element is used for encryption key derivation.
+///
+/// # Arguments
+///
+/// - `trailer`: The PDF trailer containing the /ID entry.
+///
+/// # Returns
+///
+/// The first element of the /ID array as a byte vector.
+fn extract_document_id(trailer: &Trailer) -> Result<Vec<u8>, PdfReaderError> {
+    let id_entry = trailer
+        .dictionary
+        .get("ID")
+        .ok_or(PdfReaderError::MissingDocumentId)?;
+
+    match id_entry {
+        ObjectVariant::Array(arr) => {
+            if arr.is_empty() {
+                return Err(PdfReaderError::MissingDocumentId);
+            }
+            // Get the first element
+            arr[0]
+                .try_bytes()
+                .map(|b| b.to_vec())
+                .map_err(|_| PdfReaderError::MissingDocumentId)
+        }
+        _ => Err(PdfReaderError::MissingDocumentId),
+    }
+}
+
+/// Loads all objects referenced in the cross-reference table with optional decryption.
+///
+/// This function extends `load_objects` by decrypting stream data when a decryptor
+/// is provided. Only streams are decrypted; strings within dictionaries are decrypted
+/// separately during object resolution.
+///
+/// # Arguments
+///
+/// - `entries`: The cross-reference table entries.
+/// - `parser`: The PDF parser for reading object data.
+/// - `decryptor`: Optional decryptor for encrypted documents.
+///
+/// # Returns
+///
+/// Returns an `ObjectCollection` containing all parsed (and decrypted) objects.
+fn load_objects_with_decryption(
+    entries: &BTreeMap<usize, CrossReferenceEntry>,
+    parser: &mut PdfParser,
+    decryptor: Option<&DocumentDecryptor>,
 ) -> Result<ObjectCollection, PdfReaderError> {
     let mut objects = ObjectCollection::default();
 
@@ -235,10 +396,78 @@ fn load_objects(
             });
         }
 
+        // Decrypt stream data if we have a decryptor
+        let object = if let Some(decryptor) = decryptor {
+            decrypt_object(object, decryptor)?
+        } else {
+            object
+        };
+
         objects.insert(object)?;
     }
 
     Ok(objects)
+}
+
+/// Decrypts an object's stream data if applicable.
+///
+/// Only stream objects are decrypted. The object number and generation number
+/// are used to derive the object-specific encryption key.
+fn decrypt_object(
+    object: ObjectVariant,
+    decryptor: &DocumentDecryptor,
+) -> Result<ObjectVariant, PdfReaderError> {
+    match object {
+        ObjectVariant::IndirectObject(indirect) => {
+            // Check if the inner object is a stream
+            if let Some(ObjectVariant::Stream(stream)) = &indirect.object {
+                let decrypted_stream = decrypt_stream_object(stream, decryptor)?;
+                // Create a new IndirectObject with the decrypted stream
+                let new_indirect = pdf_object::indirect_object::IndirectObject::new(
+                    indirect.object_number,
+                    indirect.generation_number,
+                    Some(ObjectVariant::Stream(std::rc::Rc::new(decrypted_stream))),
+                );
+                return Ok(ObjectVariant::IndirectObject(std::rc::Rc::new(
+                    new_indirect,
+                )));
+            }
+            // Non-stream indirect objects pass through unchanged
+            Ok(ObjectVariant::IndirectObject(indirect))
+        }
+        ObjectVariant::Stream(stream) => {
+            let decrypted = decrypt_stream_object(&stream, decryptor)?;
+            Ok(ObjectVariant::Stream(std::rc::Rc::new(decrypted)))
+        }
+        // Other objects pass through unchanged
+        // (string decryption would be handled separately during resolution)
+        other => Ok(other),
+    }
+}
+
+/// Decrypts a stream object's data.
+fn decrypt_stream_object(
+    stream: &StreamObject,
+    decryptor: &DocumentDecryptor,
+) -> Result<StreamObject, PdfReaderError> {
+    // Get the raw (encrypted) stream data
+    let encrypted_data = stream.raw_data();
+
+    // Decrypt the stream data using the object's number and generation
+    let decrypted_data = decryptor.decrypt_stream(
+        stream.object_number,
+        stream.generation_number,
+        encrypted_data,
+    )?;
+
+    // Create a new stream object with decrypted data
+    Ok(StreamObject::new(
+        stream.object_number,
+        stream.generation_number,
+        std::rc::Rc::clone(&stream.dictionary),
+        decrypted_data,
+        stream.filters().cloned(),
+    ))
 }
 
 #[cfg(test)]
@@ -421,5 +650,126 @@ mod tests {
             result.err()
         );
         // We expect it to visit xref2, then xref1, then see xref2 again and stop.
+    }
+
+    #[test]
+    fn test_encrypted_document_detection() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%PDF-1.7\n");
+
+        // Object 1: Catalog
+        let obj1_offset = data.len();
+        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog >>\nendobj\n");
+
+        // Object 2: Encryption dictionary (Standard V2)
+        let obj2_offset = data.len();
+        data.extend_from_slice(b"2 0 obj\n");
+        data.extend_from_slice(b"<< /Filter /Standard /V 2 /R 3 /Length 128 ");
+        // O and U are 32-byte hex strings (filled with zeros for test)
+        data.extend_from_slice(b"/O <00000000000000000000000000000000");
+        data.extend_from_slice(b"00000000000000000000000000000000> ");
+        data.extend_from_slice(b"/U <00000000000000000000000000000000");
+        data.extend_from_slice(b"00000000000000000000000000000000> ");
+        data.extend_from_slice(b"/P -1 >>\n");
+        data.extend_from_slice(b"endobj\n");
+
+        // Xref table
+        let xref_offset = data.len();
+        data.extend_from_slice(b"xref\n0 3\n");
+        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
+
+        // Trailer with Encrypt entry
+        data.extend_from_slice(b"trailer\n<< /Size 3 /Root 1 0 R /Encrypt 2 0 R >>\n");
+        data.extend_from_slice(b"startxref\n");
+        data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
+        data.extend_from_slice(b"%%EOF");
+
+        let mut reader = PdfReader::default();
+        let result = reader.read_from_bytes(&data, None);
+
+        // Should return an EncryptedDocument error
+        assert!(result.is_err(), "Should detect encrypted document");
+    }
+
+    #[test]
+    fn test_encrypted_document_v4_aes() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%PDF-1.7\n");
+
+        // Object 1: Catalog
+        let obj1_offset = data.len();
+        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog >>\nendobj\n");
+
+        // Object 2: Encryption dictionary (Standard V4 - AES)
+        let obj2_offset = data.len();
+        data.extend_from_slice(b"2 0 obj\n");
+        data.extend_from_slice(b"<< /Filter /Standard /V 4 /R 4 /Length 128 ");
+        data.extend_from_slice(b"/O <00000000000000000000000000000000");
+        data.extend_from_slice(b"00000000000000000000000000000000> ");
+        data.extend_from_slice(b"/U <00000000000000000000000000000000");
+        data.extend_from_slice(b"00000000000000000000000000000000> ");
+        data.extend_from_slice(b"/P -1 /EncryptMetadata false >>\n");
+        data.extend_from_slice(b"endobj\n");
+
+        // Xref table
+        let xref_offset = data.len();
+        data.extend_from_slice(b"xref\n0 3\n");
+        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
+
+        // Trailer with Encrypt entry
+        data.extend_from_slice(b"trailer\n<< /Size 3 /Root 1 0 R /Encrypt 2 0 R >>\n");
+        data.extend_from_slice(b"startxref\n");
+        data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
+        data.extend_from_slice(b"%%EOF");
+
+        let mut reader = PdfReader::default();
+        let result = reader.read_from_bytes(&data, None);
+
+        // Should return an EncryptedDocument error
+        assert!(result.is_err(), "Should detect encrypted document");
+    }
+
+    #[test]
+    fn test_unencrypted_document_loads_normally() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%PDF-1.7\n");
+
+        // Object 1: Catalog
+        let obj1_offset = data.len();
+        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        // Object 2: Pages
+        let obj2_offset = data.len();
+        data.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
+
+        // Xref table
+        let xref_offset = data.len();
+        data.extend_from_slice(b"xref\n0 3\n");
+        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
+
+        // Trailer WITHOUT Encrypt entry
+        data.extend_from_slice(b"trailer\n<< /Size 3 /Root 1 0 R >>\n");
+        data.extend_from_slice(b"startxref\n");
+        data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
+        data.extend_from_slice(b"%%EOF");
+
+        let mut reader = PdfReader::default();
+        let result = reader.read_from_bytes(&data, None);
+
+        // Should load successfully (no encryption)
+        assert!(
+            result.is_ok(),
+            "Unencrypted document should load: {:?}",
+            result.err()
+        );
+
+        let doc = result.unwrap();
+        assert_eq!(doc.page_count(), 0);
     }
 }

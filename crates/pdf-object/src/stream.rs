@@ -41,6 +41,19 @@ impl StreamObject {
         }
     }
 
+    /// Returns the raw stream bytes before any filter decoding.
+    ///
+    /// This is useful for encryption/decryption operations which need
+    /// access to the raw bytes before decompression filters are applied.
+    pub fn raw_data(&self) -> &[u8] {
+        &self.data
+    }
+
+    /// Returns a reference to the filters applied to this stream.
+    pub fn filters(&self) -> Option<&Vec<Filter>> {
+        self.filters.as_ref()
+    }
+
     /// Returns the fully decoded stream bytes.
     ///
     /// # Errors
