@@ -89,7 +89,7 @@ impl FunctionImpl for PostScriptCalculatorFunction {
         object: &ObjectVariant,
         objects: &ObjectCollection,
     ) -> Result<Function, FunctionReadError> {
-        let stream = objects.resolve_stream(object)?;
+        let stream = object.try_stream(objects)?;
         let domain = stream.dictionary.get_or_err("Domain")?.as_vec_of::<f32>()?;
 
         let range = stream.dictionary.get_or_err("Range")?.as_vec_of::<f32>()?;

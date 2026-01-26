@@ -67,7 +67,7 @@ impl FunctionImpl for ExponentialFunction {
         object: &ObjectVariant,
         objects: &ObjectCollection,
     ) -> Result<Function, FunctionReadError> {
-        let dictionary = objects.resolve_dictionary(object)?;
+        let dictionary = object.try_dictionary(objects)?;
         let domain = dictionary.get_or_err("Domain")?.as_array_of::<f32, 2>()?;
 
         // /C0: Output values at domain[0]. Defaults to [0.0].

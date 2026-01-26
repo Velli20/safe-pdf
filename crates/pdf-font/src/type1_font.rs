@@ -46,7 +46,9 @@ impl FromDictionary for Type1Font {
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         // Read '/FontDescriptor’.
-        let descriptor = objects.resolve_dictionary(dictionary.get_or_err("FontDescriptor")?)?;
+        let descriptor = dictionary
+            .get_or_err("FontDescriptor")?
+            .try_dictionary(objects)?;
 
         let font_file = FontDescriptor::from_dictionary(descriptor, objects)?;
 

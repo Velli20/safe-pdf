@@ -29,8 +29,7 @@ fn process_content_stream_array(
 ) -> Result<Vec<PdfOperatorVariant>, ContentStreamReadError> {
     let mut concatenated_ops = Vec::new();
     for value_in_array in array.iter() {
-        let stream = objects.resolve_stream(value_in_array)?;
-        let data = stream.data()?;
+        let data = value_in_array.try_stream(objects)?.data()?;
         let stream_ops = PdfOperatorVariant::from(&data)?;
         concatenated_ops.extend(stream_ops);
     }
@@ -55,7 +54,7 @@ impl FromDictionary for ContentStream {
         let contents = objects.resolve_object(contents)?;
 
         // Process the resolved /Contents object.
-        // It should be a Stream, an Array, or an IndirectObject whose payload is one of these.
+        // It should be a Stream or an Array whose payload is one of these.
         let operations = match &contents {
             ObjectVariant::Stream(stream) => {
                 let data = stream.data()?;
@@ -65,22 +64,6 @@ impl FromDictionary for ContentStream {
                 // The /Contents entry is an array of streams.
                 process_content_stream_array(array_obj, objects)?
             }
-            ObjectVariant::IndirectObject(s) => match &s.object {
-                Some(ObjectVariant::Stream(stream)) => {
-                    let stream = stream.data()?;
-                    PdfOperatorVariant::from(&stream)?
-                }
-                Some(ObjectVariant::Array(array_val)) => {
-                    process_content_stream_array(array_val, objects)?
-                }
-                Some(other) => {
-                    return Err(ContentStreamReadError::UnsupportedEntryType {
-                        found_type: other.name(),
-                    });
-                }
-                None => return Ok(None),
-            },
-
             other => {
                 return Err(ContentStreamReadError::UnsupportedEntryType {
                     found_type: other.name(),

@@ -258,7 +258,7 @@ impl FunctionImpl for SampledFunction {
         object: &ObjectVariant,
         objects: &ObjectCollection,
     ) -> Result<Function, FunctionReadError> {
-        let stream = objects.resolve_stream(object)?;
+        let stream = object.try_stream(objects)?;
         let dictionary = &stream.dictionary;
 
         // /Domain: Required. Array of 2*m numbers defining input domain.

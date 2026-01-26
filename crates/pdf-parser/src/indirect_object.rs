@@ -123,7 +123,7 @@ impl IndirectObjectParser for PdfParser<'_> {
         // Read the keyword `endobj`.
         self.read_keyword(ENDOBJ_KEYWORD)?;
 
-        Ok(Some(ObjectVariant::IndirectObject(Rc::new(
+        Ok(Some(ObjectVariant::IndirectObject(Box::new(
             IndirectObject::new(object_number, generation_number, Some(object)),
         ))))
     }

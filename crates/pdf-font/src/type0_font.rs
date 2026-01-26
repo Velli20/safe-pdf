@@ -88,13 +88,11 @@ impl FromDictionary for Type0Font {
             .into());
         }
 
-        // Retrieve the sole CIDFont dictionary reference from the array.
-        let cid_font_ref_val = descendant_fonts_array
+        // Retrieve the sole CIDFont dictionary from the array.
+        let dictionary = descendant_fonts_array
             .first()
-            .ok_or(Type0FontError::InvalidDescendantFonts("Array is empty"))?;
-
-        // Resolve the indirect reference to obtain the CIDFont dictionary.
-        let dictionary = objects.resolve_dictionary(cid_font_ref_val)?;
+            .ok_or(Type0FontError::InvalidDescendantFonts("Array is empty"))?
+            .try_dictionary(objects)?;
 
         // Determine the CIDFont subtype which dictates how glyph data is stored:
         // - CIDFontType0: Uses CFF (Compact Font Format) glyph descriptions.
@@ -130,7 +128,9 @@ impl FromDictionary for Type0Font {
 
         // The `/FontDescriptor` dictionary contains font metrics and the embedded font
         // program (via `/FontFile`, `/FontFile2`, or `/FontFile3` entries).
-        let descriptor = objects.resolve_dictionary(dictionary.get_or_err("FontDescriptor")?)?;
+        let descriptor = dictionary
+            .get_or_err("FontDescriptor")?
+            .try_dictionary(objects)?;
         let font_file = FontDescriptor::from_dictionary(descriptor, objects)?;
 
         let font_file = font_file.data()?;

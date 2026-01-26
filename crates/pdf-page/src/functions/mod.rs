@@ -197,11 +197,11 @@ impl FunctionImpl for Function {
 
     /// Parses a PDF Function object from a dictionary.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `dictionary` - The function dictionary containing function parameters.
-    /// * `objects` - The object collection for resolving indirect references.
-    /// * `stream` - Optional stream data (required for Type 4 PostScript functions).
+    /// _ `dictionary`: The function dictionary containing function parameters.
+    /// _ `objects`: The object collection for resolving indirect references.
+    /// _ `stream`: Optional stream data (required for Type 4 PostScript functions).
     ///
     /// # Errors
     ///
@@ -210,9 +210,11 @@ impl FunctionImpl for Function {
         object: &ObjectVariant,
         objects: &ObjectCollection,
     ) -> Result<Function, FunctionReadError> {
-        let dictionary = objects.resolve_dictionary(object)?;
-        let function_type_int = dictionary.get_or_err("FunctionType")?.as_number::<i32>()?;
-        let function_type = FunctionType::from_i32(function_type_int)
+        let function_type = object
+            .try_dictionary(objects)?
+            .get_or_err("FunctionType")?
+            .as_number::<i32>()
+            .map(FunctionType::from_i32)?
             .ok_or(FunctionReadError::InvalidFunctionType)?;
 
         match function_type {

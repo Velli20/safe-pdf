@@ -31,18 +31,17 @@ impl FromDictionary for FontDescriptor {
         dictionary: &Dictionary,
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        let resolve_font_file_stream = |key: &str| -> Option<&StreamObject> {
-            objects.resolve_stream(dictionary.get(key)?).ok()
+        let resolve = |key| {
+            dictionary
+                .get(key)
+                .map(|obj| obj.try_stream(objects))
+                .transpose()
         };
 
-        let font_file = resolve_font_file_stream("FontFile2")
-            .or_else(|| resolve_font_file_stream("FontFile3"))
-            .or_else(|| resolve_font_file_stream("FontFile"));
-
-        let Some(font_file) = font_file.cloned() else {
-            return Err(FontDescriptorError::MissingFontFile);
-        };
-
-        Ok(font_file)
+        resolve("FontFile2")?
+            .or(resolve("FontFile3")?)
+            .or(resolve("FontFile")?)
+            .cloned()
+            .ok_or(FontDescriptorError::MissingFontFile)
     }
 }

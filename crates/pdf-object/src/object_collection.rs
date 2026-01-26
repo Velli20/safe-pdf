@@ -1,4 +1,4 @@
-use crate::{ObjectVariant, dictionary::Dictionary, error::ObjectError, stream::StreamObject};
+use crate::{ObjectVariant, error::ObjectError, indirect_object::IndirectObject};
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -10,12 +10,50 @@ impl ObjectCollection {
     /// A limit to prevent infinite loops when resolving an object reference
     const MAX_DEREF: usize = 16;
 
+    /// Inserts a PDF object into the collection.
+    ///
+    /// This method handles different object variants and stores them using their
+    /// appropriate keys:
+    /// - `IndirectObject`: Stored by its `object_number`, with the inner object extracted.
+    /// - `Stream`: Stored by its `object_number`.
+    /// - `Reference`: Stored by the referenced object number.
+    /// - Other variants are ignored and not stored.
+    ///
+    /// # Parameters
+    ///
+    /// - `obj`: The [`ObjectVariant`] to insert into the collection.
+    ///
+    /// # Returns
+    ///
+    /// An error if a duplicate key is detected otherwise `Ok(())`.
     pub fn insert(&mut self, obj: ObjectVariant) -> Result<(), ObjectError> {
-        let key = obj.to_object_number();
-        if let Some(num) = key
-            && self.map.insert(num, obj).is_some()
-        {
-            return Err(ObjectError::DuplicateKeyInObjectCollection(num));
+        match obj {
+            ObjectVariant::IndirectObject(indirect) => {
+                let IndirectObject {
+                    object_number,
+                    object,
+                    ..
+                } = *indirect;
+                let Some(object) = object else {
+                    return Ok(());
+                };
+
+                if self.map.insert(object_number, object).is_some() {
+                    return Err(ObjectError::DuplicateKeyInObjectCollection(object_number));
+                }
+            }
+            ObjectVariant::Stream(ref stream) => {
+                let key = stream.object_number;
+                if self.map.insert(key, obj).is_some() {
+                    return Err(ObjectError::DuplicateKeyInObjectCollection(key));
+                }
+            }
+            ObjectVariant::Reference(ref reference) => {
+                if self.map.insert(*reference, obj.clone()).is_some() {
+                    return Err(ObjectError::DuplicateKeyInObjectCollection(*reference));
+                }
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -44,119 +82,10 @@ impl ObjectCollection {
                         });
                     }
                 }
-
-                ObjectVariant::IndirectObject(inner) => {
-                    if let Some(obj) = inner.object.as_ref() {
-                        return Ok(obj);
-                    } else {
-                        return Err(ObjectError::FailedResolveDictionaryObject {
-                            resolved_type: "IndirectObject",
-                        });
-                    }
-                }
-
                 other => return Ok(other),
             }
         }
 
         Ok(obj)
-    }
-
-    /// Resolves a PDF object to a `Dictionary`.
-    ///
-    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
-    /// into a `Dictionary`.
-    ///
-    /// # Arguments
-    ///
-    /// - `obj`: A reference to the `ObjectVariant` to resolve.
-    ///
-    /// # Returns
-    ///
-    /// `Dictionary` if the object can be successfully resolved to a stream
-    /// or `Err` if the object is not a stream or if an indirect reference cannot be
-    /// resolved.
-    pub fn resolve_dictionary<'a>(
-        &'a self,
-        obj: &'a ObjectVariant,
-    ) -> Result<&'a Dictionary, ObjectError> {
-        match self.resolve_object(obj)? {
-            ObjectVariant::Dictionary(dict) => Ok(dict.as_ref()),
-            ObjectVariant::Stream(s) => Ok(s.dictionary.as_ref()),
-            ObjectVariant::IndirectObject(inner) => {
-                if let Some(ObjectVariant::Dictionary(obj)) = inner.object.as_ref() {
-                    Ok(obj.as_ref())
-                } else {
-                    Err(ObjectError::FailedResolveDictionaryObject {
-                        resolved_type: "IndirectObject",
-                    })
-                }
-            }
-            other => Err(ObjectError::FailedResolveDictionaryObject {
-                resolved_type: other.name(),
-            }),
-        }
-    }
-
-    /// Resolves a PDF object to a `StreamObject`.
-    ///
-    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
-    /// into a `StreamObject`.
-    ///
-    /// # Arguments
-    ///
-    /// - `obj`: A reference to the `ObjectVariant` to resolve.
-    ///
-    /// # Returns
-    ///
-    /// `StreamObject` if the object can be successfully resolved to a stream
-    /// or `Err` if the object is not a stream or if an indirect reference cannot be
-    /// resolved.
-    pub fn resolve_stream<'a>(
-        &'a self,
-        obj: &'a ObjectVariant,
-    ) -> Result<&'a StreamObject, ObjectError> {
-        match self.resolve_object(obj)? {
-            ObjectVariant::Stream(s) => Ok(s.as_ref()),
-            ObjectVariant::IndirectObject(inner) => {
-                if let Some(ObjectVariant::Stream(s)) = inner.object.as_ref() {
-                    Ok(s.as_ref())
-                } else {
-                    Err(ObjectError::FailedResolveStreamObject {
-                        resolved_type: "IndirectObject",
-                    })
-                }
-            }
-            other => Err(ObjectError::FailedResolveStreamObject {
-                resolved_type: other.name(),
-            }),
-        }
-    }
-
-    /// Resolves a PDF object to an array slice (`&[ObjectVariant]`).
-    ///
-    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
-    /// into an array, returning a slice of its elements.
-    ///
-    /// - Follows indirect references via `Reference` up to `MAX_DEREF` using `resolve_object`.
-    /// - If the resolved value is an `Array`, returns a slice of its contents.
-    /// - If the resolved value is an `IndirectObject` that directly contains an `Array`,
-    ///   returns a slice of that array.
-    /// - Otherwise returns a `TypeMismatch("Array", found)` error.
-    pub fn resolve_array<'a>(
-        &'a self,
-        obj: &'a ObjectVariant,
-    ) -> Result<&'a [ObjectVariant], ObjectError> {
-        match self.resolve_object(obj)? {
-            ObjectVariant::Array(arr) => Ok(arr.as_slice()),
-            ObjectVariant::IndirectObject(inner) => {
-                if let Some(ObjectVariant::Array(arr)) = inner.object.as_ref() {
-                    Ok(arr.as_slice())
-                } else {
-                    Err(ObjectError::TypeMismatch("Array", "IndirectObject"))
-                }
-            }
-            other => Err(ObjectError::TypeMismatch("Array", other.name())),
-        }
     }
 }
