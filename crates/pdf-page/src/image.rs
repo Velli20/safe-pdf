@@ -185,7 +185,7 @@ impl ImageXObject {
         };
 
         // Resolve the SMask stream reference.
-        let stream = objects.resolve_stream(smask_obj)?;
+        let stream = smask_obj.try_stream(objects)?;
 
         // Recursively parse the SMask as an XObject.
         let smask_xobject =

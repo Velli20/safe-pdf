@@ -37,9 +37,11 @@ impl FromDictionary for TrueTypeFont {
         objects: &ObjectCollection,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         // Read the `/FontDescriptor` entry.
-        let font_descriptor = dictionary.get_or_err("FontDescriptor")?;
-        let font_file =
-            FontDescriptor::from_dictionary(objects.resolve_dictionary(font_descriptor)?, objects)?;
+        let font_descriptor = dictionary
+            .get_or_err("FontDescriptor")?
+            .try_dictionary(objects)?;
+
+        let font_file = FontDescriptor::from_dictionary(font_descriptor, objects)?;
         let font_file = font_file.data()?.into_owned();
 
         // Read the `/Widths` entry.

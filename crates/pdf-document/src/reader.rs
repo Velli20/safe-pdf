@@ -241,12 +241,13 @@ fn extract_page_tree(
     objects: &ObjectCollection,
 ) -> Result<PdfPages, PdfReaderError> {
     // Get the document catalog via the /Root entry in the trailer
-    let root_ref = trailer.dictionary.get_or_err("Root")?;
-    let catalog = objects.resolve_dictionary(root_ref)?;
+    let catalog = trailer
+        .dictionary
+        .get_or_err("Root")?
+        .try_dictionary(objects)?;
 
     // Get the page tree via the /Pages entry in the catalog
-    let pages_ref = catalog.get_or_err("Pages")?;
-    let pages_dict = objects.resolve_dictionary(pages_ref)?;
+    let pages_dict = catalog.get_or_err("Pages")?.try_dictionary(objects)?;
 
     // Parse the page tree structure
     PdfPages::from_dictionary(pages_dict, objects).map_err(Into::into)
@@ -428,9 +429,7 @@ fn decrypt_object(
                     indirect.generation_number,
                     Some(ObjectVariant::Stream(std::rc::Rc::new(decrypted_stream))),
                 );
-                return Ok(ObjectVariant::IndirectObject(std::rc::Rc::new(
-                    new_indirect,
-                )));
+                return Ok(ObjectVariant::IndirectObject(Box::new(new_indirect)));
             }
             // Non-stream indirect objects pass through unchanged
             Ok(ObjectVariant::IndirectObject(indirect))

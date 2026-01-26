@@ -109,7 +109,7 @@ impl FunctionImpl for StitchingFunction {
         object: &ObjectVariant,
         objects: &ObjectCollection,
     ) -> Result<Function, FunctionReadError> {
-        let dictionary = objects.resolve_dictionary(object)?;
+        let dictionary = object.try_dictionary(objects)?;
 
         let domain = dictionary.get_or_err("Domain")?.as_array_of::<f32, 2>()?;
 

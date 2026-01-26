@@ -43,7 +43,7 @@ pub enum ObjectVariant {
     /// End-of-file marker.
     EndOfFile,
     /// An indirect object with its object number and generation.
-    IndirectObject(Rc<IndirectObject>),
+    IndirectObject(Box<IndirectObject>),
     /// An indirect reference pointing to an object number.
     Reference(usize),
     /// A stream object, which may have associated dictionary and data.
@@ -51,44 +51,96 @@ pub enum ObjectVariant {
 }
 
 impl ObjectVariant {
-    /// Returns the object number if this value represents an indirect object
-    /// or a reference; otherwise returns `Err`.
-    pub fn try_object_number(&self) -> Result<usize, ObjectError> {
-        match self {
-            ObjectVariant::IndirectObject(o) => Ok(o.object_number),
-            ObjectVariant::Reference(o) => Ok(*o),
-            _ => Err(ObjectError::TypeMismatch("ObjectNumber", self.name())),
-        }
-    }
-
-    /// Converts this value into its object number if applicable.
+    /// Resolves an `ObjectVariant` into a `Dictionary`.
     ///
-    /// Unlike [`as_object_number`], this also returns the object number for
-    /// stream objects, since streams are always indirect in PDFs.
-    pub(crate) fn to_object_number(&self) -> Option<usize> {
-        match self {
-            ObjectVariant::IndirectObject(o) => Some(o.object_number),
-            ObjectVariant::Reference(o) => Some(*o),
-            ObjectVariant::Stream(o) => Some(o.object_number),
-            _ => None,
-        }
-    }
-
-    /// Like [`as_dictionary`], but returns an error on mismatch.
+    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
+    /// into a `Dictionary`.
+    ///
+    /// # Parameters
+    ///
+    /// - `objects`: A reference to the `ObjectCollection` used for resolving references.
+    ///
+    /// # Returns
+    ///
+    /// `Dictionary` or `Err` if the object is not a dictionary or if a reference cannot be
+    /// resolved.
     pub fn try_dictionary<'a>(
         &'a self,
         objects: &'a ObjectCollection,
     ) -> Result<&'a Dictionary, ObjectError> {
-        match self {
-            ObjectVariant::Reference(_) => objects.resolve_dictionary(self),
+        let object = if let ObjectVariant::Reference(_) = self {
+            objects.resolve_object(self)?
+        } else {
+            self
+        };
+
+        match object {
             ObjectVariant::Dictionary(dict) => Ok(dict.as_ref()),
             ObjectVariant::Stream(stream) => Ok(stream.dictionary.as_ref()),
             _ => Err(ObjectError::TypeMismatch("Dictionary", self.name())),
         }
     }
 
+    /// Resolves an `ObjectVariant` into a `StreamObject`.
+    ///
+    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
+    /// into a `StreamObject`.
+    ///
+    /// # Parameters
+    ///
+    /// - `objects`: A reference to the `ObjectCollection` used for resolving references.
+    ///
+    /// # Returns
+    ///
+    /// `StreamObject` or `Err` if the object is not a stream or if a reference cannot be
+    /// resolved.
+    pub fn try_stream<'a>(
+        &'a self,
+        objects: &'a ObjectCollection,
+    ) -> Result<&'a StreamObject, ObjectError> {
+        let object = if let ObjectVariant::Reference(_) = self {
+            objects.resolve_object(self)?
+        } else {
+            self
+        };
+
+        match object {
+            ObjectVariant::Stream(s) => Ok(s.as_ref()),
+            _ => Err(ObjectError::TypeMismatch("Stream", self.name())),
+        }
+    }
+
+    /// Resolves an `ObjectVariant` into an `Array`.
+    ///
+    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
+    /// into an `Array`.
+    ///
+    /// # Parameters
+    ///
+    /// - `objects`: A reference to the `ObjectCollection` used for resolving references.
+    ///
+    /// # Returns
+    ///
+    /// `Array` or `Err` if the object is not an array or if a reference cannot be
+    /// resolved.
+    pub fn try_array<'a>(
+        &'a self,
+        objects: &'a ObjectCollection,
+    ) -> Result<&'a [ObjectVariant], ObjectError> {
+        let object = if let ObjectVariant::Reference(_) = self {
+            objects.resolve_object(self)?
+        } else {
+            self
+        };
+
+        match object {
+            ObjectVariant::Array(arr) => Ok(arr.as_slice()),
+            _ => Err(ObjectError::TypeMismatch("Array", self.name())),
+        }
+    }
+
     /// Returns a slice view into the inner array if this is an `Array` variant.
-    pub fn as_array(&self) -> Option<&[ObjectVariant]> {
+    fn as_array(&self) -> Option<&[ObjectVariant]> {
         match self {
             ObjectVariant::Array(value) => Some(value),
             _ => None,
@@ -98,17 +150,6 @@ impl ObjectVariant {
     /// Returns `true` if this value is a Name object.
     pub fn is_name(&self) -> bool {
         matches!(self, ObjectVariant::Name(_))
-    }
-
-    pub fn try_array<'a>(
-        &'a self,
-        objects: &'a ObjectCollection,
-    ) -> Result<&'a [ObjectVariant], ObjectError> {
-        match self {
-            ObjectVariant::Reference(_) => objects.resolve_array(self),
-            ObjectVariant::Array(arr) => Ok(arr.as_slice()),
-            _ => Err(ObjectError::TypeMismatch("Array", self.name())),
-        }
     }
 
     /// Returns `true` if this value is an `Array`.
@@ -173,18 +214,12 @@ impl ObjectVariant {
         Ok(result)
     }
 
-    /// Returns the object number if this is a `Reference`, otherwise `None`.
-    pub fn as_reference(&self) -> Option<usize> {
-        match self {
-            ObjectVariant::Reference(value) => Some(*value),
-            _ => None,
-        }
-    }
-
-    /// Like [`as_reference`], but returns an error on mismatch.
+    /// Returns the object number if this is a `Reference`.
     pub fn try_reference(&self) -> Result<usize, ObjectError> {
-        self.as_reference()
-            .ok_or_else(|| ObjectError::TypeMismatch("Reference", self.name()))
+        match self {
+            ObjectVariant::Reference(value) => Ok(*value),
+            _ => Err(ObjectError::TypeMismatch("Reference", self.name())),
+        }
     }
 
     /// Returns a string view if this is a string-like type.
@@ -257,10 +292,6 @@ impl ObjectVariant {
             ObjectVariant::Real(value) => {
                 T::from_f64(*value).ok_or(ObjectError::NumberConversionError)
             }
-            ObjectVariant::IndirectObject(value) => value.object.as_ref().map_or_else(
-                || Err(ObjectError::TypeMismatch("Number", self.name())),
-                |obj| obj.as_number(),
-            ),
             _ => Err(ObjectError::TypeMismatch("Number", self.name())),
         }
     }

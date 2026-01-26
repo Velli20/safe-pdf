@@ -10,9 +10,9 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum PdfPagesError {
     #[error(
-        "Unexpected object type in `/Kids` array for object {obj_num}: expected 'Page' or 'Pages', found '{found_type}'"
+        "Unexpected object type in `/Kids` array for an object: expected 'Page' or 'Pages', found '{found_type}'"
     )]
-    UnexpectedObjectTypeInKids { obj_num: usize, found_type: String },
+    UnexpectedObjectTypeInKids { found_type: String },
     #[error("{0}")]
     ObjectError(#[from] ObjectError),
     #[error("Failed to parse content stream for page: {0}")]
@@ -48,10 +48,9 @@ impl FromDictionary for PdfPages {
         for value in kids_array {
             // Each entry must be an indirect reference. We extract its object number
             // for use in error messages.
-            let obj_num = value.try_object_number()?;
 
             // Resolve the indirect reference to get the child's dictionary.
-            let dictionary = objects.resolve_dictionary(value)?;
+            let dictionary = value.try_dictionary(objects)?;
 
             // Determine the type of the child object by reading its `/Type` entry.
             match dictionary.get_or_err("Type")?.try_str()?.as_ref() {
@@ -69,7 +68,6 @@ impl FromDictionary for PdfPages {
                 obj_type => {
                     // If the child has an unexpected type, return an error.
                     return Err(PdfPagesError::UnexpectedObjectTypeInKids {
-                        obj_num,
                         found_type: obj_type.to_string(),
                     });
                 }

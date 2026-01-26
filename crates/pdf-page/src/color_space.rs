@@ -259,14 +259,14 @@ fn parse_icc_based_color_space(
     arr: &[ObjectVariant],
 ) -> Result<ColorSpace, ColorSpaceError> {
     // Expected format: [/ICCBased icc-stream]
-    let [_, icc_stream_ref] = arr else {
+    let [_, icc_stream] = arr else {
         return Err(ColorSpaceError::InvalidColorSpace {
             description: format!("/ICCBased requires 2 elements, found {}", arr.len()),
         });
     };
 
-    let icc_stream = objects.resolve_stream(icc_stream_ref)?;
     let num_components = icc_stream
+        .try_stream(objects)?
         .dictionary
         .get_or_err("N")?
         .as_number::<usize>()?;
@@ -284,8 +284,5 @@ fn extract_lookup_table(
     if let Ok(data) = lookup.try_bytes() {
         return Ok(data.to_vec());
     }
-    let resolved = objects.resolve_stream(lookup)?;
-
-    let data = resolved.data()?;
-    Ok(data.into_owned())
+    Ok(lookup.try_stream(objects)?.data()?.into_owned())
 }

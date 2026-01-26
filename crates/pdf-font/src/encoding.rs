@@ -84,7 +84,7 @@ impl Encoding {
     ) -> Result<(), EncodingReadError> {
         let mut current_range_start = 0_usize;
 
-        for chunk in objects.resolve_array(differences_obj)? {
+        for chunk in differences_obj.try_array(objects)? {
             match chunk {
                 ObjectVariant::Integer(_) => {
                     current_range_start = chunk.as_number::<usize>()?;

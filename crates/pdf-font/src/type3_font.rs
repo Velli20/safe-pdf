@@ -72,18 +72,17 @@ impl FromDictionary for Type3Font {
             })
             .transpose()?;
 
-        let char_proc_dictionary =
-            objects.resolve_dictionary(dictionary.get_or_err("CharProcs")?)?;
+        let char_proc_dictionary = dictionary
+            .get_or_err("CharProcs")?
+            .try_dictionary(objects)?;
 
         // Iterate over each entry in the `/CharProcs` dictionary.
         // Each entry associates a glyph name with a reference to a content stream object.
         let mut char_procs = HashMap::new();
         for (name, value) in char_proc_dictionary.dictionary.iter() {
-            // Resolve the referenced content stream object from the PDF's object collection.
-            // If the reference cannot be resolved, return an error with the object number.
-            let content_stream_obj = objects.resolve_stream(value)?;
+            // Resolve the content stream data.
+            let data = value.try_stream(objects)?.data()?;
 
-            let data = content_stream_obj.data()?;
             // Parse the content stream data into a sequence of PDF operators.
             let operators = PdfOperatorVariant::from(&data)?;
             // Insert the parsed operators into the char_procs map under the glyph name.

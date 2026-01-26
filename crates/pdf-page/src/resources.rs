@@ -102,7 +102,7 @@ impl Resources {
             .dictionary
             .iter()
             .map(|(name, value)| {
-                let dict = objects.resolve_dictionary(value)?;
+                let dict = value.try_dictionary(objects)?;
                 let font = Font::from_dictionary(dict, objects)?;
                 Ok((name.clone(), font))
             })
@@ -123,7 +123,7 @@ impl Resources {
             .dictionary
             .iter()
             .map(|(name, value)| {
-                let dict = objects.resolve_dictionary(value)?;
+                let dict = value.try_dictionary(objects)?;
                 let state = ExternalGraphicsState::from_dictionary(dict, objects)?;
                 Ok((name.clone(), state))
             })
@@ -181,7 +181,7 @@ impl Resources {
             .dictionary
             .iter()
             .map(|(name, value)| {
-                let stream = objects.resolve_stream(value)?;
+                let stream = value.try_stream(objects)?;
                 let xobject = XObject::read_xobject(&stream.dictionary, stream, objects)?;
                 Ok((name.clone(), xobject))
             })
@@ -223,7 +223,7 @@ impl FromDictionary for Resources {
         };
 
         // Resolve the `/Resources` dictionary (may be a direct dict or indirect reference).
-        let resources = objects.resolve_dictionary(resources_entry)?;
+        let resources = resources_entry.try_dictionary(objects)?;
 
         // Parse each resource category independently.
         // Using separate methods improves readability and allows for easier
