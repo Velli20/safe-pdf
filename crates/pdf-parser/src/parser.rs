@@ -1,7 +1,7 @@
 use std::{rc::Rc, str::FromStr};
 
 use crate::error::ParserError;
-use pdf_object::{ObjectVariant, object_collection::ObjectCollection};
+use pdf_object::{ObjectVariant, object_resolver::ObjectResolver};
 use pdf_tokenizer::{PdfToken, Tokenizer};
 
 use crate::traits::{
@@ -102,7 +102,7 @@ impl PdfParser<'_> {
     pub fn parse_object_at(
         &mut self,
         position: usize,
-        objects: Option<&ObjectCollection>,
+        objects: &dyn ObjectResolver,
     ) -> Result<ObjectVariant, ParserError> {
         let mark = self.tokenizer.position;
         self.tokenizer.position = position;
@@ -195,7 +195,7 @@ impl PdfParser<'_> {
 
     fn parse_object_internal(
         &mut self,
-        objects: Option<&ObjectCollection>,
+        objects: &dyn ObjectResolver,
     ) -> Result<ObjectVariant, ParserError> {
         self.skip_whitespace();
 
@@ -223,7 +223,7 @@ impl PdfParser<'_> {
                 if t == b't' {
                     // Try parsing as a trailer first.
                     let mark = self.tokenizer.position;
-                    let value = self.parse_trailer();
+                    let value = self.parse_trailer(objects);
                     if let Ok(o) = value {
                         return Ok(ObjectVariant::Trailer(o));
                     }
@@ -237,13 +237,13 @@ impl PdfParser<'_> {
                     self.parse_null_object()?;
                     ObjectVariant::Null
                 } else if t == b'x' {
-                    ObjectVariant::CrossReferenceTable(self.parse_cross_reference_table()?)
+                    ObjectVariant::CrossReferenceTable(self.parse_cross_reference_table(objects)?)
                 } else {
                     return Err(ParserError::InvalidToken(char::from(t)));
                 }
             }
             PdfToken::DoubleLeftAngleBracket => {
-                ObjectVariant::Dictionary(Rc::new(self.parse_dictionary()?))
+                ObjectVariant::Dictionary(Rc::new(self.parse_dictionary(objects)?))
             }
             PdfToken::LeftAngleBracket => ObjectVariant::HexString(self.parse_hex_string()?),
             PdfToken::Solidus => ObjectVariant::Name(self.parse_name()?),
@@ -263,7 +263,7 @@ impl PdfParser<'_> {
             PdfToken::Minus => self.parse_number()?,
             PdfToken::Plus => self.parse_number()?,
             PdfToken::Period => self.parse_number()?,
-            PdfToken::LeftSquareBracket => ObjectVariant::Array(self.parse_array()?),
+            PdfToken::LeftSquareBracket => ObjectVariant::Array(self.parse_array(objects)?),
             PdfToken::LeftParenthesis => ObjectVariant::LiteralString(self.parse_literal_string()?),
             token => {
                 return Err(ParserError::UnexpectedTokenAt {
@@ -290,7 +290,7 @@ impl PdfParser<'_> {
     /// - `Result` containing the parsed `ObjectVariant` or a `ParserError`.
     pub fn parse_object(
         &mut self,
-        objects: Option<&ObjectCollection>,
+        objects: &dyn ObjectResolver,
     ) -> Result<ObjectVariant, ParserError> {
         // Prevent excessive nesting depth.
         if self.current_nesting_depth >= Self::MAX_NESTING_DEPTH {
@@ -306,6 +306,8 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+    use pdf_object::object_resolver::UnimplementedResolver;
+
     use super::*;
 
     #[test]
@@ -313,8 +315,7 @@ mod tests {
         let input = b"%PDF-1.3
  ";
         let mut parser = PdfParser::from(input.as_slice());
-
-        let result = parser.parse_object(None);
+        let result = parser.parse_object(&UnimplementedResolver);
         assert!(result.is_ok());
     }
 }

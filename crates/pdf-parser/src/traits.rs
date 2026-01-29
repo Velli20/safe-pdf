@@ -1,12 +1,15 @@
 use pdf_object::{
     ObjectVariant, cross_reference_table::CrossReferenceTable, dictionary::Dictionary,
-    object_collection::ObjectCollection, trailer::Trailer, version::Version,
+    object_resolver::ObjectResolver, trailer::Trailer, version::Version,
 };
 
 pub trait ArrayParser {
     type ErrorType;
 
-    fn parse_array(&mut self) -> Result<Vec<ObjectVariant>, Self::ErrorType>;
+    fn parse_array(
+        &mut self,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Vec<ObjectVariant>, Self::ErrorType>;
 }
 
 pub trait StreamParser {
@@ -15,7 +18,7 @@ pub trait StreamParser {
     fn parse_stream(
         &mut self,
         dictionary: &Dictionary,
-        objects: Option<&ObjectCollection>,
+        objects: &dyn ObjectResolver,
     ) -> Result<Vec<u8>, Self::ErrorType>;
 }
 
@@ -34,13 +37,19 @@ pub trait CommentParser {
 pub trait CrossReferenceTableParser {
     type ErrorType;
 
-    fn parse_cross_reference_table(&mut self) -> Result<CrossReferenceTable, Self::ErrorType>;
+    fn parse_cross_reference_table(
+        &mut self,
+        objects: &dyn ObjectResolver,
+    ) -> Result<CrossReferenceTable, Self::ErrorType>;
 }
 
 pub trait DictionaryParser {
     type ErrorType;
 
-    fn parse_dictionary(&mut self) -> Result<Dictionary, Self::ErrorType>;
+    fn parse_dictionary(
+        &mut self,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Dictionary, Self::ErrorType>;
 }
 
 pub trait HeaderParser {
@@ -60,7 +69,7 @@ pub trait IndirectObjectParser {
 
     fn parse_indirect_object(
         &mut self,
-        objects: Option<&ObjectCollection>,
+        objects: &dyn ObjectResolver,
     ) -> Result<Option<ObjectVariant>, Self::ErrorType>;
 }
 
@@ -90,5 +99,5 @@ pub trait NumberParser {
 pub trait TrailerParser {
     type ErrorType;
 
-    fn parse_trailer(&mut self) -> Result<Trailer, Self::ErrorType>;
+    fn parse_trailer(&mut self, objects: &dyn ObjectResolver) -> Result<Trailer, Self::ErrorType>;
 }

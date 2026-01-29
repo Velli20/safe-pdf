@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     traits::FromDictionary,
 };
 use thiserror::Error;
@@ -62,10 +62,10 @@ impl FromDictionary for Font {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         // Determine the font subtype from the dictionary.
-        let subtype = dictionary.get_or_err("Subtype")?.try_str()?;
+        let subtype = dictionary.get_or_err("Subtype")?.try_str(objects)?;
 
         match subtype.as_ref() {
             "Type0" => {

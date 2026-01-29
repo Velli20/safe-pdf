@@ -1,5 +1,5 @@
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     traits::FromDictionary,
 };
 use thiserror::Error;
@@ -34,7 +34,7 @@ impl FromDictionary for TrueTypeFont {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         // Read the `/FontDescriptor` entry.
         let font_descriptor = dictionary

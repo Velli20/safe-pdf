@@ -1,6 +1,6 @@
 use crate::{content_stream::ContentStreamReadError, page::PdfPage, resources::ResourcesError};
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     traits::FromDictionary,
 };
 
@@ -33,7 +33,7 @@ impl FromDictionary for PdfPages {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         // The `/Kids` array is a required entry in a Pages dictionary. It contains
         // indirect references to child objects, which can be either other Pages nodes
@@ -53,7 +53,7 @@ impl FromDictionary for PdfPages {
             let dictionary = value.try_dictionary(objects)?;
 
             // Determine the type of the child object by reading its `/Type` entry.
-            match dictionary.get_or_err("Type")?.try_str()?.as_ref() {
+            match dictionary.get_or_err("Type")?.try_str(objects)?.as_ref() {
                 PdfPage::KEY => {
                     // If the child is a leaf node (`/Type /Page`), parse it as a `PdfPage`.
                     let page = PdfPage::from_dictionary(dictionary, objects)?;

@@ -13,7 +13,7 @@
 
 use pdf_graphics::PixelFormat;
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     stream::StreamObject, traits::FromDictionary,
 };
 use thiserror::Error;
@@ -120,14 +120,18 @@ impl XObjectReader for ImageXObject {
     fn read_xobject(
         dictionary: &Dictionary,
         stream_data: &StreamObject,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self, Self::ErrorType> {
         // Extract required image properties from the dictionary.
-        let width = dictionary.get_or_err("Width")?.as_number::<usize>()?;
-        let height = dictionary.get_or_err("Height")?.as_number::<usize>()?;
+        let width = dictionary
+            .get_or_err("Width")?
+            .try_number::<usize>(objects)?;
+        let height = dictionary
+            .get_or_err("Height")?
+            .try_number::<usize>(objects)?;
         let bits_per_component = dictionary
             .get_or_err("BitsPerComponent")?
-            .as_number::<usize>()?;
+            .try_number::<usize>(objects)?;
 
         // Parse the optional `/ColorSpace` entry.
         let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
@@ -178,7 +182,7 @@ impl ImageXObject {
     /// that provides per-pixel opacity information.
     fn parse_smask(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Option<Box<ImageXObject>>, ImageXObjectError> {
         let Some(smask_obj) = dictionary.get("SMask") else {
             return Ok(None);

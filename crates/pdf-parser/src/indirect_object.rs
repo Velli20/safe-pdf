@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use pdf_object::{
     ObjectVariant, filter::Filter, indirect_object::IndirectObject,
-    object_collection::ObjectCollection, stream::StreamObject, traits::FromDictionary,
+    object_resolver::ObjectResolver, stream::StreamObject, traits::FromDictionary,
 };
 use pdf_tokenizer::PdfToken;
 use thiserror::Error;
@@ -61,7 +61,7 @@ impl IndirectObjectParser for PdfParser<'_> {
     /// ```
     fn parse_indirect_object(
         &mut self,
-        objects: Option<&ObjectCollection>,
+        objects: &dyn ObjectResolver,
     ) -> Result<Option<ObjectVariant>, Self::ErrorType> {
         const OBJ_KEYWORD: &[u8] = b"obj";
         const ENDOBJ_KEYWORD: &[u8] = b"endobj";
@@ -108,7 +108,6 @@ impl IndirectObjectParser for PdfParser<'_> {
             // Read the keyword `endobj`.
             self.read_keyword(ENDOBJ_KEYWORD)?;
 
-            let objects = objects.ok_or(IndirectObjectError::MissingObjectCollection)?;
             let filters = Filter::from_dictionary(&dictionary, objects)?;
 
             return Ok(Some(ObjectVariant::Stream(Rc::new(StreamObject::new(
@@ -132,7 +131,7 @@ impl IndirectObjectParser for PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use pdf_object::ObjectVariant;
+    use pdf_object::{ObjectVariant, object_resolver::UnimplementedResolver};
 
     use super::*;
 
@@ -140,9 +139,9 @@ mod tests {
     fn test_indirect_object_valid() {
         let input = b"0 1 obj\n(HELLO)\nendobj\n";
         let mut parser = PdfParser::from(input.as_slice());
-
-        if let Some(ObjectVariant::IndirectObject(indirect_object)) =
-            parser.parse_indirect_object(None).unwrap()
+        if let Some(ObjectVariant::IndirectObject(indirect_object)) = parser
+            .parse_indirect_object(&UnimplementedResolver)
+            .unwrap()
         {
             let IndirectObject {
                 object_number,

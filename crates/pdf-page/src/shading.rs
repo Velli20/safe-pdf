@@ -13,7 +13,7 @@
 
 use pdf_graphics::rect::Rect;
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     traits::FromDictionary,
 };
 use thiserror::Error;
@@ -199,11 +199,13 @@ impl Shading {
 impl Shading {
     pub fn from_dictionary(
         object: &ObjectVariant,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self, ShadingError> {
         // Extract and validate the required `/ShadingType` entry.
         let dictionary = object.try_dictionary(objects)?;
-        let shading_type_value = dictionary.get_or_err("ShadingType")?.as_number::<i32>()?;
+        let shading_type_value = dictionary
+            .get_or_err("ShadingType")?
+            .try_number::<i32>(objects)?;
         let shading_type = ShadingType::try_from(shading_type_value)?;
 
         match shading_type {
@@ -220,7 +222,7 @@ impl Shading {
     /// Parses a Type 1 (function-based) shading from a dictionary.
     fn parse_function_based(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self, ShadingError> {
         // Read optional `/ColorSpace` entry.
         let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
@@ -228,20 +230,20 @@ impl Shading {
         // Read optional `/Background` entry (array of color components).
         let background = dictionary
             .get("Background")
-            .map(ObjectVariant::as_vec_of::<f32>)
+            .map(|o| o.try_vec_of::<f32>(objects))
             .transpose()?;
 
         // Read optional `/BBox` entry (clipping rectangle).
         let bbox = dictionary
             .get("BBox")
-            .map(ObjectVariant::as_array_of::<f32, 4>)
+            .map(|o| o.try_array_of::<f32, 4>(objects))
             .transpose()?
             .map(Rect::from);
 
         // Read optional `/Domain` entry (function input range).
         let domain = dictionary
             .get("Domain")
-            .map(ObjectVariant::as_vec_of::<f32>)
+            .map(|o| o.try_vec_of::<f32>(objects))
             .transpose()?;
 
         // Read required `/Function` entry.
@@ -260,11 +262,13 @@ impl Shading {
     /// Parses a Type 2 (axial) shading from a dictionary.
     fn parse_axial(
         object: &ObjectVariant,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self, ShadingError> {
         // Read required `/Coords` entry defining the gradient axis.
         let dictionary = object.try_dictionary(objects)?;
-        let coords = dictionary.get_or_err("Coords")?.as_array_of::<f32, 4>()?;
+        let coords = dictionary
+            .get_or_err("Coords")?
+            .try_array_of::<f32, 4>(objects)?;
 
         // Read required `/ColorSpace` entry.
         let color_space = ColorSpace::from_dictionary(dictionary, objects)?.ok_or(
@@ -290,11 +294,13 @@ impl Shading {
     /// Parses a Type 3 (radial) shading from a dictionary.
     fn parse_radial(
         object: &ObjectVariant,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self, ShadingError> {
         // Read required `/Coords` entry defining the two circles.
         let dictionary = object.try_dictionary(objects)?;
-        let coords = dictionary.get_or_err("Coords")?.as_array_of::<f32, 6>()?;
+        let coords = dictionary
+            .get_or_err("Coords")?
+            .try_array_of::<f32, 6>(objects)?;
 
         // Read required `/ColorSpace` entry.
         let color_space = ColorSpace::from_dictionary(dictionary, objects)?.ok_or(
@@ -306,7 +312,7 @@ impl Shading {
         // Read optional `/BBox` entry.
         let bbox = dictionary
             .get("BBox")
-            .map(ObjectVariant::as_array_of::<f32, 4>)
+            .map(|o| o.try_array_of::<f32, 4>(objects))
             .transpose()?
             .map(Rect::from);
 
@@ -332,7 +338,7 @@ impl Shading {
     /// - An array of functions
     fn parse_functions(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Vec<Function>, ShadingError> {
         let function_obj = objects.resolve_object(dictionary.get_or_err("Function")?)?;
 

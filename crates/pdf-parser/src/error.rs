@@ -5,7 +5,6 @@ use pdf_tokenizer::error::TokenizerError;
 use thiserror::Error;
 
 use crate::{
-    array::ArrayError, boolean::BooleanError, comment::CommentError,
     cross_reference_table::CrossReferenceTableError, header::HeaderError,
     hex_string::HexStringError, indirect_object::IndirectObjectError,
     literal_string::LiteralStringObjectError, name::NameObjectError, number::NumberError,
@@ -26,16 +25,10 @@ pub enum ParserError {
     CrossReferenceTableError(#[from] CrossReferenceTableError),
     #[error("Hex string error: {0}")]
     HexStringError(#[from] HexStringError),
-    #[error("Array error: {0}")]
-    ArrayError(#[from] ArrayError),
     #[error("Number error: {0}")]
     NumberError(#[from] NumberError),
-    #[error("Boolean error: {0}")]
-    BooleanError(#[from] BooleanError),
     #[error("Name object error: {0}")]
     NameObjectError(#[from] NameObjectError),
-    #[error("Error while parsing Comment: {0}")]
-    CommentError(#[from] CommentError),
     #[error("Literal string object error: {0}")]
     LiteralStringObjectError(#[from] LiteralStringObjectError),
     #[error("Header parsing error: {0}")]

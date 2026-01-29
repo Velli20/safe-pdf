@@ -1,5 +1,5 @@
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     traits::FromDictionary,
 };
 
@@ -66,13 +66,14 @@ impl FromDictionary for Type0Font {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         // Extract the optional `/Encoding` entry which specifies the CMap used to map
         // character codes to CIDs. Common values include "Identity-H" and "Identity-V".
         let encoding = dictionary
             .get("Encoding")
-            .and_then(|v| v.as_str())
+            .map(|v| v.try_str(objects))
+            .transpose()?
             .map(FontEncoding::from);
 
         // Per PDF spec, the `/DescendantFonts` array
@@ -97,7 +98,7 @@ impl FromDictionary for Type0Font {
         // Determine the CIDFont subtype which dictates how glyph data is stored:
         // - CIDFontType0: Uses CFF (Compact Font Format) glyph descriptions.
         // - CIDFontType2: Uses TrueType glyph descriptions.
-        let subtype = match dictionary.get_or_err("Subtype")?.try_str()?.as_ref() {
+        let subtype = match dictionary.get_or_err("Subtype")?.try_str(objects)?.as_ref() {
             "CIDFontType0" => CidFontSubType::Type0,
             "CIDFontType2" => CidFontSubType::Type2,
             other => {
@@ -112,7 +113,7 @@ impl FromDictionary for Type0Font {
         // units (typically 1/1000 of a unit).
         let default_width = dictionary
             .get("DW")
-            .map(|dw| dw.as_number::<f32>())
+            .map(|dw| dw.try_number::<f32>(objects))
             .transpose()?
             .unwrap_or(Self::DEFAULT_WIDTH);
 
@@ -121,8 +122,8 @@ impl FromDictionary for Type0Font {
         let widths_map = dictionary
             .get("W")
             .map(|obj| -> Result<GlyphWidthsMap, Type0FontError> {
-                let resolved_obj = objects.resolve_object(obj)?.try_array(objects)?;
-                GlyphWidthsMap::from_array(resolved_obj).map_err(Type0FontError::from)
+                let resolved_obj = obj.try_array(objects)?;
+                GlyphWidthsMap::from_array(resolved_obj, objects).map_err(Type0FontError::from)
             })
             .transpose()?;
 

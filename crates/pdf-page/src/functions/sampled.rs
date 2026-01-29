@@ -1,6 +1,6 @@
 use num_derive::FromPrimitive;
 use num_traits::{FromPrimitive, ToPrimitive};
-use pdf_object::{ObjectVariant, object_collection::ObjectCollection};
+use pdf_object::{ObjectVariant, object_resolver::ObjectResolver};
 
 use crate::functions::{
     Function, FunctionImpl, FunctionInterpolationError, FunctionReadError, ensure_stream_len,
@@ -256,19 +256,23 @@ impl FunctionImpl for SampledFunction {
     /// linear or cubic spline interpolation between samples.
     fn parse(
         object: &ObjectVariant,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Function, FunctionReadError> {
         let stream = object.try_stream(objects)?;
         let dictionary = &stream.dictionary;
 
         // /Domain: Required. Array of 2*m numbers defining input domain.
-        let domain = dictionary.get_or_err("Domain")?.as_vec_of::<f32>()?;
+        let domain = dictionary
+            .get_or_err("Domain")?
+            .try_vec_of::<f32>(objects)?;
 
         // /Range: Required for sampled functions. Array of 2*n numbers.
-        let range = dictionary.get_or_err("Range")?.as_vec_of::<f32>()?;
+        let range = dictionary.get_or_err("Range")?.try_vec_of::<f32>(objects)?;
 
         // /Size: Required. Array of m integers specifying samples per input dimension.
-        let size = dictionary.get_or_err("Size")?.as_vec_of::<usize>()?;
+        let size = dictionary
+            .get_or_err("Size")?
+            .try_vec_of::<usize>(objects)?;
         if size.is_empty() {
             return Err(FunctionReadError::InvalidSizeArray);
         }
@@ -278,7 +282,7 @@ impl FunctionImpl for SampledFunction {
         // /BitsPerSample: Required. Must be 1, 2, 4, 8, 12, 16, 24, or 32.
         let bits_per_sample = dictionary
             .get_or_err("BitsPerSample")?
-            .as_number::<usize>()?;
+            .try_number::<usize>(objects)?;
         if !matches!(bits_per_sample, 1 | 2 | 4 | 8 | 12 | 16 | 24 | 32) {
             return Err(FunctionReadError::InvalidBitsPerSample);
         }
@@ -287,7 +291,7 @@ impl FunctionImpl for SampledFunction {
         let order = dictionary
             .get("Order")
             .map(|o| {
-                InterpolationOrder::from_i32(o.as_number::<i32>()?)
+                InterpolationOrder::from_i32(o.try_number::<i32>(objects)?)
                     .ok_or(FunctionReadError::InvalidOrder)
             })
             .transpose()?
@@ -296,7 +300,7 @@ impl FunctionImpl for SampledFunction {
         // /Encode: Optional. Defaults to [0, Size[0]-1, 0, Size[1]-1, ...].
         let encode = dictionary
             .get("Encode")
-            .map(ObjectVariant::as_vec_of::<f32>)
+            .map(|o| o.try_vec_of::<f32>(objects))
             .transpose()?
             .unwrap_or_else(|| {
                 size.iter()
@@ -311,7 +315,7 @@ impl FunctionImpl for SampledFunction {
         // /Decode: Optional. Defaults to Range values.
         let decode = dictionary
             .get("Decode")
-            .map(ObjectVariant::as_vec_of::<f32>)
+            .map(|o| o.try_vec_of::<f32>(objects))
             .transpose()?
             .unwrap_or_else(|| range.clone());
 

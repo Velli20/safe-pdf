@@ -6,7 +6,7 @@
 //! - Type 3: Stitching functions (combining multiple functions)
 //! - Type 4: PostScript Calculator functions
 
-use pdf_object::{ObjectVariant, error::ObjectError, object_collection::ObjectCollection};
+use pdf_object::{ObjectVariant, error::ObjectError, object_resolver::ObjectResolver};
 use pdf_postscript::calculator::CalcError;
 use thiserror::Error;
 
@@ -156,7 +156,7 @@ pub(crate) trait FunctionImpl {
 
     fn parse(
         object: &ObjectVariant,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Function, FunctionReadError>;
 }
 
@@ -199,21 +199,21 @@ impl FunctionImpl for Function {
     ///
     /// # Parameters
     ///
-    /// _ `dictionary`: The function dictionary containing function parameters.
-    /// _ `objects`: The object collection for resolving indirect references.
-    /// _ `stream`: Optional stream data (required for Type 4 PostScript functions).
+    /// - `dictionary`: The function dictionary containing function parameters.
+    /// - `objects`: The object collection for resolving indirect references.
+    /// - `stream`: Optional stream data (required for Type 4 PostScript functions).
     ///
     /// # Errors
     ///
     /// Returns an error if the dictionary is malformed or contains invalid values.
     fn parse(
         object: &ObjectVariant,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Function, FunctionReadError> {
         let function_type = object
             .try_dictionary(objects)?
             .get_or_err("FunctionType")?
-            .as_number::<i32>()
+            .try_number::<i32>(objects)
             .map(FunctionType::from_i32)?
             .ok_or(FunctionReadError::InvalidFunctionType)?;
 

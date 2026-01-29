@@ -3,9 +3,7 @@ use pdf_graphics::rect::Rect;
 use pdf_graphics::transform::Transform;
 use pdf_object::error::ObjectError;
 use pdf_object::stream::StreamObject;
-use pdf_object::{
-    dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
-};
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, traits::FromDictionary};
 use thiserror::Error;
 
 use crate::content_stream::ContentStream;
@@ -43,10 +41,14 @@ impl XObjectReader for FormXObject {
     fn read_xobject(
         dictionary: &Dictionary,
         stream_data: &StreamObject,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self, FormXObjectError> {
         // Retrieve the `/BBox` entry.
-        let bbox = Rect::from(dictionary.get_or_err("BBox")?.as_array_of::<f32, 4>()?);
+        let bbox = Rect::from(
+            dictionary
+                .get_or_err("BBox")?
+                .try_array_of::<f32, 4>(objects)?,
+        );
 
         // Retrieve the `/Matrix` entry if present.
         let matrix = Matrix::from_dictionary(dictionary, objects)?;

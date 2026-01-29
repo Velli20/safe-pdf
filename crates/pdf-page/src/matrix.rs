@@ -1,6 +1,6 @@
 use pdf_graphics::transform::Transform;
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     traits::FromDictionary,
 };
 
@@ -13,13 +13,13 @@ impl FromDictionary for Matrix {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        _objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let Some(matrix_obj) = dictionary.get("Matrix") else {
             return Ok(None);
         };
 
-        let [sx, ky, kx, sy, tx, ty] = matrix_obj.as_array_of::<f32, 6>()?;
+        let [sx, ky, kx, sy, tx, ty] = matrix_obj.try_array_of::<f32, 6>(objects)?;
 
         Ok(Some(Transform::from_row(sx, ky, kx, sy, tx, ty)))
     }

@@ -1,20 +1,9 @@
-use pdf_tokenizer::{PdfToken, error::TokenizerError};
-use thiserror::Error;
+use pdf_tokenizer::PdfToken;
 
-use crate::{parser::PdfParser, traits::BooleanParser};
-
-#[derive(Debug, PartialEq, Error)]
-pub enum BooleanError {
-    #[error("Invalid token for boolean object, expected 't' or 'f'")]
-    InvalidToken,
-    #[error("Failed to parse boolean keyword: {err}")]
-    FailedToParseKeyword { err: String },
-    #[error("Tokenizer error: {0}")]
-    TokenizerError(#[from] TokenizerError),
-}
+use crate::{error::ParserError, parser::PdfParser, traits::BooleanParser};
 
 impl BooleanParser for PdfParser<'_> {
-    type ErrorType = BooleanError;
+    type ErrorType = ParserError;
 
     /// Parses a PDF boolean object from the current position in the input stream.
     ///
@@ -38,14 +27,11 @@ impl BooleanParser for PdfParser<'_> {
         let expected_literal = match self.tokenizer.peek() {
             Some(PdfToken::Alphabetic(b't')) => BOOLEAN_LITERAL_TRUE,
             Some(PdfToken::Alphabetic(b'f')) => BOOLEAN_LITERAL_FALSE,
-            _ => return Err(BooleanError::InvalidToken),
+            Some(_) => return Err(ParserError::InvalidToken('o')),
+            None => return Err(ParserError::UnexpectedEndOfFile),
         };
 
-        self.read_keyword(expected_literal).map_err(|source| {
-            BooleanError::FailedToParseKeyword {
-                err: source.to_string(),
-            }
-        })?;
+        self.read_keyword(expected_literal)?;
 
         Ok(expected_literal == BOOLEAN_LITERAL_TRUE)
     }

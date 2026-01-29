@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use pdf_content_stream::{error::PdfOperatorError, pdf_operator::PdfOperatorVariant};
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     traits::FromDictionary,
 };
 use thiserror::Error;
@@ -52,23 +52,20 @@ impl FromDictionary for Type3Font {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let font_matrix = dictionary
             .get_or_err("FontMatrix")?
-            .as_array_of::<f32, 6>()?;
+            .try_array_of::<f32, 6>(objects)?;
 
         // Read optional `/Encoding` entry. This is either a name or a dictionary.
         let encoding = dictionary
             .get("Encoding")
-            .map(|enc_obj| {
-                let enc_obj = objects.resolve_object(enc_obj)?;
-                match enc_obj {
-                    ObjectVariant::Dictionary(enc_dictionary) => {
-                        Encoding::from_dictionary(enc_dictionary, objects)
-                    }
-                    _ => Encoding::from_base_encoding(FontEncoding::from(enc_obj.try_str()?)),
+            .map(|enc_obj| match objects.resolve_object(enc_obj)? {
+                ObjectVariant::Dictionary(enc_dictionary) => {
+                    Encoding::from_dictionary(enc_dictionary, objects)
                 }
+                other => Encoding::from_base_encoding(FontEncoding::from(other.try_str(objects)?)),
             })
             .transpose()?;
 

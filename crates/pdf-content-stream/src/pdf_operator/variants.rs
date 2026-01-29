@@ -1,3 +1,4 @@
+use pdf_object::object_resolver::UnimplementedResolver;
 use pdf_parser::{parser::PdfParser, traits::CommentParser};
 use pdf_tokenizer::PdfToken;
 
@@ -138,7 +139,7 @@ impl PdfOperatorVariant {
             }
 
             // Parse operand value
-            let value = parser.parse_object(None)?;
+            let value = parser.parse_object(&UnimplementedResolver)?;
             operands.push(value);
         }
 

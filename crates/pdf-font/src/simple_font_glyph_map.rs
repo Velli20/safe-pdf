@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     traits::FromDictionary,
 };
 use thiserror::Error;
@@ -35,11 +35,15 @@ impl FromDictionary for SimpleFontGlyphWidthsMap {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         // Read required fields /FirstChar and /LastChar fields.
-        let first_char = dictionary.get_or_err("FirstChar")?.as_number::<u16>()?;
-        let last_char = dictionary.get_or_err("LastChar")?.as_number::<u16>()?;
+        let first_char = dictionary
+            .get_or_err("FirstChar")?
+            .try_number::<u16>(objects)?;
+        let last_char = dictionary
+            .get_or_err("LastChar")?
+            .try_number::<u16>(objects)?;
 
         let Some(widths_obj) = dictionary.get(Self::KEY) else {
             return Ok(SimpleFontGlyphWidthsMap {
@@ -61,7 +65,7 @@ impl FromDictionary for SimpleFontGlyphWidthsMap {
             if code > last_char {
                 break;
             }
-            let width = w.as_number::<f32>()?;
+            let width = w.try_number::<f32>(objects)?;
             widths.insert(code, width);
         }
 

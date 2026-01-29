@@ -1,4 +1,6 @@
-use crate::{dictionary::Dictionary, object_collection::ObjectCollection};
+use std::str;
+
+use crate::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 /// A trait for types that can be constructed from a PDF [`Dictionary`].
 ///
@@ -17,7 +19,7 @@ pub trait FromDictionary {
 
     /// Attempts to construct an instance of `Self::ResultType` from the given PDF dictionary.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// - `dictionary`: A reference to the PDF [`Dictionary`] to parse.
     /// - `objects`: A reference to the [`ObjectCollection`] used to resolve any indirect objects.
@@ -27,6 +29,6 @@ pub trait FromDictionary {
     /// A `Result` containing the parsed `Self::ResultType` on success, or a [`ErrorType`] on failure.
     fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType>;
 }

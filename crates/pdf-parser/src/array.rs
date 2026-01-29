@@ -1,22 +1,10 @@
-use pdf_object::ObjectVariant;
-use pdf_tokenizer::{PdfToken, error::TokenizerError};
-use thiserror::Error;
+use pdf_object::{ObjectVariant, object_resolver::ObjectResolver};
+use pdf_tokenizer::PdfToken;
 
-use crate::{parser::PdfParser, traits::ArrayParser};
-
-/// Represents an error that can occur while parsing an array object.
-#[derive(Debug, PartialEq, Error)]
-pub enum ArrayError {
-    /// Indicates that there was an error while parsing an object within the array.
-    #[error("Error parsing an object within the array: {err}")]
-    ObjectParseError { err: String },
-    /// Indicates an error from the tokenizer.
-    #[error("Tokenizer error: {0}")]
-    TokenizerError(#[from] TokenizerError),
-}
+use crate::{error::ParserError, parser::PdfParser, traits::ArrayParser};
 
 impl ArrayParser for PdfParser<'_> {
-    type ErrorType = ArrayError;
+    type ErrorType = ParserError;
 
     /// Parses a PDF array object from the current position in the input stream.
     ///
@@ -46,7 +34,10 @@ impl ArrayParser for PdfParser<'_> {
     /// An `Array` object containing the parsed PDF objects as its elements,
     /// or a `ParserError` if the input is malformed (e.g., missing delimiters,
     /// invalid object syntax within the array, or an unexpected token).
-    fn parse_array(&mut self) -> Result<Vec<ObjectVariant>, ArrayError> {
+    fn parse_array(
+        &mut self,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Vec<ObjectVariant>, ParserError> {
         self.tokenizer.expect(PdfToken::LeftSquareBracket)?;
         self.skip_whitespace();
 
@@ -58,13 +49,7 @@ impl ArrayParser for PdfParser<'_> {
                 break;
             }
 
-            let value = self.parse_object(None);
-            match value {
-                Ok(value) => values.push(value),
-                Err(e) => {
-                    return Err(ArrayError::ObjectParseError { err: e.to_string() });
-                }
-            }
+            values.push(self.parse_object(objects)?);
 
             if let Some(PdfToken::RightSquareBracket) = self.tokenizer.peek() {
                 break;
@@ -81,6 +66,8 @@ impl ArrayParser for PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
+    use pdf_object::object_resolver::UnimplementedResolver;
+
     use super::*;
 
     #[test]
@@ -96,7 +83,7 @@ mod tests {
 
         for (input, expected_count) in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_array().unwrap();
+            let result = parser.parse_array(&UnimplementedResolver).unwrap();
             assert_eq!(
                 result.len(),
                 expected_count,
@@ -117,7 +104,7 @@ mod tests {
 
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            if let Ok(v) = parser.parse_array() {
+            if let Ok(v) = parser.parse_array(&UnimplementedResolver) {
                 panic!(
                     "Expected Err, got {:?} len {} input '{}™",
                     v,

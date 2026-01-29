@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use pdf_object::{ObjectVariant, object_collection::ObjectCollection};
+use pdf_object::{ObjectVariant, object_resolver::ObjectResolver};
 
 use crate::functions::{
     Function, FunctionImpl, FunctionInterpolationError, FunctionReadError, get_pair,
@@ -107,11 +107,13 @@ impl FunctionImpl for StitchingFunction {
 
     fn parse(
         object: &ObjectVariant,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Function, FunctionReadError> {
         let dictionary = object.try_dictionary(objects)?;
 
-        let domain = dictionary.get_or_err("Domain")?.as_array_of::<f32, 2>()?;
+        let domain = dictionary
+            .get_or_err("Domain")?
+            .try_array_of::<f32, 2>(objects)?;
 
         // Parse /Functions array (sub-functions to stitch together)
         let functions_arr = dictionary.get_or_err("Functions")?.try_array(objects)?;
@@ -121,10 +123,14 @@ impl FunctionImpl for StitchingFunction {
             .collect::<Result<Vec<_>, _>>()?;
 
         // Parse /Bounds array (boundaries between sub-functions)
-        let bounds = dictionary.get_or_err("Bounds")?.as_vec_of::<f32>()?;
+        let bounds = dictionary
+            .get_or_err("Bounds")?
+            .try_vec_of::<f32>(objects)?;
 
         // Parse /Encode array (input mapping for each sub-function)
-        let encode = dictionary.get_or_err("Encode")?.as_vec_of::<f32>()?;
+        let encode = dictionary
+            .get_or_err("Encode")?
+            .try_vec_of::<f32>(objects)?;
 
         // Validate structural relationships
         let expected_bounds = functions
