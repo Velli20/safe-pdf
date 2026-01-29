@@ -1,7 +1,5 @@
 use pdf_object::error::ObjectError;
-use pdf_object::{
-    dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
-};
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, traits::FromDictionary};
 
 /// Defines the page boundaries within a PDF document.
 ///
@@ -37,14 +35,14 @@ impl FromDictionary for MediaBox {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        _objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let Some(media_box_obj) = dictionary.get(Self::KEY) else {
             return Ok(None);
         };
 
         // PDF MediaBox is an array of four numbers: [LLx, LLy, URx, URy]
-        let [left, bottom, right, top] = media_box_obj.as_array_of::<f32, 4>()?;
+        let [left, bottom, right, top] = media_box_obj.try_array_of::<f32, 4>(objects)?;
 
         Ok(Some(MediaBox {
             left,

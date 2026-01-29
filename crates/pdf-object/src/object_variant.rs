@@ -6,7 +6,7 @@ use crate::cross_reference_table::CrossReferenceTable;
 use crate::dictionary::Dictionary;
 use crate::error::ObjectError;
 use crate::indirect_object::IndirectObject;
-use crate::object_collection::ObjectCollection;
+use crate::object_resolver::ObjectResolver;
 use crate::stream::StreamObject;
 use crate::trailer::Trailer;
 
@@ -66,7 +66,7 @@ impl ObjectVariant {
     /// resolved.
     pub fn try_dictionary<'a>(
         &'a self,
-        objects: &'a ObjectCollection,
+        objects: &'a dyn ObjectResolver,
     ) -> Result<&'a Dictionary, ObjectError> {
         let object = if let ObjectVariant::Reference(_) = self {
             objects.resolve_object(self)?
@@ -96,7 +96,7 @@ impl ObjectVariant {
     /// resolved.
     pub fn try_stream<'a>(
         &'a self,
-        objects: &'a ObjectCollection,
+        objects: &'a dyn ObjectResolver,
     ) -> Result<&'a StreamObject, ObjectError> {
         let object = if let ObjectVariant::Reference(_) = self {
             objects.resolve_object(self)?
@@ -106,7 +106,7 @@ impl ObjectVariant {
 
         match object {
             ObjectVariant::Stream(s) => Ok(s.as_ref()),
-            _ => Err(ObjectError::TypeMismatch("Stream", self.name())),
+            _ => Err(ObjectError::TypeMismatch("Stream", object.name())),
         }
     }
 
@@ -125,7 +125,7 @@ impl ObjectVariant {
     /// resolved.
     pub fn try_array<'a>(
         &'a self,
-        objects: &'a ObjectCollection,
+        objects: &'a dyn ObjectResolver,
     ) -> Result<&'a [ObjectVariant], ObjectError> {
         let object = if let ObjectVariant::Reference(_) = self {
             objects.resolve_object(self)?
@@ -135,15 +135,107 @@ impl ObjectVariant {
 
         match object {
             ObjectVariant::Array(arr) => Ok(arr.as_slice()),
-            _ => Err(ObjectError::TypeMismatch("Array", self.name())),
+            _ => Err(ObjectError::TypeMismatch("Array", object.name())),
         }
     }
 
-    /// Returns a slice view into the inner array if this is an `Array` variant.
-    fn as_array(&self) -> Option<&[ObjectVariant]> {
-        match self {
-            ObjectVariant::Array(value) => Some(value),
-            _ => None,
+    /// Resolves an `ObjectVariant` into a `String`.
+    ///
+    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
+    /// into a `String`.
+    ///
+    /// # Parameters
+    ///
+    /// - `objects`: A reference to the `ObjectCollection` used for resolving references.
+    ///
+    /// # Returns
+    ///
+    /// `String` or `Err` if the object is not a string or if a reference cannot be
+    /// resolved.
+    pub fn try_str<'a>(
+        &'a self,
+        objects: &'a dyn ObjectResolver,
+    ) -> Result<Cow<'a, str>, ObjectError> {
+        let object = if let ObjectVariant::Reference(_) = self {
+            objects.resolve_object(self)?
+        } else {
+            self
+        };
+
+        match object {
+            ObjectVariant::HexString(s) => {
+                let s = String::from_utf8_lossy(s);
+                Ok(s)
+            }
+            ObjectVariant::LiteralString(s) | ObjectVariant::Name(s) => Ok(Cow::Borrowed(s)),
+            _ => Err(ObjectError::TypeMismatch("String", object.name())),
+        }
+    }
+
+    /// Resolves an `ObjectVariant` into a `Vec<T>` of numeric values.
+    ///
+    /// This function attempts to convert an array object into a dynamically-sized
+    /// vector where each element is parsed as a numeric value.
+    ///
+    /// # Type Parameters
+    ///
+    /// - `T`: The numeric type to convert each element to. Must implement `FromPrimitive`,
+    ///   `Copy`, and `Default`.
+    ///
+    /// # Parameters
+    ///
+    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
+    ///
+    /// # Returns
+    ///
+    /// `Vec<T>` or `Err` if:
+    /// - The object is not an array.
+    /// - Any element cannot be converted to type `T`.
+    pub fn try_vec_of<T>(&self, objects: &dyn ObjectResolver) -> Result<Vec<T>, ObjectError>
+    where
+        T: FromPrimitive + Copy + Default,
+    {
+        let values = self.try_array(objects)?;
+
+        let mut result: Vec<T> = Vec::new();
+        for v in values.iter() {
+            result.push(v.try_number(objects)?);
+        }
+
+        Ok(result)
+    }
+
+    /// Resolves an `ObjectVariant` into a numeric type `T`.
+    ///
+    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
+    /// into a numeric type `T`.
+    ///
+    /// # Parameters
+    ///
+    /// - `objects`: A reference to the `ObjectCollection` used for resolving references.
+    ///
+    /// # Returns
+    ///
+    /// `T` or `Err` if the object is not a number or if a reference cannot be
+    /// resolved.
+    pub fn try_number<T>(&self, objects: &dyn ObjectResolver) -> Result<T, ObjectError>
+    where
+        T: FromPrimitive,
+    {
+        let object = if let ObjectVariant::Reference(_) = self {
+            objects.resolve_object(self)?
+        } else {
+            self
+        };
+
+        match object {
+            ObjectVariant::Integer(value) => {
+                T::from_i64(*value).ok_or(ObjectError::NumberConversionError)
+            }
+            ObjectVariant::Real(value) => {
+                T::from_f64(*value).ok_or(ObjectError::NumberConversionError)
+            }
+            _ => Err(ObjectError::TypeMismatch("Number", object.name())),
         }
     }
 
@@ -157,22 +249,35 @@ impl ObjectVariant {
         matches!(self, ObjectVariant::Array(_))
     }
 
-    /// Attempts to convert an array into a fixed-size array of numeric values.
+    /// Resolves an `ObjectVariant` into a fixed-size array of numeric values.
     ///
-    /// Each element must be a number that can be converted into `T` via
-    /// `FromPrimitive`. The input array length must match `N` exactly.
+    /// This function attempts to convert an array object into a Rust array of type `[T; N]`,
+    /// where each element is parsed as a numeric value.
     ///
-    /// Errors
-    /// - `TypeMismatch` if this is not an array.
-    /// - `InvalidArrayLength` if the array length does not equal `N`.
-    /// - `NumberConversionError` if any element cannot be converted to `T`.
-    pub fn as_array_of<T, const N: usize>(&self) -> Result<[T; N], ObjectError>
+    /// # Type Parameters
+    ///
+    /// - `T`: The numeric type to convert each element to. Must implement `FromPrimitive`,
+    ///   `Copy`, and `Default`.
+    /// - `N`: The expected length of the array (compile-time constant).
+    ///
+    /// # Parameters
+    ///
+    /// - `objects`: A reference to the `ObjectCollection` used for resolving references.
+    ///
+    /// # Returns
+    ///
+    /// `[T; N]` or `Err` if:
+    /// - The object is not an array.
+    /// - The array length does not match `N`.
+    /// - Any element cannot be converted to type `T`.
+    pub fn try_array_of<T, const N: usize>(
+        &self,
+        objects: &dyn ObjectResolver,
+    ) -> Result<[T; N], ObjectError>
     where
         T: FromPrimitive + Copy + Default,
     {
-        let values = self
-            .as_array()
-            .ok_or_else(|| ObjectError::TypeMismatch("Array", self.name()))?;
+        let values = self.try_array(objects)?;
 
         if values.len() != N {
             return Err(ObjectError::InvalidArrayLength {
@@ -186,32 +291,68 @@ impl ObjectVariant {
             .iter_mut()
             .zip(values.iter())
             .try_for_each(|(out, v)| {
-                *out = v.as_number()?;
+                *out = v.try_number(objects)?;
                 Ok(())
             })?;
 
         Ok(result)
     }
 
-    /// Attempts to convert an array into a `Vec<T>` of numeric values.
+    /// Resolves an `ObjectVariant` into raw bytes.
     ///
-    /// Errors
-    /// - `TypeMismatch` if this is not an array.
-    /// - `NumberConversionError` if any element cannot be converted to `T`.
-    pub fn as_vec_of<T>(&self) -> Result<Vec<T>, ObjectError>
-    where
-        T: FromPrimitive + Copy + Default,
-    {
-        let values = self
-            .as_array()
-            .ok_or_else(|| ObjectError::TypeMismatch("Array", self.name()))?;
+    /// This function attempts to extract the underlying byte representation from
+    /// string-like objects (`HexString`, `LiteralString`, or `Name`).
+    ///
+    /// # Parameters
+    ///
+    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
+    ///
+    /// # Returns
+    ///
+    /// `&[u8]` or `Err` if the object is not a string-like type or if a reference
+    /// cannot be resolved.
+    pub fn try_bytes<'a>(
+        &'a self,
+        objects: &'a dyn ObjectResolver,
+    ) -> Result<&'a [u8], ObjectError> {
+        let object = if let ObjectVariant::Reference(_) = self {
+            objects.resolve_object(self)?
+        } else {
+            self
+        };
 
-        let mut result: Vec<T> = Vec::new();
-        for v in values.iter() {
-            result.push(v.as_number()?);
+        match object {
+            ObjectVariant::HexString(s) => Ok(s),
+            ObjectVariant::Name(s) => Ok(s.as_bytes()),
+            ObjectVariant::LiteralString(s) => Ok(s.as_bytes()),
+            _ => Err(ObjectError::TypeMismatch("HexString", object.name())),
         }
+    }
 
-        Ok(result)
+    /// Resolves an `ObjectVariant` into a boolean value.
+    ///
+    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
+    /// into a `bool`.
+    ///
+    /// # Parameters
+    ///
+    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
+    ///
+    /// # Returns
+    ///
+    /// `bool` or `Err` if the object is not a boolean or if a reference cannot be
+    /// resolved.
+    pub fn try_boolean(&self, objects: &dyn ObjectResolver) -> Result<bool, ObjectError> {
+        let object = if let ObjectVariant::Reference(_) = self {
+            objects.resolve_object(self)?
+        } else {
+            self
+        };
+
+        match object {
+            ObjectVariant::Boolean(value) => Ok(*value),
+            _ => Err(ObjectError::TypeMismatch("Boolean", object.name())),
+        }
     }
 
     /// Returns the object number if this is a `Reference`.
@@ -219,93 +360,6 @@ impl ObjectVariant {
         match self {
             ObjectVariant::Reference(value) => Ok(*value),
             _ => Err(ObjectError::TypeMismatch("Reference", self.name())),
-        }
-    }
-
-    /// Returns a string view if this is a string-like type.
-    ///
-    /// For `HexString`, a lossy UTF-8 conversion is performed and returned.
-    /// For `LiteralString` and `Name`, a borrowed string slice is returned.
-    pub fn as_str(&self) -> Option<Cow<'_, str>> {
-        match self {
-            ObjectVariant::HexString(s) => {
-                let s = String::from_utf8_lossy(s);
-                Some(s)
-            }
-            ObjectVariant::LiteralString(s) | ObjectVariant::Name(s) => Some(Cow::Borrowed(s)),
-            _ => None,
-        }
-    }
-
-    /// Like [`as_str`], but returns an error on mismatch.
-    pub fn try_str(&self) -> Result<Cow<'_, str>, ObjectError> {
-        self.as_str()
-            .ok_or_else(|| ObjectError::TypeMismatch("String", self.name()))
-    }
-
-    /// Returns the raw bytes if this is a `HexString`.
-    pub fn as_bytes(&self) -> Option<&[u8]> {
-        match self {
-            ObjectVariant::HexString(s) => Some(s),
-            ObjectVariant::Name(s) => Some(s.as_bytes()),
-            ObjectVariant::LiteralString(s) => Some(s.as_bytes()),
-            _ => None,
-        }
-    }
-
-    /// Like [`as_bytes`], but returns an error on mismatch.
-    pub fn try_bytes(&self) -> Result<&[u8], ObjectError> {
-        self.as_bytes()
-            .ok_or_else(|| ObjectError::TypeMismatch("HexString", self.name()))
-    }
-
-    /// Returns the boolean value if this is a `Boolean`, otherwise `None`.
-    pub fn as_boolean(&self) -> Option<bool> {
-        match self {
-            ObjectVariant::Boolean(value) => Some(*value),
-            _ => None,
-        }
-    }
-
-    /// Like [`as_boolean`], but returns an error on mismatch.
-    pub fn try_boolean(&self) -> Result<bool, ObjectError> {
-        self.as_boolean()
-            .ok_or_else(|| ObjectError::TypeMismatch("Boolean", self.name()))
-    }
-
-    /// Attempts to convert this value into a numeric type `T`.
-    ///
-    /// Accepts `Integer` and `Real` variants and uses `FromPrimitive` to
-    /// perform the conversion.
-    ///
-    /// Errors
-    /// - `TypeMismatch` if the value is not a number.
-    /// - `NumberConversionError` if conversion into `T` fails.
-    pub fn as_number<T>(&self) -> Result<T, ObjectError>
-    where
-        T: FromPrimitive,
-    {
-        match self {
-            ObjectVariant::Integer(value) => {
-                T::from_i64(*value).ok_or(ObjectError::NumberConversionError)
-            }
-            ObjectVariant::Real(value) => {
-                T::from_f64(*value).ok_or(ObjectError::NumberConversionError)
-            }
-            _ => Err(ObjectError::TypeMismatch("Number", self.name())),
-        }
-    }
-
-    pub fn as_number_entry<T>(&self, entry_description: &'static str) -> Result<T, ObjectError>
-    where
-        T: FromPrimitive,
-    {
-        if let ObjectVariant::Integer(value) = self {
-            T::from_i64(*value).ok_or(ObjectError::NumericConversionError { entry_description })
-        } else if let ObjectVariant::Real(value) = self {
-            T::from_f64(*value).ok_or(ObjectError::NumericConversionError { entry_description })
-        } else {
-            Err(ObjectError::TypeMismatch("Number", self.name()))
         }
     }
 

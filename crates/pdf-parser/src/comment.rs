@@ -1,18 +1,9 @@
-use pdf_tokenizer::{PdfToken, error::TokenizerError};
-use thiserror::Error;
+use pdf_tokenizer::PdfToken;
 
-use crate::{parser::PdfParser, traits::CommentParser};
-
-#[derive(Debug, PartialEq, Error)]
-pub enum CommentError {
-    #[error("Tokenizer error: {0}")]
-    TokenizerError(#[from] TokenizerError),
-    #[error("Failed to read end-of-line marker after comment: {err}")]
-    MissingEOL { err: String },
-}
+use crate::{error::ParserError, parser::PdfParser, traits::CommentParser};
 
 impl CommentParser for PdfParser<'_> {
-    type ErrorType = CommentError;
+    type ErrorType = ParserError;
 
     /// Parses a PDF comment object from the current position in the input stream.
     ///
@@ -45,10 +36,7 @@ impl CommentParser for PdfParser<'_> {
         // Read until the end of the line.
         let text = self.tokenizer.read_while_u8(|c| c != b'\n' && c != b'\r');
         let text = String::from_utf8_lossy(text).to_string();
-        self.read_end_of_line_marker()
-            .map_err(|err| CommentError::MissingEOL {
-                err: err.to_string(),
-            })?;
+        self.read_end_of_line_marker()?;
         Ok(text)
     }
 }

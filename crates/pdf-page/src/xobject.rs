@@ -3,7 +3,7 @@ use crate::{
     image::{ImageXObject, ImageXObjectError},
 };
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     stream::StreamObject,
 };
 use thiserror::Error;
@@ -57,7 +57,7 @@ pub(crate) trait XObjectReader {
     fn read_xobject(
         dictionary: &Dictionary,
         stream_data: &StreamObject,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self, Self::ErrorType>
     where
         Self: Sized;
@@ -69,9 +69,9 @@ impl XObjectReader for XObject {
     fn read_xobject(
         dictionary: &Dictionary,
         stream_data: &StreamObject,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self, Self::ErrorType> {
-        let subtype = dictionary.get_or_err("Subtype")?.try_str()?;
+        let subtype = dictionary.get_or_err("Subtype")?.try_str(objects)?;
 
         match subtype.as_ref() {
             "Image" => {

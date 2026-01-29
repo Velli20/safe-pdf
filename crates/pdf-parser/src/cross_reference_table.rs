@@ -1,5 +1,6 @@
-use pdf_object::cross_reference_table::{
-    CrossReferenceEntry, CrossReferenceStatus, CrossReferenceTable,
+use pdf_object::{
+    cross_reference_table::{CrossReferenceEntry, CrossReferenceStatus, CrossReferenceTable},
+    object_resolver::ObjectResolver,
 };
 use pdf_tokenizer::PdfToken;
 use thiserror::Error;
@@ -66,7 +67,10 @@ impl CrossReferenceTableParser for PdfParser<'_> {
     /// 0000000017 00000 n
     /// 0000000081 00000 n
     /// ```
-    fn parse_cross_reference_table(&mut self) -> Result<CrossReferenceTable, Self::ErrorType> {
+    fn parse_cross_reference_table(
+        &mut self,
+        objects: &dyn ObjectResolver,
+    ) -> Result<CrossReferenceTable, Self::ErrorType> {
         const XREF_KEYWORD: &[u8] = b"xref";
 
         self.read_keyword(XREF_KEYWORD)?;
@@ -101,7 +105,7 @@ impl CrossReferenceTableParser for PdfParser<'_> {
             }
         }
 
-        let trailer = self.parse_trailer()?;
+        let trailer = self.parse_trailer(objects)?;
 
         Ok(CrossReferenceTable::new(entries, trailer))
     }
@@ -110,14 +114,17 @@ impl CrossReferenceTableParser for PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
+    use pdf_object::object_resolver::UnimplementedResolver;
+
     use super::*;
 
     #[test]
     fn test_parse_valid_xref_section() {
         let data = b"xref\n0 2\n0000000000 65535 f\n0000000017 00000 n\ntrailer\n<< /Size 2 >>\nstartxref\n0\n";
         let mut parser = PdfParser::from(data.as_slice());
-
-        let table = parser.parse_cross_reference_table().unwrap();
+        let table = parser
+            .parse_cross_reference_table(&UnimplementedResolver)
+            .unwrap();
         assert_eq!(table.entries.len(), 2);
 
         let entry0 = &table.entries[&0];
@@ -136,7 +143,7 @@ mod tests {
         let data = b"xref\n0 2\n0000000000 65535 f\n";
         let mut parser = PdfParser::from(data.as_slice());
 
-        let result = parser.parse_cross_reference_table();
+        let result = parser.parse_cross_reference_table(&UnimplementedResolver);
         assert!(result.is_err());
     }
 
@@ -145,7 +152,9 @@ mod tests {
         let data = b"xref\n0 0\ntrailer\n<< /Size 0 >>\nstartxref\n0\n";
         let mut parser = PdfParser::from(data.as_slice());
 
-        let table = parser.parse_cross_reference_table().unwrap();
+        let table = parser
+            .parse_cross_reference_table(&UnimplementedResolver)
+            .unwrap();
         assert!(table.entries.is_empty());
     }
 
@@ -160,8 +169,9 @@ mod tests {
         trailer\n<< /Size 6 >>\nstartxref\n0\n";
 
         let mut parser = PdfParser::from(data.as_slice());
-
-        let table = parser.parse_cross_reference_table().unwrap();
+        let table = parser
+            .parse_cross_reference_table(&UnimplementedResolver)
+            .unwrap();
         assert_eq!(table.entries.len(), 4);
         assert!(table.entries.contains_key(&0));
         assert!(table.entries.contains_key(&1));

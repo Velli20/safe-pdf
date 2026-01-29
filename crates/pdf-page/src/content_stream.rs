@@ -1,6 +1,6 @@
 use pdf_content_stream::{error::PdfOperatorError, pdf_operator::PdfOperatorVariant};
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     traits::FromDictionary,
 };
 use thiserror::Error;
@@ -25,7 +25,7 @@ pub struct ContentStream {
 // Helper function to process an array whose elements should be streams or references to streams
 fn process_content_stream_array(
     array: &[ObjectVariant],
-    objects: &ObjectCollection,
+    objects: &dyn ObjectResolver,
 ) -> Result<Vec<PdfOperatorVariant>, ContentStreamReadError> {
     let mut concatenated_ops = Vec::new();
     for value_in_array in array.iter() {
@@ -43,7 +43,7 @@ impl FromDictionary for ContentStream {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         // Get the optional `/Contents` entry from the page dictionary.
         let Some(contents) = dictionary.get(Self::KEY) else {

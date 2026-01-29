@@ -1,5 +1,5 @@
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     traits::FromDictionary,
 };
 use thiserror::Error;
@@ -43,7 +43,7 @@ impl FromDictionary for Type1Font {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         // Read '/FontDescriptor’.
         let descriptor = dictionary
@@ -68,7 +68,7 @@ impl FromDictionary for Type1Font {
                     Encoding::from_dictionary(enc_dictionary, objects)?
                 }
                 _ => {
-                    let base = FontEncoding::from(enc_obj.try_str()?);
+                    let base = FontEncoding::from(enc_obj.try_str(objects)?);
                     Encoding::from_base_encoding(base)?
                 }
             }

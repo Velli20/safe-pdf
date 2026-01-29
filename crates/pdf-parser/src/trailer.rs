@@ -1,5 +1,7 @@
 use crate::{error::ParserError, parser::PdfParser, traits::TrailerParser};
-use pdf_object::{ObjectVariant, error::ObjectError, trailer::Trailer};
+use pdf_object::{
+    ObjectVariant, error::ObjectError, object_resolver::ObjectResolver, trailer::Trailer,
+};
 
 impl TrailerParser for PdfParser<'_> {
     type ErrorType = ParserError;
@@ -46,7 +48,7 @@ impl TrailerParser for PdfParser<'_> {
     /// A `Trailer` object containing the parsed dictionary and the `startxref` offset,
     /// or a `ParserError` if the trailer is malformed (e.g., missing keywords,
     /// invalid dictionary, or missing offset).
-    fn parse_trailer(&mut self) -> Result<Trailer, Self::ErrorType> {
+    fn parse_trailer(&mut self, objects: &dyn ObjectResolver) -> Result<Trailer, Self::ErrorType> {
         const TRAILER_KEYWORD: &[u8] = b"trailer";
         const START_XREF_KEYWORD: &[u8] = b"startxref";
 
@@ -54,7 +56,7 @@ impl TrailerParser for PdfParser<'_> {
         self.read_keyword(TRAILER_KEYWORD)?;
 
         // Try parse dictionary object.
-        let dictionary = self.parse_object(None)?;
+        let dictionary = self.parse_object(objects)?;
 
         let dictionary = match dictionary {
             ObjectVariant::Dictionary(value) => value,
@@ -76,7 +78,7 @@ impl TrailerParser for PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use pdf_object::ObjectVariant;
+    use pdf_object::{ObjectVariant, object_resolver::UnimplementedResolver};
 
     use super::*;
 
@@ -85,7 +87,7 @@ mod tests {
         let input = b"trailer\n<< /Size 22 /Root 1 0 R >>\nstartxref\n187\n%%EOF";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let trailer = parser.parse_trailer().unwrap();
+        let trailer = parser.parse_trailer(&UnimplementedResolver).unwrap();
         assert_eq!(
             trailer.dictionary.get("Root").unwrap(),
             &ObjectVariant::Reference(1)

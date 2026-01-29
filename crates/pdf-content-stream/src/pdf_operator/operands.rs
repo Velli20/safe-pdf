@@ -1,6 +1,6 @@
 use std::{borrow::Cow, rc::Rc};
 
-use pdf_object::{ObjectVariant, dictionary::Dictionary};
+use pdf_object::{ObjectVariant, dictionary::Dictionary, object_resolver::UnimplementedResolver};
 
 use crate::{TextElement, error::PdfOperatorError};
 
@@ -60,7 +60,9 @@ impl<'a> Operands<'a> {
     }
 
     pub fn get_f32(&mut self) -> Result<f32, PdfOperatorError> {
-        self.take_and_map("Number (f32)", ObjectVariant::as_number::<f32>)
+        self.take_and_map("Number (f32)", |value| {
+            value.try_number::<f32>(&UnimplementedResolver)
+        })
     }
 
     pub fn get_dictionary(&mut self) -> Result<Rc<Dictionary>, PdfOperatorError> {
@@ -74,15 +76,17 @@ impl<'a> Operands<'a> {
     }
 
     pub fn get_str(&'_ mut self) -> Result<Cow<'_, str>, PdfOperatorError> {
-        self.take_and_map("String", ObjectVariant::try_str)
+        self.take_and_map("String", |value| value.try_str(&UnimplementedResolver))
     }
 
     pub fn get_bytes(&mut self) -> Result<&[u8], PdfOperatorError> {
-        self.take_and_map("Vec<u8>", ObjectVariant::try_bytes)
+        self.take_and_map("Vec<u8>", |value| value.try_bytes(&UnimplementedResolver))
     }
 
     pub fn get_u8(&mut self) -> Result<u8, PdfOperatorError> {
-        self.take_and_map("Number (u8)", ObjectVariant::as_number::<u8>)
+        self.take_and_map("Number (u8)", |value| {
+            value.try_number::<u8>(&UnimplementedResolver)
+        })
     }
 
     pub fn get_text_element_array(&mut self) -> Result<Vec<TextElement>, PdfOperatorError> {
@@ -97,7 +101,7 @@ impl<'a> Operands<'a> {
                     elements.push(TextElement::Text { value: s.clone() })
                 }
                 _ => {
-                    let amount = val_obj.as_number::<f32>()?;
+                    let amount = val_obj.try_number::<f32>(&UnimplementedResolver)?;
                     elements.push(TextElement::Adjustment { amount });
                 }
             }
@@ -109,6 +113,6 @@ impl<'a> Operands<'a> {
         let array = self.take_next().ok_or(PdfOperatorError::MissingOperand {
             expected_type: "Array for f32",
         })?;
-        Ok(array.as_vec_of::<f32>()?)
+        Ok(array.try_vec_of::<f32>(&UnimplementedResolver)?)
     }
 }

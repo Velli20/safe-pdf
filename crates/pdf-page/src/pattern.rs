@@ -1,6 +1,6 @@
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     stream::StreamObject, traits::FromDictionary,
 };
 use thiserror::Error;
@@ -140,10 +140,12 @@ pub enum Pattern {
 impl Pattern {
     pub(crate) fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
         stream: Option<&StreamObject>,
     ) -> Result<Pattern, PatternError> {
-        let pattern_type = dictionary.get_or_err("PatternType")?.as_number::<i32>()?;
+        let pattern_type = dictionary
+            .get_or_err("PatternType")?
+            .try_number::<i32>(objects)?;
 
         // Read the transformation matrix for the pattern. Defaults to identity.
         let matrix = Matrix::from_dictionary(dictionary, objects)?;
@@ -153,7 +155,7 @@ impl Pattern {
                 // Read the `/PaintType` entry.
                 let paint_type_int = dictionary
                     .get_or_err("PaintType")?
-                    .as_number_entry::<i32>("PaintType")?;
+                    .try_number::<i32>(objects)?;
 
                 let paint_type = PaintType::from_i32(paint_type_int).ok_or_else(|| {
                     PatternError::InvalidValue {
@@ -165,7 +167,7 @@ impl Pattern {
                 // Read the `/TilingType` entry.
                 let tiling_type_int = dictionary
                     .get_or_err("TilingType")?
-                    .as_number_entry::<i32>("TilingType")?;
+                    .try_number::<i32>(objects)?;
                 let tiling_type = TilingType::from_i32(tiling_type_int).ok_or_else(|| {
                     PatternError::InvalidValue {
                         key: "TilingType",
@@ -176,18 +178,14 @@ impl Pattern {
                 // Read the `/BBox` entry.
                 let bbox = dictionary
                     .get_or_err("BBox")?
-                    .as_array_of::<f32, 4>()?
+                    .try_array_of::<f32, 4>(objects)?
                     .into();
 
                 // Read the `/XStep` entry.
-                let x_step = dictionary
-                    .get_or_err("XStep")?
-                    .as_number_entry::<f32>("XStep")?;
+                let x_step = dictionary.get_or_err("XStep")?.try_number::<f32>(objects)?;
 
                 // Read the `/YStep` entry.
-                let y_step = dictionary
-                    .get_or_err("YStep")?
-                    .as_number_entry::<f32>("YStep")?;
+                let y_step = dictionary.get_or_err("YStep")?.try_number::<f32>(objects)?;
 
                 // Read the `/Resources` entry. Needed by the pattern's content stream.
                 let resources = Resources::from_dictionary(dictionary, objects)
@@ -217,9 +215,9 @@ impl Pattern {
                 })
             }
             Some(PatternType::Shading) => {
-                let shading_dict = objects.resolve_object(dictionary.get_or_err("Shading")?)?;
+                let shading_object = dictionary.get_or_err("Shading")?;
                 // Read the shading object that defines the gradient fill.
-                let shading = Shading::from_dictionary(shading_dict, objects)?;
+                let shading = Shading::from_dictionary(shading_object, objects)?;
 
                 // Read an external graphics state dictionary to apply when painting the pattern.
                 let ext_g_state = dictionary

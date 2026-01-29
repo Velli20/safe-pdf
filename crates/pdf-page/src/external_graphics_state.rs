@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     traits::FromDictionary,
 };
 
@@ -26,14 +26,6 @@ pub enum ExternalGraphicsStateError {
     InvalidValueError {
         key_name: Cow<'static, str>,
         description: String,
-    },
-    #[error(
-        "Unsupported PDF object type for key '{key_name}': expected {expected_type}, found {found_type}"
-    )]
-    UnsupportedTypeError {
-        key_name: String,
-        expected_type: &'static str,
-        found_type: &'static str,
     },
     #[error("Error reading Soft Mask XObject: {0}")]
     SMaskReadError(#[from] XObjectError),
@@ -135,7 +127,7 @@ impl FromDictionary for ExternalGraphicsState {
     /// and error handling readable. Unknown keys are logged and skipped.
     fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let mut params: Vec<ExternalGraphicsStateKey> = Vec::new();
 
@@ -173,7 +165,7 @@ fn parse_mask_mode(value: Cow<'_, str>) -> Result<MaskMode, ExternalGraphicsStat
 fn parse_dash_pattern(
     key_name: &str,
     value: &ObjectVariant,
-    objects: &ObjectCollection,
+    objects: &dyn ObjectResolver,
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
     let arr = value.try_array(objects)?;
     let [dash_array, dash_phase] = arr else {
@@ -184,11 +176,10 @@ fn parse_dash_pattern(
         });
     };
 
-    let dash_array_f32 = dash_array.as_vec_of::<f32>()?;
-    let dash_phase = dash_phase.as_number::<f32>()?;
+    let dash_array = dash_array.try_vec_of::<f32>(objects)?;
+    let dash_phase = dash_phase.try_number::<f32>(objects)?;
     Ok(ExternalGraphicsStateKey::DashPattern(
-        dash_array_f32,
-        dash_phase,
+        dash_array, dash_phase,
     ))
 }
 
@@ -196,7 +187,7 @@ fn parse_dash_pattern(
 fn parse_font(
     key_name: &str,
     value: &ObjectVariant,
-    objects: &ObjectCollection,
+    objects: &dyn ObjectResolver,
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
     let arr = value.try_array(objects)?;
     let [font_ref, font_size] = arr else {
@@ -207,7 +198,7 @@ fn parse_font(
         });
     };
     let font_ref = font_ref.try_reference()?;
-    let font_size = font_size.as_number::<f32>()?;
+    let font_size = font_size.try_number::<f32>(objects)?;
     Ok(ExternalGraphicsStateKey::Font(font_ref, font_size))
 }
 
@@ -239,17 +230,17 @@ fn to_blend_mode(s: &str) -> Result<BlendMode, ExternalGraphicsStateError> {
 /// Parse blend modes `BM` -> BlendMode(Vec<BlendMode>)
 fn parse_blend_mode(
     value: &ObjectVariant,
-    objects: &ObjectCollection,
+    objects: &dyn ObjectResolver,
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
-    let blend_modes_vec: Vec<BlendMode> = if let Some(name_str) = value.as_str() {
-        let mode = to_blend_mode(name_str.as_ref())?;
-        vec![mode]
-    } else {
+    let blend_modes_vec: Vec<BlendMode> = if value.is_array() {
         value
             .try_array(objects)?
             .iter()
-            .map(|obj| to_blend_mode(obj.try_str()?.as_ref()))
+            .map(|obj| to_blend_mode(obj.try_str(objects)?.as_ref()))
             .collect::<Result<Vec<BlendMode>, _>>()?
+    } else {
+        let mode = to_blend_mode(value.try_str(objects)?.as_ref())?;
+        vec![mode]
     };
 
     Ok(ExternalGraphicsStateKey::BlendMode(blend_modes_vec))
@@ -259,11 +250,11 @@ fn parse_blend_mode(
 fn parse_soft_mask(
     key_name: &str,
     value: &ObjectVariant,
-    objects: &ObjectCollection,
+    objects: &dyn ObjectResolver,
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
     let smask = match value {
         ObjectVariant::Dictionary(dict) => {
-            let mask_type = parse_mask_mode(dict.get_or_err("S")?.try_str()?)?;
+            let mask_type = parse_mask_mode(dict.get_or_err("S")?.try_str(objects)?)?;
 
             // Parse the "G" key for the `XObject`
             let stream = dict.get_or_err("G")?.try_stream(objects)?;
@@ -272,19 +263,12 @@ fn parse_soft_mask(
 
             Some(SoftMask { mask_type, shape })
         }
-        other => match other.as_str() {
-            Some(name) if name.as_ref() == "None" => None,
-            Some(_) => {
+        other => match other.try_str(objects)?.as_ref() {
+            "None" => None,
+            _ => {
                 return Err(ExternalGraphicsStateError::InvalidValueError {
                     key_name: Cow::Owned(key_name.to_string()),
                     description: "SMask must be 'None'".to_string(),
-                });
-            }
-            None => {
-                return Err(ExternalGraphicsStateError::UnsupportedTypeError {
-                    key_name: key_name.to_string(),
-                    expected_type: "Name or Dictionary",
-                    found_type: other.name(),
                 });
             }
         },
@@ -297,15 +281,15 @@ fn parse_soft_mask(
 fn parse_entry(
     name: &str,
     value: &ObjectVariant,
-    objects: &ObjectCollection,
+    objects: &dyn ObjectResolver,
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
     let parsed = match name {
         "TR" => ExternalGraphicsStateKey::TransferFunction,
         "TR2" => ExternalGraphicsStateKey::TransferFunctionNew,
-        "SM" => ExternalGraphicsStateKey::SmoothnessTolerance(value.as_number_entry::<f32>("SM")?),
-        "LW" => ExternalGraphicsStateKey::LineWidth(value.as_number_entry::<f32>("LW")?),
+        "SM" => ExternalGraphicsStateKey::SmoothnessTolerance(value.try_number::<f32>(objects)?),
+        "LW" => ExternalGraphicsStateKey::LineWidth(value.try_number::<f32>(objects)?),
         "LC" => {
-            let cap_val = value.as_number_entry::<i32>("LC")?;
+            let cap_val = value.try_number::<i32>(objects)?;
             let cap = LineCap::from_i32(cap_val).ok_or_else(|| {
                 ExternalGraphicsStateError::InvalidValueError {
                     key_name: Cow::Owned(name.to_string()),
@@ -315,7 +299,7 @@ fn parse_entry(
             ExternalGraphicsStateKey::LineCap(cap)
         }
         "LJ" => {
-            let join_val = value.as_number_entry::<i32>("LJ")?;
+            let join_val = value.try_number::<i32>(objects)?;
             let join = LineJoin::from_i32(join_val).ok_or_else(|| {
                 ExternalGraphicsStateError::InvalidValueError {
                     key_name: Cow::Owned(name.to_string()),
@@ -324,20 +308,20 @@ fn parse_entry(
             })?;
             ExternalGraphicsStateKey::LineJoin(join)
         }
-        "ML" => ExternalGraphicsStateKey::MiterLimit(value.as_number_entry::<f32>("ML")?),
+        "ML" => ExternalGraphicsStateKey::MiterLimit(value.try_number::<f32>(objects)?),
         "D" => parse_dash_pattern(name, value, objects)?,
-        "RI" => ExternalGraphicsStateKey::RenderingIntent(value.try_str()?.to_string()),
-        "OP" => ExternalGraphicsStateKey::OverprintStroke(value.try_boolean()?),
-        "op" => ExternalGraphicsStateKey::OverprintFill(value.try_boolean()?),
-        "OPM" => ExternalGraphicsStateKey::OverprintMode(value.as_number_entry::<i32>("OPM")?),
+        "RI" => ExternalGraphicsStateKey::RenderingIntent(value.try_str(objects)?.to_string()),
+        "OP" => ExternalGraphicsStateKey::OverprintStroke(value.try_boolean(objects)?),
+        "op" => ExternalGraphicsStateKey::OverprintFill(value.try_boolean(objects)?),
+        "OPM" => ExternalGraphicsStateKey::OverprintMode(value.try_number::<i32>(objects)?),
         "Font" => parse_font(name, value, objects)?,
         "BM" => parse_blend_mode(value, objects)?,
         "SMask" => parse_soft_mask(name, value, objects)?,
-        "CA" => ExternalGraphicsStateKey::StrokingAlpha(value.as_number_entry::<f32>("CA")?),
-        "ca" => ExternalGraphicsStateKey::NonStrokingAlpha(value.as_number_entry::<f32>("ca")?),
-        "SA" => ExternalGraphicsStateKey::StrokeAdjustment(value.try_boolean()?),
-        "AAPL:AA" => ExternalGraphicsStateKey::AppleAntiAliasing(value.try_boolean()?),
-        "AIS" => ExternalGraphicsStateKey::AlphaIsShape(value.try_boolean()?),
+        "CA" => ExternalGraphicsStateKey::StrokingAlpha(value.try_number::<f32>(objects)?),
+        "ca" => ExternalGraphicsStateKey::NonStrokingAlpha(value.try_number::<f32>(objects)?),
+        "SA" => ExternalGraphicsStateKey::StrokeAdjustment(value.try_boolean(objects)?),
+        "AAPL:AA" => ExternalGraphicsStateKey::AppleAntiAliasing(value.try_boolean(objects)?),
+        "AIS" => ExternalGraphicsStateKey::AlphaIsShape(value.try_boolean(objects)?),
         _ => {
             return Err(ExternalGraphicsStateError::InvalidValueError {
                 key_name: Cow::Owned(name.to_string()),

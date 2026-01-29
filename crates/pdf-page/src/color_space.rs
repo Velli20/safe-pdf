@@ -1,5 +1,5 @@
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     traits::FromDictionary,
 };
 use thiserror::Error;
@@ -119,13 +119,12 @@ impl FromDictionary for ColorSpace {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let Some(color_space_obj) = dictionary.get(Self::KEY) else {
             return Ok(None);
         };
 
-        let color_space_obj = objects.resolve_object(color_space_obj)?;
         parse_color_space_object(objects, color_space_obj, 0).map(Some)
     }
 }
@@ -136,7 +135,7 @@ impl FromDictionary for ColorSpace {
 /// - A name (e.g., `/DeviceRGB`)
 /// - An array (e.g., `[/Indexed /DeviceRGB 255 <lookup data>]`)
 fn parse_color_space_object(
-    objects: &ObjectCollection,
+    objects: &dyn ObjectResolver,
     obj: &ObjectVariant,
     depth: usize,
 ) -> Result<ColorSpace, ColorSpaceError> {
@@ -151,15 +150,13 @@ fn parse_color_space_object(
         ObjectVariant::Array(arr) => {
             parse_color_space_array(objects, arr.as_slice(), depth.saturating_add(1))
         }
-        other => parse_color_space_name(other),
+        other => parse_color_space_name(other.try_str(objects)?.as_ref()),
     }
 }
 
 /// Parses a simple named color space (e.g., `/DeviceRGB`).
-fn parse_color_space_name(obj: &ObjectVariant) -> Result<ColorSpace, ColorSpaceError> {
-    let name = obj.try_str()?;
-
-    match name.as_ref() {
+fn parse_color_space_name(name: &str) -> Result<ColorSpace, ColorSpaceError> {
+    match name {
         "DeviceRGB" => Ok(ColorSpace::DeviceRGB),
         "DeviceCMYK" => Ok(ColorSpace::DeviceCMYK),
         "DeviceGray" => Ok(ColorSpace::DeviceGray),
@@ -173,7 +170,7 @@ fn parse_color_space_name(obj: &ObjectVariant) -> Result<ColorSpace, ColorSpaceE
 ///
 /// Array-based color spaces have the form `[/Type param1 param2 ...]`.
 fn parse_color_space_array(
-    objects: &ObjectCollection,
+    objects: &dyn ObjectResolver,
     arr: &[ObjectVariant],
     depth: usize,
 ) -> Result<ColorSpace, ColorSpaceError> {
@@ -184,9 +181,7 @@ fn parse_color_space_array(
             description: "empty color space array".into(),
         })?;
 
-    let cs_type_name = objects.resolve_object(cs_type)?.try_str()?;
-
-    match cs_type_name.as_ref() {
+    match cs_type.try_str(objects)?.as_ref() {
         "Indexed" => parse_indexed_color_space(objects, arr, depth),
         "ICCBased" => parse_icc_based_color_space(objects, arr),
         "Separation" => parse_separation_color_space(objects, arr, depth),
@@ -201,7 +196,7 @@ fn parse_color_space_array(
 
 /// Parses a Separation color space: `[/Separation name alternateSpace tintTransform]`
 fn parse_separation_color_space(
-    objects: &ObjectCollection,
+    objects: &dyn ObjectResolver,
     arr: &[ObjectVariant],
     depth: usize,
 ) -> Result<ColorSpace, ColorSpaceError> {
@@ -212,7 +207,7 @@ fn parse_separation_color_space(
         });
     };
 
-    let name = objects.resolve_object(name)?.try_str()?.to_string();
+    let name = name.try_str(objects)?.to_string();
     let alternate_space = parse_color_space_object(objects, alternate_space, depth)?;
     let tint_transform = Function::parse(objects.resolve_object(tint_transform)?, objects)?;
 
@@ -229,7 +224,7 @@ fn parse_separation_color_space(
 /// - `hival`: Maximum index value (0-255)
 /// - `lookup`: Lookup table (string or stream)
 fn parse_indexed_color_space(
-    objects: &ObjectCollection,
+    objects: &dyn ObjectResolver,
     arr: &[ObjectVariant],
     depth: usize,
 ) -> Result<ColorSpace, ColorSpaceError> {
@@ -241,7 +236,7 @@ fn parse_indexed_color_space(
     };
 
     let base_cs = parse_color_space_object(objects, base, depth)?;
-    let hival = objects.resolve_object(hival)?.as_number::<u8>()?;
+    let hival = hival.try_number::<u8>(objects)?;
     let lookup = extract_lookup_table(objects, lookup)?;
 
     Ok(ColorSpace::Indexed {
@@ -255,7 +250,7 @@ fn parse_indexed_color_space(
 ///
 /// The stream dictionary must contain an `/N` entry specifying the number of components.
 fn parse_icc_based_color_space(
-    objects: &ObjectCollection,
+    objects: &dyn ObjectResolver,
     arr: &[ObjectVariant],
 ) -> Result<ColorSpace, ColorSpaceError> {
     // Expected format: [/ICCBased icc-stream]
@@ -269,7 +264,7 @@ fn parse_icc_based_color_space(
         .try_stream(objects)?
         .dictionary
         .get_or_err("N")?
-        .as_number::<usize>()?;
+        .try_number::<usize>(objects)?;
 
     Ok(ColorSpace::ICCBased { num_components })
 }
@@ -278,10 +273,10 @@ fn parse_icc_based_color_space(
 ///
 /// The lookup table can be either a string/hex-string or a stream.
 fn extract_lookup_table(
-    objects: &ObjectCollection,
+    objects: &dyn ObjectResolver,
     lookup: &ObjectVariant,
 ) -> Result<Vec<u8>, ColorSpaceError> {
-    if let Ok(data) = lookup.try_bytes() {
+    if let Ok(data) = lookup.try_bytes(objects) {
         return Ok(data.to_vec());
     }
     Ok(lookup.try_stream(objects)?.data()?.into_owned())

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use pdf_font::font::{Font, FontError};
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     traits::FromDictionary,
 };
 use thiserror::Error;
@@ -80,7 +80,7 @@ impl Resources {
     fn get_sub_dictionary<'a>(
         resources: &'a Dictionary,
         key: &str,
-        objects: &'a ObjectCollection,
+        objects: &'a dyn ObjectResolver,
     ) -> Result<Option<&'a Dictionary>, ResourcesError> {
         resources
             .get(key)
@@ -92,7 +92,7 @@ impl Resources {
     /// Parses all font resources from the `/Font` sub-dictionary.
     fn parse_fonts(
         resources: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<HashMap<String, Font>, ResourcesError> {
         let Some(font_dict) = Self::get_sub_dictionary(resources, Font::KEY, objects)? else {
             return Ok(HashMap::new());
@@ -112,7 +112,7 @@ impl Resources {
     /// Parses all external graphics state resources from the `/ExtGState` sub-dictionary.
     fn parse_external_graphics_states(
         resources: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<HashMap<String, ExternalGraphicsState>, ResourcesError> {
         let Some(ext_gstate_dict) = Self::get_sub_dictionary(resources, "ExtGState", objects)?
         else {
@@ -136,7 +136,7 @@ impl Resources {
     /// streams (Type 1 tiling patterns), so both cases are handled.
     fn parse_patterns(
         resources: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<HashMap<String, Pattern>, ResourcesError> {
         let Some(pattern_dict) = Self::get_sub_dictionary(resources, "Pattern", objects)? else {
             return Ok(HashMap::new());
@@ -171,7 +171,7 @@ impl Resources {
     /// XObjects are always streams containing either images or form content.
     fn parse_xobjects(
         resources: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<HashMap<String, XObject>, ResourcesError> {
         let Some(xobject_dict) = Self::get_sub_dictionary(resources, "XObject", objects)? else {
             return Ok(HashMap::new());
@@ -191,7 +191,7 @@ impl Resources {
     /// Parses all shading resources from the `/Shading` sub-dictionary.
     fn parse_shadings(
         resources: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<HashMap<String, Shading>, ResourcesError> {
         let Some(shading_dict) = Self::get_sub_dictionary(resources, "Shading", objects)? else {
             return Ok(HashMap::new());
@@ -201,8 +201,7 @@ impl Resources {
             .dictionary
             .iter()
             .map(|(name, value)| {
-                let dict = objects.resolve_object(value)?;
-                let shading = Shading::from_dictionary(dict, objects)?;
+                let shading = Shading::from_dictionary(value, objects)?;
                 Ok((name.clone(), shading))
             })
             .collect()
@@ -216,7 +215,7 @@ impl FromDictionary for Resources {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let Some(resources_entry) = dictionary.get(Self::KEY) else {
             return Ok(None);

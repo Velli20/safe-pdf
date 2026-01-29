@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use crate::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection,
+    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     traits::FromDictionary,
 };
 
@@ -68,7 +68,7 @@ impl FromDictionary for Filter {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let Some(filter_obj) = dictionary.get(Self::KEY) else {
             return Ok(None);
@@ -81,11 +81,11 @@ impl FromDictionary for Filter {
         let filters = match resolved {
             ObjectVariant::Array(arr) => arr
                 .iter()
-                .map(|item| item.try_str().map(Filter::from))
+                .map(|item| item.try_str(objects).map(Filter::from))
                 .collect::<Result<Vec<_>, _>>()?,
             other => {
                 // Handle single name that wasn't parsed as Name variant
-                vec![Filter::from(other.try_str()?)]
+                vec![Filter::from(other.try_str(objects)?)]
             }
         };
 
@@ -96,7 +96,7 @@ impl FromDictionary for Filter {
 impl Filter {
     /// Decodes FlateDecode (zlib/deflate) compressed stream data.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// - `stream_data`: The compressed byte stream to decode.
     ///
@@ -123,7 +123,7 @@ impl Filter {
 
     /// Decodes JPXDecode (JPEG 2000) compressed stream data.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// - `stream_data`: The JPEG 2000 compressed byte stream to decode.
     ///
@@ -165,7 +165,7 @@ impl Filter {
 
     /// Decodes DCTDecode (JPEG) compressed stream data.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// - `stream_data`: The JPEG compressed byte stream to decode.
     ///

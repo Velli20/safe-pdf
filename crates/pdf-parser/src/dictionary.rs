@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use pdf_object::dictionary::Dictionary;
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 use pdf_tokenizer::PdfToken;
 
 use crate::{
@@ -42,7 +42,10 @@ impl DictionaryParser for PdfParser<'_> {
     /// A `Dictionary` object containing the parsed key-value pairs,
     /// or a `ParserError` if the input is malformed (e.g., missing delimiters,
     /// invalid key or value syntax, or an unexpected token).
-    fn parse_dictionary(&mut self) -> Result<Dictionary, Self::ErrorType> {
+    fn parse_dictionary(
+        &mut self,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Dictionary, Self::ErrorType> {
         // Expect the opening `<<` of the dictionary.
         self.tokenizer.expect(PdfToken::DoubleLeftAngleBracket)?;
 
@@ -65,7 +68,7 @@ impl DictionaryParser for PdfParser<'_> {
             self.skip_whitespace();
 
             // Parse value.
-            let value = self.parse_object(None)?;
+            let value = self.parse_object(objects)?;
 
             dictionary.insert(key, Box::new(value));
             self.skip_whitespace();
@@ -81,8 +84,9 @@ impl DictionaryParser for PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+    use pdf_object::object_resolver::UnimplementedResolver;
 
-    use crate::{parser::PdfParser, traits::DictionaryParser};
+    use super::*;
 
     #[test]
     fn test_dictionary_valid() {
@@ -97,7 +101,7 @@ mod tests {
 
         for (input, expected_count) in inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_dictionary().unwrap();
+            let result = parser.parse_dictionary(&UnimplementedResolver).unwrap();
 
             assert_eq!(
                 result.dictionary.len(),
@@ -131,7 +135,7 @@ mod tests {
 
         for input in inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_dictionary();
+            let result = parser.parse_dictionary(&UnimplementedResolver);
 
             assert!(
                 result.is_err(),

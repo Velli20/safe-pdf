@@ -1,4 +1,4 @@
-use pdf_object::{ObjectVariant, object_collection::ObjectCollection};
+use pdf_object::{ObjectVariant, object_resolver::ObjectResolver};
 
 use crate::functions::{
     Function, FunctionImpl, FunctionInterpolationError, FunctionReadError, clamp_and_normalize,
@@ -65,27 +65,29 @@ impl FunctionImpl for ExponentialFunction {
     /// Parses a Type 2 (Exponential Interpolation) function.
     fn parse(
         object: &ObjectVariant,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Function, FunctionReadError> {
         let dictionary = object.try_dictionary(objects)?;
-        let domain = dictionary.get_or_err("Domain")?.as_array_of::<f32, 2>()?;
+        let domain = dictionary
+            .get_or_err("Domain")?
+            .try_array_of::<f32, 2>(objects)?;
 
         // /C0: Output values at domain[0]. Defaults to [0.0].
         let c0 = dictionary
             .get("C0")
-            .map(ObjectVariant::as_vec_of::<f32>)
+            .map(|o| o.try_vec_of::<f32>(objects))
             .transpose()?
             .unwrap_or_else(|| vec![0.0]);
 
         // /C1: Output values at domain[1]. Defaults to [1.0].
         let c1 = dictionary
             .get("C1")
-            .map(ObjectVariant::as_vec_of::<f32>)
+            .map(|o| o.try_vec_of::<f32>(objects))
             .transpose()?
             .unwrap_or_else(|| vec![1.0]);
 
         // /N: Interpolation exponent (required).
-        let exponent = dictionary.get_or_err("N")?.as_number::<f32>()?;
+        let exponent = dictionary.get_or_err("N")?.try_number::<f32>(objects)?;
 
         Ok(Function::Exponential(ExponentialFunction {
             c0,

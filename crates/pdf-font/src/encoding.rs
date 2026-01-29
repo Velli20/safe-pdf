@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use pdf_object::{ObjectVariant, object_collection::ObjectCollection, traits::FromDictionary};
+use pdf_object::{ObjectVariant, object_resolver::ObjectResolver, traits::FromDictionary};
 use thiserror::Error;
 
 /// Represents the base encoding of a font.
@@ -80,19 +80,19 @@ impl Encoding {
     fn apply_differences(
         &mut self,
         differences_obj: &ObjectVariant,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<(), EncodingReadError> {
         let mut current_range_start = 0_usize;
 
         for chunk in differences_obj.try_array(objects)? {
             match chunk {
                 ObjectVariant::Integer(_) => {
-                    current_range_start = chunk.as_number::<usize>()?;
+                    current_range_start = chunk.try_number::<usize>(objects)?;
                 }
                 _ => {
                     self.names.insert(
                         current_range_start,
-                        Cow::Owned(chunk.try_str()?.to_string()),
+                        Cow::Owned(chunk.try_str(objects)?.to_string()),
                     );
                     current_range_start = current_range_start.saturating_add(1);
                 }
@@ -111,11 +111,11 @@ impl FromDictionary for Encoding {
 
     fn from_dictionary(
         dictionary: &pdf_object::dictionary::Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let mut encoding = match dictionary.get("BaseEncoding") {
             Some(base) => {
-                let base_encoding = FontEncoding::from(objects.resolve_object(base)?.try_str()?);
+                let base_encoding = FontEncoding::from(base.try_str(objects)?);
                 Encoding::from_base_encoding(base_encoding)?
             }
             None => Self::default(),

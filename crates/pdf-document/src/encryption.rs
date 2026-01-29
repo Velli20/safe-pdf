@@ -10,7 +10,7 @@
 //! - The encryption dictionary contains parameters needed to decrypt the document.
 //! - Before reading other objects, the encryption dictionary must be resolved first.
 
-use pdf_object::{dictionary::Dictionary, error::ObjectError, object_collection::ObjectCollection};
+use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
 use thiserror::Error;
 
 /// Errors that can occur while processing PDF encryption.
@@ -153,43 +153,34 @@ impl EncryptDictionary {
     /// An `EncryptDictionary` on success, or an `EncryptionError` if parsing fails.
     pub fn from_dictionary(
         dict: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self, EncryptionError> {
-        let filter_obj = dict.get_or_err("Filter")?;
-        let filter_name = objects.resolve_object(filter_obj)?.try_str()?;
-        let filter = EncryptionFilter::from(filter_name.as_ref());
+        let filter = dict
+            .get_or_err("Filter")?
+            .try_str(objects)
+            .map(|obj| EncryptionFilter::from(obj.as_ref()))?;
 
         let version_obj = dict.get_or_err("V")?;
 
-        let version_num = objects.resolve_object(version_obj)?.as_number::<i32>()?;
+        let version_num = version_obj.try_number::<i32>(objects)?;
         let version = EncryptionVersion::try_from(version_num)?;
 
-        let revision = objects
-            .resolve_object(dict.get_or_err("R")?)?
-            .as_number::<i32>()?;
+        let revision = dict.get_or_err("R")?.try_number::<i32>(objects)?;
 
-        let owner_password_hash = objects
-            .resolve_object(dict.get_or_err("O")?)?
-            .try_bytes()?
-            .to_vec();
+        let owner_password_hash = dict.get_or_err("O")?.try_bytes(objects)?.to_vec();
 
-        let user_password_hash = objects
-            .resolve_object(dict.get_or_err("U")?)?
-            .try_bytes()?
-            .to_vec();
+        let user_password_hash = dict.get_or_err("U")?.try_bytes(objects)?.to_vec();
 
-        let permissions = objects
-            .resolve_object(dict.get_or_err("P")?)?
-            .as_number::<i32>()?;
+        let permissions = dict.get_or_err("P")?.try_number::<i32>(objects)?;
 
         let key_length = dict
             .get("Length")
-            .map(|l| objects.resolve_object(l)?.as_number::<i32>())
+            .map(|l| l.try_number::<i32>(objects))
             .transpose()?;
 
         let encrypt_metadata = dict
             .get("EncryptMetadata")
-            .map(|em| objects.resolve_object(em)?.try_boolean())
+            .map(|em| em.try_boolean(objects))
             .transpose()?
             .unwrap_or(Self::ENCRYPT_METADATA_DEFAULT);
 
@@ -224,7 +215,9 @@ impl EncryptDictionary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pdf_object::{ObjectVariant, dictionary::Dictionary};
+    use pdf_object::{
+        ObjectVariant, dictionary::Dictionary, object_resolver::UnimplementedResolver,
+    };
     use std::collections::BTreeMap;
 
     fn make_dictionary(entries: Vec<(&str, ObjectVariant)>) -> Dictionary {
@@ -286,8 +279,7 @@ mod tests {
             ("EncryptMetadata", ObjectVariant::Boolean(false)),
         ]);
 
-        let objects = ObjectCollection::default();
-        let result = EncryptDictionary::from_dictionary(&dict, &objects);
+        let result = EncryptDictionary::from_dictionary(&dict, &UnimplementedResolver);
 
         assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
         let encrypt = result.unwrap();

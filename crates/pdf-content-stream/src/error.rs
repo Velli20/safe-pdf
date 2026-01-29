@@ -1,5 +1,5 @@
 use pdf_object::error::ObjectError;
-use pdf_parser::{comment::CommentError, error::ParserError};
+use pdf_parser::error::ParserError;
 use pdf_tokenizer::error::TokenizerError;
 use thiserror::Error;
 
@@ -40,8 +40,6 @@ pub enum PdfOperatorError {
     Parser(#[from] ParserError),
     #[error("Empty text")]
     EmptyText,
-    #[error("Comment parse error: {0}")]
-    Comment(#[from] CommentError),
     #[error("PDF Object error: {0}")]
     ObjectError(#[from] ObjectError),
 }

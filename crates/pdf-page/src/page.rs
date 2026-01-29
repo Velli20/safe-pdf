@@ -1,9 +1,7 @@
 use crate::{
     content_stream::ContentStream, media_box::MediaBox, pages::PdfPagesError, resources::Resources,
 };
-use pdf_object::{
-    dictionary::Dictionary, object_collection::ObjectCollection, traits::FromDictionary,
-};
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, traits::FromDictionary};
 
 /// Represents a single page in a PDF document.
 ///
@@ -28,7 +26,7 @@ impl FromDictionary for PdfPage {
 
     fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &ObjectCollection,
+        objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
         let contents = ContentStream::from_dictionary(dictionary, objects)?;
         let media_box = MediaBox::from_dictionary(dictionary, objects)?;

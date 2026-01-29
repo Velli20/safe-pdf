@@ -4,6 +4,7 @@ pub mod error;
 pub mod filter;
 pub mod indirect_object;
 pub mod object_collection;
+pub mod object_resolver;
 pub mod object_variant;
 pub mod stream;
 pub mod trailer;

@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use crate::decryption::{DecryptionError, DocumentDecryptor};
 use crate::document::PdfDocument;
+use pdf_object::object_resolver::{ObjectResolver, UnimplementedResolver};
 use pdf_object::{
     ObjectVariant,
     cross_reference_table::{CrossReferenceEntry, CrossReferenceStatus, CrossReferenceTable},
@@ -152,7 +153,9 @@ fn build_xref_index(parser: &mut PdfParser) -> Result<CrossReferenceTable, PdfRe
         .ok_or(PdfReaderError::MissingTrailer)?;
 
     // Parse the trailer to get the startxref offset
-    let ObjectVariant::Trailer(initial_trailer) = parser.parse_object_at(trailer_pos, None)? else {
+    let ObjectVariant::Trailer(initial_trailer) =
+        parser.parse_object_at(trailer_pos, &UnimplementedResolver)?
+    else {
         return Err(PdfReaderError::MissingTrailer);
     };
 
@@ -176,7 +179,6 @@ fn merge_xref_chain(
     let mut visited_offsets = HashSet::new();
     let mut current_offset = start_offset;
     let mut trailer = None;
-
     loop {
         // Prevent infinite loops from circular references
         if !visited_offsets.insert(current_offset) {
@@ -185,7 +187,7 @@ fn merge_xref_chain(
 
         // Parse the xref table at the current offset
         let ObjectVariant::CrossReferenceTable(xref_table) =
-            parser.parse_object_at(current_offset, None)?
+            parser.parse_object_at(current_offset, &UnimplementedResolver)?
         else {
             return Err(PdfReaderError::InvalidXrefAtOffset {
                 offset: current_offset,
@@ -217,7 +219,7 @@ fn merge_xref_chain(
 
         // Follow the chain to the previous xref section
         if let Some(prev_value) = prev_value {
-            current_offset = prev_value.as_number::<usize>()?;
+            current_offset = prev_value.try_number::<usize>(&UnimplementedResolver)?;
         } else {
             // No more previous sections
             break;
@@ -238,7 +240,7 @@ fn merge_xref_chain(
 /// Returns a `PdfPages` structure containing the document's page hierarchy.
 fn extract_page_tree(
     trailer: &Trailer,
-    objects: &ObjectCollection,
+    objects: &dyn ObjectResolver,
 ) -> Result<PdfPages, PdfReaderError> {
     // Get the document catalog via the /Root entry in the trailer
     let catalog = trailer
@@ -290,7 +292,7 @@ fn load_encrypt_dictionary(
             }
 
             // Parse the encryption object at the specified offset
-            let object = parser.parse_object_at(entry.byte_offset, None)?;
+            let object = parser.parse_object_at(entry.byte_offset, &UnimplementedResolver)?;
 
             // Extract the dictionary from the parsed object
             match object {
@@ -322,8 +324,7 @@ fn load_encrypt_dictionary(
     };
 
     // Parse the encryption dictionary
-    let objects = ObjectCollection::default();
-    EncryptDictionary::from_dictionary(&encrypt_dict, &objects).map_err(Into::into)
+    EncryptDictionary::from_dictionary(&encrypt_dict, &UnimplementedResolver).map_err(Into::into)
 }
 
 /// Extracts the document ID from the trailer's /ID array.
@@ -339,24 +340,15 @@ fn load_encrypt_dictionary(
 ///
 /// The first element of the /ID array as a byte vector.
 fn extract_document_id(trailer: &Trailer) -> Result<Vec<u8>, PdfReaderError> {
-    let id_entry = trailer
+    // Get the first element of the /ID array
+    let first_element = trailer
         .dictionary
-        .get("ID")
+        .get_or_err("ID")?
+        .try_array(&UnimplementedResolver)?
+        .first()
         .ok_or(PdfReaderError::MissingDocumentId)?;
 
-    match id_entry {
-        ObjectVariant::Array(arr) => {
-            if arr.is_empty() {
-                return Err(PdfReaderError::MissingDocumentId);
-            }
-            // Get the first element
-            arr[0]
-                .try_bytes()
-                .map(|b| b.to_vec())
-                .map_err(|_| PdfReaderError::MissingDocumentId)
-        }
-        _ => Err(PdfReaderError::MissingDocumentId),
-    }
+    Ok(first_element.try_bytes(&UnimplementedResolver)?.to_vec())
 }
 
 /// Loads all objects referenced in the cross-reference table with optional decryption.
@@ -388,7 +380,7 @@ fn load_objects_with_decryption(
         }
 
         // Parse the object at the specified byte offset
-        let object = parser.parse_object_at(entry.byte_offset, Some(&objects))?;
+        let object = parser.parse_object_at(entry.byte_offset, &objects)?;
 
         // Sanity check: objects at xref entries shouldn't be bare references
         if matches!(object, ObjectVariant::Reference(_)) {
@@ -537,7 +529,7 @@ mod tests {
             .dictionary
             .get("Size")
             .expect("Size expected")
-            .as_number()
+            .try_number(&UnimplementedResolver)
             .unwrap();
         assert_eq!(size, 2);
     }

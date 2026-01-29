@@ -1,4 +1,4 @@
-use pdf_object::{ObjectVariant, dictionary::Dictionary, object_collection::ObjectCollection};
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 use pdf_tokenizer::PdfToken;
 use thiserror::Error;
 
@@ -75,7 +75,7 @@ impl StreamParser for PdfParser<'_> {
     fn parse_stream(
         &mut self,
         dictionary: &Dictionary,
-        objects: Option<&ObjectCollection>,
+        objects: &dyn ObjectResolver,
     ) -> Result<Vec<u8>, Self::ErrorType> {
         const STREAM_START: &[u8] = b"stream";
         const STREAM_END: &[u8] = b"endstream";
@@ -84,17 +84,9 @@ impl StreamParser for PdfParser<'_> {
         self.read_keyword(STREAM_START)?;
 
         // Find the length of the stream.
-        let length = match dictionary.get_or_err("Length")? {
-            &ObjectVariant::Reference(object_number) => {
-                let objects = objects.ok_or(StreamParsingError::MissingLength)?;
-                let length_obj = objects
-                    .get(object_number)
-                    .ok_or(StreamParsingError::MissingLength)?;
-
-                length_obj.as_number::<usize>()?
-            }
-            other => other.as_number::<usize>()?,
-        };
+        let length = dictionary
+            .get_or_err("Length")?
+            .try_number::<usize>(objects)?;
 
         // Read the stream data
         let stream_data = self.tokenizer.read_excactly(length)?.to_vec();
@@ -118,7 +110,7 @@ impl StreamParser for PdfParser<'_> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_object::ObjectVariant;
+    use pdf_object::{ObjectVariant, object_resolver::UnimplementedResolver};
 
     use super::*;
 
@@ -133,7 +125,7 @@ mod tests {
         let input = b"strm\nHello World\nendstream";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_stream(&dictionary, None);
+        let result = parser.parse_stream(&dictionary, &UnimplementedResolver);
         assert!(result.is_err());
     }
 
@@ -148,7 +140,7 @@ mod tests {
         let input = b"stream\nHello World\nendstrm";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_stream(&dictionary, None);
+        let result = parser.parse_stream(&dictionary, &UnimplementedResolver);
         assert!(result.is_err());
     }
 
@@ -159,7 +151,7 @@ mod tests {
         let input = b"stream\nHello World\nendstream";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_stream(&dictionary, None);
+        let result = parser.parse_stream(&dictionary, &UnimplementedResolver);
         assert!(result.is_err());
     }
 
@@ -174,7 +166,7 @@ mod tests {
         let input = b"stream\nHello World\nendstream";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_stream(&dictionary, None);
+        let result = parser.parse_stream(&dictionary, &UnimplementedResolver);
         assert!(result.is_err());
     }
 
@@ -189,7 +181,7 @@ mod tests {
         let input = b"stream\n   Hello World   \nendstream";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_stream(&dictionary, None);
+        let result = parser.parse_stream(&dictionary, &UnimplementedResolver);
         assert!(result.is_err()); // Extra whitespace should cause an error
     }
 }
