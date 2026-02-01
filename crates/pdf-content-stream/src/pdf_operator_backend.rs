@@ -3,10 +3,7 @@
 //! PDF drawing, text, and state commands, allowing for different backends
 //! (e.g., renderers, text extractors) to selectively implement functionality.
 
-use std::rc::Rc;
-
 use pdf_graphics::{LineCap, LineJoin, TextRenderingMode, transform::Transform};
-use pdf_object::dictionary::Dictionary;
 
 use crate::TextElement;
 
@@ -784,17 +781,11 @@ pub trait MarkedContentOps: PdfOperatorBackendError {
     /// # Parameters
     ///
     /// - `tag`: The tag for the marked-content sequence.
-    /// - `properties_name_or_dict`: The name of a property list in the resource
-    ///   dictionary or an inline dictionary.
     ///
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn begin_marked_content_with_properties(
-        &mut self,
-        tag: &str,
-        properties_name_or_dict: &Rc<Dictionary>,
-    ) -> Result<(), Self::ErrorType>;
+    fn begin_marked_content_with_properties(&mut self, tag: &str) -> Result<(), Self::ErrorType>;
 
     /// Ends a marked-content sequence.
     ///

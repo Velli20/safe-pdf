@@ -7,10 +7,7 @@ use pdf_object::{
 };
 use thiserror::Error;
 
-use crate::{
-    encoding::{Encoding, EncodingReadError, FontEncoding},
-    font_descriptor::FontDescriptorError,
-};
+use crate::encoding::{Encoding, EncodingReadError, FontEncoding};
 
 /// Represents a Type 3 font in a PDF document.
 ///
@@ -33,8 +30,6 @@ pub struct Type3Font {
 /// Defines errors that can occur while parsing a Type 3 font object.
 #[derive(Debug, Error, PartialEq)]
 pub enum Type3FontError {
-    #[error("FontDescriptor parsing error: {0}")]
-    FontDescriptorError(#[from] FontDescriptorError),
     #[error("Object error: {0}")]
     ObjectError(#[from] ObjectError),
     #[error("Error parsing content stream operators: {0}")]

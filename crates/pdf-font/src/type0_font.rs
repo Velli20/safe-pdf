@@ -4,11 +4,11 @@ use pdf_object::{
 };
 
 use crate::{
-    cff_builder::build_cff_font,
     encoding::FontEncoding,
     font::FontError,
-    font_descriptor::{FontDescriptor, FontDescriptorError},
     glyph_widths_map::{GlyphWidthsMap, GlyphWidthsMapError},
+    true_type_font::TrueTypeFont,
+    type1_font::Type1Font,
 };
 use thiserror::Error;
 
@@ -46,8 +46,6 @@ pub enum CidFontSubType {
 /// Defines errors that can occur while reading a PDF objects.
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum Type0FontError {
-    #[error("FontDescriptor parsing error: {0}")]
-    FontDescriptorError(#[from] FontDescriptorError),
     #[error("{0}")]
     ObjectError(#[from] ObjectError),
     #[error("GlyphWidthsMap parsing error: {0}")]
@@ -127,21 +125,12 @@ impl FromDictionary for Type0Font {
             })
             .transpose()?;
 
-        // The `/FontDescriptor` dictionary contains font metrics and the embedded font
-        // program (via `/FontFile`, `/FontFile2`, or `/FontFile3` entries).
-        let descriptor = dictionary
-            .get_or_err("FontDescriptor")?
-            .try_dictionary(objects)?;
-        let font_file = FontDescriptor::from_dictionary(descriptor, objects)?;
-
-        let font_file = font_file.data()?;
-
         // Process the embedded font data based on the CIDFont subtype:
         // - Type0 (CFF): Rebuild as a standalone CFF font for rendering libraries.
         // - Type2 (TrueType): Use the raw TrueType data directly.
         let font_file = match subtype {
-            CidFontSubType::Type0 => build_cff_font(&font_file)?,
-            CidFontSubType::Type2 => font_file.into_owned(),
+            CidFontSubType::Type0 => Type1Font::read_font_file(dictionary, objects)?,
+            CidFontSubType::Type2 => TrueTypeFont::read_font_file(dictionary, objects)?.to_vec(),
         };
 
         Ok(Self {

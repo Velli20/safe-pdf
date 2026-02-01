@@ -2,7 +2,6 @@ mod cff_builder;
 pub mod encoding;
 pub mod flags;
 pub mod font;
-pub mod font_descriptor;
 pub mod glyph_widths_map;
 pub mod simple_font_glyph_map;
 pub mod true_type_font;

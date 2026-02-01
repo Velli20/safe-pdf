@@ -1,7 +1,3 @@
-use std::rc::Rc;
-
-use pdf_object::dictionary::Dictionary;
-
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
@@ -44,13 +40,11 @@ impl PdfOperator for BeginMarkedContent {
 pub struct BeginMarkedContentWithProps {
     /// The tag indicating the role or nature of the marked-content sequence.
     tag: String,
-    /// The property list, which can be a name (of an entry in the resource dictionary's Properties subdictionary) or an inline dictionary.
-    properties: Rc<Dictionary>,
 }
 
 impl BeginMarkedContentWithProps {
-    pub fn new(tag: String, properties: Rc<Dictionary>) -> Self {
-        Self { tag, properties }
+    pub fn new(tag: String) -> Self {
+        Self { tag }
     }
 }
 
@@ -61,14 +55,13 @@ impl PdfOperator for BeginMarkedContentWithProps {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let tag = operands.get_str()?.into_owned();
-        let properties = operands.get_dictionary()?;
         Ok(PdfOperatorVariant::BeginMarkedContentWithProps(Self::new(
-            tag, properties,
+            tag,
         )))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
-        backend.begin_marked_content_with_properties(&self.tag, &self.properties)
+        backend.begin_marked_content_with_properties(&self.tag)
     }
 }
 

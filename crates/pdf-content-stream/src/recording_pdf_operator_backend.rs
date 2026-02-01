@@ -1,10 +1,7 @@
-use std::rc::Rc;
-
 use pdf_graphics::LineCap;
 use pdf_graphics::LineJoin;
 use pdf_graphics::TextRenderingMode;
 use pdf_graphics::transform::Transform;
-use pdf_object::dictionary::Dictionary;
 use thiserror::Error;
 
 use crate::TextElement;
@@ -205,7 +202,6 @@ pub enum RecordedOperation {
     },
     BeginMarkedContentWithProperties {
         tag: String,
-        properties_name_or_dict: Rc<Dictionary>,
     },
     EndMarkedContent,
 }
@@ -715,15 +711,10 @@ impl MarkedContentOps for RecordingBackend {
         Ok(())
     }
 
-    fn begin_marked_content_with_properties(
-        &mut self,
-        tag: &str,
-        properties_name_or_dict: &Rc<Dictionary>,
-    ) -> Result<(), Self::ErrorType> {
+    fn begin_marked_content_with_properties(&mut self, tag: &str) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::BeginMarkedContentWithProperties {
                 tag: tag.to_string(),
-                properties_name_or_dict: std::rc::Rc::clone(properties_name_or_dict),
             });
         Ok(())
     }
