@@ -1,56 +1,27 @@
 use std::collections::HashMap;
 
-use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    traits::FromDictionary,
-};
-use thiserror::Error;
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, traits::FromDictionary};
 
-/// Errors that can occur during SimpleFontGlyphWidthsMap parsing.
-#[derive(Debug, Error, Clone, PartialEq)]
-pub enum SimpleFontGlyphWidthsMapError {
-    #[error("Invalid /Widths array length")]
-    InvalidWidthArrayLength,
-    #[error("{0}")]
-    ObjectError(#[from] ObjectError),
-}
+use crate::font::FontError;
 
-/// Represents a simple font's glyph widths map parsed from a
-/// `/Type1`, `/TrueType`, or `/Type3` font.
-pub struct SimpleFontGlyphWidthsMap {
-    /// Character code to glyph width mapping.
-    pub widths: Option<HashMap<u16, f32>>,
-    /// First character code in widths array (/FirstChar).
-    pub first_char: u16,
-    /// Last character code in widths array (/LastChar).
-    pub last_char: u16,
-}
+pub struct SimpleFontGlyphWidthsMap;
 
 impl FromDictionary for SimpleFontGlyphWidthsMap {
     const KEY: &'static str = "Widths";
-
-    type ResultType = Self;
-
-    type ErrorType = SimpleFontGlyphWidthsMapError;
+    type ResultType = Option<HashMap<u16, f32>>;
+    type ErrorType = FontError;
 
     fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        // Read required fields /FirstChar and /LastChar fields.
+        // Read required fields /FirstChar entry.
         let first_char = dictionary
             .get_or_err("FirstChar")?
             .try_number::<u16>(objects)?;
-        let last_char = dictionary
-            .get_or_err("LastChar")?
-            .try_number::<u16>(objects)?;
 
         let Some(widths_obj) = dictionary.get(Self::KEY) else {
-            return Ok(SimpleFontGlyphWidthsMap {
-                widths: None,
-                first_char,
-                last_char,
-            });
+            return Ok(None);
         };
 
         let arr = widths_obj.try_array(objects)?;
@@ -62,25 +33,10 @@ impl FromDictionary for SimpleFontGlyphWidthsMap {
                 break;
             };
             let code = first_char.saturating_add(i_u16);
-            if code > last_char {
-                break;
-            }
             let width = w.try_number::<f32>(objects)?;
             widths.insert(code, width);
         }
 
-        Ok(SimpleFontGlyphWidthsMap {
-            widths: Some(widths),
-            first_char,
-            last_char,
-        })
-    }
-}
-
-impl SimpleFontGlyphWidthsMap {
-    pub(crate) fn get_width(&self, char_code: u16) -> f32 {
-        self.widths.as_ref().map_or(0.0, |widths_map| {
-            widths_map.get(&char_code).copied().unwrap_or(0.0)
-        })
+        Ok(Some(widths))
     }
 }

@@ -29,7 +29,7 @@ pub enum ObjectError {
     /// Indicates that a required key was not found in a dictionary
     #[error("Required key '{key}' not found in dictionary")]
     MissingRequiredKey { key: String },
-    #[error("Failed to convert PDF value to number for FontDescriptor entry /{entry_description}")]
+    #[error("Failed to convert PDF value to a number for entry /{entry_description}")]
     NumericConversionError { entry_description: &'static str },
     #[error("Unsupported stream filter: {0}")]
     UnsupportedFilter(String),

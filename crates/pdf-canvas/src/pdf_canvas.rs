@@ -249,6 +249,10 @@ where
             Shading::FunctionBased { .. } => Err(PdfCanvasError::NotImplemented(
                 "FunctionBased shading not implemented".into(),
             )),
+            Shading::Unsupported { name } => Err(PdfCanvasError::NotImplemented(format!(
+                "Shading type '{}' not implemented",
+                name
+            ))),
         }
     }
 

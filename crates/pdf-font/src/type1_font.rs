@@ -1,15 +1,14 @@
+use std::collections::HashMap;
+
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    traits::FromDictionary,
+    ObjectVariant, dictionary::Dictionary, object_resolver::ObjectResolver, traits::FromDictionary,
 };
-use thiserror::Error;
 
 use crate::{
     cff_builder::build_cff_font,
     encoding::{Encoding, FontEncoding},
     font::FontError,
-    font_descriptor::{FontDescriptor, FontDescriptorError},
-    simple_font_glyph_map::{SimpleFontGlyphWidthsMap, SimpleFontGlyphWidthsMapError},
+    simple_font_glyph_map::SimpleFontGlyphWidthsMap,
 };
 
 /// Minimal, initial representation of a PDF Type1 font.
@@ -20,20 +19,9 @@ pub struct Type1Font {
     /// A stream containing the font program.
     pub font_file: Vec<u8>,
     /// Widths map for character codes.
-    pub widths: SimpleFontGlyphWidthsMap,
+    pub widths: Option<HashMap<u16, f32>>,
     /// Optional encoding information.
     pub encoding: Encoding,
-}
-
-/// Errors that can occur while parsing a Type1 font dictionary.
-#[derive(Debug, Error, PartialEq)]
-pub enum Type1FontError {
-    #[error("{0}")]
-    ObjectError(#[from] ObjectError),
-    #[error("FontDescriptor error: {0}")]
-    FontDescriptor(#[from] FontDescriptorError),
-    #[error("SimpleFontGlyphWidthsMap parsing error: {0}")]
-    SimpleFontGlyphWidthsMapError(#[from] SimpleFontGlyphWidthsMapError),
 }
 
 impl FromDictionary for Type1Font {
@@ -45,20 +33,11 @@ impl FromDictionary for Type1Font {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self::ResultType, Self::ErrorType> {
-        // Read '/FontDescriptor’.
-        let descriptor = dictionary
-            .get_or_err("FontDescriptor")?
-            .try_dictionary(objects)?;
-
-        let font_file = FontDescriptor::from_dictionary(descriptor, objects)?;
-
-        let font_file = font_file.data()?;
-        let font_file = build_cff_font(&font_file)?;
+        // Read embedded font file.
+        let font_file = Self::read_font_file(dictionary, objects)?;
 
         // Read the `/Widths` entry.
         let widths = SimpleFontGlyphWidthsMap::from_dictionary(dictionary, objects)?;
-
-        // TODO: Handle `/FontMatrix`.
 
         // Read optional `/Encoding` entry. This is either a name or a dictionary.
         let encoding = if let Some(enc_obj) = dictionary.get("Encoding") {
@@ -81,5 +60,37 @@ impl FromDictionary for Type1Font {
             widths,
             encoding,
         })
+    }
+}
+
+impl Type1Font {
+    /// Reads and processes the embedded Type 1 font file from a PDF font dictionary.
+    ///
+    /// This method extracts the font program from the `FontFile3` stream within
+    /// the font descriptor and converts it into a valid CFF (Compact Font Format)
+    /// font structure.
+    ///
+    /// # Parameters
+    ///
+    /// - `dictionary`: The font dictionary containing the `FontDescriptor` reference.
+    /// - `objects`: An object resolver for dereferencing indirect PDF objects.
+    ///
+    /// # Returns
+    ///
+    /// Returns the processed CFF font data as a `Vec<u8>` or a [`FontError`].
+    pub(crate) fn read_font_file(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Vec<u8>, FontError> {
+        // Read embedded font file.
+        let font_file = dictionary
+            .get_or_err("FontDescriptor")?
+            .try_dictionary(objects)?
+            .get_or_err("FontFile3")?
+            .try_stream(objects)?
+            .data()?;
+
+        // Build CFF font from the font file stream.
+        build_cff_font(&font_file)
     }
 }

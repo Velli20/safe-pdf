@@ -169,3 +169,5 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 
 SPDX-License-Identifier: MIT
 
+This project embeds the Roboto and Roboto Mono fonts, which are licensed under the SIL Open Font License 1.1. See `crates/pdf-font/assets/OFL.txt` for details.
+

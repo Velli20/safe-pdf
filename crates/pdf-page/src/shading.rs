@@ -184,6 +184,9 @@ pub enum Shading {
         /// target coordinate space. Clips the shading to this rectangle.
         bbox: Option<Rect>,
     },
+
+    /// Placeholder for unsupported shading types (Types 4-7).
+    Unsupported { name: String },
 }
 
 impl Shading {
@@ -192,6 +195,7 @@ impl Shading {
         match self {
             Self::FunctionBased { color_space, .. } => color_space.as_ref(),
             Self::Axial { color_space, .. } | Self::Radial { color_space, .. } => Some(color_space),
+            Self::Unsupported { .. } => None,
         }
     }
 }
@@ -213,7 +217,9 @@ impl Shading {
             ShadingType::Axial => Self::parse_axial(object, objects),
             ShadingType::Radial => Self::parse_radial(object, objects),
             // Mesh-based shadings are recognized but not yet implemented.
-            unsupported => Err(ShadingError::UnsupportedShadingType(unsupported)),
+            unsupported => Ok(Shading::Unsupported {
+                name: unsupported.to_string(),
+            }),
         }
     }
 }
