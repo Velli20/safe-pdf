@@ -677,7 +677,7 @@ mod tests {
         data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
         data.extend_from_slice(b"%%EOF");
 
-        let mut reader = PdfReader::default();
+        let mut reader = PdfReader;
         let result = reader.read_from_bytes(&data, None);
 
         // Should return an EncryptedDocument error
@@ -717,7 +717,7 @@ mod tests {
         data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
         data.extend_from_slice(b"%%EOF");
 
-        let mut reader = PdfReader::default();
+        let mut reader = PdfReader;
         let result = reader.read_from_bytes(&data, None);
 
         // Should return an EncryptedDocument error
@@ -750,7 +750,7 @@ mod tests {
         data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
         data.extend_from_slice(b"%%EOF");
 
-        let mut reader = PdfReader::default();
+        let mut reader = PdfReader;
         let result = reader.read_from_bytes(&data, None);
 
         // Should load successfully (no encryption)

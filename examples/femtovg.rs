@@ -1,8 +1,9 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use std::sync::Arc;
 
 use femtovg::Canvas;
 use femtovg::{Color, renderer::WGPURenderer};
-
 use pdf_document::document::PdfDocument;
 use pdf_document::reader::PdfReader;
 use pdf_graphics_femtovg::femtovg_canvas_backend::CanvasImpl;
@@ -18,11 +19,7 @@ use winit::{
 pub trait AppRenderer {
     fn on_init(&mut self);
 
-    fn on_render(
-        &mut self,
-        canvas: &mut Canvas<femtovg::renderer::WGPURenderer>,
-        document: &PdfDocument,
-    );
+    fn on_render(&mut self, canvas: &mut Canvas<WGPURenderer>, document: &PdfDocument);
 }
 
 pub struct App {
@@ -182,24 +179,20 @@ struct Renderer2 {}
 impl AppRenderer for Renderer2 {
     fn on_init(&mut self) {}
 
-    fn on_render(
-        &mut self,
-        canvas: &mut Canvas<femtovg::renderer::WGPURenderer>,
-        document: &PdfDocument,
-    ) {
+    fn on_render(&mut self, canvas: &mut Canvas<WGPURenderer>, document: &PdfDocument) {
         canvas.clear_rect(0, 0, 595, 842, Color::rgbf(1.0, 1.0, 1.0));
         canvas.save();
 
         let mut canvas_impl = CanvasImpl { canvas };
         let mut renderer = PdfRenderer::new(document, &mut canvas_impl);
-        renderer.render(0);
+        let _ = renderer.render(0);
         canvas.restore();
     }
 }
 
 fn main() {
     const INPUT: &[u8] = include_bytes!("assets/dd5cf1a7d6d190f94a28201777f11bf4.pdf");
-    let document = PdfReader::default().read_from_bytes(INPUT).unwrap();
+    let document = PdfReader::default().read_from_bytes(INPUT, None).unwrap();
 
     let mut app = App::new(595, 842, true, document);
     let rend = Renderer2 {};

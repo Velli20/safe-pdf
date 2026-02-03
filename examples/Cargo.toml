@@ -5,17 +5,6 @@ publish = false
 edition = "2024"
 license = "MIT"
 
-[dev-dependencies]
-skia-safe          = { version = "0.89.0", features = ["gl"]  }
-glutin             = { version = "0.32.0" }
-glutin-winit       = { version = "0.5.0" }
-raw-window-handle  = { version = "0.6.0" }
-gl-rs              = { version = "0.14.0", package = "gl"  }
-winit              = { version = "0.30.2" }
-femtovg            = { version = "0.14.0", features = ["wgpu"] }
-wgpu               = { version = "24.0.3" }
-futures            = { version = "0.3.30" }
-
 [dependencies]
 pdf-document         = { path = "../crates/pdf-document" }
 pdf-object           = { path = "../crates/pdf-object" }
@@ -27,15 +16,48 @@ pdf-font             = { path = "../crates/pdf-font" }
 pdf-renderer         = { path = "../crates/pdf-renderer" }
 pdf-canvas         = { path = "../crates/pdf-canvas" }
 pdf-graphics-femtovg = { path = "../crates/pdf-graphics-femtovg", optional = true  }
-pdf-graphics-skia    = { path = "../crates/pdf-graphics-skia", optional = true  }
+pdf-graphics-skia    = { path = "../crates/pdf-graphics-skia", optional = true, features = ["gl"]  }
+
+# Runtime deps used by binaries; feature-gated so `cargo check` stays light.
+futures            = { version = "0.3.30", optional = true }
+skia-safe          = { version = "0.89.0", features = ["gl"], optional = true }
+gl-rs              = { version = "0.14.0", package = "gl", optional = true }
+
+# These dependencies don't support emscripten/wasm32; keep them optional and only enabled by native features.
+glutin             = { version = "0.32.0", optional = true }
+glutin-winit       = { version = "0.5.0", optional = true }
+raw-window-handle  = { version = "0.6.0", optional = true }
+winit              = { version = "0.30.2", optional = true }
+femtovg            = { version = "0.14.0", features = ["wgpu"], optional = true }
+wgpu               = { version = "24.0.3", optional = true }
 
 [features]
 default = []
-skia = [
+skia-core = [
     "dep:pdf-graphics-skia",
+    "dep:skia-safe",
+    "dep:gl-rs",
+]
+
+# Native Skia viewer (OpenGL window via winit/glutin)
+skia = [
+    "skia-core",
+    "dep:glutin",
+    "dep:glutin-winit",
+    "dep:raw-window-handle",
+    "dep:winit",
+]
+
+# Emscripten/WebGL build (no winit/glutin deps)
+skia-wasm = [
+    "skia-core",
 ]
 femtovg = [
     "dep:pdf-graphics-femtovg",
+    "dep:femtovg",
+    "dep:wgpu",
+    "dep:winit",
+    "dep:futures",
 ]
 
 [[example]]
@@ -43,6 +65,11 @@ name = "skia"
 path = "skia.rs"
 test = false
 required-features = ["skia"]
+
+[[bin]]
+name = "emscripten"
+path = "emscripten.rs"
+required-features = ["skia-wasm"]
 
 [[example]]
 name = "femtovg"

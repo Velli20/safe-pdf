@@ -1,0 +1,10 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Build automation tasks for safe-pdf"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+anyhow = "1"
