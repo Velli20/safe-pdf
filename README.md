@@ -81,7 +81,7 @@ safe-pdf/
 ├── examples/                 # Example applications (Skia, FemtoVG)
 │   ├── skia.rs
 │   ├── femtovg.rs
-│   └── Cargo.toml
+│   └── web/                  # Web viewer (index.html + dist/ artifacts)
 └── target/                   # Build output
 ```
 
@@ -149,7 +149,21 @@ FemtoVG + wgpu prototype (may be less feature complete):
 cargo run --example femtovg --features femtovg
 ```
 
-The FemtoVG example embeds a small PDF internally (see `femtovg.rs`). You can adapt it to load external files similarly to `skia.rs`.
+The FemtoVG example embeds a small PDF internally (see `examples/femtovg.rs`). You can adapt it to load external files similarly to `examples/skia.rs`.
+
+### WebAssembly (Emscripten) Viewer
+
+Build the WASM target and copy artifacts into `examples/web/dist/`:
+
+```bash
+cargo xtask emscripten --features skia-wasm
+```
+
+Serve the web viewer (from `examples/web/`) and open the printed URL:
+
+```bash
+cargo xtask emscripten --features skia-wasm --serve --port 8082
+```
 
 ### Adding a New Backend
 

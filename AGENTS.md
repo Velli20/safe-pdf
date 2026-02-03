@@ -55,6 +55,28 @@ cargo run --example skia --features "skia"
 cargo fmt
 ```
 
+### Building the WebAssembly/Emscripten Example
+
+The project uses `cargo xtask` for build automation:
+
+```sh
+# Build the emscripten example (compiles + copies artifacts to examples/web/dist/)
+cargo xtask emscripten --features skia-wasm
+
+# Build and start a dev server
+cargo xtask emscripten --features skia-wasm --serve
+
+# Build and serve on a custom port
+cargo xtask emscripten --serve --port 3000
+
+# Clean all artifacts
+cargo xtask clean
+```
+
+**Prerequisites for WebAssembly builds:**
+- Emscripten SDK installed at `~/emsdk`
+- Python 3 (for the dev server)
+
 ## Contribution Notes (for humans & copilots)
 
 - Keep PRs small and focused.

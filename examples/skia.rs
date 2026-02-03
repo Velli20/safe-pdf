@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use std::{
     ffi::CString,
     num::NonZeroU32,
@@ -5,7 +7,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gl::types::*;
 use gl_rs as gl;
 use glutin::{
     config::{ConfigTemplateBuilder, GlConfig},
@@ -16,8 +17,8 @@ use glutin::{
 };
 use glutin_winit::DisplayBuilder;
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
-#[allow(deprecated)]
-use raw_window_handle::HasRawWindowHandle;
+use raw_window_handle::HasWindowHandle;
+use skia_safe::{Color as SkiaColor, Surface};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::{
     application::ApplicationHandler,
@@ -27,52 +28,10 @@ use winit::{
     window::{Window, WindowAttributes},
 };
 
-use skia_safe::{
-    Color as SkiaColor, ColorType, Surface,
-    gpu::{self, DirectContext, SurfaceOrigin, backend_render_targets, gl::FramebufferInfo},
-};
-
-// Helper: create a Skia surface wrapping the current framebuffer
-fn create_surface(
-    window: &Window,
-    fb_info: FramebufferInfo,
-    gr_context: &mut skia_safe::gpu::DirectContext,
-    num_samples: usize,
-    stencil_size: usize,
-) -> Surface {
-    let size = window.inner_size();
-    let size = (
-        size.width.try_into().expect("Could not convert width"),
-        size.height.try_into().expect("Could not convert height"),
-    );
-    let backend_render_target =
-        backend_render_targets::make_gl(size, num_samples, stencil_size, fb_info);
-    gpu::surfaces::wrap_backend_render_target(
-        gr_context,
-        &backend_render_target,
-        SurfaceOrigin::BottomLeft,
-        ColorType::RGBA8888,
-        None,
-        None,
-    )
-    .expect("Could not create skia surface")
-}
-
 use pdf_document::{document::PdfDocument, reader::PdfReader};
 use pdf_renderer::PdfRenderer;
 
-// ------------------------------
-// High level entry
-// ------------------------------
-// This example was previously a single large function. It is now split into:
-// 1. CLI + document loading (load_document)
-// 2. Window/context setup (create_window_and_context)
-// 3. Application state (Application/Env structs)
-// 4. Rendering logic trait (AppRenderer) + PDF implementation (PdfPageRendererLogic)
-// 5. Run loop bootstrap (run)
-// Hardcoded constants for window size and input path were removed; path can be
-// given as first CLI argument. Fallback is a small embedded sample (if present) or error.
-// Initial window size derived from first page MediaBox when available.
+use pdf_graphics_skia::gpu_state::SkiaGpuState;
 
 fn main() {
     let settings = AppSettings::from_env();
@@ -108,7 +67,7 @@ impl AppSettings {
 // ------------------------------
 fn load_document(settings: &AppSettings) -> Arc<PdfDocument> {
     if let Some(path) = &settings.pdf_path {
-        let mut reader = PdfReader::default();
+        let mut reader = PdfReader;
         match std::fs::read(path) {
             Ok(bytes) => Arc::new(
                 reader
@@ -118,9 +77,8 @@ fn load_document(settings: &AppSettings) -> Arc<PdfDocument> {
             Err(e) => panic!("Failed to read PDF '{}': {e}", path.display()),
         }
     } else {
-        // If no path provided, return a helpful message.
         panic!(
-            "Provide a PDF path as first argument, e.g. `cargo run --example skia --features skia -- ./tests/assets/W3Schools.pdf`."
+            "Provide a PDF path as first argument, e.g. `cargo run -p examples --bin skia --features skia-native -- ./examples/assets/W3Schools.pdf`."
         );
     }
 }
@@ -130,14 +88,10 @@ fn load_document(settings: &AppSettings) -> Arc<PdfDocument> {
 // ------------------------------
 struct GlInitArtifacts {
     window: Window,
-    gl_config: glutin::config::Config,
     gl_surface: GlutinSurface<WindowSurface>,
     gl_context: PossiblyCurrentContext,
-    fb_info: FramebufferInfo,
-    gr_context: skia_safe::gpu::DirectContext,
+    gpu_state: SkiaGpuState,
     surface: Surface,
-    num_samples: usize,
-    stencil_size: usize,
 }
 
 fn derive_initial_window_size(doc: &PdfDocument) -> (u32, u32) {
@@ -182,10 +136,10 @@ fn create_window_and_context(el: &EventLoop<()>, doc: &PdfDocument) -> GlInitArt
         })
         .unwrap();
     let window = window.expect("Could not create window with OpenGL context");
-    #[allow(deprecated)]
     let raw_window_handle = window
-        .raw_window_handle()
-        .expect("Failed to retrieve RawWindowHandle");
+        .window_handle()
+        .expect("Failed to retrieve WindowHandle")
+        .as_raw();
     let context_attributes = ContextAttributesBuilder::new().build(Some(raw_window_handle));
     let fallback_context_attributes = ContextAttributesBuilder::new()
         .with_context_api(ContextApi::Gles(None))
@@ -222,40 +176,18 @@ fn create_window_and_context(el: &EventLoop<()>, doc: &PdfDocument) -> GlInitArt
             .display()
             .get_proc_address(CString::new(s).unwrap().as_c_str())
     });
-    let interface = skia_safe::gpu::gl::Interface::new_load_with(|name| {
-        if name == "eglGetCurrentDisplay" {
-            return std::ptr::null();
-        }
-        gl_config
-            .display()
-            .get_proc_address(CString::new(name).unwrap().as_c_str())
-    })
-    .expect("Could not create interface");
-    let mut gr_context = skia_safe::gpu::direct_contexts::make_gl(interface, None)
-        .expect("Could not create direct context");
-    let fb_info = {
-        let mut fboid: GLint = 0;
-        unsafe { gl::GetIntegerv(gl::FRAMEBUFFER_BINDING, &mut fboid) };
-        FramebufferInfo {
-            fboid: fboid.try_into().unwrap(),
-            format: skia_safe::gpu::gl::Format::RGBA8.into(),
-            ..Default::default()
-        }
-    };
-    // create_surface helper now defined at module scope.
-    let num_samples = gl_config.num_samples() as usize;
-    let stencil_size = gl_config.stencil_size() as usize;
-    let surface = create_surface(&window, fb_info, &mut gr_context, num_samples, stencil_size);
+
+    let mut gpu_state = SkiaGpuState::new().expect("Failed to create GPU state");
+    let surface = gpu_state
+        .create_target_surface(width as i32, height as i32)
+        .expect("Failed to create target surface");
+
     GlInitArtifacts {
         window,
-        gl_config,
+        gpu_state,
         gl_surface,
         gl_context,
-        fb_info,
-        gr_context,
         surface,
-        num_samples,
-        stencil_size,
     }
 }
 
@@ -267,20 +199,15 @@ fn run(settings: AppSettings) {
     let pdf_document = load_document(&settings);
     let GlInitArtifacts {
         window,
-        gl_config: _gl_config,
         gl_surface,
         gl_context,
-        fb_info,
-        gr_context,
+        gpu_state,
         surface,
-        num_samples,
-        stencil_size,
     } = create_window_and_context(&el, &pdf_document);
-    // Guarantee the drop order inside the FnMut closure. `Window` _must_ be dropped after DirectContext.
     struct Env {
         surface: Surface,
         gl_surface: GlutinSurface<WindowSurface>,
-        gr_context: skia_safe::gpu::DirectContext,
+        gpu_state: SkiaGpuState,
         gl_context: PossiblyCurrentContext,
         window: Window,
         pdf_document: Arc<PdfDocument>,
@@ -290,9 +217,6 @@ fn run(settings: AppSettings) {
     pdf_logic.on_init();
     struct Application {
         env: Env,
-        fb_info: FramebufferInfo,
-        num_samples: usize,
-        stencil_size: usize,
         modifiers: ModifiersState,
         previous_frame_start: Instant,
         frame_rate: f32,
@@ -301,16 +225,13 @@ fn run(settings: AppSettings) {
         surface,
         gl_surface,
         gl_context,
-        gr_context,
+        gpu_state,
         window,
         pdf_document: pdf_document.clone(),
         pdf_logic,
     };
     let mut application = Application {
         env,
-        fb_info,
-        num_samples,
-        stencil_size,
         modifiers: ModifiersState::default(),
         previous_frame_start: Instant::now(),
         frame_rate: settings.frame_rate,
@@ -338,14 +259,14 @@ fn run(settings: AppSettings) {
                     return;
                 }
                 WindowEvent::Resized(physical_size) => {
-                    self.env.surface = create_surface(
-                        &self.env.window,
-                        self.fb_info,
-                        &mut self.env.gr_context,
-                        self.num_samples,
-                        self.stencil_size,
-                    );
                     let (width, height): (u32, u32) = physical_size.into();
+
+                    self.env.surface = self
+                        .env
+                        .gpu_state
+                        .create_target_surface(width as i32, height as i32)
+                        .expect("Failed to create target surface");
+
                     self.env.gl_surface.resize(
                         &self.env.gl_context,
                         NonZeroU32::new(width.max(1)).unwrap(),
@@ -404,9 +325,8 @@ fn run(settings: AppSettings) {
                         &self.env.pdf_document,
                         size.width as f32,
                         size.height as f32,
-                        &mut self.env.gr_context,
                     );
-                    self.env.gr_context.flush_and_submit();
+                    self.env.gpu_state.context.flush_and_submit();
                     self.env
                         .gl_surface
                         .swap_buffers(&self.env.gl_context)
@@ -426,14 +346,7 @@ fn run(settings: AppSettings) {
 
 pub trait AppRenderer<C> {
     fn on_init(&mut self);
-    fn on_render(
-        &mut self,
-        canvas: &mut C,
-        document: &PdfDocument,
-        width: f32,
-        height: f32,
-        gr_context: &mut DirectContext,
-    );
+    fn on_render(&mut self, canvas: &mut C, document: &PdfDocument, width: f32, height: f32);
 }
 
 #[derive(Default)]
@@ -452,16 +365,12 @@ impl AppRenderer<skia_safe::Surface> for PdfPageRendererLogic {
         document: &PdfDocument,
         width: f32,
         height: f32,
-        _gr_context: &mut DirectContext, // Could be used for caching to an offscreen surface
     ) {
         surface.canvas().clear(SkiaColor::WHITE);
         if document.page_count() == 0 {
             return;
         }
         let page_index = self.current_page % document.page_count();
-
-        // Example: Draw PDF content directly.
-        // For more complex scenarios or caching, you might render to an offscreen surface first.
 
         let mut skia_backend = SkiaCanvasBackend {
             surface,

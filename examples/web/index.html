@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>Safe-PDF WASM Viewer</title>
+    <!-- Inline favicon to avoid 404 requests in dev -->
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23cccccc'/%3E%3Ctext x='8' y='11' font-size='9' text-anchor='middle' fill='%23333'%3ES%3C/text%3E%3C/svg%3E" />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background: #f5f5f5;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      h1 {
+        margin: 0 0 20px 0;
+        color: #333;
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 15px;
+        align-items: center;
+        margin-bottom: 20px;
+        padding: 15px;
+        background: #fff;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      }
+      .control-group {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .control-group label {
+        font-size: 12px;
+        font-weight: 600;
+        color: #666;
+        text-transform: uppercase;
+      }
+      .control-group input, .control-group select {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+      }
+      .control-group input[type="number"] {
+        width: 100px;
+      }
+      .control-group input[type="file"] {
+        padding: 6px;
+      }
+      button {
+        padding: 10px 20px;
+        background: #0066cc;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+      }
+      button:hover {
+        background: #0055aa;
+      }
+      button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+      }
+      .canvas-container {
+        background: #fff;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        display: inline-block;
+      }
+      .canvas-wrapper {
+        position: relative;
+        display: inline-block;
+      }
+      #canvas {
+        border: 1px solid #ccc;
+        image-rendering: pixelated;
+        display: block;
+      }
+      .resize-handle {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        width: 20px;
+        height: 20px;
+        cursor: nwse-resize;
+        background: linear-gradient(135deg, transparent 50%, #0066cc 50%);
+        border-bottom-right-radius: 3px;
+      }
+      .resize-handle:hover {
+        background: linear-gradient(135deg, transparent 50%, #0055aa 50%);
+      }
+      .resize-handle::before {
+        content: '';
+        position: absolute;
+        bottom: 3px;
+        right: 3px;
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid rgba(255,255,255,0.8);
+        border-bottom: 2px solid rgba(255,255,255,0.8);
+      }
+      .canvas-dimensions {
+        position: absolute;
+        bottom: -25px;
+        right: 0;
+        font-size: 12px;
+        color: #666;
+        background: rgba(255,255,255,0.9);
+        padding: 2px 6px;
+        border-radius: 3px;
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+      .canvas-wrapper.resizing .canvas-dimensions {
+        opacity: 1;
+      }
+      .status {
+        margin-top: 15px;
+        padding: 10px 15px;
+        background: #e8f4fd;
+        border-radius: 4px;
+        color: #0066cc;
+        font-size: 14px;
+      }
+      .status.error {
+        background: #fde8e8;
+        color: #cc0000;
+      }
+      .status.success {
+        background: #e8fde8;
+        color: #00aa00;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Safe-PDF WASM Viewer</h1>
+
+      <div class="controls">
+        <div class="control-group">
+          <label for="pdfFile">PDF File</label>
+          <input type="file" id="pdfFile" accept=".pdf,application/pdf" />
+        </div>
+
+        <div class="control-group">
+          <label for="pageSelect">Page</label>
+          <select id="pageSelect" disabled>
+            <option value="0">Load PDF first</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="canvas-container">
+        <div class="canvas-wrapper" id="canvasWrapper">
+          <canvas id="canvas" width="800" height="600"></canvas>
+          <div class="resize-handle" id="resizeHandle"></div>
+          <div class="canvas-dimensions" id="canvasDimensions">800 × 600</div>
+        </div>
+      </div>
+
+      <div id="status" class="status">Loading WASM module...</div>
+    </div>
+
+    <script>
+      // State management
+      let pdfDataPtr = null;
+      let pdfDataLength = 0;
+      let pageCount = 0;
+      let glHandle = null;
+      let wasmReady = false;
+      let isResizing = false;
+      let resizeStartX = 0;
+      let resizeStartY = 0;
+      let resizeStartWidth = 0;
+      let resizeStartHeight = 0;
+
+      // Function bindings (set after module loads)
+      let sk_load_pdf = null;
+      let sk_get_page_count = null;
+      let sk_render_page = null;
+      let sk_free_pdf = null;
+
+      function setStatus(message, type = '') {
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = message;
+        statusEl.className = 'status ' + type;
+      }
+
+      function initWebGL() {
+        const canvas = document.getElementById('canvas');
+
+        const attrs = {
+          alpha: true,
+          depth: true,
+          stencil: false,
+          antialias: true,
+          preserveDrawingBuffer: false,
+          preferLowPowerToHighPerformance: false,
+          failIfMajorPerformanceCaveat: false,
+          majorVersion: 2,
+          minorVersion: 0,
+          enableExtensionsByDefault: true,
+          explicitSwapControl: false,
+          proxyContextToMainThread: 0,
+          renderViaOffscreenBackBuffer: false,
+        };
+
+        const gl = canvas.getContext('webgl2', attrs) || canvas.getContext('webgl', attrs);
+        if (!gl) {
+          setStatus('Unable to create WebGL context', 'error');
+          return false;
+        }
+
+        // Register and make current via Emscripten runtime
+        if (typeof GL !== 'undefined' && GL.registerContext && GL.makeContextCurrent) {
+          glHandle = GL.registerContext(gl, attrs);
+          GL.makeContextCurrent(glHandle);
+          console.log('WebGL context created (handle=' + glHandle + ')');
+        } else {
+          console.warn('Emscripten GL runtime not found');
+        }
+
+        return true;
+      }
+
+      function loadPdfFile(file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const arrayBuffer = e.target.result;
+          const uint8Array = new Uint8Array(arrayBuffer);
+
+          // Free previous PDF data if any
+          if (pdfDataPtr !== null) {
+            Module._free(pdfDataPtr);
+            pdfDataPtr = null;
+          }
+
+          // Allocate memory in WASM heap and copy the PDF data
+          pdfDataLength = uint8Array.length;
+          pdfDataPtr = Module._malloc(pdfDataLength);
+          Module.HEAPU8.set(uint8Array, pdfDataPtr);
+
+          // Load the PDF and get page count
+          const result = sk_load_pdf(pdfDataPtr, pdfDataLength);
+          if (result < 0) {
+            setStatus('Failed to parse PDF file', 'error');
+            Module._free(pdfDataPtr);
+            pdfDataPtr = null;
+            return;
+          }
+
+          pageCount = sk_get_page_count();
+          console.log('PDF loaded with ' + pageCount + ' pages');
+
+          // Update page selector
+          const pageSelect = document.getElementById('pageSelect');
+          pageSelect.innerHTML = '';
+          for (let i = 0; i < pageCount; i++) {
+            const option = document.createElement('option');
+            option.value = i;
+            option.textContent = 'Page ' + (i + 1);
+            pageSelect.appendChild(option);
+          }
+          pageSelect.disabled = false;
+
+          setStatus('PDF loaded: ' + file.name + ' (' + pageCount + ' pages)', 'success');
+
+          // Auto-render first page
+          renderCurrentPage();
+        };
+        reader.onerror = function() {
+          setStatus('Failed to read file', 'error');
+        };
+        reader.readAsArrayBuffer(file);
+      }
+
+      function renderCurrentPage() {
+        if (pdfDataPtr === null) {
+          setStatus('No PDF loaded', 'error');
+          return;
+        }
+
+        const canvas = document.getElementById('canvas');
+        const pageIndex = parseInt(document.getElementById('pageSelect').value, 10);
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // Make sure WebGL context is current
+        if (glHandle !== null && typeof GL !== 'undefined') {
+          GL.makeContextCurrent(glHandle);
+        }
+
+        setStatus('Rendering page ' + (pageIndex + 1) + '...', '');
+
+        try {
+          const result = sk_render_page(width, height, pageIndex);
+          if (result === 0) {
+            setStatus('Rendered page ' + (pageIndex + 1) + ' of ' + pageCount, 'success');
+          } else if (result === -1) {
+            setStatus('Page ' + (pageIndex + 1) + ' not found', 'error');
+          } else {
+            setStatus('Render error (code: ' + result + ')', 'error');
+          }
+        } catch (e) {
+          setStatus('Render error: ' + e.message, 'error');
+          console.error(e);
+        }
+      }
+
+
+      function initResizeHandle() {
+        const handle = document.getElementById('resizeHandle');
+        const wrapper = document.getElementById('canvasWrapper');
+        const canvas = document.getElementById('canvas');
+        const widthInput = document.getElementById('canvasWidth');
+        const heightInput = document.getElementById('canvasHeight');
+        const dimensionsDisplay = document.getElementById('canvasDimensions');
+
+        handle.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          isResizing = true;
+          resizeStartX = e.clientX;
+          resizeStartY = e.clientY;
+          resizeStartWidth = canvas.width;
+          resizeStartHeight = canvas.height;
+          wrapper.classList.add('resizing');
+          document.body.style.cursor = 'nwse-resize';
+          document.body.style.userSelect = 'none';
+        });
+
+        document.addEventListener('mousemove', function(e) {
+          if (!isResizing) return;
+
+          const deltaX = e.clientX - resizeStartX;
+          const deltaY = e.clientY - resizeStartY;
+
+          let newWidth = Math.max(100, Math.min(4096, resizeStartWidth + deltaX));
+          let newHeight = Math.max(100, Math.min(4096, resizeStartHeight + deltaY));
+
+          // Round to integers
+          newWidth = Math.round(newWidth);
+          newHeight = Math.round(newHeight);
+
+          canvas.width = newWidth;
+          canvas.height = newHeight;
+          widthInput.value = newWidth;
+          heightInput.value = newHeight;
+          dimensionsDisplay.textContent = newWidth + ' × ' + newHeight;
+        });
+
+        document.addEventListener('mouseup', function(e) {
+          if (!isResizing) return;
+          isResizing = false;
+          wrapper.classList.remove('resizing');
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+
+          // Reinitialize WebGL and re-render
+          initWebGL();
+          if (pdfDataPtr !== null) {
+            renderCurrentPage();
+          }
+          setStatus('Canvas resized to ' + canvas.width + 'x' + canvas.height, 'success');
+        });
+
+        // Touch support
+        handle.addEventListener('touchstart', function(e) {
+          e.preventDefault();
+          const touch = e.touches[0];
+          isResizing = true;
+          resizeStartX = touch.clientX;
+          resizeStartY = touch.clientY;
+          resizeStartWidth = canvas.width;
+          resizeStartHeight = canvas.height;
+          wrapper.classList.add('resizing');
+        }, { passive: false });
+
+        document.addEventListener('touchmove', function(e) {
+          if (!isResizing) return;
+          const touch = e.touches[0];
+
+          const deltaX = touch.clientX - resizeStartX;
+          const deltaY = touch.clientY - resizeStartY;
+
+          let newWidth = Math.max(100, Math.min(4096, resizeStartWidth + deltaX));
+          let newHeight = Math.max(100, Math.min(4096, resizeStartHeight + deltaY));
+
+          newWidth = Math.round(newWidth);
+          newHeight = Math.round(newHeight);
+
+          canvas.width = newWidth;
+          canvas.height = newHeight;
+          widthInput.value = newWidth;
+          heightInput.value = newHeight;
+          dimensionsDisplay.textContent = newWidth + ' × ' + newHeight;
+        }, { passive: true });
+
+        document.addEventListener('touchend', function(e) {
+          if (!isResizing) return;
+          isResizing = false;
+          wrapper.classList.remove('resizing');
+
+          initWebGL();
+          if (pdfDataPtr !== null) {
+            renderCurrentPage();
+          }
+          setStatus('Canvas resized to ' + canvas.width + 'x' + canvas.height, 'success');
+        });
+      }
+
+      // Configure Emscripten before loading the generated glue file.
+      var Module = {
+        noInitialRun: true,
+        canvas: (function () { return document.getElementById('canvas'); })(),
+        onRuntimeInitialized: function() {
+          console.log("WASM Module Loaded and Initialized!");
+
+          // Initialize WebGL
+          if (!initWebGL()) {
+            return;
+          }
+
+          // Bind exported functions
+          sk_load_pdf = Module.cwrap('sk_load_pdf', 'number', ['number', 'number']);
+          sk_get_page_count = Module.cwrap('sk_get_page_count', 'number', []);
+          sk_render_page = Module.cwrap('sk_render_page', 'number', ['number', 'number', 'number']);
+          sk_free_pdf = Module.cwrap('sk_free_pdf', null, []);
+
+          wasmReady = true;
+          setStatus('Ready. Select a PDF file to begin.', 'success');
+
+          // Initialize the resize handle
+          initResizeHandle();
+
+          // Set up event listeners
+          document.getElementById('pdfFile').addEventListener('change', function(e) {
+            if (e.target.files.length > 0) {
+              loadPdfFile(e.target.files[0]);
+            }
+          });
+
+          document.getElementById('pageSelect').addEventListener('change', function() {
+            if (pdfDataPtr !== null) {
+              renderCurrentPage();
+            }
+          });
+
+
+        }
+      };
+    </script>
+    <!-- Load the generated Emscripten JS glue (output of build) -->
+    <script src="./dist/emscripten.js"></script>
+  </body>
+</html>

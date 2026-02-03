@@ -115,7 +115,7 @@ impl<T: std::error::Error> GraphicsStateOps for PdfCanvas<'_, T> {
                 }
                 ExternalGraphicsStateKey::SoftMask(smask) => {
                     // Handle the `/SMask` entry from an `ExtGState` dictionary.
-                    if let Some(smask) = smask {
+                    if let Some(smask) = smask.as_ref() {
                         if let XObject::Image(_) = &smask.shape {
                             return Err(PdfCanvasError::NotImplemented(
                                 "SoftMask with Image shape".into(),

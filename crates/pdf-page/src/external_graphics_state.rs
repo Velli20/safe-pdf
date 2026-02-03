@@ -49,7 +49,6 @@ pub struct SoftMask {
 /// such as line styles, color rendering, and alpha transparency. This enum
 /// enumerates the possible keys (parameters) found in such a dictionary and
 /// holds the corresponding parsed value.
-#[allow(clippy::large_enum_variant)]
 pub enum ExternalGraphicsStateKey {
     /// Line width (`LW`). A number specifying the thickness of stroked lines.
     LineWidth(f32),
@@ -82,7 +81,7 @@ pub enum ExternalGraphicsStateKey {
     /// when compositing objects.
     BlendMode(Vec<BlendMode>),
     /// Soft mask (`SMask`). A dictionary specifying the soft mask to be used, or the name `None`.
-    SoftMask(Option<SoftMask>),
+    SoftMask(Box<Option<SoftMask>>),
     /// Stroking alpha constant (`CA`). A number in the range 0.0 to 1.0 specifying the constant
     /// opacity value to be used for stroking operations.
     StrokingAlpha(f32),
@@ -274,7 +273,7 @@ fn parse_soft_mask(
         },
     };
 
-    Ok(ExternalGraphicsStateKey::SoftMask(smask))
+    Ok(ExternalGraphicsStateKey::SoftMask(Box::new(smask)))
 }
 
 /// Parse a single key/value pair of the ExtGState dictionary.
