@@ -18,6 +18,8 @@ pdf-canvas         = { path = "../crates/pdf-canvas" }
 pdf-graphics-femtovg = { path = "../crates/pdf-graphics-femtovg", optional = true  }
 pdf-graphics-skia    = { path = "../crates/pdf-graphics-skia", optional = true, features = ["gl"]  }
 
+thiserror          = "2"
+
 # Runtime deps used by binaries; feature-gated so `cargo check` stays light.
 futures            = { version = "0.3.30", optional = true }
 skia-safe          = { version = "0.89.0", features = ["gl"], optional = true }

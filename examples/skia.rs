@@ -1,11 +1,4 @@
-#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
-
-use std::{
-    ffi::CString,
-    num::NonZeroU32,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{ffi::CString, num::NonZeroU32, path::PathBuf, sync::Arc};
 
 use gl_rs as gl;
 use glutin::{
@@ -19,6 +12,7 @@ use glutin_winit::DisplayBuilder;
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
 use raw_window_handle::HasWindowHandle;
 use skia_safe::{Color as SkiaColor, Surface};
+use thiserror::Error;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::{
     application::ApplicationHandler,
@@ -29,356 +23,289 @@ use winit::{
 };
 
 use pdf_document::{document::PdfDocument, reader::PdfReader};
+use pdf_graphics_skia::gpu_state::SkiaGpuState;
 use pdf_renderer::PdfRenderer;
 
-use pdf_graphics_skia::gpu_state::SkiaGpuState;
-
-fn main() {
-    let settings = AppSettings::from_env();
-    run(settings);
+/// Errors that can occur in the PDF viewer application.
+#[derive(Debug, Error)]
+pub enum AppError {
+    #[error("No PDF path provided. Usage: skia <path-to-pdf>")]
+    NoPdfPath,
+    #[error("Failed to read PDF file '{path}': {source}")]
+    ReadFile {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("Failed to parse PDF: {0}")]
+    ParsePdf(#[from] pdf_document::reader::PdfReaderError),
+    #[error("Failed to render PDF page: {0}")]
+    PdfRendererError(#[from] pdf_renderer::PdfRendererError),
+    #[error("Failed to create event loop: {0}")]
+    EventLoop(#[from] winit::error::EventLoopError),
+    #[error("Failed to create window: {0}")]
+    WindowCreation(String),
+    #[error("Failed to get window handle: {0}")]
+    WindowHandle(#[from] raw_window_handle::HandleError),
+    #[error("Failed to create GL context: {0}")]
+    GlContext(#[from] glutin::error::Error),
+    #[error("Failed to create GPU state: {0}")]
+    GpuState(#[from] pdf_graphics_skia::gpu_state::GpuStateError),
+    #[error("Invalid window dimension (zero width or height)")]
+    InvalidDimension,
 }
 
-// ------------------------------
-// Settings / configuration
-// ------------------------------
-#[derive(Clone, Debug)]
-struct AppSettings {
-    pdf_path: Option<std::path::PathBuf>,
-    frame_rate: f32,
+fn main() -> Result<(), AppError> {
+    let pdf_path = std::env::args()
+        .nth(1)
+        .map(PathBuf::from)
+        .ok_or(AppError::NoPdfPath)?;
+
+    let bytes = std::fs::read(&pdf_path).map_err(|e| AppError::ReadFile {
+        path: pdf_path,
+        source: e,
+    })?;
+
+    let document = Arc::new(PdfReader.read_from_bytes(&bytes, None)?);
+
+    run(document)
 }
 
-impl AppSettings {
-    fn from_env() -> Self {
-        let pdf_path = std::env::args().nth(1).map(std::path::PathBuf::from);
-        let frame_rate = std::env::var("SAFE_PDF_FPS")
-            .ok()
-            .and_then(|v| v.parse::<f32>().ok())
-            .filter(|v| *v > 0.0 && *v <= 240.0)
-            .unwrap_or(20.0);
-        Self {
-            pdf_path,
-            frame_rate,
-        }
-    }
+fn initial_window_size(doc: &PdfDocument) -> (u32, u32) {
+    doc.get_page(0)
+        .and_then(|p| p.media_box.as_ref())
+        .map(|mb| (mb.width().max(1.0) as u32, mb.height().max(1.0) as u32))
+        .unwrap_or((800, 600))
 }
 
-// ------------------------------
-// Document loading
-// ------------------------------
-fn load_document(settings: &AppSettings) -> Arc<PdfDocument> {
-    if let Some(path) = &settings.pdf_path {
-        let mut reader = PdfReader;
-        match std::fs::read(path) {
-            Ok(bytes) => Arc::new(
-                reader
-                    .read_from_bytes(&bytes, None)
-                    .expect("Failed to parse PDF"),
-            ),
-            Err(e) => panic!("Failed to read PDF '{}': {e}", path.display()),
-        }
-    } else {
-        panic!(
-            "Provide a PDF path as first argument, e.g. `cargo run -p examples --bin skia --features skia-native -- ./examples/assets/W3Schools.pdf`."
-        );
-    }
-}
-
-// ------------------------------
-// Window + GL / Skia context creation
-// ------------------------------
-struct GlInitArtifacts {
+struct Application {
     window: Window,
     gl_surface: GlutinSurface<WindowSurface>,
     gl_context: PossiblyCurrentContext,
     gpu_state: SkiaGpuState,
     surface: Surface,
+    document: Arc<PdfDocument>,
+    current_page: usize,
+    modifiers: ModifiersState,
+    render_error: Option<AppError>,
 }
 
-fn derive_initial_window_size(doc: &PdfDocument) -> (u32, u32) {
-    const DEFAULT: (u32, u32) = (800, 600);
-    if doc.page_count() == 0 {
-        return DEFAULT;
+impl Application {
+    fn render(&mut self) -> Result<(), AppError> {
+        let size = self.window.inner_size();
+        self.surface.canvas().clear(SkiaColor::WHITE);
+
+        if self.document.page_count() > 0 {
+            let mut backend = SkiaCanvasBackend {
+                surface: &mut self.surface,
+                width: size.width as f32,
+                height: size.height as f32,
+            };
+            PdfRenderer::new(&self.document, &mut backend).render(self.current_page)?;
+        }
+
+        self.gpu_state.context.flush_and_submit();
+        self.gl_surface.swap_buffers(&self.gl_context)?;
+
+        Ok(())
     }
-    let page = match doc.get_page(0) {
-        Some(p) => p,
-        None => return DEFAULT,
-    };
-    if let Some(mb) = &page.media_box {
-        (mb.width().max(1.0) as u32, mb.height().max(1.0) as u32)
-    } else {
-        DEFAULT
+
+    fn next_page(&mut self) {
+        if self.document.page_count() > 0 {
+            self.current_page = (self.current_page + 1) % self.document.page_count();
+            println!(
+                "Page {}/{}",
+                self.current_page + 1,
+                self.document.page_count()
+            );
+            self.window.request_redraw();
+        }
+    }
+
+    fn prev_page(&mut self) {
+        if self.document.page_count() > 0 {
+            self.current_page = if self.current_page == 0 {
+                self.document.page_count() - 1
+            } else {
+                self.current_page - 1
+            };
+            println!(
+                "Page {}/{}",
+                self.current_page + 1,
+                self.document.page_count()
+            );
+            self.window.request_redraw();
+        }
     }
 }
 
-fn create_window_and_context(el: &EventLoop<()>, doc: &PdfDocument) -> GlInitArtifacts {
-    let (init_w, init_h) = derive_initial_window_size(doc);
-    let window_attributes =
+impl ApplicationHandler for Application {
+    fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
+
+    fn window_event(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        _window_id: winit::window::WindowId,
+        event: WindowEvent,
+    ) {
+        match event {
+            WindowEvent::CloseRequested => event_loop.exit(),
+
+            WindowEvent::Resized(size) => {
+                match self
+                    .gpu_state
+                    .create_target_surface(size.width as i32, size.height as i32)
+                {
+                    Ok(s) => self.surface = s,
+                    Err(e) => {
+                        self.render_error = Some(e.into());
+                        event_loop.exit();
+                        return;
+                    }
+                }
+                if let (Some(w), Some(h)) =
+                    (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
+                {
+                    self.gl_surface.resize(&self.gl_context, w, h);
+                }
+                self.window.request_redraw();
+            }
+
+            WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
+
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        logical_key,
+                        state: ElementState::Pressed,
+                        ..
+                    },
+                ..
+            } => match &logical_key {
+                Key::Named(NamedKey::ArrowRight) => self.next_page(),
+                Key::Named(NamedKey::ArrowLeft) => self.prev_page(),
+                Key::Character(c) if self.modifiers.super_key() && c.eq_ignore_ascii_case("q") => {
+                    event_loop.exit();
+                }
+                _ => {}
+            },
+
+            WindowEvent::RedrawRequested => {
+                if let Err(e) = self.render() {
+                    self.render_error = Some(e);
+                    event_loop.exit();
+                }
+            }
+
+            _ => {}
+        }
+        event_loop.set_control_flow(ControlFlow::Wait);
+    }
+}
+
+fn run(document: Arc<PdfDocument>) -> Result<(), AppError> {
+    let event_loop = EventLoop::new()?;
+    let (init_w, init_h) = initial_window_size(&document);
+
+    let window_attrs =
         WindowAttributes::default().with_inner_size(LogicalSize::new(init_w, init_h));
-
     let template = ConfigTemplateBuilder::new()
         .with_alpha_size(8)
         .with_transparency(true);
 
-    let display_builder = DisplayBuilder::new().with_window_attributes(window_attributes.into());
-    let (window, gl_config) = display_builder
-        .build(el, template, |configs| {
+    let (window, gl_config) = DisplayBuilder::new()
+        .with_window_attributes(Some(window_attrs))
+        .build(&event_loop, template, |configs| {
             configs
-                .reduce(|accum, config| {
-                    let transparency_check = config.supports_transparency().unwrap_or(false)
-                        & !accum.supports_transparency().unwrap_or(false);
-                    if transparency_check || config.num_samples() < accum.num_samples() {
-                        config
+                .reduce(|a, b| {
+                    let dominated = b.supports_transparency().unwrap_or(false)
+                        && !a.supports_transparency().unwrap_or(false);
+                    if dominated || b.num_samples() < a.num_samples() {
+                        b
                     } else {
-                        accum
+                        a
                     }
                 })
-                .unwrap()
+                .expect("no GL configs available")
         })
-        .unwrap();
-    let window = window.expect("Could not create window with OpenGL context");
-    let raw_window_handle = window
-        .window_handle()
-        .expect("Failed to retrieve WindowHandle")
-        .as_raw();
-    let context_attributes = ContextAttributesBuilder::new().build(Some(raw_window_handle));
-    let fallback_context_attributes = ContextAttributesBuilder::new()
-        .with_context_api(ContextApi::Gles(None))
-        .build(Some(raw_window_handle));
-    let not_current_gl_context = unsafe {
-        gl_config
-            .display()
-            .create_context(&gl_config, &context_attributes)
-            .unwrap_or_else(|_| {
-                gl_config
-                    .display()
-                    .create_context(&gl_config, &fallback_context_attributes)
-                    .expect("failed to create context")
-            })
-    };
+        .map_err(|e| AppError::WindowCreation(e.to_string()))?;
 
-    let (width, height): (u32, u32) = window.inner_size().into();
-    let attrs = SurfaceAttributesBuilder::<WindowSurface>::new().build(
-        raw_window_handle,
-        NonZeroU32::new(width).unwrap(),
-        NonZeroU32::new(height).unwrap(),
-    );
-    let gl_surface = unsafe {
-        gl_config
-            .display()
-            .create_window_surface(&gl_config, &attrs)
-            .expect("Could not create gl window surface")
-    };
-    let gl_context = not_current_gl_context
-        .make_current(&gl_surface)
-        .expect("Could not make GL context current when setting up skia renderer");
+    let window = window.ok_or_else(|| AppError::WindowCreation("no window created".into()))?;
+    let raw_handle = window.window_handle()?.as_raw();
+
+    let (w, h): (u32, u32) = window.inner_size().into();
+    let nz_w = NonZeroU32::new(w).ok_or(AppError::InvalidDimension)?;
+    let nz_h = NonZeroU32::new(h).ok_or(AppError::InvalidDimension)?;
+
+    let (gl_context, gl_surface) =
+        create_gl_context_and_surface(&gl_config, raw_handle, nz_w, nz_h)?;
+
     gl::load_with(|s| {
         gl_config
             .display()
-            .get_proc_address(CString::new(s).unwrap().as_c_str())
+            .get_proc_address(CString::new(s).expect("CString::new failed").as_c_str())
     });
 
-    let mut gpu_state = SkiaGpuState::new().expect("Failed to create GPU state");
-    let surface = gpu_state
-        .create_target_surface(width as i32, height as i32)
-        .expect("Failed to create target surface");
+    let mut gpu_state = SkiaGpuState::new()?;
+    let surface = gpu_state.create_target_surface(w as i32, h as i32)?;
 
-    GlInitArtifacts {
-        window,
-        gpu_state,
-        gl_surface,
-        gl_context,
-        surface,
-    }
-}
-
-// ------------------------------
-// Run loop bootstrap
-// ------------------------------
-fn run(settings: AppSettings) {
-    let el = EventLoop::new().expect("Failed to create event loop");
-    let pdf_document = load_document(&settings);
-    let GlInitArtifacts {
+    let mut app = Application {
         window,
         gl_surface,
         gl_context,
         gpu_state,
         surface,
-    } = create_window_and_context(&el, &pdf_document);
-    struct Env {
-        surface: Surface,
-        gl_surface: GlutinSurface<WindowSurface>,
-        gpu_state: SkiaGpuState,
-        gl_context: PossiblyCurrentContext,
-        window: Window,
-        pdf_document: Arc<PdfDocument>,
-        pdf_logic: PdfPageRendererLogic,
-    }
-    let mut pdf_logic = PdfPageRendererLogic::default();
-    pdf_logic.on_init();
-    struct Application {
-        env: Env,
-        modifiers: ModifiersState,
-        previous_frame_start: Instant,
-        frame_rate: f32,
-    }
-    let env = Env {
-        surface,
-        gl_surface,
-        gl_context,
-        gpu_state,
-        window,
-        pdf_document: pdf_document.clone(),
-        pdf_logic,
-    };
-    let mut application = Application {
-        env,
+        document,
+        current_page: 0,
         modifiers: ModifiersState::default(),
-        previous_frame_start: Instant::now(),
-        frame_rate: settings.frame_rate,
+        render_error: None,
     };
-    impl ApplicationHandler for Application {
-        fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
-        fn new_events(
-            &mut self,
-            _event_loop: &winit::event_loop::ActiveEventLoop,
-            cause: winit::event::StartCause,
-        ) {
-            if let winit::event::StartCause::ResumeTimeReached { .. } = cause {
-                self.env.window.request_redraw()
-            }
-        }
-        fn window_event(
-            &mut self,
-            event_loop: &winit::event_loop::ActiveEventLoop,
-            _window_id: winit::window::WindowId,
-            event: WindowEvent,
-        ) {
-            match event {
-                WindowEvent::CloseRequested => {
-                    event_loop.exit();
-                    return;
-                }
-                WindowEvent::Resized(physical_size) => {
-                    let (width, height): (u32, u32) = physical_size.into();
 
-                    self.env.surface = self
-                        .env
-                        .gpu_state
-                        .create_target_surface(width as i32, height as i32)
-                        .expect("Failed to create target surface");
+    event_loop.run_app(&mut app)?;
 
-                    self.env.gl_surface.resize(
-                        &self.env.gl_context,
-                        NonZeroU32::new(width.max(1)).unwrap(),
-                        NonZeroU32::new(height.max(1)).unwrap(),
-                    );
-                }
-                WindowEvent::ModifiersChanged(new_modifiers) => {
-                    self.modifiers = new_modifiers.state();
-                }
-                WindowEvent::KeyboardInput {
-                    event:
-                        KeyEvent {
-                            logical_key,
-                            state: ElementState::Pressed,
-                            ..
-                        },
-                    ..
-                } => {
-                    let mut page_changed = false;
-                    if logical_key == Key::Named(NamedKey::ArrowRight) {
-                        if self.env.pdf_document.page_count() > 0 {
-                            self.env.pdf_logic.current_page = (self.env.pdf_logic.current_page + 1)
-                                % self.env.pdf_document.page_count();
-                        }
-                        page_changed = true;
-                    } else if logical_key == Key::Named(NamedKey::ArrowLeft) {
-                        if self.env.pdf_document.page_count() > 0 {
-                            if self.env.pdf_logic.current_page == 0 {
-                                self.env.pdf_logic.current_page =
-                                    self.env.pdf_document.page_count() - 1;
-                            } else {
-                                self.env.pdf_logic.current_page =
-                                    self.env.pdf_logic.current_page.saturating_sub(1);
-                            }
-                        }
-                        page_changed = true;
-                    }
-                    if page_changed {
-                        println!("Current page: {}", self.env.pdf_logic.current_page);
-                        self.env.window.request_redraw();
-                    }
-                    if self.modifiers.super_key()
-                        && logical_key
-                            .to_text()
-                            .is_some_and(|text| text.eq_ignore_ascii_case("q"))
-                    {
-                        event_loop.exit();
-                    }
-                }
-                WindowEvent::RedrawRequested => {
-                    let size = self.env.window.inner_size();
-                    self.previous_frame_start = Instant::now();
-                    self.env.surface.canvas().restore_to_count(0);
-                    self.env.pdf_logic.on_render(
-                        &mut self.env.surface,
-                        &self.env.pdf_document,
-                        size.width as f32,
-                        size.height as f32,
-                    );
-                    self.env.gpu_state.context.flush_and_submit();
-                    self.env
-                        .gl_surface
-                        .swap_buffers(&self.env.gl_context)
-                        .unwrap();
-                }
-                _ => (),
-            }
-            let expected_frame_length_seconds = 1.0 / self.frame_rate;
-            let frame_duration = Duration::from_secs_f32(expected_frame_length_seconds);
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                self.previous_frame_start + frame_duration,
-            ));
-        }
-    }
-    el.run_app(&mut application).expect("run() failed");
-}
-
-pub trait AppRenderer<C> {
-    fn on_init(&mut self);
-    fn on_render(&mut self, canvas: &mut C, document: &PdfDocument, width: f32, height: f32);
-}
-
-#[derive(Default)]
-struct PdfPageRendererLogic {
-    current_page: usize,
-}
-
-impl AppRenderer<skia_safe::Surface> for PdfPageRendererLogic {
-    fn on_init(&mut self) {
-        self.current_page = 0;
+    if let Some(err) = app.render_error {
+        return Err(err);
     }
 
-    fn on_render(
-        &mut self,
-        surface: &mut skia_safe::Surface,
-        document: &PdfDocument,
-        width: f32,
-        height: f32,
-    ) {
-        surface.canvas().clear(SkiaColor::WHITE);
-        if document.page_count() == 0 {
-            return;
-        }
-        let page_index = self.current_page % document.page_count();
+    Ok(())
+}
 
-        let mut skia_backend = SkiaCanvasBackend {
-            surface,
-            width,
-            height,
-        };
+/// Creates the OpenGL context and window surface.
+fn create_gl_context_and_surface(
+    gl_config: &glutin::config::Config,
+    raw_handle: raw_window_handle::RawWindowHandle,
+    width: NonZeroU32,
+    height: NonZeroU32,
+) -> Result<(PossiblyCurrentContext, GlutinSurface<WindowSurface>), AppError> {
+    let context_attrs = ContextAttributesBuilder::new().build(Some(raw_handle));
+    let fallback_attrs = ContextAttributesBuilder::new()
+        .with_context_api(ContextApi::Gles(None))
+        .build(Some(raw_handle));
 
-        let mut pdf_renderer = PdfRenderer::new(document, &mut skia_backend);
-        pdf_renderer.render(page_index).unwrap();
-    }
+    // SAFETY: We pass a valid window handle obtained from a live window.
+    // The context is made current on the surface we create immediately after.
+    let gl_context = unsafe {
+        gl_config
+            .display()
+            .create_context(gl_config, &context_attrs)
+            .or_else(|_| {
+                gl_config
+                    .display()
+                    .create_context(gl_config, &fallback_attrs)
+            })?
+    };
+
+    let surface_attrs =
+        SurfaceAttributesBuilder::<WindowSurface>::new().build(raw_handle, width, height);
+
+    // SAFETY: We pass a valid window handle and the surface attributes match
+    // the window dimensions.
+    let gl_surface = unsafe {
+        gl_config
+            .display()
+            .create_window_surface(gl_config, &surface_attrs)?
+    };
+
+    let gl_context = gl_context.make_current(&gl_surface)?;
+
+    Ok((gl_context, gl_surface))
 }
