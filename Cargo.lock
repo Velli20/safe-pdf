@@ -691,6 +691,7 @@ dependencies = [
  "pdf-tokenizer",
  "raw-window-handle",
  "skia-safe",
+ "thiserror 2.0.12",
  "wgpu",
  "winit",
 ]
