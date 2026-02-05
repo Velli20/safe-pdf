@@ -121,22 +121,30 @@ fn build_emscripten(
     // Set EMCC_CFLAGS
     let emcc_cflags = [
         "--no-entry",
-        "-sASSERTIONS=1",
-        "-sALLOW_TABLE_GROWTH=1",
+        "-sASSERTIONS=0",
+        "-sALLOW_TABLE_GROWTH=0",
         "-sALLOW_MEMORY_GROWTH=1",
         "-sENVIRONMENT=web",
         "-sERROR_ON_UNDEFINED_SYMBOLS=0",
         "-sMAX_WEBGL_VERSION=2",
+        "-sWASM_BIGINT",
+        "-sSUPPORT_LONGJMP=wasm",
     ]
     .join(" ");
 
     // Set RUSTFLAGS for exported functions
     let rustflags = [
+        "-C panic=abort",
+        "-C opt-level=z",
+        "-C lto=fat",
+        "-C codegen-units=1",
+        "-C strip=symbols",
         "-C link-args=-sEXPORTED_FUNCTIONS=['_sk_load_pdf','_sk_get_page_count','_sk_render_page','_sk_free_pdf','_malloc','_free']",
         "-C link-args=-sEXPORTED_RUNTIME_METHODS=['cwrap','HEAPU8']",
         "-C link-args=-sSTANDALONE_WASM=0",
-    ]
-    .join(" ");
+        "-C link-args=-fwasm-exceptions",
+        "-C link-args=-sSUPPORT_LONGJMP=wasm",
+    ].join(" ");
 
     // Build cargo command
     let mut cargo_args = vec![

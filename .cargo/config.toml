@@ -1,2 +1,9 @@
 [alias]
 xtask = "run --package xtask --"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+opt-level = "z"
