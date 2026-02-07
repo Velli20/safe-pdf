@@ -22,7 +22,7 @@ thiserror          = "2"
 
 # Runtime deps used by binaries; feature-gated so `cargo check` stays light.
 futures            = { version = "0.3.30", optional = true }
-skia-safe          = { version = "0.89.0", features = ["gl"], optional = true }
+skia-safe          = { version = "0.91.1", features = ["gl"], optional = true }
 gl-rs              = { version = "0.14.0", package = "gl", optional = true }
 
 # These dependencies don't support emscripten/wasm32; keep them optional and only enabled by native features.
