@@ -11,5 +11,5 @@ gl = ["skia-safe/gl"]
 pdf-document = { path = "../pdf-document" }
 pdf-canvas = { path = "../pdf-canvas" }
 pdf-graphics = { path = "../pdf-graphics" }
-skia-safe = { version = "0.89.0" }
+skia-safe = { version = "0.91.1" }
 thiserror = "2.0.12"
