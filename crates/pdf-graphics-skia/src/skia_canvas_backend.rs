@@ -119,11 +119,15 @@ fn to_skia_image(image: &Image<'_>) -> Result<skia_safe::Image, SkiaCanvasBacken
 
 /// Converts a PdfPath to a Skia Path.
 fn to_skia_path(pdf_path: &PdfPath) -> skia_safe::Path {
-    let mut path = skia_safe::Path::new();
+    let mut builder = skia_safe::PathBuilder::new();
     for verb in &pdf_path.verbs {
         match verb {
-            PathVerb::MoveTo { x, y } => path.move_to((*x, *y)),
-            PathVerb::LineTo { x, y } => path.line_to((*x, *y)),
+            PathVerb::MoveTo { x, y } => {
+                builder.move_to((*x, *y));
+            }
+            PathVerb::LineTo { x, y } => {
+                builder.line_to((*x, *y));
+            }
             PathVerb::CubicTo {
                 x1,
                 y1,
@@ -131,12 +135,18 @@ fn to_skia_path(pdf_path: &PdfPath) -> skia_safe::Path {
                 y2,
                 x3,
                 y3,
-            } => path.cubic_to((*x1, *y1), (*x2, *y2), (*x3, *y3)),
-            PathVerb::Close => path.close(),
-            PathVerb::QuadTo { x1, y1, x2, y2 } => path.quad_to((*x1, *y1), (*x2, *y2)),
+            } => {
+                builder.cubic_to((*x1, *y1), (*x2, *y2), (*x3, *y3));
+            }
+            PathVerb::Close => {
+                builder.close();
+            }
+            PathVerb::QuadTo { x1, y1, x2, y2 } => {
+                builder.quad_to((*x1, *y1), (*x2, *y2));
+            }
         };
     }
-    path
+    builder.detach()
 }
 
 /// Converts a PDF Transform to a Skia Matrix.

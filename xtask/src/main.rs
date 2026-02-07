@@ -132,7 +132,7 @@ fn build_emscripten(
 
     // Set RUSTFLAGS for exported functions
     let rustflags = [
-        "-C link-args=-sEXPORTED_FUNCTIONS=['_sk_load_pdf','_sk_get_page_count','_sk_render_page','_sk_free_pdf','_malloc','_free']",
+        "-C link-args=-sEXPORTED_FUNCTIONS=['_sk_load_pdf','_sk_get_page_count','_sk_render_page','_sk_free_pdf','_malloc','_free','_main']",
         "-C link-args=-sEXPORTED_RUNTIME_METHODS=['cwrap','HEAPU8']",
         "-C link-args=-sSTANDALONE_WASM=0",
     ]
