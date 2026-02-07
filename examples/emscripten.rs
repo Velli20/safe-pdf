@@ -4,7 +4,7 @@ use gl_rs as gl;
 use pdf_document::{document::PdfDocument, reader::PdfReader};
 use pdf_graphics_skia::gpu_state::SkiaGpuState;
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
-use pdf_renderer::PdfRenderer;
+use pdf_renderer::{PageRecordingCache, render_page_cached};
 use std::cell::RefCell;
 
 // Thread-local storage for the currently loaded PDF document.
@@ -12,6 +12,9 @@ use std::cell::RefCell;
 thread_local! {
     static CURRENT_DOCUMENT: RefCell<Option<PdfDocument>> = const { RefCell::new(None) };
     static GPU_STATE: RefCell<Option<SkiaGpuState>> = const { RefCell::new(None) };
+    /// Page recording cache for efficient re-rendering.
+    /// Caches up to 5 pages as resolution-independent drawing commands.
+    static PAGE_CACHE: RefCell<PageRecordingCache> = RefCell::new(PageRecordingCache::new(5));
 }
 
 #[macro_export]
@@ -59,6 +62,10 @@ pub unsafe extern "C" fn sk_load_pdf(data_ptr: *const u8, data_len: usize) -> i3
 
     match reader.read_from_bytes(pdf_bytes, None) {
         Ok(document) => {
+            // Clear the page cache when loading a new document
+            PAGE_CACHE.with(|cache| {
+                cache.borrow_mut().clear();
+            });
             CURRENT_DOCUMENT.with(|doc| {
                 *doc.borrow_mut() = Some(document);
             });
@@ -132,20 +139,26 @@ pub extern "C" fn sk_render_page(width: i32, height: i32, page_index: usize) -> 
                 }
             };
 
+            // Clear the canvas before rendering
+            surface.canvas().clear(skia_safe::Color::TRANSPARENT);
+
             let mut skia_backend = SkiaCanvasBackend {
                 surface: &mut surface,
                 width: width as f32,
                 height: height as f32,
             };
 
-            let mut pdf_renderer = PdfRenderer::new(document, &mut skia_backend);
-            let result = match pdf_renderer.render(page_index) {
-                Ok(()) => 0,
-                Err(e) => {
-                    eprintln!("Render error: {:?}", e);
-                    -3
+            // Use cached rendering for better performance
+            let result = PAGE_CACHE.with(|cache| {
+                let mut cache = cache.borrow_mut();
+                match render_page_cached(document, page_index, &mut cache, &mut skia_backend) {
+                    Ok(()) => 0,
+                    Err(e) => {
+                        eprintln!("Render error: {:?}", e);
+                        -3
+                    }
                 }
-            };
+            });
 
             // Flush and submit to ensure GPU commands are executed
             gpu_state.context.flush_and_submit();
@@ -158,8 +171,101 @@ pub extern "C" fn sk_render_page(width: i32, height: i32, page_index: usize) -> 
 /// Frees the currently loaded PDF document and releases resources.
 #[unsafe(export_name = "sk_free_pdf")]
 pub extern "C" fn sk_free_pdf() {
+    PAGE_CACHE.with(|cache| {
+        cache.borrow_mut().clear();
+    });
     CURRENT_DOCUMENT.with(|doc| {
         *doc.borrow_mut() = None;
+    });
+}
+
+/// Returns page indices that should be prefetched for smooth navigation.
+///
+/// Call this from JavaScript to determine which pages to render in advance.
+/// Returns a pointer to an array of page indices, with the count stored at index 0.
+///
+/// # Returns
+///
+/// - Number of pages to prefetch (0-6)
+/// - The actual page indices can be retrieved via `sk_get_prefetch_page`
+#[unsafe(export_name = "sk_get_prefetch_count")]
+pub extern "C" fn sk_get_prefetch_count(current_page: usize) -> usize {
+    let page_count =
+        CURRENT_DOCUMENT.with(|doc| doc.borrow().as_ref().map(|d| d.page_count()).unwrap_or(0));
+
+    PAGE_CACHE.with(|cache| {
+        cache
+            .borrow()
+            .pages_to_prefetch(current_page, page_count)
+            .len()
+    })
+}
+
+/// Returns the page index at the given prefetch position.
+///
+/// # Parameters
+///
+/// - `current_page`: The currently displayed page.
+/// - `prefetch_index`: Index into the prefetch list (0 to prefetch_count-1).
+///
+/// # Returns
+///
+/// The page index to prefetch, or `usize::MAX` if invalid.
+#[unsafe(export_name = "sk_get_prefetch_page")]
+pub extern "C" fn sk_get_prefetch_page(current_page: usize, prefetch_index: usize) -> usize {
+    let page_count =
+        CURRENT_DOCUMENT.with(|doc| doc.borrow().as_ref().map(|d| d.page_count()).unwrap_or(0));
+
+    PAGE_CACHE.with(|cache| {
+        let pages = cache.borrow().pages_to_prefetch(current_page, page_count);
+        pages.get(prefetch_index).copied().unwrap_or(usize::MAX)
+    })
+}
+
+/// Checks if a page is currently cached.
+///
+/// # Returns
+///
+/// - `1` if the page is cached
+/// - `0` if the page is not cached
+#[unsafe(export_name = "sk_is_page_cached")]
+pub extern "C" fn sk_is_page_cached(page_index: usize) -> i32 {
+    PAGE_CACHE.with(|cache| {
+        if cache.borrow().contains(page_index) {
+            1
+        } else {
+            0
+        }
+    })
+}
+
+/// Resets the GPU state, releasing the Skia DirectContext.
+///
+/// **Must** be called before the WebGL context is destroyed or recreated
+/// (e.g. when the canvas is resized). The GPU state will be lazily
+/// re-created on the next call to [`sk_render_page`].
+#[unsafe(export_name = "sk_reset_gpu")]
+pub extern "C" fn sk_reset_gpu() {
+    GPU_STATE.with(|state| {
+        *state.borrow_mut() = None;
+    });
+}
+
+/// Returns the number of pages currently stored in the cache.
+///
+/// This is an O(1) operation, suitable for frequent UI updates.
+#[unsafe(export_name = "sk_get_cache_count")]
+pub extern "C" fn sk_get_cache_count() -> usize {
+    PAGE_CACHE.with(|cache| cache.borrow().len())
+}
+
+/// Clears the page cache.
+///
+/// Call this when the canvas size changes significantly to re-render at the new resolution.
+#[unsafe(export_name = "sk_clear_cache")]
+pub extern "C" fn sk_clear_cache() {
+    PAGE_CACHE.with(|cache| {
+        cache.borrow_mut().clear();
     });
 }
 
