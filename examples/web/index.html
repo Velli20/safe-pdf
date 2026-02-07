@@ -7,464 +7,200 @@
     <!-- Inline favicon to avoid 404 requests in dev -->
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23cccccc'/%3E%3Ctext x='8' y='11' font-size='9' text-anchor='middle' fill='%23333'%3ES%3C/text%3E%3C/svg%3E" />
     <style>
-      * {
-        box-sizing: border-box;
-      }
+      * { box-sizing: border-box; }
       body {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        margin: 0;
-        padding: 20px;
-        background: #f5f5f5;
+        margin: 0; padding: 0;
+        background: #525659;
+        overflow: hidden;
+        height: 100vh;
       }
-      .container {
-        max-width: 1200px;
-        margin: 0 auto;
-      }
-      h1 {
-        margin: 0 0 20px 0;
-        color: #333;
-      }
-      .controls {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 15px;
-        align-items: center;
-        margin-bottom: 20px;
-        padding: 15px;
-        background: #fff;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      }
-      .control-group {
+      .app-container {
         display: flex;
         flex-direction: column;
-        gap: 5px;
+        height: 100vh;
       }
+
+      /* ---- Toolbar ---- */
+      .toolbar {
+        display: flex; flex-wrap: wrap; gap: 15px; align-items: center;
+        padding: 10px 20px;
+        background: #323639;
+        border-bottom: 1px solid #1a1a1a;
+        color: #fff;
+        z-index: 100;
+      }
+      .toolbar h1 { margin: 0; font-size: 18px; font-weight: 500; color: #fff; }
+      .toolbar-spacer { flex: 1; }
+      .control-group { display: flex; align-items: center; gap: 8px; }
       .control-group label {
-        font-size: 12px;
-        font-weight: 600;
-        color: #666;
-        text-transform: uppercase;
+        font-size: 12px; font-weight: 500; color: #aaa; text-transform: uppercase;
       }
       .control-group input, .control-group select {
-        padding: 8px 12px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        font-size: 14px;
+        padding: 6px 10px; border: 1px solid #555; border-radius: 4px;
+        font-size: 13px; background: #404346; color: #fff;
       }
-      .control-group input[type="number"] {
-        width: 100px;
+      .control-group input[type="file"] { padding: 4px; }
+      .btn {
+        padding: 6px 14px; background: #0066cc; color: white;
+        border: none; border-radius: 4px; cursor: pointer;
+        font-size: 13px; font-weight: 500;
       }
-      .control-group input[type="file"] {
-        padding: 6px;
+      .btn:hover { background: #0055aa; }
+      .btn:disabled { background: #555; cursor: not-allowed; }
+      .btn-icon { padding: 6px 10px; background: transparent; border: 1px solid #555; }
+      .btn-icon:hover { background: #404346; }
+      .page-nav { display: flex; align-items: center; gap: 5px; }
+      .page-nav input { width: 50px; text-align: center; }
+      .page-nav span { color: #aaa; font-size: 13px; }
+
+      /* ---- Viewer container (filled by SafePdfViewer) ---- */
+      #viewerContainer { flex: 1; overflow: hidden; position: relative; }
+
+      /* ---- Status bar ---- */
+      .status-bar {
+        padding: 6px 20px; background: #2a2d30; color: #aaa;
+        font-size: 12px; display: flex; justify-content: space-between;
+        border-top: 1px solid #1a1a1a;
       }
-      button {
-        padding: 10px 20px;
-        background: #0066cc;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 14px;
-        font-weight: 500;
-      }
-      button:hover {
-        background: #0055aa;
-      }
-      button:disabled {
-        background: #ccc;
-        cursor: not-allowed;
-      }
-      .canvas-container {
-        background: #fff;
-        padding: 20px;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        display: inline-block;
-      }
-      .canvas-wrapper {
-        position: relative;
-        display: inline-block;
-      }
-      #canvas {
-        border: 1px solid #ccc;
-        image-rendering: pixelated;
-        display: block;
-      }
-      .resize-handle {
-        position: absolute;
-        bottom: 0;
-        right: 0;
-        width: 20px;
-        height: 20px;
-        cursor: nwse-resize;
-        background: linear-gradient(135deg, transparent 50%, #0066cc 50%);
-        border-bottom-right-radius: 3px;
-      }
-      .resize-handle:hover {
-        background: linear-gradient(135deg, transparent 50%, #0055aa 50%);
-      }
-      .resize-handle::before {
-        content: '';
-        position: absolute;
-        bottom: 3px;
-        right: 3px;
-        width: 8px;
-        height: 8px;
-        border-right: 2px solid rgba(255,255,255,0.8);
-        border-bottom: 2px solid rgba(255,255,255,0.8);
-      }
-      .canvas-dimensions {
-        position: absolute;
-        bottom: -25px;
-        right: 0;
-        font-size: 12px;
-        color: #666;
-        background: rgba(255,255,255,0.9);
-        padding: 2px 6px;
-        border-radius: 3px;
-        opacity: 0;
-        transition: opacity 0.2s;
-      }
-      .canvas-wrapper.resizing .canvas-dimensions {
-        opacity: 1;
-      }
-      .status {
-        margin-top: 15px;
-        padding: 10px 15px;
-        background: #e8f4fd;
-        border-radius: 4px;
-        color: #0066cc;
-        font-size: 14px;
-      }
-      .status.error {
-        background: #fde8e8;
-        color: #cc0000;
-      }
-      .status.success {
-        background: #e8fde8;
-        color: #00aa00;
-      }
+      .status-bar .cache-info { color: #6a6; }
+      .status-bar.error { background: #4a2020; color: #faa; }
     </style>
   </head>
   <body>
-    <div class="container">
-      <h1>Safe-PDF WASM Viewer</h1>
+    <div class="app-container">
+      <div class="toolbar">
+        <h1>Safe-PDF Viewer</h1>
+        <div class="toolbar-spacer"></div>
 
-      <div class="controls">
         <div class="control-group">
-          <label for="pdfFile">PDF File</label>
+          <label for="pdfFile">Open</label>
           <input type="file" id="pdfFile" accept=".pdf,application/pdf" />
         </div>
 
+        <div class="control-group page-nav">
+          <button class="btn btn-icon" id="prevPage" disabled>◀</button>
+          <input type="number" id="pageInput" value="1" min="1" disabled />
+          <span id="pageTotal">/ 0</span>
+          <button class="btn btn-icon" id="nextPage" disabled>▶</button>
+        </div>
+
         <div class="control-group">
-          <label for="pageSelect">Page</label>
-          <select id="pageSelect" disabled>
-            <option value="0">Load PDF first</option>
+          <label for="zoomSelect">Zoom</label>
+          <select id="zoomSelect" disabled>
+            <option value="0.5">50%</option>
+            <option value="0.75">75%</option>
+            <option value="1" selected>100%</option>
+            <option value="1.25">125%</option>
+            <option value="1.5">150%</option>
+            <option value="2">200%</option>
+            <option value="fit-width">Fit Width</option>
+            <option value="fit-page">Fit Page</option>
           </select>
         </div>
       </div>
 
-      <div class="canvas-container">
-        <div class="canvas-wrapper" id="canvasWrapper">
-          <canvas id="canvas" width="800" height="600"></canvas>
-          <div class="resize-handle" id="resizeHandle"></div>
-          <div class="canvas-dimensions" id="canvasDimensions">800 × 600</div>
-        </div>
-      </div>
+      <!-- SafePdfViewer mounts its DOM here -->
+      <div id="viewerContainer"></div>
 
-      <div id="status" class="status">Loading WASM module...</div>
+      <div class="status-bar" id="statusBar">
+        <span id="statusText">Loading WASM module...</span>
+        <span id="cacheInfo" class="cache-info"></span>
+      </div>
     </div>
 
-    <script>
-      // State management
-      let pdfDataPtr = null;
-      let pdfDataLength = 0;
-      let pageCount = 0;
-      let glHandle = null;
-      let wasmReady = false;
-      let isResizing = false;
-      let resizeStartX = 0;
-      let resizeStartY = 0;
-      let resizeStartWidth = 0;
-      let resizeStartHeight = 0;
+    <!--
+      ES-module entry point.
+      All viewer logic lives in src/safe-pdf-viewer.js (and its dependency
+      src/safe-pdf-renderer.js). This script just wires the toolbar to the
+      viewer API.
+    -->
+    <script type="module">
+      import { SafePdfViewer } from './src/safe-pdf-viewer.js';
 
-      // Function bindings (set after module loads)
-      let sk_load_pdf = null;
-      let sk_get_page_count = null;
-      let sk_render_page = null;
-      let sk_free_pdf = null;
+      // ---- DOM refs ----
+      const statusText  = document.getElementById('statusText');
+      const statusBar   = document.getElementById('statusBar');
+      const cacheInfo   = document.getElementById('cacheInfo');
+      const pdfFile     = document.getElementById('pdfFile');
+      const pageInput   = document.getElementById('pageInput');
+      const pageTotal   = document.getElementById('pageTotal');
+      const prevPage    = document.getElementById('prevPage');
+      const nextPage    = document.getElementById('nextPage');
+      const zoomSelect  = document.getElementById('zoomSelect');
 
-      function setStatus(message, type = '') {
-        const statusEl = document.getElementById('status');
-        statusEl.textContent = message;
-        statusEl.className = 'status ' + type;
+      // ---- Helpers ----
+      function setStatus(message, isError = false) {
+        statusText.textContent = message;
+        statusBar.classList.toggle('error', isError);
       }
 
-      function initWebGL() {
-        const canvas = document.getElementById('canvas');
-
-        const attrs = {
-          alpha: true,
-          depth: true,
-          stencil: false,
-          antialias: true,
-          preserveDrawingBuffer: false,
-          preferLowPowerToHighPerformance: false,
-          failIfMajorPerformanceCaveat: false,
-          majorVersion: 2,
-          minorVersion: 0,
-          enableExtensionsByDefault: true,
-          explicitSwapControl: false,
-          proxyContextToMainThread: 0,
-          renderViaOffscreenBackBuffer: false,
-        };
-
-        const gl = canvas.getContext('webgl2', attrs) || canvas.getContext('webgl', attrs);
-        if (!gl) {
-          setStatus('Unable to create WebGL context', 'error');
-          return false;
-        }
-
-        // Register and make current via Emscripten runtime
-        if (typeof GL !== 'undefined' && GL.registerContext && GL.makeContextCurrent) {
-          glHandle = GL.registerContext(gl, attrs);
-          GL.makeContextCurrent(glHandle);
-          console.log('WebGL context created (handle=' + glHandle + ')');
-        } else {
-          console.warn('Emscripten GL runtime not found');
-        }
-
-        return true;
+      function updateCacheInfo() {
+        const cached = viewer.getCachedPageCount();
+        const total  = viewer.getPageCount();
+        cacheInfo.textContent = total > 0 ? `Cache: ${cached}/${total} pages` : '';
       }
 
-      function loadPdfFile(file) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-          const arrayBuffer = e.target.result;
-          const uint8Array = new Uint8Array(arrayBuffer);
-
-          // Free previous PDF data if any
-          if (pdfDataPtr !== null) {
-            Module._free(pdfDataPtr);
-            pdfDataPtr = null;
-          }
-
-          // Allocate memory in WASM heap and copy the PDF data
-          pdfDataLength = uint8Array.length;
-          pdfDataPtr = Module._malloc(pdfDataLength);
-          Module.HEAPU8.set(uint8Array, pdfDataPtr);
-
-          // Load the PDF and get page count
-          const result = sk_load_pdf(pdfDataPtr, pdfDataLength);
-          if (result < 0) {
-            setStatus('Failed to parse PDF file', 'error');
-            Module._free(pdfDataPtr);
-            pdfDataPtr = null;
-            return;
-          }
-
-          pageCount = sk_get_page_count();
-          console.log('PDF loaded with ' + pageCount + ' pages');
-
-          // Update page selector
-          const pageSelect = document.getElementById('pageSelect');
-          pageSelect.innerHTML = '';
-          for (let i = 0; i < pageCount; i++) {
-            const option = document.createElement('option');
-            option.value = i;
-            option.textContent = 'Page ' + (i + 1);
-            pageSelect.appendChild(option);
-          }
-          pageSelect.disabled = false;
-
-          setStatus('PDF loaded: ' + file.name + ' (' + pageCount + ' pages)', 'success');
-
-          // Auto-render first page
-          renderCurrentPage();
-        };
-        reader.onerror = function() {
-          setStatus('Failed to read file', 'error');
-        };
-        reader.readAsArrayBuffer(file);
+      function enableControls(enabled) {
+        pageInput.disabled  = !enabled;
+        prevPage.disabled   = !enabled;
+        nextPage.disabled   = !enabled;
+        zoomSelect.disabled = !enabled;
       }
 
-      function renderCurrentPage() {
-        if (pdfDataPtr === null) {
-          setStatus('No PDF loaded', 'error');
-          return;
-        }
+      // ---- Create viewer ----
+      const viewer = new SafePdfViewer(
+        document.getElementById('viewerContainer'),
+        { wasmUrl: './dist/emscripten.js' }
+      );
 
-        const canvas = document.getElementById('canvas');
-        const pageIndex = parseInt(document.getElementById('pageSelect').value, 10);
-        const width = canvas.width;
-        const height = canvas.height;
+      // ---- Viewer events ----
+      viewer.addEventListener('ready', () => {
+        setStatus('Ready. Open a PDF file to begin.');
+      });
 
-        // Make sure WebGL context is current
-        if (glHandle !== null && typeof GL !== 'undefined') {
-          GL.makeContextCurrent(glHandle);
-        }
+      viewer.addEventListener('load', (e) => {
+        const { pageCount, fileName } = e.detail;
+        enableControls(true);
+        pageInput.max   = pageCount;
+        pageInput.value = 1;
+        pageTotal.textContent = `/ ${pageCount}`;
+        setStatus(`PDF loaded: ${fileName ?? 'document'} (${pageCount} pages)`);
+        updateCacheInfo();
+      });
 
-        setStatus('Rendering page ' + (pageIndex + 1) + '...', '');
+      viewer.addEventListener('pagechange', (e) => {
+        pageInput.value = e.detail.pageNumber;
+        updateCacheInfo();
+      });
 
-        try {
-          const result = sk_render_page(width, height, pageIndex);
-          if (result === 0) {
-            setStatus('Rendered page ' + (pageIndex + 1) + ' of ' + pageCount, 'success');
-          } else if (result === -1) {
-            setStatus('Page ' + (pageIndex + 1) + ' not found', 'error');
-          } else {
-            setStatus('Render error (code: ' + result + ')', 'error');
-          }
-        } catch (e) {
-          setStatus('Render error: ' + e.message, 'error');
-          console.error(e);
-        }
-      }
+      viewer.addEventListener('error', (e) => {
+        setStatus(e.detail.message, true);
+      });
 
+      // ---- Toolbar wiring ----
+      pdfFile.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) viewer.loadFile(e.target.files[0]);
+      });
 
-      function initResizeHandle() {
-        const handle = document.getElementById('resizeHandle');
-        const wrapper = document.getElementById('canvasWrapper');
-        const canvas = document.getElementById('canvas');
-        const widthInput = document.getElementById('canvasWidth');
-        const heightInput = document.getElementById('canvasHeight');
-        const dimensionsDisplay = document.getElementById('canvasDimensions');
+      prevPage.addEventListener('click', () => viewer.previousPage());
+      nextPage.addEventListener('click', () => viewer.nextPage());
 
-        handle.addEventListener('mousedown', function(e) {
-          e.preventDefault();
-          isResizing = true;
-          resizeStartX = e.clientX;
-          resizeStartY = e.clientY;
-          resizeStartWidth = canvas.width;
-          resizeStartHeight = canvas.height;
-          wrapper.classList.add('resizing');
-          document.body.style.cursor = 'nwse-resize';
-          document.body.style.userSelect = 'none';
-        });
+      pageInput.addEventListener('change', function () {
+        const page = parseInt(this.value, 10) - 1;
+        if (!isNaN(page)) viewer.goToPage(page);
+      });
 
-        document.addEventListener('mousemove', function(e) {
-          if (!isResizing) return;
+      zoomSelect.addEventListener('change', function () {
+        const val = this.value;
+        viewer.setZoom(val === 'fit-width' || val === 'fit-page' ? val : parseFloat(val));
+      });
 
-          const deltaX = e.clientX - resizeStartX;
-          const deltaY = e.clientY - resizeStartY;
-
-          let newWidth = Math.max(100, Math.min(4096, resizeStartWidth + deltaX));
-          let newHeight = Math.max(100, Math.min(4096, resizeStartHeight + deltaY));
-
-          // Round to integers
-          newWidth = Math.round(newWidth);
-          newHeight = Math.round(newHeight);
-
-          canvas.width = newWidth;
-          canvas.height = newHeight;
-          widthInput.value = newWidth;
-          heightInput.value = newHeight;
-          dimensionsDisplay.textContent = newWidth + ' × ' + newHeight;
-        });
-
-        document.addEventListener('mouseup', function(e) {
-          if (!isResizing) return;
-          isResizing = false;
-          wrapper.classList.remove('resizing');
-          document.body.style.cursor = '';
-          document.body.style.userSelect = '';
-
-          // Reinitialize WebGL and re-render
-          initWebGL();
-          if (pdfDataPtr !== null) {
-            renderCurrentPage();
-          }
-          setStatus('Canvas resized to ' + canvas.width + 'x' + canvas.height, 'success');
-        });
-
-        // Touch support
-        handle.addEventListener('touchstart', function(e) {
-          e.preventDefault();
-          const touch = e.touches[0];
-          isResizing = true;
-          resizeStartX = touch.clientX;
-          resizeStartY = touch.clientY;
-          resizeStartWidth = canvas.width;
-          resizeStartHeight = canvas.height;
-          wrapper.classList.add('resizing');
-        }, { passive: false });
-
-        document.addEventListener('touchmove', function(e) {
-          if (!isResizing) return;
-          const touch = e.touches[0];
-
-          const deltaX = touch.clientX - resizeStartX;
-          const deltaY = touch.clientY - resizeStartY;
-
-          let newWidth = Math.max(100, Math.min(4096, resizeStartWidth + deltaX));
-          let newHeight = Math.max(100, Math.min(4096, resizeStartHeight + deltaY));
-
-          newWidth = Math.round(newWidth);
-          newHeight = Math.round(newHeight);
-
-          canvas.width = newWidth;
-          canvas.height = newHeight;
-          widthInput.value = newWidth;
-          heightInput.value = newHeight;
-          dimensionsDisplay.textContent = newWidth + ' × ' + newHeight;
-        }, { passive: true });
-
-        document.addEventListener('touchend', function(e) {
-          if (!isResizing) return;
-          isResizing = false;
-          wrapper.classList.remove('resizing');
-
-          initWebGL();
-          if (pdfDataPtr !== null) {
-            renderCurrentPage();
-          }
-          setStatus('Canvas resized to ' + canvas.width + 'x' + canvas.height, 'success');
-        });
-      }
-
-      // Configure Emscripten before loading the generated glue file.
-      var Module = {
-        noInitialRun: true,
-        canvas: (function () { return document.getElementById('canvas'); })(),
-        onRuntimeInitialized: function() {
-          console.log("WASM Module Loaded and Initialized!");
-
-          // Initialize WebGL
-          if (!initWebGL()) {
-            return;
-          }
-
-          // Bind exported functions
-          sk_load_pdf = Module.cwrap('sk_load_pdf', 'number', ['number', 'number']);
-          sk_get_page_count = Module.cwrap('sk_get_page_count', 'number', []);
-          sk_render_page = Module.cwrap('sk_render_page', 'number', ['number', 'number', 'number']);
-          sk_free_pdf = Module.cwrap('sk_free_pdf', null, []);
-
-          wasmReady = true;
-          setStatus('Ready. Select a PDF file to begin.', 'success');
-
-          // Initialize the resize handle
-          initResizeHandle();
-
-          // Set up event listeners
-          document.getElementById('pdfFile').addEventListener('change', function(e) {
-            if (e.target.files.length > 0) {
-              loadPdfFile(e.target.files[0]);
-            }
-          });
-
-          document.getElementById('pageSelect').addEventListener('change', function() {
-            if (pdfDataPtr !== null) {
-              renderCurrentPage();
-            }
-          });
-
-
-        }
-      };
+      // ---- Boot ----
+      viewer.init().catch((err) => {
+        setStatus('Failed to initialise viewer: ' + err.message, true);
+        console.error(err);
+      });
     </script>
-    <!-- Load the generated Emscripten JS glue (output of build) -->
-    <script src="./dist/emscripten.js"></script>
   </body>
 </html>
