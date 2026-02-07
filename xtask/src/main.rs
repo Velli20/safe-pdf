@@ -130,11 +130,24 @@ fn build_emscripten(
     ]
     .join(" ");
 
-    // Set RUSTFLAGS for exported functions
+    // Set RUSTFLAGS for exported functions and memory configuration.
+    //
+    // Memory flags are set here (via -C link-args) to guarantee they reach
+    // the final emcc link step. Relying solely on EMCC_CFLAGS is fragile
+    // because cargo may invoke emcc for linking without that env var.
+    //
+    // INITIAL_MEMORY  – 128 MiB.  Skia's static data segments + Rust
+    //   runtime consume most of the default 16 MiB, leaving almost no heap.
+    // STACK_SIZE      – 2 MiB.  The default 64 KiB is too small for Rust.
+    // ALLOW_MEMORY_GROWTH – duplicated from EMCC_CFLAGS to ensure it
+    //   reaches the linker; the heap can grow beyond INITIAL_MEMORY.
     let rustflags = [
         "-C link-args=-sEXPORTED_FUNCTIONS=['_sk_load_pdf','_sk_get_page_count','_sk_render_page','_sk_free_pdf','_malloc','_free','_main']",
         "-C link-args=-sEXPORTED_RUNTIME_METHODS=['cwrap','HEAPU8']",
         "-C link-args=-sSTANDALONE_WASM=0",
+        "-C link-args=-sINITIAL_MEMORY=134217728",
+        "-C link-args=-sSTACK_SIZE=2097152",
+        "-C link-args=-sALLOW_MEMORY_GROWTH=1",
     ]
     .join(" ");
 
