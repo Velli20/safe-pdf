@@ -66,9 +66,9 @@ pub struct RecordingCanvas {
 }
 
 impl<'a> Shader<'a> {
-    /// Converts this shader into a `Shader<'static>` by taking ownership of all
-    /// borrowed data. This is useful for storing shaders in recording commands
-    /// that must outlive the original borrow.
+    /// Converts this shader into a `Shader<'static>` by performing a deep clone
+    /// of all borrowed data into owned storage. This is useful for storing
+    /// shaders in recording commands that must outlive the original borrow.
     fn to_static(&self) -> Shader<'static> {
         match self {
             Shader::LinearGradient {
