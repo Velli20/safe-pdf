@@ -35,7 +35,7 @@ impl<'a, 'b, T: std::error::Error> Type1FontRenderer<'a, 'b, T> {
 }
 
 impl<T: std::error::Error> TextRenderer for Type1FontRenderer<'_, '_, T> {
-    fn render_text(&mut self, iter: &mut dyn Iterator<Item = u16>) -> Result<(), PdfCanvasError> {
+    fn render_text(&mut self, iter: impl Iterator<Item = u16>) -> Result<(), PdfCanvasError> {
         let TextState {
             horizontal_scaling,
             font_size,

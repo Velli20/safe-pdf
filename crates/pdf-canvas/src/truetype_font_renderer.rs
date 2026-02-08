@@ -150,7 +150,7 @@ impl<'a, 'b, T: std::error::Error> TrueTypeFontRenderer<'a, 'b, T> {
 impl<T: std::error::Error> TextRenderer for TrueTypeFontRenderer<'_, '_, T> {
     fn render_text(
         &mut self,
-        text: &mut dyn Iterator<Item = u16>,
+        text: impl Iterator<Item = u16>,
     ) -> Result<(), crate::error::PdfCanvasError> {
         // Extract text state parameters for rendering.
         let TextState {

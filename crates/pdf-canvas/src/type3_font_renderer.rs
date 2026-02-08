@@ -74,7 +74,7 @@ impl<'a, 'b, T: std::error::Error> Type3FontRenderer<'a, 'b, T> {
 impl<T: std::error::Error> TextRenderer for Type3FontRenderer<'_, '_, T> {
     fn render_text(
         &mut self,
-        iter: &mut dyn Iterator<Item = u16>,
+        iter: impl Iterator<Item = u16>,
     ) -> Result<(), crate::error::PdfCanvasError> {
         // 1. Iterate through each character code in the input text.
         for char_code_byte in iter {
