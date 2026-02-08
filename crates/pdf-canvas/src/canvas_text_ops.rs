@@ -119,18 +119,18 @@ impl<T: std::error::Error> TextStateOps for PdfCanvas<'_, T> {
 }
 
 /// Create an iterator over big-endian CID values from a byte slice.
-fn to_cid_char_iter<'a>(text: &'a [u8]) -> Box<dyn Iterator<Item = u16> + 'a> {
-    Box::new(text.chunks_exact(2).map(|pair| {
+fn to_cid_char_iter(text: &[u8]) -> impl Iterator<Item = u16> + '_ {
+    text.chunks_exact(2).map(|pair| {
         let mut iter = pair.iter().copied();
         let first_byte = iter.next().unwrap_or(0);
         let second_byte = iter.next().unwrap_or(0);
         u16::from_be_bytes([first_byte, second_byte])
-    }))
+    })
 }
 
 /// Create an iterator over single-byte character codes as `u16`.
-fn to_char_iter<'a>(text: &'a [u8]) -> Box<dyn Iterator<Item = u16> + 'a> {
-    Box::new(text.iter().copied().map(|b| u16::from_u8(b).unwrap_or(0)))
+fn to_char_iter(text: &[u8]) -> impl Iterator<Item = u16> + '_ {
+    text.iter().copied().map(|b| u16::from_u8(b).unwrap_or(0))
 }
 
 impl<T: std::error::Error> TextShowingOps for PdfCanvas<'_, T> {
@@ -143,35 +143,35 @@ impl<T: std::error::Error> TextShowingOps for PdfCanvas<'_, T> {
 
         match current_font {
             Font::Type3(type3_font) => {
-                let mut iter = to_char_iter(text);
+                let iter = to_char_iter(text);
                 let mut renderer = Type3FontRenderer::new(self, type3_font)?;
-                renderer.render_text(&mut iter)
+                renderer.render_text(iter)
             }
             Font::Type1(type1_font) => {
                 let program = type1_font.font_file.as_slice();
-                let mut iter = to_char_iter(text);
+                let iter = to_char_iter(text);
 
                 let mut renderer = Type1FontRenderer::new(self, program)?;
-                renderer.render_text(&mut iter)
+                renderer.render_text(iter)
             }
             Font::TrueType(font) => {
-                let mut iter = to_char_iter(text);
+                let iter = to_char_iter(text);
 
                 let mut renderer = TrueTypeFontRenderer::new(self, &font.font_file, false)?;
-                renderer.render_text(&mut iter)
+                renderer.render_text(iter)
             }
             Font::Type0(font) => {
-                let mut iter = to_cid_char_iter(text);
+                let iter = to_cid_char_iter(text);
 
                 match font.subtype {
                     CidFontSubType::Type0 => {
                         let program = font.font_file.as_slice();
                         let mut renderer = Type1FontRenderer::new(self, program)?;
-                        renderer.render_text(&mut iter)
+                        renderer.render_text(iter)
                     }
                     CidFontSubType::Type2 => {
                         let mut renderer = TrueTypeFontRenderer::new(self, &font.font_file, true)?;
-                        renderer.render_text(&mut iter)
+                        renderer.render_text(iter)
                     }
                 }
             }

@@ -16,5 +16,5 @@ pub trait TextRenderer {
     /// # Returns
     ///
     /// Returns [`PdfCanvasError`] when glyph lookup, font data, or drawing operations fail.
-    fn render_text(&mut self, iter: &mut dyn Iterator<Item = u16>) -> Result<(), PdfCanvasError>;
+    fn render_text(&mut self, iter: impl Iterator<Item = u16>) -> Result<(), PdfCanvasError>;
 }
