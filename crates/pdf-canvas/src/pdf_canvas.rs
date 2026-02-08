@@ -19,11 +19,11 @@ use crate::{
     text_state::TextState,
 };
 
-pub struct PdfCanvas<'a> {
+pub struct PdfCanvas<'a, B: CanvasBackend> {
     /// The current path being constructed or drawn, if any.
     pub(crate) current_path: Option<PdfPath>,
     /// The drawing backend implementing `CanvasBackend` for rendering operations.
-    pub(crate) canvas: &'a mut dyn CanvasBackend,
+    pub(crate) canvas: &'a mut B,
     /// An optional mask surface for advanced compositing or clipping.
     pub(crate) mask: Option<(Box<RecordingCanvas>, MaskMode, Transform)>,
     /// The PDF page associated with this canvas.
@@ -32,7 +32,7 @@ pub struct PdfCanvas<'a> {
     pub(crate) canvas_stack: Vec<CanvasState<'a>>,
 }
 
-impl<'a> PdfCanvas<'a> {
+impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// Creates a new `PdfCanvas` for rendering PDF graphics onto a backend surface.
     ///
     /// # Parameters
@@ -45,7 +45,7 @@ impl<'a> PdfCanvas<'a> {
     ///
     /// A new `PdfCanvas` instance or an error if the page dimensions are invalid.
     pub fn new(
-        backend: &'a mut dyn CanvasBackend,
+        backend: &'a mut B,
         page: &'a PdfPage,
         bb: Option<&Rect>,
     ) -> Result<Self, PdfCanvasError> {
@@ -167,7 +167,7 @@ impl<'a> PdfCanvas<'a> {
             ..Default::default()
         }];
 
-        let mut other = PdfCanvas {
+        let mut other = PdfCanvas::<RecordingCanvas> {
             current_path: None,
             canvas: recording_canvas,
             mask: None,

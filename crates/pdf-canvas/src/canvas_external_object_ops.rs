@@ -14,7 +14,11 @@ use pdf_content_stream::pdf_operator_backend::XObjectOps;
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_page::{color_space::ColorSpace, image::ImageXObject, xobject::XObject};
 
-use crate::{canvas_backend::Image, error::PdfCanvasError, pdf_canvas::PdfCanvas};
+use crate::{
+    canvas_backend::{CanvasBackend, Image},
+    error::PdfCanvasError,
+    pdf_canvas::PdfCanvas,
+};
 
 /// Number of color components in RGB color space.
 const RGB_COMPONENTS: usize = 3;
@@ -198,7 +202,7 @@ fn expand_indexed_to_rgb(
     Ok(out)
 }
 
-impl XObjectOps for PdfCanvas<'_> {
+impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
     /// Invokes (renders) an XObject by name from the current resource dictionary.
     ///
     /// This method handles two types of XObjects:
@@ -237,7 +241,7 @@ impl XObjectOps for PdfCanvas<'_> {
     }
 }
 
-impl PdfCanvas<'_> {
+impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Renders an image XObject to the canvas.
     ///
     /// Handles the complete image rendering pipeline including coordinate

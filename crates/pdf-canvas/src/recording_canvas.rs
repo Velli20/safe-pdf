@@ -149,8 +149,8 @@ impl RecordingCanvas {
     /// # Returns
     ///
     /// - `Ok(())` if all commands were successfully replayed.
-    /// - An error of type `B::ErrorType` if any command fails during replay.
-    pub fn replay(&self, backend: &mut dyn CanvasBackend) -> Result<(), PdfCanvasError> {
+    /// - An error of type `PdfCanvasError` if any command fails during replay.
+    pub fn replay<B: CanvasBackend>(&self, backend: &mut B) -> Result<(), PdfCanvasError> {
         use RecordingCommand::*;
         for cmd in &self.commands {
             match cmd {

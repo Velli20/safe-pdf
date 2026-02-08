@@ -1,3 +1,4 @@
+use crate::canvas_backend::CanvasBackend;
 use crate::pdf_canvas::PdfCanvas;
 use crate::pdf_path_pen::PdfPathPen;
 use crate::text_state::TextState;
@@ -9,16 +10,16 @@ use skrifa::instance::{LocationRef, Size};
 use skrifa::outline::{DrawSettings, OutlineGlyphCollection};
 use skrifa::{FontRef, GlyphId, MetadataProvider};
 
-pub(crate) struct Type1FontRenderer<'a, 'b> {
-    canvas: &'b mut PdfCanvas<'a>,
+pub(crate) struct Type1FontRenderer<'a, 'b, B: CanvasBackend> {
+    canvas: &'b mut PdfCanvas<'a, B>,
     font_ref: FontRef<'b>,
     outlines: OutlineGlyphCollection<'b>,
 }
 
-impl<'a, 'b> Type1FontRenderer<'a, 'b> {
+impl<'a, 'b, B: CanvasBackend> Type1FontRenderer<'a, 'b, B> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        canvas: &'b mut PdfCanvas<'a>,
+        canvas: &'b mut PdfCanvas<'a, B>,
         font_bytes: &'b [u8],
     ) -> Result<Self, PdfCanvasError> {
         let font_ref = FontRef::new(font_bytes)
@@ -34,7 +35,7 @@ impl<'a, 'b> Type1FontRenderer<'a, 'b> {
     }
 }
 
-impl TextRenderer for Type1FontRenderer<'_, '_> {
+impl<B: CanvasBackend> TextRenderer for Type1FontRenderer<'_, '_, B> {
     fn render_text(&mut self, iter: impl Iterator<Item = u16>) -> Result<(), PdfCanvasError> {
         let TextState {
             horizontal_scaling,

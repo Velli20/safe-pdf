@@ -2,9 +2,12 @@ use pdf_content_stream::pdf_operator_backend::GraphicsStateOps;
 use pdf_graphics::{LineCap, LineJoin, transform::Transform};
 use pdf_page::{external_graphics_state::ExternalGraphicsStateKey, xobject::XObject};
 
-use crate::{error::PdfCanvasError, pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas};
+use crate::{
+    canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
+    recording_canvas::RecordingCanvas,
+};
 
-impl GraphicsStateOps for PdfCanvas<'_> {
+impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
     fn save_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
         self.save()
     }
