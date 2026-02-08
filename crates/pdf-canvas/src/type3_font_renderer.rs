@@ -137,20 +137,10 @@ impl<T: std::error::Error> TextRenderer for Type3FontRenderer<'_, '_, T> {
                 // Compute displacement vector in text space for (width, 0) in glyph space
                 let (x1, y1) = self.font_matrix.transform_point(width, 0.0);
                 let (x0, y0) = self.font_matrix.transform_point(0.0, 0.0);
-                let (wx_ts, wy_ts) = (x1 - x0, y1 - y0);
+                let glyph_width_x = (x1 - x0) * text_state.font_size;
+                let glyph_width_y = (y1 - y0) * text_state.font_size;
 
-                let base_adv_x = wx_ts * text_state.font_size;
-                let advance_y = wy_ts * text_state.font_size;
-
-                let word_spacing_for_char = if char_code_byte == 32 {
-                    text_state.word_spacing
-                } else {
-                    0.0
-                };
-                let advance_x = (base_adv_x + text_state.character_spacing + word_spacing_for_char)
-                    * text_state.horizontal_scaling;
-
-                text_state.matrix.post_translate(advance_x, advance_y);
+                text_state.advance_text_cursor(char_code_byte, glyph_width_x, glyph_width_y);
             }
         }
 

@@ -56,4 +56,38 @@ impl TextState<'_> {
             None
         }
     }
+
+    /// Advances the text matrix after rendering a glyph.
+    ///
+    /// Applies the standard PDF text advance formula, which computes the new text
+    /// position based on the glyph's width and the current text state parameters:
+    /// - `advance_x = (glyph_width_x + Tc + Tw_if_space) × Th`
+    /// - `advance_y = glyph_width_y`
+    ///
+    /// Word spacing (`Tw`) is applied only to the space character (char code 0x20).
+    ///
+    /// # Parameters
+    ///
+    /// - `char_code`: The character code of the glyph just rendered.
+    /// - `glyph_width_x`: The horizontal glyph displacement, already scaled to
+    ///   text-space units (e.g. `w0 / 1000 × Tfs` for Type1/TrueType).
+    /// - `glyph_width_y`: The vertical glyph displacement in text-space units
+    ///   (0.0 for horizontal writing modes).
+    pub(crate) fn advance_text_cursor(
+        &mut self,
+        char_code: u16,
+        glyph_width_x: f32,
+        glyph_width_y: f32,
+    ) {
+        const SPACE_CHAR_CODE: u16 = 0x20;
+
+        let word_spacing_for_char = if char_code == SPACE_CHAR_CODE {
+            self.word_spacing
+        } else {
+            0.0
+        };
+        let advance_x = (glyph_width_x + self.character_spacing + word_spacing_for_char)
+            * self.horizontal_scaling;
+        self.matrix.post_translate(advance_x, glyph_width_y);
+    }
 }

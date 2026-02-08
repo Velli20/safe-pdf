@@ -152,14 +152,7 @@ impl<T: std::error::Error> TextRenderer for TrueTypeFontRenderer<'_, '_, T> {
         &mut self,
         text: impl Iterator<Item = u16>,
     ) -> Result<(), crate::error::PdfCanvasError> {
-        // Extract text state parameters for rendering.
-        let TextState {
-            horizontal_scaling,
-            font_size,
-            character_spacing,
-            word_spacing,
-            ..
-        } = self.canvas.current_state()?.text_state.clone();
+        let font_size = self.canvas.current_state()?.text_state.font_size;
 
         // Iterate over each character in the input text (1-byte encoding).
         for char_code in text {
@@ -186,18 +179,8 @@ impl<T: std::error::Error> TextRenderer for TrueTypeFontRenderer<'_, '_, T> {
             }
 
             let text_state = &mut self.canvas.current_state_mut()?.text_state;
-
-            // Convert width from font units to ems and scale
-            let w0_ems = text_state.glyph_width(char_code) / 1000.0;
-            let glyph_width_tfs_scaled = w0_ems * font_size;
-
-            // Apply word spacing only to space characters (0x20)
-            let word_spacing_for_char = if char_code == 32 { word_spacing } else { 0.0 };
-
-            // Compute and apply advance
-            let advance_x = (glyph_width_tfs_scaled + character_spacing + word_spacing_for_char)
-                * horizontal_scaling;
-            text_state.matrix.post_translate(advance_x, 0.0);
+            let glyph_width_x = text_state.glyph_width(char_code) / 1000.0 * font_size;
+            text_state.advance_text_cursor(char_code, glyph_width_x, 0.0);
         }
         Ok(())
     }
