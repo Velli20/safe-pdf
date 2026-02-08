@@ -205,10 +205,8 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
     }
 
     fn move_to_next_line_and_show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented(format!(
-            "move_to_next_line_and_show_text ' (text_len={})",
-            text.len()
-        )))
+        self.move_to_start_of_next_line()?;
+        self.show_text(text)
     }
 
     fn set_spacing_and_show_text(
@@ -217,11 +215,8 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
         char_spacing: f32,
         text: &[u8],
     ) -> Result<(), Self::ErrorType> {
-        Err(PdfCanvasError::NotImplemented(format!(
-            "set_spacing_and_show_text \" : word_spacing={}, char_spacing={}, text_len={}",
-            word_spacing,
-            char_spacing,
-            text.len()
-        )))
+        self.set_word_spacing(word_spacing)?;
+        self.set_character_spacing(char_spacing)?;
+        self.move_to_next_line_and_show_text(text)
     }
 }
