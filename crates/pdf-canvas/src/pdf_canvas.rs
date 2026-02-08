@@ -574,7 +574,17 @@ where
     ///
     /// If the restored state included a clipping path, the clipping path is reset on the backend.
     pub(crate) fn restore(&mut self) -> Result<(), PdfCanvasError> {
+        // Do not allow popping the initial/base graphics state. There is no
+        // corresponding backend `save()` for it, so treating this as an
+        // underflow keeps the canvas stack and backend stack in sync.
+        if self.canvas_stack.len() <= 1 {
+            return Err(PdfCanvasError::GraphicsStateStackUnderflow);
+        }
+
+        // At this point there is at least one saved state beyond the base,
+        // so popping is safe and has a matching backend `save()`.
         let _ = self.canvas_stack.pop();
+
         self.canvas
             .restore()
             .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
