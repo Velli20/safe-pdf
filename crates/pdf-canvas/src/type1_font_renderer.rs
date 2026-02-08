@@ -40,7 +40,6 @@ impl<T: std::error::Error> TextRenderer for Type1FontRenderer<'_, '_, T> {
             horizontal_scaling,
             font_size,
             rise,
-            character_spacing,
             ..
         } = self.canvas.current_state()?.text_state.clone();
 
@@ -98,17 +97,8 @@ impl<T: std::error::Error> TextRenderer for Type1FontRenderer<'_, '_, T> {
 
             // Advance text matrix.
             let text_state = &mut self.canvas.current_state_mut()?.text_state;
-            let w0_units = text_state.glyph_width(char_code);
-            let w0_ems = w0_units / 1000.0;
-            let glyph_width_tfs_scaled = w0_ems * text_state.font_size;
-            let word_spacing_for_char = if char_code == 32 {
-                text_state.word_spacing
-            } else {
-                0.0
-            };
-            let advance_x = (glyph_width_tfs_scaled + character_spacing + word_spacing_for_char)
-                * horizontal_scaling;
-            text_state.matrix.post_translate(advance_x, 0.0);
+            let glyph_width_x = text_state.glyph_width(char_code) / 1000.0 * text_state.font_size;
+            text_state.advance_text_cursor(char_code, glyph_width_x, 0.0);
         }
         Ok(())
     }
