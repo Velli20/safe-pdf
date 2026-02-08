@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use femtovg::{Canvas, Color, FillRule, Paint, Path};
 use pdf_canvas::{
     canvas_backend::{CanvasBackend, Image, Shader},
@@ -126,7 +128,7 @@ impl CanvasBackend for CanvasImpl<'_> {
 
     fn begin_mask_layer(
         &mut self,
-        _mask: &RecordingCanvas,
+        _mask: &Arc<RecordingCanvas>,
         _transform: &pdf_graphics::transform::Transform,
         _mask_mode: MaskMode,
     ) -> Result<(), PdfCanvasError> {
@@ -136,7 +138,7 @@ impl CanvasBackend for CanvasImpl<'_> {
 
     fn end_mask_layer(
         &mut self,
-        _mask: &RecordingCanvas,
+        _mask: &Arc<RecordingCanvas>,
         _transform: &pdf_graphics::transform::Transform,
         _mask_mode: MaskMode,
     ) -> Result<(), PdfCanvasError> {

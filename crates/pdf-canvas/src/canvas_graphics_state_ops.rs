@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use pdf_content_stream::pdf_operator_backend::GraphicsStateOps;
 use pdf_graphics::{LineCap, LineJoin, transform::Transform};
 use pdf_page::{external_graphics_state::ExternalGraphicsStateKey, xobject::XObject};
@@ -143,23 +145,20 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
 
                             let transform = self.current_state()?.transform;
 
+                            let arc = Arc::new(recording_canvas);
+
                             // Enable the mask on the main canvas. Subsequent drawing operations
                             // will be modulated by this mask.
-                            self.canvas.begin_mask_layer(
-                                &recording_canvas,
-                                &transform,
-                                smask.mask_type,
-                            )?;
+                            self.canvas
+                                .begin_mask_layer(&arc, &transform, smask.mask_type)?;
 
                             // Store the mask in the current canvas state to be used until it's finished.
-                            self.mask =
-                                Some((Box::new(recording_canvas), smask.mask_type, transform));
+                            self.mask = Some((Arc::clone(&arc), smask.mask_type, transform));
                         }
                     } else if let Some((mask, mask_type, transform)) = self.mask.take() {
                         // This branch handles the case where `/SMask` is set to `/None` in the `ExtGState`,
                         // which signals the end of the current soft mask application.
-                        self.canvas
-                            .end_mask_layer(mask.as_ref(), &transform, mask_type)?;
+                        self.canvas.end_mask_layer(&mask, &transform, mask_type)?;
                     }
                 }
                 ExternalGraphicsStateKey::StrokingAlpha(alpha) => {
