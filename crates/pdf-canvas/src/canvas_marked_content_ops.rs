@@ -1,8 +1,8 @@
 use pdf_content_stream::pdf_operator_backend::MarkedContentOps;
 
-use crate::pdf_canvas::PdfCanvas;
+use crate::{canvas_backend::CanvasBackend, pdf_canvas::PdfCanvas};
 
-impl MarkedContentOps for PdfCanvas<'_> {
+impl<B: CanvasBackend> MarkedContentOps for PdfCanvas<'_, B> {
     fn mark_point(&mut self, _tag: &str) -> Result<(), Self::ErrorType> {
         Ok(())
     }

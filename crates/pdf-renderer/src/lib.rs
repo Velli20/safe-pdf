@@ -18,18 +18,18 @@ pub enum PdfRendererError {
 }
 
 /// Renders pages of a [`PdfDocument`] onto a user supplied [`CanvasBackend`].
-pub struct PdfRenderer<'a, 'b> {
+pub struct PdfRenderer<'a, 'b, B: CanvasBackend> {
     document: &'b PdfDocument,
-    canvas: &'a mut dyn CanvasBackend,
+    canvas: &'a mut B,
 }
 
-impl<'a, 'b> PdfRenderer<'a, 'b> {
+impl<'a, 'b, B: CanvasBackend> PdfRenderer<'a, 'b, B> {
     /// Creates a new renderer over the given PDF `document` and `canvas` backend.
     ///
     /// The caller retains ownership of the canvas; the renderer only holds a
     /// mutable borrow for the duration of its lifetime. Multiple pages can be
     /// rendered sequentially by repeatedly calling [`PdfRenderer::render`].
-    pub fn new(document: &'b PdfDocument, canvas: &'a mut dyn CanvasBackend) -> Self {
+    pub fn new(document: &'b PdfDocument, canvas: &'a mut B) -> Self {
         Self { document, canvas }
     }
 
@@ -138,7 +138,7 @@ pub fn render_page_cached<B: CanvasBackend>(
 
     // Check cache first
     if let Some(recording) = cache.get(page_index) {
-        // Clone to avoid borrow issues, then replay
+        // Replay directly from the cached recording.
         recording.replay(backend)?;
         return Ok(());
     }

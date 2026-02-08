@@ -4,8 +4,8 @@ use pdf_graphics::transform::Transform;
 use thiserror::Error;
 
 use crate::{
-    error::PdfCanvasError, pdf_canvas::PdfCanvas, text_renderer::TextRenderer,
-    text_state::TextState,
+    canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
+    text_renderer::TextRenderer, text_state::TextState,
 };
 
 /// Defines errors that can occur during Type 3 font rendering.
@@ -18,9 +18,9 @@ pub enum Type3FontRendererError {
 }
 
 /// A renderer for Type 3 fonts, which defines glyphs using PDF content streams.
-pub(crate) struct Type3FontRenderer<'a, 'b> {
+pub(crate) struct Type3FontRenderer<'a, 'b, B: CanvasBackend> {
     /// A mutable reference to the `PdfCanvas` where glyphs are drawn.
-    canvas: &'b mut PdfCanvas<'a>,
+    canvas: &'b mut PdfCanvas<'a, B>,
     /// The font matrix from the Type 3 font dictionary, mapping glyph space to text space.
     font_matrix: Transform,
     /// A matrix encoding font size, horizontal scaling, and text rise.
@@ -29,10 +29,10 @@ pub(crate) struct Type3FontRenderer<'a, 'b> {
     type3_font: &'a Type3Font,
 }
 
-impl<'a, 'b> Type3FontRenderer<'a, 'b> {
+impl<'a, 'b, B: CanvasBackend> Type3FontRenderer<'a, 'b, B> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        canvas: &'b mut PdfCanvas<'a>,
+        canvas: &'b mut PdfCanvas<'a, B>,
         type3_font: &'a Type3Font,
     ) -> Result<Self, PdfCanvasError> {
         let font_matrix = if let [a, b, c, d, e, f] = type3_font.font_matrix.as_slice() {
@@ -71,7 +71,7 @@ impl<'a, 'b> Type3FontRenderer<'a, 'b> {
     }
 }
 
-impl TextRenderer for Type3FontRenderer<'_, '_> {
+impl<B: CanvasBackend> TextRenderer for Type3FontRenderer<'_, '_, B> {
     fn render_text(
         &mut self,
         iter: impl Iterator<Item = u16>,

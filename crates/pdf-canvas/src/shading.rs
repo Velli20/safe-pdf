@@ -1,9 +1,9 @@
 use pdf_content_stream::pdf_operator_backend::ShadingOps;
 use pdf_graphics::pdf_path::PdfPath;
 
-use crate::{error::PdfCanvasError, pdf_canvas::PdfCanvas};
+use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
-impl ShadingOps for PdfCanvas<'_> {
+impl<B: CanvasBackend> ShadingOps for PdfCanvas<'_, B> {
     fn paint_shading(&mut self, shading_name: &str) -> Result<(), Self::ErrorType> {
         let state = self.current_state()?;
 

@@ -1,3 +1,4 @@
+use canvas_backend::CanvasBackend;
 use error::PdfCanvasError;
 use pdf_canvas::PdfCanvas;
 use pdf_content_stream::pdf_operator_backend::{PdfOperatorBackend, PdfOperatorBackendError};
@@ -23,8 +24,8 @@ mod truetype_font_renderer;
 pub mod type1_font_renderer;
 mod type3_font_renderer;
 
-impl PdfOperatorBackend for PdfCanvas<'_> {}
+impl<B: CanvasBackend> PdfOperatorBackend for PdfCanvas<'_, B> {}
 
-impl PdfOperatorBackendError for PdfCanvas<'_> {
+impl<B: CanvasBackend> PdfOperatorBackendError for PdfCanvas<'_, B> {
     type ErrorType = PdfCanvasError;
 }
