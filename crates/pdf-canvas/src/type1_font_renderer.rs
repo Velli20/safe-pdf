@@ -9,16 +9,16 @@ use skrifa::instance::{LocationRef, Size};
 use skrifa::outline::{DrawSettings, OutlineGlyphCollection};
 use skrifa::{FontRef, GlyphId, MetadataProvider};
 
-pub(crate) struct Type1FontRenderer<'a, 'b, T: std::error::Error> {
-    canvas: &'b mut PdfCanvas<'a, T>,
+pub(crate) struct Type1FontRenderer<'a, 'b> {
+    canvas: &'b mut PdfCanvas<'a>,
     font_ref: FontRef<'b>,
     outlines: OutlineGlyphCollection<'b>,
 }
 
-impl<'a, 'b, T: std::error::Error> Type1FontRenderer<'a, 'b, T> {
+impl<'a, 'b> Type1FontRenderer<'a, 'b> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        canvas: &'b mut PdfCanvas<'a, T>,
+        canvas: &'b mut PdfCanvas<'a>,
         font_bytes: &'b [u8],
     ) -> Result<Self, PdfCanvasError> {
         let font_ref = FontRef::new(font_bytes)
@@ -34,7 +34,7 @@ impl<'a, 'b, T: std::error::Error> Type1FontRenderer<'a, 'b, T> {
     }
 }
 
-impl<T: std::error::Error> TextRenderer for Type1FontRenderer<'_, '_, T> {
+impl TextRenderer for Type1FontRenderer<'_, '_> {
     fn render_text(&mut self, iter: impl Iterator<Item = u16>) -> Result<(), PdfCanvasError> {
         let TextState {
             horizontal_scaling,

@@ -4,7 +4,7 @@ use pdf_page::{external_graphics_state::ExternalGraphicsStateKey, xobject::XObje
 
 use crate::{error::PdfCanvasError, pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas};
 
-impl<T: std::error::Error> GraphicsStateOps for PdfCanvas<'_, T> {
+impl GraphicsStateOps for PdfCanvas<'_> {
     fn save_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
         self.save()
     }
@@ -142,9 +142,11 @@ impl<T: std::error::Error> GraphicsStateOps for PdfCanvas<'_, T> {
 
                             // Enable the mask on the main canvas. Subsequent drawing operations
                             // will be modulated by this mask.
-                            self.canvas
-                                .begin_mask_layer(&recording_canvas, &transform, smask.mask_type)
-                                .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
+                            self.canvas.begin_mask_layer(
+                                &recording_canvas,
+                                &transform,
+                                smask.mask_type,
+                            )?;
 
                             // Store the mask in the current canvas state to be used until it's finished.
                             self.mask =
@@ -154,8 +156,7 @@ impl<T: std::error::Error> GraphicsStateOps for PdfCanvas<'_, T> {
                         // This branch handles the case where `/SMask` is set to `/None` in the `ExtGState`,
                         // which signals the end of the current soft mask application.
                         self.canvas
-                            .end_mask_layer(mask.as_ref(), &transform, mask_type)
-                            .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
+                            .end_mask_layer(mask.as_ref(), &transform, mask_type)?;
                     }
                 }
                 ExternalGraphicsStateKey::StrokingAlpha(alpha) => {

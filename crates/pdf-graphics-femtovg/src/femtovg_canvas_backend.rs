@@ -1,15 +1,13 @@
 use femtovg::{Canvas, Color, FillRule, Paint, Path};
 use pdf_canvas::{
     canvas_backend::{CanvasBackend, Image, Shader},
+    error::PdfCanvasError,
     recording_canvas::RecordingCanvas,
 };
 use pdf_graphics::{
     BlendMode, MaskMode, PathFillType,
     pdf_path::{PathVerb, PdfPath},
 };
-
-#[derive(Debug, thiserror::Error)]
-pub enum FemtovgCanvasBackendError {}
 
 fn to_femtovg_path(pdf_path: &PdfPath) -> Path {
     let mut path = Path::new();
@@ -47,8 +45,6 @@ pub struct CanvasImpl<'a> {
 }
 
 impl CanvasBackend for CanvasImpl<'_> {
-    type ErrorType = FemtovgCanvasBackendError;
-
     fn fill_path(
         &mut self,
         path: &PdfPath,
@@ -56,7 +52,7 @@ impl CanvasBackend for CanvasImpl<'_> {
         color: pdf_graphics::color::Color,
         _shader: &Option<Shader>,
         _blend_mode: Option<pdf_graphics::BlendMode>,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         let path = to_femtovg_path(path);
 
         let mut fill_paint = Paint::color(Color::rgbf(color.r, color.g, color.b));
@@ -76,7 +72,7 @@ impl CanvasBackend for CanvasImpl<'_> {
         line_width: f32,
         _shader: &Option<Shader>,
         _blend_mode: Option<pdf_graphics::BlendMode>,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         let path = to_femtovg_path(path);
 
         let mut stroke_paint = Paint::color(Color::rgbf(color.r, color.g, color.b));
@@ -98,7 +94,7 @@ impl CanvasBackend for CanvasImpl<'_> {
         &mut self,
         _path: &PdfPath,
         mode: PathFillType,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         // let mut path = to_femtovg_path(path);
         match mode {
             PathFillType::Winding => {}
@@ -107,12 +103,12 @@ impl CanvasBackend for CanvasImpl<'_> {
         Ok(())
     }
 
-    fn save(&mut self) -> Result<(), Self::ErrorType> {
+    fn save(&mut self) -> Result<(), PdfCanvasError> {
         self.canvas.save();
         Ok(())
     }
 
-    fn restore(&mut self) -> Result<(), Self::ErrorType> {
+    fn restore(&mut self) -> Result<(), PdfCanvasError> {
         self.canvas.restore();
         Ok(())
     }
@@ -123,7 +119,7 @@ impl CanvasBackend for CanvasImpl<'_> {
         _blend_mode: Option<BlendMode>,
         _dest_rect: pdf_graphics::rect::Rect,
         _image_rotation: Option<f32>,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         // Not yet implemented in femtovg backend
         Ok(())
     }
@@ -133,7 +129,7 @@ impl CanvasBackend for CanvasImpl<'_> {
         _mask: &RecordingCanvas,
         _transform: &pdf_graphics::transform::Transform,
         _mask_mode: MaskMode,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         // Not yet implemented in femtovg backend
         Ok(())
     }
@@ -143,7 +139,7 @@ impl CanvasBackend for CanvasImpl<'_> {
         _mask: &RecordingCanvas,
         _transform: &pdf_graphics::transform::Transform,
         _mask_mode: MaskMode,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         // Not yet implemented in femtovg backend
         Ok(())
     }

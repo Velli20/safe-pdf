@@ -39,9 +39,9 @@ pub enum TrueTypeFontRendererError {
 /// Handles the conversion of TrueType glyph outlines into PDF path
 /// operations, applying the appropriate transformations for font size,
 /// scaling, and text positioning.
-pub(crate) struct TrueTypeFontRenderer<'a, 'b, T> {
+pub(crate) struct TrueTypeFontRenderer<'a, 'b> {
     /// The canvas where glyphs are rendered.
-    canvas: &'b mut PdfCanvas<'a, T>,
+    canvas: &'b mut PdfCanvas<'a>,
     /// Parsed TrueType font reference providing access to font tables.
     font_ref: FontRef<'a>,
     /// Collection of outline glyphs extracted from the font.
@@ -97,9 +97,9 @@ fn resolve_glyph_id(font: &FontRef<'_>, char_code: u16) -> GlyphId {
     GlyphId::new(u32::from(char_code))
 }
 
-impl<'a, 'b, T: std::error::Error> TrueTypeFontRenderer<'a, 'b, T> {
+impl<'a, 'b> TrueTypeFontRenderer<'a, 'b> {
     pub fn new(
-        canvas: &'b mut PdfCanvas<'a, T>,
+        canvas: &'b mut PdfCanvas<'a>,
         stream_object: &'a [u8],
         is_cid: bool,
     ) -> Result<Self, PdfCanvasError> {
@@ -147,7 +147,7 @@ impl<'a, 'b, T: std::error::Error> TrueTypeFontRenderer<'a, 'b, T> {
     }
 }
 
-impl<T: std::error::Error> TextRenderer for TrueTypeFontRenderer<'_, '_, T> {
+impl TextRenderer for TrueTypeFontRenderer<'_, '_> {
     fn render_text(
         &mut self,
         text: impl Iterator<Item = u16>,

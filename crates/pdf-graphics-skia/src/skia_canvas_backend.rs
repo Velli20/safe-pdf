@@ -1,5 +1,6 @@
 use pdf_canvas::{
     canvas_backend::{CanvasBackend, Image, Shader},
+    error::PdfCanvasError,
     recording_canvas::RecordingCanvas,
 };
 use pdf_graphics::{
@@ -33,6 +34,12 @@ pub enum SkiaCanvasBackendError {
     ShaderCreationFailed { shader: &'static str },
 }
 
+impl From<SkiaCanvasBackendError> for PdfCanvasError {
+    fn from(e: SkiaCanvasBackendError) -> Self {
+        PdfCanvasError::BackendError(e.to_string())
+    }
+}
+
 pub struct SkiaCanvasBackend<'a> {
     pub surface: &'a mut skia_safe::Surface,
     pub width: f32,
@@ -48,7 +55,7 @@ pub struct SkiaCanvasBackend<'a> {
 /// operations that expect an alpha mask.
 fn to_skia_a8_mask_image(
     recording_canvas: &RecordingCanvas,
-) -> Result<skia_safe::Image, SkiaCanvasBackendError> {
+) -> Result<skia_safe::Image, PdfCanvasError> {
     let width = recording_canvas.width();
     let height = recording_canvas.height();
     let info = skia_safe::ImageInfo::new(
@@ -62,7 +69,8 @@ fn to_skia_a8_mask_image(
             kind: "mask",
             width: width as u32,
             height: height as u32,
-        });
+        }
+        .into());
     };
 
     let mut mask_backend = SkiaCanvasBackend {
@@ -89,13 +97,13 @@ fn to_skia_a8_mask_image(
 /// # Returns
 ///
 /// - A Skia `Image` ready to be drawn with `draw_image`/`draw_image_rect`.
-fn to_skia_image(image: &Image<'_>) -> Result<skia_safe::Image, SkiaCanvasBackendError> {
+fn to_skia_image(image: &Image<'_>) -> Result<skia_safe::Image, PdfCanvasError> {
     let width = image.width;
     let height = image.height;
     let pixel_format = image.pixel_format;
 
     if width == 0 || height == 0 {
-        return Err(SkiaCanvasBackendError::InvalidImageDimensions { width, height });
+        return Err(SkiaCanvasBackendError::InvalidImageDimensions { width, height }.into());
     }
 
     let color_type = match pixel_format {
@@ -114,7 +122,7 @@ fn to_skia_image(image: &Image<'_>) -> Result<skia_safe::Image, SkiaCanvasBacken
 
     let row_bytes = width * image_info.bytes_per_pixel();
     skia_safe::images::raster_from_data(&image_info, pixel_data, row_bytes)
-        .ok_or(SkiaCanvasBackendError::RasterImageCreationFailed { width, height })
+        .ok_or_else(|| SkiaCanvasBackendError::RasterImageCreationFailed { width, height }.into())
 }
 
 /// Converts a PdfPath to a Skia Path.
@@ -195,7 +203,7 @@ fn to_skia_blend_mode(mode: BlendMode) -> skia_safe::BlendMode {
     }
 }
 
-fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, SkiaCanvasBackendError> {
+fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, PdfCanvasError> {
     match shader {
         Shader::LinearGradient {
             x0,
@@ -228,8 +236,11 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, SkiaCanvasBacken
                 None,
                 Some(&mat),
             )
-            .ok_or(SkiaCanvasBackendError::ShaderCreationFailed {
-                shader: "linear_gradient",
+            .ok_or_else(|| {
+                SkiaCanvasBackendError::ShaderCreationFailed {
+                    shader: "linear_gradient",
+                }
+                .into()
             })
         }
         Shader::RadialGradient {
@@ -265,8 +276,11 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, SkiaCanvasBacken
                 None,
                 Some(&mat),
             )
-            .ok_or(SkiaCanvasBackendError::ShaderCreationFailed {
-                shader: "two_point_conical_gradient",
+            .ok_or_else(|| {
+                SkiaCanvasBackendError::ShaderCreationFailed {
+                    shader: "two_point_conical_gradient",
+                }
+                .into()
             })
         }
         Shader::TilingPatternImage {
@@ -288,8 +302,11 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, SkiaCanvasBacken
                     skia_safe::SamplingOptions::default(),
                     Some(&mat),
                 )
-                .ok_or(SkiaCanvasBackendError::ShaderCreationFailed {
-                    shader: "tiling_pattern_image",
+                .ok_or_else(|| {
+                    SkiaCanvasBackendError::ShaderCreationFailed {
+                        shader: "tiling_pattern_image",
+                    }
+                    .into()
                 })
         }
     }
@@ -318,8 +335,6 @@ fn make_paint(
 }
 
 impl CanvasBackend for SkiaCanvasBackend<'_> {
-    type ErrorType = SkiaCanvasBackendError;
-
     fn fill_path(
         &mut self,
         path: &PdfPath,
@@ -327,7 +342,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         color: Color,
         shader: &Option<Shader>,
         blend_mode: Option<BlendMode>,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         let mut sk_path = to_skia_path(path);
         sk_path.set_fill_type(to_skia_fill_type(fill_type));
         let mut paint = make_paint(color, skia_safe::paint::Style::Fill, None, blend_mode);
@@ -347,7 +362,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         line_width: f32,
         shader: &Option<Shader>,
         blend_mode: Option<BlendMode>,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         let sk_path = to_skia_path(path);
         let mut paint = make_paint(
             color,
@@ -376,19 +391,19 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         &mut self,
         path: &PdfPath,
         mode: PathFillType,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         let mut sk_path = to_skia_path(path);
         sk_path.set_fill_type(to_skia_fill_type(mode));
         self.surface.canvas().clip_path(&sk_path, None, Some(true));
         Ok(())
     }
 
-    fn save(&mut self) -> Result<(), Self::ErrorType> {
+    fn save(&mut self) -> Result<(), PdfCanvasError> {
         self.surface.canvas().save();
         Ok(())
     }
 
-    fn restore(&mut self) -> Result<(), Self::ErrorType> {
+    fn restore(&mut self) -> Result<(), PdfCanvasError> {
         self.surface.canvas().restore();
         Ok(())
     }
@@ -399,12 +414,13 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         blend_mode: Option<BlendMode>,
         dest_rect: pdf_graphics::rect::Rect,
         image_rotation: Option<f32>,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         if image.width == 0 || image.height == 0 {
             return Err(SkiaCanvasBackendError::InvalidImageDimensions {
                 width: image.width,
                 height: image.height,
-            });
+            }
+            .into());
         }
 
         let skia_image = to_skia_image(image)?;
@@ -452,7 +468,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         mask: &RecordingCanvas,
         transform: &Transform,
         _mask_mode: MaskMode,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         self.surface.canvas().save();
         let mat = to_skia_matrix(transform);
         let rect = skia_safe::Rect::from_xywh(0.0, 0.0, mask.width(), mask.height());
@@ -471,7 +487,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         mask: &RecordingCanvas,
         transform: &Transform,
         mask_mode: MaskMode,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         // Render mask into a temporary surface depending on the requested mask mode.
         // - Alpha: render directly into an A8 mask surface.
         // - Luminosity: render into RGBA and then convert RGB luminance into an A8 mask.
@@ -538,7 +554,8 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
             if !ok {
                 return Err(SkiaCanvasBackendError::ImageDecodeFailed {
                     encoding: "read_pixels",
-                });
+                }
+                .into());
             }
             // Number of bytes per pixel in RGBA format
             const BYTES_PER_RGBA: usize = 4;
