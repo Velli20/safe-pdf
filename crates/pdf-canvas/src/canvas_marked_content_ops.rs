@@ -2,7 +2,7 @@ use pdf_content_stream::pdf_operator_backend::MarkedContentOps;
 
 use crate::pdf_canvas::PdfCanvas;
 
-impl<T: std::error::Error> MarkedContentOps for PdfCanvas<'_, T> {
+impl MarkedContentOps for PdfCanvas<'_> {
     fn mark_point(&mut self, _tag: &str) -> Result<(), Self::ErrorType> {
         Ok(())
     }

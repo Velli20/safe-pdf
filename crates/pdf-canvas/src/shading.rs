@@ -3,7 +3,7 @@ use pdf_graphics::pdf_path::PdfPath;
 
 use crate::{error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
-impl<T: std::error::Error> ShadingOps for PdfCanvas<'_, T> {
+impl ShadingOps for PdfCanvas<'_> {
     fn paint_shading(&mut self, shading_name: &str) -> Result<(), Self::ErrorType> {
         let state = self.current_state()?;
 
@@ -33,15 +33,13 @@ impl<T: std::error::Error> ShadingOps for PdfCanvas<'_, T> {
         let shader = Some(self.build_shading_shader(shading, &Some(mat))?);
 
         self.save()?;
-        self.canvas
-            .fill_path(
-                &path,
-                pdf_graphics::PathFillType::Winding,
-                fill_color,
-                &shader,
-                blend_mode,
-            )
-            .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
+        self.canvas.fill_path(
+            &path,
+            pdf_graphics::PathFillType::Winding,
+            fill_color,
+            &shader,
+            blend_mode,
+        )?;
 
         self.restore()
     }

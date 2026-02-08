@@ -18,25 +18,18 @@ pub enum PdfRendererError {
 }
 
 /// Renders pages of a [`PdfDocument`] onto a user supplied [`CanvasBackend`].
-///
-/// Type Parameter:
-///
-/// - `T` – Mask type associated with the concrete `CanvasBackend` implementation.
-pub struct PdfRenderer<'a, 'b, T> {
+pub struct PdfRenderer<'a, 'b> {
     document: &'b PdfDocument,
-    canvas: &'a mut dyn CanvasBackend<ErrorType = T>,
+    canvas: &'a mut dyn CanvasBackend,
 }
 
-impl<'a, 'b, T: std::error::Error> PdfRenderer<'a, 'b, T> {
+impl<'a, 'b> PdfRenderer<'a, 'b> {
     /// Creates a new renderer over the given PDF `document` and `canvas` backend.
     ///
     /// The caller retains ownership of the canvas; the renderer only holds a
     /// mutable borrow for the duration of its lifetime. Multiple pages can be
     /// rendered sequentially by repeatedly calling [`PdfRenderer::render`].
-    pub fn new(
-        document: &'b PdfDocument,
-        canvas: &'a mut dyn CanvasBackend<ErrorType = T>,
-    ) -> Self {
+    pub fn new(document: &'b PdfDocument, canvas: &'a mut dyn CanvasBackend) -> Self {
         Self { document, canvas }
     }
 
@@ -146,11 +139,7 @@ pub fn render_page_cached<B: CanvasBackend>(
     // Check cache first
     if let Some(recording) = cache.get(page_index) {
         // Clone to avoid borrow issues, then replay
-        recording.replay(backend).map_err(|e| {
-            PdfRendererError::PdfCanvasError(pdf_canvas::error::PdfCanvasError::BackendError(
-                e.to_string(),
-            ))
-        })?;
+        recording.replay(backend)?;
         return Ok(());
     }
 
@@ -158,11 +147,7 @@ pub fn render_page_cached<B: CanvasBackend>(
     let recording = render_page_to_recording(document, page_index, width, height)?;
 
     // Replay to the actual backend
-    recording.replay(backend).map_err(|e| {
-        PdfRendererError::PdfCanvasError(pdf_canvas::error::PdfCanvasError::BackendError(
-            e.to_string(),
-        ))
-    })?;
+    recording.replay(backend)?;
 
     // Store in cache for next time
     cache.insert(page_index, recording);

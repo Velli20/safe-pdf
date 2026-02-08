@@ -19,11 +19,11 @@ use crate::{
     text_state::TextState,
 };
 
-pub struct PdfCanvas<'a, T> {
+pub struct PdfCanvas<'a> {
     /// The current path being constructed or drawn, if any.
     pub(crate) current_path: Option<PdfPath>,
     /// The drawing backend implementing `CanvasBackend` for rendering operations.
-    pub(crate) canvas: &'a mut dyn CanvasBackend<ErrorType = T>,
+    pub(crate) canvas: &'a mut dyn CanvasBackend,
     /// An optional mask surface for advanced compositing or clipping.
     pub(crate) mask: Option<(Box<RecordingCanvas>, MaskMode, Transform)>,
     /// The PDF page associated with this canvas.
@@ -32,10 +32,7 @@ pub struct PdfCanvas<'a, T> {
     pub(crate) canvas_stack: Vec<CanvasState<'a>>,
 }
 
-impl<'a, T: std::error::Error> PdfCanvas<'a, T>
-where
-    T: 'a,
-{
+impl<'a> PdfCanvas<'a> {
     /// Creates a new `PdfCanvas` for rendering PDF graphics onto a backend surface.
     ///
     /// # Parameters
@@ -48,7 +45,7 @@ where
     ///
     /// A new `PdfCanvas` instance or an error if the page dimensions are invalid.
     pub fn new(
-        backend: &'a mut dyn CanvasBackend<ErrorType = T>,
+        backend: &'a mut dyn CanvasBackend,
         page: &'a PdfPage,
         bb: Option<&Rect>,
     ) -> Result<Self, PdfCanvasError> {
@@ -387,29 +384,24 @@ where
                 let shader = self.compute_shader(false)?;
                 self.canvas
                     .fill_path(path, fill_type, fill_color, &shader, blend_mode)
-                    .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
             }
             PaintMode::Stroke => {
                 let shader = self.compute_shader(true)?;
                 self.canvas
                     .stroke_path(path, stroke_color, line_width, &shader, blend_mode)
-                    .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
             }
             PaintMode::FillAndStroke => {
                 // First fill the path using the current fill settings
                 let fill_shader = self.compute_shader(false)?;
                 self.canvas
-                    .fill_path(path, fill_type, fill_color, &fill_shader, blend_mode)
-                    .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
+                    .fill_path(path, fill_type, fill_color, &fill_shader, blend_mode)?;
 
                 // Then stroke the path using the current stroke settings
                 let stroke_shader = self.compute_shader(true)?;
                 self.canvas
                     .stroke_path(path, stroke_color, line_width, &stroke_shader, blend_mode)
-                    .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
             }
         }
-        Ok(())
     }
 
     /// Paints the current path (if any) using the specified paint mode and fill type, then clears the path.
@@ -451,9 +443,7 @@ where
     ) -> Result<(), PdfCanvasError> {
         path.transform(&self.current_state()?.transform);
 
-        self.canvas
-            .set_clip_region(&path, mode)
-            .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
+        self.canvas.set_clip_region(&path, mode)?;
         self.current_state_mut()?.clip_path = Some(path);
         Ok(())
     }
@@ -564,10 +554,7 @@ where
     pub(crate) fn save(&mut self) -> Result<(), PdfCanvasError> {
         let state = self.current_state()?.clone();
         self.canvas_stack.push(state);
-        self.canvas
-            .save()
-            .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
-        Ok(())
+        self.canvas.save()
     }
 
     /// Restores the most recently saved graphics state from the stack.
@@ -585,10 +572,7 @@ where
         // so popping is safe and has a matching backend `save()`.
         let _ = self.canvas_stack.pop();
 
-        self.canvas
-            .restore()
-            .map_err(|e| PdfCanvasError::BackendError(e.to_string()))?;
-        Ok(())
+        self.canvas.restore()
     }
 
     /// Replaces the current transformation matrix (CTM) with the given matrix.

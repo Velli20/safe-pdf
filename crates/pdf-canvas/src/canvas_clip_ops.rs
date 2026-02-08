@@ -3,7 +3,7 @@ use pdf_graphics::PathFillType;
 
 use crate::{error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
-impl<T: std::error::Error> ClippingPathOps for PdfCanvas<'_, T> {
+impl ClippingPathOps for PdfCanvas<'_> {
     fn clip_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
         let Some(path) = self.current_path.take() else {
             return Err(PdfCanvasError::NoActivePath);

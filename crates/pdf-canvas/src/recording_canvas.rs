@@ -150,7 +150,7 @@ impl RecordingCanvas {
     ///
     /// - `Ok(())` if all commands were successfully replayed.
     /// - An error of type `B::ErrorType` if any command fails during replay.
-    pub fn replay<B: CanvasBackend>(&self, backend: &mut B) -> Result<(), B::ErrorType> {
+    pub fn replay(&self, backend: &mut dyn CanvasBackend) -> Result<(), PdfCanvasError> {
         use RecordingCommand::*;
         for cmd in &self.commands {
             match cmd {
@@ -204,8 +204,6 @@ impl RecordingCanvas {
 }
 
 impl CanvasBackend for RecordingCanvas {
-    type ErrorType = PdfCanvasError;
-
     fn fill_path(
         &mut self,
         path: &PdfPath,
@@ -213,7 +211,7 @@ impl CanvasBackend for RecordingCanvas {
         color: Color,
         shader: &Option<Shader>,
         blend_mode: Option<BlendMode>,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::FillPath {
             path: path.clone(),
             fill_type,
@@ -231,7 +229,7 @@ impl CanvasBackend for RecordingCanvas {
         line_width: f32,
         shader: &Option<Shader>,
         blend_mode: Option<BlendMode>,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::StrokePath {
             path: path.clone(),
             color,
@@ -246,7 +244,7 @@ impl CanvasBackend for RecordingCanvas {
         &mut self,
         path: &PdfPath,
         mode: PathFillType,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::SetClipRegion {
             path: path.clone(),
             mode,
@@ -262,12 +260,12 @@ impl CanvasBackend for RecordingCanvas {
         self.height
     }
 
-    fn save(&mut self) -> Result<(), Self::ErrorType> {
+    fn save(&mut self) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::Save);
         Ok(())
     }
 
-    fn restore(&mut self) -> Result<(), Self::ErrorType> {
+    fn restore(&mut self) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::Restore);
         Ok(())
     }
@@ -278,7 +276,7 @@ impl CanvasBackend for RecordingCanvas {
         blend_mode: Option<BlendMode>,
         dest_rect: Rect,
         image_rotation: Option<f32>,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::DrawImage {
             image: BackendImage {
                 data: Cow::Owned(image.data.to_vec()),
@@ -296,7 +294,7 @@ impl CanvasBackend for RecordingCanvas {
         mask: &RecordingCanvas,
         transform: &Transform,
         mask_mode: MaskMode,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::BeginMaskLayer {
             transform: *transform,
             mask_mode,
@@ -310,7 +308,7 @@ impl CanvasBackend for RecordingCanvas {
         _mask: &RecordingCanvas,
         transform: &Transform,
         mask_mode: MaskMode,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::EndMaskLayer {
             transform: *transform,
             mask_mode,

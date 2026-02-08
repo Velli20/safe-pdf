@@ -23,8 +23,8 @@ mod truetype_font_renderer;
 pub mod type1_font_renderer;
 mod type3_font_renderer;
 
-impl<T: std::error::Error> PdfOperatorBackend for PdfCanvas<'_, T> {}
+impl PdfOperatorBackend for PdfCanvas<'_> {}
 
-impl<T> PdfOperatorBackendError for PdfCanvas<'_, T> {
+impl PdfOperatorBackendError for PdfCanvas<'_> {
     type ErrorType = PdfCanvasError;
 }

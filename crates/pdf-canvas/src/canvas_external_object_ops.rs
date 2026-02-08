@@ -198,7 +198,7 @@ fn expand_indexed_to_rgb(
     Ok(out)
 }
 
-impl<T: std::error::Error> XObjectOps for PdfCanvas<'_, T> {
+impl XObjectOps for PdfCanvas<'_> {
     /// Invokes (renders) an XObject by name from the current resource dictionary.
     ///
     /// This method handles two types of XObjects:
@@ -237,7 +237,7 @@ impl<T: std::error::Error> XObjectOps for PdfCanvas<'_, T> {
     }
 }
 
-impl<T: std::error::Error> PdfCanvas<'_, T> {
+impl PdfCanvas<'_> {
     /// Renders an image XObject to the canvas.
     ///
     /// Handles the complete image rendering pipeline including coordinate
@@ -267,14 +267,12 @@ impl<T: std::error::Error> PdfCanvas<'_, T> {
         };
 
         let blend_mode = self.current_state()?.blend_mode;
-        self.canvas
-            .draw_image_rect(
-                &rendered_image,
-                blend_mode,
-                dest_rect,
-                Some(rotation_degrees),
-            )
-            .map_err(|e| PdfCanvasError::BackendError(e.to_string()))
+        self.canvas.draw_image_rect(
+            &rendered_image,
+            blend_mode,
+            dest_rect,
+            Some(rotation_degrees),
+        )
     }
 
     /// Computes the destination rectangle for image rendering.

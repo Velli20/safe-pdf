@@ -5,7 +5,7 @@ use pdf_graphics::{
     transform::Transform,
 };
 
-use crate::recording_canvas::RecordingCanvas;
+use crate::{error::PdfCanvasError, recording_canvas::RecordingCanvas};
 
 /// Represents a shader used for advanced fill and stroke operations in PDF rendering.
 ///
@@ -93,9 +93,6 @@ pub struct Image<'a> {
 /// to render content. Implementors of this trait act as the target surface,
 /// such as a raster image buffer, a window, or an SVG file.
 pub trait CanvasBackend {
-    /// The error type returned by backend operations.
-    type ErrorType: std::error::Error;
-
     /// Fills the given path with the specified color and fill rule.
     ///
     /// # Parameters
@@ -112,7 +109,7 @@ pub trait CanvasBackend {
         color: Color,
         shader: &Option<Shader>,
         blend_mode: Option<BlendMode>,
-    ) -> Result<(), Self::ErrorType>;
+    ) -> Result<(), PdfCanvasError>;
 
     /// Strokes the given path with the specified color and line width.
     ///
@@ -130,7 +127,7 @@ pub trait CanvasBackend {
         line_width: f32,
         shader: &Option<Shader>,
         blend_mode: Option<BlendMode>,
-    ) -> Result<(), Self::ErrorType>;
+    ) -> Result<(), PdfCanvasError>;
 
     /// Sets the clipping region by intersecting the current clip path with the given path.
     ///
@@ -140,11 +137,8 @@ pub trait CanvasBackend {
     ///
     /// - `path`: The path to use for clipping.
     /// - `mode`: The fill type to determine the clipping region.
-    fn set_clip_region(
-        &mut self,
-        path: &PdfPath,
-        mode: PathFillType,
-    ) -> Result<(), Self::ErrorType>;
+    fn set_clip_region(&mut self, path: &PdfPath, mode: PathFillType)
+    -> Result<(), PdfCanvasError>;
 
     /// Returns the width of the canvas in device units.
     fn width(&self) -> f32;
@@ -153,10 +147,10 @@ pub trait CanvasBackend {
     fn height(&self) -> f32;
 
     /// Saves the current graphics state (transform, clip, etc.).
-    fn save(&mut self) -> Result<(), Self::ErrorType>;
+    fn save(&mut self) -> Result<(), PdfCanvasError>;
 
     /// Restores the most recently saved graphics state.
-    fn restore(&mut self) -> Result<(), Self::ErrorType>;
+    fn restore(&mut self) -> Result<(), PdfCanvasError>;
 
     /// Draws an image onto the canvas at the current transformation.
     ///
@@ -172,7 +166,7 @@ pub trait CanvasBackend {
         blend_mode: Option<BlendMode>,
         dest_rect: Rect,
         image_rotation: Option<f32>,
-    ) -> Result<(), Self::ErrorType>;
+    ) -> Result<(), PdfCanvasError>;
 
     /// Begins drawing into the specified mask layer.
     ///
@@ -186,7 +180,7 @@ pub trait CanvasBackend {
         mask: &RecordingCanvas,
         transform: &Transform,
         mask_mode: MaskMode,
-    ) -> Result<(), Self::ErrorType>;
+    ) -> Result<(), PdfCanvasError>;
 
     /// Ends drawing into the specified mask layer and applies it to the canvas.
     ///
@@ -199,5 +193,5 @@ pub trait CanvasBackend {
         mask: &RecordingCanvas,
         transform: &Transform,
         mask_mode: MaskMode,
-    ) -> Result<(), Self::ErrorType>;
+    ) -> Result<(), PdfCanvasError>;
 }

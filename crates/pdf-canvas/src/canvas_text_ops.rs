@@ -14,7 +14,7 @@ use pdf_font::type0_font::CidFontSubType;
 use pdf_graphics::TextRenderingMode;
 use pdf_graphics::transform::Transform;
 
-impl<T: std::error::Error> TextPositioningOps for PdfCanvas<'_, T> {
+impl TextPositioningOps for PdfCanvas<'_> {
     fn move_text_position(&mut self, tx: f32, ty: f32) -> Result<(), Self::ErrorType> {
         let mat = Transform::from_translate(tx, ty);
         // PDF 1.7 (Tj and text positioning): Td updates Tlm = Tlm * T(tx, ty), then Tm = Tlm.
@@ -60,7 +60,7 @@ impl<T: std::error::Error> TextPositioningOps for PdfCanvas<'_, T> {
     }
 }
 
-impl<T: std::error::Error> TextObjectOps for PdfCanvas<'_, T> {
+impl TextObjectOps for PdfCanvas<'_> {
     fn begin_text_object(&mut self) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.text_state.matrix = Transform::identity();
         self.current_state_mut()?.text_state.line_matrix = Transform::identity();
@@ -72,7 +72,7 @@ impl<T: std::error::Error> TextObjectOps for PdfCanvas<'_, T> {
     }
 }
 
-impl<T: std::error::Error> TextStateOps for PdfCanvas<'_, T> {
+impl TextStateOps for PdfCanvas<'_> {
     fn set_character_spacing(&mut self, spacing: f32) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.text_state.character_spacing = spacing;
         Ok(())
@@ -133,7 +133,7 @@ fn to_char_iter(text: &[u8]) -> impl Iterator<Item = u16> + '_ {
     text.iter().copied().map(|b| u16::from_u8(b).unwrap_or(0))
 }
 
-impl<T: std::error::Error> TextShowingOps for PdfCanvas<'_, T> {
+impl TextShowingOps for PdfCanvas<'_> {
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
         let current_font = self
             .current_state()?
