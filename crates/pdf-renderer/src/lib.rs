@@ -15,8 +15,6 @@ pub enum PdfRendererError {
     PageNotFound(usize),
     #[error("PDF canvas error: {0}")]
     PdfCanvasError(#[from] pdf_canvas::error::PdfCanvasError),
-    #[error("Recording canvas error: {0}")]
-    RecordingError(#[from] pdf_canvas::recording_canvas::RecordingCanvasError),
 }
 
 /// Renders pages of a [`PdfDocument`] onto a user supplied [`CanvasBackend`].

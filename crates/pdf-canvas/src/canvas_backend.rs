@@ -12,6 +12,7 @@ use crate::recording_canvas::RecordingCanvas;
 /// A `Shader` defines how colors or patterns are applied to graphical elements, such
 /// as gradients or tiling patterns. It is used to enable effects like linear gradients,
 /// radial gradients, and image-based patterns when filling or stroking paths.
+#[derive(Clone)]
 pub enum Shader<'a> {
     /// Represents a color shader for filling or stroking paths with gradients.
     ///
@@ -30,9 +31,9 @@ pub enum Shader<'a> {
         /// When present, this maps the gradient's local coordinate space into device space.
         transform: Option<Transform>,
         /// The array of colors to be used in the gradient.
-        colors: &'a [Color],
+        colors: Cow<'a, [Color]>,
         /// The positions of each color stop, specified as values between 0.0 and 1.0.
-        positions: &'a [f32],
+        positions: Cow<'a, [f32]>,
     },
     /// Represents a tiling pattern image shader for filling or stroking paths with a repeated image.
     ///
@@ -62,9 +63,9 @@ pub enum Shader<'a> {
         /// The radius of the end circle.
         end_r: f32,
         /// The array of colors to be used in the gradient.
-        colors: &'a [Color],
+        colors: Cow<'a, [Color]>,
         /// The positions of each color stop, specified as values between 0.0 and 1.0.
-        positions: &'a [f32],
+        positions: Cow<'a, [f32]>,
         /// An optional transformation to apply to the gradient.
         transform: Option<Transform>,
     },
@@ -74,6 +75,7 @@ pub enum Shader<'a> {
 ///
 /// The `Image` struct encapsulates raw image data, dimensions, encoding, and optional
 /// transformation or masking information.
+#[derive(Clone)]
 pub struct Image<'a> {
     /// The raw image data.
     pub data: Cow<'a, [u8]>,

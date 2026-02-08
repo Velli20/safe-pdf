@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use pdf_content_stream::pdf_operator::PdfOperatorVariant;
 use pdf_graphics::{
     MaskMode, PaintMode, PathFillType, pdf_path::PdfPath, rect::Rect, transform::Transform,
@@ -13,7 +15,7 @@ use crate::{
     canvas_backend::{CanvasBackend, Shader},
     canvas_state::CanvasState,
     error::PdfCanvasError,
-    recording_canvas::{RecordingCanvas, RecordingCanvasError},
+    recording_canvas::RecordingCanvas,
     text_state::TextState,
 };
 
@@ -168,7 +170,7 @@ where
             ..Default::default()
         }];
 
-        let mut other: PdfCanvas<'_, RecordingCanvasError> = PdfCanvas {
+        let mut other = PdfCanvas {
             current_path: None,
             canvas: recording_canvas,
             mask: None,
@@ -227,9 +229,9 @@ where
                 y0: *y0,
                 x1: *x1,
                 y1: *y1,
-                colors: &color_stops.colors,
+                colors: Cow::Borrowed(&color_stops.colors),
                 transform: *transform,
-                positions: &color_stops.positions,
+                positions: Cow::Borrowed(&color_stops.positions),
             }),
             Shading::Radial {
                 coords: [start_x, start_y, start_r, end_x, end_y, end_r],
@@ -243,8 +245,8 @@ where
                 end_y: *end_y,
                 end_r: *end_r,
                 transform: *transform,
-                colors: &color_stops.colors,
-                positions: &color_stops.positions,
+                colors: Cow::Borrowed(&color_stops.colors),
+                positions: Cow::Borrowed(&color_stops.positions),
             }),
             Shading::FunctionBased { .. } => Err(PdfCanvasError::NotImplemented(
                 "FunctionBased shading not implemented".into(),

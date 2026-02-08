@@ -197,7 +197,7 @@ fn to_skia_blend_mode(mode: BlendMode) -> skia_safe::BlendMode {
 
 fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, SkiaCanvasBackendError> {
     match shader {
-        &Shader::LinearGradient {
+        Shader::LinearGradient {
             x0,
             y0,
             x1,
@@ -212,15 +212,18 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, SkiaCanvasBacken
                 .collect();
 
             let mat = if let Some(m) = transform {
-                to_skia_matrix(&m)
+                to_skia_matrix(m)
             } else {
                 skia_safe::Matrix::new_identity()
             };
 
             skia_safe::Shader::linear_gradient(
-                (skia_safe::Point::new(x0, y0), skia_safe::Point::new(x1, y1)),
+                (
+                    skia_safe::Point::new(*x0, *y0),
+                    skia_safe::Point::new(*x1, *y1),
+                ),
                 skia_safe::gradient_shader::GradientShaderColors::Colors(&colors),
-                Some(positions),
+                Some(positions.as_ref()),
                 skia_safe::TileMode::Clamp,
                 None,
                 Some(&mat),
@@ -229,7 +232,7 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, SkiaCanvasBacken
                 shader: "linear_gradient",
             })
         }
-        &Shader::RadialGradient {
+        Shader::RadialGradient {
             start_x,
             start_y,
             start_r,
@@ -246,18 +249,18 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, SkiaCanvasBacken
                 .collect();
 
             let mat = if let Some(m) = transform {
-                to_skia_matrix(&m)
+                to_skia_matrix(m)
             } else {
                 skia_safe::Matrix::new_identity()
             };
 
             skia_safe::Shader::two_point_conical_gradient(
-                skia_safe::Point::new(start_x, start_y),
-                start_r,
-                skia_safe::Point::new(end_x, end_y),
-                end_r,
+                skia_safe::Point::new(*start_x, *start_y),
+                *start_r,
+                skia_safe::Point::new(*end_x, *end_y),
+                *end_r,
                 skia_safe::gradient_shader::GradientShaderColors::Colors(&colors),
-                Some(positions),
+                Some(positions.as_ref()),
                 skia_safe::TileMode::Clamp,
                 None,
                 Some(&mat),
