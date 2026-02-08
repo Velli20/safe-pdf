@@ -1,127 +1,13 @@
 use std::borrow::Cow;
 
-use crate::canvas_backend::{CanvasBackend, Image as BackendImage, Shader};
+use crate::{
+    canvas_backend::{CanvasBackend, Image as BackendImage, Shader},
+    error::PdfCanvasError,
+};
 use pdf_graphics::{
-    BlendMode, MaskMode, PathFillType, PixelFormat, color::Color, pdf_path::PdfPath, rect::Rect,
+    BlendMode, MaskMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
     transform::Transform,
 };
-use thiserror::Error;
-
-/// Errors that can occur during recording operations.
-#[derive(Error, Debug)]
-pub enum RecordingCanvasError {
-    #[error("Mask layer with index {0} not found")]
-    MaskLayerNotFound(usize),
-    #[error("Unsupported feature in RecordingCanvas: {0}")]
-    UnsupportedFeature(&'static str),
-}
-
-/// Owned representation of an image.
-#[derive(Clone)]
-struct RecordedImage {
-    pub data: Vec<u8>,
-    pub width: usize,
-    pub height: usize,
-    pub pixel_format: PixelFormat,
-}
-
-impl From<&BackendImage<'_>> for RecordedImage {
-    fn from(img: &BackendImage<'_>) -> Self {
-        Self {
-            data: img.data.clone().into_owned(),
-            width: img.width,
-            height: img.height,
-            pixel_format: img.pixel_format,
-        }
-    }
-}
-
-/// Owned representation of a shader.
-#[derive(Clone)]
-enum RecordedShader {
-    LinearGradient {
-        x0: f32,
-        y0: f32,
-        x1: f32,
-        y1: f32,
-        colors: Vec<Color>,
-        positions: Vec<f32>,
-        transform: Option<Transform>,
-    },
-    TilingPatternImage {
-        image: Box<RecordingCanvas>,
-        transform: Option<Transform>,
-        x_step: f32,
-        y_step: f32,
-    },
-    RadialGradient {
-        start_x: f32,
-        start_y: f32,
-        start_r: f32,
-        end_x: f32,
-        end_y: f32,
-        end_r: f32,
-        colors: Vec<Color>,
-        positions: Vec<f32>,
-        transform: Option<Transform>,
-    },
-}
-
-impl From<&Shader<'_>> for RecordedShader {
-    fn from(shader: &Shader<'_>) -> Self {
-        match shader {
-            Shader::LinearGradient {
-                x0,
-                y0,
-                x1,
-                y1,
-                colors,
-                positions,
-                transform,
-            } => Self::LinearGradient {
-                x0: *x0,
-                y0: *y0,
-                x1: *x1,
-                y1: *y1,
-                colors: (*colors).to_vec(),
-                positions: (*positions).to_vec(),
-                transform: *transform,
-            },
-            Shader::TilingPatternImage {
-                image,
-                transform,
-                x_step,
-                y_step,
-            } => Self::TilingPatternImage {
-                image: Box::new((**image).clone()),
-                transform: *transform,
-                x_step: *x_step,
-                y_step: *y_step,
-            },
-            Shader::RadialGradient {
-                start_x,
-                start_y,
-                start_r,
-                end_x,
-                end_y,
-                end_r,
-                colors,
-                positions,
-                transform,
-            } => Self::RadialGradient {
-                start_x: *start_x,
-                start_y: *start_y,
-                start_r: *start_r,
-                end_x: *end_x,
-                end_y: *end_y,
-                end_r: *end_r,
-                colors: (*colors).to_vec(),
-                positions: (*positions).to_vec(),
-                transform: *transform,
-            },
-        }
-    }
-}
 
 /// Enum representing each drawing command that can be recorded.
 #[derive(Clone)]
@@ -130,14 +16,14 @@ enum RecordingCommand {
         path: PdfPath,
         fill_type: PathFillType,
         color: Color,
-        shader: Option<RecordedShader>,
+        shader: Option<Shader<'static>>,
         blend_mode: Option<BlendMode>,
     },
     StrokePath {
         path: PdfPath,
         color: Color,
         line_width: f32,
-        shader: Option<RecordedShader>,
+        shader: Option<Shader<'static>>,
         blend_mode: Option<BlendMode>,
     },
     SetClipRegion {
@@ -147,7 +33,7 @@ enum RecordingCommand {
     Save,
     Restore,
     DrawImage {
-        image: RecordedImage,
+        image: BackendImage<'static>,
         blend_mode: Option<BlendMode>,
         dest_rect: Rect,
         image_rotation: Option<f32>,
@@ -177,6 +63,65 @@ pub struct RecordingCanvas {
     pub height: f32,
     /// Ordered list of recorded drawing commands.
     commands: Vec<RecordingCommand>,
+}
+
+impl<'a> Shader<'a> {
+    /// Converts this shader into a `Shader<'static>` by performing a deep clone
+    /// of all borrowed data into owned storage. This is useful for storing
+    /// shaders in recording commands that must outlive the original borrow.
+    fn to_static(&self) -> Shader<'static> {
+        match self {
+            Shader::LinearGradient {
+                x0,
+                y0,
+                x1,
+                y1,
+                transform,
+                colors,
+                positions,
+            } => Shader::LinearGradient {
+                x0: *x0,
+                y0: *y0,
+                x1: *x1,
+                y1: *y1,
+                transform: *transform,
+                colors: Cow::Owned(colors.to_vec()),
+                positions: Cow::Owned(positions.to_vec()),
+            },
+            Shader::TilingPatternImage {
+                image,
+                transform,
+                x_step,
+                y_step,
+            } => Shader::TilingPatternImage {
+                image: image.clone(),
+                transform: *transform,
+                x_step: *x_step,
+                y_step: *y_step,
+            },
+            Shader::RadialGradient {
+                start_x,
+                start_y,
+                start_r,
+                end_x,
+                end_y,
+                end_r,
+                colors,
+                positions,
+                transform,
+            } => Shader::RadialGradient {
+                start_x: *start_x,
+                start_y: *start_y,
+                start_r: *start_r,
+                end_x: *end_x,
+                end_y: *end_y,
+                end_r: *end_r,
+                colors: Cow::Owned(colors.to_vec()),
+                positions: Cow::Owned(positions.to_vec()),
+                transform: *transform,
+            },
+        }
+    }
 }
 
 impl RecordingCanvas {
@@ -216,58 +161,7 @@ impl RecordingCanvas {
                     shader,
                     blend_mode,
                 } => {
-                    let shader_ref: Option<Shader> = shader.as_ref().map(|s| match s {
-                        RecordedShader::LinearGradient {
-                            x0,
-                            y0,
-                            x1,
-                            y1,
-                            colors,
-                            positions,
-                            transform,
-                        } => Shader::LinearGradient {
-                            x0: *x0,
-                            y0: *y0,
-                            x1: *x1,
-                            y1: *y1,
-                            colors,
-                            positions,
-                            transform: *transform,
-                        },
-                        RecordedShader::TilingPatternImage {
-                            image,
-                            transform,
-                            x_step,
-                            y_step,
-                        } => Shader::TilingPatternImage {
-                            image: image.clone(),
-                            transform: *transform,
-                            x_step: *x_step,
-                            y_step: *y_step,
-                        },
-                        RecordedShader::RadialGradient {
-                            start_x,
-                            start_y,
-                            start_r,
-                            end_x,
-                            end_y,
-                            end_r,
-                            colors,
-                            positions,
-                            transform,
-                        } => Shader::RadialGradient {
-                            start_x: *start_x,
-                            start_y: *start_y,
-                            start_r: *start_r,
-                            end_x: *end_x,
-                            end_y: *end_y,
-                            end_r: *end_r,
-                            colors,
-                            positions,
-                            transform: *transform,
-                        },
-                    });
-                    backend.fill_path(path, *fill_type, *color, &shader_ref, *blend_mode)?;
+                    backend.fill_path(path, *fill_type, *color, shader, *blend_mode)?;
                 }
                 StrokePath {
                     path,
@@ -276,58 +170,7 @@ impl RecordingCanvas {
                     shader,
                     blend_mode,
                 } => {
-                    let shader_ref: Option<Shader> = shader.as_ref().map(|s| match s {
-                        RecordedShader::LinearGradient {
-                            x0,
-                            y0,
-                            x1,
-                            y1,
-                            colors,
-                            positions,
-                            transform,
-                        } => Shader::LinearGradient {
-                            x0: *x0,
-                            y0: *y0,
-                            x1: *x1,
-                            y1: *y1,
-                            colors,
-                            positions,
-                            transform: *transform,
-                        },
-                        RecordedShader::TilingPatternImage {
-                            image,
-                            transform,
-                            x_step,
-                            y_step,
-                        } => Shader::TilingPatternImage {
-                            image: image.clone(),
-                            transform: *transform,
-                            x_step: *x_step,
-                            y_step: *y_step,
-                        },
-                        RecordedShader::RadialGradient {
-                            start_x,
-                            start_y,
-                            start_r,
-                            end_x,
-                            end_y,
-                            end_r,
-                            colors,
-                            positions,
-                            transform,
-                        } => Shader::RadialGradient {
-                            start_x: *start_x,
-                            start_y: *start_y,
-                            start_r: *start_r,
-                            end_x: *end_x,
-                            end_y: *end_y,
-                            end_r: *end_r,
-                            colors,
-                            positions,
-                            transform: *transform,
-                        },
-                    });
-                    backend.stroke_path(path, *color, *line_width, &shader_ref, *blend_mode)?;
+                    backend.stroke_path(path, *color, *line_width, shader, *blend_mode)?;
                 }
                 SetClipRegion { path, mode } => backend.set_clip_region(path, *mode)?,
                 Save => backend.save()?,
@@ -338,18 +181,7 @@ impl RecordingCanvas {
                     dest_rect,
                     image_rotation,
                 } => {
-                    let backend_img = BackendImage {
-                        data: Cow::Owned(image.data.clone()),
-                        width: image.width,
-                        height: image.height,
-                        pixel_format: image.pixel_format,
-                    };
-                    backend.draw_image_rect(
-                        &backend_img,
-                        *blend_mode,
-                        *dest_rect,
-                        *image_rotation,
-                    )?;
+                    backend.draw_image_rect(image, *blend_mode, *dest_rect, *image_rotation)?;
                 }
                 BeginMaskLayer {
                     transform,
@@ -372,7 +204,7 @@ impl RecordingCanvas {
 }
 
 impl CanvasBackend for RecordingCanvas {
-    type ErrorType = RecordingCanvasError;
+    type ErrorType = PdfCanvasError;
 
     fn fill_path(
         &mut self,
@@ -386,7 +218,7 @@ impl CanvasBackend for RecordingCanvas {
             path: path.clone(),
             fill_type,
             color,
-            shader: shader.as_ref().map(|s| s.into()),
+            shader: shader.as_ref().map(|s| s.to_static()),
             blend_mode,
         });
         Ok(())
@@ -404,7 +236,7 @@ impl CanvasBackend for RecordingCanvas {
             path: path.clone(),
             color,
             line_width,
-            shader: shader.as_ref().map(|s| s.into()),
+            shader: shader.as_ref().map(|s| s.to_static()),
             blend_mode,
         });
         Ok(())
@@ -448,7 +280,10 @@ impl CanvasBackend for RecordingCanvas {
         image_rotation: Option<f32>,
     ) -> Result<(), Self::ErrorType> {
         self.commands.push(RecordingCommand::DrawImage {
-            image: image.into(),
+            image: BackendImage {
+                data: Cow::Owned(image.data.to_vec()),
+                ..image.clone()
+            },
             blend_mode,
             dest_rect,
             image_rotation,
