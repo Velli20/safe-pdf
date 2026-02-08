@@ -48,7 +48,7 @@ impl CanvasState<'_> {
     /// Default stroke color.
     pub const DEFAULT_STROKE_COLOR: Color = Color::from_rgb(0.0, 0.0, 0.0);
     /// Default miter limit.
-    const DEFAULT_MITER_LIMIT: f32 = 0.0;
+    const DEFAULT_MITER_LIMIT: f32 = 10.0;
 }
 
 impl Default for CanvasState<'_> {
