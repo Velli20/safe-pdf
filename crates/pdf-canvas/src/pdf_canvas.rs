@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::sync::Arc;
 
 use pdf_content_stream::pdf_operator::PdfOperatorVariant;
 use pdf_graphics::{
@@ -25,7 +26,7 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     /// The drawing backend implementing `CanvasBackend` for rendering operations.
     pub(crate) canvas: &'a mut B,
     /// An optional mask surface for advanced compositing or clipping.
-    pub(crate) mask: Option<(Box<RecordingCanvas>, MaskMode, Transform)>,
+    pub(crate) mask: Option<(Arc<RecordingCanvas>, MaskMode, Transform)>,
     /// The PDF page associated with this canvas.
     pub(crate) page: &'a PdfPage,
     /// The stack of graphics states, supporting save/restore semantics.
@@ -345,7 +346,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 )?;
 
                 let shader = Shader::TilingPatternImage {
-                    image: Box::new(recording_canvas),
+                    image: Arc::new(recording_canvas),
                     transform,
                     x_step: *x_step,
                     y_step: *y_step,

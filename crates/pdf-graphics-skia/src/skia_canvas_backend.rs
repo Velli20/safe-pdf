@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use pdf_canvas::{
     canvas_backend::{CanvasBackend, Image, Shader},
     error::PdfCanvasError,
@@ -465,7 +467,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
 
     fn begin_mask_layer(
         &mut self,
-        mask: &RecordingCanvas,
+        mask: &Arc<RecordingCanvas>,
         transform: &Transform,
         _mask_mode: MaskMode,
     ) -> Result<(), PdfCanvasError> {
@@ -484,7 +486,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
 
     fn end_mask_layer(
         &mut self,
-        mask: &RecordingCanvas,
+        mask: &Arc<RecordingCanvas>,
         transform: &Transform,
         mask_mode: MaskMode,
     ) -> Result<(), PdfCanvasError> {

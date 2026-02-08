@@ -15,7 +15,7 @@ use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_page::{color_space::ColorSpace, image::ImageXObject, xobject::XObject};
 
 use crate::{
-    canvas_backend::{CanvasBackend, Image},
+    canvas_backend::{CanvasBackend, Image, ImageData},
     error::PdfCanvasError,
     pdf_canvas::PdfCanvas,
 };
@@ -264,7 +264,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         let image_data = self.resolve_image_data(image)?;
 
         let rendered_image = Image {
-            data: image_data,
+            data: ImageData::from(image_data),
             width: image.width,
             height: image.height,
             pixel_format: image.pixel_format,

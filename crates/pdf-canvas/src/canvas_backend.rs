@@ -1,4 +1,6 @@
 use std::borrow::Cow;
+use std::ops::Deref;
+use std::sync::Arc;
 
 use pdf_graphics::{
     BlendMode, MaskMode, PathFillType, PixelFormat, color::Color, pdf_path::PdfPath, rect::Rect,
@@ -6,6 +8,56 @@ use pdf_graphics::{
 };
 
 use crate::{error::PdfCanvasError, recording_canvas::RecordingCanvas};
+
+/// Image data storage that supports zero-copy sharing via `Arc`.
+///
+/// `ImageData` replaces `Cow<'a, [u8]>` for image pixel buffers, adding
+/// a `Shared` variant backed by `Arc<[u8]>`. Once an image is recorded,
+/// all subsequent clones of the recording share the same allocation
+/// instead of deep-copying the pixel buffer.
+#[derive(Clone)]
+pub enum ImageData<'a> {
+    /// Borrowed pixel data (zero-copy reference into an existing buffer).
+    Borrowed(&'a [u8]),
+    /// Owned pixel data (unique allocation).
+    Owned(Vec<u8>),
+    /// Reference-counted pixel data shared across recordings.
+    Shared(Arc<[u8]>),
+}
+
+impl Deref for ImageData<'_> {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match self {
+            ImageData::Borrowed(b) => b,
+            ImageData::Owned(v) => v,
+            ImageData::Shared(a) => a,
+        }
+    }
+}
+
+impl ImageData<'_> {
+    /// Returns a `Shared` variant that can be cheaply cloned.
+    ///
+    /// - `Borrowed` / `Owned`: copies the data into a new `Arc<[u8]>` once.
+    /// - `Shared`: bumps the reference count (no copy).
+    pub fn to_shared(&self) -> ImageData<'static> {
+        match self {
+            ImageData::Shared(a) => ImageData::Shared(Arc::clone(a)),
+            other => ImageData::Shared(Arc::from(&**other)),
+        }
+    }
+}
+
+impl<'a> From<Cow<'a, [u8]>> for ImageData<'a> {
+    fn from(cow: Cow<'a, [u8]>) -> Self {
+        match cow {
+            Cow::Borrowed(b) => ImageData::Borrowed(b),
+            Cow::Owned(v) => ImageData::Owned(v),
+        }
+    }
+}
 
 /// Represents a shader used for advanced fill and stroke operations in PDF rendering.
 ///
@@ -40,7 +92,7 @@ pub enum Shader<'a> {
     /// Used to define how an image is tiled across a region, with optional transformation and spacing.
     TilingPatternImage {
         /// A recording canvas containing the tiling pattern content.
-        image: Box<RecordingCanvas>,
+        image: Arc<RecordingCanvas>,
         /// The transformation to apply to the pattern tile.
         transform: Option<Transform>,
         /// The horizontal spacing between tiles.
@@ -78,7 +130,7 @@ pub enum Shader<'a> {
 #[derive(Clone)]
 pub struct Image<'a> {
     /// The raw image data.
-    pub data: Cow<'a, [u8]>,
+    pub data: ImageData<'a>,
     /// The width of the image in pixels.
     pub width: usize,
     /// The height of the image in pixels.
@@ -177,7 +229,7 @@ pub trait CanvasBackend {
     /// - `mask`: The mask layer to begin drawing into.
     fn begin_mask_layer(
         &mut self,
-        mask: &RecordingCanvas,
+        mask: &Arc<RecordingCanvas>,
         transform: &Transform,
         mask_mode: MaskMode,
     ) -> Result<(), PdfCanvasError>;
@@ -190,7 +242,7 @@ pub trait CanvasBackend {
     /// - `transform`: The transformation to apply to the mask when compositing.
     fn end_mask_layer(
         &mut self,
-        mask: &RecordingCanvas,
+        mask: &Arc<RecordingCanvas>,
         transform: &Transform,
         mask_mode: MaskMode,
     ) -> Result<(), PdfCanvasError>;

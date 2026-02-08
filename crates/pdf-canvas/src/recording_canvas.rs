@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::sync::Arc;
 
 use crate::{
     canvas_backend::{CanvasBackend, Image as BackendImage, Shader},
@@ -39,12 +40,12 @@ enum RecordingCommand {
         image_rotation: Option<f32>,
     },
     BeginMaskLayer {
-        mask: Box<RecordingCanvas>,
+        mask: Arc<RecordingCanvas>,
         transform: Transform,
         mask_mode: MaskMode,
     },
     EndMaskLayer {
-        mask: Box<RecordingCanvas>,
+        mask: Arc<RecordingCanvas>,
         transform: Transform,
         mask_mode: MaskMode,
     },
@@ -94,7 +95,7 @@ impl<'a> Shader<'a> {
                 x_step,
                 y_step,
             } => Shader::TilingPatternImage {
-                image: image.clone(),
+                image: Arc::clone(image),
                 transform: *transform,
                 x_step: *x_step,
                 y_step: *y_step,
@@ -279,8 +280,10 @@ impl CanvasBackend for RecordingCanvas {
     ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::DrawImage {
             image: BackendImage {
-                data: Cow::Owned(image.data.to_vec()),
-                ..image.clone()
+                data: image.data.to_shared(),
+                width: image.width,
+                height: image.height,
+                pixel_format: image.pixel_format,
             },
             blend_mode,
             dest_rect,
@@ -291,28 +294,28 @@ impl CanvasBackend for RecordingCanvas {
 
     fn begin_mask_layer(
         &mut self,
-        mask: &RecordingCanvas,
+        mask: &Arc<RecordingCanvas>,
         transform: &Transform,
         mask_mode: MaskMode,
     ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::BeginMaskLayer {
             transform: *transform,
             mask_mode,
-            mask: Box::new(mask.clone()),
+            mask: Arc::clone(mask),
         });
         Ok(())
     }
 
     fn end_mask_layer(
         &mut self,
-        _mask: &RecordingCanvas,
+        mask: &Arc<RecordingCanvas>,
         transform: &Transform,
         mask_mode: MaskMode,
     ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::EndMaskLayer {
             transform: *transform,
             mask_mode,
-            mask: Box::new(_mask.clone()),
+            mask: Arc::clone(mask),
         });
         Ok(())
     }
