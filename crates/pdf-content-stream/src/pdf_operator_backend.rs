@@ -7,15 +7,12 @@ use pdf_graphics::{LineCap, LineJoin, TextRenderingMode, transform::Transform};
 
 use crate::TextElement;
 
-pub trait PdfOperatorBackendError {
-    /// The error type that can be returned by operator handling methods.
-    type ErrorType: std::fmt::Debug + std::fmt::Display;
-}
-
 /// Defines methods for handling PDF path construction operators.
 ///
 /// These operators are used to define shapes and paths before they are painted.
-pub trait PathConstructionOps: PdfOperatorBackendError {
+pub trait PathConstructionOps {
+    /// The error type that can be returned by operator handling methods.
+    type ErrorType: std::fmt::Debug + std::fmt::Display;
     /// Moves the current point to the specified coordinates (x, y), starting a new subpath.
     ///
     /// # Parameters
@@ -124,7 +121,9 @@ pub trait PathConstructionOps: PdfOperatorBackendError {
 }
 
 /// Defines methods to handle PDF Path Painting operators.
-pub trait PathPaintingOps: PdfOperatorBackendError {
+pub trait PathPaintingOps {
+    /// The error type that can be returned by operator handling methods.
+    type ErrorType: std::fmt::Debug + std::fmt::Display;
     /// Strokes the current path using the current color and line style.
     ///
     /// # Returns
@@ -190,7 +189,9 @@ pub trait PathPaintingOps: PdfOperatorBackendError {
 }
 
 /// Defines methods to handle PDF Clipping Path operators.
-pub trait ClippingPathOps: PdfOperatorBackendError {
+pub trait ClippingPathOps {
+    /// The error type that can be returned by operator handling methods.
+    type ErrorType: std::fmt::Debug + std::fmt::Display;
     /// Modifies the current clipping path by intersecting it with the current path,
     /// using the non-zero winding number rule.
     ///
@@ -209,7 +210,9 @@ pub trait ClippingPathOps: PdfOperatorBackendError {
 }
 
 /// Defines methods to handle PDF Graphics State operators.
-pub trait GraphicsStateOps: PdfOperatorBackendError {
+pub trait GraphicsStateOps {
+    /// The error type that can be returned by operator handling methods.
+    type ErrorType: std::fmt::Debug + std::fmt::Display;
     /// Saves the current graphics state onto the graphics state stack.
     ///
     /// # Returns
@@ -333,7 +336,9 @@ pub trait GraphicsStateOps: PdfOperatorBackendError {
 }
 
 /// Defines methods to handle PDF Color operators.
-pub trait ColorOps: PdfOperatorBackendError {
+pub trait ColorOps {
+    /// The error type that can be returned by operator handling methods.
+    type ErrorType: std::fmt::Debug + std::fmt::Display;
     /// Sets the color space for subsequent stroking operations.
     ///
     /// # Parameters
@@ -504,7 +509,9 @@ pub trait ColorOps: PdfOperatorBackendError {
 }
 
 /// Defines methods to handle PDF Text Object operators.
-pub trait TextObjectOps: PdfOperatorBackendError {
+pub trait TextObjectOps {
+    /// The error type that can be returned by operator handling methods.
+    type ErrorType: std::fmt::Debug + std::fmt::Display;
     /// Begins a text object, initializing the text transformation matrices.
     ///
     /// # Returns
@@ -521,7 +528,9 @@ pub trait TextObjectOps: PdfOperatorBackendError {
 }
 
 /// Defines methods to handle PDF Text State operators.
-pub trait TextStateOps: PdfOperatorBackendError {
+pub trait TextStateOps {
+    /// The error type that can be returned by operator handling methods.
+    type ErrorType: std::fmt::Debug + std::fmt::Display;
     /// Sets the character spacing.
     ///
     /// # Parameters
@@ -602,7 +611,9 @@ pub trait TextStateOps: PdfOperatorBackendError {
 }
 
 /// Defines methods to handle PDF Text Positioning operators.
-pub trait TextPositioningOps: PdfOperatorBackendError {
+pub trait TextPositioningOps {
+    /// The error type that can be returned by operator handling methods.
+    type ErrorType: std::fmt::Debug + std::fmt::Display;
     /// Moves the text position to the start of the next line, offset by (tx, ty).
     ///
     /// # Parameters
@@ -652,7 +663,9 @@ pub trait TextPositioningOps: PdfOperatorBackendError {
 }
 
 /// Defines methods to handle PDF Text Showing operators.
-pub trait TextShowingOps: PdfOperatorBackendError {
+pub trait TextShowingOps {
+    /// The error type that can be returned by operator handling methods.
+    type ErrorType: std::fmt::Debug + std::fmt::Display;
     /// Shows a text string at the current text position.
     ///
     /// # Parameters
@@ -709,7 +722,9 @@ pub trait TextShowingOps: PdfOperatorBackendError {
 }
 
 /// Defines methods to handle PDF XObject operators.
-pub trait XObjectOps: PdfOperatorBackendError {
+pub trait XObjectOps {
+    /// The error type that can be returned by operator handling methods.
+    type ErrorType: std::fmt::Debug + std::fmt::Display;
     /// Invokes a named external object (XObject), such as an image or a form.
     ///
     /// # Parameters
@@ -723,7 +738,9 @@ pub trait XObjectOps: PdfOperatorBackendError {
 }
 
 /// Defines methods to handle PDF Shading operators.
-pub trait ShadingOps: PdfOperatorBackendError {
+pub trait ShadingOps {
+    /// The error type that can be returned by operator handling methods.
+    type ErrorType: std::fmt::Debug + std::fmt::Display;
     /// Paints an area defined by a named shading pattern.
     ///
     /// # Parameters
@@ -737,7 +754,9 @@ pub trait ShadingOps: PdfOperatorBackendError {
 }
 
 /// Defines methods to handle PDF Marked Content operators.
-pub trait MarkedContentOps: PdfOperatorBackendError {
+pub trait MarkedContentOps {
+    /// The error type that can be returned by operator handling methods.
+    type ErrorType: std::fmt::Debug + std::fmt::Display;
     /// Defines a marked-content point, associating it with a tag.
     ///
     /// # Parameters
@@ -795,22 +814,24 @@ pub trait MarkedContentOps: PdfOperatorBackendError {
     fn end_marked_content(&mut self) -> Result<(), Self::ErrorType>;
 }
 
+/// The error type produced by a [`PdfOperatorBackend`] implementor.
+pub type BackendError<T> = <T as PathConstructionOps>::ErrorType;
+
 /// A comprehensive backend that implements all operator categories.
 /// This can be used as a blanket implementation if a backend supports everything,
 /// or as a way to group all the specialized traits.
 pub trait PdfOperatorBackend:
-    PdfOperatorBackendError
-    + PathConstructionOps
-    + PathPaintingOps
-    + ClippingPathOps
-    + GraphicsStateOps
-    + ColorOps
-    + TextObjectOps
-    + TextStateOps
-    + TextPositioningOps
-    + TextShowingOps
-    + XObjectOps
-    + ShadingOps
-    + MarkedContentOps
+    PathConstructionOps
+    + PathPaintingOps<ErrorType = <Self as PathConstructionOps>::ErrorType>
+    + ClippingPathOps<ErrorType = <Self as PathConstructionOps>::ErrorType>
+    + GraphicsStateOps<ErrorType = <Self as PathConstructionOps>::ErrorType>
+    + ColorOps<ErrorType = <Self as PathConstructionOps>::ErrorType>
+    + TextObjectOps<ErrorType = <Self as PathConstructionOps>::ErrorType>
+    + TextStateOps<ErrorType = <Self as PathConstructionOps>::ErrorType>
+    + TextPositioningOps<ErrorType = <Self as PathConstructionOps>::ErrorType>
+    + TextShowingOps<ErrorType = <Self as PathConstructionOps>::ErrorType>
+    + XObjectOps<ErrorType = <Self as PathConstructionOps>::ErrorType>
+    + ShadingOps<ErrorType = <Self as PathConstructionOps>::ErrorType>
+    + MarkedContentOps<ErrorType = <Self as PathConstructionOps>::ErrorType>
 {
 }

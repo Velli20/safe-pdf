@@ -16,6 +16,7 @@ use pdf_graphics::TextRenderingMode;
 use pdf_graphics::transform::Transform;
 
 impl<B: CanvasBackend> TextPositioningOps for PdfCanvas<'_, B> {
+    type ErrorType = PdfCanvasError;
     fn move_text_position(&mut self, tx: f32, ty: f32) -> Result<(), Self::ErrorType> {
         let mat = Transform::from_translate(tx, ty);
         // PDF 1.7 (Tj and text positioning): Td updates Tlm = Tlm * T(tx, ty), then Tm = Tlm.
@@ -62,6 +63,7 @@ impl<B: CanvasBackend> TextPositioningOps for PdfCanvas<'_, B> {
 }
 
 impl<B: CanvasBackend> TextObjectOps for PdfCanvas<'_, B> {
+    type ErrorType = PdfCanvasError;
     fn begin_text_object(&mut self) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.text_state.matrix = Transform::identity();
         self.current_state_mut()?.text_state.line_matrix = Transform::identity();
@@ -74,6 +76,7 @@ impl<B: CanvasBackend> TextObjectOps for PdfCanvas<'_, B> {
 }
 
 impl<B: CanvasBackend> TextStateOps for PdfCanvas<'_, B> {
+    type ErrorType = PdfCanvasError;
     fn set_character_spacing(&mut self, spacing: f32) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.text_state.character_spacing = spacing;
         Ok(())
@@ -135,6 +138,7 @@ fn to_char_iter(text: &[u8]) -> impl Iterator<Item = u16> + '_ {
 }
 
 impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
+    type ErrorType = PdfCanvasError;
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
         let current_font = self
             .current_state()?

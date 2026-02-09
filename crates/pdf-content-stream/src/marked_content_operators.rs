@@ -1,7 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
-    pdf_operator_backend::PdfOperatorBackend,
+    pdf_operator_backend::{BackendError, PdfOperatorBackend},
 };
 
 /// Begins a marked-content sequence.
@@ -28,7 +28,7 @@ impl PdfOperator for BeginMarkedContent {
         Ok(PdfOperatorVariant::BeginMarkedContent(Self::new(tag)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.begin_marked_content(&self.tag)
     }
 }
@@ -60,7 +60,7 @@ impl PdfOperator for BeginMarkedContentWithProps {
         )))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.begin_marked_content_with_properties(&self.tag)
     }
 }
@@ -78,7 +78,7 @@ impl PdfOperator for EndMarkedContent {
         Ok(PdfOperatorVariant::EndMarkedContent(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.end_marked_content()
     }
 }

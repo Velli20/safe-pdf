@@ -1,7 +1,6 @@
 use canvas_backend::CanvasBackend;
-use error::PdfCanvasError;
 use pdf_canvas::PdfCanvas;
-use pdf_content_stream::pdf_operator_backend::{PdfOperatorBackend, PdfOperatorBackendError};
+use pdf_content_stream::pdf_operator_backend::PdfOperatorBackend;
 
 pub mod canvas_backend;
 mod canvas_clip_ops;
@@ -25,7 +24,3 @@ pub mod type1_font_renderer;
 mod type3_font_renderer;
 
 impl<B: CanvasBackend> PdfOperatorBackend for PdfCanvas<'_, B> {}
-
-impl<B: CanvasBackend> PdfOperatorBackendError for PdfCanvas<'_, B> {
-    type ErrorType = PdfCanvasError;
-}

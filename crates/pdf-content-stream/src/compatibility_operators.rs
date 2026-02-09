@@ -1,7 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
-    pdf_operator_backend::PdfOperatorBackend,
+    pdf_operator_backend::{BackendError, PdfOperatorBackend},
 };
 
 /// Begins a compatibility section (BX).
@@ -24,7 +24,7 @@ impl PdfOperator for BeginCompatibility {
         Ok(PdfOperatorVariant::BeginCompatibility(BeginCompatibility))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
         Ok(())
     }
 }
@@ -42,7 +42,7 @@ impl PdfOperator for EndCompatibility {
         Ok(PdfOperatorVariant::EndCompatibility(EndCompatibility))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
         Ok(())
     }
 }

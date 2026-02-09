@@ -20,12 +20,6 @@ pub enum SkiaCanvasBackendError {
         width: u32,
         height: u32,
     },
-    #[error("unsupported number of image components: {components} for image {width}x{height}")]
-    UnsupportedImageComponents {
-        components: usize,
-        width: usize,
-        height: usize,
-    },
     #[error("invalid image dimensions: {width}x{height}")]
     InvalidImageDimensions { width: usize, height: usize },
     #[error("failed to decode image with encoding: {encoding}")]

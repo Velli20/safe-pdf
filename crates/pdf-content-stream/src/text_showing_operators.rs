@@ -3,7 +3,7 @@ use crate::pdf_operator::PdfOperator;
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperatorVariant},
-    pdf_operator_backend::PdfOperatorBackend,
+    pdf_operator_backend::{BackendError, PdfOperatorBackend},
 };
 
 /// Shows a text string.
@@ -30,7 +30,7 @@ impl PdfOperator for ShowText {
         Ok(PdfOperatorVariant::ShowText(Self::new(text.to_vec())))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.show_text(&self.text)
     }
 }
@@ -60,7 +60,7 @@ impl PdfOperator for MoveNextLineShowText {
         )))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.move_to_next_line_and_show_text(&self.text)
     }
 }
@@ -104,7 +104,7 @@ impl PdfOperator for SetSpacingMoveShowText {
         )))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_spacing_and_show_text(self.word_spacing, self.char_spacing, &self.text)
     }
 }
@@ -135,7 +135,7 @@ impl PdfOperator for ShowTextArray {
         Ok(PdfOperatorVariant::ShowTextArray(Self::new(elements)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.show_text_with_glyph_positioning(&self.elements)
     }
 }

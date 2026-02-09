@@ -1,7 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
-    pdf_operator_backend::PdfOperatorBackend,
+    pdf_operator_backend::{BackendError, PdfOperatorBackend},
 };
 use num_traits::FromPrimitive;
 use pdf_graphics::TextRenderingMode;
@@ -29,7 +29,7 @@ impl PdfOperator for SetCharacterSpacing {
         Ok(PdfOperatorVariant::SetCharacterSpacing(Self::new(spacing)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_character_spacing(self.spacing)
     }
 }
@@ -58,7 +58,7 @@ impl PdfOperator for SetWordSpacing {
         Ok(PdfOperatorVariant::SetWordSpacing(Self::new(spacing)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_word_spacing(self.spacing)
     }
 }
@@ -87,7 +87,7 @@ impl PdfOperator for SetHorizontalScaling {
         Ok(PdfOperatorVariant::SetHorizontalScaling(Self::new(scale)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_horizontal_text_scaling(self.scale)
     }
 }
@@ -116,7 +116,7 @@ impl PdfOperator for SetLeading {
         Ok(PdfOperatorVariant::SetLeading(Self::new(leading)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_text_leading(self.leading)
     }
 }
@@ -148,7 +148,7 @@ impl PdfOperator for SetFont {
         Ok(PdfOperatorVariant::SetFont(Self::new(name, size)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_font_and_size(&self.name, self.size)
     }
 }
@@ -183,7 +183,7 @@ impl PdfOperator for SetRenderingMode {
         Ok(PdfOperatorVariant::SetRenderingMode(Self::new(mode)?))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_text_rendering_mode(self.mode)
     }
 }
@@ -212,7 +212,7 @@ impl PdfOperator for SetTextRise {
         Ok(PdfOperatorVariant::SetTextRise(Self::new(rise)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_text_rise(self.rise)
     }
 }

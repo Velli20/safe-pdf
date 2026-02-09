@@ -5,13 +5,23 @@ use pdf_tokenizer::PdfToken;
 use crate::compatibility_operators::{BeginCompatibility, EndCompatibility};
 use crate::type3_font_operators::SetCharWidth;
 use crate::{
-    clipping_path_operators::*, color_operators::*, error::PdfOperatorError,
-    graphics_state_operators::*, marked_content_operators::*,
-    operation_map::get_operation_descriptor, operator_tokenizer::OperatorReader, path_operators::*,
-    path_paint_operators::*, pdf_operator_backend::PdfOperatorBackend,
-    shadings_operators::PaintShading, text_object_operators::*, text_positioning_operators::*,
-    text_showing_operators::*, text_state_operators::*,
-    type3_font_operators::SetCharWidthAndBoundingBox, xobject_and_image_operators::*,
+    clipping_path_operators::*,
+    color_operators::*,
+    error::PdfOperatorError,
+    graphics_state_operators::*,
+    marked_content_operators::*,
+    operation_map::get_operation_descriptor,
+    operator_tokenizer::OperatorReader,
+    path_operators::*,
+    path_paint_operators::*,
+    pdf_operator_backend::{BackendError, PdfOperatorBackend},
+    shadings_operators::PaintShading,
+    text_object_operators::*,
+    text_positioning_operators::*,
+    text_showing_operators::*,
+    text_state_operators::*,
+    type3_font_operators::SetCharWidthAndBoundingBox,
+    xobject_and_image_operators::*,
 };
 
 use super::{Operands, PdfOperator};
@@ -178,7 +188,7 @@ impl PdfOperatorVariant {
         Ok(operator)
     }
 
-    pub fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    pub fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         match self {
             PdfOperatorVariant::LineTo(op) => op.call(backend),
             PdfOperatorVariant::MoveTo(op) => op.call(backend),

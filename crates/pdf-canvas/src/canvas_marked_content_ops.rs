@@ -1,8 +1,9 @@
 use pdf_content_stream::pdf_operator_backend::MarkedContentOps;
 
-use crate::{canvas_backend::CanvasBackend, pdf_canvas::PdfCanvas};
+use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
 impl<B: CanvasBackend> MarkedContentOps for PdfCanvas<'_, B> {
+    type ErrorType = PdfCanvasError;
     fn mark_point(&mut self, _tag: &str) -> Result<(), Self::ErrorType> {
         Ok(())
     }

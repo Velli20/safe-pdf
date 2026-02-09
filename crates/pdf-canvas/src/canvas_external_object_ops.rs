@@ -203,6 +203,7 @@ fn expand_indexed_to_rgb(
 }
 
 impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
+    type ErrorType = PdfCanvasError;
     /// Invokes (renders) an XObject by name from the current resource dictionary.
     ///
     /// This method handles two types of XObjects:

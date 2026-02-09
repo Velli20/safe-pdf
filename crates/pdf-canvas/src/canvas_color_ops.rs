@@ -4,6 +4,7 @@ use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::Pd
 use pdf_graphics::color::Color;
 
 impl<B: CanvasBackend> ColorOps for PdfCanvas<'_, B> {
+    type ErrorType = PdfCanvasError;
     fn set_stroking_color_space(&mut self, _name: &str) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.stroke_pattern = None;
         Ok(())
