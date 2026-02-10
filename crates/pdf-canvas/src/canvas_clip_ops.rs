@@ -4,6 +4,7 @@ use pdf_graphics::PathFillType;
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
 impl<B: CanvasBackend> ClippingPathOps for PdfCanvas<'_, B> {
+    type ErrorType = PdfCanvasError;
     fn clip_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
         let Some(path) = self.current_path.take() else {
             return Err(PdfCanvasError::NoActivePath);

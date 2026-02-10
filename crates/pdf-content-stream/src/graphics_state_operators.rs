@@ -4,7 +4,7 @@ use pdf_graphics::{LineCap, LineJoin, transform::Transform};
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
-    pdf_operator_backend::PdfOperatorBackend,
+    pdf_operator_backend::{BackendError, PdfOperatorBackend},
 };
 
 /// Sets the line width for path stroking.
@@ -30,7 +30,7 @@ impl PdfOperator for SetLineWidth {
         Ok(PdfOperatorVariant::SetLineWidth(Self::new(width)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_line_width(self.width)
     }
 }
@@ -64,7 +64,7 @@ impl PdfOperator for SetLineCapStyle {
         Ok(PdfOperatorVariant::SetLineCapStyle(Self::new(style)?))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_line_cap(self.style)
     }
 }
@@ -98,7 +98,7 @@ impl PdfOperator for SetLineJoinStyle {
         Ok(PdfOperatorVariant::SetLineJoinStyle(Self::new(style)?))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_line_join(self.style)
     }
 }
@@ -127,7 +127,7 @@ impl PdfOperator for SetMiterLimit {
         Ok(PdfOperatorVariant::SetMiterLimit(Self::new(limit)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_miter_limit(self.limit)
     }
 }
@@ -158,7 +158,7 @@ impl PdfOperator for SetDashPattern {
         Ok(PdfOperatorVariant::SetDashPattern(Self::new(array, phase)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_dash_pattern(&self.array, self.phase)
     }
 }
@@ -191,7 +191,7 @@ impl PdfOperator for SetFlatnessTolerance {
         )))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_flatness_tolerance(self.tolerance)
     }
 }
@@ -221,7 +221,7 @@ impl PdfOperator for SetRenderingIntent {
         Ok(PdfOperatorVariant::SetRenderingIntent(Self::new(intent)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_rendering_intent(&self.intent)
     }
 }
@@ -239,7 +239,7 @@ impl PdfOperator for SaveGraphicsState {
         Ok(PdfOperatorVariant::SaveGraphicsState(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.save_graphics_state()
     }
 }
@@ -257,7 +257,7 @@ impl PdfOperator for RestoreGraphicsState {
         Ok(PdfOperatorVariant::RestoreGraphicsState(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.restore_graphics_state()
     }
 }
@@ -296,7 +296,7 @@ impl PdfOperator for ConcatMatrix {
         ])))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.concat_matrix(&self.matrix)
     }
 }
@@ -329,7 +329,7 @@ impl PdfOperator for SetGraphicsStateFromDict {
         )))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_graphics_state_from_dict(&self.dict_name)
     }
 }

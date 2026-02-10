@@ -1,7 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
-    pdf_operator_backend::PdfOperatorBackend,
+    pdf_operator_backend::{BackendError, PdfOperatorBackend},
 };
 
 /// Strokes the current path.
@@ -17,7 +17,7 @@ impl PdfOperator for StrokePath {
         Ok(PdfOperatorVariant::StrokePath(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.stroke_path()
     }
 }
@@ -36,7 +36,7 @@ impl PdfOperator for CloseStrokePath {
         Ok(PdfOperatorVariant::CloseStrokePath(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.close_and_stroke_path()
     }
 }
@@ -54,7 +54,7 @@ impl PdfOperator for FillPathNonZero {
         Ok(PdfOperatorVariant::FillPathNonZero(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.fill_path_nonzero_winding()
     }
 }
@@ -72,7 +72,7 @@ impl PdfOperator for FillPathEvenOdd {
         Ok(PdfOperatorVariant::FillPathEvenOdd(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.fill_path_even_odd()
     }
 }
@@ -91,7 +91,7 @@ impl PdfOperator for FillAndStrokePathNonZero {
         Ok(PdfOperatorVariant::FillAndStrokePathNonZero(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.fill_and_stroke_path_nonzero_winding()
     }
 }
@@ -110,7 +110,7 @@ impl PdfOperator for FillAndStrokePathEvenOdd {
         Ok(PdfOperatorVariant::FillAndStrokePathEvenOdd(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.fill_and_stroke_path_even_odd()
     }
 }
@@ -129,7 +129,7 @@ impl PdfOperator for CloseFillAndStrokePathNonZero {
         Ok(PdfOperatorVariant::CloseFillAndStrokePathNonZero(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.close_fill_and_stroke_path_nonzero_winding()
     }
 }
@@ -148,7 +148,7 @@ impl PdfOperator for CloseFillAndStrokePathEvenOdd {
         Ok(PdfOperatorVariant::CloseFillAndStrokePathEvenOdd(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.close_fill_and_stroke_path_even_odd()
     }
 }
@@ -167,7 +167,7 @@ impl PdfOperator for EndPath {
         Ok(PdfOperatorVariant::EndPath(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.end_path_no_op()
     }
 }

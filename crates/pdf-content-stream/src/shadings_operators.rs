@@ -1,7 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
-    pdf_operator_backend::PdfOperatorBackend,
+    pdf_operator_backend::{BackendError, PdfOperatorBackend},
 };
 
 /// Paints the shape and color shading defined by a shading dictionary resource.
@@ -29,7 +29,7 @@ impl PdfOperator for PaintShading {
         Ok(PdfOperatorVariant::PaintShading(Self::new(name)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.paint_shading(&self.name)
     }
 }

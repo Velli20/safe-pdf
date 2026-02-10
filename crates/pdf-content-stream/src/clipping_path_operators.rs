@@ -1,7 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
-    pdf_operator_backend::PdfOperatorBackend,
+    pdf_operator_backend::{BackendError, PdfOperatorBackend},
 };
 
 /// Modifies the current clipping path by intersecting it with the current path, using the non-zero winding number rule to determine the region to clip.
@@ -17,7 +17,7 @@ impl PdfOperator for ClipNonZero {
         Ok(PdfOperatorVariant::ClipNonZero(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.clip_path_nonzero_winding()
     }
 }
@@ -35,7 +35,7 @@ impl PdfOperator for ClipEvenOdd {
         Ok(PdfOperatorVariant::ClipEvenOdd(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.clip_path_even_odd()
     }
 }

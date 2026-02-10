@@ -221,11 +221,8 @@ impl RecordingBackend {
 #[derive(Debug, Error)]
 pub enum PdfRecordingCanvasError {}
 
-impl PdfOperatorBackendError for RecordingBackend {
-    type ErrorType = PdfRecordingCanvasError;
-}
-
 impl PathConstructionOps for RecordingBackend {
+    type ErrorType = PdfRecordingCanvasError;
     fn move_to(&mut self, x: f32, y: f32) -> Result<(), Self::ErrorType> {
         self.operations.push(RecordedOperation::MoveTo { x, y });
         Ok(())
@@ -291,6 +288,7 @@ impl PathConstructionOps for RecordingBackend {
 }
 
 impl PathPaintingOps for RecordingBackend {
+    type ErrorType = PdfRecordingCanvasError;
     fn stroke_path(&mut self) -> Result<(), Self::ErrorType> {
         self.operations.push(RecordedOperation::StrokePath);
         Ok(())
@@ -343,6 +341,7 @@ impl PathPaintingOps for RecordingBackend {
 }
 
 impl ClippingPathOps for RecordingBackend {
+    type ErrorType = PdfRecordingCanvasError;
     fn clip_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::ClipPathNonZeroWinding);
@@ -356,6 +355,7 @@ impl ClippingPathOps for RecordingBackend {
 }
 
 impl GraphicsStateOps for RecordingBackend {
+    type ErrorType = PdfRecordingCanvasError;
     fn save_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
         self.operations.push(RecordedOperation::SaveGraphicsState);
         Ok(())
@@ -433,6 +433,7 @@ impl GraphicsStateOps for RecordingBackend {
 }
 
 impl ColorOps for RecordingBackend {
+    type ErrorType = PdfRecordingCanvasError;
     fn set_stroking_color_space(&mut self, name: &str) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::SetStrokingColorSpace {
@@ -534,6 +535,7 @@ impl ColorOps for RecordingBackend {
 }
 
 impl TextObjectOps for RecordingBackend {
+    type ErrorType = PdfRecordingCanvasError;
     fn begin_text_object(&mut self) -> Result<(), Self::ErrorType> {
         self.operations.push(RecordedOperation::BeginTextObject);
         Ok(())
@@ -546,6 +548,7 @@ impl TextObjectOps for RecordingBackend {
 }
 
 impl TextStateOps for RecordingBackend {
+    type ErrorType = PdfRecordingCanvasError;
     fn set_character_spacing(&mut self, spacing: f32) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::SetCharacterSpacing { spacing });
@@ -592,6 +595,7 @@ impl TextStateOps for RecordingBackend {
 }
 
 impl TextPositioningOps for RecordingBackend {
+    type ErrorType = PdfRecordingCanvasError;
     fn move_text_position(&mut self, tx: f32, ty: f32) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::MoveTextPosition { tx, ty });
@@ -623,6 +627,7 @@ impl TextPositioningOps for RecordingBackend {
 }
 
 impl TextShowingOps for RecordingBackend {
+    type ErrorType = PdfRecordingCanvasError;
     fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
         self.operations.push(RecordedOperation::ShowText {
             text: text.to_vec(),
@@ -666,6 +671,7 @@ impl TextShowingOps for RecordingBackend {
 }
 
 impl XObjectOps for RecordingBackend {
+    type ErrorType = PdfRecordingCanvasError;
     fn invoke_xobject(&mut self, xobject_name: &str) -> Result<(), Self::ErrorType> {
         self.operations.push(RecordedOperation::InvokeXObject {
             xobject_name: xobject_name.to_string(),
@@ -675,6 +681,7 @@ impl XObjectOps for RecordingBackend {
 }
 
 impl ShadingOps for RecordingBackend {
+    type ErrorType = PdfRecordingCanvasError;
     fn paint_shading(&mut self, shading_name: &str) -> Result<(), Self::ErrorType> {
         self.operations.push(RecordedOperation::PaintShading {
             shading_name: shading_name.to_string(),
@@ -684,6 +691,7 @@ impl ShadingOps for RecordingBackend {
 }
 
 impl MarkedContentOps for RecordingBackend {
+    type ErrorType = PdfRecordingCanvasError;
     fn mark_point(&mut self, tag: &str) -> Result<(), Self::ErrorType> {
         self.operations.push(RecordedOperation::MarkPoint {
             tag: tag.to_string(),

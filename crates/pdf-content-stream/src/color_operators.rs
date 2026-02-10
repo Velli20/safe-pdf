@@ -1,7 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
-    pdf_operator_backend::PdfOperatorBackend,
+    pdf_operator_backend::{BackendError, PdfOperatorBackend},
 };
 
 /// Sets the fill color to a grayscale value.
@@ -28,7 +28,7 @@ impl PdfOperator for SetGrayFill {
         Ok(PdfOperatorVariant::SetGrayFill(Self::new(gray)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_non_stroking_gray(self.gray)
     }
 }
@@ -57,7 +57,7 @@ impl PdfOperator for SetGrayStroke {
         Ok(PdfOperatorVariant::SetGrayStroke(Self::new(gray)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_stroking_gray(self.gray)
     }
 }
@@ -92,7 +92,7 @@ impl PdfOperator for SetRGBFill {
         Ok(PdfOperatorVariant::SetRGBFill(Self::new(r, g, b)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_non_stroking_rgb(self.r, self.g, self.b)
     }
 }
@@ -127,7 +127,7 @@ impl PdfOperator for SetRGBStroke {
         Ok(PdfOperatorVariant::SetRGBStroke(Self::new(r, g, b)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_stroking_rgb(self.r, self.g, self.b)
     }
 }
@@ -165,7 +165,7 @@ impl PdfOperator for SetCMYKFill {
         Ok(PdfOperatorVariant::SetCMYKFill(Self::new(c, m, y, k)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_non_stroking_cmyk(self.c, self.m, self.y, self.k)
     }
 }
@@ -203,7 +203,7 @@ impl PdfOperator for SetCMYKStroke {
         Ok(PdfOperatorVariant::SetCMYKStroke(Self::new(c, m, y, k)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_stroking_cmyk(self.c, self.m, self.y, self.k)
     }
 }
@@ -230,7 +230,7 @@ impl PdfOperator for SetStrokeColorSpace {
         Ok(PdfOperatorVariant::SetStrokeColorSpace(Self::new(name)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_stroking_color_space(&self.name)
     }
 }
@@ -259,7 +259,7 @@ impl PdfOperator for SetNonStrokingColorSpace {
         )))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_non_stroking_color_space(&self.name)
     }
 }
@@ -309,7 +309,7 @@ impl PdfOperator for SetStrokingColor {
         )))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         if let Some(pattern) = &self.pattern {
             backend.set_stroking_color_extended(&self.components, pattern)
         } else {
@@ -363,7 +363,7 @@ impl PdfOperator for SetNonStrokingColor {
         )))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         if let Some(pattern) = &self.pattern {
             backend.set_non_stroking_color_extended(&self.components, pattern)
         } else {

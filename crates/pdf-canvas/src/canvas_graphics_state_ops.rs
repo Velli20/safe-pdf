@@ -10,6 +10,7 @@ use crate::{
 };
 
 impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
+    type ErrorType = PdfCanvasError;
     fn save_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
         self.save()
     }

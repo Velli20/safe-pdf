@@ -1,4 +1,4 @@
-use crate::pdf_operator_backend::PdfOperatorBackend;
+use crate::pdf_operator_backend::{BackendError, PdfOperatorBackend};
 
 /// Represents a PDF content stream operator.
 ///
@@ -21,7 +21,7 @@ pub trait PdfOperator {
         operands: &mut crate::pdf_operator::Operands,
     ) -> Result<crate::pdf_operator::PdfOperatorVariant, crate::error::PdfOperatorError>;
 
-    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
         todo!("Unimplemented operator {}", Self::NAME)
     }
 }

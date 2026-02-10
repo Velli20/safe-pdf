@@ -3,7 +3,7 @@ use pdf_graphics::transform::Transform;
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
-    pdf_operator_backend::PdfOperatorBackend,
+    pdf_operator_backend::{BackendError, PdfOperatorBackend},
 };
 
 /// Moves to the start of the next line, offset from the start of the current line by (`tx`, `ty`).
@@ -35,7 +35,7 @@ impl PdfOperator for MoveTextPosition {
         Ok(PdfOperatorVariant::MoveTextPosition(Self::new(tx, ty)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.move_text_position(self.tx, self.ty)
     }
 }
@@ -70,7 +70,7 @@ impl PdfOperator for MoveTextPositionAndSetLeading {
         ))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.move_text_position_and_set_leading(self.tx, self.ty)
     }
 }
@@ -109,7 +109,7 @@ impl PdfOperator for SetTextMatrix {
         ])))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.set_text_matrix(&self.matrix)
     }
 }
@@ -129,7 +129,7 @@ impl PdfOperator for MoveToNextLine {
         Ok(PdfOperatorVariant::MoveToNextLine(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.move_to_start_of_next_line()
     }
 }

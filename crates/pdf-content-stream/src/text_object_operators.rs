@@ -1,7 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
-    pdf_operator_backend::PdfOperatorBackend,
+    pdf_operator_backend::{BackendError, PdfOperatorBackend},
 };
 
 /// Begins a text object, initializing the text matrix and text line matrix to
@@ -18,7 +18,7 @@ impl PdfOperator for BeginText {
         Ok(PdfOperatorVariant::BeginText(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.begin_text_object()
     }
 }
@@ -36,7 +36,7 @@ impl PdfOperator for EndText {
         Ok(PdfOperatorVariant::EndText(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.end_text_object()
     }
 }

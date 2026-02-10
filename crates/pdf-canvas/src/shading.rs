@@ -4,6 +4,7 @@ use pdf_graphics::pdf_path::PdfPath;
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
 impl<B: CanvasBackend> ShadingOps for PdfCanvas<'_, B> {
+    type ErrorType = PdfCanvasError;
     fn paint_shading(&mut self, shading_name: &str) -> Result<(), Self::ErrorType> {
         let state = self.current_state()?;
 

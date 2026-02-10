@@ -1,7 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
-    pdf_operator_backend::PdfOperatorBackend,
+    pdf_operator_backend::{BackendError, PdfOperatorBackend},
 };
 
 /// Begins a new subpath by moving the current point to coordinates (x, y), omitting any connecting line segment.
@@ -31,7 +31,7 @@ impl PdfOperator for MoveTo {
         Ok(PdfOperatorVariant::MoveTo(Self::new(x, y)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.move_to(self.x, self.y)
     }
 }
@@ -63,7 +63,7 @@ impl PdfOperator for LineTo {
         Ok(PdfOperatorVariant::LineTo(Self::new(x, y)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.line_to(self.x, self.y)
     }
 }
@@ -117,7 +117,7 @@ impl PdfOperator for CurveTo {
         )))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.curve_to(self.x1, self.y1, self.x2, self.y2, self.x3, self.y3)
     }
 }
@@ -157,7 +157,7 @@ impl PdfOperator for CurveToV {
         Ok(PdfOperatorVariant::CurveToV(Self::new(x2, y2, x3, y3)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.curve_to_v(self.x2, self.y2, self.x3, self.y3)
     }
 }
@@ -196,7 +196,7 @@ impl PdfOperator for CurveToY {
         Ok(PdfOperatorVariant::CurveToY(Self::new(x1, y1, x3, y3)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.curve_to_y(self.x1, self.y1, self.x3, self.y3)
     }
 }
@@ -215,7 +215,7 @@ impl PdfOperator for ClosePath {
         Ok(PdfOperatorVariant::ClosePath(Self))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.close_path()
     }
 }
@@ -261,7 +261,7 @@ impl PdfOperator for Rectangle {
         )))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), T::ErrorType> {
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.rectangle(self.x, self.y, self.width, self.height)
     }
 }

@@ -4,6 +4,7 @@ use pdf_graphics::{PaintMode, PathFillType, pdf_path::PdfPath};
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
 impl<B: CanvasBackend> PathConstructionOps for PdfCanvas<'_, B> {
+    type ErrorType = PdfCanvasError;
     fn move_to(&mut self, x: f32, y: f32) -> Result<(), Self::ErrorType> {
         self.current_path
             .get_or_insert_with(PdfPath::default)
@@ -76,6 +77,7 @@ impl<B: CanvasBackend> PathConstructionOps for PdfCanvas<'_, B> {
 }
 
 impl<B: CanvasBackend> PathPaintingOps for PdfCanvas<'_, B> {
+    type ErrorType = PdfCanvasError;
     fn stroke_path(&mut self) -> Result<(), Self::ErrorType> {
         self.paint_taken_path(PaintMode::Stroke, PathFillType::default())
     }
