@@ -141,7 +141,9 @@ impl FromDictionary for ExternalGraphicsState {
                 ObjectVariant::Reference(_) => objects.resolve_object(value)?,
                 _ => value,
             };
-            params.push(parse_entry(name, resolved, objects)?);
+            if let Some(param) = parse_entry(name, resolved, objects)? {
+                params.push(param);
+            }
         }
 
         Ok(ExternalGraphicsState { params })
@@ -277,11 +279,14 @@ fn parse_soft_mask(
 }
 
 /// Parse a single key/value pair of the ExtGState dictionary.
+///
+/// Returns `Ok(None)` for unrecognized keys, which are silently ignored
+/// per the PDF specification.
 fn parse_entry(
     name: &str,
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
-) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
+) -> Result<Option<ExternalGraphicsStateKey>, ExternalGraphicsStateError> {
     let parsed = match name {
         "TR" => ExternalGraphicsStateKey::TransferFunction,
         "TR2" => ExternalGraphicsStateKey::TransferFunctionNew,
@@ -321,13 +326,8 @@ fn parse_entry(
         "SA" => ExternalGraphicsStateKey::StrokeAdjustment(value.try_boolean(objects)?),
         "AAPL:AA" => ExternalGraphicsStateKey::AppleAntiAliasing(value.try_boolean(objects)?),
         "AIS" => ExternalGraphicsStateKey::AlphaIsShape(value.try_boolean(objects)?),
-        _ => {
-            return Err(ExternalGraphicsStateError::InvalidValueError {
-                key_name: Cow::Owned(name.to_string()),
-                description: format!("Unknown ExtGState parameter '{}'", name),
-            });
-        }
+        _ => return Ok(None),
     };
 
-    Ok(parsed)
+    Ok(Some(parsed))
 }
