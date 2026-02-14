@@ -6,7 +6,9 @@
 //! - Type 3: Stitching functions (combining multiple functions)
 //! - Type 4: PostScript Calculator functions
 
-use pdf_object::{ObjectVariant, error::ObjectError, object_resolver::ObjectResolver};
+use pdf_object::{
+    error::ObjectError, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+};
 use pdf_postscript::calculator::CalcError;
 use thiserror::Error;
 

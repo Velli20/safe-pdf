@@ -1,6 +1,6 @@
 use num_derive::FromPrimitive;
 use num_traits::{FromPrimitive, ToPrimitive};
-use pdf_object::{ObjectVariant, object_resolver::ObjectResolver};
+use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
 use crate::functions::{
     Function, FunctionImpl, FunctionInterpolationError, FunctionReadError, ensure_stream_len,

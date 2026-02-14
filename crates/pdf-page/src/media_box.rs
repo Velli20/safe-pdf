@@ -1,5 +1,5 @@
 use pdf_object::error::ObjectError;
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, traits::FromDictionary};
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 /// Defines the page boundaries within a PDF document.
 ///
@@ -28,15 +28,13 @@ impl MediaBox {
     }
 }
 
-impl FromDictionary for MediaBox {
+impl MediaBox {
     const KEY: &'static str = "MediaBox";
-    type ResultType = Option<MediaBox>;
-    type ErrorType = ObjectError;
 
-    fn from_dictionary(
+    pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self::ResultType, Self::ErrorType> {
+    ) -> Result<Option<MediaBox>, ObjectError> {
         let Some(media_box_obj) = dictionary.get(Self::KEY) else {
             return Ok(None);
         };

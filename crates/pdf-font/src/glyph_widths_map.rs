@@ -1,4 +1,6 @@
-use pdf_object::{ObjectVariant, error::ObjectError, object_resolver::ObjectResolver};
+use pdf_object::{
+    error::ObjectError, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
@@ -242,7 +244,7 @@ impl GlyphWidthsMap {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use pdf_object::{ObjectVariant, object_resolver::UnimplementedResolver};
+    use pdf_object::{object_resolver::UnimplementedResolver, object_variant::ObjectVariant};
 
     // Helper to create a pdf_object::Value::Number for i64
     fn num_i64(n: i64) -> ObjectVariant {

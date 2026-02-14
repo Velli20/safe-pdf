@@ -1,6 +1,7 @@
-use std::{borrow::Cow, rc::Rc};
-
-use pdf_object::{ObjectVariant, dictionary::Dictionary, object_resolver::UnimplementedResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_resolver::UnimplementedResolver, object_variant::ObjectVariant,
+};
+use std::borrow::Cow;
 
 use crate::{TextElement, error::PdfOperatorError};
 
@@ -65,9 +66,9 @@ impl<'a> Operands<'a> {
         })
     }
 
-    pub fn get_dictionary(&mut self) -> Result<Rc<Dictionary>, PdfOperatorError> {
+    pub fn get_dictionary(&mut self) -> Result<Box<Dictionary>, PdfOperatorError> {
         self.take_and_map("Dictionary", |value| match value {
-            ObjectVariant::Dictionary(dict) => Ok(std::rc::Rc::clone(dict)),
+            ObjectVariant::Dictionary(dict) => Ok(dict.clone()),
             _ => Err(PdfOperatorError::InvalidOperandType {
                 expected_type: "Dictionary",
                 found_type: value.name(),

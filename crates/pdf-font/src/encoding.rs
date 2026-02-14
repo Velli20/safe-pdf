@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use pdf_object::{ObjectVariant, object_resolver::ObjectResolver, traits::FromDictionary};
+use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 use thiserror::Error;
 
 /// Represents the base encoding of a font.
@@ -103,16 +103,11 @@ impl Encoding {
     }
 }
 
-impl FromDictionary for Encoding {
-    const KEY: &'static str = "Encoding";
-    type ResultType = Self;
-
-    type ErrorType = EncodingReadError;
-
-    fn from_dictionary(
+impl Encoding {
+    pub fn from_dictionary(
         dictionary: &pdf_object::dictionary::Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self::ResultType, Self::ErrorType> {
+    ) -> Result<Self, EncodingReadError> {
         let mut encoding = match dictionary.get("BaseEncoding") {
             Some(base) => {
                 let base_encoding = FontEncoding::from(base.try_str(objects)?);

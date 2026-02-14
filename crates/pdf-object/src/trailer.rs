@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::dictionary::Dictionary;
 
 /// Represents the trailer of a PDF document.
@@ -10,7 +8,7 @@ use crate::dictionary::Dictionary;
 #[derive(Debug, PartialEq, Clone)]
 pub struct Trailer {
     /// The dictionary object containing the trailer information.
-    pub dictionary: Rc<Dictionary>,
+    pub dictionary: Box<Dictionary>,
     /// The byte offset from the beginning of the file to the start of
     /// the cross-reference table (`xref` section), used for locating
     /// objects within the PDF.
@@ -18,7 +16,7 @@ pub struct Trailer {
 }
 
 impl Trailer {
-    pub fn new(dictionary: Rc<Dictionary>, offset: usize) -> Self {
+    pub fn new(dictionary: Box<Dictionary>, offset: usize) -> Self {
         Trailer { dictionary, offset }
     }
 }

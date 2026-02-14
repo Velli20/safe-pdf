@@ -1,13 +1,16 @@
 use std::borrow::Cow;
 
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    traits::FromDictionary,
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 
 use thiserror::Error;
 
-use crate::xobject::{XObject, XObjectError, XObjectReader};
+use crate::{
+    resource_cache::ResourceCache,
+    xobject::{XObject, XObjectError},
+};
 use num_traits::FromPrimitive;
 use pdf_graphics::{BlendMode, LineCap, LineJoin, MaskMode};
 
@@ -113,21 +116,16 @@ pub struct ExternalGraphicsState {
     pub params: Vec<ExternalGraphicsStateKey>,
 }
 
-impl FromDictionary for ExternalGraphicsState {
-    const KEY: &'static str = "ExtGState";
-
-    type ResultType = Self;
-
-    type ErrorType = ExternalGraphicsStateError;
-
+impl ExternalGraphicsState {
     /// Parse an ExtGState dictionary into a strongly-typed `ExternalGraphicsState`.
     ///
     /// This delegates each key's parsing to small helpers to keep control flow
     /// and error handling readable. Unknown keys are logged and skipped.
-    fn from_dictionary(
+    pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self::ResultType, Self::ErrorType> {
+        cache: &mut dyn ResourceCache,
+    ) -> Result<Self, ExternalGraphicsStateError> {
         let mut params: Vec<ExternalGraphicsStateKey> = Vec::new();
 
         for (name, value) in &dictionary.dictionary {
@@ -137,11 +135,11 @@ impl FromDictionary for ExternalGraphicsState {
                 continue;
             }
             // Resolve reference (if any).
-            let resolved = match value.as_ref() {
+            let resolved = match value {
                 ObjectVariant::Reference(_) => objects.resolve_object(value)?,
                 _ => value,
             };
-            if let Some(param) = parse_entry(name, resolved, objects)? {
+            if let Some(param) = parse_entry(name, resolved, objects, cache)? {
                 params.push(param);
             }
         }
@@ -198,7 +196,7 @@ fn parse_font(
             actual_desc: format!("array with {} elements", arr.len()),
         });
     };
-    let font_ref = font_ref.try_reference()?;
+    let font_ref = font_ref.try_object_number()?;
     let font_size = font_size.try_number::<f32>(objects)?;
     Ok(ExternalGraphicsStateKey::Font(font_ref, font_size))
 }
@@ -252,6 +250,7 @@ fn parse_soft_mask(
     key_name: &str,
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
+    cache: &mut dyn ResourceCache,
 ) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
     let smask = match value {
         ObjectVariant::Dictionary(dict) => {
@@ -260,7 +259,7 @@ fn parse_soft_mask(
             // Parse the "G" key for the `XObject`
             let stream = dict.get_or_err("G")?.try_stream(objects)?;
 
-            let shape = XObject::read_xobject(&stream.dictionary, stream, objects)?;
+            let shape = XObject::read_xobject(&stream.dictionary, stream, objects, cache)?;
 
             Some(SoftMask { mask_type, shape })
         }
@@ -286,6 +285,7 @@ fn parse_entry(
     name: &str,
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
+    cache: &mut dyn ResourceCache,
 ) -> Result<Option<ExternalGraphicsStateKey>, ExternalGraphicsStateError> {
     let parsed = match name {
         "TR" => ExternalGraphicsStateKey::TransferFunction,
@@ -320,7 +320,7 @@ fn parse_entry(
         "OPM" => ExternalGraphicsStateKey::OverprintMode(value.try_number::<i32>(objects)?),
         "Font" => parse_font(name, value, objects)?,
         "BM" => parse_blend_mode(value, objects)?,
-        "SMask" => parse_soft_mask(name, value, objects)?,
+        "SMask" => parse_soft_mask(name, value, objects, cache)?,
         "CA" => ExternalGraphicsStateKey::StrokingAlpha(value.try_number::<f32>(objects)?),
         "ca" => ExternalGraphicsStateKey::NonStrokingAlpha(value.try_number::<f32>(objects)?),
         "SA" => ExternalGraphicsStateKey::StrokeAdjustment(value.try_boolean(objects)?),

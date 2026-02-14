@@ -102,7 +102,7 @@ impl<B: CanvasBackend> TextStateOps for PdfCanvas<'_, B> {
         self.current_state_mut()?.text_state.font_size = size;
 
         if let Some(resources) = self.current_state()?.resources
-            && let Some(font) = resources.fonts.get(font_name)
+            && let Some(font) = resources.font(font_name)
         {
             self.current_state_mut()?.text_state.font = Some(font);
             return Ok(());

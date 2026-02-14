@@ -13,8 +13,8 @@
 
 use pdf_graphics::rect::Rect;
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    traits::FromDictionary,
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 use thiserror::Error;
 

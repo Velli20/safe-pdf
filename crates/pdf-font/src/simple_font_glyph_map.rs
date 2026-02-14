@@ -1,20 +1,18 @@
 use std::collections::HashMap;
 
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, traits::FromDictionary};
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 use crate::font::FontError;
 
 pub struct SimpleFontGlyphWidthsMap;
 
-impl FromDictionary for SimpleFontGlyphWidthsMap {
+impl SimpleFontGlyphWidthsMap {
     const KEY: &'static str = "Widths";
-    type ResultType = Option<HashMap<u16, f32>>;
-    type ErrorType = FontError;
 
-    fn from_dictionary(
+    pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self::ResultType, Self::ErrorType> {
+    ) -> Result<Option<HashMap<u16, f32>>, FontError> {
         // Read required fields /FirstChar entry.
         let first_char = dictionary
             .get_or_err("FirstChar")?

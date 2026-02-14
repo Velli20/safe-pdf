@@ -462,7 +462,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         let Some(pattern) = self
             .current_state()?
             .resources
-            .and_then(|r| r.patterns.get(pattern_name))
+            .and_then(|r| r.pattern(pattern_name))
         else {
             return Err(PdfCanvasError::PatternNotFound(pattern_name.to_string()));
         };
@@ -483,7 +483,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         let Some(pattern) = self
             .current_state()?
             .resources
-            .and_then(|r| r.patterns.get(pattern_name))
+            .and_then(|r| r.pattern(pattern_name))
         else {
             return Err(PdfCanvasError::PatternNotFound(pattern_name.to_string()));
         };

@@ -14,13 +14,14 @@
 use pdf_graphics::PixelFormat;
 use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    stream::StreamObject, traits::FromDictionary,
+    stream::StreamObject,
 };
 use thiserror::Error;
 
 use crate::{
     color_space::{ColorSpace, ColorSpaceError},
-    xobject::{XObject, XObjectError, XObjectReader},
+    resource_cache::ResourceCache,
+    xobject::{XObject, XObjectError},
 };
 
 /// Errors that can occur when parsing or processing PDF Image XObjects.
@@ -92,9 +93,7 @@ pub struct ImageXObject {
     pub color_space: Option<ColorSpace>,
 }
 
-impl XObjectReader for ImageXObject {
-    type ErrorType = ImageXObjectError;
-
+impl ImageXObject {
     /// Parses an Image XObject from a PDF stream dictionary and data.
     ///
     /// This method extracts all required and optional image properties from the
@@ -117,11 +116,12 @@ impl XObjectReader for ImageXObject {
     /// - An unsupported filter or filter combination is encountered
     /// - The color space cannot be parsed
     /// - The soft mask is not a valid Image XObject
-    fn read_xobject(
+    pub fn read_xobject(
         dictionary: &Dictionary,
         stream_data: &StreamObject,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self, Self::ErrorType> {
+        cache: &mut dyn ResourceCache,
+    ) -> Result<Self, ImageXObjectError> {
         // Extract required image properties from the dictionary.
         let width = dictionary
             .get_or_err("Width")?
@@ -147,7 +147,7 @@ impl XObjectReader for ImageXObject {
             .ok_or(ImageXObjectError::InvalidImageDimensions { width, height })?;
 
         // Parse the optional `/SMask` entry and convert to RGBA if needed.
-        let smask = Self::parse_smask(dictionary, objects)?;
+        let smask = Self::parse_smask(dictionary, objects, cache)?;
 
         let (data, pixel_format) = if smask.is_some() || num_color_components == 3 {
             (
@@ -183,6 +183,7 @@ impl ImageXObject {
     fn parse_smask(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
+        cache: &mut dyn ResourceCache,
     ) -> Result<Option<Box<ImageXObject>>, ImageXObjectError> {
         let Some(smask_obj) = dictionary.get("SMask") else {
             return Ok(None);
@@ -192,11 +193,9 @@ impl ImageXObject {
         let stream = smask_obj.try_stream(objects)?;
 
         // Recursively parse the SMask as an XObject.
-        let smask_xobject =
-            XObject::read_xobject(&stream.dictionary, stream, objects).map_err(|e| {
-                ImageXObjectError::SMaskReadError {
-                    source: Box::new(e),
-                }
+        let smask_xobject = XObject::read_xobject(&stream.dictionary, stream, objects, cache)
+            .map_err(|e| ImageXObjectError::SMaskReadError {
+                source: Box::new(e),
             })?;
         // Ensure the SMask is actually an Image XObject.
         match smask_xobject {

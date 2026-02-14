@@ -1,9 +1,6 @@
 use std::borrow::Cow;
 
-use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    traits::FromDictionary,
-};
+use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
 use thiserror::Error;
 
 use crate::{
@@ -44,15 +41,13 @@ pub enum Font {
     TrueType(TrueTypeFont),
 }
 
-impl FromDictionary for Font {
-    const KEY: &'static str = "Font";
-    type ResultType = Self;
-    type ErrorType = FontError;
+impl Font {
+    pub const KEY: &'static str = "Font";
 
-    fn from_dictionary(
+    pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self::ResultType, Self::ErrorType> {
+    ) -> Result<Font, FontError> {
         // Determine the font subtype from the dictionary.
         let subtype = dictionary.get_or_err("Subtype")?.try_str(objects)?;
 

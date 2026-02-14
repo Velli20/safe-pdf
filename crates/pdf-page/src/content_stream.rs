@@ -1,19 +1,8 @@
 use pdf_content_stream::{error::PdfOperatorError, pdf_operator::PdfOperatorVariant};
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    traits::FromDictionary,
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
-use thiserror::Error;
-
-#[derive(Debug, Error)]
-pub enum ContentStreamReadError {
-    #[error("Unsupported entry type for Content Stream: '{found_type}'")]
-    UnsupportedEntryType { found_type: &'static str },
-    #[error("Error parsing content stream operators: {0}")]
-    ContentStreamError(#[from] PdfOperatorError),
-    #[error("{0}")]
-    ObjectError(#[from] ObjectError),
-}
 
 /// Represents the content stream of a PDF page, containing a sequence
 /// of drawing operators.
@@ -26,7 +15,7 @@ pub struct ContentStream {
 fn process_content_stream_array(
     array: &[ObjectVariant],
     objects: &dyn ObjectResolver,
-) -> Result<Vec<PdfOperatorVariant>, ContentStreamReadError> {
+) -> Result<Vec<PdfOperatorVariant>, PdfOperatorError> {
     let mut concatenated_ops = Vec::new();
     for value_in_array in array.iter() {
         let data = value_in_array.try_stream(objects)?.data()?;
@@ -36,26 +25,21 @@ fn process_content_stream_array(
     Ok(concatenated_ops)
 }
 
-impl FromDictionary for ContentStream {
-    const KEY: &'static str = "Contents";
-    type ResultType = Option<ContentStream>;
-    type ErrorType = ContentStreamReadError;
-
-    fn from_dictionary(
+impl ContentStream {
+    pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self::ResultType, Self::ErrorType> {
+    ) -> Result<Option<ContentStream>, PdfOperatorError> {
+        const KEY: &str = "Contents";
+
         // Get the optional `/Contents` entry from the page dictionary.
-        let Some(contents) = dictionary.get(Self::KEY) else {
+        let Some(contents) = dictionary.get(KEY) else {
             return Ok(None);
         };
 
-        // Resolve the /Contents entry if it's an indirect reference.
-        let contents = objects.resolve_object(contents)?;
-
         // Process the resolved /Contents object.
         // It should be a Stream or an Array whose payload is one of these.
-        let operations = match &contents {
+        let operations = match objects.resolve_object(contents)? {
             ObjectVariant::Stream(stream) => {
                 let data = stream.data()?;
                 PdfOperatorVariant::from(&data)?
@@ -65,9 +49,7 @@ impl FromDictionary for ContentStream {
                 process_content_stream_array(array_obj, objects)?
             }
             other => {
-                return Err(ContentStreamReadError::UnsupportedEntryType {
-                    found_type: other.name(),
-                });
+                return Err(ObjectError::TypeMismatch("Stream or Array", other.name()).into());
             }
         };
 

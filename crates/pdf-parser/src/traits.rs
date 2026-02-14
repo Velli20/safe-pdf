@@ -1,6 +1,7 @@
 use pdf_object::{
-    ObjectVariant, cross_reference_table::CrossReferenceTable, dictionary::Dictionary,
-    object_resolver::ObjectResolver, trailer::Trailer, version::Version,
+    cross_reference_table::CrossReferenceTable, dictionary::Dictionary,
+    object_resolver::ObjectResolver, object_variant::ObjectVariant, trailer::Trailer,
+    version::Version,
 };
 
 pub trait ArrayParser {

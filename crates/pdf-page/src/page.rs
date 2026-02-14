@@ -1,7 +1,8 @@
 use crate::{
-    content_stream::ContentStream, media_box::MediaBox, pages::PdfPagesError, resources::Resources,
+    content_stream::ContentStream, media_box::MediaBox, pages::PdfPagesError,
+    resource_cache::ResourceCache, resources::Resources,
 };
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, traits::FromDictionary};
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 /// Represents a single page in a PDF document.
 ///
@@ -18,19 +19,17 @@ pub struct PdfPage {
     pub resources: Option<Resources>,
 }
 
-impl FromDictionary for PdfPage {
-    const KEY: &'static str = "Page";
+impl PdfPage {
+    pub const KEY: &'static str = "Page";
 
-    type ResultType = Self;
-    type ErrorType = PdfPagesError;
-
-    fn from_dictionary(
+    pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self::ResultType, Self::ErrorType> {
+        cache: &mut dyn ResourceCache,
+    ) -> Result<Self, PdfPagesError> {
         let contents = ContentStream::from_dictionary(dictionary, objects)?;
         let media_box = MediaBox::from_dictionary(dictionary, objects)?;
-        let resources = Resources::from_dictionary(dictionary, objects)?;
+        let resources = Resources::read(dictionary, objects, cache)?;
 
         Ok(Self {
             contents,

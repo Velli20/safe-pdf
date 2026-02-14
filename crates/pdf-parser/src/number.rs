@@ -1,4 +1,4 @@
-use pdf_object::ObjectVariant;
+use pdf_object::object_variant::ObjectVariant;
 use pdf_tokenizer::PdfToken;
 use thiserror::Error;
 

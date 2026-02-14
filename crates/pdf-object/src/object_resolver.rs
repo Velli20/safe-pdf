@@ -1,4 +1,4 @@
-use crate::{ObjectVariant, error::ObjectError};
+use crate::{error::ObjectError, object_variant::ObjectVariant};
 
 pub trait ObjectResolver {
     /// Resolves an object reference to its underlying object.

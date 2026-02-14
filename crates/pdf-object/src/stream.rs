@@ -1,7 +1,6 @@
-use std::{borrow::Cow, rc::Rc};
-
 use crate::error::ObjectError;
 use crate::{dictionary::Dictionary, filter::Filter};
+use std::borrow::Cow;
 
 /// Represents a PDF stream object.
 ///
@@ -16,7 +15,7 @@ pub struct StreamObject {
     /// The generation number, used for PDF incremental updates.
     pub generation_number: usize,
     /// The dictionary associated with this stream.
-    pub dictionary: Rc<Dictionary>,
+    pub dictionary: Box<Dictionary>,
     /// The raw, uncompressed, byte data of the stream.
     data: Vec<u8>,
     /// The filters applied to the stream data.
@@ -28,7 +27,7 @@ impl StreamObject {
     pub fn new(
         object_number: usize,
         generation_number: usize,
-        dictionary: Rc<Dictionary>,
+        dictionary: Box<Dictionary>,
         data: Vec<u8>,
         filters: Option<Vec<Filter>>,
     ) -> Self {

@@ -1,37 +1,21 @@
 use pdf_graphics::{rect::Rect, transform::Transform};
-use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    stream::StreamObject, traits::FromDictionary,
-};
+use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 use thiserror::Error;
 
 use crate::{
     content_stream::ContentStream,
-    external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateError},
+    external_graphics_state::ExternalGraphicsState,
     matrix::Matrix,
+    resource_cache::ResourceCache,
     resources::{Resources, ResourcesError},
-    shading::{Shading, ShadingError},
+    shading::Shading,
 };
 
 /// Defines errors that can occur while parsing a Pattern.
 #[derive(Debug, Error)]
 pub enum PatternError {
-    #[error("Missing required entry in Pattern: /{0}")]
-    MissingRequiredEntry(&'static str),
-    #[error("Invalid integer value for /PatternType value: {0}")]
-    InvalidPatternType(i32),
     #[error("Invalid value for key '{key}': {value}")]
-    InvalidValue { key: &'static str, value: String },
-    #[error("Failed to parse resources for page: {err}")]
-    ResourcesParse { err: Box<ResourcesError> },
-    #[error("External Graphics State parsing error: {0}")]
-    ExternalGraphicsStateError(#[from] ExternalGraphicsStateError),
-    #[error("Shading parsing error: {0}")]
-    ShadingError(#[from] ShadingError),
-    #[error("Error parsing content stream: {0}")]
-    ContentStreamError(#[from] pdf_content_stream::error::PdfOperatorError),
-    #[error("{0}")]
-    ObjectError(#[from] ObjectError),
+    InvalidValue { key: &'static str, value: i32 },
 }
 
 /// PaintType for tiling patterns.
@@ -43,14 +27,17 @@ pub enum PaintType {
     Uncolored = 2,
 }
 
-impl PaintType {
-    /// Attempts to create a `PaintType` from an integer value, returning `None` if the
-    /// value is not a valid paint type.
-    pub fn from_i32(val: i32) -> Option<Self> {
-        match val {
-            1 => Some(PaintType::Colored),
-            2 => Some(PaintType::Uncolored),
-            _ => None,
+impl TryFrom<i32> for PaintType {
+    type Error = PatternError;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(PaintType::Colored),
+            2 => Ok(PaintType::Uncolored),
+            _ => Err(PatternError::InvalidValue {
+                key: "PaintType",
+                value,
+            }),
         }
     }
 }
@@ -64,14 +51,17 @@ pub enum PatternType {
     Shading = 2,
 }
 
-impl PatternType {
-    /// Attempts to create a `PatternType` from an integer value, returning `None` if the
-    /// value is not a valid pattern type.
-    pub fn from_i32(val: i32) -> Option<Self> {
-        match val {
-            1 => Some(PatternType::Tiling),
-            2 => Some(PatternType::Shading),
-            _ => None,
+impl TryFrom<i32> for PatternType {
+    type Error = PatternError;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(PatternType::Tiling),
+            2 => Ok(PatternType::Shading),
+            _ => Err(PatternError::InvalidValue {
+                key: "PatternType",
+                value,
+            }),
         }
     }
 }
@@ -88,15 +78,18 @@ pub enum TilingType {
     ConstantSpacingFast = 3,
 }
 
-impl TilingType {
-    /// Attempts to create a `TilingType` from an integer value, returning `None` if the
-    /// value is not a valid tiling type.
-    pub fn from_i32(val: i32) -> Option<Self> {
-        match val {
-            1 => Some(TilingType::ConstantSpacing),
-            2 => Some(TilingType::NoDistortion),
-            3 => Some(TilingType::ConstantSpacingFast),
-            _ => None,
+impl TryFrom<i32> for TilingType {
+    type Error = PatternError;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(TilingType::ConstantSpacing),
+            2 => Ok(TilingType::NoDistortion),
+            3 => Ok(TilingType::ConstantSpacingFast),
+            _ => Err(PatternError::InvalidValue {
+                key: "TilingType",
+                value,
+            }),
         }
     }
 }
@@ -105,6 +98,7 @@ impl TilingType {
 ///
 /// Patterns are used as "colors" for filling or stroking paths, allowing for repeating
 /// graphical figures or smooth color transitions (gradients) to be used.
+#[allow(clippy::large_enum_variant)]
 pub enum Pattern {
     /// A tiling pattern, which consists of a small graphical figure (a "pattern cell")
     /// that is replicated at fixed intervals to fill an area.
@@ -138,11 +132,28 @@ pub enum Pattern {
 }
 
 impl Pattern {
-    pub(crate) fn from_dictionary(
-        dictionary: &Dictionary,
+    /// Reads and constructs a `Pattern` from a PDF object.
+    ///
+    /// This function parses a PDF pattern object, which can be either a tiling pattern or a shading pattern,
+    /// from the provided `object` using the given `objects` resolver and `cache` for resource management.
+    /// It extracts all required fields and sub-objects, handling both pattern types as defined by the PDF specification.
+    ///
+    /// # Parameters
+    ///
+    /// - `object`: The PDF object variant representing the pattern to parse.
+    /// - `objects`: The object resolver used to resolve indirect references within the PDF.
+    /// - `cache`: A mutable reference to the resource cache for resolving and storing resources.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` containing the constructed `Pattern` on success, or a `ResourcesError` if parsing fails.
+    pub(crate) fn read(
+        object: &ObjectVariant,
         objects: &dyn ObjectResolver,
-        stream: Option<&StreamObject>,
-    ) -> Result<Pattern, PatternError> {
+        cache: &mut dyn ResourceCache,
+    ) -> Result<Pattern, ResourcesError> {
+        let dictionary = object.try_dictionary(objects)?;
+
         let pattern_type = dictionary
             .get_or_err("PatternType")?
             .try_number::<i32>(objects)?;
@@ -150,30 +161,20 @@ impl Pattern {
         // Read the transformation matrix for the pattern. Defaults to identity.
         let matrix = Matrix::from_dictionary(dictionary, objects)?;
 
-        match PatternType::from_i32(pattern_type) {
-            Some(PatternType::Tiling) => {
+        match PatternType::try_from(pattern_type)? {
+            PatternType::Tiling => {
                 // Read the `/PaintType` entry.
                 let paint_type_int = dictionary
                     .get_or_err("PaintType")?
                     .try_number::<i32>(objects)?;
 
-                let paint_type = PaintType::from_i32(paint_type_int).ok_or_else(|| {
-                    PatternError::InvalidValue {
-                        key: "PaintType",
-                        value: paint_type_int.to_string(),
-                    }
-                })?;
+                let paint_type = PaintType::try_from(paint_type_int)?;
 
                 // Read the `/TilingType` entry.
                 let tiling_type_int = dictionary
                     .get_or_err("TilingType")?
                     .try_number::<i32>(objects)?;
-                let tiling_type = TilingType::from_i32(tiling_type_int).ok_or_else(|| {
-                    PatternError::InvalidValue {
-                        key: "TilingType",
-                        value: tiling_type_int.to_string(),
-                    }
-                })?;
+                let tiling_type = TilingType::try_from(tiling_type_int)?;
 
                 // Read the `/BBox` entry.
                 let bbox = dictionary
@@ -188,15 +189,9 @@ impl Pattern {
                 let y_step = dictionary.get_or_err("YStep")?.try_number::<f32>(objects)?;
 
                 // Read the `/Resources` entry. Needed by the pattern's content stream.
-                let resources = Resources::from_dictionary(dictionary, objects)
-                    .map_err(|err| PatternError::ResourcesParse { err: Box::new(err) })?
-                    .ok_or(PatternError::MissingRequiredEntry("Resources"))?;
+                let resources = Resources::read(dictionary, objects, cache)?.unwrap_or_default();
 
-                let stream_data = stream.ok_or(PatternError::MissingRequiredEntry(
-                    "Stream data for Tiling Pattern",
-                ))?;
-
-                let stream_data = stream_data.data()?;
+                let stream_data = object.try_stream(objects)?.data()?;
 
                 let content_stream = ContentStream {
                     operations: pdf_content_stream::pdf_operator::PdfOperatorVariant::from(
@@ -214,7 +209,7 @@ impl Pattern {
                     content_stream,
                 })
             }
-            Some(PatternType::Shading) => {
+            PatternType::Shading => {
                 let shading_object = dictionary.get_or_err("Shading")?;
                 // Read the shading object that defines the gradient fill.
                 let shading = Shading::from_dictionary(shading_object, objects)?;
@@ -224,7 +219,7 @@ impl Pattern {
                     .get("ExtGState")
                     .map(|obj| obj.try_dictionary(objects))
                     .transpose()?
-                    .map(|ext| ExternalGraphicsState::from_dictionary(ext, objects))
+                    .map(|ext| ExternalGraphicsState::from_dictionary(ext, objects, cache))
                     .transpose()?;
 
                 Ok(Pattern::Shading {
@@ -233,7 +228,6 @@ impl Pattern {
                     ext_g_state,
                 })
             }
-            _ => Err(PatternError::InvalidPatternType(pattern_type)),
         }
     }
 }

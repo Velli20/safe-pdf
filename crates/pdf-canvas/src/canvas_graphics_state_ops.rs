@@ -72,8 +72,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
             .ok_or(PdfCanvasError::MissingPageResources)?;
 
         let states = resources
-            .external_graphics_states
-            .get(dict_name)
+            .external_graphics_state(dict_name)
             .ok_or_else(|| PdfCanvasError::GraphicsStateNotFound(dict_name.to_string()))?;
 
         for state in &states.params {

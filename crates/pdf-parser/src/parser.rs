@@ -1,7 +1,7 @@
-use std::{rc::Rc, str::FromStr};
+use std::str::FromStr;
 
 use crate::error::ParserError;
-use pdf_object::{ObjectVariant, object_resolver::ObjectResolver};
+use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 use pdf_tokenizer::{PdfToken, Tokenizer};
 
 use crate::traits::{
@@ -243,7 +243,7 @@ impl PdfParser<'_> {
                 }
             }
             PdfToken::DoubleLeftAngleBracket => {
-                ObjectVariant::Dictionary(Rc::new(self.parse_dictionary(objects)?))
+                ObjectVariant::Dictionary(Box::new(self.parse_dictionary(objects)?))
             }
             PdfToken::LeftAngleBracket => ObjectVariant::HexString(self.parse_hex_string()?),
             PdfToken::Solidus => ObjectVariant::Name(self.parse_name()?),

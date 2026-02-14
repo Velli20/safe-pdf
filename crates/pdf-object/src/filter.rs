@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use crate::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    traits::FromDictionary,
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 
 /// Represents the compression filter applied to a stream or image in a PDF.
@@ -60,16 +60,13 @@ impl From<&str> for Filter {
 ///
 /// This corresponds to the `/Filter` entry in a PDF Image XObject's dictionary.
 /// The filter specifies the algorithm used to decompress the raw image data.
-impl FromDictionary for Filter {
+impl Filter {
     const KEY: &'static str = "Filter";
 
-    type ResultType = Option<Vec<Filter>>;
-    type ErrorType = ObjectError;
-
-    fn from_dictionary(
+    pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self::ResultType, Self::ErrorType> {
+    ) -> Result<Option<Vec<Filter>>, ObjectError> {
         let Some(filter_obj) = dictionary.get(Self::KEY) else {
             return Ok(None);
         };

@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use pdf_content_stream::{error::PdfOperatorError, pdf_operator::PdfOperatorVariant};
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    traits::FromDictionary,
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 use thiserror::Error;
 
@@ -40,15 +40,11 @@ pub enum Type3FontError {
     EncodingReadError(#[from] EncodingReadError),
 }
 
-impl FromDictionary for Type3Font {
-    const KEY: &'static str = "Font";
-    type ResultType = Self;
-    type ErrorType = Type3FontError;
-
-    fn from_dictionary(
+impl Type3Font {
+    pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self::ResultType, Self::ErrorType> {
+    ) -> Result<Self, Type3FontError> {
         let font_matrix = dictionary
             .get_or_err("FontMatrix")?
             .try_array_of::<f32, 6>(objects)?;

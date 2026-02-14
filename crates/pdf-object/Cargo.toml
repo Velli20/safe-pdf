@@ -9,7 +9,6 @@ workspace = true
 
 [features]
 default = []
-json = ["serde", "serde_json"]
 
 [dependencies]
 num-traits = "0.2.19"
@@ -17,5 +16,3 @@ thiserror = "2.0.12"
 flate2 = "1.1.1"
 jpeg2k = "0.10.1"
 image = { version = "0.25.9", default-features = false, features = ["jpeg"] }
-serde = { version = "1.0", features = ["derive"], optional = true }
-serde_json = { version = "1.0", optional = true }
