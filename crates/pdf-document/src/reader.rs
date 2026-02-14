@@ -1,18 +1,25 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::decryption::{DecryptionError, DocumentDecryptor};
 use crate::document::PdfDocument;
+use pdf_object::indirect_object::IndirectObject;
 use pdf_object::object_resolver::{ObjectResolver, UnimplementedResolver};
 use pdf_object::{
-    ObjectVariant,
     cross_reference_table::{CrossReferenceEntry, CrossReferenceStatus, CrossReferenceTable},
+    dictionary::Dictionary,
     error::ObjectError,
-    object_collection::ObjectCollection,
+    object_variant::ObjectVariant,
     stream::StreamObject,
     trailer::Trailer,
-    traits::FromDictionary,
 };
+use pdf_object_collection::object_collection::ObjectCollection;
+use pdf_page::content_stream::ContentStream;
+use pdf_page::media_box::MediaBox;
+use pdf_page::page::PdfPage;
 use pdf_page::pages::{PdfPages, PdfPagesError};
+use pdf_page::resource::Resource;
+use pdf_page::resource_cache::ResourceCache;
+use pdf_page::resources::Resources;
 use pdf_parser::{
     error::ParserError, header::HeaderError, parser::PdfParser, traits::HeaderParser,
 };
@@ -60,7 +67,7 @@ impl PdfReader {
     /// 4. Loads all objects referenced in the xref table
     /// 5. Extracts the document catalog and page tree
     ///
-    /// # Arguments
+    /// # Parameters
     ///
     /// - `input`: Raw PDF file bytes
     /// - `password`: The document password (user or owner password)
@@ -94,10 +101,13 @@ impl PdfReader {
         }
 
         // Build the cross-reference index
-        let CrossReferenceTable { entries, trailer } = build_xref_index(&mut parser)?;
+        let CrossReferenceTable {
+            entries,
+            mut trailer,
+        } = build_xref_index(&mut parser)?;
 
         // Check for encryption and handle it before loading other objects.
-        let decryptor = if let Some(encrypt_ref) = trailer.dictionary.get("Encrypt") {
+        let decryptor = if let Some(encrypt_ref) = trailer.dictionary.take("Encrypt") {
             // Load the encryption object first (it's unencrypted per PDF spec).
             let encryption = load_encrypt_dictionary(encrypt_ref, &entries, &mut parser)?;
 
@@ -119,15 +129,12 @@ impl PdfReader {
         };
 
         // Load all objects from the xref table, decrypting streams if needed
-        let objects = load_objects_with_decryption(&entries, &mut parser, decryptor.as_ref())?;
+        let mut objects = load_objects_with_decryption(&entries, &mut parser, decryptor.as_ref())?;
 
         // Extract catalog and page tree
-        let pages = extract_page_tree(&trailer, &objects)?;
+        let pages = extract_page_tree(&trailer, &mut objects)?;
 
-        Ok(PdfDocument {
-            objects,
-            pages: pages.pages,
-        })
+        Ok(PdfDocument { pages })
     }
 }
 
@@ -231,17 +238,29 @@ fn merge_xref_chain(
     Ok(CrossReferenceTable::new(entries, trailer))
 }
 
-/// Extracts the page tree from the document catalog.
+#[derive(Default)]
+struct ResourceCacheWrapper {
+    cache: HashMap<usize, Resource>,
+}
+
+impl ResourceCache for ResourceCacheWrapper {
+    fn get(&self, obj_num: &usize) -> Option<&Resource> {
+        self.cache.get(obj_num)
+    }
+
+    fn insert(&mut self, obj_num: usize, resource: Resource) {
+        self.cache.insert(obj_num, resource);
+    }
+}
+/// Extracts the page tree from the document catalog using a shared resource cache.
 ///
-/// Follows the chain: Trailer → /Root (Catalog) → /Pages (Page Tree)
-///
-/// # Returns
-///
-/// Returns a `PdfPages` structure containing the document's page hierarchy.
+/// Follows the chain: Trailer → /Root (Catalog) → /Pages (Page Tree).
+/// A `ResourceCache` is threaded through the traversal so that resources referenced
+/// by the same PDF object number are parsed once and shared via `Rc`.
 fn extract_page_tree(
     trailer: &Trailer,
-    objects: &dyn ObjectResolver,
-) -> Result<PdfPages, PdfReaderError> {
+    objects: &mut dyn ObjectResolver,
+) -> Result<Vec<PdfPage>, PdfReaderError> {
     // Get the document catalog via the /Root entry in the trailer
     let catalog = trailer
         .dictionary
@@ -251,8 +270,48 @@ fn extract_page_tree(
     // Get the page tree via the /Pages entry in the catalog
     let pages_dict = catalog.get_or_err("Pages")?.try_dictionary(objects)?;
 
-    // Parse the page tree structure
-    PdfPages::from_dictionary(pages_dict, objects).map_err(Into::into)
+    let mut cache = ResourceCacheWrapper::default();
+    flatten_page_tree(pages_dict, objects, &mut cache).map_err(Into::into)
+}
+
+/// Recursively traverses the PDF page tree, constructing `PdfPage` objects
+/// with shared resources via the provided `ResourceCache`.
+fn flatten_page_tree(
+    dictionary: &Dictionary,
+    objects: &dyn ObjectResolver,
+    cache: &mut dyn ResourceCache,
+) -> Result<Vec<PdfPage>, PdfPagesError> {
+    let kids_array = dictionary.get_or_err("Kids")?.try_array(objects)?;
+
+    let mut pages = vec![];
+
+    for value in kids_array {
+        let dictionary = value.try_dictionary(objects)?;
+
+        match dictionary.get_or_err("Type")?.try_str(objects)?.as_ref() {
+            PdfPage::KEY => {
+                let contents = ContentStream::from_dictionary(dictionary, objects)?;
+                let media_box = MediaBox::from_dictionary(dictionary, objects)?;
+                let resources = Resources::read(dictionary, objects, cache)?;
+
+                pages.push(PdfPage {
+                    contents,
+                    media_box,
+                    resources,
+                });
+            }
+            PdfPages::KEY => {
+                pages.extend(flatten_page_tree(dictionary, objects, cache)?);
+            }
+            obj_type => {
+                return Err(PdfPagesError::UnexpectedObjectTypeInKids {
+                    found_type: obj_type.to_string(),
+                });
+            }
+        }
+    }
+
+    Ok(pages)
 }
 
 /// Loads and parses the encryption dictionary from the PDF.
@@ -265,7 +324,7 @@ fn extract_page_tree(
 /// to locate and parse that object first before we can understand how to decrypt
 /// other objects.
 ///
-/// # Arguments
+/// # Parameters
 ///
 /// - `encrypt_ref`: The `/Encrypt` entry from the trailer (usually an indirect reference).
 /// - `entries`: The cross-reference table entries for locating objects.
@@ -275,7 +334,7 @@ fn extract_page_tree(
 ///
 /// Returns an `EncryptDictionary` containing the encryption parameters.
 fn load_encrypt_dictionary(
-    encrypt_ref: &ObjectVariant,
+    encrypt_ref: ObjectVariant,
     entries: &BTreeMap<usize, CrossReferenceEntry>,
     parser: &mut PdfParser,
 ) -> Result<EncryptDictionary, PdfReaderError> {
@@ -284,11 +343,11 @@ fn load_encrypt_dictionary(
         ObjectVariant::Reference(obj_num) => {
             // Look up the object in the xref table
             let entry = entries
-                .get(obj_num)
-                .ok_or(ObjectError::FailedResolveObjectReference { obj_num: *obj_num })?;
+                .get(&obj_num)
+                .ok_or(ObjectError::FailedResolveObjectReference { obj_num })?;
 
             if entry.status != CrossReferenceStatus::Normal {
-                return Err(ObjectError::FailedResolveObjectReference { obj_num: *obj_num }.into());
+                return Err(ObjectError::FailedResolveObjectReference { obj_num }.into());
             }
 
             // Parse the encryption object at the specified offset
@@ -297,8 +356,8 @@ fn load_encrypt_dictionary(
             // Extract the dictionary from the parsed object
             match object {
                 ObjectVariant::Dictionary(dict) => dict,
-                ObjectVariant::IndirectObject(indirect) => match indirect.object.as_ref() {
-                    Some(ObjectVariant::Dictionary(dict)) => std::rc::Rc::clone(dict),
+                ObjectVariant::IndirectObject(indirect) => match indirect.object {
+                    Some(ObjectVariant::Dictionary(dict)) => dict,
                     _ => {
                         return Err(ObjectError::FailedResolveDictionaryObject {
                             resolved_type: "IndirectObject",
@@ -314,7 +373,7 @@ fn load_encrypt_dictionary(
                 }
             }
         }
-        ObjectVariant::Dictionary(dict) => std::rc::Rc::clone(dict),
+        ObjectVariant::Dictionary(dict) => dict,
         other => {
             return Err(ObjectError::FailedResolveDictionaryObject {
                 resolved_type: other.name(),
@@ -332,7 +391,7 @@ fn load_encrypt_dictionary(
 /// The /ID entry is an array of two byte strings that uniquely identify the document.
 /// The first element is used for encryption key derivation.
 ///
-/// # Arguments
+/// # Parameters
 ///
 /// - `trailer`: The PDF trailer containing the /ID entry.
 ///
@@ -357,7 +416,7 @@ fn extract_document_id(trailer: &Trailer) -> Result<Vec<u8>, PdfReaderError> {
 /// is provided. Only streams are decrypted; strings within dictionaries are decrypted
 /// separately during object resolution.
 ///
-/// # Arguments
+/// # Parameters
 ///
 /// - `entries`: The cross-reference table entries.
 /// - `parser`: The PDF parser for reading object data.
@@ -413,13 +472,13 @@ fn decrypt_object(
     match object {
         ObjectVariant::IndirectObject(indirect) => {
             // Check if the inner object is a stream
-            if let Some(ObjectVariant::Stream(stream)) = &indirect.object {
-                let decrypted_stream = decrypt_stream_object(stream, decryptor)?;
+            if let Some(ObjectVariant::Stream(stream)) = indirect.object {
+                let decrypted_stream = decrypt_stream_object(&stream, decryptor)?;
                 // Create a new IndirectObject with the decrypted stream
-                let new_indirect = pdf_object::indirect_object::IndirectObject::new(
+                let new_indirect = IndirectObject::new(
                     indirect.object_number,
                     indirect.generation_number,
-                    Some(ObjectVariant::Stream(std::rc::Rc::new(decrypted_stream))),
+                    Some(ObjectVariant::Stream(decrypted_stream)),
                 );
                 return Ok(ObjectVariant::IndirectObject(Box::new(new_indirect)));
             }
@@ -428,10 +487,9 @@ fn decrypt_object(
         }
         ObjectVariant::Stream(stream) => {
             let decrypted = decrypt_stream_object(&stream, decryptor)?;
-            Ok(ObjectVariant::Stream(std::rc::Rc::new(decrypted)))
+            Ok(ObjectVariant::Stream(decrypted))
         }
-        // Other objects pass through unchanged
-        // (string decryption would be handled separately during resolution)
+        // Other objects pass through unchanged.
         other => Ok(other),
     }
 }
@@ -455,7 +513,7 @@ fn decrypt_stream_object(
     Ok(StreamObject::new(
         stream.object_number,
         stream.generation_number,
-        std::rc::Rc::clone(&stream.dictionary),
+        stream.dictionary.clone(),
         decrypted_data,
         stream.filters().cloned(),
     ))

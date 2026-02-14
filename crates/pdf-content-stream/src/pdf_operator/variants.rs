@@ -1,4 +1,5 @@
 use pdf_object::object_resolver::UnimplementedResolver;
+use pdf_object::object_variant::ObjectVariant;
 use pdf_parser::{parser::PdfParser, traits::CommentParser};
 use pdf_tokenizer::PdfToken;
 
@@ -162,7 +163,7 @@ impl PdfOperatorVariant {
     /// before parsing.
     fn parse_operator(
         name: &str,
-        operands: &mut Vec<pdf_object::ObjectVariant>,
+        operands: &mut Vec<ObjectVariant>,
     ) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let Some(descriptor) = get_operation_descriptor(name) else {
             return Err(PdfOperatorError::UnknownOperator(name.to_string()));

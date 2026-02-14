@@ -1,0 +1,19 @@
+[package]
+name = "pdf-object-collection"
+version = "0.1.0"
+edition = "2024"
+
+# Inherit all lint configurations from the workspace root
+[lints]
+workspace = true
+
+[features]
+default = []
+json = ["serde", "serde_json"]
+
+[dependencies]
+pdf-object = { path = "../pdf-object" }
+num-traits = "0.2.19"
+thiserror = "2.0.12"
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }

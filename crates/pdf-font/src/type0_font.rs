@@ -1,7 +1,4 @@
-use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    traits::FromDictionary,
-};
+use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
 
 use crate::{
     encoding::FontEncoding,
@@ -56,16 +53,11 @@ pub enum Type0FontError {
     InvalidDescendantFonts(&'static str),
 }
 
-impl FromDictionary for Type0Font {
-    const KEY: &'static str = "Font";
-
-    type ResultType = Self;
-    type ErrorType = FontError;
-
-    fn from_dictionary(
+impl Type0Font {
+    pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self::ResultType, Self::ErrorType> {
+    ) -> Result<Self, FontError> {
         // Extract the optional `/Encoding` entry which specifies the CMap used to map
         // character codes to CIDs. Common values include "Identity-H" and "Identity-V".
         let encoding = dictionary

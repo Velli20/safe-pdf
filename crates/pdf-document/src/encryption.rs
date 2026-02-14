@@ -216,14 +216,15 @@ impl EncryptDictionary {
 mod tests {
     use super::*;
     use pdf_object::{
-        ObjectVariant, dictionary::Dictionary, object_resolver::UnimplementedResolver,
+        dictionary::Dictionary, object_resolver::UnimplementedResolver,
+        object_variant::ObjectVariant,
     };
     use std::collections::BTreeMap;
 
     fn make_dictionary(entries: Vec<(&str, ObjectVariant)>) -> Dictionary {
         let mut map = BTreeMap::new();
         for (key, value) in entries {
-            map.insert(key.to_string(), Box::new(value));
+            map.insert(key.to_string(), value);
         }
         Dictionary::new(map)
     }

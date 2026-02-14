@@ -1,6 +1,6 @@
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    traits::FromDictionary,
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 use thiserror::Error;
 
@@ -112,15 +112,13 @@ impl ColorSpace {
     }
 }
 
-impl FromDictionary for ColorSpace {
+impl ColorSpace {
     const KEY: &'static str = "ColorSpace";
-    type ResultType = Option<ColorSpace>;
-    type ErrorType = ColorSpaceError;
 
-    fn from_dictionary(
+    pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self::ResultType, Self::ErrorType> {
+    ) -> Result<Option<ColorSpace>, ColorSpaceError> {
         let Some(color_space_obj) = dictionary.get(Self::KEY) else {
             return Ok(None);
         };

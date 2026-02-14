@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, object_resolver::ObjectResolver, traits::FromDictionary,
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
 use crate::{
@@ -24,15 +24,11 @@ pub struct Type1Font {
     pub encoding: Encoding,
 }
 
-impl FromDictionary for Type1Font {
-    const KEY: &'static str = "Font";
-    type ResultType = Self;
-    type ErrorType = FontError;
-
-    fn from_dictionary(
+impl Type1Font {
+    pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self::ResultType, Self::ErrorType> {
+    ) -> Result<Self, FontError> {
         // Read embedded font file.
         let font_file = Self::read_font_file(dictionary, objects)?;
 

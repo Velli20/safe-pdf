@@ -14,3 +14,5 @@ pub mod shading;
 pub mod xobject;
 
 pub mod functions;
+pub mod resource;
+pub mod resource_cache;

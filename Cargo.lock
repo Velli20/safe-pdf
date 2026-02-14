@@ -1890,6 +1890,7 @@ dependencies = [
  "md-5",
  "pdf-font",
  "pdf-object",
+ "pdf-object-collection",
  "pdf-page",
  "pdf-parser",
  "thiserror 2.0.12",
@@ -1948,6 +1949,15 @@ dependencies = [
  "image",
  "jpeg2k",
  "num-traits",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "pdf-object-collection"
+version = "0.1.0"
+dependencies = [
+ "num-traits",
+ "pdf-object",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -1964,6 +1974,7 @@ dependencies = [
  "pdf-font",
  "pdf-graphics",
  "pdf-object",
+ "pdf-object-collection",
  "pdf-postscript",
  "thiserror 2.0.12",
 ]

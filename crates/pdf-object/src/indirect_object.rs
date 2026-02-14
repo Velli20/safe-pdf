@@ -1,4 +1,4 @@
-use crate::ObjectVariant;
+use crate::object_variant::ObjectVariant;
 
 /// Represents an indirect object in a PDF file.
 /// An indirect object is a data structure that can be referenced by other objects.

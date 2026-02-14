@@ -1,6 +1,7 @@
 use crate::{error::ParserError, parser::PdfParser, traits::TrailerParser};
 use pdf_object::{
-    ObjectVariant, error::ObjectError, object_resolver::ObjectResolver, trailer::Trailer,
+    error::ObjectError, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    trailer::Trailer,
 };
 
 impl TrailerParser for PdfParser<'_> {
@@ -78,7 +79,7 @@ impl TrailerParser for PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use pdf_object::{ObjectVariant, object_resolver::UnimplementedResolver};
+    use pdf_object::{object_resolver::UnimplementedResolver, object_variant::ObjectVariant};
 
     use super::*;
 

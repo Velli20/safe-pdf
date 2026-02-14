@@ -1,4 +1,4 @@
-use pdf_object::{ObjectVariant, object_resolver::ObjectResolver};
+use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
 use crate::functions::{
     Function, FunctionImpl, FunctionInterpolationError, FunctionReadError, clamp_and_normalize,

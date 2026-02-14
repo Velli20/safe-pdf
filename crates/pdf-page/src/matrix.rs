@@ -1,21 +1,16 @@
 use pdf_graphics::transform::Transform;
-use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    traits::FromDictionary,
-};
+use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
 
 pub struct Matrix;
 
-impl FromDictionary for Matrix {
+impl Matrix {
     const KEY: &'static str = "Matrix";
-    type ResultType = Option<Transform>;
-    type ErrorType = ObjectError;
 
-    fn from_dictionary(
+    pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self::ResultType, Self::ErrorType> {
-        let Some(matrix_obj) = dictionary.get("Matrix") else {
+    ) -> Result<Option<Transform>, ObjectError> {
+        let Some(matrix_obj) = dictionary.get(Self::KEY) else {
             return Ok(None);
         };
 

@@ -110,14 +110,14 @@ impl StreamParser for PdfParser<'_> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_object::{ObjectVariant, object_resolver::UnimplementedResolver};
+    use pdf_object::{object_resolver::UnimplementedResolver, object_variant::ObjectVariant};
 
     use super::*;
 
     #[test]
     fn test_parse_stream_missing_stream_keyword() {
         let dictionary = Dictionary::new(
-            vec![("Length".to_string(), Box::new(ObjectVariant::Integer(11)))]
+            vec![("Length".to_string(), ObjectVariant::Integer(11))]
                 .into_iter()
                 .collect(),
         );
@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn test_parse_stream_missing_endstream_keyword() {
         let dictionary = Dictionary::new(
-            vec![("Length".to_string(), Box::new(ObjectVariant::Integer(11)))]
+            vec![("Length".to_string(), ObjectVariant::Integer(11))]
                 .into_iter()
                 .collect(),
         );
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn test_parse_stream_incorrect_length() {
         let dictionary = Dictionary::new(
-            vec![("Length".to_string(), Box::new(ObjectVariant::Integer(5)))] // Incorrect length
+            vec![("Length".to_string(), ObjectVariant::Integer(5))] // Incorrect length
                 .into_iter()
                 .collect(),
         );
@@ -173,7 +173,7 @@ mod tests {
     #[test]
     fn test_parse_stream_with_extra_whitespace() {
         let dictionary = Dictionary::new(
-            vec![("Length".to_string(), Box::new(ObjectVariant::Integer(11)))]
+            vec![("Length".to_string(), ObjectVariant::Integer(11))]
                 .into_iter()
                 .collect(),
         );

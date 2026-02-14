@@ -1,9 +1,6 @@
 use std::{borrow::Cow, collections::HashMap};
 
-use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    traits::FromDictionary,
-};
+use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
 
 use crate::{flags::FontFlags, font::FontError, simple_font_glyph_map::SimpleFontGlyphWidthsMap};
 
@@ -14,15 +11,11 @@ pub struct TrueTypeFont {
     pub widths: Option<HashMap<u16, f32>>,
 }
 
-impl FromDictionary for TrueTypeFont {
-    const KEY: &'static str = "Font";
-    type ResultType = Self;
-    type ErrorType = FontError;
-
-    fn from_dictionary(
+impl TrueTypeFont {
+    pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self::ResultType, Self::ErrorType> {
+    ) -> Result<Self, FontError> {
         // Read embedded font file.
         let font_file = Self::read_font_file(dictionary, objects)?.to_vec();
         // Read the `/Widths` entry.

@@ -3,13 +3,13 @@ use pdf_graphics::rect::Rect;
 use pdf_graphics::transform::Transform;
 use pdf_object::error::ObjectError;
 use pdf_object::stream::StreamObject;
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, traits::FromDictionary};
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 use thiserror::Error;
 
 use crate::content_stream::ContentStream;
 use crate::matrix::Matrix;
+use crate::resource_cache::ResourceCache;
 use crate::resources::{Resources, ResourcesError};
-use crate::xobject::XObjectReader;
 
 /// Errors that can occur during parsing of a Form XObject.
 #[derive(Debug, Error)]
@@ -34,14 +34,13 @@ pub struct FormXObject {
     pub content_stream: ContentStream,
 }
 
-impl XObjectReader for FormXObject {
-    type ErrorType = FormXObjectError;
-
+impl FormXObject {
     /// Parses a Form XObject from its dictionary and stream data.
-    fn read_xobject(
+    pub fn read_xobject(
         dictionary: &Dictionary,
         stream_data: &StreamObject,
         objects: &dyn ObjectResolver,
+        cache: &mut dyn ResourceCache,
     ) -> Result<Self, FormXObjectError> {
         // Retrieve the `/BBox` entry.
         let bbox = Rect::from(
@@ -54,7 +53,7 @@ impl XObjectReader for FormXObject {
         let matrix = Matrix::from_dictionary(dictionary, objects)?;
 
         // Parse the `/Resources` entry if present, mapping any errors.
-        let resources = Resources::from_dictionary(dictionary, objects).map_err(|err| {
+        let resources = Resources::read(dictionary, objects, cache).map_err(|err| {
             FormXObjectError::ResourcesError {
                 source: Box::new(err),
             }

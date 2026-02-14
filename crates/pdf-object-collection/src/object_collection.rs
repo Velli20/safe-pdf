@@ -1,7 +1,6 @@
-use crate::{
-    ObjectVariant, error::ObjectError, indirect_object::IndirectObject,
-    object_resolver::ObjectResolver,
-};
+use pdf_object::indirect_object::IndirectObject;
+use pdf_object::object_resolver::ObjectResolver;
+use pdf_object::{error::ObjectError, object_variant::ObjectVariant};
 use std::collections::HashMap;
 
 #[cfg(feature = "json")]
@@ -225,7 +224,7 @@ impl ObjectCollection {
 
     /// Converts a `Dictionary` to a `serde_json::Value`.
     #[cfg(feature = "json")]
-    fn dictionary_to_json(dict: &crate::dictionary::Dictionary) -> JsonValue {
+    fn dictionary_to_json(dict: &pdf_object::dictionary::Dictionary) -> JsonValue {
         let mut map = serde_json::Map::new();
         for (key, value) in &dict.dictionary {
             map.insert(key.clone(), Self::object_variant_to_json(value.as_ref()));

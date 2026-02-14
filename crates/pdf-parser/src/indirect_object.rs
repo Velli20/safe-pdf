@@ -1,8 +1,6 @@
-use std::rc::Rc;
-
 use pdf_object::{
-    ObjectVariant, filter::Filter, indirect_object::IndirectObject,
-    object_resolver::ObjectResolver, stream::StreamObject, traits::FromDictionary,
+    filter::Filter, indirect_object::IndirectObject, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant, stream::StreamObject,
 };
 use pdf_tokenizer::PdfToken;
 use thiserror::Error;
@@ -95,7 +93,10 @@ impl IndirectObjectParser for PdfParser<'_> {
         };
 
         // Parse the object.
-        let object = self.parse_object(objects)?;
+        let mut object = self.parse_object(objects)?;
+        if let ObjectVariant::Dictionary(ref mut d) = object {
+            d.object_number = object_number;
+        }
 
         self.skip_whitespace();
 
@@ -110,13 +111,13 @@ impl IndirectObjectParser for PdfParser<'_> {
 
             let filters = Filter::from_dictionary(&dictionary, objects)?;
 
-            return Ok(Some(ObjectVariant::Stream(Rc::new(StreamObject::new(
+            return Ok(Some(ObjectVariant::Stream(StreamObject::new(
                 object_number,
                 generation_number,
                 dictionary,
                 stream,
                 filters,
-            )))));
+            ))));
         }
 
         // Read the keyword `endobj`.
@@ -131,7 +132,7 @@ impl IndirectObjectParser for PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use pdf_object::{ObjectVariant, object_resolver::UnimplementedResolver};
+    use pdf_object::{object_resolver::UnimplementedResolver, object_variant::ObjectVariant};
 
     use super::*;
 

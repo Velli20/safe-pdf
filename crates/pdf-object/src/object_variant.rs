@@ -1,4 +1,4 @@
-use std::{borrow::Cow, rc::Rc};
+use std::borrow::Cow;
 
 use num_traits::FromPrimitive;
 
@@ -17,7 +17,7 @@ use crate::trailer::Trailer;
 #[derive(Debug, PartialEq, Clone)]
 pub enum ObjectVariant {
     /// A PDF dictionary object.
-    Dictionary(Rc<Dictionary>),
+    Dictionary(Box<Dictionary>),
     /// A PDF array of objects.
     Array(Vec<ObjectVariant>),
     /// A literal string (enclosed in parentheses in PDF syntax).
@@ -47,7 +47,7 @@ pub enum ObjectVariant {
     /// An indirect reference pointing to an object number.
     Reference(usize),
     /// A stream object, which may have associated dictionary and data.
-    Stream(Rc<StreamObject>),
+    Stream(StreamObject),
 }
 
 impl ObjectVariant {
@@ -58,7 +58,7 @@ impl ObjectVariant {
     ///
     /// # Parameters
     ///
-    /// - `objects`: A reference to the `ObjectCollection` used for resolving references.
+    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
     ///
     /// # Returns
     ///
@@ -88,7 +88,7 @@ impl ObjectVariant {
     ///
     /// # Parameters
     ///
-    /// - `objects`: A reference to the `ObjectCollection` used for resolving references.
+    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
     ///
     /// # Returns
     ///
@@ -105,7 +105,7 @@ impl ObjectVariant {
         };
 
         match object {
-            ObjectVariant::Stream(s) => Ok(s.as_ref()),
+            ObjectVariant::Stream(s) => Ok(s),
             _ => Err(ObjectError::TypeMismatch("Stream", object.name())),
         }
     }
@@ -117,7 +117,7 @@ impl ObjectVariant {
     ///
     /// # Parameters
     ///
-    /// - `objects`: A reference to the `ObjectCollection` used for resolving references.
+    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
     ///
     /// # Returns
     ///
@@ -146,7 +146,7 @@ impl ObjectVariant {
     ///
     /// # Parameters
     ///
-    /// - `objects`: A reference to the `ObjectCollection` used for resolving references.
+    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
     ///
     /// # Returns
     ///
@@ -212,7 +212,7 @@ impl ObjectVariant {
     ///
     /// # Parameters
     ///
-    /// - `objects`: A reference to the `ObjectCollection` used for resolving references.
+    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
     ///
     /// # Returns
     ///
@@ -262,7 +262,7 @@ impl ObjectVariant {
     ///
     /// # Parameters
     ///
-    /// - `objects`: A reference to the `ObjectCollection` used for resolving references.
+    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
     ///
     /// # Returns
     ///
@@ -356,10 +356,15 @@ impl ObjectVariant {
     }
 
     /// Returns the object number if this is a `Reference`.
-    pub fn try_reference(&self) -> Result<usize, ObjectError> {
+    pub fn try_object_number(&self) -> Result<usize, ObjectError> {
         match self {
             ObjectVariant::Reference(value) => Ok(*value),
-            _ => Err(ObjectError::TypeMismatch("Reference", self.name())),
+            ObjectVariant::Dictionary(value) => Ok(value.object_number),
+            ObjectVariant::Stream(value) => Ok(value.object_number),
+            _ => Err(ObjectError::TypeMismatch(
+                "Reference or Object with number",
+                self.name(),
+            )),
         }
     }
 

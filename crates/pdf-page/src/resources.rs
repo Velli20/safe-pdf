@@ -5,240 +5,324 @@
 //! and shadings.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use pdf_font::font::{Font, FontError};
-use pdf_object::{
-    ObjectVariant, dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    traits::FromDictionary,
-};
+use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
 use thiserror::Error;
 
 use crate::{
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateError},
     pattern::{Pattern, PatternError},
+    resource::Resource,
+    resource_cache::ResourceCache,
     shading::{Shading, ShadingError},
-    xobject::{XObject, XObjectError, XObjectReader},
+    xobject::{XObject, XObjectError},
 };
 
 /// Contains all resources referenced by a PDF content stream.
 ///
-/// The `Resources` struct holds collections of various PDF objects that can be
+/// The `Resources` struct holds a unified collection of PDF objects that can be
 /// referenced by name within content streams, including fonts, graphics states,
 /// XObjects (images/forms), patterns, and shadings.
-///
-/// # PDF Reference
-/// See PDF 32000-1:2008 Section 7.8.3 "Resource Dictionaries"
 #[derive(Default)]
-pub struct Resources {
-    /// Named font resources (key: `/Font`)
-    pub fonts: HashMap<String, Font>,
-    /// Named external graphics state resources (key: `/ExtGState`)
-    pub external_graphics_states: HashMap<String, ExternalGraphicsState>,
-    /// Named XObject resources such as images and forms (key: `/XObject`)
-    pub xobjects: HashMap<String, XObject>,
-    /// Named pattern resources (key: `/Pattern`)
-    pub patterns: HashMap<String, Pattern>,
-    /// Named shading resources (key: `/Shading`)
-    pub shadings: HashMap<String, Shading>,
-}
+pub struct Resources(HashMap<String, Resource>);
 
 /// Errors that can occur while parsing a PDF Resources dictionary.
 #[derive(Debug, Error)]
 pub enum ResourcesError {
-    /// Error occurred while parsing a font resource.
     #[error("Error processing font: {0}")]
     FontError(#[from] FontError),
-    /// Error occurred while parsing an external graphics state.
     #[error("External Graphics State parsing error: {0}")]
     ExternalGraphicsStateError(#[from] ExternalGraphicsStateError),
-    /// Error occurred while parsing an XObject.
     #[error("XObject parsing error: {0}")]
     XObjectError(#[from] XObjectError),
-    /// Error occurred while parsing a pattern.
     #[error("Pattern parsing error: {0}")]
     PatternError(#[from] PatternError),
-    /// General PDF object error.
     #[error("{0}")]
     ObjectError(#[from] ObjectError),
-    /// Error occurred while parsing a shading.
     #[error("Shading parsing error: {0}")]
     ShadingError(#[from] ShadingError),
-    /// A resource entry had an unexpected type.
-    #[error("Invalid type for entry '{entry_name}': expected {expected_type}, found {found_type}")]
-    InvalidEntryType {
-        entry_name: &'static str,
-        expected_type: &'static str,
-        found_type: &'static str,
-    },
+    #[error("Error parsing content stream: {0}")]
+    ContentStreamError(#[from] pdf_content_stream::error::PdfOperatorError),
+}
+
+/// Attempts to retrieve a sub-dictionary from the resources dictionary.
+///
+/// # Parameters
+///
+/// - `resources`: The main resources dictionary to search within.
+/// - `key`: The key of the sub-dictionary to retrieve (e.g., "Font", "Pattern").
+/// - `objects`: The object resolver to resolve indirect references if necessary.
+///
+/// # Returns
+///
+/// Returns `Ok(None)` if the key doesn't exist, `Ok(Some(dict))` if found,
+/// or an error if the value exists but isn't a valid dictionary.
+fn get_sub_dictionary<'a>(
+    resources: &'a Dictionary,
+    key: &str,
+    objects: &'a dyn ObjectResolver,
+) -> Result<Option<&'a Dictionary>, ResourcesError> {
+    resources
+        .get(key)
+        .map(|entry| entry.try_dictionary(objects))
+        .transpose()
+        .map_err(Into::into)
+}
+
+/// Parses all font resources from the `/Font` sub-dictionary.
+fn read_fonts(
+    resources: &Dictionary,
+    objects: &dyn ObjectResolver,
+    cache: &mut dyn ResourceCache,
+) -> Result<HashMap<String, Resource>, ResourcesError> {
+    let Some(font_dict) = get_sub_dictionary(resources, Font::KEY, objects)? else {
+        return Ok(HashMap::new());
+    };
+
+    let mut result = HashMap::new();
+    for (name, value) in &font_dict.dictionary {
+        let dict = value.try_dictionary(objects)?;
+        if let Some(cached) = cache.get(&dict.object_number) {
+            result.insert(name.clone(), cached.clone());
+            continue;
+        }
+
+        let resource = Resource::Font(Rc::new(Font::from_dictionary(dict, objects)?));
+        cache.insert(dict.object_number, resource.clone());
+        result.insert(name.clone(), resource);
+    }
+    Ok(result)
+}
+
+/// Parses all external graphics state resources from the `/ExtGState` sub-dictionary.
+fn read_external_graphics_states(
+    resources: &Dictionary,
+    objects: &dyn ObjectResolver,
+    cache: &mut dyn ResourceCache,
+) -> Result<HashMap<String, Resource>, ResourcesError> {
+    let Some(ext_gstate_dict) = get_sub_dictionary(resources, "ExtGState", objects)? else {
+        return Ok(HashMap::new());
+    };
+
+    let mut result = HashMap::new();
+    for (name, value) in &ext_gstate_dict.dictionary {
+        let dict = value.try_dictionary(objects)?;
+        if let Some(cached) = cache.get(&dict.object_number) {
+            result.insert(name.clone(), cached.clone());
+            continue;
+        }
+
+        let resource = Resource::ExternalGraphicsState(Rc::new(
+            ExternalGraphicsState::from_dictionary(dict, objects, cache)?,
+        ));
+        cache.insert(dict.object_number, resource.clone());
+        result.insert(name.clone(), resource);
+    }
+    Ok(result)
+}
+
+/// Parses all pattern resources from the `/Pattern` sub-dictionary.
+fn read_patterns(
+    resources: &Dictionary,
+    objects: &dyn ObjectResolver,
+    cache: &mut dyn ResourceCache,
+) -> Result<HashMap<String, Resource>, ResourcesError> {
+    let Some(pattern_dict) = get_sub_dictionary(resources, "Pattern", objects)? else {
+        return Ok(HashMap::new());
+    };
+
+    let mut result = HashMap::new();
+    for (name, value) in &pattern_dict.dictionary {
+        let object_number = value.try_object_number()?;
+        if let Some(cached) = cache.get(&object_number) {
+            result.insert(name.clone(), cached.clone());
+            continue;
+        }
+        let pattern = Pattern::read(value, objects, cache)?;
+        let resource = Resource::Pattern(Rc::new(pattern));
+        cache.insert(object_number, resource.clone());
+
+        result.insert(name.clone(), resource);
+    }
+    Ok(result)
+}
+
+/// Parses all XObject resources from the `/XObject` sub-dictionary.
+fn read_xobjects(
+    resources: &Dictionary,
+    objects: &dyn ObjectResolver,
+    cache: &mut dyn ResourceCache,
+) -> Result<HashMap<String, Resource>, ResourcesError> {
+    let Some(xobject_dict) = get_sub_dictionary(resources, "XObject", objects)? else {
+        return Ok(HashMap::new());
+    };
+
+    let mut result = HashMap::new();
+    for (name, value) in &xobject_dict.dictionary {
+        let stream = value.try_stream(objects)?;
+        if let Some(cached) = cache.get(&stream.object_number) {
+            result.insert(name.clone(), cached.clone());
+            continue;
+        }
+
+        let resource = Resource::XObject(Rc::new(XObject::read_xobject(
+            &stream.dictionary,
+            stream,
+            objects,
+            cache,
+        )?));
+        cache.insert(stream.object_number, resource.clone());
+        result.insert(name.clone(), resource);
+    }
+    Ok(result)
+}
+
+/// Parses all shading resources from the `/Shading` sub-dictionary.
+fn read_shadings(
+    resources: &Dictionary,
+    objects: &dyn ObjectResolver,
+    cache: &mut dyn ResourceCache,
+) -> Result<HashMap<String, Resource>, ResourcesError> {
+    let Some(shading_dict) = get_sub_dictionary(resources, "Shading", objects)? else {
+        return Ok(HashMap::new());
+    };
+
+    let mut result = HashMap::new();
+    for (name, value) in &shading_dict.dictionary {
+        let object_number = value.try_object_number()?;
+        if let Some(cached) = cache.get(&object_number) {
+            result.insert(name.clone(), cached.clone());
+            continue;
+        }
+        let resource = Resource::Shading(Rc::new(Shading::from_dictionary(value, objects)?));
+        cache.insert(object_number, resource.clone());
+        result.insert(name.clone(), resource);
+    }
+    Ok(result)
 }
 
 impl Resources {
-    /// Attempts to retrieve a sub-dictionary from the resources dictionary.
+    /// Returns a reference to a font resource by name, if it exists.
     ///
-    /// Returns `Ok(None)` if the key doesn't exist, `Ok(Some(dict))` if found,
-    /// or an error if the value exists but isn't a valid dictionary.
-    fn get_sub_dictionary<'a>(
-        resources: &'a Dictionary,
-        key: &str,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<Option<&'a Dictionary>, ResourcesError> {
-        resources
-            .get(key)
-            .map(|entry| entry.try_dictionary(objects))
-            .transpose()
-            .map_err(Into::into)
-    }
-
-    /// Parses all font resources from the `/Font` sub-dictionary.
-    fn parse_fonts(
-        resources: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<HashMap<String, Font>, ResourcesError> {
-        let Some(font_dict) = Self::get_sub_dictionary(resources, Font::KEY, objects)? else {
-            return Ok(HashMap::new());
-        };
-
-        font_dict
-            .dictionary
-            .iter()
-            .map(|(name, value)| {
-                let dict = value.try_dictionary(objects)?;
-                let font = Font::from_dictionary(dict, objects)?;
-                Ok((name.clone(), font))
-            })
-            .collect()
-    }
-
-    /// Parses all external graphics state resources from the `/ExtGState` sub-dictionary.
-    fn parse_external_graphics_states(
-        resources: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<HashMap<String, ExternalGraphicsState>, ResourcesError> {
-        let Some(ext_gstate_dict) = Self::get_sub_dictionary(resources, "ExtGState", objects)?
-        else {
-            return Ok(HashMap::new());
-        };
-
-        ext_gstate_dict
-            .dictionary
-            .iter()
-            .map(|(name, value)| {
-                let dict = value.try_dictionary(objects)?;
-                let state = ExternalGraphicsState::from_dictionary(dict, objects)?;
-                Ok((name.clone(), state))
-            })
-            .collect()
-    }
-
-    /// Parses all pattern resources from the `/Pattern` sub-dictionary.
+    /// # Parameters
     ///
-    /// Patterns can be either dictionaries (Type 2 shading patterns) or
-    /// streams (Type 1 tiling patterns), so both cases are handled.
-    fn parse_patterns(
-        resources: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<HashMap<String, Pattern>, ResourcesError> {
-        let Some(pattern_dict) = Self::get_sub_dictionary(resources, "Pattern", objects)? else {
-            return Ok(HashMap::new());
-        };
-
-        pattern_dict
-            .dictionary
-            .iter()
-            .map(|(name, value)| {
-                let pattern = match objects.resolve_object(value)? {
-                    ObjectVariant::Dictionary(dict) => {
-                        Pattern::from_dictionary(dict, objects, None)?
-                    }
-                    ObjectVariant::Stream(stream) => {
-                        Pattern::from_dictionary(&stream.dictionary, objects, Some(stream))?
-                    }
-                    other => {
-                        return Err(ResourcesError::InvalidEntryType {
-                            entry_name: "Pattern",
-                            expected_type: "Dictionary or Stream",
-                            found_type: other.name(),
-                        });
-                    }
-                };
-                Ok((name.clone(), pattern))
-            })
-            .collect()
-    }
-
-    /// Parses all XObject resources from the `/XObject` sub-dictionary.
+    /// - `name`: The resource name as referenced in the PDF content stream.
     ///
-    /// XObjects are always streams containing either images or form content.
-    fn parse_xobjects(
-        resources: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<HashMap<String, XObject>, ResourcesError> {
-        let Some(xobject_dict) = Self::get_sub_dictionary(resources, "XObject", objects)? else {
-            return Ok(HashMap::new());
-        };
-
-        xobject_dict
-            .dictionary
-            .iter()
-            .map(|(name, value)| {
-                let stream = value.try_stream(objects)?;
-                let xobject = XObject::read_xobject(&stream.dictionary, stream, objects)?;
-                Ok((name.clone(), xobject))
-            })
-            .collect()
+    /// # Returns
+    ///
+    /// An `Option` containing a reference to the [`Font`] if found, or `None` if not present or not a font.
+    pub fn font(&self, name: &str) -> Option<&Font> {
+        match self.0.get(name)? {
+            Resource::Font(font) => Some(font),
+            _ => None,
+        }
     }
 
-    /// Parses all shading resources from the `/Shading` sub-dictionary.
-    fn parse_shadings(
-        resources: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<HashMap<String, Shading>, ResourcesError> {
-        let Some(shading_dict) = Self::get_sub_dictionary(resources, "Shading", objects)? else {
-            return Ok(HashMap::new());
-        };
-
-        shading_dict
-            .dictionary
-            .iter()
-            .map(|(name, value)| {
-                let shading = Shading::from_dictionary(value, objects)?;
-                Ok((name.clone(), shading))
-            })
-            .collect()
+    /// Returns a reference to an external graphics state resource by name, if it exists.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: The resource name as referenced in the PDF content stream.
+    ///
+    /// # Returns
+    ///
+    /// An `Option` containing a reference to the [`ExternalGraphicsState`] if found, or `None` if not present or not an external graphics state.
+    pub fn external_graphics_state(&self, name: &str) -> Option<&ExternalGraphicsState> {
+        match self.0.get(name)? {
+            Resource::ExternalGraphicsState(state) => Some(state),
+            _ => None,
+        }
     }
-}
 
-impl FromDictionary for Resources {
-    const KEY: &'static str = "Resources";
-    type ResultType = Option<Self>;
-    type ErrorType = ResourcesError;
+    /// Returns a reference to an XObject resource by name, if it exists.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: The resource name as referenced in the PDF content stream.
+    ///
+    /// # Returns
+    ///
+    /// An `Option` containing a reference to the [`XObject`] if found, or `None` if not present or not an XObject.
+    pub fn xobject(&self, name: &str) -> Option<&XObject> {
+        match self.0.get(name)? {
+            Resource::XObject(xobject) => Some(xobject),
+            _ => None,
+        }
+    }
 
-    fn from_dictionary(
+    /// Returns a reference to a pattern resource by name, if it exists.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: The resource name as referenced in the PDF content stream.
+    ///
+    /// # Returns
+    ///
+    /// An `Option` containing a reference to the [`Pattern`] if found, or `None` if not present or not a pattern.
+    pub fn pattern(&self, name: &str) -> Option<&Pattern> {
+        match self.0.get(name)? {
+            Resource::Pattern(pattern) => Some(pattern),
+            _ => None,
+        }
+    }
+
+    /// Returns a reference to a shading resource by name, if it exists.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: The resource name as referenced in the PDF content stream.
+    ///
+    /// # Returns
+    ///
+    /// An `Option` containing a reference to the [`Shading`] if found, or `None` if not present or not a shading.
+    pub fn shading(&self, name: &str) -> Option<&Shading> {
+        match self.0.get(name)? {
+            Resource::Shading(shading) => Some(shading),
+            _ => None,
+        }
+    }
+
+    /// Reads the `/Resources` dictionary.
+    ///
+    /// This function extracts all resource types (fonts, external graphics states, patterns,
+    /// XObjects, and shadings) referenced in the provided `dictionary`.
+    ///
+    /// # Parameters
+    ///
+    /// - `dictionary`: The PDF dictionary potentially containing a `/Resources` entry.
+    /// - `objects`: An object resolver for resolving indirect PDF object references.
+    /// - `cache`: A mutable resource cache for storing and retrieving parsed resources.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Some(Resources))` if resources are found and parsed successfully, `Ok(None)`
+    /// if no `/Resources` entry exists, or an error if parsing fails for any resource type.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`ResourcesError`] if any resource fails to parse or resolve.
+    pub fn read(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self::ResultType, Self::ErrorType> {
-        let Some(resources_entry) = dictionary.get(Self::KEY) else {
+        cache: &mut dyn ResourceCache,
+    ) -> Result<Option<Self>, ResourcesError> {
+        const KEY: &str = "Resources";
+
+        let Some(resources_entry) = dictionary.get(KEY) else {
             return Ok(None);
         };
 
-        // Resolve the `/Resources` dictionary (may be a direct dict or indirect reference).
         let resources = resources_entry.try_dictionary(objects)?;
 
-        // Parse each resource category independently.
-        // Using separate methods improves readability and allows for easier
-        // error tracking when debugging resource loading issues.
-        let fonts = Self::parse_fonts(resources, objects)?;
-        let external_graphics_states = Self::parse_external_graphics_states(resources, objects)?;
-        let patterns = Self::parse_patterns(resources, objects)?;
-        let xobjects = Self::parse_xobjects(resources, objects)?;
-        let shadings = Self::parse_shadings(resources, objects)?;
+        let mut map = HashMap::new();
+        map.extend(read_fonts(resources, objects, cache)?);
+        map.extend(read_external_graphics_states(resources, objects, cache)?);
+        map.extend(read_patterns(resources, objects, cache)?);
+        map.extend(read_xobjects(resources, objects, cache)?);
+        map.extend(read_shadings(resources, objects, cache)?);
 
-        Ok(Some(Self {
-            fonts,
-            external_graphics_states,
-            xobjects,
-            patterns,
-            shadings,
-        }))
+        Ok(Some(Self(map)))
     }
 }
