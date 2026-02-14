@@ -6,20 +6,16 @@ use pdf_object::indirect_object::IndirectObject;
 use pdf_object::object_resolver::{ObjectResolver, UnimplementedResolver};
 use pdf_object::{
     cross_reference_table::{CrossReferenceEntry, CrossReferenceStatus, CrossReferenceTable},
-    dictionary::Dictionary,
     error::ObjectError,
     object_variant::ObjectVariant,
     stream::StreamObject,
     trailer::Trailer,
 };
 use pdf_object_collection::object_collection::ObjectCollection;
-use pdf_page::content_stream::ContentStream;
-use pdf_page::media_box::MediaBox;
 use pdf_page::page::PdfPage;
 use pdf_page::pages::{PdfPages, PdfPagesError};
 use pdf_page::resource::Resource;
 use pdf_page::resource_cache::ResourceCache;
-use pdf_page::resources::Resources;
 use pdf_parser::{
     error::ParserError, header::HeaderError, parser::PdfParser, traits::HeaderParser,
 };
@@ -271,46 +267,7 @@ fn extract_page_tree(
     let pages_dict = catalog.get_or_err("Pages")?.try_dictionary(objects)?;
 
     let mut cache = ResourceCacheWrapper::default();
-    flatten_page_tree(pages_dict, objects, &mut cache).map_err(Into::into)
-}
-
-/// Recursively traverses the PDF page tree, constructing `PdfPage` objects
-/// with shared resources via the provided `ResourceCache`.
-fn flatten_page_tree(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-    cache: &mut dyn ResourceCache,
-) -> Result<Vec<PdfPage>, PdfPagesError> {
-    let kids_array = dictionary.get_or_err("Kids")?.try_array(objects)?;
-
-    let mut pages = vec![];
-
-    for value in kids_array {
-        let dictionary = value.try_dictionary(objects)?;
-
-        match dictionary.get_or_err("Type")?.try_str(objects)?.as_ref() {
-            PdfPage::KEY => {
-                let contents = ContentStream::from_dictionary(dictionary, objects)?;
-                let media_box = MediaBox::from_dictionary(dictionary, objects)?;
-                let resources = Resources::read(dictionary, objects, cache)?;
-
-                pages.push(PdfPage {
-                    contents,
-                    media_box,
-                    resources,
-                });
-            }
-            PdfPages::KEY => {
-                pages.extend(flatten_page_tree(dictionary, objects, cache)?);
-            }
-            obj_type => {
-                return Err(PdfPagesError::UnexpectedObjectTypeInKids {
-                    found_type: obj_type.to_string(),
-                });
-            }
-        }
-    }
-
+    let pages = PdfPages::from_dictionary(pages_dict, objects, &mut cache)?;
     Ok(pages)
 }
 

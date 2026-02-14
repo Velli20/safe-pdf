@@ -1,3 +1,4 @@
+use pdf_content_stream::content_stream::ContentStream;
 use pdf_content_stream::error::PdfOperatorError;
 use pdf_graphics::rect::Rect;
 use pdf_graphics::transform::Transform;
@@ -6,7 +7,6 @@ use pdf_object::stream::StreamObject;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 use thiserror::Error;
 
-use crate::content_stream::ContentStream;
 use crate::matrix::Matrix;
 use crate::resource_cache::ResourceCache;
 use crate::resources::{Resources, ResourcesError};
@@ -59,11 +59,8 @@ impl FormXObject {
             }
         })?;
 
-        let stream_data = stream_data.data()?;
         // Parse the content stream data.
-        let content_stream = ContentStream {
-            operations: pdf_content_stream::pdf_operator::PdfOperatorVariant::from(&stream_data)?,
-        };
+        let content_stream = ContentStream::from_stream(stream_data)?;
 
         Ok(FormXObject {
             bbox,

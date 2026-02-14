@@ -1888,6 +1888,7 @@ dependencies = [
  "aes",
  "cbc",
  "md-5",
+ "pdf-content-stream",
  "pdf-font",
  "pdf-object",
  "pdf-object-collection",
