@@ -24,6 +24,17 @@ pub struct PdfPages;
 impl PdfPages {
     pub const KEY: &'static str = "Pages";
 
+    /// Recursively parses a PDF Pages dictionary and returns a flattened list of all leaf `PdfPage` objects.
+    ///
+    /// # Parameters
+    ///
+    /// - `dictionary`: The Pages dictionary to parse.
+    /// - `objects`: Resolver for indirect PDF objects.
+    /// - `cache`: Resource cache for page resources.
+    ///
+    /// # Returns
+    ///
+    /// Vector of parsed pages or error.
     pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,

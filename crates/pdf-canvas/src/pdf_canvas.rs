@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use pdf_content_stream::pdf_operator::PdfOperatorVariant;
+use pdf_content_stream::{content_stream::ContentStream, pdf_operator::PdfOperatorVariant};
 use pdf_graphics::{
     MaskMode, PaintMode, PathFillType, pdf_path::PdfPath, rect::Rect, transform::Transform,
 };
@@ -129,7 +129,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// # Parameters
     ///
     /// - `recording_canvas`: Target offscreen canvas to record into.
-    /// - `operations`: Parsed operator list to execute.
+    /// - `content_stream`: The content stream containing the PDF operators to execute.
     /// - `mat`: Optional additional matrix (applied like a PDF `cm` / XObject `/Matrix`).
     /// - `bbox`: The content-space bounding box to map to the recording surface.
     /// - `resources`: Optional resource dictionary for resolving fonts, patterns, etc.
@@ -142,7 +142,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     pub(crate) fn record_content_stream(
         &self,
         recording_canvas: &mut RecordingCanvas,
-        operations: &[PdfOperatorVariant],
+        content_stream: &ContentStream,
         mat: Option<Transform>,
         bbox: &Rect,
         resources: Option<&'a Resources>,
@@ -177,7 +177,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         };
 
         // Render the form's content stream into the mask canvas.
-        other.render_content_stream(operations, mat, Some(bbox), resources, filter)
+        other.render_content_stream(content_stream, mat, Some(bbox), resources, filter)
     }
 
     /// Returns a reference to the current graphics state on the stack.
@@ -338,7 +338,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 // Render the tiling content into a temporary canvas.
                 self.record_content_stream(
                     &mut recording_canvas,
-                    &content_stream.operations,
+                    content_stream,
                     None,
                     &bbox,
                     Some(resources),
@@ -495,7 +495,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     ///
     /// # Parameters
     ///
-    /// - `operations`: The list of PDF operators to execute.
+    /// - `content_stream`: The content stream containing the PDF operators to execute.
     /// - `mat`: Optional transformation matrix to apply.
     /// - `bbox`: Optional bounding box to clip the rendering.
     /// - `resources`: Optional resource dictionary to use for rendering.
@@ -506,7 +506,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// Returns an error if any operation fails or if the graphics state is invalid.
     pub fn render_content_stream(
         &mut self,
-        operations: &[PdfOperatorVariant],
+        content_stream: &ContentStream,
         mat: Option<Transform>,
         bbox: Option<&Rect>,
         resources: Option<&'a Resources>,
@@ -538,7 +538,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             self.current_state_mut()?.resources = Some(resources);
         }
 
-        for op in operations {
+        for op in &content_stream.0 {
             if filter.is_some_and(|filter| filter(op)) {
                 continue;
             }

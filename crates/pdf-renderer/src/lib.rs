@@ -49,13 +49,7 @@ impl<'a, 'b, B: CanvasBackend> PdfRenderer<'a, 'b, B> {
         };
         let mut canvas = PdfCanvas::new(self.canvas, page, None)?;
         if let Some(cs) = &page.contents {
-            canvas.render_content_stream(
-                &cs.operations,
-                None,
-                None,
-                page.resources.as_ref(),
-                None,
-            )?;
+            canvas.render_content_stream(cs, None, None, page.resources.as_ref(), None)?;
         }
         Ok(())
     }
@@ -94,13 +88,7 @@ pub fn render_page_to_recording(
     {
         let mut canvas = PdfCanvas::new(&mut recording, page, None)?;
         if let Some(cs) = &page.contents {
-            canvas.render_content_stream(
-                &cs.operations,
-                None,
-                None,
-                page.resources.as_ref(),
-                None,
-            )?;
+            canvas.render_content_stream(cs, None, None, page.resources.as_ref(), None)?;
         }
     }
 

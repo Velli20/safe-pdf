@@ -1,7 +1,7 @@
 use crate::{
-    content_stream::ContentStream, media_box::MediaBox, pages::PdfPagesError,
-    resource_cache::ResourceCache, resources::Resources,
+    media_box::MediaBox, pages::PdfPagesError, resource_cache::ResourceCache, resources::Resources,
 };
+use pdf_content_stream::content_stream::ContentStream;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 /// Represents a single page in a PDF document.

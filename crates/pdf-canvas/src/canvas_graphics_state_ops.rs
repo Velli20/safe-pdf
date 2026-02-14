@@ -136,7 +136,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                             // Render the form's content stream into the mask canvas.
                             self.record_content_stream(
                                 &mut recording_canvas,
-                                &form.content_stream.operations,
+                                &form.content_stream,
                                 form.matrix,
                                 &form.bbox,
                                 form.resources.as_ref(),

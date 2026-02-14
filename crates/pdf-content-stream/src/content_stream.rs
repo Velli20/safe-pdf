@@ -1,17 +1,24 @@
-use pdf_content_stream::{error::PdfOperatorError, pdf_operator::PdfOperatorVariant};
+use crate::{error::PdfOperatorError, pdf_operator::PdfOperatorVariant};
 use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    object_variant::ObjectVariant, stream::StreamObject,
 };
 
 /// Represents the content stream of a PDF page, containing a sequence
 /// of drawing operators.
-pub struct ContentStream {
-    /// Flat, ordered list of all PDF content stream operators that belong to a page.
-    pub operations: Vec<PdfOperatorVariant>,
-}
+pub struct ContentStream(pub Vec<PdfOperatorVariant>);
 
-// Helper function to process an array whose elements should be streams or references to streams
+/// Processes an array of PDF objects, each expected to be a stream or reference to a stream,
+/// and concatenates their content stream operators into a single vector.
+///
+/// # Parameters
+///
+/// - `array`: Slice of PDF objects representing streams or references to streams.
+/// - `objects`: Resolver for indirect PDF objects.
+///
+/// # Returns
+///
+/// Concatenated list of operators or error.
 fn process_content_stream_array(
     array: &[ObjectVariant],
     objects: &dyn ObjectResolver,
@@ -26,6 +33,19 @@ fn process_content_stream_array(
 }
 
 impl ContentStream {
+    /// Constructs a [`ContentStream`] from a PDF page dictionary by resolving the `/Contents` entry.
+    ///
+    /// The `/Contents` entry may be a stream or an array of streams. This function resolves the entry,
+    /// parses the content stream operators, and returns a [`ContentStream`] containing all operators.
+    ///
+    /// # Parameters
+    ///
+    /// - `dictionary`: The page dictionary containing the `/Contents` entry.
+    /// - `objects`: Resolver for indirect PDF objects.
+    ///
+    /// # Returns
+    ///
+    /// The parsed content stream or None if missing.
     pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
@@ -53,6 +73,12 @@ impl ContentStream {
             }
         };
 
-        Ok(Some(ContentStream { operations }))
+        Ok(Some(ContentStream(operations)))
+    }
+
+    pub fn from_stream(stream: &StreamObject) -> Result<Self, PdfOperatorError> {
+        let data = stream.data()?;
+        let operations = PdfOperatorVariant::from(&data)?;
+        Ok(ContentStream(operations))
     }
 }

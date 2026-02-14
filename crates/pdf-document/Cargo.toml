@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 pdf-object-collection = { path = "../pdf-object-collection" }
 pdf-object = { path = "../pdf-object" }
+pdf-content-stream = { path = "../pdf-content-stream" }
 pdf-parser = { path = "../pdf-parser" }
 pdf-page = { path = "../pdf-page" }
 pdf-font = { path = "../pdf-font" }

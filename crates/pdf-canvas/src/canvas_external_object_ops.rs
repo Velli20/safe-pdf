@@ -231,7 +231,7 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
         match resources.xobject(xobject_name) {
             Some(XObject::Image(image)) => self.render_image_xobject(image),
             Some(XObject::Form(form)) => self.render_content_stream(
-                &form.content_stream.operations,
+                &form.content_stream,
                 form.matrix,
                 Some(&form.bbox),
                 form.resources.as_ref(),

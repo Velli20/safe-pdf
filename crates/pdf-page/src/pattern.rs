@@ -1,9 +1,9 @@
+use pdf_content_stream::content_stream::ContentStream;
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 use thiserror::Error;
 
 use crate::{
-    content_stream::ContentStream,
     external_graphics_state::ExternalGraphicsState,
     matrix::Matrix,
     resource_cache::ResourceCache,
@@ -191,13 +191,10 @@ impl Pattern {
                 // Read the `/Resources` entry. Needed by the pattern's content stream.
                 let resources = Resources::read(dictionary, objects, cache)?.unwrap_or_default();
 
-                let stream_data = object.try_stream(objects)?.data()?;
+                let stream_data = object.try_stream(objects)?;
 
-                let content_stream = ContentStream {
-                    operations: pdf_content_stream::pdf_operator::PdfOperatorVariant::from(
-                        &stream_data,
-                    )?,
-                };
+                let content_stream = ContentStream::from_stream(stream_data)?;
+
                 Ok(Pattern::Tiling {
                     paint_type,
                     tiling_type,
