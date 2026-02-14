@@ -77,7 +77,7 @@ pub trait IndirectObjectParser {
 pub trait LiteralStringParser {
     type ErrorType;
 
-    fn parse_literal_string(&mut self) -> Result<String, Self::ErrorType>;
+    fn parse_literal_string(&mut self) -> Result<Vec<u8>, Self::ErrorType>;
 }
 
 pub trait NameParser {

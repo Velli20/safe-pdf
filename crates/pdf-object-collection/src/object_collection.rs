@@ -152,7 +152,9 @@ impl ObjectCollection {
             ObjectVariant::Array(arr) => {
                 JsonValue::Array(arr.iter().map(Self::object_variant_to_json).collect())
             }
-            ObjectVariant::LiteralString(s) => json!({ "type": "LiteralString", "value": s }),
+            ObjectVariant::LiteralString(s) => {
+                json!({ "type": "LiteralString", "value": String::from_utf8_lossy(s).as_ref() })
+            }
             ObjectVariant::Name(name) => json!({ "type": "Name", "value": name }),
             ObjectVariant::Integer(i) => JsonValue::Number((*i).into()),
             ObjectVariant::Real(r) => serde_json::Number::from_f64(*r)

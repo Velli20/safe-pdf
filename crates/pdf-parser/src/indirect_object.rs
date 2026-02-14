@@ -155,7 +155,7 @@ mod tests {
             assert_eq!(*generation_number, 1);
             assert_eq!(
                 *object,
-                Some(ObjectVariant::LiteralString(String::from("HELLO"),))
+                Some(ObjectVariant::LiteralString(b"HELLO".to_vec()))
             );
         } else {
             panic!("Expected IndirectObject variant");

@@ -95,7 +95,7 @@ impl HeaderParser for PdfParser<'_> {
             .checked_add(line_bytes.len())
             .ok_or(HeaderError::MissingEOL)?;
 
-        self.read_end_of_line_marker()
+        self.expect_end_of_line_marker()
             .map_err(|_| HeaderError::MissingEOL)?;
 
         Ok(Version::new(major, minor))

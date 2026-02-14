@@ -190,7 +190,7 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
         for element in elements {
             match element {
                 TextElement::Text { value } => {
-                    self.show_text(value.as_bytes())?;
+                    self.show_text(value)?;
                 }
                 TextElement::Adjustment { amount } => {
                     // TJ adjustment: Tm = Tm * T( -amount/1000 * Tfs * Th, 0 )
