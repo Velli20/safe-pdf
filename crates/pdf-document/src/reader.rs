@@ -5,7 +5,9 @@ use crate::document::PdfDocument;
 use pdf_object::indirect_object::IndirectObject;
 use pdf_object::object_resolver::{ObjectResolver, UnimplementedResolver};
 use pdf_object::{
-    cross_reference_table::{CrossReferenceEntry, CrossReferenceStatus, CrossReferenceTable},
+    cross_reference_table::{
+        CrossReferenceEntry, CrossReferenceEntryType, CrossReferenceTable,
+    },
     error::ObjectError,
     object_variant::ObjectVariant,
     stream::StreamObject,
@@ -134,36 +136,60 @@ impl PdfReader {
     }
 }
 
-/// Preloads the cross-reference (xref) table for classic (table-based) PDFs.
+/// Builds the cross-reference index by locating the xref structure at the end of the file.
 ///
-/// This method builds a complete xref index by:
-/// 1. Locating the final `trailer` keyword at the end of the file
-/// 2. Following the chain of cross-reference tables via `/Prev` entries
-/// 3. Merging xref entries (newer entries take precedence)
-/// 4. Selecting the best trailer (one with `/Root` if available)
+/// Supports both traditional xref tables (PDF 1.0–1.4) and cross-reference streams (PDF 1.5+).
 ///
-/// # Returns
-///
-/// Returns `CrossReferenceTable` on success or a `PdfReaderError` if the xref structure is invalid.
+/// Strategy:
+/// 1. Scan backwards for `startxref` to find the byte offset of the xref section
+/// 2. Parse the object at that offset
+/// 3. If it's a traditional `xref` table, follow the old path
+/// 4. If it's a stream object with `/Type /XRef`, parse as xref stream
+/// 5. Follow `/Prev` chain to merge all sections
 fn build_xref_index(parser: &mut PdfParser) -> Result<CrossReferenceTable, PdfReaderError> {
-    // Locate the final "trailer" keyword by scanning backwards from the end
-    const TRAILER_KEYWORD: &[u8] = b"trailer";
-    let trailer_pos = parser
+    // Find the startxref offset by scanning backwards for "startxref"
+    const STARTXREF_KEYWORD: &[u8] = b"startxref";
+    let startxref_pos = parser
         .tokenizer
         .input
-        .windows(TRAILER_KEYWORD.len())
-        .rposition(|window| window == TRAILER_KEYWORD)
+        .windows(STARTXREF_KEYWORD.len())
+        .rposition(|window| window == STARTXREF_KEYWORD)
         .ok_or(PdfReaderError::MissingTrailer)?;
 
-    // Parse the trailer to get the startxref offset
-    let ObjectVariant::Trailer(initial_trailer) =
-        parser.parse_object_at(trailer_pos, &UnimplementedResolver)?
-    else {
-        return Err(PdfReaderError::MissingTrailer);
-    };
+    // Extract the byte offset number after "startxref" keyword
+    let offset_start = startxref_pos.saturating_add(STARTXREF_KEYWORD.len());
+    let remaining = parser
+        .tokenizer
+        .input
+        .get(offset_start..)
+        .ok_or(PdfReaderError::MissingTrailer)?;
+
+    // Skip whitespace, then read digits
+    let digits_start = remaining
+        .iter()
+        .position(|b| b.is_ascii_digit())
+        .ok_or(PdfReaderError::MissingTrailer)?;
+    let digits_end = remaining
+        .get(digits_start..)
+        .map(|s| {
+            digits_start.saturating_add(
+                s.iter()
+                    .position(|b| !b.is_ascii_digit())
+                    .unwrap_or(s.len()),
+            )
+        })
+        .unwrap_or(digits_start);
+    let xref_offset: usize = std::str::from_utf8(
+        remaining
+            .get(digits_start..digits_end)
+            .ok_or(PdfReaderError::MissingTrailer)?,
+    )
+    .map_err(|_| PdfReaderError::MissingTrailer)?
+    .parse()
+    .map_err(|_| PdfReaderError::MissingTrailer)?;
 
     // Follow the xref chain, merging entries from all linked tables
-    merge_xref_chain(parser, initial_trailer.offset)
+    merge_xref_chain(parser, xref_offset)
 }
 
 /// Follows the xref chain via `/Prev` entries and merges all cross-reference tables.
@@ -171,9 +197,7 @@ fn build_xref_index(parser: &mut PdfParser) -> Result<CrossReferenceTable, PdfRe
 /// This handles incremental PDF updates where each update adds a new xref section
 /// that references the previous one via the `/Prev` entry in the trailer.
 ///
-/// # Returns
-///
-/// Returns `CrossReferenceTable` on success or a `PdfReaderError` if the xref structure is invalid.
+/// Supports both traditional xref tables and xref streams at each step in the chain.
 fn merge_xref_chain(
     parser: &mut PdfParser,
     start_offset: usize,
@@ -188,18 +212,42 @@ fn merge_xref_chain(
             break;
         }
 
-        // Parse the xref table at the current offset
-        let ObjectVariant::CrossReferenceTable(xref_table) =
-            parser.parse_object_at(current_offset, &UnimplementedResolver)?
-        else {
-            return Err(PdfReaderError::InvalidXrefAtOffset {
-                offset: current_offset,
-            });
+        // Parse the object at the current offset — could be xref table or xref stream
+        let parsed = parser.parse_object_at(current_offset, &UnimplementedResolver)?;
+
+        let xref_table = match parsed {
+            ObjectVariant::CrossReferenceTable(table) => table,
+            ObjectVariant::IndirectObject(indirect) => {
+                // Xref stream: an indirect object wrapping a stream with /Type /XRef
+                match indirect.object {
+                    Some(ObjectVariant::Stream(ref stream)) => {
+                        pdf_parser::cross_reference_stream::parse_xref_stream(
+                            stream,
+                            &UnimplementedResolver,
+                        )?
+                    }
+                    _ => {
+                        return Err(PdfReaderError::InvalidXrefAtOffset {
+                            offset: current_offset,
+                        });
+                    }
+                }
+            }
+            ObjectVariant::Stream(ref stream) => {
+                pdf_parser::cross_reference_stream::parse_xref_stream(
+                    stream,
+                    &UnimplementedResolver,
+                )?
+            }
+            _ => {
+                return Err(PdfReaderError::InvalidXrefAtOffset {
+                    offset: current_offset,
+                });
+            }
         };
 
         // Merge entries: newer entries (already in merged_xref) take precedence
         for (obj_num, entry) in xref_table.entries {
-            // Only insert if the object number doesn't already exist
             entries.entry(obj_num).or_insert(entry);
         }
 
@@ -208,11 +256,9 @@ fn merge_xref_chain(
         // Select the best trailer: prefer one with a `/Root` entry
         match trailer.as_ref() {
             None => {
-                // First trailer becomes the initial candidate
                 trailer = Some(xref_table.trailer);
             }
             Some(existing) if existing.dictionary.get("Root").is_none() => {
-                // Replace if current trailer has a `/Root` entry
                 if xref_table.trailer.dictionary.get("Root").is_some() {
                     trailer = Some(xref_table.trailer);
                 }
@@ -224,7 +270,6 @@ fn merge_xref_chain(
         if let Some(prev_value) = prev_value {
             current_offset = prev_value.try_number::<usize>(&UnimplementedResolver)?;
         } else {
-            // No more previous sections
             break;
         }
     }
@@ -303,12 +348,12 @@ fn load_encrypt_dictionary(
                 .get(&obj_num)
                 .ok_or(ObjectError::FailedResolveObjectReference { obj_num })?;
 
-            if entry.status != CrossReferenceStatus::Normal {
-                return Err(ObjectError::FailedResolveObjectReference { obj_num }.into());
-            }
+            let byte_offset = entry
+                .byte_offset()
+                .ok_or(ObjectError::FailedResolveObjectReference { obj_num })?;
 
             // Parse the encryption object at the specified offset
-            let object = parser.parse_object_at(entry.byte_offset, &UnimplementedResolver)?;
+            let object = parser.parse_object_at(byte_offset, &UnimplementedResolver)?;
 
             // Extract the dictionary from the parsed object
             match object {
@@ -389,23 +434,21 @@ fn load_objects_with_decryption(
 ) -> Result<ObjectCollection, PdfReaderError> {
     let mut objects = ObjectCollection::default();
 
+    // Pass 1: Load all type-1 (normal) entries — these are objects at byte offsets,
+    // including the object streams themselves.
     for entry in entries.values().rev() {
-        // Only load normal objects.
-        if entry.status != CrossReferenceStatus::Normal {
+        let CrossReferenceEntryType::Normal { byte_offset, .. } = entry.entry_type else {
             continue;
-        }
+        };
 
-        // Parse the object at the specified byte offset
-        let object = parser.parse_object_at(entry.byte_offset, &objects)?;
+        let object = parser.parse_object_at(byte_offset, &objects)?;
 
-        // Sanity check: objects at xref entries shouldn't be bare references
         if matches!(object, ObjectVariant::Reference(_)) {
             return Err(PdfReaderError::UnexpectedReference {
-                offset: entry.byte_offset,
+                offset: byte_offset,
             });
         }
 
-        // Decrypt stream data if we have a decryptor
         let object = if let Some(decryptor) = decryptor {
             decrypt_object(object, decryptor)?
         } else {
@@ -413,6 +456,52 @@ fn load_objects_with_decryption(
         };
 
         objects.insert(object)?;
+    }
+
+    // Pass 2: Unpack type-2 (compressed) entries from object streams.
+    // Cache parsed object streams to avoid re-parsing the same stream multiple times.
+    let mut parsed_obj_streams: HashMap<usize, Vec<(usize, ObjectVariant)>> = HashMap::new();
+
+    for (&obj_num, entry) in entries {
+        let CrossReferenceEntryType::Compressed {
+            object_stream_number,
+            index_within_stream,
+        } = entry.entry_type
+        else {
+            continue;
+        };
+
+        // Parse the object stream if we haven't already
+        if let std::collections::hash_map::Entry::Vacant(e) =
+            parsed_obj_streams.entry(object_stream_number)
+        {
+            let stream_obj = objects
+                .get(object_stream_number)
+                .ok_or(ObjectError::FailedResolveObjectReference {
+                    obj_num: object_stream_number,
+                })?;
+
+            let stream = match stream_obj {
+                ObjectVariant::Stream(s) => s,
+                _ => {
+                    return Err(ObjectError::FailedResolveObjectReference {
+                        obj_num: object_stream_number,
+                    }
+                    .into());
+                }
+            };
+
+            let unpacked =
+                pdf_parser::object_stream::parse_object_stream(stream, &objects)?;
+            e.insert(unpacked);
+        }
+
+        // Extract the object at the specified index
+        if let Some(cached) = parsed_obj_streams.get(&object_stream_number)
+            && let Some((_cached_num, obj)) = cached.get(index_within_stream)
+        {
+            objects.map.insert(obj_num, obj.clone());
+        }
     }
 
     Ok(objects)
@@ -527,16 +616,11 @@ mod tests {
         );
 
         let entry1 = table.entries.get(&1).expect("Obj 1 should exist");
-        assert_eq!(entry1.byte_offset, obj1_offset);
+        assert_eq!(entry1.byte_offset(), Some(obj1_offset));
 
         // Check free entry
         let entry0 = table.entries.get(&0).expect("Obj 0 should exist");
-        assert!(
-            format!("{:?}", entry0.status)
-                .to_lowercase()
-                .contains("free"),
-            "Obj 0 should be free"
-        );
+        assert!(entry0.is_free(), "Obj 0 should be free");
 
         // Check trailer
         let size: i64 = table
@@ -603,13 +687,18 @@ mod tests {
         // Check Obj 1 (should be v2)
         let entry1 = table.entries.get(&1).expect("Obj 1 missing");
         assert_eq!(
-            entry1.byte_offset, obj1_v2_offset,
+            entry1.byte_offset(),
+            Some(obj1_v2_offset),
             "Obj 1 should point to v2"
         );
 
         // Check Obj 2 (should be from v1)
         let entry2 = table.entries.get(&2).expect("Obj 2 missing");
-        assert_eq!(entry2.byte_offset, obj2_offset, "Obj 2 should be from v1");
+        assert_eq!(
+            entry2.byte_offset(),
+            Some(obj2_offset),
+            "Obj 2 should be from v1"
+        );
     }
 
     #[test]

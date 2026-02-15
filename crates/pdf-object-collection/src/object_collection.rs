@@ -187,9 +187,7 @@ impl ObjectCollection {
                         (
                             k.to_string(),
                             json!({
-                                "byte_offset": v.byte_offset,
-                                "generation_number": v.generation_number,
-                                "status": format!("{:?}", v.status)
+                                "entry_type": format!("{:?}", v.entry_type)
                             }),
                         )
                     })

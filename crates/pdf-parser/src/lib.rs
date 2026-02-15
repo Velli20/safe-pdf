@@ -2,6 +2,8 @@ mod array;
 mod boolean;
 pub mod comment;
 mod cross_reference_table;
+pub mod cross_reference_stream;
+pub mod object_stream;
 mod dictionary;
 pub mod error;
 pub mod header;

@@ -62,6 +62,8 @@ impl NameParser for PdfParser<'_> {
     /// or a `ParserError` if the input does not start with `/`, is empty after the `/`,
     /// or contains an invalid hex escape sequence.
     fn parse_name(&mut self) -> Result<String, Self::ErrorType> {
+        // let position = self.tokenizer.position.saturating_sub(20);
+        // println!("Parsing name object '{:?}'", String::from_utf8_lossy(&self.tokenizer.input[position..self.tokenizer.position+20]));
         self.tokenizer.expect(PdfToken::Solidus)?;
 
         let name = self.tokenizer.read_while_u8(|b| !Self::is_pdf_delimiter(b));
