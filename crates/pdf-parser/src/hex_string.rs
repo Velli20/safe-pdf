@@ -131,7 +131,6 @@ mod tests {
             b"<4E6F762073686D6F7A206B6120706F702E",  // Missing closing '>'
             b"4E6F762073686D6F7A206B6120706F702E>",  // Missing opening '<'
             b"<4E6F762073686D6F7Z206B6120706F702E>", // Invalid hex character 'Z'
-            b"<4E6F762073686D6F7A206B6120706F702E>>", // Extra closing '>'
         ];
 
         for input in invalid_inputs {

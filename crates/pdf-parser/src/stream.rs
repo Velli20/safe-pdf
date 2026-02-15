@@ -1,5 +1,4 @@
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
-use pdf_tokenizer::PdfToken;
 use thiserror::Error;
 
 use crate::{error::ParserError, parser::PdfParser, traits::StreamParser};
@@ -92,11 +91,7 @@ impl StreamParser for PdfParser<'_> {
         let stream_data = self.tokenizer.read_excactly(length)?.to_vec();
 
         // There should be an end-of-line marker after the data and before `endstream`.
-        if let Some(PdfToken::CarriageReturn) = self.tokenizer.peek() {
-            let _ = self.tokenizer.read();
-        }
-
-        self.read_end_of_line_marker()?;
+        self.expect_end_of_line_marker()?;
 
         // Read the `endstream` keyword .
         self.read_keyword(STREAM_END)?;

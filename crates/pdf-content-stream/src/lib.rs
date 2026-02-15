@@ -26,6 +26,6 @@ extern crate alloc;
 #[derive(Debug, Clone, PartialEq)]
 pub enum TextElement {
     HexString { value: Vec<u8> },
-    Text { value: String },
+    Text { value: Vec<u8> },
     Adjustment { amount: f32 },
 }

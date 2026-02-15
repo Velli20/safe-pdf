@@ -56,7 +56,7 @@ impl LiteralStringParser for PdfParser<'_> {
     /// A `LiteralString` object containing the characters between the outermost parentheses,
     /// or a `ParserError` if the parentheses are unbalanced, delimiters are missing, or an
     /// unexpected token is encountered.
-    fn parse_literal_string(&mut self) -> Result<String, Self::ErrorType> {
+    fn parse_literal_string(&mut self) -> Result<Vec<u8>, Self::ErrorType> {
         // Expect the opening parenthesis `(`.
         self.tokenizer.expect(PdfToken::LeftParenthesis)?;
 
@@ -145,7 +145,7 @@ impl LiteralStringParser for PdfParser<'_> {
                 }
                 // Possible closing of the literal or a nested close
                 (false, b')') if depth == 0 => {
-                    return Ok(String::from_utf8_lossy(&characters).to_string());
+                    return Ok(characters);
                 }
                 (false, b')') => {
                     depth = depth
@@ -167,11 +167,11 @@ mod tests {
 
     #[test]
     fn test_parse_literal_string_valid() {
-        let valid_inputs: Vec<(&[u8], &str)> = vec![
-            (b"(Hello, World!)", "Hello, World!"),
-            (b"(This is a test)", "This is a test"),
-            (b"(Nested (parentheses))", "Nested (parentheses)"),
-            (b"(Special characters *!%)", "Special characters *!%"),
+        let valid_inputs: Vec<(&[u8], &[u8])> = vec![
+            (b"(Hello, World!)", b"Hello, World!"),
+            (b"(This is a test)", b"This is a test"),
+            (b"(Nested (parentheses))", b"Nested (parentheses)"),
+            (b"(Special characters *!%)", b"Special characters *!%"),
         ];
 
         for (input, expected) in valid_inputs {
@@ -203,13 +203,13 @@ mod tests {
 
     #[test]
     fn test_parse_literal_string_with_escapes() {
-        let cases: Vec<(&[u8], &str)> = vec![
-            (b"(Hello World)", "Hello World"),
-            (b"(Line\nBreak)", "Line\nBreak"),
-            (b"(Carriage\rReturn)", "Carriage\rReturn"),
-            (b"(Tab\tSeparated)", "Tab\tSeparated"),
-            (b"(Back\\Slash)", "Back\\Slash"),
-            (b"(Paren\\(\\)Test)", "Paren()Test"),
+        let cases: Vec<(&[u8], &[u8])> = vec![
+            (b"(Hello World)", b"Hello World"),
+            (b"(Line\nBreak)", b"Line\nBreak"),
+            (b"(Carriage\rReturn)", b"Carriage\rReturn"),
+            (b"(Tab\tSeparated)", b"Tab\tSeparated"),
+            (b"(Back\\Slash)", b"Back\\Slash"),
+            (b"(Paren\\(\\)Test)", b"Paren()Test"),
         ];
 
         for (input, expected) in cases {
@@ -222,7 +222,6 @@ mod tests {
         let input: &[u8] = b"(\\000\\035)";
         let mut parser = PdfParser::from(input);
         let result = parser.parse_literal_string().unwrap();
-        let expected = String::from_utf8(vec![0x00, 0x1D]).unwrap();
-        assert_eq!(result, expected);
+        assert_eq!(result, vec![0x00, 0x1D]);
     }
 }

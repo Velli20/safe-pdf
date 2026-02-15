@@ -8,20 +8,6 @@ use crate::trailer::Trailer;
 /// the PDF file, and it is preceded by a trailer dictionary that contains
 /// information about the file, such as the number of objects and the size of
 /// the file.
-///
-/// The cross-reference table provides the following key functions:
-///
-/// - Enables quick access to any indirect object in the file
-///   by providing its exact byte offset, avoiding the need to parse the entire document.
-/// - Maintains information about which objects are in use and which
-///   are free, supporting object reuse during incremental updates.
-/// - Facilitates appending changes to a PDF file by adding new
-///   cross-reference sections and trailers, allowing reconstruction of the document's
-///   current state.
-///
-/// Each entry in the table contains the object number, generation number, and the byte
-/// offset of the object in the file. The cross-reference table is typically located at
-/// the end of the PDF file, preceded by a trailer dictionary with metadata about the file.
 #[derive(Debug, PartialEq, Clone)]
 pub struct CrossReferenceTable {
     /// The map of object numbers to cross-reference entries.
@@ -36,46 +22,86 @@ impl CrossReferenceTable {
     }
 }
 
+/// Distinguishes the type of a cross-reference entry.
+#[derive(Debug, PartialEq, Clone)]
+pub enum CrossReferenceEntryType {
+    /// Type 1: object at a byte offset in the file (traditional).
+    Normal {
+        byte_offset: usize,
+        generation_number: usize,
+    },
+    /// Type 2: object stored in a compressed object stream.
+    Compressed {
+        object_stream_number: usize,
+        index_within_stream: usize,
+    },
+    /// Type 0: free object (not in use).
+    Free {
+        next_free_object: usize,
+        generation_number: usize,
+    },
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct CrossReferenceEntry {
-    /// The byte offset of the object from the beginning of the file.
-    /// Padded with leading zeros if necessary. For free objects, this
-    /// is the object number of the next free object in a linked list.
-    /// For object 0, it's always 0. nnnnnnnnnn (10 digits):
-    pub byte_offset: usize,
-    /// The generation number of the object. This is a 5-digit number
-    /// that is incremented each time the object is modified. It is
-    /// used to determine if the object is still valid or if it has
-    /// been replaced by a newer version. nnnnn (5 digits):
-    pub generation_number: usize,
-    /// The status of the object.
-    pub status: CrossReferenceStatus,
+    pub entry_type: CrossReferenceEntryType,
 }
 
 impl CrossReferenceEntry {
-    /// Creates a new `CrossReferenceEntry` with the given byte offset,
-    /// generation number, and status.
-    ///
-    /// # Arguments
-    ///
-    /// * `byte_offset` - The byte offset of the object from the beginning of the file.
-    /// * `generation_number` - The generation number of the object.
-    /// * `status` - The status of the object.
-    ///
-    /// # Returns
-    ///
-    /// A new `CrossReferenceEntry`.
-    pub fn new(byte_offset: usize, generation_number: usize, status: CrossReferenceStatus) -> Self {
+    pub fn new_normal(byte_offset: usize, generation_number: usize) -> Self {
         CrossReferenceEntry {
-            byte_offset,
-            generation_number,
-            status,
+            entry_type: CrossReferenceEntryType::Normal {
+                byte_offset,
+                generation_number,
+            },
         }
+    }
+
+    pub fn new_compressed(object_stream_number: usize, index_within_stream: usize) -> Self {
+        CrossReferenceEntry {
+            entry_type: CrossReferenceEntryType::Compressed {
+                object_stream_number,
+                index_within_stream,
+            },
+        }
+    }
+
+    pub fn new_free(next_free_object: usize, generation_number: usize) -> Self {
+        CrossReferenceEntry {
+            entry_type: CrossReferenceEntryType::Free {
+                next_free_object,
+                generation_number,
+            },
+        }
+    }
+
+    /// Returns the byte offset if this is a Normal entry.
+    pub fn byte_offset(&self) -> Option<usize> {
+        match &self.entry_type {
+            CrossReferenceEntryType::Normal { byte_offset, .. } => Some(*byte_offset),
+            _ => None,
+        }
+    }
+
+    /// Returns true if this is a Normal (in-use, uncompressed) entry.
+    pub fn is_normal(&self) -> bool {
+        matches!(self.entry_type, CrossReferenceEntryType::Normal { .. })
+    }
+
+    /// Returns true if this is a Free entry.
+    pub fn is_free(&self) -> bool {
+        matches!(self.entry_type, CrossReferenceEntryType::Free { .. })
+    }
+
+    /// Returns true if this is a Compressed entry.
+    pub fn is_compressed(&self) -> bool {
+        matches!(self.entry_type, CrossReferenceEntryType::Compressed { .. })
     }
 }
 
 /// Represents the status of a cross-reference entry in a PDF file.
 /// The status indicates whether the object is normal, free, or old.
+/// Used by the traditional xref table parser.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum CrossReferenceStatus {
     Normal,

@@ -36,7 +36,7 @@ impl CommentParser for PdfParser<'_> {
         // Read until the end of the line.
         let text = self.tokenizer.read_while_u8(|c| c != b'\n' && c != b'\r');
         let text = String::from_utf8_lossy(text).to_string();
-        self.read_end_of_line_marker()?;
+        self.try_read_end_of_line_marker()?;
         Ok(text)
     }
 }
