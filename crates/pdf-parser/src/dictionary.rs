@@ -49,8 +49,7 @@ impl DictionaryParser for PdfParser<'_> {
         // Expect the opening `<<` of the dictionary.
         self.tokenizer.expect(PdfToken::DoubleLeftAngleBracket)?;
 
-        // Skip whitespace
-        self.skip_whitespace();
+        self.skip_whitespace_and_comments();
 
         let mut dictionary = BTreeMap::new();
 
@@ -59,19 +58,18 @@ impl DictionaryParser for PdfParser<'_> {
                 break;
             }
 
-            // Skip whitespace
-            self.skip_whitespace();
+            self.skip_whitespace_and_comments();
 
-            // Parse key.
-            let key = self.parse_name()?;
+            // Parse key. Dictionary keys are always ASCII per spec; convert at boundary.
+            let key = String::from_utf8_lossy(&self.parse_name()?).into_owned();
 
-            self.skip_whitespace();
+            self.skip_whitespace_and_comments();
 
             // Parse object.
             let object = self.parse_object(objects)?;
 
             dictionary.insert(key, object);
-            self.skip_whitespace();
+            self.skip_whitespace_and_comments();
         }
 
         // Consume the closing `>>` of the dictionary.

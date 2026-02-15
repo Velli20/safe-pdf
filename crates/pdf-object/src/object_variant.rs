@@ -22,8 +22,8 @@ pub enum ObjectVariant {
     Array(Vec<ObjectVariant>),
     /// A literal string (enclosed in parentheses in PDF syntax), stored as raw bytes.
     LiteralString(Vec<u8>),
-    /// A name object (prefixed with a slash in PDF syntax).
-    Name(String),
+    /// A name object (prefixed with a slash in PDF syntax), stored as raw bytes.
+    Name(Vec<u8>),
     /// An integer number.
     Integer(i64),
     /// A real (floating point) number.
@@ -167,8 +167,9 @@ impl ObjectVariant {
                 let s = String::from_utf8_lossy(s);
                 Ok(s)
             }
-            ObjectVariant::LiteralString(s) => Ok(String::from_utf8_lossy(s)),
-            ObjectVariant::Name(s) => Ok(Cow::Borrowed(s)),
+            ObjectVariant::LiteralString(s) | ObjectVariant::Name(s) => {
+                Ok(String::from_utf8_lossy(s))
+            }
             _ => Err(ObjectError::TypeMismatch("String", object.name())),
         }
     }
@@ -324,8 +325,7 @@ impl ObjectVariant {
 
         match object {
             ObjectVariant::HexString(s) => Ok(s),
-            ObjectVariant::Name(s) => Ok(s.as_bytes()),
-            ObjectVariant::LiteralString(s) => Ok(s),
+            ObjectVariant::Name(s) | ObjectVariant::LiteralString(s) => Ok(s),
             _ => Err(ObjectError::TypeMismatch("HexString", object.name())),
         }
     }

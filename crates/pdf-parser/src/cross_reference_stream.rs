@@ -151,7 +151,7 @@ mod tests {
         raw_data: Vec<u8>,
     ) -> StreamObject {
         let mut dict_map = BTreeMap::new();
-        dict_map.insert("Type".to_string(), ObjectVariant::Name("XRef".to_string()));
+        dict_map.insert("Type".to_string(), ObjectVariant::Name(b"XRef".to_vec()));
         dict_map.insert("Size".to_string(), ObjectVariant::Integer(size as i64));
         dict_map.insert(
             "W".to_string(),
