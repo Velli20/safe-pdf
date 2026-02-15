@@ -67,7 +67,13 @@ pub fn parse_object_stream(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::as_conversions, clippy::indexing_slicing)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::as_conversions,
+    clippy::indexing_slicing
+)]
 mod tests {
     use pdf_object::{dictionary::Dictionary, object_resolver::UnimplementedResolver};
     use std::collections::BTreeMap;
@@ -90,7 +96,10 @@ mod tests {
         let first = 10; // "10 0 11 3 " is 10 bytes
 
         let mut dict_map = BTreeMap::new();
-        dict_map.insert("Type".to_string(), ObjectVariant::Name("ObjStm".to_string()));
+        dict_map.insert(
+            "Type".to_string(),
+            ObjectVariant::Name("ObjStm".to_string()),
+        );
         dict_map.insert("N".to_string(), ObjectVariant::Integer(2));
         dict_map.insert("First".to_string(), ObjectVariant::Integer(first as i64));
         dict_map.insert(
@@ -125,7 +134,10 @@ mod tests {
         let first = 4; // "5 0 " is 4 bytes
 
         let mut dict_map = BTreeMap::new();
-        dict_map.insert("Type".to_string(), ObjectVariant::Name("ObjStm".to_string()));
+        dict_map.insert(
+            "Type".to_string(),
+            ObjectVariant::Name("ObjStm".to_string()),
+        );
         dict_map.insert("N".to_string(), ObjectVariant::Integer(1));
         dict_map.insert("First".to_string(), ObjectVariant::Integer(first as i64));
         dict_map.insert(

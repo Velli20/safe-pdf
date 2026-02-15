@@ -5,9 +5,7 @@ use crate::document::PdfDocument;
 use pdf_object::indirect_object::IndirectObject;
 use pdf_object::object_resolver::{ObjectResolver, UnimplementedResolver};
 use pdf_object::{
-    cross_reference_table::{
-        CrossReferenceEntry, CrossReferenceEntryType, CrossReferenceTable,
-    },
+    cross_reference_table::{CrossReferenceEntry, CrossReferenceEntryType, CrossReferenceTable},
     error::ObjectError,
     object_variant::ObjectVariant,
     stream::StreamObject,
@@ -475,11 +473,11 @@ fn load_objects_with_decryption(
         if let std::collections::hash_map::Entry::Vacant(e) =
             parsed_obj_streams.entry(object_stream_number)
         {
-            let stream_obj = objects
-                .get(object_stream_number)
-                .ok_or(ObjectError::FailedResolveObjectReference {
+            let stream_obj = objects.get(object_stream_number).ok_or(
+                ObjectError::FailedResolveObjectReference {
                     obj_num: object_stream_number,
-                })?;
+                },
+            )?;
 
             let stream = match stream_obj {
                 ObjectVariant::Stream(s) => s,
@@ -491,8 +489,7 @@ fn load_objects_with_decryption(
                 }
             };
 
-            let unpacked =
-                pdf_parser::object_stream::parse_object_stream(stream, &objects)?;
+            let unpacked = pdf_parser::object_stream::parse_object_stream(stream, &objects)?;
             e.insert(unpacked);
         }
 

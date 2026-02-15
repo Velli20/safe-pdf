@@ -53,9 +53,7 @@ impl CrossReferenceTableParser for PdfParser<'_> {
                 })?;
 
                 let entry = match status {
-                    CrossReferenceStatus::Normal => {
-                        CrossReferenceEntry::new_normal(field1, field2)
-                    }
+                    CrossReferenceStatus::Normal => CrossReferenceEntry::new_normal(field1, field2),
                     CrossReferenceStatus::Free | CrossReferenceStatus::Old => {
                         CrossReferenceEntry::new_free(field1, field2)
                     }

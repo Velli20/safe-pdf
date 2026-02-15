@@ -97,6 +97,13 @@ impl<'a> Tokenizer<'a> {
     }
 
     pub fn expect(&mut self, expected: PdfToken) -> Result<(), TokenizerError> {
+        if expected == PdfToken::RightAngleBracket {
+            // Special handling for '>' to check for '>>'
+            if self.match_next(b'>') {
+                return Ok(());
+            }
+        }
+
         match self.read() {
             Some(token) if token == expected => Ok(()),
             Some(token) => Err(TokenizerError::UnexpectedToken(Some(token), expected)),

@@ -1,9 +1,8 @@
 mod array;
 mod boolean;
 pub mod comment;
-mod cross_reference_table;
 pub mod cross_reference_stream;
-pub mod object_stream;
+mod cross_reference_table;
 mod dictionary;
 pub mod error;
 pub mod header;
@@ -13,6 +12,7 @@ mod literal_string;
 mod name;
 mod null;
 mod number;
+pub mod object_stream;
 pub mod parser;
 mod stream;
 mod trailer;

@@ -92,8 +92,14 @@ pub fn parse_xref_stream(
             };
             let f2_start = pos.saturating_add(w1);
             let f3_start = f2_start.saturating_add(w2);
-            let field2 = read_field(data.get(f2_start..f2_start.saturating_add(w2)).unwrap_or(&[]));
-            let field3 = read_field(data.get(f3_start..f3_start.saturating_add(w3)).unwrap_or(&[]));
+            let field2 = read_field(
+                data.get(f2_start..f2_start.saturating_add(w2))
+                    .unwrap_or(&[]),
+            );
+            let field3 = read_field(
+                data.get(f3_start..f3_start.saturating_add(w3))
+                    .unwrap_or(&[]),
+            );
 
             let entry = match entry_type {
                 0 => CrossReferenceEntry::new_free(field2, field3),
@@ -121,7 +127,13 @@ fn read_field(bytes: &[u8]) -> usize {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic, clippy::as_conversions)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::as_conversions
+)]
 mod tests {
     use pdf_object::{
         cross_reference_table::CrossReferenceEntryType, dictionary::Dictionary,
@@ -139,14 +151,8 @@ mod tests {
         raw_data: Vec<u8>,
     ) -> StreamObject {
         let mut dict_map = BTreeMap::new();
-        dict_map.insert(
-            "Type".to_string(),
-            ObjectVariant::Name("XRef".to_string()),
-        );
-        dict_map.insert(
-            "Size".to_string(),
-            ObjectVariant::Integer(size as i64),
-        );
+        dict_map.insert("Type".to_string(), ObjectVariant::Name("XRef".to_string()));
+        dict_map.insert("Size".to_string(), ObjectVariant::Integer(size as i64));
         dict_map.insert(
             "W".to_string(),
             ObjectVariant::Array(
@@ -170,13 +176,7 @@ mod tests {
             ObjectVariant::Integer(raw_data.len() as i64),
         );
 
-        StreamObject::new(
-            0,
-            0,
-            Box::new(Dictionary::new(dict_map)),
-            raw_data,
-            None,
-        )
+        StreamObject::new(0, 0, Box::new(Dictionary::new(dict_map)), raw_data, None)
     }
 
     #[test]
