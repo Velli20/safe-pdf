@@ -102,6 +102,6 @@ pub enum MaskMode {
 pub enum PixelFormat {
     /// 8-bit per channel RGBA format.
     RGBA8888,
-    /// Alpha-only format with 8 bits per pixel.
-    Alpha8,
+    /// Grayscale format with 8 bits per pixel.
+    Gray8,
 }
