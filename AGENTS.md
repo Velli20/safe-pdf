@@ -1,113 +1,68 @@
-# Hi robots, welcome to the Safe-PDF project.
+## Project Overview
 
-Safe-PDF is an open-source, high-performance PDF reader and renderer built in Rust.
+Safe-PDF is a PDF reader and renderer written in Rust (2024 edition, toolchain 1.89.0). It's a modular monorepo organized as Cargo workspace crates under `crates/`. Status: pre-alpha, APIs may change.
 
-**Mission**
-
-- Build a fast, reliable, and safe PDF renderer and reader.
-- Provide a modern Rust implementation with well-structured crates and clean APIs.
-
-## Project Structure
-
-- [crates](./crates) - Core Rust crates (monorepo style, main implementation of Safe-PDF).
-- [examples](./examples) - Example applications and demos.
-
-## Languages, Frameworks, Tools, Infrastructures
-
-**Languages**
-
-- Rust (2024 edition)
-
-**Graphics Backend**
-
-- Skia (via skia-safe crate) — Primary 2D rendering backend.
-- FemtoVG — Lightweight vector graphics alternative (WIP).
-
-## `/crates/*`
-
-Importance: **High**
-
-monorepo rust crates.
-
-The rust implementation of Safe-PDF. this is rapidly under development.
-
-## Testing & Development
-
-Run the following commands from the project root:
+## Common Commands
 
 ```sh
-# Run tests for all crates
-cargo test
-
-# Type-check all crates
-cargo check
-
-# Run Clippy lints
-cargo clippy --all --workspace
-
-# Build example app with Skia backend
-cargo build --example skia --features "skia"
-
-# Run example app with Skia backend
-cargo run --example skia --features "skia"
-
-# Format all code (pre-commit recommended)
-cargo fmt
+cargo test                                  # Run all tests
+cargo test -p pdf-parser                    # Run tests for a single crate
+cargo test -p pdf-parser -- test_name       # Run a single test
+cargo check                                 # Type-check all crates
+cargo clippy --all --workspace              # Run lints
+cargo fmt                                   # Format code
+cargo build --example skia --features skia  # Build Skia example
+cargo run --example skia --features skia -- examples/assets/webgl.pdf  # Run viewer
+cargo xtask emscripten --features skia-wasm # Build WASM target
+cargo fuzz run parse_object                 # Fuzz the parser
 ```
 
-### Building the WebAssembly/Emscripten Example
+## Workspace Lint Rules (Critical)
 
-The project uses `cargo xtask` for build automation:
+These are enforced workspace-wide via `Cargo.toml` and will fail CI:
 
-```sh
-# Build the emscripten example (compiles + copies artifacts to examples/web/dist/)
-cargo xtask emscripten --features skia-wasm
+- **`unwrap`/`expect` are denied** in non-test code. Use `Result<T, E>` with `?` propagation. (`clippy.toml` allows them in `#[cfg(test)]` only.)
+- **`unsafe_code` is forbidden.** No exceptions without narrow justification.
+- **`indexing_slicing` is denied.** Use `.get()` or iterators.
+- **`panic` is denied.** Never panic in library code.
+- **`as_conversions` is warned.** Prefer `From`/`Into`/`TryFrom`.
+- **`arithmetic_side_effects` is warned.**
 
-# Build and start a dev server
-cargo xtask emscripten --features skia-wasm --serve
+Use `thiserror::Error` for custom error types. Propagate errors with `?`.
 
-# Build and serve on a custom port
-cargo xtask emscripten --serve --port 3000
+## Architecture
 
-# Clean all artifacts
-cargo xtask clean
+The crates form a pipeline from bytes to pixels:
+
+```
+PDF bytes → pdf-tokenizer → pdf-parser → pdf-object → pdf-document
+  → pdf-page → pdf-content-stream → pdf-canvas → pdf-graphics-{skia,femtovg} → display
 ```
 
-**Prerequisites for WebAssembly builds:**
-- Emscripten SDK installed at `~/emsdk`
-- Python 3 (for the dev server)
+Key architectural traits:
+- **`CanvasBackend`** (in `pdf-canvas`): Abstracts rendering. Skia and FemtoVG are current implementations.
+- **`PdfOperatorBackend`**: Content stream operators dispatched via traits, enabling substitution with analyzers/exporters without modifying core logic.
 
-## Contribution Notes (for humans & copilots)
+Supporting crates:
+- `pdf-font`: Font decoding (Type1/TrueType/Type3), isolated from rendering
+- `pdf-graphics`: Common graphics types (color, transforms)
+- `pdf-postscript`: Optional PostScript support
+- `pdf-object-collection`: Utility collections for PDF objects
 
-- Keep PRs small and focused.
-- Add tests for new features and bug fixes.
-- Maintain clear commit messages.
-- Ensure cargo fmt and cargo check pass before pushing.
+## Code Style
 
-## Copilot Hints
+- Idiomatic Rust: iterators, ownership, lifetimes over cloning
+- Small, composable functions over monolithic ones
+- Avoid unnecessary heap allocations; prefer references and slices
+- Document public functions, structs, and enums with `///` comments
+- Unit tests go in `mod tests {}` within the same file
+- State is threaded explicitly through contexts (no global state)
 
-When suggesting or generating code for this project, please follow these rules:
+## CI
 
-### Error Handling
+CI runs on push/PR to main (`.github/workflows/ci.yml`):
+1. `cargo check` + `cargo test` + `cargo clippy` + `cargo fmt --check`
+2. Minimal feature build (no optional features)
+3. WASM/Emscripten build
 
-- Prefer Result<T, Error> or Option<T> over unwrap / expect.
-- Use thiserror::Error for custom error types.
-- Always propagate errors with ?.
-
-### Code Style
-
-- Use idiomatic Rust patterns (iterators, ownership, lifetimes).
-- Document all public functions, structs, and enums with /// comments.
-- Write small, composable functions instead of monolithic ones.
-
-### Examples & Testing
-
-- Place runnable demos in /examples.
-- Prefer unit tests inside the same crate (tests module).
-- Use integration tests in a tests/ folder only for cross-crate functionality.
-
-### Performance & Safety
-
-- Avoid unnecessary heap allocations.
-- Use references and slices instead of cloning where possible.
-- Never use unsafe unless absolutely required — and document why.
+System dependencies for Skia on Linux: `libfontconfig1-dev`, `libfreetype6-dev`.
