@@ -39,11 +39,11 @@ impl ArrayParser for PdfParser<'_> {
         objects: &dyn ObjectResolver,
     ) -> Result<Vec<ObjectVariant>, ParserError> {
         self.tokenizer.expect(PdfToken::LeftSquareBracket)?;
-        self.skip_whitespace();
+        self.skip_whitespace_and_comments();
 
         let mut values = Vec::new();
         while let Some(token) = self.tokenizer.peek() {
-            self.skip_whitespace();
+            self.skip_whitespace_and_comments();
 
             if let PdfToken::RightSquareBracket = token {
                 break;
@@ -54,7 +54,7 @@ impl ArrayParser for PdfParser<'_> {
             if let Some(PdfToken::RightSquareBracket) = self.tokenizer.peek() {
                 break;
             }
-            self.skip_whitespace();
+            self.skip_whitespace_and_comments();
         }
 
         self.tokenizer.expect(PdfToken::RightSquareBracket)?;

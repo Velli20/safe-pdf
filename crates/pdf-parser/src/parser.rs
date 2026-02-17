@@ -113,6 +113,26 @@ impl PdfParser<'_> {
         let _ = self.tokenizer.read_while_u8(Self::is_pdf_whitespace);
     }
 
+    /// Skips whitespace and comments.
+    ///
+    /// Per PDF spec Section 7.2.3, comments are equivalent to whitespace and
+    /// should be ignored everywhere whitespace is allowed. This method
+    /// repeatedly skips whitespace and consumes any `% ... EOL` comments
+    /// until a non-whitespace, non-comment token is reached.
+    pub(crate) fn skip_whitespace_and_comments(&mut self) {
+        loop {
+            self.skip_whitespace();
+            if let Some(PdfToken::Percent) = self.tokenizer.peek() {
+                // Consume the '%' and everything up to EOL.
+                self.tokenizer.read();
+                let _ = self.tokenizer.read_while_u8(|c| c != b'\n' && c != b'\r');
+                let _ = self.try_read_end_of_line_marker();
+            } else {
+                break;
+            }
+        }
+    }
+
     /// Parses a PDF object at a specific position in the input stream.
     ///
     /// This function temporarily moves the tokenizer to the specified `position`, parses the object

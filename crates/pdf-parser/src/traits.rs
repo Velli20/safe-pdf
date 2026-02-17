@@ -83,7 +83,7 @@ pub trait LiteralStringParser {
 pub trait NameParser {
     type ErrorType;
 
-    fn parse_name(&mut self) -> Result<String, Self::ErrorType>;
+    fn parse_name(&mut self) -> Result<Vec<u8>, Self::ErrorType>;
 }
 
 pub trait NullObjectParser {

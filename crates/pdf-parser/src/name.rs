@@ -61,9 +61,7 @@ impl NameParser for PdfParser<'_> {
     /// A `Name` object containing the decoded name string (with hex escapes resolved),
     /// or a `ParserError` if the input does not start with `/`, is empty after the `/`,
     /// or contains an invalid hex escape sequence.
-    fn parse_name(&mut self) -> Result<String, Self::ErrorType> {
-        // let position = self.tokenizer.position.saturating_sub(20);
-        // println!("Parsing name object '{:?}'", String::from_utf8_lossy(&self.tokenizer.input[position..self.tokenizer.position+20]));
+    fn parse_name(&mut self) -> Result<Vec<u8>, Self::ErrorType> {
         self.tokenizer.expect(PdfToken::Solidus)?;
 
         let name = self.tokenizer.read_while_u8(|b| !Self::is_pdf_delimiter(b));
@@ -71,55 +69,58 @@ impl NameParser for PdfParser<'_> {
             return Err(NameObjectError::InvalidToken);
         }
 
-        let name = escape(name)?;
-
-        Ok(name)
+        escape(name)
     }
 }
 
 /// Decodes escape sequences in PDF name objects.
-/// Handles '#' followed by two hex digits by converting them to the corresponding ASCII character.
-fn escape(input: &[u8]) -> Result<String, NameObjectError> {
-    let mut result = String::with_capacity(input.len());
-    let mut chars = input.iter();
+/// Handles '#' followed by two hex digits by converting them to the corresponding byte value.
+fn escape(input: &[u8]) -> Result<Vec<u8>, NameObjectError> {
+    let mut result = Vec::with_capacity(input.len());
+    let mut iter = input.iter();
 
-    while let Some(byte) = chars.next() {
+    while let Some(&byte) = iter.next() {
         match byte {
             b'#' => {
-                // Read the first hex digit character
-                let h1_byte = match chars.next() {
-                    Some(b) => *b,
-                    None => return Err(NameObjectError::IncompleteHexEscape),
-                };
-                // Read the second hex digit character
-                let h2_byte = match chars.next() {
-                    Some(b) => *b,
-                    None => return Err(NameObjectError::IncompleteHexEscape),
-                };
+                let h1 = *iter.next().ok_or(NameObjectError::IncompleteHexEscape)?;
+                let h2 = *iter.next().ok_or(NameObjectError::IncompleteHexEscape)?;
 
-                let h1_char = char::from(h1_byte);
-                let h2_char = char::from(h2_byte);
-
-                if !h1_char.is_ascii_hexdigit() {
-                    return Err(NameObjectError::NonHexDigitInEscape(h1_char));
+                if !h1.is_ascii_hexdigit() {
+                    return Err(NameObjectError::NonHexDigitInEscape(char::from(h1)));
                 }
-                if !h2_char.is_ascii_hexdigit() {
-                    return Err(NameObjectError::NonHexDigitInEscape(h2_char));
+                if !h2.is_ascii_hexdigit() {
+                    return Err(NameObjectError::NonHexDigitInEscape(char::from(h2)));
                 }
 
-                let hex_pair_str = String::from_iter([h1_char, h2_char]);
-                let byte_val = u8::from_str_radix(&hex_pair_str, 16).map_err(|e| {
-                    NameObjectError::HexRadixError {
-                        hex_pair: hex_pair_str,
-                        reason: e.to_string(),
-                    }
-                })?;
-                result.push(char::from(byte_val));
+                let high = hex_digit_value(h1);
+                let low = hex_digit_value(h2);
+                result.push((high << 4) | low);
             }
-            _ => result.push(char::from(*byte)),
+            _ => result.push(byte),
         }
     }
     Ok(result)
+}
+
+/// Converts an ASCII hex digit to its numeric value (0–15).
+/// Caller must ensure the byte is a valid hex digit.
+const fn hex_digit_value(b: u8) -> u8 {
+    match b {
+        b'0'..=b'9' => b.saturating_sub(b'0'),
+        b'a' => 10,
+        b'b' => 11,
+        b'c' => 12,
+        b'd' => 13,
+        b'e' => 14,
+        b'f' => 15,
+        b'A' => 10,
+        b'B' => 11,
+        b'C' => 12,
+        b'D' => 13,
+        b'E' => 14,
+        b'F' => 15,
+        _ => 0,
+    }
 }
 
 #[cfg(test)]
@@ -129,34 +130,32 @@ mod tests {
 
     #[test]
     fn test_name_object_valid() {
-        let valid_inputs: Vec<(&[u8], &str)> = vec![
-            (b"/Name\n", "Name"),
-            (b"/Name\t", "Name"),
-            (b"/Name1 ", "Name1"),
-            (b"/Name ", "Name"),
-            (b"/Name<", "Name"),
-            (b"/Name>", "Name"),
-            (b"/Name[", "Name"),
-            (b"/Name]", "Name"),
-            (b"/Name{", "Name"),
-            (b"/Name}", "Name"),
-            (b"/Name(abc)", "Name"),
-            (b"/Name", "Name"),
-            (b"/A#20Name", "A Name"),
-            (b"/D#23E#5fF", "D#E_F"),
-            (b"/A#20B", "A B"),
+        let valid_inputs: Vec<(&[u8], &[u8])> = vec![
+            (b"/Name\n", b"Name"),
+            (b"/Name\t", b"Name"),
+            (b"/Name1 ", b"Name1"),
+            (b"/Name ", b"Name"),
+            (b"/Name<", b"Name"),
+            (b"/Name>", b"Name"),
+            (b"/Name[", b"Name"),
+            (b"/Name]", b"Name"),
+            (b"/Name{", b"Name"),
+            (b"/Name}", b"Name"),
+            (b"/Name(abc)", b"Name"),
+            (b"/Name", b"Name"),
+            (b"/A#20Name", b"A Name"),
+            (b"/D#23E#5fF", b"D#E_F"),
+            (b"/A#20B", b"A B"),
         ];
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
             let value = parser.parse_name().unwrap();
-            if value != expected {
-                panic!(
-                    "Expected `{}`, but got `{}` for input `{}`",
-                    expected,
-                    value,
-                    String::from_utf8_lossy(input)
-                );
-            }
+            assert_eq!(
+                value,
+                expected,
+                "input: `{}`",
+                String::from_utf8_lossy(input)
+            );
         }
     }
 

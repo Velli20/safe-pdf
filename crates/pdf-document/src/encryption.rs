@@ -270,7 +270,7 @@ mod tests {
     #[test]
     fn test_parse_full_encrypt_dictionary() {
         let dict = make_dictionary(vec![
-            ("Filter", ObjectVariant::Name("Standard".to_string())),
+            ("Filter", ObjectVariant::Name(b"Standard".to_vec())),
             ("V", ObjectVariant::Integer(4)),
             ("R", ObjectVariant::Integer(4)),
             ("O", ObjectVariant::HexString(vec![0u8; 32])),

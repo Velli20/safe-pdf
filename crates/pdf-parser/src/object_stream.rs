@@ -96,10 +96,7 @@ mod tests {
         let first = 10; // "10 0 11 3 " is 10 bytes
 
         let mut dict_map = BTreeMap::new();
-        dict_map.insert(
-            "Type".to_string(),
-            ObjectVariant::Name("ObjStm".to_string()),
-        );
+        dict_map.insert("Type".to_string(), ObjectVariant::Name(b"ObjStm".to_vec()));
         dict_map.insert("N".to_string(), ObjectVariant::Integer(2));
         dict_map.insert("First".to_string(), ObjectVariant::Integer(first as i64));
         dict_map.insert(
@@ -134,10 +131,7 @@ mod tests {
         let first = 4; // "5 0 " is 4 bytes
 
         let mut dict_map = BTreeMap::new();
-        dict_map.insert(
-            "Type".to_string(),
-            ObjectVariant::Name("ObjStm".to_string()),
-        );
+        dict_map.insert("Type".to_string(), ObjectVariant::Name(b"ObjStm".to_vec()));
         dict_map.insert("N".to_string(), ObjectVariant::Integer(1));
         dict_map.insert("First".to_string(), ObjectVariant::Integer(first as i64));
         dict_map.insert(
@@ -158,10 +152,7 @@ mod tests {
         assert_eq!(result[0].0, 5);
         match &result[0].1 {
             ObjectVariant::Dictionary(d) => {
-                assert_eq!(
-                    d.get("Key"),
-                    Some(&ObjectVariant::Name("Value".to_string()))
-                );
+                assert_eq!(d.get("Key"), Some(&ObjectVariant::Name(b"Value".to_vec())));
             }
             other => panic!("Expected dictionary, got {:?}", other),
         }
