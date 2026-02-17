@@ -103,6 +103,13 @@ impl<B: CanvasBackend> TextRenderer for Type3FontRenderer<'_, '_, B> {
             // 4. Save graphics state before drawing the glyph.
             self.canvas.save()?;
 
+            // Override resources with Type 3 font's own resources for this glyph.
+            // Since save() cloned the state, this override is scoped to the glyph
+            // and restore() will pop it.
+            if let Some(type3_resources) = self.canvas.current_state()?.text_state.resources {
+                self.canvas.current_state_mut()?.resources = Some(type3_resources);
+            }
+
             let mut glyph_width = None;
 
             // 5. Set the transformation matrix for the glyph and execute its content stream.

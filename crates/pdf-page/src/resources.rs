@@ -26,7 +26,7 @@ use crate::{
 /// referenced by name within content streams, including fonts, graphics states,
 /// XObjects (images/forms), patterns, and shadings.
 #[derive(Default)]
-pub struct Resources(HashMap<String, Resource>);
+pub struct Resources(pub HashMap<String, Resource>);
 
 /// Errors that can occur while parsing a PDF Resources dictionary.
 #[derive(Debug, Error)]
@@ -89,7 +89,13 @@ fn read_fonts(
             continue;
         }
 
-        let resource = Resource::Font(Rc::new(Font::from_dictionary(dict, objects)?));
+        // Handle fonts that may have their own nested resources. This applies only to Type 3 fonts.
+        let nested_resources = Resources::read(dict, objects, cache)?.map(Rc::new);
+
+        let resource = Resource::Font {
+            font: Rc::new(Font::from_dictionary(dict, objects)?),
+            resources: nested_resources,
+        };
         cache.insert(dict.object_number, resource.clone());
         result.insert(name.clone(), resource);
     }
@@ -213,9 +219,9 @@ impl Resources {
     /// # Returns
     ///
     /// An `Option` containing a reference to the [`Font`] if found, or `None` if not present or not a font.
-    pub fn font(&self, name: &str) -> Option<&Font> {
+    pub fn font(&self, name: &str) -> Option<(&Font, Option<&Resources>)> {
         match self.0.get(name)? {
-            Resource::Font(font) => Some(font),
+            Resource::Font { font, resources } => Some((font, resources.as_deref())),
             _ => None,
         }
     }
