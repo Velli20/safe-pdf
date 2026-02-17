@@ -1,6 +1,6 @@
 use crate::{
-    external_graphics_state::ExternalGraphicsState, pattern::Pattern, shading::Shading,
-    xobject::XObject,
+    external_graphics_state::ExternalGraphicsState, pattern::Pattern, resources::Resources,
+    shading::Shading, xobject::XObject,
 };
 use pdf_font::font::Font;
 use std::rc::Rc;
@@ -10,7 +10,11 @@ use std::rc::Rc;
 #[derive(Clone)]
 pub enum Resource {
     /// A font resource used for text rendering.
-    Font(Rc<Font>),
+    Font {
+        font: Rc<Font>,
+        /// Optional nested resources for this font, such as ExtGState or XObjects used in Type 3 fonts.
+        resources: Option<Rc<Resources>>,
+    },
     /// An external graphics state resource.
     ExternalGraphicsState(Rc<ExternalGraphicsState>),
     /// An XObject resource, such as an image or form object.

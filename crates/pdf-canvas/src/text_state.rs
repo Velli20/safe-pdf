@@ -1,5 +1,6 @@
 use pdf_font::font::Font;
 use pdf_graphics::transform::Transform;
+use pdf_page::resources::Resources;
 
 /// Encapsulates text-specific state parameters.
 #[derive(Clone)]
@@ -22,6 +23,8 @@ pub(crate) struct TextState<'a> {
     pub(crate) leading: f32,
     /// The current font resource.
     pub(crate) font: Option<&'a Font>,
+    /// The current resource dictionary, used for resolving nested resources in Type 3 fonts.
+    pub(crate) resources: Option<&'a Resources>,
 }
 
 impl Default for TextState<'_> {
@@ -36,6 +39,7 @@ impl Default for TextState<'_> {
             rise: 0.0,
             leading: 0.0,
             font: None,
+            resources: None,
         }
     }
 }

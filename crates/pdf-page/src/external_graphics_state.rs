@@ -118,9 +118,6 @@ pub struct ExternalGraphicsState {
 
 impl ExternalGraphicsState {
     /// Parse an ExtGState dictionary into a strongly-typed `ExternalGraphicsState`.
-    ///
-    /// This delegates each key's parsing to small helpers to keep control flow
-    /// and error handling readable. Unknown keys are logged and skipped.
     pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
@@ -139,6 +136,7 @@ impl ExternalGraphicsState {
                 ObjectVariant::Reference(_) => objects.resolve_object(value)?,
                 _ => value,
             };
+
             if let Some(param) = parse_entry(name, resolved, objects, cache)? {
                 params.push(param);
             }

@@ -60,7 +60,7 @@ pub enum ImageXObjectError {
 ///
 /// When a soft mask (SMask) is present in the source PDF, the alpha channel is applied
 /// to the image data during parsing, producing RGBA output data.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ImageXObject {
     /// The width of the image in samples (pixels).
     ///

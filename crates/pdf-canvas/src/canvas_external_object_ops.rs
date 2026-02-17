@@ -228,17 +228,22 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
             .resources
             .ok_or(PdfCanvasError::MissingPageResources)?;
 
-        match resources.xobject(xobject_name) {
-            Some(XObject::Image(image)) => self.render_image_xobject(image),
-            Some(XObject::Form(form)) => self.render_content_stream(
+        let xobj = resources
+            .xobject(xobject_name)
+            .ok_or_else(|| PdfCanvasError::XObjectNotFound(xobject_name.to_string()))?;
+
+        match xobj {
+            XObject::Image(image) => self.render_image_xobject(image)?,
+            XObject::Form(form) => self.render_content_stream(
                 &form.content_stream,
                 form.matrix,
                 Some(&form.bbox),
                 form.resources.as_ref(),
                 None,
-            ),
-            None => Err(PdfCanvasError::XObjectNotFound(xobject_name.to_string())),
+            )?,
         }
+
+        Ok(())
     }
 }
 
