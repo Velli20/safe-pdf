@@ -11,6 +11,8 @@
 //!
 //! See PDF 32000-1:2008, Section 8.9 "Images" for the full specification.
 
+use std::borrow::Cow;
+
 use pdf_graphics::PixelFormat;
 use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
@@ -37,7 +39,6 @@ pub enum ImageXObjectError {
     #[error("Failed to read SMask XObject: {source}")]
     SMaskReadError {
         /// The underlying XObject error.
-        #[from]
         source: Box<XObjectError>,
     },
     /// An error occurred while parsing the color space.
@@ -46,8 +47,17 @@ pub enum ImageXObjectError {
     /// An error occurred while resolving PDF objects.
     #[error("Object error: {0}")]
     ObjectError(#[from] ObjectError),
-    #[error("invalid image dimensions: {width}x{height}")]
-    InvalidImageDimensions { width: usize, height: usize },
+    /// The image has zero-area dimensions (width or height is zero).
+    #[error("image has zero dimensions: {width}x{height}")]
+    ZeroImageDimensions { width: usize, height: usize },
+    /// The bits per component value is not supported.
+    ///
+    /// Only 8-bit-per-component images are currently supported.
+    #[error("unsupported bits per component: {bits} (only 8 is supported)")]
+    UnsupportedBitsPerComponent { bits: usize },
+    /// The color space reported zero color components, which is invalid.
+    #[error("color space reports zero color components")]
+    ZeroColorComponents,
     #[error("failed to decode image: expected at least {expected} bytes, got {actual} bytes")]
     ImageDecodeFailed { expected: usize, actual: usize },
 }
@@ -129,30 +139,77 @@ impl ImageXObject {
         let height = dictionary
             .get_or_err("Height")?
             .try_number::<usize>(objects)?;
+
+        if width == 0 || height == 0 {
+            return Err(ImageXObjectError::ZeroImageDimensions { width, height });
+        }
+
         let bits_per_component = dictionary
             .get_or_err("BitsPerComponent")?
             .try_number::<usize>(objects)?;
 
+        // Only 8-bit-per-component images are currently supported.
+        if bits_per_component != 8 {
+            return Err(ImageXObjectError::UnsupportedBitsPerComponent {
+                bits: bits_per_component,
+            });
+        }
+
         // Parse the optional `/ColorSpace` entry.
         let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
 
-        // Start with a copy of the stream data; we may need to decompress it.
+        // Decompress / decode the image stream.
         let raw_data = stream_data.data()?;
 
-        // Determine the number of color components.
+        // For Indexed color spaces, expand palette indices to actual color values now
+        // and record only the base color space going forward.  Storing the base (not
+        // the Indexed wrapper) is critical: downstream rendering code in
+        // `resolve_image_data` also checks for Indexed color spaces and would
+        // re-expand the data a second time if the Indexed wrapper were kept, producing
+        // a buffer that is too small for the declared pixel format and causing Skia to
+        // reject the image.
+        let (image_data, stored_color_space, num_color_components): (Cow<[u8]>, _, usize) =
+            match color_space {
+                Some(ColorSpace::Indexed {
+                    base,
+                    hival,
+                    lookup,
+                }) => {
+                    let base_components = base.num_color_components();
+                    let expanded =
+                        Self::expand_indexed(raw_data.as_ref(), base_components, hival, &lookup);
+                    (Cow::Owned(expanded), Some(*base), base_components)
+                }
+                other => {
+                    let components = match &other {
+                        Some(cs) => cs.num_color_components(),
+                        None => 1,
+                    };
+                    (raw_data, other, components)
+                }
+            };
+
+        if num_color_components == 0 {
+            return Err(ImageXObjectError::ZeroColorComponents);
+        }
+
         let num_pixels = width.saturating_mul(height);
-        let num_color_components = raw_data
-            .len()
-            .checked_div(num_pixels)
-            .ok_or(ImageXObjectError::InvalidImageDimensions { width, height })?;
+        let expected_bytes = num_pixels.saturating_mul(num_color_components);
+        if image_data.len() < expected_bytes {
+            return Err(ImageXObjectError::ImageDecodeFailed {
+                expected: expected_bytes,
+                actual: image_data.len(),
+            });
+        }
 
         // Parse the optional `/SMask` entry and convert to RGBA if needed.
         let smask = Self::parse_smask(dictionary, objects, cache)?;
 
-        let (data, pixel_format) = if smask.is_some() || num_color_components == 3 {
+        let (data, pixel_format) = if smask.is_some() || num_color_components != 1 {
+            // Multi-component or masked images are output as RGBA8888.
             (
                 Self::to_rgba(
-                    &raw_data,
+                    image_data.as_ref(),
                     width,
                     height,
                     num_color_components,
@@ -161,7 +218,8 @@ impl ImageXObject {
                 PixelFormat::RGBA8888,
             )
         } else {
-            (raw_data.into_owned(), PixelFormat::Alpha8)
+            // Single-component (grayscale) image without a soft mask.
+            (image_data.into_owned(), PixelFormat::Gray8)
         };
 
         Ok(Self {
@@ -170,12 +228,33 @@ impl ImageXObject {
             bits_per_component,
             data,
             pixel_format,
-            color_space,
+            color_space: stored_color_space,
         })
     }
 }
 
 impl ImageXObject {
+    /// Expands an Indexed color space image from palette indices to actual color values.
+    ///
+    /// Each byte in `data` is a palette index clamped to `0..=hival`. The lookup table
+    /// provides `base_components` bytes per index entry.
+    fn expand_indexed(data: &[u8], base_components: usize, hival: u8, lookup: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(data.len().saturating_mul(base_components));
+        for &index in data {
+            let clamped = usize::from(index.min(hival));
+            let start = clamped.saturating_mul(base_components);
+            let end = start.saturating_add(base_components);
+            match lookup.get(start..end) {
+                Some(color) => out.extend_from_slice(color),
+                None => {
+                    // Lookup table shorter than expected; pad with zeros.
+                    out.extend(std::iter::repeat_n(0, base_components));
+                }
+            }
+        }
+        out
+    }
+
     /// Parses the optional `/SMask` entry for soft mask transparency.
     ///
     /// If present, the SMask must be an Image XObject (typically grayscale)
@@ -214,7 +293,7 @@ impl ImageXObject {
     /// - `image_data`: The source image data.
     /// - `width`: Image width in pixels.
     /// - `height`: Image height in pixels.
-    /// - `num_color_components`: Number of color components (1 for gray, 3 for RGB, 4 for RGBA).
+    /// - `num_color_components`: Number of color components (1 for gray, 3 for RGB, 4 for CMYK).
     /// - `smask`: Optional soft mask image (should be grayscale).
     ///
     /// # Returns
@@ -237,18 +316,22 @@ impl ImageXObject {
         let mut out = Vec::with_capacity(num_pixels.saturating_mul(4));
 
         match num_color_components {
-            // RGBA input: modulate existing alpha by soft mask.
+            // CMYK input: convert to RGBA.
+            //
+            // PDF CMYK components are device values 0–255.
+            // R = (255−C)·(255−K)/255, similarly for G and B.
             4 => {
                 for (i, chunk) in image_data.chunks_exact(4).take(num_pixels).enumerate() {
-                    let &[r, g, b, a] = chunk else { continue };
-                    // Modulate alpha: (a * mask) / 255. Result is always <= 255.
-                    let mask = get_alpha(i);
-                    let alpha = u16::from(a)
-                        .saturating_mul(u16::from(mask))
-                        .saturating_div(255);
-
-                    let alpha = u8::try_from(alpha).unwrap_or(255);
-                    out.extend_from_slice(&[r, g, b, alpha]);
+                    let &[c, m, y, k] = chunk else { continue };
+                    let c_inv = 255u16.saturating_sub(u16::from(c));
+                    let m_inv = 255u16.saturating_sub(u16::from(m));
+                    let y_inv = 255u16.saturating_sub(u16::from(y));
+                    let k_inv = 255u16.saturating_sub(u16::from(k));
+                    // Products are at most 255*255=65025, so division by 255 fits in u8.
+                    let r = u8::try_from(c_inv.saturating_mul(k_inv) / 255).unwrap_or(0);
+                    let g = u8::try_from(m_inv.saturating_mul(k_inv) / 255).unwrap_or(0);
+                    let b = u8::try_from(y_inv.saturating_mul(k_inv) / 255).unwrap_or(0);
+                    out.extend_from_slice(&[r, g, b, get_alpha(i)]);
                 }
             }
             // RGB input: expand to RGBA using soft mask (or 255) as alpha.
@@ -264,13 +347,17 @@ impl ImageXObject {
                     out.extend_from_slice(&[gray, gray, gray, get_alpha(i)]);
                 }
             }
-            // Fallback for other component counts: extract RGB-like data.
+            // Fallback for unusual component counts (e.g. 2-channel ICC profiles).
+            // Treats the first three available channels as R, G, B per pixel.
             _ => {
-                for i in 0..num_pixels {
-                    let base = i.saturating_mul(num_color_components);
-                    let r = image_data.get(base).copied().unwrap_or(0);
-                    let g = image_data.get(base.saturating_add(1)).copied().unwrap_or(0);
-                    let b = image_data.get(base.saturating_add(2)).copied().unwrap_or(0);
+                for (i, chunk) in image_data
+                    .chunks_exact(num_color_components)
+                    .take(num_pixels)
+                    .enumerate()
+                {
+                    let r = chunk.first().copied().unwrap_or(0);
+                    let g = chunk.get(1).copied().unwrap_or(0);
+                    let b = chunk.get(2).copied().unwrap_or(0);
                     out.extend_from_slice(&[r, g, b, get_alpha(i)]);
                 }
             }
