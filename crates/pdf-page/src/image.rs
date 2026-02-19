@@ -48,8 +48,8 @@ pub enum ImageXObjectError {
     ZeroImageDimensions { width: usize, height: usize },
     /// The bits per component value is not supported.
     ///
-    /// Only 8-bit-per-component images are currently supported.
-    #[error("unsupported bits per component: {bits} (only 8 is supported)")]
+    /// Only 1-bit and 8-bit-per-component images are currently supported.
+    #[error("unsupported bits per component: {bits} (only 1 and 8 are supported)")]
     UnsupportedBitsPerComponent { bits: usize },
     /// The color space reported zero color components, which is invalid.
     #[error("color space reports zero color components")]
@@ -144,8 +144,8 @@ impl ImageXObject {
             .get_or_err("BitsPerComponent")?
             .try_number::<usize>(objects)?;
 
-        // Only 8-bit-per-component images are currently supported.
-        if bits_per_component != 8 {
+        // Only 1-bit and 8-bit-per-component images are currently supported.
+        if bits_per_component != 1 && bits_per_component != 8 {
             return Err(ImageXObjectError::UnsupportedBitsPerComponent {
                 bits: bits_per_component,
             });
@@ -156,6 +156,19 @@ impl ImageXObject {
 
         // Decompress / decode the image stream.
         let raw_data = stream_data.data()?;
+
+        // For 1-bpc images, unpack the bitstream to one byte per sample so the
+        // rest of the pipeline (Indexed expansion, size checks, RGBA conversion)
+        // operates on uniform 8-bit data.
+        let raw_data = if bits_per_component == 1 {
+            let n_components = color_space
+                .as_ref()
+                .map_or(1, ColorSpace::num_color_components);
+            let expanded = Self::expand_1bpc(raw_data.as_ref(), width, height, n_components);
+            Cow::Owned(expanded)
+        } else {
+            raw_data
+        };
 
         // For Indexed color spaces, expand palette indices to actual color values now
         // and record only the base color space going forward.  Storing the base (not
@@ -279,6 +292,36 @@ impl ImageXObject {
         }
     }
 
+    /// Unpacks 1-bit-per-component image data into 8-bit-per-component bytes.
+    ///
+    /// PDF images pack pixels MSB-first within each byte. Each row starts on a
+    /// byte boundary. Each bit is expanded to a full byte: 0 → 0x00, 1 → 0xFF.
+    ///
+    /// This expansion is correct for both plain (grayscale) and Indexed color
+    /// spaces: for Indexed spaces the `expand_indexed` step that follows clamps
+    /// the resulting byte values against `hival`, preserving correct palette
+    /// look-up for small palettes (hival ≤ 1).
+    fn expand_1bpc(data: &[u8], width: usize, height: usize, num_components: usize) -> Vec<u8> {
+        let bits_per_row = width.saturating_mul(num_components);
+        let bytes_per_row = bits_per_row.saturating_add(7) / 8;
+        let mut out =
+            Vec::with_capacity(width.saturating_mul(height).saturating_mul(num_components));
+
+        for row in 0..height {
+            let row_start = row.saturating_mul(bytes_per_row);
+            for col in 0..width {
+                for comp in 0..num_components {
+                    let bit_pos = col.saturating_mul(num_components).saturating_add(comp);
+                    let byte_idx = row_start.saturating_add(bit_pos / 8);
+                    let bit_idx = 7usize.saturating_sub(bit_pos % 8); // MSB-first
+                    let bit = data.get(byte_idx).map_or(0, |b| (b >> bit_idx) & 1);
+                    out.push(if bit == 1 { 0xFF } else { 0x00 });
+                }
+            }
+        }
+        out
+    }
+
     /// Converts image data to RGBA format, optionally applying a soft mask.
     ///
     /// If `smask` is `None`, full opacity (255) is used for the alpha channel.
@@ -359,5 +402,62 @@ impl ImageXObject {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ImageXObject;
+
+    #[test]
+    fn expand_1bpc_width_multiple_of_8() {
+        // 2×1 image, width=8, height=1, 1 component: one full byte of pixels.
+        // 0b10110010 → [1,0,1,1,0,0,1,0] → [0xFF,0x00,0xFF,0xFF,0x00,0x00,0xFF,0x00]
+        let data = [0b1011_0010u8];
+        let out = ImageXObject::expand_1bpc(&data, 8, 1, 1);
+        assert_eq!(out.len(), 8);
+        assert_eq!(out, [0xFF, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0x00]);
+    }
+
+    #[test]
+    fn expand_1bpc_width_not_multiple_of_8() {
+        // width=3, height=2, 1 component: bits_per_row=3, bytes_per_row=1.
+        // Row 0: byte 0b10100000 → bits [1,0,1] → [0xFF,0x00,0xFF]; padding bits ignored.
+        // Row 1: byte 0b01100000 → bits [0,1,1] → [0x00,0xFF,0xFF].
+        let data = [0b1010_0000u8, 0b0110_0000u8];
+        let out = ImageXObject::expand_1bpc(&data, 3, 2, 1);
+        assert_eq!(out.len(), 6, "output length must be width * height");
+        assert_eq!(out, [0xFF, 0x00, 0xFF, 0x00, 0xFF, 0xFF]);
+    }
+
+    #[test]
+    fn expand_1bpc_all_zeros() {
+        let data = [0x00u8; 4];
+        let out = ImageXObject::expand_1bpc(&data, 8, 4, 1);
+        assert!(out.iter().all(|&b| b == 0x00));
+        assert_eq!(out.len(), 32);
+    }
+
+    #[test]
+    fn expand_1bpc_all_ones() {
+        let data = [0xFFu8; 4];
+        let out = ImageXObject::expand_1bpc(&data, 8, 4, 1);
+        assert!(out.iter().all(|&b| b == 0xFF));
+        assert_eq!(out.len(), 32);
+    }
+
+    #[test]
+    fn expand_1bpc_multi_component() {
+        // width=2, height=1, num_components=3: 6 bits packed MSB-first into 1 byte.
+        // 0b11_01_10_00 (pad 2 bits): pixel 0 = (1,1,0), pixel 1 = (1,1,0)
+        // bit layout: comp0p0=bit7, comp1p0=bit6, comp2p0=bit5,
+        //             comp0p1=bit4, comp1p1=bit3, comp2p1=bit2, pad=bits1-0
+        // byte = 0b1101_1000
+        let data = [0b1101_1000u8];
+        let out = ImageXObject::expand_1bpc(&data, 2, 1, 3);
+        assert_eq!(out.len(), 6);
+        // pixel 0: bits 7,6,5 → 1,1,0 → [0xFF,0xFF,0x00]
+        // pixel 1: bits 4,3,2 → 1,1,0 → [0xFF,0xFF,0x00]
+        assert_eq!(out, [0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0x00]);
     }
 }
