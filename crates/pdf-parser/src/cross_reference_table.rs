@@ -5,11 +5,7 @@ use pdf_object::{
 use pdf_tokenizer::PdfToken;
 use thiserror::Error;
 
-use crate::{
-    error::ParserError,
-    parser::PdfParser,
-    traits::{CrossReferenceTableParser, TrailerParser},
-};
+use crate::{error::ParserError, parser::PdfParser};
 
 /// Represents an error that can occur while parsing a cross-reference table.
 #[derive(Debug, PartialEq, Error)]
@@ -20,13 +16,11 @@ pub enum CrossReferenceTableError {
     MissingStatus,
 }
 
-impl CrossReferenceTableParser for PdfParser<'_> {
-    type ErrorType = ParserError;
-
-    fn parse_cross_reference_table(
+impl PdfParser<'_> {
+    pub fn parse_cross_reference_table(
         &mut self,
         objects: &dyn ObjectResolver,
-    ) -> Result<CrossReferenceTable, Self::ErrorType> {
+    ) -> Result<CrossReferenceTable, ParserError> {
         const XREF_KEYWORD: &[u8] = b"xref";
 
         self.read_keyword(XREF_KEYWORD)?;

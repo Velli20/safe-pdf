@@ -4,19 +4,14 @@ use crate::error::ParserError;
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 use pdf_tokenizer::{PdfToken, Tokenizer};
 
-use crate::traits::{
-    ArrayParser, BooleanParser, CommentParser, CrossReferenceTableParser, DictionaryParser,
-    HexStringParser, IndirectObjectParser, LiteralStringParser, NameParser, NullObjectParser,
-    NumberParser, TrailerParser,
-};
-
-/// Represents a PDF object parser that handles parsing various
-/// PDF objects from an input stream.
+/// Parses PDF objects from a borrowed byte slice.
 pub struct PdfParser<'a> {
-    /// The tokenizer used for parsing the PDF input stream.
+    /// The underlying tokenizer that drives byte-level reading.
     pub tokenizer: Tokenizer<'a>,
-    /// Current nesting depth of PDF objects being parsed.
-    /// This is used to prevent excessive recursion and potential stack overflows.
+    /// Tracks the current recursive nesting depth while parsing.
+    ///
+    /// The parser increments this on entry to each object and decrements on exit.
+    /// Callers should not mutate this field; it is public for testing purposes only.
     pub current_nesting_depth: usize,
 }
 
@@ -33,46 +28,26 @@ impl PdfParser<'_> {
     /// Maximum nesting depth for PDF objects.
     const MAX_NESTING_DEPTH: usize = 32;
 
-    /// Checks if a character is a whitespace according to PDF 1.7 spec (Section 7.2.2).
-    /// Whitespace characters are defined as:
-    /// - Null (NUL) - `0x00` (`b'\0'`)
-    /// - Horizontal Tab (HT) - `0x09` (`b'\t'`)
-    /// - Line Feed (LF) - `0x0A` (`b'\n'`)
-    /// - Form Feed (FF) - `0x0C` (`b'\x0C'`)
-    /// - Carriage Return (CR) - `0x0D` (`b'\r'`)
-    /// - Space (SP) - `0x20` (`b' '`)
+    /// Returns whether `c` is a PDF whitespace character (NUL, HT, LF, FF, CR, or SP).
     pub(crate) const fn is_pdf_whitespace(c: u8) -> bool {
-        matches!(
-            c,
-            // Whitespace characters per PDF 1.7 spec Section 7.2.2
-            b'\0' | b'\t' | b'\n' | b'\x0C' | b'\r' | b' '
-        )
+        matches!(c, b'\0' | b'\t' | b'\n' | b'\x0C' | b'\r' | b' ')
     }
 
-    /// Checks if a character is a PDF delimiter according to PDF 1.7 spec (Section 7.2.2).
-    /// Whitespace characters (space, tab, newline, etc.) also act as delimiters.
+    /// Returns whether `c` is a PDF delimiter or whitespace character.
     pub(crate) const fn is_pdf_delimiter(c: u8) -> bool {
         if Self::is_pdf_whitespace(c) {
             return true;
         }
-        // Delimiter characters
         matches!(
             c,
-            // Delimiter characters
             b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%'
         )
     }
 
     /// Consumes an end-of-line marker from the input stream if one is present.
     ///
-    /// Per PDF 1.7 spec Section 7.2.2, valid EOL markers are:
-    /// - A line feed (`\n`) alone.
-    /// - A carriage return (`\r`) alone.
-    /// - A carriage return followed by a line feed (`\r\n`).
-    ///
-    /// If no EOL marker is present at the current position, this function
-    /// does nothing and returns `Ok(())`. Use [`expect_end_of_line_marker`]
-    /// when an EOL is required.
+    /// Valid EOL markers are `\n`, `\r`, or `\r\n`. If none is present, does nothing.
+    /// Use [`expect_end_of_line_marker`] when an EOL is required.
     pub(crate) fn try_read_end_of_line_marker(&mut self) -> Result<(), ParserError> {
         if let Some(PdfToken::CarriageReturn) = self.tokenizer.peek() {
             self.tokenizer.read();
@@ -83,12 +58,7 @@ impl PdfParser<'_> {
         Ok(())
     }
 
-    /// Reads a required end-of-line marker from the input stream.
-    ///
-    /// Per PDF 1.7 spec Section 7.2.2, valid EOL markers are:
-    /// - A line feed (`\n`) alone.
-    /// - A carriage return (`\r`) alone.
-    /// - A carriage return followed by a line feed (`\r\n`).
+    /// Reads a required end-of-line marker (`\n`, `\r`, or `\r\n`) from the input stream.
     ///
     /// Returns an error if no EOL marker is found at the current position.
     pub(crate) fn expect_end_of_line_marker(&mut self) -> Result<(), ParserError> {
@@ -109,15 +79,14 @@ impl PdfParser<'_> {
         }
     }
 
+    /// Advances past any whitespace characters at the current position.
     pub fn skip_whitespace(&mut self) {
         let _ = self.tokenizer.read_while_u8(Self::is_pdf_whitespace);
     }
 
-    /// Skips whitespace and comments.
+    /// Skips whitespace and comments (`%` to end of line).
     ///
-    /// Per PDF spec Section 7.2.3, comments are equivalent to whitespace and
-    /// should be ignored everywhere whitespace is allowed. This method
-    /// repeatedly skips whitespace and consumes any `% ... EOL` comments
+    /// Repeatedly advances past whitespace and `% ... EOL` comment sequences
     /// until a non-whitespace, non-comment token is reached.
     pub(crate) fn skip_whitespace_and_comments(&mut self) {
         loop {
@@ -133,20 +102,10 @@ impl PdfParser<'_> {
         }
     }
 
-    /// Parses a PDF object at a specific position in the input stream.
+    /// Parses a PDF object at a specific byte offset in the input stream.
     ///
-    /// This function temporarily moves the tokenizer to the specified `position`, parses the object
-    /// found there, and then restores the tokenizer to its original position. This is useful for
-    /// random access parsing (e.g., following cross-reference table entries).
-    ///
-    /// # Parameters
-    ///
-    /// - `position`: The byte offset in the input stream where parsing should begin.
-    /// - `objects`: Optional reference to an `ObjectCollection` for resolving indirect objects.
-    ///
-    /// # Returns
-    ///
-    /// - `Result` containing the parsed `ObjectVariant` or a `ParserError`.
+    /// Temporarily seeks to `position`, parses the object, then restores the original position.
+    /// Useful for random access parsing when following cross-reference table entries.
     pub fn parse_object_at(
         &mut self,
         position: usize,
@@ -160,23 +119,10 @@ impl PdfParser<'_> {
         result
     }
 
-    /// Reads and parses a number from the PDF input stream.
+    /// Reads a sequence of ASCII digits and parses them into type `T`.
     ///
-    /// This function reads a sequence of ASCII digits from the tokenizer and attempts to parse
-    /// them into the specified numeric type. After reading the number, it validates that the
-    /// following character is either a valid PDF delimiter or a decimal point.
-    ///
-    /// # Type Parameters
-    ///
-    /// - `T`: The target numeric type.
-    ///
-    /// # Parameters
-    ///
-    /// - `error`: A convertible error type that will be returned if no digits are found.
-    ///
-    /// # Returns
-    ///
-    /// - `Result` indicating success or failure.
+    /// Validates that a delimiter or decimal point follows the digits.
+    /// Optionally skips trailing whitespace when `skip_whitespace` is true.
     pub(crate) fn read_number<T: FromStr>(
         &mut self,
         skip_whitespace: bool,
@@ -186,9 +132,10 @@ impl PdfParser<'_> {
             return Err(ParserError::UnexpectedEndOfFile);
         }
 
-        let number = String::from_utf8_lossy(number_str)
+        let number_str = String::from_utf8_lossy(number_str);
+        let number = number_str
             .parse::<T>()
-            .or(Err(ParserError::InvalidNumber))?;
+            .map_err(|_| ParserError::InvalidNumber(number_str.into_owned()))?;
 
         // Check that the following character after the number is a valid delimiter
         // or a dot (potential decimal number).
@@ -206,22 +153,10 @@ impl PdfParser<'_> {
         Ok(number)
     }
 
-    /// Reads a keyword literal from the input stream and validates it.
+    /// Reads and validates a keyword literal from the input stream.
     ///
-    /// This function reads a specific keyword literal from the input stream and ensures
-    /// that it matches the expected keyword according to the PDF 1.7 specification.
-    /// If the literal does not match the expected keyword, an error is returned.
-    ///
-    /// After successfully reading the keyword, this function also consumes the
-    /// end-of-line marker that follows the keyword.
-    ///
-    /// # Parameters
-    ///
-    /// - `keyword`: A byte slice representing the expected keyword literal.
-    ///
-    /// # Returns
-    ///
-    /// - `Result` indicating success or failure.
+    /// Returns an error if the next bytes don't match `keyword` or if no delimiter follows.
+    /// Consumes any trailing end-of-line marker after the keyword.
     pub fn read_keyword(&mut self, keyword: &[u8]) -> Result<(), ParserError> {
         let literal = self.tokenizer.read_excactly(keyword.len())?;
         if literal != keyword {
@@ -326,16 +261,8 @@ impl PdfParser<'_> {
 
     /// Parses a single PDF object from the input stream at the current position.
     ///
-    /// This is the main entry point for parsing PDF objects. It handles various object types
-    /// including booleans, numbers, strings, names, arrays, dictionaries, and indirect objects.
-    ///
-    /// # Parameters
-    ///
-    /// - `objects`: Optional reference to an `ObjectCollection` for resolving indirect objects.
-    ///
-    /// # Returns
-    ///
-    /// - `Result` containing the parsed `ObjectVariant` or a `ParserError`.
+    /// Dispatches to the appropriate sub-parser based on the next token. Enforces a maximum
+    /// nesting depth to guard against deeply recursive structures.
     pub fn parse_object(
         &mut self,
         objects: &dyn ObjectResolver,

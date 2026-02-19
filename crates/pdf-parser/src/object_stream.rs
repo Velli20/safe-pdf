@@ -6,16 +6,6 @@ use crate::{error::ParserError, parser::PdfParser};
 
 /// Parses an object stream (PDF 1.5+) and extracts all objects stored within it.
 ///
-/// An object stream is a stream object that contains a sequence of PDF objects
-/// compressed together. This allows multiple small objects to share a single
-/// compression context, significantly reducing file size.
-///
-/// Per the PDF spec:
-/// - Objects in object streams always have generation number 0
-/// - Objects in object streams cannot themselves be streams
-/// - The `/N` entry gives the number of objects
-/// - The `/First` entry gives the byte offset within the decoded data to the first object
-///
 /// # Parameters
 ///
 /// - `stream`: The object stream to parse.
@@ -31,13 +21,13 @@ pub fn parse_object_stream(
     let dict = stream.dictionary.as_ref();
 
     // /N: number of objects in this stream (required)
-    let n: usize = dict.get_or_err("N")?.try_number(objects)?;
+    let n = dict.get_or_err("N")?.try_number::<usize>(objects)?;
 
     // /First: byte offset of the first object data within the decoded stream (required)
-    let first: usize = dict.get_or_err("First")?.try_number(objects)?;
+    let first = dict.get_or_err("First")?.try_number::<usize>(objects)?;
 
     // Decode stream data (applies filters)
-    let data = stream.data().map_err(ParserError::ObjectError)?;
+    let data = stream.data()?;
 
     // Parse the header: N pairs of (object_number, relative_byte_offset)
     let mut header_parser = PdfParser::from(data.as_ref());

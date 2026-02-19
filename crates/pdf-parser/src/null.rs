@@ -1,32 +1,12 @@
-use crate::{error::ParserError, parser::PdfParser, traits::NullObjectParser};
+use crate::{error::ParserError, parser::PdfParser};
 
-impl NullObjectParser for PdfParser<'_> {
-    type ErrorType = ParserError;
-
+impl PdfParser<'_> {
     /// Parses a PDF null object from the current position in the input stream.
-    ///
-    /// According to the PDF 1.7 Specification (Section 7.3.9 "Null Object"):
-    /// The null object is used to represent a non-existent or undefined value.
-    ///
-    /// # Format
-    ///
-    /// - Represented by the literal keyword `null`.
-    /// - The keyword `null` is case-sensitive.
-    /// - It must be followed by a delimiter character (e.g., whitespace, `)`, `]`, `>`, `/`, `%`).
-    ///
-    /// # Example Inputs
-    ///
-    /// ```text
-    /// null
-    /// null%comment
-    /// null]
-    /// ```
     ///
     /// # Returns
     ///
-    /// A `()` if the `null` keyword is successfully parsed,
-    /// or a `ParserError` if the keyword is not found or is malformed.
-    fn parse_null_object(&mut self) -> Result<(), Self::ErrorType> {
+    /// Returns an error if the `null` keyword is missing or not followed by a delimiter.
+    pub fn parse_null_object(&mut self) -> Result<(), ParserError> {
         const NULL_LITERAL: &[u8] = b"null";
 
         self.read_keyword(NULL_LITERAL)

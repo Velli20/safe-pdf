@@ -1,81 +1,34 @@
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 use thiserror::Error;
 
-use crate::{error::ParserError, parser::PdfParser, traits::StreamParser};
+use crate::{error::ParserError, parser::PdfParser};
 
-/// Represents an error that can occur while parsing an indirect object or an object reference.
+/// Errors that can occur while parsing a stream object.
 #[derive(Debug, PartialEq, Error)]
 pub enum StreamParsingError {
     #[error("Stream dictionary missing /Length entry")]
     MissingLength,
 }
 
-impl StreamParser for PdfParser<'_> {
-    type ErrorType = ParserError;
-
+impl PdfParser<'_> {
     /// Parses a PDF stream object from the input, using a pre-parsed dictionary.
     ///
-    /// According to the PDF 1.7 Specification (Section 7.3.8 "Stream Objects"):
-    /// A stream object, like a string object, is a sequence of bytes. However, PDF
-    /// applications can read a stream incrementally, while a string must be read in
-    /// its entirety. Furthermore, a stream can be of unlimited length, whereas a
-    /// string is subject to an implementation limit.
+    /// Reads the raw bytes of a stream body using the pre-parsed `dictionary` for metadata.
     ///
-    /// # Format
+    /// Expects the input to be positioned at the `stream` keyword. Reads exactly `/Length`
+    /// bytes, then validates and consumes the surrounding `stream`/`endstream` keywords and
+    /// EOL markers. Filter decoding is the caller's responsibility.
     ///
-    /// - A stream consists of a dictionary followed by the keyword `stream`, then an
-    ///   end-of-line (EOL) marker, a sequence of bytes (the stream data), another
-    ///   EOL marker, and finally the keyword `endstream` followed by its EOL marker.
-    /// - The EOL marker is typically a carriage return and a line feed (CRLF) or just a
-    ///   line feed (LF). The parser's `read_keyword` helper handles EOLs after keywords.
-    ///   An explicit EOL check is made after the stream data and before `endstream`.
-    /// - The stream's dictionary (which must be parsed *before* calling this function
-    ///   and is passed as an argument) provides metadata about the stream.
-    /// - **Required Dictionary Entries for this Parser:**
-    ///   - `/Length`: An integer specifying the exact number of bytes in the raw
-    ///     stream data (i.e., the data between the EOL after `stream` and the EOL
-    ///     before `endstream`).
-    ///   - `/Filter`: A name (e.g., `/FlateDecode`) or an array of names specifying
-    ///     the decoding filter(s) to be applied. This parser currently requires this
-    ///     entry and only supports a single `/FlateDecode` filter.
+    /// # Errors
     ///
-    /// The expected sequence of tokens and data is:
-    /// `stream<EOL_after_keyword>...data_bytes...<EOL_before_endstream>endstream<EOL_after_keyword>`
-    ///
-    /// # Decoding and Implementation Notes
-    ///
-    /// - This function is called when the parser expects a stream object, immediately
-    ///   after its associated dictionary has been parsed.
-    /// - It consumes the `stream` keyword and its trailing EOL.
-    /// - It reads exactly `/Length` bytes from the input as the raw stream data.
-    /// - It expects and consumes an EOL marker immediately after the raw stream data.
-    /// - It consumes the `endstream` keyword and its trailing EOL.
-    /// - If the `/Filter` entry in the dictionary is `/FlateDecode`, the raw stream
-    ///   data is decompressed using Zlib (DEFLATE).
-    /// - **Current Limitation**: Only `/FlateDecode` is supported. If `/Filter` is
-    ///   missing or specifies an unsupported filter, an error is returned.
-    ///
-    /// # Example Input
-    ///
-    /// Assuming the dictionary `<< /Length L /Filter /FlateDecode >>` has been parsed,
-    /// and `L` is the length of the *compressed* data:
-    /// ```text
-    /// stream
-    /// ... (L bytes of Flate-compressed data) ...
-    /// endstream
-    /// ```
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(Vec<u8>)`: A vector containing the decoded stream data.
-    /// - `Err(ParserError)`: If keywords are missing/malformed, EOL markers are not
-    ///   found where expected, required dictionary entries (`/Length`, `/Filter`) are
-    ///   missing, the specified `/Filter` is unsupported, or a decompression error occurs.
-    fn parse_stream(
+    /// Returns an error if the `stream` or `endstream` keyword is missing or malformed,
+    /// an EOL marker is absent where required, or the `/Length` entry is missing from
+    /// the dictionary.
+    pub fn parse_stream(
         &mut self,
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Vec<u8>, Self::ErrorType> {
+    ) -> Result<Vec<u8>, ParserError> {
         const STREAM_START: &[u8] = b"stream";
         const STREAM_END: &[u8] = b"endstream";
 

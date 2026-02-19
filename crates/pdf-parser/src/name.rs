@@ -1,7 +1,7 @@
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
-use crate::{parser::PdfParser, traits::NameParser};
+use crate::parser::PdfParser;
 
 /// Represents an error that can occur while parsing a Name object.
 #[derive(Debug, PartialEq, Error)]
@@ -22,46 +22,14 @@ pub enum NameObjectError {
     TokenizerError(#[from] TokenizerError),
 }
 
-impl NameParser for PdfParser<'_> {
-    type ErrorType = NameObjectError;
-
+impl PdfParser<'_> {
     /// Parses a PDF name object from the current position in the input stream.
-    ///
-    /// According to the PDF 1.7 Specification (Section 7.3.5 "Name Objects"):
-    /// A name object is an atomic symbol uniquely defined by a sequence of characters.
-    ///
-    /// # Format
-    ///
-    /// - Must begin with a solidus character (`/`). The solidus is a prefix and not
-    ///   part of the name itself.
-    /// - The sequence of characters following the solidus forms the name.
-    /// - The name can include any regular characters. Regular characters are any
-    ///   characters except null (0x00), tab (0x09), line feed (0x0A), form feed (0x0C),
-    ///   carriage return (0x0D), space (0x20), and the delimiter characters:
-    ///   `( ) < > [ ] { } / %`.
-    /// - Any character that is not a regular character (including space, delimiters,
-    ///   or characters outside the printable ASCII range) must be encoded using a
-    ///   number sign (`#`) followed by its two-digit hexadecimal code (e.g., `#20` for a space).
-    /// - The name is terminated by any whitespace or delimiter character.
-    /// - The maximum length of a name is 127 bytes. (This parser does not currently enforce this limit).
-    ///
-    /// # Example Inputs
-    ///
-    /// ```text
-    /// /Name1
-    /// /ASimpleName
-    /// /NameWithSpaces#20Here
-    /// /Path#2FTo#2FFile
-    /// /A#25SymbolWithPercent
-    /// /FontName#20#28Bold#29
-    /// ```
     ///
     /// # Returns
     ///
     /// A `Name` object containing the decoded name string (with hex escapes resolved),
-    /// or a `ParserError` if the input does not start with `/`, is empty after the `/`,
-    /// or contains an invalid hex escape sequence.
-    fn parse_name(&mut self) -> Result<Vec<u8>, Self::ErrorType> {
+    /// or a `NameObjectError` on failure.
+    pub fn parse_name(&mut self) -> Result<Vec<u8>, NameObjectError> {
         self.tokenizer.expect(PdfToken::Solidus)?;
 
         let name = self.tokenizer.read_while_u8(|b| !Self::is_pdf_delimiter(b));

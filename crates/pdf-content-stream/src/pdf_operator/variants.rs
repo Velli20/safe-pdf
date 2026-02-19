@@ -1,6 +1,6 @@
 use pdf_object::object_resolver::UnimplementedResolver;
 use pdf_object::object_variant::ObjectVariant;
-use pdf_parser::{parser::PdfParser, traits::CommentParser};
+use pdf_parser::parser::PdfParser;
 use pdf_tokenizer::PdfToken;
 
 use crate::compatibility_operators::{BeginCompatibility, EndCompatibility};

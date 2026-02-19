@@ -16,4 +16,3 @@ pub mod object_stream;
 pub mod parser;
 mod stream;
 mod trailer;
-pub mod traits;

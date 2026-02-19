@@ -16,9 +16,7 @@ use pdf_page::page::PdfPage;
 use pdf_page::pages::{PdfPages, PdfPagesError};
 use pdf_page::resource::Resource;
 use pdf_page::resource_cache::ResourceCache;
-use pdf_parser::{
-    error::ParserError, header::HeaderError, parser::PdfParser, traits::HeaderParser,
-};
+use pdf_parser::{error::ParserError, header::HeaderError, parser::PdfParser};
 use thiserror::Error;
 
 use crate::encryption::{EncryptDictionary, EncryptionError};
