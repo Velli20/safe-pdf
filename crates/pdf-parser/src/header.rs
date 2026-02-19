@@ -2,7 +2,7 @@ use pdf_object::version::Version;
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
-use crate::{parser::PdfParser, traits::HeaderParser};
+use crate::parser::PdfParser;
 
 #[derive(Debug, PartialEq, Error)]
 pub enum HeaderError {
@@ -20,40 +20,14 @@ pub enum HeaderError {
     MissingEOL,
 }
 
-impl HeaderParser for PdfParser<'_> {
-    type ErrorType = HeaderError;
+impl PdfParser<'_> {
     /// Parses the PDF file header from the current position in the input stream.
-    ///
-    /// According to the PDF 1.7 Specification (Section 7.5.2 "File Header"):
-    /// The first line of a PDF file shall be a header identifying the version of
-    /// the PDF specification to which the file conforms.
-    ///
-    /// # Format
-    ///
-    /// - The header must start with the 5 characters `%PDF-`.
-    /// - This is followed by a version number of the form `major.minor`.
-    ///   - `major` and `minor` are integers. For example, for PDF 1.7,
-    ///     `major` is 1 and `minor` is 7.
-    /// - The header line must be terminated by an end-of-line (EOL) marker.
-    ///   The EOL marker can be a carriage return (CR), a line feed (LF), or
-    ///   a CR followed by an LF.
-    /// - The header line should not contain any other characters, except that
-    ///   versions of PDF later than 1.4 may have a comment after the EOL marker
-    ///   on the first line (this parser currently expects only the version and EOL).
-    ///
-    /// # Example Inputs
-    ///
-    /// ```text
-    /// %PDF-1.7
-    /// ```
-    /// (Followed by an EOL marker like `\n` or `\r\n`)
     ///
     /// # Returns
     ///
     /// A `Version` object containing the parsed major and minor version numbers,
-    /// or a `ParserError` if the header is malformed (e.g., missing `%PDF-` prefix,
-    /// invalid version format, or missing EOL).
-    fn parse_header(&mut self) -> Result<Version, HeaderError> {
+    /// or a `HeaderError` if the header is malformed.
+    pub fn parse_header(&mut self) -> Result<Version, HeaderError> {
         self.tokenizer.expect(PdfToken::Percent)?;
 
         const PDF_HEADER: &[u8] = b"PDF-";

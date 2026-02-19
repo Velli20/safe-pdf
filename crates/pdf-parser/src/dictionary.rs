@@ -3,49 +3,19 @@ use std::collections::BTreeMap;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 use pdf_tokenizer::PdfToken;
 
-use crate::{
-    error::ParserError,
-    parser::PdfParser,
-    traits::{DictionaryParser, NameParser},
-};
+use crate::{error::ParserError, parser::PdfParser};
 
-impl DictionaryParser for PdfParser<'_> {
-    type ErrorType = ParserError;
-
+impl PdfParser<'_> {
     /// Parses a PDF dictionary object from the current position in the input stream.
-    ///
-    /// According to the PDF 1.7 Specification (Section 7.3.7 "Dictionary Objects"):
-    /// A dictionary object is an associative table containing pairs of objects, known as
-    /// the dictionary's entries.
-    ///
-    /// # Format
-    ///
-    /// - Must begin with double left angle brackets (`<<`) and end with double right
-    ///   angle brackets (`>>`).
-    /// - Contains zero or more key-value pairs.
-    /// - Each key must be a PDF Name object (e.g., `/Type`, `/Size`).
-    /// - Each value can be any valid PDF object (e.g., another dictionary, an array,
-    ///   a number, a string, a name, a boolean, null, or an indirect reference).
-    /// - Whitespace is generally ignored between tokens within the dictionary.
-    ///
-    /// # Example Inputs
-    ///
-    /// ```text
-    /// << >>
-    /// << /Type /Catalog /Pages 2 0 R >>
-    /// << /Key1 (Value1) /Key2 123 /Key3 [1 2 3] >>
-    /// << /NestedDict << /InnerKey /InnerValue >> >>
-    /// ```
     ///
     /// # Returns
     ///
     /// A `Dictionary` object containing the parsed key-value pairs,
-    /// or a `ParserError` if the input is malformed (e.g., missing delimiters,
-    /// invalid key or value syntax, or an unexpected token).
-    fn parse_dictionary(
+    /// or a `ParserError` if the input is malformed.
+    pub fn parse_dictionary(
         &mut self,
         objects: &dyn ObjectResolver,
-    ) -> Result<Dictionary, Self::ErrorType> {
+    ) -> Result<Dictionary, ParserError> {
         // Expect the opening `<<` of the dictionary.
         self.tokenizer.expect(PdfToken::DoubleLeftAngleBracket)?;
 

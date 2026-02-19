@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::decryption::{DecryptionError, DocumentDecryptor};
 use crate::document::PdfDocument;
+use crate::object_stream::read_object_stream;
 use pdf_object::indirect_object::IndirectObject;
 use pdf_object::object_resolver::{ObjectResolver, UnimplementedResolver};
 use pdf_object::{
@@ -16,9 +17,7 @@ use pdf_page::page::PdfPage;
 use pdf_page::pages::{PdfPages, PdfPagesError};
 use pdf_page::resource::Resource;
 use pdf_page::resource_cache::ResourceCache;
-use pdf_parser::{
-    error::ParserError, header::HeaderError, parser::PdfParser, traits::HeaderParser,
-};
+use pdf_parser::{error::ParserError, header::HeaderError, parser::PdfParser};
 use thiserror::Error;
 
 use crate::encryption::{EncryptDictionary, EncryptionError};
@@ -473,23 +472,14 @@ fn load_objects_with_decryption(
         if let std::collections::hash_map::Entry::Vacant(e) =
             parsed_obj_streams.entry(object_stream_number)
         {
-            let stream_obj = objects.get(object_stream_number).ok_or(
-                ObjectError::FailedResolveObjectReference {
+            let stream_obj = objects
+                .get(object_stream_number)
+                .ok_or(ObjectError::FailedResolveObjectReference {
                     obj_num: object_stream_number,
-                },
-            )?;
+                })?
+                .try_stream(&objects)?;
 
-            let stream = match stream_obj {
-                ObjectVariant::Stream(s) => s,
-                _ => {
-                    return Err(ObjectError::FailedResolveObjectReference {
-                        obj_num: object_stream_number,
-                    }
-                    .into());
-                }
-            };
-
-            let unpacked = pdf_parser::object_stream::parse_object_stream(stream, &objects)?;
+            let unpacked = read_object_stream(stream_obj, &objects)?;
             e.insert(unpacked);
         }
 

@@ -6,10 +6,6 @@
 //! - Parsing image metadata (dimensions, color space, bits per component)
 //! - Decoding compressed image streams (FlateDecode, DCTDecode)
 //! - Processing soft masks (SMask) for transparency
-//!
-//! # PDF Reference
-//!
-//! See PDF 32000-1:2008, Section 8.9 "Images" for the full specification.
 
 use std::borrow::Cow;
 

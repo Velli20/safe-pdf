@@ -31,22 +31,13 @@ pub fn parse_xref_stream(
         }
     }
 
-    // /Size: total number of objects (required)
-    let size: usize = dict.get_or_err("Size")?.try_number(objects)?;
+    // Get the number of objects to read.
+    let size = dict.get_or_err("Size")?.try_number::<usize>(objects)?;
 
-    // /W [w1 w2 w3]: byte widths for each field (required)
-    let w: Vec<usize> = dict.get_or_err("W")?.try_vec_of(objects)?;
-    if w.len() != 3 {
-        return Err(ParserError::InvalidKeyword(
-            "W array with 3 elements".to_string(),
-            format!("W array with {} elements", w.len()),
-        ));
-    }
-    let w1 = w.first().copied().unwrap_or(0);
-    let w2 = w.get(1).copied().unwrap_or(0);
-    let w3 = w.get(2).copied().unwrap_or(0);
+    // Read the /W array which defines the field widths for each entry.
+    let [w1, w2, w3] = dict.get_or_err("W")?.try_array_of::<usize, 3>(objects)?;
+
     let entry_size = w1.saturating_add(w2).saturating_add(w3);
-
     if entry_size == 0 {
         return Ok(CrossReferenceTable::new(
             BTreeMap::new(),
@@ -54,12 +45,11 @@ pub fn parse_xref_stream(
         ));
     }
 
-    // /Index: subsection ranges, defaults to [0 Size]
-    let index_pairs: Vec<usize> = if let Some(index_val) = dict.get("Index") {
-        index_val.try_vec_of(objects)?
-    } else {
-        vec![0, size]
-    };
+    // Read the /Index array if present, which defines subsections of object numbers.
+    let index_pairs = dict.get("Index").map_or_else(
+        || Ok(vec![0, size]),
+        |index_val| index_val.try_vec_of::<usize>(objects),
+    )?;
 
     if index_pairs.len() % 2 != 0 {
         return Err(ParserError::InvalidKeyword(

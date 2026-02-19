@@ -5,11 +5,7 @@ use pdf_object::{
 use pdf_tokenizer::PdfToken;
 use thiserror::Error;
 
-use crate::{
-    error::ParserError,
-    parser::PdfParser,
-    traits::{IndirectObjectParser, StreamParser},
-};
+use crate::{error::ParserError, parser::PdfParser};
 
 /// Represents an error that can occur while parsing an indirect object or an object reference.
 #[derive(Error, Debug, PartialEq)]
@@ -20,47 +16,12 @@ pub enum IndirectObjectError {
     MissingObjectCollection,
 }
 
-impl IndirectObjectParser for PdfParser<'_> {
-    type ErrorType = ParserError;
-
+impl PdfParser<'_> {
     /// Parses an indirect object or an object reference from the current position in the input stream.
-    ///
-    /// # Indirect Object
-    ///
-    /// According to the PDF 1.7 Specification, Section 7.3.10 Indirect Objects:
-    /// - An indirect object reference consists of an object number, a generation number,
-    ///   and the keyword `obj`.
-    /// - The object number and generation number are separated by a space.
-    /// - Ends with the keyword `endobj`.
-    ///
-    /// ## Example input
-    ///
-    /// ```text
-    /// 15 0 obj
-    /// << /Type /Catalog /Pages 1 0 R >>
-    /// endobj
-    /// ```
-    ///
-    /// # Object Reference
-    ///
-    /// An object reference in a PDF is an indirect reference to another object, and has the form:
-    /// ```text
-    /// <object-number> <generation-number> R
-    /// ```
-    ///
-    /// - `<object-number>`: A positive integer (object number) identifying the indirect object.
-    /// - `<generation-number>`: A non-negative integer representing the generation of the object.
-    /// - `R`: A literal keyword that must follow the two integers and must be separated by whitespace.
-    ///
-    /// ## Example input
-    ///
-    /// ```text
-    /// 15 0 R
-    /// ```
-    fn parse_indirect_object(
+    pub fn parse_indirect_object(
         &mut self,
         objects: &dyn ObjectResolver,
-    ) -> Result<Option<ObjectVariant>, Self::ErrorType> {
+    ) -> Result<Option<ObjectVariant>, ParserError> {
         const OBJ_KEYWORD: &[u8] = b"obj";
         const ENDOBJ_KEYWORD: &[u8] = b"endobj";
 

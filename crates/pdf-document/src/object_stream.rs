@@ -1,20 +1,11 @@
 use pdf_object::{
     object_resolver::ObjectResolver, object_variant::ObjectVariant, stream::StreamObject,
 };
+use pdf_parser::parser::PdfParser;
 
-use crate::{error::ParserError, parser::PdfParser};
+use crate::reader::PdfReaderError;
 
 /// Parses an object stream (PDF 1.5+) and extracts all objects stored within it.
-///
-/// An object stream is a stream object that contains a sequence of PDF objects
-/// compressed together. This allows multiple small objects to share a single
-/// compression context, significantly reducing file size.
-///
-/// Per the PDF spec:
-/// - Objects in object streams always have generation number 0
-/// - Objects in object streams cannot themselves be streams
-/// - The `/N` entry gives the number of objects
-/// - The `/First` entry gives the byte offset within the decoded data to the first object
 ///
 /// # Parameters
 ///
@@ -24,28 +15,28 @@ use crate::{error::ParserError, parser::PdfParser};
 /// # Returns
 ///
 /// A vector of `(object_number, ObjectVariant)` pairs for each object in the stream.
-pub fn parse_object_stream(
+pub fn read_object_stream(
     stream: &StreamObject,
     objects: &dyn ObjectResolver,
-) -> Result<Vec<(usize, ObjectVariant)>, ParserError> {
+) -> Result<Vec<(usize, ObjectVariant)>, PdfReaderError> {
     let dict = stream.dictionary.as_ref();
 
     // /N: number of objects in this stream (required)
-    let n: usize = dict.get_or_err("N")?.try_number(objects)?;
+    let n = dict.get_or_err("N")?.try_number::<usize>(objects)?;
 
     // /First: byte offset of the first object data within the decoded stream (required)
-    let first: usize = dict.get_or_err("First")?.try_number(objects)?;
+    let first = dict.get_or_err("First")?.try_number::<usize>(objects)?;
 
     // Decode stream data (applies filters)
-    let data = stream.data().map_err(ParserError::ObjectError)?;
+    let data = stream.data()?;
 
     // Parse the header: N pairs of (object_number, relative_byte_offset)
     let mut header_parser = PdfParser::from(data.as_ref());
     let mut obj_entries = Vec::with_capacity(n);
 
     for _ in 0..n {
-        let obj_num: usize = header_parser.read_number(true)?;
-        let offset: usize = header_parser.read_number(true)?;
+        let obj_num = header_parser.read_number::<usize>(true)?;
+        let offset = header_parser.read_number::<usize>(true)?;
         obj_entries.push((obj_num, offset));
     }
 
@@ -112,7 +103,7 @@ mod tests {
             None,
         );
 
-        let result = parse_object_stream(&stream, &UnimplementedResolver).unwrap();
+        let result = read_object_stream(&stream, &UnimplementedResolver).unwrap();
         assert_eq!(result.len(), 2);
 
         assert_eq!(result[0].0, 10);
@@ -147,7 +138,7 @@ mod tests {
             None,
         );
 
-        let result = parse_object_stream(&stream, &UnimplementedResolver).unwrap();
+        let result = read_object_stream(&stream, &UnimplementedResolver).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, 5);
         match &result[0].1 {

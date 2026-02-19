@@ -2,7 +2,7 @@ use pdf_object::object_variant::ObjectVariant;
 use pdf_tokenizer::PdfToken;
 use thiserror::Error;
 
-use crate::{error::ParserError, parser::PdfParser, traits::NumberParser};
+use crate::{error::ParserError, parser::PdfParser};
 
 #[derive(Debug, PartialEq, Error)]
 pub enum NumberError {
@@ -20,54 +20,14 @@ pub enum NumberError {
     NumericValueOverflow,
 }
 
-impl NumberParser for PdfParser<'_> {
-    type ErrorType = ParserError;
-
+impl PdfParser<'_> {
     /// Parses a PDF numeric object (integer or real) from the current position in the input stream.
-    ///
-    /// According to the PDF 1.7 Specification (Section 7.3.3), numeric objects can be
-    /// integers or real numbers.
-    ///
-    /// # Format
-    ///
-    /// ## Integers
-    /// - Consist of an optional sign (`+` or `-`) followed by one or more decimal digits.
-    /// - Examples: `123`, `-45`, `+0`
-    ///
-    /// ## Real Numbers
-    /// - Can be represented in several forms:
-    ///   - `digits.digits` (e.g., `34.5`, `-3.62`, `+123.6`)
-    ///   - `.digits` (e.g., `.5`)
-    ///   - `digits.` (e.g., `0.`, `123.`)
-    /// - An optional sign (`+` or `-`) can precede the number.
-    /// - This parser specifically handles the `digits.digits` form after an optional sign.
-    ///   It reads the integral part, then if a decimal point is present, reads the fractional part.
-    ///
-    /// # Implementation Notes
-    ///
-    /// - The parser first attempts to read an optional sign (`+` or `-`).
-    /// - It then reads the integral part of the number.
-    /// - If a decimal point (`.`) is encountered, it proceeds to read the fractional part.
-    /// - Integers are stored as `i64` if no decimal is present.
-    /// - Real numbers (with a decimal) are parsed into `f64`.
-    ///
-    /// # Example Inputs
-    ///
-    /// ```text
-    /// 123
-    /// -456
-    /// +0.789
-    /// 3.14159
-    /// -100.
-    /// .5
-    /// ```
     ///
     /// # Returns
     ///
     /// A `Number` object containing the parsed integer (`i64`) or real (`f64`) value,
-    /// or a `ParserError` if the input is malformed (e.g., invalid characters,
-    /// missing digits after a sign or decimal point).
-    fn parse_number(&mut self) -> Result<ObjectVariant, Self::ErrorType> {
+    /// or a `ParserError` on failure.
+    pub fn parse_number(&mut self) -> Result<ObjectVariant, ParserError> {
         let mut has_minus = false;
 
         // 1. Check for optional sign.

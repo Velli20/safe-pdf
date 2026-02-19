@@ -1,37 +1,14 @@
 use pdf_tokenizer::PdfToken;
 
-use crate::{error::ParserError, parser::PdfParser, traits::CommentParser};
+use crate::{error::ParserError, parser::PdfParser};
 
-impl CommentParser for PdfParser<'_> {
-    type ErrorType = ParserError;
-
-    /// Parses a PDF comment object from the current position in the input stream.
-    ///
-    /// According to the PDF 1.7 Specification (Section 7.2.3), comments:
-    ///
-    /// # Format
-    ///
-    /// - Must begin with a percent sign (`%`).
-    /// - Extend to the end of the line (EOL), which can be a carriage return (CR),
-    ///   a line feed (LF), or a CR followed by an LF.
-    /// - The comment includes all characters after the `%` up to, but not including,
-    ///   the EOL marker(s).
-    /// - Comments are treated as whitespace by the PDF reader and are typically ignored,
-    ///   but they can contain metadata or other information.
-    ///
-    /// # Example Inputs
-    ///
-    /// ```text
-    /// % This is a comment
-    /// %Another comment\r
-    /// % Comment with special characters *!%\n
-    /// ```
+impl PdfParser<'_> {
+    /// Parses a PDF comment from the current position in the input stream.
     ///
     /// # Returns
     ///
-    /// A `Comment` object containing the text of the comment (excluding the leading `%`
-    /// and trailing EOL marker) or an error if the input does not start with `%`.
-    fn parse_comment(&mut self) -> Result<String, Self::ErrorType> {
+    /// Returns an error if the input does not start with `%`.
+    pub fn parse_comment(&mut self) -> Result<String, ParserError> {
         self.tokenizer.expect(PdfToken::Percent)?;
         // Read until the end of the line.
         let text = self.tokenizer.read_while_u8(|c| c != b'\n' && c != b'\r');

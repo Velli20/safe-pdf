@@ -1,40 +1,17 @@
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 use pdf_tokenizer::PdfToken;
 
-use crate::{error::ParserError, parser::PdfParser, traits::ArrayParser};
+use crate::{error::ParserError, parser::PdfParser};
 
-impl ArrayParser for PdfParser<'_> {
-    type ErrorType = ParserError;
-
+impl PdfParser<'_> {
     /// Parses a PDF array object from the current position in the input stream.
-    ///
-    /// According to the PDF 1.7 Specification (Section 7.3.6 "Array Objects"):
-    /// An array object is a one-dimensional collection of objects arranged sequentially.
-    ///
-    /// # Format
-    ///
-    /// - Must begin with a left square bracket `[` and end with a right square bracket `]`.
-    /// - Contains zero or more PDF objects as its elements.
-    /// - Elements can be any valid PDF object type (e.g., numbers, strings, names,
-    ///   dictionaries, other arrays, booleans, null, or indirect references).
-    /// - Elements are separated by whitespace. Whitespace is generally ignored between tokens.
-    ///
-    /// # Example Inputs
-    ///
-    /// ```text
-    /// []
-    /// [1 2 3]
-    /// [ /Name (String) 12.3 true null ]
-    /// [ [1 2] << /Key /Value >> ]
-    /// [ 549 3.14 false /SomeName (This is a string.) ]
-    /// ```
     ///
     /// # Returns
     ///
     /// An `Array` object containing the parsed PDF objects as its elements,
     /// or a `ParserError` if the input is malformed (e.g., missing delimiters,
     /// invalid object syntax within the array, or an unexpected token).
-    fn parse_array(
+    pub fn parse_array(
         &mut self,
         objects: &dyn ObjectResolver,
     ) -> Result<Vec<ObjectVariant>, ParserError> {

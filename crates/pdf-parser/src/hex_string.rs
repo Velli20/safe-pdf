@@ -1,7 +1,7 @@
 use pdf_tokenizer::{PdfToken, error::TokenizerError};
 use thiserror::Error;
 
-use crate::{parser::PdfParser, traits::HexStringParser};
+use crate::parser::PdfParser;
 
 /// Represents an error that can occur while parsing a hex string object.
 #[derive(Debug, PartialEq, Error)]
@@ -13,30 +13,14 @@ pub enum HexStringError {
     TokenizerError(#[from] TokenizerError),
 }
 
-impl HexStringParser for PdfParser<'_> {
-    type ErrorType = HexStringError;
-
+impl PdfParser<'_> {
     /// Parses a hexadecimal string object from the current position in the input stream.
-    ///
-    /// According to PDF 1.7 Specification (Section 7.3.4.3), a hex string:
-    ///
-    /// # Format
-    ///
-    /// - Must begin with a single `<` character and end with a single `>` character
-    /// - Contains an even number of hexadecimal digits between the delimiters
-    /// - Valid digits are: `0`-`9`, `a`-`f`, and `A`-`F` (case-insensitive)
-    ///
-    /// # Exampe Inputs
-    ///
-    /// ```text
-    /// <4E6F762073686D6F7A206B6120706F702E>
-    /// ```
     ///
     /// # Returns
     ///
     /// `String` containing the decoded string value or an error if invalid format
     /// or characters are encountered.
-    fn parse_hex_string(&mut self) -> Result<Vec<u8>, Self::ErrorType> {
+    pub fn parse_hex_string(&mut self) -> Result<Vec<u8>, HexStringError> {
         self.tokenizer.expect(PdfToken::LeftAngleBracket)?;
 
         // 1. Read until the closing `>` of the hex string.
@@ -57,9 +41,7 @@ impl HexStringParser for PdfParser<'_> {
             filtered.push(*b);
         }
 
-        // 3. Handle odd number of hex digits (Appendix H, Implementer Note 5 for Section 7.3.4.3)
-        // "If the string contains an odd number of hexadecimal digits, the last digit
-        // shall be assumed to be 0."
+        // If the string contains an odd number of hex digits, the last digit is assumed to be 0.
         if filtered.len() % 2 != 0 {
             filtered.push(b'0');
         }
