@@ -12,7 +12,6 @@ mod literal_string;
 mod name;
 mod null;
 mod number;
-pub mod object_stream;
 pub mod parser;
 mod stream;
 mod trailer;

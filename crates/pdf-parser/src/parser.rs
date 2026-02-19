@@ -123,10 +123,7 @@ impl PdfParser<'_> {
     ///
     /// Validates that a delimiter or decimal point follows the digits.
     /// Optionally skips trailing whitespace when `skip_whitespace` is true.
-    pub(crate) fn read_number<T: FromStr>(
-        &mut self,
-        skip_whitespace: bool,
-    ) -> Result<T, ParserError> {
+    pub fn read_number<T: FromStr>(&mut self, skip_whitespace: bool) -> Result<T, ParserError> {
         let number_str = self.tokenizer.read_while_u8(|b| b.is_ascii_digit());
         if number_str.is_empty() {
             return Err(ParserError::UnexpectedEndOfFile);

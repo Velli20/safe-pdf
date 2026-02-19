@@ -1,8 +1,9 @@
 use pdf_object::{
     object_resolver::ObjectResolver, object_variant::ObjectVariant, stream::StreamObject,
 };
+use pdf_parser::parser::PdfParser;
 
-use crate::{error::ParserError, parser::PdfParser};
+use crate::reader::PdfReaderError;
 
 /// Parses an object stream (PDF 1.5+) and extracts all objects stored within it.
 ///
@@ -14,10 +15,10 @@ use crate::{error::ParserError, parser::PdfParser};
 /// # Returns
 ///
 /// A vector of `(object_number, ObjectVariant)` pairs for each object in the stream.
-pub fn parse_object_stream(
+pub fn read_object_stream(
     stream: &StreamObject,
     objects: &dyn ObjectResolver,
-) -> Result<Vec<(usize, ObjectVariant)>, ParserError> {
+) -> Result<Vec<(usize, ObjectVariant)>, PdfReaderError> {
     let dict = stream.dictionary.as_ref();
 
     // /N: number of objects in this stream (required)
@@ -34,8 +35,8 @@ pub fn parse_object_stream(
     let mut obj_entries = Vec::with_capacity(n);
 
     for _ in 0..n {
-        let obj_num: usize = header_parser.read_number(true)?;
-        let offset: usize = header_parser.read_number(true)?;
+        let obj_num = header_parser.read_number::<usize>(true)?;
+        let offset = header_parser.read_number::<usize>(true)?;
         obj_entries.push((obj_num, offset));
     }
 
@@ -102,7 +103,7 @@ mod tests {
             None,
         );
 
-        let result = parse_object_stream(&stream, &UnimplementedResolver).unwrap();
+        let result = read_object_stream(&stream, &UnimplementedResolver).unwrap();
         assert_eq!(result.len(), 2);
 
         assert_eq!(result[0].0, 10);
@@ -137,7 +138,7 @@ mod tests {
             None,
         );
 
-        let result = parse_object_stream(&stream, &UnimplementedResolver).unwrap();
+        let result = read_object_stream(&stream, &UnimplementedResolver).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, 5);
         match &result[0].1 {
