@@ -6,8 +6,6 @@ use crate::{error::ParserError, parser::PdfParser};
 
 #[derive(Debug, PartialEq, Error)]
 pub enum NumberError {
-    #[error("Failed to parse integral part of number: {err}")]
-    IntegralPartError { err: String },
     #[error("Failed to parse fractional part of number: {err}")]
     FractionalPartError { err: String },
     #[error("Failed to parse '{number_str}' as a real number: {source}")]
@@ -18,6 +16,8 @@ pub enum NumberError {
     },
     #[error("Numeric value overflow")]
     NumericValueOverflow,
+    #[error("Missing delimiter after number, found '{0}'")]
+    MissingDelimiterAfterNumber(char),
 }
 
 impl PdfParser<'_> {
@@ -38,59 +38,81 @@ impl PdfParser<'_> {
             has_minus = true;
         }
 
-        // 2. Parse leading digits (integral part).
-        let mut digits = if let Some(PdfToken::Period) = self.tokenizer.peek() {
+        // 2. Parse leading digits (integral part). Track whether input started with '.'
+        //    so we can distinguish ".5" (no leading digits, integer_part is a sentinel 0)
+        //    from "0.5" (leading zero, integer_part is a parsed 0). The two cases have
+        //    different validity rules: bare "." is invalid but "0." is valid.
+        let started_with_period = matches!(self.tokenizer.peek(), Some(PdfToken::Period));
+        let integer_part: i64 = if started_with_period {
             0
         } else {
             self.read_number::<i64>(false)?
         };
 
-        // 3. Check for decimal point
+        // 3. Check for decimal point.
         if let Some(PdfToken::Period) = self.tokenizer.peek() {
             self.tokenizer.read();
-            // 4. Parse fractional part as a string to preserve leading zeros.
-            let fraction_bytes = self.tokenizer.read_while_u8(|b| b.is_ascii_digit());
-            let fraction_str = String::from_utf8_lossy(fraction_bytes);
 
-            // A number can be represented as `.d` but not as `.`
-            if digits == 0 && fraction_str.is_empty() {
+            // 4. Parse fractional digits. Preserve them as raw bytes to avoid a
+            //    lossy-conversion → format! → re-parse round-trip.
+            let fraction_bytes = self.tokenizer.read_while_u8(|b| b.is_ascii_digit());
+
+            // fraction_bytes contains only ASCII digits (guaranteed by the predicate above),
+            // so from_utf8 is always successful here.
+            let fraction_str = std::str::from_utf8(fraction_bytes).map_err(|_| {
+                NumberError::FractionalPartError {
+                    err: "digit sequence contains non-UTF8 bytes".to_string(),
+                }
+            })?;
+
+            // "." and "-." are invalid; "0." and "0.0" are valid real numbers.
+            if started_with_period && fraction_str.is_empty() {
                 return Err(NumberError::FractionalPartError {
                     err: "Invalid real number: missing digits after decimal point.".to_string(),
                 }
                 .into());
             }
 
-            // 5. Combine integral and fractional parts.
-            let number_str = if has_minus {
-                format!("-{}.{}", digits, fraction_str)
+            // 5. Compute the real value directly without building a formatted string.
+            //    Parse fractional digits as their integer value (e.g. "456" → 456.0),
+            //    then scale by 10^-len to get the fractional contribution.
+            let frac_value: f64 = if fraction_str.is_empty() {
+                0.0
             } else {
-                format!("{}.{}", digits, fraction_str)
+                let exp = i32::try_from(fraction_str.len())
+                    .map_err(|_| NumberError::NumericValueOverflow)?;
+                let frac_digits = fraction_str.parse::<f64>().map_err(|source| {
+                    NumberError::RealNumberParseError {
+                        number_str: fraction_str.to_string(),
+                        source,
+                    }
+                })?;
+                frac_digits / 10_f64.powi(exp)
             };
 
-            // 6. Convert to f64.
-            let number = number_str
-                .parse::<f64>()
-                .map_err(|source| NumberError::RealNumberParseError { number_str, source })?;
+            // i64 → f64 is a well-defined lossy cast; no From impl exists in std for this pair.
+            #[allow(clippy::as_conversions)]
+            let value = integer_part as f64 + frac_value;
+            let number = if has_minus { -value } else { value };
 
             if let Some(d) = self.tokenizer.data().first().copied()
                 && !Self::is_pdf_delimiter(d)
             {
-                return Err(NumberError::FractionalPartError {
-                    err: format!("Missing delimiter after number, found '{}'", char::from(d)),
-                }
-                .into());
+                return Err(NumberError::MissingDelimiterAfterNumber(char::from(d)).into());
             }
             self.skip_whitespace();
             Ok(ObjectVariant::Real(number))
         } else {
-            // 7. No decimal point, parse as integer.
+            // 6. No decimal point: return as integer.
             self.skip_whitespace();
-            if has_minus {
-                digits = digits
+            let integer = if has_minus {
+                integer_part
                     .checked_neg()
-                    .ok_or(NumberError::NumericValueOverflow)?;
-            }
-            Ok(ObjectVariant::Integer(digits))
+                    .ok_or(NumberError::NumericValueOverflow)?
+            } else {
+                integer_part
+            };
+            Ok(ObjectVariant::Integer(integer))
         }
     }
 }
@@ -128,6 +150,11 @@ mod tests {
             (b"0.0 ", 0.0),
             (b".00048828125", 0.00048828125),
             (b"-.00048828125", -0.00048828125),
+            // "0." is a valid PDF real number representing 0.0
+            (b"0.", 0.0),
+            (b"+0.", 0.0),
+            (b"-0.", -0.0),
+            (b"42.", 42.0),
         ];
 
         for (input, expected) in valid_inputs {
@@ -145,11 +172,7 @@ mod tests {
             b"+-5",     // invalid combination
             b"4,200",   // comma not allowed
             b"123abc ", // Mixed numeric and non-numeric characters
-            b".",
-            b"-.",
-            //      b"--123 ",        // Invalid double minus
-            //     b"123..456 ",     // Invalid double decimal point
-            //    b"123.456.789 ",  // Multiple decimal points
+            b".", b"-.",
         ];
 
         for input in invalid_inputs {

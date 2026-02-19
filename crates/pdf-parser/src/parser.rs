@@ -124,15 +124,18 @@ impl PdfParser<'_> {
     /// Validates that a delimiter or decimal point follows the digits.
     /// Optionally skips trailing whitespace when `skip_whitespace` is true.
     pub fn read_number<T: FromStr>(&mut self, skip_whitespace: bool) -> Result<T, ParserError> {
-        let number_str = self.tokenizer.read_while_u8(|b| b.is_ascii_digit());
-        if number_str.is_empty() {
+        let number_bytes = self.tokenizer.read_while_u8(|b| b.is_ascii_digit());
+        if number_bytes.is_empty() {
             return Err(ParserError::UnexpectedEndOfFile);
         }
 
-        let number_str = String::from_utf8_lossy(number_str);
+        // number_bytes is guaranteed to be ASCII digits from the predicate above,
+        // so from_utf8 always succeeds here.
+        let number_str = std::str::from_utf8(number_bytes)
+            .map_err(|_| ParserError::InvalidNumber("<non-UTF8 digit sequence>".to_owned()))?;
         let number = number_str
             .parse::<T>()
-            .map_err(|_| ParserError::InvalidNumber(number_str.into_owned()))?;
+            .map_err(|_| ParserError::InvalidNumber(number_str.to_owned()))?;
 
         // Check that the following character after the number is a valid delimiter
         // or a dot (potential decimal number).
