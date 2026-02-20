@@ -37,79 +37,102 @@ impl OpDescriptor {
     }
 }
 
+// MUST remain sorted lexicographically by `name` — binary search depends on this.
+// If you add a new entry, insert it in the correct position and verify with the
+// `read_map_is_sorted` test below.
 pub(crate) const READ_MAP: &[OpDescriptor] = &[
-    OpDescriptor::from::<BeginCompatibility>(),
-    OpDescriptor::from::<ClipNonZero>(),
-    OpDescriptor::from::<ClipEvenOdd>(),
-    OpDescriptor::from::<SetGrayFill>(),
-    OpDescriptor::from::<SetGrayStroke>(),
-    OpDescriptor::from::<SetRGBFill>(),
-    OpDescriptor::from::<SetRGBStroke>(),
-    OpDescriptor::from::<SetCMYKFill>(),
-    OpDescriptor::from::<SetCMYKStroke>(),
-    OpDescriptor::from::<SetLineWidth>(),
-    OpDescriptor::from::<SetLineCapStyle>(),
-    OpDescriptor::from::<SetLineJoinStyle>(),
-    OpDescriptor::from::<SetMiterLimit>(),
-    OpDescriptor::from::<SetDashPattern>(),
-    OpDescriptor::from::<SetFlatnessTolerance>(),
-    OpDescriptor::from::<SetRenderingIntent>(),
-    OpDescriptor::from::<SetGraphicsStateFromDict>(),
-    OpDescriptor::from::<SaveGraphicsState>(),
-    OpDescriptor::from::<RestoreGraphicsState>(),
-    OpDescriptor::from::<ConcatMatrix>(),
-    OpDescriptor::from::<BeginMarkedContent>(),
-    OpDescriptor::from::<BeginMarkedContentWithProps>(),
-    OpDescriptor::from::<EndMarkedContent>(),
-    OpDescriptor::from::<MoveTo>(),
-    OpDescriptor::from::<LineTo>(),
-    OpDescriptor::from::<CurveTo>(),
-    OpDescriptor::from::<CurveToV>(),
-    OpDescriptor::from::<CurveToY>(),
-    OpDescriptor::from::<ClosePath>(),
-    OpDescriptor::from::<Rectangle>(),
-    OpDescriptor::from::<StrokePath>(),
-    OpDescriptor::from::<CloseStrokePath>(),
-    OpDescriptor::from::<FillPathNonZero>(),
-    OpDescriptor::from::<FillPathEvenOdd>(),
-    OpDescriptor::from::<FillAndStrokePathNonZero>(),
-    OpDescriptor::from::<FillAndStrokePathEvenOdd>(),
-    OpDescriptor::from::<CloseFillAndStrokePathNonZero>(),
-    OpDescriptor::from::<CloseFillAndStrokePathEvenOdd>(),
-    OpDescriptor::from::<EndPath>(),
-    OpDescriptor::from::<BeginText>(),
-    OpDescriptor::from::<EndText>(),
-    OpDescriptor::from::<MoveTextPosition>(),
-    OpDescriptor::from::<MoveTextPositionAndSetLeading>(),
-    OpDescriptor::from::<SetTextMatrix>(),
-    OpDescriptor::from::<MoveToNextLine>(),
-    OpDescriptor::from::<ShowText>(),
-    OpDescriptor::from::<MoveNextLineShowText>(),
-    OpDescriptor::from::<SetSpacingMoveShowText>(),
-    OpDescriptor::from::<ShowTextArray>(),
-    OpDescriptor::from::<SetCharacterSpacing>(),
-    OpDescriptor::from::<SetWordSpacing>(),
-    OpDescriptor::from::<SetHorizontalScaling>(),
-    OpDescriptor::from::<SetLeading>(),
-    OpDescriptor::from::<SetFont>(),
-    OpDescriptor::from::<SetRenderingMode>(),
-    OpDescriptor::from::<SetTextRise>(),
-    OpDescriptor::from::<InvokeXObject>(),
-    OpDescriptor::from::<BeginInlineImage>(),
-    OpDescriptor::from::<InlineImageData>(),
-    OpDescriptor::from::<EndInlineImage>(),
-    OpDescriptor::from::<EndCompatibility>(),
-    OpDescriptor::from::<PaintShading>(),
-    OpDescriptor::from::<SetCharWidth>(),
-    OpDescriptor::from::<SetCharWidthAndBoundingBox>(),
-    OpDescriptor::from::<SetStrokeColorSpace>(),
-    OpDescriptor::from::<SetNonStrokingColorSpace>(),
-    OpDescriptor::from::<SetStrokingColor>(),
-    OpDescriptor::from::<SetStrokingColorSc>(),
-    OpDescriptor::from::<SetNonStrokingColorSc>(),
-    OpDescriptor::from::<SetNonStrokingColor>(),
+    OpDescriptor::from::<SetSpacingMoveShowText>(), // "\""
+    OpDescriptor::from::<MoveNextLineShowText>(),   // "'"
+    OpDescriptor::from::<FillAndStrokePathNonZero>(), // "B"
+    OpDescriptor::from::<FillAndStrokePathEvenOdd>(), // "B*"
+    OpDescriptor::from::<BeginMarkedContentWithProps>(), // "BDC"
+    OpDescriptor::from::<BeginInlineImage>(),       // "BI"
+    OpDescriptor::from::<BeginMarkedContent>(),     // "BMC"
+    OpDescriptor::from::<BeginText>(),              // "BT"
+    OpDescriptor::from::<BeginCompatibility>(),     // "BX"
+    OpDescriptor::from::<SetStrokeColorSpace>(),    // "CS"
+    OpDescriptor::from::<InvokeXObject>(),          // "Do"
+    OpDescriptor::from::<EndInlineImage>(),         // "EI"
+    OpDescriptor::from::<EndMarkedContent>(),       // "EMC"
+    OpDescriptor::from::<EndText>(),                // "ET"
+    OpDescriptor::from::<EndCompatibility>(),       // "EX"
+    OpDescriptor::from::<SetGrayStroke>(),          // "G"
+    OpDescriptor::from::<InlineImageData>(),        // "ID"
+    OpDescriptor::from::<SetLineCapStyle>(),        // "J"
+    OpDescriptor::from::<SetCMYKStroke>(),          // "K"
+    OpDescriptor::from::<SetMiterLimit>(),          // "M"
+    OpDescriptor::from::<RestoreGraphicsState>(),   // "Q"
+    OpDescriptor::from::<SetRGBStroke>(),           // "RG"
+    OpDescriptor::from::<StrokePath>(),             // "S"
+    OpDescriptor::from::<SetStrokingColorSc>(),     // "SC"
+    OpDescriptor::from::<SetStrokingColor>(),       // "SCN"
+    OpDescriptor::from::<MoveToNextLine>(),         // "T*"
+    OpDescriptor::from::<MoveTextPositionAndSetLeading>(), // "TD"
+    OpDescriptor::from::<ShowTextArray>(),          // "TJ"
+    OpDescriptor::from::<SetLeading>(),             // "TL"
+    OpDescriptor::from::<SetCharacterSpacing>(),    // "Tc"
+    OpDescriptor::from::<MoveTextPosition>(),       // "Td"
+    OpDescriptor::from::<SetFont>(),                // "Tf"
+    OpDescriptor::from::<ShowText>(),               // "Tj"
+    OpDescriptor::from::<SetTextMatrix>(),          // "Tm"
+    OpDescriptor::from::<SetRenderingMode>(),       // "Tr"
+    OpDescriptor::from::<SetTextRise>(),            // "Ts"
+    OpDescriptor::from::<SetWordSpacing>(),         // "Tw"
+    OpDescriptor::from::<SetHorizontalScaling>(),   // "Tz"
+    OpDescriptor::from::<ClipNonZero>(),            // "W"
+    OpDescriptor::from::<ClipEvenOdd>(),            // "W*"
+    OpDescriptor::from::<CloseFillAndStrokePathNonZero>(), // "b"
+    OpDescriptor::from::<CloseFillAndStrokePathEvenOdd>(), // "b*"
+    OpDescriptor::from::<CurveTo>(),                // "c"
+    OpDescriptor::from::<ConcatMatrix>(),           // "cm"
+    OpDescriptor::from::<SetNonStrokingColorSpace>(), // "cs"
+    OpDescriptor::from::<SetDashPattern>(),         // "d"
+    OpDescriptor::from::<SetCharWidth>(),           // "d0"
+    OpDescriptor::from::<SetCharWidthAndBoundingBox>(), // "d1"
+    OpDescriptor::from::<FillPathNonZero>(),        // "f"
+    OpDescriptor::from::<FillPathEvenOdd>(),        // "f*"
+    OpDescriptor::from::<SetGrayFill>(),            // "g"
+    OpDescriptor::from::<SetGraphicsStateFromDict>(), // "gs"
+    OpDescriptor::from::<ClosePath>(),              // "h"
+    OpDescriptor::from::<SetFlatnessTolerance>(),   // "i"
+    OpDescriptor::from::<SetLineJoinStyle>(),       // "j"
+    OpDescriptor::from::<SetCMYKFill>(),            // "k"
+    OpDescriptor::from::<LineTo>(),                 // "l"
+    OpDescriptor::from::<MoveTo>(),                 // "m"
+    OpDescriptor::from::<EndPath>(),                // "n"
+    OpDescriptor::from::<SaveGraphicsState>(),      // "q"
+    OpDescriptor::from::<Rectangle>(),              // "re"
+    OpDescriptor::from::<SetRGBFill>(),             // "rg"
+    OpDescriptor::from::<SetRenderingIntent>(),     // "ri"
+    OpDescriptor::from::<CloseStrokePath>(),        // "s"
+    OpDescriptor::from::<SetNonStrokingColorSc>(),  // "sc"
+    OpDescriptor::from::<SetNonStrokingColor>(),    // "scn"
+    OpDescriptor::from::<PaintShading>(),           // "sh"
+    OpDescriptor::from::<CurveToV>(),               // "v"
+    OpDescriptor::from::<SetLineWidth>(),           // "w"
+    OpDescriptor::from::<CurveToY>(),               // "y"
 ];
 
 pub fn get_operation_descriptor(name: &str) -> Option<&'static OpDescriptor> {
-    READ_MAP.iter().find(|op| op.name == name)
+    READ_MAP
+        .binary_search_by(|op| op.name.cmp(name))
+        .ok()
+        .and_then(|idx| READ_MAP.get(idx))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_map_is_sorted() {
+        let names: Vec<_> = READ_MAP.iter().map(|op| op.name).collect();
+        let mut expected = names.clone();
+        expected.sort_unstable();
+        assert_eq!(
+            names, expected,
+            "READ_MAP must be sorted lexicographically by name for binary search to work"
+        );
+    }
 }

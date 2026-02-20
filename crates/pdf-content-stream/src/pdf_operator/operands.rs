@@ -76,7 +76,7 @@ impl<'a> Operands<'a> {
         })
     }
 
-    pub fn get_str(&'_ mut self) -> Result<Cow<'_, str>, PdfOperatorError> {
+    pub fn get_str(&mut self) -> Result<Cow<'a, str>, PdfOperatorError> {
         self.take_and_map("String", |value| value.try_str(&UnimplementedResolver))
     }
 

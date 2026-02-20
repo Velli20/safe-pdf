@@ -382,10 +382,16 @@ impl PdfOperator for SetNonStrokingColorSc {
     const NAME: &'static str = "sc";
     const OPERAND_COUNT: Option<usize> = None;
 
+    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
+        // Unreachable: read() always produces a SetNonStrokingColor variant,
+        // so this type is never dispatched through PdfOperatorVariant::call.
+        Ok(())
+    }
+
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let mut values = vec![];
-        while let Ok(value) = operands.get_f32() {
-            values.push(value);
+        while operands.peek_next().is_some() {
+            values.push(operands.get_f32()?);
         }
 
         if values.is_empty() {
@@ -412,10 +418,16 @@ impl PdfOperator for SetStrokingColorSc {
     const NAME: &'static str = "SC";
     const OPERAND_COUNT: Option<usize> = None;
 
+    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
+        // Unreachable: read() always produces a SetStrokingColor variant,
+        // so this type is never dispatched through PdfOperatorVariant::call.
+        Ok(())
+    }
+
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let mut values = vec![];
-        while let Ok(value) = operands.get_f32() {
-            values.push(value);
+        while operands.peek_next().is_some() {
+            values.push(operands.get_f32()?);
         }
 
         if values.is_empty() {
