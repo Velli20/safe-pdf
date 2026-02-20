@@ -1,15 +1,9 @@
-use pdf_object::{
-    dictionary::Dictionary, object_resolver::UnimplementedResolver, object_variant::ObjectVariant,
-};
-use std::borrow::Cow;
-
 use crate::{TextElement, error::PdfOperatorError};
+use pdf_object::{object_resolver::UnimplementedResolver, object_variant::ObjectVariant};
 
-pub struct Operands<'a> {
-    pub values: &'a [ObjectVariant],
-}
+pub struct Operands(pub Vec<ObjectVariant>);
 
-impl<'a> Operands<'a> {
+impl Operands {
     /// Peeks at the next operand without consuming it.
     ///
     /// Unlike [`take_next`], this method does not advance the internal slice.
@@ -17,81 +11,62 @@ impl<'a> Operands<'a> {
     /// # Returns
     ///
     /// `Some` with a reference to the next operand, or `None` if there are no more operands.
-    pub fn peek_next(&self) -> Option<&'a ObjectVariant> {
-        self.values.first()
+    pub fn peek_next(&self) -> Option<&ObjectVariant> {
+        self.0.first()
     }
 
     /// Pops and returns the next operand, advancing the internal slice.
-    fn take_next(&mut self) -> Option<&'a ObjectVariant> {
-        if let Some((value, rest)) = self.values.split_first() {
-            self.values = rest;
-            Some(value)
+    fn take_next(&mut self) -> Result<ObjectVariant, PdfOperatorError> {
+        if !self.0.is_empty() {
+            Ok(self.0.remove(0))
         } else {
-            None
+            Err(PdfOperatorError::MissingOperand {
+                expected_type: "Operand",
+            })
         }
-    }
-
-    /// Generic helper to pop an operand and convert it with a closure, mapping a missing operand
-    /// into a consistent error that mentions the expected type.
-    fn take_and_map<T, E: Into<PdfOperatorError>>(
-        &mut self,
-        expected_type_for_missing: &'static str,
-        f: impl FnOnce(&'a ObjectVariant) -> Result<T, E>,
-    ) -> Result<T, PdfOperatorError> {
-        match self.take_next() {
-            Some(value) => f(value).map_err(Into::into),
-            None => Err(PdfOperatorError::MissingOperand {
-                expected_type: expected_type_for_missing,
-            }),
-        }
-    }
-
-    /// Pops the next operand and returns it as an Array slice, or an error.
-    fn take_array(
-        &mut self,
-        expected_type_for_missing: &'static str,
-    ) -> Result<&'a [ObjectVariant], PdfOperatorError> {
-        self.take_and_map(expected_type_for_missing, |value| match value {
-            ObjectVariant::Array(arr) => Ok(arr.as_slice()),
-            _ => Err(PdfOperatorError::InvalidOperandType {
-                expected_type: "Array",
-                found_type: value.name(),
-            }),
-        })
     }
 
     pub fn get_f32(&mut self) -> Result<f32, PdfOperatorError> {
-        self.take_and_map("Number (f32)", |value| {
-            value.try_number::<f32>(&UnimplementedResolver)
-        })
+        let value = self
+            .take_next()?
+            .try_number::<f32>(&UnimplementedResolver)?;
+        Ok(value)
     }
 
-    pub fn get_dictionary(&mut self) -> Result<Box<Dictionary>, PdfOperatorError> {
-        self.take_and_map("Dictionary", |value| match value {
-            ObjectVariant::Dictionary(dict) => Ok(dict.clone()),
-            _ => Err(PdfOperatorError::InvalidOperandType {
-                expected_type: "Dictionary",
-                found_type: value.name(),
+    pub fn get_str(&mut self) -> Result<String, PdfOperatorError> {
+        match self.take_next()? {
+            ObjectVariant::HexString(s)
+            | ObjectVariant::Name(s)
+            | ObjectVariant::LiteralString(s) => Ok(String::from_utf8_lossy(&s).into_owned()),
+            other => Err(PdfOperatorError::InvalidOperandType {
+                expected_type: "String (HexString, Name, or LiteralString)",
+                found_type: other.name(),
             }),
-        })
+        }
     }
 
-    pub fn get_str(&mut self) -> Result<Cow<'a, str>, PdfOperatorError> {
-        self.take_and_map("String", |value| value.try_str(&UnimplementedResolver))
-    }
-
-    pub fn get_bytes(&mut self) -> Result<&[u8], PdfOperatorError> {
-        self.take_and_map("Vec<u8>", |value| value.try_bytes(&UnimplementedResolver))
+    pub fn get_bytes(&mut self) -> Result<Vec<u8>, PdfOperatorError> {
+        let object = self.take_next()?;
+        match object {
+            ObjectVariant::HexString(s)
+            | ObjectVariant::Name(s)
+            | ObjectVariant::LiteralString(s) => Ok(s),
+            _ => Err(PdfOperatorError::InvalidOperandType {
+                expected_type: "Bytes (HexString, Name, or LiteralString)",
+                found_type: object.name(),
+            }),
+        }
     }
 
     pub fn get_u8(&mut self) -> Result<u8, PdfOperatorError> {
-        self.take_and_map("Number (u8)", |value| {
-            value.try_number::<u8>(&UnimplementedResolver)
-        })
+        let value = self.take_next()?.try_number::<u8>(&UnimplementedResolver)?;
+        Ok(value)
     }
 
     pub fn get_text_element_array(&mut self) -> Result<Vec<TextElement>, PdfOperatorError> {
-        let array_values = self.take_array("Array for TextElement")?;
+        let object = self.take_next()?;
+        let array_values = object.try_array(&UnimplementedResolver)?;
+
         let mut elements = Vec::with_capacity(array_values.len());
         for val_obj in array_values {
             match val_obj {
@@ -111,9 +86,7 @@ impl<'a> Operands<'a> {
     }
 
     pub fn get_f32_array(&mut self) -> Result<Vec<f32>, PdfOperatorError> {
-        let array = self.take_next().ok_or(PdfOperatorError::MissingOperand {
-            expected_type: "Array for f32",
-        })?;
+        let array = self.take_next()?;
         Ok(array.try_vec_of::<f32>(&UnimplementedResolver)?)
     }
 }

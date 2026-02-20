@@ -165,8 +165,6 @@ impl PdfOperator for SetDashPattern {
 
 /// Sets the flatness tolerance, controlling the accuracy with which curves
 /// are approximated. (PDF operator `i`)
-///
-/// PDF 1.7 Specification, Section 8.4.3.4 "Flatness Tolerance".
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetFlatnessTolerance {
     /// The flatness tolerance value. Typical values range from 1 to 100.
@@ -217,7 +215,7 @@ impl PdfOperator for SetRenderingIntent {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let intent = operands.get_str()?.into_owned();
+        let intent = operands.get_str()?;
         Ok(PdfOperatorVariant::SetRenderingIntent(Self::new(intent)))
     }
 
@@ -303,8 +301,6 @@ impl PdfOperator for ConcatMatrix {
 
 /// Sets multiple graphics state parameters from a named graphics state parameter dictionary.
 /// The dictionary is expected to be in the resource dictionary. (PDF operator `gs`)
-///
-/// PDF 1.7 Specification, Section 8.4.5 "Graphics State Parameter Dictionaries".
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetGraphicsStateFromDict {
     /// The name of the graphics state parameter dictionary.
@@ -323,7 +319,7 @@ impl PdfOperator for SetGraphicsStateFromDict {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let dict_name = operands.get_str()?.into_owned();
+        let dict_name = operands.get_str()?;
         Ok(PdfOperatorVariant::SetGraphicsStateFromDict(Self::new(
             dict_name,
         )))
