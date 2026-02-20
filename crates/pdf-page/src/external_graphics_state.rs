@@ -84,7 +84,7 @@ pub enum ExternalGraphicsStateKey {
     /// when compositing objects.
     BlendMode(Vec<BlendMode>),
     /// Soft mask (`SMask`). A dictionary specifying the soft mask to be used, or the name `None`.
-    SoftMask(Box<Option<SoftMask>>),
+    SoftMask(Option<Box<SoftMask>>),
     /// Stroking alpha constant (`CA`). A number in the range 0.0 to 1.0 specifying the constant
     /// opacity value to be used for stroking operations.
     StrokingAlpha(f32),
@@ -146,7 +146,6 @@ impl ExternalGraphicsState {
     }
 }
 
-/// Parse the mask mode from a string value.
 fn parse_mask_mode(value: Cow<'_, str>) -> Result<MaskMode, ExternalGraphicsStateError> {
     match value.as_ref() {
         "Luminosity" => Ok(MaskMode::Luminosity),
@@ -158,7 +157,6 @@ fn parse_mask_mode(value: Cow<'_, str>) -> Result<MaskMode, ExternalGraphicsStat
     }
 }
 
-/// Parse the dash pattern array `D` -> DashPattern(Vec<f32>, phase)
 fn parse_dash_pattern(
     key_name: &str,
     value: &ObjectVariant,
@@ -180,7 +178,6 @@ fn parse_dash_pattern(
     ))
 }
 
-/// Parse font tuple `Font` -> Font(object_ref, size)
 fn parse_font(
     key_name: &str,
     value: &ObjectVariant,
@@ -224,7 +221,6 @@ fn to_blend_mode(s: &str) -> Result<BlendMode, ExternalGraphicsStateError> {
     }
 }
 
-/// Parse blend modes `BM` -> BlendMode(Vec<BlendMode>)
 fn parse_blend_mode(
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
@@ -243,7 +239,6 @@ fn parse_blend_mode(
     Ok(ExternalGraphicsStateKey::BlendMode(blend_modes_vec))
 }
 
-/// Parse the soft mask `SMask` -> SoftMask(Option<SoftMask>)
 fn parse_soft_mask(
     key_name: &str,
     value: &ObjectVariant,
@@ -259,7 +254,7 @@ fn parse_soft_mask(
 
             let shape = XObject::read_xobject(&stream.dictionary, stream, objects, cache)?;
 
-            Some(SoftMask { mask_type, shape })
+            Some(Box::new(SoftMask { mask_type, shape }))
         }
         other => match other.try_str(objects)?.as_ref() {
             "None" => None,
@@ -272,7 +267,7 @@ fn parse_soft_mask(
         },
     };
 
-    Ok(ExternalGraphicsStateKey::SoftMask(Box::new(smask)))
+    Ok(ExternalGraphicsStateKey::SoftMask(smask))
 }
 
 /// Parse a single key/value pair of the ExtGState dictionary.
