@@ -102,26 +102,26 @@ pub enum PdfOperatorVariant {
 impl PdfOperatorVariant {
     /// Parses a PDF content stream and returns a vector of operators.
     ///
-    /// This method reads PDF content stream bytes and converts them into structured
-    /// operator variants. It handles operands, comments, and whitespace according
-    /// to the PDF specification.
-    ///
-    /// # Arguments
-    /// * `input` - Raw bytes of the PDF content stream
-    ///
-    /// # Returns
-    /// * `Ok(Vec<PdfOperatorVariant>)` - Successfully parsed operators
-    /// * `Err(PdfOperatorError)` - Parsing failed due to invalid syntax or unknown operators
-    ///
     /// # Errors
-    /// Returns an error if:
-    /// - An unknown operator is encountered
-    /// - An operator has an incorrect number of operands
-    /// - The content stream contains malformed data
-    pub fn from(input: &[u8]) -> Result<Vec<PdfOperatorVariant>, PdfOperatorError> {
-        let mut parser = PdfParser::from(input);
+    /// Returns an error if an unknown operator is encountered, an operator has an
+    /// incorrect number of operands, or the content stream contains malformed data.
+    pub fn parse(input: &[u8]) -> Result<Vec<PdfOperatorVariant>, PdfOperatorError> {
         let mut operators = Vec::new();
-        let mut operands = Vec::new();
+        Self::parse_into(input, &mut operators)?;
+        Ok(operators)
+    }
+
+    /// Parses a PDF content stream and appends the resulting operators into `out`.
+    ///
+    /// Sharing a single output buffer across multiple streams (e.g. when a page's
+    /// `/Contents` is an array of streams) avoids per-stream allocations.
+    pub(crate) fn parse_into(
+        input: &[u8],
+        out: &mut Vec<PdfOperatorVariant>,
+    ) -> Result<(), PdfOperatorError> {
+        let mut parser = PdfParser::from(input);
+        // PDF operators have at most ~6 operands; pre-allocate to avoid reallocs.
+        let mut operands = Vec::with_capacity(6);
 
         loop {
             parser.skip_whitespace();
@@ -129,6 +129,16 @@ impl PdfOperatorVariant {
             // Skip comments
             if matches!(parser.tokenizer.peek(), Some(PdfToken::Percent)) {
                 parser.parse_comment()?;
+                continue;
+            }
+
+            // ' and " are valid PDF operators but the tokenizer returns None for them
+            // (they fall through to `_ => return None`). Check the raw byte directly
+            // so they are dispatched as operators rather than terminating the loop.
+            if matches!(parser.tokenizer.data().first(), Some(b'\'' | b'"')) {
+                let name = parser.read_operation_name()?;
+                let operator = Self::parse_operator(&name, &mut operands)?;
+                out.push(operator);
                 continue;
             }
 
@@ -145,7 +155,7 @@ impl PdfOperatorVariant {
                 }
 
                 let operator = Self::parse_operator(&name, &mut operands)?;
-                operators.push(operator);
+                out.push(operator);
                 continue;
             }
 
@@ -154,7 +164,7 @@ impl PdfOperatorVariant {
             operands.push(value);
         }
 
-        Ok(operators)
+        Ok(())
     }
 
     /// Parses a single operator with its operands.
@@ -271,7 +281,7 @@ mod tests {
     #[test]
     fn test_bug_727() {
         let input = b"[ (2.) 1 (0) 1 (!)\n2 (3) 1 (4) 1 (4) 1 (0) 1 (0) 1 (#) 2 (%) 2 (%) 2 (.) 1 (\\)) 2 (4) ]  TJ";
-        let result = PdfOperatorVariant::from(input);
+        let result = PdfOperatorVariant::parse(input);
         assert!(result.is_ok());
     }
 
@@ -550,7 +560,7 @@ mod tests {
         ];
 
         for tc in test_cases {
-            let actual_ops = PdfOperatorVariant::from(tc.input).unwrap_or_else(|e| {
+            let actual_ops = PdfOperatorVariant::parse(tc.input).unwrap_or_else(|e| {
                 panic!(
                     "Failed for test '{}': {:?}, input: '{}'",
                     tc.description,

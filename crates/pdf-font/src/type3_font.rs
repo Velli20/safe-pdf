@@ -72,7 +72,7 @@ impl Type3Font {
             let data = value.try_stream(objects)?.data()?;
 
             // Parse the content stream data into a sequence of PDF operators.
-            let operators = PdfOperatorVariant::from(&data)?;
+            let operators = PdfOperatorVariant::parse(&data)?;
             // Insert the parsed operators into the char_procs map under the glyph name.
             // If a duplicate glyph name is found, return an error to prevent overwriting.
             let prev = char_procs.insert(name.to_owned(), operators);

@@ -1,22 +1,15 @@
 use alloc::borrow::Cow;
 use pdf_parser::parser::PdfParser;
-use pdf_tokenizer::PdfToken;
 
 use crate::error::PdfOperatorError;
 
-/// Defines a trait for reading PDF operators and their operands from an input source.
-///
-/// This trait abstracts the underlying data source and provides methods to read
-/// specific types of data required for parsing PDF content stream operators.
+/// Defines a trait for reading PDF operators from an input source.
 pub trait OperatorReader<'a> {
     /// Reads the name of a PDF operator from the input.
     ///
     /// Operator names are typically one or two alphabetic characters.
     /// Whitespace preceding the operator name is skipped.
     fn read_operation_name(&mut self) -> Result<Cow<'a, str>, PdfOperatorError>;
-
-    /// Skips whitespaces and comments.
-    fn skip_whitespace_and_comments(&mut self) -> Result<(), PdfOperatorError>;
 }
 
 impl<'a> OperatorReader<'a> for PdfParser<'a> {
@@ -51,15 +44,5 @@ impl<'a> OperatorReader<'a> for PdfParser<'a> {
         }
 
         Ok(String::from_utf8_lossy(name_bytes))
-    }
-
-    fn skip_whitespace_and_comments(&mut self) -> Result<(), PdfOperatorError> {
-        // Loop to handle multiple consecutive comments and whitespace
-        self.skip_whitespace();
-
-        if let Some(PdfToken::Percent) = self.tokenizer.peek() {
-            let _comment = self.parse_comment();
-        }
-        Ok(())
     }
 }

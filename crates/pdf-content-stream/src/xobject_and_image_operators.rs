@@ -52,6 +52,10 @@ impl PdfOperator for BeginInlineImage {
         // This function merely constructs the BeginInlineImage marker.
         Ok(PdfOperatorVariant::BeginInlineImage(Self))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
+        Ok(())
+    }
 }
 
 /// Represents the image data within an inline image object.
@@ -78,6 +82,10 @@ impl PdfOperator for InlineImageData {
         // Proper parsing of inline image data requires special handling in the main parser loop.
         Err(PdfOperatorError::UnimplementedOperation(Self::NAME))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
+        Ok(())
+    }
 }
 
 /// Ends an inline image object.
@@ -93,5 +101,9 @@ impl PdfOperator for EndInlineImage {
         // The EI operator does not take any operands from the stack.
         // It simply marks the end of the inline image data.
         Ok(PdfOperatorVariant::EndInlineImage(Self))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
+        Ok(())
     }
 }

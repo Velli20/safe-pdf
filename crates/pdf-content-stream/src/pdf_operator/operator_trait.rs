@@ -21,7 +21,5 @@ pub trait PdfOperator {
         operands: &mut crate::pdf_operator::Operands,
     ) -> Result<crate::pdf_operator::PdfOperatorVariant, crate::error::PdfOperatorError>;
 
-    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
-        todo!("Unimplemented operator {}", Self::NAME)
-    }
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>>;
 }

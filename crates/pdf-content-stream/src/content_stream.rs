@@ -26,8 +26,7 @@ fn process_content_stream_array(
     let mut concatenated_ops = Vec::new();
     for value_in_array in array.iter() {
         let data = value_in_array.try_stream(objects)?.data()?;
-        let stream_ops = PdfOperatorVariant::from(&data)?;
-        concatenated_ops.extend(stream_ops);
+        PdfOperatorVariant::parse_into(&data, &mut concatenated_ops)?;
     }
     Ok(concatenated_ops)
 }
@@ -62,7 +61,7 @@ impl ContentStream {
         let operations = match objects.resolve_object(contents)? {
             ObjectVariant::Stream(stream) => {
                 let data = stream.data()?;
-                PdfOperatorVariant::from(&data)?
+                PdfOperatorVariant::parse(&data)?
             }
             ObjectVariant::Array(array_obj) => {
                 // The /Contents entry is an array of streams.
@@ -78,7 +77,7 @@ impl ContentStream {
 
     pub fn from_stream(stream: &StreamObject) -> Result<Self, PdfOperatorError> {
         let data = stream.data()?;
-        let operations = PdfOperatorVariant::from(&data)?;
+        let operations = PdfOperatorVariant::parse(&data)?;
         Ok(ContentStream(operations))
     }
 }

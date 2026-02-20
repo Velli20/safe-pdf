@@ -1,6 +1,7 @@
 use crate::{
     error::PdfOperatorError,
     pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
+    pdf_operator_backend::{BackendError, PdfOperatorBackend},
 };
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -41,6 +42,10 @@ impl PdfOperator for SetCharWidthAndBoundingBox {
             ury,
         }))
     }
+
+    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -61,5 +66,9 @@ impl PdfOperator for SetCharWidth {
         let wy = operands.get_f32()?;
 
         Ok(PdfOperatorVariant::SetCharWidth(Self { wx, wy }))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
+        Ok(())
     }
 }
