@@ -11,7 +11,7 @@ use crate::{
     graphics_state_operators::*,
     marked_content_operators::*,
     operation_map::get_operation_descriptor,
-    operator_tokenizer::OperatorReader,
+    operator_tokenizer::read_operator_name,
     path_operators::*,
     path_paint_operators::*,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
@@ -136,8 +136,8 @@ impl PdfOperatorVariant {
                 // surface as Alphabetic tokens. Handle them alongside ASCII
                 // letters in a single arm.
                 Some(b'\'' | b'"' | b'A'..=b'Z' | b'a'..=b'z') => {
-                    let name = parser.read_operation_name()?;
-                    let operator = Self::parse_operator(&name, &mut operands)?;
+                    let name = read_operator_name(&mut parser)?;
+                    let operator = Self::parse_operator(name, &mut operands)?;
                     out.push(operator);
                 }
                 // Anything else is an operand value.

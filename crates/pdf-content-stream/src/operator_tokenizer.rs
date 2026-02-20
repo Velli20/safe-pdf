@@ -1,48 +1,55 @@
-use alloc::borrow::Cow;
 use pdf_parser::parser::PdfParser;
 
 use crate::error::PdfOperatorError;
 
-/// Defines a trait for reading PDF operators from an input source.
-pub trait OperatorReader<'a> {
-    /// Reads the name of a PDF operator from the input.
-    ///
-    /// Operator names are typically one or two alphabetic characters.
-    /// Whitespace preceding the operator name is skipped.
-    fn read_operation_name(&mut self) -> Result<Cow<'a, str>, PdfOperatorError>;
-}
-
-impl<'a> OperatorReader<'a> for PdfParser<'a> {
-    fn read_operation_name(&mut self) -> Result<Cow<'a, str>, PdfOperatorError> {
-        self.skip_whitespace();
-
-        // Check for special single-character operators: ' and "
-        // These are valid PDF text-showing operators:
-        // - ' (single quote): Move to next line and show text
-        // - " (double quote): Set word and character spacing, move to next line, show text
-        if let Some(&byte) = self.tokenizer.data().first() {
-            if byte == b'\'' {
-                let _ = self.tokenizer.read_excactly(1);
-                return Ok(Cow::Borrowed("'"));
-            }
-            if byte == b'"' {
-                let _ = self.tokenizer.read_excactly(1);
-                return Ok(Cow::Borrowed("\""));
-            }
+/// Reads a PDF operator name from `parser`, advancing its cursor past the name.
+///
+/// Must be called when the parser is positioned at the first byte of an operator
+/// name — i.e. `'`, `"`, or an ASCII alphabetic byte. Whitespace must already
+/// have been consumed by the caller.
+///
+/// For the two single-character text operators (`'` and `"`) this returns a
+/// `&'static str` literal coerced to `&'a str`. For all other operator names
+/// (alphabetic characters optionally followed by `*`, `0`, or `1`) it returns a
+/// zero-copy slice of the parser's input buffer.
+///
+/// # Errors
+///
+/// Returns [`PdfOperatorError::UnknownOperator`] when no valid operator-name
+/// bytes are found at the current position (e.g. input is exhausted or the
+/// current byte is not a recognised operator character).
+pub(crate) fn read_operator_name<'a>(
+    parser: &mut PdfParser<'a>,
+) -> Result<&'a str, PdfOperatorError> {
+    let first = parser.tokenizer.data().first().copied();
+    match first {
+        Some(b'\'') => {
+            let _ = parser.tokenizer.read_excactly(1)?;
+            Ok("'")
         }
-
-        // Read standard operator names:
-        // - Alphabetic characters (a-z, A-Z): most operators (q, Q, cm, BT, ET, Tf, etc.)
-        // - '*' suffix: path/clipping operators (f*, B*, b*, W*, T*)
-        // - '0', '1' suffix: Type 3 font operators (d0, d1)
-        let name_bytes = self
-            .tokenizer
-            .read_while_u8(|b| b.is_ascii_alphabetic() || b == b'*' || b == b'0' || b == b'1');
-
-        if name_bytes.is_empty() {
-            return Ok(Cow::Borrowed(""));
+        Some(b'"') => {
+            let _ = parser.tokenizer.read_excactly(1)?;
+            Ok("\"")
         }
+        _ => {
+            // Standard operator names: ASCII letters optionally suffixed with
+            // `*` (f*, B*, b*, W*, T*) or `0`/`1` (d0, d1 — Type 3 font ops).
+            let name_bytes = parser
+                .tokenizer
+                .read_while_u8(|b| b.is_ascii_alphabetic() || b == b'*' || b == b'0' || b == b'1');
 
-        Ok(String::from_utf8_lossy(name_bytes))
+            if name_bytes.is_empty() {
+                return Err(PdfOperatorError::UnknownOperator(first.map_or_else(
+                    || "(end of input)".to_string(),
+                    |b| format!("0x{b:02X}"),
+                )));
+            }
+
+            // The predicate above only matches ASCII bytes — a strict subset of
+            // valid UTF-8 — so `from_utf8` is guaranteed to succeed here.
+            std::str::from_utf8(name_bytes).map_err(|_| {
+                PdfOperatorError::UnknownOperator(String::from_utf8_lossy(name_bytes).into_owned())
+            })
+        }
     }
 }
