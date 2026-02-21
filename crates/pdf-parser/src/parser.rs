@@ -47,7 +47,6 @@ impl PdfParser<'_> {
     /// Consumes an end-of-line marker from the input stream if one is present.
     ///
     /// Valid EOL markers are `\n`, `\r`, or `\r\n`. If none is present, does nothing.
-    /// Use [`expect_end_of_line_marker`] when an EOL is required.
     pub(crate) fn try_read_end_of_line_marker(&mut self) -> Result<(), ParserError> {
         if let Some(PdfToken::CarriageReturn) = self.tokenizer.peek() {
             self.tokenizer.read();
@@ -56,27 +55,6 @@ impl PdfParser<'_> {
             self.tokenizer.read();
         }
         Ok(())
-    }
-
-    /// Reads a required end-of-line marker (`\n`, `\r`, or `\r\n`) from the input stream.
-    ///
-    /// Returns an error if no EOL marker is found at the current position.
-    pub(crate) fn expect_end_of_line_marker(&mut self) -> Result<(), ParserError> {
-        match self.tokenizer.peek() {
-            Some(PdfToken::CarriageReturn) => {
-                self.tokenizer.read();
-                // Consume optional LF after CR.
-                if let Some(PdfToken::NewLine) = self.tokenizer.peek() {
-                    self.tokenizer.read();
-                }
-                Ok(())
-            }
-            Some(PdfToken::NewLine) => {
-                self.tokenizer.read();
-                Ok(())
-            }
-            _ => Err(ParserError::MissingEndOfLine),
-        }
     }
 
     /// Advances past any whitespace characters at the current position.
