@@ -1,7 +1,6 @@
 use pdf_object::object_resolver::UnimplementedResolver;
 use pdf_object::object_variant::ObjectVariant;
 use pdf_parser::parser::PdfParser;
-use pdf_tokenizer::PdfToken;
 
 use crate::compatibility_operators::{BeginCompatibility, EndCompatibility};
 use crate::type3_font_operators::SetCharWidth;
@@ -12,7 +11,7 @@ use crate::{
     graphics_state_operators::*,
     marked_content_operators::*,
     operation_map::get_operation_descriptor,
-    operator_tokenizer::OperatorReader,
+    operator_tokenizer::read_operator_name,
     path_operators::*,
     path_paint_operators::*,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
@@ -126,42 +125,27 @@ impl PdfOperatorVariant {
         loop {
             parser.skip_whitespace();
 
-            // Skip comments
-            if matches!(parser.tokenizer.peek(), Some(PdfToken::Percent)) {
-                parser.parse_comment()?;
-                continue;
-            }
-
-            // ' and " are valid PDF operators but the tokenizer returns None for them
-            // (they fall through to `_ => return None`). Check the raw byte directly
-            // so they are dispatched as operators rather than terminating the loop.
-            if matches!(parser.tokenizer.data().first(), Some(b'\'' | b'"')) {
-                let name = parser.read_operation_name()?;
-                let operator = Self::parse_operator(&name, &mut operands)?;
-                out.push(operator);
-                continue;
-            }
-
-            // Check for end of input
-            let Some(token) = parser.tokenizer.peek() else {
-                break;
-            };
-
-            // Handle operator names
-            if let PdfToken::Alphabetic(_) = token {
-                let name = parser.read_operation_name()?;
-                if name.is_empty() {
-                    break;
+            // Dispatch on the next raw byte.
+            match parser.tokenizer.data().first() {
+                None => break,
+                // Skip comments.
+                Some(b'%') => {
+                    parser.parse_comment()?;
                 }
-
-                let operator = Self::parse_operator(&name, &mut operands)?;
-                out.push(operator);
-                continue;
+                // ' and " are valid PDF operators that the tokenizer does not
+                // surface as Alphabetic tokens. Handle them alongside ASCII
+                // letters in a single arm.
+                Some(b'\'' | b'"' | b'A'..=b'Z' | b'a'..=b'z') => {
+                    let name = read_operator_name(&mut parser)?;
+                    let operator = Self::parse_operator(name, &mut operands)?;
+                    out.push(operator);
+                }
+                // Anything else is an operand value.
+                _ => {
+                    let value = parser.parse_object(&UnimplementedResolver)?;
+                    operands.push(value);
+                }
             }
-
-            // Parse operand value
-            let value = parser.parse_object(&UnimplementedResolver)?;
-            operands.push(value);
         }
 
         Ok(())
@@ -170,7 +154,8 @@ impl PdfOperatorVariant {
     /// Parses a single operator with its operands.
     ///
     /// Looks up the operator descriptor by name and validates the operand count
-    /// before parsing.
+    /// before parsing. Takes `operands` by `&mut` so its heap allocation can be
+    /// reclaimed and reused for the next operator.
     fn parse_operator(
         name: &str,
         operands: &mut Vec<ObjectVariant>,
@@ -179,7 +164,7 @@ impl PdfOperatorVariant {
             return Err(PdfOperatorError::UnknownOperator(name.to_string()));
         };
 
-        // Validate operand count if the operator has a fixed count requirement
+        // Validate operand count if the operator has a fixed count requirement.
         if let Some(required_count) = descriptor.operand_count
             && operands.len() != required_count
         {
@@ -190,12 +175,15 @@ impl PdfOperatorVariant {
             });
         }
 
-        let mut ops = Operands {
-            values: operands.as_slice(),
-        };
+        // Take the operand buffer, leaving an empty Vec behind. The allocation
+        // is reclaimed below so it can be reused for the next operator.
+        let mut ops = Operands(std::mem::take(operands));
         let operator = (descriptor.parser)(&mut ops)?;
-        operands.clear();
-
+        // Clear any unconsumed operands and return the buffer to the caller.
+        ops.0.clear();
+        // Reclaim the operand buffer for the next operator. This avoids per-operator
+        // allocations.
+        *operands = ops.0;
         Ok(operator)
     }
 

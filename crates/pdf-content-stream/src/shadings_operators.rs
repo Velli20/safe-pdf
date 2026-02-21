@@ -25,7 +25,7 @@ impl PdfOperator for PaintShading {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let name = operands.get_str()?.into_owned();
+        let name = operands.get_str()?;
         Ok(PdfOperatorVariant::PaintShading(Self::new(name)))
     }
 

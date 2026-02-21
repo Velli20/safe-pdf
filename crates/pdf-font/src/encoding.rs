@@ -90,10 +90,9 @@ impl Encoding {
                     current_range_start = chunk.try_number::<usize>(objects)?;
                 }
                 _ => {
-                    self.names.insert(
-                        current_range_start,
-                        Cow::Owned(chunk.try_str(objects)?.to_string()),
-                    );
+                    if let Some(slot) = self.names.get_mut(current_range_start) {
+                        *slot = Cow::Owned(chunk.try_str(objects)?.to_string());
+                    }
                     current_range_start = current_range_start.saturating_add(1);
                 }
             }

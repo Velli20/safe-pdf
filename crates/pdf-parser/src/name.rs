@@ -17,7 +17,7 @@ pub enum NameObjectError {
     )]
     HexRadixError { hex_pair: String, reason: String },
     #[error("Invalid token in name object (e.g., empty name after '/')")]
-    InvalidToken,
+    EmptyName,
     #[error("Tokenizer error: {0}")]
     TokenizerError(#[from] TokenizerError),
 }
@@ -34,7 +34,7 @@ impl PdfParser<'_> {
 
         let name = self.tokenizer.read_while_u8(|b| !Self::is_pdf_delimiter(b));
         if name.is_empty() {
-            return Err(NameObjectError::InvalidToken);
+            return Err(NameObjectError::EmptyName);
         }
 
         escape(name)

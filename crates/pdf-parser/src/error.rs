@@ -45,6 +45,4 @@ pub enum ParserError {
     ObjectError(#[from] ObjectError),
     #[error("Indirect object error: {0}")]
     IndirectObjectError(#[from] IndirectObjectError),
-    #[error("Expected end-of-line marker (CR, LF, or CRLF)")]
-    MissingEndOfLine,
 }

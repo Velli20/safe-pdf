@@ -226,7 +226,7 @@ impl PdfOperator for SetStrokeColorSpace {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let name = operands.get_str()?.into_owned();
+        let name = operands.get_str()?;
         Ok(PdfOperatorVariant::SetStrokeColorSpace(Self::new(name)))
     }
 
@@ -253,7 +253,7 @@ impl PdfOperator for SetNonStrokingColorSpace {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let name = operands.get_str()?.into_owned();
+        let name = operands.get_str()?;
         Ok(PdfOperatorVariant::SetNonStrokingColorSpace(Self::new(
             name,
         )))
@@ -298,11 +298,15 @@ impl PdfOperator for SetStrokingColor {
         }
 
         // The pattern name should come last, after the numeric color components
-        let pattern = operands
+        let pattern = if operands
             .peek_next()
-            .filter(|obj| obj.is_name())
-            .and_then(|_| operands.get_str().ok())
-            .map(|s| s.into_owned());
+            .map(|obj| obj.is_name())
+            .unwrap_or(false)
+        {
+            operands.get_str().ok()
+        } else {
+            None
+        };
 
         Ok(PdfOperatorVariant::SetStrokingColor(Self::new(
             values, pattern,
@@ -352,11 +356,15 @@ impl PdfOperator for SetNonStrokingColor {
         }
 
         // The pattern name should come last, after the numeric color components
-        let pattern = operands
+        let pattern = if operands
             .peek_next()
-            .filter(|obj| obj.is_name())
-            .and_then(|_| operands.get_str().ok())
-            .map(|s| s.into_owned());
+            .map(|obj| obj.is_name())
+            .unwrap_or(false)
+        {
+            operands.get_str().ok()
+        } else {
+            None
+        };
 
         Ok(PdfOperatorVariant::SetNonStrokingColor(Self::new(
             values, pattern,

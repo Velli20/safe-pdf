@@ -34,8 +34,6 @@ pub enum Type3FontError {
     ObjectError(#[from] ObjectError),
     #[error("Error parsing content stream operators: {0}")]
     ContentStreamError(#[from] PdfOperatorError),
-    #[error("Duplicate character name '{name}' found in /CharProcs dictionary")]
-    DuplicateCharProcName { name: String },
     #[error("Encoding read error: {0}")]
     EncodingReadError(#[from] EncodingReadError),
 }
@@ -64,23 +62,11 @@ impl Type3Font {
             .get_or_err("CharProcs")?
             .try_dictionary(objects)?;
 
-        // Iterate over each entry in the `/CharProcs` dictionary.
-        // Each entry associates a glyph name with a reference to a content stream object.
         let mut char_procs = HashMap::new();
         for (name, value) in char_proc_dictionary.dictionary.iter() {
-            // Resolve the content stream data.
             let data = value.try_stream(objects)?.data()?;
-
-            // Parse the content stream data into a sequence of PDF operators.
             let operators = PdfOperatorVariant::parse(&data)?;
-            // Insert the parsed operators into the char_procs map under the glyph name.
-            // If a duplicate glyph name is found, return an error to prevent overwriting.
-            let prev = char_procs.insert(name.to_owned(), operators);
-            if prev.is_some() {
-                return Err(Type3FontError::DuplicateCharProcName {
-                    name: name.to_owned(),
-                });
-            }
+            char_procs.insert(name.to_owned(), operators);
         }
 
         Ok(Type3Font {

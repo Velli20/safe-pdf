@@ -44,7 +44,7 @@ impl PdfParser<'_> {
         let stream_data = self.tokenizer.read_excactly(length)?.to_vec();
 
         // There should be an end-of-line marker after the data and before `endstream`.
-        self.expect_end_of_line_marker()?;
+        self.try_read_end_of_line_marker()?;
 
         // Read the `endstream` keyword .
         self.read_keyword(STREAM_END)?;
