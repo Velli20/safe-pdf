@@ -21,7 +21,7 @@ impl SetLineWidth {
 }
 
 impl PdfOperator for SetLineWidth {
-    const NAME: &'static str = "w";
+    const NAME: &'static [u8] = b"w";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -55,7 +55,7 @@ impl SetLineCapStyle {
 }
 
 impl PdfOperator for SetLineCapStyle {
-    const NAME: &'static str = "J";
+    const NAME: &'static [u8] = b"J";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -89,7 +89,7 @@ impl SetLineJoinStyle {
 }
 
 impl PdfOperator for SetLineJoinStyle {
-    const NAME: &'static str = "j";
+    const NAME: &'static [u8] = b"j";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -118,7 +118,7 @@ impl SetMiterLimit {
 }
 
 impl PdfOperator for SetMiterLimit {
-    const NAME: &'static str = "M";
+    const NAME: &'static [u8] = b"M";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -148,7 +148,7 @@ impl SetDashPattern {
 }
 
 impl PdfOperator for SetDashPattern {
-    const NAME: &'static str = "d";
+    const NAME: &'static [u8] = b"d";
 
     const OPERAND_COUNT: Option<usize> = Some(2);
 
@@ -178,7 +178,7 @@ impl SetFlatnessTolerance {
 }
 
 impl PdfOperator for SetFlatnessTolerance {
-    const NAME: &'static str = "i";
+    const NAME: &'static [u8] = b"i";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -210,7 +210,7 @@ impl SetRenderingIntent {
 }
 
 impl PdfOperator for SetRenderingIntent {
-    const NAME: &'static str = "ri";
+    const NAME: &'static [u8] = b"ri";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -229,7 +229,7 @@ impl PdfOperator for SetRenderingIntent {
 pub struct SaveGraphicsState;
 
 impl PdfOperator for SaveGraphicsState {
-    const NAME: &'static str = "q";
+    const NAME: &'static [u8] = b"q";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
@@ -247,7 +247,7 @@ impl PdfOperator for SaveGraphicsState {
 pub struct RestoreGraphicsState;
 
 impl PdfOperator for RestoreGraphicsState {
-    const NAME: &'static str = "Q";
+    const NAME: &'static [u8] = b"Q";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
@@ -278,7 +278,7 @@ impl ConcatMatrix {
 }
 
 impl PdfOperator for ConcatMatrix {
-    const NAME: &'static str = "cm";
+    const NAME: &'static [u8] = b"cm";
 
     const OPERAND_COUNT: Option<usize> = Some(6);
 
@@ -314,7 +314,7 @@ impl SetGraphicsStateFromDict {
 }
 
 impl PdfOperator for SetGraphicsStateFromDict {
-    const NAME: &'static str = "gs";
+    const NAME: &'static [u8] = b"gs";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 

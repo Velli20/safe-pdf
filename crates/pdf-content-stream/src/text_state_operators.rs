@@ -20,7 +20,7 @@ impl SetCharacterSpacing {
 }
 
 impl PdfOperator for SetCharacterSpacing {
-    const NAME: &'static str = "Tc";
+    const NAME: &'static [u8] = b"Tc";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -49,7 +49,7 @@ impl SetWordSpacing {
 }
 
 impl PdfOperator for SetWordSpacing {
-    const NAME: &'static str = "Tw";
+    const NAME: &'static [u8] = b"Tw";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -78,7 +78,7 @@ impl SetHorizontalScaling {
 }
 
 impl PdfOperator for SetHorizontalScaling {
-    const NAME: &'static str = "Tz";
+    const NAME: &'static [u8] = b"Tz";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -107,7 +107,7 @@ impl SetLeading {
 }
 
 impl PdfOperator for SetLeading {
-    const NAME: &'static str = "TL";
+    const NAME: &'static [u8] = b"TL";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -138,7 +138,7 @@ impl SetFont {
 }
 
 impl PdfOperator for SetFont {
-    const NAME: &'static str = "Tf";
+    const NAME: &'static [u8] = b"Tf";
 
     const OPERAND_COUNT: Option<usize> = Some(2);
 
@@ -174,7 +174,7 @@ impl SetRenderingMode {
 }
 
 impl PdfOperator for SetRenderingMode {
-    const NAME: &'static str = "Tr";
+    const NAME: &'static [u8] = b"Tr";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -203,7 +203,7 @@ impl SetTextRise {
 }
 
 impl PdfOperator for SetTextRise {
-    const NAME: &'static str = "Ts";
+    const NAME: &'static [u8] = b"Ts";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 

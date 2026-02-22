@@ -10,7 +10,7 @@ use crate::{
 pub struct BeginText;
 
 impl PdfOperator for BeginText {
-    const NAME: &'static str = "BT";
+    const NAME: &'static [u8] = b"BT";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
@@ -28,7 +28,7 @@ impl PdfOperator for BeginText {
 pub struct EndText;
 
 impl PdfOperator for EndText {
-    const NAME: &'static str = "ET";
+    const NAME: &'static [u8] = b"ET";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 

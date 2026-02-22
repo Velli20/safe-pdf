@@ -20,16 +20,16 @@ use crate::error::PdfOperatorError;
 /// current byte is not a recognised operator character).
 pub(crate) fn read_operator_name<'a>(
     parser: &mut PdfParser<'a>,
-) -> Result<&'a str, PdfOperatorError> {
+) -> Result<&'a [u8], PdfOperatorError> {
     let first = parser.tokenizer.data().first().copied();
     match first {
         Some(b'\'') => {
-            let _ = parser.tokenizer.read_excactly(1)?;
-            Ok("'")
+            let _ = parser.tokenizer.read_exactly(1)?;
+            Ok(b"'")
         }
         Some(b'"') => {
-            let _ = parser.tokenizer.read_excactly(1)?;
-            Ok("\"")
+            let _ = parser.tokenizer.read_exactly(1)?;
+            Ok(b"\"")
         }
         _ => {
             // Standard operator names: ASCII letters optionally suffixed with
@@ -45,11 +45,7 @@ pub(crate) fn read_operator_name<'a>(
                 )));
             }
 
-            // The predicate above only matches ASCII bytes — a strict subset of
-            // valid UTF-8 — so `from_utf8` is guaranteed to succeed here.
-            std::str::from_utf8(name_bytes).map_err(|_| {
-                PdfOperatorError::UnknownOperator(String::from_utf8_lossy(name_bytes).into_owned())
-            })
+            Ok(name_bytes)
         }
     }
 }

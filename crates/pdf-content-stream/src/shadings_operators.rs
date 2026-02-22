@@ -20,7 +20,7 @@ impl PaintShading {
 }
 
 impl PdfOperator for PaintShading {
-    const NAME: &'static str = "sh";
+    const NAME: &'static [u8] = b"sh";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 

@@ -170,7 +170,7 @@ impl<'a> Tokenizer<'a> {
         self.input.get(self.position..).unwrap_or(&[])
     }
 
-    pub fn read_excactly(&mut self, length: usize) -> Result<&[u8], TokenizerError> {
+    pub fn read_exactly(&mut self, length: usize) -> Result<&[u8], TokenizerError> {
         let available = self.input.len().saturating_sub(self.position);
         if length > available {
             return Err(TokenizerError::UnexpectedEndOfFile(length, available));

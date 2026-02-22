@@ -9,7 +9,7 @@ use crate::{
 pub struct StrokePath;
 
 impl PdfOperator for StrokePath {
-    const NAME: &'static str = "S";
+    const NAME: &'static [u8] = b"S";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
@@ -28,7 +28,7 @@ impl PdfOperator for StrokePath {
 pub struct CloseStrokePath;
 
 impl PdfOperator for CloseStrokePath {
-    const NAME: &'static str = "s";
+    const NAME: &'static [u8] = b"s";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
@@ -46,7 +46,7 @@ impl PdfOperator for CloseStrokePath {
 pub struct FillPathNonZero;
 
 impl PdfOperator for FillPathNonZero {
-    const NAME: &'static str = "f"; // TODO: or "F"
+    const NAME: &'static [u8] = b"f"; // TODO: or "F"
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
@@ -64,7 +64,7 @@ impl PdfOperator for FillPathNonZero {
 pub struct FillPathEvenOdd;
 
 impl PdfOperator for FillPathEvenOdd {
-    const NAME: &'static str = "f*";
+    const NAME: &'static [u8] = b"f*";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
@@ -83,7 +83,7 @@ impl PdfOperator for FillPathEvenOdd {
 pub struct FillAndStrokePathNonZero;
 
 impl PdfOperator for FillAndStrokePathNonZero {
-    const NAME: &'static str = "B";
+    const NAME: &'static [u8] = b"B";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
@@ -102,7 +102,7 @@ impl PdfOperator for FillAndStrokePathNonZero {
 pub struct FillAndStrokePathEvenOdd;
 
 impl PdfOperator for FillAndStrokePathEvenOdd {
-    const NAME: &'static str = "B*";
+    const NAME: &'static [u8] = b"B*";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
@@ -121,7 +121,7 @@ impl PdfOperator for FillAndStrokePathEvenOdd {
 pub struct CloseFillAndStrokePathNonZero;
 
 impl PdfOperator for CloseFillAndStrokePathNonZero {
-    const NAME: &'static str = "b";
+    const NAME: &'static [u8] = b"b";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
@@ -140,7 +140,7 @@ impl PdfOperator for CloseFillAndStrokePathNonZero {
 pub struct CloseFillAndStrokePathEvenOdd;
 
 impl PdfOperator for CloseFillAndStrokePathEvenOdd {
-    const NAME: &'static str = "b*";
+    const NAME: &'static [u8] = b"b*";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
@@ -159,7 +159,7 @@ impl PdfOperator for CloseFillAndStrokePathEvenOdd {
 pub struct EndPath;
 
 impl PdfOperator for EndPath {
-    const NAME: &'static str = "n";
+    const NAME: &'static [u8] = b"n";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 

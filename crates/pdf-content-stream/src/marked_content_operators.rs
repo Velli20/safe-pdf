@@ -19,7 +19,7 @@ impl BeginMarkedContent {
 }
 
 impl PdfOperator for BeginMarkedContent {
-    const NAME: &'static str = "BMC";
+    const NAME: &'static [u8] = b"BMC";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -49,7 +49,7 @@ impl BeginMarkedContentWithProps {
 }
 
 impl PdfOperator for BeginMarkedContentWithProps {
-    const NAME: &'static str = "BDC";
+    const NAME: &'static [u8] = b"BDC";
 
     const OPERAND_COUNT: Option<usize> = Some(2);
 
@@ -70,7 +70,7 @@ impl PdfOperator for BeginMarkedContentWithProps {
 pub struct EndMarkedContent;
 
 impl PdfOperator for EndMarkedContent {
-    const NAME: &'static str = "EMC";
+    const NAME: &'static [u8] = b"EMC";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 

@@ -3,14 +3,14 @@ use crate::pdf_operator_backend::{BackendError, PdfOperatorBackend};
 /// Represents a PDF content stream operator.
 ///
 /// This trait provides metadata about a PDF operator, such as its name
-/// (the string representation used in PDF content streams) and the number
+/// (the byte slice representation used in PDF content streams) and the number
 /// of operands it expects.
 ///
 /// Implementors of this trait are typically structs that represent specific
 /// PDF operators (e.g., `MoveTo`, `SetLineWidth`).
 pub trait PdfOperator {
-    /// The string representation of the PDF operator (e.g., "m", "BT", "rg").
-    const NAME: &'static str;
+    /// The byte slice representation of the PDF operator (e.g., b"m", b"BT", b"rg").
+    const NAME: &'static [u8];
 
     /// The number of operands this operator consumes from the operand stack.
     const OPERAND_COUNT: Option<usize>;

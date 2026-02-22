@@ -16,7 +16,7 @@ use crate::{
 pub struct BeginCompatibility;
 
 impl PdfOperator for BeginCompatibility {
-    const NAME: &'static str = "BX";
+    const NAME: &'static [u8] = b"BX";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
@@ -34,7 +34,7 @@ impl PdfOperator for BeginCompatibility {
 pub struct EndCompatibility;
 
 impl PdfOperator for EndCompatibility {
-    const NAME: &'static str = "EX";
+    const NAME: &'static [u8] = b"EX";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
