@@ -136,7 +136,7 @@ impl PdfParser<'_> {
     /// Returns an error if the next bytes don't match `keyword` or if no delimiter follows.
     /// Consumes any trailing end-of-line marker after the keyword.
     pub fn read_keyword(&mut self, keyword: &[u8]) -> Result<(), ParserError> {
-        let literal = self.tokenizer.read_excactly(keyword.len())?;
+        let literal = self.tokenizer.read_exactly(keyword.len())?;
         if literal != keyword {
             return Err(ParserError::InvalidKeyword(
                 String::from_utf8_lossy(keyword).to_string(),
@@ -171,7 +171,7 @@ impl PdfParser<'_> {
                 const EOF_KEYWORD: &[u8] = b"EOF";
 
                 // Read the keyword `EOF`.
-                let literal = self.tokenizer.read_excactly(EOF_KEYWORD.len())?;
+                let literal = self.tokenizer.read_exactly(EOF_KEYWORD.len())?;
                 if literal != EOF_KEYWORD {
                     return Err(ParserError::InvalidKeyword(
                         "EOF".to_string(),

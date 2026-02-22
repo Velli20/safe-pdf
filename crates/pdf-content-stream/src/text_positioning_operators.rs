@@ -25,7 +25,7 @@ impl MoveTextPosition {
 }
 
 impl PdfOperator for MoveTextPosition {
-    const NAME: &'static str = "Td";
+    const NAME: &'static [u8] = b"Td";
 
     const OPERAND_COUNT: Option<usize> = Some(2);
 
@@ -58,7 +58,7 @@ impl MoveTextPositionAndSetLeading {
 }
 
 impl PdfOperator for MoveTextPositionAndSetLeading {
-    const NAME: &'static str = "TD";
+    const NAME: &'static [u8] = b"TD";
 
     const OPERAND_COUNT: Option<usize> = Some(2);
 
@@ -93,7 +93,7 @@ impl SetTextMatrix {
 }
 
 impl PdfOperator for SetTextMatrix {
-    const NAME: &'static str = "Tm";
+    const NAME: &'static [u8] = b"Tm";
 
     const OPERAND_COUNT: Option<usize> = Some(6);
 
@@ -121,7 +121,7 @@ impl PdfOperator for SetTextMatrix {
 pub struct MoveToNextLine;
 
 impl PdfOperator for MoveToNextLine {
-    const NAME: &'static str = "T*";
+    const NAME: &'static [u8] = b"T*";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 

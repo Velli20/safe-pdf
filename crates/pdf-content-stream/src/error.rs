@@ -30,7 +30,7 @@ pub enum PdfOperatorError {
     },
     #[error("Incorrect operand count for operation '{op_name}': expected {expected}, got {got}")]
     IncorrectOperandCount {
-        op_name: &'static str,
+        op_name: String,
         expected: usize,
         got: usize,
     },

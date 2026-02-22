@@ -21,7 +21,7 @@ pub struct SetCharWidthAndBoundingBox {
 }
 
 impl PdfOperator for SetCharWidthAndBoundingBox {
-    const NAME: &'static str = "d1";
+    const NAME: &'static [u8] = b"d1";
 
     const OPERAND_COUNT: Option<usize> = Some(6);
 
@@ -57,7 +57,7 @@ pub struct SetCharWidth {
 }
 
 impl PdfOperator for SetCharWidth {
-    const NAME: &'static str = "d0";
+    const NAME: &'static [u8] = b"d0";
 
     const OPERAND_COUNT: Option<usize> = Some(2);
 

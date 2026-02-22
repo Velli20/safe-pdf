@@ -157,19 +157,21 @@ impl PdfOperatorVariant {
     /// before parsing. Takes `operands` by `&mut` so its heap allocation can be
     /// reclaimed and reused for the next operator.
     fn parse_operator(
-        name: &str,
+        name: &[u8],
         operands: &mut Vec<ObjectVariant>,
     ) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let Some(descriptor) = get_operation_descriptor(name) else {
-            return Err(PdfOperatorError::UnknownOperator(name.to_string()));
+            let name_str = String::from_utf8_lossy(name);
+            return Err(PdfOperatorError::UnknownOperator(name_str.to_string()));
         };
 
         // Validate operand count if the operator has a fixed count requirement.
         if let Some(required_count) = descriptor.operand_count
             && operands.len() != required_count
         {
+            let name_str = String::from_utf8_lossy(name);
             return Err(PdfOperatorError::IncorrectOperandCount {
-                op_name: descriptor.name,
+                op_name: name_str.to_string(),
                 got: operands.len(),
                 expected: required_count,
             });

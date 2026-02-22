@@ -21,7 +21,7 @@ impl ShowText {
 }
 
 impl PdfOperator for ShowText {
-    const NAME: &'static str = "Tj";
+    const NAME: &'static [u8] = b"Tj";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -49,7 +49,7 @@ impl MoveNextLineShowText {
 }
 
 impl PdfOperator for MoveNextLineShowText {
-    const NAME: &'static str = "'";
+    const NAME: &'static [u8] = b"'";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -88,7 +88,7 @@ impl SetSpacingMoveShowText {
 }
 
 impl PdfOperator for SetSpacingMoveShowText {
-    const NAME: &'static str = "\"";
+    const NAME: &'static [u8] = b"\"";
 
     const OPERAND_COUNT: Option<usize> = Some(3);
 
@@ -126,7 +126,7 @@ impl ShowTextArray {
 }
 
 impl PdfOperator for ShowTextArray {
-    const NAME: &'static str = "TJ";
+    const NAME: &'static [u8] = b"TJ";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 

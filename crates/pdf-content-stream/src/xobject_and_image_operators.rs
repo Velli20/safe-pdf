@@ -19,7 +19,7 @@ impl InvokeXObject {
 }
 
 impl PdfOperator for InvokeXObject {
-    const NAME: &'static str = "Do";
+    const NAME: &'static [u8] = b"Do";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -40,7 +40,7 @@ impl PdfOperator for InvokeXObject {
 pub struct BeginInlineImage;
 
 impl PdfOperator for BeginInlineImage {
-    const NAME: &'static str = "BI";
+    const NAME: &'static [u8] = b"BI";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
@@ -68,7 +68,7 @@ pub struct InlineImageData {
 }
 
 impl PdfOperator for InlineImageData {
-    const NAME: &'static str = "ID";
+    const NAME: &'static [u8] = b"ID";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
@@ -80,7 +80,9 @@ impl PdfOperator for InlineImageData {
         // This `read` function, within the current `Operands` model, cannot access or parse
         // the actual image data that follows the ID token.
         // Proper parsing of inline image data requires special handling in the main parser loop.
-        Err(PdfOperatorError::UnimplementedOperation(Self::NAME))
+        Err(PdfOperatorError::UnimplementedOperation(
+            "Parsing inline image data is not implemented in this operator's read function.",
+        ))
     }
 
     fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
@@ -93,7 +95,7 @@ impl PdfOperator for InlineImageData {
 pub struct EndInlineImage;
 
 impl PdfOperator for EndInlineImage {
-    const NAME: &'static str = "EI";
+    const NAME: &'static [u8] = b"EI";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 

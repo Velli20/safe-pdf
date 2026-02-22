@@ -42,7 +42,7 @@ impl PdfParser<'_> {
             // Read exactly one byte; reaching EOF without closing means unbalanced parentheses
             let b = self
                 .tokenizer
-                .read_excactly(1)?
+                .read_exactly(1)?
                 .first()
                 .copied()
                 .ok_or(LiteralStringObjectError::UnbalancedParentheses)?;
@@ -76,7 +76,7 @@ impl PdfParser<'_> {
                             }
                             if extra > 0 {
                                 // Consume exactly `extra` digits now.
-                                let next_bytes = self.tokenizer.read_excactly(extra)?;
+                                let next_bytes = self.tokenizer.read_exactly(extra)?;
                                 for &nb in next_bytes {
                                     value = value.saturating_mul(8)
                                         | u32::from(nb.saturating_sub(b'0'));

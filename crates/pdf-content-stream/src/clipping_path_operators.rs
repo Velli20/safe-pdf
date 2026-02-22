@@ -9,7 +9,7 @@ use crate::{
 pub struct ClipNonZero;
 
 impl PdfOperator for ClipNonZero {
-    const NAME: &'static str = "W";
+    const NAME: &'static [u8] = b"W";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
@@ -27,7 +27,7 @@ impl PdfOperator for ClipNonZero {
 pub struct ClipEvenOdd;
 
 impl PdfOperator for ClipEvenOdd {
-    const NAME: &'static str = "W*";
+    const NAME: &'static [u8] = b"W*";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 

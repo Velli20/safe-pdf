@@ -19,7 +19,7 @@ impl SetGrayFill {
 }
 
 impl PdfOperator for SetGrayFill {
-    const NAME: &'static str = "g";
+    const NAME: &'static [u8] = b"g";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -48,7 +48,7 @@ impl SetGrayStroke {
 }
 
 impl PdfOperator for SetGrayStroke {
-    const NAME: &'static str = "G";
+    const NAME: &'static [u8] = b"G";
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
@@ -81,7 +81,7 @@ impl SetRGBFill {
 }
 
 impl PdfOperator for SetRGBFill {
-    const NAME: &'static str = "rg";
+    const NAME: &'static [u8] = b"rg";
 
     const OPERAND_COUNT: Option<usize> = Some(3);
 
@@ -116,7 +116,7 @@ impl SetRGBStroke {
 }
 
 impl PdfOperator for SetRGBStroke {
-    const NAME: &'static str = "RG";
+    const NAME: &'static [u8] = b"RG";
 
     const OPERAND_COUNT: Option<usize> = Some(3);
 
@@ -153,7 +153,7 @@ impl SetCMYKFill {
 }
 
 impl PdfOperator for SetCMYKFill {
-    const NAME: &'static str = "k";
+    const NAME: &'static [u8] = b"k";
 
     const OPERAND_COUNT: Option<usize> = Some(4);
 
@@ -191,7 +191,7 @@ impl SetCMYKStroke {
 }
 
 impl PdfOperator for SetCMYKStroke {
-    const NAME: &'static str = "K";
+    const NAME: &'static [u8] = b"K";
 
     const OPERAND_COUNT: Option<usize> = Some(4);
 
@@ -222,7 +222,7 @@ impl SetStrokeColorSpace {
 }
 
 impl PdfOperator for SetStrokeColorSpace {
-    const NAME: &'static str = "CS";
+    const NAME: &'static [u8] = b"CS";
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
@@ -249,7 +249,7 @@ impl SetNonStrokingColorSpace {
 }
 
 impl PdfOperator for SetNonStrokingColorSpace {
-    const NAME: &'static str = "cs";
+    const NAME: &'static [u8] = b"cs";
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
@@ -284,7 +284,7 @@ impl SetStrokingColor {
 }
 
 impl PdfOperator for SetStrokingColor {
-    const NAME: &'static str = "SCN";
+    const NAME: &'static [u8] = b"SCN";
     const OPERAND_COUNT: Option<usize> = None;
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
@@ -342,7 +342,7 @@ impl SetNonStrokingColor {
 }
 
 impl PdfOperator for SetNonStrokingColor {
-    const NAME: &'static str = "scn";
+    const NAME: &'static [u8] = b"scn";
     const OPERAND_COUNT: Option<usize> = None;
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
@@ -387,7 +387,7 @@ impl PdfOperator for SetNonStrokingColor {
 pub struct SetNonStrokingColorSc;
 
 impl PdfOperator for SetNonStrokingColorSc {
-    const NAME: &'static str = "sc";
+    const NAME: &'static [u8] = b"sc";
     const OPERAND_COUNT: Option<usize> = None;
 
     fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
@@ -404,7 +404,7 @@ impl PdfOperator for SetNonStrokingColorSc {
 
         if values.is_empty() {
             return Err(PdfOperatorError::IncorrectOperandCount {
-                op_name: Self::NAME,
+                op_name: "sc".to_string(),
                 expected: 1,
                 got: 0,
             });
@@ -423,7 +423,7 @@ impl PdfOperator for SetNonStrokingColorSc {
 pub struct SetStrokingColorSc;
 
 impl PdfOperator for SetStrokingColorSc {
-    const NAME: &'static str = "SC";
+    const NAME: &'static [u8] = b"SC";
     const OPERAND_COUNT: Option<usize> = None;
 
     fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
@@ -440,7 +440,7 @@ impl PdfOperator for SetStrokingColorSc {
 
         if values.is_empty() {
             return Err(PdfOperatorError::IncorrectOperandCount {
-                op_name: Self::NAME,
+                op_name: "SC".to_string(),
                 expected: 1,
                 got: 0,
             });

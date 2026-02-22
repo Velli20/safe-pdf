@@ -22,7 +22,7 @@ use crate::{
 /// This is used to dynamically dispatch to the correct parsing logic based on the operator
 /// encountered in the PDF content.
 pub struct OpDescriptor {
-    pub name: &'static str,
+    pub name: &'static [u8],
     pub operand_count: Option<usize>,
     pub parser: fn(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError>,
 }
@@ -113,7 +113,7 @@ pub(crate) const READ_MAP: &[OpDescriptor] = &[
     OpDescriptor::from::<CurveToY>(),               // "y"
 ];
 
-pub fn get_operation_descriptor(name: &str) -> Option<&'static OpDescriptor> {
+pub fn get_operation_descriptor(name: &[u8]) -> Option<&'static OpDescriptor> {
     READ_MAP
         .binary_search_by(|op| op.name.cmp(name))
         .ok()

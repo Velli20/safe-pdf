@@ -21,7 +21,7 @@ impl MoveTo {
 }
 
 impl PdfOperator for MoveTo {
-    const NAME: &'static str = "m";
+    const NAME: &'static [u8] = b"m";
 
     const OPERAND_COUNT: Option<usize> = Some(2);
 
@@ -53,7 +53,7 @@ impl LineTo {
 }
 
 impl PdfOperator for LineTo {
-    const NAME: &'static str = "l";
+    const NAME: &'static [u8] = b"l";
 
     const OPERAND_COUNT: Option<usize> = Some(2);
 
@@ -101,7 +101,7 @@ impl CurveTo {
 }
 
 impl PdfOperator for CurveTo {
-    const NAME: &'static str = "c";
+    const NAME: &'static [u8] = b"c";
 
     const OPERAND_COUNT: Option<usize> = Some(6);
 
@@ -145,7 +145,7 @@ impl CurveToV {
 }
 
 impl PdfOperator for CurveToV {
-    const NAME: &'static str = "v";
+    const NAME: &'static [u8] = b"v";
 
     const OPERAND_COUNT: Option<usize> = Some(4);
 
@@ -184,7 +184,7 @@ impl CurveToY {
 }
 
 impl PdfOperator for CurveToY {
-    const NAME: &'static str = "y";
+    const NAME: &'static [u8] = b"y";
 
     const OPERAND_COUNT: Option<usize> = Some(4);
 
@@ -207,7 +207,7 @@ impl PdfOperator for CurveToY {
 pub struct ClosePath;
 
 impl PdfOperator for ClosePath {
-    const NAME: &'static str = "h";
+    const NAME: &'static [u8] = b"h";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
@@ -247,7 +247,7 @@ impl Rectangle {
 }
 
 impl PdfOperator for Rectangle {
-    const NAME: &'static str = "re";
+    const NAME: &'static [u8] = b"re";
 
     const OPERAND_COUNT: Option<usize> = Some(4);
 
