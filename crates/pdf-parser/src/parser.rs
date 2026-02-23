@@ -44,17 +44,24 @@ impl PdfParser<'_> {
         )
     }
 
-    /// Consumes an end-of-line marker from the input stream if one is present.
+    /// Consumes exactly one end-of-line marker from the input stream if one is present.
     ///
-    /// Valid EOL markers are `\n`, `\r`, or `\r\n`. If none is present, does nothing.
-    pub(crate) fn try_read_end_of_line_marker(&mut self) -> Result<(), ParserError> {
-        if let Some(PdfToken::CarriageReturn) = self.tokenizer.peek() {
-            self.tokenizer.read();
+    /// Valid EOL sequences are `\r\n` (CRLF), `\r` (CR), or `\n` (LF), consumed in that
+    /// priority order. If no EOL marker is present at the current position, does nothing.
+    pub(crate) fn try_read_end_of_line_marker(&mut self) {
+        match self.tokenizer.data().first().copied() {
+            Some(b'\r') => {
+                let _ = self.tokenizer.read();
+                // Consume a following LF to handle the CRLF sequence.
+                if matches!(self.tokenizer.data().first().copied(), Some(b'\n')) {
+                    let _ = self.tokenizer.read();
+                }
+            }
+            Some(b'\n') => {
+                let _ = self.tokenizer.read();
+            }
+            _ => {}
         }
-        if let Some(PdfToken::NewLine) = self.tokenizer.peek() {
-            self.tokenizer.read();
-        }
-        Ok(())
     }
 
     /// Advances past any whitespace characters at the current position.
@@ -66,14 +73,19 @@ impl PdfParser<'_> {
     ///
     /// Repeatedly advances past whitespace and `% ... EOL` comment sequences
     /// until a non-whitespace, non-comment token is reached.
-    pub(crate) fn skip_whitespace_and_comments(&mut self) {
+    ///
+    /// Per the PDF spec, a comment runs from `%` to (but not including) the
+    /// next CR, LF, or CRLF end-of-line sequence, which is then consumed.
+    /// The `%%` token is not treated as a comment start here; it is handled
+    /// separately as the `%%EOF` end-of-file marker.
+    pub fn skip_whitespace_and_comments(&mut self) {
         loop {
             self.skip_whitespace();
             if let Some(PdfToken::Percent) = self.tokenizer.peek() {
-                // Consume the '%' and everything up to EOL.
+                // Consume the '%' and everything up to (not including) the EOL.
                 self.tokenizer.read();
                 let _ = self.tokenizer.read_while_u8(|c| c != b'\n' && c != b'\r');
-                let _ = self.try_read_end_of_line_marker();
+                self.try_read_end_of_line_marker();
             } else {
                 break;
             }
@@ -151,21 +163,21 @@ impl PdfParser<'_> {
         }
 
         // Consume trailing EOL if present (keywords in arrays/dicts may not have one).
-        self.try_read_end_of_line_marker()
+        self.try_read_end_of_line_marker();
+        Ok(())
     }
 
     fn parse_object_internal(
         &mut self,
         objects: &dyn ObjectResolver,
     ) -> Result<ObjectVariant, ParserError> {
-        self.skip_whitespace();
+        self.skip_whitespace_and_comments();
 
         let Some(token) = self.tokenizer.peek() else {
             return Ok(ObjectVariant::EndOfFile);
         };
 
         let value = match token {
-            PdfToken::Percent => ObjectVariant::Comment(self.parse_comment()?),
             PdfToken::DoublePercent => {
                 self.tokenizer.read();
                 const EOF_KEYWORD: &[u8] = b"EOF";
@@ -270,5 +282,156 @@ mod tests {
         let mut parser = PdfParser::from(input.as_slice());
         let result = parser.parse_object(&UnimplementedResolver);
         assert!(result.is_ok());
+    }
+
+    mod skip_whitespace_and_comments {
+        use super::*;
+
+        fn remaining<'a>(p: &'a PdfParser<'a>) -> &'a [u8] {
+            p.tokenizer.data()
+        }
+
+        #[test]
+        fn empty_input() {
+            let mut p = PdfParser::from(b"".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"");
+        }
+
+        #[test]
+        fn no_whitespace_or_comments() {
+            let mut p = PdfParser::from(b"content".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        #[test]
+        fn spaces_and_tabs_only() {
+            let mut p = PdfParser::from(b"   \t   content".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        #[test]
+        fn newlines_only() {
+            let mut p = PdfParser::from(b"\n\r\r\n\ncontent".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        #[test]
+        fn comment_terminated_by_lf() {
+            let mut p = PdfParser::from(b"% comment\ncontent".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        #[test]
+        fn comment_terminated_by_cr() {
+            let mut p = PdfParser::from(b"% comment\rcontent".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        #[test]
+        fn comment_terminated_by_crlf() {
+            let mut p = PdfParser::from(b"% comment\r\ncontent".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        /// A comment with no trailing newline runs to end-of-file.
+        #[test]
+        fn comment_at_end_of_file() {
+            let mut p = PdfParser::from(b"% no newline".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"");
+        }
+
+        #[test]
+        fn empty_comment_body() {
+            let mut p = PdfParser::from(b"%\ncontent".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        #[test]
+        fn multiple_consecutive_comments() {
+            let mut p = PdfParser::from(b"% first\n% second\n% third\ncontent".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        #[test]
+        fn whitespace_before_comment() {
+            let mut p = PdfParser::from(b"   % comment\ncontent".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        #[test]
+        fn whitespace_after_comment() {
+            let mut p = PdfParser::from(b"% comment\n   content".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        #[test]
+        fn mixed_whitespace_and_comments() {
+            let input = b"\n% line 1\n\n% line 2\r\n  content";
+            let mut p = PdfParser::from(input.as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        /// `%` inside a comment body does not start a nested comment.
+        #[test]
+        fn percent_inside_comment_body() {
+            let mut p = PdfParser::from(b"% 50% off\ncontent".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        /// High bytes (e.g. binary PDF marker `%âãÏÓ`) are treated as comment body.
+        #[test]
+        fn high_byte_chars_in_comment() {
+            let mut p = PdfParser::from(b"% \xe2\xe3\xcf\xd3\ncontent".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        /// NUL bytes inside a comment body are consumed without error.
+        #[test]
+        fn nul_byte_in_comment_body() {
+            let mut p = PdfParser::from(b"% text\x00more\ncontent".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        /// `%%` is tokenised as `DoublePercent`, not `Percent`, so it is NOT
+        /// consumed as a comment — it remains for the caller (e.g. `%%EOF` detection).
+        #[test]
+        fn double_percent_not_skipped() {
+            let mut p = PdfParser::from(b"%%EOF".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"%%EOF");
+        }
+
+        /// CRLF is consumed as a single two-byte EOL sequence.
+        #[test]
+        fn crlf_consumed_as_single_eol() {
+            let mut p = PdfParser::from(b"% first\r\n% second\ncontent".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        /// Whitespace-only input spanning all PDF whitespace character values.
+        #[test]
+        fn all_pdf_whitespace_chars() {
+            // NUL, HT, LF, FF, CR, SP
+            let mut p = PdfParser::from(b"\x00\t\n\x0C\r content".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
     }
 }

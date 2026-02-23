@@ -34,8 +34,6 @@ pub enum ObjectVariant {
     Null,
     /// A hexadecimal string represented as raw bytes.
     HexString(Vec<u8>),
-    /// A comment encountered in the PDF content.
-    Comment(String),
     /// The trailer dictionary object.
     Trailer(Trailer),
     /// The cross-reference table object.
@@ -383,7 +381,6 @@ impl ObjectVariant {
             ObjectVariant::Null => "Null",
             ObjectVariant::Stream(_) => "Stream",
             ObjectVariant::HexString(_) => "HexString",
-            ObjectVariant::Comment(_) => "Comment",
             ObjectVariant::Trailer(_) => "Trailer",
             ObjectVariant::CrossReferenceTable(_) => "CrossReferenceTable",
             ObjectVariant::EndOfFile => "EndOfFile",

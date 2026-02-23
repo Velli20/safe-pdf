@@ -438,6 +438,12 @@ fn load_objects_with_decryption(
             continue;
         };
 
+        // Offset 0 always points to the PDF header, not a valid indirect object.
+        // Some PDF generators emit normal entries with offset 0 for deleted/null objects.
+        if byte_offset == 0 {
+            continue;
+        }
+
         let object = parser.parse_object_at(byte_offset, &objects)?;
 
         if matches!(object, ObjectVariant::Reference(_)) {

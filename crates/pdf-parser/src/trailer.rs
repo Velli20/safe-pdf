@@ -26,7 +26,7 @@ impl PdfParser<'_> {
             other => return Err(ObjectError::TypeMismatch("Dictionary", other.name()).into()),
         };
 
-        self.try_read_end_of_line_marker()?;
+        self.try_read_end_of_line_marker();
 
         // Read the `startxref` keyword.
         self.read_keyword(START_XREF_KEYWORD)?;
