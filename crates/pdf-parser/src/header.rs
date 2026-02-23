@@ -57,7 +57,7 @@ impl PdfParser<'_> {
             .parse::<u8>()
             .map_err(|e| HeaderError::InvalidMinorVersion(minor_str.to_string(), e))?;
 
-        self.try_read_end_of_line_marker()?;
+        self.try_read_end_of_line_marker();
 
         Ok(Version::new(major, minor))
     }

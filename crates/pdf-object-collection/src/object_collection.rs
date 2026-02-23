@@ -173,7 +173,6 @@ impl ObjectCollection {
                 });
                 json!({ "type": "HexString", "value": hex })
             }
-            ObjectVariant::Comment(c) => json!({ "type": "Comment", "value": c }),
             ObjectVariant::Trailer(trailer) => {
                 json!({
                     "type": "Trailer",

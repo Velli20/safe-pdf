@@ -123,15 +123,11 @@ impl PdfOperatorVariant {
         let mut operands = Vec::with_capacity(6);
 
         loop {
-            parser.skip_whitespace();
+            parser.skip_whitespace_and_comments();
 
             // Dispatch on the next raw byte.
             match parser.tokenizer.data().first() {
                 None => break,
-                // Skip comments.
-                Some(b'%') => {
-                    parser.parse_comment()?;
-                }
                 // ' and " are valid PDF operators that the tokenizer does not
                 // surface as Alphabetic tokens. Handle them alongside ASCII
                 // letters in a single arm.

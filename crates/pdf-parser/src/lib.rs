@@ -1,6 +1,5 @@
 mod array;
 mod boolean;
-pub mod comment;
 pub mod cross_reference_stream;
 mod cross_reference_table;
 mod dictionary;
