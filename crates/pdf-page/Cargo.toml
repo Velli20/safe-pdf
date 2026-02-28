@@ -13,7 +13,7 @@ pdf-object-collection = { path = "../pdf-object-collection" }
 pdf-content-stream = { path = "../pdf-content-stream" }
 pdf-font = { path = "../pdf-font" }
 pdf-graphics = { path = "../pdf-graphics" }
-pdf-postscript = { path = "../pdf-postscript" }
+pdf-function = { path = "../pdf-function" }
 thiserror = "2.0.12"
 num-traits = "0.2.19"
 num-derive = "0.4"

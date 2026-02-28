@@ -1,7 +1,5 @@
-use crate::{
-    color_space::ColorSpace,
-    functions::{Function, FunctionImpl, FunctionInterpolationError},
-};
+use crate::color_space::ColorSpace;
+use pdf_function::function::{Function, FunctionImpl, FunctionInterpolationError};
 use pdf_graphics::color::Color;
 
 /// Default domain range for shading functions when not explicitly specified.
@@ -178,7 +176,7 @@ mod tests {
 
     #[test]
     fn separation_transforms_and_converts() -> Result<(), FunctionInterpolationError> {
-        use crate::functions::exponential_interpolation::ExponentialFunction;
+        use pdf_function::exponential_interpolation::ExponentialFunction;
 
         // Linear transform: Black (0,0,0) to Red (1,0,0)
         let exp_func =

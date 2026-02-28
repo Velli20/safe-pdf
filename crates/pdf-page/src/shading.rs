@@ -21,7 +21,9 @@ use thiserror::Error;
 use crate::{
     color_space::{ColorSpace, ColorSpaceError},
     color_stops::ColorStops,
-    functions::{Function, FunctionImpl, FunctionInterpolationError, FunctionReadError},
+};
+use pdf_function::function::{
+    Function, FunctionImpl, FunctionInterpolationError, FunctionReadError,
 };
 
 /// Errors that can occur while parsing or processing a Shading object.

@@ -1,6 +1,6 @@
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
-use crate::functions::{
+use crate::function::{
     Function, FunctionImpl, FunctionInterpolationError, FunctionReadError, clamp_and_normalize,
 };
 
@@ -17,8 +17,7 @@ pub struct ExponentialFunction {
 }
 
 impl ExponentialFunction {
-    #[allow(dead_code)]
-    pub(crate) fn new(c0: Vec<f32>, c1: Vec<f32>, exponent: f32, domain: [f32; 2]) -> Self {
+    pub fn new(c0: Vec<f32>, c1: Vec<f32>, exponent: f32, domain: [f32; 2]) -> Self {
         Self {
             c0,
             c1,

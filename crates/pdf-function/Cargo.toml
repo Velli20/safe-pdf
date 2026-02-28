@@ -1,0 +1,15 @@
+[package]
+name = "pdf-function"
+version = "0.1.0"
+edition = "2024"
+
+# Inherit all lint configurations from the workspace root
+[lints]
+workspace = true
+
+[dependencies]
+pdf-object = { path = "../pdf-object" }
+pdf-postscript = { path = "../pdf-postscript" }
+thiserror = "2.0.12"
+num-traits = "0.2.19"
+num-derive = "0.4"
