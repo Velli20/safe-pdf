@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
-use crate::functions::{
+use crate::function::{
     Function, FunctionImpl, FunctionInterpolationError, FunctionReadError, get_pair,
     linear_interpolate,
 };

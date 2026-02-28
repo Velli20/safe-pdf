@@ -2,7 +2,7 @@ use num_derive::FromPrimitive;
 use num_traits::{FromPrimitive, ToPrimitive};
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
-use crate::functions::{
+use crate::function::{
     Function, FunctionImpl, FunctionInterpolationError, FunctionReadError, ensure_stream_len,
     get_pair, linear_interpolate,
 };

@@ -4,7 +4,7 @@ use pdf_object::{
 };
 use thiserror::Error;
 
-use crate::functions::{Function, FunctionImpl, FunctionReadError};
+use pdf_function::function::{Function, FunctionImpl, FunctionReadError};
 
 /// Maximum nesting depth for color space definitions.
 ///
