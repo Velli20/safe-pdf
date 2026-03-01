@@ -1,4 +1,3 @@
-pub mod color_space;
 pub mod color_stops;
 pub mod external_graphics_state;
 pub mod form;
@@ -12,6 +11,5 @@ pub mod resources;
 pub mod shading;
 pub mod xobject;
 
-pub mod functions;
 pub mod resource;
 pub mod resource_cache;

@@ -17,9 +17,12 @@ use pdf_object::{
 use thiserror::Error;
 
 use crate::{
-    color_space::{ColorSpace, ColorSpaceError},
     resource_cache::ResourceCache,
     xobject::{XObject, XObjectError},
+};
+use pdf_color_space::{
+    color_space::{ColorSpace, ColorSpaceError},
+    indexed_color_space::IndexedColorSpace,
 };
 
 /// Errors that can occur when parsing or processing PDF Image XObjects.
@@ -179,11 +182,11 @@ impl ImageXObject {
         // reject the image.
         let (image_data, stored_color_space, num_color_components): (Cow<[u8]>, _, usize) =
             match color_space {
-                Some(ColorSpace::Indexed {
+                Some(ColorSpace::Indexed(IndexedColorSpace {
                     base,
                     hival,
                     lookup,
-                }) => {
+                })) => {
                     let base_components = base.num_color_components();
                     let expanded =
                         Self::expand_indexed(raw_data.as_ref(), base_components, hival, &lookup);

@@ -1859,6 +1859,7 @@ name = "pdf-canvas"
 version = "0.1.0"
 dependencies = [
  "num-traits",
+ "pdf-color-space",
  "pdf-content-stream",
  "pdf-font",
  "pdf-graphics",
@@ -1866,6 +1867,16 @@ dependencies = [
  "pdf-page",
  "read-fonts",
  "skrifa",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "pdf-color-space"
+version = "0.1.0"
+dependencies = [
+ "pdf-function",
+ "pdf-graphics",
+ "pdf-object",
  "thiserror 2.0.12",
 ]
 
@@ -1982,6 +1993,7 @@ dependencies = [
  "flate2",
  "num-derive",
  "num-traits",
+ "pdf-color-space",
  "pdf-content-stream",
  "pdf-font",
  "pdf-function",

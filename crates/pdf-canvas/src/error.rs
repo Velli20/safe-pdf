@@ -1,3 +1,4 @@
+use pdf_color_space::color_space::ColorSpaceError;
 use thiserror::Error;
 
 use crate::truetype_font_renderer::TrueTypeFontRendererError;
@@ -18,6 +19,8 @@ pub enum PdfCanvasError {
     InvalidFont(&'static str),
     #[error("Font '{0}' not found")]
     FontNotFound(String),
+    #[error("Color space '{0}' not found in resources")]
+    ColorSpaceNotFound(String),
     #[error("Pattern '{0}' not found")]
     PatternNotFound(String),
     #[error("Graphics state dictionary '{0}' not found in resources")]
@@ -42,8 +45,12 @@ pub enum PdfCanvasError {
     NumericConversionError(&'static str),
     #[error("Invalid image data: {0}")]
     InvalidImageData(String),
+    #[error("No current color space is set for this operation")]
+    ColorSpaceNotSet,
     #[error("Not implemented: {0}")]
     NotImplemented(String),
     #[error("Canvas backend error: {0}")]
     BackendError(String),
+    #[error("Color space error: {0}")]
+    ColorSpaceError(#[from] ColorSpaceError),
 }

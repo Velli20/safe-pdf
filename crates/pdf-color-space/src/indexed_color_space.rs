@@ -1,0 +1,151 @@
+use pdf_graphics::color::Color;
+use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+
+use crate::{
+    color_space::{ColorSpace, ColorSpaceError},
+    color_space_reader::parse_color_space_object,
+};
+
+/// Indexed (palette-based) color space.
+///
+/// Maps integer indices to colors in a base color space via a lookup table.
+/// Commonly used for images with a limited color palette.
+#[derive(Debug, Clone)]
+pub struct IndexedColorSpace {
+    /// The underlying color space for palette entries.
+    pub base: Box<ColorSpace>,
+    /// Maximum valid index value (0 to 255). The palette contains `hival + 1` entries.
+    pub hival: u8,
+    /// Raw lookup table bytes. Each entry contains `base.num_color_components()` bytes.
+    pub lookup: Vec<u8>,
+}
+
+/// Parses an Indexed color space: `[/Indexed base hival lookup]`
+///
+/// - `base`: The base color space for palette entries
+/// - `hival`: Maximum index value (0-255)
+/// - `lookup`: Lookup table (string or stream)
+pub(crate) fn parse_indexed_color_space(
+    objects: &dyn ObjectResolver,
+    arr: &[ObjectVariant],
+    depth: usize,
+) -> Result<ColorSpace, ColorSpaceError> {
+    // Expected format: [/Indexed base hival lookup]
+    let [_, base, hival, lookup] = arr else {
+        return Err(ColorSpaceError::InvalidColorSpace {
+            description: format!("/Indexed requires 4 elements, found {}", arr.len()),
+        });
+    };
+
+    let base_cs = parse_color_space_object(objects, base, depth)?;
+    let hival = hival.try_number::<u8>(objects)?;
+    let lookup = extract_lookup_table(objects, lookup)?;
+
+    Ok(ColorSpace::Indexed(IndexedColorSpace {
+        base: Box::new(base_cs),
+        hival,
+        lookup,
+    }))
+}
+
+/// Extracts the lookup table bytes from an Indexed color space.
+///
+/// The lookup table can be either a string/hex-string or a stream.
+fn extract_lookup_table(
+    objects: &dyn ObjectResolver,
+    lookup: &ObjectVariant,
+) -> Result<Vec<u8>, ColorSpaceError> {
+    if let Ok(data) = lookup.try_bytes(objects) {
+        return Ok(data.to_vec());
+    }
+    Ok(lookup.try_stream(objects)?.data()?.into_owned())
+}
+
+/// Converts a raw palette entry (byte slice) to a [`Color`] using the given base color space.
+///
+/// Each byte in `entry` encodes a color component in the range 0–255.
+pub(crate) fn indexed_entry_to_color(
+    base: &ColorSpace,
+    entry: &[u8],
+) -> Result<Color, ColorSpaceError> {
+    match base {
+        ColorSpace::DeviceGray => {
+            let g = f32::from(*entry.first().ok_or_else(|| {
+                ColorSpaceError::IndexedColorSpaceError(
+                    "Gray Indexed palette entry is empty".into(),
+                )
+            })?) / 255.0;
+            Ok(Color::from_gray(g))
+        }
+        ColorSpace::DeviceRGB => match *entry {
+            [r, g, b] => Ok(Color::from_rgb(
+                f32::from(r) / 255.0,
+                f32::from(g) / 255.0,
+                f32::from(b) / 255.0,
+            )),
+            _ => Err(ColorSpaceError::IndexedColorSpaceError(format!(
+                "Indexed RGB palette entry expected 3 bytes, got {}",
+                entry.len()
+            ))),
+        },
+        ColorSpace::DeviceCMYK => match *entry {
+            [c, m, y, k] => Ok(Color::from_cmyk(
+                f32::from(c) / 255.0,
+                f32::from(m) / 255.0,
+                f32::from(y) / 255.0,
+                f32::from(k) / 255.0,
+            )),
+            _ => Err(ColorSpaceError::IndexedColorSpaceError(format!(
+                "Indexed CMYK palette entry expected 4 bytes, got {}",
+                entry.len()
+            ))),
+        },
+        _ => {
+            // Generic fallback: normalise each byte to [0.0, 1.0] and delegate
+            // to the base color space.
+            let n = base.num_color_components();
+            if entry.len() != n {
+                return Err(ColorSpaceError::IndexedColorSpaceError(format!(
+                    "Indexed palette entry: expected {n} bytes, got {}",
+                    entry.len()
+                )));
+            }
+            let components: Vec<f32> = entry.iter().map(|&b| f32::from(b) / 255.0).collect();
+            base.apply(&components)
+        }
+    }
+}
+
+impl IndexedColorSpace {
+    pub(crate) fn apply(&self, components: &[f32]) -> Result<Color, ColorSpaceError> {
+        let index = components
+            .first()
+            .copied()
+            .ok_or(ColorSpaceError::InsufficientComponents(1, components.len()))?;
+        let rounded = index.round();
+        if !rounded.is_finite() || rounded < 0.0 {
+            return Err(ColorSpaceError::Unsupported(format!(
+                "Indexed color index out of range: {rounded}"
+            )));
+        }
+
+        let bounded = rounded.min(f32::from(self.hival));
+        let idx = (0..=self.hival)
+            .find(|candidate| f32::from(*candidate) == bounded)
+            .map(usize::from)
+            .ok_or_else(|| {
+                ColorSpaceError::Unsupported(format!("Indexed color index out of range: {rounded}"))
+            })?;
+        let n = self.base.num_color_components();
+        let offset = idx.saturating_mul(n);
+        let entry = self
+            .lookup
+            .get(offset..offset.saturating_add(n))
+            .ok_or_else(|| {
+                ColorSpaceError::Unsupported(format!(
+                    "Indexed color lookup out of bounds at index {idx}"
+                ))
+            })?;
+        indexed_entry_to_color(&self.base, entry)
+    }
+}

@@ -1,3 +1,4 @@
+use pdf_color_space::color_space::ColorSpace;
 use pdf_graphics::{
     BlendMode, LineCap, LineJoin, TextRenderingMode, color::Color, pdf_path::PdfPath,
     transform::Transform,
@@ -38,6 +39,10 @@ pub(crate) struct CanvasState<'a> {
     pub blend_mode: Option<BlendMode>,
     /// The current text rendering mode.
     pub rendering_mode: Option<TextRenderingMode>,
+    /// The current color space for stroking operations.
+    pub stroke_color_space: Option<&'a ColorSpace>,
+    /// The current color space for non-stroking operations.
+    pub fill_color_space: Option<&'a ColorSpace>,
 }
 
 impl CanvasState<'_> {
@@ -49,6 +54,16 @@ impl CanvasState<'_> {
     pub const DEFAULT_STROKE_COLOR: Color = Color::from_rgb(0.0, 0.0, 0.0);
     /// Default miter limit.
     const DEFAULT_MITER_LIMIT: f32 = 10.0;
+    /// Default color space for both stroking and non-stroking operations.
+    const DEFAULT_COLOR_SPACE: ColorSpace = ColorSpace::DeviceGray;
+    /// Static DeviceGray color space.
+    pub const DEVICE_GRAY_COLOR_SPACE: ColorSpace = ColorSpace::DeviceGray;
+    /// Static DeviceRGB color space.
+    pub const DEVICE_RGB_COLOR_SPACE: ColorSpace = ColorSpace::DeviceRGB;
+    /// Static DeviceCMYK color space.
+    pub const DEVICE_CMYK_COLOR_SPACE: ColorSpace = ColorSpace::DeviceCMYK;
+    /// Static bare Pattern color space (no underlying space).
+    pub const PATTERN_COLOR_SPACE: ColorSpace = ColorSpace::Pattern(None);
 }
 
 impl Default for CanvasState<'_> {
@@ -68,6 +83,8 @@ impl Default for CanvasState<'_> {
             line_join: LineJoin::Miter,
             blend_mode: None,
             rendering_mode: None,
+            stroke_color_space: Some(&Self::DEFAULT_COLOR_SPACE),
+            fill_color_space: Some(&Self::DEFAULT_COLOR_SPACE),
         }
     }
 }

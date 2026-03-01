@@ -10,9 +10,10 @@
 
 use std::borrow::Cow;
 
+use pdf_color_space::{color_space::ColorSpace, indexed_color_space::IndexedColorSpace};
 use pdf_content_stream::pdf_operator_backend::XObjectOps;
 use pdf_graphics::{rect::Rect, transform::Transform};
-use pdf_page::{color_space::ColorSpace, image::ImageXObject, xobject::XObject};
+use pdf_page::{image::ImageXObject, xobject::XObject};
 
 use crate::{
     canvas_backend::{CanvasBackend, Image, ImageData},
@@ -319,11 +320,11 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         image: &'a ImageXObject,
     ) -> Result<Cow<'a, [u8]>, PdfCanvasError> {
         match image.color_space.as_ref() {
-            Some(ColorSpace::Indexed {
+            Some(ColorSpace::Indexed(IndexedColorSpace {
                 base,
                 hival,
                 lookup,
-            }) if matches!(base.as_ref(), ColorSpace::DeviceRGB) => {
+            })) if matches!(base.as_ref(), ColorSpace::DeviceRGB) => {
                 let expanded = expand_indexed_to_rgb(
                     &image.data,
                     lookup,

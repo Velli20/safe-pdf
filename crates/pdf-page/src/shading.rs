@@ -18,10 +18,9 @@ use pdf_object::{
 };
 use thiserror::Error;
 
-use crate::{
-    color_space::{ColorSpace, ColorSpaceError},
-    color_stops::ColorStops,
-};
+use crate::color_stops::ColorStops;
+use crate::pages::PdfPagesError;
+use pdf_color_space::color_space::{ColorSpace, ColorSpaceError};
 use pdf_function::function::{
     Function, FunctionImpl, FunctionInterpolationError, FunctionReadError,
 };
@@ -43,6 +42,8 @@ pub enum ShadingError {
     ObjectError(#[from] ObjectError),
     #[error("ColorSpace error: {0}")]
     ColorSpaceError(#[from] ColorSpaceError),
+    #[error("Error computing color stops: {0}")]
+    ColorStopsError(Box<PdfPagesError>),
 }
 
 /// Represents the PDF `/ShadingType` entry value.
@@ -290,7 +291,8 @@ impl Shading {
         let function = Function::parse(object, objects)?;
 
         // Pre-compute color stops.
-        let color_stops = ColorStops::from_function(&function, &color_space)?;
+        let color_stops = ColorStops::from_function(&function, &color_space)
+            .map_err(|e| ShadingError::ColorStopsError(Box::new(e)))?;
 
         Ok(Self::Axial {
             color_space,
@@ -329,7 +331,8 @@ impl Shading {
         let function = Function::parse(object, objects)?;
 
         // Pre-compute color stops.
-        let color_stops = ColorStops::from_function(&function, &color_space)?;
+        let color_stops = ColorStops::from_function(&function, &color_space)
+            .map_err(|e| ShadingError::ColorStopsError(Box::new(e)))?;
 
         Ok(Self::Radial {
             color_space,

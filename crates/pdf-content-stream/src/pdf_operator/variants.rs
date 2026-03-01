@@ -121,7 +121,6 @@ impl PdfOperatorVariant {
         let mut parser = PdfParser::from(input);
         // PDF operators have at most ~6 operands; pre-allocate to avoid reallocs.
         let mut operands = Vec::with_capacity(6);
-
         loop {
             parser.skip_whitespace_and_comments();
 

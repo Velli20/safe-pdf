@@ -225,6 +225,13 @@ impl FunctionImpl for Function {
     }
 }
 
+impl Function {
+    /// Evaluates the function for a single input value, clamped to its domain.
+    pub fn apply(&self, input: f32) -> Result<Vec<f32>, FunctionInterpolationError> {
+        FunctionImpl::interpolate(self, input)
+    }
+}
+
 /// Clamps a value to a domain and returns the normalized position in `[0, 1]`.
 ///
 /// Returns `None` if the domain is degenerate (min >= max).

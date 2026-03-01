@@ -19,6 +19,7 @@ use crate::{
     shading::{Shading, ShadingError},
     xobject::{XObject, XObjectError},
 };
+use pdf_color_space::color_space::{ColorSpace, ColorSpaceError};
 
 /// Contains all resources referenced by a PDF content stream.
 ///
@@ -41,6 +42,8 @@ pub enum ResourcesError {
     PatternError(#[from] PatternError),
     #[error("{0}")]
     ObjectError(#[from] ObjectError),
+    #[error("{0}")]
+    ColorSpaceError(#[from] ColorSpaceError),
     #[error("Shading parsing error: {0}")]
     ShadingError(#[from] ShadingError),
     #[error("Error parsing content stream: {0}")]
@@ -209,6 +212,34 @@ fn read_shadings(
     Ok(result)
 }
 
+fn read_color_spaces(
+    resources: &Dictionary,
+    objects: &dyn ObjectResolver,
+    cache: &mut dyn ResourceCache,
+) -> Result<HashMap<String, Resource>, ResourcesError> {
+    let Some(color_space_dict) = get_sub_dictionary(resources, "ColorSpace", objects)? else {
+        return Ok(HashMap::new());
+    };
+
+    let mut result = HashMap::new();
+    for (name, value) in &color_space_dict.dictionary {
+        let object_number = value.try_object_number().ok();
+        if let Some(num) = object_number
+            && let Some(cached) = cache.get(&num)
+        {
+            result.insert(name.clone(), cached.clone());
+            continue;
+        }
+        let color_space = ColorSpace::from_object(value, objects)?;
+        let resource = Resource::ColorSpace(Rc::new(color_space));
+        if let Some(num) = object_number {
+            cache.insert(num, resource.clone());
+        }
+        result.insert(name.clone(), resource);
+    }
+    Ok(result)
+}
+
 impl Resources {
     /// Returns a reference to a font resource by name, if it exists.
     ///
@@ -218,7 +249,8 @@ impl Resources {
     ///
     /// # Returns
     ///
-    /// An `Option` containing a reference to the [`Font`] if found, or `None` if not present or not a font.
+    /// An `Option` containing a reference to the [`Font`] if found, or `None`
+    /// if not present or not a font.
     pub fn font(&self, name: &str) -> Option<(&Font, Option<&Resources>)> {
         match self.0.get(name)? {
             Resource::Font { font, resources } => Some((font, resources.as_deref())),
@@ -234,7 +266,8 @@ impl Resources {
     ///
     /// # Returns
     ///
-    /// An `Option` containing a reference to the [`ExternalGraphicsState`] if found, or `None` if not present or not an external graphics state.
+    /// An `Option` containing a reference to the [`ExternalGraphicsState`] if found,
+    /// or `None` if not present or not an external graphics state.
     pub fn external_graphics_state(&self, name: &str) -> Option<&ExternalGraphicsState> {
         match self.0.get(name)? {
             Resource::ExternalGraphicsState(state) => Some(state),
@@ -250,7 +283,8 @@ impl Resources {
     ///
     /// # Returns
     ///
-    /// An `Option` containing a reference to the [`XObject`] if found, or `None` if not present or not an XObject.
+    /// An `Option` containing a reference to the [`XObject`] if found, or `None`
+    /// if not present or not an XObject.
     pub fn xobject(&self, name: &str) -> Option<&XObject> {
         match self.0.get(name)? {
             Resource::XObject(xobject) => Some(xobject),
@@ -266,7 +300,8 @@ impl Resources {
     ///
     /// # Returns
     ///
-    /// An `Option` containing a reference to the [`Pattern`] if found, or `None` if not present or not a pattern.
+    /// An `Option` containing a reference to the [`Pattern`] if found, or `None`
+    /// if not present or not a pattern.
     pub fn pattern(&self, name: &str) -> Option<&Pattern> {
         match self.0.get(name)? {
             Resource::Pattern(pattern) => Some(pattern),
@@ -282,7 +317,8 @@ impl Resources {
     ///
     /// # Returns
     ///
-    /// An `Option` containing a reference to the [`Shading`] if found, or `None` if not present or not a shading.
+    /// An `Option` containing a reference to the [`Shading`] if found, or `None`
+    /// if not present or not a shading.
     pub fn shading(&self, name: &str) -> Option<&Shading> {
         match self.0.get(name)? {
             Resource::Shading(shading) => Some(shading),
@@ -290,10 +326,27 @@ impl Resources {
         }
     }
 
+    /// Returns a reference to a color space resource by name, if it exists.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: The resource name as referenced in the PDF content stream.
+    ///
+    /// # Returns
+    ///
+    /// An `Option` containing a reference to the [`ColorSpace`] if found, or `None`
+    /// if not present or not a color space.
+    pub fn color_space(&self, name: &str) -> Option<&ColorSpace> {
+        match self.0.get(name)? {
+            Resource::ColorSpace(color_space) => Some(color_space),
+            _ => None,
+        }
+    }
+
     /// Reads the `/Resources` dictionary.
     ///
     /// This function extracts all resource types (fonts, external graphics states, patterns,
-    /// XObjects, and shadings) referenced in the provided `dictionary`.
+    /// XObjects, shadings, and color spaces) referenced in the provided `dictionary`.
     ///
     /// # Parameters
     ///
@@ -328,6 +381,7 @@ impl Resources {
         map.extend(read_patterns(resources, objects, cache)?);
         map.extend(read_xobjects(resources, objects, cache)?);
         map.extend(read_shadings(resources, objects, cache)?);
+        map.extend(read_color_spaces(resources, objects, cache)?);
 
         Ok(Some(Self(map)))
     }

@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use pdf_content_stream::{content_stream::ContentStream, pdf_operator::PdfOperatorVariant};
 use pdf_graphics::{
-    MaskMode, PaintMode, PathFillType, pdf_path::PdfPath, rect::Rect, transform::Transform,
+    MaskMode, PaintMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
+    transform::Transform,
 };
 use pdf_page::{
     page::PdfPage,
@@ -581,6 +582,70 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// This sets the complete transformation from user space to device space.
     pub(crate) fn set_matrix(&mut self, matrix: Transform) -> Result<(), PdfCanvasError> {
         self.current_state_mut()?.transform = matrix;
+        Ok(())
+    }
+
+    /// Sets the current color space for stroking or filling operations.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: The name of the color space to set.  c
+    /// - `is_stroking`: If `true`, sets the stroking color space; otherwise, sets the filling color space.
+    pub(crate) fn set_color_space(
+        &mut self,
+        name: &str,
+        is_stroking: bool,
+    ) -> Result<(), PdfCanvasError> {
+        let state = self.current_state_mut()?;
+        if is_stroking {
+            state.stroke_pattern = None;
+        } else {
+            state.fill_pattern = None;
+        }
+
+        // The names /DeviceGray, /DeviceRGB, /DeviceCMYK, and /Pattern are reserved
+        // keywords that always identify their corresponding colour spaces directly.
+        // Per PDF spec §8.6.8 each also sets the current colour to its initial value.
+        if matches!(name, "DeviceGray" | "DeviceRGB" | "DeviceCMYK" | "Pattern") {
+            let (cs, initial_color) = match name {
+                "DeviceGray" => (
+                    &CanvasState::DEVICE_GRAY_COLOR_SPACE,
+                    Some(Color::from_gray(0.0)),
+                ),
+                "DeviceRGB" => (
+                    &CanvasState::DEVICE_RGB_COLOR_SPACE,
+                    Some(Color::from_rgb(0.0, 0.0, 0.0)),
+                ),
+                "DeviceCMYK" => (
+                    &CanvasState::DEVICE_CMYK_COLOR_SPACE,
+                    Some(Color::from_cmyk(0.0, 0.0, 0.0, 1.0)),
+                ),
+                // Pattern: no initial colour is defined by the spec.
+                _ => (&CanvasState::PATTERN_COLOR_SPACE, None),
+            };
+            if is_stroking {
+                state.stroke_color_space = Some(cs);
+                if let Some(color) = initial_color {
+                    state.stroke_color = color;
+                }
+            } else {
+                state.fill_color_space = Some(cs);
+                if let Some(color) = initial_color {
+                    state.fill_color = color;
+                }
+            }
+            return Ok(());
+        }
+
+        let Some(cs) = state.resources.and_then(|res| res.color_space(name)) else {
+            return Err(PdfCanvasError::ColorSpaceNotFound(name.to_string()));
+        };
+
+        if is_stroking {
+            state.stroke_color_space = Some(cs);
+        } else {
+            state.fill_color_space = Some(cs);
+        }
         Ok(())
     }
 }
