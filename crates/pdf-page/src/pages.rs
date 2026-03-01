@@ -1,5 +1,7 @@
 use crate::{page::PdfPage, resource_cache::ResourceCache, resources::ResourcesError};
+use pdf_color_space::color_space::ColorSpaceError;
 use pdf_content_stream::error::PdfOperatorError;
+use pdf_function::function::FunctionInterpolationError;
 use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
 
 use thiserror::Error;
@@ -17,6 +19,10 @@ pub enum PdfPagesError {
     ContentStreamParse(#[from] PdfOperatorError),
     #[error("Failed to parse resources for page: {0}")]
     ResourcesParse(#[from] ResourcesError),
+    #[error("{0}")]
+    ColorSpaceError(#[from] ColorSpaceError),
+    #[error("{0}")]
+    FunctionInterpolationError(#[from] FunctionInterpolationError),
 }
 
 pub struct PdfPages;

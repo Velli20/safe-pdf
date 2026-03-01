@@ -13,6 +13,7 @@ pdf-page = { path = "../pdf-page" }
 pdf-font = { path = "../pdf-font" }
 pdf-object = { path = "../pdf-object" }
 pdf-graphics = { path = "../pdf-graphics" }
+pdf-color-space = { path = "../pdf-color-space" }
 thiserror = "2.0.12"
 num-traits = "0.2.19"
 read-fonts = "0.36.0"

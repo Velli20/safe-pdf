@@ -1,6 +1,8 @@
-use crate::color_space::ColorSpace;
-use pdf_function::function::{Function, FunctionImpl, FunctionInterpolationError};
+use pdf_color_space::color_space::ColorSpace;
+use pdf_function::function::{Function, FunctionImpl};
 use pdf_graphics::color::Color;
+
+use crate::pages::PdfPagesError;
 
 /// Default domain range for shading functions when not explicitly specified.
 const DEFAULT_DOMAIN: [f32; 2] = [0.0, 1.0];
@@ -19,13 +21,17 @@ pub struct ColorStops {
 }
 
 impl ColorStops {
+    /// Number of color stops to sample when converting a function to discrete gradient stops.
+    /// Higher values produce smoother gradients but increase memory usage.
+    const DEFAULT_NUM_COLOR_STOPS: u16 = 16;
+
     /// Samples a shading function to create discrete color stops.
     ///
     /// The function output is interpreted according to the provided `color_space`.
     pub fn from_function(
         function: &Function,
         color_space: &ColorSpace,
-    ) -> Result<Self, FunctionInterpolationError> {
+    ) -> Result<Self, PdfPagesError> {
         let domain = function.domain().unwrap_or(DEFAULT_DOMAIN);
         let domain_range = domain[1] - domain[0];
 
@@ -42,9 +48,8 @@ impl ColorStops {
             let x = domain[0] + t * domain_range;
 
             // Evaluate function; propagate errors to the caller.
-            let color = function
-                .interpolate(x)
-                .and_then(|components| Self::components_to_color(color_space, &components))?;
+            let components = function.interpolate(x)?;
+            let color = color_space.apply(&components)?;
 
             positions.push(t);
             colors.push(color);
@@ -55,7 +60,7 @@ impl ColorStops {
 }
 
 impl TryFrom<&Function> for ColorStops {
-    type Error = FunctionInterpolationError;
+    type Error = PdfPagesError;
 
     /// Samples a shading function to create discrete color stops.
     ///
@@ -63,136 +68,14 @@ impl TryFrom<&Function> for ColorStops {
     /// across its domain, converting the continuous function into a series of
     /// discrete color values suitable for gradient rendering.
     ///
-    /// # Arguments
+    /// # Parameters
     ///
-    /// * `function` - The shading function to sample.
+    /// - `function`: The shading function to sample.
     ///
     /// # Returns
     ///
     /// A `ColorStops` instance containing the sampled colors and their positions.
-    ///
-    /// # Note
-    ///
-    /// If function evaluation fails at any point, a default black color is used.
-    /// Color components beyond the first three (RGB) are ignored.
     fn try_from(function: &Function) -> Result<Self, Self::Error> {
-        // Backwards-compatible behavior: interpret output as RGB.
         Self::from_function(function, &ColorSpace::DeviceRGB)
-    }
-}
-
-impl ColorStops {
-    /// Number of color stops to sample when converting a function to discrete gradient stops.
-    /// Higher values produce smoother gradients but increase memory usage.
-    const DEFAULT_NUM_COLOR_STOPS: u16 = 16;
-
-    /// Converts a slice of color components to an RGBA `Color`.
-    ///
-    /// The PDF function output dimensionality depends on the shading `/ColorSpace`.
-    /// This helper performs a best-effort conversion into the renderer's RGB(A)
-    /// `Color` representation.
-    #[inline]
-    fn components_to_color(
-        color_space: &ColorSpace,
-        components: &[f32],
-    ) -> Result<Color, FunctionInterpolationError> {
-        match color_space {
-            ColorSpace::DeviceRGB => {
-                let [r, g, b] = components else {
-                    return Err(FunctionInterpolationError::InsufficientColorComponents {
-                        required: 3,
-                        returned: components.len(),
-                    });
-                };
-                Ok(Color::from_rgb(*r, *g, *b))
-            }
-            ColorSpace::DeviceGray => {
-                let Some(gray) = components.first().copied() else {
-                    return Err(FunctionInterpolationError::InsufficientColorComponents {
-                        required: 1,
-                        returned: components.len(),
-                    });
-                };
-                Ok(Color::from_gray(gray))
-            }
-            ColorSpace::DeviceCMYK => {
-                let [c, m, y, k] = components else {
-                    return Err(FunctionInterpolationError::InsufficientColorComponents {
-                        required: 4,
-                        returned: components.len(),
-                    });
-                };
-                Ok(Color::from_cmyk(*c, *m, *y, *k))
-            }
-            ColorSpace::ICCBased { num_components } => match num_components {
-                1 => Self::components_to_color(&ColorSpace::DeviceGray, components),
-                3 => Self::components_to_color(&ColorSpace::DeviceRGB, components),
-                4 => Self::components_to_color(&ColorSpace::DeviceCMYK, components),
-                _ => Self::components_to_color(&ColorSpace::DeviceRGB, components),
-            },
-            ColorSpace::Separation {
-                alternate_space,
-                tint_transform,
-                ..
-            } => {
-                let Some(tint) = components.first().copied() else {
-                    return Err(FunctionInterpolationError::InsufficientColorComponents {
-                        required: 1,
-                        returned: components.len(),
-                    });
-                };
-                let output = tint_transform.interpolate(tint)?;
-                Self::components_to_color(alternate_space, &output)
-            }
-            ColorSpace::Indexed { .. } => {
-                Err(FunctionInterpolationError::IndexedColorSpaceUnsupported)
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn approx(a: f32, b: f32) -> bool {
-        (a - b).abs() < 1e-6
-    }
-
-    #[test]
-    fn device_gray_maps_first_component() -> Result<(), FunctionInterpolationError> {
-        let c = ColorStops::components_to_color(&ColorSpace::DeviceGray, &[0.25])?;
-        assert!(approx(c.r, 0.25) && approx(c.g, 0.25) && approx(c.b, 0.25));
-        Ok(())
-    }
-
-    #[test]
-    fn device_cmyk_converts_to_rgb() -> Result<(), FunctionInterpolationError> {
-        // Magenta: C=0, M=1, Y=0, K=0 -> RGB=(1,0,1)
-        let c = ColorStops::components_to_color(&ColorSpace::DeviceCMYK, &[0.0, 1.0, 0.0, 0.0])?;
-        assert!(approx(c.r, 1.0) && approx(c.g, 0.0) && approx(c.b, 1.0));
-        Ok(())
-    }
-
-    #[test]
-    fn separation_transforms_and_converts() -> Result<(), FunctionInterpolationError> {
-        use pdf_function::exponential_interpolation::ExponentialFunction;
-
-        // Linear transform: Black (0,0,0) to Red (1,0,0)
-        let exp_func =
-            ExponentialFunction::new(vec![0.0, 0.0, 0.0], vec![1.0, 0.0, 0.0], 1.0, [0.0, 1.0]);
-        let function = Function::Exponential(exp_func);
-
-        let color_space = ColorSpace::Separation {
-            name: "MyRed".to_string(),
-            alternate_space: Box::new(ColorSpace::DeviceRGB),
-            tint_transform: function,
-        };
-
-        // Tint 0.5 -> Interpolates to (0.5, 0.0, 0.0) -> RGB
-        let c = ColorStops::components_to_color(&color_space, &[0.5])?;
-        assert!(approx(c.r, 0.5) && approx(c.g, 0.0) && approx(c.b, 0.0));
-
-        Ok(())
     }
 }

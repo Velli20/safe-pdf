@@ -2,6 +2,7 @@ use crate::{
     external_graphics_state::ExternalGraphicsState, pattern::Pattern, resources::Resources,
     shading::Shading, xobject::XObject,
 };
+use pdf_color_space::color_space::ColorSpace;
 use pdf_font::font::Font;
 use std::rc::Rc;
 
@@ -23,4 +24,6 @@ pub enum Resource {
     Pattern(Rc<Pattern>),
     /// A shading resource, used for gradient fills and complex color transitions.
     Shading(Rc<Shading>),
+    /// A color space resource, used for defining color models.
+    ColorSpace(Rc<ColorSpace>),
 }

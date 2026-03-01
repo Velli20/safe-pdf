@@ -1,6 +1,6 @@
 ## Project Overview
 
-Safe-PDF is a PDF reader and renderer written in Rust (2024 edition, toolchain 1.89.0). It's a modular monorepo organized as Cargo workspace crates under `crates/`. Status: pre-alpha, APIs may change.
+Safe-PDF is a PDF reader and renderer. It's a modular monorepo organized as Cargo workspace crates under `crates/`.
 
 ## Common Commands
 
@@ -64,5 +64,3 @@ CI runs on push/PR to main (`.github/workflows/ci.yml`):
 1. `cargo check` + `cargo test` + `cargo clippy` + `cargo fmt --check`
 2. Minimal feature build (no optional features)
 3. WASM/Emscripten build
-
-System dependencies for Skia on Linux: `libfontconfig1-dev`, `libfreetype6-dev`.

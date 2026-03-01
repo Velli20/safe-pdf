@@ -1,0 +1,14 @@
+[package]
+name = "pdf-color-space"
+version = "0.1.0"
+edition = "2024"
+
+# Inherit all lint configurations from the workspace root
+[lints]
+workspace = true
+
+[dependencies]
+pdf-object = { path = "../pdf-object" }
+pdf-function = { path = "../pdf-function" }
+pdf-graphics = { path = "../pdf-graphics" }
+thiserror = "2.0.12"

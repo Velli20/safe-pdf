@@ -1,71 +1,43 @@
+use pdf_color_space::color_space::ColorSpace;
 use pdf_content_stream::pdf_operator_backend::ColorOps;
 
-use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
+use crate::{
+    canvas_backend::CanvasBackend, canvas_state::CanvasState, error::PdfCanvasError,
+    pdf_canvas::PdfCanvas,
+};
 use pdf_graphics::color::Color;
 
 impl<B: CanvasBackend> ColorOps for PdfCanvas<'_, B> {
     type ErrorType = PdfCanvasError;
-    fn set_stroking_color_space(&mut self, _name: &str) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.stroke_pattern = None;
-        Ok(())
+    fn set_stroking_color_space(&mut self, name: &str) -> Result<(), Self::ErrorType> {
+        self.set_color_space(name, true)
     }
 
-    fn set_non_stroking_color_space(&mut self, _name: &str) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.fill_pattern = None;
-        Ok(())
+    fn set_non_stroking_color_space(&mut self, name: &str) -> Result<(), Self::ErrorType> {
+        self.set_color_space(name, false)
     }
 
     fn set_stroking_color(&mut self, components: &[f32]) -> Result<(), Self::ErrorType> {
-        // Map component arrays to a concrete color in the current graphics state.
-        // Supported forms (per current backend support):
-        // - 1 component: Gray (g)
-        // - 3 components: RGB (r g b)
-        // - 4 components: CMYK (c m y k)
-        // Any time an explicit color is set, clear an active pattern.
         let state = self.current_state_mut()?;
-        match *components {
-            [g] => {
-                state.stroke_color = Color::from_gray(g);
-            }
-            [r, g, b] => {
-                state.stroke_color = Color::from_rgb(r, g, b);
-            }
-            [c, m, y, k] => {
-                state.stroke_color = Color::from_cmyk(c, m, y, k);
-            }
-            _ => {
-                return Err(PdfCanvasError::NotImplemented(format!(
-                    "set_stroking_color expects 1 (Gray), 3 (RGB), or 4 (CMYK) components; got {:?}",
-                    components
-                )));
-            }
-        }
         state.stroke_pattern = None;
+
+        let Some(color_space) = &state.stroke_color_space else {
+            return Err(PdfCanvasError::ColorSpaceNotSet);
+        };
+
+        state.stroke_color = color_space.apply(components)?;
         Ok(())
     }
 
     fn set_non_stroking_color(&mut self, components: &[f32]) -> Result<(), Self::ErrorType> {
-        // Same component mapping as set_stroking_color for the fill color.
-        // Explicit color selection disables any active pattern.
         let state = self.current_state_mut()?;
-        match *components {
-            [g] => {
-                state.fill_color = Color::from_gray(g);
-            }
-            [r, g, b] => {
-                state.fill_color = Color::from_rgb(r, g, b);
-            }
-            [c, m, y, k] => {
-                state.fill_color = Color::from_cmyk(c, m, y, k);
-            }
-            _ => {
-                return Err(PdfCanvasError::NotImplemented(format!(
-                    "set_non_stroking_color expects 1 (Gray), 3 (RGB), or 4 (CMYK) components; got {:?}",
-                    components
-                )));
-            }
-        }
         state.fill_pattern = None;
+
+        let Some(color_space) = &state.fill_color_space else {
+            return Err(PdfCanvasError::ColorSpaceNotSet);
+        };
+
+        state.fill_color = color_space.apply(components)?;
         Ok(())
     }
 
@@ -75,7 +47,18 @@ impl<B: CanvasBackend> ColorOps for PdfCanvas<'_, B> {
         pattern_name: &str,
     ) -> Result<(), Self::ErrorType> {
         if !components.is_empty() {
-            self.set_non_stroking_color(components)?;
+            let state = self.current_state_mut()?;
+            state.fill_pattern = None;
+            let Some(cs) = state.fill_color_space else {
+                return Err(PdfCanvasError::ColorSpaceNotSet);
+            };
+            // For uncolored tiling patterns the components belong to the underlying
+            // color space wrapped inside Pattern, not to the Pattern space itself.
+            let color = match cs {
+                ColorSpace::Pattern(Some(inner_cs)) => inner_cs.apply(components)?,
+                _ => cs.apply(components)?,
+            };
+            state.fill_color = color;
         }
 
         self.set_fill_pattern(pattern_name)
@@ -87,7 +70,18 @@ impl<B: CanvasBackend> ColorOps for PdfCanvas<'_, B> {
         pattern_name: &str,
     ) -> Result<(), Self::ErrorType> {
         if !components.is_empty() {
-            self.set_stroking_color(components)?;
+            let state = self.current_state_mut()?;
+            state.stroke_pattern = None;
+            let Some(cs) = state.stroke_color_space else {
+                return Err(PdfCanvasError::ColorSpaceNotSet);
+            };
+            // For uncolored tiling patterns the components belong to the underlying
+            // color space wrapped inside Pattern, not to the Pattern space itself.
+            let color = match cs {
+                ColorSpace::Pattern(Some(inner_cs)) => inner_cs.apply(components)?,
+                _ => cs.apply(components)?,
+            };
+            state.stroke_color = color;
         }
 
         self.set_stroke_pattern(pattern_name)
@@ -97,6 +91,7 @@ impl<B: CanvasBackend> ColorOps for PdfCanvas<'_, B> {
         let state = self.current_state_mut()?;
         state.stroke_color = Color::from_gray(gray);
         state.stroke_pattern = None;
+        state.stroke_color_space = Some(&CanvasState::DEVICE_GRAY_COLOR_SPACE);
         Ok(())
     }
 
@@ -104,6 +99,7 @@ impl<B: CanvasBackend> ColorOps for PdfCanvas<'_, B> {
         let state = self.current_state_mut()?;
         state.fill_color = Color::from_gray(gray);
         state.fill_pattern = None;
+        state.fill_color_space = Some(&CanvasState::DEVICE_GRAY_COLOR_SPACE);
         Ok(())
     }
 
@@ -111,6 +107,7 @@ impl<B: CanvasBackend> ColorOps for PdfCanvas<'_, B> {
         let state = self.current_state_mut()?;
         state.stroke_color = Color::from_rgb(r, g, b);
         state.stroke_pattern = None;
+        state.stroke_color_space = Some(&CanvasState::DEVICE_RGB_COLOR_SPACE);
         Ok(())
     }
 
@@ -118,6 +115,7 @@ impl<B: CanvasBackend> ColorOps for PdfCanvas<'_, B> {
         let state = self.current_state_mut()?;
         state.fill_color = Color::from_rgb(r, g, b);
         state.fill_pattern = None;
+        state.fill_color_space = Some(&CanvasState::DEVICE_RGB_COLOR_SPACE);
         Ok(())
     }
 
@@ -125,6 +123,7 @@ impl<B: CanvasBackend> ColorOps for PdfCanvas<'_, B> {
         let state = self.current_state_mut()?;
         state.stroke_color = Color::from_cmyk(c, m, y, k);
         state.stroke_pattern = None;
+        state.stroke_color_space = Some(&CanvasState::DEVICE_CMYK_COLOR_SPACE);
         Ok(())
     }
 
@@ -138,6 +137,7 @@ impl<B: CanvasBackend> ColorOps for PdfCanvas<'_, B> {
         let state = self.current_state_mut()?;
         state.fill_color = Color::from_cmyk(c, m, y, k);
         state.fill_pattern = None;
+        state.fill_color_space = Some(&CanvasState::DEVICE_CMYK_COLOR_SPACE);
         Ok(())
     }
 }

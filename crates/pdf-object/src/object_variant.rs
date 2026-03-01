@@ -75,7 +75,7 @@ impl ObjectVariant {
         match object {
             ObjectVariant::Dictionary(dict) => Ok(dict.as_ref()),
             ObjectVariant::Stream(stream) => Ok(stream.dictionary.as_ref()),
-            _ => Err(ObjectError::TypeMismatch("Dictionary", self.name())),
+            _ => Err(ObjectError::TypeMismatch("Dictionary", object.name())),
         }
     }
 
