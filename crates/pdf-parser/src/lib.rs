@@ -1,5 +1,4 @@
 mod array;
-mod boolean;
 pub mod cross_reference_stream;
 mod cross_reference_table;
 mod dictionary;
@@ -9,7 +8,6 @@ mod hex_string;
 mod indirect_object;
 mod literal_string;
 mod name;
-mod null;
 mod number;
 pub mod parser;
 mod stream;
