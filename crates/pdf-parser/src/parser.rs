@@ -182,37 +182,33 @@ impl PdfParser<'_> {
                 self.tokenizer.read();
                 const EOF_KEYWORD: &[u8] = b"EOF";
 
-                // Read the keyword `EOF`.
-                let literal = self.tokenizer.read_exactly(EOF_KEYWORD.len())?;
-                if literal != EOF_KEYWORD {
-                    return Err(ParserError::InvalidKeyword(
-                        "EOF".to_string(),
-                        String::from_utf8_lossy(literal).to_string(),
-                    ));
-                }
+                self.read_keyword(EOF_KEYWORD)?;
                 return Ok(ObjectVariant::EndOfFile);
             }
             PdfToken::Alphabetic(t) => {
-                if t == b't' {
-                    // Try parsing as a trailer first.
-                    let mark = self.tokenizer.position;
-                    let value = self.parse_trailer(objects);
-                    if let Ok(o) = value {
-                        return Ok(ObjectVariant::Trailer(o));
-                    }
-                    // If that fails, reset and try parsing as a boolean.
-                    self.tokenizer.position = mark;
+                const BOOLEAN_LITERAL_TRUE: &[u8] = b"true";
+                const BOOLEAN_LITERAL_FALSE: &[u8] = b"false";
+                const NULL_LITERAL: &[u8] = b"null";
 
-                    ObjectVariant::Boolean(self.parse_boolean()?)
-                } else if t == b'f' {
-                    ObjectVariant::Boolean(self.parse_boolean()?)
-                } else if t == b'n' {
-                    self.parse_null_object()?;
-                    ObjectVariant::Null
-                } else if t == b'x' {
-                    ObjectVariant::CrossReferenceTable(self.parse_cross_reference_table(objects)?)
-                } else {
-                    return Err(ParserError::InvalidToken(char::from(t)));
+                match t {
+                    b't' => {
+                        self.read_keyword(BOOLEAN_LITERAL_TRUE)?;
+                        ObjectVariant::Boolean(true)
+                    }
+                    b'f' => {
+                        self.read_keyword(BOOLEAN_LITERAL_FALSE)?;
+                        ObjectVariant::Boolean(false)
+                    }
+                    b'n' => {
+                        self.read_keyword(NULL_LITERAL)?;
+                        ObjectVariant::Null
+                    }
+                    b'x' => ObjectVariant::CrossReferenceTable(
+                        self.parse_cross_reference_table(objects)?,
+                    ),
+                    other => {
+                        return Err(ParserError::InvalidToken(char::from(other)));
+                    }
                 }
             }
             PdfToken::DoubleLeftAngleBracket => {
@@ -432,6 +428,90 @@ mod tests {
             let mut p = PdfParser::from(b"\x00\t\n\x0C\r content".as_slice());
             p.skip_whitespace_and_comments();
             assert_eq!(remaining(&p), b"content");
+        }
+    }
+
+    #[test]
+    fn test_parse_boolean_valid() {
+        let valid_inputs: Vec<(&[u8], bool)> = vec![
+            (b"true ", true),
+            (b"false ", false),
+            (b"true\n", true),
+            (b"false\t", false),
+        ];
+
+        for (input, expected) in valid_inputs {
+            let mut parser = PdfParser::from(input);
+            let value = parser.parse_object(&UnimplementedResolver).unwrap();
+            assert_eq!(
+                value,
+                ObjectVariant::Boolean(expected),
+                "Failed to parse `{}`",
+                String::from_utf8_lossy(input)
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_boolean_invalid() {
+        let invalid_inputs: Vec<&[u8]> = vec![b"tru ", b"fals ", b"truefalse", b"false123"];
+
+        for input in invalid_inputs {
+            let mut parser = PdfParser::from(input);
+            let result = parser.parse_object(&UnimplementedResolver);
+            assert!(
+                result.is_err(),
+                "Expected error for invalid input `{}`",
+                String::from_utf8_lossy(input)
+            );
+        }
+    }
+
+    #[test]
+    fn test_null_object() {
+        let valid_inputs: Vec<&[u8]> = vec![
+            b"null\n",
+            b"null\t",
+            b"null ",
+            b"null<",
+            b"null>",
+            b"null[",
+            b"null]",
+            b"null{",
+            b"null}",
+            b"null(abc)",
+        ];
+
+        for input in valid_inputs {
+            let mut parser = PdfParser::from(input);
+            let result = parser.parse_object(&UnimplementedResolver);
+            assert_eq!(
+                result,
+                Ok(ObjectVariant::Null),
+                "Failed to parse `{}`",
+                String::from_utf8_lossy(input)
+            );
+        }
+        let invalid_inputs: Vec<&[u8]> = vec![
+            b"nullabc\n",
+            b"null123\n",
+            b"nulla",
+            b"nullobj\n",
+            b"nullobj<",
+            b"nullobj>",
+            b"nullobj[",
+            b"nullobj]",
+            b"nullobj{",
+            b"nullobj}",
+        ];
+        for input in invalid_inputs {
+            let mut parser = PdfParser::from(input);
+            let result = parser.parse_object(&UnimplementedResolver);
+            assert!(
+                result.is_err(),
+                "Expected error for invalid input `{}`",
+                String::from_utf8_lossy(input)
+            );
         }
     }
 }
