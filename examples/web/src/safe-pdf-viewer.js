@@ -49,6 +49,12 @@ const DEFAULT_PAGE_HEIGHT = 792;
 /** Gap between pages in the scroll view (px). */
 const PAGE_GAP = 20;
 
+/**
+ * Padding around the scroll content (px). Must match the `padding` value in
+ * `.spdf-scroll-content` CSS so that scroll-position calculations are correct.
+ */
+const SCROLL_PADDING = 20;
+
 /** Number of extra pages to render above/below the viewport. */
 const RENDER_BUFFER = 1;
 
@@ -206,11 +212,21 @@ export class SafePdfViewer extends EventTarget {
   #currentPage = 0;
   #zoom = 1.0;
   #zoomMode = 'fixed'; // 'fixed' | 'fit-width' | 'fit-page'
-  #pageWidth;
-  #pageHeight;
 
-  /** @type {Map<string, string>} Cache key → data URL */
-  #imageCache = new Map();
+  /**
+   * PDF-point dimensions of each page, populated from WASM after load.
+   * @type {Array<{width: number, height: number}>}
+   */
+  #pageSizes = [];
+
+  /**
+   * Precomputed scroll-top position (px) for the top edge of each page.
+   * @type {number[]}
+   */
+  #pageScrollOffsets = [];
+
+  /** @type {Set<string>} Cache keys (`${pageIndex}-${zoom}`) of already-rendered pages. */
+  #imageCache = new Set();
 
   // ---- Prefetch ----
   /** @type {number[]} */
@@ -251,8 +267,6 @@ export class SafePdfViewer extends EventTarget {
 
     this.#container = container;
     this.#options = options;
-    this.#pageWidth = options.pageWidth ?? DEFAULT_PAGE_WIDTH;
-    this.#pageHeight = options.pageHeight ?? DEFAULT_PAGE_HEIGHT;
     this.#zoom = options.initialZoom ?? 1.0;
 
     this.#renderer = new SafePdfRenderer();
@@ -357,10 +371,10 @@ export class SafePdfViewer extends EventTarget {
   goToPage(pageIndex) {
     if (pageIndex < 0 || pageIndex >= this.#pageCount) return;
 
-    const { height } = this.#scaledPageSize();
-    const targetScroll = pageIndex * (height + PAGE_GAP);
-
-    this.#scrollContainer.scrollTo({ top: targetScroll, behavior: 'smooth' });
+    this.#scrollContainer.scrollTo({
+      top: this.#pageScrollOffsets[pageIndex],
+      behavior: 'smooth',
+    });
     this.#setCurrentPage(pageIndex);
   }
 
@@ -382,15 +396,20 @@ export class SafePdfViewer extends EventTarget {
    *   strings `'fit-width'` / `'fit-page'`.
    */
   setZoom(value) {
+    // Use the first page as the reference for fit calculations; fall back to
+    // defaults when no PDF is loaded yet.
+    const refW = this.#pageSizes[0]?.width ?? DEFAULT_PAGE_WIDTH;
+    const refH = this.#pageSizes[0]?.height ?? DEFAULT_PAGE_HEIGHT;
+
     if (value === 'fit-width') {
       this.#zoomMode = 'fit-width';
       const available = this.#scrollContainer.clientWidth - 60;
-      this.#zoom = available / this.#pageWidth;
+      this.#zoom = available / refW;
     } else if (value === 'fit-page') {
       this.#zoomMode = 'fit-page';
       const availW = this.#scrollContainer.clientWidth - 60;
       const availH = this.#scrollContainer.clientHeight - 60;
-      this.#zoom = Math.min(availW / this.#pageWidth, availH / this.#pageHeight);
+      this.#zoom = Math.min(availW / refW, availH / refH);
     } else {
       this.#zoomMode = 'fixed';
       this.#zoom = Number(value) || 1;
@@ -404,10 +423,15 @@ export class SafePdfViewer extends EventTarget {
 
     this.#buildPageLayout();
 
-    setTimeout(() => {
-      this.goToPage(savedPage);
-      this.#renderVisiblePages();
-    }, 50);
+    // Wait for the browser to finish laying out the rebuilt page wrappers
+    // before scrolling and rendering.  Two rAF calls guarantee a full
+    // layout pass has occurred — more reliable than an arbitrary setTimeout.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        this.goToPage(savedPage);
+        this.#renderVisiblePages();
+      });
+    });
 
     this.dispatchEvent(
       new CustomEvent('zoomchange', {
@@ -507,9 +531,9 @@ export class SafePdfViewer extends EventTarget {
   #buildPageLayout() {
     this.#scrollContent.innerHTML = '';
 
-    const { width, height } = this.#scaledPageSize();
-
     for (let i = 0; i < this.#pageCount; i++) {
+      const { width, height } = this.#scaledPageSizeForPage(i);
+
       const wrapper = document.createElement('div');
       wrapper.className = 'spdf-page-wrapper';
       wrapper.style.width = `${width}px`;
@@ -528,6 +552,8 @@ export class SafePdfViewer extends EventTarget {
 
       this.#scrollContent.appendChild(wrapper);
     }
+
+    this.#computePageScrollOffsets();
   }
 
   // ==================================================================
@@ -567,6 +593,16 @@ export class SafePdfViewer extends EventTarget {
     const { pageCount } = this.#renderer.loadPdf(buffer);
     this.#pageCount = pageCount;
     this.#currentPage = 0;
+
+    // Query each page's true dimensions from the WASM/PDF layer.
+    this.#pageSizes = [];
+    for (let i = 0; i < pageCount; i++) {
+      const dims = this.#renderer.getPageDimensions(i);
+      this.#pageSizes.push(
+        dims ?? { width: DEFAULT_PAGE_WIDTH, height: DEFAULT_PAGE_HEIGHT }
+      );
+    }
+
     return { pageCount };
   }
 
@@ -574,61 +610,88 @@ export class SafePdfViewer extends EventTarget {
   #afterLoad() {
     this.#buildPageLayout();
 
-    setTimeout(() => {
-      try {
-        this.#renderVisiblePages();
-      } finally {
-        this.#showLoading(false);
-      }
-    }, 50);
+    // Use a double rAF to ensure the browser has completed layout of the
+    // newly inserted page wrappers before we try to read scroll geometry.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        try {
+          this.#renderVisiblePages();
+        } finally {
+          this.#showLoading(false);
+        }
+      });
+    });
   }
 
   // ==================================================================
   // Rendering Pipeline
   // ==================================================================
 
-  /** Calculate the pixel size of a page at the current zoom. */
-  #scaledPageSize() {
+  /**
+   * Calculate the pixel size of a specific page at the current zoom.
+   * Uses the page's true PDF dimensions if available, falling back to defaults.
+   *
+   * @param {number} pageIndex
+   * @returns {{ width: number, height: number }}
+   */
+  #scaledPageSizeForPage(pageIndex) {
+    const size = this.#pageSizes[pageIndex];
+    const w = size?.width ?? DEFAULT_PAGE_WIDTH;
+    const h = size?.height ?? DEFAULT_PAGE_HEIGHT;
     return {
-      width: Math.round(this.#pageWidth * this.#zoom),
-      height: Math.round(this.#pageHeight * this.#zoom),
+      width: Math.round(w * this.#zoom),
+      height: Math.round(h * this.#zoom),
     };
   }
 
   /**
-   * Render a page (or serve from cache) and return its data URL.
-   * @param {number} pageIndex
-   * @returns {string}
+   * Precompute the scroll-top position of the top edge of every page and
+   * store the results in {@link #pageScrollOffsets}.  Must be called after
+   * the page layout is (re)built or after the zoom changes.
    */
-  #renderPageCached(pageIndex) {
-    const key = `${pageIndex}-${this.#zoom}`;
-
-    if (this.#imageCache.has(key)) {
-      return this.#imageCache.get(key);
+  #computePageScrollOffsets() {
+    this.#pageScrollOffsets = [];
+    let top = SCROLL_PADDING;
+    for (let i = 0; i < this.#pageCount; i++) {
+      this.#pageScrollOffsets.push(top);
+      const { height } = this.#scaledPageSizeForPage(i);
+      top += height + PAGE_GAP;
     }
-
-    const { width, height } = this.#scaledPageSize();
-    const dataUrl = this.#renderer.renderPage(pageIndex, width, height);
-    this.#imageCache.set(key, dataUrl);
-    return dataUrl;
   }
 
-  /** Show a rendered image in the corresponding page wrapper. */
-  #displayPageImage(pageIndex, dataUrl) {
+  /**
+   * Render a page into the corresponding page wrapper using `drawImage`,
+   * bypassing the expensive encode→data-URL→decode cycle.
+   * Results are cached by page index + zoom level so each page is only
+   * rendered once per zoom.
+   *
+   * @param {number} pageIndex
+   */
+  #renderAndDisplay(pageIndex) {
+    const key = `${pageIndex}-${this.#zoom.toFixed(4)}`;
+    if (this.#imageCache.has(key)) return;
+
+    const { width, height } = this.#scaledPageSizeForPage(pageIndex);
+    this.#renderer.renderPageToCanvas(pageIndex, width, height);
+
     const wrapper = this.#scrollContent.children[pageIndex];
     if (!wrapper) return;
 
-    let img = wrapper.querySelector('.spdf-page-img');
-    if (!img) {
+    let displayCanvas = wrapper.querySelector('.spdf-page-canvas');
+    if (!displayCanvas) {
       const placeholder = wrapper.querySelector('.spdf-page-placeholder');
       if (placeholder) placeholder.remove();
 
-      img = document.createElement('img');
-      img.className = 'spdf-page-img';
-      wrapper.insertBefore(img, wrapper.firstChild);
+      displayCanvas = document.createElement('canvas');
+      displayCanvas.className = 'spdf-page-canvas spdf-page-img';
+      wrapper.insertBefore(displayCanvas, wrapper.firstChild);
     }
 
-    img.src = dataUrl;
+    displayCanvas.width = width;
+    displayCanvas.height = height;
+    displayCanvas.getContext('2d').drawImage(this.#renderer.canvas, 0, 0);
+
+    this.#imageCache.add(key);
   }
 
   // ==================================================================
@@ -639,27 +702,55 @@ export class SafePdfViewer extends EventTarget {
   #visiblePageRange() {
     const scrollTop = this.#scrollContainer.scrollTop;
     const viewportH = this.#scrollContainer.clientHeight;
-    const { height } = this.#scaledPageSize();
-    const step = height + PAGE_GAP;
+    const viewBottom = scrollTop + viewportH;
 
-    const first = Math.max(0, Math.floor(scrollTop / step) - RENDER_BUFFER);
-    const last = Math.min(
-      this.#pageCount - 1,
-      Math.ceil((scrollTop + viewportH) / step) + RENDER_BUFFER
-    );
+    // Linear scan: find the first and last pages whose bounding boxes
+    // overlap the viewport.  Works correctly for mixed page heights.
+    let first = 0;
+    let last = this.#pageCount - 1;
+    let foundFirst = false;
 
-    return { first, last };
+    for (let i = 0; i < this.#pageCount; i++) {
+      const pageTop = this.#pageScrollOffsets[i];
+      const { height } = this.#scaledPageSizeForPage(i);
+      const pageBottom = pageTop + height;
+
+      if (pageBottom > scrollTop && pageTop < viewBottom) {
+        if (!foundFirst) {
+          first = i;
+          foundFirst = true;
+        }
+        last = i;
+      } else if (foundFirst) {
+        // Pages are ordered, so once we leave the viewport we're done.
+        break;
+      }
+    }
+
+    return {
+      first: Math.max(0, first - RENDER_BUFFER),
+      last: Math.min(this.#pageCount - 1, last + RENDER_BUFFER),
+    };
   }
 
   /** Determine which page is "current" based on scroll position. */
   #pageFromScroll() {
     const scrollTop = this.#scrollContainer.scrollTop;
     const viewportH = this.#scrollContainer.clientHeight;
-    const { height } = this.#scaledPageSize();
-    const step = height + PAGE_GAP;
     const center = scrollTop + viewportH / 2;
 
-    return Math.max(0, Math.min(this.#pageCount - 1, Math.floor(center / step)));
+    // Binary search for the last page whose top edge is at or above center.
+    let lo = 0;
+    let hi = this.#pageCount - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (this.#pageScrollOffsets[mid] <= center) {
+        lo = mid;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return lo;
   }
 
   /** Render every page that is currently visible (or nearly visible). */
@@ -670,8 +761,7 @@ export class SafePdfViewer extends EventTarget {
 
     for (let i = first; i <= last; i++) {
       try {
-        const dataUrl = this.#renderPageCached(i);
-        this.#displayPageImage(i, dataUrl);
+        this.#renderAndDisplay(i);
       } catch (err) {
         console.error(`Failed to render page ${i + 1}`, err);
       }
@@ -692,17 +782,19 @@ export class SafePdfViewer extends EventTarget {
   // ==================================================================
 
   #schedulePrefetch(currentPage) {
-    if (this.#isPrefetching) return;
-
     const pages = this.#renderer.getPrefetchPages(currentPage);
-    this.#prefetchQueue = pages.filter((idx) => {
-      const key = `${idx}-${this.#zoom}`;
+    const newQueue = pages.filter((idx) => {
+      const key = `${idx}-${this.#zoom.toFixed(4)}`;
       return !this.#imageCache.has(key);
     });
 
+    // Always replace the queue so an in-flight idle callback picks up
+    // pages relevant to the current scroll position, not a stale one.
+    this.#prefetchQueue = newQueue;
+
+    if (this.#isPrefetching) return; // callback already scheduled
+
     if (this.#prefetchQueue.length > 0) {
-      // Set the flag immediately so rapid scroll events don't schedule
-      // multiple overlapping idle callbacks.
       this.#isPrefetching = true;
       _requestIdleCallback(
         (deadline) => this.#processPrefetchQueue(deadline),
@@ -723,8 +815,7 @@ export class SafePdfViewer extends EventTarget {
     ) {
       const idx = this.#prefetchQueue.shift();
       try {
-        const dataUrl = this.#renderPageCached(idx);
-        this.#displayPageImage(idx, dataUrl);
+        this.#renderAndDisplay(idx);
       } catch (err) {
         console.warn(`Prefetch failed for page ${idx + 1}`, err);
       }

@@ -58,6 +58,10 @@ export class SafePdfRenderer {
   /** @type {number|null} Emscripten GL context handle. */
   #glHandle = null;
 
+  // ---- Extra WASM function bindings ----
+  #sk_get_page_width = null;
+  #sk_get_page_height = null;
+
   /** @type {object|null} Reference to the Emscripten `Module` object. */
   #wasmModule = null;
 
@@ -189,45 +193,49 @@ export class SafePdfRenderer {
 
   /**
    * Render a single page to the internal canvas and return its contents as
-   * a PNG data-URL string.
+   * a JPEG data-URL string.
    *
    * @param {number} pageIndex  Zero-based page index.
    * @param {number} width      Target width in device pixels.
    * @param {number} height     Target height in device pixels.
-   * @returns {string}          PNG data-URL of the rendered page.
+   * @returns {string}          JPEG data-URL of the rendered page.
    * @throws {RangeError} If `pageIndex` is out of bounds.
    * @throws {Error}      If the WASM render call fails.
    */
   renderPage(pageIndex, width, height) {
+    this.#renderInternal(pageIndex, width, height);
+    return this.#canvas.toDataURL('image/jpeg', 0.92);
+  }
+
+  /**
+   * Render a single page to the internal canvas without encoding it to a
+   * data-URL.  Callers can then read the canvas pixels directly, e.g. via
+   * `drawImage(renderer.canvas, 0, 0)`, avoiding a costly encode/decode cycle.
+   *
+   * @param {number} pageIndex  Zero-based page index.
+   * @param {number} width      Target width in device pixels.
+   * @param {number} height     Target height in device pixels.
+   * @throws {RangeError} If `pageIndex` is out of bounds.
+   * @throws {Error}      If the WASM render call fails.
+   */
+  renderPageToCanvas(pageIndex, width, height) {
+    this.#renderInternal(pageIndex, width, height);
+  }
+
+  /**
+   * Return the dimensions of a PDF page in PDF points.
+   *
+   * @param {number} pageIndex  Zero-based page index.
+   * @returns {{ width: number, height: number } | null}
+   *   Page dimensions, or `null` if the page has no media box or the index
+   *   is out of range.
+   */
+  getPageDimensions(pageIndex) {
     this.#assertReady();
-    this.#assertPdfLoaded();
-
-    if (pageIndex < 0 || pageIndex >= this.#pageCount) {
-      throw new RangeError(
-        `Page index ${pageIndex} out of range [0, ${this.#pageCount - 1}]`
-      );
-    }
-
-    // Resize the canvas (and reinitialise WebGL) when the target size changes.
-    if (this.#canvas.width !== width || this.#canvas.height !== height) {
-      // Drop the Skia DirectContext BEFORE the GL context is invalidated by
-      // the canvas resize.  Skia caches GPU resources (textures, programs,
-      // buffers) that become stale when the WebGL context is reset.
-      this.#sk_reset_gpu();
-
-      this.#canvas.width = width;
-      this.#canvas.height = height;
-      this.#initWebGL();
-    }
-
-    this.#makeGLCurrent();
-
-    const result = this.#sk_render_page(width, height, pageIndex);
-    if (result !== 0) {
-      throw new Error(`Render failed for page ${pageIndex} (code ${result})`);
-    }
-
-    return this.#canvas.toDataURL('image/png');
+    const width = this.#sk_get_page_width(pageIndex);
+    const height = this.#sk_get_page_height(pageIndex);
+    if (width === 0 || height === 0) return null;
+    return { width, height };
   }
 
   /**
@@ -367,6 +375,45 @@ export class SafePdfRenderer {
     });
   }
 
+  /**
+   * Core render path shared by {@link renderPage} and {@link renderPageToCanvas}.
+   * Resizes the canvas if needed, reinitialises WebGL, and invokes the WASM
+   * render call.  Does NOT encode the result.
+   *
+   * @param {number} pageIndex
+   * @param {number} width
+   * @param {number} height
+   */
+  #renderInternal(pageIndex, width, height) {
+    this.#assertReady();
+    this.#assertPdfLoaded();
+
+    if (pageIndex < 0 || pageIndex >= this.#pageCount) {
+      throw new RangeError(
+        `Page index ${pageIndex} out of range [0, ${this.#pageCount - 1}]`
+      );
+    }
+
+    // Resize the canvas (and reinitialise WebGL) when the target size changes.
+    if (this.#canvas.width !== width || this.#canvas.height !== height) {
+      // Drop the Skia DirectContext BEFORE the GL context is invalidated by
+      // the canvas resize.  Skia caches GPU resources (textures, programs,
+      // buffers) that become stale when the WebGL context is reset.
+      this.#sk_reset_gpu();
+
+      this.#canvas.width = width;
+      this.#canvas.height = height;
+      this.#initWebGL();
+    }
+
+    this.#makeGLCurrent();
+
+    const result = this.#sk_render_page(width, height, pageIndex);
+    if (result !== 0) {
+      throw new Error(`Render failed for page ${pageIndex} (code ${result})`);
+    }
+  }
+
   /** Create (or recreate) the WebGL context on the internal canvas. */
   #initWebGL() {
     // Clean up the previous Emscripten GL handle so we don't leak entries
@@ -414,5 +461,7 @@ export class SafePdfRenderer {
     this.#sk_reset_gpu       = M.cwrap('sk_reset_gpu',       null,     []);
     this.#sk_get_prefetch_count = M.cwrap('sk_get_prefetch_count', 'number', ['number']);
     this.#sk_get_prefetch_page  = M.cwrap('sk_get_prefetch_page',  'number', ['number', 'number']);
+    this.#sk_get_page_width     = M.cwrap('sk_get_page_width',     'number', ['number']);
+    this.#sk_get_page_height    = M.cwrap('sk_get_page_height',    'number', ['number']);
   }
 }

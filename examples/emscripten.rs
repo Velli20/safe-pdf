@@ -269,4 +269,34 @@ pub extern "C" fn sk_clear_cache() {
     });
 }
 
+/// Returns the width of the given page in PDF points.
+///
+/// Returns `0.0` if the page index is out of range or the page has no media box.
+#[unsafe(export_name = "sk_get_page_width")]
+pub extern "C" fn sk_get_page_width(page_index: usize) -> f32 {
+    CURRENT_DOCUMENT.with(|doc| {
+        doc.borrow()
+            .as_ref()
+            .and_then(|d| d.get_page(page_index))
+            .and_then(|p| p.media_box.as_ref())
+            .map(|mb| mb.width())
+            .unwrap_or(0.0)
+    })
+}
+
+/// Returns the height of the given page in PDF points.
+///
+/// Returns `0.0` if the page index is out of range or the page has no media box.
+#[unsafe(export_name = "sk_get_page_height")]
+pub extern "C" fn sk_get_page_height(page_index: usize) -> f32 {
+    CURRENT_DOCUMENT.with(|doc| {
+        doc.borrow()
+            .as_ref()
+            .and_then(|d| d.get_page(page_index))
+            .and_then(|p| p.media_box.as_ref())
+            .map(|mb| mb.height())
+            .unwrap_or(0.0)
+    })
+}
+
 fn main() {}
