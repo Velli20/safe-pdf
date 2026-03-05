@@ -142,7 +142,7 @@ fn build_emscripten(
     // ALLOW_MEMORY_GROWTH – duplicated from EMCC_CFLAGS to ensure it
     //   reaches the linker; the heap can grow beyond INITIAL_MEMORY.
     let rustflags = [
-        "-C link-args=-sEXPORTED_FUNCTIONS=['_sk_load_pdf','_sk_get_prefetch_count','_sk_get_prefetch_page','_sk_get_page_count','_sk_render_page','_sk_free_pdf','_sk_reset_gpu','_sk_is_page_cached','_sk_get_cache_count','_sk_clear_cache','_malloc','_free','_main']",
+        "-C link-args=-sEXPORTED_FUNCTIONS=['_sk_load_pdf','_sk_get_prefetch_count','_sk_get_prefetch_page','_sk_get_page_count','_sk_render_page','_sk_free_pdf','_sk_reset_gpu','_sk_is_page_cached','_sk_get_cache_count','_sk_clear_cache','_sk_get_page_width','_sk_get_page_height','_malloc','_free','_main']",
         "-C link-args=-sEXPORTED_RUNTIME_METHODS=['cwrap','HEAPU8']",
         "-C link-args=-sSTANDALONE_WASM=0",
         "-C link-args=-sINITIAL_MEMORY=134217728",
