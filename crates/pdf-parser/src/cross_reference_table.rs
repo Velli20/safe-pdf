@@ -68,7 +68,7 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
-    use pdf_object::object_resolver::UnimplementedResolver;
+    use pdf_object::object_resolver::PassthroughResolver;
 
     use super::*;
 
@@ -77,7 +77,7 @@ mod tests {
         let data = b"xref\n0 2\n0000000000 65535 f\n0000000017 00000 n\ntrailer\n<< /Size 2 >>\nstartxref\n0\n";
         let mut parser = PdfParser::from(data.as_slice());
         let table = parser
-            .parse_cross_reference_table(&UnimplementedResolver)
+            .parse_cross_reference_table(&PassthroughResolver)
             .unwrap();
         assert_eq!(table.entries.len(), 2);
 
@@ -94,7 +94,7 @@ mod tests {
         let data = b"xref\n0 2\n0000000000 65535 f\n";
         let mut parser = PdfParser::from(data.as_slice());
 
-        let result = parser.parse_cross_reference_table(&UnimplementedResolver);
+        let result = parser.parse_cross_reference_table(&PassthroughResolver);
         assert!(result.is_err());
     }
 
@@ -104,7 +104,7 @@ mod tests {
         let mut parser = PdfParser::from(data.as_slice());
 
         let table = parser
-            .parse_cross_reference_table(&UnimplementedResolver)
+            .parse_cross_reference_table(&PassthroughResolver)
             .unwrap();
         assert!(table.entries.is_empty());
     }
@@ -121,7 +121,7 @@ mod tests {
 
         let mut parser = PdfParser::from(data.as_slice());
         let table = parser
-            .parse_cross_reference_table(&UnimplementedResolver)
+            .parse_cross_reference_table(&PassthroughResolver)
             .unwrap();
         assert_eq!(table.entries.len(), 4);
         assert!(table.entries.contains_key(&0));

@@ -43,7 +43,7 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use pdf_object::object_resolver::UnimplementedResolver;
+    use pdf_object::object_resolver::PassthroughResolver;
 
     use super::*;
 
@@ -60,7 +60,7 @@ mod tests {
 
         for (input, expected_count) in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_array(&UnimplementedResolver).unwrap();
+            let result = parser.parse_array(&PassthroughResolver).unwrap();
             assert_eq!(
                 result.len(),
                 expected_count,
@@ -81,7 +81,7 @@ mod tests {
 
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            if let Ok(v) = parser.parse_array(&UnimplementedResolver) {
+            if let Ok(v) = parser.parse_array(&PassthroughResolver) {
                 panic!(
                     "Expected Err, got {:?} len {} input '{}™",
                     v,

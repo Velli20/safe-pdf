@@ -244,7 +244,7 @@ impl GlyphWidthsMap {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use pdf_object::{object_resolver::UnimplementedResolver, object_variant::ObjectVariant};
+    use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
 
     // Helper to create a pdf_object::Value::Number for i64
     fn num_i64(n: i64) -> ObjectVariant {
@@ -265,7 +265,7 @@ mod tests {
     fn test_from_array_empty() {
         let input_array = vec![];
         let glyph_widths_map =
-            GlyphWidthsMap::from_array(&input_array, &UnimplementedResolver).unwrap();
+            GlyphWidthsMap::from_array(&input_array, &PassthroughResolver).unwrap();
         assert!(glyph_widths_map.runs.is_empty());
     }
 
@@ -274,7 +274,7 @@ mod tests {
         // [ 0 [500 450] ]
         let input_array = vec![num_i64(0), arr(vec![num_f32(500.0), num_f32(450.0)])];
         let glyph_widths_map =
-            GlyphWidthsMap::from_array(&input_array, &UnimplementedResolver).unwrap();
+            GlyphWidthsMap::from_array(&input_array, &PassthroughResolver).unwrap();
         assert_eq!(glyph_widths_map.runs.len(), 1);
         assert_eq!(glyph_widths_map.get_width(0), Some(500.0));
         assert_eq!(glyph_widths_map.get_width(1), Some(450.0));
@@ -292,7 +292,7 @@ mod tests {
             arr(vec![num_f32(700.0)]),
         ];
         let glyph_widths_map =
-            GlyphWidthsMap::from_array(&input_array, &UnimplementedResolver).unwrap();
+            GlyphWidthsMap::from_array(&input_array, &PassthroughResolver).unwrap();
         assert_eq!(glyph_widths_map.runs.len(), 3);
         assert_eq!(glyph_widths_map.get_width(0), Some(500.0));
         assert_eq!(glyph_widths_map.get_width(10), Some(600.0));
@@ -304,7 +304,7 @@ mod tests {
     fn test_from_array_missing_widths_array() {
         // [ 0 ] (missing widths array)
         let input_array = vec![num_i64(0)];
-        let result = GlyphWidthsMap::from_array(&input_array, &UnimplementedResolver);
+        let result = GlyphWidthsMap::from_array(&input_array, &PassthroughResolver);
         assert!(matches!(
             result,
             Err(GlyphWidthsMapError::IncompleteCIDEntry { cid: 0 })
@@ -315,7 +315,7 @@ mod tests {
     fn test_from_array_widths_not_an_array() {
         // [ 0, 500 ] (500 is not an array)
         let input_array = vec![num_i64(0), num_f32(500.0)];
-        let result = GlyphWidthsMap::from_array(&input_array, &UnimplementedResolver);
+        let result = GlyphWidthsMap::from_array(&input_array, &PassthroughResolver);
         // Now parsed as start of range with missing width -> MissingWidthForCIDRange
         assert!(matches!(
             result,
@@ -404,7 +404,7 @@ mod tests {
         // [ 10 12 600 ] -> CIDs 10, 11, 12 have width 600
         let input_array = vec![num_i64(10), num_i64(12), num_f32(600.0)];
         let glyph_widths_map =
-            GlyphWidthsMap::from_array(&input_array, &UnimplementedResolver).unwrap();
+            GlyphWidthsMap::from_array(&input_array, &PassthroughResolver).unwrap();
         assert_eq!(glyph_widths_map.runs.len(), 1);
         assert_eq!(glyph_widths_map.get_width(10), Some(600.0));
         assert_eq!(glyph_widths_map.get_width(11), Some(600.0));
@@ -416,7 +416,7 @@ mod tests {
         // [ 5 5 300 ] -> CID 5 has width 300
         let input_array = vec![num_i64(5), num_i64(5), num_f32(300.0)];
         let glyph_widths_map =
-            GlyphWidthsMap::from_array(&input_array, &UnimplementedResolver).unwrap();
+            GlyphWidthsMap::from_array(&input_array, &PassthroughResolver).unwrap();
         assert_eq!(glyph_widths_map.runs.len(), 1);
         assert_eq!(glyph_widths_map.get_width(5), Some(300.0));
     }
@@ -434,7 +434,7 @@ mod tests {
             arr(vec![num_f32(700.0), num_f32(750.0)]),
         ];
         let glyph_widths_map =
-            GlyphWidthsMap::from_array(&input_array, &UnimplementedResolver).unwrap();
+            GlyphWidthsMap::from_array(&input_array, &PassthroughResolver).unwrap();
         assert_eq!(glyph_widths_map.runs.len(), 3);
         assert_eq!(glyph_widths_map.get_width(0), Some(500.0));
         assert_eq!(glyph_widths_map.get_width(10), Some(600.0));
@@ -447,7 +447,7 @@ mod tests {
     fn test_from_array_error_empty_array() {
         // [ 0 [] ]
         let input_array = vec![num_i64(0), arr(vec![])];
-        let result = GlyphWidthsMap::from_array(&input_array, &UnimplementedResolver);
+        let result = GlyphWidthsMap::from_array(&input_array, &PassthroughResolver);
         assert!(matches!(
             result,
             Err(GlyphWidthsMapError::EmptyWidthsArray { cid: 0 })
@@ -463,7 +463,7 @@ mod tests {
             num_i64(0),
             arr(vec![num_f32(600.0)]),
         ];
-        let result = GlyphWidthsMap::from_array(&input_array, &UnimplementedResolver);
+        let result = GlyphWidthsMap::from_array(&input_array, &PassthroughResolver);
         assert!(matches!(
             result,
             Err(GlyphWidthsMapError::DuplicateCIDStart { cid: 0 })
@@ -480,7 +480,7 @@ mod tests {
             num_i64(2),
             num_f32(600.0),
         ];
-        let result = GlyphWidthsMap::from_array(&input_array, &UnimplementedResolver);
+        let result = GlyphWidthsMap::from_array(&input_array, &PassthroughResolver);
         assert!(matches!(
             result,
             Err(GlyphWidthsMapError::OverlappingRange { cid: 1 })
@@ -497,7 +497,7 @@ mod tests {
             num_i64(2),
             arr(vec![num_f32(700.0)]),
         ];
-        let result = GlyphWidthsMap::from_array(&input_array, &UnimplementedResolver);
+        let result = GlyphWidthsMap::from_array(&input_array, &PassthroughResolver);
         assert!(matches!(
             result,
             Err(GlyphWidthsMapError::OverlappingRange { cid: 2 })
@@ -509,7 +509,7 @@ mod tests {
         // [ 10 12 600 ]
         let input_array = vec![num_i64(10), num_i64(12), num_f32(600.0)];
         let glyph_widths_map =
-            GlyphWidthsMap::from_array(&input_array, &UnimplementedResolver).unwrap();
+            GlyphWidthsMap::from_array(&input_array, &PassthroughResolver).unwrap();
         for cid in 10..=12 {
             assert_eq!(glyph_widths_map.get_width(cid), Some(600.0));
         }
@@ -520,7 +520,7 @@ mod tests {
     fn test_from_array_error_c_last_less_than_c_first() {
         // [ 10 8 600 ]
         let input_array = vec![num_i64(10), num_i64(8), num_f32(600.0)];
-        let result = GlyphWidthsMap::from_array(&input_array, &UnimplementedResolver);
+        let result = GlyphWidthsMap::from_array(&input_array, &PassthroughResolver);
         assert!(matches!(
             result,
             Err(GlyphWidthsMapError::InvalidCIDRange {
@@ -534,7 +534,7 @@ mod tests {
     fn test_from_array_error_missing_w_in_c_first_c_last_w() {
         // [ 10 12 ] (missing w)
         let input_array = vec![num_i64(10), num_i64(12)];
-        let result = GlyphWidthsMap::from_array(&input_array, &UnimplementedResolver);
+        let result = GlyphWidthsMap::from_array(&input_array, &PassthroughResolver);
         assert!(matches!(
             result,
             Err(GlyphWidthsMapError::MissingWidthForCIDRange { c_first: 10 })

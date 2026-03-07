@@ -1,10 +1,10 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use crate::decryption::{DecryptionError, DocumentDecryptor};
 use crate::document::PdfDocument;
 use crate::object_stream::read_object_stream;
 use pdf_object::indirect_object::IndirectObject;
-use pdf_object::object_resolver::{ObjectResolver, UnimplementedResolver};
+use pdf_object::object_resolver::{ObjectResolver, PassthroughResolver};
 use pdf_object::{
     cross_reference_table::{CrossReferenceEntry, CrossReferenceEntryType, CrossReferenceTable},
     error::ObjectError,
@@ -16,7 +16,6 @@ use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_page::page::PdfPage;
 use pdf_page::pages::{PdfPages, PdfPagesError};
 use pdf_page::resource::Resource;
-use pdf_page::resource_cache::ResourceCache;
 use pdf_parser::{error::ParserError, header::HeaderError, parser::PdfParser};
 use thiserror::Error;
 
@@ -71,16 +70,7 @@ impl PdfReader {
     ///
     /// Returns a `PdfDocument` containing the parsed objects and page structure.
     pub fn read_from_bytes(
-        &mut self,
-        input: &[u8],
-        password: Option<&[u8]>,
-    ) -> Result<PdfDocument, PdfReaderError> {
-        self.read_from_bytes_internal(input, password)
-    }
-
-    /// Internal implementation for reading PDF documents with optional password.
-    fn read_from_bytes_internal(
-        &mut self,
+        &self,
         input: &[u8],
         password: Option<&[u8]>,
     ) -> Result<PdfDocument, PdfReaderError> {
@@ -99,7 +89,7 @@ impl PdfReader {
         let CrossReferenceTable {
             entries,
             mut trailer,
-        } = build_xref_index(&mut parser)?;
+        } = parser.build_xref_table()?;
 
         // Check for encryption and handle it before loading other objects.
         let decryptor = if let Some(encrypt_ref) = trailer.dictionary.take("Encrypt") {
@@ -133,163 +123,6 @@ impl PdfReader {
     }
 }
 
-/// Builds the cross-reference index by locating the xref structure at the end of the file.
-///
-/// Supports both traditional xref tables (PDF 1.0–1.4) and cross-reference streams (PDF 1.5+).
-///
-/// Strategy:
-/// 1. Scan backwards for `startxref` to find the byte offset of the xref section
-/// 2. Parse the object at that offset
-/// 3. If it's a traditional `xref` table, follow the old path
-/// 4. If it's a stream object with `/Type /XRef`, parse as xref stream
-/// 5. Follow `/Prev` chain to merge all sections
-fn build_xref_index(parser: &mut PdfParser) -> Result<CrossReferenceTable, PdfReaderError> {
-    // Find the startxref offset by scanning backwards for "startxref"
-    const STARTXREF_KEYWORD: &[u8] = b"startxref";
-    let startxref_pos = parser
-        .tokenizer
-        .input
-        .windows(STARTXREF_KEYWORD.len())
-        .rposition(|window| window == STARTXREF_KEYWORD)
-        .ok_or(PdfReaderError::MissingTrailer)?;
-
-    // Extract the byte offset number after "startxref" keyword
-    let offset_start = startxref_pos.saturating_add(STARTXREF_KEYWORD.len());
-    let remaining = parser
-        .tokenizer
-        .input
-        .get(offset_start..)
-        .ok_or(PdfReaderError::MissingTrailer)?;
-
-    // Skip whitespace, then read digits
-    let digits_start = remaining
-        .iter()
-        .position(|b| b.is_ascii_digit())
-        .ok_or(PdfReaderError::MissingTrailer)?;
-    let digits_end = remaining
-        .get(digits_start..)
-        .map(|s| {
-            digits_start.saturating_add(
-                s.iter()
-                    .position(|b| !b.is_ascii_digit())
-                    .unwrap_or(s.len()),
-            )
-        })
-        .unwrap_or(digits_start);
-    let xref_offset: usize = std::str::from_utf8(
-        remaining
-            .get(digits_start..digits_end)
-            .ok_or(PdfReaderError::MissingTrailer)?,
-    )
-    .map_err(|_| PdfReaderError::MissingTrailer)?
-    .parse()
-    .map_err(|_| PdfReaderError::MissingTrailer)?;
-
-    // Follow the xref chain, merging entries from all linked tables
-    merge_xref_chain(parser, xref_offset)
-}
-
-/// Follows the xref chain via `/Prev` entries and merges all cross-reference tables.
-///
-/// This handles incremental PDF updates where each update adds a new xref section
-/// that references the previous one via the `/Prev` entry in the trailer.
-///
-/// Supports both traditional xref tables and xref streams at each step in the chain.
-fn merge_xref_chain(
-    parser: &mut PdfParser,
-    start_offset: usize,
-) -> Result<CrossReferenceTable, PdfReaderError> {
-    let mut entries: BTreeMap<usize, CrossReferenceEntry> = BTreeMap::new();
-    let mut visited_offsets = HashSet::new();
-    let mut current_offset = start_offset;
-    let mut trailer = None;
-    loop {
-        // Prevent infinite loops from circular references
-        if !visited_offsets.insert(current_offset) {
-            break;
-        }
-
-        // Parse the object at the current offset — could be xref table or xref stream
-        let parsed = parser.parse_object_at(current_offset, &UnimplementedResolver)?;
-
-        let xref_table = match parsed {
-            ObjectVariant::CrossReferenceTable(table) => table,
-            ObjectVariant::IndirectObject(indirect) => {
-                // Xref stream: an indirect object wrapping a stream with /Type /XRef
-                match indirect.object {
-                    Some(ObjectVariant::Stream(ref stream)) => {
-                        pdf_parser::cross_reference_stream::parse_xref_stream(
-                            stream,
-                            &UnimplementedResolver,
-                        )?
-                    }
-                    _ => {
-                        return Err(PdfReaderError::InvalidXrefAtOffset {
-                            offset: current_offset,
-                        });
-                    }
-                }
-            }
-            ObjectVariant::Stream(ref stream) => {
-                pdf_parser::cross_reference_stream::parse_xref_stream(
-                    stream,
-                    &UnimplementedResolver,
-                )?
-            }
-            _ => {
-                return Err(PdfReaderError::InvalidXrefAtOffset {
-                    offset: current_offset,
-                });
-            }
-        };
-
-        // Merge entries: newer entries (already in merged_xref) take precedence
-        for (obj_num, entry) in xref_table.entries {
-            entries.entry(obj_num).or_insert(entry);
-        }
-
-        let prev_value = xref_table.trailer.dictionary.get("Prev").cloned();
-
-        // Select the best trailer: prefer one with a `/Root` entry
-        match trailer.as_ref() {
-            None => {
-                trailer = Some(xref_table.trailer);
-            }
-            Some(existing) if existing.dictionary.get("Root").is_none() => {
-                if xref_table.trailer.dictionary.get("Root").is_some() {
-                    trailer = Some(xref_table.trailer);
-                }
-            }
-            _ => {}
-        }
-
-        // Follow the chain to the previous xref section
-        if let Some(prev_value) = prev_value {
-            current_offset = prev_value.try_number::<usize>(&UnimplementedResolver)?;
-        } else {
-            break;
-        }
-    }
-
-    let trailer = trailer.ok_or(PdfReaderError::MissingTrailer)?;
-
-    Ok(CrossReferenceTable::new(entries, trailer))
-}
-
-#[derive(Default)]
-struct ResourceCacheWrapper {
-    cache: HashMap<usize, Resource>,
-}
-
-impl ResourceCache for ResourceCacheWrapper {
-    fn get(&self, obj_num: &usize) -> Option<&Resource> {
-        self.cache.get(obj_num)
-    }
-
-    fn insert(&mut self, obj_num: usize, resource: Resource) {
-        self.cache.insert(obj_num, resource);
-    }
-}
 /// Extracts the page tree from the document catalog using a shared resource cache.
 ///
 /// Follows the chain: Trailer → /Root (Catalog) → /Pages (Page Tree).
@@ -308,7 +141,7 @@ fn extract_page_tree(
     // Get the page tree via the /Pages entry in the catalog
     let pages_dict = catalog.get_or_err("Pages")?.try_dictionary(objects)?;
 
-    let mut cache = ResourceCacheWrapper::default();
+    let mut cache: HashMap<usize, Resource> = HashMap::new();
     let pages = PdfPages::from_dictionary(pages_dict, objects, &mut cache)?;
     Ok(pages)
 }
@@ -350,7 +183,7 @@ fn load_encrypt_dictionary(
                 .ok_or(ObjectError::FailedResolveObjectReference { obj_num })?;
 
             // Parse the encryption object at the specified offset
-            let object = parser.parse_object_at(byte_offset, &UnimplementedResolver)?;
+            let object = parser.parse_object_at(byte_offset, &PassthroughResolver)?;
 
             // Extract the dictionary from the parsed object
             match object {
@@ -382,7 +215,7 @@ fn load_encrypt_dictionary(
     };
 
     // Parse the encryption dictionary
-    EncryptDictionary::from_dictionary(&encrypt_dict, &UnimplementedResolver).map_err(Into::into)
+    EncryptDictionary::from_dictionary(&encrypt_dict, &PassthroughResolver).map_err(Into::into)
 }
 
 /// Extracts the document ID from the trailer's /ID array.
@@ -402,11 +235,11 @@ fn extract_document_id(trailer: &Trailer) -> Result<Vec<u8>, PdfReaderError> {
     let first_element = trailer
         .dictionary
         .get_or_err("ID")?
-        .try_array(&UnimplementedResolver)?
+        .try_array(&PassthroughResolver)?
         .first()
         .ok_or(PdfReaderError::MissingDocumentId)?;
 
-    Ok(first_element.try_bytes(&UnimplementedResolver)?.to_vec())
+    Ok(first_element.try_bytes(&PassthroughResolver)?.to_vec())
 }
 
 /// Loads all objects referenced in the cross-reference table with optional decryption.
@@ -489,11 +322,12 @@ fn load_objects_with_decryption(
             e.insert(unpacked);
         }
 
-        // Extract the object at the specified index
+        // Extract the object at the specified index and insert it.
+        // Use `insert_compressed` to overwrite: the object-stream version is authoritative.
         if let Some(cached) = parsed_obj_streams.get(&object_stream_number)
             && let Some((_cached_num, obj)) = cached.get(index_within_stream)
         {
-            objects.map.insert(obj_num, obj.clone());
+            objects.insert_compressed(obj_num, obj.clone());
         }
     }
 
@@ -571,176 +405,6 @@ mod tests {
     }
 
     #[test]
-    fn test_build_xref_index_simple() {
-        let mut data = Vec::new();
-        data.extend_from_slice(b"%PDF-1.7\n");
-
-        // Object 1: Catalog
-        let obj1_offset = data.len();
-        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog >>\nendobj\n");
-
-        // Xref table
-        let xref_offset = data.len();
-        data.extend_from_slice(b"xref\n0 2\n");
-        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
-        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
-
-        // Trailer
-        data.extend_from_slice(b"trailer\n<< /Size 2 /Root 1 0 R >>\n");
-        data.extend_from_slice(b"startxref\n");
-        data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
-        data.extend_from_slice(b"%%EOF");
-
-        let mut parser = PdfParser::from(data.as_slice());
-        let result = build_xref_index(&mut parser);
-
-        assert!(
-            result.is_ok(),
-            "Should successfully build xref index: {:?}",
-            result.err()
-        );
-        let table = result.unwrap();
-
-        // Check entries: Includes free object 0 and object 1.
-        assert_eq!(
-            table.entries.len(),
-            2,
-            "Should have 2 entries (obj 0 and obj 1)"
-        );
-
-        let entry1 = table.entries.get(&1).expect("Obj 1 should exist");
-        assert_eq!(entry1.byte_offset(), Some(obj1_offset));
-
-        // Check free entry
-        let entry0 = table.entries.get(&0).expect("Obj 0 should exist");
-        assert!(entry0.is_free(), "Obj 0 should be free");
-
-        // Check trailer
-        let size: i64 = table
-            .trailer
-            .dictionary
-            .get("Size")
-            .expect("Size expected")
-            .try_number(&UnimplementedResolver)
-            .unwrap();
-        assert_eq!(size, 2);
-    }
-
-    #[test]
-    fn test_merge_xref_chain_incremental() {
-        let mut data = Vec::new();
-        data.extend_from_slice(b"%PDF-1.7\n");
-
-        // --- Revision 1 ---
-        // Obj 1 (v1)
-        let _obj1_v1_offset = data.len();
-        data.extend_from_slice(b"1 0 obj\n(v1)\nendobj\n");
-        // Obj 2
-        let obj2_offset = data.len();
-        data.extend_from_slice(b"2 0 obj\n(obj2)\nendobj\n");
-
-        let xref1_offset = data.len();
-        data.extend_from_slice(b"xref\n0 3\n");
-        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
-        data.extend_from_slice(format_xref_entry(_obj1_v1_offset, 0, true).as_bytes());
-        data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
-
-        data.extend_from_slice(b"trailer\n<< /Size 3 /Root 1 0 R >>\n");
-        data.extend_from_slice(b"startxref\n");
-        data.extend_from_slice(format!("{}\n", xref1_offset).as_bytes());
-        data.extend_from_slice(b"%%EOF\n");
-
-        // --- Revision 2 (Update Obj 1) ---
-        // Obj 1 (v2)
-        let obj1_v2_offset = data.len();
-        data.extend_from_slice(b"1 0 obj\n(v2)\nendobj\n");
-
-        let xref2_offset = data.len();
-        data.extend_from_slice(b"xref\n0 1\n"); // dummy head
-        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
-        data.extend_from_slice(b"1 1\n"); // Subsection for obj 1
-        data.extend_from_slice(format_xref_entry(obj1_v2_offset, 0, true).as_bytes());
-
-        // Trailer points to Prev xref
-        data.extend_from_slice(b"trailer\n<< /Size 3 /Root 1 0 R /Prev ");
-        data.extend_from_slice(format!("{}", xref1_offset).as_bytes());
-        data.extend_from_slice(b" >>\n");
-        data.extend_from_slice(b"startxref\n");
-        data.extend_from_slice(format!("{}\n", xref2_offset).as_bytes());
-        data.extend_from_slice(b"%%EOF");
-
-        let mut parser = PdfParser::from(data.as_slice());
-
-        // Test merge_xref_chain starting from the second xref
-        let result = merge_xref_chain(&mut parser, xref2_offset);
-
-        assert!(result.is_ok(), "Should merge xref chain");
-        let table = result.unwrap();
-
-        // Check Obj 1 (should be v2)
-        let entry1 = table.entries.get(&1).expect("Obj 1 missing");
-        assert_eq!(
-            entry1.byte_offset(),
-            Some(obj1_v2_offset),
-            "Obj 1 should point to v2"
-        );
-
-        // Check Obj 2 (should be from v1)
-        let entry2 = table.entries.get(&2).expect("Obj 2 missing");
-        assert_eq!(
-            entry2.byte_offset(),
-            Some(obj2_offset),
-            "Obj 2 should be from v1"
-        );
-    }
-
-    #[test]
-    fn test_merge_xref_circular_protection() {
-        let mut data = Vec::new();
-        data.extend_from_slice(b"%PDF-1.7\n");
-
-        // Create 2 xrefs pointing to each other
-        let _xref1_pos_holder = data.len();
-
-        // Let's just put placeholders.
-        // Xref 1 at offset 100
-        while data.len() < 100 {
-            data.push(b' ');
-        }
-        let xref1_offset = data.len();
-        data.extend_from_slice(b"xref\n0 1\n");
-        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
-        // Trailer 1 points to Prev = 200 (xref2)
-        data.extend_from_slice(b"trailer\n<< /Prev 200 >>\n");
-        // Assuming parser might greedily look for startxref if it treats it as a file trailer
-        data.extend_from_slice(b"startxref\n0\n%%EOF\n");
-
-        // Xref 2 at offset 200
-        while data.len() < 200 {
-            data.push(b' ');
-        }
-        let xref2_offset = data.len();
-        data.extend_from_slice(b"xref\n0 1\n");
-        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
-        // Trailer 2 points to Prev = 100 (xref1)
-        data.extend_from_slice(format!("trailer\n<< /Prev {} >>\n", xref1_offset).as_bytes());
-
-        // Add end of file markers just in case
-        data.extend_from_slice(b"startxref\n0\n%%EOF");
-
-        let mut parser = PdfParser::from(data.as_slice());
-        let result = merge_xref_chain(&mut parser, xref2_offset);
-
-        // It should succeed by breaking the loop, not crash or hang.
-        assert!(
-            result.is_ok(),
-            "Failed circular xref test: {:?}",
-            result.err()
-        );
-        // We expect it to visit xref2, then xref1, then see xref2 again and stop.
-    }
-
-    #[test]
     fn test_encrypted_document_detection() {
         let mut data = Vec::new();
         data.extend_from_slice(b"%PDF-1.7\n");
@@ -774,7 +438,7 @@ mod tests {
         data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
         data.extend_from_slice(b"%%EOF");
 
-        let mut reader = PdfReader;
+        let reader = PdfReader;
         let result = reader.read_from_bytes(&data, None);
 
         // Should return an EncryptedDocument error
@@ -814,7 +478,7 @@ mod tests {
         data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
         data.extend_from_slice(b"%%EOF");
 
-        let mut reader = PdfReader;
+        let reader = PdfReader;
         let result = reader.read_from_bytes(&data, None);
 
         // Should return an EncryptedDocument error
@@ -847,7 +511,7 @@ mod tests {
         data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
         data.extend_from_slice(b"%%EOF");
 
-        let mut reader = PdfReader;
+        let reader = PdfReader;
         let result = reader.read_from_bytes(&data, None);
 
         // Should load successfully (no encryption)

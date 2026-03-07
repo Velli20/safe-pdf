@@ -23,9 +23,17 @@ pub trait ObjectResolver {
     ) -> Result<&'a ObjectVariant, ObjectError>;
 }
 
-pub struct UnimplementedResolver;
+/// A resolver that returns every object unchanged without following references.
+///
+/// Use this only in contexts where the input is known to contain no
+/// [`ObjectVariant::Reference`] values (e.g., early parsing phases before the
+/// cross-reference table is available). Feeding a `Reference` into a
+/// `try_*` helper through this resolver will return the reference itself,
+/// not the resolved object, producing a wrong-type error rather than
+/// resolving correctly.
+pub struct PassthroughResolver;
 
-impl ObjectResolver for UnimplementedResolver {
+impl ObjectResolver for PassthroughResolver {
     fn resolve_object<'a>(
         &'a self,
         obj: &'a ObjectVariant,
@@ -33,3 +41,7 @@ impl ObjectResolver for UnimplementedResolver {
         Ok(obj)
     }
 }
+
+/// Deprecated alias for [`PassthroughResolver`]. Use `PassthroughResolver` instead.
+#[deprecated(note = "Use PassthroughResolver instead")]
+pub type UnimplementedResolver = PassthroughResolver;

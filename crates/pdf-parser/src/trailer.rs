@@ -41,7 +41,7 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use pdf_object::{object_resolver::UnimplementedResolver, object_variant::ObjectVariant};
+    use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
 
     use super::*;
 
@@ -50,7 +50,7 @@ mod tests {
         let input = b"trailer\n<< /Size 22 /Root 1 0 R >>\nstartxref\n187\n%%EOF";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let trailer = parser.parse_trailer(&UnimplementedResolver).unwrap();
+        let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
         assert_eq!(
             trailer.dictionary.get("Root").unwrap(),
             &ObjectVariant::Reference(1)

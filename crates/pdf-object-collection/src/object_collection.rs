@@ -96,6 +96,17 @@ impl ObjectCollection {
         Ok(())
     }
 
+    /// Inserts a compressed object (from an object stream) into the collection,
+    /// overwriting any existing entry for `obj_num`.
+    ///
+    /// Unlike [`insert`](Self::insert), this method does not error on duplicate keys
+    /// because compressed-object pass-2 loading may encounter object numbers that
+    /// were already registered in pass 1 (e.g., via an object stream entry in the
+    /// xref table). The object-stream version is authoritative for these objects.
+    pub fn insert_compressed(&mut self, obj_num: usize, obj: ObjectVariant) {
+        self.map.insert(obj_num, obj);
+    }
+
     pub fn get(&self, key: usize) -> Option<&ObjectVariant> {
         if let Some(obj) = self.map.get(&key) {
             return Some(obj);
