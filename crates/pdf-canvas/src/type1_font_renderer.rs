@@ -1,13 +1,10 @@
 use crate::canvas_backend::CanvasBackend;
 use crate::pdf_canvas::PdfCanvas;
-use crate::pdf_path_pen::PdfPathPen;
-use crate::text_state::TextState;
+use crate::pdf_path_pen::draw_outline_glyph;
 use crate::{error::PdfCanvasError, text_renderer::TextRenderer};
-use pdf_graphics::transform::Transform;
-use pdf_graphics::{PaintMode, PathFillType};
 use read_fonts::TableProvider;
-use skrifa::instance::{LocationRef, Size};
-use skrifa::outline::{DrawSettings, OutlineGlyphCollection};
+use skrifa::instance::Size;
+use skrifa::outline::OutlineGlyphCollection;
 use skrifa::{FontRef, GlyphId, MetadataProvider};
 
 pub(crate) struct Type1FontRenderer<'a, 'b, B: CanvasBackend> {
@@ -37,15 +34,11 @@ impl<'a, 'b, B: CanvasBackend> Type1FontRenderer<'a, 'b, B> {
 
 impl<B: CanvasBackend> TextRenderer for Type1FontRenderer<'_, '_, B> {
     fn render_text(&mut self, iter: impl Iterator<Item = u16>) -> Result<(), PdfCanvasError> {
-        let TextState {
-            horizontal_scaling,
-            font_size,
-            rise,
-            ..
-        } = self.canvas.current_state()?.text_state.clone();
-
-        let scale = font_size * 0.001;
-        let m_params = Transform::from_row(scale * horizontal_scaling, 0.0, 0.0, scale, 0.0, rise);
+        let m_params = self
+            .canvas
+            .current_state()?
+            .text_state
+            .glyph_base_transform(0.001);
 
         let cff = self
             .font_ref
@@ -57,10 +50,10 @@ impl<B: CanvasBackend> TextRenderer for Type1FontRenderer<'_, '_, B> {
             .map_err(|_| PdfCanvasError::InvalidFont("failed to read CFF charset"))?;
 
         for char_code in iter {
-            let mut glyph_matrix_for_char = m_params;
-            let state = &self.canvas.current_state()?;
-            glyph_matrix_for_char.concat(&state.text_state.matrix);
-            glyph_matrix_for_char.concat(&state.transform);
+            let state = self.canvas.current_state()?;
+            let glyph_matrix_for_char = state
+                .text_state
+                .compose_glyph_matrix(m_params, &state.transform);
 
             // Resolve glyph id from CFF charset.
             let gid = if let Some(charset) = &charset {
@@ -78,28 +71,18 @@ impl<B: CanvasBackend> TextRenderer for Type1FontRenderer<'_, '_, B> {
             };
 
             if let Some(outline_glyph) = self.outlines.get(gid) {
-                let mut pen = PdfPathPen::default();
-                // Draw unhinted at requested font size.
-                let size = Size::new(1000.0);
-                let settings = DrawSettings::from((size, LocationRef::default()));
-                if outline_glyph.draw(settings, &mut pen).is_ok() {
-                    pen.path.transform(&glyph_matrix_for_char);
-                    self.canvas
-                        .draw_path(&pen.path, PaintMode::Fill, PathFillType::Winding)?;
-                } else {
-                    // println!(
-                    //     "Failed to draw outline for char code {}",
-                    //     char::from(char_code)
-                    // );
-                }
-            } else {
-                println!("No outline for gid {:?} ", gid,);
+                draw_outline_glyph(
+                    self.canvas,
+                    &outline_glyph,
+                    Size::new(1000.0),
+                    &glyph_matrix_for_char,
+                )?;
             }
 
-            // Advance text matrix.
-            let text_state = &mut self.canvas.current_state_mut()?.text_state;
-            let glyph_width_x = text_state.glyph_width(char_code) / 1000.0 * text_state.font_size;
-            text_state.advance_text_cursor(char_code, glyph_width_x, 0.0);
+            self.canvas
+                .current_state_mut()?
+                .text_state
+                .advance_horizontal_glyph(char_code);
         }
         Ok(())
     }
