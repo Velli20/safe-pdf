@@ -17,9 +17,9 @@ pub struct PostScriptCalculatorFunction {
 }
 
 impl PostScriptCalculatorFunction {
-    /// Builds the input stack for PostScript evaluation.
+    /// Builds the PostScript input stack, clamping each value to its domain entry.
     fn build_postscript_stack(
-        x: f32,
+        inputs: &[f32],
         domain: &[f32],
         input_count: usize,
     ) -> Result<Vec<f64>, FunctionInterpolationError> {
@@ -29,8 +29,14 @@ impl PostScriptCalculatorFunction {
             let (start, end) =
                 get_pair(domain, i).ok_or(FunctionInterpolationError::EncodeIndexError)?;
 
-            // Placeholder behavior for multi-input functions: reuse the same input value
-            let val = x.clamp(start, end);
+            let val = inputs
+                .get(i)
+                .copied()
+                .ok_or(FunctionInterpolationError::InsufficientInputs {
+                    expected: input_count,
+                    got: inputs.len(),
+                })?
+                .clamp(start, end);
 
             stack.push(f64::from(val));
         }
@@ -65,12 +71,22 @@ impl PostScriptCalculatorFunction {
 
 impl FunctionImpl for PostScriptCalculatorFunction {
     /// Interpolates using PostScript calculator (Type 4 function).
-    fn interpolate(&self, x: f32) -> Result<Vec<f32>, FunctionInterpolationError> {
+    ///
+    /// All input values are taken from `inputs` in order, clamped to their respective
+    /// domain entries, and pushed onto the PostScript stack before execution.
+    fn interpolate(&self, inputs: &[f32]) -> Result<Vec<f32>, FunctionInterpolationError> {
         let input_count = self.domain.len() / 2;
         let output_count = self.range.len() / 2;
 
+        if inputs.len() < input_count {
+            return Err(FunctionInterpolationError::InsufficientInputs {
+                expected: input_count,
+                got: inputs.len(),
+            });
+        }
+
         // Build the input stack, clamping each input to its domain
-        let stack = Self::build_postscript_stack(x, &self.domain, input_count)?;
+        let stack = Self::build_postscript_stack(inputs, &self.domain, input_count)?;
         // Execute PostScript operators
         let result_stack = pdf_postscript::calculator::execute(&stack, &self.operators)?;
 

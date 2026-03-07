@@ -48,7 +48,7 @@ impl ColorStops {
             let x = domain[0] + t * domain_range;
 
             // Evaluate function; propagate errors to the caller.
-            let components = function.interpolate(x)?;
+            let components = function.interpolate(&[x])?;
             let color = color_space.apply(&components)?;
 
             positions.push(t);
