@@ -216,8 +216,7 @@ impl EncryptDictionary {
 mod tests {
     use super::*;
     use pdf_object::{
-        dictionary::Dictionary, object_resolver::UnimplementedResolver,
-        object_variant::ObjectVariant,
+        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     };
     use std::collections::BTreeMap;
 
@@ -280,7 +279,7 @@ mod tests {
             ("EncryptMetadata", ObjectVariant::Boolean(false)),
         ]);
 
-        let result = EncryptDictionary::from_dictionary(&dict, &UnimplementedResolver);
+        let result = EncryptDictionary::from_dictionary(&dict, &PassthroughResolver);
 
         assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
         let encrypt = result.unwrap();

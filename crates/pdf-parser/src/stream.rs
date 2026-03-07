@@ -58,7 +58,7 @@ impl PdfParser<'_> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_object::{object_resolver::UnimplementedResolver, object_variant::ObjectVariant};
+    use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
 
     use super::*;
 
@@ -73,7 +73,7 @@ mod tests {
         let input = b"strm\nHello World\nendstream";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_stream(&dictionary, &UnimplementedResolver);
+        let result = parser.parse_stream(&dictionary, &PassthroughResolver);
         assert!(result.is_err());
     }
 
@@ -88,7 +88,7 @@ mod tests {
         let input = b"stream\nHello World\nendstrm";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_stream(&dictionary, &UnimplementedResolver);
+        let result = parser.parse_stream(&dictionary, &PassthroughResolver);
         assert!(result.is_err());
     }
 
@@ -99,7 +99,7 @@ mod tests {
         let input = b"stream\nHello World\nendstream";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_stream(&dictionary, &UnimplementedResolver);
+        let result = parser.parse_stream(&dictionary, &PassthroughResolver);
         assert!(result.is_err());
     }
 
@@ -114,7 +114,7 @@ mod tests {
         let input = b"stream\nHello World\nendstream";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_stream(&dictionary, &UnimplementedResolver);
+        let result = parser.parse_stream(&dictionary, &PassthroughResolver);
         assert!(result.is_err());
     }
 
@@ -129,7 +129,7 @@ mod tests {
         let input = b"stream\n   Hello World   \nendstream";
         let mut parser = PdfParser::from(input.as_slice());
 
-        let result = parser.parse_stream(&dictionary, &UnimplementedResolver);
+        let result = parser.parse_stream(&dictionary, &PassthroughResolver);
         assert!(result.is_err()); // Extra whitespace should cause an error
     }
 }

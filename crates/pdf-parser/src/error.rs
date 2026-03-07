@@ -45,4 +45,8 @@ pub enum ParserError {
     ObjectError(#[from] ObjectError),
     #[error("Indirect object error: {0}")]
     IndirectObjectError(#[from] IndirectObjectError),
+    #[error("Missing startxref marker in PDF")]
+    MissingStartXref,
+    #[error("Invalid cross-reference table at offset {offset}")]
+    InvalidXrefAtOffset { offset: usize },
 }

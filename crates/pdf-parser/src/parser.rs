@@ -267,7 +267,7 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use pdf_object::object_resolver::UnimplementedResolver;
+    use pdf_object::object_resolver::PassthroughResolver;
 
     use super::*;
 
@@ -276,7 +276,7 @@ mod tests {
         let input = b"%PDF-1.3
  ";
         let mut parser = PdfParser::from(input.as_slice());
-        let result = parser.parse_object(&UnimplementedResolver);
+        let result = parser.parse_object(&PassthroughResolver);
         assert!(result.is_ok());
     }
 
@@ -442,7 +442,7 @@ mod tests {
 
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let value = parser.parse_object(&UnimplementedResolver).unwrap();
+            let value = parser.parse_object(&PassthroughResolver).unwrap();
             assert_eq!(
                 value,
                 ObjectVariant::Boolean(expected),
@@ -458,7 +458,7 @@ mod tests {
 
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_object(&UnimplementedResolver);
+            let result = parser.parse_object(&PassthroughResolver);
             assert!(
                 result.is_err(),
                 "Expected error for invalid input `{}`",
@@ -484,7 +484,7 @@ mod tests {
 
         for input in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_object(&UnimplementedResolver);
+            let result = parser.parse_object(&PassthroughResolver);
             assert_eq!(
                 result,
                 Ok(ObjectVariant::Null),
@@ -506,7 +506,7 @@ mod tests {
         ];
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_object(&UnimplementedResolver);
+            let result = parser.parse_object(&PassthroughResolver);
             assert!(
                 result.is_err(),
                 "Expected error for invalid input `{}`",

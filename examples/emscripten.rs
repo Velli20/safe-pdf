@@ -58,7 +58,7 @@ pub unsafe extern "C" fn sk_load_pdf(data_ptr: *const u8, data_len: usize) -> i3
     // and `data_len` is non-zero. The slice is only used within this function scope.
     let pdf_bytes = unsafe { std::slice::from_raw_parts(data_ptr, data_len) };
 
-    let mut reader = PdfReader;
+    let reader = PdfReader;
 
     match reader.read_from_bytes(pdf_bytes, None) {
         Ok(document) => {

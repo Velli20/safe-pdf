@@ -1,5 +1,5 @@
 use crate::{TextElement, error::PdfOperatorError};
-use pdf_object::{object_resolver::UnimplementedResolver, object_variant::ObjectVariant};
+use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
 
 pub struct Operands(pub Vec<ObjectVariant>);
 
@@ -27,9 +27,7 @@ impl Operands {
     }
 
     pub fn get_f32(&mut self) -> Result<f32, PdfOperatorError> {
-        let value = self
-            .take_next()?
-            .try_number::<f32>(&UnimplementedResolver)?;
+        let value = self.take_next()?.try_number::<f32>(&PassthroughResolver)?;
         Ok(value)
     }
 
@@ -59,13 +57,13 @@ impl Operands {
     }
 
     pub fn get_u8(&mut self) -> Result<u8, PdfOperatorError> {
-        let value = self.take_next()?.try_number::<u8>(&UnimplementedResolver)?;
+        let value = self.take_next()?.try_number::<u8>(&PassthroughResolver)?;
         Ok(value)
     }
 
     pub fn get_text_element_array(&mut self) -> Result<Vec<TextElement>, PdfOperatorError> {
         let object = self.take_next()?;
-        let array_values = object.try_array(&UnimplementedResolver)?;
+        let array_values = object.try_array(&PassthroughResolver)?;
 
         let mut elements = Vec::with_capacity(array_values.len());
         for val_obj in array_values {
@@ -77,7 +75,7 @@ impl Operands {
                     elements.push(TextElement::Text { value: s.clone() })
                 }
                 _ => {
-                    let amount = val_obj.try_number::<f32>(&UnimplementedResolver)?;
+                    let amount = val_obj.try_number::<f32>(&PassthroughResolver)?;
                     elements.push(TextElement::Adjustment { amount });
                 }
             }
@@ -87,6 +85,6 @@ impl Operands {
 
     pub fn get_f32_array(&mut self) -> Result<Vec<f32>, PdfOperatorError> {
         let array = self.take_next()?;
-        Ok(array.try_vec_of::<f32>(&UnimplementedResolver)?)
+        Ok(array.try_vec_of::<f32>(&PassthroughResolver)?)
     }
 }

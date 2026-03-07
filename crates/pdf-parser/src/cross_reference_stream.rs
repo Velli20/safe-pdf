@@ -127,7 +127,7 @@ fn read_field(bytes: &[u8]) -> usize {
 mod tests {
     use pdf_object::{
         cross_reference_table::CrossReferenceEntryType, dictionary::Dictionary,
-        object_resolver::UnimplementedResolver, object_variant::ObjectVariant,
+        object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     };
     use std::collections::BTreeMap;
 
@@ -183,7 +183,7 @@ mod tests {
         data.extend_from_slice(&[1, 2, 0, 0]);
 
         let stream = build_xref_stream([1, 2, 1], None, 4, data);
-        let table = parse_xref_stream(&stream, &UnimplementedResolver).unwrap();
+        let table = parse_xref_stream(&stream, &PassthroughResolver).unwrap();
 
         assert_eq!(table.entries.len(), 4);
 
@@ -218,7 +218,7 @@ mod tests {
         data.extend_from_slice(&[0, 200]);
 
         let stream = build_xref_stream([0, 2, 0], None, 2, data);
-        let table = parse_xref_stream(&stream, &UnimplementedResolver).unwrap();
+        let table = parse_xref_stream(&stream, &PassthroughResolver).unwrap();
 
         assert_eq!(table.entries.len(), 2);
         assert_eq!(table.entries[&0].byte_offset(), Some(100));
@@ -234,7 +234,7 @@ mod tests {
         data.extend_from_slice(&[1, 100, 0]);
 
         let stream = build_xref_stream([1, 1, 1], Some(vec![5, 2, 10, 1]), 11, data);
-        let table = parse_xref_stream(&stream, &UnimplementedResolver).unwrap();
+        let table = parse_xref_stream(&stream, &PassthroughResolver).unwrap();
 
         assert_eq!(table.entries.len(), 3);
         assert_eq!(table.entries[&5].byte_offset(), Some(50));

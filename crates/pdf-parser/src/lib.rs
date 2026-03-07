@@ -12,3 +12,4 @@ mod number;
 pub mod parser;
 mod stream;
 mod trailer;
+pub mod xref_builder;

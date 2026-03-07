@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::resource::Resource;
 
 /// A trait for managing cached PDF resources by object number.
@@ -28,4 +30,14 @@ pub trait ResourceCache {
     /// - `obj_num`: The object number to associate with the resource.
     /// - `resource`: The `Resource` to insert into the cache.
     fn insert(&mut self, obj_num: usize, resource: Resource);
+}
+
+impl ResourceCache for HashMap<usize, Resource> {
+    fn get(&self, obj_num: &usize) -> Option<&Resource> {
+        HashMap::get(self, obj_num)
+    }
+
+    fn insert(&mut self, obj_num: usize, resource: Resource) {
+        HashMap::insert(self, obj_num, resource);
+    }
 }

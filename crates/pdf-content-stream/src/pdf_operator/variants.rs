@@ -1,4 +1,4 @@
-use pdf_object::object_resolver::UnimplementedResolver;
+use pdf_object::object_resolver::PassthroughResolver;
 use pdf_object::object_variant::ObjectVariant;
 use pdf_parser::parser::PdfParser;
 
@@ -137,7 +137,7 @@ impl PdfOperatorVariant {
                 }
                 // Anything else is an operand value.
                 _ => {
-                    let value = parser.parse_object(&UnimplementedResolver)?;
+                    let value = parser.parse_object(&PassthroughResolver)?;
                     operands.push(value);
                 }
             }

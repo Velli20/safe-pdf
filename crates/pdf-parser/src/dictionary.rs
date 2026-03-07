@@ -52,7 +52,7 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use pdf_object::object_resolver::UnimplementedResolver;
+    use pdf_object::object_resolver::PassthroughResolver;
 
     use super::*;
 
@@ -69,7 +69,7 @@ mod tests {
 
         for (input, expected_count) in inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_dictionary(&UnimplementedResolver).unwrap();
+            let result = parser.parse_dictionary(&PassthroughResolver).unwrap();
 
             assert_eq!(
                 result.dictionary.len(),
@@ -103,7 +103,7 @@ mod tests {
 
         for input in inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_dictionary(&UnimplementedResolver);
+            let result = parser.parse_dictionary(&PassthroughResolver);
 
             assert!(
                 result.is_err(),

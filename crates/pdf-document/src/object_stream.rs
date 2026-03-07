@@ -66,7 +66,7 @@ pub fn read_object_stream(
     clippy::indexing_slicing
 )]
 mod tests {
-    use pdf_object::{dictionary::Dictionary, object_resolver::UnimplementedResolver};
+    use pdf_object::{dictionary::Dictionary, object_resolver::PassthroughResolver};
     use std::collections::BTreeMap;
 
     use super::*;
@@ -103,7 +103,7 @@ mod tests {
             None,
         );
 
-        let result = read_object_stream(&stream, &UnimplementedResolver).unwrap();
+        let result = read_object_stream(&stream, &PassthroughResolver).unwrap();
         assert_eq!(result.len(), 2);
 
         assert_eq!(result[0].0, 10);
@@ -138,7 +138,7 @@ mod tests {
             None,
         );
 
-        let result = read_object_stream(&stream, &UnimplementedResolver).unwrap();
+        let result = read_object_stream(&stream, &PassthroughResolver).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, 5);
         match &result[0].1 {

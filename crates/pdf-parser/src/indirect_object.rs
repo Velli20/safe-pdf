@@ -93,7 +93,7 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use pdf_object::{object_resolver::UnimplementedResolver, object_variant::ObjectVariant};
+    use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
 
     use super::*;
 
@@ -101,9 +101,8 @@ mod tests {
     fn test_indirect_object_valid() {
         let input = b"0 1 obj\n(HELLO)\nendobj\n";
         let mut parser = PdfParser::from(input.as_slice());
-        if let Some(ObjectVariant::IndirectObject(indirect_object)) = parser
-            .parse_indirect_object(&UnimplementedResolver)
-            .unwrap()
+        if let Some(ObjectVariant::IndirectObject(indirect_object)) =
+            parser.parse_indirect_object(&PassthroughResolver).unwrap()
         {
             let IndirectObject {
                 object_number,
