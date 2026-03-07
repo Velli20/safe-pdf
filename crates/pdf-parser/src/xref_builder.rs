@@ -20,52 +20,27 @@ impl PdfParser<'_> {
     /// (using the *first* `startxref`) is not yet implemented.
     /// TODO: handle linearized PDFs by using the first `startxref` offset instead.
     pub fn build_xref_table(&mut self) -> Result<CrossReferenceTable, ParserError> {
-        let xref_offset = find_startxref_offset(self.tokenizer.input)?;
+        let xref_offset = self.find_startxref_offset()?;
         merge_xref_chain(self, xref_offset)
     }
-}
 
-/// Scans backward through `input` for the last `startxref` keyword and extracts
-/// the byte offset that follows it.
-fn find_startxref_offset(input: &[u8]) -> Result<usize, ParserError> {
-    const STARTXREF_KEYWORD: &[u8] = b"startxref";
+    /// Scans backward through the input for the last `startxref` keyword and extracts
+    /// the byte offset that follows it.
+    fn find_startxref_offset(&mut self) -> Result<usize, ParserError> {
+        const STARTXREF_KEYWORD: &[u8] = b"startxref";
 
-    let startxref_pos = input
-        .windows(STARTXREF_KEYWORD.len())
-        .rposition(|window| window == STARTXREF_KEYWORD)
-        .ok_or(ParserError::MissingStartXref)?;
+        let startxref_pos = self
+            .tokenizer
+            .input
+            .windows(STARTXREF_KEYWORD.len())
+            .rposition(|window| window == STARTXREF_KEYWORD)
+            .ok_or(ParserError::MissingStartXref)?;
 
-    let offset_start = startxref_pos.saturating_add(STARTXREF_KEYWORD.len());
-    let remaining = input
-        .get(offset_start..)
-        .ok_or(ParserError::MissingStartXref)?;
-
-    // Skip whitespace, then read the digit run.
-    let digits_start = remaining
-        .iter()
-        .position(|b| b.is_ascii_digit())
-        .ok_or(ParserError::MissingStartXref)?;
-
-    // `digits_start` came from `position()` so `get(digits_start..)` always succeeds.
-    let digit_slice = remaining
-        .get(digits_start..)
-        .ok_or(ParserError::MissingStartXref)?;
-    let digit_count = digit_slice
-        .iter()
-        .position(|b| !b.is_ascii_digit())
-        .unwrap_or(digit_slice.len());
-    let digits_end = digits_start.saturating_add(digit_count);
-
-    let xref_offset: usize = std::str::from_utf8(
-        remaining
-            .get(digits_start..digits_end)
-            .ok_or(ParserError::MissingStartXref)?,
-    )
-    .map_err(|_| ParserError::MissingStartXref)?
-    .parse()
-    .map_err(|_| ParserError::MissingStartXref)?;
-
-    Ok(xref_offset)
+        self.tokenizer.position = startxref_pos;
+        self.read_keyword(b"startxref")?;
+        self.read_number::<usize>(true)
+            .map_err(|_| ParserError::MissingStartXref)
+    }
 }
 
 /// Follows the xref chain via `/Prev` entries and merges all cross-reference tables.
