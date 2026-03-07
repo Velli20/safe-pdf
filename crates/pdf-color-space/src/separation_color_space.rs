@@ -58,7 +58,7 @@ impl SeparationColorSpace {
             .first()
             .copied()
             .ok_or(ColorSpaceError::InsufficientComponents(1, components.len()))?;
-        let alt = self.tint_transform.apply(tint).map_err(|e| {
+        let alt = self.tint_transform.apply(&[tint]).map_err(|e| {
             ColorSpaceError::Unsupported(format!("Separation tint transform failed: {e}"))
         })?;
 

@@ -66,6 +66,12 @@ pub enum FunctionReadError {
     /// The `/Decode` array length is invalid.
     #[error("Decode array length must be exactly 2 * number of outputs")]
     InvalidDecodeLength,
+    /// C0 and C1 arrays must have the same length (validated at parse time).
+    #[error("C0 and C1 arrays must have the same length")]
+    MismatchedC0C1Length,
+    /// A sample value could not be converted to the required numeric type.
+    #[error("Sample data conversion failed")]
+    InvalidSampleData,
 }
 
 /// Errors that can occur during function interpolation.
@@ -73,8 +79,6 @@ pub enum FunctionReadError {
 pub enum FunctionInterpolationError {
     #[error("Interpolation is not supported for function type {0:?}")]
     UnsupportedFunctionType(FunctionType),
-    #[error("C0 and C1 arrays must have the same length")]
-    MismatchedC0C1Length,
     #[error("Domain must be an increasing interval (domain[0] < domain[1])")]
     InvalidDomain,
     #[error("PostScript calculator error: {0}")]
@@ -101,6 +105,15 @@ pub enum FunctionInterpolationError {
     InsufficientColorComponents { required: usize, returned: usize },
     #[error("Indexed color space is unsupported for color conversion")]
     IndexedColorSpaceUnsupported,
+    /// Cubic spline interpolation for Type 0 functions is not implemented.
+    #[error("Cubic spline interpolation (Order=3) is not implemented for sampled functions")]
+    CubicInterpolationNotSupported,
+    /// Caller provided fewer inputs than the function requires.
+    #[error("Insufficient inputs: expected {expected}, got {got}")]
+    InsufficientInputs { expected: usize, got: usize },
+    /// A bounds value in a stitching function is NaN.
+    #[error("Bounds array contains NaN — cannot determine segment for input value")]
+    InvalidBounds,
 }
 
 /// Represents the type of a PDF Function object (Table 38 in PDF spec).
@@ -135,18 +148,19 @@ impl FunctionType {
 }
 
 pub trait FunctionImpl {
-    /// Interpolates an input value `x` according to the function's definition.
+    /// Interpolates a slice of input values according to the function's definition.
     ///
-    /// The input is automatically clamped to the function's domain before
-    /// interpolation. The output values are also clamped to any defined range.
+    /// Each input is clamped to its corresponding domain entry before interpolation.
+    /// Output values are clamped to any defined range. The slice must contain at
+    /// least as many values as the function has input dimensions.
     ///
     /// # Errors
     ///
     /// Returns an error if:
-    /// - The input is NaN
+    /// - Fewer inputs are provided than the function requires
     /// - The function data is structurally invalid
     /// - A PostScript calculation fails
-    fn interpolate(&self, x: f32) -> Result<Vec<f32>, FunctionInterpolationError>;
+    fn interpolate(&self, inputs: &[f32]) -> Result<Vec<f32>, FunctionInterpolationError>;
 
     /// Returns the input domain of this function as `[min, max]`.
     fn domain(&self) -> Option<[f32; 2]>;
@@ -174,12 +188,12 @@ pub enum Function {
 }
 
 impl FunctionImpl for Function {
-    fn interpolate(&self, x: f32) -> Result<Vec<f32>, FunctionInterpolationError> {
+    fn interpolate(&self, inputs: &[f32]) -> Result<Vec<f32>, FunctionInterpolationError> {
         match self {
-            Function::Sampled(f) => f.interpolate(x),
-            Function::Exponential(f) => f.interpolate(x),
-            Function::Stitching(f) => f.interpolate(x),
-            Function::PostScriptCalculator(f) => f.interpolate(x),
+            Function::Sampled(f) => f.interpolate(inputs),
+            Function::Exponential(f) => f.interpolate(inputs),
+            Function::Stitching(f) => f.interpolate(inputs),
+            Function::PostScriptCalculator(f) => f.interpolate(inputs),
         }
     }
 
@@ -226,9 +240,12 @@ impl FunctionImpl for Function {
 }
 
 impl Function {
-    /// Evaluates the function for a single input value, clamped to its domain.
-    pub fn apply(&self, input: f32) -> Result<Vec<f32>, FunctionInterpolationError> {
-        FunctionImpl::interpolate(self, input)
+    /// Evaluates the function for one or more input values.
+    ///
+    /// `inputs` must contain at least as many values as the function has input
+    /// dimensions. Extra values are ignored. Each input is clamped to its domain.
+    pub fn apply(&self, inputs: &[f32]) -> Result<Vec<f32>, FunctionInterpolationError> {
+        FunctionImpl::interpolate(self, inputs)
     }
 }
 

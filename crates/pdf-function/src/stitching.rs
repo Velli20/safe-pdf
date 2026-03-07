@@ -52,30 +52,26 @@ impl FunctionImpl for StitchingFunction {
     ///
     /// Selects the appropriate sub-function based on bounds and maps the input
     /// to the sub-function's domain using the encode array.
-    fn interpolate(&self, x: f32) -> Result<Vec<f32>, FunctionInterpolationError> {
-        // Validate structural invariants
-        let expected_bounds_len = self
-            .functions
-            .len()
-            .checked_sub(1)
-            .ok_or(FunctionInterpolationError::InvalidBoundsLength)?;
-        if self.bounds.len() != expected_bounds_len {
-            return Err(FunctionInterpolationError::InvalidBoundsLength);
-        }
+    fn interpolate(&self, inputs: &[f32]) -> Result<Vec<f32>, FunctionInterpolationError> {
+        let x = inputs
+            .first()
+            .copied()
+            .ok_or(FunctionInterpolationError::InsufficientInputs {
+                expected: 1,
+                got: 0,
+            })?;
 
-        let expected_encode_len = self
-            .functions
-            .len()
-            .checked_mul(2)
-            .ok_or(FunctionInterpolationError::InvalidEncodeLength)?;
-        if self.encode.len() != expected_encode_len {
-            return Err(FunctionInterpolationError::InvalidEncodeLength);
+        // Reject NaN bounds: partial_cmp returns None for NaN, which would silently
+        // return the wrong segment index.
+        if self.bounds.iter().any(|b| b.is_nan()) {
+            return Err(FunctionInterpolationError::InvalidBounds);
         }
 
         // Clamp input to domain
         let x_clamped = x.clamp(self.domain[0], self.domain[1]);
 
-        // Find which sub-function to use via binary search on bounds
+        // Find which sub-function to use via binary search on bounds.
+        // SAFETY: NaN-free bounds checked above; partial_cmp always returns Some.
         let index = match self
             .bounds
             .binary_search_by(|b| b.partial_cmp(&x_clamped).unwrap_or(Ordering::Less))
@@ -98,7 +94,7 @@ impl FunctionImpl for StitchingFunction {
             .functions
             .get(index)
             .ok_or(FunctionInterpolationError::EncodeIndexError)?;
-        func.interpolate(x_mapped)
+        func.interpolate(&[x_mapped])
     }
 
     fn domain(&self) -> Option<[f32; 2]> {
@@ -155,5 +151,79 @@ impl FunctionImpl for StitchingFunction {
             encode,
             domain,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        exponential_interpolation::ExponentialFunction,
+        function::{Function, FunctionImpl},
+    };
+
+    fn make_linear_exp(c0: f32, c1: f32, domain: [f32; 2]) -> Function {
+        Function::Exponential(ExponentialFunction::new(vec![c0], vec![c1], 1.0, domain))
+    }
+
+    fn make_stitch(
+        bounds: Vec<f32>,
+        encode: Vec<f32>,
+        functions: Vec<Function>,
+    ) -> StitchingFunction {
+        StitchingFunction {
+            functions,
+            bounds,
+            encode,
+            domain: [0.0, 1.0],
+        }
+    }
+
+    #[test]
+    fn test_two_segments() {
+        // Domain [0,1] split at 0.5: left segment maps [0,0.5]→[0,1], right [0.5,1]→[0,1]
+        let f = make_stitch(
+            vec![0.5],
+            vec![0.0, 1.0, 0.0, 1.0],
+            vec![
+                make_linear_exp(0.0, 1.0, [0.0, 1.0]),
+                make_linear_exp(0.5, 1.0, [0.0, 1.0]),
+            ],
+        );
+        // x=0.25 is in left segment, mapped to e=0.5 → f(0.5) = 0.5
+        let out = f.interpolate(&[0.25]).unwrap();
+        assert!((out[0] - 0.5).abs() < 1e-5, "got {}", out[0]);
+    }
+
+    #[test]
+    fn test_no_inputs_errors() {
+        let f = make_stitch(
+            vec![0.5],
+            vec![0.0, 1.0, 0.0, 1.0],
+            vec![
+                make_linear_exp(0.0, 1.0, [0.0, 1.0]),
+                make_linear_exp(0.0, 1.0, [0.0, 1.0]),
+            ],
+        );
+        assert!(matches!(
+            f.interpolate(&[]),
+            Err(FunctionInterpolationError::InsufficientInputs { .. })
+        ));
+    }
+
+    #[test]
+    fn test_nan_bounds_error() {
+        let f = make_stitch(
+            vec![f32::NAN],
+            vec![0.0, 1.0, 0.0, 1.0],
+            vec![
+                make_linear_exp(0.0, 1.0, [0.0, 1.0]),
+                make_linear_exp(0.0, 1.0, [0.0, 1.0]),
+            ],
+        );
+        assert!(matches!(
+            f.interpolate(&[0.5]),
+            Err(FunctionInterpolationError::InvalidBounds)
+        ));
     }
 }

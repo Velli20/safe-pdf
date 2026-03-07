@@ -2,6 +2,7 @@ use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant}
 
 use crate::function::{
     Function, FunctionImpl, FunctionInterpolationError, FunctionReadError, clamp_and_normalize,
+    get_pair,
 };
 
 #[derive(Debug, Clone)]
@@ -14,6 +15,8 @@ pub struct ExponentialFunction {
     exponent: f32,
     /// Input domain `[min, max]`.
     domain: [f32; 2],
+    /// Optional output range `[min0, max0, min1, max1, ...]` for clamping (ISO 32000 §7.10.3).
+    range: Option<Vec<f32>>,
 }
 
 impl ExponentialFunction {
@@ -23,6 +26,7 @@ impl ExponentialFunction {
             c1,
             exponent,
             domain,
+            range: None,
         }
     }
 }
@@ -31,10 +35,15 @@ impl FunctionImpl for ExponentialFunction {
     /// Interpolates using exponential interpolation (Type 2 function).
     ///
     /// Formula: `result[i] = c0[i] + x^N * (c1[i] - c0[i])`
-    fn interpolate(&self, x: f32) -> Result<Vec<f32>, FunctionInterpolationError> {
-        if self.c0.len() != self.c1.len() {
-            return Err(FunctionInterpolationError::MismatchedC0C1Length);
-        }
+    /// Output is clamped to `/Range` if present (ISO 32000 §7.10.3).
+    fn interpolate(&self, inputs: &[f32]) -> Result<Vec<f32>, FunctionInterpolationError> {
+        let x = inputs
+            .first()
+            .copied()
+            .ok_or(FunctionInterpolationError::InsufficientInputs {
+                expected: 1,
+                got: 0,
+            })?;
 
         // Normalize input to [0, 1]
         let x_normalized =
@@ -47,12 +56,21 @@ impl FunctionImpl for ExponentialFunction {
 
         // Apply interpolation formula: c0 + x^N * (c1 - c0)
         let pow = x_normalized.powf(self.exponent);
-        let result = self
+        let mut result: Vec<f32> = self
             .c0
             .iter()
             .zip(self.c1.iter())
             .map(|(&c0_i, &c1_i)| c0_i + pow * (c1_i - c0_i))
             .collect();
+
+        // Clamp outputs to Range if defined (ISO 32000 §7.10.3).
+        if let Some(range) = &self.range {
+            for (i, val) in result.iter_mut().enumerate() {
+                if let Some((min, max)) = get_pair(range, i) {
+                    *val = val.clamp(min, max);
+                }
+            }
+        }
 
         Ok(result)
     }
@@ -85,14 +103,76 @@ impl FunctionImpl for ExponentialFunction {
             .transpose()?
             .unwrap_or_else(|| vec![1.0]);
 
+        // Validate C0/C1 length match at parse time.
+        if c0.len() != c1.len() {
+            return Err(FunctionReadError::MismatchedC0C1Length);
+        }
+
         // /N: Interpolation exponent (required).
         let exponent = dictionary.get_or_err("N")?.try_number::<f32>(objects)?;
+
+        // /Range: Optional. Output range for clamping (ISO 32000 §7.10.3).
+        let range = dictionary
+            .get("Range")
+            .map(|o| o.try_vec_of::<f32>(objects))
+            .transpose()?;
 
         Ok(Function::Exponential(ExponentialFunction {
             c0,
             c1,
             exponent,
             domain,
+            range,
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_exp(c0: Vec<f32>, c1: Vec<f32>, n: f32) -> ExponentialFunction {
+        ExponentialFunction {
+            c0,
+            c1,
+            exponent: n,
+            domain: [0.0, 1.0],
+            range: None,
+        }
+    }
+
+    #[test]
+    fn test_linear_n1() {
+        // N=1: result = c0 + x*(c1-c0)
+        let f = make_exp(vec![0.0], vec![1.0], 1.0);
+        let out = f.interpolate(&[0.5]).unwrap();
+        assert!((out[0] - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_range_clamping() {
+        let mut f = make_exp(vec![0.0], vec![2.0], 1.0);
+        f.range = Some(vec![0.0, 1.0]);
+        // Without clamping: x=1.0 → c0 + 1*(c1-c0) = 2.0; clamped to 1.0
+        let out = f.interpolate(&[1.0]).unwrap();
+        assert!((out[0] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_no_inputs_errors() {
+        let f = make_exp(vec![0.0], vec![1.0], 1.0);
+        assert!(matches!(
+            f.interpolate(&[]),
+            Err(FunctionInterpolationError::InsufficientInputs { .. })
+        ));
+    }
+
+    #[test]
+    fn test_negative_exponent_at_zero_errors() {
+        let f = make_exp(vec![0.0], vec![1.0], -1.0);
+        assert!(matches!(
+            f.interpolate(&[0.0]),
+            Err(FunctionInterpolationError::NegativeExponentAtZero)
+        ));
     }
 }
