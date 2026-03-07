@@ -1,14 +1,10 @@
 use crate::{
     canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
-    pdf_path_pen::PdfPathPen, text_renderer::TextRenderer, text_state::TextState,
+    pdf_path_pen::draw_outline_glyph, text_renderer::TextRenderer,
 };
-use pdf_graphics::{PaintMode, PathFillType, transform::Transform};
+use pdf_graphics::transform::Transform;
 use read_fonts::TableProvider;
-use skrifa::{
-    FontRef, GlyphId, MetadataProvider,
-    instance::{LocationRef, Size},
-    outline::{DrawSettings, OutlineGlyphCollection},
-};
+use skrifa::{FontRef, GlyphId, MetadataProvider, instance::Size, outline::OutlineGlyphCollection};
 use thiserror::Error;
 
 /// Fallback value for a font's `units_per_em` (design units per em).
@@ -103,20 +99,11 @@ impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
         stream_object: &'a [u8],
         is_cid: bool,
     ) -> Result<Self, PdfCanvasError> {
-        // Extract text state parameters for rendering.
-        let TextState {
-            horizontal_scaling,
-            font_size,
-            rise,
-            ..
-        } = canvas.current_state()?.text_state.clone();
-
         let font_ref = FontRef::new(stream_object)
             .map_err(|e| TrueTypeFontRendererError::FontParseError(e.to_string()))?;
 
         let outlines = font_ref.outline_glyphs();
 
-        // Extract font and text state parameters.
         let units_per_em = font_ref
             .head()
             .ok()
@@ -124,18 +111,12 @@ impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
             .filter(|&upe| upe != 0)
             .unwrap_or(DEFAULT_UNITS_PER_EM);
 
-        // Compute the inverse of units per em for scaling.
         let upe_inv = 1.0 / f32::from(units_per_em);
 
-        // Build the text rendering transform.
-        let glyph_base_transform = Transform::from_row(
-            font_size * upe_inv * horizontal_scaling, // sx
-            0.0,                                      // ky (skew)
-            0.0,                                      // kx (skew)
-            font_size * upe_inv,                      // sy
-            0.0,                                      // tx
-            rise,                                     // ty
-        );
+        let glyph_base_transform = canvas
+            .current_state()?
+            .text_state
+            .glyph_base_transform(upe_inv);
 
         Ok(Self {
             font_ref,
@@ -152,16 +133,12 @@ impl<B: CanvasBackend> TextRenderer for TrueTypeFontRenderer<'_, '_, B> {
         &mut self,
         text: impl Iterator<Item = u16>,
     ) -> Result<(), crate::error::PdfCanvasError> {
-        let font_size = self.canvas.current_state()?.text_state.font_size;
-
-        // Iterate over each character in the input text (1-byte encoding).
         for char_code in text {
-            // Compose the final transformation matrix for this glyph:
-            let mut glyph_matrix_for_char = self.glyph_base_transform;
-            glyph_matrix_for_char.concat(&self.canvas.current_state()?.text_state.matrix);
-            glyph_matrix_for_char.concat(&self.canvas.current_state()?.transform);
+            let state = self.canvas.current_state()?;
+            let glyph_matrix_for_char = state
+                .text_state
+                .compose_glyph_matrix(self.glyph_base_transform, &state.transform);
 
-            // Build and fill the glyph outline.
             let glyph_id = if !self.is_cid {
                 resolve_glyph_id(&self.font_ref, char_code)
             } else {
@@ -169,18 +146,18 @@ impl<B: CanvasBackend> TextRenderer for TrueTypeFontRenderer<'_, '_, B> {
             };
 
             if let Some(outline_glyph) = self.outlines.get(glyph_id) {
-                let mut pen = PdfPathPen::default();
-                let settings = DrawSettings::from((Size::unscaled(), LocationRef::default()));
-                if outline_glyph.draw(settings, &mut pen).is_ok() {
-                    pen.path.transform(&glyph_matrix_for_char);
-                    self.canvas
-                        .draw_path(&pen.path, PaintMode::Fill, PathFillType::Winding)?;
-                }
+                draw_outline_glyph(
+                    self.canvas,
+                    &outline_glyph,
+                    Size::unscaled(),
+                    &glyph_matrix_for_char,
+                )?;
             }
 
-            let text_state = &mut self.canvas.current_state_mut()?.text_state;
-            let glyph_width_x = text_state.glyph_width(char_code) / 1000.0 * font_size;
-            text_state.advance_text_cursor(char_code, glyph_width_x, 0.0);
+            self.canvas
+                .current_state_mut()?
+                .text_state
+                .advance_horizontal_glyph(char_code);
         }
         Ok(())
     }

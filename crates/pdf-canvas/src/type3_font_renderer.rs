@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::{
     canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
-    text_renderer::TextRenderer, text_state::TextState,
+    text_renderer::TextRenderer,
 };
 
 /// Defines errors that can occur during Type 3 font rendering.
@@ -41,26 +41,10 @@ impl<'a, 'b, B: CanvasBackend> Type3FontRenderer<'a, 'b, B> {
             return Err(Type3FontRendererError::InvalidFontMatrix.into());
         };
 
-        // Extract text state parameters for rendering.
-        let TextState {
-            horizontal_scaling,
-            font_size,
-            rise,
-            ..
-        } = canvas.current_state()?.text_state.clone();
-
         // For Type 3 fonts, each glyph's transformation is computed as CTM * Tm * S * FontMatrix
-        // S encodes font size (Tfs), horizontal scaling (Th), and text rise (Ts)
-        // S = [Tfs * Th 0 0 Tfs 0 Ts] in matrix notation
-        // We precompute this combined transformation; concat applies each matrix in sequence (pre-multiplied)
-        let font_size_matrix = Transform::from_row(
-            font_size * horizontal_scaling, // sx
-            0.0,                            // ky
-            0.0,                            // kx
-            font_size,                      // sy
-            0.0,                            // tx
-            rise,                           // ty
-        );
+        // S encodes font size (Tfs), horizontal scaling (Th), and text rise (Ts):
+        // S = [Tfs*Th 0 0 Tfs 0 Ts], which is exactly glyph_base_transform(1.0).
+        let font_size_matrix = canvas.current_state()?.text_state.glyph_base_transform(1.0);
 
         Ok(Self {
             canvas,
@@ -79,13 +63,13 @@ impl<B: CanvasBackend> TextRenderer for Type3FontRenderer<'_, '_, B> {
         // 1. Iterate through each character code in the input text.
         for char_code_byte in iter {
             let state = self.canvas.current_state()?;
-            let mut text_rendering_matrix = self.font_matrix;
-            // Multiply by the font size, horizontal scaling, and rise matrix (S).
-            text_rendering_matrix.concat(&self.font_size_matrix);
-            // Multiply by the current text matrix (Tm).
-            text_rendering_matrix.concat(&state.text_state.matrix);
-            // Multiply by the current transformation matrix (CTM).
-            text_rendering_matrix.concat(&state.transform);
+            let text_rendering_matrix = {
+                let mut base = self.font_matrix;
+                base.concat(&self.font_size_matrix);
+                state
+                    .text_state
+                    .compose_glyph_matrix(base, &state.transform)
+            };
 
             // 2. Map character code to glyph name using the font's encoding.
             let glyph_name = state.text_state.glyph_name(char_code_byte);
