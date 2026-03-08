@@ -19,14 +19,12 @@ impl<B: CanvasBackend> TextPositioningOps for PdfCanvas<'_, B> {
     type ErrorType = PdfCanvasError;
     fn move_text_position(&mut self, tx: f32, ty: f32) -> Result<(), Self::ErrorType> {
         let mat = Transform::from_translate(tx, ty);
+        let state = self.current_state_mut()?;
         // PDF 1.7 (Tj and text positioning): Td updates Tlm = Tlm * T(tx, ty), then Tm = Tlm.
         // Use post-multiplication to move in text space coordinates.
-        self.current_state_mut()?
-            .text_state
-            .line_matrix
-            .post_concat(&mat);
-        let lm = self.current_state()?.text_state.line_matrix;
-        self.current_state_mut()?.text_state.matrix = lm;
+        state.text_state.line_matrix.post_concat(&mat);
+        let lm = state.text_state.line_matrix;
+        state.text_state.matrix = lm;
         Ok(())
     }
 
@@ -42,22 +40,22 @@ impl<B: CanvasBackend> TextPositioningOps for PdfCanvas<'_, B> {
     }
 
     fn set_text_matrix(&mut self, transform: &Transform) -> Result<(), Self::ErrorType> {
+        let state = self.current_state_mut()?;
         // Tm operator sets both Tm and Tlm to the same matrix.
-        self.current_state_mut()?.text_state.line_matrix = *transform;
-        self.current_state_mut()?.text_state.matrix = *transform;
+        state.text_state.line_matrix = *transform;
+        state.text_state.matrix = *transform;
         Ok(())
     }
 
     fn move_to_start_of_next_line(&mut self) -> Result<(), Self::ErrorType> {
         // T*: Move to start of next line using current leading: Tlm = Tlm * T(0, -Tl); Tm = Tlm.
         let leading = self.current_state()?.text_state.leading;
+        let state = self.current_state_mut()?;
+
         let mat = Transform::from_translate(0.0, -leading);
-        self.current_state_mut()?
-            .text_state
-            .line_matrix
-            .post_concat(&mat);
-        let lm = self.current_state()?.text_state.line_matrix;
-        self.current_state_mut()?.text_state.matrix = lm;
+        state.text_state.line_matrix.post_concat(&mat);
+        let lm = state.text_state.line_matrix;
+        state.text_state.matrix = lm;
         Ok(())
     }
 }
@@ -65,8 +63,9 @@ impl<B: CanvasBackend> TextPositioningOps for PdfCanvas<'_, B> {
 impl<B: CanvasBackend> TextObjectOps for PdfCanvas<'_, B> {
     type ErrorType = PdfCanvasError;
     fn begin_text_object(&mut self) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.text_state.matrix = Transform::identity();
-        self.current_state_mut()?.text_state.line_matrix = Transform::identity();
+        let state = self.current_state_mut()?;
+        state.text_state.matrix = Transform::identity();
+        state.text_state.line_matrix = Transform::identity();
         Ok(())
     }
 
@@ -99,13 +98,14 @@ impl<B: CanvasBackend> TextStateOps for PdfCanvas<'_, B> {
     }
 
     fn set_font_and_size(&mut self, font_name: &str, size: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.text_state.font_size = size;
+        let state = self.current_state_mut()?;
+        state.text_state.font_size = size;
 
-        if let Some(resources) = self.current_state()?.resources
+        if let Some(resources) = state.resources
             && let Some((font, nested_resources)) = resources.font(font_name)
         {
-            self.current_state_mut()?.text_state.font = Some(font);
-            self.current_state_mut()?.text_state.resources = nested_resources;
+            state.text_state.font = Some(font);
+            state.text_state.resources = nested_resources;
             return Ok(());
         }
 

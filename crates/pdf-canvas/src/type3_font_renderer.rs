@@ -111,10 +111,7 @@ impl<B: CanvasBackend> TextRenderer for Type3FontRenderer<'_, '_, B> {
                 } else if let PdfOperatorVariant::SetCharWidth(op) = op {
                     glyph_width = Some(op.wx);
                 } else {
-                    op.call(self.canvas)
-                        .map_err(|err| Type3FontRendererError::CharProcError {
-                            err: format!("Error calling operator: {:?}", err),
-                        })?;
+                    op.call(self.canvas)?;
                 }
             }
 
