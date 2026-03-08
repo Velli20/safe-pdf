@@ -1,7 +1,16 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use crate::{
+    canvas_backend::{CanvasBackend, Shader},
+    canvas_state::CanvasState,
+    error::PdfCanvasError,
+    pdf_path_pen::PdfPathPen,
+    recording_canvas::RecordingCanvas,
+    text_state::TextState,
+};
 use pdf_content_stream::{content_stream::ContentStream, pdf_operator::PdfOperatorVariant};
+use pdf_graphics::TextRenderingMode;
 use pdf_graphics::{
     MaskMode, PaintMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
     transform::Transform,
@@ -12,13 +21,10 @@ use pdf_page::{
     resources::Resources,
     shading::Shading,
 };
-
-use crate::{
-    canvas_backend::{CanvasBackend, Shader},
-    canvas_state::CanvasState,
-    error::PdfCanvasError,
-    recording_canvas::RecordingCanvas,
-    text_state::TextState,
+use skrifa::{
+    OutlineGlyph,
+    outline::DrawSettings,
+    prelude::{LocationRef, Size},
 };
 
 pub struct PdfCanvas<'a, B: CanvasBackend> {
@@ -450,6 +456,19 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         Ok(())
     }
 
+    /// Appends a glyph outline (already in device space) to the pending text clip accumulator.
+    ///
+    /// Call this for every glyph rendered with a clip mode (4–7). The accumulated path
+    /// is applied as a clip region when the text object ends via `end_text_object`.
+    pub(crate) fn add_to_text_clip(&mut self, path: &PdfPath) -> Result<(), PdfCanvasError> {
+        let state = self.current_state_mut()?;
+        match &mut state.pending_text_clip {
+            Some(clip) => clip.extend(path),
+            slot => *slot = Some(path.clone()),
+        }
+        Ok(())
+    }
+
     /// Sets the current fill pattern by name from the page resources.
     ///
     /// # Parameters
@@ -647,5 +666,63 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             state.fill_color_space = Some(cs);
         }
         Ok(())
+    }
+
+    /// Draws a font outline glyph onto the canvas using the current text rendering mode.
+    ///
+    /// # Parameters
+    ///
+    /// - `outline_glyph`: The outline representation of the glyph to render.
+    /// - `size`: The size to render the glyph at (font units to device units).
+    /// - `transform`: The transformation matrix to apply to the glyph path
+    ///   (maps glyph space to device space).
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the glyph is rendered successfully, or an error if drawing fails.
+    pub(crate) fn draw_outline_glyph(
+        &mut self,
+        outline_glyph: &OutlineGlyph<'_>,
+        size: Size,
+        transform: &Transform,
+    ) -> Result<(), PdfCanvasError> {
+        let rendering_mode = self.current_state()?.rendering_mode;
+        if rendering_mode == TextRenderingMode::Invisible {
+            return Ok(());
+        }
+
+        let mut pen = PdfPathPen::default();
+        let settings = DrawSettings::from((size, LocationRef::default()));
+        if outline_glyph.draw(settings, &mut pen).is_err() {
+            // Missing or malformed glyphs are not treated as errors: skip drawing this glyph.
+            return Ok(());
+        }
+
+        pen.path.transform(transform);
+        match rendering_mode {
+            TextRenderingMode::Fill => {
+                self.draw_path(&pen.path, PaintMode::Fill, PathFillType::Winding)
+            }
+            TextRenderingMode::Stroke => {
+                self.draw_path(&pen.path, PaintMode::Stroke, PathFillType::Winding)
+            }
+            TextRenderingMode::FillAndStroke => {
+                self.draw_path(&pen.path, PaintMode::FillAndStroke, PathFillType::Winding)
+            }
+            TextRenderingMode::Invisible => Ok(()),
+            TextRenderingMode::FillClip => {
+                self.draw_path(&pen.path, PaintMode::Fill, PathFillType::Winding)?;
+                self.add_to_text_clip(&pen.path)
+            }
+            TextRenderingMode::StrokeClip => {
+                self.draw_path(&pen.path, PaintMode::Stroke, PathFillType::Winding)?;
+                self.add_to_text_clip(&pen.path)
+            }
+            TextRenderingMode::FillStrokeClip => {
+                self.draw_path(&pen.path, PaintMode::FillAndStroke, PathFillType::Winding)?;
+                self.add_to_text_clip(&pen.path)
+            }
+            TextRenderingMode::Clip => self.add_to_text_clip(&pen.path),
+        }
     }
 }

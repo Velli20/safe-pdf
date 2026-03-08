@@ -66,10 +66,19 @@ impl<B: CanvasBackend> TextObjectOps for PdfCanvas<'_, B> {
         let state = self.current_state_mut()?;
         state.text_state.matrix = Transform::identity();
         state.text_state.line_matrix = Transform::identity();
+        // Clear any stale clip accumulator (guards against a missing ET from a prior object).
+        state.pending_text_clip = None;
         Ok(())
     }
 
     fn end_text_object(&mut self) -> Result<(), Self::ErrorType> {
+        // Apply any glyph outlines accumulated for clip-mode text rendering (modes 4–7).
+        // Per ISO 32000 §9.3.6, the clip path is set at the end of the text object.
+        if let Some(clip_path) = self.current_state_mut()?.pending_text_clip.take() {
+            self.canvas
+                .set_clip_region(&clip_path, pdf_graphics::PathFillType::Winding)?;
+            self.current_state_mut()?.clip_path = Some(clip_path);
+        }
         Ok(())
     }
 }
@@ -113,7 +122,7 @@ impl<B: CanvasBackend> TextStateOps for PdfCanvas<'_, B> {
     }
 
     fn set_text_rendering_mode(&mut self, mode: TextRenderingMode) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.rendering_mode = Some(mode);
+        self.current_state_mut()?.rendering_mode = mode;
         Ok(())
     }
 

@@ -98,6 +98,13 @@ impl<B: CanvasBackend> TextRenderer for Type3FontRenderer<'_, '_, B> {
 
             // 5. Set the transformation matrix for the glyph and execute its content stream.
             // The CTM is temporarily replaced with the computed text rendering matrix.
+            //
+            // Note: For clip rendering modes (TextRenderingMode 4–7), Type 3 glyph outlines
+            // should also be accumulated into the text clip path (ISO 32000 §9.3.6). This
+            // requires intercepting the paths painted by the glyph's content stream procedure,
+            // which is not yet implemented. Clip modes for Type 3 fonts are therefore a no-op
+            // for the clip accumulation step; only the paint part (fill/stroke) takes effect
+            // because the glyph's procedure calls standard painting operators directly.
             self.canvas.set_matrix(text_rendering_matrix)?;
 
             for op in char_procs {

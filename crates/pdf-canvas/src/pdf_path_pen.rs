@@ -1,11 +1,5 @@
-use crate::canvas_backend::CanvasBackend;
-use crate::error::PdfCanvasError;
-use crate::pdf_canvas::PdfCanvas;
 use pdf_graphics::pdf_path::PdfPath;
-use pdf_graphics::transform::Transform;
-use pdf_graphics::{PaintMode, PathFillType};
-use skrifa::instance::{LocationRef, Size};
-use skrifa::outline::{DrawSettings, OutlineGlyph, OutlinePen};
+use skrifa::outline::OutlinePen;
 
 /// An implementation of `skrifa::outline::OutlinePen` that converts glyph outlines
 /// into a `PdfPath`.
@@ -35,23 +29,4 @@ impl OutlinePen for PdfPathPen {
     fn close(&mut self) {
         self.path.close();
     }
-}
-
-/// Draws a single outline glyph onto `canvas` using `PdfPathPen`.
-///
-/// If the outline cannot be drawn (e.g. an empty glyph), the call is silently
-/// skipped — missing glyphs are not an error.
-pub(crate) fn draw_outline_glyph<B: CanvasBackend>(
-    canvas: &mut PdfCanvas<'_, B>,
-    outline_glyph: &OutlineGlyph<'_>,
-    size: Size,
-    transform: &Transform,
-) -> Result<(), PdfCanvasError> {
-    let mut pen = PdfPathPen::default();
-    let settings = DrawSettings::from((size, LocationRef::default()));
-    if outline_glyph.draw(settings, &mut pen).is_ok() {
-        pen.path.transform(transform);
-        canvas.draw_path(&pen.path, PaintMode::Fill, PathFillType::Winding)?;
-    }
-    Ok(())
 }

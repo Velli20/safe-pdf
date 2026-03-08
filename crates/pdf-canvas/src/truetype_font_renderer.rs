@@ -1,6 +1,6 @@
 use crate::{
     canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
-    pdf_path_pen::draw_outline_glyph, text_renderer::TextRenderer,
+    text_renderer::TextRenderer,
 };
 use pdf_graphics::transform::Transform;
 use read_fonts::TableProvider;
@@ -146,8 +146,7 @@ impl<B: CanvasBackend> TextRenderer for TrueTypeFontRenderer<'_, '_, B> {
             };
 
             if let Some(outline_glyph) = self.outlines.get(glyph_id) {
-                draw_outline_glyph(
-                    self.canvas,
+                self.canvas.draw_outline_glyph(
                     &outline_glyph,
                     Size::unscaled(),
                     &glyph_matrix_for_char,
