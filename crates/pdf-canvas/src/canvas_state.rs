@@ -38,7 +38,12 @@ pub(crate) struct CanvasState<'a> {
     /// The current blend mode, controlling compositing behavior.
     pub blend_mode: Option<BlendMode>,
     /// The current text rendering mode.
-    pub rendering_mode: Option<TextRenderingMode>,
+    pub rendering_mode: TextRenderingMode,
+    /// Accumulated glyph outlines (in device space) for clip-mode text rendering (modes 4–7).
+    ///
+    /// Glyphs are appended here during a text object and the resulting path is applied
+    /// as a clip region when the text object ends (ET operator).
+    pub pending_text_clip: Option<PdfPath>,
     /// The current color space for stroking operations.
     pub stroke_color_space: Option<&'a ColorSpace>,
     /// The current color space for non-stroking operations.
@@ -82,7 +87,8 @@ impl Default for CanvasState<'_> {
             line_cap: LineCap::Butt,
             line_join: LineJoin::Miter,
             blend_mode: None,
-            rendering_mode: None,
+            rendering_mode: TextRenderingMode::Fill,
+            pending_text_clip: None,
             stroke_color_space: Some(&Self::DEFAULT_COLOR_SPACE),
             fill_color_space: Some(&Self::DEFAULT_COLOR_SPACE),
         }

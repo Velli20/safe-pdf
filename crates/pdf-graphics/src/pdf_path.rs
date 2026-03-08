@@ -121,6 +121,35 @@ impl PdfPath {
         self.verbs.push(PathVerb::Close);
     }
 
+    /// Appends all verbs from `other` into this path.
+    ///
+    /// Useful for accumulating multiple glyph outlines (already transformed to device space)
+    /// into a single path, e.g. when building a text clip region.
+    pub fn extend(&mut self, other: &PdfPath) {
+        self.verbs.extend_from_slice(&other.verbs);
+        // Update current point from the last verb of the other path.
+        for verb in other.verbs.iter().rev() {
+            match *verb {
+                PathVerb::MoveTo { x, y } | PathVerb::LineTo { x, y } => {
+                    self.current_x = x;
+                    self.current_y = y;
+                    break;
+                }
+                PathVerb::CubicTo { x3, y3, .. } => {
+                    self.current_x = x3;
+                    self.current_y = y3;
+                    break;
+                }
+                PathVerb::QuadTo { x2, y2, .. } => {
+                    self.current_x = x2;
+                    self.current_y = y2;
+                    break;
+                }
+                PathVerb::Close => {}
+            }
+        }
+    }
+
     pub fn transform(&mut self, transform: &Transform) {
         for verb in &mut self.verbs {
             match verb {
