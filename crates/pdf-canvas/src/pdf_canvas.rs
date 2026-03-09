@@ -673,7 +673,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// # Parameters
     ///
     /// - `outline_glyph`: The outline representation of the glyph to render.
-    /// - `size`: The size to render the glyph at (font units to device units).
     /// - `transform`: The transformation matrix to apply to the glyph path
     ///   (maps glyph space to device space).
     ///
@@ -683,7 +682,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     pub(crate) fn draw_outline_glyph(
         &mut self,
         outline_glyph: &OutlineGlyph<'_>,
-        size: Size,
         transform: &Transform,
     ) -> Result<(), PdfCanvasError> {
         let rendering_mode = self.current_state()?.rendering_mode;
@@ -692,7 +690,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         }
 
         let mut pen = PdfPathPen::default();
-        let settings = DrawSettings::from((size, LocationRef::default()));
+        let settings = DrawSettings::from((Size::unscaled(), LocationRef::default()));
         if outline_glyph.draw(settings, &mut pen).is_err() {
             // Missing or malformed glyphs are not treated as errors: skip drawing this glyph.
             return Ok(());

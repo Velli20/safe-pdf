@@ -2,7 +2,6 @@ use crate::canvas_backend::CanvasBackend;
 use crate::pdf_canvas::PdfCanvas;
 use crate::{error::PdfCanvasError, text_renderer::TextRenderer};
 use read_fonts::TableProvider;
-use skrifa::instance::Size;
 use skrifa::outline::OutlineGlyphCollection;
 use skrifa::{FontRef, GlyphId, MetadataProvider};
 
@@ -70,11 +69,8 @@ impl<B: CanvasBackend> TextRenderer for Type1FontRenderer<'_, '_, B> {
             };
 
             if let Some(outline_glyph) = self.outlines.get(gid) {
-                self.canvas.draw_outline_glyph(
-                    &outline_glyph,
-                    Size::new(1000.0),
-                    &glyph_matrix_for_char,
-                )?;
+                self.canvas
+                    .draw_outline_glyph(&outline_glyph, &glyph_matrix_for_char)?;
             }
 
             self.canvas

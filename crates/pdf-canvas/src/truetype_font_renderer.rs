@@ -4,7 +4,7 @@ use crate::{
 };
 use pdf_graphics::transform::Transform;
 use read_fonts::TableProvider;
-use skrifa::{FontRef, GlyphId, MetadataProvider, instance::Size, outline::OutlineGlyphCollection};
+use skrifa::{FontRef, GlyphId, MetadataProvider, outline::OutlineGlyphCollection};
 use thiserror::Error;
 
 /// Fallback value for a font's `units_per_em` (design units per em).
@@ -146,11 +146,8 @@ impl<B: CanvasBackend> TextRenderer for TrueTypeFontRenderer<'_, '_, B> {
             };
 
             if let Some(outline_glyph) = self.outlines.get(glyph_id) {
-                self.canvas.draw_outline_glyph(
-                    &outline_glyph,
-                    Size::unscaled(),
-                    &glyph_matrix_for_char,
-                )?;
+                self.canvas
+                    .draw_outline_glyph(&outline_glyph, &glyph_matrix_for_char)?;
             }
 
             self.canvas
