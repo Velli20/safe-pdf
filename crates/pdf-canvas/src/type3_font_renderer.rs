@@ -1,28 +1,16 @@
 use pdf_content_stream::pdf_operator::PdfOperatorVariant;
 use pdf_font::type3_font::Type3Font;
 use pdf_graphics::transform::Transform;
-use thiserror::Error;
 
 use crate::{
     canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
     text_renderer::TextRenderer,
 };
 
-/// Defines errors that can occur during Type 3 font rendering.
-#[derive(Debug, Error)]
-pub enum Type3FontRendererError {
-    #[error("Invalid /FontMatrix. Expected an array of 6 numbers.")]
-    InvalidFontMatrix,
-    #[error("Error processing character procedure: {err}")]
-    CharProcError { err: String },
-}
-
 /// A renderer for Type 3 fonts, which defines glyphs using PDF content streams.
 pub(crate) struct Type3FontRenderer<'a, 'b, B: CanvasBackend> {
     /// A mutable reference to the `PdfCanvas` where glyphs are drawn.
     canvas: &'b mut PdfCanvas<'a, B>,
-    /// The font matrix from the Type 3 font dictionary, mapping glyph space to text space.
-    font_matrix: Transform,
     /// A matrix encoding font size, horizontal scaling, and text rise.
     font_size_matrix: Transform,
     /// The Type 3 font definition, containing glyph content streams.
@@ -30,17 +18,10 @@ pub(crate) struct Type3FontRenderer<'a, 'b, B: CanvasBackend> {
 }
 
 impl<'a, 'b, B: CanvasBackend> Type3FontRenderer<'a, 'b, B> {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         canvas: &'b mut PdfCanvas<'a, B>,
         type3_font: &'a Type3Font,
     ) -> Result<Self, PdfCanvasError> {
-        let font_matrix = if let [a, b, c, d, e, f] = type3_font.font_matrix.as_slice() {
-            Transform::from_row(*a, *b, *c, *d, *e, *f)
-        } else {
-            return Err(Type3FontRendererError::InvalidFontMatrix.into());
-        };
-
         // For Type 3 fonts, each glyph's transformation is computed as CTM * Tm * S * FontMatrix
         // S encodes font size (Tfs), horizontal scaling (Th), and text rise (Ts):
         // S = [Tfs*Th 0 0 Tfs 0 Ts], which is exactly glyph_base_transform(1.0).
@@ -48,7 +29,6 @@ impl<'a, 'b, B: CanvasBackend> Type3FontRenderer<'a, 'b, B> {
 
         Ok(Self {
             canvas,
-            font_matrix,
             font_size_matrix,
             type3_font,
         })
@@ -64,7 +44,7 @@ impl<B: CanvasBackend> TextRenderer for Type3FontRenderer<'_, '_, B> {
         for char_code_byte in iter {
             let state = self.canvas.current_state()?;
             let text_rendering_matrix = {
-                let mut base = self.font_matrix;
+                let mut base = self.type3_font.font_matrix;
                 base.concat(&self.font_size_matrix);
                 state
                     .text_state
@@ -130,8 +110,8 @@ impl<B: CanvasBackend> TextRenderer for Type3FontRenderer<'_, '_, B> {
                 let text_state = &mut self.canvas.current_state_mut()?.text_state;
 
                 // Compute displacement vector in text space for (width, 0) in glyph space
-                let (x1, y1) = self.font_matrix.transform_point(width, 0.0);
-                let (x0, y0) = self.font_matrix.transform_point(0.0, 0.0);
+                let (x1, y1) = self.type3_font.font_matrix.transform_point(width, 0.0);
+                let (x0, y0) = self.type3_font.font_matrix.transform_point(0.0, 0.0);
                 let glyph_width_x = (x1 - x0) * text_state.font_size;
                 let glyph_width_y = (y1 - y0) * text_state.font_size;
 

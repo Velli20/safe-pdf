@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use pdf_content_stream::{error::PdfOperatorError, pdf_operator::PdfOperatorVariant};
+use pdf_graphics::transform::Transform;
 use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     object_variant::ObjectVariant,
@@ -20,7 +21,7 @@ use crate::encoding::{Encoding, EncodingReadError, FontEncoding};
 pub struct Type3Font {
     /// A matrix that maps user space coordinates to glyph space coordinates.
     /// It is used to transform glyph outlines during rendering.
-    pub font_matrix: [f32; 6],
+    pub font_matrix: Transform,
     /// A procedure defining any special actions to be taken before a character from this font is rendered.
     pub char_procs: HashMap<String, Vec<PdfOperatorVariant>>,
     /// The font's encoding, specifying the mapping from character codes to glyph names.
@@ -43,9 +44,10 @@ impl Type3Font {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, Type3FontError> {
-        let font_matrix = dictionary
+        let [a, b, c, d, e, f] = dictionary
             .get_or_err("FontMatrix")?
             .try_array_of::<f32, 6>(objects)?;
+        let font_matrix = Transform::from_row(a, b, c, d, e, f);
 
         // Read optional `/Encoding` entry. This is either a name or a dictionary.
         let encoding = dictionary

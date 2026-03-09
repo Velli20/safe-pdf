@@ -2,7 +2,6 @@ use pdf_color_space::color_space::ColorSpaceError;
 use thiserror::Error;
 
 use crate::truetype_font_renderer::TrueTypeFontRendererError;
-use crate::type3_font_renderer::Type3FontRendererError;
 
 /// Defines errors that can occur during PDF canvas operations.
 #[derive(Debug, Error)]
@@ -35,8 +34,6 @@ pub enum PdfCanvasError {
     GraphicsStateStackUnderflow,
     #[error("TrueType font rendering error: {0}")]
     TrueTypeFontError(#[from] TrueTypeFontRendererError),
-    #[error("Type3 font rendering error: {0}")]
-    Type3FontError(#[from] Type3FontRendererError),
     #[error("Extrenal object '{0}' not found in resources")]
     XObjectNotFound(String),
     #[error("Page missing media box")]
