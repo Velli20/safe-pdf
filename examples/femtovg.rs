@@ -19,14 +19,14 @@ use winit::{
 pub trait AppRenderer {
     fn on_init(&mut self);
 
-    fn on_render(&mut self, canvas: &mut Canvas<WGPURenderer>, document: &PdfDocument);
+    fn on_render(&mut self, canvas: &mut Canvas<WGPURenderer>, renderer: &PdfRenderer);
 }
 
 pub struct App {
     width: u32,
     height: u32,
     keep_flushing: bool,
-    document: Option<PdfDocument>,
+    renderer: Option<PdfRenderer>,
 }
 
 impl App {
@@ -35,7 +35,7 @@ impl App {
             width,
             height,
             keep_flushing,
-            document: Some(document),
+            renderer: Some(PdfRenderer::new(document)),
         }
     }
 
@@ -113,7 +113,7 @@ impl App {
             canvas: Canvas<WGPURenderer>,
             surface: wgpu::Surface<'static>,
             queue: wgpu::Queue,
-            document: PdfDocument,
+            renderer: PdfRenderer,
             keep_flushing: bool,
             window: Arc<Window>,
         }
@@ -130,7 +130,7 @@ impl App {
                         event_loop.exit();
                     }
                     WindowEvent::RedrawRequested => {
-                        self.render.on_render(&mut self.canvas, &self.document);
+                        self.render.on_render(&mut self.canvas, &self.renderer);
 
                         let frame = self
                             .surface
@@ -165,7 +165,10 @@ impl App {
             canvas,
             surface,
             queue,
-            document: self.document.take().unwrap(),
+            renderer: self
+                .renderer
+                .take()
+                .expect("renderer must be initialized before run"),
             keep_flushing: self.keep_flushing,
             window: window.clone(),
         };
@@ -179,13 +182,12 @@ struct Renderer2 {}
 impl AppRenderer for Renderer2 {
     fn on_init(&mut self) {}
 
-    fn on_render(&mut self, canvas: &mut Canvas<WGPURenderer>, document: &PdfDocument) {
+    fn on_render(&mut self, canvas: &mut Canvas<WGPURenderer>, renderer: &PdfRenderer) {
         canvas.clear_rect(0, 0, 595, 842, Color::rgbf(1.0, 1.0, 1.0));
         canvas.save();
 
         let mut canvas_impl = CanvasImpl { canvas };
-        let mut renderer = PdfRenderer::new(document, &mut canvas_impl);
-        let _ = renderer.render(0);
+        let _ = renderer.render(&mut canvas_impl, 0);
         canvas.restore();
     }
 }

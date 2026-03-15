@@ -1,16 +1,16 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use gl_rs as gl;
-use pdf_document::{document::PdfDocument, reader::PdfReader};
+use pdf_document::reader::PdfReader;
 use pdf_graphics_skia::gpu_state::SkiaGpuState;
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
-use pdf_renderer::{PageRecordingCache, render_page_cached};
+use pdf_renderer::{PageRecordingCache, PdfRenderer, render_page_cached};
 use std::cell::RefCell;
 
-// Thread-local storage for the currently loaded PDF document.
+// Thread-local storage for the currently loaded PDF renderer.
 // Using RefCell for interior mutability since WASM is single-threaded.
 thread_local! {
-    static CURRENT_DOCUMENT: RefCell<Option<PdfDocument>> = const { RefCell::new(None) };
+    static CURRENT_RENDERER: RefCell<Option<PdfRenderer>> = const { RefCell::new(None) };
     static GPU_STATE: RefCell<Option<SkiaGpuState>> = const { RefCell::new(None) };
     /// Page recording cache for efficient re-rendering.
     /// Caches up to 5 pages as resolution-independent drawing commands.
@@ -66,8 +66,8 @@ pub unsafe extern "C" fn sk_load_pdf(data_ptr: *const u8, data_len: usize) -> i3
             PAGE_CACHE.with(|cache| {
                 cache.borrow_mut().clear();
             });
-            CURRENT_DOCUMENT.with(|doc| {
-                *doc.borrow_mut() = Some(document);
+            CURRENT_RENDERER.with(|renderer| {
+                *renderer.borrow_mut() = Some(PdfRenderer::new(document));
             });
             0
         }
@@ -81,7 +81,13 @@ pub unsafe extern "C" fn sk_load_pdf(data_ptr: *const u8, data_len: usize) -> i3
 /// Returns the number of pages in the currently loaded PDF document.
 #[unsafe(export_name = "sk_get_page_count")]
 pub extern "C" fn sk_get_page_count() -> usize {
-    CURRENT_DOCUMENT.with(|doc| doc.borrow().as_ref().map(|d| d.page_count()).unwrap_or(0))
+    CURRENT_RENDERER.with(|renderer| {
+        renderer
+            .borrow()
+            .as_ref()
+            .map(|renderer| renderer.document().page_count())
+            .unwrap_or(0)
+    })
 }
 
 /// Renders a specific page of the loaded PDF document.
@@ -112,14 +118,14 @@ pub extern "C" fn sk_render_page(width: i32, height: i32, page_index: usize) -> 
         }
     });
 
-    CURRENT_DOCUMENT.with(|doc| {
-        let doc_ref = doc.borrow();
-        let Some(document) = doc_ref.as_ref() else {
+    CURRENT_RENDERER.with(|renderer| {
+        let renderer_ref = renderer.borrow();
+        let Some(renderer) = renderer_ref.as_ref() else {
             return -2;
         };
 
         // Check page index bounds
-        if page_index >= document.page_count() {
+        if page_index >= renderer.document().page_count() {
             return -1;
         }
 
@@ -151,7 +157,7 @@ pub extern "C" fn sk_render_page(width: i32, height: i32, page_index: usize) -> 
             // Use cached rendering for better performance
             let result = PAGE_CACHE.with(|cache| {
                 let mut cache = cache.borrow_mut();
-                match render_page_cached(document, page_index, &mut cache, &mut skia_backend) {
+                match render_page_cached(renderer, page_index, &mut cache, &mut skia_backend) {
                     Ok(()) => 0,
                     Err(e) => {
                         eprintln!("Render error: {:?}", e);
@@ -174,8 +180,8 @@ pub extern "C" fn sk_free_pdf() {
     PAGE_CACHE.with(|cache| {
         cache.borrow_mut().clear();
     });
-    CURRENT_DOCUMENT.with(|doc| {
-        *doc.borrow_mut() = None;
+    CURRENT_RENDERER.with(|renderer| {
+        *renderer.borrow_mut() = None;
     });
 }
 
@@ -190,8 +196,13 @@ pub extern "C" fn sk_free_pdf() {
 /// - The actual page indices can be retrieved via `sk_get_prefetch_page`
 #[unsafe(export_name = "sk_get_prefetch_count")]
 pub extern "C" fn sk_get_prefetch_count(current_page: usize) -> usize {
-    let page_count =
-        CURRENT_DOCUMENT.with(|doc| doc.borrow().as_ref().map(|d| d.page_count()).unwrap_or(0));
+    let page_count = CURRENT_RENDERER.with(|renderer| {
+        renderer
+            .borrow()
+            .as_ref()
+            .map(|renderer| renderer.document().page_count())
+            .unwrap_or(0)
+    });
 
     PAGE_CACHE.with(|cache| {
         cache
@@ -213,8 +224,13 @@ pub extern "C" fn sk_get_prefetch_count(current_page: usize) -> usize {
 /// The page index to prefetch, or `usize::MAX` if invalid.
 #[unsafe(export_name = "sk_get_prefetch_page")]
 pub extern "C" fn sk_get_prefetch_page(current_page: usize, prefetch_index: usize) -> usize {
-    let page_count =
-        CURRENT_DOCUMENT.with(|doc| doc.borrow().as_ref().map(|d| d.page_count()).unwrap_or(0));
+    let page_count = CURRENT_RENDERER.with(|renderer| {
+        renderer
+            .borrow()
+            .as_ref()
+            .map(|renderer| renderer.document().page_count())
+            .unwrap_or(0)
+    });
 
     PAGE_CACHE.with(|cache| {
         let pages = cache.borrow().pages_to_prefetch(current_page, page_count);
@@ -274,10 +290,11 @@ pub extern "C" fn sk_clear_cache() {
 /// Returns `0.0` if the page index is out of range or the page has no media box.
 #[unsafe(export_name = "sk_get_page_width")]
 pub extern "C" fn sk_get_page_width(page_index: usize) -> f32 {
-    CURRENT_DOCUMENT.with(|doc| {
-        doc.borrow()
+    CURRENT_RENDERER.with(|renderer| {
+        renderer
+            .borrow()
             .as_ref()
-            .and_then(|d| d.get_page(page_index))
+            .and_then(|renderer| renderer.document().get_page(page_index))
             .and_then(|p| p.media_box.as_ref())
             .map(|mb| mb.width())
             .unwrap_or(0.0)
@@ -289,10 +306,11 @@ pub extern "C" fn sk_get_page_width(page_index: usize) -> f32 {
 /// Returns `0.0` if the page index is out of range or the page has no media box.
 #[unsafe(export_name = "sk_get_page_height")]
 pub extern "C" fn sk_get_page_height(page_index: usize) -> f32 {
-    CURRENT_DOCUMENT.with(|doc| {
-        doc.borrow()
+    CURRENT_RENDERER.with(|renderer| {
+        renderer
+            .borrow()
             .as_ref()
-            .and_then(|d| d.get_page(page_index))
+            .and_then(|renderer| renderer.document().get_page(page_index))
             .and_then(|p| p.media_box.as_ref())
             .map(|mb| mb.height())
             .unwrap_or(0.0)

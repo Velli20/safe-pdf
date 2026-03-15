@@ -1,4 +1,4 @@
-use std::{ffi::CString, num::NonZeroU32, path::PathBuf, sync::Arc};
+use std::{ffi::CString, num::NonZeroU32, path::PathBuf};
 
 use gl_rs as gl;
 use glutin::{
@@ -65,7 +65,7 @@ fn main() -> Result<(), AppError> {
         source: e,
     })?;
 
-    let document = Arc::new(PdfReader.read_from_bytes(&bytes, None)?);
+    let document = PdfReader.read_from_bytes(&bytes, None)?;
 
     run(document)
 }
@@ -83,7 +83,7 @@ struct Application {
     gl_context: PossiblyCurrentContext,
     gpu_state: SkiaGpuState,
     surface: Surface,
-    document: Arc<PdfDocument>,
+    renderer: PdfRenderer,
     current_page: usize,
     modifiers: ModifiersState,
     render_error: Option<AppError>,
@@ -94,13 +94,13 @@ impl Application {
         let size = self.window.inner_size();
         self.surface.canvas().clear(SkiaColor::WHITE);
 
-        if self.document.page_count() > 0 {
+        if self.renderer.document().page_count() > 0 {
             let mut backend = SkiaCanvasBackend {
                 surface: &mut self.surface,
                 width: size.width as f32,
                 height: size.height as f32,
             };
-            PdfRenderer::new(&self.document, &mut backend).render(self.current_page)?;
+            self.renderer.render(&mut backend, self.current_page)?;
         }
 
         self.gpu_state.context.flush_and_submit();
@@ -110,29 +110,23 @@ impl Application {
     }
 
     fn next_page(&mut self) {
-        if self.document.page_count() > 0 {
-            self.current_page = (self.current_page + 1) % self.document.page_count();
-            println!(
-                "Page {}/{}",
-                self.current_page + 1,
-                self.document.page_count()
-            );
+        let document = self.renderer.document();
+        if document.page_count() > 0 {
+            self.current_page = (self.current_page + 1) % document.page_count();
+            println!("Page {}/{}", self.current_page + 1, document.page_count());
             self.window.request_redraw();
         }
     }
 
     fn prev_page(&mut self) {
-        if self.document.page_count() > 0 {
+        let document = self.renderer.document();
+        if document.page_count() > 0 {
             self.current_page = if self.current_page == 0 {
-                self.document.page_count() - 1
+                document.page_count() - 1
             } else {
                 self.current_page - 1
             };
-            println!(
-                "Page {}/{}",
-                self.current_page + 1,
-                self.document.page_count()
-            );
+            println!("Page {}/{}", self.current_page + 1, document.page_count());
             self.window.request_redraw();
         }
     }
@@ -202,9 +196,10 @@ impl ApplicationHandler for Application {
     }
 }
 
-fn run(document: Arc<PdfDocument>) -> Result<(), AppError> {
+fn run(document: PdfDocument) -> Result<(), AppError> {
     let event_loop = EventLoop::new()?;
     let (init_w, init_h) = initial_window_size(&document);
+    let renderer = PdfRenderer::new(document);
 
     let window_attrs =
         WindowAttributes::default().with_inner_size(LogicalSize::new(init_w, init_h));
@@ -254,7 +249,7 @@ fn run(document: Arc<PdfDocument>) -> Result<(), AppError> {
         gl_context,
         gpu_state,
         surface,
-        document,
+        renderer,
         current_page: 0,
         modifiers: ModifiersState::default(),
         render_error: None,

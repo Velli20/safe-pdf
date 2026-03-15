@@ -18,19 +18,27 @@ pub enum PdfRendererError {
 }
 
 /// Renders pages of a [`PdfDocument`] onto a user supplied [`CanvasBackend`].
-pub struct PdfRenderer<'a, 'b, B: CanvasBackend> {
-    document: &'b PdfDocument,
-    canvas: &'a mut B,
+pub struct PdfRenderer {
+    document: PdfDocument,
 }
 
-impl<'a, 'b, B: CanvasBackend> PdfRenderer<'a, 'b, B> {
-    /// Creates a new renderer over the given PDF `document` and `canvas` backend.
+impl PdfRenderer {
+    /// Creates a new renderer over the owned PDF `document`.
     ///
-    /// The caller retains ownership of the canvas; the renderer only holds a
-    /// mutable borrow for the duration of its lifetime. Multiple pages can be
-    /// rendered sequentially by repeatedly calling [`PdfRenderer::render`].
-    pub fn new(document: &'b PdfDocument, canvas: &'a mut B) -> Self {
-        Self { document, canvas }
+    /// The renderer owns the document for its lifetime. Call [`PdfRenderer::render`]
+    /// with a mutable canvas backend each time a page should be drawn.
+    pub fn new(document: PdfDocument) -> Self {
+        Self { document }
+    }
+
+    /// Returns the owned document by reference.
+    pub fn document(&self) -> &PdfDocument {
+        &self.document
+    }
+
+    /// Returns the owned document after rendering is complete.
+    pub fn into_document(self) -> PdfDocument {
+        self.document
     }
 
     /// Renders a page onto the canvas backend.
@@ -43,56 +51,46 @@ impl<'a, 'b, B: CanvasBackend> PdfRenderer<'a, 'b, B> {
     ///
     /// Returns `Ok(())` if the page was rendered successfully, or an error if the
     /// page could not be found or if an error occurred during rendering.
-    pub fn render(&mut self, page_index: usize) -> Result<(), PdfRendererError> {
-        let Some(page) = self.document.pages.get(page_index) else {
-            return Err(PdfRendererError::PageNotFound(page_index));
-        };
-        let mut canvas = PdfCanvas::new(self.canvas, page, None)?;
+    pub fn render<B: CanvasBackend>(
+        &self,
+        canvas_backend: &mut B,
+        page_index: usize,
+    ) -> Result<(), PdfRendererError> {
+        let page = self.page(page_index)?;
+        let mut canvas = PdfCanvas::new(canvas_backend, page, None)?;
         if let Some(cs) = &page.contents {
             canvas.render_content_stream(cs, None, None, page.resources.as_ref(), None)?;
         }
         Ok(())
     }
-}
 
-/// Renders a PDF page into a [`RecordingCanvas`] for caching.
-///
-/// This function records all drawing commands for a page into a resolution-independent
-/// `RecordingCanvas` that can be replayed to any backend at any size.
-///
-/// # Parameters
-///
-/// - `document`: The PDF document containing the page.
-/// - `page_index`: Zero-based index of the page to render.
-/// - `width`: Logical width of the recording canvas.
-/// - `height`: Logical height of the recording canvas.
-///
-/// # Returns
-///
-/// A `RecordingCanvas` containing all drawing commands for the page.
-///
-/// # Errors
-///
-/// Returns an error if the page is not found or if rendering fails.
-pub fn render_page_to_recording(
-    document: &PdfDocument,
-    page_index: usize,
-    width: f32,
-    height: f32,
-) -> Result<RecordingCanvas, PdfRendererError> {
-    let Some(page) = document.pages.get(page_index) else {
-        return Err(PdfRendererError::PageNotFound(page_index));
-    };
-
-    let mut recording = RecordingCanvas::new(width, height);
-    {
-        let mut canvas = PdfCanvas::new(&mut recording, page, None)?;
-        if let Some(cs) = &page.contents {
-            canvas.render_content_stream(cs, None, None, page.resources.as_ref(), None)?;
+    /// Renders a PDF page into a [`RecordingCanvas`] for caching.
+    ///
+    /// This records all drawing commands for a page into a resolution-independent
+    /// `RecordingCanvas` that can be replayed to any backend at any size.
+    pub fn render_page_to_recording(
+        &self,
+        page_index: usize,
+        width: f32,
+        height: f32,
+    ) -> Result<RecordingCanvas, PdfRendererError> {
+        let page = self.page(page_index)?;
+        let mut recording = RecordingCanvas::new(width, height);
+        {
+            let mut canvas = PdfCanvas::new(&mut recording, page, None)?;
+            if let Some(cs) = &page.contents {
+                canvas.render_content_stream(cs, None, None, page.resources.as_ref(), None)?;
+            }
         }
+        Ok(recording)
     }
 
-    Ok(recording)
+    fn page(&self, page_index: usize) -> Result<&pdf_page::page::PdfPage, PdfRendererError> {
+        let Some(page) = self.document.pages.get(page_index) else {
+            return Err(PdfRendererError::PageNotFound(page_index));
+        };
+        Ok(page)
+    }
 }
 
 /// Renders a cached [`RecordingCanvas`] to a backend, or renders the page
@@ -103,7 +101,7 @@ pub fn render_page_to_recording(
 ///
 /// # Parameters
 ///
-/// - `document`: The PDF document containing the page.
+/// - `renderer`: The PDF renderer owning the document containing the page.
 /// - `page_index`: Zero-based index of the page to render.
 /// - `cache`: The page recording cache.
 /// - `backend`: The canvas backend to render to.
@@ -116,7 +114,7 @@ pub fn render_page_to_recording(
 ///
 /// Returns an error if the page is not found or if rendering fails.
 pub fn render_page_cached<B: CanvasBackend>(
-    document: &PdfDocument,
+    renderer: &PdfRenderer,
     page_index: usize,
     cache: &mut PageRecordingCache,
     backend: &mut B,
@@ -132,7 +130,7 @@ pub fn render_page_cached<B: CanvasBackend>(
     }
 
     // Cache miss: render to recording canvas
-    let recording = render_page_to_recording(document, page_index, width, height)?;
+    let recording = renderer.render_page_to_recording(page_index, width, height)?;
 
     // Replay to the actual backend
     recording.replay(backend)?;
