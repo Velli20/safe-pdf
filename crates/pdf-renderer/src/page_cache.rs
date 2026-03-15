@@ -8,16 +8,17 @@
 //! # Example
 //!
 //! ```ignore
-//! use pdf_renderer::page_cache::PageRecordingCache;
+//! use pdf_renderer::{page_cache::PageRecordingCache, PdfRenderer};
 //!
 //! let mut cache = PageRecordingCache::new(5); // Cache up to 5 pages
+//! let renderer = PdfRenderer::new(document);
 //!
 //! // Check if page is cached
 //! if let Some(recording) = cache.get(page_index) {
 //!     recording.replay(&mut backend)?;
 //! } else {
 //!     // Render to RecordingCanvas and cache it
-//!     let recording = render_page_to_recording(document, page_index)?;
+//!     let recording = renderer.render_page_to_recording(page_index, width, height)?;
 //!     cache.insert(page_index, recording.clone());
 //!     recording.replay(&mut backend)?;
 //! }
