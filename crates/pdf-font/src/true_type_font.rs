@@ -1,14 +1,27 @@
 use std::{borrow::Cow, collections::HashMap};
 
-use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
+};
 
-use crate::{flags::FontFlags, font::FontError, simple_font_glyph_map::SimpleFontGlyphWidthsMap};
+use crate::{
+    encoding::{Encoding, FontEncoding},
+    flags::FontFlags,
+    font::FontError,
+    simple_font_glyph_map::SimpleFontGlyphWidthsMap,
+    to_unicode_cmap::ToUnicodeCMap,
+};
 
 pub struct TrueTypeFont {
     /// Font file containing embedded TrueType program.
     pub font_file: Vec<u8>,
     /// Widths for character codes.
     pub widths: Option<HashMap<u16, f32>>,
+    /// Optional glyph name encoding, used as AGL fallback when ToUnicode is absent.
+    pub encoding: Option<Encoding>,
+    /// Parsed ToUnicode CMap for char-code → Unicode mapping.
+    pub to_unicode: Option<ToUnicodeCMap>,
 }
 
 impl TrueTypeFont {
@@ -21,7 +34,34 @@ impl TrueTypeFont {
         // Read the `/Widths` entry.
         let widths = SimpleFontGlyphWidthsMap::from_dictionary(dictionary, objects)?;
 
-        Ok(Self { font_file, widths })
+        // Read optional `/Encoding` entry — either a name (base encoding) or a
+        // dictionary (with optional BaseEncoding + Differences).  Errors are
+        // treated as absent encoding rather than propagated, since TrueType fonts
+        // often omit or mis-specify this entry.
+        let encoding: Option<Encoding> = dictionary.get("Encoding").and_then(|enc_obj| {
+            let resolved = objects.resolve_object(enc_obj).ok()?;
+            match resolved {
+                ObjectVariant::Dictionary(d) => Encoding::from_dictionary(d, objects).ok(),
+                _ => {
+                    let base = FontEncoding::from(resolved.try_str(objects).ok()?);
+                    Encoding::from_base_encoding(base).ok()
+                }
+            }
+        });
+
+        // Parse optional ToUnicode CMap stream.
+        let to_unicode = dictionary
+            .get("ToUnicode")
+            .and_then(|e| e.try_stream(objects).ok())
+            .and_then(|s| s.data().ok())
+            .map(|data| ToUnicodeCMap::from_bytes(&data));
+
+        Ok(Self {
+            font_file,
+            widths,
+            encoding,
+            to_unicode,
+        })
     }
 }
 

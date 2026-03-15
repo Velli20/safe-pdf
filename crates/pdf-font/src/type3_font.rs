@@ -8,7 +8,10 @@ use pdf_object::{
 };
 use thiserror::Error;
 
-use crate::encoding::{Encoding, EncodingReadError, FontEncoding};
+use crate::{
+    encoding::{Encoding, EncodingReadError, FontEncoding},
+    to_unicode_cmap::ToUnicodeCMap,
+};
 
 /// Represents a Type 3 font in a PDF document.
 ///
@@ -28,6 +31,8 @@ pub struct Type3Font {
     pub char_procs: HashMap<String, Vec<PdfOperatorVariant>>,
     /// The font's encoding, specifying the mapping from character codes to glyph names.
     pub encoding: Option<Encoding>,
+    /// Parsed ToUnicode CMap for char-code → Unicode mapping.
+    pub to_unicode: Option<ToUnicodeCMap>,
 }
 
 /// Defines errors that can occur while parsing a Type 3 font object.
@@ -83,11 +88,19 @@ impl Type3Font {
             char_procs.insert(name.to_owned(), operators);
         }
 
+        // Parse optional ToUnicode CMap stream.
+        let to_unicode = dictionary
+            .get("ToUnicode")
+            .and_then(|e| e.try_stream(objects).ok())
+            .and_then(|s| s.data().ok())
+            .map(|data| ToUnicodeCMap::from_bytes(&data));
+
         Ok(Type3Font {
             font_matrix,
             bounds,
             char_procs,
             encoding,
+            to_unicode,
         })
     }
 }

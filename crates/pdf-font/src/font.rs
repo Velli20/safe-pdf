@@ -4,6 +4,9 @@ use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::Ob
 use thiserror::Error;
 
 use crate::{
+    char_vec::CharVec,
+    glyph_name_to_unicode::glyph_name_to_unicode,
+    to_unicode_cmap::ToUnicodeCMap,
     true_type_font::TrueTypeFont,
     type0_font::{Type0Font, Type0FontError},
     type1_font::Type1Font,
@@ -104,7 +107,132 @@ impl Font {
                 .encoding
                 .as_ref()
                 .and_then(|enc| enc.names.get(index).map(Cow::as_ref)),
+            Font::TrueType(font) => font
+                .encoding
+                .as_ref()
+                .and_then(|enc| enc.names.get(index).map(Cow::as_ref)),
             _ => None,
         }
+    }
+
+    /// Map a PDF character code to all of its Unicode scalar values.
+    ///
+    /// Resolution order:
+    /// 1. ToUnicode CMap — returns the full slice (handles ligatures such as "fi"
+    ///    mapped to `['f','i']`).
+    /// 2. Glyph name → Adobe Glyph List (Type1 / Type3 / TrueType with encodings).
+    /// 3. Type0/CID reverse-cmap fallback (Identity-H/V fonts without ToUnicode).
+    ///
+    /// Returns an empty [`CharVec`] when no mapping is found.
+    pub fn chars_to_unicode(&self, char_code: u16) -> CharVec {
+        // Priority 1: ToUnicode CMap
+        let to_unicode: Option<&ToUnicodeCMap> = match self {
+            Font::Type0(f) => f.to_unicode.as_ref(),
+            Font::Type1(f) => f.to_unicode.as_ref(),
+            Font::TrueType(f) => f.to_unicode.as_ref(),
+            Font::Type3(f) => f.to_unicode.as_ref(),
+        };
+        if let Some(chars) = to_unicode.and_then(|m| m.map_char_code(char_code))
+            && !chars.is_empty()
+        {
+            return CharVec::from_slice(chars);
+        }
+
+        // Priority 2: glyph name → AGL
+        if let Some(name) = self.glyph_name(char_code)
+            && let Some(c) = glyph_name_to_unicode(name)
+        {
+            return CharVec::from(c);
+        }
+
+        // Priority 3: Type0 reverse-cmap (Identity-H/V without ToUnicode)
+        if let Font::Type0(f) = self
+            && let Some(map) = &f.glyph_to_unicode
+            && let Some(&c) = map.get(&char_code)
+        {
+            return CharVec::from(c);
+        }
+
+        CharVec::new()
+    }
+
+    /// Map a PDF character code to its first Unicode scalar value.
+    ///
+    /// For ligatures that map to multiple code points, only the first is returned.
+    /// Prefer [`chars_to_unicode`](Self::chars_to_unicode) when full coverage is needed.
+    pub fn char_to_unicode(&self, char_code: u16) -> Option<char> {
+        self.chars_to_unicode(char_code).into_iter().next().copied()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+
+    use super::*;
+    use crate::{encoding::Encoding, to_unicode_cmap::ToUnicodeCMap, true_type_font::TrueTypeFont};
+
+    #[test]
+    fn test_truetype_encoding_fallback() {
+        // Build a TrueType font with a minimal encoding that maps char code 65
+        // to the glyph name "A".  The AGL single-char rule maps "A" → U+0041.
+        let names: Vec<Cow<'static, str>> = (0..256)
+            .map(|index| {
+                if index == 65 {
+                    Cow::Borrowed("A")
+                } else {
+                    Cow::Borrowed(".notdef")
+                }
+            })
+            .collect();
+        let enc = Encoding { names };
+        let font = Font::TrueType(TrueTypeFont {
+            font_file: vec![],
+            widths: None,
+            encoding: Some(enc),
+            to_unicode: None,
+        });
+        assert_eq!(font.char_to_unicode(65), Some('A'));
+        assert_eq!(&*font.chars_to_unicode(65), ['A'].as_slice());
+    }
+
+    #[test]
+    fn test_ligature_chars_to_unicode() {
+        // ToUnicode CMap maps char 1 → fi (U+FB01) + fl (U+FB02) as a ligature pair.
+        let cmap_data = b"beginbfchar\n<01> <FB01FB02>\nendbfchar\n";
+        let cmap = ToUnicodeCMap::from_bytes(cmap_data);
+        let font = Font::TrueType(TrueTypeFont {
+            font_file: vec![],
+            widths: None,
+            encoding: None,
+            to_unicode: Some(cmap),
+        });
+        assert_eq!(
+            &*font.chars_to_unicode(1),
+            ['\u{FB01}', '\u{FB02}'].as_slice()
+        );
+        // char_to_unicode returns only the first character
+        assert_eq!(font.char_to_unicode(1), Some('\u{FB01}'));
+    }
+
+    #[test]
+    fn test_type0_glyph_to_unicode_fallback() {
+        use std::collections::HashMap;
+
+        use crate::type0_font::{CidFontSubType, Type0Font};
+
+        let mut glyph_map: HashMap<u16, char> = HashMap::new();
+        glyph_map.insert(65u16, 'A');
+        let font = Font::Type0(Type0Font {
+            subtype: CidFontSubType::Type2,
+            font_file: vec![],
+            widths: None,
+            encoding: None,
+            default_width: 1000.0,
+            to_unicode: None,
+            glyph_to_unicode: Some(glyph_map),
+        });
+        assert_eq!(&*font.chars_to_unicode(65), ['A'].as_slice());
+        assert_eq!(font.char_to_unicode(65), Some('A'));
     }
 }

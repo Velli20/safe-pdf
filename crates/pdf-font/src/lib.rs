@@ -1,9 +1,12 @@
 mod cff_builder;
+pub mod char_vec;
 pub mod encoding;
 pub mod flags;
 pub mod font;
+pub mod glyph_name_to_unicode;
 pub mod glyph_widths_map;
 pub mod simple_font_glyph_map;
+pub mod to_unicode_cmap;
 pub mod true_type_font;
 pub mod type0_font;
 pub mod type1_font;
