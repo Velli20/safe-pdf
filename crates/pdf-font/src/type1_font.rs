@@ -9,6 +9,7 @@ use crate::{
     encoding::{Encoding, FontEncoding},
     font::FontError,
     simple_font_glyph_map::SimpleFontGlyphWidthsMap,
+    to_unicode_cmap::ToUnicodeCMap,
 };
 
 /// Minimal, initial representation of a PDF Type1 font.
@@ -22,6 +23,8 @@ pub struct Type1Font {
     pub widths: Option<HashMap<u16, f32>>,
     /// Optional encoding information.
     pub encoding: Encoding,
+    /// Parsed ToUnicode CMap for char-code → Unicode mapping.
+    pub to_unicode: Option<ToUnicodeCMap>,
 }
 
 impl Type1Font {
@@ -51,10 +54,18 @@ impl Type1Font {
             Encoding::default()
         };
 
+        // Parse optional ToUnicode CMap stream.
+        let to_unicode = dictionary
+            .get("ToUnicode")
+            .and_then(|e| e.try_stream(objects).ok())
+            .and_then(|s| s.data().ok())
+            .map(|data| ToUnicodeCMap::from_bytes(&data));
+
         Ok(Self {
             font_file,
             widths,
             encoding,
+            to_unicode,
         })
     }
 }

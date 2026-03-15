@@ -1,9 +1,13 @@
+use std::collections::HashMap;
+
 use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
+use read_fonts::{FontRef, TableProvider};
 
 use crate::{
     encoding::FontEncoding,
     font::FontError,
     glyph_widths_map::{GlyphWidthsMap, GlyphWidthsMapError},
+    to_unicode_cmap::ToUnicodeCMap,
     true_type_font::TrueTypeFont,
     type1_font::Type1Font,
 };
@@ -24,6 +28,14 @@ pub struct Type0Font {
     /// The default width for glyphs in the font.
     /// This is the `/DW` entry in the CIDFont dictionary.
     pub(crate) default_width: f32,
+    /// Parsed ToUnicode CMap for char-code → Unicode mapping.
+    pub to_unicode: Option<ToUnicodeCMap>,
+    /// Reverse Unicode cmap built from the embedded font's cmap tables.
+    ///
+    /// Only populated for Identity-H/V encoded fonts that lack a ToUnicode
+    /// stream.  Maps glyph ID (= CID = char code for Identity encoding) to
+    /// the Unicode scalar value found in the font's best cmap subtable.
+    pub glyph_to_unicode: Option<HashMap<u16, char>>,
 }
 
 impl Type0Font {
@@ -65,6 +77,14 @@ impl Type0Font {
             .map(|v| v.try_str(objects))
             .transpose()?
             .map(FontEncoding::from);
+
+        // Parse optional ToUnicode CMap from the top-level Type0 font dictionary.
+        // (Must be read before `dictionary` is shadowed by the descendant dict below.)
+        let to_unicode = dictionary
+            .get("ToUnicode")
+            .and_then(|e| e.try_stream(objects).ok())
+            .and_then(|s| s.data().ok())
+            .map(|data| ToUnicodeCMap::from_bytes(&data));
 
         // Per PDF spec, the `/DescendantFonts` array
         // must contain exactly one CIDFont reference. This single descendant provides
@@ -125,12 +145,54 @@ impl Type0Font {
             CidFontSubType::Type2 => TrueTypeFont::read_font_file(dictionary, objects)?.to_vec(),
         };
 
+        // Build reverse glyph→Unicode map from the embedded font's cmap when
+        // ToUnicode is absent and the encoding is Identity-H or Identity-V (i.e.,
+        // char code == CID == glyph ID).
+        let is_identity_encoding = matches!(
+            &encoding,
+            Some(FontEncoding::Unknown(s)) if s == "Identity-H" || s == "Identity-V"
+        );
+        let glyph_to_unicode = if to_unicode.is_none()
+            && is_identity_encoding
+            && matches!(subtype, CidFontSubType::Type2)
+        {
+            build_glyph_to_unicode(&font_file)
+        } else {
+            None
+        };
+
         Ok(Self {
             subtype,
             font_file,
             widths: widths_map,
             encoding,
             default_width,
+            to_unicode,
+            glyph_to_unicode,
         })
     }
+}
+
+/// Build a reverse cmap table: glyph ID → Unicode char.
+///
+/// Iterates over all (codepoint, glyph_id) pairs in the font's best Unicode
+/// cmap subtable and inverts the mapping.  The first Unicode value seen for
+/// each glyph ID wins (earlier subtable entries take priority).
+fn build_glyph_to_unicode(font_data: &[u8]) -> Option<HashMap<u16, char>> {
+    let font = FontRef::new(font_data).ok()?;
+    let cmap = font.cmap().ok()?;
+    let (_, _, subtable) = cmap.best_subtable()?;
+
+    let mut map = HashMap::new();
+    for (codepoint, glyph_id) in subtable.iter() {
+        let Some(c) = char::from_u32(codepoint) else {
+            continue;
+        };
+        let gid_u32 = u32::from(glyph_id);
+        if let Ok(gid_u16) = u16::try_from(gid_u32) {
+            map.entry(gid_u16).or_insert(c);
+        }
+    }
+
+    if map.is_empty() { None } else { Some(map) }
 }
