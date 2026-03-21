@@ -132,8 +132,19 @@ impl PdfOperatorVariant {
                 // letters in a single arm.
                 Some(b'\'' | b'"' | b'A'..=b'Z' | b'a'..=b'z') => {
                     let name = read_operator_name(&mut parser)?;
-                    let operator = Self::parse_operator(name, &mut operands)?;
-                    out.push(operator);
+                    match parse_operator(name, &mut operands) {
+                        Ok(operator) => out.push(operator),
+                        Err(err) => {
+                            // Don't fail hard on operator parsing errors. Log and skip the
+                            // operator, but continue parsing the rest of the stream.
+                            println!(
+                                "Failed to parse operator '{}': {:?}",
+                                String::from_utf8_lossy(name),
+                                err
+                            );
+                        }
+                    }
+                    operands.clear();
                 }
                 // Anything else is an operand value.
                 _ => {
@@ -144,44 +155,6 @@ impl PdfOperatorVariant {
         }
 
         Ok(())
-    }
-
-    /// Parses a single operator with its operands.
-    ///
-    /// Looks up the operator descriptor by name and validates the operand count
-    /// before parsing. Takes `operands` by `&mut` so its heap allocation can be
-    /// reclaimed and reused for the next operator.
-    fn parse_operator(
-        name: &[u8],
-        operands: &mut Vec<ObjectVariant>,
-    ) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let Some(descriptor) = get_operation_descriptor(name) else {
-            let name_str = String::from_utf8_lossy(name);
-            return Err(PdfOperatorError::UnknownOperator(name_str.to_string()));
-        };
-
-        // Validate operand count if the operator has a fixed count requirement.
-        if let Some(required_count) = descriptor.operand_count
-            && operands.len() != required_count
-        {
-            let name_str = String::from_utf8_lossy(name);
-            return Err(PdfOperatorError::IncorrectOperandCount {
-                op_name: name_str.to_string(),
-                got: operands.len(),
-                expected: required_count,
-            });
-        }
-
-        // Take the operand buffer, leaving an empty Vec behind. The allocation
-        // is reclaimed below so it can be reused for the next operator.
-        let mut ops = Operands(std::mem::take(operands));
-        let operator = (descriptor.parser)(&mut ops)?;
-        // Clear any unconsumed operands and return the buffer to the caller.
-        ops.0.clear();
-        // Reclaim the operand buffer for the next operator. This avoids per-operator
-        // allocations.
-        *operands = ops.0;
-        Ok(operator)
     }
 
     pub fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
@@ -256,6 +229,44 @@ impl PdfOperatorVariant {
             PdfOperatorVariant::SetNonStrokingColor(op) => op.call(backend),
         }
     }
+}
+
+/// Parses a single operator with its operands.
+///
+/// Looks up the operator descriptor by name and validates the operand count
+/// before parsing. Takes `operands` by `&mut` so its heap allocation can be
+/// reclaimed and reused for the next operator.
+fn parse_operator(
+    name: &[u8],
+    operands: &mut Vec<ObjectVariant>,
+) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    let Some(descriptor) = get_operation_descriptor(name) else {
+        let name_str = String::from_utf8_lossy(name);
+        return Err(PdfOperatorError::UnknownOperator(name_str.to_string()));
+    };
+
+    // Validate operand count if the operator has a fixed count requirement.
+    if let Some(required_count) = descriptor.operand_count
+        && operands.len() != required_count
+    {
+        let name_str = String::from_utf8_lossy(name);
+        return Err(PdfOperatorError::IncorrectOperandCount {
+            op_name: name_str.to_string(),
+            got: operands.len(),
+            expected: required_count,
+        });
+    }
+
+    // Take the operand buffer, leaving an empty Vec behind. The allocation
+    // is reclaimed below so it can be reused for the next operator.
+    let mut ops = Operands(std::mem::take(operands));
+    let operator = (descriptor.parser)(&mut ops)?;
+    // Clear any unconsumed operands and return the buffer to the caller.
+    ops.0.clear();
+    // Reclaim the operand buffer for the next operator. This avoids per-operator
+    // allocations.
+    *operands = ops.0;
+    Ok(operator)
 }
 
 #[cfg(test)]
