@@ -75,10 +75,12 @@ impl Type1Font {
     ///
     /// Tries the following sources in order:
     ///
-    /// 1. **`FontFile3`** — a CFF (Compact Font Format) stream inside the
-    ///    `/FontDescriptor`.  The raw CFF data is wrapped into a minimal
-    ///    OpenType container so downstream renderers (`skrifa` / `read-fonts`)
-    ///    can consume it.
+    /// 1. **`FontFile3`** — stream inside the `/FontDescriptor`.
+    ///    - `/Subtype /Type1C` or `/Subtype /CIDFontType0C`: raw CFF data,
+    ///      wrapped into a minimal OpenType container so downstream renderers
+    ///      (`skrifa` / `read-fonts`) can consume it.
+    ///    - `/Subtype /OpenType`: already an OpenType font program, returned as-is.
+    ///    - Any other or missing `/Subtype`: unsupported.
     /// 2. **`FontFile`** — a classic PostScript Type 1 font program.
     ///    Currently unsupported; returns [`FontError::UnsupportedFontSubtype`].
     ///
@@ -89,8 +91,8 @@ impl Type1Font {
     /// # Errors
     ///
     /// - [`FontError::MissingFontFile`] — no embedded font program found.
-    /// - [`FontError::UnsupportedFontSubtype`] — a `FontFile` (classic Type 1)
-    ///   stream was found but the format is not yet supported.
+    /// - [`FontError::UnsupportedFontSubtype`] — unsupported `FontFile3` subtype
+    ///   or a `FontFile` (classic Type 1) stream.
     /// - Any [`FontError`] propagated from stream decompression or CFF building.
     pub(crate) fn read_font_file(
         dictionary: &Dictionary,
@@ -105,10 +107,27 @@ impl Type1Font {
             return Err(FontError::MissingFontFile);
         };
 
-        // Path 1: CFF data in FontFile3.
+        // Path 1: FontFile3 stream with subtype-driven handling.
         if let Some(font_file3) = descriptor.get("FontFile3") {
             let stream = font_file3.try_stream(objects)?;
-            return build_cff_font(stream.data()?.as_ref());
+            let subtype = stream
+                .dictionary
+                .get("Subtype")
+                .map(|obj| obj.try_str(objects))
+                .transpose()?;
+
+            let data = stream.data()?;
+
+            return match subtype.as_deref() {
+                Some("Type1C") | Some("CIDFontType0C") => build_cff_font(data.as_ref()),
+                Some("OpenType") => Ok(data.into_owned()),
+                Some(other) => Err(FontError::UnsupportedFontSubtype {
+                    subtype: other.to_string(),
+                }),
+                None => Err(FontError::UnsupportedFontSubtype {
+                    subtype: "FontFile3".to_string(),
+                }),
+            };
         }
 
         // Path 2: classic Type 1 in FontFile (not yet supported).
@@ -120,5 +139,92 @@ impl Type1Font {
 
         // No embedded font program at all.
         Err(FontError::MissingFontFile)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use pdf_object::{
+        object_resolver::PassthroughResolver, object_variant::ObjectVariant, stream::StreamObject,
+    };
+
+    use super::*;
+
+    fn make_font_dict_with_font_file3(subtype: Option<&str>, bytes: Vec<u8>) -> Dictionary {
+        let mut file3_stream_dict = BTreeMap::new();
+        if let Some(subtype) = subtype {
+            file3_stream_dict.insert(
+                "Subtype".to_string(),
+                ObjectVariant::Name(subtype.as_bytes().to_vec()),
+            );
+        }
+        let font_file3_stream = StreamObject::new(
+            10,
+            0,
+            Box::new(Dictionary::new(file3_stream_dict)),
+            bytes,
+            None,
+        );
+
+        let mut descriptor_dict = BTreeMap::new();
+        descriptor_dict.insert(
+            "FontFile3".to_string(),
+            ObjectVariant::Stream(font_file3_stream),
+        );
+
+        let mut font_dict = BTreeMap::new();
+        font_dict.insert(
+            "FontDescriptor".to_string(),
+            ObjectVariant::Dictionary(Box::new(Dictionary::new(descriptor_dict))),
+        );
+        Dictionary::new(font_dict)
+    }
+
+    #[test]
+    fn font_file3_type1c_is_wrapped_into_opentype() {
+        let cff_bytes = vec![1, 2, 3, 4, 5];
+        let dict = make_font_dict_with_font_file3(Some("Type1C"), cff_bytes.clone());
+
+        let parsed = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap();
+        let expected = build_cff_font(&cff_bytes).unwrap();
+        assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn font_file3_opentype_is_returned_as_is() {
+        let opentype_bytes = vec![0, 1, 2, 3, 4, 5];
+        let dict = make_font_dict_with_font_file3(Some("OpenType"), opentype_bytes.clone());
+
+        let parsed = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap();
+        assert_eq!(parsed, opentype_bytes);
+    }
+
+    #[test]
+    fn font_file3_unknown_subtype_is_unsupported() {
+        let dict = make_font_dict_with_font_file3(Some("Type42"), vec![1, 2, 3]);
+
+        let err = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap_err();
+        assert_eq!(
+            err,
+            FontError::UnsupportedFontSubtype {
+                subtype: "Type42".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn font_file3_missing_subtype_is_unsupported() {
+        let dict = make_font_dict_with_font_file3(None, vec![1, 2, 3]);
+
+        let err = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap_err();
+        assert_eq!(
+            err,
+            FontError::UnsupportedFontSubtype {
+                subtype: "FontFile3".to_string()
+            }
+        );
     }
 }
