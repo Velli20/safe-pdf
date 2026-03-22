@@ -10,12 +10,18 @@ use crate::{
     flags::FontFlags,
     font::FontError,
     simple_font_glyph_map::SimpleFontGlyphWidthsMap,
+    standard14::Standard14Font,
     to_unicode_cmap::ToUnicodeCMap,
 };
 
+/// A TrueType font parsed from a PDF font dictionary.
 pub struct TrueTypeFont {
-    /// Font file containing embedded TrueType program.
-    pub font_file: Vec<u8>,
+    /// Font program bytes.
+    ///
+    /// `Cow::Borrowed` for bundled Standard 14 fallback fonts (avoids copying
+    /// the static `include_bytes!` data), `Cow::Owned` for fonts embedded in
+    /// the PDF stream.
+    pub font_file: Cow<'static, [u8]>,
     /// Widths for character codes.
     pub widths: Option<HashMap<u16, f32>>,
     /// Optional glyph name encoding, used as AGL fallback when ToUnicode is absent.
@@ -25,12 +31,15 @@ pub struct TrueTypeFont {
 }
 
 impl TrueTypeFont {
+    /// Parses a TrueType font from a PDF font dictionary.
+    ///
+    /// Reads the embedded font program (or falls back to a bundled substitute),
+    /// optional `/Widths`, `/Encoding`, and `/ToUnicode` entries.
     pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, FontError> {
-        // Read embedded font file.
-        let font_file = Self::read_font_file(dictionary, objects)?.to_vec();
+        let font_file = Self::read_font_file(dictionary, objects)?;
         // Read the `/Widths` entry.
         let widths = SimpleFontGlyphWidthsMap::from_dictionary(dictionary, objects)?;
 
@@ -62,6 +71,20 @@ impl TrueTypeFont {
             encoding,
             to_unicode,
         })
+    }
+
+    /// Creates a minimal `TrueTypeFont` from raw font bytes with no
+    /// widths, encoding, or ToUnicode map.
+    ///
+    /// Used for Standard 14 fallback fonts where the bundled bytes are
+    /// `Cow::Borrowed` (zero-copy from `include_bytes!`).
+    pub fn from_bytes(font_file: Cow<'static, [u8]>) -> Self {
+        Self {
+            font_file,
+            widths: None,
+            encoding: None,
+            to_unicode: None,
+        }
     }
 }
 
@@ -110,20 +133,6 @@ impl TrueTypeFont {
             FontFlags::empty()
         };
 
-        let font_bytes: &[u8] = match (
-            flags.contains(FontFlags::FIXED_PITCH),
-            flags.contains(FontFlags::FORCE_BOLD),
-            flags.contains(FontFlags::ITALIC),
-        ) {
-            (true, false, false) => include_bytes!("../assets/RobotoMono-Regular.ttf"),
-            (true, true, false) => include_bytes!("../assets/RobotoMono-Bold.ttf"),
-            (true, false, true) => include_bytes!("../assets/RobotoMono-Italic.ttf"),
-            (true, true, true) => include_bytes!("../assets/RobotoMono-BoldItalic.ttf"),
-            (false, false, false) => include_bytes!("../assets/Roboto-Regular.ttf"),
-            (false, true, false) => include_bytes!("../assets/Roboto-Bold.ttf"),
-            (false, false, true) => include_bytes!("../assets/Roboto-Italic.ttf"),
-            (false, true, true) => include_bytes!("../assets/Roboto-BoldItalic.ttf"),
-        };
-        Ok(Cow::Borrowed(font_bytes))
+        Ok(Standard14Font::from(flags).fallback_font_bytes())
     }
 }

@@ -73,31 +73,52 @@ impl Type1Font {
 impl Type1Font {
     /// Reads and processes the embedded Type 1 font file from a PDF font dictionary.
     ///
-    /// This method extracts the font program from the `FontFile3` stream within
-    /// the font descriptor and converts it into a valid CFF (Compact Font Format)
-    /// font structure.
+    /// Tries the following sources in order:
     ///
-    /// # Parameters
+    /// 1. **`FontFile3`** — a CFF (Compact Font Format) stream inside the
+    ///    `/FontDescriptor`.  The raw CFF data is wrapped into a minimal
+    ///    OpenType container so downstream renderers (`skrifa` / `read-fonts`)
+    ///    can consume it.
+    /// 2. **`FontFile`** — a classic PostScript Type 1 font program.
+    ///    Currently unsupported; returns [`FontError::UnsupportedFontSubtype`].
     ///
-    /// - `dictionary`: The font dictionary containing the `FontDescriptor` reference.
-    /// - `objects`: An object resolver for dereferencing indirect PDF objects.
+    /// If neither stream is present (or there is no `/FontDescriptor` at all),
+    /// returns [`FontError::MissingFontFile`].  The caller (`Font::from_dictionary`)
+    /// catches that sentinel and falls back to a bundled Standard 14 substitute.
     ///
-    /// # Returns
+    /// # Errors
     ///
-    /// Returns the processed CFF font data as a `Vec<u8>` or a [`FontError`].
+    /// - [`FontError::MissingFontFile`] — no embedded font program found.
+    /// - [`FontError::UnsupportedFontSubtype`] — a `FontFile` (classic Type 1)
+    ///   stream was found but the format is not yet supported.
+    /// - Any [`FontError`] propagated from stream decompression or CFF building.
     pub(crate) fn read_font_file(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Vec<u8>, FontError> {
-        // Read embedded font file.
-        let font_file = dictionary
-            .get_or_err("FontDescriptor")?
-            .try_dictionary(objects)?
-            .get_or_err("FontFile3")?
-            .try_stream(objects)?
-            .data()?;
+        let descriptor = dictionary
+            .get("FontDescriptor")
+            .map(|obj| obj.try_dictionary(objects))
+            .transpose()?;
 
-        // Build CFF font from the font file stream.
-        build_cff_font(&font_file)
+        let Some(descriptor) = descriptor else {
+            return Err(FontError::MissingFontFile);
+        };
+
+        // Path 1: CFF data in FontFile3.
+        if let Some(font_file3) = descriptor.get("FontFile3") {
+            let stream = font_file3.try_stream(objects)?;
+            return build_cff_font(stream.data()?.as_ref());
+        }
+
+        // Path 2: classic Type 1 in FontFile (not yet supported).
+        if descriptor.get("FontFile").is_some() {
+            return Err(FontError::UnsupportedFontSubtype {
+                subtype: "FontFile".to_string(),
+            });
+        }
+
+        // No embedded font program at all.
+        Err(FontError::MissingFontFile)
     }
 }

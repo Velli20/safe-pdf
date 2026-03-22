@@ -6,6 +6,7 @@ use thiserror::Error;
 use crate::{
     char_vec::CharVec,
     glyph_name_to_unicode::glyph_name_to_unicode,
+    standard14::Standard14Font,
     to_unicode_cmap::ToUnicodeCMap,
     true_type_font::TrueTypeFont,
     type0_font::{Type0Font, Type0FontError},
@@ -30,6 +31,13 @@ pub enum FontError {
     FontBuildError(String),
     #[error("Encoding reading error: {0}")]
     EncodingReadError(#[from] crate::encoding::EncodingReadError),
+    /// The font dictionary or descriptor lacks an embedded font program stream
+    /// (`FontFile`, `FontFile2`, or `FontFile3`).
+    ///
+    /// For Type 1 fonts this is a sentinel: `Font::from_dictionary` catches it
+    /// and substitutes a bundled Standard 14 TrueType fallback.
+    #[error("Missing embedded font file stream")]
+    MissingFontFile,
 }
 
 /// Represents a font object in a PDF document.
@@ -60,8 +68,28 @@ impl Font {
                 Ok(Font::Type0(type0_font))
             }
             "Type1" => {
-                let type1_font = Type1Font::from_dictionary(dictionary, objects)?;
-                Ok(Font::Type1(type1_font))
+                match Type1Font::from_dictionary(dictionary, objects) {
+                    Err(FontError::MissingFontFile) => {
+                        // No embedded font program — attempt a Standard 14 substitution.
+                        //
+                        // 1. Try matching the `/BaseFont` name to a known Standard 14 font.
+                        // 2. Fall back to a default sans-serif (Helvetica / Roboto-Regular).
+                        let base_font_name = dictionary
+                            .get("BaseFont")
+                            .and_then(|v| v.try_str(objects).ok());
+
+                        let std14 = base_font_name
+                            .as_ref()
+                            .and_then(|name| Standard14Font::from_base_font_name(name.as_ref()))
+                            .unwrap_or_default();
+
+                        Ok(Font::TrueType(TrueTypeFont::from_bytes(
+                            std14.fallback_font_bytes(),
+                        )))
+                    }
+                    Ok(type1_font) => Ok(Font::Type1(type1_font)),
+                    Err(e) => Err(e),
+                }
             }
             "Type3" => {
                 let type3_font = Type3Font::from_dictionary(dictionary, objects)?;
@@ -187,7 +215,7 @@ mod tests {
             .collect();
         let enc = Encoding { names };
         let font = Font::TrueType(TrueTypeFont {
-            font_file: vec![],
+            font_file: Cow::Owned(vec![]),
             widths: None,
             encoding: Some(enc),
             to_unicode: None,
@@ -202,7 +230,7 @@ mod tests {
         let cmap_data = b"beginbfchar\n<01> <FB01FB02>\nendbfchar\n";
         let cmap = ToUnicodeCMap::from_bytes(cmap_data);
         let font = Font::TrueType(TrueTypeFont {
-            font_file: vec![],
+            font_file: Cow::Owned(vec![]),
             widths: None,
             encoding: None,
             to_unicode: Some(cmap),
