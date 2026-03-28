@@ -80,6 +80,10 @@ impl StreamObject {
                     let decoded = Filter::decode_jpeg_baseline(&data)?;
                     data = Cow::Owned(decoded);
                 }
+                Filter::ASCII85Decode => {
+                    let decoded = Filter::decode_ascii85(&data)?;
+                    data = Cow::Owned(decoded);
+                }
                 _ => {
                     println!(
                         "Unsupported filter in data_with_remaining_filter: {:?}",
