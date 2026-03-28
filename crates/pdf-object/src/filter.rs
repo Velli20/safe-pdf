@@ -189,10 +189,26 @@ impl Filter {
         Ok(bitmap.as_bytes().to_vec())
     }
 
-    pub fn decode_ccitt_fax(_stream_data: &[u8]) -> Result<Vec<u8>, ObjectError> {
-        Err(ObjectError::DecompressionError(
-            "CCITT Fax decoding not implemented".to_string(),
-        ))
+    /// Decodes CCITTFaxDecode (Group 3 / Group 4 fax) compressed stream data.
+    ///
+    /// # Parameters
+    ///
+    /// - `stream_data`: The compressed byte stream to decode.
+    /// - `params`: Decode parameters parsed from the stream's `/DecodeParms` dictionary.
+    ///
+    /// # Returns
+    ///
+    /// The decompressed image data as a packed MSB-first 1-bit-per-pixel `Vec<u8>`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ObjectError::DecompressionError`] if the stream is truncated or
+    /// contains an invalid bit pattern.
+    pub fn decode_ccitt_fax(
+        stream_data: &[u8],
+        params: &crate::ccitt::CCITTFaxParams,
+    ) -> Result<Vec<u8>, ObjectError> {
+        crate::ccitt::decode(stream_data, params)
     }
 
     /// Decodes ASCII85Decode-encoded stream data.

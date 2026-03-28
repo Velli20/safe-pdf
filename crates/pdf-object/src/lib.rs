@@ -1,3 +1,4 @@
+pub mod ccitt;
 pub mod cross_reference_table;
 pub mod dictionary;
 pub mod error;
