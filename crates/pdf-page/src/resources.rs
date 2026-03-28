@@ -21,13 +21,27 @@ use crate::{
 };
 use pdf_color_space::color_space::{ColorSpace, ColorSpaceError};
 
-/// Contains all resources referenced by a PDF content stream.
+/// Contains all resources referenced by a PDF content stream, organized per PDF sub-dictionary.
 ///
-/// The `Resources` struct holds a unified collection of PDF objects that can be
-/// referenced by name within content streams, including fonts, graphics states,
-/// XObjects (images/forms), patterns, and shadings.
-#[derive(Default)]
-pub struct Resources(pub HashMap<String, Resource>);
+/// Each field corresponds to a named sub-dictionary in the PDF `/Resources` dictionary
+/// (PDF spec §7.8.3). Keeping them separate ensures that resource names are scoped per
+/// category: a font named `"F1"` and an XObject named `"F1"` are independent entries and
+/// will never collide during page-tree resource inheritance (PDF spec §7.7.4).
+#[derive(Default, Clone)]
+pub struct Resources {
+    /// Resources from the `/Font` sub-dictionary.
+    pub fonts: HashMap<String, Resource>,
+    /// Resources from the `/ExtGState` sub-dictionary.
+    pub ext_g_states: HashMap<String, Resource>,
+    /// Resources from the `/Pattern` sub-dictionary.
+    pub patterns: HashMap<String, Resource>,
+    /// Resources from the `/XObject` sub-dictionary.
+    pub xobjects: HashMap<String, Resource>,
+    /// Resources from the `/Shading` sub-dictionary.
+    pub shadings: HashMap<String, Resource>,
+    /// Resources from the `/ColorSpace` sub-dictionary.
+    pub color_spaces: HashMap<String, Resource>,
+}
 
 /// Errors that can occur while parsing a PDF Resources dictionary.
 #[derive(Debug, Error)]
@@ -212,6 +226,7 @@ fn read_shadings(
     Ok(result)
 }
 
+/// Parses all color space resources from the `/ColorSpace` sub-dictionary.
 fn read_color_spaces(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
@@ -252,10 +267,10 @@ impl Resources {
     /// An `Option` containing a reference to the [`Font`] if found, or `None`
     /// if not present or not a font.
     pub fn font(&self, name: &str) -> Option<(&Font, Option<&Resources>)> {
-        match self.0.get(name)? {
-            Resource::Font { font, resources } => Some((font, resources.as_deref())),
-            _ => None,
-        }
+        let Resource::Font { font, resources } = self.fonts.get(name)? else {
+            return None;
+        };
+        Some((font, resources.as_deref()))
     }
 
     /// Returns a reference to an external graphics state resource by name, if it exists.
@@ -269,10 +284,10 @@ impl Resources {
     /// An `Option` containing a reference to the [`ExternalGraphicsState`] if found,
     /// or `None` if not present or not an external graphics state.
     pub fn external_graphics_state(&self, name: &str) -> Option<&ExternalGraphicsState> {
-        match self.0.get(name)? {
-            Resource::ExternalGraphicsState(state) => Some(state),
-            _ => None,
-        }
+        let Resource::ExternalGraphicsState(state) = self.ext_g_states.get(name)? else {
+            return None;
+        };
+        Some(state)
     }
 
     /// Returns a reference to an XObject resource by name, if it exists.
@@ -286,10 +301,10 @@ impl Resources {
     /// An `Option` containing a reference to the [`XObject`] if found, or `None`
     /// if not present or not an XObject.
     pub fn xobject(&self, name: &str) -> Option<&XObject> {
-        match self.0.get(name)? {
-            Resource::XObject(xobject) => Some(xobject),
-            _ => None,
-        }
+        let Resource::XObject(xobject) = self.xobjects.get(name)? else {
+            return None;
+        };
+        Some(xobject)
     }
 
     /// Returns a reference to a pattern resource by name, if it exists.
@@ -303,10 +318,10 @@ impl Resources {
     /// An `Option` containing a reference to the [`Pattern`] if found, or `None`
     /// if not present or not a pattern.
     pub fn pattern(&self, name: &str) -> Option<&Pattern> {
-        match self.0.get(name)? {
-            Resource::Pattern(pattern) => Some(pattern),
-            _ => None,
-        }
+        let Resource::Pattern(pattern) = self.patterns.get(name)? else {
+            return None;
+        };
+        Some(pattern)
     }
 
     /// Returns a reference to a shading resource by name, if it exists.
@@ -320,10 +335,10 @@ impl Resources {
     /// An `Option` containing a reference to the [`Shading`] if found, or `None`
     /// if not present or not a shading.
     pub fn shading(&self, name: &str) -> Option<&Shading> {
-        match self.0.get(name)? {
-            Resource::Shading(shading) => Some(shading),
-            _ => None,
-        }
+        let Resource::Shading(shading) = self.shadings.get(name)? else {
+            return None;
+        };
+        Some(shading)
     }
 
     /// Returns a reference to a color space resource by name, if it exists.
@@ -337,10 +352,10 @@ impl Resources {
     /// An `Option` containing a reference to the [`ColorSpace`] if found, or `None`
     /// if not present or not a color space.
     pub fn color_space(&self, name: &str) -> Option<&ColorSpace> {
-        match self.0.get(name)? {
-            Resource::ColorSpace(color_space) => Some(color_space),
-            _ => None,
-        }
+        let Resource::ColorSpace(color_space) = self.color_spaces.get(name)? else {
+            return None;
+        };
+        Some(color_space)
     }
 
     /// Reads the `/Resources` dictionary.
@@ -375,14 +390,40 @@ impl Resources {
 
         let resources = resources_entry.try_dictionary(objects)?;
 
-        let mut map = HashMap::new();
-        map.extend(read_fonts(resources, objects, cache)?);
-        map.extend(read_external_graphics_states(resources, objects, cache)?);
-        map.extend(read_patterns(resources, objects, cache)?);
-        map.extend(read_xobjects(resources, objects, cache)?);
-        map.extend(read_shadings(resources, objects, cache)?);
-        map.extend(read_color_spaces(resources, objects, cache)?);
+        Ok(Some(Self {
+            fonts: read_fonts(resources, objects, cache)?,
+            ext_g_states: read_external_graphics_states(resources, objects, cache)?,
+            patterns: read_patterns(resources, objects, cache)?,
+            xobjects: read_xobjects(resources, objects, cache)?,
+            shadings: read_shadings(resources, objects, cache)?,
+            color_spaces: read_color_spaces(resources, objects, cache)?,
+        }))
+    }
 
-        Ok(Some(Self(map)))
+    /// Merges inherited resources from a parent `/Pages` node into `self`.
+    ///
+    /// Per PDF spec §7.7.4, child-defined entries always take precedence. Only
+    /// entries that are absent in `self` are inherited from `parent`. Merging is
+    /// performed independently per resource sub-dictionary so that a child entry
+    /// in one category (e.g. a font named `"F1"`) never blocks inheritance of a
+    /// parent entry of a different category with the same name (e.g. an XObject
+    /// named `"F1"`).
+    pub fn merge_from_parent(&mut self, parent: &Self) {
+        Self::inherit_category(&mut self.fonts, &parent.fonts);
+        Self::inherit_category(&mut self.ext_g_states, &parent.ext_g_states);
+        Self::inherit_category(&mut self.patterns, &parent.patterns);
+        Self::inherit_category(&mut self.xobjects, &parent.xobjects);
+        Self::inherit_category(&mut self.shadings, &parent.shadings);
+        Self::inherit_category(&mut self.color_spaces, &parent.color_spaces);
+    }
+
+    /// Copies entries from `parent` into `child` for a single resource category,
+    /// inserting only names that are not already present in `child`.
+    fn inherit_category(child: &mut HashMap<String, Resource>, parent: &HashMap<String, Resource>) {
+        for (k, v) in parent {
+            if !child.contains_key(k) {
+                child.insert(k.clone(), v.clone());
+            }
+        }
     }
 }
