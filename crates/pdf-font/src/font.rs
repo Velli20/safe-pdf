@@ -85,6 +85,7 @@ impl Font {
 
                         Ok(Font::TrueType(TrueTypeFont::from_bytes(
                             std14.fallback_font_bytes(),
+                            Some(std14),
                         )))
                     }
                     Ok(type1_font) => Ok(Font::Type1(type1_font)),
@@ -107,23 +108,37 @@ impl Font {
 }
 
 impl Font {
-    pub fn get_glyph_width(&self, char_code: u16) -> f32 {
+    /// Returns the Standard 14 identity when this font is backed by the
+    /// synthetic Standard 14 fallback path.
+    pub fn as_standard14(&self) -> Option<Standard14Font> {
+        match self {
+            Font::TrueType(font) => font.standard14,
+            _ => None,
+        }
+    }
+
+    /// Returns a glyph width in PDF glyph-space units (1/1000 em) for simple
+    /// and CID fonts when available.
+    ///
+    /// For Type0 fonts, this returns the font's default width when explicit
+    /// width data is missing.
+    pub fn glyph_width(&self, char_code: u16) -> Option<f32> {
         match self {
             Font::Type0(font) => {
                 if let Some(w) = &font.widths {
-                    return w.get_width(char_code).unwrap_or(font.default_width);
+                    return w.get_width(char_code).or(Some(font.default_width));
                 }
-                font.default_width
+                Some(font.default_width)
             }
             Font::TrueType(font) => font
                 .widths
                 .as_ref()
-                .map_or(0.0, |w| w.get(&char_code).copied().unwrap_or(0.0)),
+                .and_then(|w| w.get(&char_code).copied()),
             Font::Type1(font) => font
                 .widths
                 .as_ref()
-                .map_or(0.0, |w| w.get(&char_code).copied().unwrap_or(0.0)),
-            _ => 0.0,
+                .and_then(|w| w.get(&char_code).copied()),
+            _ => None,
         }
     }
 
@@ -219,6 +234,7 @@ mod tests {
             widths: None,
             encoding: Some(enc),
             to_unicode: None,
+            standard14: None,
         });
         assert_eq!(font.char_to_unicode(65), Some('A'));
         assert_eq!(&*font.chars_to_unicode(65), ['A'].as_slice());
@@ -234,6 +250,7 @@ mod tests {
             widths: None,
             encoding: None,
             to_unicode: Some(cmap),
+            standard14: None,
         });
         assert_eq!(
             &*font.chars_to_unicode(1),

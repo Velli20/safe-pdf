@@ -28,6 +28,9 @@ pub struct TrueTypeFont {
     pub encoding: Option<Encoding>,
     /// Parsed ToUnicode CMap for char-code → Unicode mapping.
     pub to_unicode: Option<ToUnicodeCMap>,
+    /// Standard 14 identity when this font is a synthetic fallback selected
+    /// from a Standard 14 `/BaseFont` name.
+    pub standard14: Option<Standard14Font>,
 }
 
 impl TrueTypeFont {
@@ -70,6 +73,7 @@ impl TrueTypeFont {
             widths,
             encoding,
             to_unicode,
+            standard14: None,
         })
     }
 
@@ -78,12 +82,13 @@ impl TrueTypeFont {
     ///
     /// Used for Standard 14 fallback fonts where the bundled bytes are
     /// `Cow::Borrowed` (zero-copy from `include_bytes!`).
-    pub fn from_bytes(font_file: Cow<'static, [u8]>) -> Self {
+    pub fn from_bytes(font_file: Cow<'static, [u8]>, standard14: Option<Standard14Font>) -> Self {
         Self {
             font_file,
             widths: None,
             encoding: None,
             to_unicode: None,
+            standard14,
         }
     }
 }

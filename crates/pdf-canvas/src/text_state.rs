@@ -1,6 +1,9 @@
+use crate::error::PdfCanvasError;
 use pdf_font::font::Font;
 use pdf_graphics::transform::Transform;
 use pdf_page::resources::Resources;
+use read_fonts::TableProvider;
+use skrifa::{FontRef, GlyphId};
 
 /// Encapsulates text-specific state parameters.
 #[derive(Clone)]
@@ -45,13 +48,29 @@ impl Default for TextState<'_> {
 }
 
 impl TextState<'_> {
-    pub(crate) fn glyph_width(&self, char_code: u16) -> f32 {
-        if let Some(font) = self.font {
-            font.get_glyph_width(char_code)
-        } else {
-            0.0
-        }
-    }
+    /// Fallback value for a font's `units_per_em` (design units per em).
+    ///
+    /// In OpenType/TrueType fonts this value normally comes from the `head` table
+    /// and is required to be in the range
+    /// [`MIN_UNITS_PER_EM`][Self::MIN_UNITS_PER_EM]..=[`MAX_UNITS_PER_EM`][Self::MAX_UNITS_PER_EM];
+    /// a value of zero is invalid.
+    ///
+    /// There is no universally correct fallback: many TrueType outlines use 2048
+    /// units/em, while Type 1 and OpenType/CFF outlines commonly use 1000.
+    ///
+    /// We use 1000 here as a stable, PDF-friendly default (PDF text space is
+    /// conventionally scaled around 1000 units per em) that avoids division by
+    /// zero and keeps glyph scaling reasonable when the actual value is missing
+    /// or unusable.
+    pub(crate) const DEFAULT_UNITS_PER_EM: u16 = 1000;
+
+    /// Minimum valid `unitsPerEm` value as defined by the OpenType specification
+    /// (ISO/IEC 14496-22 §4.3, `head` table).
+    pub(crate) const MIN_UNITS_PER_EM: u16 = 16;
+
+    /// Maximum valid `unitsPerEm` value as defined by the OpenType specification
+    /// (ISO/IEC 14496-22 §4.3, `head` table).
+    pub(crate) const MAX_UNITS_PER_EM: u16 = 16384;
 
     pub(crate) fn glyph_name(&self, char_code: u16) -> Option<&str> {
         if let Some(font) = self.font {
@@ -99,8 +118,9 @@ impl TextState<'_> {
     /// the current text state fields.
     ///
     /// - `units_per_em_inv`: reciprocal of the font's design units per em.
-    ///   Pass `0.001` for Type1 (1000 u/em), `1.0 / units_per_em` for TrueType,
-    ///   or `1.0` for Type3 (the font matrix handles design-unit scaling).
+    ///   Pass `1.0 / units_per_em` for Type1/CFF and TrueType (read from the
+    ///   font's `head` table), or `1.0` for Type3 (the font matrix handles
+    ///   design-unit scaling).
     pub(crate) fn glyph_base_transform(&self, units_per_em_inv: f32) -> Transform {
         let scale = self.font_size * units_per_em_inv;
         Transform::from_row(
@@ -121,17 +141,63 @@ impl TextState<'_> {
         base
     }
 
-    /// Advances the text cursor by one horizontal glyph (Type1/TrueType convention:
-    /// glyph width in 1/1000 em units, scaled by font size).
-    pub(crate) fn advance_horizontal_glyph(&mut self, char_code: u16) {
-        let glyph_width_x = self.glyph_width(char_code) / 1000.0 * self.font_size;
+    /// Advances the text cursor by one horizontal glyph.
+    ///
+    /// Preferred source is PDF-provided widths (in 1/1000 em per ISO 32000-1 §9.2.4).
+    /// For Standard 14 fallback fonts (where `/Widths` is typically absent), falls
+    /// back to the OpenType `hmtx` advance metrics scaled by `units_per_em`.
+    ///
+    /// # Parameters
+    ///
+    /// - `char_code`: PDF character code of the glyph.
+    /// - `font_ref`: Parsed OpenType font, used for the `hmtx` fallback.
+    /// - `gid`: Resolved glyph ID, used for the `hmtx` fallback.
+    /// - `units_per_em`: Font design units per em (from `head` table). Pass
+    ///   `DEFAULT_UNITS_PER_EM` for Type 1/CFF fonts or when the value is
+    ///   unavailable.
+    pub(crate) fn advance_horizontal_glyph(
+        &mut self,
+        char_code: u16,
+        font_ref: &FontRef<'_>,
+        gid: GlyphId,
+        units_per_em: u16,
+    ) -> Result<(), PdfCanvasError> {
+        let Some(font) = self.font else {
+            return Ok(());
+        };
+
+        // PDF `/Widths` values are always in 1/1000 em.
+        if let Some(glyph_width) = font.glyph_width(char_code) {
+            let glyph_width_x =
+                glyph_width / f32::from(TextState::DEFAULT_UNITS_PER_EM) * self.font_size;
+            self.advance_text_cursor(char_code, glyph_width_x, 0.0);
+            return Ok(());
+        }
+
+        let hmtx = font_ref
+            .hmtx()
+            .map_err(|_| PdfCanvasError::InvalidFont("missing or invalid hmtx table"))?;
+
+        // If the glyph is absent from hmtx (sparse coverage), use zero advance
+        // so that any already-drawn outline is not lost.
+        let advance_width = hmtx.advance(gid).unwrap_or(0);
+
+        let safe_upe = if units_per_em == 0 {
+            TextState::DEFAULT_UNITS_PER_EM
+        } else {
+            units_per_em
+        };
+
+        let glyph_width_x = f32::from(advance_width) / f32::from(safe_upe) * self.font_size;
         self.advance_text_cursor(char_code, glyph_width_x, 0.0);
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pdf_font::standard14::Standard14Font;
 
     fn make_text_state(font_size: f32, horizontal_scaling: f32, rise: f32) -> TextState<'static> {
         TextState {
@@ -199,10 +265,20 @@ mod tests {
 
     #[test]
     fn advance_horizontal_glyph_no_font_is_noop() {
-        // With no font, glyph_width returns 0.0, so the matrix should not move.
+        // With no current font set in text state, this is a no-op.
         let mut ts = make_text_state(12.0, 1.0, 0.0);
         let initial_matrix = ts.matrix;
-        ts.advance_horizontal_glyph(0x41); // 'A'
+
+        let fallback = Standard14Font::default().fallback_font_bytes();
+        let font_ref = FontRef::new(fallback.as_ref()).expect("bundled fallback font must parse");
+
+        ts.advance_horizontal_glyph(
+            0x41,
+            &font_ref,
+            GlyphId::NOTDEF,
+            TextState::DEFAULT_UNITS_PER_EM,
+        )
+        .expect("no-font path should be a no-op");
         assert_eq!(ts.matrix, initial_matrix);
     }
 }
