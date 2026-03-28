@@ -1,6 +1,8 @@
 use crate::canvas_backend::CanvasBackend;
 use crate::pdf_canvas::PdfCanvas;
+use crate::text_state::TextState;
 use crate::{error::PdfCanvasError, text_renderer::TextRenderer};
+use pdf_graphics::transform::Transform;
 use read_fonts::TableProvider;
 use skrifa::outline::OutlineGlyphCollection;
 use skrifa::{FontRef, GlyphId, MetadataProvider};
@@ -9,10 +11,14 @@ pub(crate) struct Type1FontRenderer<'a, 'b, B: CanvasBackend> {
     canvas: &'b mut PdfCanvas<'a, B>,
     font_ref: FontRef<'b>,
     outlines: OutlineGlyphCollection<'b>,
+    /// Base transformation matrix incorporating font size, horizontal scaling,
+    /// and text rise, computed once in `new()` using the font's actual UPE.
+    glyph_base_transform: Transform,
+    /// Font design units per em, read from the `head` table in `new()`.
+    units_per_em: u16,
 }
 
 impl<'a, 'b, B: CanvasBackend> Type1FontRenderer<'a, 'b, B> {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         canvas: &'b mut PdfCanvas<'a, B>,
         font_bytes: &'b [u8],
@@ -22,22 +28,34 @@ impl<'a, 'b, B: CanvasBackend> Type1FontRenderer<'a, 'b, B> {
 
         let outlines = font_ref.outline_glyphs();
 
+        let units_per_em = font_ref
+            .head()
+            .ok()
+            .map(|h| h.units_per_em())
+            .filter(|&upe| {
+                (TextState::MIN_UNITS_PER_EM..=TextState::MAX_UNITS_PER_EM).contains(&upe)
+            })
+            .unwrap_or(TextState::DEFAULT_UNITS_PER_EM);
+
+        let upe_inv = 1.0 / f32::from(units_per_em);
+
+        let glyph_base_transform = canvas
+            .current_state()?
+            .text_state
+            .glyph_base_transform(upe_inv);
+
         Ok(Self {
             canvas,
             font_ref,
             outlines,
+            glyph_base_transform,
+            units_per_em,
         })
     }
 }
 
 impl<B: CanvasBackend> TextRenderer for Type1FontRenderer<'_, '_, B> {
     fn render_text(&mut self, iter: impl Iterator<Item = u16>) -> Result<(), PdfCanvasError> {
-        let m_params = self
-            .canvas
-            .current_state()?
-            .text_state
-            .glyph_base_transform(0.001);
-
         let cff = self
             .font_ref
             .cff()
@@ -51,7 +69,7 @@ impl<B: CanvasBackend> TextRenderer for Type1FontRenderer<'_, '_, B> {
             let state = self.canvas.current_state()?;
             let glyph_matrix_for_char = state
                 .text_state
-                .compose_glyph_matrix(m_params, &state.transform);
+                .compose_glyph_matrix(self.glyph_base_transform, &state.transform);
 
             // Resolve glyph id from CFF charset.
             let gid = if let Some(charset) = &charset {
@@ -76,7 +94,7 @@ impl<B: CanvasBackend> TextRenderer for Type1FontRenderer<'_, '_, B> {
             self.canvas
                 .current_state_mut()?
                 .text_state
-                .advance_horizontal_glyph(char_code);
+                .advance_horizontal_glyph(char_code, &self.font_ref, gid, self.units_per_em)?;
         }
         Ok(())
     }

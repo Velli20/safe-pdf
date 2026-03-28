@@ -1,25 +1,11 @@
 use crate::{
     canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
-    text_renderer::TextRenderer,
+    text_renderer::TextRenderer, text_state::TextState,
 };
 use pdf_graphics::transform::Transform;
 use read_fonts::TableProvider;
 use skrifa::{FontRef, GlyphId, MetadataProvider, outline::OutlineGlyphCollection};
 use thiserror::Error;
-
-/// Fallback value for a font's `units_per_em` (design units per em).
-///
-/// In OpenType/TrueType fonts this normally comes from the `head` table and is
-/// required to be in the range 16..=16384; a value of zero is invalid.
-///
-/// There is no universally correct fallback: many TrueType outlines use 2048
-/// units/em, while Type 1 and OpenType/CFF outlines commonly use 1000.
-///
-/// We use 1000 here as a stable, PDF-friendly default (PDF text space is
-/// conventionally scaled around 1000 units per em) that avoids division by zero
-/// and keeps glyph scaling reasonable when the actual value is missing or
-/// unusable.
-const DEFAULT_UNITS_PER_EM: u16 = 1000;
 
 /// Defines errors that can occur during TrueType font rendering.
 #[derive(Debug, Error)]
@@ -45,6 +31,8 @@ pub(crate) struct TrueTypeFontRenderer<'a, 'b, B: CanvasBackend> {
     /// Base transformation matrix for glyph rendering, incorporating font size,
     /// horizontal scaling, and text rise.
     glyph_base_transform: Transform,
+    /// Font design units per em, read once from the `head` table in `new()`.
+    units_per_em: u16,
     /// Whether this font uses CID (Character Identifier) encoding.
     is_cid: bool,
 }
@@ -108,8 +96,10 @@ impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
             .head()
             .ok()
             .map(|h| h.units_per_em())
-            .filter(|&upe| upe != 0)
-            .unwrap_or(DEFAULT_UNITS_PER_EM);
+            .filter(|&upe| {
+                (TextState::MIN_UNITS_PER_EM..=TextState::MAX_UNITS_PER_EM).contains(&upe)
+            })
+            .unwrap_or(TextState::DEFAULT_UNITS_PER_EM);
 
         let upe_inv = 1.0 / f32::from(units_per_em);
 
@@ -123,6 +113,7 @@ impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
             canvas,
             outlines,
             glyph_base_transform,
+            units_per_em,
             is_cid,
         })
     }
@@ -153,7 +144,7 @@ impl<B: CanvasBackend> TextRenderer for TrueTypeFontRenderer<'_, '_, B> {
             self.canvas
                 .current_state_mut()?
                 .text_state
-                .advance_horizontal_glyph(char_code);
+                .advance_horizontal_glyph(char_code, &self.font_ref, glyph_id, self.units_per_em)?;
         }
         Ok(())
     }
