@@ -26,7 +26,7 @@ use pdf_color_space::color_space::{ColorSpace, ColorSpaceError};
 /// The `Resources` struct holds a unified collection of PDF objects that can be
 /// referenced by name within content streams, including fonts, graphics states,
 /// XObjects (images/forms), patterns, and shadings.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Resources(pub HashMap<String, Resource>);
 
 /// Errors that can occur while parsing a PDF Resources dictionary.
@@ -212,6 +212,7 @@ fn read_shadings(
     Ok(result)
 }
 
+/// Parses all color space resources from the `/ColorSpace` sub-dictionary.
 fn read_color_spaces(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,

@@ -1,4 +1,8 @@
-use crate::{page::PdfPage, resource_cache::ResourceCache, resources::ResourcesError};
+use crate::{
+    page::PdfPage,
+    resource_cache::ResourceCache,
+    resources::{Resources, ResourcesError},
+};
 use pdf_color_space::color_space::ColorSpaceError;
 use pdf_content_stream::error::PdfOperatorError;
 use pdf_function::function::FunctionInterpolationError;
@@ -55,6 +59,8 @@ impl PdfPages {
         // found by traversing the page tree.
         let mut pages = vec![];
 
+        let resources = Resources::read(dictionary, objects, cache)?;
+
         // Iterate over each entry in the `/Kids` array.
         for value in kids_array {
             // Resolve the indirect reference to get the child's dictionary.
@@ -77,6 +83,24 @@ impl PdfPages {
                     return Err(PdfPagesError::UnexpectedObjectTypeInKids {
                         found_type: obj_type.to_string(),
                     });
+                }
+            }
+        }
+
+        if let Some(resources) = resources {
+            for page in &mut pages {
+                if let Some(page_resources) = page.resources.as_mut() {
+                    // Page has its own resources: fill in only the entries that the
+                    // child doesn't already define (child resources take priority).
+                    for (k, v) in &resources.0 {
+                        page_resources
+                            .0
+                            .entry(k.clone())
+                            .or_insert_with(|| v.clone());
+                    }
+                } else {
+                    // Page has no resources of its own: inherit the parent's directly.
+                    page.resources = Some(resources.clone());
                 }
             }
         }
