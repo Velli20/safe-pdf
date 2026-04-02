@@ -21,7 +21,7 @@ use thiserror::Error;
 use crate::{
     bitreader::BitReader,
     ccitt_fax_params::CCITTFaxParams,
-    ccitt_tables::{BLACK_RUN_INS, ONE_LEAD_POS, WHITE_RUN_INS},
+    ccitt_tables::{BLACK_RUN_INS, WHITE_RUN_INS},
     error::ObjectError,
 };
 
@@ -54,9 +54,11 @@ pub enum CcittDecodeError {
 
 /// Returns the MSB-first position of the leading set bit of `byte`
 /// (0 = MSB, 7 = LSB).  Returns 8 when `byte == 0`.
+///
+/// Equivalent to `u8::leading_zeros` but returns `usize`.
 #[inline]
-fn one_lead_pos(byte: u8) -> usize {
-    usize::from(ONE_LEAD_POS.get(usize::from(byte)).copied().unwrap_or(8))
+fn lead_set_pos(byte: u8) -> usize {
+    byte.leading_zeros() as usize
 }
 
 /// Returns the color (true = white, false = black) of pixel `pos` in `row`.
@@ -78,39 +80,26 @@ fn fill_bits(row: &mut [u8], columns: usize, start: usize, end: usize) {
     let first_byte = start / 8;
     let last_byte = (end - 1) / 8; // safe: end > 0
 
-    let bit_start = start % 8;
-    let bit_end = (end - 1) % 8;
+    // Mask of bits from `start % 8` through LSB within the first byte.
+    let start_mask = 0xffu8 >> (start % 8);
+    // Mask of bits from MSB through `(end-1) % 8` within the last byte.
+    let end_mask = 0xffu8 << (7 - (end - 1) % 8);
 
     if first_byte == last_byte {
-        // Both endpoints in the same byte.
-        let mask_hi = 0xffu8 >> bit_start;
-        let mask_lo = if bit_end < 7 {
-            !(0xffu8 >> (bit_end + 1))
-        } else {
-            0xff
-        };
         if let Some(b) = row.get_mut(first_byte) {
-            *b &= !(mask_hi & mask_lo);
+            *b &= !(start_mask & end_mask);
         }
         return;
     }
 
-    // Clear the tail of the first byte.
     if let Some(b) = row.get_mut(first_byte) {
-        *b &= !(0xffu8 >> bit_start);
+        *b &= !start_mask;
     }
-    // Clear whole middle bytes.
     if let Some(middle) = row.get_mut(first_byte + 1..last_byte) {
         middle.fill(0x00);
     }
-    // Clear the head of the last byte.
-    let mask_last = if bit_end < 7 {
-        !(0xffu8 >> (bit_end + 1))
-    } else {
-        0xff
-    };
     if let Some(b) = row.get_mut(last_byte) {
-        *b &= !mask_last;
+        *b &= !end_mask;
     }
 }
 
@@ -129,7 +118,7 @@ fn find_bit(row: &[u8], max_pos: usize, start_pos: usize, bit: bool) -> usize {
         if let Some(&b) = row.get(bp) {
             let data = (b ^ bit_xor) & (0xffu8 >> bit_offset);
             if data != 0 {
-                return (bp * 8 + one_lead_pos(data)).min(max_pos);
+                return (bp * 8 + lead_set_pos(data)).min(max_pos);
             }
         }
         byte_pos = start_pos.div_ceil(8);
@@ -138,23 +127,30 @@ fn find_bit(row: &[u8], max_pos: usize, start_pos: usize, bit: bool) -> usize {
     }
 
     let max_byte = max_pos.div_ceil(8);
-    let skip_byte: u8 = if bit { 0x00 } else { 0xff };
+    let skip_word: u64 = if bit { 0 } else { u64::MAX };
 
-    // Skip 8 bytes at a time when there is nothing to find.
+    // Scan 8 bytes at a time using u64 leading_zeros.
     while byte_pos + 8 <= max_byte {
-        match row.get(byte_pos..byte_pos + 8) {
-            Some(chunk) if chunk.iter().all(|&b| b == skip_byte) => {
-                byte_pos += 8;
+        if let Some(chunk) = row.get(byte_pos..byte_pos + 8) {
+            let mut buf = [0u8; 8];
+            buf.copy_from_slice(chunk);
+            let word = u64::from_be_bytes(buf) ^ skip_word;
+            if word != 0 {
+                let pos = byte_pos * 8 + (word.leading_zeros() as usize);
+                return pos.min(max_pos);
             }
-            _ => break,
+            byte_pos += 8;
+        } else {
+            break;
         }
     }
 
+    // Scan remaining bytes one at a time.
     while byte_pos < max_byte {
         if let Some(&b) = row.get(byte_pos) {
             let data = b ^ bit_xor;
             if data != 0 {
-                return (byte_pos * 8 + one_lead_pos(data)).min(max_pos);
+                return (byte_pos * 8 + lead_set_pos(data)).min(max_pos);
             }
         }
         byte_pos += 1;
@@ -1112,19 +1108,19 @@ mod tests {
     }
 
     #[test]
-    fn one_lead_pos_all_zero() {
-        assert_eq!(one_lead_pos(0), 8);
+    fn lead_set_pos_all_zero() {
+        assert_eq!(lead_set_pos(0), 8);
     }
 
     #[test]
-    fn one_lead_pos_msb_set() {
-        assert_eq!(one_lead_pos(0x80), 0);
-        assert_eq!(one_lead_pos(0xff), 0);
+    fn lead_set_pos_msb_set() {
+        assert_eq!(lead_set_pos(0x80), 0);
+        assert_eq!(lead_set_pos(0xff), 0);
     }
 
     #[test]
-    fn one_lead_pos_lsb_only() {
-        assert_eq!(one_lead_pos(0x01), 7);
+    fn lead_set_pos_lsb_only() {
+        assert_eq!(lead_set_pos(0x01), 7);
     }
 
     #[test]
