@@ -10,253 +10,46 @@
 //!
 //! No external crate dependencies are required; all Huffman tables are
 //! embedded as `const` data taken from ITU-T T.4 (Appendix A) and T.6.
+//!
+//! # Errors
+//!
+//! Decompression errors are reported through [`CcittDecodeError`].  Truncated
+//! or damaged streams are decoded best-effort (matching PDFium behaviour).
 
-use crate::{dictionary::Dictionary, error::ObjectError, object_variant::ObjectVariant};
+use thiserror::Error;
 
-// ─── Decode parameters ───────────────────────────────────────────────────────
+use crate::{
+    bitreader::BitReader,
+    ccitt_fax_params::CCITTFaxParams,
+    ccitt_tables::{BLACK_RUN_INS, ONE_LEAD_POS, WHITE_RUN_INS},
+    error::ObjectError,
+};
 
-/// Decode parameters for the `CCITTFaxDecode` filter (PDF spec §7.4.6, Table 11).
-#[derive(Debug, Clone)]
-pub struct CCITTFaxParams {
-    /// Selects the encoding scheme.
-    /// `K < 0` = Group 4 (T.6 MMR); `K = 0` = Group 3 1D; `K > 0` = Group 3 2D.
-    /// Default: `0`.
-    pub k: i32,
-    /// Width of the image in pixels. Default: `1728`.
-    pub columns: u32,
-    /// Number of rows. `0` means decode until end-of-block / data exhaustion. Default: `0`.
-    pub rows: u32,
-    /// Whether EOL bit patterns appear before each row. Default: `false`.
-    pub end_of_line: bool,
-    /// Whether each EOL code begins on a byte boundary. Default: `false`.
-    pub encoded_byte_align: bool,
-    /// Whether a block terminator (EOFB / RTC) is present. Default: `true`.
-    pub end_of_block: bool,
-    /// If `true`, black = 1 and white = 0. Default: `false` (white = 1).
-    pub black_is1: bool,
-    /// Tolerated number of damaged rows before returning an error. Default: `0`.
-    pub damaged_rows_before_error: u32,
-}
-
-impl Default for CCITTFaxParams {
-    fn default() -> Self {
-        Self {
-            k: 0,
-            columns: 1728,
-            rows: 0,
-            end_of_line: false,
-            encoded_byte_align: false,
-            end_of_block: true,
-            black_is1: false,
-            damaged_rows_before_error: 0,
-        }
-    }
-}
-
-impl CCITTFaxParams {
-    /// Parse decode parameters from a PDF `/DecodeParms` dictionary.
-    ///
-    /// Values are extracted by directly matching [`ObjectVariant`] variants in the
-    /// provided [`Dictionary`]. This function does not resolve indirect references
-    /// on its own; if the `/DecodeParms` entry is an indirect reference (as allowed
-    /// by the PDF specification), the caller must resolve it to a dictionary before
-    /// calling this method.
-    pub fn from_dictionary(dict: &Dictionary) -> Self {
-        let mut p = Self::default();
-
-        if let Some(ObjectVariant::Integer(v)) = dict.get("K") {
-            p.k = i32::try_from(*v).unwrap_or_default();
-        }
-        if let Some(ObjectVariant::Integer(v)) = dict.get("Columns")
-            && *v > 0
-        {
-            p.columns = u32::try_from(*v).unwrap_or(p.columns);
-        }
-        if let Some(ObjectVariant::Integer(v)) = dict.get("Rows")
-            && *v >= 0
-        {
-            p.rows = u32::try_from(*v).unwrap_or_default();
-        }
-        if let Some(ObjectVariant::Boolean(v)) = dict.get("EndOfLine") {
-            p.end_of_line = *v;
-        }
-        if let Some(ObjectVariant::Boolean(v)) = dict.get("EncodedByteAlign") {
-            p.encoded_byte_align = *v;
-        }
-        if let Some(ObjectVariant::Boolean(v)) = dict.get("EndOfBlock") {
-            p.end_of_block = *v;
-        }
-        if let Some(ObjectVariant::Boolean(v)) = dict.get("BlackIs1") {
-            p.black_is1 = *v;
-        }
-        if let Some(ObjectVariant::Integer(v)) = dict.get("DamagedRowsBeforeError")
-            && *v >= 0
-        {
-            p.damaged_rows_before_error = u32::try_from(*v).unwrap_or_default();
-        }
-
-        p
-    }
-}
-
-// ─── Huffman tables ──────────────────────────────────────────────────────────
-
-/// For byte value `v`, `ONE_LEAD_POS[v]` is the MSB-first bit offset (0 = MSB)
-/// of the first set bit.  Value `8` means no set bit (`v == 0`).
-const ONE_LEAD_POS: [u8; 256] = [
-    8, 7, 6, 6, 5, 5, 5, 5, 4, 4, 4, 4, 4, 4, 4, 4, // 0-15
-    3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, // 16-31
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, // 32-47
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, // 48-63
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 64-79
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 80-95
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 96-111
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // 112-127
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 128-143
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 144-159
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 160-175
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 176-191
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 192-207
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 208-223
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 224-239
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // 240-255
-];
-
-/// Black-run Huffman instruction table (ITU-T T.4 Table 1 / T.6).
+/// An error that occurred during CCITTFaxDecode decompression.
 ///
-/// Format: each level starts with a `count` byte (number of entries at this
-/// depth), followed by `count × 3` bytes of `(code, run_lo, run_hi)` tuples
-/// where `run = run_lo + run_hi * 256`.  `0xFF` terminates the table.
-const BLACK_RUN_INS: &[u8] = &[
-    // level 1 – 0 entries
-    0, // level 2 – 2 entries
-    2, 0x02, 3, 0, 0x03, 2, 0, // level 3 – 2 entries
-    2, 0x02, 1, 0, 0x03, 4, 0, // level 4 – 2 entries
-    2, 0x02, 6, 0, 0x03, 5, 0, // level 5 – 1 entry
-    1, 0x03, 7, 0, // level 6 – 2 entries
-    2, 0x04, 9, 0, 0x05, 8, 0, // level 7 – 3 entries
-    3, 0x04, 10, 0, 0x05, 11, 0, 0x07, 12, 0, // level 8 – 2 entries
-    2, 0x04, 13, 0, 0x07, 14, 0, // level 9 – 1 entry
-    1, 0x18, 15, 0, // level 10 – 5 entries  (includes makeup-64 and terminators 0,16-18)
-    5, 0x08, 18, 0, 0x0f, 64, 0, 0x17, 16, 0, 0x18, 17, 0, 0x37, 0, 0,
-    // level 11 – 10 entries  (makeups 1792-1920 and terminators 19-25)
-    10, 0x08, 0, 7, 0x0c, 64, 7, 0x0d, 128, 7, // runs 1792, 1856, 1920
-    0x17, 24, 0, 0x18, 25, 0, 0x28, 23, 0, 0x37, 22, 0, 0x67, 19, 0, 0x68, 20, 0, 0x6c, 21, 0,
-    // level 12 – 54 entries  (makeups 1984-2560 and many terminators)
-    54, 0x12, 192, 7, 0x13, 0, 8, 0x14, 64, 8, 0x15, 128, 8, // 1984-2176
-    0x16, 192, 8, 0x17, 0, 9, 0x1c, 64, 9, 0x1d, 128, 9, // 2240-2432
-    0x1e, 192, 9, 0x1f, 0, 10, // 2496, 2560
-    0x24, 52, 0, 0x27, 55, 0, 0x28, 56, 0, 0x2b, 59, 0, 0x2c, 60, 0, 0x33, 64, 1, 0x34, 128, 1,
-    0x35, 192, 1, // 320, 384, 448
-    0x37, 53, 0, 0x38, 54, 0, 0x52, 50, 0, 0x53, 51, 0, 0x54, 44, 0, 0x55, 45, 0, 0x56, 46, 0,
-    0x57, 47, 0, 0x58, 57, 0, 0x59, 58, 0, 0x5a, 61, 0, 0x5b, 0, 1, // 256
-    0x64, 48, 0, 0x65, 49, 0, 0x66, 62, 0, 0x67, 63, 0, 0x68, 30, 0, 0x69, 31, 0, 0x6a, 32, 0,
-    0x6b, 33, 0, 0x6c, 40, 0, 0x6d, 41, 0, 0xc8, 128, 0, 0xc9, 192, 0, 0xca, 26, 0, 0xcb, 27, 0,
-    0xcc, 28, 0, 0xcd, 29, 0, 0xd2, 34, 0, 0xd3, 35, 0, 0xd4, 36, 0, 0xd5, 37, 0, 0xd6, 38, 0,
-    0xd7, 39, 0, 0xda, 42, 0, 0xdb, 43, 0,
-    // level 13 – 20 entries  (makeups 512-1728 in stride-64 groups)
-    20, 0x4a, 128, 2, 0x4b, 192, 2, 0x4c, 0, 3, 0x4d, 64, 3, // 640-832
-    0x52, 0, 5, 0x53, 64, 5, 0x54, 128, 5, 0x55, 192, 5, // 1280-1472
-    0x5a, 0, 6, 0x5b, 64, 6, 0x64, 128, 6, 0x65, 192, 6, // 1536-1728
-    0x6c, 0, 2, 0x6d, 64, 2, // 512, 576
-    0x72, 128, 3, 0x73, 192, 3, 0x74, 0, 4, 0x75, 64, 4, // 896-1088
-    0x76, 128, 4, 0x77, 192, 4, // 1152, 1216
-    // sentinel
-    0xff,
-];
-
-/// White-run Huffman instruction table (ITU-T T.4 Table 2 / T.6).
-const WHITE_RUN_INS: &[u8] = &[
-    // levels 1-3 – 0 entries each
-    0, 0, 0, // level 4 – 6 entries  (terminators 2-7)
-    6, 0x07, 2, 0, 0x08, 3, 0, 0x0b, 4, 0, 0x0c, 5, 0, 0x0e, 6, 0, 0x0f, 7, 0,
-    // level 5 – 6 entries  (terminators 8-11 and makeups 64, 128)
-    6, 0x07, 10, 0, 0x08, 11, 0, 0x12, 128, 0, 0x13, 8, 0, 0x14, 9, 0, 0x1b, 64, 0,
-    // level 6 – 9 entries  (terminators 1,12-17, makeup 192, makeup 1664)
-    9, 0x03, 13, 0, 0x07, 1, 0, 0x08, 12, 0, 0x17, 192, 0, 0x18, 128, 6, // 1664
-    0x2a, 16, 0, 0x2b, 17, 0, 0x34, 14, 0, 0x35, 15, 0,
-    // level 7 – 12 entries  (terminators 18-28 and makeup 256)
-    12, 0x03, 22, 0, 0x04, 23, 0, 0x08, 20, 0, 0x0c, 19, 0, 0x13, 26, 0, 0x17, 21, 0, 0x18, 28, 0,
-    0x24, 27, 0, 0x27, 18, 0, 0x28, 24, 0, 0x2b, 25, 0, 0x37, 0, 1, // 256
-    // level 8 – 42 entries  (terminators 0,29-63, makeups 320-640)
-    42, 0x02, 29, 0, 0x03, 30, 0, 0x04, 45, 0, 0x05, 46, 0, 0x0a, 47, 0, 0x0b, 48, 0, 0x12, 33, 0,
-    0x13, 34, 0, 0x14, 35, 0, 0x15, 36, 0, 0x16, 37, 0, 0x17, 38, 0, 0x1a, 31, 0, 0x1b, 32, 0,
-    0x24, 53, 0, 0x25, 54, 0, 0x28, 39, 0, 0x29, 40, 0, 0x2a, 41, 0, 0x2b, 42, 0, 0x2c, 43, 0,
-    0x2d, 44, 0, 0x32, 61, 0, 0x33, 62, 0, 0x34, 63, 0, 0x35, 0, 0, 0x36, 64, 1, 0x37, 128,
-    1, // 320, 384
-    0x4a, 59, 0, 0x4b, 60, 0, 0x52, 49, 0, 0x53, 50, 0, 0x54, 51, 0, 0x55, 52, 0, 0x58, 55, 0,
-    0x59, 56, 0, 0x5a, 57, 0, 0x5b, 58, 0, 0x64, 192, 1, 0x65, 0, 2, 0x67, 128, 2, 0x68, 64,
-    2, // 448,512,640,576
-    // level 9 – 16 entries  (makeups 704-1728 except 1664)
-    16, 0x98, 192, 5, 0x99, 0, 6, 0x9a, 64, 6, 0x9b, 192, 6, // 1472-1728
-    0xcc, 192, 2, 0xcd, 0, 3, // 704, 768
-    0xd2, 64, 3, 0xd3, 128, 3, 0xd4, 192, 3, // 832-960
-    0xd5, 0, 4, 0xd6, 64, 4, 0xd7, 128, 4, 0xd8, 192, 4, // 1024-1216
-    0xd9, 0, 5, 0xda, 64, 5, 0xdb, 128, 5, // 1280-1408
-    // level 10 – 0 entries
-    0, // level 11 – 3 entries  (makeups 1792-1920)
-    3, 0x08, 0, 7, 0x0c, 64, 7, 0x0d, 128, 7, // 1792, 1856, 1920
-    // level 12 – 10 entries  (makeups 1984-2560)
-    10, 0x12, 192, 7, 0x13, 0, 8, 0x14, 64, 8, 0x15, 128, 8, // 1984-2176
-    0x16, 192, 8, 0x17, 0, 9, 0x1c, 64, 9, 0x1d, 128, 9, // 2240-2432
-    0x1e, 192, 9, 0x1f, 0, 10, // 2496, 2560
-    // sentinel
-    0xff,
-];
-
-// ─── Bit reader ──────────────────────────────────────────────────────────────
-
-/// Reads bits MSB-first from a byte slice.
-struct BitReader<'a> {
-    src: &'a [u8],
-    bit_pos: usize,
-}
-
-impl<'a> BitReader<'a> {
-    fn new(src: &'a [u8]) -> Self {
-        Self { src, bit_pos: 0 }
-    }
-
-    /// Read the next bit and advance. Returns `None` when exhausted.
-    #[allow(clippy::arithmetic_side_effects)]
-    fn next_bit(&mut self) -> Option<bool> {
-        let pos = self.bit_pos;
-        let byte = self.src.get(pos / 8)?;
-        self.bit_pos += 1;
-        Some((byte >> (7 - pos % 8)) & 1 != 0)
-    }
-
-    fn pos(&self) -> usize {
-        self.bit_pos
-    }
-
-    fn set_pos(&mut self, pos: usize) {
-        self.bit_pos = pos;
-    }
-
-    fn exhausted(&self) -> bool {
-        self.bit_pos >= self.src.len().saturating_mul(8)
-    }
-
-    /// Advance to the next byte boundary, but only if all padding bits are 0.
-    /// Returns `true` if alignment happened, `false` if a non-zero pad bit was
-    /// found (the caller should disable byte-alignment for remaining rows).
-    #[allow(clippy::arithmetic_side_effects)]
-    fn try_align_to_byte(&mut self) -> bool {
-        let cur = self.bit_pos;
-        let aligned = (cur + 7) & !7;
-        for p in cur..aligned {
-            let is_set = self
-                .src
-                .get(p / 8)
-                .is_some_and(|&b| (b >> (7 - p % 8)) & 1 != 0);
-            if is_set {
-                return false;
-            }
-        }
-        self.bit_pos = aligned;
-        true
-    }
+/// This type is `#[non_exhaustive]` to allow adding new variants in the future
+/// without breaking downstream code.
+#[non_exhaustive]
+#[derive(Debug, Error, PartialEq)]
+pub enum CcittDecodeError {
+    /// The column count is zero, which is not a valid image width.
+    #[error("CCITTFaxDecode: zero column count")]
+    ZeroColumns,
+    /// The bit stream ended before the row was fully decoded.
+    #[error("CCITTFaxDecode: unexpected end of stream")]
+    UnexpectedEof,
+    /// No matching Huffman codeword could be found in the run-length tables.
+    #[error("CCITTFaxDecode: invalid Huffman code")]
+    InvalidCode,
+    /// 2D decoding: the current position regressed (monotonicity constraint violated).
+    #[error("CCITTFaxDecode: 2D monotonicity violated")]
+    MonotonicityViolated,
+    /// 2D decoding: an unknown extension codeword was encountered.
+    #[error("CCITTFaxDecode: unknown extension codeword")]
+    UnknownExtensionCode,
+    /// A wrapped [`ObjectError`] from an upstream PDF object operation.
+    #[error("CCITTFaxDecode: {0}")]
+    ObjectError(#[from] ObjectError),
 }
 
 // ─── Low-level helpers ───────────────────────────────────────────────────────
@@ -271,15 +64,19 @@ fn one_lead_pos(byte: u8) -> usize {
 /// Returns the color (true = white, false = black) of pixel `pos` in `row`.
 /// Out-of-bounds reads return white (imaginary padding).
 #[inline]
-#[allow(clippy::arithmetic_side_effects)]
 fn ref_pixel(row: &[u8], pos: usize) -> bool {
     row.get(pos / 8)
         .is_none_or(|&b| (b >> (7 - pos % 8)) & 1 != 0)
 }
 
+/// Clamp a signed position to `usize`, treating negative values as zero.
+#[inline]
+fn clamp_to_usize(val: i32) -> usize {
+    usize::try_from(val.max(0)).unwrap_or(0)
+}
+
 /// Set pixels in `[start, end)` to black (0) in `row`.
 /// `row` must be at least `(columns + 7) / 8` bytes long.
-#[allow(clippy::arithmetic_side_effects)]
 fn fill_bits(row: &mut [u8], columns: usize, start: usize, end: usize) {
     let end = end.min(columns);
     if start >= end {
@@ -312,9 +109,7 @@ fn fill_bits(row: &mut [u8], columns: usize, start: usize, end: usize) {
     }
     // Clear whole middle bytes.
     if let Some(middle) = row.get_mut(first_byte + 1..last_byte) {
-        for b in middle.iter_mut() {
-            *b = 0x00;
-        }
+        middle.fill(0x00);
     }
     // Clear the head of the last byte.
     let mask_last = if bit_end < 7 {
@@ -329,7 +124,6 @@ fn fill_bits(row: &mut [u8], columns: usize, start: usize, end: usize) {
 
 /// Returns the position of the first bit equal to `bit` in `row[start_pos..max_pos]`,
 /// or `max_pos` if not found.
-#[allow(clippy::arithmetic_side_effects)]
 fn find_bit(row: &[u8], max_pos: usize, start_pos: usize, bit: bool) -> usize {
     let start_pos = start_pos.min(max_pos);
     let bit_xor: u8 = if bit { 0x00 } else { 0xff };
@@ -383,16 +177,15 @@ fn find_bit(row: &[u8], max_pos: usize, start_pos: usize, bit: bool) -> usize {
 /// * `a0color` – color of the current coding line at `a0`.
 ///
 /// Returns `(b1, b2)` where each may equal `columns` when not found.
-#[allow(clippy::arithmetic_side_effects)]
 fn find_b1_b2(ref_row: &[u8], columns: usize, a0: i32, a0color: bool) -> (usize, usize) {
     // Color of the reference line at position a0 (white when a0 < 0).
     let first_bit = if a0 < 0 {
         true
     } else {
-        ref_pixel(ref_row, usize::try_from(a0).unwrap_or(0))
+        ref_pixel(ref_row, clamp_to_usize(a0))
     };
 
-    let search_start = usize::try_from(a0.saturating_add(1).max(0)).unwrap_or(0);
+    let search_start = clamp_to_usize(a0.saturating_add(1));
     let mut b1 = find_bit(ref_row, columns, search_start, !first_bit);
 
     if b1 >= columns {
@@ -418,7 +211,6 @@ fn find_b1_b2(ref_row: &[u8], columns: usize, a0: i32, a0color: bool) -> (usize,
 
 /// Decode one Huffman-encoded run length from `reader`.
 /// Returns the run length, or `None` on truncated / invalid stream.
-#[allow(clippy::arithmetic_side_effects)]
 fn get_run(ins: &[u8], reader: &mut BitReader<'_>) -> Option<u16> {
     let mut code: u32 = 0;
     let mut ins_off: usize = 0;
@@ -447,16 +239,23 @@ fn get_run(ins: &[u8], reader: &mut BitReader<'_>) -> Option<u16> {
     }
 }
 
-/// Decode a complete run-length sequence (makeup + terminating codes).
-/// Colors: `true` = white, `false` = black.  Returns `None` on stream error.
-fn decode_run_seq(reader: &mut BitReader<'_>, color: bool) -> Option<i32> {
+/// Decode a complete run-length sequence (one or more makeup codes followed
+/// by a single terminating code).
+///
+/// `color`: `true` = white run, `false` = black run.
+///
+/// # Errors
+///
+/// Returns [`CcittDecodeError::InvalidCode`] when no matching Huffman codeword
+/// is found (including cases where the stream is exhausted mid-code).
+fn decode_run_seq(reader: &mut BitReader<'_>, color: bool) -> Result<i32, CcittDecodeError> {
     let ins = if color { WHITE_RUN_INS } else { BLACK_RUN_INS };
     let mut total: i32 = 0;
     loop {
-        let run = i32::from(get_run(ins, reader)?);
+        let run = i32::from(get_run(ins, reader).ok_or(CcittDecodeError::InvalidCode)?);
         total = total.saturating_add(run);
         if run < 64 {
-            return Some(total);
+            return Ok(total);
         }
         // Makeup code: keep reading for the terminating code.
     }
@@ -467,7 +266,6 @@ fn decode_run_seq(reader: &mut BitReader<'_>, color: bool) -> Option<i32> {
 /// An EOL consists of ≥ 11 leading zero-bits followed by a one-bit (12 bits
 /// total for T.4 EOL).  If fewer than 12 bits are consumed before the
 /// one-bit, the position is reset (no EOL was present).
-#[allow(clippy::arithmetic_side_effects)]
 fn skip_eol(reader: &mut BitReader<'_>) {
     let start = reader.pos();
     loop {
@@ -484,207 +282,338 @@ fn skip_eol(reader: &mut BitReader<'_>) {
     }
 }
 
-// ─── Row decoders ────────────────────────────────────────────────────────────
+// ─── 2D opcode decoder ───────────────────────────────────────────────────────
 
-/// Decode one Group 3 1D scan line.
+/// A decoded T.4 / T.6 two-dimensional scan-line opcode.
 ///
-/// `row` must be pre-filled with `0xFF` (all white).  Black runs are written
-/// by calling [`fill_bits`].
-fn decode_1d_row(reader: &mut BitReader<'_>, row: &mut [u8], columns: usize) {
-    let mut color = true; // start white
-    let mut startpos: usize = 0;
+/// Each variant is decoded from the bit stream by [`read_2d_mode`] and drives
+/// the main dispatch loop inside [`decode_2d_row`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TwoDMode {
+    /// Vertical mode: `a1 = b1 + delta` where `delta ∈ {−3, −2, −1, 0, 1, 2, 3}`.
+    Vertical(i32),
+    /// Horizontal mode: two explicit run-length sequences follow in the bit stream.
+    Horizontal,
+    /// Pass mode: the coding line "passes" b2; advance `a0` to `b2` without changing color.
+    Pass,
+    /// End-of-facsimile-block first marker (T.6 §4.2.8).
+    ///
+    /// The 3 padding bits that complete the first EOL codeword have already
+    /// been consumed.  The decoder continues the row loop to process the
+    /// second EOFB marker before the stream is exhausted.
+    EndOfBlock,
+    /// Extension or unknown codeword.
+    ///
+    /// The 5 padding bits of the extension codeword have already been consumed.
+    /// The decoder should terminate the current row.
+    Extension,
+}
 
-    loop {
-        if reader.exhausted() {
-            return;
-        }
+/// Decode one T.4 / T.6 two-dimensional scan-line opcode from `reader`.
+///
+/// Reads the minimum number of bits needed to identify the mode.  For
+/// [`TwoDMode::EndOfBlock`] and [`TwoDMode::Extension`], the remaining bits
+/// of the fixed-width codeword (3 and 5 bits respectively) are also consumed
+/// before returning, so the caller does not need to skip them.
+///
+/// Returns `None` if the bit stream is exhausted before a complete codeword
+/// can be read.
+fn read_2d_mode(reader: &mut BitReader<'_>) -> Option<TwoDMode> {
+    // Bit pattern table (ITU-T T.4 Table 1):
+    //   1          → V(0)
+    //   011        → V(+1)
+    //   010        → V(-1)
+    //   001        → H mode
+    //   0001       → Pass
+    //   000011 x   → V(+2) / V(-2)
+    //   0000010 x  → V(-3) / V(+3)   (bit=1 → +3)
+    //   0000001    → EOFB first EOL  (+ 3 padding bits consumed here)
+    //   0000000    → Extension        (+ 5 padding bits consumed here)
 
-        let mut run_len: usize = 0;
-        loop {
-            let ins = if color { WHITE_RUN_INS } else { BLACK_RUN_INS };
-            match get_run(ins, reader) {
-                None => {
-                    // Stream error: scan forward to the next 1-bit (EOL marker).
-                    loop {
-                        match reader.next_bit() {
-                            None | Some(true) => return,
-                            Some(false) => {}
-                        }
-                    }
-                }
-                Some(run) => {
-                    run_len = run_len.saturating_add(usize::from(run));
-                    if run < 64 {
-                        break; // terminating code – run complete
-                    }
-                    // Makeup code – continue reading.
-                }
-            }
-        }
+    if reader.next_bit()? {
+        return Some(TwoDMode::Vertical(0)); // 1
+    }
+    let bit1 = reader.next_bit()?;
+    let bit2 = reader.next_bit()?;
 
-        if !color {
-            fill_bits(row, columns, startpos, startpos.saturating_add(run_len));
-        }
+    if bit1 {
+        // 01x → V(+1) or V(-1)
+        return Some(TwoDMode::Vertical(if bit2 { 1 } else { -1 }));
+    }
+    if bit2 {
+        // 001 → H mode
+        return Some(TwoDMode::Horizontal);
+    }
 
-        startpos = startpos.saturating_add(run_len);
-        if startpos >= columns {
-            break;
-        }
-        color = !color;
+    let bit3 = reader.next_bit()?;
+    if bit3 {
+        // 0001 → Pass
+        return Some(TwoDMode::Pass);
+    }
+
+    let bit4 = reader.next_bit()?;
+    let bit5 = reader.next_bit()?;
+
+    if bit4 {
+        // 000011 x → V(+2) or V(-2)
+        return Some(TwoDMode::Vertical(if bit5 { 2 } else { -2 }));
+    }
+    if bit5 {
+        // 0000010 x → V(-3) or V(+3)
+        let bit6 = reader.next_bit()?;
+        return Some(TwoDMode::Vertical(if bit6 { 3 } else { -3 }));
+    }
+
+    // 000000 x
+    let bit6 = reader.next_bit()?;
+    if bit6 {
+        // 0000001 → first EOL of EOFB; consume 3 more bits to complete the
+        // 12-bit EOL pattern from the 7 bits already read (7 + 3 + a leading 1 = 11).
+        reader.skip_bits(3);
+        Some(TwoDMode::EndOfBlock)
+    } else {
+        // 0000000 → extension codeword; consume 5 more bits.
+        reader.skip_bits(5);
+        Some(TwoDMode::Extension)
     }
 }
 
-/// Decode one Group 4 (T.6 / MMR) or Group 3 2D scan line.
-///
-/// `row` must be pre-filled with `0xFF` (all white).
-#[allow(clippy::arithmetic_side_effects)]
-fn decode_2d_row(reader: &mut BitReader<'_>, row: &mut [u8], ref_row: &[u8], columns: usize) {
-    let columns_i32 = i32::try_from(columns).unwrap_or(i32::MAX);
-    let mut a0: i32 = -1;
-    let mut a0color = true; // white
+// ─── Row decoders ────────────────────────────────────────────────────────────
 
-    'outer: loop {
-        if reader.exhausted() {
-            return;
+/// Internal decoder state for a single CCITTFaxDecode stream.
+///
+/// Encapsulates the bit reader, row buffers, and configuration needed to
+/// decode rows sequentially.  Created and consumed by [`decode`].
+struct CcittDecoder<'a> {
+    reader: BitReader<'a>,
+    ref_row: Vec<u8>,
+    row_buf: Vec<u8>,
+    columns: usize,
+    columns_i32: i32,
+    k: i32,
+    end_of_line: bool,
+    byte_align: bool,
+    black_is1: bool,
+}
+
+impl<'a> CcittDecoder<'a> {
+    /// Construct a new decoder from raw stream data and CCITT parameters.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CcittDecodeError::ZeroColumns`] if `params.columns` is zero.
+    fn new(data: &'a [u8], params: &CCITTFaxParams) -> Result<Self, CcittDecodeError> {
+        let columns = usize::try_from(params.columns).unwrap_or(0);
+        if columns == 0 {
+            return Err(CcittDecodeError::ZeroColumns);
+        }
+        let row_bytes = columns.div_ceil(8);
+
+        Ok(Self {
+            reader: BitReader::new(data),
+            ref_row: vec![0xff; row_bytes],
+            row_buf: vec![0xff; row_bytes],
+            columns,
+            columns_i32: i32::try_from(columns).unwrap_or(i32::MAX),
+            k: params.k,
+            end_of_line: params.end_of_line,
+            byte_align: params.encoded_byte_align,
+            black_is1: params.black_is1,
+        })
+    }
+
+    /// Decode all rows and return the concatenated output buffer.
+    ///
+    /// The caller specifies `max_rows`; `0` means decode until data exhaustion.
+    fn decode_all(&mut self, max_rows: usize) -> Result<Vec<u8>, CcittDecodeError> {
+        let row_bytes = self.columns.div_ceil(8);
+        let mut output: Vec<u8> =
+            Vec::with_capacity(max_rows.saturating_mul(row_bytes).max(row_bytes * 16));
+        let mut decoded_rows: usize = 0;
+
+        loop {
+            if max_rows > 0 && decoded_rows >= max_rows {
+                break;
+            }
+
+            skip_eol(&mut self.reader);
+
+            if self.reader.exhausted() {
+                break;
+            }
+
+            self.row_buf.fill(0xff);
+            self.decode_next_row()?;
+
+            if self.end_of_line {
+                skip_eol(&mut self.reader);
+            }
+
+            if self.byte_align {
+                let cur = self.reader.pos();
+                let aligned = (cur + 7) & !7;
+                if cur < aligned && !self.reader.try_align_to_byte() {
+                    self.byte_align = false;
+                }
+            }
+
+            output.extend_from_slice(&self.row_buf);
+            decoded_rows += 1;
         }
 
-        let (b1, b2) = find_b1_b2(ref_row, columns, a0, a0color);
+        if self.black_is1 {
+            output.iter_mut().for_each(|b| *b ^= 0xff);
+        }
 
-        let v_delta: i32 = {
-            let bit0 = match reader.next_bit() {
-                Some(b) => b,
-                None => return,
+        Ok(output)
+    }
+
+    /// Dispatch a single row based on the `K` parameter.
+    fn decode_next_row(&mut self) -> Result<(), CcittDecodeError> {
+        match self.k.cmp(&0) {
+            std::cmp::Ordering::Less => {
+                self.decode_2d_row()?;
+                self.ref_row.copy_from_slice(&self.row_buf);
+            }
+            std::cmp::Ordering::Equal => {
+                self.decode_1d_row()?;
+            }
+            std::cmp::Ordering::Greater => {
+                let use_1d = self.reader.next_bit().unwrap_or(true);
+                if use_1d {
+                    self.decode_1d_row()?;
+                } else {
+                    self.decode_2d_row()?;
+                }
+                self.ref_row.copy_from_slice(&self.row_buf);
+            }
+        }
+        Ok(())
+    }
+
+    /// Decode one Group 3 1D scan line into `self.row_buf`.
+    ///
+    /// `row_buf` must be pre-filled with `0xFF` (all white).  Black runs are
+    /// written by calling [`fill_bits`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CcittDecodeError::UnexpectedEof`] when the stream ends before
+    /// the row is complete, and [`CcittDecodeError::InvalidCode`] when a run
+    /// cannot be decoded.
+    fn decode_1d_row(&mut self) -> Result<(), CcittDecodeError> {
+        let mut color = true; // T.4 always starts with a white run
+        let mut startpos: usize = 0;
+
+        loop {
+            if self.reader.exhausted() {
+                return Err(CcittDecodeError::UnexpectedEof);
+            }
+
+            let run_len = match decode_run_seq(&mut self.reader, color) {
+                Ok(r) => clamp_to_usize(r),
+                Err(_) => return Err(CcittDecodeError::InvalidCode),
             };
 
-            if bit0 {
-                // V(0): a1 = b1
-                0
-            } else {
-                let bit1 = match reader.next_bit() {
-                    Some(b) => b,
-                    None => return,
-                };
-                let bit2 = match reader.next_bit() {
-                    Some(b) => b,
-                    None => return,
-                };
+            if !color {
+                fill_bits(
+                    &mut self.row_buf,
+                    self.columns,
+                    startpos,
+                    startpos.saturating_add(run_len),
+                );
+            }
 
-                if bit1 {
-                    // 01x → V(+1) or V(-1)
-                    if bit2 { 1 } else { -1 }
-                } else if bit2 {
-                    // 001 → H mode: two explicit run lengths
-                    let mut run_len1 = match decode_run_seq(reader, a0color) {
-                        Some(r) => r,
-                        None => return,
-                    };
+            startpos = startpos.saturating_add(run_len);
+            if startpos >= self.columns {
+                return Ok(());
+            }
+            color = !color;
+        }
+    }
+
+    /// Decode one Group 4 (T.6 / MMR) or Group 3 2D scan line into `self.row_buf`.
+    ///
+    /// `row_buf` must be pre-filled with `0xFF` (all white).
+    fn decode_2d_row(&mut self) -> Result<(), CcittDecodeError> {
+        let mut a0: i32 = -1;
+        let mut a0color = true; // white
+
+        loop {
+            if self.reader.exhausted() {
+                return Err(CcittDecodeError::UnexpectedEof);
+            }
+
+            let (b1, b2) = find_b1_b2(&self.ref_row, self.columns, a0, a0color);
+
+            match read_2d_mode(&mut self.reader).ok_or(CcittDecodeError::UnexpectedEof)? {
+                TwoDMode::Vertical(delta) => {
+                    let a1 = i32::try_from(b1).unwrap_or(i32::MAX) + delta;
+                    if !a0color {
+                        fill_bits(
+                            &mut self.row_buf,
+                            self.columns,
+                            clamp_to_usize(a0),
+                            clamp_to_usize(a1),
+                        );
+                    }
+                    if a1 >= self.columns_i32 {
+                        return Ok(());
+                    }
+                    if a0 >= a1 {
+                        return Err(CcittDecodeError::MonotonicityViolated);
+                    }
+                    a0 = a1;
+                    a0color = !a0color;
+                }
+
+                TwoDMode::Horizontal => {
+                    let mut run_len1 = decode_run_seq(&mut self.reader, a0color)?;
                     if a0 < 0 {
                         run_len1 += 1;
                     }
-                    let a0s = usize::try_from(a0.max(0)).unwrap_or(0);
+                    let a0s = clamp_to_usize(a0);
                     let a1 = a0.max(0) + run_len1;
                     if !a0color {
-                        fill_bits(row, columns, a0s, usize::try_from(a1.max(0)).unwrap_or(0));
+                        fill_bits(&mut self.row_buf, self.columns, a0s, clamp_to_usize(a1));
                     }
 
-                    let run_len2 = match decode_run_seq(reader, !a0color) {
-                        Some(r) => r,
-                        None => return,
-                    };
+                    let run_len2 = decode_run_seq(&mut self.reader, !a0color)?;
                     let a2 = a1 + run_len2;
                     if a0color {
                         fill_bits(
-                            row,
-                            columns,
-                            usize::try_from(a1.max(0)).unwrap_or(0),
-                            usize::try_from(a2.max(0)).unwrap_or(0),
+                            &mut self.row_buf,
+                            self.columns,
+                            clamp_to_usize(a1),
+                            clamp_to_usize(a2),
                         );
                     }
 
                     a0 = a2;
-                    if a0 < columns_i32 {
-                        continue 'outer;
-                    }
-                    return;
-                } else {
-                    // 000…
-                    let bit3 = match reader.next_bit() {
-                        Some(b) => b,
-                        None => return,
-                    };
-                    if bit3 {
-                        // 0001 → Pass mode
-                        if !a0color {
-                            fill_bits(row, columns, usize::try_from(a0.max(0)).unwrap_or(0), b2);
-                        }
-                        if b2 >= columns {
-                            return;
-                        }
-                        a0 = i32::try_from(b2).unwrap_or(i32::MAX);
-                        continue 'outer;
-                    }
-
-                    // 0000xx…
-                    let nb1 = match reader.next_bit() {
-                        Some(b) => b,
-                        None => return,
-                    };
-                    let nb2 = match reader.next_bit() {
-                        Some(b) => b,
-                        None => return,
-                    };
-
-                    if nb1 {
-                        // 000011x → V(+2) or V(-2)
-                        if nb2 { 2 } else { -2 }
-                    } else if nb2 {
-                        // 0000010 or 0000011 → V(+3) or V(-3)
-                        let nb3 = match reader.next_bit() {
-                            Some(b) => b,
-                            None => return,
-                        };
-                        if nb3 { 3 } else { -3 }
-                    } else {
-                        // 000000x – EOFB marker or extension code
-                        let nb3 = match reader.next_bit() {
-                            Some(b) => b,
-                            None => return,
-                        };
-                        if nb3 {
-                            // First EOL of EOFB; skip 3 remaining bits.
-                            for _ in 0..3 {
-                                reader.next_bit();
-                            }
-                            continue 'outer;
-                        }
-                        // Extension code; skip 5 remaining bits and end row.
-                        for _ in 0..5 {
-                            reader.next_bit();
-                        }
-                        return;
+                    if a0 >= self.columns_i32 {
+                        return Ok(());
                     }
                 }
-            }
-        };
 
-        // Apply V-mode: a1 = b1 + v_delta
-        let a1 = i32::try_from(b1).unwrap_or(i32::MAX) + v_delta;
-        if !a0color {
-            fill_bits(
-                row,
-                columns,
-                usize::try_from(a0.max(0)).unwrap_or(0),
-                usize::try_from(a1.max(0)).unwrap_or(0),
-            );
+                TwoDMode::Pass => {
+                    if !a0color {
+                        fill_bits(&mut self.row_buf, self.columns, clamp_to_usize(a0), b2);
+                    }
+                    if b2 >= self.columns {
+                        return Ok(());
+                    }
+                    a0 = i32::try_from(b2).unwrap_or(i32::MAX);
+                }
+
+                TwoDMode::EndOfBlock => {
+                    // First EOL of EOFB; bits already consumed in read_2d_mode.
+                }
+
+                TwoDMode::Extension => {
+                    return Err(CcittDecodeError::UnknownExtensionCode);
+                }
+            }
         }
-        if a1 >= columns_i32 {
-            return;
-        }
-        if a0 >= a1 {
-            return; // monotonicity violated – stop
-        }
-        a0 = a1;
-        a0color = !a0color;
     }
 }
 
@@ -697,124 +626,19 @@ fn decode_2d_row(reader: &mut BitReader<'_>, row: &mut [u8], ref_row: &[u8], col
 ///
 /// # Errors
 ///
-/// Returns [`ObjectError::DecompressionError`] if `columns` is zero.
+/// Returns [`CcittDecodeError::ZeroColumns`] if `params.columns` is zero.
 /// Truncated or damaged streams are decoded as-is (matching PDFium behaviour).
-#[allow(clippy::arithmetic_side_effects)]
-pub fn decode(data: &[u8], params: &CCITTFaxParams) -> Result<Vec<u8>, ObjectError> {
-    let columns = usize::try_from(params.columns).unwrap_or(0);
-    if columns == 0 {
-        return Err(ObjectError::DecompressionError(
-            "CCITTFaxDecode: zero column count".into(),
-        ));
-    }
-
-    let row_bytes = columns.div_ceil(8);
+/// Use `From<CcittDecodeError>` to convert the error into [`ObjectError`] when
+/// needed by higher-level callers.
+pub fn decode(data: &[u8], params: &CCITTFaxParams) -> Result<Vec<u8>, CcittDecodeError> {
     let rows = usize::try_from(params.rows).unwrap_or(0);
-
-    let mut output: Vec<u8> =
-        Vec::with_capacity(rows.saturating_mul(row_bytes).max(row_bytes * 16));
-
-    let mut reader = BitReader::new(data);
-    let mut ref_row = vec![0xffu8; row_bytes];
-    let mut row_buf = vec![0xffu8; row_bytes];
-    let mut decoded_rows: usize = 0;
-    let mut byte_align = params.encoded_byte_align;
-
-    loop {
-        if rows > 0 && decoded_rows >= rows {
-            break;
-        }
-
-        // Skip any EOL marker preceding the row (no-op when none present).
-        skip_eol(&mut reader);
-
-        if reader.exhausted() {
-            break;
-        }
-
-        row_buf.fill(0xff);
-
-        match params.k.cmp(&0) {
-            std::cmp::Ordering::Less => {
-                // Group 4 / MMR (T.6)
-                decode_2d_row(&mut reader, &mut row_buf, &ref_row, columns);
-                ref_row.copy_from_slice(&row_buf);
-            }
-            std::cmp::Ordering::Equal => {
-                // Group 3, 1D
-                decode_1d_row(&mut reader, &mut row_buf, columns);
-            }
-            std::cmp::Ordering::Greater => {
-                // Group 3, 2D: tag bit selects 1D (1) or 2D (0)
-                let use_1d = reader.next_bit().unwrap_or(true);
-                if use_1d {
-                    decode_1d_row(&mut reader, &mut row_buf, columns);
-                } else {
-                    decode_2d_row(&mut reader, &mut row_buf, &ref_row, columns);
-                }
-                ref_row.copy_from_slice(&row_buf);
-            }
-        }
-
-        // Optional trailing EOL.
-        if params.end_of_line {
-            skip_eol(&mut reader);
-        }
-
-        // Optional byte-alignment.  A non-zero padding bit permanently
-        // disables alignment for the remainder of the stream.
-        if byte_align {
-            let cur = reader.pos();
-            let aligned = (cur + 7) & !7;
-            if cur < aligned && !reader.try_align_to_byte() {
-                byte_align = false;
-            }
-        }
-
-        output.extend_from_slice(&row_buf);
-        decoded_rows += 1;
-    }
-
-    if params.black_is1 {
-        for b in output.iter_mut() {
-            *b ^= 0xff;
-        }
-    }
-
-    Ok(output)
+    let mut decoder = CcittDecoder::new(data, params)?;
+    decoder.decode_all(rows)
 }
-
-// ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn params_1d(columns: u32, rows: u32) -> CCITTFaxParams {
-        CCITTFaxParams {
-            k: 0,
-            columns,
-            rows,
-            end_of_line: false,
-            encoded_byte_align: false,
-            end_of_block: true,
-            black_is1: false,
-            damaged_rows_before_error: 0,
-        }
-    }
-
-    fn params_g4(columns: u32, rows: u32) -> CCITTFaxParams {
-        CCITTFaxParams {
-            k: -1,
-            columns,
-            rows,
-            end_of_line: false,
-            encoded_byte_align: false,
-            end_of_block: true,
-            black_is1: false,
-            damaged_rows_before_error: 0,
-        }
-    }
 
     // ── fill_bits ────────────────────────────────────────────────────────────
 
@@ -847,6 +671,22 @@ mod tests {
         assert_eq!(row[1], 0x0f); // upper nibble cleared
     }
 
+    #[test]
+    fn fill_bits_noop_when_start_equals_end() {
+        let mut row = [0xffu8; 1];
+        fill_bits(&mut row, 8, 4, 4);
+        assert_eq!(row[0], 0xff); // unchanged
+    }
+
+    #[test]
+    fn fill_bits_clamps_to_columns() {
+        let mut row = [0xffu8; 2];
+        fill_bits(&mut row, 8, 6, 16); // end clamped from 16 to 8
+        // bits 6-7 of byte 0 cleared; byte 1 untouched
+        assert_eq!(row[0], 0xfc);
+        assert_eq!(row[1], 0xff);
+    }
+
     // ── find_bit ─────────────────────────────────────────────────────────────
 
     #[test]
@@ -868,6 +708,221 @@ mod tests {
         let row = [0b1111_0000u8]; // white in bits 0-3, black in 4-7
         assert_eq!(find_bit(&row, 8, 0, false), 4); // first black at 4
         assert_eq!(find_bit(&row, 8, 4, true), 8); // no white after 4 → max
+    }
+
+    #[test]
+    fn find_bit_respects_start_pos() {
+        let row = [0b0000_0001u8]; // only bit 7 is white
+        assert_eq!(find_bit(&row, 8, 0, true), 7);
+        assert_eq!(find_bit(&row, 8, 8, true), 8); // start >= max → max
+    }
+
+    // ── find_b1_b2 ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn find_b1_b2_all_white_ref() {
+        let ref_row = [0xffu8; 1]; // all white
+        // a0=-1 white coding, ref all white → no opposite-color transition
+        let (b1, b2) = find_b1_b2(&ref_row, 8, -1, true);
+        assert_eq!((b1, b2), (8, 8)); // not found
+    }
+
+    #[test]
+    fn find_b1_b2_transition_at_midpoint() {
+        let ref_row = [0b1111_0000u8]; // white 0-3, black 4-7
+        // a0=-1 coding=white: first opposite (black) in ref at 4 → b1=4
+        // then next same-color (black) after b1 → no white → b2=8
+        let (b1, b2) = find_b1_b2(&ref_row, 8, -1, true);
+        assert_eq!(b1, 4);
+        assert_eq!(b2, 8);
+    }
+
+    // ── Test helpers ─────────────────────────────────────────────────────────
+
+    fn params_1d(columns: u32, rows: u32) -> CCITTFaxParams {
+        CCITTFaxParams {
+            k: 0,
+            columns,
+            rows,
+            ..Default::default()
+        }
+    }
+
+    fn params_g4(columns: u32, rows: u32) -> CCITTFaxParams {
+        CCITTFaxParams {
+            k: -1,
+            columns,
+            rows,
+            ..Default::default()
+        }
+    }
+
+    fn params_g3_2d(columns: u32, rows: u32) -> CCITTFaxParams {
+        CCITTFaxParams {
+            k: 1,
+            columns,
+            rows,
+            ..Default::default()
+        }
+    }
+
+    // ── get_run / decode_run_seq ──────────────────────────────────────────────
+
+    #[test]
+    fn decode_run_seq_white_run_8() {
+        // White run-8 = 5-bit code 10011 packed MSB-first → byte 0x98.
+        let data = [0x98u8];
+        let mut r = BitReader::new(&data);
+        let run = decode_run_seq(&mut r, true);
+        assert_eq!(run, Ok(8));
+    }
+
+    #[test]
+    fn decode_run_seq_black_run_2() {
+        // Black run-2 is at level 2 in BLACK_RUN_INS: code 0x03 (binary 11, 2 bits).
+        // Packed MSB-first: 1100_0000 = 0xC0.
+        let data = [0xC0u8];
+        let mut r = BitReader::new(&data);
+        let run = decode_run_seq(&mut r, false);
+        assert_eq!(run, Ok(2));
+    }
+
+    #[test]
+    fn decode_run_seq_truncated_returns_err() {
+        let data: &[u8] = &[];
+        let mut r = BitReader::new(data);
+        assert_eq!(
+            decode_run_seq(&mut r, true),
+            Err(CcittDecodeError::InvalidCode)
+        );
+    }
+
+    // ── skip_eol ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn skip_eol_present_12_bits() {
+        // 12-bit EOL = 000000000001 padded to 2 bytes: 0x00 0x10
+        let data = [0x00u8, 0x10u8];
+        let mut r = BitReader::new(&data);
+        skip_eol(&mut r);
+        assert_eq!(r.pos(), 12);
+    }
+
+    #[test]
+    fn skip_eol_absent_resets_position() {
+        // Starts with a 1-bit, which is fewer than 11 zeros → not an EOL.
+        let data = [0x80u8]; // 1000_0000
+        let mut r = BitReader::new(&data);
+        skip_eol(&mut r);
+        assert_eq!(r.pos(), 0); // reset: was only 1 bit consumed
+    }
+
+    // ── read_2d_mode ─────────────────────────────────────────────────────────
+
+    #[allow(clippy::arithmetic_side_effects)]
+    fn bits_to_bytes(bits: &[u8]) -> Vec<u8> {
+        let nbytes = bits.len().div_ceil(8);
+        let mut out = vec![0u8; nbytes];
+        for (i, &b) in bits.iter().enumerate() {
+            if b != 0 {
+                let byte_i = i / 8;
+                let bit_i = 7 - (i % 8);
+                if let Some(slot) = out.get_mut(byte_i) {
+                    *slot |= 1 << bit_i;
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn read_2d_mode_vertical_0() {
+        let data = bits_to_bytes(&[1]);
+        let mut r = BitReader::new(&data);
+        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::Vertical(0)));
+        assert_eq!(r.pos(), 1);
+    }
+
+    #[test]
+    fn read_2d_mode_vertical_plus1() {
+        let data = bits_to_bytes(&[0, 1, 1]);
+        let mut r = BitReader::new(&data);
+        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::Vertical(1)));
+        assert_eq!(r.pos(), 3);
+    }
+
+    #[test]
+    fn read_2d_mode_vertical_minus1() {
+        let data = bits_to_bytes(&[0, 1, 0]);
+        let mut r = BitReader::new(&data);
+        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::Vertical(-1)));
+    }
+
+    #[test]
+    fn read_2d_mode_horizontal() {
+        let data = bits_to_bytes(&[0, 0, 1, 0, 0, 0, 0, 0]); // 001 + padding
+        let mut r = BitReader::new(&data);
+        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::Horizontal));
+        assert_eq!(r.pos(), 3);
+    }
+
+    #[test]
+    fn read_2d_mode_pass() {
+        let data = bits_to_bytes(&[0, 0, 0, 1, 0, 0, 0, 0]); // 0001 + padding
+        let mut r = BitReader::new(&data);
+        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::Pass));
+        assert_eq!(r.pos(), 4);
+    }
+
+    #[test]
+    fn read_2d_mode_vertical_plus2() {
+        // 000011 1 → V(+2), code is 6 bits + 1 for direction = 7 bits total
+        let data = bits_to_bytes(&[0, 0, 0, 0, 1, 1, 1, 0]);
+        let mut r = BitReader::new(&data);
+        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::Vertical(2)));
+        assert_eq!(r.pos(), 6);
+    }
+
+    #[test]
+    fn read_2d_mode_vertical_minus2() {
+        // Codeword 000010: bit4=1, bit5=0 → V(-2)
+        let data = bits_to_bytes(&[0, 0, 0, 0, 1, 0, 0, 0]);
+        let mut r = BitReader::new(&data);
+        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::Vertical(-2)));
+    }
+
+    #[test]
+    fn read_2d_mode_vertical_plus3() {
+        // Codeword 0000011: bit4=0, bit5=1, bit6=1 → V(+3)
+        let data = bits_to_bytes(&[0, 0, 0, 0, 0, 1, 1, 0]);
+        let mut r = BitReader::new(&data);
+        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::Vertical(3)));
+        assert_eq!(r.pos(), 7);
+    }
+
+    #[test]
+    fn read_2d_mode_end_of_block() {
+        // 0000001 + 3 skipped = 10 bits consumed total
+        let data = bits_to_bytes(&[0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let mut r = BitReader::new(&data);
+        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::EndOfBlock));
+        assert_eq!(r.pos(), 10);
+    }
+
+    #[test]
+    fn read_2d_mode_extension() {
+        // 0000000 + 5 skipped = 12 bits consumed total
+        let data = bits_to_bytes(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let mut r = BitReader::new(&data);
+        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::Extension));
+        assert_eq!(r.pos(), 12);
+    }
+
+    #[test]
+    fn read_2d_mode_truncated_returns_none() {
+        let data: &[u8] = &[];
+        let mut r = BitReader::new(data);
+        assert_eq!(read_2d_mode(&mut r), None);
     }
 
     // ── Group 3 1D ───────────────────────────────────────────────────────────
@@ -918,14 +973,38 @@ mod tests {
         assert_eq!(out, [0x00]); // inverted: was 0xFF → 0x00
     }
 
-    // ── Group 4 empty stream ─────────────────────────────────────────────────
+    // ── Group 3 2D ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn decode_g3_2d_all_white_row() {
+        // Group 3 2D: tag bit=1 selects 1D encoding for the first row.
+        // Tag bit (1) + white run-8 code (10011) = 6 bits → 1_10011_00 = 0xCC
+        let data = [0xccu8];
+        let out = decode(&data, &params_g3_2d(8, 1)).expect("decode failed");
+        assert_eq!(out, [0xff]);
+    }
+
+    // ── Group 4 ──────────────────────────────────────────────────────────────
 
     #[test]
     fn decode_g4_empty_gives_empty() {
         let data: &[u8] = &[];
-        let out = decode(&data, &params_g4(8, 1)).expect("decode failed");
+        let out = decode(data, &params_g4(8, 1)).expect("decode failed");
         // No bits → skip_eol reads nothing → exhausted → no rows appended.
         assert_eq!(out.len(), 0);
+    }
+
+    // ── encoded_byte_align ───────────────────────────────────────────────────
+
+    #[test]
+    fn decode_byte_align_skips_zero_padding() {
+        // White run-8 = 5 bits (10011); with byte-align the 3 trailing zeros
+        // are skipped, and the second row should start on a byte boundary.
+        let data = [0x98u8, 0x98u8]; // two rows of all-white 8px, each 5 bits + 3 pad
+        let mut p = params_1d(8, 2);
+        p.encoded_byte_align = true;
+        let out = decode(&data, &p).expect("decode failed");
+        assert_eq!(out, [0xff, 0xff]); // two all-white rows
     }
 
     // ── Error cases ──────────────────────────────────────────────────────────
@@ -938,11 +1017,114 @@ mod tests {
     }
 
     #[test]
+    fn decode_zero_columns_error_is_zero_columns_variant() {
+        let mut p = params_1d(0, 1);
+        p.columns = 0;
+        let err = decode(&[], &p).unwrap_err();
+        assert!(matches!(err, CcittDecodeError::ZeroColumns));
+    }
+
+    #[test]
     fn decode_truncated_stream_returns_partial() {
         // 4 columns, 2 rows requested, but only 1 byte of data.
         let data = [0xf0u8]; // some bits
         let p = params_1d(4, 2);
         // Should not panic; returns whatever was decoded.
         let _ = decode(&data, &p).expect("decode should not error on truncation");
+    }
+
+    // ── Edge-case tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn decode_1d_multi_row_all_white() {
+        // Two all-white rows of 8 pixels each.
+        // White run-8 = 5 bits (10011). Two consecutive rows: 10011_10011_...
+        // First row: bits 0-4 = 10011, second row: bits 5-9 = 10011.
+        // Byte 0: 10011_100 = 0x9C, Byte 1: 11_000000 = 0xC0
+        let data = [0x9cu8, 0xc0u8];
+        let out = decode(&data, &params_1d(8, 2)).expect("decode failed");
+        assert_eq!(out, [0xff, 0xff]); // two all-white rows
+    }
+
+    #[test]
+    fn fill_bits_start_beyond_columns_is_noop() {
+        let mut row = [0xffu8; 2];
+        fill_bits(&mut row, 8, 10, 16); // start > columns → no-op
+        assert_eq!(row, [0xff, 0xff]);
+    }
+
+    #[test]
+    fn find_bit_large_row_uses_skip_path() {
+        // Create a row > 8 bytes so the 8-byte skip loop is exercised.
+        let mut row = vec![0xffu8; 16]; // all white (128 pixels)
+        // Place a single black pixel at position 100: byte 12, bit 4
+        if let Some(b) = row.get_mut(12) {
+            *b = 0xf7; // clear bit at position 100 (12*8 + 4 = 100, bit 4 = 0b1111_0111)
+        }
+        assert_eq!(find_bit(&row, 128, 0, false), 100);
+    }
+
+    #[test]
+    fn decode_1d_black_is1_with_g4() {
+        // Group 4 with empty data and black_is1.
+        let data: &[u8] = &[];
+        let mut p = params_g4(8, 1);
+        p.black_is1 = true;
+        let out = decode(data, &p).expect("decode failed");
+        assert_eq!(out.len(), 0); // no rows decoded from empty data
+    }
+
+    #[test]
+    fn clamp_to_usize_negative() {
+        assert_eq!(clamp_to_usize(-1), 0);
+        assert_eq!(clamp_to_usize(-100), 0);
+        assert_eq!(clamp_to_usize(i32::MIN), 0);
+    }
+
+    #[test]
+    fn clamp_to_usize_zero_and_positive() {
+        assert_eq!(clamp_to_usize(0), 0);
+        assert_eq!(clamp_to_usize(1), 1);
+        assert_eq!(clamp_to_usize(42), 42);
+    }
+
+    #[test]
+    fn ref_pixel_out_of_bounds_returns_white() {
+        let row = [0x00u8]; // all black
+        // Position beyond the row should return white.
+        assert!(ref_pixel(&row, 8));
+        assert!(ref_pixel(&row, 100));
+    }
+
+    #[test]
+    fn ref_pixel_reads_correct_bits() {
+        let row = [0b1010_0101u8];
+        assert!(ref_pixel(&row, 0)); // bit 0 = 1 (white)
+        assert!(!ref_pixel(&row, 1)); // bit 1 = 0 (black)
+        assert!(ref_pixel(&row, 2)); // bit 2 = 1 (white)
+        assert!(!ref_pixel(&row, 3)); // bit 3 = 0 (black)
+    }
+
+    #[test]
+    fn one_lead_pos_all_zero() {
+        assert_eq!(one_lead_pos(0), 8);
+    }
+
+    #[test]
+    fn one_lead_pos_msb_set() {
+        assert_eq!(one_lead_pos(0x80), 0);
+        assert_eq!(one_lead_pos(0xff), 0);
+    }
+
+    #[test]
+    fn one_lead_pos_lsb_only() {
+        assert_eq!(one_lead_pos(0x01), 7);
+    }
+
+    #[test]
+    fn ccitt_decode_error_converts_to_object_error() {
+        let ccitt_err = CcittDecodeError::ZeroColumns;
+        let obj_err: ObjectError = ccitt_err.into();
+        assert!(matches!(obj_err, ObjectError::DecompressionError(_)));
     }
 }

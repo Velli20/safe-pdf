@@ -1,4 +1,6 @@
+use crate::ccitt_fax_params::CCITTFaxParams;
 use crate::error::ObjectError;
+use crate::object_resolver::{ObjectResolver, PassthroughResolver};
 use crate::object_variant::ObjectVariant;
 use crate::{dictionary::Dictionary, filter::Filter};
 use std::borrow::Cow;
@@ -86,7 +88,8 @@ impl StreamObject {
                     data = Cow::Owned(decoded);
                 }
                 Filter::CCITTFaxDecode => {
-                    let params = ccitt_params_for_filter(&self.dictionary, filter_idx);
+                    let objects = PassthroughResolver;
+                    let params = ccitt_params_for_filter(&self.dictionary, filter_idx, &objects);
                     let decoded = Filter::decode_ccitt_fax(&data, &params)?;
                     data = Cow::Owned(decoded);
                 }
@@ -109,19 +112,25 @@ impl StreamObject {
 /// Per PDF spec §7.3.8.2, `/DecodeParms` is either a single dictionary (when
 /// there is one filter) or an array of dictionaries (one per filter). Values
 /// are always inline objects, so no object resolver is needed.
-fn ccitt_params_for_filter(dict: &Dictionary, filter_idx: usize) -> crate::ccitt::CCITTFaxParams {
+fn ccitt_params_for_filter(
+    dict: &Dictionary,
+    filter_idx: usize,
+    objects: &dyn ObjectResolver,
+) -> CCITTFaxParams {
     match dict.get("DecodeParms") {
-        Some(ObjectVariant::Dictionary(d)) => crate::ccitt::CCITTFaxParams::from_dictionary(d),
+        Some(ObjectVariant::Dictionary(d)) => {
+            CCITTFaxParams::from_dictionary(d, objects).unwrap_or_default()
+        }
         Some(ObjectVariant::Array(arr)) => arr
             .get(filter_idx)
             .and_then(|v| {
                 if let ObjectVariant::Dictionary(d) = v {
-                    Some(crate::ccitt::CCITTFaxParams::from_dictionary(d))
+                    Some(CCITTFaxParams::from_dictionary(d, objects).unwrap_or_default())
                 } else {
                     None
                 }
             })
             .unwrap_or_default(),
-        _ => crate::ccitt::CCITTFaxParams::default(),
+        _ => CCITTFaxParams::default(),
     }
 }

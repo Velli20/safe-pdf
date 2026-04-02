@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
 use crate::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    ccitt_fax_params::CCITTFaxParams, dictionary::Dictionary, error::ObjectError,
+    object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
 /// Represents the compression filter applied to a stream or image in a PDF.
@@ -206,9 +206,9 @@ impl Filter {
     /// contains an invalid bit pattern.
     pub fn decode_ccitt_fax(
         stream_data: &[u8],
-        params: &crate::ccitt::CCITTFaxParams,
+        params: &CCITTFaxParams,
     ) -> Result<Vec<u8>, ObjectError> {
-        crate::ccitt::decode(stream_data, params)
+        Ok(crate::ccitt::decode(stream_data, params)?)
     }
 
     /// Decodes ASCII85Decode-encoded stream data.

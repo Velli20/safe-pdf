@@ -292,7 +292,7 @@ impl ObjectVariant {
             .zip(values.iter())
             .try_for_each(|(out, v)| {
                 *out = v.try_number(objects)?;
-                Ok(())
+                Ok::<(), ObjectError>(())
             })?;
 
         Ok(result)

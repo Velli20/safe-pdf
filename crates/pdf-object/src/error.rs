@@ -36,3 +36,9 @@ pub enum ObjectError {
     #[error("Error while decoding stream: {0}")]
     DecompressionError(String),
 }
+
+impl From<crate::ccitt::CcittDecodeError> for ObjectError {
+    fn from(err: crate::ccitt::CcittDecodeError) -> Self {
+        ObjectError::DecompressionError(err.to_string())
+    }
+}

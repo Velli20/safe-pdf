@@ -1,4 +1,7 @@
+mod bitreader;
 pub mod ccitt;
+mod ccitt_fax_params;
+mod ccitt_tables;
 pub mod cross_reference_table;
 pub mod dictionary;
 pub mod error;
