@@ -52,8 +52,6 @@ pub enum CcittDecodeError {
     ObjectError(#[from] ObjectError),
 }
 
-// ─── Low-level helpers ───────────────────────────────────────────────────────
-
 /// Returns the MSB-first position of the leading set bit of `byte`
 /// (0 = MSB, 7 = LSB).  Returns 8 when `byte == 0`.
 #[inline]
@@ -387,8 +385,6 @@ fn read_2d_mode(reader: &mut BitReader<'_>) -> Option<TwoDMode> {
     }
 }
 
-// ─── Row decoders ────────────────────────────────────────────────────────────
-
 /// Internal decoder state for a single CCITTFaxDecode stream.
 ///
 /// Encapsulates the bit reader, row buffers, and configuration needed to
@@ -402,6 +398,9 @@ struct CcittDecoder<'a> {
     end_of_line: bool,
     byte_align: bool,
     black_is1: bool,
+    /// Maximum number of damaged rows before aborting.
+    /// `0` means tolerate all damaged rows (PDF spec §7.4.6).
+    damaged_rows_before_error: u32,
 }
 
 impl<'a> CcittDecoder<'a> {
@@ -425,17 +424,23 @@ impl<'a> CcittDecoder<'a> {
             end_of_line: params.end_of_line,
             byte_align: params.encoded_byte_align,
             black_is1: params.black_is1,
+            damaged_rows_before_error: params.damaged_rows_before_error,
         })
     }
 
     /// Decode all rows and return the concatenated output buffer.
     ///
     /// The caller specifies `max_rows`; `0` means decode until data exhaustion.
+    /// Row-level decode errors (truncated data, invalid codes, etc.) are treated
+    /// as damaged rows: the partial row is included in the output and decoding
+    /// continues.  If `damaged_rows_before_error` is non-zero and the number of
+    /// damaged rows exceeds that limit, the error is returned.
     fn decode_all(&mut self, max_rows: usize) -> Result<Vec<u8>, CcittDecodeError> {
         let row_bytes = self.columns.div_ceil(8);
         let mut output: Vec<u8> =
             Vec::with_capacity(max_rows.saturating_mul(row_bytes).max(row_bytes * 16));
         let mut decoded_rows: usize = 0;
+        let mut damaged_rows: u32 = 0;
 
         loop {
             if max_rows > 0 && decoded_rows >= max_rows {
@@ -449,7 +454,31 @@ impl<'a> CcittDecoder<'a> {
             }
 
             self.row_buf.fill(0xff);
-            self.decode_next_row()?;
+
+            if let Err(e) = self.decode_next_row() {
+                // Row-level errors: include partial row, then decide whether to
+                // continue or abort based on damaged_rows_before_error.
+                match e {
+                    CcittDecodeError::UnexpectedEof => {
+                        // Stream ended mid-row — include partial data, stop.
+                        output.extend_from_slice(&self.row_buf);
+                        break;
+                    }
+                    CcittDecodeError::ObjectError(_) | CcittDecodeError::ZeroColumns => {
+                        return Err(e);
+                    }
+                    _ => {
+                        // InvalidCode, MonotonicityViolated, UnknownExtensionCode, etc.
+                        damaged_rows = damaged_rows.saturating_add(1);
+                        if self.damaged_rows_before_error > 0
+                            && damaged_rows > self.damaged_rows_before_error
+                        {
+                            return Err(e);
+                        }
+                        // Include whatever was decoded for this row and continue.
+                    }
+                }
+            }
 
             if self.end_of_line {
                 skip_eol(&mut self.reader);
@@ -548,12 +577,17 @@ impl<'a> CcittDecoder<'a> {
             }
 
             let (b1, b2) = find_b1_b2(&self.ref_row, self.columns, a0, a0color);
+            let mode = read_2d_mode(&mut self.reader).ok_or(CcittDecodeError::UnexpectedEof)?;
 
-            match read_2d_mode(&mut self.reader).ok_or(CcittDecodeError::UnexpectedEof)? {
-                TwoDMode::VerticalRight(delta) => {
-                    let a1 = b1
-                        .checked_add(delta)
-                        .ok_or(CcittDecodeError::MonotonicityViolated)?;
+            match mode {
+                TwoDMode::VerticalRight(delta) | TwoDMode::VerticalLeft(delta) => {
+                    let a1 = if let TwoDMode::VerticalRight(delta) = mode {
+                        // Overflow → treat as end-of-row (best-effort).
+                        b1.checked_add(delta).unwrap_or(self.columns)
+                    } else {
+                        // Underflow → clamp to 0 (best-effort).
+                        b1.saturating_sub(delta)
+                    };
                     if !a0color {
                         fill_bits(&mut self.row_buf, self.columns, a0.unwrap_or(0), a1);
                     }
@@ -561,28 +595,11 @@ impl<'a> CcittDecoder<'a> {
                         return Ok(());
                     }
                     if a0.is_some_and(|pos| pos >= a1) {
-                        return Err(CcittDecodeError::MonotonicityViolated);
-                    }
-                    a0 = Some(a1);
-                    a0color = !a0color;
-                }
-                TwoDMode::VerticalLeft(delta) => {
-                    let a1 = b1
-                        .checked_sub(delta)
-                        .ok_or(CcittDecodeError::MonotonicityViolated)?;
-                    if !a0color {
-                        fill_bits(&mut self.row_buf, self.columns, a0.unwrap_or(0), a1);
-                    }
-                    if a1 >= self.columns {
                         return Ok(());
                     }
-                    if a0.is_some_and(|pos| pos >= a1) {
-                        return Err(CcittDecodeError::MonotonicityViolated);
-                    }
                     a0 = Some(a1);
                     a0color = !a0color;
                 }
-
                 TwoDMode::Horizontal => {
                     let run_len1 = decode_run_seq(&mut self.reader, a0color)?;
                     let (a0_fill, a1) = match a0 {
@@ -604,7 +621,6 @@ impl<'a> CcittDecoder<'a> {
                         return Ok(());
                     }
                 }
-
                 TwoDMode::Pass => {
                     if !a0color {
                         fill_bits(&mut self.row_buf, self.columns, a0.unwrap_or(0), b2);
@@ -627,8 +643,6 @@ impl<'a> CcittDecoder<'a> {
     }
 }
 
-// ─── Public API ──────────────────────────────────────────────────────────────
-
 /// Decode a CCITTFaxDecode-compressed byte stream.
 ///
 /// Supports Group 3 1D (`K = 0`), Group 3 2D (`K > 0`), and Group 4 /
@@ -649,8 +663,6 @@ pub fn decode(data: &[u8], params: &CCITTFaxParams) -> Result<Vec<u8>, CcittDeco
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── fill_bits ────────────────────────────────────────────────────────────
 
     #[test]
     fn fill_bits_full_byte() {
@@ -696,8 +708,6 @@ mod tests {
         assert_eq!(row[0], 0xfc);
         assert_eq!(row[1], 0xff);
     }
-
-    // ── find_bit ─────────────────────────────────────────────────────────────
 
     #[test]
     fn find_bit_all_white() {
@@ -1122,5 +1132,46 @@ mod tests {
         let ccitt_err = CcittDecodeError::ZeroColumns;
         let obj_err: ObjectError = ccitt_err.into();
         assert!(matches!(obj_err, ObjectError::DecompressionError(_)));
+    }
+
+    // ── Lenient decoding / damaged-row tolerance ─────────────────────────────
+
+    #[test]
+    fn decode_g4_regression_is_lenient() {
+        // Two consecutive V(-1) codes on an all-white reference row cause
+        // a monotonicity regression (a0=7 >= a1=7).  The decoder should
+        // end the row early instead of returning an error.
+        //
+        // V(-1) = 010 (3 bits).  Two in a row: 010_010_00 → 0x48.
+        let data = [0x48u8];
+        let out = decode(&data, &params_g4(8, 1)).expect("regression should be lenient");
+        assert_eq!(out, [0xff]); // partial all-white row
+    }
+
+    #[test]
+    fn decode_g4_extension_code_tolerated() {
+        // V(-1) moves a0 to 7, then an Extension code (0000000 + 5 padding
+        // bits) triggers UnknownExtensionCode.  With default
+        // damaged_rows_before_error = 0 (unlimited), the partial row is
+        // returned instead of an error.
+        //
+        // V(-1) = 010, Extension = 0000000 + 5 bits = 15 bits total.
+        // Bits: 010_0000000_00000_0 → [0x40, 0x00].
+        let data = [0x40u8, 0x00u8];
+        let out = decode(&data, &params_g4(8, 1)).expect("extension should be tolerated");
+        assert_eq!(out, [0xff]); // partial all-white row
+    }
+
+    #[test]
+    fn decode_g4_damaged_rows_exceeds_limit() {
+        // Two rows both triggering UnknownExtensionCode.
+        // V(-1) = 010, Extension = 0000000 + 5 padding = 15 bits per row.
+        // With byte alignment, each row pads to 16 bits (2 bytes).
+        let data = [0x40u8, 0x00, 0x40, 0x00];
+        let mut p = params_g4(8, 2);
+        p.encoded_byte_align = true;
+        p.damaged_rows_before_error = 1;
+        let err = decode(&data, &p).unwrap_err();
+        assert!(matches!(err, CcittDecodeError::UnknownExtensionCode));
     }
 }
