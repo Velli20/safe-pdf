@@ -10,7 +10,7 @@ pub struct CCITTFaxParams {
     /// Width of the image in pixels. Default: `1728`.
     pub columns: u32,
     /// Number of rows. `0` means decode until end-of-block / data exhaustion. Default: `0`.
-    pub rows: u32,
+    pub rows: usize,
     /// Whether EOL bit patterns appear before each row. Default: `false`.
     pub end_of_line: bool,
     /// Whether each EOL code begins on a byte boundary. Default: `false`.
@@ -27,8 +27,8 @@ impl Default for CCITTFaxParams {
     fn default() -> Self {
         Self {
             k: 0,
-            columns: 1728,
-            rows: 0,
+            columns: Self::DEFFAULT_IMAGE_WIDTH,
+            rows: Self::DEFAULT_NUMBER_OF_ROWS,
             end_of_line: false,
             encoded_byte_align: false,
             end_of_block: true,
@@ -39,6 +39,11 @@ impl Default for CCITTFaxParams {
 }
 
 impl CCITTFaxParams {
+    /// The default image width for CCITT-encoded images, used when the `/Columns` entry is missing or invalid.
+    const DEFFAULT_IMAGE_WIDTH: u32 = 1728;
+    /// The default number of rows for CCITT-encoded images, used when the `/Rows` entry is missing or invalid.
+    const DEFAULT_NUMBER_OF_ROWS: usize = 0;
+
     /// Build a [`CCITTFaxParams`] from a PDF `/DecodeParms` dictionary.
     ///
     /// Every key is optional; missing or invalid values fall back to the PDF
@@ -57,7 +62,7 @@ impl CCITTFaxParams {
             p.columns = obj.try_number::<u32>(objects)?;
         }
         if let Some(obj) = dict.get("Rows") {
-            p.rows = obj.try_number::<u32>(objects)?;
+            p.rows = obj.try_number::<usize>(objects)?;
         }
         if let Some(obj) = dict.get("EndOfLine") {
             p.end_of_line = obj.try_boolean(objects)?;

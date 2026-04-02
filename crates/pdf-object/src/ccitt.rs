@@ -69,10 +69,16 @@ fn ref_pixel(row: &[u8], pos: usize) -> bool {
         .is_none_or(|&b| (b >> (7 - pos % 8)) & 1 != 0)
 }
 
-/// Clamp a signed position to `usize`, treating negative values as zero.
+/// Apply a signed vertical delta to a `usize` position.
+///
+/// Returns `None` on underflow (negative result) or overflow.
 #[inline]
-fn clamp_to_usize(val: i32) -> usize {
-    usize::try_from(val.max(0)).unwrap_or(0)
+fn apply_delta(base: usize, delta: i32) -> Option<usize> {
+    if delta >= 0 {
+        base.checked_add(usize::try_from(delta).ok()?)
+    } else {
+        base.checked_sub(usize::try_from(delta.unsigned_abs()).ok()?)
+    }
 }
 
 /// Set pixels in `[start, end)` to black (0) in `row`.
@@ -173,19 +179,18 @@ fn find_bit(row: &[u8], max_pos: usize, start_pos: usize, bit: bool) -> usize {
 
 /// Locate reference pixels b1 and b2 for the 2D row decoder.
 ///
-/// * `a0` – current position on the coding line (−1 = before first pixel).
+/// * `a0` – current position on the coding line (`None` = before first pixel).
 /// * `a0color` – color of the current coding line at `a0`.
 ///
 /// Returns `(b1, b2)` where each may equal `columns` when not found.
-fn find_b1_b2(ref_row: &[u8], columns: usize, a0: i32, a0color: bool) -> (usize, usize) {
-    // Color of the reference line at position a0 (white when a0 < 0).
-    let first_bit = if a0 < 0 {
-        true
-    } else {
-        ref_pixel(ref_row, clamp_to_usize(a0))
+fn find_b1_b2(ref_row: &[u8], columns: usize, a0: Option<usize>, a0color: bool) -> (usize, usize) {
+    // Color of the reference line at position a0 (white when before first pixel).
+    let first_bit = match a0 {
+        None => true,
+        Some(pos) => ref_pixel(ref_row, pos),
     };
 
-    let search_start = clamp_to_usize(a0.saturating_add(1));
+    let search_start = a0.map_or(0, |pos| pos.saturating_add(1));
     let mut b1 = find_bit(ref_row, columns, search_start, !first_bit);
 
     if b1 >= columns {
@@ -248,13 +253,15 @@ fn get_run(ins: &[u8], reader: &mut BitReader<'_>) -> Option<u16> {
 ///
 /// Returns [`CcittDecodeError::InvalidCode`] when no matching Huffman codeword
 /// is found (including cases where the stream is exhausted mid-code).
-fn decode_run_seq(reader: &mut BitReader<'_>, color: bool) -> Result<i32, CcittDecodeError> {
+fn decode_run_seq(reader: &mut BitReader<'_>, color: bool) -> Result<usize, CcittDecodeError> {
     let ins = if color { WHITE_RUN_INS } else { BLACK_RUN_INS };
-    let mut total: i32 = 0;
+    let mut total: usize = 0;
+    const CCITT_TERMINATING_RUN_LIMIT: usize = 64;
+
     loop {
-        let run = i32::from(get_run(ins, reader).ok_or(CcittDecodeError::InvalidCode)?);
+        let run = usize::from(get_run(ins, reader).ok_or(CcittDecodeError::InvalidCode)?);
         total = total.saturating_add(run);
-        if run < 64 {
+        if run < CCITT_TERMINATING_RUN_LIMIT {
             return Ok(total);
         }
         // Makeup code: keep reading for the terminating code.
@@ -389,7 +396,6 @@ struct CcittDecoder<'a> {
     ref_row: Vec<u8>,
     row_buf: Vec<u8>,
     columns: usize,
-    columns_i32: i32,
     k: i32,
     end_of_line: bool,
     byte_align: bool,
@@ -414,7 +420,6 @@ impl<'a> CcittDecoder<'a> {
             ref_row: vec![0xff; row_bytes],
             row_buf: vec![0xff; row_bytes],
             columns,
-            columns_i32: i32::try_from(columns).unwrap_or(i32::MAX),
             k: params.k,
             end_of_line: params.end_of_line,
             byte_align: params.encoded_byte_align,
@@ -510,10 +515,7 @@ impl<'a> CcittDecoder<'a> {
                 return Err(CcittDecodeError::UnexpectedEof);
             }
 
-            let run_len = match decode_run_seq(&mut self.reader, color) {
-                Ok(r) => clamp_to_usize(r),
-                Err(_) => return Err(CcittDecodeError::InvalidCode),
-            };
+            let run_len = decode_run_seq(&mut self.reader, color)?;
 
             if !color {
                 fill_bits(
@@ -536,7 +538,7 @@ impl<'a> CcittDecoder<'a> {
     ///
     /// `row_buf` must be pre-filled with `0xFF` (all white).
     fn decode_2d_row(&mut self) -> Result<(), CcittDecodeError> {
-        let mut a0: i32 = -1;
+        let mut a0: Option<usize> = None;
         let mut a0color = true; // white
 
         loop {
@@ -548,61 +550,51 @@ impl<'a> CcittDecoder<'a> {
 
             match read_2d_mode(&mut self.reader).ok_or(CcittDecodeError::UnexpectedEof)? {
                 TwoDMode::Vertical(delta) => {
-                    let a1 = i32::try_from(b1).unwrap_or(i32::MAX) + delta;
+                    let a1 =
+                        apply_delta(b1, delta).ok_or(CcittDecodeError::MonotonicityViolated)?;
                     if !a0color {
-                        fill_bits(
-                            &mut self.row_buf,
-                            self.columns,
-                            clamp_to_usize(a0),
-                            clamp_to_usize(a1),
-                        );
+                        fill_bits(&mut self.row_buf, self.columns, a0.unwrap_or(0), a1);
                     }
-                    if a1 >= self.columns_i32 {
+                    if a1 >= self.columns {
                         return Ok(());
                     }
-                    if a0 >= a1 {
+                    if a0.is_some_and(|pos| pos >= a1) {
                         return Err(CcittDecodeError::MonotonicityViolated);
                     }
-                    a0 = a1;
+                    a0 = Some(a1);
                     a0color = !a0color;
                 }
 
                 TwoDMode::Horizontal => {
-                    let mut run_len1 = decode_run_seq(&mut self.reader, a0color)?;
-                    if a0 < 0 {
-                        run_len1 += 1;
-                    }
-                    let a0s = clamp_to_usize(a0);
-                    let a1 = a0.max(0) + run_len1;
+                    let run_len1 = decode_run_seq(&mut self.reader, a0color)?;
+                    let (a0_fill, a1) = match a0 {
+                        None => (0, run_len1.saturating_add(1)),
+                        Some(pos) => (pos, pos.saturating_add(run_len1)),
+                    };
                     if !a0color {
-                        fill_bits(&mut self.row_buf, self.columns, a0s, clamp_to_usize(a1));
+                        fill_bits(&mut self.row_buf, self.columns, a0_fill, a1);
                     }
 
                     let run_len2 = decode_run_seq(&mut self.reader, !a0color)?;
-                    let a2 = a1 + run_len2;
+                    let a2 = a1.saturating_add(run_len2);
                     if a0color {
-                        fill_bits(
-                            &mut self.row_buf,
-                            self.columns,
-                            clamp_to_usize(a1),
-                            clamp_to_usize(a2),
-                        );
+                        fill_bits(&mut self.row_buf, self.columns, a1, a2);
                     }
 
-                    a0 = a2;
-                    if a0 >= self.columns_i32 {
+                    a0 = Some(a2);
+                    if a2 >= self.columns {
                         return Ok(());
                     }
                 }
 
                 TwoDMode::Pass => {
                     if !a0color {
-                        fill_bits(&mut self.row_buf, self.columns, clamp_to_usize(a0), b2);
+                        fill_bits(&mut self.row_buf, self.columns, a0.unwrap_or(0), b2);
                     }
                     if b2 >= self.columns {
                         return Ok(());
                     }
-                    a0 = i32::try_from(b2).unwrap_or(i32::MAX);
+                    a0 = Some(b2);
                 }
 
                 TwoDMode::EndOfBlock => {
@@ -722,24 +714,24 @@ mod tests {
     #[test]
     fn find_b1_b2_all_white_ref() {
         let ref_row = [0xffu8; 1]; // all white
-        // a0=-1 white coding, ref all white → no opposite-color transition
-        let (b1, b2) = find_b1_b2(&ref_row, 8, -1, true);
+        // a0=None (before first pixel), white coding, ref all white → no opposite-color transition
+        let (b1, b2) = find_b1_b2(&ref_row, 8, None, true);
         assert_eq!((b1, b2), (8, 8)); // not found
     }
 
     #[test]
     fn find_b1_b2_transition_at_midpoint() {
         let ref_row = [0b1111_0000u8]; // white 0-3, black 4-7
-        // a0=-1 coding=white: first opposite (black) in ref at 4 → b1=4
+        // a0=None coding=white: first opposite (black) in ref at 4 → b1=4
         // then next same-color (black) after b1 → no white → b2=8
-        let (b1, b2) = find_b1_b2(&ref_row, 8, -1, true);
+        let (b1, b2) = find_b1_b2(&ref_row, 8, None, true);
         assert_eq!(b1, 4);
         assert_eq!(b2, 8);
     }
 
     // ── Test helpers ─────────────────────────────────────────────────────────
 
-    fn params_1d(columns: u32, rows: u32) -> CCITTFaxParams {
+    fn params_1d(columns: u32, rows: usize) -> CCITTFaxParams {
         CCITTFaxParams {
             k: 0,
             columns,
@@ -748,7 +740,7 @@ mod tests {
         }
     }
 
-    fn params_g4(columns: u32, rows: u32) -> CCITTFaxParams {
+    fn params_g4(columns: u32, rows: usize) -> CCITTFaxParams {
         CCITTFaxParams {
             k: -1,
             columns,
@@ -757,7 +749,7 @@ mod tests {
         }
     }
 
-    fn params_g3_2d(columns: u32, rows: u32) -> CCITTFaxParams {
+    fn params_g3_2d(columns: u32, rows: usize) -> CCITTFaxParams {
         CCITTFaxParams {
             k: 1,
             columns,
@@ -1072,20 +1064,6 @@ mod tests {
         p.black_is1 = true;
         let out = decode(data, &p).expect("decode failed");
         assert_eq!(out.len(), 0); // no rows decoded from empty data
-    }
-
-    #[test]
-    fn clamp_to_usize_negative() {
-        assert_eq!(clamp_to_usize(-1), 0);
-        assert_eq!(clamp_to_usize(-100), 0);
-        assert_eq!(clamp_to_usize(i32::MIN), 0);
-    }
-
-    #[test]
-    fn clamp_to_usize_zero_and_positive() {
-        assert_eq!(clamp_to_usize(0), 0);
-        assert_eq!(clamp_to_usize(1), 1);
-        assert_eq!(clamp_to_usize(42), 42);
     }
 
     #[test]
