@@ -69,18 +69,6 @@ fn ref_pixel(row: &[u8], pos: usize) -> bool {
         .is_none_or(|&b| (b >> (7 - pos % 8)) & 1 != 0)
 }
 
-/// Apply a signed vertical delta to a `usize` position.
-///
-/// Returns `None` on underflow (negative result) or overflow.
-#[inline]
-fn apply_delta(base: usize, delta: i32) -> Option<usize> {
-    if delta >= 0 {
-        base.checked_add(usize::try_from(delta).ok()?)
-    } else {
-        base.checked_sub(usize::try_from(delta.unsigned_abs()).ok()?)
-    }
-}
-
 /// Set pixels in `[start, end)` to black (0) in `row`.
 /// `row` must be at least `(columns + 7) / 8` bytes long.
 fn fill_bits(row: &mut [u8], columns: usize, start: usize, end: usize) {
@@ -297,8 +285,10 @@ fn skip_eol(reader: &mut BitReader<'_>) {
 /// the main dispatch loop inside [`decode_2d_row`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TwoDMode {
-    /// Vertical mode: `a1 = b1 + delta` where `delta ∈ {−3, −2, −1, 0, 1, 2, 3}`.
-    Vertical(i32),
+    /// Vertical-right mode: `a1 = b1 + delta` where `delta ∈ {0, 1, 2, 3}`.
+    VerticalRight(usize),
+    /// Vertical-left mode: `a1 = b1 − delta` where `delta ∈ {1, 2, 3}`.
+    VerticalLeft(usize),
     /// Horizontal mode: two explicit run-length sequences follow in the bit stream.
     Horizontal,
     /// Pass mode: the coding line "passes" b2; advance `a0` to `b2` without changing color.
@@ -338,14 +328,18 @@ fn read_2d_mode(reader: &mut BitReader<'_>) -> Option<TwoDMode> {
     //   0000000    → Extension        (+ 5 padding bits consumed here)
 
     if reader.next_bit()? {
-        return Some(TwoDMode::Vertical(0)); // 1
+        return Some(TwoDMode::VerticalRight(0)); // 1
     }
     let bit1 = reader.next_bit()?;
     let bit2 = reader.next_bit()?;
 
     if bit1 {
         // 01x → V(+1) or V(-1)
-        return Some(TwoDMode::Vertical(if bit2 { 1 } else { -1 }));
+        return Some(if bit2 {
+            TwoDMode::VerticalRight(1)
+        } else {
+            TwoDMode::VerticalLeft(1)
+        });
     }
     if bit2 {
         // 001 → H mode
@@ -363,12 +357,20 @@ fn read_2d_mode(reader: &mut BitReader<'_>) -> Option<TwoDMode> {
 
     if bit4 {
         // 000011 x → V(+2) or V(-2)
-        return Some(TwoDMode::Vertical(if bit5 { 2 } else { -2 }));
+        return Some(if bit5 {
+            TwoDMode::VerticalRight(2)
+        } else {
+            TwoDMode::VerticalLeft(2)
+        });
     }
     if bit5 {
         // 0000010 x → V(-3) or V(+3)
         let bit6 = reader.next_bit()?;
-        return Some(TwoDMode::Vertical(if bit6 { 3 } else { -3 }));
+        return Some(if bit6 {
+            TwoDMode::VerticalRight(3)
+        } else {
+            TwoDMode::VerticalLeft(3)
+        });
     }
 
     // 000000 x
@@ -409,17 +411,16 @@ impl<'a> CcittDecoder<'a> {
     ///
     /// Returns [`CcittDecodeError::ZeroColumns`] if `params.columns` is zero.
     fn new(data: &'a [u8], params: &CCITTFaxParams) -> Result<Self, CcittDecodeError> {
-        let columns = usize::try_from(params.columns).unwrap_or(0);
-        if columns == 0 {
+        if params.columns == 0 {
             return Err(CcittDecodeError::ZeroColumns);
         }
-        let row_bytes = columns.div_ceil(8);
+        let row_bytes = params.columns.div_ceil(8);
 
         Ok(Self {
             reader: BitReader::new(data),
             ref_row: vec![0xff; row_bytes],
             row_buf: vec![0xff; row_bytes],
-            columns,
+            columns: params.columns,
             k: params.k,
             end_of_line: params.end_of_line,
             byte_align: params.encoded_byte_align,
@@ -549,9 +550,26 @@ impl<'a> CcittDecoder<'a> {
             let (b1, b2) = find_b1_b2(&self.ref_row, self.columns, a0, a0color);
 
             match read_2d_mode(&mut self.reader).ok_or(CcittDecodeError::UnexpectedEof)? {
-                TwoDMode::Vertical(delta) => {
-                    let a1 =
-                        apply_delta(b1, delta).ok_or(CcittDecodeError::MonotonicityViolated)?;
+                TwoDMode::VerticalRight(delta) => {
+                    let a1 = b1
+                        .checked_add(delta)
+                        .ok_or(CcittDecodeError::MonotonicityViolated)?;
+                    if !a0color {
+                        fill_bits(&mut self.row_buf, self.columns, a0.unwrap_or(0), a1);
+                    }
+                    if a1 >= self.columns {
+                        return Ok(());
+                    }
+                    if a0.is_some_and(|pos| pos >= a1) {
+                        return Err(CcittDecodeError::MonotonicityViolated);
+                    }
+                    a0 = Some(a1);
+                    a0color = !a0color;
+                }
+                TwoDMode::VerticalLeft(delta) => {
+                    let a1 = b1
+                        .checked_sub(delta)
+                        .ok_or(CcittDecodeError::MonotonicityViolated)?;
                     if !a0color {
                         fill_bits(&mut self.row_buf, self.columns, a0.unwrap_or(0), a1);
                     }
@@ -731,7 +749,7 @@ mod tests {
 
     // ── Test helpers ─────────────────────────────────────────────────────────
 
-    fn params_1d(columns: u32, rows: usize) -> CCITTFaxParams {
+    fn params_1d(columns: usize, rows: usize) -> CCITTFaxParams {
         CCITTFaxParams {
             k: 0,
             columns,
@@ -740,7 +758,7 @@ mod tests {
         }
     }
 
-    fn params_g4(columns: u32, rows: usize) -> CCITTFaxParams {
+    fn params_g4(columns: usize, rows: usize) -> CCITTFaxParams {
         CCITTFaxParams {
             k: -1,
             columns,
@@ -749,7 +767,7 @@ mod tests {
         }
     }
 
-    fn params_g3_2d(columns: u32, rows: usize) -> CCITTFaxParams {
+    fn params_g3_2d(columns: usize, rows: usize) -> CCITTFaxParams {
         CCITTFaxParams {
             k: 1,
             columns,
@@ -831,7 +849,7 @@ mod tests {
     fn read_2d_mode_vertical_0() {
         let data = bits_to_bytes(&[1]);
         let mut r = BitReader::new(&data);
-        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::Vertical(0)));
+        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::VerticalRight(0)));
         assert_eq!(r.pos(), 1);
     }
 
@@ -839,7 +857,7 @@ mod tests {
     fn read_2d_mode_vertical_plus1() {
         let data = bits_to_bytes(&[0, 1, 1]);
         let mut r = BitReader::new(&data);
-        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::Vertical(1)));
+        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::VerticalRight(1)));
         assert_eq!(r.pos(), 3);
     }
 
@@ -847,7 +865,7 @@ mod tests {
     fn read_2d_mode_vertical_minus1() {
         let data = bits_to_bytes(&[0, 1, 0]);
         let mut r = BitReader::new(&data);
-        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::Vertical(-1)));
+        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::VerticalLeft(1)));
     }
 
     #[test]
@@ -871,7 +889,7 @@ mod tests {
         // 000011 1 → V(+2), code is 6 bits + 1 for direction = 7 bits total
         let data = bits_to_bytes(&[0, 0, 0, 0, 1, 1, 1, 0]);
         let mut r = BitReader::new(&data);
-        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::Vertical(2)));
+        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::VerticalRight(2)));
         assert_eq!(r.pos(), 6);
     }
 
@@ -880,7 +898,7 @@ mod tests {
         // Codeword 000010: bit4=1, bit5=0 → V(-2)
         let data = bits_to_bytes(&[0, 0, 0, 0, 1, 0, 0, 0]);
         let mut r = BitReader::new(&data);
-        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::Vertical(-2)));
+        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::VerticalLeft(2)));
     }
 
     #[test]
@@ -888,7 +906,7 @@ mod tests {
         // Codeword 0000011: bit4=0, bit5=1, bit6=1 → V(+3)
         let data = bits_to_bytes(&[0, 0, 0, 0, 0, 1, 1, 0]);
         let mut r = BitReader::new(&data);
-        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::Vertical(3)));
+        assert_eq!(read_2d_mode(&mut r), Some(TwoDMode::VerticalRight(3)));
         assert_eq!(r.pos(), 7);
     }
 
