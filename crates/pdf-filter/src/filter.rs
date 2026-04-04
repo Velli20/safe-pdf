@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::fmt;
 
-use crate::{ccitt::CcittDecodeError, ccitt_fax_params::CCITTFaxParams, error::FilterError};
+use crate::{ccitt_fax_params::CCITTFaxParams, error::FilterError};
 
 use pdf_object::{
     dictionary::Dictionary,
@@ -82,6 +82,18 @@ impl fmt::Display for Filter {
     }
 }
 
+/// Per-filter decoded parameters extracted from `/DecodeParms`.
+///
+/// Each variant holds the strongly-typed parameters for one filter in the
+/// chain.  Variants are added as new filters gain parameter support.
+#[derive(Debug, Clone)]
+pub(crate) enum DecodeParms {
+    /// No parameters needed or provided for this filter.
+    None,
+    /// Parameters for the `CCITTFaxDecode` filter.
+    CcittFax(CCITTFaxParams),
+}
+
 /// Methods for parsing the `/Filter` entry from a PDF dictionary.
 impl Filter {
     const KEY: &'static str = "Filter";
@@ -130,7 +142,7 @@ impl Filter {
     ///
     /// Returns [`FilterError::Decompression`] if the zlib decompression fails,
     /// which can happen if the data is corrupted or not valid zlib-compressed data.
-    pub fn decode_flate(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
+    fn decode_flate(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
         let mut decoder = flate2::read::ZlibDecoder::new(stream_data);
         let mut decoded = Vec::new();
 
@@ -149,7 +161,7 @@ impl Filter {
     ///
     /// Returns [`FilterError::Decompression`] if the JPEG 2000 decoding fails,
     /// which can happen if the data is corrupted or not valid JPEG 2000 data.
-    pub fn decode_jpeg2000(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
+    fn decode_jpeg2000(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
         let bitmap = jpeg2k::Image::from_bytes(stream_data)
             .map_err(|e| FilterError::Decompression(e.to_string()))?;
 
@@ -183,104 +195,11 @@ impl Filter {
     ///
     /// Returns [`FilterError::Decompression`] if the JPEG decoding fails,
     /// which can happen if the data is corrupted or not a valid JPEG image.
-    pub fn decode_jpeg_baseline(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
+    fn decode_jpeg_baseline(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
         let bitmap = image::load_from_memory_with_format(stream_data, image::ImageFormat::Jpeg)
             .map_err(|e| FilterError::Decompression(e.to_string()))?;
 
         Ok(bitmap.as_bytes().to_vec())
-    }
-
-    /// Decodes CCITTFaxDecode (Group 3 / Group 4 fax) compressed stream data.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CcittDecodeError`] if the stream is truncated or
-    /// contains an invalid bit pattern.
-    pub fn decode_ccitt_fax(
-        stream_data: &[u8],
-        params: &CCITTFaxParams,
-    ) -> Result<Vec<u8>, CcittDecodeError> {
-        crate::ccitt::decode(stream_data, params)
-    }
-
-    /// Decodes ASCII85Decode-encoded stream data.
-    ///
-    /// ASCII85 encodes 4 binary bytes as 5 printable ASCII characters in the
-    /// range `!` (33) through `u` (117), using base 85. The special symbol `z`
-    /// represents a group of four zero bytes. Whitespace is ignored. The
-    /// end-of-data marker `~>` terminates the stream; any bytes after it are
-    /// discarded.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`FilterError::Decompression`] if an invalid character is
-    /// encountered (outside the expected ASCII85 alphabet).
-    pub fn decode_ascii85(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
-        let mut output = Vec::with_capacity(stream_data.len().saturating_div(5).saturating_mul(4));
-        let mut group = [0u32; 5];
-        let mut group_len = 0usize;
-
-        for &byte in stream_data {
-            // End-of-data marker `~>`
-            if byte == b'~' {
-                break;
-            }
-
-            // Skip whitespace
-            if byte.is_ascii_whitespace() {
-                continue;
-            }
-
-            // `z` shorthand: four zero bytes (only valid at a group boundary)
-            if byte == b'z' {
-                if group_len != 0 {
-                    return Err(FilterError::Decompression(
-                        "ASCII85: 'z' encountered in the middle of a group".to_string(),
-                    ));
-                }
-                output.extend_from_slice(&[0u8; 4]);
-                continue;
-            }
-
-            if !(b'!'..=b'u').contains(&byte) {
-                return Err(FilterError::Decompression(format!(
-                    "ASCII85: invalid character 0x{byte:02X}"
-                )));
-            }
-
-            if let Some(slot) = group.get_mut(group_len) {
-                // byte is validated to be in b'!'..=b'u', so wrapping_sub is safe
-                *slot = u32::from(byte.wrapping_sub(b'!'));
-            }
-            group_len = group_len.saturating_add(1);
-
-            if group_len == 5 {
-                // Horner's method: avoids large intermediate exponents
-                let val = group
-                    .iter()
-                    .fold(0u32, |acc, &d| acc.wrapping_mul(85).wrapping_add(d));
-                output.extend_from_slice(&val.to_be_bytes());
-                group_len = 0;
-            }
-        }
-
-        // Handle the final partial group (1–4 chars → 1–3 bytes)
-        if group_len > 0 {
-            let partial_bytes = group_len.saturating_sub(1);
-            // Pad remaining slots with `u` (value 84) per PDF spec §7.4.3
-            for slot in group.iter_mut().skip(group_len) {
-                *slot = 84;
-            }
-            let val = group
-                .iter()
-                .fold(0u32, |acc, &d| acc.wrapping_mul(85).wrapping_add(d));
-            let bytes = val.to_be_bytes();
-            if let Some(slice) = bytes.get(..partial_bytes) {
-                output.extend_from_slice(slice);
-            }
-        }
-
-        Ok(output)
     }
 }
 
@@ -297,13 +216,16 @@ impl Filter {
 /// Returns [`FilterError`] if any filter in the chain fails or is unsupported.
 pub fn decode(stream: &StreamObject) -> Result<Cow<'_, [u8]>, FilterError> {
     let mut data: Cow<'_, [u8]> = Cow::Borrowed(&stream.data);
-    let filters = Filter::from_dictionary(&stream.dictionary, &PassthroughResolver)?;
+    let objects = PassthroughResolver;
+    let filters = Filter::from_dictionary(&stream.dictionary, &objects)?;
 
     let Some(filters) = &filters else {
         return Ok(data);
     };
 
-    for (filter_idx, filter) in filters.iter().enumerate() {
+    let decode_params = parse_decode_params(&stream.dictionary, filters, &objects);
+
+    for (filter, params) in filters.iter().zip(decode_params.iter()) {
         match filter {
             Filter::FlateDecode => {
                 let decoded = Filter::decode_flate(&data)?;
@@ -318,13 +240,15 @@ pub fn decode(stream: &StreamObject) -> Result<Cow<'_, [u8]>, FilterError> {
                 data = Cow::Owned(decoded);
             }
             Filter::ASCII85Decode => {
-                let decoded = Filter::decode_ascii85(&data)?;
+                let decoded = crate::ascii85::decode_ascii85(&data)?;
                 data = Cow::Owned(decoded);
             }
             Filter::CCITTFaxDecode => {
-                let objects = PassthroughResolver;
-                let params = ccitt_params_for_filter(&stream.dictionary, filter_idx, &objects);
-                let decoded = Filter::decode_ccitt_fax(&data, &params)?;
+                let ccitt_params = match params {
+                    DecodeParms::CcittFax(p) => p,
+                    DecodeParms::None => &CCITTFaxParams::DEFAULT,
+                };
+                let decoded = crate::ccitt::decode(&data, ccitt_params)?;
                 data = Cow::Owned(decoded);
             }
             Filter::Unsupported(name) => {
@@ -335,99 +259,50 @@ pub fn decode(stream: &StreamObject) -> Result<Cow<'_, [u8]>, FilterError> {
     Ok(data)
 }
 
-/// Extract [`CCITTFaxParams`][crate::ccitt::CCITTFaxParams] for the filter at
-/// `filter_idx` from the stream's `/DecodeParms` dictionary entry.
+/// Parses the `/DecodeParms` entry from a stream dictionary into a
+/// [`Vec<DecodeParms>`] aligned 1-to-1 with `filters`.
 ///
 /// Per PDF spec §7.3.8.2, `/DecodeParms` is either a single dictionary (when
-/// there is one filter) or an array of dictionaries (one per filter). Values
-/// are always inline objects, so no object resolver is needed.
-fn ccitt_params_for_filter(
+/// there is one filter) or an array of dictionaries (one per filter).
+fn parse_decode_params(
     dict: &Dictionary,
-    filter_idx: usize,
+    filters: &[Filter],
     objects: &dyn ObjectResolver,
-) -> CCITTFaxParams {
-    match dict.get("DecodeParms") {
+) -> Vec<DecodeParms> {
+    let params_entry = dict.get("DecodeParms");
+
+    // Pre-extract per-index dictionaries from the `/DecodeParms` value.
+    let param_dicts: Vec<Option<&Dictionary>> = match params_entry {
         Some(ObjectVariant::Dictionary(d)) => {
-            CCITTFaxParams::from_dictionary(d, objects).unwrap_or_default()
+            // Single dict applies to all filters (common single-filter case).
+            vec![Some(d); filters.len()]
         }
-        Some(ObjectVariant::Array(arr)) => arr
-            .get(filter_idx)
-            .and_then(|v| {
-                if let ObjectVariant::Dictionary(d) = v {
-                    Some(CCITTFaxParams::from_dictionary(d, objects).unwrap_or_default())
-                } else {
-                    None
-                }
+        Some(ObjectVariant::Array(arr)) => filters
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                arr.get(i).and_then(|v| {
+                    if let ObjectVariant::Dictionary(d) = v {
+                        Some(d.as_ref())
+                    } else {
+                        None
+                    }
+                })
             })
-            .unwrap_or_default(),
-        _ => CCITTFaxParams::default(),
-    }
-}
+            .collect(),
+        _ => vec![None; filters.len()],
+    };
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_decode_ascii85_basic() {
-        // "Man " → known ASCII85 encoding "9jqo^"
-        let man_encoded = b"9jqo^~>";
-        let decoded = Filter::decode_ascii85(man_encoded).expect("decode failed");
-        assert_eq!(decoded, b"Man ");
-    }
-
-    #[test]
-    fn test_decode_ascii85_z_shorthand() {
-        // `z` represents 4 zero bytes
-        let input = b"z~>";
-        let decoded = Filter::decode_ascii85(input).expect("decode failed");
-        assert_eq!(decoded, [0u8; 4]);
-    }
-
-    #[test]
-    fn test_decode_ascii85_multiple_groups() {
-        // "Man is di" — two full groups + one partial group (1 byte → 2 chars)
-        let input = b"9jqo^BlbD-B`~>";
-        let decoded = Filter::decode_ascii85(input).expect("decode failed");
-        assert_eq!(&decoded, b"Man is di");
-    }
-
-    #[test]
-    fn test_decode_ascii85_whitespace_ignored() {
-        // Whitespace (spaces, newlines) must be ignored
-        let input = b"9j qo\n^~>";
-        let decoded = Filter::decode_ascii85(input).expect("decode failed");
-        assert_eq!(&decoded, b"Man ");
-    }
-
-    #[test]
-    fn test_decode_ascii85_partial_group() {
-        // 2 input chars → 1 output byte
-        // Encode 0xAB: pad to [0xAB, 84<<24…] etc.
-        // 0xAB000000 in base85: 0xAB000000 = 2,869,231,616
-        // / 85^4 = 2869231616 / 52200625 = 54 → char '!'+ 54 = 'W'
-        // remainder: 2869231616 - 54*52200625 = 2869231616 - 2818833750 = 50397866
-        // / 85^3 = 50397866 / 614125 = 82 → char '!'+ 82 = 's'
-        // So first two chars of the full 5-char group for 0xAB000000 are "Ws..."
-        // We only need the first 2 chars to recover 1 byte.
-        let input = b"Ws~>";
-        let decoded = Filter::decode_ascii85(input).expect("decode failed");
-        assert_eq!(decoded.len(), 1);
-        assert_eq!(decoded[0], 0xAB);
-    }
-
-    #[test]
-    fn test_decode_ascii85_invalid_char() {
-        let input = b"9jqo\x80~>";
-        let result = Filter::decode_ascii85(input);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_decode_ascii85_z_in_middle_of_group_is_error() {
-        // 'z' mid-group is invalid
-        let input = b"9jz~>";
-        let result = Filter::decode_ascii85(input);
-        assert!(result.is_err());
-    }
+    filters
+        .iter()
+        .zip(param_dicts.iter())
+        .map(|(filter, param_dict)| match (filter, param_dict) {
+            (Filter::CCITTFaxDecode, Some(d)) => {
+                let p = CCITTFaxParams::from_dictionary(d, objects).unwrap_or_default();
+                DecodeParms::CcittFax(p)
+            }
+            (Filter::CCITTFaxDecode, None) => DecodeParms::CcittFax(CCITTFaxParams::default()),
+            _ => DecodeParms::None,
+        })
+        .collect()
 }

@@ -13,9 +13,10 @@
 //! [`StreamObject`](pdf_object::stream::StreamObject) and applies the full
 //! filter chain declared in its `/Filter` dictionary entry.
 
+pub(crate) mod ascii85;
 mod bitreader;
-pub mod ccitt;
-pub mod ccitt_fax_params;
+pub(crate) mod ccitt;
+pub(crate) mod ccitt_fax_params;
 mod ccitt_tables;
 pub mod error;
 pub mod filter;

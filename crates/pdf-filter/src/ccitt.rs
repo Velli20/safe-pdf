@@ -25,9 +25,6 @@ use crate::{
 };
 
 /// An error that occurred during CCITTFaxDecode decompression.
-///
-/// This type is `#[non_exhaustive]` to allow adding new variants in the future
-/// without breaking downstream code.
 #[non_exhaustive]
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum CcittDecodeError {
@@ -573,7 +570,7 @@ impl<'a> CcittDecoder<'a> {
     /// `row_buf` must be pre-filled with `0xFF` (all white).
     fn decode_2d_row(&mut self) -> Result<(), CcittDecodeError> {
         let mut a0: Option<usize> = None;
-        let mut a0color = true; // white
+        let mut a0color = true;
 
         loop {
             if self.reader.exhausted() {

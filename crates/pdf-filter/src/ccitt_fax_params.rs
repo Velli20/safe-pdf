@@ -25,16 +25,7 @@ pub struct CCITTFaxParams {
 
 impl Default for CCITTFaxParams {
     fn default() -> Self {
-        Self {
-            k: 0,
-            columns: Self::DEFAULT_IMAGE_WIDTH,
-            rows: Self::DEFAULT_NUMBER_OF_ROWS,
-            end_of_line: false,
-            encoded_byte_align: false,
-            end_of_block: true,
-            black_is1: false,
-            damaged_rows_before_error: 0,
-        }
+        Self::DEFAULT
     }
 }
 
@@ -43,6 +34,17 @@ impl CCITTFaxParams {
     const DEFAULT_IMAGE_WIDTH: usize = 1728;
     /// The default number of rows for CCITT-encoded images, used when the `/Rows` entry is missing or invalid.
     const DEFAULT_NUMBER_OF_ROWS: usize = 0;
+    /// The full set of default parameter values, used when no `/DecodeParms` entry is present.
+    pub(crate) const DEFAULT: Self = Self {
+        k: 0,
+        columns: Self::DEFAULT_IMAGE_WIDTH,
+        rows: Self::DEFAULT_NUMBER_OF_ROWS,
+        end_of_line: false,
+        encoded_byte_align: false,
+        end_of_block: true,
+        black_is1: false,
+        damaged_rows_before_error: 0,
+    };
 
     /// Build a [`CCITTFaxParams`] from a PDF `/DecodeParms` dictionary.
     ///
