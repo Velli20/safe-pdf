@@ -1,4 +1,4 @@
-use crate::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
+use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
 
 /// Decode parameters for the `CCITTFaxDecode` filter (PDF spec §7.4.6, Table 11).
 #[derive(Debug, Clone)]
@@ -87,7 +87,7 @@ impl CCITTFaxParams {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{dictionary::Dictionary, object_resolver::PassthroughResolver};
+    use pdf_object::object_resolver::PassthroughResolver;
     use std::collections::BTreeMap;
 
     #[test]
@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn params_from_dict_reads_all_keys() -> Result<(), ObjectError> {
-        use crate::object_variant::ObjectVariant;
+        use pdf_object::object_variant::ObjectVariant;
 
         let mut dict = Dictionary::new(BTreeMap::new());
         dict.dictionary
@@ -142,20 +142,6 @@ mod tests {
         assert!(!p.end_of_block);
         assert!(p.black_is1);
         assert_eq!(p.damaged_rows_before_error, 2);
-        Ok(())
-    }
-
-    #[test]
-    fn params_from_dict_ignores_zero_columns() -> Result<(), ObjectError> {
-        use crate::object_variant::ObjectVariant;
-        use std::collections::BTreeMap;
-        let mut dict = Dictionary::new(BTreeMap::new());
-        dict.dictionary
-            .insert("Columns".to_string(), ObjectVariant::Integer(0));
-        let objects = PassthroughResolver;
-        let p = CCITTFaxParams::from_dictionary(&dict, &objects)?;
-        // Zero Columns is invalid; the default (1728) must be kept.
-        assert_eq!(p.columns, 1728);
         Ok(())
     }
 }

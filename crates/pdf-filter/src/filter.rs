@@ -1,8 +1,13 @@
 use std::borrow::Cow;
+use std::fmt;
 
-use crate::{
-    ccitt_fax_params::CCITTFaxParams, dictionary::Dictionary, error::ObjectError,
-    object_resolver::ObjectResolver, object_variant::ObjectVariant,
+use crate::{ccitt::CcittDecodeError, ccitt_fax_params::CCITTFaxParams, error::FilterError};
+
+use pdf_object::{
+    dictionary::Dictionary,
+    object_resolver::{ObjectResolver, PassthroughResolver},
+    object_variant::ObjectVariant,
+    stream::StreamObject,
 };
 
 /// Represents the compression filter applied to a stream or image in a PDF.
@@ -64,17 +69,36 @@ impl From<&str> for Filter {
     }
 }
 
-/// Represents the compression filter applied to an image's stream data.
-///
-/// This corresponds to the `/Filter` entry in a PDF Image XObject's dictionary.
-/// The filter specifies the algorithm used to decompress the raw image data.
+impl fmt::Display for Filter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DCTDecode => f.write_str("DCTDecode"),
+            Self::JPXDecode => f.write_str("JPXDecode"),
+            Self::FlateDecode => f.write_str("FlateDecode"),
+            Self::CCITTFaxDecode => f.write_str("CCITTFaxDecode"),
+            Self::ASCII85Decode => f.write_str("ASCII85Decode"),
+            Self::Unsupported(name) => f.write_str(name),
+        }
+    }
+}
+
+/// Methods for parsing the `/Filter` entry from a PDF dictionary.
 impl Filter {
     const KEY: &'static str = "Filter";
 
+    /// Parses the `/Filter` entry from a PDF object dictionary.
+    ///
+    /// Returns `Ok(None)` when no `/Filter` key is present, or
+    /// `Ok(Some(filters))` with the ordered list of filters to apply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FilterError::Object`] if an object reference cannot be
+    /// resolved or a name cannot be extracted.
     pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Option<Vec<Filter>>, ObjectError> {
+    ) -> Result<Option<Vec<Filter>>, FilterError> {
         let Some(filter_obj) = dictionary.get(Self::KEY) else {
             return Ok(None);
         };
@@ -98,55 +122,40 @@ impl Filter {
     }
 }
 
+/// Individual filter decoding methods.
 impl Filter {
     /// Decodes FlateDecode (zlib/deflate) compressed stream data.
     ///
-    /// # Parameters
-    ///
-    /// - `stream_data`: The compressed byte stream to decode.
-    ///
-    /// # Returns
-    ///
-    /// The decompressed data as a `Vec<u8>`, or an error if decompression fails.
-    ///
     /// # Errors
     ///
-    /// Returns [`ObjectError::DecompressionError`] if the zlib decompression fails,
+    /// Returns [`FilterError::Decompression`] if the zlib decompression fails,
     /// which can happen if the data is corrupted or not valid zlib-compressed data.
-    pub fn decode_flate(stream_data: &[u8]) -> Result<Vec<u8>, ObjectError> {
+    pub fn decode_flate(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
         let mut decoder = flate2::read::ZlibDecoder::new(stream_data);
         let mut decoded = Vec::new();
 
         use std::io::Read;
 
-        if let Err(e) = decoder.read_to_end(&mut decoded) {
-            return Err(ObjectError::DecompressionError(e.to_string()));
-        }
+        decoder
+            .read_to_end(&mut decoded)
+            .map_err(|e| FilterError::Decompression(e.to_string()))?;
 
         Ok(decoded)
     }
 
     /// Decodes JPXDecode (JPEG 2000) compressed stream data.
     ///
-    /// # Parameters
-    ///
-    /// - `stream_data`: The JPEG 2000 compressed byte stream to decode.
-    ///
-    /// # Returns
-    ///
-    /// The decompressed image data as a `Vec<u8>`, or an error if decompression fails.
-    ///
     /// # Errors
     ///
-    /// Returns [`ObjectError::DecompressionError`] if the JPEG 2000 decoding fails,
+    /// Returns [`FilterError::Decompression`] if the JPEG 2000 decoding fails,
     /// which can happen if the data is corrupted or not valid JPEG 2000 data.
-    pub fn decode_jpeg2000(stream_data: &[u8]) -> Result<Vec<u8>, ObjectError> {
+    pub fn decode_jpeg2000(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
         let bitmap = jpeg2k::Image::from_bytes(stream_data)
-            .map_err(|e| ObjectError::DecompressionError(e.to_string()))?;
+            .map_err(|e| FilterError::Decompression(e.to_string()))?;
 
         let pixels = bitmap
             .get_pixels(None)
-            .map_err(|e| ObjectError::DecompressionError(e.to_string()))?;
+            .map_err(|e| FilterError::Decompression(e.to_string()))?;
 
         let data = match pixels.data {
             jpeg2k::ImagePixelData::L8(data) => data,
@@ -159,8 +168,8 @@ impl Filter {
                 .flat_map(|v| v.to_be_bytes())
                 .collect::<Vec<u8>>(),
             _ => {
-                return Err(ObjectError::DecompressionError(
-                    "Unsupported JPEG 2000 pixel format".to_string(),
+                return Err(FilterError::Decompression(
+                    "unsupported JPEG 2000 pixel format".to_string(),
                 ));
             }
         };
@@ -170,45 +179,28 @@ impl Filter {
 
     /// Decodes DCTDecode (JPEG) compressed stream data.
     ///
-    /// # Parameters
-    ///
-    /// - `stream_data`: The JPEG compressed byte stream to decode.
-    ///
-    /// # Returns
-    ///
-    /// The decompressed image data as a `Vec<u8>`, or an error if decompression fails.
-    ///
     /// # Errors
     ///
-    /// Returns [`ObjectError::DecompressionError`] if the JPEG decoding fails,
+    /// Returns [`FilterError::Decompression`] if the JPEG decoding fails,
     /// which can happen if the data is corrupted or not a valid JPEG image.
-    pub fn decode_jpeg_baseline(stream_data: &[u8]) -> Result<Vec<u8>, ObjectError> {
+    pub fn decode_jpeg_baseline(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
         let bitmap = image::load_from_memory_with_format(stream_data, image::ImageFormat::Jpeg)
-            .map_err(|e| ObjectError::DecompressionError(e.to_string()))?;
+            .map_err(|e| FilterError::Decompression(e.to_string()))?;
 
         Ok(bitmap.as_bytes().to_vec())
     }
 
     /// Decodes CCITTFaxDecode (Group 3 / Group 4 fax) compressed stream data.
     ///
-    /// # Parameters
-    ///
-    /// - `stream_data`: The compressed byte stream to decode.
-    /// - `params`: Decode parameters parsed from the stream's `/DecodeParms` dictionary.
-    ///
-    /// # Returns
-    ///
-    /// The decompressed image data as a packed MSB-first 1-bit-per-pixel `Vec<u8>`.
-    ///
     /// # Errors
     ///
-    /// Returns [`ObjectError::DecompressionError`] if the stream is truncated or
+    /// Returns [`CcittDecodeError`] if the stream is truncated or
     /// contains an invalid bit pattern.
     pub fn decode_ccitt_fax(
         stream_data: &[u8],
         params: &CCITTFaxParams,
-    ) -> Result<Vec<u8>, ObjectError> {
-        Ok(crate::ccitt::decode(stream_data, params)?)
+    ) -> Result<Vec<u8>, CcittDecodeError> {
+        crate::ccitt::decode(stream_data, params)
     }
 
     /// Decodes ASCII85Decode-encoded stream data.
@@ -221,9 +213,9 @@ impl Filter {
     ///
     /// # Errors
     ///
-    /// Returns [`ObjectError::DecompressionError`] if an invalid character is
+    /// Returns [`FilterError::Decompression`] if an invalid character is
     /// encountered (outside the expected ASCII85 alphabet).
-    pub fn decode_ascii85(stream_data: &[u8]) -> Result<Vec<u8>, ObjectError> {
+    pub fn decode_ascii85(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
         let mut output = Vec::with_capacity(stream_data.len().saturating_div(5).saturating_mul(4));
         let mut group = [0u32; 5];
         let mut group_len = 0usize;
@@ -242,7 +234,7 @@ impl Filter {
             // `z` shorthand: four zero bytes (only valid at a group boundary)
             if byte == b'z' {
                 if group_len != 0 {
-                    return Err(ObjectError::DecompressionError(
+                    return Err(FilterError::Decompression(
                         "ASCII85: 'z' encountered in the middle of a group".to_string(),
                     ));
                 }
@@ -251,7 +243,7 @@ impl Filter {
             }
 
             if !(b'!'..=b'u').contains(&byte) {
-                return Err(ObjectError::DecompressionError(format!(
+                return Err(FilterError::Decompression(format!(
                     "ASCII85: invalid character 0x{byte:02X}"
                 )));
             }
@@ -289,6 +281,86 @@ impl Filter {
         }
 
         Ok(output)
+    }
+}
+
+/// Decodes a [`StreamObject`] by applying its full filter chain.
+///
+/// Reads the `/Filter` entry from the stream's dictionary and applies each
+/// filter in order. Returns the fully decoded bytes, or `Cow::Borrowed` if
+/// no filters are present.
+///
+/// This is the main entry point for stream decoding in the `pdf-filter` crate.
+///
+/// # Errors
+///
+/// Returns [`FilterError`] if any filter in the chain fails or is unsupported.
+pub fn decode(stream: &StreamObject) -> Result<Cow<'_, [u8]>, FilterError> {
+    let mut data: Cow<'_, [u8]> = Cow::Borrowed(&stream.data);
+    let filters = Filter::from_dictionary(&stream.dictionary, &PassthroughResolver)?;
+
+    let Some(filters) = &filters else {
+        return Ok(data);
+    };
+
+    for (filter_idx, filter) in filters.iter().enumerate() {
+        match filter {
+            Filter::FlateDecode => {
+                let decoded = Filter::decode_flate(&data)?;
+                data = Cow::Owned(decoded);
+            }
+            Filter::JPXDecode => {
+                let decoded = Filter::decode_jpeg2000(&data)?;
+                data = Cow::Owned(decoded);
+            }
+            Filter::DCTDecode => {
+                let decoded = Filter::decode_jpeg_baseline(&data)?;
+                data = Cow::Owned(decoded);
+            }
+            Filter::ASCII85Decode => {
+                let decoded = Filter::decode_ascii85(&data)?;
+                data = Cow::Owned(decoded);
+            }
+            Filter::CCITTFaxDecode => {
+                let objects = PassthroughResolver;
+                let params = ccitt_params_for_filter(&stream.dictionary, filter_idx, &objects);
+                let decoded = Filter::decode_ccitt_fax(&data, &params)?;
+                data = Cow::Owned(decoded);
+            }
+            Filter::Unsupported(name) => {
+                return Err(FilterError::UnsupportedFilter(name.clone()));
+            }
+        }
+    }
+    Ok(data)
+}
+
+/// Extract [`CCITTFaxParams`][crate::ccitt::CCITTFaxParams] for the filter at
+/// `filter_idx` from the stream's `/DecodeParms` dictionary entry.
+///
+/// Per PDF spec §7.3.8.2, `/DecodeParms` is either a single dictionary (when
+/// there is one filter) or an array of dictionaries (one per filter). Values
+/// are always inline objects, so no object resolver is needed.
+fn ccitt_params_for_filter(
+    dict: &Dictionary,
+    filter_idx: usize,
+    objects: &dyn ObjectResolver,
+) -> CCITTFaxParams {
+    match dict.get("DecodeParms") {
+        Some(ObjectVariant::Dictionary(d)) => {
+            CCITTFaxParams::from_dictionary(d, objects).unwrap_or_default()
+        }
+        Some(ObjectVariant::Array(arr)) => arr
+            .get(filter_idx)
+            .and_then(|v| {
+                if let ObjectVariant::Dictionary(d) = v {
+                    Some(CCITTFaxParams::from_dictionary(d, objects).unwrap_or_default())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default(),
+        _ => CCITTFaxParams::default(),
     }
 }
 

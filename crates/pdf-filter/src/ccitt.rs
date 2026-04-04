@@ -22,7 +22,6 @@ use crate::{
     bitreader::BitReader,
     ccitt_fax_params::CCITTFaxParams,
     ccitt_tables::{BLACK_RUN_INS, WHITE_RUN_INS},
-    error::ObjectError,
 };
 
 /// An error that occurred during CCITTFaxDecode decompression.
@@ -30,7 +29,7 @@ use crate::{
 /// This type is `#[non_exhaustive]` to allow adding new variants in the future
 /// without breaking downstream code.
 #[non_exhaustive]
-#[derive(Debug, Error, PartialEq)]
+#[derive(Debug, Error, Clone, PartialEq)]
 pub enum CcittDecodeError {
     /// The column count is zero, which is not a valid image width.
     #[error("CCITTFaxDecode: zero column count")]
@@ -47,9 +46,6 @@ pub enum CcittDecodeError {
     /// 2D decoding: an unknown extension codeword was encountered.
     #[error("CCITTFaxDecode: unknown extension codeword")]
     UnknownExtensionCode,
-    /// A wrapped [`ObjectError`] from an upstream PDF object operation.
-    #[error("CCITTFaxDecode: {0}")]
-    ObjectError(#[from] ObjectError),
 }
 
 /// Returns the MSB-first position of the leading set bit of `byte`
@@ -58,7 +54,8 @@ pub enum CcittDecodeError {
 /// Equivalent to `u8::leading_zeros` but returns `usize`.
 #[inline]
 fn lead_set_pos(byte: u8) -> usize {
-    byte.leading_zeros() as usize
+    // u8::leading_zeros() returns u32 in 0..=8; fits in usize on all platforms.
+    usize::try_from(byte.leading_zeros()).unwrap_or(0)
 }
 
 /// Returns the color (true = white, false = black) of pixel `pos` in `row`.
@@ -66,7 +63,7 @@ fn lead_set_pos(byte: u8) -> usize {
 #[inline]
 fn ref_pixel(row: &[u8], pos: usize) -> bool {
     row.get(pos / 8)
-        .is_none_or(|&b| (b >> (7 - pos % 8)) & 1 != 0)
+        .is_none_or(|&b| (b >> 7usize.wrapping_sub(pos % 8)) & 1 != 0)
 }
 
 /// Set pixels in `[start, end)` to black (0) in `row`.
@@ -78,12 +75,12 @@ fn fill_bits(row: &mut [u8], columns: usize, start: usize, end: usize) {
     }
 
     let first_byte = start / 8;
-    let last_byte = (end - 1) / 8; // safe: end > 0
+    let last_byte = end.wrapping_sub(1) / 8;
 
     // Mask of bits from `start % 8` through LSB within the first byte.
     let start_mask = 0xffu8 >> (start % 8);
     // Mask of bits from MSB through `(end-1) % 8` within the last byte.
-    let end_mask = 0xffu8 << (7 - (end - 1) % 8);
+    let end_mask = 0xffu8 << 7usize.wrapping_sub(end.wrapping_sub(1) % 8);
 
     if first_byte == last_byte {
         if let Some(b) = row.get_mut(first_byte) {
@@ -95,7 +92,7 @@ fn fill_bits(row: &mut [u8], columns: usize, start: usize, end: usize) {
     if let Some(b) = row.get_mut(first_byte) {
         *b &= !start_mask;
     }
-    if let Some(middle) = row.get_mut(first_byte + 1..last_byte) {
+    if let Some(middle) = row.get_mut(first_byte.saturating_add(1)..last_byte) {
         middle.fill(0x00);
     }
     if let Some(b) = row.get_mut(last_byte) {
@@ -118,7 +115,10 @@ fn find_bit(row: &[u8], max_pos: usize, start_pos: usize, bit: bool) -> usize {
         if let Some(&b) = row.get(bp) {
             let data = (b ^ bit_xor) & (0xffu8 >> bit_offset);
             if data != 0 {
-                return (bp * 8 + lead_set_pos(data)).min(max_pos);
+                return bp
+                    .saturating_mul(8)
+                    .saturating_add(lead_set_pos(data))
+                    .min(max_pos);
             }
         }
         byte_pos = start_pos.div_ceil(8);
@@ -130,16 +130,18 @@ fn find_bit(row: &[u8], max_pos: usize, start_pos: usize, bit: bool) -> usize {
     let skip_word: u64 = if bit { 0 } else { u64::MAX };
 
     // Scan 8 bytes at a time using u64 leading_zeros.
-    while byte_pos + 8 <= max_byte {
-        if let Some(chunk) = row.get(byte_pos..byte_pos + 8) {
+    while byte_pos.saturating_add(8) <= max_byte {
+        if let Some(chunk) = row.get(byte_pos..byte_pos.saturating_add(8)) {
             let mut buf = [0u8; 8];
             buf.copy_from_slice(chunk);
             let word = u64::from_be_bytes(buf) ^ skip_word;
             if word != 0 {
-                let pos = byte_pos * 8 + (word.leading_zeros() as usize);
+                let pos = byte_pos
+                    .saturating_mul(8)
+                    .saturating_add(usize::try_from(word.leading_zeros()).unwrap_or(0));
                 return pos.min(max_pos);
             }
-            byte_pos += 8;
+            byte_pos = byte_pos.saturating_add(8);
         } else {
             break;
         }
@@ -150,10 +152,13 @@ fn find_bit(row: &[u8], max_pos: usize, start_pos: usize, bit: bool) -> usize {
         if let Some(&b) = row.get(byte_pos) {
             let data = b ^ bit_xor;
             if data != 0 {
-                return (byte_pos * 8 + lead_set_pos(data)).min(max_pos);
+                return byte_pos
+                    .saturating_mul(8)
+                    .saturating_add(lead_set_pos(data))
+                    .min(max_pos);
             }
         }
-        byte_pos += 1;
+        byte_pos = byte_pos.saturating_add(1);
     }
 
     max_pos
@@ -184,7 +189,7 @@ fn find_b1_b2(ref_row: &[u8], columns: usize, a0: Option<usize>, a0color: bool) 
     // more so that b1 ends up at the nearest opposite-color transition.
     let mut cur_first_bit = first_bit;
     if first_bit != a0color {
-        b1 = find_bit(ref_row, columns, b1 + 1, first_bit);
+        b1 = find_bit(ref_row, columns, b1.saturating_add(1), first_bit);
         cur_first_bit = !cur_first_bit;
     }
 
@@ -192,7 +197,7 @@ fn find_b1_b2(ref_row: &[u8], columns: usize, a0: Option<usize>, a0color: bool) 
         return (columns, columns);
     }
 
-    let b2 = find_bit(ref_row, columns, b1 + 1, cur_first_bit);
+    let b2 = find_bit(ref_row, columns, b1.saturating_add(1), cur_first_bit);
     (b1, b2)
 }
 
@@ -204,7 +209,7 @@ fn get_run(ins: &[u8], reader: &mut BitReader<'_>) -> Option<u16> {
 
     loop {
         let count = *ins.get(ins_off)?;
-        ins_off += 1;
+        ins_off = ins_off.saturating_add(1);
 
         if count == 0xff {
             return None;
@@ -213,15 +218,15 @@ fn get_run(ins: &[u8], reader: &mut BitReader<'_>) -> Option<u16> {
         let bit = reader.next_bit()?;
         code = (code << 1) | u32::from(bit);
 
-        let next_off = ins_off.saturating_add(usize::from(count) * 3);
+        let next_off = ins_off.saturating_add(usize::from(count).saturating_mul(3));
         while ins_off < next_off {
             let entry_code = ins.get(ins_off).copied()?;
             if u32::from(entry_code) == code {
-                let lo = u16::from(ins.get(ins_off + 1).copied()?);
-                let hi = u16::from(ins.get(ins_off + 2).copied()?);
+                let lo = u16::from(ins.get(ins_off.saturating_add(1)).copied()?);
+                let hi = u16::from(ins.get(ins_off.saturating_add(2)).copied()?);
                 return Some(lo | (hi << 8));
             }
-            ins_off += 3;
+            ins_off = ins_off.saturating_add(3);
         }
     }
 }
@@ -262,7 +267,7 @@ fn skip_eol(reader: &mut BitReader<'_>) {
             None => return,
             Some(false) => {} // consume zero-bits
             Some(true) => {
-                if reader.pos() - start <= 11 {
+                if reader.pos().wrapping_sub(start) <= 11 {
                     reader.set_pos(start); // too few zeros – not a real EOL
                 }
                 return;
@@ -433,8 +438,11 @@ impl<'a> CcittDecoder<'a> {
     /// damaged rows exceeds that limit, the error is returned.
     fn decode_all(&mut self, max_rows: usize) -> Result<Vec<u8>, CcittDecodeError> {
         let row_bytes = self.columns.div_ceil(8);
-        let mut output: Vec<u8> =
-            Vec::with_capacity(max_rows.saturating_mul(row_bytes).max(row_bytes * 16));
+        let mut output: Vec<u8> = Vec::with_capacity(
+            max_rows
+                .saturating_mul(row_bytes)
+                .max(row_bytes.saturating_mul(16)),
+        );
         let mut decoded_rows: usize = 0;
         let mut damaged_rows: u32 = 0;
 
@@ -460,7 +468,7 @@ impl<'a> CcittDecoder<'a> {
                         output.extend_from_slice(&self.row_buf);
                         break;
                     }
-                    CcittDecodeError::ObjectError(_) | CcittDecodeError::ZeroColumns => {
+                    CcittDecodeError::ZeroColumns => {
                         return Err(e);
                     }
                     _ => {
@@ -482,14 +490,14 @@ impl<'a> CcittDecoder<'a> {
 
             if self.byte_align {
                 let cur = self.reader.pos();
-                let aligned = (cur + 7) & !7;
+                let aligned = cur.wrapping_add(7) & !7;
                 if cur < aligned && !self.reader.try_align_to_byte() {
                     self.byte_align = false;
                 }
             }
 
             output.extend_from_slice(&self.row_buf);
-            decoded_rows += 1;
+            decoded_rows = decoded_rows.saturating_add(1);
         }
 
         if self.black_is1 {
@@ -648,10 +656,8 @@ impl<'a> CcittDecoder<'a> {
 ///
 /// Returns [`CcittDecodeError::ZeroColumns`] if `params.columns` is zero.
 /// Truncated or damaged streams are decoded as-is (matching PDFium behaviour).
-/// Use `From<CcittDecodeError>` to convert the error into [`ObjectError`] when
-/// needed by higher-level callers.
 pub fn decode(data: &[u8], params: &CCITTFaxParams) -> Result<Vec<u8>, CcittDecodeError> {
-    let rows = usize::try_from(params.rows).unwrap_or(0);
+    let rows = params.rows;
     let mut decoder = CcittDecoder::new(data, params)?;
     decoder.decode_all(rows)
 }
@@ -1121,13 +1127,6 @@ mod tests {
     #[test]
     fn lead_set_pos_lsb_only() {
         assert_eq!(lead_set_pos(0x01), 7);
-    }
-
-    #[test]
-    fn ccitt_decode_error_converts_to_object_error() {
-        let ccitt_err = CcittDecodeError::ZeroColumns;
-        let obj_err: ObjectError = ccitt_err.into();
-        assert!(matches!(obj_err, ObjectError::DecompressionError(_)));
     }
 
     // ── Lenient decoding / damaged-row tolerance ─────────────────────────────

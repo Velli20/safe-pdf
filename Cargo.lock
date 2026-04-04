@@ -1899,12 +1899,22 @@ dependencies = [
  "aes",
  "cbc",
  "md-5",
- "pdf-content-stream",
- "pdf-font",
  "pdf-object",
  "pdf-object-collection",
  "pdf-page",
  "pdf-parser",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "pdf-filter"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "image",
+ "jpeg2k",
+ "num-traits",
+ "pdf-object",
  "thiserror 2.0.12",
 ]
 
@@ -1968,9 +1978,6 @@ dependencies = [
 name = "pdf-object"
 version = "0.1.0"
 dependencies = [
- "flate2",
- "image",
- "jpeg2k",
  "num-traits",
  "thiserror 2.0.12",
 ]
@@ -1980,6 +1987,7 @@ name = "pdf-object-collection"
 version = "0.1.0"
 dependencies = [
  "num-traits",
+ "pdf-filter",
  "pdf-object",
  "serde",
  "serde_json",
@@ -2084,9 +2092,9 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
 name = "png"
-version = "0.18.0"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97baced388464909d42d89643fe4361939af9b7ce7a31ee32a168f832a70f2a0"
+checksum = "60769b8b31b2a9f263dae2776c37b1b28ae246943cf719eb6946a1db05128a61"
 dependencies = [
  "bitflags 2.9.1",
  "crc32fast",
@@ -3702,15 +3710,15 @@ dependencies = [
 
 [[package]]
 name = "zune-core"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "111f7d9820f05fd715df3144e254d6fc02ee4088b0644c0ffd0efc9e6d9d2773"
+checksum = "cb8a0807f7c01457d0379ba880ba6322660448ddebc890ce29bb64da71fb40f9"
 
 [[package]]
 name = "zune-jpeg"
-version = "0.5.8"
+version = "0.5.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e35aee689668bf9bd6f6f3a6c60bb29ba1244b3b43adfd50edd554a371da37d5"
+checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
 dependencies = [
  "zune-core",
 ]

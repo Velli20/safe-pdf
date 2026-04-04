@@ -1,5 +1,5 @@
 use pdf_object::{
-    filter::Filter, indirect_object::IndirectObject, object_resolver::ObjectResolver,
+    indirect_object::IndirectObject, object_resolver::ObjectResolver,
     object_variant::ObjectVariant, stream::StreamObject,
 };
 use pdf_tokenizer::PdfToken;
@@ -12,8 +12,6 @@ use crate::{error::ParserError, parser::PdfParser};
 pub enum IndirectObjectError {
     #[error("Stream object found without a preceding dictionary")]
     StreamObjectWithoutDictionary,
-    #[error("Object collection is required to parse stream filters")]
-    MissingObjectCollection,
 }
 
 impl PdfParser<'_> {
@@ -70,14 +68,11 @@ impl PdfParser<'_> {
             // Read the keyword `endobj`.
             self.read_keyword(ENDOBJ_KEYWORD)?;
 
-            let filters = Filter::from_dictionary(&dictionary, objects)?;
-
             return Ok(Some(ObjectVariant::Stream(StreamObject::new(
                 object_number,
                 generation_number,
                 dictionary,
                 stream,
-                filters,
             ))));
         }
 
