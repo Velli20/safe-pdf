@@ -41,6 +41,26 @@ impl<'a> BitReader<'a> {
         }
     }
 
+    /// Read `n` bits MSB-first and return them as a `u16`.
+    ///
+    /// Returns `None` if there are fewer than `n` bits remaining. `n` must be
+    /// at most 16.
+    #[allow(clippy::arithmetic_side_effects)]
+    pub fn read_bits(&mut self, n: u8) -> Option<u16> {
+        let total_bits = self.src.len().saturating_mul(8);
+        if self.bit_pos.saturating_add(usize::from(n)) > total_bits {
+            return None;
+        }
+        let mut value: u16 = 0;
+        for _ in 0..n {
+            value <<= 1;
+            if self.next_bit()? {
+                value |= 1;
+            }
+        }
+        Some(value)
+    }
+
     /// Advance to the next byte boundary, but only if all padding bits are 0.
     /// Returns `true` if alignment happened, `false` if a non-zero pad bit was
     /// found (the caller should disable byte-alignment for remaining rows).
@@ -82,5 +102,42 @@ mod tests {
         let mut r = BitReader::new(&data);
         r.skip_bits(100); // should not panic
         assert!(r.exhausted());
+    }
+
+    #[test]
+    fn read_bits_returns_msb_first_value() {
+        // 0b1010_0110 = 0xA6
+        let data = [0xA6u8];
+        let mut r = BitReader::new(&data);
+        // Read 4 bits: 1010 = 10
+        assert_eq!(r.read_bits(4), Some(0b1010));
+        // Read 4 bits: 0110 = 6
+        assert_eq!(r.read_bits(4), Some(0b0110));
+    }
+
+    #[test]
+    fn read_bits_across_byte_boundary() {
+        let data = [0b1111_0000u8, 0b1010_1010u8];
+        let mut r = BitReader::new(&data);
+        r.skip_bits(4);
+        // Read 8 bits spanning bytes: 0000_1010 = 0x0A
+        assert_eq!(r.read_bits(8), Some(0b0000_1010));
+    }
+
+    #[test]
+    fn read_bits_returns_none_when_exhausted() {
+        let data = [0xFFu8];
+        let mut r = BitReader::new(&data);
+        assert_eq!(r.read_bits(9), None);
+    }
+
+    #[test]
+    fn read_bits_9_bit_code() {
+        // Two bytes: 0b1_0000_0001 0xxxxxxx
+        // Code 0x101 = 257 in 9 bits MSB-first
+        // Byte 0: 1000_0000  Byte 1: 1xxxxxxx
+        let data = [0b1000_0000u8, 0b1000_0000u8];
+        let mut r = BitReader::new(&data);
+        assert_eq!(r.read_bits(9), Some(0b1_0000_0001)); // 257
     }
 }
