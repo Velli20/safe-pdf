@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::fmt;
 
-use crate::{ccitt_fax_params::CCITTFaxParams, error::FilterError};
+use crate::{ccitt_fax_params::CCITTFaxParams, error::FilterError, predictor::PredictorParams};
 
 use pdf_object::{
     dictionary::Dictionary,
@@ -43,6 +43,11 @@ pub enum Filter {
     /// bytes. The special character `z` represents four zero bytes. The
     /// end-of-data marker is `~>`.
     ASCII85Decode,
+    /// The LZW (Lempel-Ziv-Welch) filter, a lossless compression algorithm.
+    ///
+    /// Based on variable-length code substitution. This was used in older PDFs
+    /// before FlateDecode became the standard. See PDF spec §7.4.4.
+    LZWDecode,
     /// A filter that is not currently supported by this implementation.
     ///
     /// The contained string holds the original filter name from the PDF,
@@ -58,6 +63,7 @@ impl From<Cow<'_, str>> for Filter {
             "JPXDecode" => Self::JPXDecode,
             "CCITTFaxDecode" => Self::CCITTFaxDecode,
             "ASCII85Decode" => Self::ASCII85Decode,
+            "LZWDecode" => Self::LZWDecode,
             _ => Self::Unsupported(name.into_owned()),
         }
     }
@@ -77,6 +83,7 @@ impl fmt::Display for Filter {
             Self::FlateDecode => f.write_str("FlateDecode"),
             Self::CCITTFaxDecode => f.write_str("CCITTFaxDecode"),
             Self::ASCII85Decode => f.write_str("ASCII85Decode"),
+            Self::LZWDecode => f.write_str("LZWDecode"),
             Self::Unsupported(name) => f.write_str(name),
         }
     }
@@ -92,6 +99,13 @@ pub(crate) enum DecodeParms {
     None,
     /// Parameters for the `CCITTFaxDecode` filter.
     CcittFax(CCITTFaxParams),
+    /// Parameters for `LZWDecode`: EarlyChange flag + optional predictor.
+    Lzw {
+        early_change: bool,
+        predictor: PredictorParams,
+    },
+    /// Predictor parameters for `FlateDecode`.
+    Flate { predictor: PredictorParams },
 }
 
 /// Methods for parsing the `/Filter` entry from a PDF dictionary.
@@ -229,6 +243,27 @@ pub fn decode(stream: &StreamObject) -> Result<Cow<'_, [u8]>, FilterError> {
         match filter {
             Filter::FlateDecode => {
                 let decoded = Filter::decode_flate(&data)?;
+                let decoded = match params {
+                    DecodeParms::Flate { predictor } if !predictor.is_none() => {
+                        crate::predictor::apply_predictor(&decoded, predictor)?
+                    }
+                    _ => decoded,
+                };
+                data = Cow::Owned(decoded);
+            }
+            Filter::LZWDecode => {
+                let (early_change, predictor) = match params {
+                    DecodeParms::Lzw {
+                        early_change,
+                        predictor,
+                    } => (*early_change, Some(predictor)),
+                    _ => (true, None),
+                };
+                let decoded = crate::lzw::decode(&data, early_change)?;
+                let decoded = match predictor {
+                    Some(p) if !p.is_none() => crate::predictor::apply_predictor(&decoded, p)?,
+                    _ => decoded,
+                };
                 data = Cow::Owned(decoded);
             }
             Filter::JPXDecode => {
@@ -246,7 +281,7 @@ pub fn decode(stream: &StreamObject) -> Result<Cow<'_, [u8]>, FilterError> {
             Filter::CCITTFaxDecode => {
                 let ccitt_params = match params {
                     DecodeParms::CcittFax(p) => p,
-                    DecodeParms::None => &CCITTFaxParams::DEFAULT,
+                    _ => &CCITTFaxParams::DEFAULT,
                 };
                 let decoded = crate::ccitt::decode(&data, ccitt_params)?;
                 data = Cow::Owned(decoded);
@@ -302,6 +337,29 @@ fn parse_decode_params(
                 DecodeParms::CcittFax(p)
             }
             (Filter::CCITTFaxDecode, None) => DecodeParms::CcittFax(CCITTFaxParams::default()),
+            (Filter::LZWDecode, Some(d)) => {
+                let early_change = d
+                    .get("EarlyChange")
+                    .and_then(|v| v.try_number::<i64>(objects).ok())
+                    .unwrap_or(1)
+                    != 0;
+                let predictor = PredictorParams::from_dictionary(d, objects).unwrap_or_default();
+                DecodeParms::Lzw {
+                    early_change,
+                    predictor,
+                }
+            }
+            (Filter::LZWDecode, None) => DecodeParms::Lzw {
+                early_change: true,
+                predictor: PredictorParams::default(),
+            },
+            (Filter::FlateDecode, Some(d)) => {
+                let predictor = PredictorParams::from_dictionary(d, objects).unwrap_or_default();
+                DecodeParms::Flate { predictor }
+            }
+            (Filter::FlateDecode, None) => DecodeParms::Flate {
+                predictor: PredictorParams::default(),
+            },
             _ => DecodeParms::None,
         })
         .collect()

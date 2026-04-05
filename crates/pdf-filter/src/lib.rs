@@ -4,6 +4,7 @@
 //! specification (§7.4):
 //!
 //! - **FlateDecode** — zlib/deflate (RFC 1950 / RFC 1951)
+//! - **LZWDecode** — LZW compression (§7.4.4)
 //! - **DCTDecode** — baseline JPEG
 //! - **JPXDecode** — JPEG 2000
 //! - **CCITTFaxDecode** — Group 3 / Group 4 fax compression
@@ -20,3 +21,5 @@ pub(crate) mod ccitt_fax_params;
 mod ccitt_tables;
 pub mod error;
 pub mod filter;
+pub(crate) mod lzw;
+pub(crate) mod predictor;
