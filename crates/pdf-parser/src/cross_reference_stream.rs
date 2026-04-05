@@ -14,6 +14,9 @@ use crate::error::ParserError;
 /// Cross-reference streams replace traditional xref tables in modern PDFs.
 /// They encode the same information in a compact binary format stored as a
 /// stream object with `/Type /XRef`.
+///
+/// The stream data is decoded (filters such as FlateDecode and predictors
+/// are applied) before reading the binary xref entries.
 pub fn parse_xref_stream(
     stream: &StreamObject,
     objects: &dyn ObjectResolver,
@@ -58,8 +61,8 @@ pub fn parse_xref_stream(
         ));
     }
 
-    // Decode stream data (applies filters like FlateDecode)
-    let data = stream.data().map_err(ParserError::ObjectError)?;
+    // Decode stream data (applies filters like FlateDecode + predictors)
+    let data = pdf_filter::filter::decode(stream).map_err(pdf_object::error::ObjectError::from)?;
 
     let mut entries = BTreeMap::new();
     let mut pos: usize = 0;
@@ -242,5 +245,134 @@ mod tests {
         assert_eq!(table.entries[&10].byte_offset(), Some(100));
         assert!(!table.entries.contains_key(&0));
         assert!(!table.entries.contains_key(&7));
+    }
+
+    /// Builds a compressed xref stream with FlateDecode + PNG Up predictor,
+    /// mimicking what real PDFs like linearized documents produce.
+    fn build_compressed_xref_stream(
+        w: [usize; 3],
+        index: Option<Vec<usize>>,
+        size: usize,
+        raw_entries: Vec<u8>,
+        columns: usize,
+    ) -> StreamObject {
+        use std::io::Write;
+
+        // Apply PNG Up predictor (type 2): prefix each row with filter byte 2.
+        // Row i: filter_byte=2, then delta from previous row.
+        let row_bytes = columns;
+        let mut predicted = Vec::new();
+        let num_rows = raw_entries.len() / row_bytes;
+        let mut prev_row: Vec<u8> = vec![0u8; row_bytes];
+        for r in 0..num_rows {
+            predicted.push(2u8); // PNG Up filter
+            let row_start = r * row_bytes;
+            for c in 0..row_bytes {
+                let cur = raw_entries[row_start + c];
+                let above = prev_row[c];
+                predicted.push(cur.wrapping_sub(above));
+            }
+            prev_row = raw_entries[row_start..row_start + row_bytes].to_vec();
+        }
+
+        // Compress with zlib
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&predicted).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let mut dict_map = BTreeMap::new();
+        dict_map.insert("Type".to_string(), ObjectVariant::Name(b"XRef".to_vec()));
+        dict_map.insert("Size".to_string(), ObjectVariant::Integer(size as i64));
+        dict_map.insert(
+            "W".to_string(),
+            ObjectVariant::Array(
+                w.iter()
+                    .map(|&v| ObjectVariant::Integer(v as i64))
+                    .collect(),
+            ),
+        );
+        if let Some(idx) = index {
+            dict_map.insert(
+                "Index".to_string(),
+                ObjectVariant::Array(
+                    idx.iter()
+                        .map(|&v| ObjectVariant::Integer(v as i64))
+                        .collect(),
+                ),
+            );
+        }
+        dict_map.insert(
+            "Filter".to_string(),
+            ObjectVariant::Name(b"FlateDecode".to_vec()),
+        );
+        dict_map.insert(
+            "DecodeParms".to_string(),
+            ObjectVariant::Dictionary(Box::new(Dictionary::new(
+                vec![
+                    (
+                        "Columns".to_string(),
+                        ObjectVariant::Integer(columns as i64),
+                    ),
+                    ("Predictor".to_string(), ObjectVariant::Integer(12)),
+                ]
+                .into_iter()
+                .collect(),
+            ))),
+        );
+        dict_map.insert(
+            "Length".to_string(),
+            ObjectVariant::Integer(compressed.len() as i64),
+        );
+
+        StreamObject::new(0, 0, Box::new(Dictionary::new(dict_map)), compressed)
+    }
+
+    #[test]
+    fn test_parse_xref_stream_flatedecode_with_predictor() {
+        // Simulates /W[1 3 1] /Filter/FlateDecode /DecodeParms<</Columns 5/Predictor 12>>
+        // which is exactly what ii.pdf uses.
+        let mut raw_entries = Vec::new();
+        // Entry 0: free, next=0, gen=255
+        raw_entries.extend_from_slice(&[0, 0, 0, 0, 255]);
+        // Entry 1: normal at offset 1000, gen=0
+        raw_entries.extend_from_slice(&[1, 0, 3, 232, 0]); // 1000 = 0x03E8
+        // Entry 2: normal at offset 2000, gen=0
+        raw_entries.extend_from_slice(&[1, 0, 7, 208, 0]); // 2000 = 0x07D0
+        // Entry 3: compressed in stream obj 1, index 0
+        raw_entries.extend_from_slice(&[2, 0, 0, 1, 0]);
+
+        let stream = build_compressed_xref_stream(
+            [1, 3, 1],
+            None,
+            4,
+            raw_entries,
+            5, // columns = w1+w2+w3
+        );
+        let table = parse_xref_stream(&stream, &PassthroughResolver).unwrap();
+
+        assert_eq!(table.entries.len(), 4);
+
+        let e0 = &table.entries[&0];
+        assert!(e0.is_free());
+
+        let e1 = &table.entries[&1];
+        assert_eq!(e1.byte_offset(), Some(1000));
+
+        let e2 = &table.entries[&2];
+        assert_eq!(e2.byte_offset(), Some(2000));
+
+        let e3 = &table.entries[&3];
+        assert!(e3.is_compressed());
+        match &e3.entry_type {
+            CrossReferenceEntryType::Compressed {
+                object_stream_number,
+                index_within_stream,
+            } => {
+                assert_eq!(*object_stream_number, 1);
+                assert_eq!(*index_within_stream, 0);
+            }
+            _ => panic!("Expected compressed entry"),
+        }
     }
 }

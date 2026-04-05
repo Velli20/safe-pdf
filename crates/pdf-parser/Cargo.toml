@@ -10,4 +10,8 @@ workspace = true
 [dependencies]
 pdf-tokenizer = { path = "../pdf-tokenizer" }
 pdf-object = { path = "../pdf-object" }
+pdf-filter = { path = "../pdf-filter" }
 thiserror = "2.0.12"
+
+[dev-dependencies]
+flate2 = "1.1.1"
