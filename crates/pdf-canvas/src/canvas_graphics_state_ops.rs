@@ -71,9 +71,10 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
             .resources
             .ok_or(PdfCanvasError::MissingPageResources)?;
 
-        let states = resources
-            .external_graphics_state(dict_name)
-            .ok_or_else(|| PdfCanvasError::GraphicsStateNotFound(dict_name.to_string()))?;
+        let Some(states) = resources.external_graphics_state(dict_name) else {
+            // If the specified `ExtGState` is not found, the ignored parameters should not cause an error.
+            return Ok(());
+        };
 
         for state in &states.params {
             match state {
