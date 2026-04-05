@@ -22,8 +22,6 @@ pub enum PdfCanvasError {
     ColorSpaceNotFound(String),
     #[error("Pattern '{0}' not found")]
     PatternNotFound(String),
-    #[error("Graphics state dictionary '{0}' not found in resources")]
-    GraphicsStateNotFound(String),
     #[error("Font '{0}' is a Type3 font but is missing its definition data")]
     MissingType3FontData(String),
     #[error(
