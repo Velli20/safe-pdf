@@ -2015,6 +2015,8 @@ dependencies = [
 name = "pdf-parser"
 version = "0.1.0"
 dependencies = [
+ "flate2",
+ "pdf-filter",
  "pdf-object",
  "pdf-tokenizer",
  "thiserror 2.0.12",
