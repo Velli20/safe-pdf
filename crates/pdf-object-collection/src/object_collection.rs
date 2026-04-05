@@ -1,5 +1,6 @@
 use pdf_object::indirect_object::IndirectObject;
 use pdf_object::object_resolver::ObjectResolver;
+use pdf_object::stream::StreamObject;
 use pdf_object::{error::ObjectError, object_variant::ObjectVariant};
 use std::collections::HashMap;
 
@@ -80,10 +81,23 @@ impl ObjectCollection {
                     return Err(ObjectError::DuplicateKeyInObjectCollection(object_number));
                 }
             }
-            ObjectVariant::Stream(ref stream) => {
-                let key = stream.object_number;
-                if self.map.insert(key, obj).is_some() {
-                    return Err(ObjectError::DuplicateKeyInObjectCollection(key));
+            ObjectVariant::Stream(stream) => {
+                let data = pdf_filter::filter::decode(&stream)?.to_vec();
+                let StreamObject {
+                    object_number,
+                    generation_number,
+                    dictionary,
+                    ..
+                } = stream;
+
+                let obj = StreamObject::new(object_number, generation_number, dictionary, data);
+
+                if self
+                    .map
+                    .insert(object_number, ObjectVariant::Stream(obj))
+                    .is_some()
+                {
+                    return Err(ObjectError::DuplicateKeyInObjectCollection(object_number));
                 }
             }
             ObjectVariant::Reference(ref reference) => {

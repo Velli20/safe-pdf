@@ -161,13 +161,8 @@ mod tests {
                 ObjectVariant::Name(subtype.as_bytes().to_vec()),
             );
         }
-        let font_file3_stream = StreamObject::new(
-            10,
-            0,
-            Box::new(Dictionary::new(file3_stream_dict)),
-            bytes,
-            None,
-        );
+        let font_file3_stream =
+            StreamObject::new(10, 0, Box::new(Dictionary::new(file3_stream_dict)), bytes);
 
         let mut descriptor_dict = BTreeMap::new();
         descriptor_dict.insert(

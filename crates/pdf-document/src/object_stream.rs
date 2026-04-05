@@ -100,7 +100,6 @@ mod tests {
             0,
             Box::new(Dictionary::new(dict_map)),
             stream_content.to_vec(),
-            None,
         );
 
         let result = read_object_stream(&stream, &PassthroughResolver).unwrap();
@@ -135,7 +134,6 @@ mod tests {
             0,
             Box::new(Dictionary::new(dict_map)),
             stream_content.to_vec(),
-            None,
         );
 
         let result = read_object_stream(&stream, &PassthroughResolver).unwrap();

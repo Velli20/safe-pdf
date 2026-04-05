@@ -13,6 +13,7 @@ json = ["serde", "serde_json"]
 
 [dependencies]
 pdf-object = { path = "../pdf-object" }
+pdf-filter = { path = "../pdf-filter" }
 num-traits = "0.2.19"
 thiserror = "2.0.12"
 serde = { version = "1.0", features = ["derive"], optional = true }

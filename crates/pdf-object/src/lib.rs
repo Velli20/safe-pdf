@@ -1,7 +1,6 @@
 pub mod cross_reference_table;
 pub mod dictionary;
 pub mod error;
-pub mod filter;
 pub mod indirect_object;
 pub mod object_resolver;
 pub mod object_variant;

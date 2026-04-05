@@ -388,7 +388,6 @@ fn decrypt_stream_object(
         stream.generation_number,
         stream.dictionary.clone(),
         decrypted_data,
-        stream.filters().cloned(),
     ))
 }
 

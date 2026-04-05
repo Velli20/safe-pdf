@@ -166,7 +166,7 @@ mod tests {
             ObjectVariant::Integer(raw_data.len() as i64),
         );
 
-        StreamObject::new(0, 0, Box::new(Dictionary::new(dict_map)), raw_data, None)
+        StreamObject::new(0, 0, Box::new(Dictionary::new(dict_map)), raw_data)
     }
 
     #[test]
