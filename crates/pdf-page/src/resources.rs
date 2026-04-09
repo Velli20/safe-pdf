@@ -101,7 +101,10 @@ fn read_fonts(
     let mut result = HashMap::new();
     for (name, value) in &font_dict.dictionary {
         let dict = value.try_dictionary(objects)?;
-        if let Some(cached) = cache.get(&dict.object_number) {
+
+        if let Some(num) = &dict.object_number
+            && let Some(cached) = cache.get(num)
+        {
             result.insert(name.clone(), cached.clone());
             continue;
         }
@@ -113,7 +116,10 @@ fn read_fonts(
             font: Rc::new(Font::from_dictionary(dict, objects)?),
             resources: nested_resources,
         };
-        cache.insert(dict.object_number, resource.clone());
+
+        if let Some(num) = &dict.object_number {
+            cache.insert(*num, resource.clone());
+        }
         result.insert(name.clone(), resource);
     }
     Ok(result)
@@ -132,7 +138,9 @@ fn read_external_graphics_states(
     let mut result = HashMap::new();
     for (name, value) in &ext_gstate_dict.dictionary {
         let dict = value.try_dictionary(objects)?;
-        if let Some(cached) = cache.get(&dict.object_number) {
+        if let Some(num) = &dict.object_number
+            && let Some(cached) = cache.get(num)
+        {
             result.insert(name.clone(), cached.clone());
             continue;
         }
@@ -140,7 +148,9 @@ fn read_external_graphics_states(
         let resource = Resource::ExternalGraphicsState(Rc::new(
             ExternalGraphicsState::from_dictionary(dict, objects, cache)?,
         ));
-        cache.insert(dict.object_number, resource.clone());
+        if let Some(num) = &dict.object_number {
+            cache.insert(*num, resource.clone());
+        }
         result.insert(name.clone(), resource);
     }
     Ok(result)

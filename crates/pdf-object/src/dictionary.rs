@@ -5,14 +5,14 @@ use crate::{error::ObjectError, object_variant::ObjectVariant};
 #[derive(Debug, PartialEq, Clone)]
 pub struct Dictionary {
     pub dictionary: BTreeMap<String, ObjectVariant>,
-    pub object_number: usize,
+    pub object_number: Option<usize>,
 }
 
 impl Dictionary {
     pub fn new(dictionary: BTreeMap<String, ObjectVariant>) -> Self {
         Dictionary {
             dictionary,
-            object_number: 0,
+            object_number: None,
         }
     }
 
