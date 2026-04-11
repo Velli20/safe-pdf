@@ -31,6 +31,9 @@ pub struct TrueTypeFont {
     /// Standard 14 identity when this font is a synthetic fallback selected
     /// from a Standard 14 `/BaseFont` name.
     pub standard14: Option<Standard14Font>,
+    /// Font flags from the PDF font descriptor, if available.  Used to determine
+    /// whether to apply the symbolic font fallback behavior for unmapped char codes.
+    pub flags: FontFlags,
 }
 
 impl TrueTypeFont {
@@ -42,7 +45,7 @@ impl TrueTypeFont {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, FontError> {
-        let font_file = Self::read_font_file(dictionary, objects)?;
+        let (font_file, flags) = Self::read_font_file(dictionary, objects)?;
         // Read the `/Widths` entry.
         let widths = SimpleFontGlyphWidthsMap::from_dictionary(dictionary, objects)?;
 
@@ -74,21 +77,25 @@ impl TrueTypeFont {
             encoding,
             to_unicode,
             standard14: None,
+            flags,
         })
     }
 
     /// Creates a minimal `TrueTypeFont` from raw font bytes with no
-    /// widths, encoding, or ToUnicode map.
+    /// widths or ToUnicode map.
     ///
     /// Used for Standard 14 fallback fonts where the bundled bytes are
-    /// `Cow::Borrowed` (zero-copy from `include_bytes!`).
+    /// `Cow::Borrowed` (zero-copy from `include_bytes!`). Those fallback fonts
+    /// behave like simple Type 1 fonts, so they default to StandardEncoding
+    /// when the PDF omitted an explicit `/Encoding`.
     pub fn from_bytes(font_file: Cow<'static, [u8]>, standard14: Option<Standard14Font>) -> Self {
         Self {
             font_file,
             widths: None,
-            encoding: None,
+            encoding: standard14.map(|_| Encoding::default()),
             to_unicode: None,
             standard14,
+            flags: FontFlags::empty(),
         }
     }
 }
@@ -114,30 +121,52 @@ impl TrueTypeFont {
     pub(crate) fn read_font_file(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Cow<'static, [u8]>, ObjectError> {
+    ) -> Result<(Cow<'static, [u8]>, FontFlags), ObjectError> {
         let flags = if let Some(descriptor) = dictionary
             .get("FontDescriptor")
             .map(|obj| obj.try_dictionary(objects))
             .transpose()?
         {
+            let flags = descriptor
+                .get("Flags")
+                .and_then(|obj| obj.try_number::<u32>(objects).ok())
+                .map(FontFlags::from_bits_truncate)
+                .unwrap_or_default();
+
             if let Some(stream) = descriptor
                 .get("FontFile2")
                 .map(|obj| obj.try_stream(objects))
                 .transpose()?
             {
-                return Ok(Cow::Owned(stream.data()?.to_vec()));
+                return Ok((Cow::Owned(stream.data()?.to_vec()), flags));
             }
 
-            // Read Flags to determine fallback font style
-            descriptor
-                .get("Flags")
-                .and_then(|obj| obj.try_number::<u32>(objects).ok())
-                .map(FontFlags::from_bits_truncate)
-                .unwrap_or_default()
+            flags
         } else {
             FontFlags::empty()
         };
 
-        Ok(Standard14Font::from(flags).fallback_font_bytes())
+        Ok((Standard14Font::from(flags).fallback_font_bytes(), flags))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn standard14_fallback_fonts_default_to_standard_encoding() {
+        let font = TrueTypeFont::from_bytes(
+            Standard14Font::Helvetica.fallback_font_bytes(),
+            Some(Standard14Font::Helvetica),
+        );
+
+        assert_eq!(
+            font.encoding
+                .as_ref()
+                .and_then(|encoding| encoding.names.get(65))
+                .map(std::borrow::Cow::as_ref),
+            Some("A"),
+        );
     }
 }

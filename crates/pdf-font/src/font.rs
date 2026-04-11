@@ -213,7 +213,10 @@ mod tests {
     use std::borrow::Cow;
 
     use super::*;
-    use crate::{encoding::Encoding, to_unicode_cmap::ToUnicodeCMap, true_type_font::TrueTypeFont};
+    use crate::{
+        encoding::Encoding, flags::FontFlags, to_unicode_cmap::ToUnicodeCMap,
+        true_type_font::TrueTypeFont,
+    };
 
     #[test]
     fn test_truetype_encoding_fallback() {
@@ -235,6 +238,7 @@ mod tests {
             encoding: Some(enc),
             to_unicode: None,
             standard14: None,
+            flags: FontFlags::empty(),
         });
         assert_eq!(font.char_to_unicode(65), Some('A'));
         assert_eq!(&*font.chars_to_unicode(65), ['A'].as_slice());
@@ -251,6 +255,7 @@ mod tests {
             encoding: None,
             to_unicode: Some(cmap),
             standard14: None,
+            flags: FontFlags::empty(),
         });
         assert_eq!(
             &*font.chars_to_unicode(1),
