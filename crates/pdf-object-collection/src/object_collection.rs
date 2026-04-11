@@ -73,10 +73,13 @@ impl ObjectCollection {
                     object,
                     ..
                 } = *indirect;
-                let Some(object) = object else {
+                let Some(mut object) = object else {
                     return Ok(());
                 };
 
+                if let ObjectVariant::Dictionary(ref mut d) = object {
+                    d.object_number = Some(object_number);
+                }
                 if self.map.insert(object_number, object).is_some() {
                     return Err(ObjectError::DuplicateKeyInObjectCollection(object_number));
                 }

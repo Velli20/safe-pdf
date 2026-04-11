@@ -52,10 +52,7 @@ impl PdfParser<'_> {
         };
 
         // Parse the object.
-        let mut object = self.parse_object(objects)?;
-        if let ObjectVariant::Dictionary(ref mut d) = object {
-            d.object_number = object_number;
-        }
+        let object = self.parse_object(objects)?;
 
         self.skip_whitespace();
 

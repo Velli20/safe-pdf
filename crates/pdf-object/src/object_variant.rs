@@ -358,7 +358,11 @@ impl ObjectVariant {
     pub fn try_object_number(&self) -> Result<usize, ObjectError> {
         match self {
             ObjectVariant::Reference(value) => Ok(*value),
-            ObjectVariant::Dictionary(value) => Ok(value.object_number),
+            ObjectVariant::Dictionary(value) => {
+                value.object_number.ok_or(ObjectError::ObjectMissingNumber {
+                    found_type: "Dictionary",
+                })
+            }
             ObjectVariant::Stream(value) => Ok(value.object_number),
             _ => Err(ObjectError::TypeMismatch(
                 "Reference or Object with number",

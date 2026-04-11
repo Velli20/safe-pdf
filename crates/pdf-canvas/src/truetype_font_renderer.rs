@@ -2,9 +2,12 @@ use crate::{
     canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
     text_renderer::TextRenderer, text_state::TextState,
 };
+use pdf_font::glyph_name_to_unicode::glyph_name_to_unicode;
 use pdf_graphics::transform::Transform;
 use read_fonts::TableProvider;
-use skrifa::{FontRef, GlyphId, MetadataProvider, outline::OutlineGlyphCollection};
+use skrifa::{
+    FontRef, GlyphId, MetadataProvider, charmap::Charmap, outline::OutlineGlyphCollection,
+};
 use thiserror::Error;
 
 /// Defines errors that can occur during TrueType font rendering.
@@ -28,6 +31,9 @@ pub(crate) struct TrueTypeFontRenderer<'a, 'b, B: CanvasBackend> {
     font_ref: FontRef<'a>,
     /// Collection of outline glyphs extracted from the font.
     outlines: OutlineGlyphCollection<'a>,
+    /// Pre-computed character-to-glyph mapping, selecting the best cmap
+    /// subtable automatically (Unicode full repertoire > BMP > symbol).
+    charmap: Charmap<'a>,
     /// Base transformation matrix for glyph rendering, incorporating font size,
     /// horizontal scaling, and text rise.
     glyph_base_transform: Transform,
@@ -39,45 +45,40 @@ pub(crate) struct TrueTypeFontRenderer<'a, 'b, B: CanvasBackend> {
 
 /// Resolve a TrueType `GlyphId` for a given encoded character code.
 ///
-/// This helper probes the font’s `cmap` tables to translate a 1- or 2-byte
-/// character code (already decoded to `u16`) into the corresponding TrueType
-/// `GlyphId`.
+/// Implements the glyph-mapping algorithm described in ISO 32000-1 §9.6.6.4
+/// for non-CID TrueType fonts embedded in PDF.
 ///
-/// # Parameters:
+/// # Resolution order
 ///
-/// - `font`: Parsed TrueType `FontRef` providing access to `cmap` tables.
-/// - `char_code`: The PDF text stream’s character code.
+/// 1. **Encoding → AGL → cmap**: If a glyph name is available from the PDF
+///    font's `/Encoding`, map it to a Unicode codepoint via the Adobe Glyph
+///    List, then look up the codepoint in the font's best cmap subtable.
+/// 2. **Direct Unicode**: Treat `char_code` as a Unicode scalar value and
+///    probe the cmap (works for WinAnsiEncoding where codes ≈ Unicode).
+/// 3. **Raw glyph index**: Use `char_code` as a raw glyph ID (last resort).
 ///
-/// # Returns:
+/// # Parameters
 ///
-/// The resolved `GlyphId` if a `cmap` entry is found, otherwise a fallback
-/// `GlyphId(char_code)`.
-fn resolve_glyph_id(font: &FontRef<'_>, char_code: u16) -> GlyphId {
-    // Candidate character codes to probe in the cmap:
-    // - The literal Unicode scalar value (for Unicode cmaps).
-    // - 0xF000/0xF100 + code: common remappings used by symbol-encoded fonts
-    //   (e.g., Windows “Symbol” encoding) where glyphs live in private-use ranges.
-    let candidates = [
-        u32::from(char_code),
-        0xF000u32.saturating_add(u32::from(char_code)),
-        0xF100u32.saturating_add(u32::from(char_code)),
-    ];
-
-    let mut resolved: Option<GlyphId> = None;
-
-    'outer: for subtable in font.cmap().iter() {
-        for code in candidates {
-            if let Some(id) = subtable.map_codepoint(code) {
-                resolved = Some(id);
-                break 'outer;
-            }
-        }
+/// - `charmap`: Pre-computed skrifa `Charmap` (selects the best cmap subtable).
+/// - `char_code`: The PDF text stream's 1-byte character code (widened to `u16`).
+/// - `glyph_name`: Optional glyph name from the font's `/Encoding` dictionary.
+fn resolve_glyph_id(charmap: &Charmap<'_>, char_code: u16, glyph_name: Option<&str>) -> GlyphId {
+    // Step 1: Encoding -> glyph name -> Unicode (via AGL) -> cmap
+    if let Some(name) = glyph_name
+        && let Some(unicode_char) = glyph_name_to_unicode(name)
+        && let Some(gid) = charmap.map(unicode_char)
+    {
+        return gid;
     }
 
-    if let Some(id) = resolved {
-        return id;
+    // Step 2: treat char_code as a Unicode codepoint directly
+    if let Some(unicode_char) = char::from_u32(u32::from(char_code))
+        && let Some(gid) = charmap.map(unicode_char)
+    {
+        return gid;
     }
 
+    // Step 3: use the character code as a raw glyph index
     GlyphId::new(u32::from(char_code))
 }
 
@@ -89,8 +90,8 @@ impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
     ) -> Result<Self, PdfCanvasError> {
         let font_ref = FontRef::new(stream_object)
             .map_err(|e| TrueTypeFontRendererError::FontParseError(e.to_string()))?;
-
         let outlines = font_ref.outline_glyphs();
+        let charmap = font_ref.charmap();
 
         let units_per_em = font_ref
             .head()
@@ -112,6 +113,7 @@ impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
             font_ref,
             canvas,
             outlines,
+            charmap,
             glyph_base_transform,
             units_per_em,
             is_cid,
@@ -131,7 +133,8 @@ impl<B: CanvasBackend> TextRenderer for TrueTypeFontRenderer<'_, '_, B> {
                 .compose_glyph_matrix(self.glyph_base_transform, &state.transform);
 
             let glyph_id = if !self.is_cid {
-                resolve_glyph_id(&self.font_ref, char_code)
+                let glyph_name = state.text_state.glyph_name(char_code);
+                resolve_glyph_id(&self.charmap, char_code, glyph_name)
             } else {
                 GlyphId::new(u32::from(char_code))
             };
