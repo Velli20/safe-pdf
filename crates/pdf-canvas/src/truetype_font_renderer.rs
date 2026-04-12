@@ -41,52 +41,42 @@ pub(crate) struct TrueTypeFontRenderer<'a, 'b, B: CanvasBackend> {
     units_per_em: u16,
     /// Whether this font uses CID (Character Identifier) encoding.
     is_cid: bool,
-}
-
-/// Resolve a TrueType `GlyphId` for a given encoded character code.
-///
-/// Implements the glyph-mapping algorithm described in ISO 32000-1 §9.6.6.4
-/// for non-CID TrueType fonts embedded in PDF.
-///
-/// # Resolution order
-///
-/// 1. **Encoding → AGL → cmap**: If a glyph name is available from the PDF
-///    font's `/Encoding`, map it to a Unicode codepoint via the Adobe Glyph
-///    List, then look up the codepoint in the font's best cmap subtable.
-/// 2. **Direct Unicode**: Treat `char_code` as a Unicode scalar value and
-///    probe the cmap (works for WinAnsiEncoding where codes ≈ Unicode).
-/// 3. **Raw glyph index**: Use `char_code` as a raw glyph ID (last resort).
-///
-/// # Parameters
-///
-/// - `charmap`: Pre-computed skrifa `Charmap` (selects the best cmap subtable).
-/// - `char_code`: The PDF text stream's 1-byte character code (widened to `u16`).
-/// - `glyph_name`: Optional glyph name from the font's `/Encoding` dictionary.
-fn resolve_glyph_id(charmap: &Charmap<'_>, char_code: u16, glyph_name: Option<&str>) -> GlyphId {
-    // Step 1: Encoding -> glyph name -> Unicode (via AGL) -> cmap
-    if let Some(name) = glyph_name
-        && let Some(unicode_char) = glyph_name_to_unicode(name)
-        && let Some(gid) = charmap.map(unicode_char)
-    {
-        return gid;
-    }
-
-    // Step 2: treat char_code as a Unicode codepoint directly
-    if let Some(unicode_char) = char::from_u32(u32::from(char_code))
-        && let Some(gid) = charmap.map(unicode_char)
-    {
-        return gid;
-    }
-
-    // Step 3: use the character code as a raw glyph index
-    GlyphId::new(u32::from(char_code))
+    /// Whether the font is flagged as symbolic (FontFlags::SYMBOLIC).
+    is_symbolic: bool,
 }
 
 impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
+    fn resolve_simple_gid(&self, code: u16, glyph_name: Option<&str>) -> GlyphId {
+        // Non-symbolic path: encoding → glyph name → AGL → Unicode → cmap.
+        if let Some(name) = glyph_name
+            && let Some(unicode_char) = glyph_name_to_unicode(name)
+            && let Some(gid) = self.charmap.map(unicode_char)
+        {
+            return gid;
+        }
+
+        if let Ok(cmap) = self.font_ref.cmap()
+            && let Some((_, _, subtable)) = cmap.best_subtable()
+            && let Some(id) = subtable.map_codepoint(code)
+        {
+            return id;
+        }
+
+        if self.is_symbolic {
+            // Fall back: treat char_code as a Unicode codepoint directly.
+            // Correct for WinAnsiEncoding (codes 0x20–0xFF ≈ Unicode).
+            GlyphId::new(u32::from(code))
+        } else {
+            // No mapping found.
+            GlyphId::NOTDEF
+        }
+    }
+
     pub fn new(
         canvas: &'b mut PdfCanvas<'a, B>,
         stream_object: &'a [u8],
         is_cid: bool,
+        is_symbolic: bool,
     ) -> Result<Self, PdfCanvasError> {
         let font_ref = FontRef::new(stream_object)
             .map_err(|e| TrueTypeFontRendererError::FontParseError(e.to_string()))?;
@@ -117,6 +107,7 @@ impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
             glyph_base_transform,
             units_per_em,
             is_cid,
+            is_symbolic,
         })
     }
 }
@@ -132,22 +123,31 @@ impl<B: CanvasBackend> TextRenderer for TrueTypeFontRenderer<'_, '_, B> {
                 .text_state
                 .compose_glyph_matrix(self.glyph_base_transform, &state.transform);
 
-            let glyph_id = if !self.is_cid {
+            // For CID fonts the char_code IS the glyph index by definition.
+            // For non-CID fonts use the §9.6.6.4 resolver; None means the cmap
+            // has no entry for this code — draw nothing but still advance.
+            let resolved_glyph_id = if !self.is_cid {
                 let glyph_name = state.text_state.glyph_name(char_code);
-                resolve_glyph_id(&self.charmap, char_code, glyph_name)
+                self.resolve_simple_gid(char_code, glyph_name)
             } else {
                 GlyphId::new(u32::from(char_code))
             };
 
-            if let Some(outline_glyph) = self.outlines.get(glyph_id) {
+            if resolved_glyph_id != GlyphId::NOTDEF
+                && let Some(outline_glyph) = self.outlines.get(resolved_glyph_id)
+            {
                 self.canvas
                     .draw_outline_glyph(&outline_glyph, &glyph_matrix_for_char)?;
             }
-
             self.canvas
                 .current_state_mut()?
                 .text_state
-                .advance_horizontal_glyph(char_code, &self.font_ref, glyph_id, self.units_per_em)?;
+                .advance_horizontal_glyph(
+                    char_code,
+                    &self.font_ref,
+                    resolved_glyph_id,
+                    self.units_per_em,
+                )?;
         }
         Ok(())
     }

@@ -10,6 +10,7 @@ use pdf_content_stream::TextElement;
 use pdf_content_stream::pdf_operator_backend::{
     TextObjectOps, TextPositioningOps, TextShowingOps, TextStateOps,
 };
+use pdf_font::flags::FontFlags;
 use pdf_font::font::Font;
 use pdf_font::type0_font::CidFontSubType;
 use pdf_graphics::TextRenderingMode;
@@ -171,8 +172,9 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
             }
             Font::TrueType(font) => {
                 let iter = to_char_iter(text);
-
-                let mut renderer = TrueTypeFontRenderer::new(self, &font.font_file, false)?;
+                let is_symbolic = font.flags.contains(FontFlags::SYMBOLIC);
+                let mut renderer =
+                    TrueTypeFontRenderer::new(self, &font.font_file, false, is_symbolic)?;
                 renderer.render_text(iter)
             }
             Font::Type0(font) => {
@@ -185,7 +187,9 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
                         renderer.render_text(iter)
                     }
                     CidFontSubType::Type2 => {
-                        let mut renderer = TrueTypeFontRenderer::new(self, &font.font_file, true)?;
+                        // CID TrueType fonts use glyph IDs directly; symbolic flag is irrelevant.
+                        let mut renderer =
+                            TrueTypeFontRenderer::new(self, &font.font_file, true, false)?;
                         renderer.render_text(iter)
                     }
                 }

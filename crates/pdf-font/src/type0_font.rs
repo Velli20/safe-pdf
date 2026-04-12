@@ -142,7 +142,9 @@ impl Type0Font {
         // - Type2 (TrueType): Use the raw TrueType data directly.
         let font_file = match subtype {
             CidFontSubType::Type0 => Type1Font::read_font_file(dictionary, objects)?,
-            CidFontSubType::Type2 => TrueTypeFont::read_font_file(dictionary, objects)?.to_vec(),
+            CidFontSubType::Type2 => TrueTypeFont::read_font_file(dictionary, objects)?
+                .0
+                .to_vec(),
         };
 
         // Build reverse glyph→Unicode map from the embedded font's cmap when
