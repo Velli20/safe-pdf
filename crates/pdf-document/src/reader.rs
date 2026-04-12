@@ -46,6 +46,15 @@ pub enum PdfReaderError {
     DecryptionError(#[from] DecryptionError),
     #[error("missing document ID required for encryption")]
     MissingDocumentId,
+    #[error(
+        "failed to resolve {count} object(s) after {iterations} iteration(s); \
+         first unresolved at byte offset {first_offset}"
+    )]
+    UnresolvedObjects {
+        count: usize,
+        iterations: usize,
+        first_offset: usize,
+    },
 }
 
 #[derive(Default)]
@@ -262,7 +271,12 @@ fn load_objects_with_decryption(
     parser: &mut PdfParser,
     decryptor: Option<&DocumentDecryptor>,
 ) -> Result<ObjectCollection, PdfReaderError> {
+    /// Maximum number of retry iterations for resolving forward references.
+    /// Real PDFs rarely need more than 1–2; this is a safety cap.
+    const MAX_RESOLVE_ITERATIONS: usize = 16;
+
     let mut objects = ObjectCollection::default();
+    let mut unresolved: Vec<usize> = Vec::new();
 
     // Pass 1: Load all type-1 (normal) entries — these are objects at byte offsets,
     // including the object streams themselves.
@@ -277,21 +291,51 @@ fn load_objects_with_decryption(
             continue;
         }
 
-        let object = parser.parse_object_at(byte_offset, &objects)?;
+        match try_load_object(byte_offset, parser, &mut objects, decryptor) {
+            Ok(()) => {}
+            Err(PdfReaderError::ParserError(ParserError::ObjectError(
+                ObjectError::FailedResolveObjectReference { .. },
+            ))) => {
+                unresolved.push(byte_offset);
+            }
+            Err(e) => return Err(e),
+        }
+    }
 
-        if matches!(object, ObjectVariant::Reference(_)) {
-            return Err(PdfReaderError::UnexpectedReference {
-                offset: byte_offset,
-            });
+    // Iteratively retry unresolved objects until convergence or the cap is reached.
+    // Each iteration may resolve objects whose dependencies were loaded in a prior
+    // iteration, unblocking further progress.
+    let mut iterations: usize = 0;
+    while !unresolved.is_empty() && iterations < MAX_RESOLVE_ITERATIONS {
+        iterations = iterations.saturating_add(1);
+        let mut still_unresolved: Vec<usize> = Vec::new();
+
+        for byte_offset in &unresolved {
+            match try_load_object(*byte_offset, parser, &mut objects, decryptor) {
+                Ok(()) => {}
+                Err(PdfReaderError::ParserError(ParserError::ObjectError(
+                    ObjectError::FailedResolveObjectReference { .. },
+                ))) => {
+                    still_unresolved.push(*byte_offset);
+                }
+                Err(e) => return Err(e),
+            }
         }
 
-        let object = if let Some(decryptor) = decryptor {
-            decrypt_object(object, decryptor)?
-        } else {
-            object
-        };
+        // No progress — the remaining objects are truly unresolvable.
+        if still_unresolved.len() == unresolved.len() {
+            break;
+        }
 
-        objects.insert(object)?;
+        unresolved = still_unresolved;
+    }
+
+    if let Some(&first_offset) = unresolved.first() {
+        return Err(PdfReaderError::UnresolvedObjects {
+            count: unresolved.len(),
+            iterations,
+            first_offset,
+        });
     }
 
     // Pass 2: Unpack type-2 (compressed) entries from object streams.
@@ -332,6 +376,32 @@ fn load_objects_with_decryption(
     }
 
     Ok(objects)
+}
+
+/// Parses a single object at `byte_offset`, validates it, optionally decrypts it,
+/// and inserts it into the collection.
+fn try_load_object(
+    byte_offset: usize,
+    parser: &mut PdfParser,
+    objects: &mut ObjectCollection,
+    decryptor: Option<&DocumentDecryptor>,
+) -> Result<(), PdfReaderError> {
+    let object = parser.parse_object_at(byte_offset, objects)?;
+
+    if matches!(object, ObjectVariant::Reference(_)) {
+        return Err(PdfReaderError::UnexpectedReference {
+            offset: byte_offset,
+        });
+    }
+
+    let object = if let Some(decryptor) = decryptor {
+        decrypt_object(object, decryptor)?
+    } else {
+        object
+    };
+
+    objects.insert(object)?;
+    Ok(())
 }
 
 /// Decrypts an object's stream data if applicable.
@@ -522,5 +592,109 @@ mod tests {
 
         let doc = result.unwrap();
         assert_eq!(doc.page_count(), 0);
+    }
+
+    #[test]
+    fn test_stream_with_indirect_length_resolves() {
+        // Object 4 is a stream whose /Length is an indirect reference to object 3.
+        // Since entries are processed in reverse key order (4, 3, 2, 1), object 4
+        // will be deferred on the first pass because object 3 isn't loaded yet.
+        // The retry loop should resolve it.
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%PDF-1.7\n");
+
+        // Object 3: the stream length value (5)
+        let obj3_offset = data.len();
+        data.extend_from_slice(b"3 0 obj\n5\nendobj\n");
+
+        // Object 4: a stream with /Length as an indirect reference
+        let obj4_offset = data.len();
+        data.extend_from_slice(b"4 0 obj\n<< /Length 3 0 R >>\nstream\nHello\nendstream\nendobj\n");
+
+        // Object 1: Catalog
+        let obj1_offset = data.len();
+        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        // Object 2: Pages
+        let obj2_offset = data.len();
+        data.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
+
+        // Xref table
+        let xref_offset = data.len();
+        data.extend_from_slice(b"xref\n0 5\n");
+        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj3_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj4_offset, 0, true).as_bytes());
+
+        // Trailer
+        data.extend_from_slice(b"trailer\n<< /Size 5 /Root 1 0 R >>\n");
+        data.extend_from_slice(b"startxref\n");
+        data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
+        data.extend_from_slice(b"%%EOF");
+
+        let reader = PdfReader;
+        let result = reader.read_from_bytes(&data, None);
+
+        assert!(
+            result.is_ok(),
+            "Stream with indirect /Length should resolve: {:?}",
+            result.err()
+        );
+
+        let doc = result.unwrap();
+        assert_eq!(doc.page_count(), 0);
+    }
+
+    #[test]
+    fn test_unresolvable_reference_returns_error() {
+        // Object 4 is a stream whose /Length references a non-existent object (99 0 R).
+        // The retry loop should detect no progress and return UnresolvedObjects.
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%PDF-1.7\n");
+
+        // Object 4: a stream referencing non-existent object 99 for /Length
+        let obj4_offset = data.len();
+        data.extend_from_slice(
+            b"4 0 obj\n<< /Length 99 0 R >>\nstream\nHello\nendstream\nendobj\n",
+        );
+
+        // Object 1: Catalog
+        let obj1_offset = data.len();
+        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        // Object 2: Pages
+        let obj2_offset = data.len();
+        data.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
+
+        // Xref table — object 99 is NOT present
+        let xref_offset = data.len();
+        data.extend_from_slice(b"xref\n0 5\n");
+        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
+        // entry 3 = free (placeholder)
+        data.extend_from_slice(format_xref_entry(0, 0, false).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj4_offset, 0, true).as_bytes());
+
+        // Trailer
+        data.extend_from_slice(b"trailer\n<< /Size 5 /Root 1 0 R >>\n");
+        data.extend_from_slice(b"startxref\n");
+        data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
+        data.extend_from_slice(b"%%EOF");
+
+        let reader = PdfReader;
+        let result = reader.read_from_bytes(&data, None);
+
+        assert!(result.is_err(), "Should fail for unresolvable reference");
+        let err_msg = match result {
+            Err(e) => e.to_string(),
+            Ok(_) => unreachable!(),
+        };
+        assert!(
+            err_msg.contains("failed to resolve"),
+            "Expected UnresolvedObjects error, got: {err_msg}"
+        );
     }
 }
