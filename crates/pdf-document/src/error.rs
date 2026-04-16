@@ -30,4 +30,13 @@ pub enum PdfReaderError {
     DecryptionError(#[from] DecryptionError),
     #[error("missing document ID required for encryption")]
     MissingDocumentId,
+    #[error(
+        "failed to resolve {count} object(s) after {iterations} iteration(s); \
+         first unresolved at byte offset {first_offset}"
+    )]
+    UnresolvedObjects {
+        count: usize,
+        iterations: usize,
+        first_offset: usize,
+    },
 }

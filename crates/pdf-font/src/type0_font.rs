@@ -75,9 +75,9 @@ impl Type0Font {
             .get_or_err("DescendantFonts")?
             .try_array(objects)?;
         if descendant_fonts_array.len() != 1 {
-            return Err(
-                FontError::InvalidDescendantFonts("Expected exactly one descendant font").into(),
-            );
+            return Err(FontError::InvalidDescendantFonts(
+                "Expected exactly one descendant font",
+            ));
         }
 
         // Retrieve the sole CIDFont dictionary from the array.
@@ -95,8 +95,7 @@ impl Type0Font {
             other => {
                 return Err(FontError::UnsupportedCidFontSubtype {
                     subtype: other.to_string(),
-                }
-                .into());
+                });
             }
         };
 
