@@ -7,19 +7,14 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use pdf_font::font::{Font, FontError};
-use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
-use thiserror::Error;
+use pdf_font::font::Font;
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 use crate::{
-    external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateError},
-    pattern::{Pattern, PatternError},
-    resource::Resource,
-    resource_cache::ResourceCache,
-    shading::{Shading, ShadingError},
-    xobject::{XObject, XObjectError},
+    error::PdfPagesError, external_graphics_state::ExternalGraphicsState, pattern::Pattern,
+    resource::Resource, resource_cache::ResourceCache, shading::Shading, xobject::XObject,
 };
-use pdf_color_space::color_space::{ColorSpace, ColorSpaceError};
+use pdf_color_space::color_space::ColorSpace;
 
 /// Contains all resources referenced by a PDF content stream, organized per PDF sub-dictionary.
 ///
@@ -43,27 +38,6 @@ pub struct Resources {
     pub color_spaces: HashMap<String, Resource>,
 }
 
-/// Errors that can occur while parsing a PDF Resources dictionary.
-#[derive(Debug, Error)]
-pub enum ResourcesError {
-    #[error("Error processing font: {0}")]
-    FontError(#[from] FontError),
-    #[error("External Graphics State parsing error: {0}")]
-    ExternalGraphicsStateError(#[from] ExternalGraphicsStateError),
-    #[error("XObject parsing error: {0}")]
-    XObjectError(#[from] XObjectError),
-    #[error("Pattern parsing error: {0}")]
-    PatternError(#[from] PatternError),
-    #[error("{0}")]
-    ObjectError(#[from] ObjectError),
-    #[error("{0}")]
-    ColorSpaceError(#[from] ColorSpaceError),
-    #[error("Shading parsing error: {0}")]
-    ShadingError(#[from] ShadingError),
-    #[error("Error parsing content stream: {0}")]
-    ContentStreamError(#[from] pdf_content_stream::error::PdfOperatorError),
-}
-
 /// Attempts to retrieve a sub-dictionary from the resources dictionary.
 ///
 /// # Parameters
@@ -80,7 +54,7 @@ fn get_sub_dictionary<'a>(
     resources: &'a Dictionary,
     key: &str,
     objects: &'a dyn ObjectResolver,
-) -> Result<Option<&'a Dictionary>, ResourcesError> {
+) -> Result<Option<&'a Dictionary>, PdfPagesError> {
     resources
         .get(key)
         .map(|entry| entry.try_dictionary(objects))
@@ -93,7 +67,7 @@ fn read_fonts(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
-) -> Result<HashMap<String, Resource>, ResourcesError> {
+) -> Result<HashMap<String, Resource>, PdfPagesError> {
     let Some(font_dict) = get_sub_dictionary(resources, Font::KEY, objects)? else {
         return Ok(HashMap::new());
     };
@@ -130,7 +104,7 @@ fn read_external_graphics_states(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
-) -> Result<HashMap<String, Resource>, ResourcesError> {
+) -> Result<HashMap<String, Resource>, PdfPagesError> {
     let Some(ext_gstate_dict) = get_sub_dictionary(resources, "ExtGState", objects)? else {
         return Ok(HashMap::new());
     };
@@ -161,7 +135,7 @@ fn read_patterns(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
-) -> Result<HashMap<String, Resource>, ResourcesError> {
+) -> Result<HashMap<String, Resource>, PdfPagesError> {
     let Some(pattern_dict) = get_sub_dictionary(resources, "Pattern", objects)? else {
         return Ok(HashMap::new());
     };
@@ -187,7 +161,7 @@ fn read_xobjects(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
-) -> Result<HashMap<String, Resource>, ResourcesError> {
+) -> Result<HashMap<String, Resource>, PdfPagesError> {
     let Some(xobject_dict) = get_sub_dictionary(resources, "XObject", objects)? else {
         return Ok(HashMap::new());
     };
@@ -217,7 +191,7 @@ fn read_shadings(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
-) -> Result<HashMap<String, Resource>, ResourcesError> {
+) -> Result<HashMap<String, Resource>, PdfPagesError> {
     let Some(shading_dict) = get_sub_dictionary(resources, "Shading", objects)? else {
         return Ok(HashMap::new());
     };
@@ -241,7 +215,7 @@ fn read_color_spaces(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
-) -> Result<HashMap<String, Resource>, ResourcesError> {
+) -> Result<HashMap<String, Resource>, PdfPagesError> {
     let Some(color_space_dict) = get_sub_dictionary(resources, "ColorSpace", objects)? else {
         return Ok(HashMap::new());
     };
@@ -386,12 +360,12 @@ impl Resources {
     ///
     /// # Errors
     ///
-    /// Returns a [`ResourcesError`] if any resource fails to parse or resolve.
+    /// Returns a [`PdfPagesError`] if any resource fails to parse or resolve.
     pub fn read(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
-    ) -> Result<Option<Self>, ResourcesError> {
+    ) -> Result<Option<Self>, PdfPagesError> {
         const KEY: &str = "Resources";
 
         let Some(resources_entry) = dictionary.get(KEY) else {

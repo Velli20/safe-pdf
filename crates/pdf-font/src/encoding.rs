@@ -1,7 +1,8 @@
 use std::borrow::Cow;
 
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
-use thiserror::Error;
+
+use crate::error::FontError;
 
 /// Represents the base encoding of a font.
 #[derive(Default, PartialEq, Clone, Debug)]
@@ -16,8 +17,6 @@ pub enum FontEncoding {
     MacExpert,
     /// Windows ANSI encoding.
     WinAnsi,
-    /// PDF Document encoding.
-    PDFDocEncoding,
     /// Unknown encoding.
     Unknown(String),
 }
@@ -29,22 +28,9 @@ impl From<Cow<'_, str>> for FontEncoding {
             "MacExpertEncoding" => Self::MacExpert,
             "StandardEncoding" => Self::Standard,
             "WinAnsiEncoding" => Self::WinAnsi,
-            "PDFDocEncoding" => Self::PDFDocEncoding,
             _ => Self::Unknown(name.to_string()),
         }
     }
-}
-
-#[derive(Debug, Error, Clone, PartialEq)]
-pub enum EncodingReadError {
-    #[error("PDF Object error: {0}")]
-    ObjectError(#[from] pdf_object::error::ObjectError),
-    #[error("BaseEncoding must be a name or string")]
-    InvalidBaseEncodingType,
-    #[error("PDFDocEncoding is not yet supported")]
-    UnsupportedPdfDocEncoding,
-    #[error("Unknown base encoding '{0}'")]
-    UnknownBaseEncoding(String),
 }
 
 #[derive(Debug)]
@@ -60,17 +46,14 @@ impl Default for Encoding {
 }
 
 impl Encoding {
-    pub(crate) fn from_base_encoding(encoding: FontEncoding) -> Result<Self, EncodingReadError> {
+    pub(crate) fn from_base_encoding(encoding: FontEncoding) -> Result<Self, FontError> {
         let names = match encoding {
             FontEncoding::Standard => names_from_base(&STANDARD_NAMES),
             FontEncoding::WinAnsi => names_from_base(&WIN_ANSI_NAMES),
             FontEncoding::MacRoman => names_from_base(&MAC_ROMAN_NAMES),
             FontEncoding::MacExpert => names_from_base(&MAC_EXPERT_NAMES),
-            FontEncoding::PDFDocEncoding => {
-                return Err(EncodingReadError::UnsupportedPdfDocEncoding);
-            }
             FontEncoding::Unknown(name) => {
-                return Err(EncodingReadError::UnknownBaseEncoding(name));
+                return Err(FontError::UnsupportedBaseEncoding(name));
             }
             FontEncoding::None => Vec::new(),
         };
@@ -81,7 +64,7 @@ impl Encoding {
         &mut self,
         differences_obj: &ObjectVariant,
         objects: &dyn ObjectResolver,
-    ) -> Result<(), EncodingReadError> {
+    ) -> Result<(), FontError> {
         let mut current_range_start = 0_usize;
 
         for chunk in differences_obj.try_array(objects)? {
@@ -106,7 +89,7 @@ impl Encoding {
     pub fn from_dictionary(
         dictionary: &pdf_object::dictionary::Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self, EncodingReadError> {
+    ) -> Result<Self, FontError> {
         let mut encoding = match dictionary.get("BaseEncoding") {
             Some(base) => {
                 let base_encoding = FontEncoding::from(base.try_str(objects)?);

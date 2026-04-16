@@ -1,17 +1,12 @@
 use std::collections::HashMap;
 
-use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 use read_fonts::{FontRef, TableProvider};
 
 use crate::{
-    encoding::FontEncoding,
-    font::FontError,
-    glyph_widths_map::{GlyphWidthsMap, GlyphWidthsMapError},
-    to_unicode_cmap::ToUnicodeCMap,
-    true_type_font::TrueTypeFont,
-    type1_font::Type1Font,
+    encoding::FontEncoding, error::FontError, glyph_widths_map::GlyphWidthsMap,
+    to_unicode_cmap::ToUnicodeCMap, true_type_font::TrueTypeFont, type1_font::Type1Font,
 };
-use thiserror::Error;
 
 /// Represents a PDF Type0 (composite) font, which references a CIDFont
 /// for glyph definitions.
@@ -52,19 +47,6 @@ pub enum CidFontSubType {
     Type2,
 }
 
-/// Defines errors that can occur while reading a PDF objects.
-#[derive(Debug, Error, Clone, PartialEq)]
-pub enum Type0FontError {
-    #[error("{0}")]
-    ObjectError(#[from] ObjectError),
-    #[error("GlyphWidthsMap parsing error: {0}")]
-    GlyphWidthsMapError(#[from] GlyphWidthsMapError),
-    #[error("Unsupported CIDFont subtype '{subtype}'")]
-    UnsupportedCidFontSubtype { subtype: String },
-    #[error("Invalid /DescendantFonts entry in Type0 font: {0}")]
-    InvalidDescendantFonts(&'static str),
-}
-
 impl Type0Font {
     pub fn from_dictionary(
         dictionary: &Dictionary,
@@ -93,16 +75,15 @@ impl Type0Font {
             .get_or_err("DescendantFonts")?
             .try_array(objects)?;
         if descendant_fonts_array.len() != 1 {
-            return Err(Type0FontError::InvalidDescendantFonts(
-                "Expected exactly one descendant font",
-            )
-            .into());
+            return Err(
+                FontError::InvalidDescendantFonts("Expected exactly one descendant font").into(),
+            );
         }
 
         // Retrieve the sole CIDFont dictionary from the array.
         let dictionary = descendant_fonts_array
             .first()
-            .ok_or(Type0FontError::InvalidDescendantFonts("Array is empty"))?
+            .ok_or(FontError::InvalidDescendantFonts("Array is empty"))?
             .try_dictionary(objects)?;
 
         // Determine the CIDFont subtype which dictates how glyph data is stored:
@@ -112,7 +93,7 @@ impl Type0Font {
             "CIDFontType0" => CidFontSubType::Type0,
             "CIDFontType2" => CidFontSubType::Type2,
             other => {
-                return Err(Type0FontError::UnsupportedCidFontSubtype {
+                return Err(FontError::UnsupportedCidFontSubtype {
                     subtype: other.to_string(),
                 }
                 .into());
@@ -131,9 +112,9 @@ impl Type0Font {
         // default width for specific CIDs.
         let widths_map = dictionary
             .get("W")
-            .map(|obj| -> Result<GlyphWidthsMap, Type0FontError> {
+            .map(|obj| -> Result<GlyphWidthsMap, FontError> {
                 let resolved_obj = obj.try_array(objects)?;
-                GlyphWidthsMap::from_array(resolved_obj, objects).map_err(Type0FontError::from)
+                GlyphWidthsMap::from_array(resolved_obj, objects).map_err(FontError::from)
             })
             .transpose()?;
 

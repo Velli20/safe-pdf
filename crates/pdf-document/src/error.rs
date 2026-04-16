@@ -1,25 +1,17 @@
 use pdf_object::error::ObjectError;
-use pdf_page::pages::PdfPagesError;
+use pdf_page::error::PdfPagesError;
 use pdf_parser::{error::ParserError, header::HeaderError};
 use thiserror::Error;
 
+use crate::decryption::DecryptionError;
+
 /// Errors that can occur while reading a PDF document.
 #[derive(Debug, Error)]
-pub enum PdfError {
-    /// An error occurred during the parsing phase of the PDF document structure.
-    #[error("read error: {0}")]
-    ReadError(String),
-    /// The PDF document trailer dictionary could not be found or is malformed.
+pub enum PdfReaderError {
     #[error("missing trailer")]
     MissingTrailer,
-    /// The `Pages` entry in the document catalog is missing or invalid.
-    #[error("missing page tree")]
-    MissingPageTree,
-    /// The document catalog (the object referenced by `/Root` in the trailer) is missing or invalid.
-    #[error("missing catalog")]
-    MissingCatalog,
-    #[error("missing type")]
-    MissingType,
+    #[error("unexpected reference object at offset {offset}")]
+    UnexpectedReference { offset: usize },
     #[error("{0}")]
     ObjectError(#[from] ObjectError),
     #[error("{0}")]
@@ -28,4 +20,14 @@ pub enum PdfError {
     ParserError(#[from] ParserError),
     #[error("Error parsing PDF header: {0}")]
     HeaderError(#[from] HeaderError),
+    #[error("unsupported PDF version: {0}.{1}")]
+    UnsupportedVersion(u8, u8),
+    #[error("invalid cross-reference table at offset {offset}")]
+    InvalidXrefAtOffset { offset: usize },
+    #[error("unsupported encryption version: {version}")]
+    UnsupportedEncryptionVersion { version: i32 },
+    #[error("decryption error: {0}")]
+    DecryptionError(#[from] DecryptionError),
+    #[error("missing document ID required for encryption")]
+    MissingDocumentId,
 }

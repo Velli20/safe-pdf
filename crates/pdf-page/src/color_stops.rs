@@ -2,7 +2,7 @@ use pdf_color_space::color_space::ColorSpace;
 use pdf_function::function::{Function, FunctionImpl};
 use pdf_graphics::color::Color;
 
-use crate::pages::PdfPagesError;
+use crate::error::PdfPagesError;
 
 /// Default domain range for shading functions when not explicitly specified.
 const DEFAULT_DOMAIN: [f32; 2] = [0.0, 1.0];

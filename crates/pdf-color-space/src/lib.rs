@@ -3,6 +3,7 @@ pub mod cal_rgb_color_space;
 pub mod color_space;
 pub mod color_space_reader;
 pub mod device_n_color_space;
+pub mod error;
 pub mod icc_based_color_space;
 pub mod indexed_color_space;
 pub mod lab_color_space;

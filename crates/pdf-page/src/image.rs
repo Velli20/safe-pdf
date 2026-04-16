@@ -10,56 +10,10 @@
 use std::borrow::Cow;
 
 use pdf_graphics::PixelFormat;
-use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    stream::StreamObject,
-};
-use thiserror::Error;
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, stream::StreamObject};
 
-use crate::{
-    resource_cache::ResourceCache,
-    xobject::{XObject, XObjectError},
-};
-use pdf_color_space::{
-    color_space::{ColorSpace, ColorSpaceError},
-    indexed_color_space::IndexedColorSpace,
-};
-
-/// Errors that can occur when parsing or processing PDF Image XObjects.
-#[derive(Debug, Error)]
-pub enum ImageXObjectError {
-    /// The `/SMask` entry referenced a non-image XObject.
-    ///
-    /// Per the PDF specification, soft masks must always be Image XObjects
-    /// with a `/ColorSpace` of `/DeviceGray`.
-    #[error("SMask must be an Image XObject, but found a different XObject type")]
-    SMaskNotImage,
-    /// An error occurred while reading the soft mask XObject.
-    #[error("Failed to read SMask XObject: {source}")]
-    SMaskReadError {
-        /// The underlying XObject error.
-        source: Box<XObjectError>,
-    },
-    /// An error occurred while parsing the color space.
-    #[error("ColorSpace error: {0}")]
-    ColorSpaceError(#[from] ColorSpaceError),
-    /// An error occurred while resolving PDF objects.
-    #[error("Object error: {0}")]
-    ObjectError(#[from] ObjectError),
-    /// The image has zero-area dimensions (width or height is zero).
-    #[error("image has zero dimensions: {width}x{height}")]
-    ZeroImageDimensions { width: usize, height: usize },
-    /// The bits per component value is not supported.
-    ///
-    /// Only 1-bit and 8-bit-per-component images are currently supported.
-    #[error("unsupported bits per component: {bits} (only 1 and 8 are supported)")]
-    UnsupportedBitsPerComponent { bits: usize },
-    /// The color space reported zero color components, which is invalid.
-    #[error("color space reports zero color components")]
-    ZeroColorComponents,
-    #[error("failed to decode image: expected at least {expected} bytes, got {actual} bytes")]
-    ImageDecodeFailed { expected: usize, actual: usize },
-}
+use crate::{error::PdfPagesError, resource_cache::ResourceCache, xobject::XObject};
+use pdf_color_space::{color_space::ColorSpace, indexed_color_space::IndexedColorSpace};
 
 /// Represents a PDF Image XObject, which is a self-contained raster image.
 ///
@@ -130,7 +84,7 @@ impl ImageXObject {
         stream_data: &StreamObject,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
-    ) -> Result<Self, ImageXObjectError> {
+    ) -> Result<Self, PdfPagesError> {
         // Extract required image properties from the dictionary.
         let width = dictionary
             .get_or_err("Width")?
@@ -140,7 +94,7 @@ impl ImageXObject {
             .try_number::<usize>(objects)?;
 
         if width == 0 || height == 0 {
-            return Err(ImageXObjectError::ZeroImageDimensions { width, height });
+            return Err(PdfPagesError::InvalidImageDimensions { width, height });
         }
 
         let bits_per_component = dictionary
@@ -149,9 +103,7 @@ impl ImageXObject {
 
         // Only 1-bit and 8-bit-per-component images are currently supported.
         if bits_per_component != 1 && bits_per_component != 8 {
-            return Err(ImageXObjectError::UnsupportedBitsPerComponent {
-                bits: bits_per_component,
-            });
+            return Err(PdfPagesError::UnsupportedImageBitsPerComponent { bits_per_component });
         }
 
         // Parse the optional `/ColorSpace` entry.
@@ -202,15 +154,15 @@ impl ImageXObject {
             };
 
         if num_color_components == 0 {
-            return Err(ImageXObjectError::ZeroColorComponents);
+            return Err(PdfPagesError::InvalidColorComponentCount);
         }
 
         let num_pixels = width.saturating_mul(height);
         let expected_bytes = num_pixels.saturating_mul(num_color_components);
         if image_data.len() < expected_bytes {
-            return Err(ImageXObjectError::ImageDecodeFailed {
-                expected: expected_bytes,
-                actual: image_data.len(),
+            return Err(PdfPagesError::TruncatedImageData {
+                expected_bytes,
+                actual_bytes: image_data.len(),
             });
         }
 
@@ -275,7 +227,7 @@ impl ImageXObject {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
-    ) -> Result<Option<Box<ImageXObject>>, ImageXObjectError> {
+    ) -> Result<Option<Box<ImageXObject>>, PdfPagesError> {
         let Some(smask_obj) = dictionary.get("SMask") else {
             return Ok(None);
         };
@@ -284,14 +236,12 @@ impl ImageXObject {
         let stream = smask_obj.try_stream(objects)?;
 
         // Recursively parse the SMask as an XObject.
-        let smask_xobject = XObject::read_xobject(&stream.dictionary, stream, objects, cache)
-            .map_err(|e| ImageXObjectError::SMaskReadError {
-                source: Box::new(e),
-            })?;
+        let smask_xobject = XObject::read_xobject(&stream.dictionary, stream, objects, cache)?;
+
         // Ensure the SMask is actually an Image XObject.
         match smask_xobject {
             XObject::Image(img) => Ok(Some(Box::new(img))),
-            _ => Err(ImageXObjectError::SMaskNotImage),
+            _ => Err(PdfPagesError::InvalidSoftMaskXObject),
         }
     }
 

@@ -253,10 +253,10 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 colors: Cow::Borrowed(&color_stops.colors),
                 positions: Cow::Borrowed(&color_stops.positions),
             }),
-            Shading::FunctionBased { .. } => Err(PdfCanvasError::NotImplemented(
+            Shading::FunctionBased { .. } => Err(PdfCanvasError::UnsupportedFeature(
                 "FunctionBased shading not implemented".into(),
             )),
-            Shading::Unsupported { name } => Err(PdfCanvasError::NotImplemented(format!(
+            Shading::Unsupported { name } => Err(PdfCanvasError::UnsupportedFeature(format!(
                 "Shading type '{}' not implemented",
                 name
             ))),

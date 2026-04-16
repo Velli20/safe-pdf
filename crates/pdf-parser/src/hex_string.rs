@@ -1,17 +1,5 @@
-use pdf_tokenizer::{PdfToken, error::TokenizerError};
-use thiserror::Error;
-
-use crate::parser::PdfParser;
-
-/// Represents an error that can occur while parsing a hex string object.
-#[derive(Debug, PartialEq, Error)]
-pub enum HexStringError {
-    /// Indicates that the input contains a non-hexadecimal character.
-    #[error("Invalid non-hex decimal character in the input: '{0}'")]
-    NotHexDecimal(char),
-    #[error("Tokenizer error: {0}")]
-    TokenizerError(#[from] TokenizerError),
-}
+use crate::{error::ParserError, parser::PdfParser};
+use pdf_tokenizer::PdfToken;
 
 impl PdfParser<'_> {
     /// Parses a hexadecimal string object from the current position in the input stream.
@@ -20,7 +8,7 @@ impl PdfParser<'_> {
     ///
     /// `String` containing the decoded string value or an error if invalid format
     /// or characters are encountered.
-    pub fn parse_hex_string(&mut self) -> Result<Vec<u8>, HexStringError> {
+    pub fn parse_hex_string(&mut self) -> Result<Vec<u8>, ParserError> {
         self.tokenizer.expect(PdfToken::LeftAngleBracket)?;
 
         // 1. Read until the closing `>` of the hex string.
@@ -35,7 +23,7 @@ impl PdfParser<'_> {
 
             // 2. Check if the character is a valid hex digit (0-9, a-f, A-F)
             if !b.is_ascii_hexdigit() {
-                return Err(HexStringError::NotHexDecimal(char::from(*b)));
+                return Err(ParserError::NotHexDecimal(char::from(*b)));
             }
             // 3. Append hex digits to the hex string.
             filtered.push(*b);

@@ -8,18 +8,6 @@ use read_fonts::TableProvider;
 use skrifa::{
     FontRef, GlyphId, MetadataProvider, charmap::Charmap, outline::OutlineGlyphCollection,
 };
-use thiserror::Error;
-
-/// Defines errors that can occur during TrueType font rendering.
-#[derive(Debug, Error)]
-pub enum TrueTypeFontRendererError {
-    #[error("The font file object is not a stream, but a {found_type}")]
-    FontFileNotStream { found_type: &'static str },
-    #[error("Failed to parse the TrueType font file: {0}")]
-    FontParseError(String),
-    #[error("Incomplete 2-byte character at the end of the string")]
-    IncompleteTwoByteCharacter,
-}
 
 /// Handles the conversion of TrueType glyph outlines into PDF path
 /// operations, applying the appropriate transformations for font size,
@@ -79,7 +67,7 @@ impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
         is_symbolic: bool,
     ) -> Result<Self, PdfCanvasError> {
         let font_ref = FontRef::new(stream_object)
-            .map_err(|e| TrueTypeFontRendererError::FontParseError(e.to_string()))?;
+            .map_err(|e| PdfCanvasError::TrueTypeFontParse(e.to_string()))?;
         let outlines = font_ref.outline_glyphs();
         let charmap = font_ref.charmap();
 

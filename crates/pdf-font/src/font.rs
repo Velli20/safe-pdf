@@ -1,44 +1,12 @@
 use std::borrow::Cow;
 
-use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
-use thiserror::Error;
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 use crate::{
-    char_vec::CharVec,
-    glyph_name_to_unicode::glyph_name_to_unicode,
-    standard14::Standard14Font,
-    to_unicode_cmap::ToUnicodeCMap,
-    true_type_font::TrueTypeFont,
-    type0_font::{Type0Font, Type0FontError},
-    type1_font::Type1Font,
-    type3_font::{Type3Font, Type3FontError},
+    char_vec::CharVec, error::FontError, glyph_name_to_unicode::glyph_name_to_unicode,
+    standard14::Standard14Font, to_unicode_cmap::ToUnicodeCMap, true_type_font::TrueTypeFont,
+    type0_font::Type0Font, type1_font::Type1Font, type3_font::Type3Font,
 };
-
-/// Defines errors that can occur while reading a font object.
-#[derive(Debug, Error, PartialEq)]
-pub enum FontError {
-    #[error("{0}")]
-    ObjectError(#[from] ObjectError),
-    #[error("Error processing Type3 font: {0}")]
-    Type3FontError(#[from] Type3FontError),
-    #[error("Error processing Type0 font: {0}")]
-    Type0FontError(#[from] Type0FontError),
-    #[error("Unsupported or invalid font subtype '{subtype}'")]
-    UnsupportedFontSubtype { subtype: String },
-    #[error("Unsupported or invalid font subtype '{0}'")]
-    InvalidFontSubtype(String),
-    #[error("Failed to build font: {0}")]
-    FontBuildError(String),
-    #[error("Encoding reading error: {0}")]
-    EncodingReadError(#[from] crate::encoding::EncodingReadError),
-    /// The font dictionary or descriptor lacks an embedded font program stream
-    /// (`FontFile`, `FontFile2`, or `FontFile3`).
-    ///
-    /// For Type 1 fonts this is a sentinel: `Font::from_dictionary` catches it
-    /// and substitutes a bundled Standard 14 TrueType fallback.
-    #[error("Missing embedded font file stream")]
-    MissingFontFile,
-}
 
 /// Represents a font object in a PDF document.
 pub enum Font {

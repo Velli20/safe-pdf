@@ -13,38 +13,13 @@
 
 use pdf_graphics::rect::Rect;
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
-use thiserror::Error;
 
 use crate::color_stops::ColorStops;
-use crate::pages::PdfPagesError;
-use pdf_color_space::color_space::{ColorSpace, ColorSpaceError};
-use pdf_function::function::{
-    Function, FunctionImpl, FunctionInterpolationError, FunctionReadError,
-};
-
-/// Errors that can occur while parsing or processing a Shading object.
-#[derive(Debug, Error)]
-pub enum ShadingError {
-    #[error("Missing required entry '{entry_name}'")]
-    MissingRequiredEntry { entry_name: &'static str },
-    #[error("Unsupported /ShadingType value: {0}")]
-    UnsupportedShadingType(ShadingType),
-    #[error("Unknown /ShadingType value: {0}")]
-    InvalidShadingType(i32),
-    #[error("Error parsing Function: {0}")]
-    FunctionReadError(#[from] FunctionReadError),
-    #[error("Error interpolating Function: {0}")]
-    FunctionInterpolationError(#[from] FunctionInterpolationError),
-    #[error("Error parsing Dictionary: {0}")]
-    ObjectError(#[from] ObjectError),
-    #[error("ColorSpace error: {0}")]
-    ColorSpaceError(#[from] ColorSpaceError),
-    #[error("Error computing color stops: {0}")]
-    ColorStopsError(Box<PdfPagesError>),
-}
+use crate::error::PdfPagesError;
+use pdf_color_space::color_space::ColorSpace;
+use pdf_function::function::{Function, FunctionImpl};
 
 /// Represents the PDF `/ShadingType` entry value.
 ///
@@ -88,13 +63,13 @@ impl std::fmt::Display for ShadingType {
 }
 
 impl TryFrom<i32> for ShadingType {
-    type Error = ShadingError;
+    type Error = PdfPagesError;
 
     /// Attempts to convert an integer to a `ShadingType`.
     ///
     /// # Errors
     ///
-    /// Returns [`ShadingError::InvalidShadingType`] if the value is not in the range 1-7.
+    /// Returns [`PdfPagesError::InvalidShadingType`] if the value is not in the range 1-7.
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(Self::FunctionBased),
@@ -104,7 +79,7 @@ impl TryFrom<i32> for ShadingType {
             5 => Ok(Self::LatticeFormTriangleMesh),
             6 => Ok(Self::CoonsPatchMesh),
             7 => Ok(Self::TensorProductPatchMesh),
-            _ => Err(ShadingError::InvalidShadingType(value)),
+            _ => Err(PdfPagesError::InvalidShadingType { value }),
         }
     }
 }
@@ -207,7 +182,7 @@ impl Shading {
     pub fn from_dictionary(
         object: &ObjectVariant,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self, ShadingError> {
+    ) -> Result<Self, PdfPagesError> {
         // Extract and validate the required `/ShadingType` entry.
         let dictionary = object.try_dictionary(objects)?;
         let shading_type_value = dictionary
@@ -232,7 +207,7 @@ impl Shading {
     fn parse_function_based(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self, ShadingError> {
+    ) -> Result<Self, PdfPagesError> {
         // Read optional `/ColorSpace` entry.
         let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
 
@@ -272,7 +247,7 @@ impl Shading {
     fn parse_axial(
         object: &ObjectVariant,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self, ShadingError> {
+    ) -> Result<Self, PdfPagesError> {
         // Read required `/Coords` entry defining the gradient axis.
         let dictionary = object.try_dictionary(objects)?;
         let coords = dictionary
@@ -281,8 +256,8 @@ impl Shading {
 
         // Read required `/ColorSpace` entry.
         let color_space = ColorSpace::from_dictionary(dictionary, objects)?.ok_or(
-            ShadingError::MissingRequiredEntry {
-                entry_name: "ColorSpace",
+            PdfPagesError::MissingRequiredEntry {
+                entry: "ColorSpace",
             },
         )?;
 
@@ -291,8 +266,7 @@ impl Shading {
         let function = Function::parse(object, objects)?;
 
         // Pre-compute color stops.
-        let color_stops = ColorStops::from_function(&function, &color_space)
-            .map_err(|e| ShadingError::ColorStopsError(Box::new(e)))?;
+        let color_stops = ColorStops::from_function(&function, &color_space)?;
 
         Ok(Self::Axial {
             color_space,
@@ -305,7 +279,7 @@ impl Shading {
     fn parse_radial(
         object: &ObjectVariant,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self, ShadingError> {
+    ) -> Result<Self, PdfPagesError> {
         // Read required `/Coords` entry defining the two circles.
         let dictionary = object.try_dictionary(objects)?;
         let coords = dictionary
@@ -314,8 +288,8 @@ impl Shading {
 
         // Read required `/ColorSpace` entry.
         let color_space = ColorSpace::from_dictionary(dictionary, objects)?.ok_or(
-            ShadingError::MissingRequiredEntry {
-                entry_name: "ColorSpace",
+            PdfPagesError::MissingRequiredEntry {
+                entry: "ColorSpace",
             },
         )?;
 
@@ -331,8 +305,7 @@ impl Shading {
         let function = Function::parse(object, objects)?;
 
         // Pre-compute color stops.
-        let color_stops = ColorStops::from_function(&function, &color_space)
-            .map_err(|e| ShadingError::ColorStopsError(Box::new(e)))?;
+        let color_stops = ColorStops::from_function(&function, &color_space)?;
 
         Ok(Self::Radial {
             color_space,
@@ -350,14 +323,14 @@ impl Shading {
     fn parse_functions(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Vec<Function>, ShadingError> {
+    ) -> Result<Vec<Function>, PdfPagesError> {
         let function_obj = objects.resolve_object(dictionary.get_or_err("Function")?)?;
 
         if let ObjectVariant::Array(array) = function_obj {
             // Parse array of functions.
             array
                 .iter()
-                .map(|value| Function::parse(value, objects).map_err(ShadingError::from))
+                .map(|value| Function::parse(value, objects).map_err(PdfPagesError::from))
                 .collect()
         } else {
             // Parse single function.

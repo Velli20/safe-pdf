@@ -2,8 +2,10 @@ use num_traits::ToPrimitive;
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 use pdf_postscript::operator::Operator;
 
-use crate::function::{
-    Function, FunctionImpl, FunctionInterpolationError, FunctionReadError, get_pair,
+use crate::{
+    error::FunctionReadError,
+    function::{Function, FunctionImpl, get_pair},
+    function_interpolation_error::FunctionInterpolationError,
 };
 
 #[derive(Debug, Clone)]
@@ -26,8 +28,8 @@ impl PostScriptCalculatorFunction {
         let mut stack = Vec::with_capacity(input_count);
 
         for i in 0..input_count {
-            let (start, end) =
-                get_pair(domain, i).ok_or(FunctionInterpolationError::EncodeIndexError)?;
+            let (start, end) = get_pair(domain, i)
+                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
 
             let val = inputs
                 .get(i)
@@ -55,12 +57,14 @@ impl PostScriptCalculatorFunction {
         for i in 0..output_count {
             let val = *result_stack
                 .get(i)
-                .ok_or(FunctionInterpolationError::InsufficientResultStack)?;
+                .ok_or(FunctionInterpolationError::PostScriptResultStackUnderflow)?;
 
-            let (min, max) =
-                get_pair(range, i).ok_or(FunctionInterpolationError::EncodeIndexError)?;
+            let (min, max) = get_pair(range, i)
+                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
 
-            let v_f32 = val.to_f32().ok_or(FunctionInterpolationError::InputIsNaN)?;
+            let v_f32 = val
+                .to_f32()
+                .ok_or(FunctionInterpolationError::NonFiniteNumericValue)?;
 
             outputs.push(v_f32.clamp(min, max));
         }

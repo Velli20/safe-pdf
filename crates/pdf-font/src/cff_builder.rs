@@ -4,7 +4,7 @@ use write_fonts::{
     types::Tag,
 };
 
-use crate::font::FontError;
+use crate::error::FontError;
 
 /// Builds a minimal OpenType font from raw CFF (Compact Font Format) bytes.
 ///

@@ -2,9 +2,10 @@ use num_derive::FromPrimitive;
 use num_traits::{FromPrimitive, ToPrimitive};
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
-use crate::function::{
-    Function, FunctionImpl, FunctionInterpolationError, FunctionReadError, ensure_stream_len,
-    get_pair, linear_interpolate,
+use crate::{
+    error::FunctionReadError,
+    function::{Function, FunctionImpl, ensure_stream_len, get_pair, linear_interpolate},
+    function_interpolation_error::FunctionInterpolationError,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, FromPrimitive, Default)]
@@ -166,7 +167,7 @@ impl FunctionImpl for SampledFunction {
     ///
     /// Supports N-dimensional multilinear interpolation as defined in ISO 32000 §7.10.2.
     /// Cubic spline interpolation (Order=3) is recognised in the dictionary but not yet
-    /// implemented; it returns [`FunctionInterpolationError::CubicInterpolationNotSupported`].
+    /// implemented; it returns [`FunctionInterpolationError::CubicInterpolationUnsupported`].
     fn interpolate(&self, inputs: &[f32]) -> Result<Vec<f32>, FunctionInterpolationError> {
         let m = self.size.len();
 
@@ -178,14 +179,14 @@ impl FunctionImpl for SampledFunction {
         }
 
         if self.order == InterpolationOrder::Cubic {
-            return Err(FunctionInterpolationError::CubicInterpolationNotSupported);
+            return Err(FunctionInterpolationError::CubicInterpolationUnsupported);
         }
 
         // Encode each input dimension to a continuous sample coordinate.
         let mut enc_coords: Vec<f32> = Vec::with_capacity(m);
         for i in 0..m {
-            let (domain_min, domain_max) =
-                get_pair(&self.domain, i).ok_or(FunctionInterpolationError::EncodeIndexError)?;
+            let (domain_min, domain_max) = get_pair(&self.domain, i)
+                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
             let x_clamped = inputs
                 .get(i)
                 .copied()
@@ -195,8 +196,8 @@ impl FunctionImpl for SampledFunction {
                 })?
                 .clamp(domain_min, domain_max);
 
-            let (encode_min, encode_max) =
-                get_pair(&self.encode, i).ok_or(FunctionInterpolationError::EncodeIndexError)?;
+            let (encode_min, encode_max) = get_pair(&self.encode, i)
+                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
             let encoded =
                 linear_interpolate(x_clamped, domain_min, domain_max, encode_min, encode_max);
 
@@ -204,11 +205,11 @@ impl FunctionImpl for SampledFunction {
                 .size
                 .get(i)
                 .copied()
-                .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
             let max_i = size_i
                 .saturating_sub(1)
                 .to_f32()
-                .ok_or(FunctionInterpolationError::SampleIndexOutOfBounds)?;
+                .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
 
             enc_coords.push(encoded.clamp(0.0, max_i));
         }
@@ -222,12 +223,12 @@ impl FunctionImpl for SampledFunction {
                 .size
                 .get(i)
                 .copied()
-                .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
             let max_i_idx = size_i.saturating_sub(1);
             let low = enc
                 .floor()
                 .to_usize()
-                .ok_or(FunctionInterpolationError::SampleIndexOutOfBounds)?;
+                .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
             let high = low.saturating_add(1).min(max_i_idx);
             idx_low.push(low);
             idx_high.push(high);
@@ -242,25 +243,25 @@ impl FunctionImpl for SampledFunction {
                 .size
                 .get(next)
                 .copied()
-                .ok_or(FunctionInterpolationError::SampleIndexOutOfBounds)?;
+                .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
             let next_stride = strides
                 .get(next)
                 .copied()
-                .ok_or(FunctionInterpolationError::SampleIndexOutOfBounds)?;
+                .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
             let s = strides
                 .get_mut(i)
-                .ok_or(FunctionInterpolationError::SampleIndexOutOfBounds)?;
+                .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
             *s = next_size
                 .checked_mul(next_stride)
-                .ok_or(FunctionInterpolationError::SampleIndexOutOfBounds)?;
+                .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
         }
 
         // Multilinear interpolation: iterate over all 2^m corners of the hypercube.
-        let m_u32 =
-            u32::try_from(m).map_err(|_| FunctionInterpolationError::SampleIndexOutOfBounds)?;
+        let m_u32 = u32::try_from(m)
+            .map_err(|_| FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
         let num_corners = 1usize
             .checked_shl(m_u32)
-            .ok_or(FunctionInterpolationError::SampleIndexOutOfBounds)?;
+            .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
 
         let mut accum = vec![0.0f32; self.output_count];
         for corner in 0..num_corners {
@@ -269,27 +270,27 @@ impl FunctionImpl for SampledFunction {
 
             for dim in 0..m {
                 let dim_u32 = u32::try_from(dim)
-                    .map_err(|_| FunctionInterpolationError::SampleIndexOutOfBounds)?;
+                    .map_err(|_| FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
                 let use_high = (corner >> dim_u32) & 1 == 1;
                 let (idx, frac_part) = if use_high {
                     let i = idx_high
                         .get(dim)
                         .copied()
-                        .ok_or(FunctionInterpolationError::SampleIndexOutOfBounds)?;
+                        .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
                     let f = fracs
                         .get(dim)
                         .copied()
-                        .ok_or(FunctionInterpolationError::SampleIndexOutOfBounds)?;
+                        .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
                     (i, f)
                 } else {
                     let i = idx_low
                         .get(dim)
                         .copied()
-                        .ok_or(FunctionInterpolationError::SampleIndexOutOfBounds)?;
+                        .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
                     let f = fracs
                         .get(dim)
                         .copied()
-                        .ok_or(FunctionInterpolationError::SampleIndexOutOfBounds)?;
+                        .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
                     (i, 1.0 - f)
                 };
                 weight *= frac_part;
@@ -297,25 +298,25 @@ impl FunctionImpl for SampledFunction {
                 let stride = strides
                     .get(dim)
                     .copied()
-                    .ok_or(FunctionInterpolationError::SampleIndexOutOfBounds)?;
+                    .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
                 flat_index = flat_index
                     .checked_add(
                         idx.checked_mul(stride)
-                            .ok_or(FunctionInterpolationError::SampleIndexOutOfBounds)?,
+                            .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?,
                     )
-                    .ok_or(FunctionInterpolationError::SampleIndexOutOfBounds)?;
+                    .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
             }
 
             for (j, accum_j) in accum.iter_mut().enumerate() {
                 let sample_idx = flat_index
                     .checked_mul(self.output_count)
                     .and_then(|v| v.checked_add(j))
-                    .ok_or(FunctionInterpolationError::SampleIndexOutOfBounds)?;
+                    .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
                 let sample = self
                     .samples
                     .get(sample_idx)
                     .copied()
-                    .ok_or(FunctionInterpolationError::SampleIndexOutOfBounds)?;
+                    .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
                 *accum_j += weight * sample;
             }
         }
@@ -323,12 +324,12 @@ impl FunctionImpl for SampledFunction {
         // Apply decode mapping and range clamping (ISO 32000 §7.10.2).
         let mut outputs = Vec::with_capacity(self.output_count);
         for (j, &interp) in accum.iter().enumerate() {
-            let (decode_min, decode_max) =
-                get_pair(&self.decode, j).ok_or(FunctionInterpolationError::EncodeIndexError)?;
+            let (decode_min, decode_max) = get_pair(&self.decode, j)
+                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
             let decoded = decode_min + interp * (decode_max - decode_min);
 
-            let (range_min, range_max) =
-                get_pair(&self.range, j).ok_or(FunctionInterpolationError::EncodeIndexError)?;
+            let (range_min, range_max) = get_pair(&self.range, j)
+                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
             outputs.push(decoded.clamp(range_min, range_max));
         }
 
@@ -507,7 +508,7 @@ mod tests {
         f.order = InterpolationOrder::Cubic;
         assert!(matches!(
             f.interpolate(&[0.5]),
-            Err(FunctionInterpolationError::CubicInterpolationNotSupported)
+            Err(FunctionInterpolationError::CubicInterpolationUnsupported)
         ));
     }
 }

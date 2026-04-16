@@ -1,8 +1,9 @@
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
-use crate::function::{
-    Function, FunctionImpl, FunctionInterpolationError, FunctionReadError, clamp_and_normalize,
-    get_pair,
+use crate::{
+    error::FunctionReadError,
+    function::{Function, FunctionImpl, clamp_and_normalize, get_pair},
+    function_interpolation_error::FunctionInterpolationError,
 };
 
 #[derive(Debug, Clone)]
@@ -46,12 +47,12 @@ impl FunctionImpl for ExponentialFunction {
             })?;
 
         // Normalize input to [0, 1]
-        let x_normalized =
-            clamp_and_normalize(x, self.domain).ok_or(FunctionInterpolationError::InvalidDomain)?;
+        let x_normalized = clamp_and_normalize(x, self.domain)
+            .ok_or(FunctionInterpolationError::InvalidDomainInterval)?;
 
         // Guard against 0^(negative) which is undefined
         if self.exponent < 0.0 && x_normalized == 0.0 {
-            return Err(FunctionInterpolationError::NegativeExponentAtZero);
+            return Err(FunctionInterpolationError::UndefinedExponentiationAtZero);
         }
 
         // Apply interpolation formula: c0 + x^N * (c1 - c0)
@@ -172,7 +173,7 @@ mod tests {
         let f = make_exp(vec![0.0], vec![1.0], -1.0);
         assert!(matches!(
             f.interpolate(&[0.0]),
-            Err(FunctionInterpolationError::NegativeExponentAtZero)
+            Err(FunctionInterpolationError::UndefinedExponentiationAtZero)
         ));
     }
 }

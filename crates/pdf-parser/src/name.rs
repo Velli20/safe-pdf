@@ -12,10 +12,6 @@ pub enum NameObjectError {
     IncompleteHexEscape,
     #[error("Invalid hex escape in name object: Non-hex character '{0}' found in sequence")]
     NonHexDigitInEscape(char),
-    #[error(
-        "Invalid hex escape in name object: Could not parse hex string '{hex_pair}'. Reason: {reason}"
-    )]
-    HexRadixError { hex_pair: String, reason: String },
     #[error("Invalid token in name object (e.g., empty name after '/')")]
     EmptyName,
     #[error("Tokenizer error: {0}")]

@@ -1,40 +1,10 @@
-use std::borrow::Cow;
-
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
-use thiserror::Error;
-
-use crate::{
-    resource_cache::ResourceCache,
-    xobject::{XObject, XObjectError},
-};
+use crate::{error::PdfPagesError, resource_cache::ResourceCache, xobject::XObject};
 use num_traits::FromPrimitive;
 use pdf_graphics::{BlendMode, LineCap, LineJoin, MaskMode};
-
-/// Errors that can occur during parsing of an External Graphics State dictionary.
-#[derive(Error, Debug)]
-pub enum ExternalGraphicsStateError {
-    #[error(
-        "Invalid array structure for key '{key_name}': expected {expected_desc}, found {actual_desc}"
-    )]
-    InvalidArrayStructureError {
-        key_name: Cow<'static, str>,
-        expected_desc: &'static str,
-        actual_desc: String,
-    },
-    #[error("Invalid value for key '{key_name}': {description}")]
-    InvalidValueError {
-        key_name: Cow<'static, str>,
-        description: String,
-    },
-    #[error("Error reading Soft Mask XObject: {0}")]
-    SMaskReadError(#[from] XObjectError),
-    #[error("{0}")]
-    ObjectError(#[from] ObjectError),
-}
 
 /// Soft mask extracted from an ExtGState `SMask` entry.
 pub struct SoftMask {
@@ -122,7 +92,7 @@ impl ExternalGraphicsState {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
-    ) -> Result<Self, ExternalGraphicsStateError> {
+    ) -> Result<Self, PdfPagesError> {
         let mut params: Vec<ExternalGraphicsStateKey> = Vec::new();
 
         for (name, value) in &dictionary.dictionary {
@@ -146,14 +116,33 @@ impl ExternalGraphicsState {
     }
 }
 
-fn parse_mask_mode(value: Cow<'_, str>) -> Result<MaskMode, ExternalGraphicsStateError> {
-    match value.as_ref() {
+fn invalid_ext_gstate_entry_structure(
+    entry: &str,
+    expected_structure: &'static str,
+    actual_structure: String,
+) -> PdfPagesError {
+    PdfPagesError::InvalidExtGStateEntryStructure {
+        entry: entry.to_string(),
+        expected_structure,
+        actual_structure,
+    }
+}
+
+fn invalid_ext_gstate_entry_value(entry: &str, reason: impl Into<String>) -> PdfPagesError {
+    PdfPagesError::InvalidExtGStateEntryValue {
+        entry: entry.to_string(),
+        reason: reason.into(),
+    }
+}
+
+fn parse_mask_mode(value: &str) -> Result<MaskMode, PdfPagesError> {
+    match value {
         "Luminosity" => Ok(MaskMode::Luminosity),
         "Alpha" => Ok(MaskMode::Alpha),
-        other => Err(ExternalGraphicsStateError::InvalidValueError {
-            key_name: Cow::Borrowed("MaskMode"),
-            description: format!("Unknown SMask type '{}'", other),
-        }),
+        other => Err(invalid_ext_gstate_entry_value(
+            "SMask/S",
+            format!("unsupported soft mask mode '{other}' (expected 'Alpha' or 'Luminosity')"),
+        )),
     }
 }
 
@@ -161,14 +150,14 @@ fn parse_dash_pattern(
     key_name: &str,
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
-) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
+) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
     let arr = value.try_array(objects)?;
     let [dash_array, dash_phase] = arr else {
-        return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
-            key_name: Cow::Owned(key_name.to_string()),
-            expected_desc: "array with 2 elements",
-            actual_desc: format!("array with {} elements", arr.len()),
-        });
+        return Err(invalid_ext_gstate_entry_structure(
+            key_name,
+            "an array with exactly 2 elements",
+            format!("an array with {} elements", arr.len()),
+        ));
     };
 
     let dash_array = dash_array.try_vec_of::<f32>(objects)?;
@@ -182,21 +171,21 @@ fn parse_font(
     key_name: &str,
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
-) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
+) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
     let arr = value.try_array(objects)?;
     let [font_ref, font_size] = arr else {
-        return Err(ExternalGraphicsStateError::InvalidArrayStructureError {
-            key_name: Cow::Owned(key_name.to_string()),
-            expected_desc: "array with 2 elements",
-            actual_desc: format!("array with {} elements", arr.len()),
-        });
+        return Err(invalid_ext_gstate_entry_structure(
+            key_name,
+            "an array with exactly 2 elements",
+            format!("an array with {} elements", arr.len()),
+        ));
     };
     let font_ref = font_ref.try_object_number()?;
     let font_size = font_size.try_number::<f32>(objects)?;
     Ok(ExternalGraphicsStateKey::Font(font_ref, font_size))
 }
 
-fn to_blend_mode(s: &str) -> Result<BlendMode, ExternalGraphicsStateError> {
+fn to_blend_mode(s: &str) -> Result<BlendMode, PdfPagesError> {
     match s {
         "Normal" => Ok(BlendMode::Normal),
         "Multiply" => Ok(BlendMode::Multiply),
@@ -214,17 +203,17 @@ fn to_blend_mode(s: &str) -> Result<BlendMode, ExternalGraphicsStateError> {
         "Saturation" => Ok(BlendMode::Saturation),
         "Color" => Ok(BlendMode::Color),
         "Luminosity" => Ok(BlendMode::Luminosity),
-        _ => Err(ExternalGraphicsStateError::InvalidValueError {
-            key_name: Cow::Borrowed("BM"),
-            description: format!("Unknown blend mode '{}'", s),
-        }),
+        _ => Err(invalid_ext_gstate_entry_value(
+            "BM",
+            format!("unsupported blend mode '{s}'"),
+        )),
     }
 }
 
 fn parse_blend_mode(
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
-) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
+) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
     let blend_modes_vec: Vec<BlendMode> = if value.is_array() {
         value
             .try_array(objects)?
@@ -244,10 +233,10 @@ fn parse_soft_mask(
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
-) -> Result<ExternalGraphicsStateKey, ExternalGraphicsStateError> {
+) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
     let smask = match value {
         ObjectVariant::Dictionary(dict) => {
-            let mask_type = parse_mask_mode(dict.get_or_err("S")?.try_str(objects)?)?;
+            let mask_type = parse_mask_mode(dict.get_or_err("S")?.try_str(objects)?.as_ref())?;
 
             // Parse the "G" key for the `XObject`
             let stream = dict.get_or_err("G")?.try_stream(objects)?;
@@ -259,10 +248,10 @@ fn parse_soft_mask(
         other => match other.try_str(objects)?.as_ref() {
             "None" => None,
             _ => {
-                return Err(ExternalGraphicsStateError::InvalidValueError {
-                    key_name: Cow::Owned(key_name.to_string()),
-                    description: "SMask must be 'None'".to_string(),
-                });
+                return Err(invalid_ext_gstate_entry_value(
+                    key_name,
+                    "expected a soft mask dictionary or the name 'None'",
+                ));
             }
         },
     };
@@ -279,7 +268,7 @@ fn parse_entry(
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
-) -> Result<Option<ExternalGraphicsStateKey>, ExternalGraphicsStateError> {
+) -> Result<Option<ExternalGraphicsStateKey>, PdfPagesError> {
     let parsed = match name {
         "TR" => ExternalGraphicsStateKey::TransferFunction,
         "TR2" => ExternalGraphicsStateKey::TransferFunctionNew,
@@ -288,20 +277,20 @@ fn parse_entry(
         "LC" => {
             let cap_val = value.try_number::<i32>(objects)?;
             let cap = LineCap::from_i32(cap_val).ok_or_else(|| {
-                ExternalGraphicsStateError::InvalidValueError {
-                    key_name: Cow::Owned(name.to_string()),
-                    description: format!("Invalid LineCap value: {}", cap_val),
-                }
+                invalid_ext_gstate_entry_value(
+                    name,
+                    format!("unsupported line cap value {cap_val} (expected 0, 1, or 2)"),
+                )
             })?;
             ExternalGraphicsStateKey::LineCap(cap)
         }
         "LJ" => {
             let join_val = value.try_number::<i32>(objects)?;
             let join = LineJoin::from_i32(join_val).ok_or_else(|| {
-                ExternalGraphicsStateError::InvalidValueError {
-                    key_name: Cow::Owned(name.to_string()),
-                    description: format!("Invalid LineJoin value: {}", join_val),
-                }
+                invalid_ext_gstate_entry_value(
+                    name,
+                    format!("unsupported line join value {join_val} (expected 0, 1, or 2)"),
+                )
             })?;
             ExternalGraphicsStateKey::LineJoin(join)
         }

@@ -1,22 +1,11 @@
 use pdf_content_stream::content_stream::ContentStream;
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
-use thiserror::Error;
 
 use crate::{
-    external_graphics_state::ExternalGraphicsState,
-    matrix::Matrix,
-    resource_cache::ResourceCache,
-    resources::{Resources, ResourcesError},
-    shading::Shading,
+    error::PdfPagesError, external_graphics_state::ExternalGraphicsState, matrix::Matrix,
+    resource_cache::ResourceCache, resources::Resources, shading::Shading,
 };
-
-/// Defines errors that can occur while parsing a Pattern.
-#[derive(Debug, Error)]
-pub enum PatternError {
-    #[error("Invalid value for key '{key}': {value}")]
-    InvalidValue { key: &'static str, value: i32 },
-}
 
 /// PaintType for tiling patterns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,16 +17,13 @@ pub enum PaintType {
 }
 
 impl TryFrom<i32> for PaintType {
-    type Error = PatternError;
+    type Error = PdfPagesError;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(PaintType::Colored),
             2 => Ok(PaintType::Uncolored),
-            _ => Err(PatternError::InvalidValue {
-                key: "PaintType",
-                value,
-            }),
+            _ => Err(PdfPagesError::InvalidPaintType { value }),
         }
     }
 }
@@ -52,16 +38,13 @@ pub enum PatternType {
 }
 
 impl TryFrom<i32> for PatternType {
-    type Error = PatternError;
+    type Error = PdfPagesError;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(PatternType::Tiling),
             2 => Ok(PatternType::Shading),
-            _ => Err(PatternError::InvalidValue {
-                key: "PatternType",
-                value,
-            }),
+            _ => Err(PdfPagesError::InvalidPatternType { value }),
         }
     }
 }
@@ -79,17 +62,14 @@ pub enum TilingType {
 }
 
 impl TryFrom<i32> for TilingType {
-    type Error = PatternError;
+    type Error = PdfPagesError;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(TilingType::ConstantSpacing),
             2 => Ok(TilingType::NoDistortion),
             3 => Ok(TilingType::ConstantSpacingFast),
-            _ => Err(PatternError::InvalidValue {
-                key: "TilingType",
-                value,
-            }),
+            _ => Err(PdfPagesError::InvalidTilingType { value }),
         }
     }
 }
@@ -146,12 +126,12 @@ impl Pattern {
     ///
     /// # Returns
     ///
-    /// Returns a `Result` containing the constructed `Pattern` on success, or a `ResourcesError` if parsing fails.
+    /// Returns a `Result` containing the constructed `Pattern` on success, or a `PdfPagesError` if parsing fails.
     pub(crate) fn read(
         object: &ObjectVariant,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
-    ) -> Result<Pattern, ResourcesError> {
+    ) -> Result<Pattern, PdfPagesError> {
         let dictionary = object.try_dictionary(objects)?;
 
         let pattern_type = dictionary

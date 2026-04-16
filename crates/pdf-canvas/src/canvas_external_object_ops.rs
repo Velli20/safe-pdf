@@ -84,7 +84,7 @@ const MASK_1BIT: u8 = 0x01;
 /// # Errors
 ///
 /// - [`PdfCanvasError::InvalidImageData`] if `data` has insufficient bytes.
-/// - [`PdfCanvasError::NotImplemented`] if `bits` is not 1, 2, 4, or 8.
+/// - [`PdfCanvasError::UnsupportedFeature`] if `bits` is not 1, 2, 4, or 8.
 ///
 /// # Bit Packing Layout
 ///
@@ -125,7 +125,7 @@ fn extract_index(data: &[u8], bits: usize, bit_pos: &mut usize) -> Result<u32, P
             u32::from((byte >> shift) & MASK_1BIT)
         }
         _ => {
-            return Err(PdfCanvasError::NotImplemented(format!(
+            return Err(PdfCanvasError::UnsupportedFeature(format!(
                 "BitsPerComponent {bits} not supported for indexed images"
             )));
         }
@@ -227,7 +227,7 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
         let resources = self
             .current_state()?
             .resources
-            .ok_or(PdfCanvasError::MissingPageResources)?;
+            .ok_or(PdfCanvasError::PageResourcesMissing)?;
 
         let xobj = resources
             .xobject(xobject_name)

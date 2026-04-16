@@ -20,8 +20,8 @@ impl Operands {
         if !self.0.is_empty() {
             Ok(self.0.remove(0))
         } else {
-            Err(PdfOperatorError::MissingOperand {
-                expected_type: "Operand",
+            Err(PdfOperatorError::OperandMissing {
+                expected: "an operand",
             })
         }
     }
@@ -36,9 +36,9 @@ impl Operands {
             ObjectVariant::HexString(s)
             | ObjectVariant::Name(s)
             | ObjectVariant::LiteralString(s) => Ok(String::from_utf8_lossy(&s).into_owned()),
-            other => Err(PdfOperatorError::InvalidOperandType {
-                expected_type: "String (HexString, Name, or LiteralString)",
-                found_type: other.name(),
+            other => Err(PdfOperatorError::OperandTypeMismatch {
+                expected: "a string operand (HexString, Name, or LiteralString)",
+                found: other.name(),
             }),
         }
     }
@@ -49,9 +49,9 @@ impl Operands {
             ObjectVariant::HexString(s)
             | ObjectVariant::Name(s)
             | ObjectVariant::LiteralString(s) => Ok(s),
-            _ => Err(PdfOperatorError::InvalidOperandType {
-                expected_type: "Bytes (HexString, Name, or LiteralString)",
-                found_type: object.name(),
+            _ => Err(PdfOperatorError::OperandTypeMismatch {
+                expected: "a byte string operand (HexString, Name, or LiteralString)",
+                found: object.name(),
             }),
         }
     }

@@ -1,13 +1,7 @@
 use crate::{
-    form::{FormXObject, FormXObjectError},
-    image::{ImageXObject, ImageXObjectError},
-    resource_cache::ResourceCache,
+    error::PdfPagesError, form::FormXObject, image::ImageXObject, resource_cache::ResourceCache,
 };
-use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    stream::StreamObject,
-};
-use thiserror::Error;
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, stream::StreamObject};
 
 /// Represents a PDF External Object (XObject).
 ///
@@ -22,25 +16,13 @@ pub enum XObject {
     Form(Box<FormXObject>),
 }
 
-#[derive(Debug, Error)]
-pub enum XObjectError {
-    #[error("Error parsing Image XObject: {0}")]
-    ImageReadError(#[from] ImageXObjectError),
-    #[error("Error parsing Form XObject: {0}")]
-    FormReadError(#[from] FormXObjectError),
-    #[error("Unsupported XObject type: '{subtype}'")]
-    UnsupportedXObjectType { subtype: String },
-    #[error("{0}")]
-    ObjectError(#[from] ObjectError),
-}
-
 impl XObject {
     pub fn read_xobject(
         dictionary: &Dictionary,
         stream_data: &StreamObject,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
-    ) -> Result<Self, XObjectError> {
+    ) -> Result<Self, PdfPagesError> {
         let subtype = dictionary.get_or_err("Subtype")?.try_str(objects)?;
 
         match subtype.as_ref() {
@@ -54,7 +36,7 @@ impl XObject {
                     FormXObject::read_xobject(dictionary, stream_data, objects, cache)?;
                 Ok(XObject::Form(Box::new(form_xobject)))
             }
-            other => Err(XObjectError::UnsupportedXObjectType {
+            other => Err(PdfPagesError::UnsupportedXObjectSubtype {
                 subtype: other.to_string(),
             }),
         }

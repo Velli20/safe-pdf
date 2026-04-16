@@ -1,5 +1,5 @@
 use crate::{
-    media_box::MediaBox, pages::PdfPagesError, resource_cache::ResourceCache, resources::Resources,
+    error::PdfPagesError, media_box::MediaBox, resource_cache::ResourceCache, resources::Resources,
 };
 use pdf_content_stream::content_stream::ContentStream;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};

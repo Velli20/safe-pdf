@@ -1,49 +1,39 @@
-use pdf_color_space::color_space::ColorSpaceError;
+use pdf_color_space::error::ColorSpaceError;
 use thiserror::Error;
-
-use crate::truetype_font_renderer::TrueTypeFontRendererError;
 
 /// Defines errors that can occur during PDF canvas operations.
 #[derive(Debug, Error)]
 pub enum PdfCanvasError {
-    #[error("No active path to perform the painting operation")]
-    NoActivePath,
-    #[error("Operation requires a current point, but none is set")]
-    NoCurrentPoint,
-    #[error("Operation requires a current font, but none is set")]
-    NoCurrentFont,
-    #[error("Missing page resources")]
-    MissingPageResources,
-    #[error("Invalid font: {0}")]
-    InvalidFont(&'static str),
-    #[error("Font '{0}' not found")]
+    #[error("The current operation requires an active path, but no path has been started")]
+    PathRequired,
+    #[error("The current operation requires a current point, but no current point is set")]
+    CurrentPointRequired,
+    #[error("The current operation requires a current font, but no font is selected")]
+    CurrentFontRequired,
+    #[error("Page resources are missing")]
+    PageResourcesMissing,
+    #[error("Invalid font data: {0}")]
+    InvalidFont(String),
+    #[error("Font resource '{0}' was not found")]
     FontNotFound(String),
-    #[error("Color space '{0}' not found in resources")]
+    #[error("Color space resource '{0}' was not found")]
     ColorSpaceNotFound(String),
-    #[error("Pattern '{0}' not found")]
+    #[error("Pattern resource '{0}' was not found")]
     PatternNotFound(String),
-    #[error("Font '{0}' is a Type3 font but is missing its definition data")]
-    MissingType3FontData(String),
-    #[error(
-        "Graphics state stack is empty, cannot access current state. This indicates an internal error."
-    )]
+    #[error("Graphics state stack is empty while accessing the current state")]
     EmptyGraphicsStateStack,
-    #[error("Cannot restore graphics state: stack underflow (no state to restore).")]
+    #[error("Cannot restore graphics state because the stack is already at its base state")]
     GraphicsStateStackUnderflow,
-    #[error("TrueType font rendering error: {0}")]
-    TrueTypeFontError(#[from] TrueTypeFontRendererError),
-    #[error("Extrenal object '{0}' not found in resources")]
+    #[error("Failed to parse TrueType font data: {0}")]
+    TrueTypeFontParse(String),
+    #[error("External object (XObject) '{0}' was not found in page resources")]
     XObjectNotFound(String),
-    #[error("Page missing media box")]
-    MissingMediaBox,
-    #[error("Failed numeric conversion: {0}")]
-    NumericConversionError(&'static str),
     #[error("Invalid image data: {0}")]
     InvalidImageData(String),
-    #[error("No current color space is set for this operation")]
+    #[error("The current operation requires a color space, but none is set")]
     ColorSpaceNotSet,
-    #[error("Not implemented: {0}")]
-    NotImplemented(String),
+    #[error("Unsupported PDF canvas feature: {0}")]
+    UnsupportedFeature(String),
     #[error("Canvas backend error: {0}")]
     BackendError(String),
     #[error("Color space error: {0}")]
