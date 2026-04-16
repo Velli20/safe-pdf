@@ -3,43 +3,43 @@ use pdf_parser::error::ParserError;
 use pdf_tokenizer::error::TokenizerError;
 use thiserror::Error;
 
-/// Defines errors that can occur in pdf-painter crate.
+/// Errors that can occur while parsing or validating PDF content stream operators.
 #[derive(Error, Debug, PartialEq)]
 pub enum PdfOperatorError {
-    #[error("Unimplemented operation: {0}")]
-    UnimplementedOperation(&'static str),
-    #[error("Unknown operator: '{0}'")]
+    #[error("PDF operator '{0}' is recognized but not implemented")]
+    UnsupportedOperator(&'static str),
+    #[error("Unknown PDF operator '{0}'")]
     UnknownOperator(String),
-    #[error("Missing operand: expected a {expected_type}")]
-    MissingOperand { expected_type: &'static str },
-    #[error("Invalid operand type: expected {expected_type}, found {found_type}")]
-    InvalidOperandType {
-        expected_type: &'static str,
-        found_type: &'static str,
+    #[error("Missing operand; expected {expected}")]
+    OperandMissing { expected: &'static str },
+    #[error("Invalid operand type; expected {expected}, found {found}")]
+    OperandTypeMismatch {
+        expected: &'static str,
+        found: &'static str,
     },
-    #[error("Invalid operand value: expected {expected}, found {value}")]
+    #[error("Invalid operand value; expected {expected}, found '{found}'")]
     InvalidOperandValue {
         expected: &'static str,
-        value: String,
+        found: String,
     },
-    #[error("Failed to convert a PDF value to number of type '{expected_type}': {source}")]
-    OperandNumericConversionError {
-        expected_type: &'static str,
+    #[error("Failed to convert operand to {target_type}: {source}")]
+    OperandNumberConversion {
+        target_type: &'static str,
         #[source]
         source: ObjectError,
     },
-    #[error("Incorrect operand count for operation '{op_name}': expected {expected}, got {got}")]
-    IncorrectOperandCount {
-        op_name: String,
+    #[error("Operator '{operator}' expects {expected} operand(s), got {actual}")]
+    OperandCountMismatch {
+        operator: String,
         expected: usize,
-        got: usize,
+        actual: usize,
     },
-    #[error("Tokenizer error: {0}")]
-    Tokenizer(#[from] TokenizerError),
-    #[error("Parser error: {0}")]
-    Parser(#[from] ParserError),
-    #[error("Empty text")]
-    EmptyText,
-    #[error("PDF Object error: {0}")]
-    ObjectError(#[from] ObjectError),
+    #[error("Tokenizer error while reading a content stream: {0}")]
+    TokenizerError(#[from] TokenizerError),
+    #[error("Parser error while reading a content stream: {0}")]
+    ParserError(#[from] ParserError),
+    #[error("Text-showing operator received an empty text operand")]
+    EmptyTextOperand,
+    #[error("Object error while reading a content stream: {0}")]
+    Object(#[from] ObjectError),
 }

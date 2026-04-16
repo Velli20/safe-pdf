@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 
-use pdf_content_stream::{error::PdfOperatorError, pdf_operator::PdfOperatorVariant};
+use pdf_content_stream::pdf_operator::PdfOperatorVariant;
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
-use thiserror::Error;
 
 use crate::{
-    encoding::{Encoding, EncodingReadError, FontEncoding},
+    encoding::{Encoding, FontEncoding},
+    error::FontError,
     to_unicode_cmap::ToUnicodeCMap,
 };
 
@@ -35,22 +34,11 @@ pub struct Type3Font {
     pub to_unicode: Option<ToUnicodeCMap>,
 }
 
-/// Defines errors that can occur while parsing a Type 3 font object.
-#[derive(Debug, Error, PartialEq)]
-pub enum Type3FontError {
-    #[error("Object error: {0}")]
-    ObjectError(#[from] ObjectError),
-    #[error("Error parsing content stream operators: {0}")]
-    ContentStreamError(#[from] PdfOperatorError),
-    #[error("Encoding read error: {0}")]
-    EncodingReadError(#[from] EncodingReadError),
-}
-
 impl Type3Font {
     pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self, Type3FontError> {
+    ) -> Result<Self, FontError> {
         let [a, b, c, d, e, f] = dictionary
             .get_or_err("FontMatrix")?
             .try_array_of::<f32, 6>(objects)?;

@@ -3,16 +3,8 @@ use pdf_object::{
     object_variant::ObjectVariant, stream::StreamObject,
 };
 use pdf_tokenizer::PdfToken;
-use thiserror::Error;
 
 use crate::{error::ParserError, parser::PdfParser};
-
-/// Represents an error that can occur while parsing an indirect object or an object reference.
-#[derive(Error, Debug, PartialEq)]
-pub enum IndirectObjectError {
-    #[error("Stream object found without a preceding dictionary")]
-    StreamObjectWithoutDictionary,
-}
 
 impl PdfParser<'_> {
     /// Parses an indirect object or an object reference from the current position in the input stream.
@@ -58,7 +50,7 @@ impl PdfParser<'_> {
 
         if let Some(PdfToken::Alphabetic(b's')) = self.tokenizer.peek() {
             let ObjectVariant::Dictionary(dictionary) = object else {
-                return Err(IndirectObjectError::StreamObjectWithoutDictionary.into());
+                return Err(ParserError::StreamObjectWithoutDictionary);
             };
             let stream = self.parse_stream(&dictionary, objects)?;
 

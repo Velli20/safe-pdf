@@ -4,9 +4,7 @@ use thiserror::Error;
 
 use crate::{
     cross_reference_table::CrossReferenceTableError, header::HeaderError,
-    hex_string::HexStringError, indirect_object::IndirectObjectError,
     literal_string::LiteralStringObjectError, name::NameObjectError, number::NumberError,
-    stream::StreamParsingError,
 };
 
 #[derive(Error, Debug, PartialEq)]
@@ -21,8 +19,8 @@ pub enum ParserError {
     TokenizerError(#[from] TokenizerError),
     #[error("Cross-reference table error: {0}")]
     CrossReferenceTableError(#[from] CrossReferenceTableError),
-    #[error("Hex string error: {0}")]
-    HexStringError(#[from] HexStringError),
+    #[error("Invalid non-hex decimal character in the input: '{0}'")]
+    NotHexDecimal(char),
     #[error("Number error: {0}")]
     NumberError(#[from] NumberError),
     #[error("Name object error: {0}")]
@@ -39,12 +37,10 @@ pub enum ParserError {
     UnexpectedTokenAt { token: String, position: usize },
     #[error("Nesting depth exceeded")]
     NestingDepthExceeded,
-    #[error("Stream parsing error: {0}")]
-    StreamParsingError(#[from] StreamParsingError),
     #[error("Object error: {0}")]
     ObjectError(#[from] ObjectError),
-    #[error("Indirect object error: {0}")]
-    IndirectObjectError(#[from] IndirectObjectError),
+    #[error("Stream object found without a preceding dictionary")]
+    StreamObjectWithoutDictionary,
     #[error("Missing startxref marker in PDF")]
     MissingStartXref,
     #[error("Invalid cross-reference table at offset {offset}")]

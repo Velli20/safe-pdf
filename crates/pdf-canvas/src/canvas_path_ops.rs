@@ -40,7 +40,7 @@ impl<B: CanvasBackend> PathConstructionOps for PdfCanvas<'_, B> {
             path.curve_to(x, y, x2, y2, x3, y3);
             Ok(())
         } else {
-            Err(PdfCanvasError::NoCurrentPoint)
+            Err(PdfCanvasError::CurrentPointRequired)
         }
     }
 

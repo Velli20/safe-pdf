@@ -24,7 +24,7 @@ impl<'a, 'b, B: CanvasBackend> Type1FontRenderer<'a, 'b, B> {
         font_bytes: &'b [u8],
     ) -> Result<Self, PdfCanvasError> {
         let font_ref = FontRef::new(font_bytes)
-            .map_err(|_| PdfCanvasError::InvalidFont("invalid font data"))?;
+            .map_err(|_| PdfCanvasError::InvalidFont("unrecognized Type 1 font data".into()))?;
 
         let outlines = font_ref.outline_glyphs();
 
@@ -56,14 +56,13 @@ impl<'a, 'b, B: CanvasBackend> Type1FontRenderer<'a, 'b, B> {
 
 impl<B: CanvasBackend> TextRenderer for Type1FontRenderer<'_, '_, B> {
     fn render_text(&mut self, iter: impl Iterator<Item = u16>) -> Result<(), PdfCanvasError> {
-        let cff = self
-            .font_ref
-            .cff()
-            .map_err(|_| PdfCanvasError::InvalidFont("failed to read CFF table from Type1 font"))?;
+        let cff = self.font_ref.cff().map_err(|_| {
+            PdfCanvasError::InvalidFont("failed to read the CFF table from the Type 1 font".into())
+        })?;
 
-        let charset = cff
-            .charset(0)
-            .map_err(|_| PdfCanvasError::InvalidFont("failed to read CFF charset"))?;
+        let charset = cff.charset(0).map_err(|_| {
+            PdfCanvasError::InvalidFont("failed to read the Type 1 font CFF charset".into())
+        })?;
 
         for char_code in iter {
             let state = self.canvas.current_state()?;

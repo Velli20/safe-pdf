@@ -1,26 +1,13 @@
 use pdf_content_stream::content_stream::ContentStream;
-use pdf_content_stream::error::PdfOperatorError;
 use pdf_graphics::rect::Rect;
 use pdf_graphics::transform::Transform;
-use pdf_object::error::ObjectError;
 use pdf_object::stream::StreamObject;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
-use thiserror::Error;
 
+use crate::error::PdfPagesError;
 use crate::matrix::Matrix;
 use crate::resource_cache::ResourceCache;
-use crate::resources::{Resources, ResourcesError};
-
-/// Errors that can occur during parsing of a Form XObject.
-#[derive(Debug, Error)]
-pub enum FormXObjectError {
-    #[error("Error parsing /Resources: {source}")]
-    ResourcesError { source: Box<ResourcesError> },
-    #[error("Error parsing content stream: {0}")]
-    ContentStreamError(#[from] PdfOperatorError),
-    #[error("{0}")]
-    ObjectError(#[from] ObjectError),
-}
+use crate::resources::Resources;
 
 /// Represents a PDF Form XObject.
 pub struct FormXObject {
@@ -41,7 +28,7 @@ impl FormXObject {
         stream_data: &StreamObject,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
-    ) -> Result<Self, FormXObjectError> {
+    ) -> Result<Self, PdfPagesError> {
         // Retrieve the `/BBox` entry.
         let bbox = Rect::from(
             dictionary
@@ -53,11 +40,7 @@ impl FormXObject {
         let matrix = Matrix::from_dictionary(dictionary, objects)?;
 
         // Parse the `/Resources` entry if present, mapping any errors.
-        let resources = Resources::read(dictionary, objects, cache).map_err(|err| {
-            FormXObjectError::ResourcesError {
-                source: Box::new(err),
-            }
-        })?;
+        let resources = Resources::read(dictionary, objects, cache)?;
 
         // Parse the content stream data.
         let content_stream = ContentStream::from_stream(stream_data)?;

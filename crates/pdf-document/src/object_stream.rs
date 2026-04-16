@@ -3,7 +3,7 @@ use pdf_object::{
 };
 use pdf_parser::parser::PdfParser;
 
-use crate::reader::PdfReaderError;
+use crate::error::PdfReaderError;
 
 /// Parses an object stream (PDF 1.5+) and extracts all objects stored within it.
 ///

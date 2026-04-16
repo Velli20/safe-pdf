@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
 
-use crate::decryption::{DecryptionError, DocumentDecryptor};
+use crate::decryption::DocumentDecryptor;
 use crate::document::PdfDocument;
+use crate::error::PdfReaderError;
 use crate::object_stream::read_object_stream;
 use pdf_object::indirect_object::IndirectObject;
 use pdf_object::object_resolver::{ObjectResolver, PassthroughResolver};
@@ -14,48 +15,12 @@ use pdf_object::{
 };
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_page::page::PdfPage;
-use pdf_page::pages::{PdfPages, PdfPagesError};
+use pdf_page::pages::PdfPages;
 use pdf_page::resource::Resource;
-use pdf_parser::{error::ParserError, header::HeaderError, parser::PdfParser};
-use thiserror::Error;
+use pdf_parser::error::ParserError;
+use pdf_parser::parser::PdfParser;
 
-use crate::encryption::{EncryptDictionary, EncryptionError};
-
-/// Errors that can occur while reading a PDF document.
-#[derive(Debug, Error)]
-pub enum PdfReaderError {
-    #[error("missing trailer")]
-    MissingTrailer,
-    #[error("unexpected reference object at offset {offset}")]
-    UnexpectedReference { offset: usize },
-    #[error("{0}")]
-    ObjectError(#[from] ObjectError),
-    #[error("{0}")]
-    PdfPagesError(#[from] PdfPagesError),
-    #[error("{0}")]
-    ParserError(#[from] ParserError),
-    #[error("Error parsing PDF header: {0}")]
-    HeaderError(#[from] HeaderError),
-    #[error("unsupported PDF version: {0}.{1}")]
-    UnsupportedVersion(u8, u8),
-    #[error("invalid cross-reference table at offset {offset}")]
-    InvalidXrefAtOffset { offset: usize },
-    #[error("encryption error: {0}")]
-    EncryptionError(#[from] EncryptionError),
-    #[error("decryption error: {0}")]
-    DecryptionError(#[from] DecryptionError),
-    #[error("missing document ID required for encryption")]
-    MissingDocumentId,
-    #[error(
-        "failed to resolve {count} object(s) after {iterations} iteration(s); \
-         first unresolved at byte offset {first_offset}"
-    )]
-    UnresolvedObjects {
-        count: usize,
-        iterations: usize,
-        first_offset: usize,
-    },
-}
+use crate::encryption::EncryptDictionary;
 
 #[derive(Default)]
 pub struct PdfReader;
@@ -224,7 +189,7 @@ fn load_encrypt_dictionary(
     };
 
     // Parse the encryption dictionary
-    EncryptDictionary::from_dictionary(&encrypt_dict, &PassthroughResolver).map_err(Into::into)
+    EncryptDictionary::from_dictionary(&encrypt_dict, &PassthroughResolver)
 }
 
 /// Extracts the document ID from the trailer's /ID array.

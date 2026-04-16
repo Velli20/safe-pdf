@@ -176,7 +176,7 @@ impl TextState<'_> {
 
         let hmtx = font_ref
             .hmtx()
-            .map_err(|_| PdfCanvasError::InvalidFont("missing or invalid hmtx table"))?;
+            .map_err(|_| PdfCanvasError::InvalidFont("missing or invalid hmtx table".into()))?;
 
         // If the glyph is absent from hmtx (sparse coverage), use zero advance
         // so that any already-drawn outline is not lost.

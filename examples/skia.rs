@@ -37,7 +37,7 @@ pub enum AppError {
         source: std::io::Error,
     },
     #[error("Failed to parse PDF: {0}")]
-    ParsePdf(#[from] pdf_document::reader::PdfReaderError),
+    ParsePdf(#[from] pdf_document::error::PdfReaderError),
     #[error("Failed to render PDF page: {0}")]
     PdfRendererError(#[from] pdf_renderer::PdfRendererError),
     #[error("Failed to create event loop: {0}")]

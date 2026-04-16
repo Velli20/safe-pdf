@@ -155,7 +155,7 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
             .current_state()?
             .text_state
             .font
-            .ok_or(PdfCanvasError::NoCurrentFont)?;
+            .ok_or(PdfCanvasError::CurrentFontRequired)?;
 
         match current_font {
             Font::Type3(type3_font) => {

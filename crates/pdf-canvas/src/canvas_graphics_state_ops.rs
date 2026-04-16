@@ -69,7 +69,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
         let resources = self
             .current_state()?
             .resources
-            .ok_or(PdfCanvasError::MissingPageResources)?;
+            .ok_or(PdfCanvasError::PageResourcesMissing)?;
 
         let Some(states) = resources.external_graphics_state(dict_name) else {
             // If the specified `ExtGState` is not found, the ignored parameters should not cause an error.
@@ -91,12 +91,12 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                     self.current_state_mut()?.miter_limit = *miter;
                 }
                 ExternalGraphicsStateKey::DashPattern(..) => {
-                    return Err(PdfCanvasError::NotImplemented(
+                    return Err(PdfCanvasError::UnsupportedFeature(
                         "ExtGState: DashPattern".into(),
                     ));
                 }
                 ExternalGraphicsStateKey::RenderingIntent(_) => {
-                    return Err(PdfCanvasError::NotImplemented(
+                    return Err(PdfCanvasError::UnsupportedFeature(
                         "ExtGState: RenderingIntent".into(),
                     ));
                 }
@@ -104,14 +104,14 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                 ExternalGraphicsStateKey::OverprintFill(_) => {}
                 ExternalGraphicsStateKey::OverprintMode(_) => {}
                 ExternalGraphicsStateKey::Font(..) => {
-                    return Err(PdfCanvasError::NotImplemented("ExtGState: Font".into()));
+                    return Err(PdfCanvasError::UnsupportedFeature("ExtGState: Font".into()));
                 }
                 ExternalGraphicsStateKey::BlendMode(modes) => {
                     // Store the blend mode(s) in the current graphics state.
                     // PDF spec: If multiple blend modes are specified, use the first one supported.
                     // We only support the first for now.
                     if modes.len() > 1 {
-                        return Err(PdfCanvasError::NotImplemented(
+                        return Err(PdfCanvasError::UnsupportedFeature(
                             "ExtGState: Only one blend mode is supported".into(),
                         ));
                     }
@@ -123,7 +123,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                     // Handle the `/SMask` entry from an `ExtGState` dictionary.
                     if let Some(smask) = smask.as_ref() {
                         if let XObject::Image(_) = &smask.shape {
-                            return Err(PdfCanvasError::NotImplemented(
+                            return Err(PdfCanvasError::UnsupportedFeature(
                                 "SoftMask with Image shape".into(),
                             ));
                         } else if let XObject::Form(form) = &smask.shape {

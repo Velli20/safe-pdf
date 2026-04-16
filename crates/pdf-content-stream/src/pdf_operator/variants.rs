@@ -250,9 +250,9 @@ fn parse_operator(
         && operands.len() != required_count
     {
         let name_str = String::from_utf8_lossy(name);
-        return Err(PdfOperatorError::IncorrectOperandCount {
-            op_name: name_str.to_string(),
-            got: operands.len(),
+        return Err(PdfOperatorError::OperandCountMismatch {
+            operator: name_str.to_string(),
+            actual: operands.len(),
             expected: required_count,
         });
     }

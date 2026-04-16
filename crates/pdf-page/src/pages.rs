@@ -1,33 +1,8 @@
 use crate::{
-    page::PdfPage,
-    resource_cache::ResourceCache,
-    resources::{Resources, ResourcesError},
+    error::PdfPagesError, page::PdfPage, resource_cache::ResourceCache, resources::Resources,
 };
-use pdf_color_space::color_space::ColorSpaceError;
-use pdf_content_stream::error::PdfOperatorError;
-use pdf_function::function::FunctionInterpolationError;
-use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
 
-use thiserror::Error;
-
-/// Errors that can occur during parsing of a PDF Pages object.
-#[derive(Error, Debug)]
-pub enum PdfPagesError {
-    #[error(
-        "Unexpected object type in `/Kids` array for an object: expected 'Page' or 'Pages', found '{found_type}'"
-    )]
-    UnexpectedObjectTypeInKids { found_type: String },
-    #[error("{0}")]
-    ObjectError(#[from] ObjectError),
-    #[error("Failed to parse content stream for page: {0}")]
-    ContentStreamParse(#[from] PdfOperatorError),
-    #[error("Failed to parse resources for page: {0}")]
-    ResourcesParse(#[from] ResourcesError),
-    #[error("{0}")]
-    ColorSpaceError(#[from] ColorSpaceError),
-    #[error("{0}")]
-    FunctionInterpolationError(#[from] FunctionInterpolationError),
-}
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 pub struct PdfPages;
 
@@ -80,7 +55,7 @@ impl PdfPages {
                 }
                 obj_type => {
                     // If the child has an unexpected type, return an error.
-                    return Err(PdfPagesError::UnexpectedObjectTypeInKids {
+                    return Err(PdfPagesError::InvalidKidsEntryType {
                         found_type: obj_type.to_string(),
                     });
                 }

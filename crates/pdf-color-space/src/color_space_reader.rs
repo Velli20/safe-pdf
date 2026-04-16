@@ -2,7 +2,6 @@ use pdf_object::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
-use crate::color_space::{ColorSpace, ColorSpaceError};
 use crate::{
     cal_gray_color_space::parse_cal_gray_color_space,
     cal_rgb_color_space::parse_cal_rgb_color_space,
@@ -11,6 +10,7 @@ use crate::{
     indexed_color_space::parse_indexed_color_space, lab_color_space::parse_lab_color_space,
     separation_color_space::parse_separation_color_space,
 };
+use crate::{color_space::ColorSpace, error::ColorSpaceError};
 
 /// Maximum nesting depth for color space definitions.
 ///

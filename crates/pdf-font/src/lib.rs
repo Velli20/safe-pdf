@@ -1,6 +1,7 @@
 mod cff_builder;
 pub mod char_vec;
 pub mod encoding;
+pub mod error;
 pub mod flags;
 pub mod font;
 pub mod glyph_name_to_unicode;

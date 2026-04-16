@@ -2,9 +2,10 @@ use std::cmp::Ordering;
 
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
-use crate::function::{
-    Function, FunctionImpl, FunctionInterpolationError, FunctionReadError, get_pair,
-    linear_interpolate,
+use crate::{
+    error::FunctionReadError,
+    function::{Function, FunctionImpl, get_pair, linear_interpolate},
+    function_interpolation_error::FunctionInterpolationError,
 };
 
 #[derive(Debug, Clone)]
@@ -27,11 +28,11 @@ impl StitchingFunction {
         } else {
             let prev_idx = index
                 .checked_sub(1)
-                .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
             *self
                 .bounds
                 .get(prev_idx)
-                .ok_or(FunctionInterpolationError::EncodeIndexError)?
+                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?
         };
 
         let b1 = if index >= self.bounds.len() {
@@ -40,7 +41,7 @@ impl StitchingFunction {
             *self
                 .bounds
                 .get(index)
-                .ok_or(FunctionInterpolationError::EncodeIndexError)?
+                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?
         };
 
         Ok((b0, b1))
@@ -64,7 +65,7 @@ impl FunctionImpl for StitchingFunction {
         // Reject NaN bounds: partial_cmp returns None for NaN, which would silently
         // return the wrong segment index.
         if self.bounds.iter().any(|b| b.is_nan()) {
-            return Err(FunctionInterpolationError::InvalidBounds);
+            return Err(FunctionInterpolationError::BoundsContainNaN);
         }
 
         // Clamp input to domain
@@ -84,8 +85,8 @@ impl FunctionImpl for StitchingFunction {
         let (b0, b1) = self.get_subdomain(index)?;
 
         // Get encoding values [e0, e1] for mapping to sub-function domain
-        let (e0, e1) =
-            get_pair(&self.encode, index).ok_or(FunctionInterpolationError::EncodeIndexError)?;
+        let (e0, e1) = get_pair(&self.encode, index)
+            .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
         // Map input from [b0, b1] to [e0, e1]
         let x_mapped = linear_interpolate(x_clamped, b0, b1, e0, e1);
 
@@ -93,7 +94,7 @@ impl FunctionImpl for StitchingFunction {
         let func = self
             .functions
             .get(index)
-            .ok_or(FunctionInterpolationError::EncodeIndexError)?;
+            .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
         func.interpolate(&[x_mapped])
     }
 
@@ -223,7 +224,7 @@ mod tests {
         );
         assert!(matches!(
             f.interpolate(&[0.5]),
-            Err(FunctionInterpolationError::InvalidBounds)
+            Err(FunctionInterpolationError::BoundsContainNaN)
         ));
     }
 }

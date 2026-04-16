@@ -6,115 +6,14 @@
 //! - Type 3: Stitching functions (combining multiple functions)
 //! - Type 4: PostScript Calculator functions
 
-use pdf_object::{
-    error::ObjectError, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-};
-use pdf_postscript::calculator::CalcError;
-use thiserror::Error;
+use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
 use crate::{
-    exponential_interpolation::ExponentialFunction,
+    error::FunctionReadError, exponential_interpolation::ExponentialFunction,
+    function_interpolation_error::FunctionInterpolationError,
     postscript_calculator::PostScriptCalculatorFunction, sampled::SampledFunction,
     stitching::StitchingFunction,
 };
-
-/// Errors that can occur when parsing a PDF Function dictionary.
-#[derive(Debug, Error)]
-pub enum FunctionReadError {
-    /// The `/FunctionType` entry is missing or has an unsupported value.
-    #[error("Invalid /FunctionType value")]
-    InvalidFunctionType,
-    /// The function requires an associated stream but none was provided.
-    #[error("Stream data is required for {function_type:?} functions")]
-    StreamRequired { function_type: FunctionType },
-    /// The `/Encode` array length must be exactly `2 * number of functions`.
-    #[error("Encode array length must be exactly 2 * number of functions")]
-    InvalidEncodeLength,
-    /// The `/Bounds` array length must be `number of functions - 1`.
-    #[error("Bounds array length must be number of functions - 1")]
-    InvalidBoundsLength,
-    /// A function entry was not a dictionary or stream.
-    #[error("Function entry must be a dictionary or stream")]
-    InvalidFunctionEntryType,
-    /// Failed to read a required dictionary entry.
-    #[error("Failed to read function value for '{entry_description}': {source}")]
-    EntryReadError {
-        entry_description: &'static str,
-        #[source]
-        source: ObjectError,
-    },
-    /// Failed to parse the `/Domain` array.
-    #[error("Domain parsing error: {0}")]
-    DomainParsingError(#[from] ObjectError),
-    /// Error during PostScript code parsing.
-    #[error("PostScript calculator error: {0}")]
-    PostScriptCalculatorError(#[from] CalcError),
-    /// The `/Size` array is empty or invalid for a sampled function.
-    #[error("Size array must have at least one element")]
-    InvalidSizeArray,
-    /// The `/BitsPerSample` value is invalid.
-    #[error("BitsPerSample must be 1, 2, 4, 8, 12, 16, 24, or 32")]
-    InvalidBitsPerSample,
-    /// The stream data is too short for the declared sample table.
-    #[error(
-        "Stream data is too short for the sample table (expected {expected} bytes, got {actual})"
-    )]
-    InsufficientStreamData { expected: usize, actual: usize },
-    /// The `/Order` value is invalid (must be 1 or 3).
-    #[error("Order must be 1 (linear) or 3 (cubic)")]
-    InvalidOrder,
-    /// The `/Decode` array length is invalid.
-    #[error("Decode array length must be exactly 2 * number of outputs")]
-    InvalidDecodeLength,
-    /// C0 and C1 arrays must have the same length (validated at parse time).
-    #[error("C0 and C1 arrays must have the same length")]
-    MismatchedC0C1Length,
-    /// A sample value could not be converted to the required numeric type.
-    #[error("Sample data conversion failed")]
-    InvalidSampleData,
-}
-
-/// Errors that can occur during function interpolation.
-#[derive(Debug, Error)]
-pub enum FunctionInterpolationError {
-    #[error("Interpolation is not supported for function type {0:?}")]
-    UnsupportedFunctionType(FunctionType),
-    #[error("Domain must be an increasing interval (domain[0] < domain[1])")]
-    InvalidDomain,
-    #[error("PostScript calculator error: {0}")]
-    PostScriptCalculatorError(#[from] CalcError),
-    #[error("Encode array length must be exactly 2 * number of functions")]
-    InvalidEncodeLength,
-    #[error("Bounds array length must be number of functions - 1")]
-    InvalidBoundsLength,
-    #[error("Index calculation overflow or out-of-bounds during encode access")]
-    EncodeIndexError,
-    #[error("Result stack does not contain enough values for declared range")]
-    InsufficientResultStack,
-    #[error("Negative exponent with zero normalized input produces undefined result")]
-    NegativeExponentAtZero,
-    #[error("Input value is NaN")]
-    InputIsNaN,
-    #[error("Sample index out of bounds")]
-    SampleIndexOutOfBounds,
-    #[error("Invalid sample data")]
-    InvalidSampleData,
-    #[error(
-        "Function returned insufficient color components: required {required}, returned {returned}"
-    )]
-    InsufficientColorComponents { required: usize, returned: usize },
-    #[error("Indexed color space is unsupported for color conversion")]
-    IndexedColorSpaceUnsupported,
-    /// Cubic spline interpolation for Type 0 functions is not implemented.
-    #[error("Cubic spline interpolation (Order=3) is not implemented for sampled functions")]
-    CubicInterpolationNotSupported,
-    /// Caller provided fewer inputs than the function requires.
-    #[error("Insufficient inputs: expected {expected}, got {got}")]
-    InsufficientInputs { expected: usize, got: usize },
-    /// A bounds value in a stitching function is NaN.
-    #[error("Bounds array contains NaN — cannot determine segment for input value")]
-    InvalidBounds,
-}
 
 /// Represents the type of a PDF Function object (Table 38 in PDF spec).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

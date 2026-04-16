@@ -2,8 +2,7 @@ use pdf_graphics::color::Color;
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
 use crate::{
-    color_space::{ColorSpace, ColorSpaceError},
-    color_space_reader::parse_color_space_object,
+    color_space::ColorSpace, color_space_reader::parse_color_space_object, error::ColorSpaceError,
 };
 
 /// DeviceN color space.
@@ -41,28 +40,18 @@ pub(crate) fn parse_device_n_color_space(
     arr: &[ObjectVariant],
     depth: usize,
 ) -> Result<ColorSpace, ColorSpaceError> {
-    if arr.len() < 4 {
+    let [_, names_obj, alt_obj, _, _] = arr else {
         return Err(ColorSpaceError::InvalidColorSpace {
             description: format!("/DeviceN requires at least 4 elements, found {}", arr.len()),
         });
-    }
+    };
 
-    let names_obj = arr
-        .get(1)
-        .ok_or_else(|| ColorSpaceError::InvalidColorSpace {
-            description: "/DeviceN missing names array".into(),
-        })?;
     let names = names_obj
         .try_array(objects)?
         .iter()
         .map(|n| n.try_str(objects).map(|s| s.into_owned()))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let alt_obj = arr
-        .get(2)
-        .ok_or_else(|| ColorSpaceError::InvalidColorSpace {
-            description: "/DeviceN missing alternate space".into(),
-        })?;
     let alternate_space = parse_color_space_object(objects, alt_obj, depth)?;
 
     Ok(ColorSpace::DeviceN(DeviceNColorSpace {

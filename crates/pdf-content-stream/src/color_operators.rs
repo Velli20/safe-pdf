@@ -403,10 +403,10 @@ impl PdfOperator for SetNonStrokingColorSc {
         }
 
         if values.is_empty() {
-            return Err(PdfOperatorError::IncorrectOperandCount {
-                op_name: "sc".to_string(),
+            return Err(PdfOperatorError::OperandCountMismatch {
+                operator: "sc".to_string(),
                 expected: 1,
-                got: 0,
+                actual: 0,
             });
         }
 
@@ -439,10 +439,10 @@ impl PdfOperator for SetStrokingColorSc {
         }
 
         if values.is_empty() {
-            return Err(PdfOperatorError::IncorrectOperandCount {
-                op_name: "SC".to_string(),
+            return Err(PdfOperatorError::OperandCountMismatch {
+                operator: "SC".to_string(),
                 expected: 1,
-                got: 0,
+                actual: 0,
             });
         }
 

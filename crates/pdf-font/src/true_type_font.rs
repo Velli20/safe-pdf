@@ -7,8 +7,8 @@ use pdf_object::{
 
 use crate::{
     encoding::{Encoding, FontEncoding},
+    error::FontError,
     flags::FontFlags,
-    font::FontError,
     simple_font_glyph_map::SimpleFontGlyphWidthsMap,
     standard14::Standard14Font,
     to_unicode_cmap::ToUnicodeCMap,

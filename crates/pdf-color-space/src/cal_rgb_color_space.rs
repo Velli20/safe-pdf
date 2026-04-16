@@ -2,7 +2,7 @@ use pdf_graphics::color::Color;
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
 use crate::cal_gray_color_space::xyz_to_srgb;
-use crate::color_space::{ColorSpace, ColorSpaceError};
+use crate::{color_space::ColorSpace, error::ColorSpaceError};
 
 /// Calibrated RGB color space.
 ///

@@ -1,14 +1,5 @@
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
-use thiserror::Error;
-
 use crate::{error::ParserError, parser::PdfParser};
-
-/// Errors that can occur while parsing a stream object.
-#[derive(Debug, PartialEq, Error)]
-pub enum StreamParsingError {
-    #[error("Stream dictionary missing /Length entry")]
-    MissingLength,
-}
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 impl PdfParser<'_> {
     /// Parses a PDF stream object from the input, using a pre-parsed dictionary.

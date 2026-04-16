@@ -48,7 +48,7 @@ impl SetLineCapStyle {
             Some(style_enum) => Ok(Self { style: style_enum }),
             None => Err(PdfOperatorError::InvalidOperandValue {
                 expected: "line cap style (0 butt, 1 round, 2 projecting square)",
-                value: style.to_string(),
+                found: style.to_string(),
             }),
         }
     }
@@ -82,7 +82,7 @@ impl SetLineJoinStyle {
             Some(style_enum) => Ok(Self { style: style_enum }),
             None => Err(PdfOperatorError::InvalidOperandValue {
                 expected: "line join style (0 miter, 1 round, 2 bevel)",
-                value: style.to_string(),
+                found: style.to_string(),
             }),
         }
     }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
-use crate::font::FontError;
+use crate::error::FontError;
 
 pub struct SimpleFontGlyphWidthsMap;
 

@@ -7,7 +7,7 @@ use pdf_object::{
 use crate::{
     cff_builder::build_cff_font,
     encoding::{Encoding, FontEncoding},
-    font::FontError,
+    error::FontError,
     simple_font_glyph_map::SimpleFontGlyphWidthsMap,
     to_unicode_cmap::ToUnicodeCMap,
 };

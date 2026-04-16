@@ -2,8 +2,7 @@ use pdf_graphics::color::Color;
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
 use crate::{
-    color_space::{ColorSpace, ColorSpaceError},
-    color_space_reader::parse_color_space_object,
+    color_space::ColorSpace, color_space_reader::parse_color_space_object, error::ColorSpaceError,
 };
 
 /// Indexed (palette-based) color space.

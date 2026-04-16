@@ -80,7 +80,7 @@ impl PdfOperator for InlineImageData {
         // This `read` function, within the current `Operands` model, cannot access or parse
         // the actual image data that follows the ID token.
         // Proper parsing of inline image data requires special handling in the main parser loop.
-        Err(PdfOperatorError::UnimplementedOperation(
+        Err(PdfOperatorError::UnsupportedOperator(
             "Parsing inline image data is not implemented in this operator's read function.",
         ))
     }

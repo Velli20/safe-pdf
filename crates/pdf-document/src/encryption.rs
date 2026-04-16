@@ -10,17 +10,9 @@
 //! - The encryption dictionary contains parameters needed to decrypt the document.
 //! - Before reading other objects, the encryption dictionary must be resolved first.
 
-use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
-use thiserror::Error;
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
-/// Errors that can occur while processing PDF encryption.
-#[derive(Debug, Error)]
-pub enum EncryptionError {
-    #[error("unsupported encryption version: {version}")]
-    UnsupportedVersion { version: i32 },
-    #[error("object error while parsing encryption: {0}")]
-    ObjectError(#[from] ObjectError),
-}
+use crate::error::PdfReaderError;
 
 /// Standard security handler filter names.
 #[derive(Debug, Clone, PartialEq)]
@@ -76,7 +68,7 @@ impl std::fmt::Display for EncryptionVersion {
 }
 
 impl TryFrom<i32> for EncryptionVersion {
-    type Error = EncryptionError;
+    type Error = PdfReaderError;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         match value {
@@ -85,7 +77,7 @@ impl TryFrom<i32> for EncryptionVersion {
             3 => Ok(EncryptionVersion::V3),
             4 => Ok(EncryptionVersion::V4),
             5 => Ok(EncryptionVersion::V5),
-            _ => Err(EncryptionError::UnsupportedVersion { version: value }),
+            _ => Err(PdfReaderError::UnsupportedEncryptionVersion { version: value }),
         }
     }
 }
@@ -150,11 +142,11 @@ impl EncryptDictionary {
     ///
     /// # Returns
     ///
-    /// An `EncryptDictionary` on success, or an `EncryptionError` if parsing fails.
+    /// An `EncryptDictionary` on success, or a `PdfReaderError` if parsing fails.
     pub fn from_dictionary(
         dict: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Self, EncryptionError> {
+    ) -> Result<Self, PdfReaderError> {
         let filter = dict
             .get_or_err("Filter")?
             .try_str(objects)

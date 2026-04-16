@@ -167,7 +167,7 @@ impl SetRenderingMode {
             Some(mode) => Ok(Self { mode }),
             None => Err(PdfOperatorError::InvalidOperandValue {
                 expected: "One of the valid text rendering modes (0-7)",
-                value: mode.to_string(),
+                found: mode.to_string(),
             }),
         }
     }
