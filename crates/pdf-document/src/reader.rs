@@ -662,4 +662,85 @@ mod tests {
             "Expected UnresolvedObjects error, got: {err_msg}"
         );
     }
+
+    /// A cyclic page tree (3→4→5→3) must not cause a stack overflow.
+    /// Object 6 is the only valid leaf /Page and should be returned.
+    #[test]
+    fn test_cyclic_page_tree_does_not_overflow() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%PDF-1.7\n");
+
+        // Object 1: Catalog
+        let obj1_offset = data.len();
+        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        // Object 2: Root Pages — kids are a leaf (6) and a subtree (3) with a cycle
+        let obj2_offset = data.len();
+        data.extend_from_slice(
+            b"2 0 obj\n<< /Type /Pages /Kids [6 0 R 3 0 R] /Count 2 /MediaBox [0 0 595 842] >>\nendobj\n",
+        );
+
+        // Objects 3→4→5→3: cyclic /Pages chain (no leaf pages)
+        let obj3_offset = data.len();
+        data.extend_from_slice(
+            b"3 0 obj\n<< /Type /Pages /Kids [4 0 R] /Count 1 /MediaBox [0 0 595 842] >>\nendobj\n",
+        );
+        let obj4_offset = data.len();
+        data.extend_from_slice(
+            b"4 0 obj\n<< /Type /Pages /Kids [5 0 R] /Count 1 /MediaBox [0 0 595 842] >>\nendobj\n",
+        );
+        let obj5_offset = data.len();
+        data.extend_from_slice(
+            b"5 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 595 842] >>\nendobj\n",
+        );
+
+        // Object 6: The only valid leaf page
+        let obj6_offset = data.len();
+        data.extend_from_slice(
+            b"6 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] >>\nendobj\n",
+        );
+
+        // Xref table
+        let xref_offset = data.len();
+        data.extend_from_slice(b"xref\n0 7\n");
+        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj3_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj4_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj5_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj6_offset, 0, true).as_bytes());
+
+        // Trailer
+        data.extend_from_slice(b"trailer\n<< /Size 7 /Root 1 0 R >>\n");
+        data.extend_from_slice(b"startxref\n");
+        data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
+        data.extend_from_slice(b"%%EOF");
+
+        let reader = PdfReader;
+        let result = reader.read_from_bytes(&data, None);
+
+        assert!(
+            result.is_ok(),
+            "Cyclic page tree should not cause an error: {:?}",
+            result.err()
+        );
+
+        let doc = result.unwrap();
+        assert_eq!(
+            doc.page_count(),
+            1,
+            "Only the one valid leaf page (obj 6) should be returned"
+        );
+
+        // The leaf page has no /MediaBox of its own; it must inherit from
+        // the parent /Pages node (object 2) which defines [0 0 595 842].
+        let page = doc.get_page(0).expect("page 0 should exist");
+        let mb = page
+            .media_box
+            .as_ref()
+            .expect("page should inherit MediaBox from parent /Pages");
+        assert_eq!(mb.right, 595.0);
+        assert_eq!(mb.top, 842.0);
+    }
 }

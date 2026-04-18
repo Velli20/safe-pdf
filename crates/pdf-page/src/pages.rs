@@ -1,5 +1,8 @@
+use std::collections::HashSet;
+
 use crate::{
-    error::PdfPagesError, page::PdfPage, resource_cache::ResourceCache, resources::Resources,
+    error::PdfPagesError, media_box::MediaBox, page::PdfPage, resource_cache::ResourceCache,
+    resources::Resources,
 };
 
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
@@ -10,6 +13,10 @@ impl PdfPages {
     pub const KEY: &'static str = "Pages";
 
     /// Recursively parses a PDF Pages dictionary and returns a flattened list of all leaf `PdfPage` objects.
+    ///
+    /// Detects cycles in the page tree (e.g. a /Pages node that eventually
+    /// references itself) and silently skips the cyclic branch, preserving all
+    /// valid leaf pages that are reachable without following the cycle.
     ///
     /// # Parameters
     ///
@@ -25,6 +32,23 @@ impl PdfPages {
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
     ) -> Result<Vec<PdfPage>, PdfPagesError> {
+        let mut visited = HashSet::new();
+        // Seed the visited set with the root /Pages node so that any child
+        // referencing it back is detected as a cycle.
+        if let Some(obj_num) = dictionary.object_number {
+            visited.insert(obj_num);
+        }
+        Self::from_dictionary_inner(dictionary, objects, cache, &mut visited)
+    }
+
+    /// Inner recursive helper that carries the set of already-visited /Pages
+    /// object numbers to detect and break cycles.
+    fn from_dictionary_inner(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+        cache: &mut dyn ResourceCache,
+        visited: &mut HashSet<usize>,
+    ) -> Result<Vec<PdfPage>, PdfPagesError> {
         // The `/Kids` array is a required entry in a Pages dictionary. It contains
         // indirect references to child objects, which can be either other Pages nodes
         // or leaf Page nodes.
@@ -35,6 +59,9 @@ impl PdfPages {
         let mut pages = vec![];
 
         let resources = Resources::read(dictionary, objects, cache)?;
+
+        // Read the inheritable `/MediaBox` from this /Pages node (ISO 32000-1 §7.7.3.4).
+        let media_box = MediaBox::from_dictionary(dictionary, objects)?;
 
         // Iterate over each entry in the `/Kids` array.
         for value in kids_array {
@@ -49,9 +76,19 @@ impl PdfPages {
                     pages.push(page);
                 }
                 PdfPages::KEY => {
-                    // If the child is another branch node (`/Type /Pages`), recursively call this
-                    // function to process its children and extend our list of pages.
-                    pages.extend(PdfPages::from_dictionary(dictionary, objects, cache)?);
+                    // If the child /Pages node has already been visited, a cycle
+                    // exists — skip it to prevent infinite recursion.
+                    // See ISO 32000-1:2008 §7.7.3.2: the page tree must be an
+                    // acyclic tree; cycles are malformed but we handle them
+                    // gracefully by skipping the back-edge.
+                    if let Some(obj_num) = dictionary.object_number
+                        && !visited.insert(obj_num)
+                    {
+                        continue;
+                    }
+                    pages.extend(Self::from_dictionary_inner(
+                        dictionary, objects, cache, visited,
+                    )?);
                 }
                 obj_type => {
                     // If the child has an unexpected type, return an error.
@@ -66,7 +103,27 @@ impl PdfPages {
             Self::apply_resource_inheritance(&mut pages, &resources);
         }
 
+        // Per PDF spec §7.7.3.4, `/MediaBox` is inheritable: a page without
+        // its own `/MediaBox` inherits the nearest ancestor's value.
+        if let Some(ref mb) = media_box {
+            Self::apply_media_box_inheritance(&mut pages, mb);
+        }
+
         Ok(pages)
+    }
+
+    /// Applies inherited `/MediaBox` from an ancestor `/Pages` node to leaf pages
+    /// that do not define their own.
+    ///
+    /// Per PDF spec §7.7.3.4, `/MediaBox` is an inheritable attribute.  A page
+    /// that does not carry its own `/MediaBox` receives the nearest ancestor's
+    /// value.  Pages that already have a `/MediaBox` are left unchanged.
+    fn apply_media_box_inheritance(pages: &mut [PdfPage], media_box: &MediaBox) {
+        for page in pages {
+            if page.media_box.is_none() {
+                page.media_box = Some(media_box.clone());
+            }
+        }
     }
 
     /// Applies inherited resources from an ancestor `/Pages` node to a set of leaf pages.
@@ -212,6 +269,65 @@ mod tests {
         assert!(
             result.color_spaces.contains_key("CS2"),
             "parent CS2 should have been inherited into the child"
+        );
+    }
+
+    #[test]
+    fn leaf_page_without_media_box_inherits_parent_media_box() {
+        let parent_mb = MediaBox {
+            left: 0.0,
+            bottom: 0.0,
+            right: 595.0,
+            top: 842.0,
+        };
+
+        let mut page = PdfPage {
+            resources: None,
+            contents: None,
+            media_box: None,
+        };
+
+        PdfPages::apply_media_box_inheritance(std::slice::from_mut(&mut page), &parent_mb);
+
+        let inherited = page
+            .media_box
+            .expect("page should have inherited media box");
+        assert_eq!(inherited.right, 595.0);
+        assert_eq!(inherited.top, 842.0);
+    }
+
+    #[test]
+    fn leaf_page_with_own_media_box_is_not_overwritten() {
+        let parent_mb = MediaBox {
+            left: 0.0,
+            bottom: 0.0,
+            right: 595.0,
+            top: 842.0,
+        };
+
+        let child_mb = MediaBox {
+            left: 0.0,
+            bottom: 0.0,
+            right: 200.0,
+            top: 300.0,
+        };
+
+        let mut page = PdfPage {
+            resources: None,
+            contents: None,
+            media_box: Some(child_mb),
+        };
+
+        PdfPages::apply_media_box_inheritance(std::slice::from_mut(&mut page), &parent_mb);
+
+        let result = page.media_box.expect("page should still have media box");
+        assert_eq!(
+            result.right, 200.0,
+            "child MediaBox should not be overwritten"
+        );
+        assert_eq!(
+            result.top, 300.0,
+            "child MediaBox should not be overwritten"
         );
     }
 }
