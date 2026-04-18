@@ -16,7 +16,7 @@ use pdf_object::{
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_page::page::PdfPage;
 use pdf_page::pages::PdfPages;
-use pdf_page::resource::Resource;
+use pdf_page::resource_cache::DefaultResourceCache;
 use pdf_parser::error::ParserError;
 use pdf_parser::parser::PdfParser;
 
@@ -115,7 +115,7 @@ fn extract_page_tree(
     // Get the page tree via the /Pages entry in the catalog
     let pages_dict = catalog.get_or_err("Pages")?.try_dictionary(objects)?;
 
-    let mut cache: HashMap<usize, Resource> = HashMap::new();
+    let mut cache = DefaultResourceCache::new();
     let pages = PdfPages::from_dictionary(pages_dict, objects, &mut cache)?;
     Ok(pages)
 }
@@ -742,5 +742,28 @@ mod tests {
             .expect("page should inherit MediaBox from parent /Pages");
         assert_eq!(mb.right, 595.0);
         assert_eq!(mb.top, 842.0);
+    }
+
+    /// Verifies that a PDF containing cyclic Type 3 font resource references
+    /// does not cause a stack overflow.
+    ///
+    /// The test file has: Font 6 (FType3A) → Font 9 (FType3B) → Pattern 12 →
+    /// Font 6 (cycle).  The cycle detection in resource parsing must break the
+    /// loop instead of recursing indefinitely.
+    ///
+    /// Note: the test file may produce non-fatal parsing errors for individual
+    /// resources.  What matters is that the process terminates normally.
+    ///
+    /// See ISO 32000-2:2020 §7.8.3: circular resource references are
+    /// non-conforming, but readers must handle them gracefully.
+    #[test]
+    fn cyclic_type3_resources_do_not_cause_stack_overflow() {
+        let data =
+            include_bytes!("../../../examples/assets/ContentStreamCycleType3insideType3.pdf");
+
+        let reader = PdfReader;
+        // The primary assertion is that this call returns (does not stack-overflow).
+        // A parsing error is acceptable; an infinite recursion is not.
+        let _result = reader.read_from_bytes(data, None);
     }
 }

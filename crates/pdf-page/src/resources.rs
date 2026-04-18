@@ -63,6 +63,17 @@ fn get_sub_dictionary<'a>(
 }
 
 /// Parses all font resources from the `/Font` sub-dictionary.
+///
+/// For Type 3 fonts whose dictionaries carry a nested `/Resources` entry, this
+/// function inserts a **sentinel** `Resource::Font { font, resources: None }`
+/// into the cache *before* reading the nested resources.  If the nested
+/// resource tree cycles back to the same font, the cache hit returns the
+/// sentinel — a usable font without infinite recursion.  Once the nested
+/// resources have been fully read, the sentinel is replaced with the complete
+/// resource.
+///
+/// See ISO 32000-2:2020 §7.8.3: circular resource references are non-conforming,
+/// but a robust reader must handle them gracefully.
 fn read_fonts(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
@@ -83,11 +94,27 @@ fn read_fonts(
             continue;
         }
 
+        // Parse the font first so we can insert a sentinel before recursing.
+        let font = Rc::new(Font::from_dictionary(dict, objects)?);
+
+        // Insert a sentinel with empty nested resources.  If the resource tree
+        // cycles back to this font, the cache lookup will return this sentinel,
+        // breaking the infinite recursion while still providing a usable font.
+        if let Some(num) = &dict.object_number {
+            cache.insert(
+                *num,
+                Resource::Font {
+                    font: Rc::clone(&font),
+                    resources: None,
+                },
+            );
+        }
+
         // Handle fonts that may have their own nested resources. This applies only to Type 3 fonts.
         let nested_resources = Resources::read(dict, objects, cache)?.map(Rc::new);
 
         let resource = Resource::Font {
-            font: Rc::new(Font::from_dictionary(dict, objects)?),
+            font,
             resources: nested_resources,
         };
 
@@ -131,6 +158,10 @@ fn read_external_graphics_states(
 }
 
 /// Parses all pattern resources from the `/Pattern` sub-dictionary.
+///
+/// Uses [`ResourceCache::begin_read`] / [`ResourceCache::end_read`] to detect
+/// cyclic references.  If a pattern is already being read in an ancestor frame,
+/// the cycle is broken by skipping the pattern entirely.
 fn read_patterns(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
@@ -147,9 +178,17 @@ fn read_patterns(
             result.insert(name.clone(), cached.clone());
             continue;
         }
+
+        // Cycle detection: skip this pattern if it is already being read
+        // in an ancestor call frame (ISO 32000-2:2020 §7.8.3).
+        if !cache.begin_read(object_number) {
+            continue;
+        }
+
         let pattern = Pattern::read(value, objects, cache)?;
         let resource = Resource::Pattern(Rc::new(pattern));
         cache.insert(object_number, resource.clone());
+        cache.end_read(&object_number);
 
         result.insert(name.clone(), resource);
     }
@@ -157,6 +196,10 @@ fn read_patterns(
 }
 
 /// Parses all XObject resources from the `/XObject` sub-dictionary.
+///
+/// Uses [`ResourceCache::begin_read`] / [`ResourceCache::end_read`] to detect
+/// cyclic references.  If an XObject is already being read in an ancestor
+/// frame, the cycle is broken by skipping the XObject entirely.
 fn read_xobjects(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
@@ -174,6 +217,12 @@ fn read_xobjects(
             continue;
         }
 
+        // Cycle detection: skip this XObject if it is already being read
+        // in an ancestor call frame (ISO 32000-2:2020 §7.8.3).
+        if !cache.begin_read(stream.object_number) {
+            continue;
+        }
+
         let resource = Resource::XObject(Rc::new(XObject::read_xobject(
             &stream.dictionary,
             stream,
@@ -181,6 +230,8 @@ fn read_xobjects(
             cache,
         )?));
         cache.insert(stream.object_number, resource.clone());
+        cache.end_read(&stream.object_number);
+
         result.insert(name.clone(), resource);
     }
     Ok(result)
