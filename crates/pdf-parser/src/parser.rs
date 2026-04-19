@@ -69,25 +69,50 @@ impl PdfParser<'_> {
         let _ = self.tokenizer.read_while_u8(Self::is_pdf_whitespace);
     }
 
+    /// Skips from the current position to the end of the current line.
+    ///
+    /// Call after the leading `%` (or `%%`) of a comment has already been consumed.
+    fn skip_comment_body(&mut self) {
+        let _ = self.tokenizer.read_while_u8(|c| c != b'\n' && c != b'\r');
+        self.try_read_end_of_line_marker();
+    }
+
+    /// Returns `true` if the current position is at a `%%EOF` marker.
+    ///
+    /// Uses [`read_keyword`] for the `EOF` check (including the trailing
+    /// delimiter requirement) and always restores the original position.
+    fn is_at_eof_marker(&mut self) -> bool {
+        let mark = self.tokenizer.position;
+        let is_eof = matches!(self.tokenizer.peek(), Some(PdfToken::DoublePercent)) && {
+            self.tokenizer.read();
+            self.read_keyword(b"EOF").is_ok()
+        };
+        self.tokenizer.position = mark;
+        is_eof
+    }
+
     /// Skips whitespace and comments (`%` to end of line).
     ///
-    /// Repeatedly advances past whitespace and `% ... EOL` comment sequences
+    /// Repeatedly advances past whitespace and `% … EOL` comment sequences
     /// until a non-whitespace, non-comment token is reached.
     ///
-    /// Per the PDF spec, a comment runs from `%` to (but not including) the
-    /// next CR, LF, or CRLF end-of-line sequence, which is then consumed.
-    /// The `%%` token is not treated as a comment start here; it is handled
-    /// separately as the `%%EOF` end-of-file marker.
+    /// Per the PDF spec (ISO 32000-1:2008 §7.2.3), a comment runs from `%`
+    /// to (but not including) the next CR, LF, or CRLF end-of-line sequence,
+    /// which is then consumed.  The `%%EOF` marker is the sole exception: it
+    /// is *not* a comment and is left unconsumed for the caller to handle.
     pub fn skip_whitespace_and_comments(&mut self) {
         loop {
             self.skip_whitespace();
-            if let Some(PdfToken::Percent) = self.tokenizer.peek() {
-                // Consume the '%' and everything up to (not including) the EOL.
-                self.tokenizer.read();
-                let _ = self.tokenizer.read_while_u8(|c| c != b'\n' && c != b'\r');
-                self.try_read_end_of_line_marker();
-            } else {
-                break;
+            match self.tokenizer.peek() {
+                Some(PdfToken::Percent) => {
+                    self.tokenizer.read();
+                    self.skip_comment_body();
+                }
+                Some(PdfToken::DoublePercent) if !self.is_at_eof_marker() => {
+                    self.tokenizer.read();
+                    self.skip_comment_body();
+                }
+                _ => break,
             }
         }
     }
@@ -404,13 +429,54 @@ mod tests {
             assert_eq!(remaining(&p), b"content");
         }
 
-        /// `%%` is tokenised as `DoublePercent`, not `Percent`, so it is NOT
-        /// consumed as a comment — it remains for the caller (e.g. `%%EOF` detection).
+        /// `%%` is tokenised as `DoublePercent`, not `Percent`, but `%%EOF`
+        /// is specifically detected and preserved for the caller.
         #[test]
-        fn double_percent_not_skipped() {
+        fn double_percent_eof_not_skipped() {
             let mut p = PdfParser::from(b"%%EOF".as_slice());
             p.skip_whitespace_and_comments();
             assert_eq!(remaining(&p), b"%%EOF");
+        }
+
+        /// `%%EOF` followed by a newline is still preserved.
+        #[test]
+        fn double_percent_eof_with_trailing_newline_not_skipped() {
+            let mut p = PdfParser::from(b"%%EOF\n".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"%%EOF\n");
+        }
+
+        /// `%%%` followed by comment text is an ordinary comment and must be skipped.
+        #[test]
+        fn triple_percent_comment_skipped() {
+            let input = b"%%% FType3A stroked red 'rect' = 97 or 'a'\ncontent";
+            let mut p = PdfParser::from(input.as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        /// `%%` followed by non-`EOF` text is a comment and must be skipped.
+        #[test]
+        fn double_percent_non_eof_comment_skipped() {
+            let mut p = PdfParser::from(b"%% this is a comment\ncontent".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        /// `%%EOFOO` does not match the `%%EOF` marker (no delimiter after `EOF`).
+        #[test]
+        fn double_percent_eofoo_is_comment() {
+            let mut p = PdfParser::from(b"%%EOFOO\ncontent".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"content");
+        }
+
+        /// `%%` followed by nothing (bare `%%` at end of input) is consumed as a comment.
+        #[test]
+        fn bare_double_percent_at_eof() {
+            let mut p = PdfParser::from(b"%%".as_slice());
+            p.skip_whitespace_and_comments();
+            assert_eq!(remaining(&p), b"");
         }
 
         /// CRLF is consumed as a single two-byte EOL sequence.
