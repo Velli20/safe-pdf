@@ -40,44 +40,34 @@ impl<B: CanvasBackend> TextRenderer for Type3FontRenderer<'_, '_, B> {
         &mut self,
         iter: impl Iterator<Item = u16>,
     ) -> Result<(), crate::error::PdfCanvasError> {
-        // 1. Iterate through each character code in the input text.
         for char_code_byte in iter {
             let state = self.canvas.current_state()?;
-            let text_rendering_matrix = {
+
+            // Compute a relative glyph matrix (Tm × S × FontMatrix) without the CTM.
+            // render_content_stream will post-concatenate this onto the current CTM,
+            // yielding the same absolute matrix: CTM × Tm × S × FontMatrix.
+            let glyph_matrix = {
                 let mut base = self.type3_font.font_matrix;
                 base.concat(&self.font_size_matrix);
-                state
-                    .text_state
-                    .compose_glyph_matrix(base, &state.transform)
+                base.concat(&state.text_state.matrix);
+                base
             };
 
-            // 2. Map character code to glyph name using the font's encoding.
             let glyph_name = state.text_state.glyph_name(char_code_byte);
             let Some(glyph_name) = glyph_name else {
                 continue;
             };
 
-            // 3. Look up the glyph's content stream from the `CharProcs` map.
             let Some(char_procs) = self.type3_font.char_procs.get(glyph_name) else {
-                // If the character code does not map to a glyph name via the font's encoding,
-                // this character is skipped.
                 continue;
             };
 
-            // 4. Save graphics state before drawing the glyph.
-            self.canvas.save()?;
+            // Type 3 fonts may carry their own resource dictionary for glyph procedures.
+            let type3_resources = state.text_state.resources;
 
-            // Override resources with Type 3 font's own resources for this glyph.
-            // Since save() cloned the state, this override is scoped to the glyph
-            // and restore() will pop it.
-            if let Some(type3_resources) = self.canvas.current_state()?.text_state.resources {
-                self.canvas.current_state_mut()?.resources = Some(type3_resources);
-            }
-
-            let mut glyph_width = None;
-
-            // 5. Set the transformation matrix for the glyph and execute its content stream.
-            // The CTM is temporarily replaced with the computed text rendering matrix.
+            // Intercept d0/d1 operators via the filter to capture glyph width.
+            // These operators are no-ops on the backend; the filter skips them
+            // while recording the width for text cursor advancement.
             //
             // Note: For clip rendering modes (TextRenderingMode 4–7), Type 3 glyph outlines
             // should also be accumulated into the text clip path (ISO 32000 §9.3.6). This
@@ -85,27 +75,30 @@ impl<B: CanvasBackend> TextRenderer for Type3FontRenderer<'_, '_, B> {
             // which is not yet implemented. Clip modes for Type 3 fonts are therefore a no-op
             // for the clip accumulation step; only the paint part (fill/stroke) takes effect
             // because the glyph's procedure calls standard painting operators directly.
-            self.canvas.set_matrix(text_rendering_matrix)?;
-
-            for op in char_procs {
-                // Check if this the `d1` operator. The `d1` operator is only used within the
-                // content stream of a Type 3 font's character procedure. It sets the width
-                // and bounding box of the character being defined.
-                // The backend is responsible for storing the width (`wx`, `wy`)
-                // so it can be used to advance the text matrix after the glyph is painted.
-                if let PdfOperatorVariant::SetCharWidthAndBoundingBox(op) = op {
-                    glyph_width = Some(op.wx);
-                } else if let PdfOperatorVariant::SetCharWidth(op) = op {
-                    glyph_width = Some(op.wx);
-                } else {
-                    op.call(self.canvas)?;
+            let mut glyph_width = None;
+            let mut filter = |op: &PdfOperatorVariant| -> bool {
+                match op {
+                    PdfOperatorVariant::SetCharWidthAndBoundingBox(d1) => {
+                        glyph_width = Some(d1.wx);
+                        true
+                    }
+                    PdfOperatorVariant::SetCharWidth(d0) => {
+                        glyph_width = Some(d0.wx);
+                        true
+                    }
+                    _ => false,
                 }
-            }
+            };
 
-            // 6. Restore the original graphics state.
-            self.canvas.restore()?;
+            self.canvas.render_content_stream(
+                char_procs,
+                Some(glyph_matrix),
+                None,
+                type3_resources,
+                Some(&mut filter),
+            )?;
 
-            // 7. Advance the text matrix (Tm) to position the next glyph.
+            // Advance the text matrix (Tm) to position the next glyph.
             if let Some(width) = glyph_width {
                 let text_state = &mut self.canvas.current_state_mut()?.text_state;
 
