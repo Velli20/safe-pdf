@@ -153,7 +153,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         mat: Option<Transform>,
         bbox: &Rect,
         resources: Option<&'a Resources>,
-        filter: Option<&(dyn Fn(&PdfOperatorVariant) -> bool + '_)>,
+        filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
     ) -> Result<(), PdfCanvasError> {
         // Calculate scale factors.
         let scale_x = recording_canvas.width() / bbox.width();
@@ -320,7 +320,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
                 // Uncolored patterns use the current color from the graphics state,
                 // so we filter out color-setting operators from the content stream.
-                const UNCOLORED_FILTER: fn(&PdfOperatorVariant) -> bool = |op| {
+                let mut uncolored_filter = |op: &PdfOperatorVariant| -> bool {
                     matches!(
                         op,
                         PdfOperatorVariant::SetNonStrokingColor(_)
@@ -334,9 +334,10 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     )
                 };
 
-                let filter: Option<&dyn Fn(&PdfOperatorVariant) -> bool> = match paint_type {
+                let filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool)> = match paint_type
+                {
                     PaintType::Colored => None,
-                    PaintType::Uncolored => Some(&UNCOLORED_FILTER),
+                    PaintType::Uncolored => Some(&mut uncolored_filter),
                 };
 
                 // Create a recording canvas to render the tiling pattern.
@@ -530,7 +531,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         mat: Option<Transform>,
         bbox: Option<&Rect>,
         resources: Option<&'a Resources>,
-        filter: Option<&(dyn Fn(&PdfOperatorVariant) -> bool + '_)>,
+        mut filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
     ) -> Result<(), PdfCanvasError> {
         self.save()?;
 
@@ -559,7 +560,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         }
 
         for op in &content_stream.0 {
-            if filter.is_some_and(|filter| filter(op)) {
+            if filter.as_mut().is_some_and(|filter| filter(op)) {
                 continue;
             }
             op.call(self)?;
@@ -594,14 +595,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         let _ = self.canvas_stack.pop();
 
         self.canvas.restore()
-    }
-
-    /// Replaces the current transformation matrix (CTM) with the given matrix.
-    ///
-    /// This sets the complete transformation from user space to device space.
-    pub(crate) fn set_matrix(&mut self, matrix: Transform) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.transform = matrix;
-        Ok(())
     }
 
     /// Sets the current color space for stroking or filling operations.

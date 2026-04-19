@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use pdf_content_stream::pdf_operator::PdfOperatorVariant;
+use pdf_content_stream::content_stream::ContentStream;
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
@@ -19,7 +19,6 @@ use crate::{
 /// offer more flexibility in defining character shapes, allowing for complex
 /// graphical elements within glyphs.  However, they are less efficient and do not
 /// support advanced typographic features like hinting.
-#[derive(Debug)]
 pub struct Type3Font {
     /// A matrix that maps user space coordinates to glyph space coordinates.
     /// It is used to transform glyph outlines during rendering.
@@ -27,7 +26,7 @@ pub struct Type3Font {
     /// The bounding box of the font.
     pub bounds: Rect,
     /// A procedure defining any special actions to be taken before a character from this font is rendered.
-    pub char_procs: HashMap<String, Vec<PdfOperatorVariant>>,
+    pub char_procs: HashMap<String, ContentStream>,
     /// The font's encoding, specifying the mapping from character codes to glyph names.
     pub encoding: Option<Encoding>,
     /// Parsed ToUnicode CMap for char-code → Unicode mapping.
@@ -71,8 +70,8 @@ impl Type3Font {
 
         let mut char_procs = HashMap::new();
         for (name, value) in char_proc_dictionary.dictionary.iter() {
-            let data = value.try_stream(objects)?.data()?;
-            let operators = PdfOperatorVariant::parse(&data)?;
+            let data = value.try_stream(objects)?;
+            let operators = ContentStream::from_stream(data)?;
             char_procs.insert(name.to_owned(), operators);
         }
 
