@@ -6,7 +6,18 @@ use pdf_object::{
 
 /// Represents the content stream of a PDF page, containing a sequence
 /// of drawing operators.
-pub struct ContentStream(pub Vec<PdfOperatorVariant>);
+pub struct ContentStream {
+    /// The parsed drawing operators from the content stream.
+    pub operators: Vec<PdfOperatorVariant>,
+    /// The PDF object number that identifies this content stream, if available.
+    ///
+    /// For streams created via [`from_stream`](Self::from_stream), this is the
+    /// stream object's own number. For streams created via
+    /// [`from_dictionary`](Self::from_dictionary), this is the object number of
+    /// the `/Contents` entry (whether it resolves to a single stream or an array
+    /// of streams).
+    pub id: Option<usize>,
+}
 
 /// Processes an array of PDF objects, each expected to be a stream or reference to a stream,
 /// and concatenates their content stream operators into a single vector.
@@ -56,9 +67,15 @@ impl ContentStream {
             return Ok(None);
         };
 
+        // Extract the object number from the raw `/Contents` entry before
+        // resolving. This works whether `/Contents` is a reference to a single
+        // stream or to an array of streams — the reference target's object
+        // number uniquely identifies this content stream.
+        let id = contents.try_object_number().ok();
+
         // Process the resolved /Contents object.
         // It should be a Stream or an Array whose payload is one of these.
-        let operations = match objects.resolve_object(contents)? {
+        let operators = match objects.resolve_object(contents)? {
             ObjectVariant::Stream(stream) => {
                 let data = stream.data()?;
                 PdfOperatorVariant::parse(&data)?
@@ -72,12 +89,15 @@ impl ContentStream {
             }
         };
 
-        Ok(Some(ContentStream(operations)))
+        Ok(Some(ContentStream { operators, id }))
     }
 
     pub fn from_stream(stream: &StreamObject) -> Result<Self, PdfOperatorError> {
         let data = stream.data()?;
-        let operations = PdfOperatorVariant::parse(&data)?;
-        Ok(ContentStream(operations))
+        let operators = PdfOperatorVariant::parse(&data)?;
+        Ok(ContentStream {
+            operators,
+            id: Some(stream.object_number),
+        })
     }
 }

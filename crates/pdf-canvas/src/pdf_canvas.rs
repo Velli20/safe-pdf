@@ -559,7 +559,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             self.current_state_mut()?.resources = Some(resources);
         }
 
-        for op in &content_stream.0 {
+        for op in &content_stream.operators {
             if filter.as_mut().is_some_and(|filter| filter(op)) {
                 continue;
             }
