@@ -6,6 +6,8 @@ use thiserror::Error;
 /// Errors that can occur while parsing or validating PDF content stream operators.
 #[derive(Error, Debug, PartialEq)]
 pub enum PdfOperatorError {
+    #[error("content stream ID allocator exhausted available usize values")]
+    ContentStreamIdExhausted,
     #[error("PDF operator '{0}' is recognized but not implemented")]
     UnsupportedOperator(&'static str),
     #[error("Unknown PDF operator '{0}'")]

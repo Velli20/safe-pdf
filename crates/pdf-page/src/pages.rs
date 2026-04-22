@@ -5,6 +5,7 @@ use crate::{
     resources::Resources,
 };
 
+use pdf_content_stream::content_stream::ContentStreamIdAllocator;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 pub struct PdfPages;
@@ -31,6 +32,7 @@ impl PdfPages {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Vec<PdfPage>, PdfPagesError> {
         let mut visited = HashSet::new();
         // Seed the visited set with the root /Pages node so that any child
@@ -38,7 +40,7 @@ impl PdfPages {
         if let Some(obj_num) = dictionary.object_number {
             visited.insert(obj_num);
         }
-        Self::from_dictionary_inner(dictionary, objects, cache, &mut visited)
+        Self::from_dictionary_inner(dictionary, objects, cache, id_allocator, &mut visited)
     }
 
     /// Inner recursive helper that carries the set of already-visited /Pages
@@ -47,6 +49,7 @@ impl PdfPages {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        id_allocator: &mut ContentStreamIdAllocator,
         visited: &mut HashSet<usize>,
     ) -> Result<Vec<PdfPage>, PdfPagesError> {
         // The `/Kids` array is a required entry in a Pages dictionary. It contains
@@ -58,7 +61,7 @@ impl PdfPages {
         // found by traversing the page tree.
         let mut pages = vec![];
 
-        let resources = Resources::read(dictionary, objects, cache)?;
+        let resources = Resources::read(dictionary, objects, cache, id_allocator)?;
 
         // Read the inheritable `/MediaBox` from this /Pages node (ISO 32000-1 §7.7.3.4).
         let media_box = MediaBox::from_dictionary(dictionary, objects)?;
@@ -72,7 +75,7 @@ impl PdfPages {
             match dictionary.get_or_err("Type")?.try_str(objects)?.as_ref() {
                 PdfPage::KEY => {
                     // If the child is a leaf node (`/Type /Page`), parse it as a `PdfPage`.
-                    let page = PdfPage::from_dictionary(dictionary, objects, cache)?;
+                    let page = PdfPage::from_dictionary(dictionary, objects, cache, id_allocator)?;
                     pages.push(page);
                 }
                 PdfPages::KEY => {
@@ -87,7 +90,11 @@ impl PdfPages {
                         continue;
                     }
                     pages.extend(Self::from_dictionary_inner(
-                        dictionary, objects, cache, visited,
+                        dictionary,
+                        objects,
+                        cache,
+                        id_allocator,
+                        visited,
                     )?);
                 }
                 obj_type => {

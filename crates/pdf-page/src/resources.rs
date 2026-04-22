@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use pdf_content_stream::content_stream::ContentStreamIdAllocator;
 use pdf_font::font::Font;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
@@ -67,6 +68,7 @@ fn read_fonts(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
+    id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<HashMap<String, Resource>, PdfPagesError> {
     let Some(font_dict) = get_sub_dictionary(resources, Font::KEY, objects)? else {
         return Ok(HashMap::new());
@@ -84,10 +86,10 @@ fn read_fonts(
         }
 
         // Handle fonts that may have their own nested resources. This applies only to Type 3 fonts.
-        let nested_resources = Resources::read(dict, objects, cache)?.map(Rc::new);
+        let nested_resources = Resources::read(dict, objects, cache, id_allocator)?.map(Rc::new);
 
         let resource = Resource::Font {
-            font: Rc::new(Font::from_dictionary(dict, objects)?),
+            font: Rc::new(Font::from_dictionary(dict, objects, id_allocator)?),
             resources: nested_resources,
         };
 
@@ -104,6 +106,7 @@ fn read_external_graphics_states(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
+    id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<HashMap<String, Resource>, PdfPagesError> {
     let Some(ext_gstate_dict) = get_sub_dictionary(resources, "ExtGState", objects)? else {
         return Ok(HashMap::new());
@@ -120,7 +123,7 @@ fn read_external_graphics_states(
         }
 
         let resource = Resource::ExternalGraphicsState(Rc::new(
-            ExternalGraphicsState::from_dictionary(dict, objects, cache)?,
+            ExternalGraphicsState::from_dictionary(dict, objects, cache, id_allocator)?,
         ));
         if let Some(num) = &dict.object_number {
             cache.insert(*num, resource.clone());
@@ -135,6 +138,7 @@ fn read_patterns(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
+    id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<HashMap<String, Resource>, PdfPagesError> {
     let Some(pattern_dict) = get_sub_dictionary(resources, "Pattern", objects)? else {
         return Ok(HashMap::new());
@@ -147,7 +151,7 @@ fn read_patterns(
             result.insert(name.clone(), cached.clone());
             continue;
         }
-        let pattern = Pattern::read(value, objects, cache)?;
+        let pattern = Pattern::read(value, objects, cache, id_allocator)?;
         let resource = Resource::Pattern(Rc::new(pattern));
         cache.insert(object_number, resource.clone());
 
@@ -161,6 +165,7 @@ fn read_xobjects(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
+    id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<HashMap<String, Resource>, PdfPagesError> {
     let Some(xobject_dict) = get_sub_dictionary(resources, "XObject", objects)? else {
         return Ok(HashMap::new());
@@ -179,6 +184,7 @@ fn read_xobjects(
             stream,
             objects,
             cache,
+            id_allocator,
         )?));
         cache.insert(stream.object_number, resource.clone());
         result.insert(name.clone(), resource);
@@ -352,6 +358,7 @@ impl Resources {
     /// - `dictionary`: The PDF dictionary potentially containing a `/Resources` entry.
     /// - `objects`: An object resolver for resolving indirect PDF object references.
     /// - `cache`: A mutable resource cache for storing and retrieving parsed resources.
+    /// - `id_allocator`: Shared allocator for generated `ContentStream` IDs.
     ///
     /// # Returns
     ///
@@ -365,6 +372,7 @@ impl Resources {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Option<Self>, PdfPagesError> {
         const KEY: &str = "Resources";
 
@@ -375,10 +383,10 @@ impl Resources {
         let resources = resources_entry.try_dictionary(objects)?;
 
         Ok(Some(Self {
-            fonts: read_fonts(resources, objects, cache)?,
-            ext_g_states: read_external_graphics_states(resources, objects, cache)?,
-            patterns: read_patterns(resources, objects, cache)?,
-            xobjects: read_xobjects(resources, objects, cache)?,
+            fonts: read_fonts(resources, objects, cache, id_allocator)?,
+            ext_g_states: read_external_graphics_states(resources, objects, cache, id_allocator)?,
+            patterns: read_patterns(resources, objects, cache, id_allocator)?,
+            xobjects: read_xobjects(resources, objects, cache, id_allocator)?,
             shadings: read_shadings(resources, objects, cache)?,
             color_spaces: read_color_spaces(resources, objects, cache)?,
         }))
@@ -409,5 +417,106 @@ impl Resources {
                 child.insert(k.clone(), v.clone());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, HashMap};
+
+    use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+    use pdf_object::{
+        dictionary::Dictionary, object_resolver::PassthroughResolver,
+        object_variant::ObjectVariant, stream::StreamObject,
+    };
+
+    use crate::{resource::Resource, xobject::XObject};
+
+    use super::read_xobjects;
+
+    fn integer(value: i64) -> ObjectVariant {
+        ObjectVariant::Integer(value)
+    }
+
+    fn form_xobject_stream(object_number: usize, data: &[u8]) -> ObjectVariant {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            ("Subtype".to_string(), ObjectVariant::Name(b"Form".to_vec())),
+            (
+                "BBox".to_string(),
+                ObjectVariant::Array(vec![integer(0), integer(0), integer(10), integer(10)]),
+            ),
+        ]));
+
+        ObjectVariant::Stream(StreamObject::new(
+            object_number,
+            0,
+            Box::new(dictionary),
+            data.to_vec(),
+        ))
+    }
+
+    fn xobject_resources(entries: Vec<(&str, ObjectVariant)>) -> Dictionary {
+        let xobjects = entries
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value))
+            .collect::<BTreeMap<_, _>>();
+
+        Dictionary::new(BTreeMap::from([(
+            "XObject".to_string(),
+            ObjectVariant::Dictionary(Box::new(Dictionary::new(xobjects))),
+        )]))
+    }
+
+    fn form_content_stream_id(resource: &Resource) -> Option<usize> {
+        match resource {
+            Resource::XObject(xobject) => match xobject.as_ref() {
+                XObject::Form(form) => Some(form.content_stream.id),
+                XObject::Image(_) => None,
+            },
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn cached_form_xobjects_keep_their_generated_ids() {
+        let shared = form_xobject_stream(11, b"q");
+        let distinct = form_xobject_stream(12, b"Q");
+        let resources = xobject_resources(vec![
+            ("SharedA", shared.clone()),
+            ("SharedB", shared),
+            ("Distinct", distinct),
+        ]);
+
+        let mut cache = HashMap::new();
+        let mut ids = ContentStreamIdAllocator::new();
+
+        let parsed = read_xobjects(&resources, &PassthroughResolver, &mut cache, &mut ids)
+            .expect("xobjects should parse");
+
+        let shared_a = form_content_stream_id(parsed.get("SharedA").expect("SharedA should exist"))
+            .expect("SharedA should be a form XObject");
+        let shared_b = form_content_stream_id(parsed.get("SharedB").expect("SharedB should exist"))
+            .expect("SharedB should be a form XObject");
+        let distinct_id =
+            form_content_stream_id(parsed.get("Distinct").expect("Distinct should exist"))
+                .expect("Distinct should be a form XObject");
+
+        assert_eq!(shared_b, shared_a);
+        assert_ne!(distinct_id, shared_a);
+
+        let parsed_again = read_xobjects(&resources, &PassthroughResolver, &mut cache, &mut ids)
+            .expect("cached xobjects should parse");
+        let shared_again =
+            form_content_stream_id(parsed_again.get("SharedA").expect("SharedA should exist"))
+                .expect("SharedA should be a form XObject");
+        assert_eq!(shared_again, shared_a);
+
+        let later_resources = xobject_resources(vec![("Later", form_xobject_stream(13, b"q Q"))]);
+        let later = read_xobjects(&later_resources, &PassthroughResolver, &mut cache, &mut ids)
+            .expect("later xobject should parse");
+        let later_id = form_content_stream_id(later.get("Later").expect("Later should exist"))
+            .expect("Later should be a form XObject");
+
+        assert_eq!(later_id, 2);
     }
 }

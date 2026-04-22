@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use pdf_content_stream::content_stream::ContentStream;
+use pdf_content_stream::content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
@@ -37,6 +37,7 @@ impl Type3Font {
     pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
+        id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, FontError> {
         let [a, b, c, d, e, f] = dictionary
             .get_or_err("FontMatrix")?
@@ -71,7 +72,7 @@ impl Type3Font {
         let mut char_procs = HashMap::new();
         for (name, value) in char_proc_dictionary.dictionary.iter() {
             let data = value.try_stream(objects)?;
-            let operators = ContentStream::from_stream(data)?;
+            let operators = ContentStream::from_stream(data, id_allocator)?;
             char_procs.insert(name.to_owned(), operators);
         }
 

@@ -1,7 +1,7 @@
 use crate::{
     error::PdfPagesError, media_box::MediaBox, resource_cache::ResourceCache, resources::Resources,
 };
-use pdf_content_stream::content_stream::ContentStream;
+use pdf_content_stream::content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 /// Represents a single page in a PDF document.
@@ -26,10 +26,11 @@ impl PdfPage {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, PdfPagesError> {
-        let contents = ContentStream::from_dictionary(dictionary, objects)?;
+        let contents = ContentStream::from_dictionary(dictionary, objects, id_allocator)?;
         let media_box = MediaBox::from_dictionary(dictionary, objects)?;
-        let resources = Resources::read(dictionary, objects, cache)?;
+        let resources = Resources::read(dictionary, objects, cache, id_allocator)?;
 
         Ok(Self {
             contents,

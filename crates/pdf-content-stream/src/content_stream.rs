@@ -4,19 +4,37 @@ use pdf_object::{
     object_variant::ObjectVariant, stream::StreamObject,
 };
 
+/// Allocates monotonically increasing IDs for parsed [`ContentStream`] values.
+#[derive(Debug, Default)]
+pub struct ContentStreamIdAllocator {
+    next_id: usize,
+}
+
+impl ContentStreamIdAllocator {
+    /// Creates a new allocator whose first issued ID is `0`.
+    pub const fn new() -> Self {
+        Self { next_id: 0 }
+    }
+
+    /// Returns the next content-stream ID.
+    pub fn next_id(&mut self) -> Result<usize, PdfOperatorError> {
+        let Some(next_id) = self.next_id.checked_add(1) else {
+            return Err(PdfOperatorError::ContentStreamIdExhausted);
+        };
+
+        let id = self.next_id;
+        self.next_id = next_id;
+        Ok(id)
+    }
+}
+
 /// Represents the content stream of a PDF page, containing a sequence
 /// of drawing operators.
 pub struct ContentStream {
     /// The parsed drawing operators from the content stream.
     pub operators: Vec<PdfOperatorVariant>,
-    /// The PDF object number that identifies this content stream, if available.
-    ///
-    /// For streams created via [`from_stream`](Self::from_stream), this is the
-    /// stream object's own number. For streams created via
-    /// [`from_dictionary`](Self::from_dictionary), this is the object number of
-    /// the `/Contents` entry (whether it resolves to a single stream or an array
-    /// of streams).
-    pub id: Option<usize>,
+    /// A monotonic ID assigned when this content stream is materialized.
+    pub id: usize,
 }
 
 /// Processes an array of PDF objects, each expected to be a stream or reference to a stream,
@@ -52,6 +70,7 @@ impl ContentStream {
     ///
     /// - `dictionary`: The page dictionary containing the `/Contents` entry.
     /// - `objects`: Resolver for indirect PDF objects.
+    /// - `id_allocator`: Monotonic allocator used to assign the returned content stream ID.
     ///
     /// # Returns
     ///
@@ -59,6 +78,7 @@ impl ContentStream {
     pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
+        id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Option<ContentStream>, PdfOperatorError> {
         const KEY: &str = "Contents";
 
@@ -66,12 +86,6 @@ impl ContentStream {
         let Some(contents) = dictionary.get(KEY) else {
             return Ok(None);
         };
-
-        // Extract the object number from the raw `/Contents` entry before
-        // resolving. This works whether `/Contents` is a reference to a single
-        // stream or to an array of streams — the reference target's object
-        // number uniquely identifies this content stream.
-        let id = contents.try_object_number().ok();
 
         // Process the resolved /Contents object.
         // It should be a Stream or an Array whose payload is one of these.
@@ -89,15 +103,76 @@ impl ContentStream {
             }
         };
 
+        let id = id_allocator.next_id()?;
         Ok(Some(ContentStream { operators, id }))
     }
 
-    pub fn from_stream(stream: &StreamObject) -> Result<Self, PdfOperatorError> {
+    pub fn from_stream(
+        stream: &StreamObject,
+        id_allocator: &mut ContentStreamIdAllocator,
+    ) -> Result<Self, PdfOperatorError> {
         let data = stream.data()?;
         let operators = PdfOperatorVariant::parse(&data)?;
-        Ok(ContentStream {
-            operators,
-            id: Some(stream.object_number),
-        })
+        let id = id_allocator.next_id()?;
+        Ok(ContentStream { operators, id })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use pdf_object::{
+        dictionary::Dictionary, object_resolver::PassthroughResolver,
+        object_variant::ObjectVariant, stream::StreamObject,
+    };
+
+    use super::{ContentStream, ContentStreamIdAllocator};
+
+    fn stream_object(object_number: usize, data: &[u8]) -> StreamObject {
+        StreamObject::new(
+            object_number,
+            0,
+            Box::new(Dictionary::new(BTreeMap::new())),
+            data.to_vec(),
+        )
+    }
+
+    #[test]
+    fn missing_contents_does_not_consume_an_id() {
+        let page = Dictionary::new(BTreeMap::new());
+        let mut ids = ContentStreamIdAllocator::new();
+
+        let contents = ContentStream::from_dictionary(&page, &PassthroughResolver, &mut ids)
+            .expect("missing /Contents should not error");
+
+        assert!(contents.is_none());
+
+        let stream = stream_object(10, b"q");
+        let content_stream =
+            ContentStream::from_stream(&stream, &mut ids).expect("stream should parse");
+        assert_eq!(content_stream.id, 0);
+    }
+
+    #[test]
+    fn contents_array_flattens_into_one_stream_and_one_id() {
+        let contents = ObjectVariant::Array(vec![
+            ObjectVariant::Stream(stream_object(1, b"q")),
+            ObjectVariant::Stream(stream_object(2, b"Q")),
+        ]);
+        let page = Dictionary::new(BTreeMap::from([("Contents".to_string(), contents)]));
+        let mut ids = ContentStreamIdAllocator::new();
+
+        let content_stream = ContentStream::from_dictionary(&page, &PassthroughResolver, &mut ids)
+            .expect("/Contents array should parse")
+            .expect("page should have a content stream");
+
+        assert_eq!(content_stream.id, 0);
+        assert_eq!(content_stream.operators.len(), 2);
+
+        let direct_stream = stream_object(3, b"q");
+        let next_stream =
+            ContentStream::from_stream(&direct_stream, &mut ids).expect("stream should parse");
+        assert_eq!(next_stream.id, 1);
     }
 }

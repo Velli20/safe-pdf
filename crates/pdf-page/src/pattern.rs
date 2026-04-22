@@ -1,4 +1,4 @@
-use pdf_content_stream::content_stream::ContentStream;
+use pdf_content_stream::content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
@@ -131,6 +131,7 @@ impl Pattern {
         object: &ObjectVariant,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Pattern, PdfPagesError> {
         let dictionary = object.try_dictionary(objects)?;
 
@@ -169,11 +170,12 @@ impl Pattern {
                 let y_step = dictionary.get_or_err("YStep")?.try_number::<f32>(objects)?;
 
                 // Read the `/Resources` entry. Needed by the pattern's content stream.
-                let resources = Resources::read(dictionary, objects, cache)?.unwrap_or_default();
+                let resources =
+                    Resources::read(dictionary, objects, cache, id_allocator)?.unwrap_or_default();
 
                 let stream_data = object.try_stream(objects)?;
 
-                let content_stream = ContentStream::from_stream(stream_data)?;
+                let content_stream = ContentStream::from_stream(stream_data, id_allocator)?;
 
                 Ok(Pattern::Tiling {
                     paint_type,
@@ -196,7 +198,9 @@ impl Pattern {
                     .get("ExtGState")
                     .map(|obj| obj.try_dictionary(objects))
                     .transpose()?
-                    .map(|ext| ExternalGraphicsState::from_dictionary(ext, objects, cache))
+                    .map(|ext| {
+                        ExternalGraphicsState::from_dictionary(ext, objects, cache, id_allocator)
+                    })
                     .transpose()?;
 
                 Ok(Pattern::Shading {
