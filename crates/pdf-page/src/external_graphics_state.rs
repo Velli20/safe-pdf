@@ -95,6 +95,25 @@ impl ExternalGraphicsState {
         cache: &mut dyn ResourceCache,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, PdfPagesError> {
+        if let Some(obj_num) = dictionary.object_number {
+            if !cache.begin_read(obj_num) {
+                return Err(pdf_object::error::ObjectError::CyclicDependency { obj_num }.into());
+            }
+
+            let result = Self::from_dictionary_inner(dictionary, objects, cache, id_allocator);
+            cache.end_read(obj_num);
+            return result;
+        }
+
+        Self::from_dictionary_inner(dictionary, objects, cache, id_allocator)
+    }
+
+    fn from_dictionary_inner(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+        cache: &mut dyn ResourceCache,
+        id_allocator: &mut ContentStreamIdAllocator,
+    ) -> Result<Self, PdfPagesError> {
         let mut params: Vec<ExternalGraphicsStateKey> = Vec::new();
 
         for (name, value) in &dictionary.dictionary {
@@ -244,8 +263,19 @@ fn parse_soft_mask(
             // Parse the "G" key for the `XObject`
             let stream = dict.get_or_err("G")?.try_stream(objects)?;
 
-            let shape =
-                XObject::read_xobject(&stream.dictionary, stream, objects, cache, id_allocator)?;
+            let shape = match XObject::read_xobject(
+                &stream.dictionary,
+                stream,
+                objects,
+                cache,
+                id_allocator,
+            ) {
+                Ok(shape) => shape,
+                Err(err) if err.is_cyclic_dependency() => {
+                    return Ok(ExternalGraphicsStateKey::SoftMask(None));
+                }
+                Err(err) => return Err(err),
+            };
 
             Some(Box::new(SoftMask { mask_type, shape }))
         }

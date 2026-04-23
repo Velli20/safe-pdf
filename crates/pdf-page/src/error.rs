@@ -70,3 +70,9 @@ pub enum PdfPagesError {
     #[error("{0}")]
     FunctionRead(#[from] FunctionReadError),
 }
+
+impl PdfPagesError {
+    pub(crate) fn is_cyclic_dependency(&self) -> bool {
+        matches!(self, Self::Object(ObjectError::CyclicDependency { .. }))
+    }
+}

@@ -240,7 +240,11 @@ impl ImageXObject {
 
         // Recursively parse the SMask as an XObject.
         let smask_xobject =
-            XObject::read_xobject(&stream.dictionary, stream, objects, cache, id_allocator)?;
+            match XObject::read_xobject(&stream.dictionary, stream, objects, cache, id_allocator) {
+                Ok(xobject) => xobject,
+                Err(err) if err.is_cyclic_dependency() => return Ok(None),
+                Err(err) => return Err(err),
+            };
 
         // Ensure the SMask is actually an Image XObject.
         match smask_xobject {

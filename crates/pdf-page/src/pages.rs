@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use crate::{
     error::PdfPagesError, media_box::MediaBox, page::PdfPage, resource_cache::ResourceCache,
     resources::Resources,
@@ -34,23 +32,25 @@ impl PdfPages {
         cache: &mut dyn ResourceCache,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Vec<PdfPage>, PdfPagesError> {
-        let mut visited = HashSet::new();
-        // Seed the visited set with the root /Pages node so that any child
-        // referencing it back is detected as a cycle.
         if let Some(obj_num) = dictionary.object_number {
-            visited.insert(obj_num);
+            if !cache.begin_read(obj_num) {
+                return Ok(vec![]);
+            }
+
+            let result = Self::from_dictionary_inner(dictionary, objects, cache, id_allocator);
+            cache.end_read(obj_num);
+            return result;
         }
-        Self::from_dictionary_inner(dictionary, objects, cache, id_allocator, &mut visited)
+
+        Self::from_dictionary_inner(dictionary, objects, cache, id_allocator)
     }
 
-    /// Inner recursive helper that carries the set of already-visited /Pages
-    /// object numbers to detect and break cycles.
+    /// Inner recursive helper for parsing a `/Pages` dictionary.
     fn from_dictionary_inner(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
         id_allocator: &mut ContentStreamIdAllocator,
-        visited: &mut HashSet<usize>,
     ) -> Result<Vec<PdfPage>, PdfPagesError> {
         // The `/Kids` array is a required entry in a Pages dictionary. It contains
         // indirect references to child objects, which can be either other Pages nodes
@@ -79,22 +79,11 @@ impl PdfPages {
                     pages.push(page);
                 }
                 PdfPages::KEY => {
-                    // If the child /Pages node has already been visited, a cycle
-                    // exists — skip it to prevent infinite recursion.
-                    // See ISO 32000-1:2008 §7.7.3.2: the page tree must be an
-                    // acyclic tree; cycles are malformed but we handle them
-                    // gracefully by skipping the back-edge.
-                    if let Some(obj_num) = dictionary.object_number
-                        && !visited.insert(obj_num)
-                    {
-                        continue;
-                    }
-                    pages.extend(Self::from_dictionary_inner(
+                    pages.extend(Self::from_dictionary(
                         dictionary,
                         objects,
                         cache,
                         id_allocator,
-                        visited,
                     )?);
                 }
                 obj_type => {

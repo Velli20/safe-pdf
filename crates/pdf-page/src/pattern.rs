@@ -194,14 +194,25 @@ impl Pattern {
                 let shading = Shading::from_dictionary(shading_object, objects)?;
 
                 // Read an external graphics state dictionary to apply when painting the pattern.
-                let ext_g_state = dictionary
+                let ext_g_state = match dictionary
                     .get("ExtGState")
                     .map(|obj| obj.try_dictionary(objects))
                     .transpose()?
-                    .map(|ext| {
-                        ExternalGraphicsState::from_dictionary(ext, objects, cache, id_allocator)
-                    })
-                    .transpose()?;
+                {
+                    Some(ext) => {
+                        match ExternalGraphicsState::from_dictionary(
+                            ext,
+                            objects,
+                            cache,
+                            id_allocator,
+                        ) {
+                            Ok(ext_g_state) => Some(ext_g_state),
+                            Err(err) if err.is_cyclic_dependency() => None,
+                            Err(err) => return Err(err),
+                        }
+                    }
+                    None => None,
+                };
 
                 Ok(Pattern::Shading {
                     shading,

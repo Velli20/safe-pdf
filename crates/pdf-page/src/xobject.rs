@@ -25,6 +25,26 @@ impl XObject {
         cache: &mut dyn ResourceCache,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, PdfPagesError> {
+        if !cache.begin_read(stream_data.object_number) {
+            return Err(pdf_object::error::ObjectError::CyclicDependency {
+                obj_num: stream_data.object_number,
+            }
+            .into());
+        }
+
+        let result =
+            Self::read_xobject_inner(dictionary, stream_data, objects, cache, id_allocator);
+        cache.end_read(stream_data.object_number);
+        result
+    }
+
+    fn read_xobject_inner(
+        dictionary: &Dictionary,
+        stream_data: &StreamObject,
+        objects: &dyn ObjectResolver,
+        cache: &mut dyn ResourceCache,
+        id_allocator: &mut ContentStreamIdAllocator,
+    ) -> Result<Self, PdfPagesError> {
         let subtype = dictionary.get_or_err("Subtype")?.try_str(objects)?;
 
         match subtype.as_ref() {

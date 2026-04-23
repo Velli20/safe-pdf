@@ -13,6 +13,8 @@ pub enum ObjectError {
     TypeMismatch(&'static str, &'static str),
     #[error("Failed to convert number to the requested type")]
     NumberConversionError,
+    #[error("Detected a cyclic dependency while reading object {obj_num}")]
+    CyclicDependency { obj_num: usize },
     #[error("Failed to resolve an object reference {obj_num}")]
     FailedResolveObjectReference { obj_num: usize },
     #[error("Failed to resolve an object to a dictionary, but found type '{resolved_type}'")]

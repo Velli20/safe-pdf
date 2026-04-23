@@ -17,7 +17,7 @@ use pdf_object::{
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_page::page::PdfPage;
 use pdf_page::pages::PdfPages;
-use pdf_page::resource::Resource;
+use pdf_page::resource_cache::DefaultResourceCache;
 use pdf_parser::error::ParserError;
 use pdf_parser::parser::PdfParser;
 
@@ -116,7 +116,7 @@ fn extract_page_tree(
     // Get the page tree via the /Pages entry in the catalog
     let pages_dict = catalog.get_or_err("Pages")?.try_dictionary(objects)?;
 
-    let mut cache: HashMap<usize, Resource> = HashMap::new();
+    let mut cache = DefaultResourceCache::default();
     let mut content_stream_ids = ContentStreamIdAllocator::new();
     let pages =
         PdfPages::from_dictionary(pages_dict, objects, &mut cache, &mut content_stream_ids)?;

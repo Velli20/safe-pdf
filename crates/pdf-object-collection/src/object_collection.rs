@@ -1,3 +1,4 @@
+use pdf_object::cycle_list::ObjectCycleList;
 use pdf_object::indirect_object::IndirectObject;
 use pdf_object::object_resolver::ObjectResolver;
 use pdf_object::stream::StreamObject;
@@ -17,34 +18,22 @@ impl ObjectResolver for ObjectCollection {
         &'a self,
         obj: &'a ObjectVariant,
     ) -> Result<&'a ObjectVariant, ObjectError> {
-        // A limit to prevent infinite loops when resolving an object reference
-        const MAX_DEREF: usize = 16;
-
         let mut current_obj = obj;
+        let mut cycle_list = ObjectCycleList::default();
 
-        for _ in 0..MAX_DEREF {
+        loop {
             match current_obj {
                 ObjectVariant::Reference(object_number) => {
-                    if let Some(obj) = self.map.get(object_number) {
-                        current_obj = obj;
-                    } else {
-                        return Err(ObjectError::FailedResolveObjectReference {
+                    cycle_list.begin_read(*object_number)?;
+                    current_obj = self.map.get(object_number).ok_or(
+                        ObjectError::FailedResolveObjectReference {
                             obj_num: *object_number,
-                        });
-                    }
+                        },
+                    )?;
                 }
                 other => return Ok(other),
             }
         }
-
-        // If we reach here, we exceeded MAX_DEREF without resolving to a non-reference.
-        if let ObjectVariant::Reference(object_number) = current_obj {
-            return Err(ObjectError::FailedResolveObjectReference {
-                obj_num: *object_number,
-            });
-        }
-
-        Ok(obj)
     }
 }
 
@@ -262,5 +251,36 @@ impl ObjectCollection {
             "type": "Dictionary",
             "entries": JsonValue::Object(map)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_object_reports_direct_self_reference_cycle() {
+        let mut collection = ObjectCollection::default();
+        collection.map.insert(1, ObjectVariant::Reference(1));
+
+        let err = collection
+            .resolve_object(&ObjectVariant::Reference(1))
+            .expect_err("self-referential object should report a cycle");
+
+        assert_eq!(err, ObjectError::CyclicDependency { obj_num: 1 });
+    }
+
+    #[test]
+    fn resolve_object_reports_indirect_reference_cycle() {
+        let mut collection = ObjectCollection::default();
+        collection.map.insert(1, ObjectVariant::Reference(2));
+        collection.map.insert(2, ObjectVariant::Reference(3));
+        collection.map.insert(3, ObjectVariant::Reference(1));
+
+        let err = collection
+            .resolve_object(&ObjectVariant::Reference(1))
+            .expect_err("mutually recursive references should report a cycle");
+
+        assert_eq!(err, ObjectError::CyclicDependency { obj_num: 1 });
     }
 }

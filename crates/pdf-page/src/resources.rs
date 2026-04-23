@@ -12,8 +12,13 @@ use pdf_font::font::Font;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 use crate::{
-    error::PdfPagesError, external_graphics_state::ExternalGraphicsState, pattern::Pattern,
-    resource::Resource, resource_cache::ResourceCache, shading::Shading, xobject::XObject,
+    error::PdfPagesError,
+    external_graphics_state::ExternalGraphicsState,
+    pattern::Pattern,
+    resource::Resource,
+    resource_cache::{ResourceCache, read_with_cycle_guard},
+    shading::Shading,
+    xobject::XObject,
 };
 use pdf_color_space::color_space::ColorSpace;
 
@@ -85,16 +90,21 @@ fn read_fonts(
             continue;
         }
 
-        // Handle fonts that may have their own nested resources. This applies only to Type 3 fonts.
-        let nested_resources = Resources::read(dict, objects, cache, id_allocator)?.map(Rc::new);
+        let Some(resource) = read_with_cycle_guard(cache, dict.object_number, |cache| {
+            let nested_resources =
+                Resources::read(dict, objects, cache, id_allocator)?.map(Rc::new);
 
-        let resource = Resource::Font {
-            font: Rc::new(Font::from_dictionary(dict, objects, id_allocator)?),
-            resources: nested_resources,
+            Ok::<Resource, PdfPagesError>(Resource::Font {
+                font: Rc::new(Font::from_dictionary(dict, objects, id_allocator)?),
+                resources: nested_resources,
+            })
+        })?
+        else {
+            continue;
         };
 
-        if let Some(num) = &dict.object_number {
-            cache.insert(*num, resource.clone());
+        if let Some(num) = dict.object_number {
+            cache.insert(num, resource.clone());
         }
         result.insert(name.clone(), resource);
     }
@@ -122,11 +132,15 @@ fn read_external_graphics_states(
             continue;
         }
 
-        let resource = Resource::ExternalGraphicsState(Rc::new(
-            ExternalGraphicsState::from_dictionary(dict, objects, cache, id_allocator)?,
-        ));
-        if let Some(num) = &dict.object_number {
-            cache.insert(*num, resource.clone());
+        let resource =
+            match ExternalGraphicsState::from_dictionary(dict, objects, cache, id_allocator) {
+                Ok(ext_g_state) => Resource::ExternalGraphicsState(Rc::new(ext_g_state)),
+                Err(err) if err.is_cyclic_dependency() => continue,
+                Err(err) => return Err(err),
+            };
+
+        if let Some(num) = dict.object_number {
+            cache.insert(num, resource.clone());
         }
         result.insert(name.clone(), resource);
     }
@@ -151,8 +165,15 @@ fn read_patterns(
             result.insert(name.clone(), cached.clone());
             continue;
         }
-        let pattern = Pattern::read(value, objects, cache, id_allocator)?;
-        let resource = Resource::Pattern(Rc::new(pattern));
+
+        let Some(resource) = read_with_cycle_guard(cache, Some(object_number), |cache| {
+            let pattern = Pattern::read(value, objects, cache, id_allocator)?;
+            Ok::<Resource, PdfPagesError>(Resource::Pattern(Rc::new(pattern)))
+        })?
+        else {
+            continue;
+        };
+
         cache.insert(object_number, resource.clone());
 
         result.insert(name.clone(), resource);
@@ -179,13 +200,13 @@ fn read_xobjects(
             continue;
         }
 
-        let resource = Resource::XObject(Rc::new(XObject::read_xobject(
-            &stream.dictionary,
-            stream,
-            objects,
-            cache,
-            id_allocator,
-        )?));
+        let resource =
+            match XObject::read_xobject(&stream.dictionary, stream, objects, cache, id_allocator) {
+                Ok(xobject) => Resource::XObject(Rc::new(xobject)),
+                Err(err) if err.is_cyclic_dependency() => continue,
+                Err(err) => return Err(err),
+            };
+
         cache.insert(stream.object_number, resource.clone());
         result.insert(name.clone(), resource);
     }
@@ -209,7 +230,16 @@ fn read_shadings(
             result.insert(name.clone(), cached.clone());
             continue;
         }
-        let resource = Resource::Shading(Rc::new(Shading::from_dictionary(value, objects)?));
+
+        let Some(resource) = read_with_cycle_guard(cache, Some(object_number), |_| {
+            Ok::<Resource, PdfPagesError>(Resource::Shading(Rc::new(Shading::from_dictionary(
+                value, objects,
+            )?)))
+        })?
+        else {
+            continue;
+        };
+
         cache.insert(object_number, resource.clone());
         result.insert(name.clone(), resource);
     }
@@ -235,8 +265,15 @@ fn read_color_spaces(
             result.insert(name.clone(), cached.clone());
             continue;
         }
-        let color_space = ColorSpace::from_object(value, objects)?;
-        let resource = Resource::ColorSpace(Rc::new(color_space));
+
+        let Some(resource) = read_with_cycle_guard(cache, object_number, |_| {
+            let color_space = ColorSpace::from_object(value, objects)?;
+            Ok::<Resource, PdfPagesError>(Resource::ColorSpace(Rc::new(color_space)))
+        })?
+        else {
+            continue;
+        };
+
         if let Some(num) = object_number {
             cache.insert(num, resource.clone());
         }
@@ -381,15 +418,21 @@ impl Resources {
         };
 
         let resources = resources_entry.try_dictionary(objects)?;
-
-        Ok(Some(Self {
-            fonts: read_fonts(resources, objects, cache, id_allocator)?,
-            ext_g_states: read_external_graphics_states(resources, objects, cache, id_allocator)?,
-            patterns: read_patterns(resources, objects, cache, id_allocator)?,
-            xobjects: read_xobjects(resources, objects, cache, id_allocator)?,
-            shadings: read_shadings(resources, objects, cache)?,
-            color_spaces: read_color_spaces(resources, objects, cache)?,
-        }))
+        read_with_cycle_guard(cache, resources.object_number, |cache| {
+            Ok(Self {
+                fonts: read_fonts(resources, objects, cache, id_allocator)?,
+                ext_g_states: read_external_graphics_states(
+                    resources,
+                    objects,
+                    cache,
+                    id_allocator,
+                )?,
+                patterns: read_patterns(resources, objects, cache, id_allocator)?,
+                xobjects: read_xobjects(resources, objects, cache, id_allocator)?,
+                shadings: read_shadings(resources, objects, cache)?,
+                color_spaces: read_color_spaces(resources, objects, cache)?,
+            })
+        })
     }
 
     /// Merges inherited resources from a parent `/Pages` node into `self`.
@@ -426,13 +469,14 @@ mod tests {
 
     use pdf_content_stream::content_stream::ContentStreamIdAllocator;
     use pdf_object::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver,
-        object_variant::ObjectVariant, stream::StreamObject,
+        dictionary::Dictionary, indirect_object::IndirectObject,
+        object_resolver::PassthroughResolver, object_variant::ObjectVariant, stream::StreamObject,
     };
+    use pdf_object_collection::object_collection::ObjectCollection;
 
-    use crate::{resource::Resource, xobject::XObject};
+    use crate::{resource::Resource, resource_cache::DefaultResourceCache, xobject::XObject};
 
-    use super::read_xobjects;
+    use super::{Resources, read_xobjects};
 
     fn integer(value: i64) -> ObjectVariant {
         ObjectVariant::Integer(value)
@@ -518,5 +562,68 @@ mod tests {
             .expect("Later should be a form XObject");
 
         assert_eq!(later_id, 2);
+    }
+
+    #[test]
+    fn cyclic_form_resources_are_skipped_without_recursing_forever() {
+        let xobject_entries = BTreeMap::from([("Self".to_string(), ObjectVariant::Reference(11))]);
+        let resource_dict = Dictionary::new(BTreeMap::from([(
+            "XObject".to_string(),
+            ObjectVariant::Dictionary(Box::new(Dictionary::new(xobject_entries))),
+        )]));
+
+        let form_dict = Dictionary::new(BTreeMap::from([
+            ("Subtype".to_string(), ObjectVariant::Name(b"Form".to_vec())),
+            (
+                "BBox".to_string(),
+                ObjectVariant::Array(vec![integer(0), integer(0), integer(10), integer(10)]),
+            ),
+            ("Resources".to_string(), ObjectVariant::Reference(10)),
+        ]));
+
+        let page_dict = Dictionary::new(BTreeMap::from([(
+            "Resources".to_string(),
+            ObjectVariant::Reference(10),
+        )]));
+
+        let mut objects = ObjectCollection::default();
+        objects
+            .insert(ObjectVariant::IndirectObject(Box::new(
+                IndirectObject::new(
+                    10,
+                    0,
+                    Some(ObjectVariant::Dictionary(Box::new(resource_dict))),
+                ),
+            )))
+            .expect("resource dictionary should insert");
+        objects
+            .insert(ObjectVariant::Stream(StreamObject::new(
+                11,
+                0,
+                Box::new(form_dict),
+                b"q".to_vec(),
+            )))
+            .expect("form xobject should insert");
+
+        let mut cache = DefaultResourceCache::default();
+        let mut ids = ContentStreamIdAllocator::new();
+
+        let resources = Resources::read(&page_dict, &objects, &mut cache, &mut ids)
+            .expect("cyclic resources should parse")
+            .expect("page resources should exist");
+
+        let form = resources.xobject("Self");
+        assert!(
+            matches!(form, Some(XObject::Form(_))),
+            "expected the self-referential form xobject to be parsed"
+        );
+        let Some(XObject::Form(form)) = form else {
+            return;
+        };
+
+        assert!(
+            form.resources.is_none(),
+            "recursive /Resources reference should be skipped once the cycle is detected"
+        );
     }
 }
