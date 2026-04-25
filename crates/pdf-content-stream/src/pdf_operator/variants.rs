@@ -573,4 +573,19 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn parse_recovers_from_empty_name_operand_before_next_operator() {
+        let input = b"/ 12 Tf q";
+
+        let actual_ops = PdfOperatorVariant::parse(input).expect("stream should parse");
+
+        assert_eq!(
+            actual_ops,
+            vec![
+                PdfOperatorVariant::SetFont(SetFont::new(String::new(), 12.0)),
+                PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState),
+            ]
+        );
+    }
 }
