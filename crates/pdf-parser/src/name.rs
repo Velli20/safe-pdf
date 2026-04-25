@@ -12,8 +12,6 @@ pub enum NameObjectError {
     IncompleteHexEscape,
     #[error("Invalid hex escape in name object: Non-hex character '{0}' found in sequence")]
     NonHexDigitInEscape(char),
-    #[error("Invalid token in name object (e.g., empty name after '/')")]
-    EmptyName,
     #[error("Tokenizer error: {0}")]
     TokenizerError(#[from] TokenizerError),
 }
@@ -29,10 +27,6 @@ impl PdfParser<'_> {
         self.tokenizer.expect(PdfToken::Solidus)?;
 
         let name = self.tokenizer.read_while_u8(|b| !Self::is_pdf_delimiter(b));
-        if name.is_empty() {
-            return Err(NameObjectError::EmptyName);
-        }
-
         escape(name)
     }
 }
@@ -95,6 +89,9 @@ mod tests {
     #[test]
     fn test_name_object_valid() {
         let valid_inputs: Vec<(&[u8], &[u8])> = vec![
+            (b"/", b""),
+            (b"/ ", b""),
+            (b"/\n", b""),
             (b"/Name\n", b"Name"),
             (b"/Name\t", b"Name"),
             (b"/Name1 ", b"Name1"),
