@@ -54,6 +54,8 @@ impl PdfParser<'_> {
             };
             let stream = self.parse_stream(&dictionary, objects)?;
 
+            self.skip_whitespace();
+
             // Read the keyword `endobj`.
             self.read_keyword(ENDOBJ_KEYWORD)?;
 
@@ -103,6 +105,22 @@ mod tests {
             );
         } else {
             panic!("Expected IndirectObject variant");
+        }
+    }
+
+    #[test]
+    fn test_stream_indirect_object_allows_whitespace_before_endobj() {
+        let input = b"1 0 obj\n<< /Length 5 >>\nstream\nHello\nendstream \nendobj\n";
+        let mut parser = PdfParser::from(input.as_slice());
+
+        if let Some(ObjectVariant::Stream(stream)) =
+            parser.parse_indirect_object(&PassthroughResolver).unwrap()
+        {
+            assert_eq!(stream.object_number, 1);
+            assert_eq!(stream.generation_number, 0);
+            assert_eq!(stream.data, b"Hello");
+        } else {
+            panic!("Expected Stream variant");
         }
     }
 }
