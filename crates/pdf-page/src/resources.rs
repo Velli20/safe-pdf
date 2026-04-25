@@ -4,6 +4,7 @@
 //! content streams, providing access to fonts, graphics states, XObjects, patterns,
 //! and shadings.
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -16,11 +17,33 @@ use crate::{
     external_graphics_state::ExternalGraphicsState,
     pattern::Pattern,
     resource::Resource,
-    resource_cache::{ResourceCache, read_resource_lazy, read_with_cycle_guard},
+    resource_cache::{ResourceCache, read_resource_lazy},
     shading::Shading,
     xobject::XObject,
 };
 use pdf_color_space::color_space::ColorSpace;
+
+/// Lazily-resolved handle to a `/Resources` dictionary that is still being constructed.
+#[derive(Clone)]
+pub struct ResourcesReference {
+    resources: Rc<OnceCell<Resources>>,
+}
+
+impl ResourcesReference {
+    pub(crate) fn new(_object_number: usize) -> Self {
+        Self {
+            resources: Rc::new(OnceCell::new()),
+        }
+    }
+
+    pub(crate) fn resolve(&self, resources: Resources) {
+        let _ = self.resources.set(resources);
+    }
+
+    pub(crate) fn resolved(&self) -> Option<&Resources> {
+        self.resources.get()
+    }
+}
 
 /// Contains all resources referenced by a PDF content stream, organized per PDF sub-dictionary.
 ///
@@ -42,6 +65,8 @@ pub struct Resources {
     pub shadings: HashMap<String, Resource>,
     /// Resources from the `/ColorSpace` sub-dictionary.
     pub color_spaces: HashMap<String, Resource>,
+    #[doc(hidden)]
+    pub lazy_reference: Option<ResourcesReference>,
 }
 
 /// Attempts to retrieve a sub-dictionary from the resources dictionary.
@@ -239,6 +264,24 @@ fn read_color_spaces(
 }
 
 impl Resources {
+    pub(crate) fn cyclic_reference(object_number: usize) -> (Self, ResourcesReference) {
+        let reference = ResourcesReference::new(object_number);
+        (
+            Self {
+                lazy_reference: Some(reference.clone()),
+                ..Self::default()
+            },
+            reference,
+        )
+    }
+
+    fn resolved(&self) -> Option<&Self> {
+        match &self.lazy_reference {
+            Some(reference) => reference.resolved()?.resolved(),
+            None => Some(self),
+        }
+    }
+
     /// Returns a reference to a font resource by name, if it exists.
     ///
     /// # Parameters
@@ -250,7 +293,7 @@ impl Resources {
     /// An `Option` containing a reference to the [`Font`] if found, or `None`
     /// if not present or not a font.
     pub fn font(&self, name: &str) -> Option<(&Font, Option<&Resources>)> {
-        self.fonts.get(name)?.as_font()
+        self.resolved()?.fonts.get(name)?.as_font()
     }
 
     /// Returns a reference to an external graphics state resource by name, if it exists.
@@ -264,7 +307,10 @@ impl Resources {
     /// An `Option` containing a reference to the [`ExternalGraphicsState`] if found,
     /// or `None` if not present or not an external graphics state.
     pub fn external_graphics_state(&self, name: &str) -> Option<&ExternalGraphicsState> {
-        self.ext_g_states.get(name)?.as_external_graphics_state()
+        self.resolved()?
+            .ext_g_states
+            .get(name)?
+            .as_external_graphics_state()
     }
 
     /// Returns a reference to an XObject resource by name, if it exists.
@@ -278,7 +324,7 @@ impl Resources {
     /// An `Option` containing a reference to the [`XObject`] if found, or `None`
     /// if not present or not an XObject.
     pub fn xobject(&self, name: &str) -> Option<&XObject> {
-        self.xobjects.get(name)?.as_xobject()
+        self.resolved()?.xobjects.get(name)?.as_xobject()
     }
 
     /// Returns a reference to a pattern resource by name, if it exists.
@@ -292,7 +338,7 @@ impl Resources {
     /// An `Option` containing a reference to the [`Pattern`] if found, or `None`
     /// if not present or not a pattern.
     pub fn pattern(&self, name: &str) -> Option<&Pattern> {
-        self.patterns.get(name)?.as_pattern()
+        self.resolved()?.patterns.get(name)?.as_pattern()
     }
 
     /// Returns a reference to a shading resource by name, if it exists.
@@ -306,7 +352,7 @@ impl Resources {
     /// An `Option` containing a reference to the [`Shading`] if found, or `None`
     /// if not present or not a shading.
     pub fn shading(&self, name: &str) -> Option<&Shading> {
-        self.shadings.get(name)?.as_shading()
+        self.resolved()?.shadings.get(name)?.as_shading()
     }
 
     /// Returns a reference to a color space resource by name, if it exists.
@@ -320,7 +366,7 @@ impl Resources {
     /// An `Option` containing a reference to the [`ColorSpace`] if found, or `None`
     /// if not present or not a color space.
     pub fn color_space(&self, name: &str) -> Option<&ColorSpace> {
-        self.color_spaces.get(name)?.as_color_space()
+        self.resolved()?.color_spaces.get(name)?.as_color_space()
     }
 
     /// Reads the `/Resources` dictionary.
@@ -356,7 +402,7 @@ impl Resources {
         };
 
         let resources = resources_entry.try_dictionary(objects)?;
-        read_with_cycle_guard(cache, resources.object_number, |cache| {
+        read_resource_lazy(cache, resources.object_number, |cache| {
             Ok(Self {
                 fonts: read_fonts(resources, objects, cache, id_allocator)?,
                 ext_g_states: read_external_graphics_states(
@@ -369,8 +415,10 @@ impl Resources {
                 xobjects: read_xobjects(resources, objects, cache, id_allocator)?,
                 shadings: read_shadings(resources, objects, cache)?,
                 color_spaces: read_color_spaces(resources, objects, cache)?,
+                lazy_reference: None,
             })
         })
+        .map(Some)
     }
 
     /// Merges inherited resources from a parent `/Pages` node into `self`.
@@ -382,12 +430,20 @@ impl Resources {
     /// parent entry of a different category with the same name (e.g. an XObject
     /// named `"F1"`).
     pub fn merge_from_parent(&mut self, parent: &Self) {
-        Self::inherit_category(&mut self.fonts, &parent.fonts);
-        Self::inherit_category(&mut self.ext_g_states, &parent.ext_g_states);
-        Self::inherit_category(&mut self.patterns, &parent.patterns);
-        Self::inherit_category(&mut self.xobjects, &parent.xobjects);
-        Self::inherit_category(&mut self.shadings, &parent.shadings);
-        Self::inherit_category(&mut self.color_spaces, &parent.color_spaces);
+        let Some(parent) = parent.resolved() else {
+            return;
+        };
+        let Some(mut child) = self.resolved().cloned() else {
+            return;
+        };
+
+        Self::inherit_category(&mut child.fonts, &parent.fonts);
+        Self::inherit_category(&mut child.ext_g_states, &parent.ext_g_states);
+        Self::inherit_category(&mut child.patterns, &parent.patterns);
+        Self::inherit_category(&mut child.xobjects, &parent.xobjects);
+        Self::inherit_category(&mut child.shadings, &parent.shadings);
+        Self::inherit_category(&mut child.color_spaces, &parent.color_spaces);
+        *self = child;
     }
 
     /// Copies entries from `parent` into `child` for a single resource category,
@@ -593,7 +649,7 @@ mod tests {
     }
 
     #[test]
-    fn cyclic_form_resources_are_skipped_without_recursing_forever() {
+    fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
         let xobject_entries = BTreeMap::from([("Self".to_string(), ObjectVariant::Reference(11))]);
         let resource_dict = Dictionary::new(BTreeMap::from([(
             "XObject".to_string(),
@@ -649,9 +705,28 @@ mod tests {
             return;
         };
 
+        let nested_resources = form
+            .resources
+            .as_ref()
+            .expect("recursive /Resources reference should stay available");
+        let nested_form = nested_resources
+            .xobject("Self")
+            .expect("recursive lookup should resolve the same form");
         assert!(
-            form.resources.is_none(),
-            "recursive /Resources reference should be skipped once the cycle is detected"
+            matches!(nested_form, XObject::Form(_)),
+            "expected the recursive lookup to resolve the cached form xobject"
+        );
+        let XObject::Form(nested_form) = nested_form else {
+            return;
+        };
+
+        assert!(
+            nested_form.resources.is_some(),
+            "lazy recursive /Resources links should remain available after the cycle resolves"
+        );
+        assert_eq!(
+            nested_form.content_stream.id, form.content_stream.id,
+            "recursive /Resources lookups should resolve to the cached form xobject"
         );
     }
 

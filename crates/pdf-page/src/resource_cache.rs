@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use crate::resource::Resource;
+use crate::{
+    resource::{Resource, ResourceReference},
+    resources::{Resources, ResourcesReference},
+};
 use pdf_object::cycle_list::ObjectCycleList;
 
 /// A trait for managing cached PDF resources by object number.
@@ -32,8 +35,21 @@ pub trait ResourceCache {
     /// - `resource`: The `Resource` to insert into the cache.
     fn insert(&mut self, obj_num: usize, resource: Resource);
 
+    /// Retrieves a reference to a parsed `/Resources` dictionary associated with the object number.
+    fn get_resources(&self, _obj_num: &usize) -> Option<&Resources> {
+        None
+    }
+
+    /// Inserts a parsed `/Resources` dictionary into the cache.
+    fn insert_resources(&mut self, _obj_num: usize, _resources: Resources) {}
+
     /// Removes a cached resource for the given object number, if present.
     fn remove(&mut self, _obj_num: &usize) -> Option<Resource> {
+        None
+    }
+
+    /// Removes a cached `/Resources` dictionary for the given object number, if present.
+    fn remove_resources(&mut self, _obj_num: &usize) -> Option<Resources> {
         None
     }
 
@@ -57,6 +73,7 @@ pub trait ResourceCache {
 #[derive(Default)]
 pub struct DefaultResourceCache {
     resources: HashMap<usize, Resource>,
+    resource_dictionaries: HashMap<usize, Resources>,
     cycles: ObjectCycleList,
 }
 
@@ -69,8 +86,20 @@ impl ResourceCache for DefaultResourceCache {
         self.resources.insert(obj_num, resource);
     }
 
+    fn get_resources(&self, obj_num: &usize) -> Option<&Resources> {
+        self.resource_dictionaries.get(obj_num)
+    }
+
+    fn insert_resources(&mut self, obj_num: usize, resources: Resources) {
+        self.resource_dictionaries.insert(obj_num, resources);
+    }
+
     fn remove(&mut self, obj_num: &usize) -> Option<Resource> {
         self.resources.remove(obj_num)
+    }
+
+    fn remove_resources(&mut self, obj_num: &usize) -> Option<Resources> {
+        self.resource_dictionaries.remove(obj_num)
     }
 
     fn begin_read(&mut self, obj_num: usize) -> bool {
@@ -111,38 +140,108 @@ where
     result.map(Some)
 }
 
-/// Reads a resource while publishing a lazy placeholder in the cache first.
+/// A lazily cached value that can publish a placeholder before parsing finishes.
+pub trait LazyCacheValue: Clone {
+    /// The reference handle stored inside the placeholder.
+    type Reference;
+
+    /// Returns a cached value if one already exists for `obj_num`.
+    fn get_cached<'a>(cache: &'a dyn ResourceCache, obj_num: &usize) -> Option<&'a Self>;
+
+    /// Inserts a value into the cache.
+    fn insert_cached(cache: &mut dyn ResourceCache, obj_num: usize, value: Self);
+
+    /// Removes a value from the cache.
+    fn remove_cached(cache: &mut dyn ResourceCache, obj_num: &usize) -> Option<Self>;
+
+    /// Creates a placeholder/reference pair for `obj_num`.
+    fn cyclic_reference(object_number: usize) -> (Self, Self::Reference);
+
+    /// Resolves the placeholder reference to `value`.
+    fn resolve(reference: &Self::Reference, value: Self);
+}
+
+impl LazyCacheValue for Resource {
+    type Reference = ResourceReference;
+
+    fn get_cached<'a>(cache: &'a dyn ResourceCache, obj_num: &usize) -> Option<&'a Self> {
+        cache.get(obj_num)
+    }
+
+    fn insert_cached(cache: &mut dyn ResourceCache, obj_num: usize, value: Self) {
+        cache.insert(obj_num, value);
+    }
+
+    fn remove_cached(cache: &mut dyn ResourceCache, obj_num: &usize) -> Option<Self> {
+        cache.remove(obj_num)
+    }
+
+    fn cyclic_reference(object_number: usize) -> (Self, Self::Reference) {
+        Self::cyclic_reference(object_number)
+    }
+
+    fn resolve(reference: &Self::Reference, value: Self) {
+        reference.resolve(value);
+    }
+}
+
+impl LazyCacheValue for Resources {
+    type Reference = ResourcesReference;
+
+    fn get_cached<'a>(cache: &'a dyn ResourceCache, obj_num: &usize) -> Option<&'a Self> {
+        cache.get_resources(obj_num)
+    }
+
+    fn insert_cached(cache: &mut dyn ResourceCache, obj_num: usize, value: Self) {
+        cache.insert_resources(obj_num, value);
+    }
+
+    fn remove_cached(cache: &mut dyn ResourceCache, obj_num: &usize) -> Option<Self> {
+        cache.remove_resources(obj_num)
+    }
+
+    fn cyclic_reference(object_number: usize) -> (Self, Self::Reference) {
+        Self::cyclic_reference(object_number)
+    }
+
+    fn resolve(reference: &Self::Reference, value: Self) {
+        reference.resolve(value);
+    }
+}
+
+/// Reads a cacheable value while publishing a lazy placeholder in the cache first.
 ///
-/// This is useful for resource kinds such as fonts where recursive lookups
+/// This is useful for resource kinds such as fonts or `/Resources` dictionaries where recursive lookups
 /// should keep the entry alive and resolve it later instead of dropping it
 /// when the same object number is encountered again during parsing.
-pub fn read_resource_lazy<E, F>(
+pub fn read_resource_lazy<T, E, F>(
     cache: &mut dyn ResourceCache,
     obj_num: Option<usize>,
     read: F,
-) -> Result<Resource, E>
+) -> Result<T, E>
 where
-    F: FnOnce(&mut dyn ResourceCache) -> Result<Resource, E>,
+    T: LazyCacheValue,
+    F: FnOnce(&mut dyn ResourceCache) -> Result<T, E>,
 {
     let Some(obj_num) = obj_num else {
         return read(cache);
     };
 
-    if let Some(cached) = cache.get(&obj_num) {
+    if let Some(cached) = T::get_cached(cache, &obj_num) {
         return Ok(cached.clone());
     }
 
-    let (placeholder, reference) = Resource::cyclic_reference(obj_num);
-    cache.insert(reference.object_number(), placeholder);
+    let (placeholder, reference) = T::cyclic_reference(obj_num);
+    T::insert_cached(cache, obj_num, placeholder);
 
     match read(cache) {
-        Ok(resource) => {
-            reference.resolve(resource.clone());
-            cache.insert(obj_num, resource.clone());
-            Ok(resource)
+        Ok(value) => {
+            T::resolve(&reference, value.clone());
+            T::insert_cached(cache, obj_num, value.clone());
+            Ok(value)
         }
         Err(err) => {
-            let _ = cache.remove(&obj_num);
+            let _ = T::remove_cached(cache, &obj_num);
             Err(err)
         }
     }

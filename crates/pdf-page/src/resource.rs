@@ -13,20 +13,14 @@ use std::{cell::OnceCell, rc::Rc};
 /// encounter a cycle back to the same PDF object.
 #[derive(Clone)]
 pub struct ResourceReference {
-    object_number: usize,
     resource: Rc<OnceCell<Resource>>,
 }
 
 impl ResourceReference {
-    pub(crate) fn new(object_number: usize) -> Self {
+    pub(crate) fn new(_object_number: usize) -> Self {
         Self {
-            object_number,
             resource: Rc::new(OnceCell::new()),
         }
-    }
-
-    pub(crate) fn object_number(&self) -> usize {
-        self.object_number
     }
 
     pub(crate) fn resolve(&self, resource: Resource) {
