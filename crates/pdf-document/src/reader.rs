@@ -30,7 +30,7 @@ impl PdfReader {
     /// Reads and parses a PDF document from raw bytes.
     ///
     /// This method performs the following steps:
-    /// 1. Parses the PDF header and validates the version
+    /// 1. Parses the PDF header when present and validates the version
     /// 2. Builds the cross-reference index to locate all objects
     /// 3. Checks for encryption and resolves the Encrypt dictionary first
     /// 4. Loads all objects referenced in the xref table
@@ -51,9 +51,10 @@ impl PdfReader {
     ) -> Result<PdfDocument, PdfReaderError> {
         let mut parser = PdfParser::from(input);
 
-        // Parse and validate PDF header
-        let version = parser.parse_header()?;
-        if version.major() != 1 {
+        // Parse and validate the PDF header when it is present near the start of the file.
+        if let Some(version) = parser.parse_header_in_opening_bytes()?
+            && version.major() != 1
+        {
             return Err(PdfReaderError::UnsupportedVersion(
                 version.major(),
                 version.minor(),
@@ -560,6 +561,105 @@ mod tests {
 
         let doc = result.unwrap();
         assert_eq!(doc.page_count(), 0);
+    }
+
+    #[test]
+    fn test_headerless_document_loads_normally() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%\xe2\xe3\xcf\xd3\n");
+
+        // Object 1: Catalog
+        let obj1_offset = data.len();
+        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        // Object 2: Pages
+        let obj2_offset = data.len();
+        data.extend_from_slice(
+            b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 595 842] >>\nendobj\n",
+        );
+
+        // Object 3: Page
+        let obj3_offset = data.len();
+        data.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n");
+
+        // Xref table
+        let xref_offset = data.len();
+        data.extend_from_slice(b"xref\n0 4\n");
+        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj3_offset, 0, true).as_bytes());
+
+        // Trailer
+        data.extend_from_slice(b"trailer\n<< /Size 4 /Root 1 0 R >>\n");
+        data.extend_from_slice(b"startxref\n");
+        data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
+        data.extend_from_slice(b"%%EOF");
+
+        let reader = PdfReader;
+        let result = reader.read_from_bytes(&data, None);
+
+        assert!(
+            result.is_ok(),
+            "Headerless document should load: {:?}",
+            result.err()
+        );
+
+        let doc = result.unwrap();
+        assert_eq!(doc.page_count(), 1);
+    }
+
+    #[test]
+    fn test_headerless_document_with_shifted_xref_offsets_loads_normally() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%\xe2\xe3\xcf\xd3\n");
+
+        // Object 1: Catalog
+        let obj1_offset = data.len();
+        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        // Object 2: Pages
+        let obj2_offset = data.len();
+        data.extend_from_slice(
+            b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 595 842] >>\nendobj\n",
+        );
+
+        // Object 3: Page
+        let obj3_offset = data.len();
+        data.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n");
+
+        // Xref table
+        let xref_offset = data.len();
+        data.extend_from_slice(b"xref\n0 4\n");
+        const STRIPPED_HEADER_DELTA: usize = 9;
+        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+        data.extend_from_slice(
+            format_xref_entry(obj1_offset + STRIPPED_HEADER_DELTA, 0, true).as_bytes(),
+        );
+        data.extend_from_slice(
+            format_xref_entry(obj2_offset + STRIPPED_HEADER_DELTA, 0, true).as_bytes(),
+        );
+        data.extend_from_slice(
+            format_xref_entry(obj3_offset + STRIPPED_HEADER_DELTA, 0, true).as_bytes(),
+        );
+
+        // Trailer
+        data.extend_from_slice(b"trailer\n<< /Size 4 /Root 1 0 R >>\n");
+        data.extend_from_slice(b"startxref\n");
+        data.extend_from_slice(format!("{}\n", xref_offset + STRIPPED_HEADER_DELTA).as_bytes());
+        data.extend_from_slice(b"%%EOF");
+
+        let reader = PdfReader;
+        let result = reader.read_from_bytes(&data, None);
+
+        assert!(
+            result.is_ok(),
+            "Headerless document with shifted xref offsets should load: {:?}",
+            result.err()
+        );
+
+        let doc = result.unwrap();
+        assert_eq!(doc.page_count(), 1);
     }
 
     #[test]
