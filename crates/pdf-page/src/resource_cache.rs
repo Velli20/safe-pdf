@@ -32,6 +32,11 @@ pub trait ResourceCache {
     /// - `resource`: The `Resource` to insert into the cache.
     fn insert(&mut self, obj_num: usize, resource: Resource);
 
+    /// Removes a cached resource for the given object number, if present.
+    fn remove(&mut self, _obj_num: &usize) -> Option<Resource> {
+        None
+    }
+
     /// Marks the object as currently being parsed.
     ///
     /// Returns `false` when the object is already in progress, indicating a cycle.
@@ -62,6 +67,10 @@ impl ResourceCache for DefaultResourceCache {
 
     fn insert(&mut self, obj_num: usize, resource: Resource) {
         self.resources.insert(obj_num, resource);
+    }
+
+    fn remove(&mut self, obj_num: &usize) -> Option<Resource> {
+        self.resources.remove(obj_num)
     }
 
     fn begin_read(&mut self, obj_num: usize) -> bool {
@@ -102,6 +111,43 @@ where
     result.map(Some)
 }
 
+/// Reads a resource while publishing a lazy placeholder in the cache first.
+///
+/// This is useful for resource kinds such as fonts where recursive lookups
+/// should keep the entry alive and resolve it later instead of dropping it
+/// when the same object number is encountered again during parsing.
+pub fn read_resource_lazy<E, F>(
+    cache: &mut dyn ResourceCache,
+    obj_num: Option<usize>,
+    read: F,
+) -> Result<Resource, E>
+where
+    F: FnOnce(&mut dyn ResourceCache) -> Result<Resource, E>,
+{
+    let Some(obj_num) = obj_num else {
+        return read(cache);
+    };
+
+    if let Some(cached) = cache.get(&obj_num) {
+        return Ok(cached.clone());
+    }
+
+    let (placeholder, reference) = Resource::cyclic_reference(obj_num);
+    cache.insert(reference.object_number(), placeholder);
+
+    match read(cache) {
+        Ok(resource) => {
+            reference.resolve(resource.clone());
+            cache.insert(obj_num, resource.clone());
+            Ok(resource)
+        }
+        Err(err) => {
+            let _ = cache.remove(&obj_num);
+            Err(err)
+        }
+    }
+}
+
 impl ResourceCache for HashMap<usize, Resource> {
     fn get(&self, obj_num: &usize) -> Option<&Resource> {
         HashMap::get(self, obj_num)
@@ -109,5 +155,9 @@ impl ResourceCache for HashMap<usize, Resource> {
 
     fn insert(&mut self, obj_num: usize, resource: Resource) {
         HashMap::insert(self, obj_num, resource);
+    }
+
+    fn remove(&mut self, obj_num: &usize) -> Option<Resource> {
+        HashMap::remove(self, obj_num)
     }
 }

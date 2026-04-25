@@ -4,7 +4,39 @@ use crate::{
 };
 use pdf_color_space::color_space::ColorSpace;
 use pdf_font::font::Font;
-use std::rc::Rc;
+use std::{cell::OnceCell, rc::Rc};
+
+/// Lazily-resolved handle to a resource that is still being constructed.
+///
+/// The resource cache inserts this handle before recursive parsing begins so
+/// child lookups can preserve the entry instead of dropping it when they
+/// encounter a cycle back to the same PDF object.
+#[derive(Clone)]
+pub struct ResourceReference {
+    object_number: usize,
+    resource: Rc<OnceCell<Resource>>,
+}
+
+impl ResourceReference {
+    pub(crate) fn new(object_number: usize) -> Self {
+        Self {
+            object_number,
+            resource: Rc::new(OnceCell::new()),
+        }
+    }
+
+    pub(crate) fn object_number(&self) -> usize {
+        self.object_number
+    }
+
+    pub(crate) fn resolve(&self, resource: Resource) {
+        let _ = self.resource.set(resource);
+    }
+
+    pub(crate) fn resolved(&self) -> Option<&Resource> {
+        self.resource.get()
+    }
+}
 
 /// Represents a PDF resource used on a page, such as fonts,
 /// graphics states, XObjects, patterns, or shadings.
@@ -26,4 +58,62 @@ pub enum Resource {
     Shading(Rc<Shading>),
     /// A color space resource, used for defining color models.
     ColorSpace(Rc<ColorSpace>),
+    /// A placeholder for a resource that is still being lazily resolved.
+    CyclicReference(ResourceReference),
+}
+
+impl Resource {
+    pub(crate) fn cyclic_reference(object_number: usize) -> (Self, ResourceReference) {
+        let reference = ResourceReference::new(object_number);
+        (Self::CyclicReference(reference.clone()), reference)
+    }
+
+    pub(crate) fn resolved(&self) -> Option<&Self> {
+        match self {
+            Self::CyclicReference(reference) => reference.resolved()?.resolved(),
+            _ => Some(self),
+        }
+    }
+
+    pub(crate) fn as_font(&self) -> Option<(&Font, Option<&Resources>)> {
+        let Self::Font { font, resources } = self.resolved()? else {
+            return None;
+        };
+        Some((font, resources.as_deref()))
+    }
+
+    pub(crate) fn as_external_graphics_state(&self) -> Option<&ExternalGraphicsState> {
+        let Self::ExternalGraphicsState(state) = self.resolved()? else {
+            return None;
+        };
+        Some(state)
+    }
+
+    pub(crate) fn as_xobject(&self) -> Option<&XObject> {
+        let Self::XObject(xobject) = self.resolved()? else {
+            return None;
+        };
+        Some(xobject)
+    }
+
+    pub(crate) fn as_pattern(&self) -> Option<&Pattern> {
+        let Self::Pattern(pattern) = self.resolved()? else {
+            return None;
+        };
+        Some(pattern)
+    }
+
+    pub(crate) fn as_shading(&self) -> Option<&Shading> {
+        let Self::Shading(shading) = self.resolved()? else {
+            return None;
+        };
+        Some(shading)
+    }
+
+    pub(crate) fn as_color_space(&self) -> Option<&ColorSpace> {
+        let Self::ColorSpace(color_space) = self.resolved()? else {
+            return None;
+        };
+        Some(color_space)
+    }
 }

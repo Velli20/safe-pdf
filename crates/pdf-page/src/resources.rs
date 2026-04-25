@@ -16,7 +16,7 @@ use crate::{
     external_graphics_state::ExternalGraphicsState,
     pattern::Pattern,
     resource::Resource,
-    resource_cache::{ResourceCache, read_with_cycle_guard},
+    resource_cache::{ResourceCache, read_resource_lazy, read_with_cycle_guard},
     shading::Shading,
     xobject::XObject,
 };
@@ -68,6 +68,18 @@ fn get_sub_dictionary<'a>(
         .map_err(Into::into)
 }
 
+fn read_font_resource(
+    dictionary: &Dictionary,
+    objects: &dyn ObjectResolver,
+    cache: &mut dyn ResourceCache,
+    id_allocator: &mut ContentStreamIdAllocator,
+) -> Result<Resource, PdfPagesError> {
+    let font = Rc::new(Font::from_dictionary(dictionary, objects, id_allocator)?);
+    let resources = Resources::read(dictionary, objects, cache, id_allocator)?.map(Rc::new);
+
+    Ok(Resource::Font { font, resources })
+}
+
 /// Parses all font resources from the `/Font` sub-dictionary.
 fn read_fonts(
     resources: &Dictionary,
@@ -82,30 +94,9 @@ fn read_fonts(
     let mut result = HashMap::new();
     for (name, value) in &font_dict.dictionary {
         let dict = value.try_dictionary(objects)?;
-
-        if let Some(num) = &dict.object_number
-            && let Some(cached) = cache.get(num)
-        {
-            result.insert(name.clone(), cached.clone());
-            continue;
-        }
-
-        let Some(resource) = read_with_cycle_guard(cache, dict.object_number, |cache| {
-            let nested_resources =
-                Resources::read(dict, objects, cache, id_allocator)?.map(Rc::new);
-
-            Ok::<Resource, PdfPagesError>(Resource::Font {
-                font: Rc::new(Font::from_dictionary(dict, objects, id_allocator)?),
-                resources: nested_resources,
-            })
-        })?
-        else {
-            continue;
-        };
-
-        if let Some(num) = dict.object_number {
-            cache.insert(num, resource.clone());
-        }
+        let resource = read_resource_lazy(cache, dict.object_number, |cache| {
+            read_font_resource(dict, objects, cache, id_allocator)
+        })?;
         result.insert(name.clone(), resource);
     }
     Ok(result)
@@ -294,10 +285,7 @@ impl Resources {
     /// An `Option` containing a reference to the [`Font`] if found, or `None`
     /// if not present or not a font.
     pub fn font(&self, name: &str) -> Option<(&Font, Option<&Resources>)> {
-        let Resource::Font { font, resources } = self.fonts.get(name)? else {
-            return None;
-        };
-        Some((font, resources.as_deref()))
+        self.fonts.get(name)?.as_font()
     }
 
     /// Returns a reference to an external graphics state resource by name, if it exists.
@@ -311,10 +299,7 @@ impl Resources {
     /// An `Option` containing a reference to the [`ExternalGraphicsState`] if found,
     /// or `None` if not present or not an external graphics state.
     pub fn external_graphics_state(&self, name: &str) -> Option<&ExternalGraphicsState> {
-        let Resource::ExternalGraphicsState(state) = self.ext_g_states.get(name)? else {
-            return None;
-        };
-        Some(state)
+        self.ext_g_states.get(name)?.as_external_graphics_state()
     }
 
     /// Returns a reference to an XObject resource by name, if it exists.
@@ -328,10 +313,7 @@ impl Resources {
     /// An `Option` containing a reference to the [`XObject`] if found, or `None`
     /// if not present or not an XObject.
     pub fn xobject(&self, name: &str) -> Option<&XObject> {
-        let Resource::XObject(xobject) = self.xobjects.get(name)? else {
-            return None;
-        };
-        Some(xobject)
+        self.xobjects.get(name)?.as_xobject()
     }
 
     /// Returns a reference to a pattern resource by name, if it exists.
@@ -345,10 +327,7 @@ impl Resources {
     /// An `Option` containing a reference to the [`Pattern`] if found, or `None`
     /// if not present or not a pattern.
     pub fn pattern(&self, name: &str) -> Option<&Pattern> {
-        let Resource::Pattern(pattern) = self.patterns.get(name)? else {
-            return None;
-        };
-        Some(pattern)
+        self.patterns.get(name)?.as_pattern()
     }
 
     /// Returns a reference to a shading resource by name, if it exists.
@@ -362,10 +341,7 @@ impl Resources {
     /// An `Option` containing a reference to the [`Shading`] if found, or `None`
     /// if not present or not a shading.
     pub fn shading(&self, name: &str) -> Option<&Shading> {
-        let Resource::Shading(shading) = self.shadings.get(name)? else {
-            return None;
-        };
-        Some(shading)
+        self.shadings.get(name)?.as_shading()
     }
 
     /// Returns a reference to a color space resource by name, if it exists.
@@ -379,10 +355,7 @@ impl Resources {
     /// An `Option` containing a reference to the [`ColorSpace`] if found, or `None`
     /// if not present or not a color space.
     pub fn color_space(&self, name: &str) -> Option<&ColorSpace> {
-        let Resource::ColorSpace(color_space) = self.color_spaces.get(name)? else {
-            return None;
-        };
-        Some(color_space)
+        self.color_spaces.get(name)?.as_color_space()
     }
 
     /// Reads the `/Resources` dictionary.
@@ -468,6 +441,7 @@ mod tests {
     use std::collections::{BTreeMap, HashMap};
 
     use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+    use pdf_font::font::Font;
     use pdf_object::{
         dictionary::Dictionary, indirect_object::IndirectObject,
         object_resolver::PassthroughResolver, object_variant::ObjectVariant, stream::StreamObject,
@@ -480,6 +454,14 @@ mod tests {
 
     fn integer(value: i64) -> ObjectVariant {
         ObjectVariant::Integer(value)
+    }
+
+    fn real(value: f64) -> ObjectVariant {
+        ObjectVariant::Real(value)
+    }
+
+    fn name(value: &str) -> ObjectVariant {
+        ObjectVariant::Name(value.as_bytes().to_vec())
     }
 
     fn form_xobject_stream(object_number: usize, data: &[u8]) -> ObjectVariant {
@@ -509,6 +491,55 @@ mod tests {
             "XObject".to_string(),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(xobjects))),
         )]))
+    }
+
+    fn type3_char_proc(data: &[u8]) -> ObjectVariant {
+        ObjectVariant::Stream(StreamObject::new(
+            0,
+            0,
+            Box::new(Dictionary::new(BTreeMap::new())),
+            data.to_vec(),
+        ))
+    }
+
+    fn self_referential_type3_font(object_number: usize) -> Dictionary {
+        Dictionary::new(BTreeMap::from([
+            ("Type".to_string(), name("Font")),
+            ("Subtype".to_string(), name("Type3")),
+            ("Name".to_string(), name("Self")),
+            (
+                "FontBBox".to_string(),
+                ObjectVariant::Array(vec![integer(0), integer(0), integer(1000), integer(1000)]),
+            ),
+            (
+                "FontMatrix".to_string(),
+                ObjectVariant::Array(vec![
+                    real(0.001),
+                    real(0.0),
+                    real(0.0),
+                    real(0.001),
+                    real(0.0),
+                    real(0.0),
+                ]),
+            ),
+            (
+                "CharProcs".to_string(),
+                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                    "A".to_string(),
+                    type3_char_proc(b"0 0 d0"),
+                )])))),
+            ),
+            (
+                "Resources".to_string(),
+                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                    "Font".to_string(),
+                    ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                        "Self".to_string(),
+                        ObjectVariant::Reference(object_number),
+                    )])))),
+                )])))),
+            ),
+        ]))
     }
 
     fn form_content_stream_id(resource: &Resource) -> Option<usize> {
@@ -624,6 +655,62 @@ mod tests {
         assert!(
             form.resources.is_none(),
             "recursive /Resources reference should be skipped once the cycle is detected"
+        );
+    }
+
+    #[test]
+    fn self_referential_font_resources_resolve_lazily() {
+        let page_dict = Dictionary::new(BTreeMap::from([(
+            "Resources".to_string(),
+            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                "Font".to_string(),
+                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                    "Self".to_string(),
+                    ObjectVariant::Reference(21),
+                )])))),
+            )])))),
+        )]));
+
+        let mut objects = ObjectCollection::default();
+        objects
+            .insert(ObjectVariant::IndirectObject(Box::new(
+                IndirectObject::new(
+                    21,
+                    0,
+                    Some(ObjectVariant::Dictionary(Box::new(
+                        self_referential_type3_font(21),
+                    ))),
+                ),
+            )))
+            .expect("font should insert");
+
+        let mut cache = DefaultResourceCache::default();
+        let mut ids = ContentStreamIdAllocator::new();
+
+        let resources = Resources::read(&page_dict, &objects, &mut cache, &mut ids)
+            .expect("resources should parse")
+            .expect("page resources should exist");
+
+        let (font, nested_resources) = resources.font("Self").expect("font should resolve");
+        assert!(
+            matches!(font, Font::Type3(_)),
+            "expected the self-referential font to stay usable"
+        );
+
+        let nested_resources = nested_resources.expect("nested font resources should resolve");
+        let (nested_font, nested_again) = nested_resources
+            .font("Self")
+            .expect("lazy nested font lookup should resolve");
+
+        assert!(
+            matches!(nested_font, Font::Type3(_)),
+            "expected the nested self-reference to resolve to the same font type"
+        );
+
+        let nested_again = nested_again.expect("recursive nested resources should stay accessible");
+        assert!(
+            std::ptr::eq(nested_resources, nested_again),
+            "lazy font resolution should preserve the recursive resource graph"
         );
     }
 }

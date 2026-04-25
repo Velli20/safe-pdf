@@ -185,7 +185,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             mask: None,
             page: self.page,
             canvas_stack,
-            active_content_stream_ids: HashSet::new(),
+            active_content_stream_ids: self.active_content_stream_ids.clone(),
         };
 
         // Render the form's content stream into the mask canvas.
