@@ -4,6 +4,7 @@ use pdf_object::{
 
 use crate::{error::PdfPagesError, resource_cache::ResourceCache, xobject::XObject};
 use num_traits::FromPrimitive;
+use pdf_content_stream::content_stream::ContentStreamIdAllocator;
 use pdf_graphics::{BlendMode, LineCap, LineJoin, MaskMode};
 
 /// Soft mask extracted from an ExtGState `SMask` entry.
@@ -92,6 +93,26 @@ impl ExternalGraphicsState {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        id_allocator: &mut ContentStreamIdAllocator,
+    ) -> Result<Self, PdfPagesError> {
+        if let Some(obj_num) = dictionary.object_number {
+            if !cache.begin_read(obj_num) {
+                return Err(pdf_object::error::ObjectError::CyclicDependency { obj_num }.into());
+            }
+
+            let result = Self::from_dictionary_inner(dictionary, objects, cache, id_allocator);
+            cache.end_read(obj_num);
+            return result;
+        }
+
+        Self::from_dictionary_inner(dictionary, objects, cache, id_allocator)
+    }
+
+    fn from_dictionary_inner(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+        cache: &mut dyn ResourceCache,
+        id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, PdfPagesError> {
         let mut params: Vec<ExternalGraphicsStateKey> = Vec::new();
 
@@ -107,7 +128,7 @@ impl ExternalGraphicsState {
                 _ => value,
             };
 
-            if let Some(param) = parse_entry(name, resolved, objects, cache)? {
+            if let Some(param) = parse_entry(name, resolved, objects, cache, id_allocator)? {
                 params.push(param);
             }
         }
@@ -233,6 +254,7 @@ fn parse_soft_mask(
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
+    id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
     let smask = match value {
         ObjectVariant::Dictionary(dict) => {
@@ -241,7 +263,19 @@ fn parse_soft_mask(
             // Parse the "G" key for the `XObject`
             let stream = dict.get_or_err("G")?.try_stream(objects)?;
 
-            let shape = XObject::read_xobject(&stream.dictionary, stream, objects, cache)?;
+            let shape = match XObject::read_xobject(
+                &stream.dictionary,
+                stream,
+                objects,
+                cache,
+                id_allocator,
+            ) {
+                Ok(shape) => shape,
+                Err(err) if err.is_cyclic_dependency() => {
+                    return Ok(ExternalGraphicsStateKey::SoftMask(None));
+                }
+                Err(err) => return Err(err),
+            };
 
             Some(Box::new(SoftMask { mask_type, shape }))
         }
@@ -268,6 +302,7 @@ fn parse_entry(
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
+    id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<Option<ExternalGraphicsStateKey>, PdfPagesError> {
     let parsed = match name {
         "TR" => ExternalGraphicsStateKey::TransferFunction,
@@ -302,7 +337,7 @@ fn parse_entry(
         "OPM" => ExternalGraphicsStateKey::OverprintMode(value.try_number::<i32>(objects)?),
         "Font" => parse_font(name, value, objects)?,
         "BM" => parse_blend_mode(value, objects)?,
-        "SMask" => parse_soft_mask(name, value, objects, cache)?,
+        "SMask" => parse_soft_mask(name, value, objects, cache, id_allocator)?,
         "CA" => ExternalGraphicsStateKey::StrokingAlpha(value.try_number::<f32>(objects)?),
         "ca" => ExternalGraphicsStateKey::NonStrokingAlpha(value.try_number::<f32>(objects)?),
         "SA" => ExternalGraphicsStateKey::StrokeAdjustment(value.try_boolean(objects)?),

@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::{
@@ -38,6 +39,8 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     pub(crate) page: &'a PdfPage,
     /// The stack of graphics states, supporting save/restore semantics.
     pub(crate) canvas_stack: Vec<CanvasState<'a>>,
+    /// Content-stream IDs currently being rendered on this canvas stack.
+    pub(crate) active_content_stream_ids: HashSet<usize>,
 }
 
 impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
@@ -109,6 +112,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             mask: None,
             page,
             canvas_stack,
+            active_content_stream_ids: HashSet::new(),
         })
     }
 
@@ -181,6 +185,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             mask: None,
             page: self.page,
             canvas_stack,
+            active_content_stream_ids: self.active_content_stream_ids.clone(),
         };
 
         // Render the form's content stream into the mask canvas.
@@ -533,6 +538,10 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         resources: Option<&'a Resources>,
         mut filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
     ) -> Result<(), PdfCanvasError> {
+        if !self.active_content_stream_ids.insert(content_stream.id) {
+            return Ok(());
+        }
+
         self.save()?;
 
         if let Some(mat) = mat {
@@ -559,14 +568,17 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             self.current_state_mut()?.resources = Some(resources);
         }
 
-        for op in &content_stream.0 {
+        for op in &content_stream.operators {
             if filter.as_mut().is_some_and(|filter| filter(op)) {
                 continue;
             }
             op.call(self)?;
         }
 
-        self.restore()
+        self.restore()?;
+
+        let _ = self.active_content_stream_ids.remove(&content_stream.id);
+        Ok(())
     }
 
     /// Saves the entire current graphics state onto a stack.
@@ -715,5 +727,207 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             }
             TextRenderingMode::Clip => self.add_to_text_clip(&pen.path),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashMap, rc::Rc, sync::Arc};
+
+    use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+    use pdf_graphics::{
+        BlendMode, MaskMode, PathFillType, color::Color, rect::Rect, transform::Transform,
+    };
+    use pdf_object::{dictionary::Dictionary, stream::StreamObject};
+    use pdf_page::{
+        form::FormXObject, page::PdfPage, resource::Resource, resources::Resources,
+        xobject::XObject,
+    };
+
+    use crate::{
+        canvas_backend::{CanvasBackend, Image, Shader},
+        recording_canvas::RecordingCanvas,
+    };
+
+    use super::PdfCanvas;
+
+    #[derive(Default)]
+    struct CountingCanvas {
+        save_count: usize,
+        restore_count: usize,
+    }
+
+    impl CanvasBackend for CountingCanvas {
+        fn fill_path(
+            &mut self,
+            _path: &pdf_graphics::pdf_path::PdfPath,
+            _fill_type: PathFillType,
+            _color: Color,
+            _shader: &Option<Shader>,
+            _blend_mode: Option<BlendMode>,
+        ) -> Result<(), crate::error::PdfCanvasError> {
+            Ok(())
+        }
+
+        fn stroke_path(
+            &mut self,
+            _path: &pdf_graphics::pdf_path::PdfPath,
+            _color: Color,
+            _line_width: f32,
+            _shader: &Option<Shader>,
+            _blend_mode: Option<BlendMode>,
+        ) -> Result<(), crate::error::PdfCanvasError> {
+            Ok(())
+        }
+
+        fn set_clip_region(
+            &mut self,
+            _path: &pdf_graphics::pdf_path::PdfPath,
+            _mode: PathFillType,
+        ) -> Result<(), crate::error::PdfCanvasError> {
+            Ok(())
+        }
+
+        fn width(&self) -> f32 {
+            100.0
+        }
+
+        fn height(&self) -> f32 {
+            100.0
+        }
+
+        fn save(&mut self) -> Result<(), crate::error::PdfCanvasError> {
+            self.save_count += 1;
+            Ok(())
+        }
+
+        fn restore(&mut self) -> Result<(), crate::error::PdfCanvasError> {
+            self.restore_count += 1;
+            Ok(())
+        }
+
+        fn draw_image_rect(
+            &mut self,
+            _image: &Image<'_>,
+            _blend_mode: Option<BlendMode>,
+            _dest_rect: Rect,
+            _image_rotation: Option<f32>,
+        ) -> Result<(), crate::error::PdfCanvasError> {
+            Ok(())
+        }
+
+        fn begin_mask_layer(
+            &mut self,
+            _mask: &Arc<RecordingCanvas>,
+            _transform: &Transform,
+            _mask_mode: MaskMode,
+        ) -> Result<(), crate::error::PdfCanvasError> {
+            Ok(())
+        }
+
+        fn end_mask_layer(
+            &mut self,
+            _mask: &Arc<RecordingCanvas>,
+            _transform: &Transform,
+            _mask_mode: MaskMode,
+        ) -> Result<(), crate::error::PdfCanvasError> {
+            Ok(())
+        }
+    }
+
+    fn page() -> PdfPage {
+        PdfPage {
+            contents: None,
+            media_box: None,
+            resources: None,
+        }
+    }
+
+    fn stream_object(object_number: usize, data: &[u8]) -> StreamObject {
+        StreamObject::new(
+            object_number,
+            0,
+            Box::new(Dictionary::new(Default::default())),
+            data.to_vec(),
+        )
+    }
+
+    fn form_resource(
+        name: &str,
+        content_stream: pdf_content_stream::content_stream::ContentStream,
+    ) -> Resources {
+        Resources {
+            xobjects: HashMap::from([(
+                name.to_string(),
+                Resource::XObject(Rc::new(XObject::Form(Box::new(FormXObject {
+                    bbox: Rect {
+                        left: 0.0,
+                        top: 0.0,
+                        right: 10.0,
+                        bottom: 10.0,
+                    },
+                    matrix: None,
+                    resources: None,
+                    content_stream,
+                })))),
+            )]),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn skips_recursive_render_when_content_stream_id_is_already_active() {
+        let mut ids = ContentStreamIdAllocator::new();
+        let root_stream = stream_object(1, b"/Self Do");
+        let root =
+            pdf_content_stream::content_stream::ContentStream::from_stream(&root_stream, &mut ids)
+                .expect("root stream should parse");
+        let resources = form_resource(
+            "Self",
+            pdf_content_stream::content_stream::ContentStream {
+                operators: root.operators.clone(),
+                id: root.id,
+            },
+        );
+
+        let page = page();
+        let mut backend = CountingCanvas::default();
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
+
+        canvas
+            .render_content_stream(&root, None, None, Some(&resources), None)
+            .expect("recursive render should be skipped gracefully");
+
+        assert!(canvas.active_content_stream_ids.is_empty());
+        assert_eq!(canvas.canvas_stack.len(), 1);
+        assert_eq!(backend.save_count, 1);
+        assert_eq!(backend.restore_count, 1);
+    }
+
+    #[test]
+    fn still_renders_nested_streams_with_distinct_ids() {
+        let mut ids = ContentStreamIdAllocator::new();
+        let root_stream = stream_object(1, b"/Child Do");
+        let child_stream = stream_object(2, b"q Q");
+        let root =
+            pdf_content_stream::content_stream::ContentStream::from_stream(&root_stream, &mut ids)
+                .expect("root stream should parse");
+        let child =
+            pdf_content_stream::content_stream::ContentStream::from_stream(&child_stream, &mut ids)
+                .expect("child stream should parse");
+        let resources = form_resource("Child", child);
+
+        let page = page();
+        let mut backend = CountingCanvas::default();
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
+
+        canvas
+            .render_content_stream(&root, None, None, Some(&resources), None)
+            .expect("distinct nested stream should render");
+
+        assert!(canvas.active_content_stream_ids.is_empty());
+        assert_eq!(canvas.canvas_stack.len(), 1);
+        assert_eq!(backend.save_count, 3);
+        assert_eq!(backend.restore_count, 3);
     }
 }

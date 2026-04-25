@@ -1,4 +1,4 @@
-use pdf_content_stream::content_stream::ContentStream;
+use pdf_content_stream::content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_graphics::rect::Rect;
 use pdf_graphics::transform::Transform;
 use pdf_object::stream::StreamObject;
@@ -28,6 +28,7 @@ impl FormXObject {
         stream_data: &StreamObject,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, PdfPagesError> {
         // Retrieve the `/BBox` entry.
         let bbox = Rect::from(
@@ -40,10 +41,10 @@ impl FormXObject {
         let matrix = Matrix::from_dictionary(dictionary, objects)?;
 
         // Parse the `/Resources` entry if present, mapping any errors.
-        let resources = Resources::read(dictionary, objects, cache)?;
+        let resources = Resources::read(dictionary, objects, cache, id_allocator)?;
 
         // Parse the content stream data.
-        let content_stream = ContentStream::from_stream(stream_data)?;
+        let content_stream = ContentStream::from_stream(stream_data, id_allocator)?;
 
         Ok(FormXObject {
             bbox,

@@ -9,6 +9,7 @@
 
 use std::borrow::Cow;
 
+use pdf_content_stream::content_stream::ContentStreamIdAllocator;
 use pdf_graphics::PixelFormat;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, stream::StreamObject};
 
@@ -84,6 +85,7 @@ impl ImageXObject {
         stream_data: &StreamObject,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, PdfPagesError> {
         // Extract required image properties from the dictionary.
         let width = dictionary
@@ -167,7 +169,7 @@ impl ImageXObject {
         }
 
         // Parse the optional `/SMask` entry and convert to RGBA if needed.
-        let smask = Self::parse_smask(dictionary, objects, cache)?;
+        let smask = Self::parse_smask(dictionary, objects, cache, id_allocator)?;
 
         let (data, pixel_format) = if smask.is_some() || num_color_components != 1 {
             // Multi-component or masked images are output as RGBA8888.
@@ -227,6 +229,7 @@ impl ImageXObject {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Option<Box<ImageXObject>>, PdfPagesError> {
         let Some(smask_obj) = dictionary.get("SMask") else {
             return Ok(None);
@@ -236,7 +239,12 @@ impl ImageXObject {
         let stream = smask_obj.try_stream(objects)?;
 
         // Recursively parse the SMask as an XObject.
-        let smask_xobject = XObject::read_xobject(&stream.dictionary, stream, objects, cache)?;
+        let smask_xobject =
+            match XObject::read_xobject(&stream.dictionary, stream, objects, cache, id_allocator) {
+                Ok(xobject) => xobject,
+                Err(err) if err.is_cyclic_dependency() => return Ok(None),
+                Err(err) => return Err(err),
+            };
 
         // Ensure the SMask is actually an Image XObject.
         match smask_xobject {

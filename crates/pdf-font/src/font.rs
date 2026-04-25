@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use pdf_content_stream::content_stream::ContentStreamIdAllocator;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 use crate::{
@@ -26,6 +27,7 @@ impl Font {
     pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
+        id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Font, FontError> {
         // Determine the font subtype from the dictionary.
         let subtype = dictionary.get_or_err("Subtype")?.try_str(objects)?;
@@ -61,7 +63,7 @@ impl Font {
                 }
             }
             "Type3" => {
-                let type3_font = Type3Font::from_dictionary(dictionary, objects)?;
+                let type3_font = Type3Font::from_dictionary(dictionary, objects, id_allocator)?;
                 Ok(Font::Type3(type3_font))
             }
             "TrueType" => {
