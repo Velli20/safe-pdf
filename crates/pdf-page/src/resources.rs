@@ -152,21 +152,10 @@ fn read_patterns(
     let mut result = HashMap::new();
     for (name, value) in &pattern_dict.dictionary {
         let object_number = value.try_object_number()?;
-        if let Some(cached) = cache.get(&object_number) {
-            result.insert(name.clone(), cached.clone());
-            continue;
-        }
-
-        let Some(resource) = read_with_cycle_guard(cache, Some(object_number), |cache| {
+        let resource = read_resource_lazy(cache, Some(object_number), |cache| {
             let pattern = Pattern::read(value, objects, cache, id_allocator)?;
             Ok::<Resource, PdfPagesError>(Resource::Pattern(Rc::new(pattern)))
-        })?
-        else {
-            continue;
-        };
-
-        cache.insert(object_number, resource.clone());
-
+        })?;
         result.insert(name.clone(), resource);
     }
     Ok(result)
@@ -217,21 +206,11 @@ fn read_shadings(
     let mut result = HashMap::new();
     for (name, value) in &shading_dict.dictionary {
         let object_number = value.try_object_number()?;
-        if let Some(cached) = cache.get(&object_number) {
-            result.insert(name.clone(), cached.clone());
-            continue;
-        }
-
-        let Some(resource) = read_with_cycle_guard(cache, Some(object_number), |_| {
+        let resource = read_resource_lazy(cache, Some(object_number), |_| {
             Ok::<Resource, PdfPagesError>(Resource::Shading(Rc::new(Shading::from_dictionary(
                 value, objects,
             )?)))
-        })?
-        else {
-            continue;
-        };
-
-        cache.insert(object_number, resource.clone());
+        })?;
         result.insert(name.clone(), resource);
     }
     Ok(result)
@@ -250,24 +229,10 @@ fn read_color_spaces(
     let mut result = HashMap::new();
     for (name, value) in &color_space_dict.dictionary {
         let object_number = value.try_object_number().ok();
-        if let Some(num) = object_number
-            && let Some(cached) = cache.get(&num)
-        {
-            result.insert(name.clone(), cached.clone());
-            continue;
-        }
-
-        let Some(resource) = read_with_cycle_guard(cache, object_number, |_| {
+        let resource = read_resource_lazy(cache, object_number, |_| {
             let color_space = ColorSpace::from_object(value, objects)?;
             Ok::<Resource, PdfPagesError>(Resource::ColorSpace(Rc::new(color_space)))
-        })?
-        else {
-            continue;
-        };
-
-        if let Some(num) = object_number {
-            cache.insert(num, resource.clone());
-        }
+        })?;
         result.insert(name.clone(), resource);
     }
     Ok(result)
@@ -448,7 +413,10 @@ mod tests {
     };
     use pdf_object_collection::object_collection::ObjectCollection;
 
-    use crate::{resource::Resource, resource_cache::DefaultResourceCache, xobject::XObject};
+    use crate::{
+        pattern::Pattern, resource::Resource, resource_cache::DefaultResourceCache,
+        xobject::XObject,
+    };
 
     use super::{Resources, read_xobjects};
 
@@ -540,6 +508,35 @@ mod tests {
                 )])))),
             ),
         ]))
+    }
+
+    fn self_referential_tiling_pattern(object_number: usize) -> ObjectVariant {
+        ObjectVariant::Stream(StreamObject::new(
+            object_number,
+            0,
+            Box::new(Dictionary::new(BTreeMap::from([
+                ("PatternType".to_string(), integer(1)),
+                ("PaintType".to_string(), integer(1)),
+                ("TilingType".to_string(), integer(1)),
+                (
+                    "BBox".to_string(),
+                    ObjectVariant::Array(vec![integer(0), integer(0), integer(10), integer(10)]),
+                ),
+                ("XStep".to_string(), real(10.0)),
+                ("YStep".to_string(), real(10.0)),
+                (
+                    "Resources".to_string(),
+                    ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                        "Pattern".to_string(),
+                        ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                            "Self".to_string(),
+                            ObjectVariant::Reference(object_number),
+                        )])))),
+                    )])))),
+                ),
+            ]))),
+            b"q".to_vec(),
+        ))
     }
 
     fn form_content_stream_id(resource: &Resource) -> Option<usize> {
@@ -711,6 +708,59 @@ mod tests {
         assert!(
             std::ptr::eq(nested_resources, nested_again),
             "lazy font resolution should preserve the recursive resource graph"
+        );
+    }
+
+    #[test]
+    fn self_referential_pattern_resources_resolve_lazily() {
+        let page_dict = Dictionary::new(BTreeMap::from([(
+            "Resources".to_string(),
+            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                "Pattern".to_string(),
+                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                    "Self".to_string(),
+                    ObjectVariant::Reference(31),
+                )])))),
+            )])))),
+        )]));
+
+        let mut objects = ObjectCollection::default();
+        objects
+            .insert(self_referential_tiling_pattern(31))
+            .expect("pattern should insert");
+
+        let mut cache = DefaultResourceCache::default();
+        let mut ids = ContentStreamIdAllocator::new();
+
+        let resources = Resources::read(&page_dict, &objects, &mut cache, &mut ids)
+            .expect("resources should parse")
+            .expect("page resources should exist");
+
+        let pattern = resources.pattern("Self").expect("pattern should resolve");
+        assert!(
+            matches!(pattern, Pattern::Tiling { .. }),
+            "expected the self-referential pattern to stay usable"
+        );
+
+        let Pattern::Tiling {
+            resources: nested_resources,
+            ..
+        } = pattern
+        else {
+            return;
+        };
+
+        let nested_pattern = nested_resources
+            .pattern("Self")
+            .expect("lazy nested pattern lookup should resolve");
+
+        assert!(
+            matches!(nested_pattern, Pattern::Tiling { .. }),
+            "expected the nested self-reference to resolve to the same pattern type"
+        );
+        assert!(
+            std::ptr::eq(pattern, nested_pattern),
+            "lazy pattern resolution should preserve the recursive resource graph"
         );
     }
 }
