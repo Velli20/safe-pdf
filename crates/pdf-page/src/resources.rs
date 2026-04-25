@@ -4,7 +4,6 @@
 //! content streams, providing access to fonts, graphics states, XObjects, patterns,
 //! and shadings.
 
-use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -23,27 +22,7 @@ use crate::{
 };
 use pdf_color_space::color_space::ColorSpace;
 
-/// Lazily-resolved handle to a `/Resources` dictionary that is still being constructed.
-#[derive(Clone)]
-pub struct ResourcesReference {
-    resources: Rc<OnceCell<Resources>>,
-}
-
-impl ResourcesReference {
-    pub(crate) fn new(_object_number: usize) -> Self {
-        Self {
-            resources: Rc::new(OnceCell::new()),
-        }
-    }
-
-    pub(crate) fn resolve(&self, resources: Resources) {
-        let _ = self.resources.set(resources);
-    }
-
-    pub(crate) fn resolved(&self) -> Option<&Resources> {
-        self.resources.get()
-    }
-}
+pub use crate::resources_reference::ResourcesReference;
 
 /// Contains all resources referenced by a PDF content stream, organized per PDF sub-dictionary.
 ///
@@ -264,6 +243,12 @@ fn read_color_spaces(
 }
 
 impl Resources {
+    /// Creates a placeholder/reference pair for a `/Resources` dictionary.
+    ///
+    /// The placeholder is inserted into the cache before recursive parsing
+    /// continues, allowing later lookups of the same object number to keep the
+    /// entry alive until the final dictionary can be published through the
+    /// returned [`ResourcesReference`].
     pub(crate) fn cyclic_reference(object_number: usize) -> (Self, ResourcesReference) {
         let reference = ResourcesReference::new(object_number);
         (
@@ -275,6 +260,11 @@ impl Resources {
         )
     }
 
+    /// Returns the fully resolved `/Resources` dictionary behind `self`.
+    ///
+    /// If `self` is still the lazy placeholder produced by
+    /// [`Self::cyclic_reference`], this follows its [`ResourcesReference`] and
+    /// returns the final dictionary only after it has been published.
     fn resolved(&self) -> Option<&Self> {
         match &self.lazy_reference {
             Some(reference) => reference.resolved()?.resolved(),

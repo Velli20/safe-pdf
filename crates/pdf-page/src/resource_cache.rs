@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 
-use crate::{
-    resource::{Resource, ResourceReference},
-    resources::{Resources, ResourcesReference},
-};
+pub use crate::lazy_cache_value::LazyCacheValue;
+use crate::{resource::Resource, resources::Resources};
 use pdf_object::cycle_list::ObjectCycleList;
 
 /// A trait for managing cached PDF resources by object number.
@@ -112,100 +110,6 @@ impl ResourceCache for DefaultResourceCache {
 
     fn is_being_read(&self, obj_num: &usize) -> bool {
         self.cycles.is_being_read(*obj_num)
-    }
-}
-
-/// Runs `read` while marking `obj_num` as in progress.
-///
-/// Returns `Ok(None)` when the object is already being read so callers can skip
-/// the cyclic branch.
-pub fn read_with_cycle_guard<T, E, F>(
-    cache: &mut dyn ResourceCache,
-    obj_num: Option<usize>,
-    read: F,
-) -> Result<Option<T>, E>
-where
-    F: FnOnce(&mut dyn ResourceCache) -> Result<T, E>,
-{
-    let Some(obj_num) = obj_num else {
-        return read(cache).map(Some);
-    };
-
-    if !cache.begin_read(obj_num) {
-        return Ok(None);
-    }
-
-    let result = read(cache);
-    cache.end_read(obj_num);
-    result.map(Some)
-}
-
-/// A lazily cached value that can publish a placeholder before parsing finishes.
-pub trait LazyCacheValue: Clone {
-    /// The reference handle stored inside the placeholder.
-    type Reference;
-
-    /// Returns a cached value if one already exists for `obj_num`.
-    fn get_cached<'a>(cache: &'a dyn ResourceCache, obj_num: &usize) -> Option<&'a Self>;
-
-    /// Inserts a value into the cache.
-    fn insert_cached(cache: &mut dyn ResourceCache, obj_num: usize, value: Self);
-
-    /// Removes a value from the cache.
-    fn remove_cached(cache: &mut dyn ResourceCache, obj_num: &usize) -> Option<Self>;
-
-    /// Creates a placeholder/reference pair for `obj_num`.
-    fn cyclic_reference(object_number: usize) -> (Self, Self::Reference);
-
-    /// Resolves the placeholder reference to `value`.
-    fn resolve(reference: &Self::Reference, value: Self);
-}
-
-impl LazyCacheValue for Resource {
-    type Reference = ResourceReference;
-
-    fn get_cached<'a>(cache: &'a dyn ResourceCache, obj_num: &usize) -> Option<&'a Self> {
-        cache.get(obj_num)
-    }
-
-    fn insert_cached(cache: &mut dyn ResourceCache, obj_num: usize, value: Self) {
-        cache.insert(obj_num, value);
-    }
-
-    fn remove_cached(cache: &mut dyn ResourceCache, obj_num: &usize) -> Option<Self> {
-        cache.remove(obj_num)
-    }
-
-    fn cyclic_reference(object_number: usize) -> (Self, Self::Reference) {
-        Self::cyclic_reference(object_number)
-    }
-
-    fn resolve(reference: &Self::Reference, value: Self) {
-        reference.resolve(value);
-    }
-}
-
-impl LazyCacheValue for Resources {
-    type Reference = ResourcesReference;
-
-    fn get_cached<'a>(cache: &'a dyn ResourceCache, obj_num: &usize) -> Option<&'a Self> {
-        cache.get_resources(obj_num)
-    }
-
-    fn insert_cached(cache: &mut dyn ResourceCache, obj_num: usize, value: Self) {
-        cache.insert_resources(obj_num, value);
-    }
-
-    fn remove_cached(cache: &mut dyn ResourceCache, obj_num: &usize) -> Option<Self> {
-        cache.remove_resources(obj_num)
-    }
-
-    fn cyclic_reference(object_number: usize) -> (Self, Self::Reference) {
-        Self::cyclic_reference(object_number)
-    }
-
-    fn resolve(reference: &Self::Reference, value: Self) {
-        reference.resolve(value);
     }
 }
 

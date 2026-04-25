@@ -57,11 +57,21 @@ pub enum Resource {
 }
 
 impl Resource {
+    /// Creates a placeholder/reference pair for a resource object.
+    ///
+    /// The placeholder is inserted into the resource cache before parsing the
+    /// final resource so recursive lookups can keep the entry alive until the
+    /// returned [`ResourceReference`] is resolved.
     pub(crate) fn cyclic_reference(object_number: usize) -> (Self, ResourceReference) {
         let reference = ResourceReference::new(object_number);
         (Self::CyclicReference(reference.clone()), reference)
     }
 
+    /// Returns the fully resolved resource behind `self`.
+    ///
+    /// When `self` is the lazy placeholder produced by
+    /// [`Self::cyclic_reference`], this follows its [`ResourceReference`] and
+    /// yields the published resource once parsing has completed.
     pub(crate) fn resolved(&self) -> Option<&Self> {
         match self {
             Self::CyclicReference(reference) => reference.resolved()?.resolved(),
