@@ -11,7 +11,10 @@ use std::borrow::Cow;
 
 use pdf_content_stream::content_stream::ContentStreamIdAllocator;
 use pdf_graphics::PixelFormat;
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, stream::StreamObject};
+use pdf_object::{
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    stream::StreamObject,
+};
 
 use crate::{error::PdfPagesError, resource_cache::ResourceCache, xobject::XObject};
 use pdf_color_space::{color_space::ColorSpace, indexed_color_space::IndexedColorSpace};
@@ -235,8 +238,16 @@ impl ImageXObject {
             return Ok(None);
         };
 
+        let resolved = objects.resolve_object(smask_obj)?;
+
+        if let ObjectVariant::Name(name) = resolved
+            && name.as_slice() == b"None"
+        {
+            return Ok(None);
+        }
+
         // Resolve the SMask stream reference.
-        let stream = smask_obj.try_stream(objects)?;
+        let stream = resolved.try_stream(objects)?;
 
         // Recursively parse the SMask as an XObject.
         let smask_xobject =
@@ -368,6 +379,15 @@ impl ImageXObject {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+    use pdf_object::{
+        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+    };
+
+    use crate::resource_cache::DefaultResourceCache;
+
     use super::ImageXObject;
 
     #[test]
@@ -420,5 +440,24 @@ mod tests {
         // pixel 0: bits 7,6,5 → 1,1,0 → [0xFF,0xFF,0x00]
         // pixel 1: bits 4,3,2 → 1,1,0 → [0xFF,0xFF,0x00]
         assert_eq!(out, [0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0x00]);
+    }
+
+    #[test]
+    fn parse_smask_name_none_is_treated_as_absent() {
+        let dictionary = Dictionary::new(BTreeMap::from([(
+            "SMask".to_string(),
+            ObjectVariant::Name(b"None".to_vec()),
+        )]));
+        let mut cache = DefaultResourceCache::default();
+        let mut ids = ContentStreamIdAllocator::new();
+
+        let smask =
+            ImageXObject::parse_smask(&dictionary, &PassthroughResolver, &mut cache, &mut ids)
+                .expect("name-valued /SMask should be accepted");
+
+        assert!(
+            smask.is_none(),
+            "/SMask /None should behave like no soft mask"
+        );
     }
 }
