@@ -766,6 +766,66 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_image_xobject_smask_name_none_loads_normally() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%PDF-1.7\n");
+
+        // Object 1: Catalog
+        let obj1_offset = data.len();
+        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        // Object 2: Pages
+        let obj2_offset = data.len();
+        data.extend_from_slice(
+            b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 1 1] >>\nendobj\n",
+        );
+
+        // Object 3: Page with an image XObject resource.
+        let obj3_offset = data.len();
+        data.extend_from_slice(
+            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /Resources 5 0 R /MediaBox [0 0 1 1] >>\nendobj\n",
+        );
+
+        // Object 4: Image XObject with `/SMask /None`.
+        let obj4_offset = data.len();
+        data.extend_from_slice(
+            b"4 0 obj\n<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 /SMask /None >>\nstream\nA\nendstream\nendobj\n",
+        );
+
+        // Object 5: Resources dictionary referencing the image.
+        let obj5_offset = data.len();
+        data.extend_from_slice(b"5 0 obj\n<< /XObject << /Im1 4 0 R >> >>\nendobj\n");
+
+        // Xref table
+        let xref_offset = data.len();
+        data.extend_from_slice(b"xref\n0 6\n");
+        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj3_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj4_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj5_offset, 0, true).as_bytes());
+
+        // Trailer
+        data.extend_from_slice(b"trailer\n<< /Size 6 /Root 1 0 R >>\n");
+        data.extend_from_slice(b"startxref\n");
+        data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
+        data.extend_from_slice(b"%%EOF");
+
+        let reader = PdfReader;
+        let result = reader.read_from_bytes(&data, None);
+
+        assert!(
+            result.is_ok(),
+            "Image XObject with /SMask /None should load: {:?}",
+            result.err()
+        );
+
+        let doc = result.unwrap();
+        assert_eq!(doc.page_count(), 1);
+    }
+
     /// A cyclic page tree (3→4→5→3) must not cause a stack overflow.
     /// Object 6 is the only valid leaf /Page and should be returned.
     #[test]
