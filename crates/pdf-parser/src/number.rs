@@ -16,8 +16,6 @@ pub enum NumberError {
     },
     #[error("Numeric value overflow")]
     NumericValueOverflow,
-    #[error("Missing delimiter after number, found '{0}'")]
-    MissingDelimiterAfterNumber(char),
 }
 
 impl PdfParser<'_> {
@@ -95,11 +93,6 @@ impl PdfParser<'_> {
             let value = integer_part as f64 + frac_value;
             let number = if has_minus { -value } else { value };
 
-            if let Some(d) = self.tokenizer.data().first().copied()
-                && !Self::is_pdf_delimiter(d)
-            {
-                return Err(NumberError::MissingDelimiterAfterNumber(char::from(d)).into());
-            }
             self.skip_whitespace();
             Ok(ObjectVariant::Real(number))
         } else {
@@ -167,11 +160,9 @@ mod tests {
     #[test]
     fn test_parse_number_invalid() {
         let invalid_inputs: Vec<&[u8]> = vec![
-            b"--42",    // double minus
-            b"++17",    // double plus
-            b"+-5",     // invalid combination
-            b"4,200",   // comma not allowed
-            b"123abc ", // Mixed numeric and non-numeric characters
+            b"--42", // double minus
+            b"++17", // double plus
+            b"+-5",  // invalid combination
             b".", b"-.",
         ];
 
@@ -184,5 +175,15 @@ mod tests {
                 String::from_utf8_lossy(input)
             );
         }
+    }
+
+    #[test]
+    fn test_parse_number_keeps_trailing_bytes_for_best_effort() {
+        let mut parser = PdfParser::from(b"61endobj".as_slice());
+
+        let result = parser.parse_number().unwrap();
+
+        assert_eq!(result, ObjectVariant::Integer(61));
+        assert_eq!(parser.tokenizer.data(), b"endobj");
     }
 }
