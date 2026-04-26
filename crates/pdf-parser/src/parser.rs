@@ -136,7 +136,9 @@ impl PdfParser<'_> {
 
     /// Reads a sequence of ASCII digits and parses them into type `T`.
     ///
-    /// Validates that a delimiter or decimal point follows the digits.
+    /// Best-effort parsing intentionally stops at the first non-digit byte instead of enforcing a
+    /// trailing token delimiter. Higher-level parsers decide whether the remaining bytes form a
+    /// meaningful continuation.
     /// Optionally skips trailing whitespace when `skip_whitespace` is true.
     pub fn read_number<T: FromStr>(&mut self, skip_whitespace: bool) -> Result<T, ParserError> {
         let number_bytes = self.tokenizer.read_while_u8(|b| b.is_ascii_digit());
@@ -151,15 +153,6 @@ impl PdfParser<'_> {
         let number = number_str
             .parse::<T>()
             .map_err(|_| ParserError::InvalidNumber(number_str.to_owned()))?;
-
-        // Check that the following character after the number is a valid delimiter
-        // or a dot (potential decimal number).
-        if let Some(d) = self.tokenizer.data().first().copied()
-            && !Self::is_pdf_delimiter(d)
-            && d != b'.'
-        {
-            return Err(ParserError::MissingDelimiterAfterKeyword(d));
-        }
 
         if skip_whitespace {
             self.skip_whitespace();
@@ -184,7 +177,11 @@ impl PdfParser<'_> {
         if let Some(d) = self.tokenizer.data().first().copied()
             && !Self::is_pdf_delimiter(d)
         {
-            return Err(ParserError::MissingDelimiterAfterKeyword(d));
+            return Err(ParserError::MissingDelimiterAfterKeyword {
+                keyword: String::from_utf8_lossy(keyword).into_owned(),
+                found: d,
+                position: self.tokenizer.position,
+            });
         }
 
         // Consume trailing EOL if present (keywords in arrays/dicts may not have one).
@@ -303,6 +300,32 @@ mod tests {
         let mut parser = PdfParser::from(input.as_slice());
         let result = parser.parse_object(&PassthroughResolver);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_read_number_stops_at_first_non_digit_for_best_effort() {
+        let mut parser = PdfParser::from(b"123abc".as_slice());
+
+        let number = parser.read_number::<usize>(false).unwrap();
+
+        assert_eq!(number, 123);
+        assert_eq!(parser.tokenizer.data(), b"abc");
+    }
+
+    #[test]
+    fn test_read_keyword_error_reports_keyword_and_offset() {
+        let mut parser = PdfParser::from(b"truefalse".as_slice());
+
+        let error = parser.read_keyword(b"true").unwrap_err();
+
+        assert_eq!(
+            error,
+            ParserError::MissingDelimiterAfterKeyword {
+                keyword: "true".to_string(),
+                found: b'f',
+                position: 4,
+            }
+        );
     }
 
     mod skip_whitespace_and_comments {

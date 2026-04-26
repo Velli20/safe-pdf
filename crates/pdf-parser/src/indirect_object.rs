@@ -123,4 +123,27 @@ mod tests {
             panic!("Expected Stream variant");
         }
     }
+
+    #[test]
+    fn test_indirect_object_allows_compact_integer_before_endobj() {
+        let input = b"1501 0 obj\n61endobj\n";
+        let mut parser = PdfParser::from(input.as_slice());
+
+        if let Some(ObjectVariant::IndirectObject(indirect_object)) =
+            parser.parse_indirect_object(&PassthroughResolver).unwrap()
+        {
+            let IndirectObject {
+                object_number,
+                generation_number,
+                object,
+                ..
+            } = indirect_object.as_ref();
+
+            assert_eq!(*object_number, 1501);
+            assert_eq!(*generation_number, 0);
+            assert_eq!(*object, Some(ObjectVariant::Integer(61)));
+        } else {
+            panic!("Expected IndirectObject variant");
+        }
+    }
 }

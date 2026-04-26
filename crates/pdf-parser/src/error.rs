@@ -31,8 +31,14 @@ pub enum ParserError {
     HeaderError(#[from] HeaderError),
     #[error("Error while reading a keyword. Expected '{0}' got '{1}'")]
     InvalidKeyword(String, String),
-    #[error("Expected delimiter after keyword, found: {0:?}")]
-    MissingDelimiterAfterKeyword(u8),
+    #[error(
+        "Expected delimiter after keyword '{keyword}' at byte offset {position}, found: {found:?}"
+    )]
+    MissingDelimiterAfterKeyword {
+        keyword: String,
+        found: u8,
+        position: usize,
+    },
     #[error("Unexpected token '{token}' at position {position}")]
     UnexpectedTokenAt { token: String, position: usize },
     #[error("Nesting depth exceeded")]
