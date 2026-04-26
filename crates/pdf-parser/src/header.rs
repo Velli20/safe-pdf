@@ -61,6 +61,34 @@ impl PdfParser<'_> {
 
         Ok(Version::new(major, minor))
     }
+
+    /// Searches the opening bytes of the file for a `%PDF-` header and parses it when found.
+    ///
+    /// ISO 32000 permits the PDF header to appear somewhere within the first 1024 bytes.
+    /// This helper restores the parser position before returning so callers can probe for a
+    /// header without affecting later random-access parsing.
+    pub fn parse_header_in_opening_bytes(&mut self) -> Result<Option<Version>, ParserError> {
+        const HEADER_SEARCH_LIMIT: usize = 1024;
+        const PDF_HEADER_PREFIX: &[u8] = b"%PDF-";
+
+        let mark = self.tokenizer.position;
+        let search_len = self.tokenizer.input.len().min(HEADER_SEARCH_LIMIT);
+        let opening_bytes = self.tokenizer.input.get(..search_len).unwrap_or(&[]);
+        let header_position = opening_bytes
+            .windows(PDF_HEADER_PREFIX.len())
+            .position(|window| window == PDF_HEADER_PREFIX);
+
+        let version = match header_position {
+            Some(position) => {
+                self.tokenizer.position = position;
+                Some(self.parse_header()?)
+            }
+            None => None,
+        };
+
+        self.tokenizer.position = mark;
+        Ok(version)
+    }
 }
 
 #[cfg(test)]
@@ -84,5 +112,36 @@ mod tests {
         let mut parser = PdfParser::from(input.as_slice());
         let result = parser.parse_header();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_header_in_opening_bytes_valid() {
+        let input = b"%PDF-1.7\n";
+        let mut parser = PdfParser::from(input.as_slice());
+        let version = parser.parse_header_in_opening_bytes().unwrap();
+        let version = version.unwrap();
+        assert_eq!(version.major(), 1);
+        assert_eq!(version.minor(), 7);
+        assert_eq!(parser.tokenizer.position, 0);
+    }
+
+    #[test]
+    fn test_parse_header_in_opening_bytes_with_leading_junk() {
+        let input = b"garbage before header\n%PDF-1.4\n";
+        let mut parser = PdfParser::from(input.as_slice());
+        let version = parser.parse_header_in_opening_bytes().unwrap();
+        let version = version.unwrap();
+        assert_eq!(version.major(), 1);
+        assert_eq!(version.minor(), 4);
+        assert_eq!(parser.tokenizer.position, 0);
+    }
+
+    #[test]
+    fn test_parse_header_in_opening_bytes_missing_header() {
+        let input = b"%\xe2\xe3\xcf\xd3\n1 0 obj\n";
+        let mut parser = PdfParser::from(input.as_slice());
+        let version = parser.parse_header_in_opening_bytes().unwrap();
+        assert!(version.is_none());
+        assert_eq!(parser.tokenizer.position, 0);
     }
 }
