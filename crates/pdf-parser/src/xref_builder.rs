@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use pdf_object::{
-    cross_reference_table::{CrossReferenceEntry, CrossReferenceTable},
+    cross_reference_table::{CrossReferenceEntry, CrossReferenceEntryType, CrossReferenceTable},
     object_resolver::PassthroughResolver,
     object_variant::ObjectVariant,
 };
@@ -96,13 +96,118 @@ fn recover_traditional_xref_offset(parser: &PdfParser, declared_offset: usize) -
         })
 }
 
-fn normalize_traditional_xref_offsets(table: &mut CrossReferenceTable, offset_delta: usize) {
+fn matches_indirect_object_header(
+    input: &[u8],
+    offset: usize,
+    object_number: usize,
+    generation_number: usize,
+) -> bool {
+    let object_number = object_number.to_string();
+    let generation_number = generation_number.to_string();
+    let object_number = object_number.as_bytes();
+    let generation_number = generation_number.as_bytes();
+
+    let Some(data) = input.get(offset..) else {
+        return false;
+    };
+    if !data.starts_with(object_number) {
+        return false;
+    }
+
+    let mut position = object_number.len();
+    position = match skip_required_whitespace(data, position) {
+        Some(position) => position,
+        None => return false,
+    };
+
+    let Some(remaining) = data.get(position..) else {
+        return false;
+    };
+    if !remaining.starts_with(generation_number) {
+        return false;
+    }
+
+    position = position.saturating_add(generation_number.len());
+    position = match skip_required_whitespace(data, position) {
+        Some(position) => position,
+        None => return false,
+    };
+
+    let Some(keyword) = data.get(position..position.saturating_add(3)) else {
+        return false;
+    };
+    if keyword != b"obj" {
+        return false;
+    }
+
+    match data.get(position.saturating_add(3)).copied() {
+        Some(next) => PdfParser::is_pdf_delimiter(next),
+        None => true,
+    }
+}
+
+fn skip_required_whitespace(input: &[u8], start: usize) -> Option<usize> {
+    let mut position = start;
+    let mut consumed = false;
+
+    while let Some(byte) = input.get(position).copied() {
+        if !PdfParser::is_pdf_whitespace(byte) {
+            break;
+        }
+        consumed = true;
+        position = position.saturating_add(1);
+    }
+
+    consumed.then_some(position)
+}
+
+fn find_nearby_indirect_object_offset(
+    input: &[u8],
+    object_number: usize,
+    generation_number: usize,
+    declared_offset: usize,
+    search_radius: usize,
+) -> Option<usize> {
+    let search_start = declared_offset.saturating_sub(search_radius);
+    let search_end = declared_offset
+        .saturating_add(search_radius)
+        .saturating_add(1)
+        .min(input.len());
+    let mut best_candidate = None;
+
+    for candidate in search_start..search_end {
+        if !matches_indirect_object_header(input, candidate, object_number, generation_number) {
+            continue;
+        }
+
+        let distance = candidate.abs_diff(declared_offset);
+        match best_candidate {
+            Some((best_offset, best_distance))
+                if best_distance < distance
+                    || (best_distance == distance && best_offset <= candidate) => {}
+            _ => best_candidate = Some((candidate, distance)),
+        }
+    }
+
+    best_candidate.map(|(candidate, _)| candidate)
+}
+
+fn repair_traditional_xref_offsets(
+    parser: &PdfParser,
+    table: &mut CrossReferenceTable,
+    offset_delta: usize,
+) {
+    const MIN_SEARCH_RADIUS: usize = 64;
+
     if offset_delta == 0 {
         return;
     }
 
-    for entry in table.entries.values_mut() {
-        let pdf_object::cross_reference_table::CrossReferenceEntryType::Normal {
+    let input = parser.tokenizer.input;
+    let search_radius = offset_delta.max(MIN_SEARCH_RADIUS);
+
+    for (&object_number, entry) in &mut table.entries {
+        let CrossReferenceEntryType::Normal {
             byte_offset,
             generation_number,
         } = &entry.entry_type
@@ -110,10 +215,38 @@ fn normalize_traditional_xref_offsets(table: &mut CrossReferenceTable, offset_de
             continue;
         };
 
-        let adjusted_offset = byte_offset
-            .checked_sub(offset_delta)
-            .unwrap_or(*byte_offset);
-        *entry = CrossReferenceEntry::new_normal(adjusted_offset, *generation_number);
+        if *byte_offset == 0
+            || matches_indirect_object_header(
+                input,
+                *byte_offset,
+                object_number,
+                *generation_number,
+            )
+        {
+            continue;
+        }
+
+        if let Some(adjusted_offset) = byte_offset.checked_sub(offset_delta)
+            && matches_indirect_object_header(
+                input,
+                adjusted_offset,
+                object_number,
+                *generation_number,
+            )
+        {
+            *entry = CrossReferenceEntry::new_normal(adjusted_offset, *generation_number);
+            continue;
+        }
+
+        if let Some(recovered_offset) = find_nearby_indirect_object_offset(
+            input,
+            object_number,
+            *generation_number,
+            *byte_offset,
+            search_radius,
+        ) {
+            *entry = CrossReferenceEntry::new_normal(recovered_offset, *generation_number);
+        }
     }
 }
 
@@ -130,7 +263,8 @@ fn parse_xref_section_with_recovery(
                 },
             )?;
             let mut table = parse_xref_section_at_offset(parser, recovered_offset)?;
-            normalize_traditional_xref_offsets(
+            repair_traditional_xref_offsets(
+                parser,
                 &mut table,
                 declared_offset.saturating_sub(recovered_offset),
             );
@@ -195,12 +329,87 @@ fn merge_xref_chain(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use pdf_object::object_resolver::PassthroughResolver;
 
     fn format_xref_entry(offset: usize, generation: u16, used: bool) -> String {
         let kind = if used { 'n' } else { 'f' };
         format!("{:010} {:05} {} \n", offset, generation, kind)
+    }
+
+    fn build_issue139_like_pdf() -> (Vec<u8>, BTreeMap<usize, usize>) {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%PDF-1.4\n");
+
+        let obj6_offset = data.len();
+        data.extend_from_slice(b"6 0 obj\n<<\n /Type /Catalog\n /Pages 5 0 R\n>>\nendobj\n\n");
+
+        let obj1_offset = data.len();
+        data.extend_from_slice(
+            b"1 0 obj\n<<\n /Type /Page\n /Parent 5 0 R\n /MediaBox [ 0 0 612 792 ]\n /Resources 3 0 R\n /Contents 2 0 R\n>>\nendobj\n\n",
+        );
+
+        let obj4_offset = data.len();
+        data.extend_from_slice(
+            b"4 0 obj\n<<\n /Type /Font\n /Subtype /Type1\n /Name /F1\n /BaseFont/Helvetica\n>>\nendobj\n\n",
+        );
+
+        let obj2_offset = data.len();
+        data.extend_from_slice(
+            b"2 0 obj\n<<\n /Length 53\n>>\nstream\ntoString\nendstream\nendobj\n\n",
+        );
+
+        let obj5_offset = data.len();
+        data.extend_from_slice(
+            b"5 0 obj\n<<\n /Type /Pages\n /Kids [ 1 0 R ]\n /Count 1\n>>\nendobj\n\n",
+        );
+
+        let obj3_offset = data.len();
+        data.extend_from_slice(
+            b"3 0 obj\n<<\n /ProcSet[/PDF/Text]\n /Font <</F1 4 0 R >>\n>>\nendobj\n\n",
+        );
+
+        let stream_payload_offset = data
+            .windows(b"toString".len())
+            .position(|window| window == b"toString")
+            .expect("stream payload should exist");
+
+        let xref_offset = data.len();
+        data.extend_from_slice(b"xref\n0 7\n");
+        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+        data.extend_from_slice(
+            format_xref_entry(obj1_offset.saturating_sub(8), 0, true).as_bytes(),
+        );
+        data.extend_from_slice(format_xref_entry(stream_payload_offset, 0, true).as_bytes());
+        data.extend_from_slice(
+            format_xref_entry(obj3_offset.saturating_add(4), 0, true).as_bytes(),
+        );
+        data.extend_from_slice(
+            format_xref_entry(obj4_offset.saturating_sub(3), 0, true).as_bytes(),
+        );
+        data.extend_from_slice(
+            format_xref_entry(obj5_offset.saturating_add(9), 0, true).as_bytes(),
+        );
+        data.extend_from_slice(format_xref_entry(obj6_offset, 0, true).as_bytes());
+
+        data.extend_from_slice(b"trailer\n<< /Size 7 /Root 6 0 R >>\n");
+        data.extend_from_slice(b"startxref\n");
+        data.extend_from_slice(format!("{}\n", xref_offset.saturating_add(36)).as_bytes());
+        data.extend_from_slice(b"%%EOF");
+
+        (
+            data,
+            BTreeMap::from([
+                (1, obj1_offset),
+                (2, obj2_offset),
+                (3, obj3_offset),
+                (4, obj4_offset),
+                (5, obj5_offset),
+                (6, obj6_offset),
+            ]),
+        )
     }
 
     #[test]
@@ -379,5 +588,36 @@ mod tests {
 
         let entry2 = table.entries.get(&2).expect("obj 2 should exist");
         assert_eq!(entry2.byte_offset(), Some(obj2_offset));
+    }
+
+    #[test]
+    fn test_build_xref_table_repairs_issue139_offsets() {
+        let (data, expected_offsets) = build_issue139_like_pdf();
+        let mut parser = PdfParser::from(data.as_slice());
+        let table = parser
+            .build_xref_table()
+            .expect("xref recovery should repair nearby object offsets");
+
+        for object_number in 1..=6 {
+            let entry = table
+                .entries
+                .get(&object_number)
+                .expect("expected normal object entry");
+            let expected_offset = expected_offsets
+                .get(&object_number)
+                .copied()
+                .expect("expected known object offset");
+            let byte_offset = entry
+                .byte_offset()
+                .expect("entry should have a byte offset");
+            assert_eq!(
+                byte_offset, expected_offset,
+                "object {object_number} should recover its true offset"
+            );
+            assert!(
+                matches_indirect_object_header(data.as_slice(), byte_offset, object_number, 0),
+                "object {object_number} should point to its indirect object header, got offset {byte_offset}"
+            );
+        }
     }
 }

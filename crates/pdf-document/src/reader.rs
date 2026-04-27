@@ -442,6 +442,69 @@ mod tests {
         format!("{:010} {:05} {} \n", offset, generation, kind)
     }
 
+    fn build_issue139_like_pdf() -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%PDF-1.4\n");
+
+        let obj6_offset = data.len();
+        data.extend_from_slice(b"6 0 obj\n<<\n /Type /Catalog\n /Pages 5 0 R\n>>\nendobj\n\n");
+
+        let obj1_offset = data.len();
+        data.extend_from_slice(
+            b"1 0 obj\n<<\n /Type /Page\n /Parent 5 0 R\n /MediaBox [ 0 0 612 792 ]\n /Resources 3 0 R\n /Contents 2 0 R\n>>\nendobj\n\n",
+        );
+
+        let obj4_offset = data.len();
+        data.extend_from_slice(
+            b"4 0 obj\n<<\n /Type /Font\n /Subtype /Type1\n /Name /F1\n /BaseFont/Helvetica\n>>\nendobj\n\n",
+        );
+
+        let _obj2_offset = data.len();
+        data.extend_from_slice(
+            b"2 0 obj\n<<\n /Length 53\n>>\nstream\ntoString\nendstream\nendobj\n\n",
+        );
+
+        let obj5_offset = data.len();
+        data.extend_from_slice(
+            b"5 0 obj\n<<\n /Type /Pages\n /Kids [ 1 0 R ]\n /Count 1\n>>\nendobj\n\n",
+        );
+
+        let obj3_offset = data.len();
+        data.extend_from_slice(
+            b"3 0 obj\n<<\n /ProcSet[/PDF/Text]\n /Font <</F1 4 0 R >>\n>>\nendobj\n\n",
+        );
+
+        let stream_payload_offset = data
+            .windows(b"toString".len())
+            .position(|window| window == b"toString")
+            .expect("stream payload should exist");
+
+        let xref_offset = data.len();
+        data.extend_from_slice(b"xref\n0 7\n");
+        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+        data.extend_from_slice(
+            format_xref_entry(obj1_offset.saturating_sub(8), 0, true).as_bytes(),
+        );
+        data.extend_from_slice(format_xref_entry(stream_payload_offset, 0, true).as_bytes());
+        data.extend_from_slice(
+            format_xref_entry(obj3_offset.saturating_add(4), 0, true).as_bytes(),
+        );
+        data.extend_from_slice(
+            format_xref_entry(obj4_offset.saturating_sub(3), 0, true).as_bytes(),
+        );
+        data.extend_from_slice(
+            format_xref_entry(obj5_offset.saturating_add(9), 0, true).as_bytes(),
+        );
+        data.extend_from_slice(format_xref_entry(obj6_offset, 0, true).as_bytes());
+
+        data.extend_from_slice(b"trailer\n<< /Size 7 /Root 6 0 R >>\n");
+        data.extend_from_slice(b"startxref\n");
+        data.extend_from_slice(format!("{}\n", xref_offset.saturating_add(36)).as_bytes());
+        data.extend_from_slice(b"%%EOF");
+
+        data
+    }
+
     #[test]
     fn test_encrypted_document_detection() {
         let mut data = Vec::new();
@@ -655,6 +718,22 @@ mod tests {
         assert!(
             result.is_ok(),
             "Headerless document with shifted xref offsets should load: {:?}",
+            result.err()
+        );
+
+        let doc = result.unwrap();
+        assert_eq!(doc.page_count(), 1);
+    }
+
+    #[test]
+    fn test_issue139_pdf_loads_normally() {
+        let reader = PdfReader;
+        let data = build_issue139_like_pdf();
+        let result = reader.read_from_bytes(&data, None);
+
+        assert!(
+            result.is_ok(),
+            "issue139.pdf should load after xref recovery: {:?}",
             result.err()
         );
 
