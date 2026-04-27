@@ -43,6 +43,12 @@ pub enum Filter {
     /// bytes. The special character `z` represents four zero bytes. The
     /// end-of-data marker is `~>`.
     ASCII85Decode,
+    /// The ASCII hexadecimal filter, which decodes ASCIIHex-encoded stream data.
+    ///
+    /// ASCIIHex encodes arbitrary binary data as hexadecimal digits. ASCII
+    /// whitespace is ignored, `>` marks end-of-data, and a final single digit
+    /// is padded with a trailing `0` nibble.
+    ASCIIHexDecode,
     /// The LZW (Lempel-Ziv-Welch) filter, a lossless compression algorithm.
     ///
     /// Based on variable-length code substitution. This was used in older PDFs
@@ -63,6 +69,7 @@ impl From<Cow<'_, str>> for Filter {
             "JPXDecode" => Self::JPXDecode,
             "CCITTFaxDecode" => Self::CCITTFaxDecode,
             "ASCII85Decode" => Self::ASCII85Decode,
+            "ASCIIHexDecode" => Self::ASCIIHexDecode,
             "LZWDecode" => Self::LZWDecode,
             _ => Self::Unsupported(name.into_owned()),
         }
@@ -83,6 +90,7 @@ impl fmt::Display for Filter {
             Self::FlateDecode => f.write_str("FlateDecode"),
             Self::CCITTFaxDecode => f.write_str("CCITTFaxDecode"),
             Self::ASCII85Decode => f.write_str("ASCII85Decode"),
+            Self::ASCIIHexDecode => f.write_str("ASCIIHexDecode"),
             Self::LZWDecode => f.write_str("LZWDecode"),
             Self::Unsupported(name) => f.write_str(name),
         }
@@ -278,6 +286,10 @@ pub fn decode(stream: &StreamObject) -> Result<Cow<'_, [u8]>, FilterError> {
                 let decoded = crate::ascii85::decode_ascii85(&data)?;
                 data = Cow::Owned(decoded);
             }
+            Filter::ASCIIHexDecode => {
+                let decoded = crate::asciihex::decode_ascii_hex(&data)?;
+                data = Cow::Owned(decoded);
+            }
             Filter::CCITTFaxDecode => {
                 let ccitt_params = match params {
                     DecodeParms::CcittFax(p) => p,
@@ -363,4 +375,39 @@ fn parse_decode_params(
             _ => DecodeParms::None,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{borrow::Cow, collections::BTreeMap};
+
+    use pdf_object::{dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject};
+
+    use super::*;
+
+    #[test]
+    fn test_filter_name_round_trip_ascii_hex() {
+        let filter = Filter::from(Cow::Borrowed("ASCIIHexDecode"));
+        assert_eq!(filter, Filter::ASCIIHexDecode);
+        assert_eq!(filter.to_string(), "ASCIIHexDecode");
+    }
+
+    #[test]
+    fn test_decode_ascii_hex_stream() {
+        let mut dict = BTreeMap::new();
+        dict.insert(
+            "Filter".to_string(),
+            ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
+        );
+
+        let stream = StreamObject::new(
+            1,
+            0,
+            Box::new(Dictionary::new(dict)),
+            b"48 65 6c 6c 6f>ignored".to_vec(),
+        );
+
+        let decoded = decode(&stream).expect("decode failed");
+        assert_eq!(decoded.as_ref(), b"Hello");
+    }
 }
