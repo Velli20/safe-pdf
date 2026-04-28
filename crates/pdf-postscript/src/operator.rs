@@ -41,6 +41,8 @@ pub enum Operator {
     Not,
     /// copy (x1 .. xn n -- x1 .. xn x1 .. xn) duplicates the top `n` elements.
     Copy,
+    /// index (x1 .. xn i -- x1 .. xn xi) copies the `i`th element from the top.
+    Index,
     /// roll (x1 .. xn j n -- rotated) rotates the top `n` elements by `j` steps.
     Roll,
     /// sqrt (x -- sqrt(x)) square root.
