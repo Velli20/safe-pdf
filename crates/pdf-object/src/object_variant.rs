@@ -392,3 +392,19 @@ impl ObjectVariant {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::object_resolver::PassthroughResolver;
+
+    #[test]
+    fn try_str_returns_type_mismatch_for_non_string() {
+        let object = ObjectVariant::Integer(7);
+        let err = object
+            .try_str(&PassthroughResolver)
+            .expect_err("non-string object should not decode as string");
+
+        assert_eq!(err, ObjectError::TypeMismatch("String", "Integer"));
+    }
+}

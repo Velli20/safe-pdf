@@ -1,3 +1,4 @@
+use pdf_filter::error::FilterError;
 use pdf_object::error::ObjectError;
 use pdf_tokenizer::error::TokenizerError;
 use thiserror::Error;
@@ -51,4 +52,6 @@ pub enum ParserError {
     MissingStartXref,
     #[error("Invalid cross-reference table at offset {offset}")]
     InvalidXrefAtOffset { offset: usize },
+    #[error("Filter error: {0}")]
+    FilterError(#[from] FilterError),
 }

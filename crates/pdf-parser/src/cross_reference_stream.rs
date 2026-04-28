@@ -62,7 +62,7 @@ pub fn parse_xref_stream(
     }
 
     // Decode stream data (applies filters like FlateDecode + predictors)
-    let data = pdf_filter::filter::decode(stream).map_err(pdf_object::error::ObjectError::from)?;
+    let data = pdf_filter::filter::decode_with_resolver(stream, objects)?;
 
     let mut entries = BTreeMap::new();
     let mut pos: usize = 0;
