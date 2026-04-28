@@ -12,7 +12,7 @@ pub enum FilterError {
     /// The stream data could not be decompressed.
     ///
     /// This covers failures from zlib (FlateDecode), JPEG (DCTDecode),
-    /// JPEG 2000 (JPXDecode), and ASCII85Decode decoders.
+    /// JPEG 2000 (JPXDecode), ASCII85Decode, and ASCIIHexDecode decoders.
     #[error("decompression failed: {0}")]
     Decompression(String),
 

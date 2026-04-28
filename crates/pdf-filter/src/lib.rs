@@ -9,12 +9,14 @@
 //! - **JPXDecode** — JPEG 2000
 //! - **CCITTFaxDecode** — Group 3 / Group 4 fax compression
 //! - **ASCII85Decode** — ASCII base-85 encoding
+//! - **ASCIIHexDecode** — ASCII hexadecimal encoding
 //!
 //! The main entry point is [`filter::decode`], which accepts a
 //! [`StreamObject`](pdf_object::stream::StreamObject) and applies the full
 //! filter chain declared in its `/Filter` dictionary entry.
 
 pub(crate) mod ascii85;
+pub(crate) mod asciihex;
 mod bitreader;
 pub(crate) mod ccitt;
 pub(crate) mod ccitt_fax_params;
