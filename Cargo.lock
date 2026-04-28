@@ -1987,6 +1987,7 @@ dependencies = [
 name = "pdf-object-collection"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "num-traits",
  "pdf-filter",
  "pdf-object",

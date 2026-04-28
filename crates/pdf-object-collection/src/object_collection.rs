@@ -74,7 +74,7 @@ impl ObjectCollection {
                 }
             }
             ObjectVariant::Stream(stream) => {
-                let data = pdf_filter::filter::decode(&stream)?.to_vec();
+                let data = pdf_filter::filter::decode_with_resolver(&stream, self)?.to_vec();
                 let StreamObject {
                     object_number,
                     generation_number,
@@ -282,5 +282,68 @@ mod tests {
             .expect_err("mutually recursive references should report a cycle");
 
         assert_eq!(err, ObjectError::CyclicDependency { obj_num: 1 });
+    }
+
+    #[test]
+    fn insert_decodes_stream_with_indirect_decode_parms() {
+        use pdf_object::{
+            dictionary::Dictionary, indirect_object::IndirectObject, stream::StreamObject,
+        };
+        use std::collections::BTreeMap;
+        use std::io::Write;
+
+        let mut encoded_row = Vec::from([2u8]);
+        encoded_row.extend_from_slice(b"hello");
+
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&encoded_row).expect("zlib write failed");
+        let compressed = encoder.finish().expect("zlib finish failed");
+
+        let mut decode_parms = BTreeMap::new();
+        decode_parms.insert("Predictor".to_string(), ObjectVariant::Integer(12));
+        decode_parms.insert("Columns".to_string(), ObjectVariant::Integer(5));
+        decode_parms.insert("Colors".to_string(), ObjectVariant::Integer(1));
+        decode_parms.insert("BitsPerComponent".to_string(), ObjectVariant::Integer(8));
+
+        let decode_parms_object = ObjectVariant::IndirectObject(Box::new(IndirectObject::new(
+            2,
+            0,
+            Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
+                decode_parms,
+            )))),
+        )));
+
+        let mut collection = ObjectCollection::default();
+        collection
+            .insert(decode_parms_object)
+            .expect("decode parms insert failed");
+
+        let mut stream_dict = BTreeMap::new();
+        stream_dict.insert(
+            "Filter".to_string(),
+            ObjectVariant::Name(b"FlateDecode".to_vec()),
+        );
+        stream_dict.insert("DecodeParms".to_string(), ObjectVariant::Reference(2));
+        stream_dict.insert(
+            "Length".to_string(),
+            ObjectVariant::Integer(compressed.len() as i64),
+        );
+
+        let stream = ObjectVariant::Stream(StreamObject::new(
+            1,
+            0,
+            Box::new(Dictionary::new(stream_dict)),
+            compressed,
+        ));
+
+        collection.insert(stream).expect("stream insert failed");
+
+        let decoded = collection.get(1).and_then(|obj| match obj {
+            ObjectVariant::Stream(stream) => Some(stream.raw_data()),
+            _ => None,
+        });
+
+        assert_eq!(decoded, Some(b"hello".as_slice()));
     }
 }
