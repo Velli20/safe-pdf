@@ -40,9 +40,12 @@ pub(crate) fn parse_device_n_color_space(
     arr: &[ObjectVariant],
     depth: usize,
 ) -> Result<ColorSpace, ColorSpaceError> {
-    let [_, names_obj, alt_obj, _, _] = arr else {
+    let [_, names_obj, alt_obj, _tint_transform, ..] = arr else {
         return Err(ColorSpaceError::InvalidColorSpace {
-            description: format!("/DeviceN requires at least 4 elements, found {}", arr.len()),
+            description: format!(
+                "/DeviceN requires [/DeviceN names alternateSpace tintTransform] with an optional attributes dictionary; found {} element(s)",
+                arr.len()
+            ),
         });
     };
 
@@ -75,5 +78,84 @@ impl DeviceNColorSpace {
             "DeviceN with {} colorant(s) requires multi-input function support",
             self.names.len()
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_device_n_color_space;
+    use crate::{color_space::ColorSpace, error::ColorSpaceError};
+    use pdf_object::{
+        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+    };
+    use std::collections::BTreeMap;
+
+    fn name(value: &str) -> ObjectVariant {
+        ObjectVariant::Name(value.as_bytes().to_vec())
+    }
+
+    fn device_n_array(mut entries: Vec<ObjectVariant>) -> Vec<ObjectVariant> {
+        let mut array = vec![name("DeviceN")];
+        array.append(&mut entries);
+        array
+    }
+
+    #[test]
+    fn parses_four_element_device_n_array() {
+        let arr = device_n_array(vec![
+            ObjectVariant::Array(vec![name("Cyan"), name("Magenta")]),
+            name("DeviceRGB"),
+            ObjectVariant::Null,
+        ]);
+
+        let parsed = parse_device_n_color_space(&PassthroughResolver, &arr, 0).unwrap();
+
+        let ColorSpace::DeviceN(device_n) = parsed else {
+            panic!("expected DeviceN color space");
+        };
+
+        assert_eq!(
+            device_n.names,
+            vec!["Cyan".to_string(), "Magenta".to_string()]
+        );
+        assert!(matches!(*device_n.alternate_space, ColorSpace::DeviceRGB));
+    }
+
+    #[test]
+    fn parses_five_element_device_n_array_with_attributes() {
+        let attrs = ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::new())));
+        let arr = device_n_array(vec![
+            ObjectVariant::Array(vec![name("Spot")]),
+            name("DeviceCMYK"),
+            ObjectVariant::Null,
+            attrs,
+        ]);
+
+        let parsed = parse_device_n_color_space(&PassthroughResolver, &arr, 0).unwrap();
+
+        let ColorSpace::DeviceN(device_n) = parsed else {
+            panic!("expected DeviceN color space");
+        };
+
+        assert_eq!(device_n.names, vec!["Spot".to_string()]);
+        assert!(matches!(*device_n.alternate_space, ColorSpace::DeviceCMYK));
+    }
+
+    #[test]
+    fn rejects_three_element_device_n_array() {
+        let arr = vec![
+            name("DeviceN"),
+            ObjectVariant::Array(vec![name("Cyan")]),
+            name("DeviceRGB"),
+        ];
+
+        let err = parse_device_n_color_space(&PassthroughResolver, &arr, 0).unwrap_err();
+
+        assert!(matches!(
+            err,
+            ColorSpaceError::InvalidColorSpace { description }
+                if description.contains("/DeviceN requires [/DeviceN names alternateSpace tintTransform]")
+                    && description.contains("found 3 element(s)")
+        ));
     }
 }
