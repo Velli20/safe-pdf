@@ -262,6 +262,32 @@ pub fn execute(input_stack: &[f64], ops: &[Operator]) -> Result<Vec<f64>, CalcEr
                     frame.push(v)?;
                 }
             }
+            Operator::Index => {
+                let n_val = frame.pop()?;
+                let n = n_val.to_usize().ok_or(CalcError::InvalidIntegerOperand {
+                    op: "index",
+                    value: n_val,
+                })?;
+                let len = frame.len();
+                if n >= len {
+                    return Err(CalcError::IndexOutOfBounds {
+                        op: "index",
+                        length: len,
+                        index: n,
+                    });
+                }
+
+                let target = len
+                    .checked_sub(1)
+                    .and_then(|value| value.checked_sub(n))
+                    .ok_or(CalcError::ArithmeticOverflow { op: "index" })?;
+                let value = *frame.stack.get(target).ok_or(CalcError::IndexOutOfBounds {
+                    op: "index",
+                    length: len,
+                    index: n,
+                })?;
+                frame.push(value)?;
+            }
             Operator::Sqrt => {
                 let a = frame.pop()?;
                 if a < 0.0 {
@@ -614,6 +640,12 @@ mod tests {
     fn test_copy() {
         let result = evaluate_postscript(&[1.0, 2.0, 3.0], "2 copy").unwrap();
         assert_eq!(result, vec![1.0, 2.0, 3.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn test_index() {
+        let result = evaluate_postscript(&[1.0, 2.0, 3.0, 4.0], "2 index").unwrap();
+        assert_eq!(result, vec![1.0, 2.0, 3.0, 4.0, 2.0]);
     }
 
     #[test]

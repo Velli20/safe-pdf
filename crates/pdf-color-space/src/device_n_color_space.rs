@@ -1,3 +1,7 @@
+use pdf_function::{
+    function::{Function, FunctionImpl},
+    function_interpolation_error::FunctionInterpolationError,
+};
 use pdf_graphics::color::Color;
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
@@ -12,35 +16,25 @@ use crate::{
 /// multiple colorants simultaneously.
 ///
 /// [`Separation`]: crate::separation_color_space::SeparationColorSpace
-///
-/// # Rendering limitation
-///
-/// The tint transform for DeviceN accepts `n` inputs (one per colorant), but the
-/// current [`Function`] API only supports single-input evaluation. Calling
-/// [`apply`] therefore returns [`ColorSpaceError::Unsupported`] until multi-input
-/// function evaluation is implemented.
-///
-/// [`Function`]: pdf_function::function::Function
-/// [`apply`]: DeviceNColorSpace::apply
 #[derive(Debug, Clone)]
 pub struct DeviceNColorSpace {
     /// Ordered list of colorant names (e.g., `["Cyan", "Magenta"]`).
     pub names: Vec<String>,
     /// Fallback color space used when the colorants are not available.
     pub alternate_space: Box<ColorSpace>,
+    /// Tint transform function used to map DeviceN components into the alternate space.
+    pub tint_transform: Function,
 }
 
 /// Parses a DeviceN color space: `[/DeviceN names alternateSpace tintTransform]`
 ///
 /// An optional fifth element (attributes dictionary) is accepted and ignored.
-/// The tint transform is also ignored for now; see the rendering limitation in
-/// [`DeviceNColorSpace`].
 pub(crate) fn parse_device_n_color_space(
     objects: &dyn ObjectResolver,
     arr: &[ObjectVariant],
     depth: usize,
 ) -> Result<ColorSpace, ColorSpaceError> {
-    let [_, names_obj, alt_obj, _tint_transform, ..] = arr else {
+    let [_, names_obj, alt_obj, tint_transform, ..] = arr else {
         return Err(ColorSpaceError::InvalidColorSpace {
             description: format!(
                 "/DeviceN requires [/DeviceN names alternateSpace tintTransform] with an optional attributes dictionary; found {} element(s)",
@@ -56,10 +50,12 @@ pub(crate) fn parse_device_n_color_space(
         .collect::<Result<Vec<_>, _>>()?;
 
     let alternate_space = parse_color_space_object(objects, alt_obj, depth)?;
+    let tint_transform = Function::parse(objects.resolve_object(tint_transform)?, objects)?;
 
     Ok(ColorSpace::DeviceN(DeviceNColorSpace {
         names,
         alternate_space: Box::new(alternate_space),
+        tint_transform,
     }))
 }
 
@@ -70,14 +66,31 @@ impl DeviceNColorSpace {
         self.names.len()
     }
 
-    /// Not yet supported — requires multi-input function evaluation.
-    ///
-    /// See the rendering limitation documented on [`DeviceNColorSpace`].
-    pub(crate) fn apply(&self, _components: &[f32]) -> Result<Color, ColorSpaceError> {
-        Err(ColorSpaceError::Unsupported(format!(
-            "DeviceN with {} colorant(s) requires multi-input function support",
-            self.names.len()
-        )))
+    pub(crate) fn apply(&self, components: &[f32]) -> Result<Color, ColorSpaceError> {
+        let expected_components = self.names.len();
+        if components.len() != expected_components {
+            return Err(ColorSpaceError::InsufficientComponents(
+                expected_components,
+                components.len(),
+            ));
+        }
+
+        let alternate_components = self.tint_transform.apply(components).map_err(|e| {
+            ColorSpaceError::Unsupported(format!("DeviceN tint transform failed: {e}"))
+        })?;
+
+        let expected_alternate_components = self.alternate_space.num_color_components();
+        if alternate_components.len() != expected_alternate_components {
+            return Err(ColorSpaceError::Unsupported(
+                FunctionInterpolationError::ColorComponentCountMismatch {
+                    required: expected_alternate_components,
+                    returned: alternate_components.len(),
+                }
+                .to_string(),
+            ));
+        }
+
+        self.alternate_space.apply(&alternate_components)
     }
 }
 
@@ -85,8 +98,12 @@ impl DeviceNColorSpace {
 mod tests {
     use super::parse_device_n_color_space;
     use crate::{color_space::ColorSpace, error::ColorSpaceError};
+    use pdf_function::{
+        function::Function, function_interpolation_error::FunctionInterpolationError,
+    };
     use pdf_object::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+        dictionary::Dictionary, object_resolver::PassthroughResolver,
+        object_variant::ObjectVariant, stream::StreamObject,
     };
     use std::collections::BTreeMap;
 
@@ -100,12 +117,43 @@ mod tests {
         array
     }
 
+    fn function_stream(code: &str, output_components: usize) -> ObjectVariant {
+        let mut dict = BTreeMap::new();
+        dict.insert("FunctionType".to_string(), ObjectVariant::Integer(4));
+        dict.insert(
+            "Domain".to_string(),
+            ObjectVariant::Array(vec![
+                ObjectVariant::Real(0.0),
+                ObjectVariant::Real(1.0),
+                ObjectVariant::Real(0.0),
+                ObjectVariant::Real(1.0),
+                ObjectVariant::Real(0.0),
+                ObjectVariant::Real(1.0),
+            ]),
+        );
+        dict.insert(
+            "Range".to_string(),
+            ObjectVariant::Array(
+                (0..output_components)
+                    .flat_map(|_| [ObjectVariant::Real(0.0), ObjectVariant::Real(1.0)])
+                    .collect(),
+            ),
+        );
+
+        ObjectVariant::Stream(StreamObject::new(
+            1,
+            0,
+            Box::new(Dictionary::new(dict)),
+            code.as_bytes().to_vec(),
+        ))
+    }
+
     #[test]
     fn parses_four_element_device_n_array() {
         let arr = device_n_array(vec![
             ObjectVariant::Array(vec![name("Cyan"), name("Magenta")]),
             name("DeviceRGB"),
-            ObjectVariant::Null,
+            function_stream("pop pop 0.1 0.2 0.3", 3),
         ]);
 
         let parsed = parse_device_n_color_space(&PassthroughResolver, &arr, 0).unwrap();
@@ -119,6 +167,10 @@ mod tests {
             vec!["Cyan".to_string(), "Magenta".to_string()]
         );
         assert!(matches!(*device_n.alternate_space, ColorSpace::DeviceRGB));
+        assert!(matches!(
+            device_n.tint_transform,
+            Function::PostScriptCalculator(_)
+        ));
     }
 
     #[test]
@@ -127,7 +179,7 @@ mod tests {
         let arr = device_n_array(vec![
             ObjectVariant::Array(vec![name("Spot")]),
             name("DeviceCMYK"),
-            ObjectVariant::Null,
+            function_stream("pop 0.2 0.4 0.6 0.8", 4),
             attrs,
         ]);
 
@@ -139,6 +191,70 @@ mod tests {
 
         assert_eq!(device_n.names, vec!["Spot".to_string()]);
         assert!(matches!(*device_n.alternate_space, ColorSpace::DeviceCMYK));
+    }
+
+    #[test]
+    fn applies_device_n_through_tint_transform_and_alternate_space() {
+        let arr = device_n_array(vec![
+            ObjectVariant::Array(vec![name("Cyan"), name("Magenta"), name("Yellow")]),
+            name("DeviceRGB"),
+            function_stream("pop pop pop 0.25 0.5 0.75", 3),
+        ]);
+
+        let parsed = parse_device_n_color_space(&PassthroughResolver, &arr, 0).unwrap();
+        let ColorSpace::DeviceN(device_n) = parsed else {
+            panic!("expected DeviceN color space");
+        };
+
+        let color = device_n.apply(&[0.9, 0.8, 0.7]).unwrap();
+
+        assert_eq!(color.r, 0.25);
+        assert_eq!(color.g, 0.5);
+        assert_eq!(color.b, 0.75);
+        assert_eq!(color.a, 1.0);
+    }
+
+    #[test]
+    fn rejects_device_n_tint_transform_output_arity_mismatch() {
+        let arr = device_n_array(vec![
+            ObjectVariant::Array(vec![name("Cyan"), name("Magenta"), name("Yellow")]),
+            name("DeviceRGB"),
+            function_stream("pop pop 0.25 0.5", 2),
+        ]);
+
+        let parsed = parse_device_n_color_space(&PassthroughResolver, &arr, 0).unwrap();
+        let ColorSpace::DeviceN(device_n) = parsed else {
+            panic!("expected DeviceN color space");
+        };
+
+        let err = device_n.apply(&[0.9, 0.8, 0.7]).unwrap_err();
+
+        assert!(matches!(
+            err,
+            ColorSpaceError::Unsupported(message)
+                if message == FunctionInterpolationError::ColorComponentCountMismatch {
+                    required: 3,
+                    returned: 2
+                }.to_string()
+        ));
+    }
+
+    #[test]
+    fn rejects_device_n_with_too_few_input_components() {
+        let arr = device_n_array(vec![
+            ObjectVariant::Array(vec![name("Cyan"), name("Magenta")]),
+            name("DeviceRGB"),
+            function_stream("pop pop 0.1 0.2 0.3", 3),
+        ]);
+
+        let parsed = parse_device_n_color_space(&PassthroughResolver, &arr, 0).unwrap();
+        let ColorSpace::DeviceN(device_n) = parsed else {
+            panic!("expected DeviceN color space");
+        };
+
+        let err = device_n.apply(&[0.25]).unwrap_err();
+
+        assert!(matches!(err, ColorSpaceError::InsufficientComponents(2, 1)));
     }
 
     #[test]
