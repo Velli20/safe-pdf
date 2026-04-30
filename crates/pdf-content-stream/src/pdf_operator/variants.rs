@@ -11,9 +11,9 @@ use crate::{
     graphics_state_operators::*,
     marked_content_operators::*,
     operation_map::get_operation_descriptor,
-    operator_tokenizer::read_operator_name,
     path_operators::*,
     path_paint_operators::*,
+    pdf_operator::inline_image::parse_inline_image,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     shadings_operators::PaintShading,
     text_object_operators::*,
@@ -131,18 +131,16 @@ impl PdfOperatorVariant {
                 // surface as Alphabetic tokens. Handle them alongside ASCII
                 // letters in a single arm.
                 Some(b'\'' | b'"' | b'A'..=b'Z' | b'a'..=b'z') => {
-                    let name = read_operator_name(&mut parser)?;
+                    let name = crate::operator_tokenizer::read_operator_name(&mut parser)?;
+                    if name == BeginInlineImage::NAME {
+                        parse_inline_image(&mut parser, out)?;
+                        operands.clear();
+                        continue;
+                    }
+
                     match parse_operator(name, &mut operands) {
                         Ok(operator) => out.push(operator),
-                        Err(err) => {
-                            // Don't fail hard on operator parsing errors. Log and skip the
-                            // operator, but continue parsing the rest of the stream.
-                            println!(
-                                "Failed to parse operator '{}': {:?}",
-                                String::from_utf8_lossy(name),
-                                err
-                            );
-                        }
+                        Err(_err) => {}
                     }
                     operands.clear();
                 }
@@ -279,6 +277,74 @@ mod tests {
         let input = b"[ (2.) 1 (0) 1 (!)\n2 (3) 1 (4) 1 (4) 1 (0) 1 (0) 1 (#) 2 (%) 2 (%) 2 (.) 1 (\\)) 2 (4) ]  TJ";
         let result = PdfOperatorVariant::parse(input);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn parses_inline_image_and_resumes_after_ei() {
+        let input = b"q BI /IM true /W 1 /H 1 /BPC 8 ID \x00\x01\x02\nEI Q Q";
+
+        let result = PdfOperatorVariant::parse(input).unwrap();
+
+        assert_eq!(
+            result,
+            vec![
+                PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState),
+                PdfOperatorVariant::BeginInlineImage(BeginInlineImage),
+                PdfOperatorVariant::InlineImageData(InlineImageData::new(vec![
+                    0x00, 0x01, 0x02, b'\n',
+                ])),
+                PdfOperatorVariant::EndInlineImage(EndInlineImage),
+                PdfOperatorVariant::RestoreGraphicsState(RestoreGraphicsState),
+                PdfOperatorVariant::RestoreGraphicsState(RestoreGraphicsState),
+            ]
+        );
+    }
+
+    #[test]
+    fn inline_image_dictionary_boolean_values_do_not_become_operators() {
+        let input = b"BI /IM true /Mask false /Intent null ID x\nEI Q";
+
+        let result = PdfOperatorVariant::parse(input).unwrap();
+
+        assert_eq!(result.len(), 4);
+        assert!(matches!(
+            result.first(),
+            Some(PdfOperatorVariant::BeginInlineImage(BeginInlineImage))
+        ));
+        assert!(matches!(
+            result.get(1),
+            Some(PdfOperatorVariant::InlineImageData(_))
+        ));
+        assert!(matches!(
+            result.get(2),
+            Some(PdfOperatorVariant::EndInlineImage(EndInlineImage))
+        ));
+        assert!(matches!(
+            result.get(3),
+            Some(PdfOperatorVariant::RestoreGraphicsState(
+                RestoreGraphicsState
+            ))
+        ));
+    }
+
+    #[test]
+    fn inline_image_data_does_not_stop_at_embedded_ei_bytes() {
+        let input = b"BI /W 1 /H 1 ID abcEIxdef\nEI Q";
+
+        let result = PdfOperatorVariant::parse(input).unwrap();
+
+        match result.get(1) {
+            Some(PdfOperatorVariant::InlineImageData(data)) => {
+                assert_eq!(data.data(), b"abcEIxdef\n");
+            }
+            other => panic!("expected inline image data, got {other:?}"),
+        }
+        assert!(matches!(
+            result.last(),
+            Some(PdfOperatorVariant::RestoreGraphicsState(
+                RestoreGraphicsState
+            ))
+        ));
     }
 
     #[test]

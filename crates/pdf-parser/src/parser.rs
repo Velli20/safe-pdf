@@ -29,12 +29,12 @@ impl PdfParser<'_> {
     const MAX_NESTING_DEPTH: usize = 32;
 
     /// Returns whether `c` is a PDF whitespace character (NUL, HT, LF, FF, CR, or SP).
-    pub(crate) const fn is_pdf_whitespace(c: u8) -> bool {
+    pub const fn is_pdf_whitespace(c: u8) -> bool {
         matches!(c, b'\0' | b'\t' | b'\n' | b'\x0C' | b'\r' | b' ')
     }
 
     /// Returns whether `c` is a PDF delimiter or whitespace character.
-    pub(crate) const fn is_pdf_delimiter(c: u8) -> bool {
+    pub const fn is_pdf_delimiter(c: u8) -> bool {
         if Self::is_pdf_whitespace(c) {
             return true;
         }
@@ -48,7 +48,7 @@ impl PdfParser<'_> {
     ///
     /// Valid EOL sequences are `\r\n` (CRLF), `\r` (CR), or `\n` (LF), consumed in that
     /// priority order. If no EOL marker is present at the current position, does nothing.
-    pub(crate) fn try_read_end_of_line_marker(&mut self) {
+    pub fn try_read_end_of_line_marker(&mut self) {
         match self.tokenizer.data().first().copied() {
             Some(b'\r') => {
                 let _ = self.tokenizer.read();

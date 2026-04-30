@@ -67,22 +67,24 @@ pub struct InlineImageData {
     data: Vec<u8>,
 }
 
+impl InlineImageData {
+    pub(crate) fn new(data: Vec<u8>) -> Self {
+        Self { data }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn data(&self) -> &[u8] {
+        &self.data
+    }
+}
+
 impl PdfOperator for InlineImageData {
     const NAME: &'static [u8] = b"ID";
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        // The ID (Image Data) operator itself does not have preceding operands that form the image data.
-        // The image data stream follows the ID token and is terminated by EI.
-        // The `_operands` received here would typically contain the key-value pairs of the
-        // inline image dictionary if the main parser collected them as generic operands before ID.
-        // This `read` function, within the current `Operands` model, cannot access or parse
-        // the actual image data that follows the ID token.
-        // Proper parsing of inline image data requires special handling in the main parser loop.
-        Err(PdfOperatorError::UnsupportedOperator(
-            "Parsing inline image data is not implemented in this operator's read function.",
-        ))
+        Ok(PdfOperatorVariant::InlineImageData(Self::new(Vec::new())))
     }
 
     fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {

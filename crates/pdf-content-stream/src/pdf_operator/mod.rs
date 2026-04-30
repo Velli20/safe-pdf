@@ -1,3 +1,4 @@
+pub(crate) mod inline_image;
 pub mod operands;
 pub mod operator_trait;
 pub mod variants;
