@@ -84,9 +84,7 @@ pub enum PdfOperatorVariant {
     SetTextRise(SetTextRise),
     InvokeXObject(InvokeXObject),
     BeginCompatibility(BeginCompatibility),
-    BeginInlineImage(BeginInlineImage),
-    InlineImageData(InlineImageData),
-    EndInlineImage(EndInlineImage),
+    InlineImage(InlineImage),
     EndCompatibility(EndCompatibility),
     PaintShading(PaintShading),
     SetCharWidthAndBoundingBox(SetCharWidthAndBoundingBox),
@@ -132,7 +130,7 @@ impl PdfOperatorVariant {
                 // letters in a single arm.
                 Some(b'\'' | b'"' | b'A'..=b'Z' | b'a'..=b'z') => {
                     let name = crate::operator_tokenizer::read_operator_name(&mut parser)?;
-                    if name == BeginInlineImage::NAME {
+                    if name == InlineImage::NAME {
                         parse_inline_image(&mut parser, out)?;
                         operands.clear();
                         continue;
@@ -213,9 +211,7 @@ impl PdfOperatorVariant {
             PdfOperatorVariant::SetTextRise(op) => op.call(backend),
             PdfOperatorVariant::InvokeXObject(op) => op.call(backend),
             PdfOperatorVariant::BeginCompatibility(op) => op.call(backend),
-            PdfOperatorVariant::BeginInlineImage(op) => op.call(backend),
-            PdfOperatorVariant::InlineImageData(op) => op.call(backend),
-            PdfOperatorVariant::EndInlineImage(op) => op.call(backend),
+            PdfOperatorVariant::InlineImage(op) => op.call(backend),
             PdfOperatorVariant::EndCompatibility(op) => op.call(backend),
             PdfOperatorVariant::PaintShading(op) => op.call(backend),
             PdfOperatorVariant::SetCharWidthAndBoundingBox(op) => op.call(backend),
@@ -289,11 +285,15 @@ mod tests {
             result,
             vec![
                 PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState),
-                PdfOperatorVariant::BeginInlineImage(BeginInlineImage),
-                PdfOperatorVariant::InlineImageData(InlineImageData::new(vec![
-                    0x00, 0x01, 0x02, b'\n',
-                ])),
-                PdfOperatorVariant::EndInlineImage(EndInlineImage),
+                PdfOperatorVariant::InlineImage(InlineImage::new(
+                    pdf_object::dictionary::Dictionary::new(std::collections::BTreeMap::from([
+                        ("BPC".to_string(), ObjectVariant::Integer(8)),
+                        ("H".to_string(), ObjectVariant::Integer(1)),
+                        ("IM".to_string(), ObjectVariant::Boolean(true)),
+                        ("W".to_string(), ObjectVariant::Integer(1)),
+                    ])),
+                    vec![0x00, 0x01, 0x02, b'\n'],
+                )),
                 PdfOperatorVariant::RestoreGraphicsState(RestoreGraphicsState),
                 PdfOperatorVariant::RestoreGraphicsState(RestoreGraphicsState),
             ]
@@ -306,21 +306,23 @@ mod tests {
 
         let result = PdfOperatorVariant::parse(input).unwrap();
 
-        assert_eq!(result.len(), 4);
-        assert!(matches!(
-            result.first(),
-            Some(PdfOperatorVariant::BeginInlineImage(BeginInlineImage))
-        ));
+        assert_eq!(result.len(), 2);
+        match result.first() {
+            Some(PdfOperatorVariant::InlineImage(image)) => {
+                assert_eq!(
+                    image.dictionary(),
+                    &std::collections::BTreeMap::from([
+                        ("IM".to_string(), ObjectVariant::Boolean(true)),
+                        ("Intent".to_string(), ObjectVariant::Null),
+                        ("Mask".to_string(), ObjectVariant::Boolean(false)),
+                    ])
+                );
+                assert_eq!(image.data(), b"x\n");
+            }
+            other => panic!("expected inline image, got {other:?}"),
+        }
         assert!(matches!(
             result.get(1),
-            Some(PdfOperatorVariant::InlineImageData(_))
-        ));
-        assert!(matches!(
-            result.get(2),
-            Some(PdfOperatorVariant::EndInlineImage(EndInlineImage))
-        ));
-        assert!(matches!(
-            result.get(3),
             Some(PdfOperatorVariant::RestoreGraphicsState(
                 RestoreGraphicsState
             ))
@@ -333,11 +335,18 @@ mod tests {
 
         let result = PdfOperatorVariant::parse(input).unwrap();
 
-        match result.get(1) {
-            Some(PdfOperatorVariant::InlineImageData(data)) => {
-                assert_eq!(data.data(), b"abcEIxdef\n");
+        match result.first() {
+            Some(PdfOperatorVariant::InlineImage(image)) => {
+                assert_eq!(image.data(), b"abcEIxdef\n");
+                assert_eq!(
+                    image.dictionary(),
+                    &std::collections::BTreeMap::from([
+                        ("H".to_string(), ObjectVariant::Integer(1)),
+                        ("W".to_string(), ObjectVariant::Integer(1)),
+                    ])
+                );
             }
-            other => panic!("expected inline image data, got {other:?}"),
+            other => panic!("expected inline image, got {other:?}"),
         }
         assert!(matches!(
             result.last(),

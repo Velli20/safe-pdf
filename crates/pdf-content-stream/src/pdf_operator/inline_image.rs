@@ -1,16 +1,20 @@
-use pdf_object::object_resolver::PassthroughResolver;
+use std::collections::BTreeMap;
+
+use pdf_object::{
+    dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+};
 use pdf_parser::{error::ParserError, parser::PdfParser};
 
 use crate::{
     error::PdfOperatorError,
     operator_tokenizer::read_operator_name,
-    xobject_and_image_operators::{BeginInlineImage, EndInlineImage, InlineImageData},
+    xobject_and_image_operators::InlineImage,
 };
 
-use super::{PdfOperator, variants::PdfOperatorVariant};
+use super::variants::PdfOperatorVariant;
 
-const INLINE_IMAGE_DATA_BEGIN: &[u8] = InlineImageData::NAME;
-const INLINE_IMAGE_DATA_END: &[u8] = EndInlineImage::NAME;
+const INLINE_IMAGE_DATA_BEGIN: &[u8] = b"ID";
+const INLINE_IMAGE_DATA_END: &[u8] = b"EI";
 
 pub(crate) fn parse_inline_image(
     parser: &mut PdfParser<'_>,
@@ -29,31 +33,32 @@ impl<'parser, 'input> InlineImageReader<'parser, 'input> {
     }
 
     fn parse_into(mut self, out: &mut Vec<PdfOperatorVariant>) -> Result<(), PdfOperatorError> {
-        out.push(PdfOperatorVariant::BeginInlineImage(BeginInlineImage));
-
-        self.parse_dictionary_until_data_begin()?;
+        let dictionary = self.parse_dictionary_until_data_begin()?;
         self.consume_required_data_separator()?;
 
         let data = self.read_data_until_end()?;
-        out.push(PdfOperatorVariant::InlineImageData(InlineImageData::new(
-            data,
+        out.push(PdfOperatorVariant::InlineImage(InlineImage::new(
+            dictionary, data,
         )));
-        out.push(PdfOperatorVariant::EndInlineImage(EndInlineImage));
 
         Ok(())
     }
 
-    fn parse_dictionary_until_data_begin(&mut self) -> Result<(), PdfOperatorError> {
+    fn parse_dictionary_until_data_begin(&mut self) -> Result<Dictionary, PdfOperatorError> {
+        let mut dictionary = BTreeMap::new();
+
         loop {
             self.parser.skip_whitespace_and_comments();
             if self.next_token_is_keyword(INLINE_IMAGE_DATA_BEGIN) {
                 let _ = read_operator_name(self.parser)?;
-                return Ok(());
+                return Ok(Dictionary::new(dictionary));
             }
 
-            let _key = self.parser.parse_object(&PassthroughResolver)?;
+            let key = self.parser.parse_object(&PassthroughResolver)?;
             self.parser.skip_whitespace_and_comments();
-            let _value = self.parser.parse_object(&PassthroughResolver)?;
+            let value = self.parser.parse_object(&PassthroughResolver)?;
+            let key = dictionary_key(key)?;
+            let _ = dictionary.insert(key, value);
         }
     }
 
@@ -93,6 +98,16 @@ impl<'parser, 'input> InlineImageReader<'parser, 'input> {
         let is_match = self.parser.read_keyword(keyword).is_ok();
         self.parser.tokenizer.position = mark;
         is_match
+    }
+}
+
+fn dictionary_key(key: ObjectVariant) -> Result<String, PdfOperatorError> {
+    match key {
+        ObjectVariant::Name(name) => Ok(String::from_utf8_lossy(&name).into_owned()),
+        other => Err(PdfOperatorError::OperandTypeMismatch {
+            expected: "an inline image dictionary key name",
+            found: other.name(),
+        }),
     }
 }
 
