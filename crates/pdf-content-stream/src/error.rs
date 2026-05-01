@@ -40,6 +40,12 @@ pub enum PdfOperatorError {
     TokenizerError(#[from] TokenizerError),
     #[error("Parser error while reading a content stream: {0}")]
     ParserError(#[from] ParserError),
+    #[error(
+        "inline image data must start with whitespace after 'ID' at byte offset {position}, found: {found:?}"
+    )]
+    InlineImageMissingDataSeparator { found: u8, position: usize },
+    #[error("inline image data ended unexpectedly before 'EI' terminator")]
+    InlineImageMissingDataEnd,
     #[error("Text-showing operator received an empty text operand")]
     EmptyTextOperand,
     #[error("Object error while reading a content stream: {0}")]
