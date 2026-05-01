@@ -6,6 +6,7 @@ pub mod error;
 pub mod header;
 mod hex_string;
 mod indirect_object;
+mod inline_image;
 mod literal_string;
 mod name;
 mod number;

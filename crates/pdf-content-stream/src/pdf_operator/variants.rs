@@ -1,3 +1,4 @@
+use pdf_object::InlineImage;
 use pdf_object::object_resolver::PassthroughResolver;
 use pdf_object::object_variant::ObjectVariant;
 use pdf_parser::parser::PdfParser;
@@ -13,7 +14,6 @@ use crate::{
     operation_map::get_operation_descriptor,
     path_operators::*,
     path_paint_operators::*,
-    pdf_operator::inline_image::parse_inline_image,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     shadings_operators::PaintShading,
     text_object_operators::*,
@@ -131,7 +131,8 @@ impl PdfOperatorVariant {
                 Some(b'\'' | b'"' | b'A'..=b'Z' | b'a'..=b'z') => {
                     let name = crate::operator_tokenizer::read_operator_name(&mut parser)?;
                     if name == InlineImage::NAME {
-                        parse_inline_image(&mut parser, out)?;
+                        let image = parser.parse_inline_image(&PassthroughResolver)?;
+                        out.push(PdfOperatorVariant::InlineImage(image));
                         operands.clear();
                         continue;
                     }
@@ -310,7 +311,7 @@ mod tests {
         match result.first() {
             Some(PdfOperatorVariant::InlineImage(image)) => {
                 assert_eq!(
-                    image.dictionary(),
+                    &image.dictionary().dictionary,
                     &std::collections::BTreeMap::from([
                         ("IM".to_string(), ObjectVariant::Boolean(true)),
                         ("Intent".to_string(), ObjectVariant::Null),
@@ -339,7 +340,7 @@ mod tests {
             Some(PdfOperatorVariant::InlineImage(image)) => {
                 assert_eq!(image.data(), b"abcEIxdef\n");
                 assert_eq!(
-                    image.dictionary(),
+                    &image.dictionary().dictionary,
                     &std::collections::BTreeMap::from([
                         ("H".to_string(), ObjectVariant::Integer(1)),
                         ("W".to_string(), ObjectVariant::Integer(1)),

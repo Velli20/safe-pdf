@@ -46,7 +46,7 @@ pub(crate) const READ_MAP: &[OpDescriptor] = &[
     OpDescriptor::from::<FillAndStrokePathNonZero>(), // "B"
     OpDescriptor::from::<FillAndStrokePathEvenOdd>(), // "B*"
     OpDescriptor::from::<BeginMarkedContentWithProps>(), // "BDC"
-    OpDescriptor::from::<InlineImage>(),            // "BI"
+    OpDescriptor::from::<pdf_object::InlineImage>(), // "BI"
     OpDescriptor::from::<BeginMarkedContent>(),     // "BMC"
     OpDescriptor::from::<BeginText>(),              // "BT"
     OpDescriptor::from::<BeginCompatibility>(),     // "BX"

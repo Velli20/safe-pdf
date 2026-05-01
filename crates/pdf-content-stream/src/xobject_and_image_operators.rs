@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 
-use pdf_object::dictionary::Dictionary;
-#[cfg(test)]
-use pdf_object::object_variant::ObjectVariant;
+use pdf_object::{InlineImage, dictionary::Dictionary};
 
 use crate::{
     error::PdfOperatorError,
@@ -36,33 +34,6 @@ impl PdfOperator for InvokeXObject {
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.invoke_xobject(&self.name)
-    }
-}
-
-/// Represents a complete inline image object.
-/// This operator is followed by key-value pairs defining the image's properties,
-/// then the `ID` operator and image data, and finally `EI`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct InlineImage {
-    /// The key-value pairs declared after `BI` and before `ID`.
-    dictionary: Dictionary,
-    /// The raw byte data of the inline image.
-    data: Vec<u8>,
-}
-
-impl InlineImage {
-    pub(crate) fn new(dictionary: Dictionary, data: Vec<u8>) -> Self {
-        Self { dictionary, data }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn dictionary(&self) -> &BTreeMap<String, ObjectVariant> {
-        &self.dictionary.dictionary
-    }
-
-    #[cfg(test)]
-    pub(crate) fn data(&self) -> &[u8] {
-        &self.data
     }
 }
 
