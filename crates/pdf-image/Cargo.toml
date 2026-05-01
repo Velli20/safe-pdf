@@ -1,0 +1,13 @@
+[package]
+name = "pdf-image"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+pdf-object = { path = "../pdf-object" }
+pdf-graphics = { path = "../pdf-graphics" }
+pdf-color-space = { path = "../pdf-color-space" }
+thiserror = "2.0.12"

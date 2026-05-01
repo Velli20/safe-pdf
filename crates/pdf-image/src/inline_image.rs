@@ -1,4 +1,4 @@
-use crate::dictionary::Dictionary;
+use pdf_object::dictionary::Dictionary;
 
 /// Canonical parsed representation of a PDF inline image.
 #[derive(Debug, Clone, PartialEq)]

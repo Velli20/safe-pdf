@@ -4,6 +4,7 @@ use pdf_font::error::FontError;
 use pdf_function::{
     error::FunctionReadError, function_interpolation_error::FunctionInterpolationError,
 };
+use pdf_image::PdfImageError;
 
 use pdf_object::error::ObjectError;
 use thiserror::Error;
@@ -45,28 +46,8 @@ pub enum PdfPagesError {
     UnsupportedXObjectSubtype { subtype: String },
     #[error("missing required dictionary entry '/{entry}'")]
     MissingRequiredEntry { entry: &'static str },
-    /// The `/SMask` entry referenced a non-image XObject.
-    ///
-    /// Per the PDF specification, soft masks must always be Image XObjects
-    /// with a `/ColorSpace` of `/DeviceGray`.
-    #[error("invalid soft mask XObject: /SMask must reference an image XObject")]
-    InvalidSoftMaskXObject,
-    /// The image has zero-area dimensions (width or height is zero).
-    #[error("invalid image dimensions: width={width}, height={height}")]
-    InvalidImageDimensions { width: usize, height: usize },
-    /// The bits per component value is not supported.
-    ///
-    /// Only 1-bit and 8-bit-per-component images are currently supported.
-    #[error("unsupported image BitsPerComponent value: {bits_per_component} (supported: 1, 8)")]
-    UnsupportedImageBitsPerComponent { bits_per_component: usize },
-    /// The color space reported zero color components, which is invalid.
-    #[error("invalid image color space: reported zero color components")]
-    InvalidColorComponentCount,
-    #[error("truncated image data: expected at least {expected_bytes} bytes, got {actual_bytes}")]
-    TruncatedImageData {
-        expected_bytes: usize,
-        actual_bytes: usize,
-    },
+    #[error("failed to process image: {0}")]
+    Image(#[from] PdfImageError),
     #[error("{0}")]
     FunctionRead(#[from] FunctionReadError),
 }
@@ -74,5 +55,6 @@ pub enum PdfPagesError {
 impl PdfPagesError {
     pub(crate) fn is_cyclic_dependency(&self) -> bool {
         matches!(self, Self::Object(ObjectError::CyclicDependency { .. }))
+            || matches!(self, Self::Image(err) if err.is_cyclic_dependency())
     }
 }

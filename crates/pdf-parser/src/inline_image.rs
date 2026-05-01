@@ -1,4 +1,5 @@
-use pdf_object::{InlineImage, object_resolver::ObjectResolver};
+use pdf_image::InlineImage;
+use pdf_object::object_resolver::ObjectResolver;
 
 use crate::{error::ParserError, parser::PdfParser};
 
@@ -8,7 +9,7 @@ const INLINE_IMAGE_DATA_END: &[u8] = b"EI";
 impl PdfParser<'_> {
     /// Parses an inline image after the `BI` operator has already been consumed.
     ///
-    /// Returns the canonical `pdf_object::InlineImage` representation.
+    /// Returns the canonical `pdf_image::InlineImage` representation.
     pub fn parse_inline_image(
         &mut self,
         objects: &dyn ObjectResolver,

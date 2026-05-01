@@ -1,4 +1,4 @@
-use pdf_object::InlineImage;
+use pdf_image::InlineImage;
 use pdf_object::object_resolver::PassthroughResolver;
 use pdf_object::object_variant::ObjectVariant;
 use pdf_parser::parser::PdfParser;

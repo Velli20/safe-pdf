@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
-use pdf_object::{InlineImage, dictionary::Dictionary};
+use pdf_image::InlineImage;
+use pdf_object::dictionary::Dictionary;
 
 use crate::{
     error::PdfOperatorError,
