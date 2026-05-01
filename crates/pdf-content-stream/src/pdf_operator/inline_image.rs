@@ -1,15 +1,7 @@
-use std::collections::BTreeMap;
-
-use pdf_object::{
-    dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
-};
+use pdf_object::object_resolver::PassthroughResolver;
 use pdf_parser::{error::ParserError, parser::PdfParser};
 
-use crate::{
-    error::PdfOperatorError,
-    operator_tokenizer::read_operator_name,
-    xobject_and_image_operators::InlineImage,
-};
+use crate::{error::PdfOperatorError, xobject_and_image_operators::InlineImage};
 
 use super::variants::PdfOperatorVariant;
 
@@ -33,7 +25,9 @@ impl<'parser, 'input> InlineImageReader<'parser, 'input> {
     }
 
     fn parse_into(mut self, out: &mut Vec<PdfOperatorVariant>) -> Result<(), PdfOperatorError> {
-        let dictionary = self.parse_dictionary_until_data_begin()?;
+        let dictionary = self
+            .parser
+            .parse_dictionary_until_keyword(&PassthroughResolver, INLINE_IMAGE_DATA_BEGIN)?;
         self.consume_required_data_separator()?;
 
         let data = self.read_data_until_end()?;
@@ -42,24 +36,6 @@ impl<'parser, 'input> InlineImageReader<'parser, 'input> {
         )));
 
         Ok(())
-    }
-
-    fn parse_dictionary_until_data_begin(&mut self) -> Result<Dictionary, PdfOperatorError> {
-        let mut dictionary = BTreeMap::new();
-
-        loop {
-            self.parser.skip_whitespace_and_comments();
-            if self.next_token_is_keyword(INLINE_IMAGE_DATA_BEGIN) {
-                let _ = read_operator_name(self.parser)?;
-                return Ok(Dictionary::new(dictionary));
-            }
-
-            let key = self.parser.parse_object(&PassthroughResolver)?;
-            self.parser.skip_whitespace_and_comments();
-            let value = self.parser.parse_object(&PassthroughResolver)?;
-            let key = dictionary_key(key)?;
-            let _ = dictionary.insert(key, value);
-        }
     }
 
     fn consume_required_data_separator(&mut self) -> Result<(), PdfOperatorError> {
@@ -91,23 +67,6 @@ impl<'parser, 'input> InlineImageReader<'parser, 'input> {
 
         self.parser.tokenizer.position = start + end + INLINE_IMAGE_DATA_END.len();
         Ok(data)
-    }
-
-    fn next_token_is_keyword(&mut self, keyword: &[u8]) -> bool {
-        let mark = self.parser.tokenizer.position;
-        let is_match = self.parser.read_keyword(keyword).is_ok();
-        self.parser.tokenizer.position = mark;
-        is_match
-    }
-}
-
-fn dictionary_key(key: ObjectVariant) -> Result<String, PdfOperatorError> {
-    match key {
-        ObjectVariant::Name(name) => Ok(String::from_utf8_lossy(&name).into_owned()),
-        other => Err(PdfOperatorError::OperandTypeMismatch {
-            expected: "an inline image dictionary key name",
-            found: other.name(),
-        }),
     }
 }
 
