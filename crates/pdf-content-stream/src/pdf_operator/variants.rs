@@ -1,3 +1,4 @@
+use pdf_object::InlineImage;
 use pdf_object::object_resolver::PassthroughResolver;
 use pdf_object::object_variant::ObjectVariant;
 use pdf_parser::parser::PdfParser;
@@ -11,7 +12,6 @@ use crate::{
     graphics_state_operators::*,
     marked_content_operators::*,
     operation_map::get_operation_descriptor,
-    operator_tokenizer::read_operator_name,
     path_operators::*,
     path_paint_operators::*,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
@@ -84,9 +84,7 @@ pub enum PdfOperatorVariant {
     SetTextRise(SetTextRise),
     InvokeXObject(InvokeXObject),
     BeginCompatibility(BeginCompatibility),
-    BeginInlineImage(BeginInlineImage),
-    InlineImageData(InlineImageData),
-    EndInlineImage(EndInlineImage),
+    InlineImage(InlineImage),
     EndCompatibility(EndCompatibility),
     PaintShading(PaintShading),
     SetCharWidthAndBoundingBox(SetCharWidthAndBoundingBox),
@@ -131,18 +129,17 @@ impl PdfOperatorVariant {
                 // surface as Alphabetic tokens. Handle them alongside ASCII
                 // letters in a single arm.
                 Some(b'\'' | b'"' | b'A'..=b'Z' | b'a'..=b'z') => {
-                    let name = read_operator_name(&mut parser)?;
+                    let name = crate::operator_tokenizer::read_operator_name(&mut parser)?;
+                    if name == InlineImage::NAME {
+                        let image = parser.parse_inline_image(&PassthroughResolver)?;
+                        out.push(PdfOperatorVariant::InlineImage(image));
+                        operands.clear();
+                        continue;
+                    }
+
                     match parse_operator(name, &mut operands) {
                         Ok(operator) => out.push(operator),
-                        Err(err) => {
-                            // Don't fail hard on operator parsing errors. Log and skip the
-                            // operator, but continue parsing the rest of the stream.
-                            println!(
-                                "Failed to parse operator '{}': {:?}",
-                                String::from_utf8_lossy(name),
-                                err
-                            );
-                        }
+                        Err(_err) => {}
                     }
                     operands.clear();
                 }
@@ -215,9 +212,7 @@ impl PdfOperatorVariant {
             PdfOperatorVariant::SetTextRise(op) => op.call(backend),
             PdfOperatorVariant::InvokeXObject(op) => op.call(backend),
             PdfOperatorVariant::BeginCompatibility(op) => op.call(backend),
-            PdfOperatorVariant::BeginInlineImage(op) => op.call(backend),
-            PdfOperatorVariant::InlineImageData(op) => op.call(backend),
-            PdfOperatorVariant::EndInlineImage(op) => op.call(backend),
+            PdfOperatorVariant::InlineImage(op) => op.call(backend),
             PdfOperatorVariant::EndCompatibility(op) => op.call(backend),
             PdfOperatorVariant::PaintShading(op) => op.call(backend),
             PdfOperatorVariant::SetCharWidthAndBoundingBox(op) => op.call(backend),
@@ -279,6 +274,87 @@ mod tests {
         let input = b"[ (2.) 1 (0) 1 (!)\n2 (3) 1 (4) 1 (4) 1 (0) 1 (0) 1 (#) 2 (%) 2 (%) 2 (.) 1 (\\)) 2 (4) ]  TJ";
         let result = PdfOperatorVariant::parse(input);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn parses_inline_image_and_resumes_after_ei() {
+        let input = b"q BI /IM true /W 1 /H 1 /BPC 8 ID \x00\x01\x02\nEI Q Q";
+
+        let result = PdfOperatorVariant::parse(input).unwrap();
+
+        assert_eq!(
+            result,
+            vec![
+                PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState),
+                PdfOperatorVariant::InlineImage(InlineImage::new(
+                    pdf_object::dictionary::Dictionary::new(std::collections::BTreeMap::from([
+                        ("BPC".to_string(), ObjectVariant::Integer(8)),
+                        ("H".to_string(), ObjectVariant::Integer(1)),
+                        ("IM".to_string(), ObjectVariant::Boolean(true)),
+                        ("W".to_string(), ObjectVariant::Integer(1)),
+                    ])),
+                    vec![0x00, 0x01, 0x02, b'\n'],
+                )),
+                PdfOperatorVariant::RestoreGraphicsState(RestoreGraphicsState),
+                PdfOperatorVariant::RestoreGraphicsState(RestoreGraphicsState),
+            ]
+        );
+    }
+
+    #[test]
+    fn inline_image_dictionary_boolean_values_do_not_become_operators() {
+        let input = b"BI /IM true /Mask false /Intent null ID x\nEI Q";
+
+        let result = PdfOperatorVariant::parse(input).unwrap();
+
+        assert_eq!(result.len(), 2);
+        match result.first() {
+            Some(PdfOperatorVariant::InlineImage(image)) => {
+                assert_eq!(
+                    &image.dictionary().dictionary,
+                    &std::collections::BTreeMap::from([
+                        ("IM".to_string(), ObjectVariant::Boolean(true)),
+                        ("Intent".to_string(), ObjectVariant::Null),
+                        ("Mask".to_string(), ObjectVariant::Boolean(false)),
+                    ])
+                );
+                assert_eq!(image.data(), b"x\n");
+            }
+            other => panic!("expected inline image, got {other:?}"),
+        }
+        assert!(matches!(
+            result.get(1),
+            Some(PdfOperatorVariant::RestoreGraphicsState(
+                RestoreGraphicsState
+            ))
+        ));
+    }
+
+    #[test]
+    fn inline_image_data_does_not_stop_at_embedded_ei_bytes() {
+        let input = b"BI /W 1 /H 1 ID abcEIxdef\nEI Q";
+
+        let result = PdfOperatorVariant::parse(input).unwrap();
+
+        match result.first() {
+            Some(PdfOperatorVariant::InlineImage(image)) => {
+                assert_eq!(image.data(), b"abcEIxdef\n");
+                assert_eq!(
+                    &image.dictionary().dictionary,
+                    &std::collections::BTreeMap::from([
+                        ("H".to_string(), ObjectVariant::Integer(1)),
+                        ("W".to_string(), ObjectVariant::Integer(1)),
+                    ])
+                );
+            }
+            other => panic!("expected inline image, got {other:?}"),
+        }
+        assert!(matches!(
+            result.last(),
+            Some(PdfOperatorVariant::RestoreGraphicsState(
+                RestoreGraphicsState
+            ))
+        ));
     }
 
     #[test]

@@ -40,6 +40,12 @@ pub enum ParserError {
         found: u8,
         position: usize,
     },
+    #[error(
+        "inline image data must start with whitespace after 'ID' at byte offset {position}, found: {found:?}"
+    )]
+    InlineImageMissingDataSeparator { found: u8, position: usize },
+    #[error("inline image data ended unexpectedly before 'EI' terminator")]
+    InlineImageMissingDataEnd,
     #[error("Unexpected token '{token}' at position {position}")]
     UnexpectedTokenAt { token: String, position: usize },
     #[error("Nesting depth exceeded")]

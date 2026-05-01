@@ -3,8 +3,11 @@ pub mod cycle_list;
 pub mod dictionary;
 pub mod error;
 pub mod indirect_object;
+pub mod inline_image;
 pub mod object_resolver;
 pub mod object_variant;
 pub mod stream;
 pub mod trailer;
 pub mod version;
+
+pub use inline_image::InlineImage;

@@ -5,6 +5,11 @@ use pdf_tokenizer::PdfToken;
 
 use crate::{error::ParserError, parser::PdfParser};
 
+enum DictionaryTerminator<'a> {
+    DoubleRightAngleBracket,
+    Keyword(&'a [u8]),
+}
+
 impl PdfParser<'_> {
     /// Parses a PDF dictionary object from the current position in the input stream.
     ///
@@ -21,14 +26,49 @@ impl PdfParser<'_> {
 
         self.skip_whitespace_and_comments();
 
+        let dictionary = self.parse_dictionary_entries_until(
+            objects,
+            DictionaryTerminator::DoubleRightAngleBracket,
+        )?;
+
+        // Consume the closing `>>` of the dictionary.
+        self.tokenizer.expect(PdfToken::DoubleRightAngleBracket)?;
+
+        Ok(dictionary)
+    }
+
+    /// Parses a dictionary entry sequence terminated by the given keyword, then consumes it.
+    ///
+    /// This is used by inline image parsing, where `ID` ends the dictionary and starts data.
+    pub fn parse_dictionary_until_keyword(
+        &mut self,
+        objects: &dyn ObjectResolver,
+        keyword: &[u8],
+    ) -> Result<Dictionary, ParserError> {
+        let dictionary =
+            self.parse_dictionary_entries_until(objects, DictionaryTerminator::Keyword(keyword))?;
+        self.read_keyword(keyword)?;
+
+        Ok(dictionary)
+    }
+
+    fn parse_dictionary_entries_until(
+        &mut self,
+        objects: &dyn ObjectResolver,
+        terminator: DictionaryTerminator<'_>,
+    ) -> Result<Dictionary, ParserError> {
         let mut dictionary = BTreeMap::new();
 
-        while let Some(token) = self.tokenizer.peek() {
-            if let PdfToken::DoubleRightAngleBracket = token {
-                break;
+        loop {
+            self.skip_whitespace_and_comments();
+
+            if self.tokenizer.peek().is_none() {
+                return Err(ParserError::UnexpectedEndOfFile);
             }
 
-            self.skip_whitespace_and_comments();
+            if terminator.is_reached(self) {
+                return Ok(Dictionary::new(dictionary));
+            }
 
             // Parse key. Dictionary keys are always ASCII per spec; convert at boundary.
             let key = String::from_utf8_lossy(&self.parse_name()?).into_owned();
@@ -39,14 +79,29 @@ impl PdfParser<'_> {
             let object = self.parse_object(objects)?;
 
             dictionary.insert(key, object);
-            self.skip_whitespace_and_comments();
         }
-
-        // Consume the closing `>>` of the dictionary.
-        self.tokenizer.expect(PdfToken::DoubleRightAngleBracket)?;
-
-        Ok(Dictionary::new(dictionary))
     }
+}
+
+impl DictionaryTerminator<'_> {
+    fn is_reached(&self, parser: &mut PdfParser<'_>) -> bool {
+        match self {
+            Self::DoubleRightAngleBracket => {
+                matches!(
+                    parser.tokenizer.peek(),
+                    Some(PdfToken::DoubleRightAngleBracket)
+                )
+            }
+            Self::Keyword(keyword) => has_keyword_ahead(parser, keyword),
+        }
+    }
+}
+
+fn has_keyword_ahead(parser: &mut PdfParser<'_>, keyword: &[u8]) -> bool {
+    let mark = parser.tokenizer.position;
+    let is_match = parser.read_keyword(keyword).is_ok();
+    parser.tokenizer.position = mark;
+    is_match
 }
 
 #[cfg(test)]
@@ -58,11 +113,14 @@ mod tests {
 
     #[test]
     fn test_dictionary_valid() {
-        let inputs:  Vec<(&[u8], usize)> = vec![
+        let inputs: Vec<(&[u8], usize)> = vec![
             (b"<< >>", 0),
             (b"<< /Type /Catalog >>", 1),
             (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>", 3),
-            (b"<< /Type /Annot /Rect [100 100 200 200] /A << /S /URI /URI (https://example.com) >> >>", 3),
+            (
+                b"<< /Type /Annot /Rect [100 100 200 200] /A << /S /URI /URI (https://example.com) >> >>",
+                3,
+            ),
             (b"<< /Author (John Doe) /IsDraft true >>", 2),
             (b"<< /Count 42 /ID <4FAE23> >>", 2),
         ];
@@ -80,6 +138,17 @@ mod tests {
                 result.dictionary.len()
             );
         }
+    }
+
+    #[test]
+    fn test_dictionary_until_keyword_valid() {
+        let mut parser = PdfParser::from(b"/IM true /W 1 /H 1 ID \x00\x01".as_slice());
+        let result = parser
+            .parse_dictionary_until_keyword(&PassthroughResolver, b"ID")
+            .unwrap();
+
+        assert_eq!(result.dictionary.len(), 3);
+        assert!(parser.tokenizer.data().starts_with(b" \x00\x01"));
     }
 
     #[test]
@@ -112,5 +181,21 @@ mod tests {
                 result
             );
         }
+    }
+
+    #[test]
+    fn test_dictionary_until_keyword_invalid_key() {
+        let mut parser = PdfParser::from(b"(Title) /Something ID".as_slice());
+        let result = parser.parse_dictionary_until_keyword(&PassthroughResolver, b"ID");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dictionary_until_keyword_missing_value() {
+        let mut parser = PdfParser::from(b"/Title ID".as_slice());
+        let result = parser.parse_dictionary_until_keyword(&PassthroughResolver, b"ID");
+
+        assert!(result.is_err());
     }
 }
