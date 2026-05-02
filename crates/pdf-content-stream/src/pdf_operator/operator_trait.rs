@@ -21,5 +21,26 @@ pub trait PdfOperator {
         operands: &mut crate::pdf_operator::Operands,
     ) -> Result<crate::pdf_operator::PdfOperatorVariant, crate::error::PdfOperatorError>;
 
+    /// Optional custom parsing hook.
+    ///
+    /// Operators that cannot be parsed solely from the pre-collected `Operands`
+    /// (for example, operators that need to read additional bytes from the
+    /// content stream or use a non-standard grammar) should implement this
+    /// method so they can perform custom parsing using the low-level
+    /// `pdf_parser::parser::PdfParser`.
+    ///
+    /// The parser is positioned immediately after the operator token. If the
+    /// operator successfully parses itself it should return `Ok(Some(variant))`.
+    /// Returning `Ok(None)` (the default) signals that no custom parsing took
+    /// place and the parsing machinery should fall back to the normal
+    /// operands-based `read` implementation.
+    ///
+    /// Errors should be returned using `PdfOperatorError`.
+    fn parse<'a>(
+        _parser: &mut pdf_parser::parser::PdfParser<'a>,
+    ) -> Result<Option<crate::pdf_operator::PdfOperatorVariant>, crate::error::PdfOperatorError> {
+        Ok(None)
+    }
+
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>>;
 }

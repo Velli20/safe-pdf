@@ -123,13 +123,16 @@ impl PdfOperatorVariant {
             parser.skip_whitespace_and_comments();
 
             // Dispatch on the next raw byte.
-            match parser.tokenizer.data().first() {
+            let next_byte = parser.tokenizer.data().first().copied();
+            match next_byte {
                 None => break,
                 // ' and " are valid PDF operators that the tokenizer does not
                 // surface as Alphabetic tokens. Handle them alongside ASCII
                 // letters in a single arm.
                 Some(b'\'' | b'"' | b'A'..=b'Z' | b'a'..=b'z') => {
-                    let name = crate::operator_tokenizer::read_operator_name(&mut parser)?;
+                    let name_slice = crate::operator_tokenizer::read_operator_name(&mut parser)?;
+                    let name_owned = name_slice.to_vec();
+                    let name = name_owned.as_slice();
                     if name == InlineImage::NAME {
                         let image = parser.parse_inline_image(&PassthroughResolver)?;
                         out.push(PdfOperatorVariant::InlineImage(image));
@@ -144,7 +147,7 @@ impl PdfOperatorVariant {
                     operands.clear();
                 }
                 // Anything else is an operand value.
-                _ => {
+                Some(_) => {
                     let value = parser.parse_object(&PassthroughResolver)?;
                     operands.push(value);
                 }
