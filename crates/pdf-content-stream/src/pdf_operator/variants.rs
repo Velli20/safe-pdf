@@ -11,7 +11,7 @@ use crate::{
     error::PdfOperatorError,
     graphics_state_operators::*,
     marked_content_operators::*,
-    operation_map::{get_operation_descriptor, OpDescriptor},
+    operation_map::{OpDescriptor, get_operation_descriptor},
     path_operators::*,
     path_paint_operators::*,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
@@ -267,6 +267,8 @@ fn parse_operator(
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
+    use crate::recording_pdf_operator_backend::{RecordedOperation, RecordingBackend};
+
     use super::*;
 
     #[test]
@@ -355,6 +357,26 @@ mod tests {
                 RestoreGraphicsState
             ))
         ));
+    }
+
+    #[test]
+    fn parsed_inline_image_is_recorded_by_backend() {
+        let input = b"BI /W 1 /H 1 ID \x00 EI";
+        let operators = PdfOperatorVariant::parse(input).unwrap();
+        let inline_image = match operators.first() {
+            Some(PdfOperatorVariant::InlineImage(image)) => image.clone(),
+            other => panic!("expected inline image, got {other:?}"),
+        };
+
+        let mut backend = RecordingBackend::default();
+        operators[0].call(&mut backend).unwrap();
+
+        assert_eq!(
+            backend.operations,
+            vec![RecordedOperation::PaintInlineImage {
+                image: inline_image
+            }]
+        );
     }
 
     #[test]

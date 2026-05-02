@@ -28,7 +28,8 @@ pub struct OpDescriptor {
     pub name: &'static [u8],
     pub operand_count: Option<usize>,
     pub parser: fn(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError>,
-    pub parse_hook: for<'a> fn(&mut PdfParser<'a>) -> Result<Option<PdfOperatorVariant>, PdfOperatorError>,
+    pub parse_hook:
+        for<'a> fn(&mut PdfParser<'a>) -> Result<Option<PdfOperatorVariant>, PdfOperatorError>,
 }
 
 impl OpDescriptor {

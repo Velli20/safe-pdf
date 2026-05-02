@@ -15,6 +15,12 @@ pub enum PdfImageError {
     InvalidImageDimensions { width: usize, height: usize },
     #[error("unsupported image BitsPerComponent value: {bits_per_component} (supported: 1, 8)")]
     UnsupportedImageBitsPerComponent { bits_per_component: usize },
+    #[error(
+        "unsupported indexed BitsPerComponent value: {bits_per_component} (supported: 1, 2, 4, 8)"
+    )]
+    UnsupportedIndexedBits { bits_per_component: usize },
+    #[error("{0}")]
+    InvalidImageData(String),
     #[error("invalid image color space: reported zero color components")]
     InvalidColorComponentCount,
     #[error("truncated image data: expected at least {expected_bytes} bytes, got {actual_bytes}")]

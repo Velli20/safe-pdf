@@ -113,12 +113,12 @@ impl SoftMaskResolver for PageSoftMaskResolver<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use std::collections::BTreeMap;
     use pdf_content_stream::content_stream::ContentStreamIdAllocator;
     use pdf_object::{
         dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
         stream::StreamObject,
     };
+    use std::collections::BTreeMap;
 
     use crate::resource_cache::DefaultResourceCache;
 

@@ -220,6 +220,19 @@ pub trait CanvasBackend {
         image_rotation: Option<f32>,
     ) -> Result<(), PdfCanvasError>;
 
+    /// Draws an inline image onto the canvas.
+    ///
+    /// The default implementation forwards to [`CanvasBackend::draw_image_rect`].
+    fn draw_inline_image(
+        &mut self,
+        image: &Image<'_>,
+        blend_mode: Option<BlendMode>,
+        dest_rect: Rect,
+        image_rotation: Option<f32>,
+    ) -> Result<(), PdfCanvasError> {
+        self.draw_image_rect(image, blend_mode, dest_rect, image_rotation)
+    }
+
     /// Begins drawing into the specified mask layer.
     ///
     /// All subsequent drawing operations will affect the mask until `end_mask_layer` is called.

@@ -43,6 +43,25 @@ impl ImageXObject {
         objects: &dyn ObjectResolver,
         soft_mask_resolver: &mut dyn SoftMaskResolver,
     ) -> Result<Self, PdfImageError> {
+        let raw_data = stream_data.data()?;
+        Self::decode_normalized_image(
+            dictionary,
+            raw_data.as_ref(),
+            objects,
+            Some(soft_mask_resolver),
+        )
+    }
+
+    /// Decodes a normalized image dictionary and raw bytes into a raster image.
+    ///
+    /// The dictionary must already use canonical image keys such as `Width`,
+    /// `Height`, `BitsPerComponent`, and `ColorSpace`.
+    pub fn decode_normalized_image(
+        dictionary: &Dictionary,
+        raw_data: &[u8],
+        objects: &dyn ObjectResolver,
+        soft_mask_resolver: Option<&mut dyn SoftMaskResolver>,
+    ) -> Result<Self, PdfImageError> {
         let width = dictionary
             .get_or_err("Width")?
             .try_number::<usize>(objects)?;
@@ -62,20 +81,14 @@ impl ImageXObject {
         }
 
         let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
-        let raw_data = stream_data.data()?;
 
         let raw_data = if bits_per_component == 1 {
             let n_components = color_space
                 .as_ref()
                 .map_or(1, ColorSpace::num_color_components);
-            Cow::Owned(Self::expand_1bpc(
-                raw_data.as_ref(),
-                width,
-                height,
-                n_components,
-            ))
+            Cow::Owned(Self::expand_1bpc(raw_data, width, height, n_components))
         } else {
-            raw_data
+            Cow::Borrowed(raw_data)
         };
 
         let (image_data, stored_color_space, num_color_components): (Cow<[u8]>, _, usize) =
@@ -112,7 +125,10 @@ impl ImageXObject {
             });
         }
 
-        let smask = Self::parse_smask(dictionary, objects, soft_mask_resolver)?;
+        let smask = match soft_mask_resolver {
+            Some(resolver) => Self::parse_smask(dictionary, objects, resolver)?,
+            None => None,
+        };
 
         let (data, pixel_format) = if smask.is_some() || num_color_components != 1 {
             (
@@ -331,6 +347,62 @@ mod tests {
         assert!(
             smask.is_none(),
             "/SMask /None should behave like no soft mask"
+        );
+    }
+
+    #[test]
+    fn decode_normalized_1bpc_image_expands_samples() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            ("BitsPerComponent".to_string(), ObjectVariant::Integer(1)),
+            ("ColorSpace".to_string(), ObjectVariant::Name(b"DeviceGray".to_vec())),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(8)),
+        ]));
+
+        let image = ImageXObject::decode_normalized_image(
+            &dictionary,
+            &[0b1011_0010],
+            &PassthroughResolver,
+            None,
+        )
+        .expect("1-bpc image should decode");
+
+        assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
+        assert_eq!(
+            image.data,
+            vec![0xFF, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0x00]
+        );
+    }
+
+    #[test]
+    fn decode_normalized_indexed_image_expands_palette_data() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (
+                "ColorSpace".to_string(),
+                ObjectVariant::Array(vec![
+                    ObjectVariant::Name(b"Indexed".to_vec()),
+                    ObjectVariant::Name(b"DeviceRGB".to_vec()),
+                    ObjectVariant::Integer(1),
+                    ObjectVariant::HexString(vec![10, 11, 12, 20, 21, 22]),
+                ]),
+            ),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(2)),
+        ]));
+
+        let image = ImageXObject::decode_normalized_image(
+            &dictionary,
+            &[0, 1],
+            &PassthroughResolver,
+            None,
+        )
+        .expect("indexed image should decode");
+
+        assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
+        assert_eq!(
+            image.data,
+            vec![10, 11, 12, 255, 20, 21, 22, 255]
         );
     }
 }

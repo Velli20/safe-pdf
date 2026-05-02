@@ -39,6 +39,12 @@ enum RecordingCommand {
         dest_rect: Rect,
         image_rotation: Option<f32>,
     },
+    DrawInlineImage {
+        image: BackendImage<'static>,
+        blend_mode: Option<BlendMode>,
+        dest_rect: Rect,
+        image_rotation: Option<f32>,
+    },
     BeginMaskLayer {
         mask: Arc<RecordingCanvas>,
         transform: Transform,
@@ -184,6 +190,14 @@ impl RecordingCanvas {
                 } => {
                     backend.draw_image_rect(image, *blend_mode, *dest_rect, *image_rotation)?;
                 }
+                DrawInlineImage {
+                    image,
+                    blend_mode,
+                    dest_rect,
+                    image_rotation,
+                } => {
+                    backend.draw_inline_image(image, *blend_mode, *dest_rect, *image_rotation)?;
+                }
                 BeginMaskLayer {
                     transform,
                     mask_mode,
@@ -279,6 +293,27 @@ impl CanvasBackend for RecordingCanvas {
         image_rotation: Option<f32>,
     ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::DrawImage {
+            image: BackendImage {
+                data: image.data.to_shared(),
+                width: image.width,
+                height: image.height,
+                pixel_format: image.pixel_format,
+            },
+            blend_mode,
+            dest_rect,
+            image_rotation,
+        });
+        Ok(())
+    }
+
+    fn draw_inline_image(
+        &mut self,
+        image: &BackendImage<'_>,
+        blend_mode: Option<BlendMode>,
+        dest_rect: Rect,
+        image_rotation: Option<f32>,
+    ) -> Result<(), PdfCanvasError> {
+        self.commands.push(RecordingCommand::DrawInlineImage {
             image: BackendImage {
                 data: image.data.to_shared(),
                 width: image.width,
