@@ -1,7 +1,6 @@
-use std::collections::BTreeMap;
-
 use pdf_image::InlineImage;
-use pdf_object::dictionary::Dictionary;
+use pdf_object::object_resolver::PassthroughResolver;
+use pdf_parser::parser::PdfParser;
 
 use crate::{
     error::PdfOperatorError,
@@ -44,10 +43,12 @@ impl PdfOperator for InlineImage {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::InlineImage(Self::new(
-            Dictionary::new(BTreeMap::new()),
-            Vec::new(),
-        )))
+        Err(PdfOperatorError::UnsupportedOperator("BI"))
+    }
+
+    fn parse<'a>(parser: &mut PdfParser<'a>) -> Result<Option<PdfOperatorVariant>, PdfOperatorError> {
+        let image = parser.parse_inline_image(&PassthroughResolver)?;
+        Ok(Some(PdfOperatorVariant::InlineImage(image)))
     }
 
     fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {

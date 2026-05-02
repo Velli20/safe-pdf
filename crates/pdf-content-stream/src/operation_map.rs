@@ -17,6 +17,7 @@ use crate::{
     xobject_and_image_operators::*,
 };
 
+use pdf_image::InlineImage;
 use pdf_parser::parser::PdfParser;
 
 /// Defines a mapping between a PDF operator's string representation (e.g., "m" for MoveTo)
@@ -27,7 +28,7 @@ pub struct OpDescriptor {
     pub name: &'static [u8],
     pub operand_count: Option<usize>,
     pub parser: fn(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError>,
-    pub parse_hook: for<'a> fn(&'a mut PdfParser<'a>) -> Result<Option<PdfOperatorVariant>, PdfOperatorError>,
+    pub parse_hook: for<'a> fn(&mut PdfParser<'a>) -> Result<Option<PdfOperatorVariant>, PdfOperatorError>,
 }
 
 impl OpDescriptor {
@@ -50,7 +51,7 @@ pub(crate) const READ_MAP: &[OpDescriptor] = &[
     OpDescriptor::from::<FillAndStrokePathNonZero>(), // "B"
     OpDescriptor::from::<FillAndStrokePathEvenOdd>(), // "B*"
     OpDescriptor::from::<BeginMarkedContentWithProps>(), // "BDC"
-    OpDescriptor::from::<pdf_image::InlineImage>(), // "BI"
+    OpDescriptor::from::<InlineImage>(),            // "BI"
     OpDescriptor::from::<BeginMarkedContent>(),     // "BMC"
     OpDescriptor::from::<BeginText>(),              // "BT"
     OpDescriptor::from::<BeginCompatibility>(),     // "BX"

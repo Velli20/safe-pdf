@@ -11,7 +11,7 @@ use crate::{
     error::PdfOperatorError,
     graphics_state_operators::*,
     marked_content_operators::*,
-    operation_map::get_operation_descriptor,
+    operation_map::{get_operation_descriptor, OpDescriptor},
     path_operators::*,
     path_paint_operators::*,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
@@ -133,16 +133,18 @@ impl PdfOperatorVariant {
                     let name_slice = crate::operator_tokenizer::read_operator_name(&mut parser)?;
                     let name_owned = name_slice.to_vec();
                     let name = name_owned.as_slice();
-                    if name == InlineImage::NAME {
-                        let image = parser.parse_inline_image(&PassthroughResolver)?;
-                        out.push(PdfOperatorVariant::InlineImage(image));
+                    let Some(descriptor) = get_operation_descriptor(name) else {
+                        // Skip unknown operator and its operands gracefully. This allows us
+                        // to parse content streams that contain operators that are outside
+                        // the PDF specification or were simply missed by this implementation.
                         operands.clear();
                         continue;
-                    }
+                    };
 
-                    match parse_operator(name, &mut operands) {
-                        Ok(operator) => out.push(operator),
-                        Err(_err) => {}
+                    if let Some(operator) = (descriptor.parse_hook)(&mut parser)? {
+                        out.push(operator);
+                    } else {
+                        out.push(parse_operator(descriptor, &mut operands)?);
                     }
                     operands.clear();
                 }
@@ -235,19 +237,14 @@ impl PdfOperatorVariant {
 /// before parsing. Takes `operands` by `&mut` so its heap allocation can be
 /// reclaimed and reused for the next operator.
 fn parse_operator(
-    name: &[u8],
+    descriptor: &OpDescriptor,
     operands: &mut Vec<ObjectVariant>,
 ) -> Result<PdfOperatorVariant, PdfOperatorError> {
-    let Some(descriptor) = get_operation_descriptor(name) else {
-        let name_str = String::from_utf8_lossy(name);
-        return Err(PdfOperatorError::UnknownOperator(name_str.to_string()));
-    };
-
     // Validate operand count if the operator has a fixed count requirement.
     if let Some(required_count) = descriptor.operand_count
         && operands.len() != required_count
     {
-        let name_str = String::from_utf8_lossy(name);
+        let name_str = String::from_utf8_lossy(descriptor.name);
         return Err(PdfOperatorError::OperandCountMismatch {
             operator: name_str.to_string(),
             actual: operands.len(),
