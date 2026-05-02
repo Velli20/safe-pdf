@@ -740,9 +740,7 @@ mod tests {
         transform::Transform,
     };
     use pdf_image::InlineImage;
-    use pdf_object::{
-        dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject,
-    };
+    use pdf_object::{dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject};
     use pdf_page::{
         form::FormXObject, page::PdfPage, resource::Resource, resources::Resources,
         xobject::XObject,
@@ -901,7 +899,10 @@ mod tests {
     fn image_xobject_dictionary() -> Dictionary {
         Dictionary::new(std::collections::BTreeMap::from([
             ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
-            ("ColorSpace".to_string(), ObjectVariant::Name(b"DeviceRGB".to_vec())),
+            (
+                "ColorSpace".to_string(),
+                ObjectVariant::Name(b"DeviceRGB".to_vec()),
+            ),
             ("Height".to_string(), ObjectVariant::Integer(1)),
             ("Width".to_string(), ObjectVariant::Integer(2)),
         ]))
@@ -1006,10 +1007,13 @@ mod tests {
 
         let transform = Transform::from_row(2.0, 0.0, 0.0, 3.0, 10.0, 20.0);
 
-        let mut xobject_canvas = PdfCanvas::new(&mut xobject_backend, &page, None)
-            .expect("xobject canvas should build");
+        let mut xobject_canvas =
+            PdfCanvas::new(&mut xobject_backend, &page, None).expect("xobject canvas should build");
         xobject_canvas.current_state_mut().expect("state").transform = transform;
-        xobject_canvas.current_state_mut().expect("state").blend_mode = Some(BlendMode::Multiply);
+        xobject_canvas
+            .current_state_mut()
+            .expect("state")
+            .blend_mode = Some(BlendMode::Multiply);
 
         let image = pdf_image::ImageXObject::decode_normalized_image(
             &image_xobject_dictionary(),
@@ -1023,8 +1027,8 @@ mod tests {
             .render_image_xobject(&image)
             .expect("xobject image should render");
 
-        let mut inline_canvas = PdfCanvas::new(&mut inline_backend, &page, None)
-            .expect("inline canvas should build");
+        let mut inline_canvas =
+            PdfCanvas::new(&mut inline_backend, &page, None).expect("inline canvas should build");
         inline_canvas.current_state_mut().expect("state").transform = transform;
         inline_canvas.current_state_mut().expect("state").blend_mode = Some(BlendMode::Multiply);
 

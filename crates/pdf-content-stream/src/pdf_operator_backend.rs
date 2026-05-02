@@ -737,10 +737,8 @@ pub trait XObjectOps {
     fn invoke_xobject(&mut self, xobject_name: &str) -> Result<(), Self::ErrorType>;
 
     /// Paints an inline image.
-    fn paint_inline_image(
-        &mut self,
-        image: &pdf_image::InlineImage,
-    ) -> Result<(), Self::ErrorType>;
+    fn paint_inline_image(&mut self, image: &pdf_image::InlineImage)
+    -> Result<(), Self::ErrorType>;
 }
 
 /// Defines methods to handle PDF Shading operators.

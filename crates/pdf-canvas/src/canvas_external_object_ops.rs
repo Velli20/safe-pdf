@@ -98,10 +98,7 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
         Ok(())
     }
 
-    fn paint_inline_image(
-        &mut self,
-        image: &InlineImage,
-    ) -> Result<(), Self::ErrorType> {
+    fn paint_inline_image(&mut self, image: &InlineImage) -> Result<(), Self::ErrorType> {
         let dictionary = normalize_inline_image_dictionary(image.dictionary());
         let decoded = ImageXObject::decode_normalized_image(
             &dictionary,
@@ -117,7 +114,10 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
 
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Renders an image XObject to the canvas.
-    pub(crate) fn render_image_xobject(&mut self, image: &ImageXObject) -> Result<(), PdfCanvasError> {
+    pub(crate) fn render_image_xobject(
+        &mut self,
+        image: &ImageXObject,
+    ) -> Result<(), PdfCanvasError> {
         self.render_decoded_image(image, false)
     }
 
@@ -180,5 +180,4 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
 
         dest_rect
     }
-
 }

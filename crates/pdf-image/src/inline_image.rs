@@ -100,10 +100,16 @@ mod tests {
             normalized.dictionary,
             BTreeMap::from([
                 ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
-                ("ColorSpace".to_string(), ObjectVariant::Name(b"DeviceRGB".to_vec())),
+                (
+                    "ColorSpace".to_string(),
+                    ObjectVariant::Name(b"DeviceRGB".to_vec())
+                ),
                 ("Decode".to_string(), ObjectVariant::Null),
                 ("DecodeParms".to_string(), ObjectVariant::Boolean(true)),
-                ("Filter".to_string(), ObjectVariant::Name(b"DCTDecode".to_vec())),
+                (
+                    "Filter".to_string(),
+                    ObjectVariant::Name(b"DCTDecode".to_vec())
+                ),
                 ("Height".to_string(), ObjectVariant::Integer(2)),
                 ("ImageMask".to_string(), ObjectVariant::Boolean(true)),
                 ("Interpolate".to_string(), ObjectVariant::Boolean(false)),

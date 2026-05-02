@@ -354,7 +354,10 @@ mod tests {
     fn decode_normalized_1bpc_image_expands_samples() {
         let dictionary = Dictionary::new(BTreeMap::from([
             ("BitsPerComponent".to_string(), ObjectVariant::Integer(1)),
-            ("ColorSpace".to_string(), ObjectVariant::Name(b"DeviceGray".to_vec())),
+            (
+                "ColorSpace".to_string(),
+                ObjectVariant::Name(b"DeviceGray".to_vec()),
+            ),
             ("Height".to_string(), ObjectVariant::Integer(1)),
             ("Width".to_string(), ObjectVariant::Integer(8)),
         ]));
@@ -391,18 +394,11 @@ mod tests {
             ("Width".to_string(), ObjectVariant::Integer(2)),
         ]));
 
-        let image = ImageXObject::decode_normalized_image(
-            &dictionary,
-            &[0, 1],
-            &PassthroughResolver,
-            None,
-        )
-        .expect("indexed image should decode");
+        let image =
+            ImageXObject::decode_normalized_image(&dictionary, &[0, 1], &PassthroughResolver, None)
+                .expect("indexed image should decode");
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
-        assert_eq!(
-            image.data,
-            vec![10, 11, 12, 255, 20, 21, 22, 255]
-        );
+        assert_eq!(image.data, vec![10, 11, 12, 255, 20, 21, 22, 255]);
     }
 }

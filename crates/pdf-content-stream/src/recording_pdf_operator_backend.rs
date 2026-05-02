@@ -1,8 +1,8 @@
-use pdf_image::InlineImage;
 use pdf_graphics::LineCap;
 use pdf_graphics::LineJoin;
 use pdf_graphics::TextRenderingMode;
 use pdf_graphics::transform::Transform;
+use pdf_image::InlineImage;
 use thiserror::Error;
 
 use crate::TextElement;
@@ -684,10 +684,9 @@ impl XObjectOps for RecordingBackend {
     }
 
     fn paint_inline_image(&mut self, image: &InlineImage) -> Result<(), Self::ErrorType> {
-        self.operations
-            .push(RecordedOperation::PaintInlineImage {
-                image: image.clone(),
-            });
+        self.operations.push(RecordedOperation::PaintInlineImage {
+            image: image.clone(),
+        });
         Ok(())
     }
 }

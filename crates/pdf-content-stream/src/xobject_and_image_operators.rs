@@ -73,7 +73,9 @@ mod tests {
         let image = InlineImage::new(Dictionary::new(BTreeMap::new()), vec![0x01, 0x02]);
         let mut backend = RecordingBackend::default();
 
-        image.call(&mut backend).expect("inline image should dispatch");
+        image
+            .call(&mut backend)
+            .expect("inline image should dispatch");
 
         assert_eq!(
             backend.operations,
