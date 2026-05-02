@@ -82,24 +82,25 @@ fn extract_index(data: &[u8], bits: usize, bit_pos: &mut usize) -> Result<u32, P
     Ok(value)
 }
 
-/// Expands indexed color image data to RGB format.
+/// Expands indexed color image data to an arbitrary component count.
 ///
 /// Indexed (palette-based) images store each pixel as an index into a color
 /// lookup table. This function decodes the packed index data and produces
-/// an RGB byte stream suitable for rendering.
+/// a byte stream whose palette entries have `base_components` bytes each.
 ///
 /// # Parameters
 ///
 /// - `indexed_data`: Raw packed pixel indices.
-/// - `lookup`: Color lookup table (RGB triplets, 3 bytes per entry).
+/// - `lookup`: Color lookup table, `base_components` bytes per palette entry.
 /// - `width`: Image width in pixels.
 /// - `height`: Image height in pixels.
 /// - `bits_per_component`: Bit depth of indices (1, 2, 4, or 8).
 /// - `hival`: Maximum valid index value (indices are clamped to this).
+/// - `base_components`: Number of bytes per palette entry.
 ///
 /// # Returns
 ///
-/// - `Ok(Vec<u8>)`: Expanded RGB data (`width * height * 3` bytes).
+/// - `Ok(Vec<u8>)`: Expanded palette data (`width * height * base_components` bytes).
 /// - `Err`: If data is malformed or insufficient.
 ///
 /// # Example
@@ -107,8 +108,56 @@ fn extract_index(data: &[u8], bits: usize, bit_pos: &mut usize) -> Result<u32, P
 /// For a 2x2 image with 4-bit indices and a 16-color palette:
 /// ```text
 /// Input:  [0x12, 0x34]  (indices: 1, 2, 3, 4)
-/// Output: [R1,G1,B1, R2,G2,B2, R3,G3,B3, R4,G4,B4]
+/// Output: [C1..., C2..., C3..., C4...]
 /// ```
+pub fn expand_indexed_to_components(
+    indexed_data: &[u8],
+    lookup: &[u8],
+    width: usize,
+    height: usize,
+    bits_per_component: usize,
+    hival: u8,
+    base_components: usize,
+) -> Result<Vec<u8>, PdfImageError> {
+    let num_pixels = width.saturating_mul(height);
+    if base_components == 0 {
+        return Err(PdfImageError::InvalidColorComponentCount);
+    }
+
+    let bits_per_row = width.saturating_mul(bits_per_component);
+    let bytes_per_row = bits_per_row.saturating_add(7) / 8;
+    let mut out = Vec::with_capacity(num_pixels.saturating_mul(base_components));
+
+    for row in 0..height {
+        let row_start_bit = row.saturating_mul(bytes_per_row).saturating_mul(8);
+        let mut bit_pos = row_start_bit;
+        for pixel_idx in 0..width {
+            let index = extract_index(indexed_data, bits_per_component, &mut bit_pos)?;
+
+            // Clamp index to valid palette range.
+            let clamped_index = index.min(u32::from(hival));
+            #[allow(clippy::as_conversions)]
+            let clamped_index_usize = clamped_index as usize;
+            let base = clamped_index_usize.saturating_mul(base_components);
+            let end = base.saturating_add(base_components);
+
+            let entry = lookup.get(base..end).ok_or_else(|| {
+                PdfImageError::InvalidImageData(format!(
+                    "Palette index {} out of bounds at pixel {} (lookup table size: {})",
+                    clamped_index_usize,
+                    row.saturating_mul(width).saturating_add(pixel_idx),
+                    lookup.len()
+                ))
+            })?;
+
+            out.extend_from_slice(entry);
+        }
+    }
+
+    Ok(out)
+}
+
+/// Expands indexed color image data to RGB format.
 pub fn expand_indexed_to_rgb(
     indexed_data: &[u8],
     lookup: &[u8],
@@ -117,37 +166,15 @@ pub fn expand_indexed_to_rgb(
     bits_per_component: usize,
     hival: u8,
 ) -> Result<Vec<u8>, PdfImageError> {
-    let num_pixels = width.saturating_mul(height);
-    let mut out = Vec::with_capacity(num_pixels.saturating_mul(RGB_COMPONENTS));
-    let mut bit_pos = 0;
-
-    for pixel_idx in 0..num_pixels {
-        let index = extract_index(indexed_data, bits_per_component, &mut bit_pos)?;
-
-        // Clamp index to valid palette range
-        // Using u32::from for widening conversion, then usize conversion
-        let clamped_index = index.min(u32::from(hival));
-        // Conversion from u32 to usize: on 32-bit platforms this is identity,
-        // on 64-bit platforms this is a widening cast - both are infallible
-        #[allow(clippy::as_conversions)]
-        let clamped_index_usize = clamped_index as usize;
-        let base = clamped_index_usize.saturating_mul(RGB_COMPONENTS);
-        let end = base.saturating_add(RGB_COMPONENTS);
-
-        // Safely access lookup table with bounds checking
-        let rgb = lookup.get(base..end).ok_or_else(|| {
-            PdfImageError::InvalidImageData(format!(
-                "Palette index {} out of bounds at pixel {} (lookup table size: {})",
-                clamped_index_usize,
-                pixel_idx,
-                lookup.len()
-            ))
-        })?;
-
-        out.extend_from_slice(rgb);
-    }
-
-    Ok(out)
+    expand_indexed_to_components(
+        indexed_data,
+        lookup,
+        width,
+        height,
+        bits_per_component,
+        hival,
+        RGB_COMPONENTS,
+    )
 }
 
 #[cfg(test)]
@@ -178,6 +205,23 @@ mod tests {
     }
 
     #[test]
+    fn test_expand_indexed_4bit() {
+        let width = 4usize;
+        let height = 1usize;
+        let indexed_data = vec![0x01u8, 0x23u8];
+        let lookup = vec![
+            1u8, 2u8, 3u8, // 0
+            4u8, 5u8, 6u8, // 1
+            7u8, 8u8, 9u8, // 2
+            10u8, 11u8, 12u8, // 3
+        ];
+
+        let out = expand_indexed_to_rgb(&indexed_data, &lookup, width, height, 4, 3).unwrap();
+        let expected = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        assert_eq!(out, expected);
+    }
+
+    #[test]
     fn test_expand_indexed_2bit() {
         // width=4,height=1 => 4 pixels packed into one byte: indices 0,1,2,3 -> 00 01 10 11 = 0x1B
         let width = 4usize;
@@ -192,6 +236,44 @@ mod tests {
 
         let out = expand_indexed_to_rgb(&indexed_data, &lookup, width, height, 2, 3).unwrap();
         let expected = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn test_expand_indexed_1bit() {
+        let width = 8usize;
+        let height = 1usize;
+        let indexed_data = vec![0b1010_1100u8];
+        let lookup = vec![
+            10u8, 11u8, 12u8, // 0
+            20u8, 21u8, 22u8, // 1
+        ];
+
+        let out =
+            expand_indexed_to_components(&indexed_data, &lookup, width, height, 1, 1, 3).unwrap();
+        let expected = vec![
+            20, 21, 22, 10, 11, 12, 20, 21, 22, 10, 11, 12, 20, 21, 22, 20, 21, 22, 10, 11, 12, 10,
+            11, 12,
+        ];
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn test_expand_indexed_1bit_multi_row_uses_row_padding() {
+        let width = 3usize;
+        let height = 2usize;
+        let indexed_data = vec![0b1010_0000u8, 0b0110_0000u8];
+        let lookup = vec![
+            1u8, 2u8, 3u8, // 0
+            4u8, 5u8, 6u8, // 1
+        ];
+
+        let out =
+            expand_indexed_to_components(&indexed_data, &lookup, width, height, 1, 1, 3).unwrap();
+        let expected = vec![
+            4, 5, 6, 1, 2, 3, 4, 5, 6, // row 1: 1,0,1
+            1, 2, 3, 4, 5, 6, 4, 5, 6, // row 2: 0,1,1
+        ];
         assert_eq!(out, expected);
     }
 

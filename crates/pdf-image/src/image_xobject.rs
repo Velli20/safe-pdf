@@ -8,6 +8,7 @@ use pdf_object::{
 };
 
 use crate::error::PdfImageError;
+use crate::indexed::expand_indexed_to_components;
 
 /// Resolves a stream as an image soft mask, or reports a cycle/non-image failure.
 pub trait SoftMaskResolver {
@@ -76,20 +77,19 @@ impl ImageXObject {
         let bits_per_component = dictionary
             .get_or_err("BitsPerComponent")?
             .try_number::<usize>(objects)?;
-        if bits_per_component != 1 && bits_per_component != 8 {
+        let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
+        let is_indexed = matches!(color_space, Some(ColorSpace::Indexed(_)));
+        if is_indexed {
+            if bits_per_component != 1
+                && bits_per_component != 2
+                && bits_per_component != 4
+                && bits_per_component != 8
+            {
+                return Err(PdfImageError::UnsupportedIndexedBits { bits_per_component });
+            }
+        } else if bits_per_component != 1 && bits_per_component != 8 {
             return Err(PdfImageError::UnsupportedImageBitsPerComponent { bits_per_component });
         }
-
-        let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
-
-        let raw_data = if bits_per_component == 1 {
-            let n_components = color_space
-                .as_ref()
-                .map_or(1, ColorSpace::num_color_components);
-            Cow::Owned(Self::expand_1bpc(raw_data, width, height, n_components))
-        } else {
-            Cow::Borrowed(raw_data)
-        };
 
         let (image_data, stored_color_space, num_color_components): (Cow<[u8]>, _, usize) =
             match color_space {
@@ -99,11 +99,25 @@ impl ImageXObject {
                     lookup,
                 })) => {
                     let base_components = base.num_color_components();
-                    let expanded =
-                        Self::expand_indexed(raw_data.as_ref(), base_components, hival, &lookup);
+                    let expanded = expand_indexed_to_components(
+                        raw_data,
+                        &lookup,
+                        width,
+                        height,
+                        bits_per_component,
+                        hival,
+                        base_components,
+                    )?;
                     (Cow::Owned(expanded), Some(*base), base_components)
                 }
                 other => {
+                    let raw_data = if bits_per_component == 1 {
+                        let n_components =
+                            other.as_ref().map_or(1, ColorSpace::num_color_components);
+                        Cow::Owned(Self::expand_1bpc(raw_data, width, height, n_components))
+                    } else {
+                        Cow::Borrowed(raw_data)
+                    };
                     let components = match &other {
                         Some(cs) => cs.num_color_components(),
                         None => 1,
@@ -153,20 +167,6 @@ impl ImageXObject {
             pixel_format,
             color_space: stored_color_space,
         })
-    }
-
-    fn expand_indexed(data: &[u8], base_components: usize, hival: u8, lookup: &[u8]) -> Vec<u8> {
-        let mut out = Vec::with_capacity(data.len().saturating_mul(base_components));
-        for &index in data {
-            let clamped = usize::from(index.min(hival));
-            let start = clamped.saturating_mul(base_components);
-            let end = start.saturating_add(base_components);
-            match lookup.get(start..end) {
-                Some(color) => out.extend_from_slice(color),
-                None => out.extend(std::iter::repeat_n(0, base_components)),
-            }
-        }
-        out
     }
 
     fn parse_smask(
@@ -378,27 +378,98 @@ mod tests {
     }
 
     #[test]
-    fn decode_normalized_indexed_image_expands_palette_data() {
-        let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+    fn decode_normalized_indexed_image_1bpc_expands_samples() {
+        let dictionary = indexed_dictionary(1);
+        let image = ImageXObject::decode_normalized_image(
+            &dictionary,
+            &[0b1010_0000],
+            &PassthroughResolver,
+            None,
+        )
+        .expect("1-bpc indexed image should decode");
+
+        assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
+        assert_eq!(
+            image.data,
+            vec![
+                20, 21, 22, 255, 10, 11, 12, 255, 20, 21, 22, 255, 10, 11, 12, 255
+            ]
+        );
+    }
+
+    #[test]
+    fn decode_normalized_indexed_image_2bpc_expands_samples() {
+        let dictionary = indexed_dictionary(2);
+        let image =
+            ImageXObject::decode_normalized_image(&dictionary, &[0x1B], &PassthroughResolver, None)
+                .expect("2-bpc indexed image should decode");
+
+        assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
+        assert_eq!(
+            image.data,
+            vec![
+                10, 11, 12, 255, 20, 21, 22, 255, 30, 31, 32, 255, 40, 41, 42, 255,
+            ]
+        );
+    }
+
+    #[test]
+    fn decode_normalized_indexed_image_4bpc_expands_samples() {
+        let dictionary = indexed_dictionary(4);
+        let image = ImageXObject::decode_normalized_image(
+            &dictionary,
+            &[0x01, 0x23],
+            &PassthroughResolver,
+            None,
+        )
+        .expect("4-bpc indexed image should decode");
+
+        assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
+        assert_eq!(
+            image.data,
+            vec![
+                10, 11, 12, 255, 20, 21, 22, 255, 30, 31, 32, 255, 40, 41, 42, 255
+            ]
+        );
+    }
+
+    #[test]
+    fn decode_normalized_indexed_image_8bpc_continues_to_work() {
+        let dictionary = indexed_dictionary(8);
+        let image = ImageXObject::decode_normalized_image(
+            &dictionary,
+            &[0, 1, 2, 3],
+            &PassthroughResolver,
+            None,
+        )
+        .expect("8-bpc indexed image should decode");
+
+        assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
+        assert_eq!(
+            image.data,
+            vec![
+                10, 11, 12, 255, 20, 21, 22, 255, 30, 31, 32, 255, 40, 41, 42, 255
+            ]
+        );
+    }
+
+    fn indexed_dictionary(bits_per_component: i64) -> Dictionary {
+        Dictionary::new(BTreeMap::from([
+            (
+                "BitsPerComponent".to_string(),
+                ObjectVariant::Integer(bits_per_component),
+            ),
             (
                 "ColorSpace".to_string(),
                 ObjectVariant::Array(vec![
                     ObjectVariant::Name(b"Indexed".to_vec()),
                     ObjectVariant::Name(b"DeviceRGB".to_vec()),
-                    ObjectVariant::Integer(1),
-                    ObjectVariant::HexString(vec![10, 11, 12, 20, 21, 22]),
+                    ObjectVariant::Integer(3),
+                    ObjectVariant::HexString(vec![10, 11, 12, 20, 21, 22, 30, 31, 32, 40, 41, 42]),
                 ]),
             ),
             ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(2)),
-        ]));
-
-        let image =
-            ImageXObject::decode_normalized_image(&dictionary, &[0, 1], &PassthroughResolver, None)
-                .expect("indexed image should decode");
-
-        assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
-        assert_eq!(image.data, vec![10, 11, 12, 255, 20, 21, 22, 255]);
+            ("Width".to_string(), ObjectVariant::Integer(4)),
+        ]))
     }
 }
