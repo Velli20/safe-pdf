@@ -1,4 +1,3 @@
-mod decode;
 pub mod error;
 pub mod image_xobject;
 pub mod indexed;

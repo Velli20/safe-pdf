@@ -1,4 +1,5 @@
 use pdf_color_space::error::ColorSpaceError;
+use pdf_decode::DecodeError;
 use pdf_filter::error::FilterError;
 use pdf_object::error::ObjectError;
 use thiserror::Error;
@@ -43,5 +44,44 @@ pub enum PdfImageError {
 impl PdfImageError {
     pub fn is_cyclic_dependency(&self) -> bool {
         matches!(self, Self::Object(ObjectError::CyclicDependency { .. }))
+    }
+}
+
+impl From<DecodeError> for PdfImageError {
+    fn from(value: DecodeError) -> Self {
+        match value {
+            DecodeError::Object(err) => Self::Object(err),
+            DecodeError::InvalidBitsPerSample { bits_per_sample } => {
+                Self::UnsupportedImageBitsPerComponent {
+                    bits_per_component: bits_per_sample,
+                }
+            }
+            DecodeError::InsufficientData {
+                expected_bytes,
+                actual_bytes,
+            } => Self::TruncatedImageData {
+                expected_bytes,
+                actual_bytes,
+            },
+            DecodeError::InvalidDecodeLength {
+                expected_values,
+                actual_values,
+            } => Self::InvalidDecodeLength {
+                expected_values,
+                actual_values,
+            },
+            DecodeError::InvalidDecodeValue => Self::InvalidDecodeValue,
+            DecodeError::InvalidComponentCount => Self::InvalidColorComponentCount,
+            DecodeError::PaletteLookupOutOfBounds {
+                index,
+                pixel_index,
+                lookup_len,
+            } => Self::InvalidImageData(format!(
+                "Palette index {index} out of bounds at pixel {pixel_index} (lookup table size: {lookup_len})"
+            )),
+            DecodeError::InvalidSampleData => {
+                Self::InvalidImageData("packed sample value cannot fit in a byte".to_string())
+            }
+        }
     }
 }

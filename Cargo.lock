@@ -1895,6 +1895,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdf-decode"
+version = "0.1.0"
+dependencies = [
+ "num-traits",
+ "pdf-object",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "pdf-document"
 version = "0.1.0"
 dependencies = [
@@ -1942,6 +1951,7 @@ version = "0.1.0"
 dependencies = [
  "num-derive",
  "num-traits",
+ "pdf-decode",
  "pdf-object",
  "pdf-postscript",
  "thiserror 2.0.12",
@@ -1983,6 +1993,7 @@ version = "0.1.0"
 dependencies = [
  "num-traits",
  "pdf-color-space",
+ "pdf-decode",
  "pdf-filter",
  "pdf-graphics",
  "pdf-object",

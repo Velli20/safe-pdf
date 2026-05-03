@@ -8,6 +8,7 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+pdf-decode = { path = "../pdf-decode" }
 pdf-object = { path = "../pdf-object" }
 pdf-postscript = { path = "../pdf-postscript" }
 thiserror = "2.0.12"

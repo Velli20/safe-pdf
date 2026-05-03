@@ -1,4 +1,5 @@
 use pdf_color_space::{color_space::ColorSpace, indexed_color_space::IndexedColorSpace};
+use pdf_decode::{DecodeMap, SampleLayout, decode_sample_codes};
 use pdf_filter::filter::decode_with_resolver;
 use pdf_graphics::PixelFormat;
 use pdf_object::{
@@ -7,9 +8,8 @@ use pdf_object::{
 };
 
 use crate::InlineImage;
-use crate::decode::ImageDecode;
 use crate::error::PdfImageError;
-use crate::indexed::{expand_indexed_values_to_components, unpack_image_samples};
+use crate::indexed::expand_indexed_values_to_components;
 
 /// Resolves a stream as an image soft mask, or reports a cycle/non-image failure.
 pub trait SoftMaskResolver {
@@ -187,23 +187,10 @@ impl ImageXObject {
         metadata: &ImageMetadata,
         indexed: &IndexedColorSpace,
     ) -> Result<DecodedSamples, PdfImageError> {
-        let sample_codes = unpack_image_samples(
-            raw_data,
-            metadata.width,
-            metadata.height,
-            metadata.bits_per_component,
-            1,
-        )?;
+        let sample_codes = Self::decode_image_sample_codes(raw_data, 1, metadata)?;
         let sample_max = Self::sample_max(metadata.bits_per_component)?;
-        let decode = ImageDecode::from_dictionary(
-            dictionary,
-            objects,
-            1,
-            sample_max,
-            sample_max,
-            metadata.image_mask,
-        )?;
-        let decoded_indices = decode.apply(&sample_codes);
+        let decode = DecodeMap::from_dictionary(dictionary, objects, 1, metadata.image_mask)?;
+        let decoded_indices = decode.apply_to_bytes(&sample_codes, sample_max, sample_max);
         let base_components = indexed.base.num_color_components();
         let image_data = expand_indexed_values_to_components(
             &decoded_indices,
@@ -230,27 +217,46 @@ impl ImageXObject {
             .color_space
             .as_ref()
             .map_or(1, ColorSpace::num_color_components);
-        let sample_codes = unpack_image_samples(
-            raw_data,
-            metadata.width,
-            metadata.height,
-            metadata.bits_per_component,
-            num_components,
-        )?;
-        let decode = ImageDecode::from_dictionary(
-            dictionary,
-            objects,
-            num_components,
-            Self::sample_max(metadata.bits_per_component)?,
-            255,
-            metadata.image_mask,
-        )?;
+        let sample_codes = Self::decode_image_sample_codes(raw_data, num_components, metadata)?;
+        let decode =
+            DecodeMap::from_dictionary(dictionary, objects, num_components, metadata.image_mask)?;
 
         Ok(DecodedSamples {
             stored_color_space: metadata.color_space.clone(),
             num_color_components: num_components,
-            image_data: decode.apply(&sample_codes),
+            image_data: decode.apply_to_bytes(
+                &sample_codes,
+                Self::sample_max(metadata.bits_per_component)?,
+                255,
+            ),
         })
+    }
+
+    fn decode_image_sample_codes(
+        raw_data: &[u8],
+        samples_per_pixel: usize,
+        metadata: &ImageMetadata,
+    ) -> Result<Vec<u8>, PdfImageError> {
+        let sample_codes = decode_sample_codes(
+            raw_data,
+            metadata.bits_per_component,
+            SampleLayout::RowAligned {
+                width: metadata.width,
+                height: metadata.height,
+                samples_per_pixel,
+            },
+        )?;
+
+        sample_codes
+            .into_iter()
+            .map(|sample| {
+                u8::try_from(sample).map_err(|_| {
+                    PdfImageError::InvalidImageData(
+                        "packed sample value cannot fit in a byte".to_string(),
+                    )
+                })
+            })
+            .collect()
     }
 
     /// Ensures the decoded component stream is large enough for the declared dimensions.

@@ -7,6 +7,7 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+pdf-decode = { path = "../pdf-decode" }
 pdf-object = { path = "../pdf-object" }
 pdf-graphics = { path = "../pdf-graphics" }
 pdf-color-space = { path = "../pdf-color-space" }

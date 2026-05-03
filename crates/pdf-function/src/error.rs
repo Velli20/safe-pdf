@@ -1,3 +1,4 @@
+use pdf_decode::DecodeError;
 use pdf_object::error::ObjectError;
 use pdf_postscript::calculator::CalcError;
 use thiserror::Error;
@@ -43,4 +44,25 @@ pub enum FunctionReadError {
     /// A sample value could not be converted to the required numeric type.
     #[error("Sample data conversion failed")]
     InvalidSampleData,
+}
+
+impl From<DecodeError> for FunctionReadError {
+    fn from(value: DecodeError) -> Self {
+        match value {
+            DecodeError::InvalidBitsPerSample { .. } => Self::InvalidBitsPerSample,
+            DecodeError::InsufficientData {
+                expected_bytes,
+                actual_bytes,
+            } => Self::InsufficientStreamData {
+                expected: expected_bytes,
+                actual: actual_bytes,
+            },
+            DecodeError::InvalidSampleData => Self::InvalidSampleData,
+            DecodeError::Object(err) => Self::DomainParsingError(err),
+            DecodeError::InvalidDecodeLength { .. }
+            | DecodeError::InvalidDecodeValue
+            | DecodeError::InvalidComponentCount
+            | DecodeError::PaletteLookupOutOfBounds { .. } => Self::InvalidSampleData,
+        }
+    }
 }
