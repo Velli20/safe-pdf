@@ -10,7 +10,7 @@
 
 use pdf_content_stream::pdf_operator_backend::XObjectOps;
 use pdf_graphics::{rect::Rect, transform::Transform};
-use pdf_image::{ImageXObject, InlineImage, normalize_inline_image_dictionary};
+use pdf_image::{ImageXObject, InlineImage};
 use pdf_object::object_resolver::PassthroughResolver;
 use pdf_page::xobject::XObject;
 
@@ -99,14 +99,8 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
     }
 
     fn paint_inline_image(&mut self, image: &InlineImage) -> Result<(), Self::ErrorType> {
-        let dictionary = normalize_inline_image_dictionary(image.dictionary());
-        let decoded = ImageXObject::decode_normalized_image(
-            &dictionary,
-            image.data(),
-            &PassthroughResolver,
-            None,
-        )
-        .map_err(|e| PdfCanvasError::InvalidImageData(e.to_string()))?;
+        let decoded = ImageXObject::decode_inline_image(image, &PassthroughResolver, None)
+            .map_err(|e| PdfCanvasError::InvalidImageData(e.to_string()))?;
 
         self.render_decoded_image(&decoded, true)
     }

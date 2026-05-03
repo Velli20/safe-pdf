@@ -1981,7 +1981,9 @@ dependencies = [
 name = "pdf-image"
 version = "0.1.0"
 dependencies = [
+ "num-traits",
  "pdf-color-space",
+ "pdf-filter",
  "pdf-graphics",
  "pdf-object",
  "thiserror 2.0.12",

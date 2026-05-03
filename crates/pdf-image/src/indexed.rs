@@ -83,6 +83,39 @@ fn extract_index(data: &[u8], bits: usize, bit_pos: &mut usize) -> Result<u32, P
 }
 
 /// Expands indexed color image data to an arbitrary component count.
+pub(crate) fn expand_indexed_values_to_components(
+    indexed_values: &[u8],
+    lookup: &[u8],
+    hival: u8,
+    base_components: usize,
+) -> Result<Vec<u8>, PdfImageError> {
+    let num_pixels = indexed_values.len();
+    if base_components == 0 {
+        return Err(PdfImageError::InvalidColorComponentCount);
+    }
+
+    let mut out = Vec::with_capacity(num_pixels.saturating_mul(base_components));
+    for (pixel_idx, &index) in indexed_values.iter().enumerate() {
+        let clamped_index = index.min(hival);
+        let base = usize::from(clamped_index).saturating_mul(base_components);
+        let end = base.saturating_add(base_components);
+
+        let entry = lookup.get(base..end).ok_or_else(|| {
+            PdfImageError::InvalidImageData(format!(
+                "Palette index {} out of bounds at pixel {} (lookup table size: {})",
+                clamped_index,
+                pixel_idx,
+                lookup.len()
+            ))
+        })?;
+
+        out.extend_from_slice(entry);
+    }
+
+    Ok(out)
+}
+
+/// Expands indexed color image data to an arbitrary component count.
 ///
 /// Indexed (palette-based) images store each pixel as an index into a color
 /// lookup table. This function decodes the packed index data and produces
@@ -120,41 +153,27 @@ pub fn expand_indexed_to_components(
     base_components: usize,
 ) -> Result<Vec<u8>, PdfImageError> {
     let num_pixels = width.saturating_mul(height);
-    if base_components == 0 {
-        return Err(PdfImageError::InvalidColorComponentCount);
-    }
 
     let bits_per_row = width.saturating_mul(bits_per_component);
     let bytes_per_row = bits_per_row.saturating_add(7) / 8;
-    let mut out = Vec::with_capacity(num_pixels.saturating_mul(base_components));
+    let mut indices = Vec::with_capacity(num_pixels);
 
     for row in 0..height {
         let row_start_bit = row.saturating_mul(bytes_per_row).saturating_mul(8);
         let mut bit_pos = row_start_bit;
-        for pixel_idx in 0..width {
+        for _pixel_idx in 0..width {
             let index = extract_index(indexed_data, bits_per_component, &mut bit_pos)?;
-
-            // Clamp index to valid palette range.
             let clamped_index = index.min(u32::from(hival));
-            #[allow(clippy::as_conversions)]
-            let clamped_index_usize = clamped_index as usize;
-            let base = clamped_index_usize.saturating_mul(base_components);
-            let end = base.saturating_add(base_components);
-
-            let entry = lookup.get(base..end).ok_or_else(|| {
+            let clamped_index = u8::try_from(clamped_index).map_err(|_| {
                 PdfImageError::InvalidImageData(format!(
-                    "Palette index {} out of bounds at pixel {} (lookup table size: {})",
-                    clamped_index_usize,
-                    row.saturating_mul(width).saturating_add(pixel_idx),
-                    lookup.len()
+                    "palette index {clamped_index} cannot fit in a byte"
                 ))
             })?;
-
-            out.extend_from_slice(entry);
+            indices.push(clamped_index);
         }
     }
 
-    Ok(out)
+    expand_indexed_values_to_components(&indices, lookup, hival, base_components)
 }
 
 /// Expands indexed color image data to RGB format.

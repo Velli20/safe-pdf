@@ -732,7 +732,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, rc::Rc, sync::Arc};
+    use std::{collections::HashMap, ops::Deref, rc::Rc, sync::Arc};
 
     use pdf_content_stream::content_stream::ContentStreamIdAllocator;
     use pdf_graphics::{
@@ -765,6 +765,7 @@ mod tests {
 
     #[derive(Debug, Clone, PartialEq)]
     struct DrawnImage {
+        data: Vec<u8>,
         width: usize,
         height: usize,
         pixel_format: PixelFormat,
@@ -831,6 +832,7 @@ mod tests {
         ) -> Result<(), crate::error::PdfCanvasError> {
             self.draw_image_count += 1;
             self.last_draw_image = Some(DrawnImage {
+                data: _image.data.deref().to_vec(),
                 width: _image.width,
                 height: _image.height,
                 pixel_format: _image.pixel_format,
@@ -850,6 +852,7 @@ mod tests {
         ) -> Result<(), crate::error::PdfCanvasError> {
             self.draw_inline_image_count += 1;
             self.last_draw_inline_image = Some(DrawnImage {
+                data: image.data.deref().to_vec(),
                 width: image.width,
                 height: image.height,
                 pixel_format: image.pixel_format,
@@ -898,25 +901,39 @@ mod tests {
 
     fn image_xobject_dictionary() -> Dictionary {
         Dictionary::new(std::collections::BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            ("BitsPerComponent".to_string(), ObjectVariant::Integer(1)),
             (
                 "ColorSpace".to_string(),
-                ObjectVariant::Name(b"DeviceRGB".to_vec()),
+                ObjectVariant::Name(b"DeviceGray".to_vec()),
+            ),
+            (
+                "Decode".to_string(),
+                ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(0)]),
             ),
             ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(2)),
+            ("Width".to_string(), ObjectVariant::Integer(4)),
         ]))
     }
 
     fn inline_image() -> InlineImage {
         InlineImage::new(
             Dictionary::new(std::collections::BTreeMap::from([
-                ("BPC".to_string(), ObjectVariant::Integer(8)),
-                ("CS".to_string(), ObjectVariant::Name(b"DeviceRGB".to_vec())),
+                ("BPC".to_string(), ObjectVariant::Integer(1)),
+                (
+                    "CS".to_string(),
+                    ObjectVariant::Name(b"DeviceGray".to_vec()),
+                ),
+                (
+                    "D".to_string(),
+                    ObjectVariant::Array(vec![
+                        ObjectVariant::Integer(1),
+                        ObjectVariant::Integer(0),
+                    ]),
+                ),
                 ("H".to_string(), ObjectVariant::Integer(1)),
-                ("W".to_string(), ObjectVariant::Integer(2)),
+                ("W".to_string(), ObjectVariant::Integer(4)),
             ])),
-            vec![10, 11, 12, 20, 21, 22],
+            vec![0b1010_0000],
         )
     }
 
@@ -1017,7 +1034,7 @@ mod tests {
 
         let image = pdf_image::ImageXObject::decode_normalized_image(
             &image_xobject_dictionary(),
-            &[10, 11, 12, 20, 21, 22],
+            &[0b1010_0000],
             &pdf_object::object_resolver::PassthroughResolver,
             None,
         )
@@ -1051,10 +1068,12 @@ mod tests {
             .expect("inline draw should be recorded");
 
         assert_eq!(xobject_draw, inline_draw);
-        assert_eq!(xobject_draw.width, 2);
+        assert_eq!(xobject_draw.width, 4);
         assert_eq!(xobject_draw.height, 1);
-        assert_eq!(xobject_draw.pixel_format, PixelFormat::RGBA8888);
+        assert_eq!(xobject_draw.pixel_format, PixelFormat::Gray8);
         assert_eq!(xobject_draw.blend_mode, Some(BlendMode::Multiply));
         assert_eq!(xobject_draw.dest_rect, inline_draw.dest_rect);
+        assert_eq!(xobject_draw.data, inline_draw.data);
+        assert_eq!(xobject_draw.data, vec![0x00, 0xFF, 0x00, 0xFF]);
     }
 }

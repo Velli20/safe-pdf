@@ -10,4 +10,6 @@ workspace = true
 pdf-object = { path = "../pdf-object" }
 pdf-graphics = { path = "../pdf-graphics" }
 pdf-color-space = { path = "../pdf-color-space" }
+pdf-filter = { path = "../pdf-filter" }
 thiserror = "2.0.12"
+num-traits = "0.2"

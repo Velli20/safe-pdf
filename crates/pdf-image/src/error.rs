@@ -1,4 +1,5 @@
 use pdf_color_space::error::ColorSpaceError;
+use pdf_filter::error::FilterError;
 use pdf_object::error::ObjectError;
 use thiserror::Error;
 
@@ -9,6 +10,8 @@ pub enum PdfImageError {
     Object(#[from] ObjectError),
     #[error("{0}")]
     ColorSpace(#[from] ColorSpaceError),
+    #[error("{0}")]
+    Filter(#[from] FilterError),
     #[error("invalid soft mask XObject: /SMask must reference an image XObject")]
     InvalidSoftMaskXObject,
     #[error("invalid image dimensions: width={width}, height={height}")]
@@ -23,6 +26,13 @@ pub enum PdfImageError {
     InvalidImageData(String),
     #[error("invalid image color space: reported zero color components")]
     InvalidColorComponentCount,
+    #[error("invalid /Decode array length: expected {expected_values} values, got {actual_values}")]
+    InvalidDecodeLength {
+        expected_values: usize,
+        actual_values: usize,
+    },
+    #[error("invalid /Decode value")]
+    InvalidDecodeValue,
     #[error("truncated image data: expected at least {expected_bytes} bytes, got {actual_bytes}")]
     TruncatedImageData {
         expected_bytes: usize,
