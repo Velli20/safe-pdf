@@ -126,10 +126,10 @@ impl PdfOperatorVariant {
             let next_byte = parser.tokenizer.data().first().copied();
             match next_byte {
                 None => break,
-                // ' and " are valid PDF operators that the tokenizer does not
-                // surface as Alphabetic tokens. Handle them alongside ASCII
-                // letters in a single arm.
-                Some(b'\'' | b'"' | b'A'..=b'Z' | b'a'..=b'z') => {
+                Some(b)
+                    if PdfParser::is_pdf_regular_character(b)
+                        && !matches!(b, b'+' | b'-' | b'.' | b'0'..=b'9') =>
+                {
                     let name_slice = match parser.read_operator_name() {
                         Ok(s) => s,
                         Err(e) => {
@@ -703,6 +703,52 @@ mod tests {
                 PdfOperatorVariant::SetFont(SetFont::new(String::new(), 12.0)),
                 PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState),
             ]
+        );
+    }
+
+    #[test]
+    fn parse_handles_non_alphabetic_operator_keywords() {
+        let input = b"1 2 d0 BT T* (x) ' 1 2 (y) \" ET";
+
+        let actual_ops = PdfOperatorVariant::parse(input).expect("stream should parse");
+
+        assert_eq!(actual_ops.len(), 6);
+        assert!(matches!(
+            actual_ops.first(),
+            Some(PdfOperatorVariant::SetCharWidth(op)) if op.wx == 1.0
+        ));
+        assert!(matches!(
+            actual_ops.get(1),
+            Some(PdfOperatorVariant::BeginText(BeginText))
+        ));
+        assert!(matches!(
+            actual_ops.get(2),
+            Some(PdfOperatorVariant::MoveToNextLine(MoveToNextLine))
+        ));
+        assert!(matches!(
+            actual_ops.get(3),
+            Some(PdfOperatorVariant::MoveNextLineShowText(op)) if op == &MoveNextLineShowText::new(b"x".to_vec())
+        ));
+        assert!(matches!(
+            actual_ops.get(4),
+            Some(PdfOperatorVariant::SetSpacingMoveShowText(op))
+                if op == &SetSpacingMoveShowText::new(1.0, 2.0, b"y".to_vec())
+        ));
+        assert!(matches!(
+            actual_ops.get(5),
+            Some(PdfOperatorVariant::EndText(EndText))
+        ));
+    }
+
+    #[test]
+    fn parse_skips_unknown_regular_character_token_and_recovers() {
+        let input = b"@ q";
+
+        let actual_ops = PdfOperatorVariant::parse(input).expect("stream should parse");
+
+        assert_eq!(
+            actual_ops,
+            vec![PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState)]
         );
     }
 }

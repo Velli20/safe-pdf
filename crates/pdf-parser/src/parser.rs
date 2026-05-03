@@ -44,6 +44,13 @@ impl PdfParser<'_> {
         )
     }
 
+    /// Returns whether `c` is a regular PDF character.
+    ///
+    /// Regular characters are any bytes that are neither whitespace nor delimiters.
+    pub const fn is_pdf_regular_character(c: u8) -> bool {
+        !Self::is_pdf_delimiter(c)
+    }
+
     /// Consumes exactly one end-of-line marker from the input stream if one is present.
     ///
     /// Valid EOL sequences are `\r\n` (CRLF), `\r` (CR), or `\n` (LF), consumed in that
@@ -117,48 +124,23 @@ impl PdfParser<'_> {
         }
     }
 
-    /// Reads a PDF operator name from the current parser position.
-    ///
-    /// Must be called when the parser is positioned at the first byte of an operator
-    /// name — i.e. `'`, `"`, or an ASCII alphabetic byte. Whitespace must already
-    /// have been consumed by the caller.
-    ///
-    /// For the two single-character text operators (`'` and `"`) this returns a
-    /// `&'static` slice. For all other operator names (alphabetic characters
-    /// optionally followed by `*`, `0`, or `1`) it returns a zero-copy slice of
-    /// the parser's input buffer.
-    pub fn read_operator_name(&mut self) -> Result<&[u8], ParserError> {
+    fn read_regular_character_token(&mut self) -> Result<&[u8], ParserError> {
         let first = self.tokenizer.data().first().copied();
         match first {
-            Some(b'\'') => {
-                let _ = self.tokenizer.read_exactly(1)?;
-                Ok(b"'")
+            Some(b) if Self::is_pdf_regular_character(b) => {
+                Ok(self.tokenizer.read_while_u8(Self::is_pdf_regular_character))
             }
-            Some(b'"') => {
-                let _ = self.tokenizer.read_exactly(1)?;
-                Ok(b"\"")
-            }
-            _ => {
-                // Standard operator names: ASCII letters optionally suffixed with
-                // `*` (f*, B*, b*, W*, T*) or `0`/`1` (d0, d1 — Type 3 font ops).
-                let name_bytes = self.tokenizer.read_while_u8(|b| {
-                    b.is_ascii_alphabetic() || b == b'*' || b == b'0' || b == b'1'
-                });
-
-                if name_bytes.is_empty() {
-                    // Produce a parser-level error describing the unexpected byte or EOF.
-                    match first {
-                        Some(b) => {
-                            let c = std::char::from_u32(u32::from(b)).unwrap_or('\u{FFFD}');
-                            return Err(ParserError::InvalidToken(c));
-                        }
-                        None => return Err(ParserError::UnexpectedEndOfFile),
-                    }
-                }
-
-                Ok(name_bytes)
-            }
+            Some(b) => Err(ParserError::InvalidToken(char::from(b))),
+            None => Err(ParserError::UnexpectedEndOfFile),
         }
+    }
+
+    /// Reads a PDF operator name from the current parser position.
+    ///
+    /// Content stream operators are PDF keywords, so this reads a single token
+    /// consisting of consecutive regular PDF characters.
+    pub fn read_operator_name(&mut self) -> Result<&[u8], ParserError> {
+        self.read_regular_character_token()
     }
 
     /// Parses a PDF object at a specific byte offset in the input stream.
@@ -210,22 +192,24 @@ impl PdfParser<'_> {
     /// Returns an error if the next bytes don't match `keyword` or if no delimiter follows.
     /// Consumes any trailing end-of-line marker after the keyword.
     pub fn read_keyword(&mut self, keyword: &[u8]) -> Result<(), ParserError> {
-        let literal = self.tokenizer.read_exactly(keyword.len())?;
+        let keyword_start = self.tokenizer.position;
+        let literal = self.read_regular_character_token()?;
+
         if literal != keyword {
+            if literal.starts_with(keyword)
+                && let Some(found) = literal.get(keyword.len()).copied()
+            {
+                return Err(ParserError::MissingDelimiterAfterKeyword {
+                    keyword: String::from_utf8_lossy(keyword).into_owned(),
+                    found,
+                    position: keyword_start.saturating_add(keyword.len()),
+                });
+            }
+
             return Err(ParserError::InvalidKeyword(
                 String::from_utf8_lossy(keyword).to_string(),
                 String::from_utf8_lossy(literal).to_string(),
             ));
-        }
-
-        if let Some(d) = self.tokenizer.data().first().copied()
-            && !Self::is_pdf_delimiter(d)
-        {
-            return Err(ParserError::MissingDelimiterAfterKeyword {
-                keyword: String::from_utf8_lossy(keyword).into_owned(),
-                found: d,
-                position: self.tokenizer.position,
-            });
         }
 
         // Consume trailing EOL if present (keywords in arrays/dicts may not have one).
@@ -370,6 +354,38 @@ mod tests {
                 position: 4,
             }
         );
+    }
+
+    #[test]
+    fn test_read_operator_name_reads_complete_regular_character_token() {
+        let cases = [
+            b"q ".as_slice(),
+            b"T* ".as_slice(),
+            b"d1 ".as_slice(),
+            b"' ".as_slice(),
+            b"\" ".as_slice(),
+        ];
+
+        for input in cases {
+            let mut parser = PdfParser::from(input);
+            let operator = parser.read_operator_name().unwrap();
+
+            assert_eq!(operator, &input[..input.len().saturating_sub(1)]);
+            assert_eq!(parser.tokenizer.data(), b" ");
+        }
+    }
+
+    #[test]
+    fn test_read_operator_name_rejects_non_regular_character_start() {
+        for input in [
+            b"".as_slice(),
+            b"/Name".as_slice(),
+            b"(text)".as_slice(),
+            b" value".as_slice(),
+        ] {
+            let mut parser = PdfParser::from(input);
+            assert!(parser.read_operator_name().is_err());
+        }
     }
 
     mod skip_whitespace_and_comments {
