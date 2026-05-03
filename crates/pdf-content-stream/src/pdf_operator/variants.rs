@@ -130,7 +130,26 @@ impl PdfOperatorVariant {
                 // surface as Alphabetic tokens. Handle them alongside ASCII
                 // letters in a single arm.
                 Some(b'\'' | b'"' | b'A'..=b'Z' | b'a'..=b'z') => {
-                    let name_slice = crate::operator_tokenizer::read_operator_name(&mut parser)?;
+                    let name_slice = match parser.read_operator_name() {
+                        Ok(s) => s,
+                        Err(e) => {
+                            use pdf_parser::error::ParserError;
+                            match e {
+                                ParserError::UnexpectedEndOfFile => {
+                                    return Err(PdfOperatorError::UnknownOperator(
+                                        "(end of input)".to_string(),
+                                    ));
+                                }
+                                ParserError::InvalidToken(c) => {
+                                    return Err(PdfOperatorError::UnknownOperator(format!(
+                                        "{:?}",
+                                        c
+                                    )));
+                                }
+                                other => return Err(PdfOperatorError::ParserError(other)),
+                            }
+                        }
+                    };
                     let name_owned = name_slice.to_vec();
                     let name = name_owned.as_slice();
                     let Some(descriptor) = get_operation_descriptor(name) else {

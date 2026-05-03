@@ -117,6 +117,50 @@ impl PdfParser<'_> {
         }
     }
 
+    /// Reads a PDF operator name from the current parser position.
+    ///
+    /// Must be called when the parser is positioned at the first byte of an operator
+    /// name — i.e. `'`, `"`, or an ASCII alphabetic byte. Whitespace must already
+    /// have been consumed by the caller.
+    ///
+    /// For the two single-character text operators (`'` and `"`) this returns a
+    /// `&'static` slice. For all other operator names (alphabetic characters
+    /// optionally followed by `*`, `0`, or `1`) it returns a zero-copy slice of
+    /// the parser's input buffer.
+    pub fn read_operator_name(&mut self) -> Result<&[u8], ParserError> {
+        let first = self.tokenizer.data().first().copied();
+        match first {
+            Some(b'\'') => {
+                let _ = self.tokenizer.read_exactly(1)?;
+                Ok(b"'")
+            }
+            Some(b'"') => {
+                let _ = self.tokenizer.read_exactly(1)?;
+                Ok(b"\"")
+            }
+            _ => {
+                // Standard operator names: ASCII letters optionally suffixed with
+                // `*` (f*, B*, b*, W*, T*) or `0`/`1` (d0, d1 — Type 3 font ops).
+                let name_bytes = self.tokenizer.read_while_u8(|b| {
+                    b.is_ascii_alphabetic() || b == b'*' || b == b'0' || b == b'1'
+                });
+
+                if name_bytes.is_empty() {
+                    // Produce a parser-level error describing the unexpected byte or EOF.
+                    match first {
+                        Some(b) => {
+                            let c = std::char::from_u32(u32::from(b)).unwrap_or('\u{FFFD}');
+                            return Err(ParserError::InvalidToken(c));
+                        }
+                        None => return Err(ParserError::UnexpectedEndOfFile),
+                    }
+                }
+
+                Ok(name_bytes)
+            }
+        }
+    }
+
     /// Parses a PDF object at a specific byte offset in the input stream.
     ///
     /// Temporarily seeks to `position`, parses the object, then restores the original position.
