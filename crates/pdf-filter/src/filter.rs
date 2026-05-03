@@ -372,6 +372,7 @@ fn resolve_decode_parms_array<'a>(
             let resolved = objects.resolve_object(item)?;
             match resolved {
                 ObjectVariant::Dictionary(d) => Ok(Some(d.as_ref())),
+                ObjectVariant::Null => Ok(None),
                 other => Err(FilterError::from(
                     pdf_object::error::ObjectError::TypeMismatch("Dictionary", other.name()),
                 )),
