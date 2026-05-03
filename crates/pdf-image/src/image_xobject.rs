@@ -9,7 +9,7 @@ use pdf_object::{
 use crate::InlineImage;
 use crate::decode::ImageDecode;
 use crate::error::PdfImageError;
-use crate::indexed::expand_indexed_values_to_components;
+use crate::indexed::{expand_indexed_values_to_components, unpack_image_samples};
 
 /// Resolves a stream as an image soft mask, or reports a cycle/non-image failure.
 pub trait SoftMaskResolver {
@@ -35,6 +35,24 @@ pub struct ImageXObject {
     pub pixel_format: PixelFormat,
     /// The color space of the image samples.
     pub color_space: Option<ColorSpace>,
+}
+
+/// Stores the normalized metadata needed to decode an image stream.
+#[derive(Debug, Clone)]
+struct ImageMetadata {
+    width: usize,
+    height: usize,
+    bits_per_component: usize,
+    color_space: Option<ColorSpace>,
+    image_mask: bool,
+}
+
+/// Stores decoded sample bytes before the final pixel format conversion.
+#[derive(Debug, Clone)]
+struct DecodedSamples {
+    stored_color_space: Option<ColorSpace>,
+    num_color_components: usize,
+    image_data: Vec<u8>,
 }
 
 impl ImageXObject {
@@ -77,6 +95,27 @@ impl ImageXObject {
         objects: &dyn ObjectResolver,
         soft_mask_resolver: Option<&mut dyn SoftMaskResolver>,
     ) -> Result<Self, PdfImageError> {
+        let metadata = Self::read_metadata(dictionary, objects)?;
+        let decoded_samples = Self::decode_samples(dictionary, raw_data, objects, &metadata)?;
+        Self::validate_decoded_samples(&metadata, &decoded_samples)?;
+        let smask = Self::parse_optional_soft_mask(dictionary, objects, soft_mask_resolver)?;
+        let (data, pixel_format) = Self::assemble_pixel_data(&metadata, &decoded_samples, smask);
+
+        Ok(Self {
+            width: metadata.width,
+            height: metadata.height,
+            bits_per_component: metadata.bits_per_component,
+            data,
+            pixel_format,
+            color_space: decoded_samples.stored_color_space,
+        })
+    }
+
+    /// Reads and validates the normalized image metadata from the image dictionary.
+    fn read_metadata(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+    ) -> Result<ImageMetadata, PdfImageError> {
         let width = dictionary
             .get_or_err("Width")?
             .try_number::<usize>(objects)?;
@@ -92,117 +131,162 @@ impl ImageXObject {
             .get_or_err("BitsPerComponent")?
             .try_number::<usize>(objects)?;
         let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
-        let is_indexed = matches!(color_space, Some(ColorSpace::Indexed(_)));
-        if is_indexed {
-            if bits_per_component != 1
-                && bits_per_component != 2
-                && bits_per_component != 4
-                && bits_per_component != 8
-            {
-                return Err(PdfImageError::UnsupportedIndexedBits { bits_per_component });
-            }
-        } else if bits_per_component != 1 && bits_per_component != 8 {
-            return Err(PdfImageError::UnsupportedImageBitsPerComponent { bits_per_component });
-        }
+        Self::validate_bits_per_component(bits_per_component, color_space.as_ref())?;
 
         let image_mask = dictionary
             .get("ImageMask")
             .map_or(Ok(false), |value| value.try_boolean(objects))?;
 
-        let (stored_color_space, num_color_components, image_data) = match color_space {
-            Some(ColorSpace::Indexed(IndexedColorSpace {
-                base,
-                hival,
-                lookup,
-            })) => {
-                let base_components = base.num_color_components();
-                let sample_codes =
-                    Self::unpack_samples(raw_data, width, height, bits_per_component, 1)?;
-                let decode = ImageDecode::from_dictionary(
-                    dictionary,
-                    objects,
-                    1,
-                    Self::sample_max(bits_per_component)?,
-                    Self::sample_max(bits_per_component)?,
-                    image_mask,
-                )?;
-                let decoded_indices = decode.apply(&sample_codes);
-                let expanded = expand_indexed_values_to_components(
-                    &decoded_indices,
-                    &lookup,
-                    hival,
-                    base_components,
-                )?;
-                (Some(*base), base_components, expanded)
-            }
-            other => {
-                let num_components = match &other {
-                    Some(cs) => cs.num_color_components(),
-                    None => 1,
-                };
-                let sample_codes = Self::unpack_samples(
-                    raw_data,
-                    width,
-                    height,
-                    bits_per_component,
-                    num_components,
-                )?;
-                let decode = ImageDecode::from_dictionary(
-                    dictionary,
-                    objects,
-                    num_components,
-                    Self::sample_max(bits_per_component)?,
-                    255,
-                    image_mask,
-                )?;
-                let decoded_samples = decode.apply(&sample_codes);
-                (other, num_components, decoded_samples)
-            }
-        };
-
-        if num_color_components == 0 {
-            return Err(PdfImageError::InvalidColorComponentCount);
-        }
-
-        let num_pixels = width.saturating_mul(height);
-        let expected_bytes = num_pixels.saturating_mul(num_color_components);
-        if image_data.len() < expected_bytes {
-            return Err(PdfImageError::TruncatedImageData {
-                expected_bytes,
-                actual_bytes: image_data.len(),
-            });
-        }
-
-        let smask = match soft_mask_resolver {
-            Some(resolver) => Self::parse_smask(dictionary, objects, resolver)?,
-            None => None,
-        };
-
-        let (data, pixel_format) = if smask.is_some() || num_color_components != 1 {
-            (
-                Self::to_rgba(
-                    &image_data,
-                    width,
-                    height,
-                    num_color_components,
-                    smask.as_ref(),
-                ),
-                PixelFormat::RGBA8888,
-            )
-        } else {
-            (image_data, PixelFormat::Gray8)
-        };
-
-        Ok(Self {
+        Ok(ImageMetadata {
             width,
             height,
             bits_per_component,
-            data,
-            pixel_format,
-            color_space: stored_color_space,
+            color_space,
+            image_mask,
         })
     }
 
+    /// Validates the allowed bit depths for indexed and non-indexed images.
+    fn validate_bits_per_component(
+        bits_per_component: usize,
+        color_space: Option<&ColorSpace>,
+    ) -> Result<(), PdfImageError> {
+        if matches!(color_space, Some(ColorSpace::Indexed(_))) {
+            return match bits_per_component {
+                1 | 2 | 4 | 8 => Ok(()),
+                _ => Err(PdfImageError::UnsupportedIndexedBits { bits_per_component }),
+            };
+        }
+
+        match bits_per_component {
+            1 | 8 => Ok(()),
+            _ => Err(PdfImageError::UnsupportedImageBitsPerComponent { bits_per_component }),
+        }
+    }
+
+    /// Decodes raw image bytes into component samples based on the configured color space.
+    fn decode_samples(
+        dictionary: &Dictionary,
+        raw_data: &[u8],
+        objects: &dyn ObjectResolver,
+        metadata: &ImageMetadata,
+    ) -> Result<DecodedSamples, PdfImageError> {
+        match metadata.color_space.as_ref() {
+            Some(ColorSpace::Indexed(indexed)) => {
+                Self::decode_indexed_samples(dictionary, raw_data, objects, metadata, indexed)
+            }
+            _ => Self::decode_direct_samples(dictionary, raw_data, objects, metadata),
+        }
+    }
+
+    /// Decodes indexed image samples, applies `/Decode`, and expands palette entries.
+    fn decode_indexed_samples(
+        dictionary: &Dictionary,
+        raw_data: &[u8],
+        objects: &dyn ObjectResolver,
+        metadata: &ImageMetadata,
+        indexed: &IndexedColorSpace,
+    ) -> Result<DecodedSamples, PdfImageError> {
+        let sample_codes = unpack_image_samples(
+            raw_data,
+            metadata.width,
+            metadata.height,
+            metadata.bits_per_component,
+            1,
+        )?;
+        let sample_max = Self::sample_max(metadata.bits_per_component)?;
+        let decode = ImageDecode::from_dictionary(
+            dictionary,
+            objects,
+            1,
+            sample_max,
+            sample_max,
+            metadata.image_mask,
+        )?;
+        let decoded_indices = decode.apply(&sample_codes);
+        let base_components = indexed.base.num_color_components();
+        let image_data = expand_indexed_values_to_components(
+            &decoded_indices,
+            &indexed.lookup,
+            indexed.hival,
+            base_components,
+        )?;
+
+        Ok(DecodedSamples {
+            stored_color_space: Some(*indexed.base.clone()),
+            num_color_components: base_components,
+            image_data,
+        })
+    }
+
+    /// Decodes non-indexed image samples and applies the `/Decode` transform.
+    fn decode_direct_samples(
+        dictionary: &Dictionary,
+        raw_data: &[u8],
+        objects: &dyn ObjectResolver,
+        metadata: &ImageMetadata,
+    ) -> Result<DecodedSamples, PdfImageError> {
+        let num_components = metadata
+            .color_space
+            .as_ref()
+            .map_or(1, ColorSpace::num_color_components);
+        let sample_codes = unpack_image_samples(
+            raw_data,
+            metadata.width,
+            metadata.height,
+            metadata.bits_per_component,
+            num_components,
+        )?;
+        let decode = ImageDecode::from_dictionary(
+            dictionary,
+            objects,
+            num_components,
+            Self::sample_max(metadata.bits_per_component)?,
+            255,
+            metadata.image_mask,
+        )?;
+
+        Ok(DecodedSamples {
+            stored_color_space: metadata.color_space.clone(),
+            num_color_components: num_components,
+            image_data: decode.apply(&sample_codes),
+        })
+    }
+
+    /// Ensures the decoded component stream is large enough for the declared dimensions.
+    fn validate_decoded_samples(
+        metadata: &ImageMetadata,
+        decoded_samples: &DecodedSamples,
+    ) -> Result<(), PdfImageError> {
+        if decoded_samples.num_color_components == 0 {
+            return Err(PdfImageError::InvalidColorComponentCount);
+        }
+
+        let num_pixels = metadata.width.saturating_mul(metadata.height);
+        let expected_bytes = num_pixels.saturating_mul(decoded_samples.num_color_components);
+        if decoded_samples.image_data.len() < expected_bytes {
+            return Err(PdfImageError::TruncatedImageData {
+                expected_bytes,
+                actual_bytes: decoded_samples.image_data.len(),
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Resolves an optional soft mask if one is available and a resolver was provided.
+    fn parse_optional_soft_mask(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+        soft_mask_resolver: Option<&mut dyn SoftMaskResolver>,
+    ) -> Result<Option<ImageXObject>, PdfImageError> {
+        match soft_mask_resolver {
+            Some(resolver) => Self::parse_smask(dictionary, objects, resolver),
+            None => Ok(None),
+        }
+    }
+
+    /// Resolves the `/SMask` entry and treats `/None` as an absent mask.
     fn parse_smask(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
@@ -224,6 +308,7 @@ impl ImageXObject {
         soft_mask_resolver.resolve_soft_mask(stream, objects)
     }
 
+    /// Returns the maximum encoded sample value for a supported bit depth.
     fn sample_max(bits_per_component: usize) -> Result<u8, PdfImageError> {
         match bits_per_component {
             1 => Ok(1),
@@ -234,85 +319,29 @@ impl ImageXObject {
         }
     }
 
-    fn read_packed_sample(
-        data: &[u8],
-        bits_per_component: usize,
-        bit_pos: &mut usize,
-    ) -> Result<u8, PdfImageError> {
-        let byte_index = *bit_pos / 8;
-        let bit_offset = *bit_pos % 8;
-        let byte = *data
-            .get(byte_index)
-            .ok_or_else(|| PdfImageError::TruncatedImageData {
-                expected_bytes: byte_index.saturating_add(1),
-                actual_bytes: data.len(),
-            })?;
-
-        let value = match bits_per_component {
-            8 => u32::from(byte),
-            4 => u32::from((byte >> (4usize.saturating_sub(bit_offset))) & 0x0F),
-            2 => u32::from((byte >> (6usize.saturating_sub(bit_offset))) & 0x03),
-            1 => u32::from((byte >> (7usize.saturating_sub(bit_offset))) & 0x01),
-            _ => {
-                return Err(PdfImageError::UnsupportedImageBitsPerComponent { bits_per_component });
-            }
-        };
-
-        *bit_pos = bit_pos.saturating_add(bits_per_component);
-        u8::try_from(value).map_err(|_| {
-            PdfImageError::InvalidImageData("packed sample value cannot fit in a byte".to_string())
-        })
-    }
-
-    fn unpack_samples(
-        data: &[u8],
-        width: usize,
-        height: usize,
-        bits_per_component: usize,
-        num_components: usize,
-    ) -> Result<Vec<u8>, PdfImageError> {
-        let samples_per_row = width.saturating_mul(num_components);
-        let bits_per_row = samples_per_row.saturating_mul(bits_per_component);
-        let bytes_per_row = bits_per_row.saturating_add(7) / 8;
-        let mut out =
-            Vec::with_capacity(width.saturating_mul(height).saturating_mul(num_components));
-
-        for row in 0..height {
-            let mut bit_pos = row.saturating_mul(bytes_per_row).saturating_mul(8);
-            for _ in 0..samples_per_row {
-                out.push(Self::read_packed_sample(
-                    data,
-                    bits_per_component,
-                    &mut bit_pos,
-                )?);
-            }
+    /// Builds the final pixel buffer and pixel format after optional soft-mask application.
+    fn assemble_pixel_data(
+        metadata: &ImageMetadata,
+        decoded_samples: &DecodedSamples,
+        smask: Option<ImageXObject>,
+    ) -> (Vec<u8>, PixelFormat) {
+        if smask.is_some() || decoded_samples.num_color_components != 1 {
+            return (
+                Self::to_rgba(
+                    &decoded_samples.image_data,
+                    metadata.width,
+                    metadata.height,
+                    decoded_samples.num_color_components,
+                    smask.as_ref(),
+                ),
+                PixelFormat::RGBA8888,
+            );
         }
 
-        Ok(out)
+        (decoded_samples.image_data.clone(), PixelFormat::Gray8)
     }
 
-    #[allow(dead_code)]
-    fn expand_1bpc(data: &[u8], width: usize, height: usize, num_components: usize) -> Vec<u8> {
-        let bits_per_row = width.saturating_mul(num_components);
-        let bytes_per_row = bits_per_row.saturating_add(7) / 8;
-        let mut out =
-            Vec::with_capacity(width.saturating_mul(height).saturating_mul(num_components));
-
-        for row in 0..height {
-            let row_start = row.saturating_mul(bytes_per_row);
-            for col in 0..width {
-                for comp in 0..num_components {
-                    let bit_pos = col.saturating_mul(num_components).saturating_add(comp);
-                    let byte_idx = row_start.saturating_add(bit_pos / 8);
-                    let bit_idx = 7usize.saturating_sub(bit_pos % 8);
-                    let bit = data.get(byte_idx).map_or(0, |b| (b >> bit_idx) & 1);
-                    out.push(if bit == 1 { 0xFF } else { 0x00 });
-                }
-            }
-        }
-        out
-    }
-
+    /// Converts decoded image samples into RGBA pixels with an optional soft-mask alpha channel.
     fn to_rgba(
         image_data: &[u8],
         width: usize,
@@ -321,51 +350,69 @@ impl ImageXObject {
         smask: Option<&ImageXObject>,
     ) -> Vec<u8> {
         let num_pixels = width.saturating_mul(height);
-        let smask_data = smask.map(|s| s.data.as_slice());
-        let get_alpha =
-            |i: usize| -> u8 { smask_data.map_or(255, |data| data.get(i).copied().unwrap_or(255)) };
-
         let mut out = Vec::with_capacity(num_pixels.saturating_mul(4));
 
-        match num_color_components {
-            4 => {
-                for (i, chunk) in image_data.chunks_exact(4).take(num_pixels).enumerate() {
-                    let &[c, m, y, k] = chunk else { continue };
-                    let c_inv = 255u16.saturating_sub(u16::from(c));
-                    let m_inv = 255u16.saturating_sub(u16::from(m));
-                    let y_inv = 255u16.saturating_sub(u16::from(y));
-                    let k_inv = 255u16.saturating_sub(u16::from(k));
-                    let r = u8::try_from(c_inv.saturating_mul(k_inv) / 255).unwrap_or(0);
-                    let g = u8::try_from(m_inv.saturating_mul(k_inv) / 255).unwrap_or(0);
-                    let b = u8::try_from(y_inv.saturating_mul(k_inv) / 255).unwrap_or(0);
-                    out.extend_from_slice(&[r, g, b, get_alpha(i)]);
-                }
-            }
-            3 => {
-                for (i, chunk) in image_data.chunks_exact(3).take(num_pixels).enumerate() {
-                    let &[r, g, b] = chunk else { continue };
-                    out.extend_from_slice(&[r, g, b, get_alpha(i)]);
-                }
-            }
-            1 => {
-                for (i, &gray) in image_data.iter().take(num_pixels).enumerate() {
-                    out.extend_from_slice(&[gray, gray, gray, get_alpha(i)]);
-                }
-            }
-            _ => {
-                for (i, chunk) in image_data
-                    .chunks_exact(num_color_components)
-                    .take(num_pixels)
-                    .enumerate()
-                {
-                    let r = chunk.first().copied().unwrap_or(0);
-                    let g = chunk.get(1).copied().unwrap_or(0);
-                    let b = chunk.get(2).copied().unwrap_or(0);
-                    out.extend_from_slice(&[r, g, b, get_alpha(i)]);
-                }
+        for (pixel_index, chunk) in image_data
+            .chunks_exact(num_color_components)
+            .take(num_pixels)
+            .enumerate()
+        {
+            let alpha = Self::alpha_for_pixel(smask, pixel_index);
+            match num_color_components {
+                4 => Self::append_cmyk_rgba(&mut out, chunk, alpha),
+                3 => Self::append_rgb_rgba(&mut out, chunk, alpha),
+                1 => Self::append_gray_rgba(&mut out, chunk.first().copied().unwrap_or(0), alpha),
+                _ => Self::append_fallback_rgba(&mut out, chunk, alpha),
             }
         }
+
         out
+    }
+
+    /// Returns the alpha value for a pixel from the soft mask, defaulting to full opacity.
+    fn alpha_for_pixel(smask: Option<&ImageXObject>, pixel_index: usize) -> u8 {
+        smask
+            .and_then(|mask| mask.data.get(pixel_index).copied())
+            .unwrap_or(255)
+    }
+
+    /// Appends a grayscale sample as an RGBA pixel.
+    fn append_gray_rgba(out: &mut Vec<u8>, gray: u8, alpha: u8) {
+        out.extend_from_slice(&[gray, gray, gray, alpha]);
+    }
+
+    /// Appends an RGB sample as an RGBA pixel.
+    fn append_rgb_rgba(out: &mut Vec<u8>, rgb: &[u8], alpha: u8) {
+        let r = rgb.first().copied().unwrap_or(0);
+        let g = rgb.get(1).copied().unwrap_or(0);
+        let b = rgb.get(2).copied().unwrap_or(0);
+        out.extend_from_slice(&[r, g, b, alpha]);
+    }
+
+    /// Appends a CMYK sample converted to RGBA.
+    fn append_cmyk_rgba(out: &mut Vec<u8>, cmyk: &[u8], alpha: u8) {
+        let c = cmyk.first().copied().unwrap_or(0);
+        let m = cmyk.get(1).copied().unwrap_or(0);
+        let y = cmyk.get(2).copied().unwrap_or(0);
+        let k = cmyk.get(3).copied().unwrap_or(0);
+
+        let c_inv = 255u16.saturating_sub(u16::from(c));
+        let m_inv = 255u16.saturating_sub(u16::from(m));
+        let y_inv = 255u16.saturating_sub(u16::from(y));
+        let k_inv = 255u16.saturating_sub(u16::from(k));
+
+        let r = u8::try_from(c_inv.saturating_mul(k_inv) / 255).unwrap_or(0);
+        let g = u8::try_from(m_inv.saturating_mul(k_inv) / 255).unwrap_or(0);
+        let b = u8::try_from(y_inv.saturating_mul(k_inv) / 255).unwrap_or(0);
+        out.extend_from_slice(&[r, g, b, alpha]);
+    }
+
+    /// Appends a best-effort RGBA pixel for unsupported component counts.
+    fn append_fallback_rgba(out: &mut Vec<u8>, components: &[u8], alpha: u8) {
+        let r = components.first().copied().unwrap_or(0);
+        let g = components.get(1).copied().unwrap_or(0);
+        let b = components.get(2).copied().unwrap_or(0);
+        out.extend_from_slice(&[r, g, b, alpha]);
     }
 }
 
@@ -394,46 +441,6 @@ mod tests {
     }
 
     use pdf_object::{object_resolver::ObjectResolver, stream::StreamObject};
-
-    #[test]
-    fn expand_1bpc_width_multiple_of_8() {
-        let data = [0b1011_0010u8];
-        let out = ImageXObject::expand_1bpc(&data, 8, 1, 1);
-        assert_eq!(out.len(), 8);
-        assert_eq!(out, [0xFF, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0x00]);
-    }
-
-    #[test]
-    fn expand_1bpc_width_not_multiple_of_8() {
-        let data = [0b1010_0000u8, 0b0110_0000u8];
-        let out = ImageXObject::expand_1bpc(&data, 3, 2, 1);
-        assert_eq!(out.len(), 6, "output length must be width * height");
-        assert_eq!(out, [0xFF, 0x00, 0xFF, 0x00, 0xFF, 0xFF]);
-    }
-
-    #[test]
-    fn expand_1bpc_all_zeros() {
-        let data = [0x00u8; 4];
-        let out = ImageXObject::expand_1bpc(&data, 8, 4, 1);
-        assert!(out.iter().all(|&b| b == 0x00));
-        assert_eq!(out.len(), 32);
-    }
-
-    #[test]
-    fn expand_1bpc_all_ones() {
-        let data = [0xFFu8; 4];
-        let out = ImageXObject::expand_1bpc(&data, 8, 4, 1);
-        assert!(out.iter().all(|&b| b == 0xFF));
-        assert_eq!(out.len(), 32);
-    }
-
-    #[test]
-    fn expand_1bpc_multi_component() {
-        let data = [0b1101_1000u8];
-        let out = ImageXObject::expand_1bpc(&data, 2, 1, 3);
-        assert_eq!(out.len(), 6);
-        assert_eq!(out, [0xFF, 0xFF, 0x00, 0xFF, 0xFF, 0x00]);
-    }
 
     #[test]
     fn decode_normalized_1bpc_gray_inverts_samples() {
