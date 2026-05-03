@@ -162,8 +162,8 @@ impl PdfOperatorVariant {
 
                     if let Some(operator) = (descriptor.parse_hook)(&mut parser)? {
                         out.push(operator);
-                    } else {
-                        out.push(parse_operator(descriptor, &mut operands)?);
+                    } else if let Some(operator) = parse_operator(descriptor, &mut operands)? {
+                        out.push(operator);
                     }
                     operands.clear();
                 }
@@ -258,29 +258,23 @@ impl PdfOperatorVariant {
 fn parse_operator(
     descriptor: &OpDescriptor,
     operands: &mut Vec<ObjectVariant>,
-) -> Result<PdfOperatorVariant, PdfOperatorError> {
+) -> Result<Option<PdfOperatorVariant>, PdfOperatorError> {
     // Validate operand count if the operator has a fixed count requirement.
     if let Some(required_count) = descriptor.operand_count
         && operands.len() != required_count
     {
-        let name_str = String::from_utf8_lossy(descriptor.name);
-        return Err(PdfOperatorError::OperandCountMismatch {
-            operator: name_str.to_string(),
-            actual: operands.len(),
-            expected: required_count,
-        });
+        // If the operand count doesn't match, skip this operator and its operands gracefully. This allows us to parse content streams that contain malformed operators without failing the entire stream.
+        return Ok(None);
     }
 
     // Take the operand buffer, leaving an empty Vec behind. The allocation
     // is reclaimed below so it can be reused for the next operator.
     let mut ops = Operands(std::mem::take(operands));
     let operator = (descriptor.parser)(&mut ops)?;
-    // Clear any unconsumed operands and return the buffer to the caller.
-    ops.0.clear();
     // Reclaim the operand buffer for the next operator. This avoids per-operator
     // allocations.
     *operands = ops.0;
-    Ok(operator)
+    Ok(Some(operator))
 }
 
 #[cfg(test)]
@@ -743,6 +737,18 @@ mod tests {
     #[test]
     fn parse_skips_unknown_regular_character_token_and_recovers() {
         let input = b"@ q";
+
+        let actual_ops = PdfOperatorVariant::parse(input).expect("stream should parse");
+
+        assert_eq!(
+            actual_ops,
+            vec![PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState)]
+        );
+    }
+
+    #[test]
+    fn parse_skips_malformed_operator_operand_sequence_and_recovers() {
+        let input = b"1 2 3 m q";
 
         let actual_ops = PdfOperatorVariant::parse(input).expect("stream should parse");
 
