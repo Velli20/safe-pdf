@@ -18,14 +18,13 @@ pub fn expand_indexed_values(
         let clamped_index = index.min(hival);
         let start = usize::from(clamped_index).saturating_mul(base_components);
         let end = start.saturating_add(base_components);
-        let entry =
-            lookup
-                .get(start..end)
-                .ok_or_else(|| DecodeError::PaletteLookupOutOfBounds {
-                    index: clamped_index,
-                    pixel_index,
-                    lookup_len: lookup.len(),
-                })?;
+        let entry = lookup
+            .get(start..end)
+            .ok_or(DecodeError::PaletteLookupOutOfBounds {
+                index: clamped_index,
+                pixel_index,
+                lookup_len: lookup.len(),
+            })?;
         out.extend_from_slice(entry);
     }
 

@@ -85,7 +85,9 @@ impl DecodeMap {
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_object::{dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant};
+    use pdf_object::{
+        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+    };
 
     use super::*;
 
