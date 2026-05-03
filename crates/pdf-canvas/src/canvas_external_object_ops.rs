@@ -8,21 +8,17 @@
 //! between PDF image space (top-left origin, Y down) and PDF user space
 //! (bottom-left origin, Y up).
 
-use std::borrow::Cow;
-
-use pdf_color_space::{color_space::ColorSpace, indexed_color_space::IndexedColorSpace};
 use pdf_content_stream::pdf_operator_backend::XObjectOps;
 use pdf_graphics::{rect::Rect, transform::Transform};
-use pdf_page::{image::ImageXObject, xobject::XObject};
+use pdf_image::{ImageXObject, InlineImage};
+use pdf_object::object_resolver::PassthroughResolver;
+use pdf_page::xobject::XObject;
 
 use crate::{
     canvas_backend::{CanvasBackend, Image, ImageData},
     error::PdfCanvasError,
     pdf_canvas::PdfCanvas,
 };
-
-/// Number of color components in RGB color space.
-const RGB_COMPONENTS: usize = 3;
 
 /// Tolerance in degrees for detecting right-angle rotations.
 const ROTATION_TOLERANCE_DEGREES: f32 = 1e-3;
@@ -56,151 +52,6 @@ const IMAGE_SPACE_Y_FLIP: Transform = Transform::from_row(1.0, 0.0, 0.0, -1.0, 0
 fn generate_image_orientation_matrix(mut ctm: Transform) -> Transform {
     ctm.post_concat(&IMAGE_SPACE_Y_FLIP);
     ctm
-}
-
-/// Bit mask for extracting the low nibble (4 bits) from a byte.
-const MASK_4BIT: u8 = 0x0F;
-/// Bit mask for extracting 2 bits from a byte.
-const MASK_2BIT: u8 = 0x03;
-/// Bit mask for extracting 1 bit from a byte.
-const MASK_1BIT: u8 = 0x01;
-
-/// Extracts a color index value from packed bit data.
-///
-/// Indexed color images in PDF can use 1, 2, 4, or 8 bits per component.
-/// This function extracts a single index value from the packed byte stream,
-/// handling the bit-level addressing required for sub-byte bit depths.
-///
-/// # Parameters
-///
-/// - `data`: The raw packed image data bytes.
-/// - `bits`: Bits per component (must be 1, 2, 4, or 8).
-/// - `bit_pos`: Current bit position in the data stream; advanced by `bits` on success.
-///
-/// # Returns
-///
-/// The extracted index value in the range `[0, 2^bits - 1]`.
-///
-/// # Errors
-///
-/// - [`PdfCanvasError::InvalidImageData`] if `data` has insufficient bytes.
-/// - [`PdfCanvasError::UnsupportedFeature`] if `bits` is not 1, 2, 4, or 8.
-///
-/// # Bit Packing Layout
-///
-/// Bits are packed from MSB to LSB within each byte:
-///
-/// | Depth | Layout per byte                         |
-/// |-------|-----------------------------------------|
-/// | 8-bit | `[b7..b0]` (entire byte)                |
-/// | 4-bit | `[high_nibble \| low_nibble]`           |
-/// | 2-bit | `[b7b6 \| b5b4 \| b3b2 \| b1b0]`        |
-/// | 1-bit | `[b7 \| b6 \| b5 \| b4 \| b3 \| b2 \| b1 \| b0]` |
-fn extract_index(data: &[u8], bits: usize, bit_pos: &mut usize) -> Result<u32, PdfCanvasError> {
-    let byte_index = *bit_pos / 8;
-    let bit_offset = *bit_pos % 8;
-
-    let byte = *data.get(byte_index).ok_or_else(|| {
-        PdfCanvasError::InvalidImageData(format!(
-            "Insufficient data for indexed image: need byte at index {byte_index}, but data length is {}",
-            data.len()
-        ))
-    })?;
-
-    let value = match bits {
-        8 => u32::from(byte),
-        4 => {
-            // High nibble (bits 7–4) at offset 0, low nibble (bits 3–0) at offset 4
-            let shift = 4_usize.saturating_sub(bit_offset);
-            u32::from((byte >> shift) & MASK_4BIT)
-        }
-        2 => {
-            // Extract 2-bit value; valid offsets are 0, 2, 4, 6
-            let shift = 6_usize.saturating_sub(bit_offset);
-            u32::from((byte >> shift) & MASK_2BIT)
-        }
-        1 => {
-            // Extract single bit; valid offsets are 0–7
-            let shift = 7_usize.saturating_sub(bit_offset);
-            u32::from((byte >> shift) & MASK_1BIT)
-        }
-        _ => {
-            return Err(PdfCanvasError::UnsupportedFeature(format!(
-                "BitsPerComponent {bits} not supported for indexed images"
-            )));
-        }
-    };
-
-    *bit_pos = bit_pos.saturating_add(bits);
-    Ok(value)
-}
-
-/// Expands indexed color image data to RGB format.
-///
-/// Indexed (palette-based) images store each pixel as an index into a color
-/// lookup table. This function decodes the packed index data and produces
-/// an RGB byte stream suitable for rendering.
-///
-/// # Parameters
-///
-/// - `indexed_data`: Raw packed pixel indices.
-/// - `lookup`: Color lookup table (RGB triplets, 3 bytes per entry).
-/// - `width`: Image width in pixels.
-/// - `height`: Image height in pixels.
-/// - `bits_per_component`: Bit depth of indices (1, 2, 4, or 8).
-/// - `hival`: Maximum valid index value (indices are clamped to this).
-///
-/// # Returns
-///
-/// - `Ok(Vec<u8>)`: Expanded RGB data (`width * height * 3` bytes).
-/// - `Err`: If data is malformed or insufficient.
-///
-/// # Example
-///
-/// For a 2x2 image with 4-bit indices and a 16-color palette:
-/// ```text
-/// Input:  [0x12, 0x34]  (indices: 1, 2, 3, 4)
-/// Output: [R1,G1,B1, R2,G2,B2, R3,G3,B3, R4,G4,B4]
-/// ```
-fn expand_indexed_to_rgb(
-    indexed_data: &[u8],
-    lookup: &[u8],
-    width: usize,
-    height: usize,
-    bits_per_component: usize,
-    hival: u8,
-) -> Result<Vec<u8>, PdfCanvasError> {
-    let num_pixels = width.saturating_mul(height);
-    let mut out = Vec::with_capacity(num_pixels.saturating_mul(RGB_COMPONENTS));
-    let mut bit_pos = 0;
-
-    for pixel_idx in 0..num_pixels {
-        let index = extract_index(indexed_data, bits_per_component, &mut bit_pos)?;
-
-        // Clamp index to valid palette range
-        // Using u32::from for widening conversion, then usize conversion
-        let clamped_index = index.min(u32::from(hival));
-        // Conversion from u32 to usize: on 32-bit platforms this is identity,
-        // on 64-bit platforms this is a widening cast - both are infallible
-        #[allow(clippy::as_conversions)]
-        let clamped_index_usize = clamped_index as usize;
-        let base = clamped_index_usize.saturating_mul(RGB_COMPONENTS);
-        let end = base.saturating_add(RGB_COMPONENTS);
-
-        // Safely access lookup table with bounds checking
-        let rgb = lookup.get(base..end).ok_or_else(|| {
-            PdfCanvasError::InvalidImageData(format!(
-                "Palette index {} out of bounds at pixel {} (lookup table size: {})",
-                clamped_index_usize,
-                pixel_idx,
-                lookup.len()
-            ))
-        })?;
-
-        out.extend_from_slice(rgb);
-    }
-
-    Ok(out)
 }
 
 impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
@@ -246,44 +97,57 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
 
         Ok(())
     }
+
+    fn paint_inline_image(&mut self, image: &InlineImage) -> Result<(), Self::ErrorType> {
+        let decoded = ImageXObject::decode_inline_image(image, &PassthroughResolver, None)
+            .map_err(|e| PdfCanvasError::InvalidImageData(e.to_string()))?;
+
+        self.render_decoded_image(&decoded, true)
+    }
 }
 
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Renders an image XObject to the canvas.
-    ///
-    /// Handles the complete image rendering pipeline including coordinate
-    /// transformation, color space conversion, and backend delegation.
-    fn render_image_xobject(&mut self, image: &ImageXObject) -> Result<(), PdfCanvasError> {
+    pub(crate) fn render_image_xobject(
+        &mut self,
+        image: &ImageXObject,
+    ) -> Result<(), PdfCanvasError> {
+        self.render_decoded_image(image, false)
+    }
+
+    fn render_decoded_image(
+        &mut self,
+        image: &ImageXObject,
+        inline_image: bool,
+    ) -> Result<(), PdfCanvasError> {
         let transform = self.current_state()?.transform;
         let rotation_degrees = transform.rotation_degrees();
-
-        // Post-concatenate a unit-square → user-space orientation fix that
-        // flips the Y axis (image space is top-left origin, PDF user space is
-        // bottom-left). This keeps positions/scales the same but makes the
-        // image render right-side up in user space.
         let transform = generate_image_orientation_matrix(transform);
-
-        // Map the unit square through the transform to compute an axis-aligned
-        // bounding rectangle (AABB) that contains the transformed image
         let dest_rect = Self::compute_destination_rect(&transform, rotation_degrees);
 
-        // Expand indexed color data to RGB if applicable
-        let image_data = self.resolve_image_data(image)?;
-
         let rendered_image = Image {
-            data: ImageData::from(image_data),
+            data: ImageData::Owned(image.data.clone()),
             width: image.width,
             height: image.height,
             pixel_format: image.pixel_format,
         };
 
         let blend_mode = self.current_state()?.blend_mode;
-        self.canvas.draw_image_rect(
-            &rendered_image,
-            blend_mode,
-            dest_rect,
-            Some(rotation_degrees),
-        )
+        if inline_image {
+            self.canvas.draw_inline_image(
+                &rendered_image,
+                blend_mode,
+                dest_rect,
+                Some(rotation_degrees),
+            )
+        } else {
+            self.canvas.draw_image_rect(
+                &rendered_image,
+                blend_mode,
+                dest_rect,
+                Some(rotation_degrees),
+            )
+        }
     }
 
     /// Computes the destination rectangle for image rendering.
@@ -309,33 +173,5 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         }
 
         dest_rect
-    }
-
-    /// Resolves image data, expanding indexed colors to RGB when necessary.
-    ///
-    /// For indexed color spaces with an RGB base, this expands the palette
-    /// indices to full RGB triplets. Other color spaces pass through unchanged.
-    fn resolve_image_data<'a>(
-        &self,
-        image: &'a ImageXObject,
-    ) -> Result<Cow<'a, [u8]>, PdfCanvasError> {
-        match image.color_space.as_ref() {
-            Some(ColorSpace::Indexed(IndexedColorSpace {
-                base,
-                hival,
-                lookup,
-            })) if matches!(base.as_ref(), ColorSpace::DeviceRGB) => {
-                let expanded = expand_indexed_to_rgb(
-                    &image.data,
-                    lookup,
-                    image.width,
-                    image.height,
-                    image.bits_per_component,
-                    *hival,
-                )?;
-                Ok(Cow::Owned(expanded))
-            }
-            _ => Ok(Cow::Borrowed(image.data.as_slice())),
-        }
     }
 }

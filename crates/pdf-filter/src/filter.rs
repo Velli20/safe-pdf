@@ -65,12 +65,16 @@ impl From<Cow<'_, str>> for Filter {
     fn from(name: Cow<'_, str>) -> Self {
         match name.as_ref() {
             "DCTDecode" => Self::DCTDecode,
+            "DCT" => Self::DCTDecode,
             "FlateDecode" => Self::FlateDecode,
+            "Fl" => Self::FlateDecode,
             "JPXDecode" => Self::JPXDecode,
             "CCITTFaxDecode" => Self::CCITTFaxDecode,
+            "CCF" => Self::CCITTFaxDecode,
             "ASCII85Decode" => Self::ASCII85Decode,
             "ASCIIHexDecode" => Self::ASCIIHexDecode,
             "LZWDecode" => Self::LZWDecode,
+            "LZW" => Self::LZWDecode,
             _ => Self::Unsupported(name.into_owned()),
         }
     }
@@ -372,6 +376,7 @@ fn resolve_decode_parms_array<'a>(
             let resolved = objects.resolve_object(item)?;
             match resolved {
                 ObjectVariant::Dictionary(d) => Ok(Some(d.as_ref())),
+                ObjectVariant::Null => Ok(None),
                 other => Err(FilterError::from(
                     pdf_object::error::ObjectError::TypeMismatch("Dictionary", other.name()),
                 )),

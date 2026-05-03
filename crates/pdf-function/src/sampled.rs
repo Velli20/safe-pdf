@@ -1,10 +1,11 @@
 use num_derive::FromPrimitive;
 use num_traits::{FromPrimitive, ToPrimitive};
+use pdf_decode::decode_normalized_samples;
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
 use crate::{
     error::FunctionReadError,
-    function::{Function, FunctionImpl, ensure_stream_len, get_pair, linear_interpolate},
+    function::{Function, FunctionImpl, get_pair, linear_interpolate},
     function_interpolation_error::FunctionInterpolationError,
 };
 
@@ -37,129 +38,6 @@ pub struct SampledFunction {
     samples: Vec<f32>,
     /// Number of output values per sample point.
     output_count: usize,
-}
-
-impl SampledFunction {
-    /// Reads a value of the specified bit width from a byte stream at a bit offset.
-    #[inline]
-    fn read_bits(data: &[u8], bit_offset: usize, bits: usize) -> Result<u32, FunctionReadError> {
-        if bits == 0 {
-            return Ok(0);
-        }
-
-        let byte_offset = bit_offset / 8;
-        let bit_shift = bit_offset % 8;
-
-        let total_bits = bit_shift.saturating_add(bits);
-        let bytes_needed = total_bits.div_ceil(8);
-
-        // Read enough bytes to cover our bits (up to 5 bytes for 32-bit at worst alignment)
-        let mut value: u64 = 0;
-        for i in 0..bytes_needed {
-            let Some(&byte) = data.get(byte_offset.saturating_add(i)) else {
-                break;
-            };
-
-            let shift_bytes = bytes_needed.saturating_sub(1).saturating_sub(i);
-            let shift_bits = shift_bytes.saturating_mul(8);
-            value |= u64::from(byte) << shift_bits;
-        }
-
-        // Shift and mask to extract the value
-        let shift = bytes_needed
-            .saturating_mul(8)
-            .saturating_sub(bit_shift)
-            .saturating_sub(bits);
-        let bits_u32 = u32::try_from(bits).map_err(|_| FunctionReadError::InvalidBitsPerSample)?;
-        let mask = u64::MAX
-            .checked_shr(u64::BITS.saturating_sub(bits_u32))
-            .ok_or(FunctionReadError::InvalidBitsPerSample)?;
-
-        u32::try_from((value >> shift) & mask).map_err(|_| FunctionReadError::InvalidSampleData)
-    }
-
-    /// Decodes sample values from the stream data.
-    ///
-    /// Samples are packed into the stream with the specified bits per sample.
-    /// Returns normalized values in the range [0, 1].
-    fn decode_samples(
-        stream: &[u8],
-        bits_per_sample: usize,
-        count: usize,
-    ) -> Result<Vec<f32>, FunctionReadError> {
-        let max_value = (1u64 << bits_per_sample).saturating_sub(1);
-        let max_value_f32 = max_value
-            .to_f32()
-            .ok_or(FunctionReadError::InvalidSampleData)?;
-
-        let mut samples = Vec::with_capacity(count);
-
-        match bits_per_sample {
-            8 => {
-                // Fast path for 8-bit samples
-                ensure_stream_len(stream, count)?;
-                for &byte in stream.iter().take(count) {
-                    samples.push(f32::from(byte) / max_value_f32);
-                }
-            }
-            16 => {
-                // Fast path for 16-bit samples (big-endian)
-                let expected_bytes = count.saturating_mul(2);
-                ensure_stream_len(stream, expected_bytes)?;
-                for chunk in stream.chunks_exact(2).take(count) {
-                    // chunks_exact guarantees exactly 2 elements
-                    if let [b0, b1] = chunk {
-                        let value = u16::from_be_bytes([*b0, *b1]);
-                        samples.push(f32::from(value) / max_value_f32);
-                    }
-                }
-            }
-            24 => {
-                // 24-bit samples (big-endian)
-                let expected_bytes = count.saturating_mul(3);
-                ensure_stream_len(stream, expected_bytes)?;
-                for chunk in stream.chunks_exact(3).take(count) {
-                    // chunks_exact guarantees exactly 3 elements
-                    if let [b0, b1, b2] = chunk {
-                        let value = u32::from_be_bytes([0, *b0, *b1, *b2]);
-                        let value_f32 =
-                            value.to_f32().ok_or(FunctionReadError::InvalidSampleData)?;
-                        samples.push(value_f32 / max_value_f32);
-                    }
-                }
-            }
-            32 => {
-                // 32-bit samples (big-endian)
-                let expected_bytes = count.saturating_mul(4);
-                ensure_stream_len(stream, expected_bytes)?;
-                for chunk in stream.chunks_exact(4).take(count) {
-                    // chunks_exact guarantees exactly 4 elements
-                    if let [b0, b1, b2, b3] = chunk {
-                        let value = u32::from_be_bytes([*b0, *b1, *b2, *b3]);
-                        let value_f32 =
-                            value.to_f32().ok_or(FunctionReadError::InvalidSampleData)?;
-                        samples.push(value_f32 / max_value_f32);
-                    }
-                }
-            }
-            _ => {
-                // Generic bit-packed decoding for 1, 2, 4, 12 bits
-                let total_bits = count.saturating_mul(bits_per_sample);
-                let expected_bytes = total_bits.div_ceil(8);
-                ensure_stream_len(stream, expected_bytes)?;
-
-                let mut bit_offset: usize = 0;
-                for _ in 0..count {
-                    let value = Self::read_bits(stream, bit_offset, bits_per_sample)?;
-                    let value_f32 = value.to_f32().ok_or(FunctionReadError::InvalidSampleData)?;
-                    samples.push(value_f32 / max_value_f32);
-                    bit_offset = bit_offset.saturating_add(bits_per_sample);
-                }
-            }
-        }
-
-        Ok(samples)
-    }
 }
 
 impl FunctionImpl for SampledFunction {
@@ -427,7 +305,7 @@ impl FunctionImpl for SampledFunction {
         let stream = stream.data()?;
 
         // Decode samples from the stream
-        let samples = Self::decode_samples(&stream, bits_per_sample, samples_count)?;
+        let samples = decode_normalized_samples(&stream, bits_per_sample, samples_count)?;
 
         Ok(Function::Sampled(SampledFunction {
             size,

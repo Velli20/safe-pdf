@@ -1863,6 +1863,7 @@ dependencies = [
  "pdf-content-stream",
  "pdf-font",
  "pdf-graphics",
+ "pdf-image",
  "pdf-object",
  "pdf-page",
  "read-fonts",
@@ -1886,9 +1887,19 @@ version = "0.1.0"
 dependencies = [
  "num-traits",
  "pdf-graphics",
+ "pdf-image",
  "pdf-object",
  "pdf-parser",
  "pdf-tokenizer",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "pdf-decode"
+version = "0.1.0"
+dependencies = [
+ "num-traits",
+ "pdf-object",
  "thiserror 2.0.12",
 ]
 
@@ -1940,6 +1951,7 @@ version = "0.1.0"
 dependencies = [
  "num-derive",
  "num-traits",
+ "pdf-decode",
  "pdf-object",
  "pdf-postscript",
  "thiserror 2.0.12",
@@ -1976,6 +1988,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdf-image"
+version = "0.1.0"
+dependencies = [
+ "num-traits",
+ "pdf-color-space",
+ "pdf-decode",
+ "pdf-filter",
+ "pdf-graphics",
+ "pdf-object",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "pdf-object"
 version = "0.1.0"
 dependencies = [
@@ -2000,7 +2025,6 @@ dependencies = [
 name = "pdf-page"
 version = "0.1.0"
 dependencies = [
- "flate2",
  "num-derive",
  "num-traits",
  "pdf-color-space",
@@ -2008,6 +2032,7 @@ dependencies = [
  "pdf-font",
  "pdf-function",
  "pdf-graphics",
+ "pdf-image",
  "pdf-object",
  "pdf-object-collection",
  "thiserror 2.0.12",
@@ -2019,6 +2044,7 @@ version = "0.1.0"
 dependencies = [
  "flate2",
  "pdf-filter",
+ "pdf-image",
  "pdf-object",
  "pdf-tokenizer",
  "thiserror 2.0.12",

@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
-
-use pdf_object::{InlineImage, dictionary::Dictionary};
+use pdf_image::InlineImage;
+use pdf_object::object_resolver::PassthroughResolver;
+use pdf_parser::parser::PdfParser;
 
 use crate::{
     error::PdfOperatorError,
@@ -43,13 +43,45 @@ impl PdfOperator for InlineImage {
     const OPERAND_COUNT: Option<usize> = Some(0);
 
     fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Ok(PdfOperatorVariant::InlineImage(Self::new(
-            Dictionary::new(BTreeMap::new()),
-            Vec::new(),
-        )))
+        Err(PdfOperatorError::UnsupportedOperator("BI"))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
-        Ok(())
+    fn parse<'a>(
+        parser: &mut PdfParser<'a>,
+    ) -> Result<Option<PdfOperatorVariant>, PdfOperatorError> {
+        let image = parser.parse_inline_image(&PassthroughResolver)?;
+        Ok(Some(PdfOperatorVariant::InlineImage(image)))
+    }
+
+    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+        backend.paint_inline_image(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use pdf_image::InlineImage;
+    use pdf_object::dictionary::Dictionary;
+
+    use crate::pdf_operator::PdfOperator;
+    use crate::recording_pdf_operator_backend::{RecordedOperation, RecordingBackend};
+
+    #[test]
+    fn inline_image_call_dispatches_to_backend_hook() {
+        let image = InlineImage::new(Dictionary::new(BTreeMap::new()), vec![0x01, 0x02]);
+        let mut backend = RecordingBackend::default();
+
+        image
+            .call(&mut backend)
+            .expect("inline image should dispatch");
+
+        assert_eq!(
+            backend.operations,
+            vec![RecordedOperation::PaintInlineImage {
+                image: image.clone()
+            }]
+        );
     }
 }

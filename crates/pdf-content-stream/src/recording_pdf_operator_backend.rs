@@ -2,6 +2,7 @@ use pdf_graphics::LineCap;
 use pdf_graphics::LineJoin;
 use pdf_graphics::TextRenderingMode;
 use pdf_graphics::transform::Transform;
+use pdf_image::InlineImage;
 use thiserror::Error;
 
 use crate::TextElement;
@@ -186,6 +187,9 @@ pub enum RecordedOperation {
     },
     InvokeXObject {
         xobject_name: String,
+    },
+    PaintInlineImage {
+        image: InlineImage,
     },
     PaintShading {
         shading_name: String,
@@ -675,6 +679,13 @@ impl XObjectOps for RecordingBackend {
     fn invoke_xobject(&mut self, xobject_name: &str) -> Result<(), Self::ErrorType> {
         self.operations.push(RecordedOperation::InvokeXObject {
             xobject_name: xobject_name.to_string(),
+        });
+        Ok(())
+    }
+
+    fn paint_inline_image(&mut self, image: &InlineImage) -> Result<(), Self::ErrorType> {
+        self.operations.push(RecordedOperation::PaintInlineImage {
+            image: image.clone(),
         });
         Ok(())
     }

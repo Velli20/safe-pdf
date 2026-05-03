@@ -1,4 +1,4 @@
-use pdf_object::InlineImage;
+use pdf_image::InlineImage;
 use pdf_object::object_resolver::PassthroughResolver;
 use pdf_object::object_variant::ObjectVariant;
 use pdf_parser::parser::PdfParser;
@@ -11,7 +11,7 @@ use crate::{
     error::PdfOperatorError,
     graphics_state_operators::*,
     marked_content_operators::*,
-    operation_map::get_operation_descriptor,
+    operation_map::{OpDescriptor, get_operation_descriptor},
     path_operators::*,
     path_paint_operators::*,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
@@ -123,28 +123,52 @@ impl PdfOperatorVariant {
             parser.skip_whitespace_and_comments();
 
             // Dispatch on the next raw byte.
-            match parser.tokenizer.data().first() {
+            let next_byte = parser.tokenizer.data().first().copied();
+            match next_byte {
                 None => break,
                 // ' and " are valid PDF operators that the tokenizer does not
                 // surface as Alphabetic tokens. Handle them alongside ASCII
                 // letters in a single arm.
                 Some(b'\'' | b'"' | b'A'..=b'Z' | b'a'..=b'z') => {
-                    let name = crate::operator_tokenizer::read_operator_name(&mut parser)?;
-                    if name == InlineImage::NAME {
-                        let image = parser.parse_inline_image(&PassthroughResolver)?;
-                        out.push(PdfOperatorVariant::InlineImage(image));
+                    let name_slice = match parser.read_operator_name() {
+                        Ok(s) => s,
+                        Err(e) => {
+                            use pdf_parser::error::ParserError;
+                            match e {
+                                ParserError::UnexpectedEndOfFile => {
+                                    return Err(PdfOperatorError::UnknownOperator(
+                                        "(end of input)".to_string(),
+                                    ));
+                                }
+                                ParserError::InvalidToken(c) => {
+                                    return Err(PdfOperatorError::UnknownOperator(format!(
+                                        "{:?}",
+                                        c
+                                    )));
+                                }
+                                other => return Err(PdfOperatorError::ParserError(other)),
+                            }
+                        }
+                    };
+                    let name_owned = name_slice.to_vec();
+                    let name = name_owned.as_slice();
+                    let Some(descriptor) = get_operation_descriptor(name) else {
+                        // Skip unknown operator and its operands gracefully. This allows us
+                        // to parse content streams that contain operators that are outside
+                        // the PDF specification or were simply missed by this implementation.
                         operands.clear();
                         continue;
-                    }
+                    };
 
-                    match parse_operator(name, &mut operands) {
-                        Ok(operator) => out.push(operator),
-                        Err(_err) => {}
+                    if let Some(operator) = (descriptor.parse_hook)(&mut parser)? {
+                        out.push(operator);
+                    } else {
+                        out.push(parse_operator(descriptor, &mut operands)?);
                     }
                     operands.clear();
                 }
                 // Anything else is an operand value.
-                _ => {
+                Some(_) => {
                     let value = parser.parse_object(&PassthroughResolver)?;
                     operands.push(value);
                 }
@@ -232,19 +256,14 @@ impl PdfOperatorVariant {
 /// before parsing. Takes `operands` by `&mut` so its heap allocation can be
 /// reclaimed and reused for the next operator.
 fn parse_operator(
-    name: &[u8],
+    descriptor: &OpDescriptor,
     operands: &mut Vec<ObjectVariant>,
 ) -> Result<PdfOperatorVariant, PdfOperatorError> {
-    let Some(descriptor) = get_operation_descriptor(name) else {
-        let name_str = String::from_utf8_lossy(name);
-        return Err(PdfOperatorError::UnknownOperator(name_str.to_string()));
-    };
-
     // Validate operand count if the operator has a fixed count requirement.
     if let Some(required_count) = descriptor.operand_count
         && operands.len() != required_count
     {
-        let name_str = String::from_utf8_lossy(name);
+        let name_str = String::from_utf8_lossy(descriptor.name);
         return Err(PdfOperatorError::OperandCountMismatch {
             operator: name_str.to_string(),
             actual: operands.len(),
@@ -267,6 +286,8 @@ fn parse_operator(
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
+    use crate::recording_pdf_operator_backend::{RecordedOperation, RecordingBackend};
+
     use super::*;
 
     #[test]
@@ -355,6 +376,26 @@ mod tests {
                 RestoreGraphicsState
             ))
         ));
+    }
+
+    #[test]
+    fn parsed_inline_image_is_recorded_by_backend() {
+        let input = b"BI /W 1 /H 1 ID \x00 EI";
+        let operators = PdfOperatorVariant::parse(input).unwrap();
+        let inline_image = match operators.first() {
+            Some(PdfOperatorVariant::InlineImage(image)) => image.clone(),
+            other => panic!("expected inline image, got {other:?}"),
+        };
+
+        let mut backend = RecordingBackend::default();
+        operators[0].call(&mut backend).unwrap();
+
+        assert_eq!(
+            backend.operations,
+            vec![RecordedOperation::PaintInlineImage {
+                image: inline_image
+            }]
+        );
     }
 
     #[test]

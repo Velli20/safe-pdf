@@ -732,13 +732,15 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, rc::Rc, sync::Arc};
+    use std::{collections::HashMap, ops::Deref, rc::Rc, sync::Arc};
 
     use pdf_content_stream::content_stream::ContentStreamIdAllocator;
     use pdf_graphics::{
-        BlendMode, MaskMode, PathFillType, color::Color, rect::Rect, transform::Transform,
+        BlendMode, MaskMode, PathFillType, PixelFormat, color::Color, rect::Rect,
+        transform::Transform,
     };
-    use pdf_object::{dictionary::Dictionary, stream::StreamObject};
+    use pdf_image::InlineImage;
+    use pdf_object::{dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject};
     use pdf_page::{
         form::FormXObject, page::PdfPage, resource::Resource, resources::Resources,
         xobject::XObject,
@@ -755,6 +757,21 @@ mod tests {
     struct CountingCanvas {
         save_count: usize,
         restore_count: usize,
+        draw_image_count: usize,
+        draw_inline_image_count: usize,
+        last_draw_image: Option<DrawnImage>,
+        last_draw_inline_image: Option<DrawnImage>,
+    }
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct DrawnImage {
+        data: Vec<u8>,
+        width: usize,
+        height: usize,
+        pixel_format: PixelFormat,
+        blend_mode: Option<BlendMode>,
+        dest_rect: Rect,
+        image_rotation: Option<f32>,
     }
 
     impl CanvasBackend for CountingCanvas {
@@ -809,10 +826,40 @@ mod tests {
         fn draw_image_rect(
             &mut self,
             _image: &Image<'_>,
-            _blend_mode: Option<BlendMode>,
-            _dest_rect: Rect,
-            _image_rotation: Option<f32>,
+            blend_mode: Option<BlendMode>,
+            dest_rect: Rect,
+            image_rotation: Option<f32>,
         ) -> Result<(), crate::error::PdfCanvasError> {
+            self.draw_image_count += 1;
+            self.last_draw_image = Some(DrawnImage {
+                data: _image.data.deref().to_vec(),
+                width: _image.width,
+                height: _image.height,
+                pixel_format: _image.pixel_format,
+                blend_mode,
+                dest_rect,
+                image_rotation,
+            });
+            Ok(())
+        }
+
+        fn draw_inline_image(
+            &mut self,
+            image: &Image<'_>,
+            blend_mode: Option<BlendMode>,
+            dest_rect: Rect,
+            image_rotation: Option<f32>,
+        ) -> Result<(), crate::error::PdfCanvasError> {
+            self.draw_inline_image_count += 1;
+            self.last_draw_inline_image = Some(DrawnImage {
+                data: image.data.deref().to_vec(),
+                width: image.width,
+                height: image.height,
+                pixel_format: image.pixel_format,
+                blend_mode,
+                dest_rect,
+                image_rotation,
+            });
             Ok(())
         }
 
@@ -849,6 +896,44 @@ mod tests {
             0,
             Box::new(Dictionary::new(Default::default())),
             data.to_vec(),
+        )
+    }
+
+    fn image_xobject_dictionary() -> Dictionary {
+        Dictionary::new(std::collections::BTreeMap::from([
+            ("BitsPerComponent".to_string(), ObjectVariant::Integer(1)),
+            (
+                "ColorSpace".to_string(),
+                ObjectVariant::Name(b"DeviceGray".to_vec()),
+            ),
+            (
+                "Decode".to_string(),
+                ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(0)]),
+            ),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(4)),
+        ]))
+    }
+
+    fn inline_image() -> InlineImage {
+        InlineImage::new(
+            Dictionary::new(std::collections::BTreeMap::from([
+                ("BPC".to_string(), ObjectVariant::Integer(1)),
+                (
+                    "CS".to_string(),
+                    ObjectVariant::Name(b"DeviceGray".to_vec()),
+                ),
+                (
+                    "D".to_string(),
+                    ObjectVariant::Array(vec![
+                        ObjectVariant::Integer(1),
+                        ObjectVariant::Integer(0),
+                    ]),
+                ),
+                ("H".to_string(), ObjectVariant::Integer(1)),
+                ("W".to_string(), ObjectVariant::Integer(4)),
+            ])),
+            vec![0b1010_0000],
         )
     }
 
@@ -929,5 +1014,66 @@ mod tests {
         assert_eq!(canvas.canvas_stack.len(), 1);
         assert_eq!(backend.save_count, 3);
         assert_eq!(backend.restore_count, 3);
+    }
+
+    #[test]
+    fn inline_image_render_path_matches_image_xobject_path() {
+        let page = page();
+        let mut xobject_backend = CountingCanvas::default();
+        let mut inline_backend = CountingCanvas::default();
+
+        let transform = Transform::from_row(2.0, 0.0, 0.0, 3.0, 10.0, 20.0);
+
+        let mut xobject_canvas =
+            PdfCanvas::new(&mut xobject_backend, &page, None).expect("xobject canvas should build");
+        xobject_canvas.current_state_mut().expect("state").transform = transform;
+        xobject_canvas
+            .current_state_mut()
+            .expect("state")
+            .blend_mode = Some(BlendMode::Multiply);
+
+        let image = pdf_image::ImageXObject::decode_normalized_image(
+            &image_xobject_dictionary(),
+            &[0b1010_0000],
+            &pdf_object::object_resolver::PassthroughResolver,
+            None,
+        )
+        .expect("xobject image should decode");
+
+        xobject_canvas
+            .render_image_xobject(&image)
+            .expect("xobject image should render");
+
+        let mut inline_canvas =
+            PdfCanvas::new(&mut inline_backend, &page, None).expect("inline canvas should build");
+        inline_canvas.current_state_mut().expect("state").transform = transform;
+        inline_canvas.current_state_mut().expect("state").blend_mode = Some(BlendMode::Multiply);
+
+        pdf_content_stream::pdf_operator_backend::XObjectOps::paint_inline_image(
+            &mut inline_canvas,
+            &inline_image(),
+        )
+        .expect("inline image should render");
+
+        assert_eq!(xobject_backend.draw_image_count, 1);
+        assert_eq!(inline_backend.draw_inline_image_count, 1);
+
+        let xobject_draw = xobject_backend
+            .last_draw_image
+            .as_ref()
+            .expect("xobject draw should be recorded");
+        let inline_draw = inline_backend
+            .last_draw_inline_image
+            .as_ref()
+            .expect("inline draw should be recorded");
+
+        assert_eq!(xobject_draw, inline_draw);
+        assert_eq!(xobject_draw.width, 4);
+        assert_eq!(xobject_draw.height, 1);
+        assert_eq!(xobject_draw.pixel_format, PixelFormat::Gray8);
+        assert_eq!(xobject_draw.blend_mode, Some(BlendMode::Multiply));
+        assert_eq!(xobject_draw.dest_rect, inline_draw.dest_rect);
+        assert_eq!(xobject_draw.data, inline_draw.data);
+        assert_eq!(xobject_draw.data, vec![0x00, 0xFF, 0x00, 0xFF]);
     }
 }

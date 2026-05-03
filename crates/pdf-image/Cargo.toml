@@ -1,16 +1,16 @@
 [package]
-name = "pdf-function"
+name = "pdf-image"
 version = "0.1.0"
 edition = "2024"
 
-# Inherit all lint configurations from the workspace root
 [lints]
 workspace = true
 
 [dependencies]
 pdf-decode = { path = "../pdf-decode" }
 pdf-object = { path = "../pdf-object" }
-pdf-postscript = { path = "../pdf-postscript" }
+pdf-graphics = { path = "../pdf-graphics" }
+pdf-color-space = { path = "../pdf-color-space" }
+pdf-filter = { path = "../pdf-filter" }
 thiserror = "2.0.12"
-num-traits = "0.2.19"
-num-derive = "0.4"
+num-traits = "0.2"
