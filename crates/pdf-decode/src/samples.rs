@@ -188,10 +188,7 @@ where
     F: Fn(&[u8]) -> u32,
 {
     let mut out = Vec::with_capacity(sample_count);
-    for chunk in data
-        .chunks_exact(bytes_per_sample)
-        .take(sample_count)
-    {
+    for chunk in data.chunks_exact(bytes_per_sample).take(sample_count) {
         out.push(decode_chunk(chunk));
     }
     Ok(out)

@@ -1,4 +1,5 @@
 pub mod operands;
+mod operator_stream_parser;
 pub mod operator_trait;
 pub mod variants;
 

@@ -1,7 +1,4 @@
 use pdf_image::InlineImage;
-use pdf_object::object_resolver::PassthroughResolver;
-use pdf_object::object_variant::ObjectVariant;
-use pdf_parser::parser::PdfParser;
 
 use crate::compatibility_operators::{BeginCompatibility, EndCompatibility};
 use crate::type3_font_operators::SetCharWidth;
@@ -11,7 +8,6 @@ use crate::{
     error::PdfOperatorError,
     graphics_state_operators::*,
     marked_content_operators::*,
-    operation_map::{OpDescriptor, get_operation_descriptor},
     path_operators::*,
     path_paint_operators::*,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
@@ -24,7 +20,8 @@ use crate::{
     xobject_and_image_operators::*,
 };
 
-use super::{Operands, PdfOperator};
+use super::PdfOperator;
+use super::operator_stream_parser::OperatorStreamParser;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PdfOperatorVariant {
@@ -116,64 +113,8 @@ impl PdfOperatorVariant {
         input: &[u8],
         out: &mut Vec<PdfOperatorVariant>,
     ) -> Result<(), PdfOperatorError> {
-        let mut parser = PdfParser::from(input);
-        // PDF operators have at most ~6 operands; pre-allocate to avoid reallocs.
-        let mut operands = Vec::with_capacity(6);
-        loop {
-            parser.skip_whitespace_and_comments();
-
-            // Dispatch on the next raw byte.
-            let next_byte = parser.tokenizer.data().first().copied();
-            match next_byte {
-                None => break,
-                Some(b)
-                    if PdfParser::is_pdf_regular_character(b)
-                        && !matches!(b, b'+' | b'-' | b'.' | b'0'..=b'9') =>
-                {
-                    let name_slice = match parser.read_operator_name() {
-                        Ok(s) => s,
-                        Err(e) => {
-                            use pdf_parser::error::ParserError;
-                            match e {
-                                ParserError::UnexpectedEndOfFile => {
-                                    return Err(PdfOperatorError::UnknownOperator(
-                                        "(end of input)".to_string(),
-                                    ));
-                                }
-                                ParserError::InvalidToken(c) => {
-                                    return Err(PdfOperatorError::UnknownOperator(format!(
-                                        "{:?}",
-                                        c
-                                    )));
-                                }
-                                other => return Err(PdfOperatorError::ParserError(other)),
-                            }
-                        }
-                    };
-                    let name_owned = name_slice.to_vec();
-                    let name = name_owned.as_slice();
-                    let Some(descriptor) = get_operation_descriptor(name) else {
-                        // Skip unknown operator and its operands gracefully. This allows us
-                        // to parse content streams that contain operators that are outside
-                        // the PDF specification or were simply missed by this implementation.
-                        operands.clear();
-                        continue;
-                    };
-
-                    if let Some(operator) = (descriptor.parse_hook)(&mut parser)? {
-                        out.push(operator);
-                    } else if let Some(operator) = parse_operator(descriptor, &mut operands)? {
-                        out.push(operator);
-                    }
-                    operands.clear();
-                }
-                // Anything else is an operand value.
-                Some(_) => {
-                    let value = parser.parse_object(&PassthroughResolver)?;
-                    operands.push(value);
-                }
-            }
-        }
+        let mut parser = OperatorStreamParser::new(input, out);
+        while parser.parse_next_item()? {}
 
         Ok(())
     }
@@ -250,37 +191,11 @@ impl PdfOperatorVariant {
     }
 }
 
-/// Parses a single operator with its operands.
-///
-/// Looks up the operator descriptor by name and validates the operand count
-/// before parsing. Takes `operands` by `&mut` so its heap allocation can be
-/// reclaimed and reused for the next operator.
-fn parse_operator(
-    descriptor: &OpDescriptor,
-    operands: &mut Vec<ObjectVariant>,
-) -> Result<Option<PdfOperatorVariant>, PdfOperatorError> {
-    // Validate operand count if the operator has a fixed count requirement.
-    if let Some(required_count) = descriptor.operand_count
-        && operands.len() != required_count
-    {
-        // If the operand count doesn't match, skip this operator and its operands gracefully. This allows us to parse content streams that contain malformed operators without failing the entire stream.
-        return Ok(None);
-    }
-
-    // Take the operand buffer, leaving an empty Vec behind. The allocation
-    // is reclaimed below so it can be reused for the next operator.
-    let mut ops = Operands(std::mem::take(operands));
-    let operator = (descriptor.parser)(&mut ops)?;
-    // Reclaim the operand buffer for the next operator. This avoids per-operator
-    // allocations.
-    *operands = ops.0;
-    Ok(Some(operator))
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use crate::recording_pdf_operator_backend::{RecordedOperation, RecordingBackend};
+    use pdf_object::object_variant::ObjectVariant;
 
     use super::*;
 
