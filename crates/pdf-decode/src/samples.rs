@@ -154,12 +154,13 @@ fn decode_row_aligned_samples(
 
         if is_byte_aligned {
             let sample_bytes = samples_per_row.saturating_mul(bytes_per_sample);
-            let packed_row = row_data
-                .get(..sample_bytes)
-                .ok_or(DecodeError::InsufficientData {
-                    expected_bytes: row_start.saturating_add(sample_bytes),
-                    actual_bytes: data.len(),
-                })?;
+            let packed_row =
+                row_data
+                    .get(..sample_bytes)
+                    .ok_or_else(|| DecodeError::InsufficientData {
+                        expected_bytes: row_start.saturating_add(sample_bytes),
+                        actual_bytes: data.len(),
+                    })?;
             out.extend(decode_contiguous_samples(
                 packed_row,
                 bits_per_sample,
