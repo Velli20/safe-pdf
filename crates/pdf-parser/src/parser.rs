@@ -169,7 +169,13 @@ impl PdfParser<'_> {
     pub fn read_number<T: FromStr>(&mut self, skip_whitespace: bool) -> Result<T, ParserError> {
         let number_bytes = self.tokenizer.read_while_u8(|b| b.is_ascii_digit());
         if number_bytes.is_empty() {
-            return Err(ParserError::UnexpectedEndOfFile);
+            return match self.tokenizer.data().first().copied() {
+                Some(byte) => Err(ParserError::UnexpectedTokenAt {
+                    token: String::from_utf8_lossy(&[byte]).into_owned(),
+                    position: self.tokenizer.position,
+                }),
+                None => Err(ParserError::UnexpectedEndOfFile),
+            };
         }
 
         // number_bytes is guaranteed to be ASCII digits from the predicate above,
@@ -338,6 +344,21 @@ mod tests {
 
         assert_eq!(number, 123);
         assert_eq!(parser.tokenizer.data(), b"abc");
+    }
+
+    #[test]
+    fn test_read_number_returns_error_on_non_digit_input() {
+        let mut parser = PdfParser::from(b"%123".as_slice());
+
+        let error = parser.read_number::<usize>(false).unwrap_err();
+
+        assert_eq!(
+            error,
+            ParserError::UnexpectedTokenAt {
+                token: "%".to_string(),
+                position: 0,
+            }
+        );
     }
 
     #[test]
