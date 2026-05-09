@@ -108,7 +108,7 @@ impl PdfParser<'_> {
             return Ok(Some(candidate_start));
         }
 
-        Err(ParserError::InlineImageMissingDataEnd)
+        Ok(None)
     }
 
     /// Finds the first valid inline-image `EI` end marker by scanning binary data.
@@ -295,6 +295,16 @@ mod tests {
         let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
 
         assert_eq!(image.data(), b"abc EIxyzj");
+        assert_eq!(parser.tokenizer.data(), b" Q");
+    }
+
+    #[test]
+    fn exact_length_inline_image_allows_whitespace_before_ei() {
+        let mut parser = PdfParser::from(b"/W 1 /H 1 /BPC 1 /IM true ID \x00\nEI Q".as_slice());
+
+        let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
+
+        assert_eq!(image.data(), b"\x00\n");
         assert_eq!(parser.tokenizer.data(), b" Q");
     }
 

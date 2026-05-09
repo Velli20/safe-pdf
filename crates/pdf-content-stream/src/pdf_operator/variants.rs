@@ -308,6 +308,20 @@ mod tests {
     }
 
     #[test]
+    fn parses_inline_image_with_exact_length_followed_by_newline_before_ei() {
+        let input = b"46 0 0 0 1 1 d1\nq\n0 0 m\n0 1 l\n1 1 l\n1 0 l\nh\nW n\nq 1 0 0 -1 0 1 cm\nBI\n/IM true\n/W 1\n/H 1\n/BPC 1\n/D[1\n0]\nID \x00\nEI Q\nQ\n";
+
+        let result = PdfOperatorVariant::parse(input).unwrap();
+
+        assert!(matches!(
+            result
+                .iter()
+                .find(|operator| matches!(operator, PdfOperatorVariant::InlineImage(_))),
+            Some(PdfOperatorVariant::InlineImage(_))
+        ));
+    }
+
+    #[test]
     fn test_simple() {
         struct TestCase<'a> {
             description: &'a str,
