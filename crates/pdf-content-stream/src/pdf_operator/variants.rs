@@ -686,4 +686,33 @@ mod tests {
             vec![PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState)]
         );
     }
+
+    #[test]
+    fn parse_recovers_from_truncated_trailing_array_operand() {
+        let input = b"0 j 0 J [ ";
+
+        let actual_ops = PdfOperatorVariant::parse(input).expect("stream should parse");
+
+        assert_eq!(actual_ops.len(), 2);
+        assert!(matches!(
+            actual_ops.first(),
+            Some(PdfOperatorVariant::SetLineJoinStyle(_))
+        ));
+        assert!(matches!(
+            actual_ops.get(1),
+            Some(PdfOperatorVariant::SetLineCapStyle(_))
+        ));
+    }
+
+    #[test]
+    fn parse_fixture_with_truncated_trailing_operand_stream() {
+        let input = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../pdf-operator-variant-parse-4.txt"
+        ));
+
+        let actual_ops = PdfOperatorVariant::parse(input).expect("fixture stream should parse");
+
+        assert!(!actual_ops.is_empty());
+    }
 }

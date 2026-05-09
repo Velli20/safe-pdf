@@ -2,6 +2,7 @@ use pdf_object::object_resolver::PassthroughResolver;
 use pdf_object::object_variant::ObjectVariant;
 use pdf_parser::error::ParserError;
 use pdf_parser::parser::PdfParser;
+use pdf_tokenizer::error::TokenizerError;
 
 use crate::{
     error::PdfOperatorError,
@@ -45,7 +46,7 @@ impl<'a, 'out> OperatorStreamParser<'a, 'out> {
         if next_item_is_operator(next_byte) {
             self.parse_operator_from_stream()?;
         } else {
-            self.parse_operand()?;
+            return self.parse_operand_or_stop();
         }
 
         Ok(true)
@@ -66,6 +67,18 @@ impl<'a, 'out> OperatorStreamParser<'a, 'out> {
         let value = self.parser.parse_object(&PassthroughResolver)?;
         self.operands.push(value);
         Ok(())
+    }
+
+    /// Parses one operand object or stops cleanly when the stream ends mid-object.
+    fn parse_operand_or_stop(&mut self) -> Result<bool, PdfOperatorError> {
+        match self.parse_operand() {
+            Ok(()) => Ok(true),
+            Err(error) if is_truncated_operand_error(&error) => {
+                self.operands.clear();
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Parses the next operator token and dispatches it through the operation map.
@@ -121,6 +134,32 @@ fn map_operator_name_error(error: ParserError) -> PdfOperatorError {
         }
         ParserError::InvalidToken(c) => PdfOperatorError::UnknownOperator(format!("{:?}", c)),
         other => PdfOperatorError::ParserError(other),
+    }
+}
+
+/// Returns whether an operand parse error means the content stream ended
+/// before the operand object was fully available.
+fn is_truncated_operand_error(error: &PdfOperatorError) -> bool {
+    match error {
+        PdfOperatorError::ParserError(parser_error) => match parser_error {
+            ParserError::UnexpectedEndOfFile => true,
+            ParserError::TokenizerError(tokenizer_error) => {
+                matches!(
+                    tokenizer_error,
+                    TokenizerError::UnexpectedEndOfFile(_, _)
+                        | TokenizerError::UnexpectedToken(None, _)
+                )
+            }
+            _ => false,
+        },
+        PdfOperatorError::TokenizerError(tokenizer_error) => {
+            matches!(
+                tokenizer_error,
+                TokenizerError::UnexpectedEndOfFile(_, _)
+                    | TokenizerError::UnexpectedToken(None, _)
+            )
+        }
+        _ => false,
     }
 }
 
@@ -187,6 +226,26 @@ mod tests {
         let error = map_operator_name_error(ParserError::InvalidToken('/'));
 
         assert_eq!(error, PdfOperatorError::UnknownOperator("'/'".to_string()));
+    }
+
+    #[test]
+    fn truncated_operand_errors_are_detected() {
+        for error in [
+            PdfOperatorError::ParserError(ParserError::UnexpectedEndOfFile),
+            PdfOperatorError::ParserError(ParserError::TokenizerError(
+                TokenizerError::UnexpectedToken(None, pdf_tokenizer::PdfToken::RightSquareBracket),
+            )),
+            PdfOperatorError::TokenizerError(TokenizerError::UnexpectedEndOfFile(1, 0)),
+        ] {
+            assert!(is_truncated_operand_error(&error));
+        }
+
+        assert!(!is_truncated_operand_error(&PdfOperatorError::ParserError(
+            ParserError::UnexpectedTokenAt {
+                token: "]".to_string(),
+                position: 0,
+            },
+        )));
     }
 
     #[test]
@@ -285,6 +344,28 @@ mod tests {
             Some(PdfOperatorVariant::RestoreGraphicsState(
                 RestoreGraphicsState
             ))
+        ));
+    }
+
+    #[test]
+    fn parse_next_item_stops_cleanly_on_truncated_trailing_operand() {
+        let mut out = Vec::new();
+        let mut parser = OperatorStreamParser::new(b"0 j 0 J [ ", &mut out);
+
+        while parser
+            .parse_next_item()
+            .expect("stream items before truncation should parse")
+        {}
+
+        assert!(parser.operands.is_empty());
+        assert_eq!(parser.out.len(), 2);
+        assert!(matches!(
+            parser.out.first(),
+            Some(PdfOperatorVariant::SetLineJoinStyle(_))
+        ));
+        assert!(matches!(
+            parser.out.get(1),
+            Some(PdfOperatorVariant::SetLineCapStyle(_))
         ));
     }
 }
