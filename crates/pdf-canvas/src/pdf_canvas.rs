@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::{
-    canvas_backend::{CanvasBackend, Shader},
+    canvas_backend::{CanvasBackend, Image, ImageData, Shader},
     canvas_state::CanvasState,
     error::PdfCanvasError,
     pdf_path_pen::PdfPathPen,
@@ -13,14 +13,14 @@ use crate::{
 use pdf_content_stream::{content_stream::ContentStream, pdf_operator::PdfOperatorVariant};
 use pdf_graphics::TextRenderingMode;
 use pdf_graphics::{
-    MaskMode, PaintMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
-    transform::Transform,
+    MaskMode, PaintMode, PathFillType, PixelFormat, color::Color, pdf_path::PdfPath, point::Point,
+    rect::Rect, transform::Transform,
 };
 use pdf_page::{
     page::PdfPage,
     pattern::{PaintType, Pattern},
     resources::Resources,
-    shading::Shading,
+    shading::{MeshPatch, Shading},
 };
 use skrifa::{
     OutlineGlyph,
@@ -41,6 +41,13 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     pub(crate) canvas_stack: Vec<CanvasState<'a>>,
     /// Content-stream IDs currently being rendered on this canvas stack.
     pub(crate) active_content_stream_ids: HashSet<usize>,
+}
+
+#[derive(Clone, Copy)]
+struct Vertex {
+    x: f32,
+    y: f32,
+    color: Color,
 }
 
 impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
@@ -285,6 +292,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             Shading::FunctionBased { .. } => Err(PdfCanvasError::UnsupportedFeature(
                 "FunctionBased shading not implemented".into(),
             )),
+            Shading::PatchMesh { bbox, patches, .. } => {
+                self.build_patch_mesh_shader(patches, bbox, transform)
+            }
             Shading::Unsupported { name } => Err(PdfCanvasError::UnsupportedFeature(format!(
                 "Shading type '{}' not implemented",
                 name
@@ -393,6 +403,432 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 };
                 Ok(Some(shader))
             }
+        }
+    }
+
+    fn build_patch_mesh_shader<'b>(
+        &mut self,
+        patches: &'b [MeshPatch],
+        bbox: &'b Option<Rect>,
+        transform: &Option<Transform>,
+    ) -> Result<Shader<'b>, PdfCanvasError> {
+        let mesh_transform = transform.unwrap_or_default();
+        let mut bounds = bbox.map(|rect| mesh_transform.map_rect(&rect));
+        if bounds.is_none() {
+            bounds = Self::patch_mesh_bounds(patches, &mesh_transform);
+        }
+        let bounds = bounds
+            .map(|rect| rect.normalized())
+            .ok_or_else(|| PdfCanvasError::UnsupportedFeature("Patch mesh has no bounds".into()))?;
+        if bounds.width() <= 0.0 || bounds.height() <= 0.0 {
+            return Err(PdfCanvasError::UnsupportedFeature(
+                "Patch mesh bounds are empty".into(),
+            ));
+        }
+
+        let width = bounds.width().ceil().max(1.0) as usize;
+        let height = bounds.height().ceil().max(1.0) as usize;
+        let width = width.min(2048);
+        let height = height.min(2048);
+
+        let mut pixels = vec![255u8; width.saturating_mul(height).saturating_mul(4)];
+
+        for patch in patches {
+            let subdivision = Self::patch_subdivision(patch, &mesh_transform);
+            let triangles = Self::tessellate_patch(patch, &mesh_transform, subdivision);
+            for triangle in triangles {
+                Self::rasterize_triangle(&mut pixels, width, height, &bounds, triangle);
+            }
+        }
+
+        Ok(Shader::RasterImage {
+            image: Image {
+                data: ImageData::Owned(pixels),
+                width,
+                height,
+                pixel_format: PixelFormat::RGBA8888,
+            },
+            dest_rect: bounds,
+            transform: None,
+        })
+    }
+
+    fn patch_mesh_bounds(patches: &[MeshPatch], transform: &Transform) -> Option<Rect> {
+        let mut min_x = f32::INFINITY;
+        let mut min_y = f32::INFINITY;
+        let mut max_x = f32::NEG_INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+
+        for patch in patches {
+            let points: &[Point] = match patch {
+                MeshPatch::Coons { control_points, .. } => control_points.as_slice(),
+                MeshPatch::Tensor { control_points, .. } => control_points.as_slice(),
+            };
+            for point in points {
+                let (x, y) = transform.transform_point(point.x, point.y);
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
+            }
+        }
+
+        if min_x.is_finite() && min_y.is_finite() && max_x.is_finite() && max_y.is_finite() {
+            Some(Rect {
+                left: min_x,
+                top: min_y,
+                right: max_x,
+                bottom: max_y,
+            })
+        } else {
+            None
+        }
+    }
+
+    fn patch_subdivision(patch: &MeshPatch, transform: &Transform) -> usize {
+        let bounds = Self::patch_mesh_bounds(std::slice::from_ref(patch), transform)
+            .unwrap_or_default()
+            .normalized();
+        let max_extent = bounds.width().max(bounds.height());
+        max_extent.clamp(8.0, 32.0).round() as usize
+    }
+
+    fn tessellate_patch(
+        patch: &MeshPatch,
+        transform: &Transform,
+        subdivision: usize,
+    ) -> Vec<[Vertex; 3]> {
+        let steps = subdivision.max(1);
+        let mut rows = Vec::with_capacity(steps.saturating_add(1));
+        for row in 0..=steps {
+            let v = row as f32 / steps as f32;
+            let mut vertices = Vec::with_capacity(steps.saturating_add(1));
+            for column in 0..=steps {
+                let u = column as f32 / steps as f32;
+                let vertex = match patch {
+                    MeshPatch::Coons {
+                        control_points,
+                        corner_colors,
+                    } => {
+                        Self::evaluate_coons_vertex(control_points, corner_colors, transform, u, v)
+                    }
+                    MeshPatch::Tensor {
+                        control_points,
+                        corner_colors,
+                    } => {
+                        Self::evaluate_tensor_vertex(control_points, corner_colors, transform, u, v)
+                    }
+                };
+                vertices.push(vertex);
+            }
+            rows.push(vertices);
+        }
+
+        let mut triangles = Vec::with_capacity(steps.saturating_mul(steps).saturating_mul(2));
+        for row in 0..steps {
+            for column in 0..steps {
+                let top_left = rows.get(row).and_then(|values| values.get(column)).copied();
+                let top_right = rows
+                    .get(row)
+                    .and_then(|values| values.get(column.saturating_add(1)))
+                    .copied();
+                let bottom_left = rows
+                    .get(row.saturating_add(1))
+                    .and_then(|values| values.get(column))
+                    .copied();
+                let bottom_right = rows
+                    .get(row.saturating_add(1))
+                    .and_then(|values| values.get(column.saturating_add(1)))
+                    .copied();
+
+                if let (Some(top_left), Some(top_right), Some(bottom_left), Some(bottom_right)) =
+                    (top_left, top_right, bottom_left, bottom_right)
+                {
+                    triangles.push([top_left, top_right, bottom_left]);
+                    triangles.push([top_right, bottom_right, bottom_left]);
+                }
+            }
+        }
+
+        triangles
+    }
+
+    fn evaluate_coons_vertex(
+        control_points: &[Point; 12],
+        corner_colors: &[Color; 4],
+        transform: &Transform,
+        u: f32,
+        v: f32,
+    ) -> Vertex {
+        let top = Self::evaluate_cubic_bezier(
+            [
+                *control_points.first().unwrap_or(&Point::default()),
+                *control_points.get(1).unwrap_or(&Point::default()),
+                *control_points.get(2).unwrap_or(&Point::default()),
+                *control_points.get(3).unwrap_or(&Point::default()),
+            ],
+            u,
+        );
+        let right = Self::evaluate_cubic_bezier(
+            [
+                *control_points.get(3).unwrap_or(&Point::default()),
+                *control_points.get(4).unwrap_or(&Point::default()),
+                *control_points.get(5).unwrap_or(&Point::default()),
+                *control_points.get(6).unwrap_or(&Point::default()),
+            ],
+            v,
+        );
+        let bottom = Self::evaluate_cubic_bezier(
+            [
+                *control_points.get(9).unwrap_or(&Point::default()),
+                *control_points.get(8).unwrap_or(&Point::default()),
+                *control_points.get(7).unwrap_or(&Point::default()),
+                *control_points.get(6).unwrap_or(&Point::default()),
+            ],
+            u,
+        );
+        let left = Self::evaluate_cubic_bezier(
+            [
+                *control_points.first().unwrap_or(&Point::default()),
+                *control_points.get(11).unwrap_or(&Point::default()),
+                *control_points.get(10).unwrap_or(&Point::default()),
+                *control_points.get(9).unwrap_or(&Point::default()),
+            ],
+            v,
+        );
+        let top_left = *control_points.first().unwrap_or(&Point::default());
+        let top_right = *control_points.get(3).unwrap_or(&Point::default());
+        let bottom_right = *control_points.get(6).unwrap_or(&Point::default());
+        let bottom_left = *control_points.get(9).unwrap_or(&Point::default());
+
+        let bilinear = Self::bilinear_point(top_left, top_right, bottom_right, bottom_left, u, v);
+        let x = (1.0 - v) * top.x + v * bottom.x + (1.0 - u) * left.x + u * right.x - bilinear.x;
+        let y = (1.0 - v) * top.y + v * bottom.y + (1.0 - u) * left.y + u * right.y - bilinear.y;
+        let (x, y) = transform.transform_point(x, y);
+        Vertex {
+            x,
+            y,
+            color: Self::bilinear_color(corner_colors, u, v),
+        }
+    }
+
+    fn evaluate_tensor_vertex(
+        control_points: &[Point; 16],
+        corner_colors: &[Color; 4],
+        transform: &Transform,
+        u: f32,
+        v: f32,
+    ) -> Vertex {
+        let u_basis = Self::bernstein_basis(u);
+        let v_basis = Self::bernstein_basis(v);
+        let mut x = 0.0;
+        let mut y = 0.0;
+
+        for row in 0..4usize {
+            for column in 0..4usize {
+                let index = row.saturating_mul(4).saturating_add(column);
+                let point = control_points.get(index).copied().unwrap_or_default();
+                let weight = u_basis.get(column).copied().unwrap_or_default()
+                    * v_basis.get(row).copied().unwrap_or_default();
+                x += point.x * weight;
+                y += point.y * weight;
+            }
+        }
+
+        let (x, y) = transform.transform_point(x, y);
+        Vertex {
+            x,
+            y,
+            color: Self::bilinear_color(corner_colors, u, v),
+        }
+    }
+
+    fn bernstein_basis(t: f32) -> [f32; 4] {
+        let omt = 1.0 - t;
+        [
+            omt * omt * omt,
+            3.0 * t * omt * omt,
+            3.0 * t * t * omt,
+            t * t * t,
+        ]
+    }
+
+    fn evaluate_cubic_bezier(points: [Point; 4], t: f32) -> Point {
+        let basis = Self::bernstein_basis(t);
+        let x = points
+            .iter()
+            .zip(basis.iter())
+            .fold(0.0, |acc, (point, weight)| acc + point.x * *weight);
+        let y = points
+            .iter()
+            .zip(basis.iter())
+            .fold(0.0, |acc, (point, weight)| acc + point.y * *weight);
+        Point::new(x, y)
+    }
+
+    fn bilinear_point(
+        top_left: Point,
+        top_right: Point,
+        bottom_right: Point,
+        bottom_left: Point,
+        u: f32,
+        v: f32,
+    ) -> Point {
+        let omt_u = 1.0 - u;
+        let omt_v = 1.0 - v;
+        Point::new(
+            omt_u * omt_v * top_left.x
+                + u * omt_v * top_right.x
+                + u * v * bottom_right.x
+                + omt_u * v * bottom_left.x,
+            omt_u * omt_v * top_left.y
+                + u * omt_v * top_right.y
+                + u * v * bottom_right.y
+                + omt_u * v * bottom_left.y,
+        )
+    }
+
+    fn bilinear_color(corner_colors: &[Color; 4], u: f32, v: f32) -> Color {
+        let top_left = corner_colors
+            .first()
+            .copied()
+            .unwrap_or(Color::from_gray(0.0));
+        let top_right = corner_colors
+            .get(1)
+            .copied()
+            .unwrap_or(Color::from_gray(0.0));
+        let bottom_right = corner_colors
+            .get(2)
+            .copied()
+            .unwrap_or(Color::from_gray(0.0));
+        let bottom_left = corner_colors
+            .get(3)
+            .copied()
+            .unwrap_or(Color::from_gray(0.0));
+        let omt_u = 1.0 - u;
+        let omt_v = 1.0 - v;
+
+        Color::from_rgba(
+            omt_u * omt_v * top_left.r
+                + u * omt_v * top_right.r
+                + u * v * bottom_right.r
+                + omt_u * v * bottom_left.r,
+            omt_u * omt_v * top_left.g
+                + u * omt_v * top_right.g
+                + u * v * bottom_right.g
+                + omt_u * v * bottom_left.g,
+            omt_u * omt_v * top_left.b
+                + u * omt_v * top_right.b
+                + u * v * bottom_right.b
+                + omt_u * v * bottom_left.b,
+            omt_u * omt_v * top_left.a
+                + u * omt_v * top_right.a
+                + u * v * bottom_right.a
+                + omt_u * v * bottom_left.a,
+        )
+    }
+
+    fn rasterize_triangle(
+        pixels: &mut [u8],
+        width: usize,
+        height: usize,
+        bounds: &Rect,
+        triangle: [Vertex; 3],
+    ) {
+        let min_x = triangle
+            .iter()
+            .map(|vertex| vertex.x)
+            .fold(f32::INFINITY, f32::min)
+            .floor()
+            .max(bounds.left);
+        let max_x = triangle
+            .iter()
+            .map(|vertex| vertex.x)
+            .fold(f32::NEG_INFINITY, f32::max)
+            .ceil()
+            .min(bounds.right);
+        let min_y = triangle
+            .iter()
+            .map(|vertex| vertex.y)
+            .fold(f32::INFINITY, f32::min)
+            .floor()
+            .max(bounds.top);
+        let max_y = triangle
+            .iter()
+            .map(|vertex| vertex.y)
+            .fold(f32::NEG_INFINITY, f32::max)
+            .ceil()
+            .min(bounds.bottom);
+
+        if min_x >= max_x || min_y >= max_y {
+            return;
+        }
+
+        let start_y = ((min_y - bounds.top).max(0.0) as usize).min(height);
+        let end_y = ((max_y - bounds.top).max(0.0) as usize).min(height);
+        let start_x = ((min_x - bounds.left).max(0.0) as usize).min(width);
+        let end_x = ((max_x - bounds.left).max(0.0) as usize).min(width);
+
+        for y in start_y..end_y {
+            for x in start_x..end_x {
+                let device_x = bounds.left + x as f32 + 0.5;
+                let device_y = bounds.top + y as f32 + 0.5;
+                if let Some((w0, w1, w2)) = Self::barycentric_weights(triangle, device_x, device_y)
+                {
+                    let color = Color::from_rgba(
+                        triangle[0].color.r * w0
+                            + triangle[1].color.r * w1
+                            + triangle[2].color.r * w2,
+                        triangle[0].color.g * w0
+                            + triangle[1].color.g * w1
+                            + triangle[2].color.g * w2,
+                        triangle[0].color.b * w0
+                            + triangle[1].color.b * w1
+                            + triangle[2].color.b * w2,
+                        triangle[0].color.a * w0
+                            + triangle[1].color.a * w1
+                            + triangle[2].color.a * w2,
+                    );
+                    let pixel_index = y.saturating_mul(width).saturating_add(x).saturating_mul(4);
+                    if let Some(pixel) = pixels.get_mut(pixel_index..pixel_index.saturating_add(4))
+                    {
+                        let red = (color.r.clamp(0.0, 1.0) * 255.0).round() as u8;
+                        let green = (color.g.clamp(0.0, 1.0) * 255.0).round() as u8;
+                        let blue = (color.b.clamp(0.0, 1.0) * 255.0).round() as u8;
+                        let alpha = (color.a.clamp(0.0, 1.0) * 255.0).round() as u8;
+                        if let Some(channel) = pixel.get_mut(0) {
+                            *channel = red;
+                        }
+                        if let Some(channel) = pixel.get_mut(1) {
+                            *channel = green;
+                        }
+                        if let Some(channel) = pixel.get_mut(2) {
+                            *channel = blue;
+                        }
+                        if let Some(channel) = pixel.get_mut(3) {
+                            *channel = alpha;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn barycentric_weights(triangle: [Vertex; 3], x: f32, y: f32) -> Option<(f32, f32, f32)> {
+        let [a, b, c] = triangle;
+        let denominator = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y);
+        if denominator.abs() <= f32::EPSILON {
+            return None;
+        }
+
+        let w0 = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / denominator;
+        let w1 = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / denominator;
+        let w2 = 1.0 - w0 - w1;
+        let epsilon = -0.001;
+        if w0 >= epsilon && w1 >= epsilon && w2 >= epsilon {
+            Some((w0, w1, w2))
+        } else {
+            None
         }
     }
 

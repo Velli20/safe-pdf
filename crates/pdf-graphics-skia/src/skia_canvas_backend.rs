@@ -305,6 +305,44 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, PdfCanvasError> 
                     .into()
                 })
         }
+        Shader::RasterImage {
+            image,
+            dest_rect,
+            transform,
+        } => {
+            let image = to_skia_image(image)?;
+            let width = dest_rect.width().max(1.0);
+            let height = dest_rect.height().max(1.0);
+            let mut matrix = skia_safe::Matrix::new_all(
+                width / image.width() as f32,
+                0.0,
+                dest_rect.left,
+                0.0,
+                height / image.height() as f32,
+                dest_rect.top,
+                0.0,
+                0.0,
+                1.0,
+            );
+            if let Some(local_transform) = transform {
+                let mut local_matrix = to_skia_matrix(local_transform);
+                local_matrix.pre_concat(&matrix);
+                matrix = local_matrix;
+            }
+
+            image
+                .to_shader(
+                    (skia_safe::TileMode::Clamp, skia_safe::TileMode::Clamp),
+                    skia_safe::SamplingOptions::default(),
+                    Some(&matrix),
+                )
+                .ok_or_else(|| {
+                    SkiaCanvasBackendError::ShaderCreationFailed {
+                        shader: "raster_image",
+                    }
+                    .into()
+                })
+        }
     }
 }
 

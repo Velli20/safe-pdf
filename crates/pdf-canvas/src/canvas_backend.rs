@@ -121,6 +121,15 @@ pub enum Shader<'a> {
         /// An optional transformation to apply to the gradient.
         transform: Option<Transform>,
     },
+    /// A raster image shader, typically used for pre-rasterized mesh shadings.
+    RasterImage {
+        /// Rasterized image content.
+        image: Image<'a>,
+        /// Destination rect in device space.
+        dest_rect: Rect,
+        /// Optional local transform.
+        transform: Option<Transform>,
+    },
 }
 
 /// Represents an image resource for drawing or pattern tiling in the PDF canvas backend.

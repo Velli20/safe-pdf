@@ -16,6 +16,7 @@ pdf-font = { path = "../pdf-font" }
 pdf-graphics = { path = "../pdf-graphics" }
 pdf-function = { path = "../pdf-function" }
 pdf-color-space = { path = "../pdf-color-space" }
+pdf-decode = { path = "../pdf-decode" }
 thiserror = "2.0.12"
 num-traits = "0.2.19"
 num-derive = "0.4"

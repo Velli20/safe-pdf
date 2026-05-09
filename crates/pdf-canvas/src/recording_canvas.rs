@@ -127,6 +127,20 @@ impl<'a> Shader<'a> {
                 positions: Cow::Owned(positions.to_vec()),
                 transform: *transform,
             },
+            Shader::RasterImage {
+                image,
+                dest_rect,
+                transform,
+            } => Shader::RasterImage {
+                image: BackendImage {
+                    data: image.data.to_shared(),
+                    width: image.width,
+                    height: image.height,
+                    pixel_format: image.pixel_format,
+                },
+                dest_rect: *dest_rect,
+                transform: *transform,
+            },
         }
     }
 }

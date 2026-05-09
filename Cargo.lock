@@ -2029,6 +2029,7 @@ dependencies = [
  "num-traits",
  "pdf-color-space",
  "pdf-content-stream",
+ "pdf-decode",
  "pdf-font",
  "pdf-function",
  "pdf-graphics",

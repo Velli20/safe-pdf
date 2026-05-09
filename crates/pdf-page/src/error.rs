@@ -1,5 +1,6 @@
 use pdf_color_space::error::ColorSpaceError;
 use pdf_content_stream::error::PdfOperatorError;
+use pdf_decode::DecodeError;
 use pdf_font::error::FontError;
 use pdf_function::{
     error::FunctionReadError, function_interpolation_error::FunctionInterpolationError,
@@ -50,6 +51,10 @@ pub enum PdfPagesError {
     Image(#[from] PdfImageError),
     #[error("{0}")]
     FunctionRead(#[from] FunctionReadError),
+    #[error("{0}")]
+    Decode(#[from] DecodeError),
+    #[error("invalid shading mesh data: {reason}")]
+    InvalidShadingMeshData { reason: String },
 }
 
 impl PdfPagesError {
