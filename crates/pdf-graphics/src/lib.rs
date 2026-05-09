@@ -1,4 +1,5 @@
 pub mod color;
+pub mod mesh_shading;
 pub mod pdf_path;
 pub mod point;
 pub mod rect;
