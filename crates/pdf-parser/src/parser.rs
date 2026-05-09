@@ -198,6 +198,18 @@ impl PdfParser<'_> {
     /// Returns an error if the next bytes don't match `keyword` or if no delimiter follows.
     /// Consumes any trailing end-of-line marker after the keyword.
     pub fn read_keyword(&mut self, keyword: &[u8]) -> Result<(), ParserError> {
+        self.read_keyword_with_optional_eol(keyword, true)
+    }
+
+    /// Reads and validates a keyword literal from the input stream.
+    ///
+    /// When `consume_trailing_eol` is `false`, the parser leaves a following CR, LF,
+    /// or CRLF sequence untouched so callers can handle that boundary themselves.
+    pub(crate) fn read_keyword_with_optional_eol(
+        &mut self,
+        keyword: &[u8],
+        consume_trailing_eol: bool,
+    ) -> Result<(), ParserError> {
         let keyword_start = self.tokenizer.position;
         let literal = self.read_regular_character_token()?;
 
@@ -218,8 +230,10 @@ impl PdfParser<'_> {
             ));
         }
 
-        // Consume trailing EOL if present (keywords in arrays/dicts may not have one).
-        self.try_read_end_of_line_marker();
+        if consume_trailing_eol {
+            // Consume trailing EOL if present (keywords in arrays/dicts may not have one).
+            self.try_read_end_of_line_marker();
+        }
         Ok(())
     }
 

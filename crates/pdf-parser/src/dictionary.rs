@@ -45,9 +45,22 @@ impl PdfParser<'_> {
         objects: &dyn ObjectResolver,
         keyword: &[u8],
     ) -> Result<Dictionary, ParserError> {
+        self.parse_dictionary_until_keyword_with_options(objects, keyword, true)
+    }
+
+    /// Parses a dictionary entry sequence terminated by the given keyword, then consumes it.
+    ///
+    /// Callers can opt out of trailing-EOL consumption when the keyword's following
+    /// separator belongs to the next grammar production, such as inline-image data.
+    pub(crate) fn parse_dictionary_until_keyword_with_options(
+        &mut self,
+        objects: &dyn ObjectResolver,
+        keyword: &[u8],
+        consume_trailing_eol: bool,
+    ) -> Result<Dictionary, ParserError> {
         let dictionary =
             self.parse_dictionary_entries_until(objects, DictionaryTerminator::Keyword(keyword))?;
-        self.read_keyword(keyword)?;
+        self.read_keyword_with_optional_eol(keyword, consume_trailing_eol)?;
 
         Ok(dictionary)
     }

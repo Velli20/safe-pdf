@@ -14,7 +14,11 @@ impl PdfParser<'_> {
         &mut self,
         objects: &dyn ObjectResolver,
     ) -> Result<InlineImage, ParserError> {
-        let dictionary = self.parse_dictionary_until_keyword(objects, INLINE_IMAGE_DATA_BEGIN)?;
+        let dictionary = self.parse_dictionary_until_keyword_with_options(
+            objects,
+            INLINE_IMAGE_DATA_BEGIN,
+            false,
+        )?;
         self.consume_inline_image_data_separator()?;
         let data = self.read_inline_image_data_until_end(&dictionary, objects)?;
         Ok(InlineImage::new(dictionary, data))
@@ -305,6 +309,19 @@ mod tests {
         let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
 
         assert_eq!(image.data(), b"\x00\n");
+        assert_eq!(parser.tokenizer.data(), b" Q");
+    }
+
+    #[test]
+    fn exact_length_inline_image_allows_newline_immediately_after_id() {
+        let mut input = b"/CS /G /I true /W 2 /H 1 /BPC 8 ID\n".to_vec();
+        input.extend_from_slice(&[0xFF, 0x80]);
+        input.extend_from_slice(b"\nEI Q");
+
+        let mut parser = PdfParser::from(input.as_slice());
+        let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
+
+        assert_eq!(image.data(), &[0xFF, 0x80, b'\n']);
         assert_eq!(parser.tokenizer.data(), b" Q");
     }
 

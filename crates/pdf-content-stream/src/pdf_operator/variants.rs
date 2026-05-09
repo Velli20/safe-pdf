@@ -346,6 +346,30 @@ mod tests {
     }
 
     #[test]
+    fn parses_compact_inline_image_with_newline_after_id() {
+        let input = b"q BI/CS/G/I true/W 2/H 1/BPC 8 ID\n\xFF\x80\nEI Q";
+
+        let result = PdfOperatorVariant::parse(input).unwrap();
+
+        match result.get(1) {
+            Some(PdfOperatorVariant::InlineImage(image)) => {
+                assert_eq!(image.data(), &[0xFF, 0x80, b'\n']);
+                assert_eq!(
+                    &image.dictionary().dictionary,
+                    &std::collections::BTreeMap::from([
+                        ("BPC".to_string(), ObjectVariant::Integer(8)),
+                        ("CS".to_string(), ObjectVariant::Name(b"G".to_vec())),
+                        ("H".to_string(), ObjectVariant::Integer(1)),
+                        ("I".to_string(), ObjectVariant::Boolean(true)),
+                        ("W".to_string(), ObjectVariant::Integer(2)),
+                    ])
+                );
+            }
+            other => panic!("expected inline image, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_simple() {
         struct TestCase<'a> {
             description: &'a str,
