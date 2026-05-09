@@ -116,6 +116,30 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         })
     }
 
+    /// Returns whether a form or pattern bbox is safe to materialize as an offscreen recording.
+    ///
+    /// PDFs in the wild sometimes contain malformed `/BBox` values for Form XObjects or tiling
+    /// patterns, including inverted coordinates, zero-sized boxes, non-finite values, or sentinel
+    /// coordinates near `±32768` that would expand into enormous temporary surfaces. This guard
+    /// keeps those cases from turning into backend allocation failures by requiring a finite,
+    /// positive bbox whose dimensions and total area stay within conservative offscreen limits.
+    pub(crate) fn can_record_offscreen_bbox(bbox: &Rect) -> bool {
+        const MAX_OFFSCREEN_RECORDING_DIMENSION: f32 = 8_192.0;
+        const MAX_OFFSCREEN_RECORDING_AREA: f32 =
+            MAX_OFFSCREEN_RECORDING_DIMENSION * MAX_OFFSCREEN_RECORDING_DIMENSION;
+
+        let width = bbox.width();
+        let height = bbox.height();
+
+        width.is_finite()
+            && height.is_finite()
+            && width > 0.0
+            && height > 0.0
+            && width <= MAX_OFFSCREEN_RECORDING_DIMENSION
+            && height <= MAX_OFFSCREEN_RECORDING_DIMENSION
+            && (width * height) <= MAX_OFFSCREEN_RECORDING_AREA
+    }
+
     /// Records a PDF content stream into an offscreen [`RecordingCanvas`].
     ///
     /// This helper is intended for rendering intermediate layers (e.g. pattern tiles or mask
@@ -317,6 +341,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 ..
             } => {
                 let bbox = *bbox;
+                if !Self::can_record_offscreen_bbox(&bbox) {
+                    return Ok(None);
+                }
 
                 // The tiling pattern's `/Matrix` maps pattern space -> user space.
                 // We pass it through unchanged and let the backend concatenate it with
@@ -1075,5 +1102,17 @@ mod tests {
         assert_eq!(xobject_draw.dest_rect, inline_draw.dest_rect);
         assert_eq!(xobject_draw.data, inline_draw.data);
         assert_eq!(xobject_draw.data, vec![0x00, 0xFF, 0x00, 0xFF]);
+    }
+
+    #[test]
+    fn rejects_absurd_offscreen_recording_bbox() {
+        assert!(!PdfCanvas::<CountingCanvas>::can_record_offscreen_bbox(
+            &Rect {
+                left: -32768.0,
+                top: -32768.0,
+                right: 32767.0,
+                bottom: 32767.0,
+            }
+        ));
     }
 }
