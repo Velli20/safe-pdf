@@ -307,6 +307,10 @@ pub fn execute(input_stack: &[f64], ops: &[Operator]) -> Result<Vec<f64>, CalcEr
                 let a = frame.pop()?;
                 frame.push(a.trunc())?;
             }
+            Operator::Cvr => {
+                let a = frame.pop()?;
+                frame.push(a)?;
+            }
             Operator::Abs => {
                 let a = frame.pop()?;
                 frame.push(a.abs())?;
@@ -483,6 +487,13 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_cvr_operator() {
+        let tokens = vec!["cvr"];
+        let ops = parse_tokens(&tokens).unwrap();
+        assert_eq!(ops, vec![Operator::Cvr]);
+    }
+
+    #[test]
     fn test_add() {
         let result = evaluate_postscript(&[2.0, 3.0], "add").unwrap();
         assert_eq!(result, vec![5.0]);
@@ -504,6 +515,12 @@ mod tests {
     fn test_div() {
         let result = evaluate_postscript(&[8.0, 2.0], "div").unwrap();
         assert_eq!(result, vec![4.0]);
+    }
+
+    #[test]
+    fn test_cvr_is_no_op_for_real_stack_values() {
+        let result = evaluate_postscript(&[8.5], "cvr").unwrap();
+        assert_eq!(result, vec![8.5]);
     }
 
     #[test]
