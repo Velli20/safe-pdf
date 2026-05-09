@@ -27,13 +27,16 @@ impl PdfParser<'_> {
     /// or a `ParserError` on failure.
     pub fn parse_number(&mut self) -> Result<ObjectVariant, ParserError> {
         let mut has_minus = false;
+        let mut saw_sign = false;
 
         // 1. Check for optional sign.
         if let Some(PdfToken::Plus) = self.tokenizer.peek() {
             self.tokenizer.read();
+            saw_sign = true;
         } else if let Some(PdfToken::Minus) = self.tokenizer.peek() {
             self.tokenizer.read();
             has_minus = true;
+            saw_sign = true;
         }
 
         // 2. Parse leading digits (integral part). Track whether input started with '.'
@@ -44,7 +47,16 @@ impl PdfParser<'_> {
         let integer_part: i64 = if started_with_period {
             0
         } else {
-            self.read_number::<i64>(false)?
+            match self.read_number::<i64>(false) {
+                Ok(value) => value,
+                Err(error @ ParserError::UnexpectedTokenAt { .. }) if saw_sign => {
+                    if matches!(self.tokenizer.peek(), Some(PdfToken::Plus | PdfToken::Minus)) {
+                        return Err(error);
+                    }
+                    0
+                }
+                Err(error) => return Err(error),
+            }
         };
 
         // 3. Check for decimal point.
@@ -174,6 +186,21 @@ mod tests {
                 "Expected error for invalid input `{}`",
                 String::from_utf8_lossy(input)
             );
+        }
+    }
+
+    #[test]
+    fn test_parse_number_treats_bare_sign_as_zero_and_keeps_next_token() {
+        for (input, trailing) in [
+            (b"-(".as_slice(), b"(".as_slice()),
+            (b"+(".as_slice(), b"(".as_slice()),
+        ] {
+            let mut parser = PdfParser::from(input);
+
+            let result = parser.parse_number().unwrap();
+
+            assert_eq!(result, ObjectVariant::Integer(0));
+            assert_eq!(parser.tokenizer.data(), trailing);
         }
     }
 

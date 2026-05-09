@@ -195,6 +195,7 @@ impl PdfOperatorVariant {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use crate::recording_pdf_operator_backend::{RecordedOperation, RecordingBackend};
+    use crate::TextElement;
     use pdf_object::object_variant::ObjectVariant;
 
     use super::*;
@@ -204,6 +205,29 @@ mod tests {
         let input = b"[ (2.) 1 (0) 1 (!)\n2 (3) 1 (4) 1 (4) 1 (0) 1 (0) 1 (#) 2 (%) 2 (%) 2 (.) 1 (\\)) 2 (4) ]  TJ";
         let result = PdfOperatorVariant::parse(input);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_bug_1953099_bare_sign_in_text_array_becomes_zero_adjustment() {
+        let input = b"BT\n/F1 11.67 Tf\n1 0 0 1 10 20 Tm\n[(e)-4(x)12(t)-3(e)-4(n)-4(s)3(i)3(v)-(e)-4(l)3(y)]TJ\nET\n";
+
+        let result = PdfOperatorVariant::parse(input).unwrap();
+
+        assert_eq!(result.len(), 5);
+        match result.get(3) {
+            Some(PdfOperatorVariant::ShowTextArray(op)) => {
+                let elements = op.elements();
+                assert!(matches!(
+                    elements.get(15),
+                    Some(TextElement::Adjustment { amount }) if *amount == 0.0
+                ));
+                assert!(matches!(
+                    elements.get(16),
+                    Some(TextElement::Text { value }) if value == b"e"
+                ));
+            }
+            other => panic!("expected TJ operator, got {other:?}"),
+        }
     }
 
     #[test]
