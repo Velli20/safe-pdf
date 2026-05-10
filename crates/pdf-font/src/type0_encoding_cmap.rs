@@ -2,6 +2,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use pdf_parser::cmap::{CMapParser, CMapToken};
 
+use crate::cmap_support::bytes_to_u32;
 use crate::error::FontError;
 
 /// Writing mode declared by a Type0 encoding CMap.
@@ -233,18 +234,6 @@ fn decode_identity(text: &[u8]) -> Vec<u16> {
 }
 
 /// Convert a big-endian byte sequence into a `u32`.
-fn bytes_to_u32(bytes: &[u8]) -> u32 {
-    bytes.iter().fold(0u32, |value, byte| {
-        value.checked_shl(8).unwrap_or(0) | u32::from(*byte)
-    })
-}
-
-fn next_cmap_token(parser: &mut CMapParser<'_>) -> Result<Option<CMapToken>, FontError> {
-    parser
-        .next_token()
-        .map_err(|error| FontError::InvalidType0EncodingCMap(error.to_string()))
-}
-
 fn parse_codespace_ranges(
     parser: &mut CMapParser<'_>,
     code_space_ranges: &mut Vec<CodeSpaceRange>,
@@ -341,20 +330,6 @@ fn parse_cid_ranges(
     Ok(())
 }
 
-fn expect_hex_token(parser: &mut CMapParser<'_>, message: &str) -> Result<Vec<u8>, FontError> {
-    match next_cmap_token(parser)? {
-        Some(CMapToken::HexString(bytes)) => Ok(bytes),
-        Some(_) | None => Err(FontError::InvalidType0EncodingCMap(message.to_string())),
-    }
-}
-
-fn expect_integer_token(parser: &mut CMapParser<'_>, message: &str) -> Result<i64, FontError> {
-    match next_cmap_token(parser)? {
-        Some(CMapToken::Integer(value)) => Ok(value),
-        Some(_) | None => Err(FontError::InvalidType0EncodingCMap(message.to_string())),
-    }
-}
-
 fn expect_u16_token(parser: &mut CMapParser<'_>, message: &str) -> Result<u16, FontError> {
     let value = expect_integer_token(parser, message)?;
     u16::try_from(value).map_err(|_| FontError::InvalidType0EncodingCMap(message.to_string()))
@@ -366,6 +341,21 @@ fn u32_from_bytes(bytes: &[u8], message: &str) -> Result<u32, FontError> {
     }
 
     Ok(bytes_to_u32(bytes))
+}
+
+fn next_cmap_token(parser: &mut CMapParser<'_>) -> Result<Option<CMapToken>, FontError> {
+    crate::cmap_support::next_cmap_token(parser)
+        .map_err(|error| FontError::InvalidType0EncodingCMap(error.to_string()))
+}
+
+fn expect_hex_token(parser: &mut CMapParser<'_>, message: &str) -> Result<Vec<u8>, FontError> {
+    crate::cmap_support::expect_hex_token(parser, message)
+        .map_err(|_| FontError::InvalidType0EncodingCMap(message.to_string()))
+}
+
+fn expect_integer_token(parser: &mut CMapParser<'_>, message: &str) -> Result<i64, FontError> {
+    crate::cmap_support::expect_integer_token(parser, message)
+        .map_err(|_| FontError::InvalidType0EncodingCMap(message.to_string()))
 }
 
 #[cfg(test)]

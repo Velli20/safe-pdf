@@ -1,5 +1,6 @@
 mod cff_builder;
 pub mod char_vec;
+mod cmap_support;
 pub mod encoding;
 pub mod error;
 pub mod flags;
