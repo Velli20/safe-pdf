@@ -194,8 +194,8 @@ impl PdfOperatorVariant {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use crate::recording_pdf_operator_backend::{RecordedOperation, RecordingBackend};
     use crate::TextElement;
+    use crate::recording_pdf_operator_backend::{RecordedOperation, RecordingBackend};
     use pdf_object::object_variant::ObjectVariant;
 
     use super::*;

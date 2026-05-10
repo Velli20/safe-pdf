@@ -2,7 +2,12 @@
 
 use num_traits::ToPrimitive;
 use pdf_graphics::{
-    BoundsAccumulator, color::Color, point::Point, rect::Rect, transform::Transform,
+    BoundsAccumulator,
+    bezier::{bernstein_basis, evaluate_cubic_bezier},
+    color::Color,
+    point::Point,
+    rect::Rect,
+    transform::Transform,
 };
 
 use crate::model::MeshPatch;
@@ -290,28 +295,6 @@ where
 
 fn transformed_point(point: Point, transform: &Transform) -> Point {
     let (x, y) = transform.transform_point(point.x, point.y);
-    Point::new(x, y)
-}
-
-fn bernstein_basis(t: f32) -> [f32; 4] {
-    let one_minus_t = 1.0 - t;
-    [
-        one_minus_t * one_minus_t * one_minus_t,
-        3.0 * t * one_minus_t * one_minus_t,
-        3.0 * t * t * one_minus_t,
-        t * t * t,
-    ]
-}
-
-fn evaluate_cubic_bezier(points: [Point; 4], t: f32) -> Point {
-    let basis = bernstein_basis(t);
-    let (x, y) = points
-        .into_iter()
-        .zip(basis)
-        .fold((0.0, 0.0), |(x, y), (point, weight)| {
-            (x + point.x * weight, y + point.y * weight)
-        });
-
     Point::new(x, y)
 }
 

@@ -1,3 +1,4 @@
+pub mod bezier;
 mod bounds_accumulator;
 pub mod color;
 pub mod pdf_path;

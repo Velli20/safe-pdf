@@ -13,6 +13,12 @@ pub struct BoundsAccumulator {
     max_y: f32,
 }
 
+impl Default for BoundsAccumulator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BoundsAccumulator {
     /// Creates an empty bounds accumulator.
     pub fn new() -> Self {

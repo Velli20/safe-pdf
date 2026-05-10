@@ -50,7 +50,10 @@ impl PdfParser<'_> {
             match self.read_number::<i64>(false) {
                 Ok(value) => value,
                 Err(error @ ParserError::UnexpectedTokenAt { .. }) if saw_sign => {
-                    if matches!(self.tokenizer.peek(), Some(PdfToken::Plus | PdfToken::Minus)) {
+                    if matches!(
+                        self.tokenizer.peek(),
+                        Some(PdfToken::Plus | PdfToken::Minus)
+                    ) {
                         return Err(error);
                     }
                     0
