@@ -25,4 +25,8 @@ pub enum FontError {
     InvalidDescendantFonts(&'static str),
     #[error("Unsupported /BaseEncoding value '{0}'")]
     UnsupportedBaseEncoding(String),
+    #[error("Unsupported Type0 /Encoding CMap '{0}'")]
+    UnsupportedType0EncodingCMap(String),
+    #[error("Invalid Type0 /Encoding CMap: {0}")]
+    InvalidType0EncodingCMap(String),
 }

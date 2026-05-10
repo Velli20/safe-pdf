@@ -133,16 +133,6 @@ impl<B: CanvasBackend> TextStateOps for PdfCanvas<'_, B> {
     }
 }
 
-/// Create an iterator over big-endian CID values from a byte slice.
-fn to_cid_char_iter(text: &[u8]) -> impl Iterator<Item = u16> + '_ {
-    text.chunks_exact(2).map(|pair| {
-        let mut iter = pair.iter().copied();
-        let first_byte = iter.next().unwrap_or(0);
-        let second_byte = iter.next().unwrap_or(0);
-        u16::from_be_bytes([first_byte, second_byte])
-    })
-}
-
 /// Create an iterator over single-byte character codes as `u16`.
 fn to_char_iter(text: &[u8]) -> impl Iterator<Item = u16> + '_ {
     text.iter().copied().map(|b| u16::from_u8(b).unwrap_or(0))
@@ -167,7 +157,7 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
                 let program = type1_font.font_file.as_slice();
                 let iter = to_char_iter(text);
 
-                let mut renderer = Type1FontRenderer::new(self, program)?;
+                let mut renderer = Type1FontRenderer::new(self, program, false)?;
                 renderer.render_text(iter)
             }
             Font::TrueType(font) => {
@@ -178,12 +168,13 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
                 renderer.render_text(iter)
             }
             Font::Type0(font) => {
-                let iter = to_cid_char_iter(text);
+                let decoded_cids = font.decode_bytes_to_cids(text);
+                let iter = decoded_cids.into_iter();
 
                 match font.subtype {
                     CidFontSubType::Type0 => {
                         let program = font.font_file.as_slice();
-                        let mut renderer = Type1FontRenderer::new(self, program)?;
+                        let mut renderer = Type1FontRenderer::new(self, program, true)?;
                         renderer.render_text(iter)
                     }
                     CidFontSubType::Type2 => {

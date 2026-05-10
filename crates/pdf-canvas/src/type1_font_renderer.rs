@@ -11,6 +11,8 @@ pub(crate) struct Type1FontRenderer<'a, 'b, B: CanvasBackend> {
     canvas: &'b mut PdfCanvas<'a, B>,
     font_ref: FontRef<'b>,
     outlines: OutlineGlyphCollection<'b>,
+    /// Whether the incoming values are CIDs from a composite Type0 font.
+    is_cid: bool,
     /// Base transformation matrix incorporating font size, horizontal scaling,
     /// and text rise, computed once in `new()` using the font's actual UPE.
     glyph_base_transform: Transform,
@@ -22,6 +24,7 @@ impl<'a, 'b, B: CanvasBackend> Type1FontRenderer<'a, 'b, B> {
     pub fn new(
         canvas: &'b mut PdfCanvas<'a, B>,
         font_bytes: &'b [u8],
+        is_cid: bool,
     ) -> Result<Self, PdfCanvasError> {
         let font_ref = FontRef::new(font_bytes)
             .map_err(|_| PdfCanvasError::InvalidFont("unrecognized Type 1 font data".into()))?;
@@ -48,6 +51,7 @@ impl<'a, 'b, B: CanvasBackend> Type1FontRenderer<'a, 'b, B> {
             canvas,
             font_ref,
             outlines,
+            is_cid,
             glyph_base_transform,
             units_per_em,
         })
@@ -70,8 +74,11 @@ impl<B: CanvasBackend> TextRenderer for Type1FontRenderer<'_, '_, B> {
                 .text_state
                 .compose_glyph_matrix(self.glyph_base_transform, &state.transform);
 
-            // Resolve glyph id from CFF charset.
-            let gid = if let Some(charset) = &charset {
+            // Simple Type1 fonts resolve through glyph names in the CFF charset.
+            // CID-keyed CFF fonts already arrive here as decoded CIDs.
+            let gid = if self.is_cid {
+                GlyphId::new(u32::from(char_code))
+            } else if let Some(charset) = &charset {
                 let name = state.text_state.glyph_name(char_code).unwrap_or(".notdef");
 
                 charset
