@@ -11,6 +11,12 @@ pub enum CMapToken {
     Integer(i64),
     /// A PDF hex string decoded into raw bytes.
     HexString(Vec<u8>),
+    /// A PDF literal string decoded into raw bytes.
+    LiteralString(Vec<u8>),
+    /// `<<` token.
+    DoubleLeftAngleBracket,
+    /// `>>` token.
+    DoubleRightAngleBracket,
     /// `[` token.
     LeftSquareBracket,
     /// `]` token.
@@ -55,11 +61,32 @@ impl<'a> CMapParser<'a> {
                 let _ = self.parser.tokenizer.read();
                 CMapToken::RightSquareBracket
             }
+            b'(' => CMapToken::LiteralString(self.parser.parse_literal_string()?),
             b'/' => {
                 let _ = self.parser.tokenizer.read();
                 CMapToken::Name(self.parser.read_operator_name()?.to_vec())
             }
-            b'<' => CMapToken::HexString(self.parser.parse_hex_string()?),
+            b'<' => {
+                if matches!(self.parser.tokenizer.data().get(1).copied(), Some(b'<')) {
+                    let _ = self.parser.tokenizer.read();
+                    let _ = self.parser.tokenizer.read();
+                    CMapToken::DoubleLeftAngleBracket
+                } else {
+                    CMapToken::HexString(self.parser.parse_hex_string()?)
+                }
+            }
+            b'>' => {
+                if matches!(self.parser.tokenizer.data().get(1).copied(), Some(b'>')) {
+                    let _ = self.parser.tokenizer.read();
+                    let _ = self.parser.tokenizer.read();
+                    CMapToken::DoubleRightAngleBracket
+                } else {
+                    return Err(ParserError::UnexpectedTokenAt {
+                        token: String::from_utf8_lossy(&[byte]).into_owned(),
+                        position: self.parser.tokenizer.position,
+                    });
+                }
+            }
             b'+' | b'-' | b'0'..=b'9' => CMapToken::Integer(self.parse_integer()?),
             _ if PdfParser::is_pdf_regular_character(byte) => {
                 CMapToken::Operator(self.parser.read_operator_name()?.to_vec())
@@ -145,5 +172,36 @@ mod tests {
         let token = parser.next_token().unwrap();
 
         assert_eq!(token, Some(CMapToken::HexString(vec![0x01, 0x20])));
+    }
+
+    #[test]
+    fn parses_literal_strings_and_dictionary_delimiters() {
+        let mut parser = CMapParser::from(b"<< /Registry (G) /Ordering (GrpOne) >>".as_slice());
+
+        assert_eq!(
+            parser.next_token().unwrap(),
+            Some(CMapToken::DoubleLeftAngleBracket)
+        );
+        assert_eq!(
+            parser.next_token().unwrap(),
+            Some(CMapToken::Name(b"Registry".to_vec()))
+        );
+        assert_eq!(
+            parser.next_token().unwrap(),
+            Some(CMapToken::LiteralString(b"G".to_vec()))
+        );
+        assert_eq!(
+            parser.next_token().unwrap(),
+            Some(CMapToken::Name(b"Ordering".to_vec()))
+        );
+        assert_eq!(
+            parser.next_token().unwrap(),
+            Some(CMapToken::LiteralString(b"GrpOne".to_vec()))
+        );
+        assert_eq!(
+            parser.next_token().unwrap(),
+            Some(CMapToken::DoubleRightAngleBracket)
+        );
+        assert_eq!(parser.next_token().unwrap(), None);
     }
 }

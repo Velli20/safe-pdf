@@ -448,4 +448,25 @@ mod tests {
         assert_eq!(cmap.decode(&[0x00, 0x01, 0x00, 0x02, 0xFF]), vec![4, 0, 0]);
         assert_eq!(cmap.writing_mode(), WritingMode::Vertical);
     }
+
+    #[test]
+    fn embedded_cmap_parses_cid_system_info_dictionary_strings() {
+        let data = br#"
+        begincmap
+        /CIDSystemInfo << /Registry (G) /Ordering (GrpOne) /Supplement 1 >> def
+        /WMode 0 def
+        1 begincodespacerange
+        <0001> <FFFF>
+        endcodespacerange
+        1 begincidchar
+        <0001> 1
+        endcidchar
+        endcmap
+        "#;
+
+        let cmap = Type0EncodingCMap::from_bytes(data).unwrap();
+
+        assert_eq!(cmap.decode(&[0x00, 0x01]), vec![1]);
+        assert_eq!(cmap.writing_mode(), WritingMode::Horizontal);
+    }
 }
