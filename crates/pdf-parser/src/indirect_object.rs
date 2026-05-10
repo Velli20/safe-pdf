@@ -46,7 +46,7 @@ impl PdfParser<'_> {
         // Parse the object.
         let object = self.parse_object(objects)?;
 
-        self.skip_whitespace();
+        self.skip_whitespace_and_comments();
 
         if let Some(PdfToken::Alphabetic(b's')) = self.tokenizer.peek() {
             let ObjectVariant::Dictionary(dictionary) = object else {
@@ -54,7 +54,7 @@ impl PdfParser<'_> {
             };
             let stream = self.parse_stream(&dictionary, objects)?;
 
-            self.skip_whitespace();
+            self.skip_whitespace_and_comments();
 
             // Read the keyword `endobj`.
             self.read_keyword(ENDOBJ_KEYWORD)?;
@@ -109,8 +109,8 @@ mod tests {
     }
 
     #[test]
-    fn test_stream_indirect_object_allows_whitespace_before_endobj() {
-        let input = b"1 0 obj\n<< /Length 5 >>\nstream\nHello\nendstream \nendobj\n";
+    fn test_stream_indirect_object_allows_comment_before_endobj() {
+        let input = b"1 0 obj\n<< /Length 5 >>\nstream\nHello\nendstream\n%  %\nendobj\n";
         let mut parser = PdfParser::from(input.as_slice());
 
         if let Some(ObjectVariant::Stream(stream)) =
@@ -125,8 +125,8 @@ mod tests {
     }
 
     #[test]
-    fn test_indirect_object_allows_compact_integer_before_endobj() {
-        let input = b"1501 0 obj\n61endobj\n";
+    fn test_indirect_object_allows_comment_before_endobj() {
+        let input = b"1501 0 obj\n61\n% comment\nendobj\n";
         let mut parser = PdfParser::from(input.as_slice());
 
         if let Some(ObjectVariant::IndirectObject(indirect_object)) =
