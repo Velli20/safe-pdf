@@ -1,7 +1,9 @@
 //! Mesh shading evaluation, tessellation, and rasterization helpers.
 
 use num_traits::ToPrimitive;
-use pdf_graphics::{color::Color, point::Point, rect::Rect, transform::Transform};
+use pdf_graphics::{
+    BoundsAccumulator, color::Color, point::Point, rect::Rect, transform::Transform,
+};
 
 use crate::model::MeshPatch;
 
@@ -525,48 +527,6 @@ fn clamp_offset_to_usize(value: f32, max: usize) -> usize {
     match clamped.to_usize() {
         Some(result) => result.min(max),
         None => max,
-    }
-}
-
-struct BoundsAccumulator {
-    min_x: f32,
-    min_y: f32,
-    max_x: f32,
-    max_y: f32,
-}
-
-impl BoundsAccumulator {
-    fn new() -> Self {
-        Self {
-            min_x: f32::INFINITY,
-            min_y: f32::INFINITY,
-            max_x: f32::NEG_INFINITY,
-            max_y: f32::NEG_INFINITY,
-        }
-    }
-
-    fn include(&mut self, point: Point) {
-        self.min_x = self.min_x.min(point.x);
-        self.min_y = self.min_y.min(point.y);
-        self.max_x = self.max_x.max(point.x);
-        self.max_y = self.max_y.max(point.y);
-    }
-
-    fn finish(self) -> Option<Rect> {
-        if self.min_x.is_finite()
-            && self.min_y.is_finite()
-            && self.max_x.is_finite()
-            && self.max_y.is_finite()
-        {
-            Some(Rect {
-                left: self.min_x,
-                top: self.min_y,
-                right: self.max_x,
-                bottom: self.max_y,
-            })
-        } else {
-            None
-        }
     }
 }
 

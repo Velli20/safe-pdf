@@ -1,8 +1,11 @@
+mod bounds_accumulator;
 pub mod color;
 pub mod pdf_path;
 pub mod point;
 pub mod rect;
 pub mod transform;
+
+pub use bounds_accumulator::BoundsAccumulator;
 use num_derive::FromPrimitive;
 
 /// Specifies the shape to be used at the end of open subpaths when they are stroked.
