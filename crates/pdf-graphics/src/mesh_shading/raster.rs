@@ -1,3 +1,5 @@
+use num_traits::ToPrimitive;
+
 use crate::{color::Color, rect::Rect, transform::Transform};
 
 use super::{MeshPatchRef, MeshVertex, patch_subdivision, tessellate_patch};
@@ -22,10 +24,8 @@ where
     I: IntoIterator<Item = MeshPatchRef<'a>>,
 {
     let bounds = bounds.normalized();
-    let width = bounds.width().ceil().max(1.0) as usize;
-    let height = bounds.height().ceil().max(1.0) as usize;
-    let width = width.min(max_dimension);
-    let height = height.min(max_dimension);
+    let width = bounded_raster_dimension(bounds.width(), max_dimension);
+    let height = bounded_raster_dimension(bounds.height(), max_dimension);
     let mut pixels = vec![255u8; width.saturating_mul(height).saturating_mul(4)];
 
     for patch in patches {
@@ -56,16 +56,31 @@ pub fn rasterize_triangle(
         return;
     };
 
-    for y in scan_bounds.start_y..scan_bounds.end_y {
-        for x in scan_bounds.start_x..scan_bounds.end_x {
-            let sample_x = bounds.left + x as f32 + 0.5;
-            let sample_y = bounds.top + y as f32 + 0.5;
+    let start_x = scan_bounds.left.to_usize().unwrap_or(width).min(width);
+    let end_x = scan_bounds.right.to_usize().unwrap_or(width).min(width);
+    let start_y = scan_bounds.top.to_usize().unwrap_or(height).min(height);
+    let end_y = scan_bounds.bottom.to_usize().unwrap_or(height).min(height);
 
+    let Some(start_x_f32) = start_x.to_f32() else {
+        return;
+    };
+    let Some(start_y_f32) = start_y.to_f32() else {
+        return;
+    };
+
+    let mut sample_y = bounds.top + start_y_f32 + 0.5;
+    for y in start_y..end_y {
+        let mut sample_x = bounds.left + start_x_f32 + 0.5;
+        for x in start_x..end_x {
             if let Some((w0, w1, w2)) = barycentric_weights(triangle, sample_x, sample_y) {
                 let color = interpolate_triangle_color(triangle, w0, w1, w2);
                 write_rgba_pixel(pixels, width, x, y, color);
             }
+
+            sample_x += 1.0;
         }
+
+        sample_y += 1.0;
     }
 }
 
@@ -93,10 +108,10 @@ fn write_rgba_pixel(pixels: &mut [u8], width: usize, x: usize, y: usize, color: 
 
 fn color_to_rgba8(color: Color) -> [u8; 4] {
     [
-        (color.r.clamp(0.0, 1.0) * 255.0).round() as u8,
-        (color.g.clamp(0.0, 1.0) * 255.0).round() as u8,
-        (color.b.clamp(0.0, 1.0) * 255.0).round() as u8,
-        (color.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+        float_channel_to_u8(color.r),
+        float_channel_to_u8(color.g),
+        float_channel_to_u8(color.b),
+        float_channel_to_u8(color.a),
     ]
 }
 
@@ -130,7 +145,7 @@ fn triangle_scan_bounds(
     bounds: &Rect,
     width: usize,
     height: usize,
-) -> Option<ScanBounds> {
+) -> Option<Rect> {
     let min_x = triangle
         .iter()
         .map(|vertex| vertex.point.x)
@@ -160,17 +175,35 @@ fn triangle_scan_bounds(
         return None;
     }
 
-    Some(ScanBounds {
-        start_x: ((min_x - bounds.left).max(0.0) as usize).min(width),
-        end_x: ((max_x - bounds.left).max(0.0) as usize).min(width),
-        start_y: ((min_y - bounds.top).max(0.0) as usize).min(height),
-        end_y: ((max_y - bounds.top).max(0.0) as usize).min(height),
+    let max_width = width.to_f32().unwrap_or(f32::MAX);
+    let max_height = height.to_f32().unwrap_or(f32::MAX);
+
+    Some(Rect {
+        left: (min_x - bounds.left).max(0.0).min(max_width),
+        top: (min_y - bounds.top).max(0.0).min(max_height),
+        right: (max_x - bounds.left).max(0.0).min(max_width),
+        bottom: (max_y - bounds.top).max(0.0).min(max_height),
     })
 }
 
-struct ScanBounds {
-    start_x: usize,
-    end_x: usize,
-    start_y: usize,
-    end_y: usize,
+fn bounded_raster_dimension(value: f32, max_dimension: usize) -> usize {
+    let ceil_value = value.ceil().max(1.0);
+    match ceil_value.to_usize() {
+        Some(dimension) => dimension.min(max_dimension),
+        None => max_dimension,
+    }
+}
+
+fn float_channel_to_u8(channel: f32) -> u8 {
+    let scaled = (channel.clamp(0.0, 1.0) * 255.0).round();
+    match scaled.to_u8() {
+        Some(value) => value,
+        None => {
+            if scaled.is_sign_negative() {
+                0
+            } else {
+                u8::MAX
+            }
+        }
+    }
 }

@@ -253,21 +253,31 @@ pub fn rasterize_triangle(
         return;
     };
 
-    for y in scan_bounds.start_y..scan_bounds.end_y {
-        let Some(sample_y) = y.to_f32().map(|value| bounds.top + value + 0.5) else {
-            continue;
-        };
+    let start_x = scan_bounds.left.to_usize().unwrap_or(width).min(width);
+    let end_x = scan_bounds.right.to_usize().unwrap_or(width).min(width);
+    let start_y = scan_bounds.top.to_usize().unwrap_or(height).min(height);
+    let end_y = scan_bounds.bottom.to_usize().unwrap_or(height).min(height);
 
-        for x in scan_bounds.start_x..scan_bounds.end_x {
-            let Some(sample_x) = x.to_f32().map(|value| bounds.left + value + 0.5) else {
-                continue;
-            };
+    let Some(start_x_f32) = start_x.to_f32() else {
+        return;
+    };
+    let Some(start_y_f32) = start_y.to_f32() else {
+        return;
+    };
 
+    let mut sample_y = bounds.top + start_y_f32 + 0.5;
+    for y in start_y..end_y {
+        let mut sample_x = bounds.left + start_x_f32 + 0.5;
+        for x in start_x..end_x {
             if let Some((w0, w1, w2)) = barycentric_weights(triangle, sample_x, sample_y) {
                 let color = interpolate_triangle_color(triangle, w0, w1, w2);
                 write_rgba_pixel(pixels, width, x, y, color);
             }
+
+            sample_x += 1.0;
         }
+
+        sample_y += 1.0;
     }
 }
 
@@ -484,7 +494,7 @@ fn triangle_scan_bounds(
     bounds: &Rect,
     width: usize,
     height: usize,
-) -> Option<ScanBounds> {
+) -> Option<Rect> {
     let min_x = triangle
         .iter()
         .map(|vertex| vertex.point.x)
@@ -514,27 +524,15 @@ fn triangle_scan_bounds(
         return None;
     }
 
-    Some(ScanBounds {
-        start_x: clamp_offset_to_usize(min_x - bounds.left, width),
-        end_x: clamp_offset_to_usize(max_x - bounds.left, width),
-        start_y: clamp_offset_to_usize(min_y - bounds.top, height),
-        end_y: clamp_offset_to_usize(max_y - bounds.top, height),
+    let max_width = width.to_f32().unwrap_or(f32::MAX);
+    let max_height = height.to_f32().unwrap_or(f32::MAX);
+
+    Some(Rect {
+        left: (min_x - bounds.left).max(0.0).min(max_width),
+        top: (min_y - bounds.top).max(0.0).min(max_height),
+        right: (max_x - bounds.left).max(0.0).min(max_width),
+        bottom: (max_y - bounds.top).max(0.0).min(max_height),
     })
-}
-
-fn clamp_offset_to_usize(value: f32, max: usize) -> usize {
-    let clamped = value.max(0.0);
-    match clamped.to_usize() {
-        Some(result) => result.min(max),
-        None => max,
-    }
-}
-
-struct ScanBounds {
-    start_x: usize,
-    end_x: usize,
-    start_y: usize,
-    end_y: usize,
 }
 
 #[cfg(test)]
