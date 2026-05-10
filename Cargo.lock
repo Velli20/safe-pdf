@@ -1941,6 +1941,7 @@ dependencies = [
  "pdf-content-stream",
  "pdf-graphics",
  "pdf-object",
+ "pdf-parser",
  "read-fonts",
  "thiserror 2.0.12",
  "write-fonts",

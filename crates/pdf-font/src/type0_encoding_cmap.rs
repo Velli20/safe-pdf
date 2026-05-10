@@ -1,5 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 
+use pdf_parser::cmap::{CMapParser, CMapToken};
+
 use crate::error::FontError;
 
 /// Writing mode declared by a Type0 encoding CMap.
@@ -78,126 +80,34 @@ impl Type0EncodingCMap {
     /// - `begincidrange`
     /// - `/WMode`
     pub fn from_bytes(data: &[u8]) -> Result<Self, FontError> {
-        let text = strip_comments(&String::from_utf8_lossy(data));
-        let tokens: Vec<&str> = text.split_whitespace().collect();
-
         let mut code_space_ranges = Vec::new();
         let mut code_lengths = BTreeSet::new();
         let mut cid_chars = HashMap::new();
         let mut cid_ranges = Vec::new();
         let mut writing_mode = WritingMode::Horizontal;
 
-        let mut index = 0usize;
-        while let Some(token) = tokens.get(index) {
-            match *token {
-                "begincodespacerange" => {
-                    index = index.saturating_add(1);
-                    while let Some(token) = tokens.get(index) {
-                        if *token == "endcodespacerange" {
-                            break;
-                        }
-
-                        let start = parse_hex_token(token).ok_or_else(|| {
-                            FontError::InvalidType0EncodingCMap(
-                                "invalid codespace range start token".to_string(),
-                            )
-                        })?;
-                        let end = tokens
-                            .get(index.saturating_add(1))
-                            .and_then(|value| parse_hex_token(value))
-                            .ok_or_else(|| {
-                                FontError::InvalidType0EncodingCMap(
-                                    "invalid codespace range end token".to_string(),
-                                )
-                            })?;
-
-                        let len = hex_token_len(token).ok_or_else(|| {
-                            FontError::InvalidType0EncodingCMap(
-                                "invalid codespace range length".to_string(),
-                            )
-                        })?;
-
-                        code_lengths.insert(len);
-                        code_space_ranges.push(CodeSpaceRange { start, end, len });
-                        index = index.saturating_add(2);
-                    }
+        let mut parser = CMapParser::from(data);
+        while let Some(token) = next_cmap_token(&mut parser)? {
+            match token {
+                CMapToken::Operator(operator) if operator.as_slice() == b"begincodespacerange" => {
+                    parse_codespace_ranges(&mut parser, &mut code_space_ranges, &mut code_lengths)?;
                 }
-                "begincidchar" => {
-                    index = index.saturating_add(1);
-                    while let Some(token) = tokens.get(index) {
-                        if *token == "endcidchar" {
-                            break;
-                        }
-
-                        let code = parse_hex_token(token).ok_or_else(|| {
-                            FontError::InvalidType0EncodingCMap(
-                                "invalid cidchar source token".to_string(),
-                            )
-                        })?;
-                        let cid = tokens
-                            .get(index.saturating_add(1))
-                            .and_then(|value| value.parse::<u16>().ok())
-                            .ok_or_else(|| {
-                                FontError::InvalidType0EncodingCMap(
-                                    "invalid cidchar destination token".to_string(),
-                                )
-                            })?;
-                        cid_chars.insert(code, cid);
-                        index = index.saturating_add(2);
-                    }
+                CMapToken::Operator(operator) if operator.as_slice() == b"begincidchar" => {
+                    parse_cid_chars(&mut parser, &mut cid_chars)?;
                 }
-                "begincidrange" => {
-                    index = index.saturating_add(1);
-                    while let Some(token) = tokens.get(index) {
-                        if *token == "endcidrange" {
-                            break;
-                        }
-
-                        let start = parse_hex_token(token).ok_or_else(|| {
-                            FontError::InvalidType0EncodingCMap(
-                                "invalid cidrange start token".to_string(),
-                            )
-                        })?;
-                        let end = tokens
-                            .get(index.saturating_add(1))
-                            .and_then(|value| parse_hex_token(value))
-                            .ok_or_else(|| {
-                                FontError::InvalidType0EncodingCMap(
-                                    "invalid cidrange end token".to_string(),
-                                )
-                            })?;
-                        let cid_start = tokens
-                            .get(index.saturating_add(2))
-                            .and_then(|value| value.parse::<u16>().ok())
-                            .ok_or_else(|| {
-                                FontError::InvalidType0EncodingCMap(
-                                    "invalid cidrange destination token".to_string(),
-                                )
-                            })?;
-                        cid_ranges.push(CidRange {
-                            start,
-                            end,
-                            cid_start,
-                        });
-                        index = index.saturating_add(3);
-                    }
+                CMapToken::Operator(operator) if operator.as_slice() == b"begincidrange" => {
+                    parse_cid_ranges(&mut parser, &mut cid_ranges)?;
                 }
-                "/WMode" => {
-                    let mode = tokens
-                        .get(index.saturating_add(1))
-                        .and_then(|value| value.parse::<u8>().ok())
-                        .unwrap_or(0);
+                CMapToken::Name(name) if name.as_slice() == b"WMode" => {
+                    let mode = expect_integer_token(&mut parser, "invalid /WMode value")?;
                     writing_mode = if mode == 1 {
                         WritingMode::Vertical
                     } else {
                         WritingMode::Horizontal
                     };
-                    index = index.saturating_add(1);
                 }
                 _ => {}
             }
-
-            index = index.saturating_add(1);
         }
 
         if code_space_ranges.is_empty() {
@@ -322,70 +232,140 @@ fn decode_identity(text: &[u8]) -> Vec<u16> {
     decoded
 }
 
-/// Remove `%` line comments from a PostScript-like CMap source string.
-fn strip_comments(text: &str) -> String {
-    let mut stripped = String::new();
-
-    for line in text.lines() {
-        let line = line.split('%').next().unwrap_or_default();
-        stripped.push_str(line);
-        stripped.push('\n');
-    }
-
-    stripped
-}
-
-/// Parse a `<...>` hexadecimal token into an unsigned integer code value.
-fn parse_hex_token(token: &str) -> Option<u32> {
-    let inner = token.strip_prefix('<')?.strip_suffix('>')?;
-    let mut value = 0u32;
-
-    for pair in hex_bytes(inner)? {
-        value = value.checked_shl(8)? | u32::from(pair);
-    }
-
-    Some(value)
-}
-
-/// Return the decoded byte length of a `<...>` hexadecimal token.
-fn hex_token_len(token: &str) -> Option<usize> {
-    Some(hex_bytes(token.strip_prefix('<')?.strip_suffix('>')?)?.len())
-}
-
-/// Decode a hexadecimal string into bytes.
-///
-/// Non-hex characters are ignored and odd-length inputs are left-padded with
-/// zero to follow PDF hex-string rules.
-fn hex_bytes(hex: &str) -> Option<Vec<u8>> {
-    let hex: String = hex.chars().filter(|c| c.is_ascii_hexdigit()).collect();
-    let padded = if hex.len() % 2 == 0 {
-        hex
-    } else {
-        let mut prefixed = String::with_capacity(hex.len().saturating_add(1));
-        prefixed.push('0');
-        prefixed.push_str(&hex);
-        prefixed
-    };
-
-    let mut bytes = Vec::with_capacity(padded.len() / 2);
-    let chars: Vec<char> = padded.chars().collect();
-    let mut index = 0usize;
-    while let (Some(high), Some(low)) = (chars.get(index), chars.get(index.saturating_add(1))) {
-        let high = high.to_digit(16)?;
-        let low = low.to_digit(16)?;
-        let byte = u8::try_from((high << 4) | low).ok()?;
-        bytes.push(byte);
-        index = index.saturating_add(2);
-    }
-
-    Some(bytes)
-}
-
 /// Convert a big-endian byte sequence into a `u32`.
 fn bytes_to_u32(bytes: &[u8]) -> u32 {
     bytes.iter().fold(0u32, |value, byte| {
         value.checked_shl(8).unwrap_or(0) | u32::from(*byte)
     })
+}
+
+fn next_cmap_token(parser: &mut CMapParser<'_>) -> Result<Option<CMapToken>, FontError> {
+    parser
+        .next_token()
+        .map_err(|error| FontError::InvalidType0EncodingCMap(error.to_string()))
+}
+
+fn parse_codespace_ranges(
+    parser: &mut CMapParser<'_>,
+    code_space_ranges: &mut Vec<CodeSpaceRange>,
+    code_lengths: &mut BTreeSet<usize>,
+) -> Result<(), FontError> {
+    loop {
+        match next_cmap_token(parser)? {
+            Some(CMapToken::Operator(operator)) if operator.as_slice() == b"endcodespacerange" => {
+                break;
+            }
+            Some(CMapToken::HexString(start_bytes)) => {
+                let end_bytes = expect_hex_token(parser, "invalid codespace range end token")?;
+                let len = start_bytes.len();
+                let start = u32_from_bytes(&start_bytes, "invalid codespace range start token")?;
+                let end = u32_from_bytes(&end_bytes, "invalid codespace range end token")?;
+                code_lengths.insert(len);
+                code_space_ranges.push(CodeSpaceRange { start, end, len });
+            }
+            Some(_) => {
+                return Err(FontError::InvalidType0EncodingCMap(
+                    "invalid codespace range start token".to_string(),
+                ));
+            }
+            None => {
+                return Err(FontError::InvalidType0EncodingCMap(
+                    "missing endcodespacerange".to_string(),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_cid_chars(
+    parser: &mut CMapParser<'_>,
+    cid_chars: &mut HashMap<u32, u16>,
+) -> Result<(), FontError> {
+    loop {
+        match next_cmap_token(parser)? {
+            Some(CMapToken::Operator(operator)) if operator.as_slice() == b"endcidchar" => break,
+            Some(CMapToken::HexString(code_bytes)) => {
+                let code = u32_from_bytes(&code_bytes, "invalid cidchar source token")?;
+                let cid = expect_u16_token(parser, "invalid cidchar destination token")?;
+                cid_chars.insert(code, cid);
+            }
+            Some(_) => {
+                return Err(FontError::InvalidType0EncodingCMap(
+                    "invalid cidchar source token".to_string(),
+                ));
+            }
+            None => {
+                return Err(FontError::InvalidType0EncodingCMap(
+                    "missing endcidchar".to_string(),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_cid_ranges(
+    parser: &mut CMapParser<'_>,
+    cid_ranges: &mut Vec<CidRange>,
+) -> Result<(), FontError> {
+    loop {
+        match next_cmap_token(parser)? {
+            Some(CMapToken::Operator(operator)) if operator.as_slice() == b"endcidrange" => break,
+            Some(CMapToken::HexString(start_bytes)) => {
+                let end_bytes = expect_hex_token(parser, "invalid cidrange end token")?;
+                let cid_start = expect_u16_token(parser, "invalid cidrange destination token")?;
+                let start = u32_from_bytes(&start_bytes, "invalid cidrange start token")?;
+                let end = u32_from_bytes(&end_bytes, "invalid cidrange end token")?;
+                cid_ranges.push(CidRange {
+                    start,
+                    end,
+                    cid_start,
+                });
+            }
+            Some(_) => {
+                return Err(FontError::InvalidType0EncodingCMap(
+                    "invalid cidrange start token".to_string(),
+                ));
+            }
+            None => {
+                return Err(FontError::InvalidType0EncodingCMap(
+                    "missing endcidrange".to_string(),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn expect_hex_token(parser: &mut CMapParser<'_>, message: &str) -> Result<Vec<u8>, FontError> {
+    match next_cmap_token(parser)? {
+        Some(CMapToken::HexString(bytes)) => Ok(bytes),
+        Some(_) | None => Err(FontError::InvalidType0EncodingCMap(message.to_string())),
+    }
+}
+
+fn expect_integer_token(parser: &mut CMapParser<'_>, message: &str) -> Result<i64, FontError> {
+    match next_cmap_token(parser)? {
+        Some(CMapToken::Integer(value)) => Ok(value),
+        Some(_) | None => Err(FontError::InvalidType0EncodingCMap(message.to_string())),
+    }
+}
+
+fn expect_u16_token(parser: &mut CMapParser<'_>, message: &str) -> Result<u16, FontError> {
+    let value = expect_integer_token(parser, message)?;
+    u16::try_from(value).map_err(|_| FontError::InvalidType0EncodingCMap(message.to_string()))
+}
+
+fn u32_from_bytes(bytes: &[u8], message: &str) -> Result<u32, FontError> {
+    if bytes.len() > std::mem::size_of::<u32>() {
+        return Err(FontError::InvalidType0EncodingCMap(message.to_string()));
+    }
+
+    Ok(bytes_to_u32(bytes))
 }
 
 #[cfg(test)]
@@ -427,6 +407,26 @@ mod tests {
             vec![7, 50, 52]
         );
         assert_eq!(cmap.writing_mode(), WritingMode::Horizontal);
+    }
+
+    #[test]
+    fn embedded_cmap_parses_comments_and_pdf_hex_string_rules() {
+        let data = br#"
+        begincmap
+        /WMode 0 def
+        1 begincodespacerange
+        <01> % comment between codespace tokens
+        <F>
+        endcodespacerange
+        1 begincidchar
+        <01> 9 % trailing comment
+        endcidchar
+        endcmap
+        "#;
+
+        let cmap = Type0EncodingCMap::from_bytes(data).unwrap();
+
+        assert_eq!(cmap.decode(&[0x01, 0xF0]), vec![9, 0]);
     }
 
     #[test]
