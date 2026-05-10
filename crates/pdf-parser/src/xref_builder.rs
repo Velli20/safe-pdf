@@ -99,13 +99,19 @@ fn recover_traditional_xref_offset(parser: &PdfParser, declared_offset: usize) -
 
     let input = parser.tokenizer.input;
     let search_start = declared_offset.saturating_sub(RECOVERY_WINDOW);
-    let search_end = declared_offset.min(input.len());
+    let search_end = declared_offset
+        .saturating_add(RECOVERY_WINDOW)
+        .min(input.len());
     let haystack = input.get(search_start..search_end)?;
 
     haystack
         .windows(XREF_KEYWORD.len())
-        .rposition(|window| window == XREF_KEYWORD)
-        .and_then(|relative_position| search_start.checked_add(relative_position))
+        .enumerate()
+        .filter_map(|(relative_position, window)| {
+            (window == XREF_KEYWORD)
+                .then(|| search_start.checked_add(relative_position))
+                .flatten()
+        })
         .filter(|&candidate| candidate != declared_offset)
         .filter(|&candidate| {
             let starts_on_line_boundary =
@@ -123,6 +129,7 @@ fn recover_traditional_xref_offset(parser: &PdfParser, declared_offset: usize) -
 
             starts_on_line_boundary && has_delimiter_after_keyword
         })
+        .min_by_key(|candidate| candidate.abs_diff(declared_offset))
 }
 
 fn matches_indirect_object_header(
@@ -315,21 +322,17 @@ fn parse_xref_section_with_recovery(
 ) -> Result<CrossReferenceTable, ParserError> {
     match parse_xref_section_at_offset(parser, declared_offset) {
         Ok(table) => Ok(table),
-        Err(ParserError::InvalidXrefAtOffset { .. }) => {
-            let recovered_offset = recover_traditional_xref_offset(parser, declared_offset).ok_or(
-                ParserError::InvalidXrefAtOffset {
-                    offset: declared_offset,
-                },
-            )?;
+        Err(original_error) => {
+            let recovered_offset =
+                recover_traditional_xref_offset(parser, declared_offset).ok_or(original_error)?;
             let mut table = parse_xref_section_at_offset(parser, recovered_offset)?;
             repair_traditional_xref_offsets(
                 parser,
                 &mut table,
-                declared_offset.saturating_sub(recovered_offset),
+                declared_offset.abs_diff(recovered_offset),
             );
             Ok(table)
         }
-        Err(error) => Err(error),
     }
 }
 
@@ -690,6 +693,58 @@ mod tests {
 
         let entry2 = table.entries.get(&2).expect("obj 2 should exist");
         assert_eq!(entry2.byte_offset(), Some(obj2_offset));
+    }
+
+    #[test]
+    fn test_build_xref_table_recovers_startxref_inside_endstream() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%PDF-1.7\n");
+
+        let obj1_offset = data.len();
+        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        let obj2_offset = data.len();
+        data.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
+
+        let obj3_offset = data.len();
+        data.extend_from_slice(b"3 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n");
+
+        let bad_startxref_offset = data
+            .windows(b"endstream".len())
+            .position(|window| window == b"endstream")
+            .expect("test fixture should contain endstream")
+            .saturating_add(1);
+
+        let xref_offset = data.len();
+        data.extend_from_slice(b"xref\n0 4\n");
+        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+        data.extend_from_slice(
+            format_xref_entry(obj2_offset.saturating_sub(3), 0, true).as_bytes(),
+        );
+        data.extend_from_slice(
+            format_xref_entry(obj3_offset.saturating_sub(2), 0, true).as_bytes(),
+        );
+
+        data.extend_from_slice(b"trailer\n<< /Size 4 /Root 1 0 R >>\n");
+        data.extend_from_slice(b"startxref\n");
+        data.extend_from_slice(format!("{bad_startxref_offset}\n").as_bytes());
+        data.extend_from_slice(b"%%EOF");
+
+        let mut parser = PdfParser::from(data.as_slice());
+        let table = parser
+            .build_xref_table()
+            .expect("xref recovery should find the later traditional table");
+
+        let entry1 = table.entries.get(&1).expect("obj 1 should exist");
+        assert_eq!(entry1.byte_offset(), Some(obj1_offset));
+
+        let entry2 = table.entries.get(&2).expect("obj 2 should exist");
+        assert_eq!(entry2.byte_offset(), Some(obj2_offset));
+
+        let entry3 = table.entries.get(&3).expect("obj 3 should exist");
+        assert_eq!(entry3.byte_offset(), Some(obj3_offset));
+        assert!(bad_startxref_offset < xref_offset);
     }
 
     #[test]
