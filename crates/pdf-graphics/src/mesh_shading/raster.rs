@@ -56,31 +56,26 @@ pub fn rasterize_triangle(
         return;
     };
 
-    let start_x = scan_bounds.left.to_usize().unwrap_or(width).min(width);
-    let end_x = scan_bounds.right.to_usize().unwrap_or(width).min(width);
-    let start_y = scan_bounds.top.to_usize().unwrap_or(height).min(height);
-    let end_y = scan_bounds.bottom.to_usize().unwrap_or(height).min(height);
+    let start_x = scan_bounds.left.max(0.0);
+    let end_x = scan_bounds.right;
+    let start_y = scan_bounds.top.max(0.0);
+    let end_y = scan_bounds.bottom;
 
-    let Some(start_x_f32) = start_x.to_f32() else {
-        return;
-    };
-    let Some(start_y_f32) = start_y.to_f32() else {
-        return;
-    };
-
-    let mut sample_y = bounds.top + start_y_f32 + 0.5;
-    for y in start_y..end_y {
-        let mut sample_x = bounds.left + start_x_f32 + 0.5;
-        for x in start_x..end_x {
+    let mut y = start_y;
+    while y < end_y {
+        let mut x = start_x;
+        let sample_y = bounds.top + y + 0.5;
+        while x < end_x {
+            let sample_x = bounds.left + x + 0.5;
             if let Some((w0, w1, w2)) = barycentric_weights(triangle, sample_x, sample_y) {
                 let color = interpolate_triangle_color(triangle, w0, w1, w2);
                 write_rgba_pixel(pixels, width, x, y, color);
             }
 
-            sample_x += 1.0;
+            x += 1.0;
         }
 
-        sample_y += 1.0;
+        y += 1.0;
     }
 }
 
@@ -93,7 +88,14 @@ fn interpolate_triangle_color(triangle: [MeshVertex; 3], w0: f32, w1: f32, w2: f
     )
 }
 
-fn write_rgba_pixel(pixels: &mut [u8], width: usize, x: usize, y: usize, color: Color) {
+fn write_rgba_pixel(pixels: &mut [u8], width: usize, x: f32, y: f32, color: Color) {
+    let Some(x) = x.to_usize() else {
+        return;
+    };
+    let Some(y) = y.to_usize() else {
+        return;
+    };
+
     let pixel_index = y.saturating_mul(width).saturating_add(x).saturating_mul(4);
     let Some(pixel) = pixels.get_mut(pixel_index..pixel_index.saturating_add(4)) else {
         return;
