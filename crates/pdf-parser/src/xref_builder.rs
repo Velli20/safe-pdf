@@ -9,37 +9,66 @@ use pdf_object::{
 use crate::{error::ParserError, parser::PdfParser};
 
 impl PdfParser<'_> {
-    /// Locates the cross-reference section via the trailing `startxref` marker,
-    /// then follows the `/Prev` chain to produce a fully-merged [`CrossReferenceTable`].
-    ///
-    /// # Note on linearized PDFs
-    ///
-    /// This implementation always scans for the *last* `startxref` in the file.
-    /// For linearized PDFs the last `startxref` points to the linearization
-    /// parameter dictionary, not the primary xref. Full linearized-PDF support
-    /// (using the *first* `startxref`) is not yet implemented.
-    /// TODO: handle linearized PDFs by using the first `startxref` offset instead.
+    /// Locates a cross-reference section via `startxref` markers, then follows
+    /// the `/Prev` chain to produce a fully-merged [`CrossReferenceTable`].
     pub fn build_xref_table(&mut self) -> Result<CrossReferenceTable, ParserError> {
-        let xref_offset = self.find_startxref_offset()?;
-        merge_xref_chain(self, xref_offset)
+        let xref_offsets = self.find_startxref_offsets()?;
+        let mut last_error = None;
+
+        for xref_offset in xref_offsets {
+            match merge_xref_chain(self, xref_offset)
+                .and_then(|table| validate_xref_table(self, table, xref_offset))
+            {
+                Ok(table) => return Ok(table),
+                Err(error) => last_error = Some(error),
+            }
+        }
+
+        Err(last_error.unwrap_or(ParserError::MissingStartXref))
     }
 
-    /// Scans backward through the input for the last `startxref` keyword and extracts
-    /// the byte offset that follows it.
-    fn find_startxref_offset(&mut self) -> Result<usize, ParserError> {
+    /// Scans backward through the input for `startxref` keywords and extracts
+    /// the byte offsets that follow them, newest first.
+    fn find_startxref_offsets(&mut self) -> Result<Vec<usize>, ParserError> {
         const STARTXREF_KEYWORD: &[u8] = b"startxref";
 
-        let startxref_pos = self
+        let positions: Vec<usize> = self
             .tokenizer
             .input
             .windows(STARTXREF_KEYWORD.len())
-            .rposition(|window| window == STARTXREF_KEYWORD)
-            .ok_or(ParserError::MissingStartXref)?;
+            .enumerate()
+            .filter_map(|(position, window)| {
+                if window == STARTXREF_KEYWORD {
+                    Some(position)
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-        self.tokenizer.position = startxref_pos;
-        self.read_keyword(b"startxref")?;
-        self.read_number::<usize>(true)
-            .map_err(|_| ParserError::MissingStartXref)
+        if positions.is_empty() {
+            return Err(ParserError::MissingStartXref);
+        }
+
+        let mut offsets = Vec::with_capacity(positions.len());
+        let original_position = self.tokenizer.position;
+
+        for startxref_pos in positions.into_iter().rev() {
+            self.tokenizer.position = startxref_pos;
+            if self.read_keyword(b"startxref").is_ok()
+                && let Ok(offset) = self.read_number::<usize>(true)
+            {
+                offsets.push(offset);
+            }
+        }
+
+        self.tokenizer.position = original_position;
+
+        if offsets.is_empty() {
+            return Err(ParserError::MissingStartXref);
+        }
+
+        Ok(offsets)
     }
 }
 
@@ -250,6 +279,36 @@ fn repair_traditional_xref_offsets(
     }
 }
 
+fn validate_xref_table(
+    parser: &PdfParser,
+    table: CrossReferenceTable,
+    xref_offset: usize,
+) -> Result<CrossReferenceTable, ParserError> {
+    let input = parser.tokenizer.input;
+
+    for (&object_number, entry) in &table.entries {
+        let CrossReferenceEntryType::Normal {
+            byte_offset,
+            generation_number,
+        } = &entry.entry_type
+        else {
+            continue;
+        };
+
+        if *byte_offset == 0 {
+            continue;
+        }
+
+        if !matches_indirect_object_header(input, *byte_offset, object_number, *generation_number) {
+            return Err(ParserError::InvalidXrefAtOffset {
+                offset: xref_offset,
+            });
+        }
+    }
+
+    Ok(table)
+}
+
 fn parse_xref_section_with_recovery(
     parser: &mut PdfParser,
     declared_offset: usize,
@@ -456,6 +515,49 @@ mod tests {
             .try_number(&PassthroughResolver)
             .unwrap();
         assert_eq!(size, 2);
+    }
+
+    #[test]
+    fn test_build_xref_table_falls_back_from_invalid_newer_xref() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%PDF-1.7\n");
+
+        let obj1_offset = data.len();
+        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        let obj2_offset = data.len();
+        data.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
+
+        let xref1_offset = data.len();
+        data.extend_from_slice(b"xref\n0 3\n");
+        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
+        data.extend_from_slice(b"trailer\n<< /Size 3 /Root 1 0 R >>\n");
+        data.extend_from_slice(b"startxref\n");
+        data.extend_from_slice(format!("{}\n", xref1_offset).as_bytes());
+        data.extend_from_slice(b"%%EOF\n");
+
+        let invalid_obj2_offset = obj2_offset.saturating_add(2);
+        let xref2_offset = data.len();
+        data.extend_from_slice(b"xref\n0 3\n");
+        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(invalid_obj2_offset, 0, true).as_bytes());
+        data.extend_from_slice(b"trailer\n<< /Size 3 /Root 1 0 R /Prev ");
+        data.extend_from_slice(format!("{}", xref1_offset).as_bytes());
+        data.extend_from_slice(b" >>\n");
+        data.extend_from_slice(b"startxref\n");
+        data.extend_from_slice(format!("{}\n", xref2_offset).as_bytes());
+        data.extend_from_slice(b"%%EOF");
+
+        let mut parser = PdfParser::from(data.as_slice());
+        let table = parser
+            .build_xref_table()
+            .expect("invalid newer xref should fall back to older valid xref");
+
+        let entry2 = table.entries.get(&2).expect("obj 2 should exist");
+        assert_eq!(entry2.byte_offset(), Some(obj2_offset));
     }
 
     #[test]

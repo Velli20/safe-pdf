@@ -26,6 +26,10 @@ use pdf_document::{document::PdfDocument, reader::PdfReader};
 use pdf_graphics_skia::gpu_state::SkiaGpuState;
 use pdf_renderer::PdfRenderer;
 
+const DEFAULT_INITIAL_WINDOW_SIZE: (u32, u32) = (800, 600);
+const MAX_INITIAL_WINDOW_WIDTH: f32 = 1200.0;
+const MAX_INITIAL_WINDOW_HEIGHT: f32 = 900.0;
+
 /// Errors that can occur in the PDF viewer application.
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -73,8 +77,23 @@ fn main() -> Result<(), AppError> {
 fn initial_window_size(doc: &PdfDocument) -> (u32, u32) {
     doc.get_page(0)
         .and_then(|p| p.media_box.as_ref())
-        .map(|mb| (mb.width().max(1.0) as u32, mb.height().max(1.0) as u32))
-        .unwrap_or((800, 600))
+        .map(|mb| fit_initial_window_size(mb.width(), mb.height()))
+        .unwrap_or(DEFAULT_INITIAL_WINDOW_SIZE)
+}
+
+fn fit_initial_window_size(width: f32, height: f32) -> (u32, u32) {
+    if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+        return DEFAULT_INITIAL_WINDOW_SIZE;
+    }
+
+    let scale = (MAX_INITIAL_WINDOW_WIDTH / width)
+        .min(MAX_INITIAL_WINDOW_HEIGHT / height)
+        .min(1.0);
+
+    (
+        (width * scale).round().max(1.0) as u32,
+        (height * scale).round().max(1.0) as u32,
+    )
 }
 
 struct Application {
@@ -227,7 +246,17 @@ fn run(document: PdfDocument) -> Result<(), AppError> {
     let window = window.ok_or_else(|| AppError::WindowCreation("no window created".into()))?;
     let raw_handle = window.window_handle()?.as_raw();
 
-    let (w, h): (u32, u32) = window.inner_size().into();
+    let initial_size = window.inner_size();
+    let w = if initial_size.width == 0 {
+        init_w
+    } else {
+        initial_size.width
+    };
+    let h = if initial_size.height == 0 {
+        init_h
+    } else {
+        initial_size.height
+    };
     let nz_w = NonZeroU32::new(w).ok_or(AppError::InvalidDimension)?;
     let nz_h = NonZeroU32::new(h).ok_or(AppError::InvalidDimension)?;
 
