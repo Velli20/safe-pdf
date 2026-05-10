@@ -1866,6 +1866,7 @@ dependencies = [
  "pdf-image",
  "pdf-object",
  "pdf-page",
+ "pdf-shading",
  "read-fonts",
  "skrifa",
  "thiserror 2.0.12",
@@ -1973,6 +1974,7 @@ dependencies = [
  "pdf-canvas",
  "pdf-document",
  "pdf-graphics",
+ "pdf-shading",
  "thiserror 2.0.12",
 ]
 
@@ -1983,6 +1985,7 @@ dependencies = [
  "pdf-canvas",
  "pdf-document",
  "pdf-graphics",
+ "pdf-shading",
  "skia-safe",
  "thiserror 2.0.12",
 ]
@@ -2036,6 +2039,7 @@ dependencies = [
  "pdf-image",
  "pdf-object",
  "pdf-object-collection",
+ "pdf-shading",
  "thiserror 2.0.12",
 ]
 
@@ -2067,6 +2071,19 @@ dependencies = [
  "pdf-content-stream",
  "pdf-document",
  "pdf-page",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "pdf-shading"
+version = "0.1.0"
+dependencies = [
+ "num-traits",
+ "pdf-color-space",
+ "pdf-decode",
+ "pdf-function",
+ "pdf-graphics",
+ "pdf-object",
  "thiserror 2.0.12",
 ]
 

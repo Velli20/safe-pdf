@@ -1,0 +1,16 @@
+[package]
+name = "pdf-shading"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+num-traits = "0.2.19"
+pdf-color-space = { path = "../pdf-color-space" }
+pdf-decode = { path = "../pdf-decode" }
+pdf-function = { path = "../pdf-function" }
+pdf-graphics = { path = "../pdf-graphics" }
+pdf-object = { path = "../pdf-object" }
+thiserror = "2.0.12"

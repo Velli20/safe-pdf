@@ -9,4 +9,5 @@ femtovg = { version = "0.14.0", features = ["wgpu"] }
 pdf-document = { path = "../pdf-document" }
 pdf-canvas = { path = "../pdf-canvas" }
 pdf-graphics = { path = "../pdf-graphics" }
+pdf-shading = { path = "../pdf-shading" }
 thiserror = "2.0.12"

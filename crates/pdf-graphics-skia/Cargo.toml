@@ -11,5 +11,6 @@ gl = ["skia-safe/gl"]
 pdf-document = { path = "../pdf-document" }
 pdf-canvas = { path = "../pdf-canvas" }
 pdf-graphics = { path = "../pdf-graphics" }
+pdf-shading = { path = "../pdf-shading" }
 skia-safe = { version = "0.91.1", default-features = false, features = ["binary-cache"] }
 thiserror = "2.0.12"

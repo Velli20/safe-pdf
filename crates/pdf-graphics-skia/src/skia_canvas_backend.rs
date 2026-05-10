@@ -11,6 +11,7 @@ use pdf_graphics::{
     pdf_path::{PathVerb, PdfPath},
     transform::Transform,
 };
+use pdf_shading::paint::ShadingPaint;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SkiaCanvasBackendError {
@@ -201,7 +202,7 @@ fn to_skia_blend_mode(mode: BlendMode) -> skia_safe::BlendMode {
 
 fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, PdfCanvasError> {
     match shader {
-        Shader::LinearGradient {
+        Shader::Shading(ShadingPaint::LinearGradient {
             x0,
             y0,
             x1,
@@ -209,7 +210,7 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, PdfCanvasError> 
             transform,
             positions,
             colors,
-        } => {
+        }) => {
             let colors: Vec<skia_safe::Color> = colors
                 .iter()
                 .map(|color| skia_safe::Color4f::new(color.r, color.g, color.b, color.a).to_color())
@@ -239,7 +240,7 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, PdfCanvasError> 
                 .into()
             })
         }
-        Shader::RadialGradient {
+        Shader::Shading(ShadingPaint::RadialGradient {
             start_x,
             start_y,
             start_r,
@@ -249,7 +250,7 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, PdfCanvasError> 
             positions,
             colors,
             transform,
-        } => {
+        }) => {
             let colors: Vec<skia_safe::Color> = colors
                 .iter()
                 .map(|color| skia_safe::Color4f::new(color.r, color.g, color.b, color.a).to_color())
@@ -305,12 +306,19 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, PdfCanvasError> 
                     .into()
                 })
         }
-        Shader::RasterImage {
-            image,
+        Shader::Shading(ShadingPaint::RasterImage {
+            pixels,
+            width,
+            height,
             dest_rect,
             transform,
-        } => {
-            let image = to_skia_image(image)?;
+        }) => {
+            let image = to_skia_image(&Image {
+                data: pixels.clone().into(),
+                width: *width,
+                height: *height,
+                pixel_format: PixelFormat::RGBA8888,
+            })?;
             let width = dest_rect.width().max(1.0);
             let height = dest_rect.height().max(1.0);
             let mut matrix = skia_safe::Matrix::new_all(

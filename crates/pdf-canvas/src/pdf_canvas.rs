@@ -1,9 +1,8 @@
-use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::{
-    canvas_backend::{CanvasBackend, Image, ImageData, Shader},
+    canvas_backend::{CanvasBackend, Shader},
     canvas_state::CanvasState,
     error::PdfCanvasError,
     pdf_path_pen::PdfPathPen,
@@ -13,19 +12,16 @@ use crate::{
 use pdf_content_stream::{content_stream::ContentStream, pdf_operator::PdfOperatorVariant};
 use pdf_graphics::TextRenderingMode;
 use pdf_graphics::{
-    MaskMode, PaintMode, PathFillType, PixelFormat,
-    color::Color,
-    mesh_shading::{MeshPatchRef, patch_mesh_bounds, rasterize_patch_mesh},
-    pdf_path::PdfPath,
-    rect::Rect,
+    MaskMode, PaintMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
     transform::Transform,
 };
 use pdf_page::{
     page::PdfPage,
     pattern::{PaintType, Pattern},
     resources::Resources,
-    shading::{MeshPatch, Shading},
+    shading::Shading,
 };
+use pdf_shading::paint::build_shading_paint;
 use skrifa::{
     OutlineGlyph,
     outline::DrawSettings,
@@ -242,7 +238,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             .ok_or(PdfCanvasError::EmptyGraphicsStateStack)
     }
 
-    /// Builds a shader from a shading pattern definition (Axial / Radial / FunctionBased).
+    /// Builds a shader from a parsed shading definition.
     ///
     /// # Parameters
     ///
@@ -257,46 +253,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         shading: &'b Shading,
         transform: &Option<Transform>,
     ) -> Result<Shader<'b>, PdfCanvasError> {
-        match shading {
-            Shading::Axial {
-                coords: [x0, y0, x1, y1],
-                color_stops,
-                ..
-            } => Ok(Shader::LinearGradient {
-                x0: *x0,
-                y0: *y0,
-                x1: *x1,
-                y1: *y1,
-                colors: Cow::Borrowed(&color_stops.colors),
-                transform: *transform,
-                positions: Cow::Borrowed(&color_stops.positions),
-            }),
-            Shading::Radial {
-                coords: [start_x, start_y, start_r, end_x, end_y, end_r],
-                color_stops,
-                ..
-            } => Ok(Shader::RadialGradient {
-                start_x: *start_x,
-                start_y: *start_y,
-                start_r: *start_r,
-                end_x: *end_x,
-                end_y: *end_y,
-                end_r: *end_r,
-                transform: *transform,
-                colors: Cow::Borrowed(&color_stops.colors),
-                positions: Cow::Borrowed(&color_stops.positions),
-            }),
-            Shading::FunctionBased { .. } => Err(PdfCanvasError::UnsupportedFeature(
-                "FunctionBased shading not implemented".into(),
-            )),
-            Shading::PatchMesh { bbox, patches, .. } => {
-                self.build_patch_mesh_shader(patches, bbox, transform)
-            }
-            Shading::Unsupported { name } => Err(PdfCanvasError::UnsupportedFeature(format!(
-                "Shading type '{}' not implemented",
-                name
-            ))),
-        }
+        build_shading_paint(shading, *transform)
+            .map(Shader::Shading)
+            .map_err(|error| PdfCanvasError::UnsupportedFeature(error.to_string()))
     }
 
     /// Computes the current shader based on the active pattern.
@@ -400,64 +359,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 };
                 Ok(Some(shader))
             }
-        }
-    }
-
-    fn build_patch_mesh_shader<'b>(
-        &mut self,
-        patches: &'b [MeshPatch],
-        bbox: &'b Option<Rect>,
-        transform: &Option<Transform>,
-    ) -> Result<Shader<'b>, PdfCanvasError> {
-        let mesh_transform = transform.unwrap_or_default();
-        let mut bounds = bbox.map(|rect| mesh_transform.map_rect(&rect));
-        if bounds.is_none() {
-            bounds = patch_mesh_bounds(patches.iter().map(Self::mesh_patch_ref), &mesh_transform);
-        }
-        let bounds = bounds
-            .map(|rect| rect.normalized())
-            .ok_or_else(|| PdfCanvasError::UnsupportedFeature("Patch mesh has no bounds".into()))?;
-        if bounds.width() <= 0.0 || bounds.height() <= 0.0 {
-            return Err(PdfCanvasError::UnsupportedFeature(
-                "Patch mesh bounds are empty".into(),
-            ));
-        }
-
-        let raster = rasterize_patch_mesh(
-            patches.iter().map(Self::mesh_patch_ref),
-            bounds,
-            &mesh_transform,
-            2048,
-        );
-
-        Ok(Shader::RasterImage {
-            image: Image {
-                data: ImageData::Owned(raster.pixels),
-                width: raster.width,
-                height: raster.height,
-                pixel_format: PixelFormat::RGBA8888,
-            },
-            dest_rect: raster.bounds,
-            transform: None,
-        })
-    }
-
-    fn mesh_patch_ref(patch: &MeshPatch) -> MeshPatchRef<'_> {
-        match patch {
-            MeshPatch::Coons {
-                control_points,
-                corner_colors,
-            } => MeshPatchRef::Coons {
-                control_points,
-                corner_colors,
-            },
-            MeshPatch::Tensor {
-                control_points,
-                corner_colors,
-            } => MeshPatchRef::Tensor {
-                control_points,
-                corner_colors,
-            },
         }
     }
 

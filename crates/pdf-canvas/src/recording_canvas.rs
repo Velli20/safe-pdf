@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::sync::Arc;
 
 use crate::{
@@ -78,23 +77,7 @@ impl<'a> Shader<'a> {
     /// shaders in recording commands that must outlive the original borrow.
     fn to_static(&self) -> Shader<'static> {
         match self {
-            Shader::LinearGradient {
-                x0,
-                y0,
-                x1,
-                y1,
-                transform,
-                colors,
-                positions,
-            } => Shader::LinearGradient {
-                x0: *x0,
-                y0: *y0,
-                x1: *x1,
-                y1: *y1,
-                transform: *transform,
-                colors: Cow::Owned(colors.to_vec()),
-                positions: Cow::Owned(positions.to_vec()),
-            },
+            Shader::Shading(shading) => Shader::Shading(shading.to_static()),
             Shader::TilingPatternImage {
                 image,
                 transform,
@@ -105,41 +88,6 @@ impl<'a> Shader<'a> {
                 transform: *transform,
                 x_step: *x_step,
                 y_step: *y_step,
-            },
-            Shader::RadialGradient {
-                start_x,
-                start_y,
-                start_r,
-                end_x,
-                end_y,
-                end_r,
-                colors,
-                positions,
-                transform,
-            } => Shader::RadialGradient {
-                start_x: *start_x,
-                start_y: *start_y,
-                start_r: *start_r,
-                end_x: *end_x,
-                end_y: *end_y,
-                end_r: *end_r,
-                colors: Cow::Owned(colors.to_vec()),
-                positions: Cow::Owned(positions.to_vec()),
-                transform: *transform,
-            },
-            Shader::RasterImage {
-                image,
-                dest_rect,
-                transform,
-            } => Shader::RasterImage {
-                image: BackendImage {
-                    data: image.data.to_shared(),
-                    width: image.width,
-                    height: image.height,
-                    pixel_format: image.pixel_format,
-                },
-                dest_rect: *dest_rect,
-                transform: *transform,
             },
         }
     }
