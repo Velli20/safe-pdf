@@ -185,7 +185,7 @@ mod tests {
     use super::*;
     use crate::{
         encoding::Encoding, flags::FontFlags, to_unicode_cmap::ToUnicodeCMap,
-        true_type_font::TrueTypeFont,
+        true_type_font::TrueTypeFont, type0_encoding_cmap::Type0EncodingCMap,
     };
 
     #[test]
@@ -233,6 +233,33 @@ mod tests {
         );
         // char_to_unicode returns only the first character
         assert_eq!(font.char_to_unicode(1), Some('\u{FB01}'));
+    }
+
+    #[test]
+    fn test_cmap_parsers_share_comment_whitespace_and_hex_rules() {
+        let type0_data = br#"
+        begincmap
+        /WMode 0 def
+        1 begincodespacerange
+        <01> % comment between tokens
+        <F>
+        endcodespacerange
+        1 begincidchar
+        <01> 9
+        endcidchar
+        endcmap
+        "#;
+        let type0 = Type0EncodingCMap::from_bytes(type0_data).unwrap();
+        assert_eq!(type0.decode(&[0x01, 0xF0]), vec![9, 0]);
+
+        let to_unicode_data = br#"
+        beginbfchar
+        <01> % comment between tokens
+        <041>
+        endbfchar
+        "#;
+        let cmap = ToUnicodeCMap::from_bytes(to_unicode_data);
+        assert_eq!(cmap.map_char_code(0x01), Some(['\u{0410}'].as_slice()));
     }
 
     #[test]

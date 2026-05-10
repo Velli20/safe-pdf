@@ -1,5 +1,6 @@
 mod cff_builder;
 pub mod char_vec;
+mod cmap_support;
 pub mod encoding;
 pub mod error;
 pub mod flags;
@@ -10,6 +11,7 @@ pub mod simple_font_glyph_map;
 pub mod standard14;
 pub mod to_unicode_cmap;
 pub mod true_type_font;
+pub mod type0_encoding_cmap;
 pub mod type0_font;
 pub mod type1_font;
 pub mod type3_font;

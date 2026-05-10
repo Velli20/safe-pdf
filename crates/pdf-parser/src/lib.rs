@@ -1,4 +1,5 @@
 mod array;
+pub mod cmap;
 pub mod cross_reference_stream;
 mod cross_reference_table;
 mod dictionary;
