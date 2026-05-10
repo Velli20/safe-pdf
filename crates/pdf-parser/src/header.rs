@@ -81,7 +81,14 @@ impl PdfParser<'_> {
         let version = match header_position {
             Some(position) => {
                 self.tokenizer.position = position;
-                Some(self.parse_header()?)
+                match self.parse_header() {
+                    Ok(version) => Some(version),
+                    Err(ParserError::HeaderError(_)) => None,
+                    Err(err) => {
+                        self.tokenizer.position = mark;
+                        return Err(err);
+                    }
+                }
             }
             None => None,
         };
@@ -139,6 +146,15 @@ mod tests {
     #[test]
     fn test_parse_header_in_opening_bytes_missing_header() {
         let input = b"%\xe2\xe3\xcf\xd3\n1 0 obj\n";
+        let mut parser = PdfParser::from(input.as_slice());
+        let version = parser.parse_header_in_opening_bytes().unwrap();
+        assert!(version.is_none());
+        assert_eq!(parser.tokenizer.position, 0);
+    }
+
+    #[test]
+    fn test_parse_header_in_opening_bytes_malformed_header_returns_none() {
+        let input = b"%PDF-1.\n1 0 obj\n";
         let mut parser = PdfParser::from(input.as_slice());
         let version = parser.parse_header_in_opening_bytes().unwrap();
         assert!(version.is_none());
