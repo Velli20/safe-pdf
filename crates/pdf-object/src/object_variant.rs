@@ -407,4 +407,14 @@ mod tests {
 
         assert_eq!(err, ObjectError::TypeMismatch("String", "Integer"));
     }
+
+    #[test]
+    fn try_number_returns_type_mismatch_for_non_number() {
+        let object = ObjectVariant::Array(vec![]);
+        let err = object
+            .try_number::<u16>(&PassthroughResolver)
+            .expect_err("non-number object should not decode as number");
+
+        assert_eq!(err, ObjectError::TypeMismatch("Number", "Array"));
+    }
 }

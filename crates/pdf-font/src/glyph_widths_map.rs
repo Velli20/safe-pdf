@@ -75,8 +75,6 @@ impl GlyphWidthsMap {
         array: &[ObjectVariant],
         objects: &dyn ObjectResolver,
     ) -> Result<Self, GlyphWidthsMapError> {
-        // Iterates the raw `/W` array and delegates to helper routines to insert explicit
-        // or uniform width runs.
         let mut map = GlyphWidthsMap::default();
 
         let mut i = 0usize;
@@ -89,30 +87,27 @@ impl GlyphWidthsMap {
             // Advance past CID.
             i = i.saturating_add(1);
 
-            match array.get(i) {
-                Some(ObjectVariant::Array(widths_arr)) => {
-                    map.insert_explicit(cid, widths_arr, objects)?;
-                    i = i.saturating_add(1);
-                }
-                Some(other) => {
-                    // Need c_last and width
-                    let c_last = other.try_number::<u16>(objects)?;
+            let Some(second) = array.get(i) else {
+                return Err(GlyphWidthsMapError::IncompleteCIDEntry { cid });
+            };
 
-                    let width_idx = i.saturating_add(1);
-                    let width = array
-                        .get(width_idx)
-                        .ok_or(GlyphWidthsMapError::MissingWidthForCIDRange { c_first: cid })?;
-
-                    let width = width.try_number::<f32>(objects)?;
-                    map.insert_uniform(cid, c_last, width)?;
-                    // Advance past c_last and width (2 elements).
-                    i = i.saturating_add(2);
-                }
-                None => {
-                    // No more elements after CID; incomplete entry.
-                    return Err(GlyphWidthsMapError::IncompleteCIDEntry { cid });
-                }
+            if let Ok(widths_arr) = second.try_array(objects) {
+                map.insert_explicit(cid, widths_arr, objects)?;
+                i = i.saturating_add(1);
+                continue;
             }
+
+            let c_last = second.try_number::<u16>(objects)?;
+
+            let width_idx = i.saturating_add(1);
+            let width = array
+                .get(width_idx)
+                .ok_or(GlyphWidthsMapError::MissingWidthForCIDRange { c_first: cid })?;
+
+            let width = width.try_number::<f32>(objects)?;
+            map.insert_uniform(cid, c_last, width)?;
+            // Advance past c_last and width (2 elements).
+            i = i.saturating_add(2);
         }
         Ok(map)
     }
@@ -360,7 +355,10 @@ fn widths_match(left: f32, right: f32) -> bool {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
+    use pdf_object::{
+        error::ObjectError, object_resolver::ObjectResolver, object_resolver::PassthroughResolver,
+        object_variant::ObjectVariant,
+    };
 
     // Helper to create a pdf_object::Value::Number for i64
     fn num_i64(n: i64) -> ObjectVariant {
@@ -377,6 +375,22 @@ mod tests {
         ObjectVariant::Array(elements)
     }
 
+    struct SingleObjectResolver {
+        resolved: ObjectVariant,
+    }
+
+    impl ObjectResolver for SingleObjectResolver {
+        fn resolve_object<'a>(
+            &'a self,
+            obj: &'a ObjectVariant,
+        ) -> Result<&'a ObjectVariant, ObjectError> {
+            match obj {
+                ObjectVariant::Reference(_) => Ok(&self.resolved),
+                _ => Ok(obj),
+            }
+        }
+    }
+
     #[test]
     fn test_from_array_empty() {
         let input_array = vec![];
@@ -391,6 +405,20 @@ mod tests {
         let input_array = vec![num_i64(0), arr(vec![num_f32(500.0), num_f32(450.0)])];
         let glyph_widths_map =
             GlyphWidthsMap::from_array(&input_array, &PassthroughResolver).unwrap();
+        assert_eq!(glyph_widths_map.runs.len(), 1);
+        assert_eq!(glyph_widths_map.get_width(0), Some(500.0));
+        assert_eq!(glyph_widths_map.get_width(1), Some(450.0));
+    }
+
+    #[test]
+    fn test_from_array_single_entry_with_indirect_widths_array() {
+        // [ 0 Ref(widths) ]
+        let widths = arr(vec![num_f32(500.0), num_f32(450.0)]);
+        let input_array = vec![num_i64(0), ObjectVariant::Reference(42)];
+        let resolver = SingleObjectResolver { resolved: widths };
+
+        let glyph_widths_map = GlyphWidthsMap::from_array(&input_array, &resolver).unwrap();
+
         assert_eq!(glyph_widths_map.runs.len(), 1);
         assert_eq!(glyph_widths_map.get_width(0), Some(500.0));
         assert_eq!(glyph_widths_map.get_width(1), Some(450.0));
