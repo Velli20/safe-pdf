@@ -122,9 +122,6 @@ impl GlyphWidthsMap {
         if widths_arr.is_empty() {
             return Err(GlyphWidthsMapError::EmptyWidthsArray { cid });
         }
-        if self.runs.contains_key(&cid) {
-            return Err(GlyphWidthsMapError::DuplicateCIDStart { cid });
-        }
         let widths = widths_arr
             .iter()
             .map(|v| v.try_number::<f32>(objects))
@@ -197,9 +194,6 @@ impl GlyphWidthsMap {
                 c_first: cid,
                 c_last,
             });
-        }
-        if self.runs.contains_key(&cid) {
-            return Err(GlyphWidthsMapError::DuplicateCIDStart { cid });
         }
 
         let overlapping_runs = self
@@ -634,8 +628,22 @@ mod tests {
         let result = GlyphWidthsMap::from_array(&input_array, &PassthroughResolver);
         assert!(matches!(
             result,
-            Err(GlyphWidthsMapError::DuplicateCIDStart { cid: 0 })
+            Err(GlyphWidthsMapError::OverlappingRange { cid: 0 })
         ));
+    }
+
+    #[test]
+    fn test_from_array_allows_duplicate_start_with_same_width() {
+        // [ 0 [500] 0 [500] ]
+        let input_array = vec![
+            num_i64(0),
+            arr(vec![num_f32(500.0)]),
+            num_i64(0),
+            arr(vec![num_f32(500.0)]),
+        ];
+        let glyph_widths_map =
+            GlyphWidthsMap::from_array(&input_array, &PassthroughResolver).unwrap();
+        assert_eq!(glyph_widths_map.get_width(0), Some(500.0));
     }
 
     #[test]
