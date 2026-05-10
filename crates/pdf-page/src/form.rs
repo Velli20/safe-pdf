@@ -35,7 +35,8 @@ impl FormXObject {
             dictionary
                 .get_or_err("BBox")?
                 .try_array_of::<f32, 4>(objects)?,
-        );
+        )
+        .normalized();
 
         // Retrieve the `/Matrix` entry if present.
         let matrix = Matrix::from_dictionary(dictionary, objects)?;
@@ -52,5 +53,54 @@ impl FormXObject {
             resources,
             content_stream,
         })
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+    use pdf_object::{
+        dictionary::Dictionary, object_resolver::PassthroughResolver,
+        object_variant::ObjectVariant, stream::StreamObject,
+    };
+
+    use crate::resource_cache::DefaultResourceCache;
+
+    use super::FormXObject;
+
+    #[test]
+    fn read_xobject_normalizes_inverted_bbox() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            (
+                "BBox".to_string(),
+                ObjectVariant::Array(vec![
+                    ObjectVariant::Real(265.077),
+                    ObjectVariant::Real(71.8304),
+                    ObjectVariant::Real(301.321),
+                    ObjectVariant::Real(43.3206),
+                ]),
+            ),
+            ("Subtype".to_string(), ObjectVariant::Name(b"Form".to_vec())),
+        ]));
+        let stream = StreamObject::new(7, 0, Box::new(dictionary.clone()), Vec::new());
+        let mut cache = DefaultResourceCache::default();
+        let mut id_allocator = ContentStreamIdAllocator::new();
+
+        let form = FormXObject::read_xobject(
+            &dictionary,
+            &stream,
+            &PassthroughResolver,
+            &mut cache,
+            &mut id_allocator,
+        )
+        .expect("form xobject should parse");
+
+        assert_eq!(form.bbox.left, 265.077);
+        assert_eq!(form.bbox.top, 43.3206);
+        assert_eq!(form.bbox.right, 301.321);
+        assert_eq!(form.bbox.bottom, 71.8304);
     }
 }

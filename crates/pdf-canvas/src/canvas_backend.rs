@@ -6,6 +6,7 @@ use pdf_graphics::{
     BlendMode, MaskMode, PathFillType, PixelFormat, color::Color, pdf_path::PdfPath, rect::Rect,
     transform::Transform,
 };
+use pdf_shading::paint::ShadingPaint;
 
 use crate::{error::PdfCanvasError, recording_canvas::RecordingCanvas};
 
@@ -60,33 +61,10 @@ impl<'a> From<Cow<'a, [u8]>> for ImageData<'a> {
 }
 
 /// Represents a shader used for advanced fill and stroke operations in PDF rendering.
-///
-/// A `Shader` defines how colors or patterns are applied to graphical elements, such
-/// as gradients or tiling patterns. It is used to enable effects like linear gradients,
-/// radial gradients, and image-based patterns when filling or stroking paths.
 #[derive(Clone)]
 pub enum Shader<'a> {
-    /// Represents a color shader for filling or stroking paths with gradients.
-    ///
-    /// Used to define how colors are interpolated across a region, such as a linear or radial gradient.
-    LinearGradient {
-        /// The starting x-coordinate of the gradient line.
-        x0: f32,
-        /// The starting y-coordinate of the gradient line.
-        y0: f32,
-        /// The ending x-coordinate of the gradient line.
-        x1: f32,
-        /// The ending y-coordinate of the gradient line.
-        y1: f32,
-        /// An optional transformation to apply to the gradient.
-        ///
-        /// When present, this maps the gradient's local coordinate space into device space.
-        transform: Option<Transform>,
-        /// The array of colors to be used in the gradient.
-        colors: Cow<'a, [Color]>,
-        /// The positions of each color stop, specified as values between 0.0 and 1.0.
-        positions: Cow<'a, [f32]>,
-    },
+    /// A shading-backed shader such as an axial gradient, radial gradient, or mesh raster.
+    Shading(ShadingPaint<'a>),
     /// Represents a tiling pattern image shader for filling or stroking paths with a repeated image.
     ///
     /// Used to define how an image is tiled across a region, with optional transformation and spacing.
@@ -99,27 +77,6 @@ pub enum Shader<'a> {
         x_step: f32,
         /// The vertical spacing between tiles.
         y_step: f32,
-    },
-    /// A radial gradient shader, interpolating colors between two circles.
-    RadialGradient {
-        /// The x-coordinate of the start circle's center.
-        start_x: f32,
-        /// The y-coordinate of the start circle's center.
-        start_y: f32,
-        /// The radius of the start circle.
-        start_r: f32,
-        /// The x-coordinate of the end circle's center.
-        end_x: f32,
-        /// The y-coordinate of the end circle's center.
-        end_y: f32,
-        /// The radius of the end circle.
-        end_r: f32,
-        /// The array of colors to be used in the gradient.
-        colors: Cow<'a, [Color]>,
-        /// The positions of each color stop, specified as values between 0.0 and 1.0.
-        positions: Cow<'a, [f32]>,
-        /// An optional transformation to apply to the gradient.
-        transform: Option<Transform>,
     },
 }
 

@@ -123,6 +123,11 @@ impl ShowTextArray {
     pub fn new(elements: Vec<TextElement>) -> Self {
         Self { elements }
     }
+
+    #[cfg(test)]
+    pub(crate) fn elements(&self) -> &[TextElement] {
+        &self.elements
+    }
 }
 
 impl PdfOperator for ShowTextArray {

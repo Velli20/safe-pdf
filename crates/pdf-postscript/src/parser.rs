@@ -85,6 +85,7 @@ pub fn parse_tokens(tokens: &[&str]) -> Result<Vec<Operator>, CalcError> {
             "roll" => block_stack.push(Operator::Roll)?,
             "sqrt" => block_stack.push(Operator::Sqrt)?,
             "cvi" => block_stack.push(Operator::Cvi)?,
+            "cvr" => block_stack.push(Operator::Cvr)?,
             "mod" => block_stack.push(Operator::Mod)?,
             "truncate" => block_stack.push(Operator::Truncate)?,
             "abs" => block_stack.push(Operator::Abs)?,

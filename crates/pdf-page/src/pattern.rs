@@ -170,8 +170,11 @@ impl Pattern {
                 let y_step = dictionary.get_or_err("YStep")?.try_number::<f32>(objects)?;
 
                 // Read the `/Resources` entry. Needed by the pattern's content stream.
-                let resources =
-                    Resources::read(dictionary, objects, cache, id_allocator)?.unwrap_or_default();
+                let parsed_resources = Resources::read(dictionary, objects, cache, id_allocator)?;
+                let mut resources = Resources::default();
+                if let Some(parsed) = parsed_resources {
+                    resources = parsed;
+                }
 
                 let stream_data = object.try_stream(objects)?;
 

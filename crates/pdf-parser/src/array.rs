@@ -19,19 +19,14 @@ impl PdfParser<'_> {
         self.skip_whitespace_and_comments();
 
         let mut values = Vec::new();
-        while let Some(token) = self.tokenizer.peek() {
+        loop {
             self.skip_whitespace_and_comments();
 
-            if let PdfToken::RightSquareBracket = token {
-                break;
-            }
-
-            values.push(self.parse_object(objects)?);
-
-            if let Some(PdfToken::RightSquareBracket) = self.tokenizer.peek() {
-                break;
-            }
-            self.skip_whitespace_and_comments();
+            match self.tokenizer.peek() {
+                Some(PdfToken::RightSquareBracket) => break,
+                Some(_) => values.push(self.parse_object(objects)?),
+                None => break,
+            };
         }
 
         self.tokenizer.expect(PdfToken::RightSquareBracket)?;
@@ -50,6 +45,9 @@ mod tests {
     #[test]
     fn test_parse_array_valid() {
         let valid_inputs: Vec<(&[u8], usize)> = vec![
+            (b"[]", 0),
+            (b"[ ]", 0),
+            (b"[\n]", 0),
             (b"[1 2 3]", 3),
             (b"[ 4 0 R]", 1),
             (b"[true false null]", 3),
@@ -69,6 +67,11 @@ mod tests {
                 result.len()
             );
         }
+
+        let mut parser = PdfParser::from(b"[]0".as_slice());
+        let result = parser.parse_array(&PassthroughResolver).unwrap();
+        assert!(result.is_empty());
+        assert_eq!(parser.tokenizer.data(), b"0");
     }
 
     #[test]

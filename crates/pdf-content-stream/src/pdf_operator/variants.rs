@@ -1,7 +1,4 @@
 use pdf_image::InlineImage;
-use pdf_object::object_resolver::PassthroughResolver;
-use pdf_object::object_variant::ObjectVariant;
-use pdf_parser::parser::PdfParser;
 
 use crate::compatibility_operators::{BeginCompatibility, EndCompatibility};
 use crate::type3_font_operators::SetCharWidth;
@@ -11,7 +8,6 @@ use crate::{
     error::PdfOperatorError,
     graphics_state_operators::*,
     marked_content_operators::*,
-    operation_map::{OpDescriptor, get_operation_descriptor},
     path_operators::*,
     path_paint_operators::*,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
@@ -24,7 +20,8 @@ use crate::{
     xobject_and_image_operators::*,
 };
 
-use super::{Operands, PdfOperator};
+use super::PdfOperator;
+use super::operator_stream_parser::OperatorStreamParser;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PdfOperatorVariant {
@@ -116,64 +113,8 @@ impl PdfOperatorVariant {
         input: &[u8],
         out: &mut Vec<PdfOperatorVariant>,
     ) -> Result<(), PdfOperatorError> {
-        let mut parser = PdfParser::from(input);
-        // PDF operators have at most ~6 operands; pre-allocate to avoid reallocs.
-        let mut operands = Vec::with_capacity(6);
-        loop {
-            parser.skip_whitespace_and_comments();
-
-            // Dispatch on the next raw byte.
-            let next_byte = parser.tokenizer.data().first().copied();
-            match next_byte {
-                None => break,
-                // ' and " are valid PDF operators that the tokenizer does not
-                // surface as Alphabetic tokens. Handle them alongside ASCII
-                // letters in a single arm.
-                Some(b'\'' | b'"' | b'A'..=b'Z' | b'a'..=b'z') => {
-                    let name_slice = match parser.read_operator_name() {
-                        Ok(s) => s,
-                        Err(e) => {
-                            use pdf_parser::error::ParserError;
-                            match e {
-                                ParserError::UnexpectedEndOfFile => {
-                                    return Err(PdfOperatorError::UnknownOperator(
-                                        "(end of input)".to_string(),
-                                    ));
-                                }
-                                ParserError::InvalidToken(c) => {
-                                    return Err(PdfOperatorError::UnknownOperator(format!(
-                                        "{:?}",
-                                        c
-                                    )));
-                                }
-                                other => return Err(PdfOperatorError::ParserError(other)),
-                            }
-                        }
-                    };
-                    let name_owned = name_slice.to_vec();
-                    let name = name_owned.as_slice();
-                    let Some(descriptor) = get_operation_descriptor(name) else {
-                        // Skip unknown operator and its operands gracefully. This allows us
-                        // to parse content streams that contain operators that are outside
-                        // the PDF specification or were simply missed by this implementation.
-                        operands.clear();
-                        continue;
-                    };
-
-                    if let Some(operator) = (descriptor.parse_hook)(&mut parser)? {
-                        out.push(operator);
-                    } else {
-                        out.push(parse_operator(descriptor, &mut operands)?);
-                    }
-                    operands.clear();
-                }
-                // Anything else is an operand value.
-                Some(_) => {
-                    let value = parser.parse_object(&PassthroughResolver)?;
-                    operands.push(value);
-                }
-            }
-        }
+        let mut parser = OperatorStreamParser::new(input, out);
+        while parser.parse_next_item()? {}
 
         Ok(())
     }
@@ -250,43 +191,12 @@ impl PdfOperatorVariant {
     }
 }
 
-/// Parses a single operator with its operands.
-///
-/// Looks up the operator descriptor by name and validates the operand count
-/// before parsing. Takes `operands` by `&mut` so its heap allocation can be
-/// reclaimed and reused for the next operator.
-fn parse_operator(
-    descriptor: &OpDescriptor,
-    operands: &mut Vec<ObjectVariant>,
-) -> Result<PdfOperatorVariant, PdfOperatorError> {
-    // Validate operand count if the operator has a fixed count requirement.
-    if let Some(required_count) = descriptor.operand_count
-        && operands.len() != required_count
-    {
-        let name_str = String::from_utf8_lossy(descriptor.name);
-        return Err(PdfOperatorError::OperandCountMismatch {
-            operator: name_str.to_string(),
-            actual: operands.len(),
-            expected: required_count,
-        });
-    }
-
-    // Take the operand buffer, leaving an empty Vec behind. The allocation
-    // is reclaimed below so it can be reused for the next operator.
-    let mut ops = Operands(std::mem::take(operands));
-    let operator = (descriptor.parser)(&mut ops)?;
-    // Clear any unconsumed operands and return the buffer to the caller.
-    ops.0.clear();
-    // Reclaim the operand buffer for the next operator. This avoids per-operator
-    // allocations.
-    *operands = ops.0;
-    Ok(operator)
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
+    use crate::TextElement;
     use crate::recording_pdf_operator_backend::{RecordedOperation, RecordingBackend};
+    use pdf_object::object_variant::ObjectVariant;
 
     use super::*;
 
@@ -295,6 +205,29 @@ mod tests {
         let input = b"[ (2.) 1 (0) 1 (!)\n2 (3) 1 (4) 1 (4) 1 (0) 1 (0) 1 (#) 2 (%) 2 (%) 2 (.) 1 (\\)) 2 (4) ]  TJ";
         let result = PdfOperatorVariant::parse(input);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_bug_1953099_bare_sign_in_text_array_becomes_zero_adjustment() {
+        let input = b"BT\n/F1 11.67 Tf\n1 0 0 1 10 20 Tm\n[(e)-4(x)12(t)-3(e)-4(n)-4(s)3(i)3(v)-(e)-4(l)3(y)]TJ\nET\n";
+
+        let result = PdfOperatorVariant::parse(input).unwrap();
+
+        assert_eq!(result.len(), 5);
+        match result.get(3) {
+            Some(PdfOperatorVariant::ShowTextArray(op)) => {
+                let elements = op.elements();
+                assert!(matches!(
+                    elements.get(15),
+                    Some(TextElement::Adjustment { amount }) if *amount == 0.0
+                ));
+                assert!(matches!(
+                    elements.get(16),
+                    Some(TextElement::Text { value }) if value == b"e"
+                ));
+            }
+            other => panic!("expected TJ operator, got {other:?}"),
+        }
     }
 
     #[test]
@@ -396,6 +329,44 @@ mod tests {
                 image: inline_image
             }]
         );
+    }
+
+    #[test]
+    fn parses_inline_image_with_exact_length_followed_by_newline_before_ei() {
+        let input = b"46 0 0 0 1 1 d1\nq\n0 0 m\n0 1 l\n1 1 l\n1 0 l\nh\nW n\nq 1 0 0 -1 0 1 cm\nBI\n/IM true\n/W 1\n/H 1\n/BPC 1\n/D[1\n0]\nID \x00\nEI Q\nQ\n";
+
+        let result = PdfOperatorVariant::parse(input).unwrap();
+
+        assert!(matches!(
+            result
+                .iter()
+                .find(|operator| matches!(operator, PdfOperatorVariant::InlineImage(_))),
+            Some(PdfOperatorVariant::InlineImage(_))
+        ));
+    }
+
+    #[test]
+    fn parses_compact_inline_image_with_newline_after_id() {
+        let input = b"q BI/CS/G/I true/W 2/H 1/BPC 8 ID\n\xFF\x80\nEI Q";
+
+        let result = PdfOperatorVariant::parse(input).unwrap();
+
+        match result.get(1) {
+            Some(PdfOperatorVariant::InlineImage(image)) => {
+                assert_eq!(image.data(), &[0xFF, 0x80, b'\n']);
+                assert_eq!(
+                    &image.dictionary().dictionary,
+                    &std::collections::BTreeMap::from([
+                        ("BPC".to_string(), ObjectVariant::Integer(8)),
+                        ("CS".to_string(), ObjectVariant::Name(b"G".to_vec())),
+                        ("H".to_string(), ObjectVariant::Integer(1)),
+                        ("I".to_string(), ObjectVariant::Boolean(true)),
+                        ("W".to_string(), ObjectVariant::Integer(2)),
+                    ])
+                );
+            }
+            other => panic!("expected inline image, got {other:?}"),
+        }
     }
 
     #[test]
@@ -704,5 +675,88 @@ mod tests {
                 PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState),
             ]
         );
+    }
+
+    #[test]
+    fn parse_handles_non_alphabetic_operator_keywords() {
+        let input = b"1 2 d0 BT T* (x) ' 1 2 (y) \" ET";
+
+        let actual_ops = PdfOperatorVariant::parse(input).expect("stream should parse");
+
+        assert_eq!(actual_ops.len(), 6);
+        assert!(matches!(
+            actual_ops.first(),
+            Some(PdfOperatorVariant::SetCharWidth(op)) if op.wx == 1.0
+        ));
+        assert!(matches!(
+            actual_ops.get(1),
+            Some(PdfOperatorVariant::BeginText(BeginText))
+        ));
+        assert!(matches!(
+            actual_ops.get(2),
+            Some(PdfOperatorVariant::MoveToNextLine(MoveToNextLine))
+        ));
+        assert!(matches!(
+            actual_ops.get(3),
+            Some(PdfOperatorVariant::MoveNextLineShowText(op)) if op == &MoveNextLineShowText::new(b"x".to_vec())
+        ));
+        assert!(matches!(
+            actual_ops.get(4),
+            Some(PdfOperatorVariant::SetSpacingMoveShowText(op))
+                if op == &SetSpacingMoveShowText::new(1.0, 2.0, b"y".to_vec())
+        ));
+        assert!(matches!(
+            actual_ops.get(5),
+            Some(PdfOperatorVariant::EndText(EndText))
+        ));
+    }
+
+    #[test]
+    fn parse_skips_unknown_regular_character_token_and_recovers() {
+        let input = b"@ q";
+
+        let actual_ops = PdfOperatorVariant::parse(input).expect("stream should parse");
+
+        assert_eq!(
+            actual_ops,
+            vec![PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState)]
+        );
+    }
+
+    #[test]
+    fn parse_skips_malformed_operator_operand_sequence_and_recovers() {
+        let input = b"1 2 3 m q";
+
+        let actual_ops = PdfOperatorVariant::parse(input).expect("stream should parse");
+
+        assert_eq!(
+            actual_ops,
+            vec![PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState)]
+        );
+    }
+
+    #[test]
+    fn parse_recovers_from_truncated_trailing_array_operand() {
+        let input = b"0 j 0 J [ ";
+
+        let actual_ops = PdfOperatorVariant::parse(input).expect("stream should parse");
+
+        assert_eq!(actual_ops.len(), 2);
+        assert!(matches!(
+            actual_ops.first(),
+            Some(PdfOperatorVariant::SetLineJoinStyle(_))
+        ));
+        assert!(matches!(
+            actual_ops.get(1),
+            Some(PdfOperatorVariant::SetLineCapStyle(_))
+        ));
+    }
+
+    #[test]
+    fn parse_fixture_with_truncated_trailing_operand_stream() {
+        let input = b"0 0 m 100 100 l 200 200 m 300 300 l S 1 j 0 J [ ";
+        let actual_ops = PdfOperatorVariant::parse(input).expect("fixture stream should parse");
+
+        assert!(!actual_ops.is_empty());
     }
 }

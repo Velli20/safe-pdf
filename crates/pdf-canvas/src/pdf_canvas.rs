@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -22,6 +21,7 @@ use pdf_page::{
     resources::Resources,
     shading::Shading,
 };
+use pdf_shading::paint::build_shading_paint;
 use skrifa::{
     OutlineGlyph,
     outline::DrawSettings,
@@ -114,6 +114,30 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             canvas_stack,
             active_content_stream_ids: HashSet::new(),
         })
+    }
+
+    /// Returns whether a form or pattern bbox is safe to materialize as an offscreen recording.
+    ///
+    /// PDFs in the wild sometimes contain malformed `/BBox` values for Form XObjects or tiling
+    /// patterns, including inverted coordinates, zero-sized boxes, non-finite values, or sentinel
+    /// coordinates near `±32768` that would expand into enormous temporary surfaces. This guard
+    /// keeps those cases from turning into backend allocation failures by requiring a finite,
+    /// positive bbox whose dimensions and total area stay within conservative offscreen limits.
+    pub(crate) fn can_record_offscreen_bbox(bbox: &Rect) -> bool {
+        const MAX_OFFSCREEN_RECORDING_DIMENSION: f32 = 8_192.0;
+        const MAX_OFFSCREEN_RECORDING_AREA: f32 =
+            MAX_OFFSCREEN_RECORDING_DIMENSION * MAX_OFFSCREEN_RECORDING_DIMENSION;
+
+        let width = bbox.width();
+        let height = bbox.height();
+
+        width.is_finite()
+            && height.is_finite()
+            && width > 0.0
+            && height > 0.0
+            && width <= MAX_OFFSCREEN_RECORDING_DIMENSION
+            && height <= MAX_OFFSCREEN_RECORDING_DIMENSION
+            && (width * height) <= MAX_OFFSCREEN_RECORDING_AREA
     }
 
     /// Records a PDF content stream into an offscreen [`RecordingCanvas`].
@@ -214,7 +238,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             .ok_or(PdfCanvasError::EmptyGraphicsStateStack)
     }
 
-    /// Builds a shader from a shading pattern definition (Axial / Radial / FunctionBased).
+    /// Builds a shader from a parsed shading definition.
     ///
     /// # Parameters
     ///
@@ -229,43 +253,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         shading: &'b Shading,
         transform: &Option<Transform>,
     ) -> Result<Shader<'b>, PdfCanvasError> {
-        match shading {
-            Shading::Axial {
-                coords: [x0, y0, x1, y1],
-                color_stops,
-                ..
-            } => Ok(Shader::LinearGradient {
-                x0: *x0,
-                y0: *y0,
-                x1: *x1,
-                y1: *y1,
-                colors: Cow::Borrowed(&color_stops.colors),
-                transform: *transform,
-                positions: Cow::Borrowed(&color_stops.positions),
-            }),
-            Shading::Radial {
-                coords: [start_x, start_y, start_r, end_x, end_y, end_r],
-                color_stops,
-                ..
-            } => Ok(Shader::RadialGradient {
-                start_x: *start_x,
-                start_y: *start_y,
-                start_r: *start_r,
-                end_x: *end_x,
-                end_y: *end_y,
-                end_r: *end_r,
-                transform: *transform,
-                colors: Cow::Borrowed(&color_stops.colors),
-                positions: Cow::Borrowed(&color_stops.positions),
-            }),
-            Shading::FunctionBased { .. } => Err(PdfCanvasError::UnsupportedFeature(
-                "FunctionBased shading not implemented".into(),
-            )),
-            Shading::Unsupported { name } => Err(PdfCanvasError::UnsupportedFeature(format!(
-                "Shading type '{}' not implemented",
-                name
-            ))),
-        }
+        build_shading_paint(shading, *transform)
+            .map(Shader::Shading)
+            .map_err(|error| PdfCanvasError::UnsupportedFeature(error.to_string()))
     }
 
     /// Computes the current shader based on the active pattern.
@@ -317,6 +307,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 ..
             } => {
                 let bbox = *bbox;
+                if !Self::can_record_offscreen_bbox(&bbox) {
+                    return Ok(None);
+                }
 
                 // The tiling pattern's `/Matrix` maps pattern space -> user space.
                 // We pass it through unchanged and let the backend concatenate it with
@@ -1075,5 +1068,17 @@ mod tests {
         assert_eq!(xobject_draw.dest_rect, inline_draw.dest_rect);
         assert_eq!(xobject_draw.data, inline_draw.data);
         assert_eq!(xobject_draw.data, vec![0x00, 0xFF, 0x00, 0xFF]);
+    }
+
+    #[test]
+    fn rejects_absurd_offscreen_recording_bbox() {
+        assert!(!PdfCanvas::<CountingCanvas>::can_record_offscreen_bbox(
+            &Rect {
+                left: -32768.0,
+                top: -32768.0,
+                right: 32767.0,
+                bottom: 32767.0,
+            }
+        ));
     }
 }

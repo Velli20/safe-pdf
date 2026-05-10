@@ -51,6 +51,9 @@ pub enum Operator {
     Abs,
     /// cvi (x -- int) convert to integer (truncate toward zero in PostScript).
     Cvi,
+    /// cvr (x -- real) convert to real. Values are already stored as `f64`,
+    /// so this is a no-op that preserves the top stack element.
+    Cvr,
     /// mod (a b -- a%b) remainder (same sign behavior as PostScript: sign of a).
     Mod,
     /// truncate (x -- truncated) implementation-specific explicit truncation.

@@ -52,12 +52,18 @@ fn process_content_stream_array(
     array: &[ObjectVariant],
     objects: &dyn ObjectResolver,
 ) -> Result<Vec<PdfOperatorVariant>, PdfOperatorError> {
-    let mut concatenated_ops = Vec::new();
+    let mut combined_data = Vec::new();
+
     for value_in_array in array.iter() {
         let data = value_in_array.try_stream(objects)?.data()?;
-        PdfOperatorVariant::parse_into(&data, &mut concatenated_ops)?;
+        if !combined_data.is_empty() {
+            // Separate adjacent stream payloads so tokens do not merge accidentally.
+            combined_data.push(b'\n');
+        }
+        combined_data.extend_from_slice(&data);
     }
-    Ok(concatenated_ops)
+
+    PdfOperatorVariant::parse(&combined_data)
 }
 
 impl ContentStream {
@@ -128,6 +134,7 @@ mod tests {
     };
 
     use super::{ContentStream, ContentStreamIdAllocator};
+    use crate::pdf_operator::PdfOperatorVariant;
 
     fn stream_object(object_number: usize, data: &[u8]) -> StreamObject {
         StreamObject::new(
@@ -174,5 +181,34 @@ mod tests {
         let next_stream =
             ContentStream::from_stream(&direct_stream, &mut ids).expect("stream should parse");
         assert_eq!(next_stream.id, 1);
+    }
+
+    #[test]
+    fn contents_array_concatenates_streams_before_parsing() {
+        let contents = ObjectVariant::Array(vec![
+            ObjectVariant::Stream(stream_object(1, b"0 j 0 J [")),
+            ObjectVariant::Stream(stream_object(2, b"]0 d")),
+        ]);
+        let page = Dictionary::new(BTreeMap::from([("Contents".to_string(), contents)]));
+        let mut ids = ContentStreamIdAllocator::new();
+
+        let content_stream = ContentStream::from_dictionary(&page, &PassthroughResolver, &mut ids)
+            .expect("/Contents array should parse")
+            .expect("page should have a content stream");
+
+        assert_eq!(content_stream.id, 0);
+        assert_eq!(content_stream.operators.len(), 3);
+        assert!(matches!(
+            content_stream.operators.first(),
+            Some(PdfOperatorVariant::SetLineJoinStyle(_))
+        ));
+        assert!(matches!(
+            content_stream.operators.get(1),
+            Some(PdfOperatorVariant::SetLineCapStyle(_))
+        ));
+        assert!(matches!(
+            content_stream.operators.get(2),
+            Some(PdfOperatorVariant::SetDashPattern(_))
+        ));
     }
 }

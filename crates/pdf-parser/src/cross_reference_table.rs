@@ -24,18 +24,26 @@ impl PdfParser<'_> {
         const XREF_KEYWORD: &[u8] = b"xref";
 
         self.read_keyword(XREF_KEYWORD)?;
-        self.skip_whitespace();
+        self.skip_whitespace_and_comments();
 
         let mut entries = std::collections::BTreeMap::new();
 
-        // Parse sections while we see a number (start of a new section).
-        while matches!(self.tokenizer.peek(), Some(PdfToken::Number(_))) {
+        loop {
+            self.skip_whitespace_and_comments();
+            if !matches!(self.tokenizer.peek(), Some(PdfToken::Number(_))) {
+                break;
+            }
+
             let start_object_number = self.read_number::<usize>(true)?;
+            self.skip_whitespace_and_comments();
             let count = self.read_number::<usize>(true)?;
 
             for i in 0..count {
+                self.skip_whitespace_and_comments();
                 let field1 = self.read_number::<usize>(true)?;
+                self.skip_whitespace_and_comments();
                 let field2 = self.read_number::<usize>(true)?;
+                self.skip_whitespace_and_comments();
 
                 let status_byte = match self.tokenizer.read() {
                     Some(PdfToken::Alphabetic(b)) => b,
@@ -55,7 +63,7 @@ impl PdfParser<'_> {
 
                 entries.insert(start_object_number.saturating_add(i), entry);
 
-                self.skip_whitespace();
+                self.skip_whitespace_and_comments();
             }
         }
 
@@ -128,5 +136,20 @@ mod tests {
         assert!(table.entries.contains_key(&1));
         assert!(table.entries.contains_key(&4));
         assert!(table.entries.contains_key(&5));
+    }
+
+    #[test]
+    fn test_parse_xref_section_with_comment_between_entries() {
+        let data = b"xref\n0 3\n0000000000 65535 f\n0000000017 00000 n\n% comment between rows\n0000000081 00000 n\ntrailer\n<< /Size 3 >>\nstartxref\n0\n";
+        let mut parser = PdfParser::from(data.as_slice());
+
+        let table = parser
+            .parse_cross_reference_table(&PassthroughResolver)
+            .unwrap();
+
+        assert_eq!(table.entries.len(), 3);
+        assert!(table.entries[&0].is_free());
+        assert_eq!(table.entries[&1].byte_offset(), Some(17));
+        assert_eq!(table.entries[&2].byte_offset(), Some(81));
     }
 }
