@@ -84,7 +84,10 @@ impl<B: CanvasBackend> TextRenderer for Type1FontRenderer<'_, '_, B> {
                 charset
                     .iter()
                     .find_map(|(i, s)| {
-                        let is_match = s.standard_string().map(|st| st == name).unwrap_or(false);
+                        let is_match = s
+                            .resolve_standard()
+                            .map(|st| st == name.as_bytes())
+                            .unwrap_or(false);
                         if is_match { Some(i) } else { None }
                     })
                     .unwrap_or(GlyphId::NOTDEF)
