@@ -13,6 +13,7 @@ use pdf_content_stream::pdf_operator_backend::{
 use pdf_font::flags::FontFlags;
 use pdf_font::font::Font;
 use pdf_font::type0_font::CidFontSubType;
+use pdf_font::type1_font::Type1FontProgramFormat;
 use pdf_graphics::TextRenderingMode;
 use pdf_graphics::transform::Transform;
 
@@ -157,7 +158,8 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
                 let program = type1_font.font_file.as_slice();
                 let iter = to_char_iter(text);
 
-                let mut renderer = Type1FontRenderer::new(self, program, false)?;
+                let mut renderer =
+                    Type1FontRenderer::new(self, program, type1_font.program_format, false)?;
                 renderer.render_text(iter)
             }
             Font::TrueType(font) => {
@@ -174,7 +176,12 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
                 match font.subtype {
                     CidFontSubType::Type0 => {
                         let program = font.font_file.as_slice();
-                        let mut renderer = Type1FontRenderer::new(self, program, true)?;
+                        let mut renderer = Type1FontRenderer::new(
+                            self,
+                            program,
+                            Type1FontProgramFormat::OpenTypeCff,
+                            true,
+                        )?;
                         renderer.render_text(iter)
                     }
                     CidFontSubType::Type2 => {

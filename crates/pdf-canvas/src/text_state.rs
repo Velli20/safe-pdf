@@ -114,6 +114,22 @@ impl TextState<'_> {
         self.matrix.post_translate(advance_x, glyph_width_y);
     }
 
+    pub(crate) fn advance_horizontal_width(
+        &mut self,
+        char_code: u16,
+        glyph_width: f32,
+        units_per_em: u16,
+    ) {
+        let safe_upe = if units_per_em == 0 {
+            TextState::DEFAULT_UNITS_PER_EM
+        } else {
+            units_per_em
+        };
+
+        let glyph_width_x = glyph_width / f32::from(safe_upe) * self.font_size;
+        self.advance_text_cursor(char_code, glyph_width_x, 0.0);
+    }
+
     /// Builds the glyph base transform ("S" matrix, ISO 32000 §9.4.4) from
     /// the current text state fields.
     ///
@@ -168,9 +184,7 @@ impl TextState<'_> {
 
         // PDF `/Widths` values are always in 1/1000 em.
         if let Some(glyph_width) = font.glyph_width(char_code) {
-            let glyph_width_x =
-                glyph_width / f32::from(TextState::DEFAULT_UNITS_PER_EM) * self.font_size;
-            self.advance_text_cursor(char_code, glyph_width_x, 0.0);
+            self.advance_horizontal_width(char_code, glyph_width, TextState::DEFAULT_UNITS_PER_EM);
             return Ok(());
         }
 
@@ -182,14 +196,7 @@ impl TextState<'_> {
         // so that any already-drawn outline is not lost.
         let advance_width = hmtx.advance(gid).unwrap_or(0);
 
-        let safe_upe = if units_per_em == 0 {
-            TextState::DEFAULT_UNITS_PER_EM
-        } else {
-            units_per_em
-        };
-
-        let glyph_width_x = f32::from(advance_width) / f32::from(safe_upe) * self.font_size;
-        self.advance_text_cursor(char_code, glyph_width_x, 0.0);
+        self.advance_horizontal_width(char_code, f32::from(advance_width), units_per_em);
         Ok(())
     }
 }

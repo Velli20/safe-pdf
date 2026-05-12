@@ -682,11 +682,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         outline_glyph: &OutlineGlyph<'_>,
         transform: &Transform,
     ) -> Result<(), PdfCanvasError> {
-        let rendering_mode = self.current_state()?.rendering_mode;
-        if rendering_mode == TextRenderingMode::Invisible {
-            return Ok(());
-        }
-
         let mut pen = PdfPathPen::default();
         let settings = DrawSettings::from((Size::unscaled(), LocationRef::default()));
         if outline_glyph.draw(settings, &mut pen).is_err() {
@@ -695,30 +690,37 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         }
 
         pen.path.transform(transform);
+        self.draw_glyph_path(&pen.path)
+    }
+
+    pub(crate) fn draw_glyph_path(&mut self, path: &PdfPath) -> Result<(), PdfCanvasError> {
+        let rendering_mode = self.current_state()?.rendering_mode;
+        if rendering_mode == TextRenderingMode::Invisible {
+            return Ok(());
+        }
+
         match rendering_mode {
-            TextRenderingMode::Fill => {
-                self.draw_path(&pen.path, PaintMode::Fill, PathFillType::Winding)
-            }
+            TextRenderingMode::Fill => self.draw_path(path, PaintMode::Fill, PathFillType::Winding),
             TextRenderingMode::Stroke => {
-                self.draw_path(&pen.path, PaintMode::Stroke, PathFillType::Winding)
+                self.draw_path(path, PaintMode::Stroke, PathFillType::Winding)
             }
             TextRenderingMode::FillAndStroke => {
-                self.draw_path(&pen.path, PaintMode::FillAndStroke, PathFillType::Winding)
+                self.draw_path(path, PaintMode::FillAndStroke, PathFillType::Winding)
             }
             TextRenderingMode::Invisible => Ok(()),
             TextRenderingMode::FillClip => {
-                self.draw_path(&pen.path, PaintMode::Fill, PathFillType::Winding)?;
-                self.add_to_text_clip(&pen.path)
+                self.draw_path(path, PaintMode::Fill, PathFillType::Winding)?;
+                self.add_to_text_clip(path)
             }
             TextRenderingMode::StrokeClip => {
-                self.draw_path(&pen.path, PaintMode::Stroke, PathFillType::Winding)?;
-                self.add_to_text_clip(&pen.path)
+                self.draw_path(path, PaintMode::Stroke, PathFillType::Winding)?;
+                self.add_to_text_clip(path)
             }
             TextRenderingMode::FillStrokeClip => {
-                self.draw_path(&pen.path, PaintMode::FillAndStroke, PathFillType::Winding)?;
-                self.add_to_text_clip(&pen.path)
+                self.draw_path(path, PaintMode::FillAndStroke, PathFillType::Winding)?;
+                self.add_to_text_clip(path)
             }
-            TextRenderingMode::Clip => self.add_to_text_clip(&pen.path),
+            TextRenderingMode::Clip => self.add_to_text_clip(path),
         }
     }
 }
