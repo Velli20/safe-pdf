@@ -18,5 +18,5 @@ pdf-shading = { path = "../pdf-shading" }
 pdf-color-space = { path = "../pdf-color-space" }
 thiserror = "2.0.12"
 num-traits = "0.2.19"
-read-fonts = "0.36.0"
-skrifa =  "0.39.0"
+read-fonts = "0.39.2"
+skrifa =  "0.42.1"

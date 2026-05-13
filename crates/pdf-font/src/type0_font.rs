@@ -4,8 +4,12 @@ use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 use read_fonts::{FontRef, TableProvider};
 
 use crate::{
-    error::FontError, glyph_widths_map::GlyphWidthsMap, to_unicode_cmap::ToUnicodeCMap,
-    true_type_font::TrueTypeFont, type0_encoding_cmap::Type0EncodingCMap, type1_font::Type1Font,
+    error::FontError,
+    glyph_widths_map::GlyphWidthsMap,
+    to_unicode_cmap::ToUnicodeCMap,
+    true_type_font::TrueTypeFont,
+    type0_encoding_cmap::Type0EncodingCMap,
+    type1_font::{Type1Font, Type1FontProgramFormat},
 };
 
 /// Represents a PDF Type0 (composite) font, which references a CIDFont
@@ -128,7 +132,15 @@ impl Type0Font {
         // - Type0 (CFF): Rebuild as a standalone CFF font for rendering libraries.
         // - Type2 (TrueType): Use the raw TrueType data directly.
         let font_file = match subtype {
-            CidFontSubType::Type0 => Type1Font::read_font_file(dictionary, objects)?,
+            CidFontSubType::Type0 => {
+                let (font_file, format) = Type1Font::read_font_file(dictionary, objects)?;
+                if format != Type1FontProgramFormat::OpenTypeCff {
+                    return Err(FontError::UnsupportedFontSubtype {
+                        subtype: "FontFile".to_string(),
+                    });
+                }
+                font_file
+            }
             CidFontSubType::Type2 => TrueTypeFont::read_font_file(dictionary, objects)?
                 .0
                 .to_vec(),

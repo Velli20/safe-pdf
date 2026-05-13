@@ -12,6 +12,12 @@ use crate::{
     to_unicode_cmap::ToUnicodeCMap,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Type1FontProgramFormat {
+    OpenTypeCff,
+    ClassicType1,
+}
+
 /// Minimal, initial representation of a PDF Type1 font.
 ///
 /// This focuses on dictionary-level metadata needed by higher layers
@@ -19,6 +25,8 @@ use crate::{
 pub struct Type1Font {
     /// A stream containing the font program.
     pub font_file: Vec<u8>,
+    /// The format of `font_file`.
+    pub program_format: Type1FontProgramFormat,
     /// Widths map for character codes.
     pub widths: Option<HashMap<u16, f32>>,
     /// Optional encoding information.
@@ -33,7 +41,7 @@ impl Type1Font {
         objects: &dyn ObjectResolver,
     ) -> Result<Self, FontError> {
         // Read embedded font file.
-        let font_file = Self::read_font_file(dictionary, objects)?;
+        let (font_file, program_format) = Self::read_font_file(dictionary, objects)?;
 
         // Read the `/Widths` entry.
         let widths = SimpleFontGlyphWidthsMap::from_dictionary(dictionary, objects)?;
@@ -63,6 +71,7 @@ impl Type1Font {
 
         Ok(Self {
             font_file,
+            program_format,
             widths,
             encoding,
             to_unicode,
@@ -82,7 +91,8 @@ impl Type1Font {
     ///    - `/Subtype /OpenType`: already an OpenType font program, returned as-is.
     ///    - Any other or missing `/Subtype`: unsupported.
     /// 2. **`FontFile`** — a classic PostScript Type 1 font program.
-    ///    Currently unsupported; returns [`FontError::UnsupportedFontSubtype`].
+    ///    Returned as classic Type 1 bytes after trimming with `/Length1..3`
+    ///    when available and validating the program with `read-fonts`.
     ///
     /// If neither stream is present (or there is no `/FontDescriptor` at all),
     /// returns [`FontError::MissingFontFile`].  The caller (`Font::from_dictionary`)
@@ -92,12 +102,12 @@ impl Type1Font {
     ///
     /// - [`FontError::MissingFontFile`] — no embedded font program found.
     /// - [`FontError::UnsupportedFontSubtype`] — unsupported `FontFile3` subtype
-    ///   or a `FontFile` (classic Type 1) stream.
+    ///   or an invalid `FontFile` (classic Type 1) stream.
     /// - Any [`FontError`] propagated from stream decompression or CFF building.
     pub(crate) fn read_font_file(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<Vec<u8>, FontError> {
+    ) -> Result<(Vec<u8>, Type1FontProgramFormat), FontError> {
         let descriptor = dictionary
             .get("FontDescriptor")
             .map(|obj| obj.try_dictionary(objects))
@@ -119,8 +129,9 @@ impl Type1Font {
             let data = stream.data()?;
 
             return match subtype.as_deref() {
-                Some("Type1C") | Some("CIDFontType0C") => build_cff_font(data.as_ref()),
-                Some("OpenType") => Ok(data.into_owned()),
+                Some("Type1C") | Some("CIDFontType0C") => build_cff_font(data.as_ref())
+                    .map(|font| (font, Type1FontProgramFormat::OpenTypeCff)),
+                Some("OpenType") => Ok((data.into_owned(), Type1FontProgramFormat::OpenTypeCff)),
                 Some(other) => Err(FontError::UnsupportedFontSubtype {
                     subtype: other.to_string(),
                 }),
@@ -130,16 +141,74 @@ impl Type1Font {
             };
         }
 
-        // Path 2: classic Type 1 in FontFile (not yet supported).
-        if descriptor.get("FontFile").is_some() {
-            return Err(FontError::UnsupportedFontSubtype {
-                subtype: "FontFile".to_string(),
-            });
+        // Path 2: classic Type 1 in FontFile.
+        if let Some(font_file) = descriptor.get("FontFile") {
+            let stream = font_file.try_stream(objects)?;
+            let data = stream.data()?;
+            let normalized = normalize_classic_type1_bytes(descriptor, data.as_ref(), objects)?;
+            read_fonts::ps::type1::Type1Font::new(&normalized).map_err(|_| {
+                FontError::UnsupportedFontSubtype {
+                    subtype: "FontFile".to_string(),
+                }
+            })?;
+            return Ok((normalized, Type1FontProgramFormat::ClassicType1));
         }
 
         // No embedded font program at all.
         Err(FontError::MissingFontFile)
     }
+}
+
+fn normalize_classic_type1_bytes(
+    descriptor: &Dictionary,
+    data: &[u8],
+    objects: &dyn ObjectResolver,
+) -> Result<Vec<u8>, FontError> {
+    if is_pfb(data) {
+        return Ok(data.to_vec());
+    }
+
+    let trimmed = trim_classic_type1_by_lengths(descriptor, data, objects)?;
+    Ok(trimmed.unwrap_or_else(|| data.to_vec()))
+}
+
+fn trim_classic_type1_by_lengths(
+    descriptor: &Dictionary,
+    data: &[u8],
+    objects: &dyn ObjectResolver,
+) -> Result<Option<Vec<u8>>, FontError> {
+    let length1 = descriptor
+        .get("Length1")
+        .map(|obj| obj.try_number::<usize>(objects))
+        .transpose()?;
+    let length2 = descriptor
+        .get("Length2")
+        .map(|obj| obj.try_number::<usize>(objects))
+        .transpose()?;
+    let length3 = descriptor
+        .get("Length3")
+        .map(|obj| obj.try_number::<usize>(objects))
+        .transpose()?;
+
+    let Some(total_length) = length1
+        .zip(length2)
+        .and_then(|(length1, length2)| length3.map(|length3| (length1, length2, length3)))
+        .and_then(|(length1, length2, length3)| {
+            length1
+                .checked_add(length2)
+                .and_then(|sum| sum.checked_add(length3))
+        })
+    else {
+        return Ok(None);
+    };
+
+    Ok(data
+        .get(..total_length.min(data.len()))
+        .map(ToOwned::to_owned))
+}
+
+fn is_pfb(data: &[u8]) -> bool {
+    data.len() >= 2 && data.first() == Some(&0x80) && matches!(data.get(1), Some(0x01 | 0x02))
 }
 
 #[cfg(test)]
@@ -152,6 +221,8 @@ mod tests {
     };
 
     use super::*;
+
+    const EEXEC_SEED: u16 = 55665;
 
     fn make_font_dict_with_font_file3(subtype: Option<&str>, bytes: Vec<u8>) -> Dictionary {
         let mut file3_stream_dict = BTreeMap::new();
@@ -178,13 +249,113 @@ mod tests {
         Dictionary::new(font_dict)
     }
 
+    fn make_font_dict_with_font_file(
+        bytes: Vec<u8>,
+        lengths: Option<(usize, usize, usize)>,
+    ) -> Dictionary {
+        let mut descriptor_dict = BTreeMap::new();
+        if let Some((length1, length2, length3)) = lengths {
+            descriptor_dict.insert(
+                "Length1".to_string(),
+                ObjectVariant::Integer(length1 as i64),
+            );
+            descriptor_dict.insert(
+                "Length2".to_string(),
+                ObjectVariant::Integer(length2 as i64),
+            );
+            descriptor_dict.insert(
+                "Length3".to_string(),
+                ObjectVariant::Integer(length3 as i64),
+            );
+        }
+        descriptor_dict.insert(
+            "FontFile".to_string(),
+            ObjectVariant::Stream(StreamObject::new(
+                11,
+                0,
+                Box::new(Dictionary::new(BTreeMap::new())),
+                bytes,
+            )),
+        );
+
+        let mut font_dict = BTreeMap::new();
+        font_dict.insert(
+            "FontDescriptor".to_string(),
+            ObjectVariant::Dictionary(Box::new(Dictionary::new(descriptor_dict))),
+        );
+        Dictionary::new(font_dict)
+    }
+
+    fn encrypt(bytes: &[u8], seed: u16) -> Vec<u8> {
+        let mut r = seed;
+        let mut out = Vec::with_capacity(bytes.len());
+        for &plain in bytes {
+            let cipher = plain ^ ((r >> 8) as u8);
+            out.push(cipher);
+            r = u16::try_from(
+                (u32::from(cipher) + u32::from(r))
+                    .wrapping_mul(52845)
+                    .wrapping_add(22719)
+                    & 0xFFFF,
+            )
+            .unwrap();
+        }
+        out
+    }
+
+    fn minimal_type1_segments() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+        let cleartext = br#"%!FontType1-1.0: DummyFont 1.0
+10 dict begin
+/FontName /DummyFont def
+/FontType 1 def
+/FontMatrix [0.001 0 0 0.001 0 0] readonly def
+/FontBBox [0 0 0 0] readonly def
+/Encoding StandardEncoding def
+currentdict end
+currentfile eexec
+"#
+        .to_vec();
+
+        let private_plain = b"/Private 1 dict dup begin\n/lenIV -1 def\n/CharStrings 1 dict dup begin\n/.notdef 1 RD \x0E ND\nend\nend\nmark currentfile closefile\n";
+        let mut encrypted_private = vec![0, 0, 0, 0];
+        encrypted_private.extend_from_slice(private_plain);
+        let encrypted_private = encrypt(&encrypted_private, EEXEC_SEED);
+
+        let trailer = b"0000000000000000000000000000000000000000\ncleartomark\n".to_vec();
+        (cleartext, encrypted_private, trailer)
+    }
+
+    fn minimal_pfa_font() -> (Vec<u8>, (usize, usize, usize)) {
+        let (cleartext, encrypted_private, trailer) = minimal_type1_segments();
+        let lengths = (cleartext.len(), encrypted_private.len(), trailer.len());
+        let mut bytes = cleartext;
+        bytes.extend_from_slice(&encrypted_private);
+        bytes.extend_from_slice(&trailer);
+        (bytes, lengths)
+    }
+
+    fn minimal_pfb_font() -> Vec<u8> {
+        let (cleartext, encrypted_private, trailer) = minimal_type1_segments();
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&[0x80, 0x01]);
+        bytes.extend_from_slice(&(cleartext.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&cleartext);
+        bytes.extend_from_slice(&[0x80, 0x02]);
+        bytes.extend_from_slice(&((encrypted_private.len() + trailer.len()) as u32).to_le_bytes());
+        bytes.extend_from_slice(&encrypted_private);
+        bytes.extend_from_slice(&trailer);
+        bytes.extend_from_slice(&[0x80, 0x03, 0x00, 0x00, 0x00, 0x00]);
+        bytes
+    }
+
     #[test]
     fn font_file3_type1c_is_wrapped_into_opentype() {
         let cff_bytes = vec![1, 2, 3, 4, 5];
         let dict = make_font_dict_with_font_file3(Some("Type1C"), cff_bytes.clone());
 
-        let parsed = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap();
+        let (parsed, format) = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap();
         let expected = build_cff_font(&cff_bytes).unwrap();
+        assert_eq!(format, Type1FontProgramFormat::OpenTypeCff);
         assert_eq!(parsed, expected);
     }
 
@@ -193,7 +364,8 @@ mod tests {
         let opentype_bytes = vec![0, 1, 2, 3, 4, 5];
         let dict = make_font_dict_with_font_file3(Some("OpenType"), opentype_bytes.clone());
 
-        let parsed = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap();
+        let (parsed, format) = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap();
+        assert_eq!(format, Type1FontProgramFormat::OpenTypeCff);
         assert_eq!(parsed, opentype_bytes);
     }
 
@@ -219,6 +391,51 @@ mod tests {
             err,
             FontError::UnsupportedFontSubtype {
                 subtype: "FontFile3".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn font_file_pfa_is_returned_as_classic_type1() {
+        let (bytes, lengths) = minimal_pfa_font();
+        let dict = make_font_dict_with_font_file(bytes.clone(), Some(lengths));
+
+        let (parsed, format) = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap();
+        assert_eq!(format, Type1FontProgramFormat::ClassicType1);
+        assert_eq!(parsed, bytes);
+    }
+
+    #[test]
+    fn font_file_pfb_is_returned_as_classic_type1() {
+        let bytes = minimal_pfb_font();
+        let dict = make_font_dict_with_font_file(bytes.clone(), None);
+
+        let (parsed, format) = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap();
+        assert_eq!(format, Type1FontProgramFormat::ClassicType1);
+        assert_eq!(parsed, bytes);
+    }
+
+    #[test]
+    fn font_file_lengths_trim_trailing_padding() {
+        let (mut bytes, lengths) = minimal_pfa_font();
+        bytes.extend_from_slice(b"trailing junk");
+        let dict = make_font_dict_with_font_file(bytes, Some(lengths));
+
+        let (parsed, format) = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap();
+        assert_eq!(format, Type1FontProgramFormat::ClassicType1);
+        let expected_len = lengths.0 + lengths.1 + lengths.2;
+        assert_eq!(parsed.len(), expected_len);
+    }
+
+    #[test]
+    fn font_file_invalid_data_is_unsupported() {
+        let dict = make_font_dict_with_font_file(b"not a type1 font".to_vec(), None);
+
+        let err = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap_err();
+        assert_eq!(
+            err,
+            FontError::UnsupportedFontSubtype {
+                subtype: "FontFile".to_string()
             }
         );
     }
