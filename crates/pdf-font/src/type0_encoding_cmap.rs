@@ -77,6 +77,8 @@ impl Type0EncodingCMap {
     ///
     /// This currently supports:
     /// - `begincodespacerange`
+    /// - `beginbfchar`
+    /// - `beginbfrange`
     /// - `begincidchar`
     /// - `begincidrange`
     /// - `/WMode`
@@ -92,6 +94,12 @@ impl Type0EncodingCMap {
             match token {
                 CMapToken::Operator(operator) if operator.as_slice() == b"begincodespacerange" => {
                     parse_codespace_ranges(&mut parser, &mut code_space_ranges, &mut code_lengths)?;
+                }
+                CMapToken::Operator(operator) if operator.as_slice() == b"beginbfchar" => {
+                    parse_bf_chars(&mut parser, &mut cid_chars)?;
+                }
+                CMapToken::Operator(operator) if operator.as_slice() == b"beginbfrange" => {
+                    parse_bf_ranges(&mut parser, &mut cid_ranges)?;
                 }
                 CMapToken::Operator(operator) if operator.as_slice() == b"begincidchar" => {
                     parse_cid_chars(&mut parser, &mut cid_chars)?;
@@ -233,7 +241,11 @@ fn decode_identity(text: &[u8]) -> Vec<u16> {
     decoded
 }
 
-/// Convert a big-endian byte sequence into a `u32`.
+/// Parse a `begincodespacerange` block into the embedded CMap state.
+///
+/// Each entry is a pair of hex strings describing the inclusive start and end
+/// of one valid code space. The parser records both the numeric range and the
+/// byte length so decoding can later prefer the longest matching code width.
 fn parse_codespace_ranges(
     parser: &mut CMapParser<'_>,
     code_space_ranges: &mut Vec<CodeSpaceRange>,
@@ -268,6 +280,11 @@ fn parse_codespace_ranges(
     Ok(())
 }
 
+/// Parse a `begincidchar` block containing explicit code-to-CID mappings.
+///
+/// Entries have the form `<src> <cid-int>`. Source codes are accepted at any
+/// width supported by the codespace ranges and are stored as packed big-endian
+/// integers for later lookup during text decoding.
 fn parse_cid_chars(
     parser: &mut CMapParser<'_>,
     cid_chars: &mut HashMap<u32, u16>,
@@ -296,6 +313,43 @@ fn parse_cid_chars(
     Ok(())
 }
 
+/// Parse a `beginbfchar` block used as a Type0 encoding map.
+///
+/// In this context the destination hex string is interpreted as a CID value,
+/// not Unicode text. Only one- or two-byte destinations are accepted.
+fn parse_bf_chars(
+    parser: &mut CMapParser<'_>,
+    cid_chars: &mut HashMap<u32, u16>,
+) -> Result<(), FontError> {
+    loop {
+        match next_cmap_token(parser)? {
+            Some(CMapToken::Operator(operator)) if operator.as_slice() == b"endbfchar" => break,
+            Some(CMapToken::HexString(code_bytes)) => {
+                let code = u32_from_bytes(&code_bytes, "invalid bfchar source token")?;
+                let cid_bytes = expect_hex_token(parser, "invalid bfchar destination token")?;
+                let cid = u16_from_bytes(&cid_bytes, "invalid bfchar destination token")?;
+                cid_chars.insert(code, cid);
+            }
+            Some(_) => {
+                return Err(FontError::InvalidType0EncodingCMap(
+                    "invalid bfchar source token".to_string(),
+                ));
+            }
+            None => {
+                return Err(FontError::InvalidType0EncodingCMap(
+                    "missing endbfchar".to_string(),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Parse a `begincidrange` block containing sequential CID mappings.
+///
+/// Each entry has the form `<start> <end> <cid-int>`, meaning the first source
+/// code maps to `cid-int` and subsequent codes increment the CID by one.
 fn parse_cid_ranges(
     parser: &mut CMapParser<'_>,
     cid_ranges: &mut Vec<CidRange>,
@@ -330,11 +384,67 @@ fn parse_cid_ranges(
     Ok(())
 }
 
+/// Parse a `beginbfrange` block used as a Type0 encoding map.
+///
+/// This parser currently supports the sequential hex-string destination form
+/// `<start> <end> <base-cid-hex>`. Array destinations are rejected here
+/// because the current Type0 encoding use cases do not require them.
+fn parse_bf_ranges(
+    parser: &mut CMapParser<'_>,
+    cid_ranges: &mut Vec<CidRange>,
+) -> Result<(), FontError> {
+    loop {
+        match next_cmap_token(parser)? {
+            Some(CMapToken::Operator(operator)) if operator.as_slice() == b"endbfrange" => break,
+            Some(CMapToken::HexString(start_bytes)) => {
+                let end_bytes = expect_hex_token(parser, "invalid bfrange end token")?;
+                let cid_bytes = expect_hex_token(parser, "invalid bfrange destination token")?;
+                let cid_start = u16_from_bytes(&cid_bytes, "invalid bfrange destination token")?;
+                let start = u32_from_bytes(&start_bytes, "invalid bfrange start token")?;
+                let end = u32_from_bytes(&end_bytes, "invalid bfrange end token")?;
+                cid_ranges.push(CidRange {
+                    start,
+                    end,
+                    cid_start,
+                });
+            }
+            Some(_) => {
+                return Err(FontError::InvalidType0EncodingCMap(
+                    "invalid bfrange start token".to_string(),
+                ));
+            }
+            None => {
+                return Err(FontError::InvalidType0EncodingCMap(
+                    "missing endbfrange".to_string(),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Read the next token as an integer CID and ensure it fits in `u16`.
 fn expect_u16_token(parser: &mut CMapParser<'_>, message: &str) -> Result<u16, FontError> {
     let value = expect_integer_token(parser, message)?;
     u16::try_from(value).map_err(|_| FontError::InvalidType0EncodingCMap(message.to_string()))
 }
 
+/// Convert a one- or two-byte big-endian byte slice into a `u16`.
+///
+/// This is used for `bfchar`/`bfrange` destinations where the CMap expresses
+/// CIDs as hex strings rather than integer literals.
+fn u16_from_bytes(bytes: &[u8], message: &str) -> Result<u16, FontError> {
+    if bytes.is_empty() || bytes.len() > std::mem::size_of::<u16>() {
+        return Err(FontError::InvalidType0EncodingCMap(message.to_string()));
+    }
+
+    Ok(bytes.iter().fold(0u16, |value, byte| {
+        value.checked_shl(8).unwrap_or(0) | u16::from(*byte)
+    }))
+}
+
+/// Convert up to four big-endian bytes into a packed `u32` source code.
 fn u32_from_bytes(bytes: &[u8], message: &str) -> Result<u32, FontError> {
     if bytes.len() > std::mem::size_of::<u32>() {
         return Err(FontError::InvalidType0EncodingCMap(message.to_string()));
@@ -343,16 +453,22 @@ fn u32_from_bytes(bytes: &[u8], message: &str) -> Result<u32, FontError> {
     Ok(bytes_to_u32(bytes))
 }
 
+/// Read one token from the shared CMap tokenizer and normalize parser errors
+/// into `InvalidType0EncodingCMap`.
 fn next_cmap_token(parser: &mut CMapParser<'_>) -> Result<Option<CMapToken>, FontError> {
     crate::cmap_support::next_cmap_token(parser)
         .map_err(|error| FontError::InvalidType0EncodingCMap(error.to_string()))
 }
 
+/// Read the next token as a hex string and normalize type errors into the
+/// Type0 encoding error domain.
 fn expect_hex_token(parser: &mut CMapParser<'_>, message: &str) -> Result<Vec<u8>, FontError> {
     crate::cmap_support::expect_hex_token(parser, message)
         .map_err(|_| FontError::InvalidType0EncodingCMap(message.to_string()))
 }
 
+/// Read the next token as a signed integer and normalize type errors into the
+/// Type0 encoding error domain.
 fn expect_integer_token(parser: &mut CMapParser<'_>, message: &str) -> Result<i64, FontError> {
     crate::cmap_support::expect_integer_token(parser, message)
         .map_err(|_| FontError::InvalidType0EncodingCMap(message.to_string()))
@@ -458,5 +574,49 @@ mod tests {
 
         assert_eq!(cmap.decode(&[0x00, 0x01]), vec![1]);
         assert_eq!(cmap.writing_mode(), WritingMode::Horizontal);
+    }
+
+    #[test]
+    fn embedded_cmap_decodes_bfchar_entries_and_trailing_comments() {
+        let data = br#"
+        begincmap
+        /WMode 0 def
+        1 begincodespacerange
+        <0000> <FFFF>
+        endcodespacerange
+        2 beginbfchar
+        <0020> <0003>
+        <0043> <0046>
+        endbfchar
+        endcmap
+        %%EndResource
+        %%EOF
+        "#;
+
+        let cmap = Type0EncodingCMap::from_bytes(data).unwrap();
+
+        assert_eq!(cmap.decode(&[0x00, 0x20, 0x00, 0x43]), vec![3, 70]);
+    }
+
+    #[test]
+    fn embedded_cmap_decodes_bfrange_entries() {
+        let data = br#"
+        begincmap
+        /WMode 0 def
+        1 begincodespacerange
+        <0000> <FFFF>
+        endcodespacerange
+        1 beginbfrange
+        <0020> <0022> <0003>
+        endbfrange
+        endcmap
+        "#;
+
+        let cmap = Type0EncodingCMap::from_bytes(data).unwrap();
+
+        assert_eq!(
+            cmap.decode(&[0x00, 0x20, 0x00, 0x21, 0x00, 0x22]),
+            vec![3, 4, 5]
+        );
     }
 }

@@ -337,4 +337,66 @@ mod tests {
         );
         assert_eq!(font.decode_bytes_to_cids(&[0x00, 0x41]), vec![65]);
     }
+
+    #[test]
+    fn type0_font_accepts_bfchar_encoding_streams() {
+        let encoding_stream = make_stream_object(
+            1,
+            Dictionary::new(BTreeMap::new()),
+            br#"
+            begincmap
+            /WMode 0 def
+            1 begincodespacerange
+            <0000> <FFFF>
+            endcodespacerange
+            1 beginbfchar
+            <0043> <0046>
+            endbfchar
+            endcmap
+            %%EOF
+            "#
+            .to_vec(),
+        );
+
+        let mut descriptor_dict = BTreeMap::new();
+        descriptor_dict.insert(
+            "FontFile2".to_string(),
+            ObjectVariant::Stream(StreamObject::new(
+                3,
+                0,
+                Box::new(Dictionary::new(BTreeMap::new())),
+                vec![0, 1, 0, 0],
+            )),
+        );
+
+        let mut descendant_dict = BTreeMap::new();
+        descendant_dict.insert(
+            "Subtype".to_string(),
+            ObjectVariant::Name(b"CIDFontType2".to_vec()),
+        );
+        descendant_dict.insert(
+            "FontDescriptor".to_string(),
+            ObjectVariant::Dictionary(Box::new(Dictionary::new(descriptor_dict))),
+        );
+
+        let descendant_fonts = vec![ObjectVariant::Dictionary(Box::new(Dictionary::new(
+            descendant_dict,
+        )))];
+
+        let mut font_dict = BTreeMap::new();
+        font_dict.insert(
+            "Subtype".to_string(),
+            ObjectVariant::Name(b"Type0".to_vec()),
+        );
+        font_dict.insert("Encoding".to_string(), encoding_stream);
+        font_dict.insert(
+            "DescendantFonts".to_string(),
+            ObjectVariant::Array(descendant_fonts),
+        );
+
+        let font =
+            Type0Font::from_dictionary(&Dictionary::new(font_dict), &PassthroughResolver).unwrap();
+
+        assert_eq!(font.decode_bytes_to_cids(&[0x00, 0x43]), vec![70]);
+    }
 }
