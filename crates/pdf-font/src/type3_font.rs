@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use pdf_content_stream::content_stream::{ContentStream, ContentStreamIdAllocator};
+use pdf_content_stream::{
+    ContentStream, ContentStreamIdAllocator, parse_content_stream_from_stream,
+};
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
@@ -72,8 +74,8 @@ impl Type3Font {
         let mut char_procs = HashMap::new();
         for (name, value) in char_proc_dictionary.dictionary.iter() {
             let data = value.try_stream(objects)?;
-            let operators = ContentStream::from_stream(data, id_allocator)?;
-            char_procs.insert(name.to_owned(), operators);
+            let content_stream = parse_content_stream_from_stream(data, id_allocator)?;
+            char_procs.insert(name.to_owned(), content_stream);
         }
 
         // Parse optional ToUnicode CMap stream.

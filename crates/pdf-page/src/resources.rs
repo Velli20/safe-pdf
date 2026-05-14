@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_font::font::Font;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
@@ -451,7 +451,7 @@ impl Resources {
 mod tests {
     use std::collections::{BTreeMap, HashMap};
 
-    use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+    use pdf_content_stream::ContentStreamIdAllocator;
     use pdf_font::font::Font;
     use pdf_object::{
         dictionary::Dictionary, indirect_object::IndirectObject,

@@ -4,7 +4,7 @@ use pdf_object::{
 
 use crate::{error::PdfPagesError, resource_cache::ResourceCache, xobject::XObject};
 use num_traits::FromPrimitive;
-use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_graphics::{BlendMode, LineCap, LineJoin, MaskMode};
 
 /// Soft mask extracted from an ExtGState `SMask` entry.

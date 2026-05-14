@@ -8,6 +8,7 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+pdf-content-stream-operators = { path = "../pdf-content-stream-operators" }
 pdf-content-stream = { path = "../pdf-content-stream" }
 pdf-page = { path = "../pdf-page" }
 pdf-image = { path = "../pdf-image" }

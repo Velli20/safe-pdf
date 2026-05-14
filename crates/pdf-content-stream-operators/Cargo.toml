@@ -1,5 +1,5 @@
 [package]
-name = "pdf-content-stream"
+name = "pdf-content-stream-operators"
 version = "0.1.0"
 edition = "2024"
 
@@ -13,6 +13,5 @@ pdf-tokenizer = { path = "../pdf-tokenizer" }
 pdf-object = { path = "../pdf-object" }
 pdf-image = { path = "../pdf-image" }
 pdf-graphics = { path = "../pdf-graphics" }
-pdf-content-stream-operators = { path = "../pdf-content-stream-operators" }
 thiserror = "2.0.12"
 num-traits = "0.2.19"

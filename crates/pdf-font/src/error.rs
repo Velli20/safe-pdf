@@ -1,4 +1,4 @@
-use pdf_content_stream::error::PdfOperatorError;
+use pdf_content_stream_operators::error::PdfOperatorError;
 use pdf_object::error::ObjectError;
 use thiserror::Error;
 

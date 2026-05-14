@@ -3,8 +3,10 @@ use pdf_graphics::{LineCap, LineJoin, transform::Transform};
 
 use crate::{
     error::PdfOperatorError,
-    pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
+    operands::Operands,
+    operator_trait::PdfOperator,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
+    variants::PdfOperatorVariant,
 };
 
 /// Sets the line width for path stroking.

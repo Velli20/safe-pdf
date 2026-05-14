@@ -1,4 +1,4 @@
-use pdf_content_stream::pdf_operator_backend::{PathConstructionOps, PathPaintingOps};
+use pdf_content_stream_operators::pdf_operator_backend::{PathConstructionOps, PathPaintingOps};
 use pdf_graphics::{PaintMode, PathFillType, pdf_path::PdfPath};
 
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};

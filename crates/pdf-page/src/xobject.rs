@@ -1,5 +1,5 @@
 use crate::{error::PdfPagesError, form::FormXObject, resource_cache::ResourceCache};
-use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_image::{ImageXObject, PdfImageError, SoftMaskResolver};
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, stream::StreamObject};
 
@@ -106,7 +106,7 @@ impl SoftMaskResolver for PageSoftMaskResolver<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+    use pdf_content_stream::ContentStreamIdAllocator;
     use pdf_object::{
         dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
         object_variant::ObjectVariant, stream::StreamObject,

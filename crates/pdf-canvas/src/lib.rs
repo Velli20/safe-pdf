@@ -1,6 +1,6 @@
 use canvas_backend::CanvasBackend;
 use pdf_canvas::PdfCanvas;
-use pdf_content_stream::pdf_operator_backend::PdfOperatorBackend;
+use pdf_content_stream_operators::pdf_operator_backend::PdfOperatorBackend;
 
 pub mod canvas_backend;
 mod canvas_clip_ops;

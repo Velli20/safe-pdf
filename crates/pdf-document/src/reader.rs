@@ -4,7 +4,7 @@ use crate::decryption::DocumentDecryptor;
 use crate::document::PdfDocument;
 use crate::error::PdfReaderError;
 use crate::object_stream::read_object_stream;
-use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_object::indirect_object::IndirectObject;
 use pdf_object::object_resolver::{ObjectResolver, PassthroughResolver};
 use pdf_object::{

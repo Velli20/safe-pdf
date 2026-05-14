@@ -8,7 +8,7 @@
 //! between PDF image space (top-left origin, Y down) and PDF user space
 //! (bottom-left origin, Y up).
 
-use pdf_content_stream::pdf_operator_backend::XObjectOps;
+use pdf_content_stream_operators::pdf_operator_backend::XObjectOps;
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_image::{ImageXObject, InlineImage};
 use pdf_object::object_resolver::PassthroughResolver;

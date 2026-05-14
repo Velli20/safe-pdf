@@ -5,15 +5,17 @@ use crate::{
     error::PdfOperatorError,
     graphics_state_operators::*,
     marked_content_operators::*,
+    operands::Operands,
+    operator_trait::PdfOperator,
     path_operators::*,
     path_paint_operators::*,
-    pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
     shadings_operators::PaintShading,
     text_object_operators::*,
     text_positioning_operators::*,
     text_showing_operators::*,
     text_state_operators::*,
     type3_font_operators::{SetCharWidth, SetCharWidthAndBoundingBox},
+    variants::PdfOperatorVariant,
     xobject_and_image_operators::*,
 };
 
