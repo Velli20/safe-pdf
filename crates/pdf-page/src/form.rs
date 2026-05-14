@@ -1,6 +1,4 @@
-use pdf_content_stream::{
-    ContentStream, ContentStreamIdAllocator, parse_content_stream_from_stream,
-};
+use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_graphics::rect::Rect;
 use pdf_graphics::transform::Transform;
 use pdf_object::stream::StreamObject;
@@ -47,7 +45,7 @@ impl FormXObject {
         let resources = Resources::read(dictionary, objects, cache, id_allocator)?;
 
         // Parse the content stream data.
-        let content_stream = parse_content_stream_from_stream(stream_data, id_allocator)?;
+        let content_stream = ContentStream::from_stream(stream_data, id_allocator)?;
 
         Ok(FormXObject {
             bbox,

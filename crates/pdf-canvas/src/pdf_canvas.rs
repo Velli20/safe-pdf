@@ -957,7 +957,7 @@ mod tests {
     fn skips_recursive_render_when_content_stream_id_is_already_active() {
         let mut ids = ContentStreamIdAllocator::new();
         let root_stream = stream_object(1, b"/Self Do");
-        let root = pdf_content_stream::parse_content_stream_from_stream(&root_stream, &mut ids)
+        let root = pdf_content_stream::ContentStream::from_stream(&root_stream, &mut ids)
             .expect("root stream should parse");
         let resources = form_resource(
             "Self",
@@ -986,9 +986,9 @@ mod tests {
         let mut ids = ContentStreamIdAllocator::new();
         let root_stream = stream_object(1, b"/Child Do");
         let child_stream = stream_object(2, b"q Q");
-        let root = pdf_content_stream::parse_content_stream_from_stream(&root_stream, &mut ids)
+        let root = pdf_content_stream::ContentStream::from_stream(&root_stream, &mut ids)
             .expect("root stream should parse");
-        let child = pdf_content_stream::parse_content_stream_from_stream(&child_stream, &mut ids)
+        let child = pdf_content_stream::ContentStream::from_stream(&child_stream, &mut ids)
             .expect("child stream should parse");
         let resources = form_resource("Child", child);
 

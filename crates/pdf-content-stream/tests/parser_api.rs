@@ -25,11 +25,14 @@ fn stream_object(object_number: usize, data: &[u8]) -> StreamObject {
 }
 
 #[test]
-fn parse_returns_expected_operators() {
-    let parsed = pdf_content_stream::parse(b"BX EX 10 20 m 30 40 l").expect("stream should parse");
+fn content_stream_new_returns_expected_operators_and_assigns_ids() {
+    let mut ids = ContentStreamIdAllocator::new();
+    let parsed =
+        ContentStream::new(b"BX EX 10 20 m 30 40 l", &mut ids).expect("stream should parse");
 
+    assert_eq!(parsed.id, 0);
     assert_eq!(
-        parsed,
+        parsed.operators,
         vec![
             PdfOperatorVariant::BeginCompatibility(BeginCompatibility),
             PdfOperatorVariant::EndCompatibility(EndCompatibility),
@@ -40,14 +43,16 @@ fn parse_returns_expected_operators() {
 }
 
 #[test]
-fn parse_handles_bare_sign_text_array_adjustment() {
-    let parsed = pdf_content_stream::parse(
+fn content_stream_new_handles_bare_sign_text_array_adjustment() {
+    let mut ids = ContentStreamIdAllocator::new();
+    let parsed = ContentStream::new(
         b"BT\n/F1 11.67 Tf\n1 0 0 1 10 20 Tm\n[(e)-4(x)12(t)-3(e)-4(n)-4(s)3(i)3(v)-(e)-4(l)3(y)]TJ\nET\n",
+        &mut ids,
     )
     .expect("stream should parse");
 
     assert!(matches!(
-        parsed.get(3),
+        parsed.operators.get(3),
         Some(PdfOperatorVariant::ShowTextArray(op))
             if op
                 == &ShowTextArray::new(vec![
@@ -78,15 +83,16 @@ fn parse_handles_bare_sign_text_array_adjustment() {
 
 #[test]
 fn parsed_inline_image_can_be_dispatched() {
-    let parsed =
-        pdf_content_stream::parse(b"BI /W 1 /H 1 ID \x00 EI").expect("inline image should parse");
-    let inline_image = match parsed.first() {
+    let mut ids = ContentStreamIdAllocator::new();
+    let parsed = ContentStream::new(b"BI /W 1 /H 1 ID \x00 EI", &mut ids)
+        .expect("inline image should parse");
+    let inline_image = match parsed.operators.first() {
         Some(PdfOperatorVariant::InlineImage(image)) => image.clone(),
         other => panic!("expected inline image, got {other:?}"),
     };
 
     let mut backend = RecordingBackend::default();
-    parsed[0]
+    parsed.operators[0]
         .call(&mut backend)
         .expect("dispatch should succeed");
 
@@ -99,33 +105,30 @@ fn parsed_inline_image_can_be_dispatched() {
 }
 
 #[test]
-fn parse_skips_unknown_operator_and_recovers() {
-    let parsed = pdf_content_stream::parse(b"@ q").expect("stream should parse");
+fn content_stream_new_skips_unknown_operator_and_recovers() {
+    let mut ids = ContentStreamIdAllocator::new();
+    let parsed = ContentStream::new(b"@ q", &mut ids).expect("stream should parse");
 
     assert_eq!(
-        parsed,
+        parsed.operators,
         vec![PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState)]
     );
 }
 
 #[test]
-fn parse_content_stream_from_dictionary_preserves_allocator_for_missing_contents() {
+fn from_dictionary_preserves_allocator_for_missing_contents() {
     let page = Dictionary::new(BTreeMap::new());
     let mut ids = ContentStreamIdAllocator::new();
 
-    let contents = pdf_content_stream::parse_content_stream_from_dictionary(
-        &page,
-        &PassthroughResolver,
-        &mut ids,
-    )
-    .expect("missing contents should not error");
+    let contents = ContentStream::from_dictionary(&page, &PassthroughResolver, &mut ids)
+        .expect("missing contents should not error");
 
     assert!(contents.is_none());
     assert_eq!(ids.next_id().expect("id should still start at zero"), 0);
 }
 
 #[test]
-fn parse_content_stream_from_dictionary_concatenates_stream_arrays() {
+fn from_dictionary_concatenates_stream_arrays_and_from_stream_allocates_monotonically() {
     let contents = ObjectVariant::Array(vec![
         ObjectVariant::Stream(stream_object(1, b"q")),
         ObjectVariant::Stream(stream_object(2, b"Q")),
@@ -133,13 +136,9 @@ fn parse_content_stream_from_dictionary_concatenates_stream_arrays() {
     let page = Dictionary::new(BTreeMap::from([("Contents".to_string(), contents)]));
     let mut ids = ContentStreamIdAllocator::new();
 
-    let content_stream = pdf_content_stream::parse_content_stream_from_dictionary(
-        &page,
-        &PassthroughResolver,
-        &mut ids,
-    )
-    .expect("contents array should parse")
-    .expect("page should have a content stream");
+    let content_stream = ContentStream::from_dictionary(&page, &PassthroughResolver, &mut ids)
+        .expect("contents array should parse")
+        .expect("page should have a content stream");
 
     assert_eq!(content_stream.id, 0);
     assert_eq!(
@@ -150,9 +149,8 @@ fn parse_content_stream_from_dictionary_concatenates_stream_arrays() {
         ]
     );
 
-    let next =
-        pdf_content_stream::parse_content_stream_from_stream(&stream_object(3, b"q"), &mut ids)
-            .expect("follow-up stream should parse");
+    let next = ContentStream::from_stream(&stream_object(3, b"q"), &mut ids)
+        .expect("follow-up stream should parse");
     assert_eq!(next.id, 1);
 }
 

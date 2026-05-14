@@ -1,6 +1,4 @@
-use pdf_content_stream::{
-    ContentStream, ContentStreamIdAllocator, parse_content_stream_from_stream,
-};
+use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
@@ -180,7 +178,7 @@ impl Pattern {
 
                 let stream_data = object.try_stream(objects)?;
 
-                let content_stream = parse_content_stream_from_stream(stream_data, id_allocator)?;
+                let content_stream = ContentStream::from_stream(stream_data, id_allocator)?;
 
                 Ok(Pattern::Tiling {
                     paint_type,
