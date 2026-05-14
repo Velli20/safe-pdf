@@ -1,7 +1,9 @@
 use crate::{
     error::PdfOperatorError,
-    pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
+    operands::Operands,
+    operator_trait::PdfOperator,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
+    variants::PdfOperatorVariant,
 };
 
 /// Strokes the current path.

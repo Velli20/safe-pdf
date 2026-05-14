@@ -1,5 +1,5 @@
 use pdf_color_space::color_space::ColorSpace;
-use pdf_content_stream::pdf_operator_backend::ColorOps;
+use pdf_content_stream_operators::pdf_operator_backend::ColorOps;
 
 use crate::{
     canvas_backend::CanvasBackend, canvas_state::CanvasState, error::PdfCanvasError,

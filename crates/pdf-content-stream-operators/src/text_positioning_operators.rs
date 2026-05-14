@@ -2,8 +2,10 @@ use pdf_graphics::transform::Transform;
 
 use crate::{
     error::PdfOperatorError,
-    pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
+    operands::Operands,
+    operator_trait::PdfOperator,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
+    variants::PdfOperatorVariant,
 };
 
 /// Moves to the start of the next line, offset from the start of the current line by (`tx`, `ty`).

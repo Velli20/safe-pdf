@@ -3,7 +3,7 @@ use crate::{
     resources::Resources,
 };
 
-use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 pub struct PdfPages;

@@ -1,7 +1,9 @@
 use crate::{
     error::PdfOperatorError,
-    pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
+    operands::Operands,
+    operator_trait::PdfOperator,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
+    variants::PdfOperatorVariant,
 };
 
 /// Sets the fill color to a grayscale value.

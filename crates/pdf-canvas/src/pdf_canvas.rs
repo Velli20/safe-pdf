@@ -9,7 +9,8 @@ use crate::{
     recording_canvas::RecordingCanvas,
     text_state::TextState,
 };
-use pdf_content_stream::{content_stream::ContentStream, pdf_operator::PdfOperatorVariant};
+use pdf_content_stream::ContentStream;
+use pdf_content_stream_operators::variants::PdfOperatorVariant;
 use pdf_graphics::TextRenderingMode;
 use pdf_graphics::{
     MaskMode, PaintMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
@@ -729,7 +730,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 mod tests {
     use std::{collections::HashMap, ops::Deref, rc::Rc, sync::Arc};
 
-    use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+    use pdf_content_stream::ContentStreamIdAllocator;
     use pdf_graphics::{
         BlendMode, MaskMode, PathFillType, PixelFormat, color::Color, rect::Rect,
         transform::Transform,
@@ -932,10 +933,7 @@ mod tests {
         )
     }
 
-    fn form_resource(
-        name: &str,
-        content_stream: pdf_content_stream::content_stream::ContentStream,
-    ) -> Resources {
+    fn form_resource(name: &str, content_stream: pdf_content_stream::ContentStream) -> Resources {
         Resources {
             xobjects: HashMap::from([(
                 name.to_string(),
@@ -959,12 +957,15 @@ mod tests {
     fn skips_recursive_render_when_content_stream_id_is_already_active() {
         let mut ids = ContentStreamIdAllocator::new();
         let root_stream = stream_object(1, b"/Self Do");
-        let root =
-            pdf_content_stream::content_stream::ContentStream::from_stream(&root_stream, &mut ids)
-                .expect("root stream should parse");
+        let root = pdf_content_stream::ContentStream::new(
+            &ObjectVariant::Stream(root_stream.clone()),
+            &pdf_object::object_resolver::PassthroughResolver,
+            &mut ids,
+        )
+        .expect("root stream should parse");
         let resources = form_resource(
             "Self",
-            pdf_content_stream::content_stream::ContentStream {
+            pdf_content_stream::ContentStream {
                 operators: root.operators.clone(),
                 id: root.id,
             },
@@ -989,12 +990,18 @@ mod tests {
         let mut ids = ContentStreamIdAllocator::new();
         let root_stream = stream_object(1, b"/Child Do");
         let child_stream = stream_object(2, b"q Q");
-        let root =
-            pdf_content_stream::content_stream::ContentStream::from_stream(&root_stream, &mut ids)
-                .expect("root stream should parse");
-        let child =
-            pdf_content_stream::content_stream::ContentStream::from_stream(&child_stream, &mut ids)
-                .expect("child stream should parse");
+        let root = pdf_content_stream::ContentStream::new(
+            &ObjectVariant::Stream(root_stream.clone()),
+            &pdf_object::object_resolver::PassthroughResolver,
+            &mut ids,
+        )
+        .expect("root stream should parse");
+        let child = pdf_content_stream::ContentStream::new(
+            &ObjectVariant::Stream(child_stream.clone()),
+            &pdf_object::object_resolver::PassthroughResolver,
+            &mut ids,
+        )
+        .expect("child stream should parse");
         let resources = form_resource("Child", child);
 
         let page = page();
@@ -1044,7 +1051,7 @@ mod tests {
         inline_canvas.current_state_mut().expect("state").transform = transform;
         inline_canvas.current_state_mut().expect("state").blend_mode = Some(BlendMode::Multiply);
 
-        pdf_content_stream::pdf_operator_backend::XObjectOps::paint_inline_image(
+        pdf_content_stream_operators::pdf_operator_backend::XObjectOps::paint_inline_image(
             &mut inline_canvas,
             &inline_image(),
         )

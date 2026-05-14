@@ -1,7 +1,8 @@
 use crate::{
     error::PdfOperatorError,
-    pdf_operator::PdfOperatorVariant,
+    operands::Operands,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
+    variants::PdfOperatorVariant,
 };
 
 /// Represents a PDF content stream operator.
@@ -21,9 +22,7 @@ pub trait PdfOperator {
 
     /// Reads and consumes the necessary operands from the provided `Operands`
     /// slice and constructs the specific `PdfOperatorVariant`.
-    fn read(
-        operands: &mut crate::pdf_operator::Operands,
-    ) -> Result<PdfOperatorVariant, PdfOperatorError>;
+    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError>;
 
     /// Optional custom parsing hook.
     ///

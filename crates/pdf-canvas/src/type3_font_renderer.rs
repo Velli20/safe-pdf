@@ -1,4 +1,4 @@
-use pdf_content_stream::pdf_operator::PdfOperatorVariant;
+use pdf_content_stream_operators::variants::PdfOperatorVariant;
 use pdf_font::type3_font::Type3Font;
 use pdf_graphics::transform::Transform;
 

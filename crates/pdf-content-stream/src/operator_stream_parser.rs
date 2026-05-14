@@ -4,12 +4,12 @@ use pdf_parser::error::ParserError;
 use pdf_parser::parser::PdfParser;
 use pdf_tokenizer::error::TokenizerError;
 
-use crate::{
+use pdf_content_stream_operators::{
     error::PdfOperatorError,
+    operands::Operands,
     operation_map::{OpDescriptor, get_operation_descriptor},
+    variants::PdfOperatorVariant,
 };
-
-use super::{Operands, variants::PdfOperatorVariant};
 
 /// Incrementally parses one content stream into PDF operators while reusing the
 /// same operand buffer across operator boundaries.
@@ -187,9 +187,9 @@ fn parse_operator(
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use crate::{
+    use pdf_content_stream_operators::{
         graphics_state_operators::RestoreGraphicsState, path_operators::MoveTo,
-        pdf_operator::variants::PdfOperatorVariant,
+        variants::PdfOperatorVariant,
     };
 
     use super::*;

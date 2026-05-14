@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 use crate::{

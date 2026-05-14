@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use pdf_content_stream::pdf_operator_backend::GraphicsStateOps;
+use pdf_content_stream_operators::pdf_operator_backend::GraphicsStateOps;
 use pdf_graphics::{LineCap, LineJoin, transform::Transform};
 use pdf_page::{external_graphics_state::ExternalGraphicsStateKey, xobject::XObject};
 
@@ -188,7 +188,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
 mod tests {
     use std::{collections::HashMap, rc::Rc};
 
-    use pdf_content_stream::content_stream::ContentStream;
+    use pdf_content_stream::ContentStream;
     use pdf_graphics::{MaskMode, PathFillType, color::Color, rect::Rect};
     use pdf_page::{
         external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateKey, SoftMask},

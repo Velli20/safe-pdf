@@ -4,7 +4,7 @@ use pdf_object::{
 
 use crate::{error::PdfPagesError, resource_cache::ResourceCache, xobject::XObject};
 use num_traits::FromPrimitive;
-use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_graphics::{BlendMode, LineCap, LineJoin, MaskMode};
 
 /// Soft mask extracted from an ExtGState `SMask` entry.
@@ -264,6 +264,7 @@ fn parse_soft_mask(
             let stream = dict.get_or_err("G")?.try_stream(objects)?;
 
             let shape = match XObject::read_xobject(
+                &ObjectVariant::Stream(stream.clone()),
                 &stream.dictionary,
                 stream,
                 objects,

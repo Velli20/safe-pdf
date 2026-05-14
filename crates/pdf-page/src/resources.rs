@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_font::font::Font;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
@@ -184,12 +184,18 @@ fn read_xobjects(
             continue;
         }
 
-        let resource =
-            match XObject::read_xobject(&stream.dictionary, stream, objects, cache, id_allocator) {
-                Ok(xobject) => Resource::XObject(Rc::new(xobject)),
-                Err(err) if err.is_cyclic_dependency() => continue,
-                Err(err) => return Err(err),
-            };
+        let resource = match XObject::read_xobject(
+            value,
+            &stream.dictionary,
+            stream,
+            objects,
+            cache,
+            id_allocator,
+        ) {
+            Ok(xobject) => Resource::XObject(Rc::new(xobject)),
+            Err(err) if err.is_cyclic_dependency() => continue,
+            Err(err) => return Err(err),
+        };
 
         cache.insert(stream.object_number, resource.clone());
         result.insert(name.clone(), resource);
@@ -451,7 +457,7 @@ impl Resources {
 mod tests {
     use std::collections::{BTreeMap, HashMap};
 
-    use pdf_content_stream::content_stream::ContentStreamIdAllocator;
+    use pdf_content_stream::ContentStreamIdAllocator;
     use pdf_font::font::Font;
     use pdf_object::{
         dictionary::Dictionary, indirect_object::IndirectObject,

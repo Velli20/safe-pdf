@@ -4,8 +4,10 @@ use pdf_parser::parser::PdfParser;
 
 use crate::{
     error::PdfOperatorError,
-    pdf_operator::{Operands, PdfOperator, PdfOperatorVariant},
+    operands::Operands,
+    operator_trait::PdfOperator,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
+    variants::PdfOperatorVariant,
 };
 
 /// Invokes a named XObject.
@@ -65,8 +67,10 @@ mod tests {
     use pdf_image::InlineImage;
     use pdf_object::dictionary::Dictionary;
 
-    use crate::pdf_operator::PdfOperator;
-    use crate::recording_pdf_operator_backend::{RecordedOperation, RecordingBackend};
+    use crate::{
+        operator_trait::PdfOperator,
+        recording_pdf_operator_backend::{RecordedOperation, RecordingBackend},
+    };
 
     #[test]
     fn inline_image_call_dispatches_to_backend_hook() {

@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 pdf-object = { path = "../pdf-object" }
 pdf-object-collection = { path = "../pdf-object-collection" }
+pdf-content-stream-operators = { path = "../pdf-content-stream-operators" }
 pdf-content-stream = { path = "../pdf-content-stream" }
 pdf-image = { path = "../pdf-image" }
 pdf-font = { path = "../pdf-font" }

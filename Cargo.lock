@@ -1870,6 +1870,7 @@ dependencies = [
  "num-traits",
  "pdf-color-space",
  "pdf-content-stream",
+ "pdf-content-stream-operators",
  "pdf-font",
  "pdf-graphics",
  "pdf-image",
@@ -1893,6 +1894,20 @@ dependencies = [
 
 [[package]]
 name = "pdf-content-stream"
+version = "0.1.0"
+dependencies = [
+ "num-traits",
+ "pdf-content-stream-operators",
+ "pdf-graphics",
+ "pdf-image",
+ "pdf-object",
+ "pdf-parser",
+ "pdf-tokenizer",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "pdf-content-stream-operators"
 version = "0.1.0"
 dependencies = [
  "num-traits",
@@ -1948,6 +1963,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "pdf-content-stream",
+ "pdf-content-stream-operators",
  "pdf-graphics",
  "pdf-object",
  "pdf-parser",
@@ -2042,6 +2058,7 @@ dependencies = [
  "num-traits",
  "pdf-color-space",
  "pdf-content-stream",
+ "pdf-content-stream-operators",
  "pdf-decode",
  "pdf-font",
  "pdf-function",

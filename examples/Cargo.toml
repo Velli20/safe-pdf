@@ -9,7 +9,7 @@ license = "MIT"
 pdf-document         = { path = "../crates/pdf-document" }
 pdf-object           = { path = "../crates/pdf-object" }
 pdf-page             = { path = "../crates/pdf-page" }
-pdf-content-stream   = { path = "../crates/pdf-content-stream" }
+pdf-content-stream = { path = "../crates/pdf-content-stream" }
 pdf-parser           = { path = "../crates/pdf-parser" }
 pdf-tokenizer        = { path = "../crates/pdf-tokenizer" }
 pdf-font             = { path = "../crates/pdf-font" }
@@ -78,4 +78,3 @@ name = "femtovg"
 path = "femtovg.rs"
 test = false
 required-features = ["femtovg"]
-

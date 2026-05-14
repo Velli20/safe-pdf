@@ -1,5 +1,5 @@
 use pdf_color_space::error::ColorSpaceError;
-use pdf_content_stream::error::PdfOperatorError;
+use pdf_content_stream_operators::error::PdfOperatorError;
 use pdf_decode::DecodeError;
 use pdf_font::error::FontError;
 use pdf_function::{

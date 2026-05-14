@@ -6,8 +6,8 @@ use crate::truetype_font_renderer::TrueTypeFontRenderer;
 use crate::type1_font_renderer::Type1FontRenderer;
 use crate::type3_font_renderer::Type3FontRenderer;
 use num_traits::FromPrimitive;
-use pdf_content_stream::TextElement;
-use pdf_content_stream::pdf_operator_backend::{
+use pdf_content_stream_operators::TextElement;
+use pdf_content_stream_operators::pdf_operator_backend::{
     TextObjectOps, TextPositioningOps, TextShowingOps, TextStateOps,
 };
 use pdf_font::flags::FontFlags;
@@ -197,7 +197,7 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
 
     fn show_text_with_glyph_positioning(
         &mut self,
-        elements: &[pdf_content_stream::TextElement],
+        elements: &[pdf_content_stream_operators::TextElement],
     ) -> Result<(), Self::ErrorType> {
         for element in elements {
             match element {

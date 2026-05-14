@@ -1,9 +1,10 @@
 use crate::TextElement;
-use crate::pdf_operator::PdfOperator;
+use crate::operands::Operands;
+use crate::operator_trait::PdfOperator;
 use crate::{
     error::PdfOperatorError,
-    pdf_operator::{Operands, PdfOperatorVariant},
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
+    variants::PdfOperatorVariant,
 };
 
 /// Shows a text string.
@@ -122,11 +123,6 @@ pub struct ShowTextArray {
 impl ShowTextArray {
     pub fn new(elements: Vec<TextElement>) -> Self {
         Self { elements }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn elements(&self) -> &[TextElement] {
-        &self.elements
     }
 }
 
