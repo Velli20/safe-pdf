@@ -264,6 +264,7 @@ fn parse_soft_mask(
             let stream = dict.get_or_err("G")?.try_stream(objects)?;
 
             let shape = match XObject::read_xobject(
+                &ObjectVariant::Stream(stream.clone()),
                 &stream.dictionary,
                 stream,
                 objects,

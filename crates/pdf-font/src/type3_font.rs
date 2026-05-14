@@ -71,8 +71,7 @@ impl Type3Font {
 
         let mut char_procs = HashMap::new();
         for (name, value) in char_proc_dictionary.dictionary.iter() {
-            let data = value.try_stream(objects)?;
-            let content_stream = ContentStream::from_stream(data, id_allocator)?;
+            let content_stream = ContentStream::new(value, objects, id_allocator)?;
             char_procs.insert(name.to_owned(), content_stream);
         }
 

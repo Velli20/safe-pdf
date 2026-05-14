@@ -5,7 +5,7 @@ use crate::{
 use pdf_content_stream_operators::{error::PdfOperatorError, variants::PdfOperatorVariant};
 use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant, stream::StreamObject,
+    object_variant::ObjectVariant,
 };
 
 /// Represents one materialized PDF content stream as parsed operators plus its
@@ -18,18 +18,20 @@ pub struct ContentStream {
 }
 
 impl ContentStream {
-    /// Parses decoded content-stream bytes into a materialized content stream.
+    /// Parses a resolved content-stream object into a materialized content stream.
     ///
-    /// The input is treated as one decoded PDF content stream. Parsing is
-    /// tolerant of recoverable issues such as unknown operators and truncated
-    /// trailing operands, matching the lower-level operator parser.
+    /// A single stream is decoded and parsed directly. An array is parsed by
+    /// decoding and parsing each stream in order into the same operator buffer
+    /// without concatenating the decoded bytes first.
     ///
     /// A content-stream ID is allocated only after parsing succeeds. If
     /// parsing fails, the allocator is left unchanged.
     ///
     /// # Parameters
     ///
-    /// - `input`: Decoded bytes of one PDF content stream.
+    /// - `content`: A resolved stream or array of streams, optionally behind
+    ///   an indirect reference.
+    /// - `objects`: Object resolver used to follow indirect references.
     /// - `id_allocator`: Monotonic allocator used to assign the returned
     ///   content-stream ID.
     ///
@@ -43,43 +45,40 @@ impl ContentStream {
     /// Returns [`PdfOperatorError`] if parsing fails or if the ID allocator is
     /// exhausted.
     pub fn new(
-        input: &[u8],
+        content: &ObjectVariant,
+        objects: &dyn ObjectResolver,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, PdfOperatorError> {
         let mut operators = Vec::new();
-        let mut parser = OperatorStreamParser::new(input, &mut operators);
-        while parser.parse_next_item()? {}
+        let resolved = objects.resolve_object(content)?;
+        match resolved {
+            ObjectVariant::Stream(stream) => {
+                Self::parse_decoded_stream(stream.raw_data(), &mut operators)?;
+            }
+            ObjectVariant::Array(streams) => {
+                for value in streams {
+                    let stream = value.try_stream(objects)?;
+                    Self::parse_decoded_stream(stream.raw_data(), &mut operators)?;
+                }
+            }
+            other => {
+                return Err(ObjectError::TypeMismatch("Stream or Array", other.name()).into());
+            }
+        }
+
         let id = id_allocator.next_id()?;
         Ok(Self { operators, id })
     }
 
-    /// Parses an already resolved stream object into a materialized content stream.
+    /// Parses decoded content-stream bytes into the supplied operator buffer.
     ///
-    /// The stream payload is decoded through [`StreamObject::data`] and then
-    /// passed to [`ContentStream::new`]. ID allocation therefore follows the
-    /// same success-only semantics as [`ContentStream::new`].
-    ///
-    /// # Parameters
-    ///
-    /// - `stream`: Resolved PDF stream object to decode and parse.
-    /// - `id_allocator`: Monotonic allocator used to assign the returned
-    ///   content-stream ID.
-    ///
-    /// # Returns
-    ///
-    /// Returns a fully materialized [`ContentStream`] containing the parsed
-    /// operators and a fresh ID.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`PdfOperatorError`] if decoding the stream payload fails,
-    /// parsing fails, or the ID allocator is exhausted.
-    pub fn from_stream(
-        stream: &StreamObject,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Self, PdfOperatorError> {
-        let data = stream.data()?;
-        Self::new(&data, id_allocator)
+    fn parse_decoded_stream(
+        input: &[u8],
+        operators: &mut Vec<PdfOperatorVariant>,
+    ) -> Result<(), PdfOperatorError> {
+        let mut parser = OperatorStreamParser::new(input, operators);
+        while parser.parse_next_item()? {}
+        Ok(())
     }
 
     /// Resolves and parses an optional `/Contents` entry from a dictionary.
@@ -89,8 +88,8 @@ impl ContentStream {
     ///
     /// - missing `/Contents` returns `Ok(None)` without consuming an ID
     /// - a single stream is parsed directly
-    /// - an array of streams is decoded, concatenated with one newline between
-    ///   adjacent payloads, and parsed as a single logical stream
+    /// - an array of streams is parsed in order without concatenating the
+    ///   decoded bytes first
     /// - any other resolved type produces a type-mismatch error
     ///
     /// # Parameters
@@ -120,57 +119,7 @@ impl ContentStream {
             return Ok(None);
         };
 
-        let content_stream = match objects.resolve_object(contents)? {
-            ObjectVariant::Stream(stream) => Some(Self::from_stream(stream, id_allocator)?),
-            ObjectVariant::Array(array_obj) => {
-                let data = Self::concatenate_content_stream_array(array_obj, objects)?;
-                Some(Self::new(&data, id_allocator)?)
-            }
-            other => {
-                return Err(ObjectError::TypeMismatch("Stream or Array", other.name()).into());
-            }
-        };
-
-        Ok(content_stream)
-    }
-
-    /// Concatenates an array of resolved content streams into one decoded byte
-    /// buffer.
-    ///
-    /// Each element must resolve to a stream. The decoded payloads are appended
-    /// in order with a single newline byte inserted between adjacent payloads.
-    /// The separator prevents tokens at stream boundaries from merging when the
-    /// source payloads do not already contain whitespace at the join point.
-    ///
-    /// # Parameters
-    ///
-    /// - `array`: Array of content-stream references to concatenate.
-    /// - `objects`: Object resolver used to resolve each array entry into a
-    ///   stream and decode its payload.
-    ///
-    /// # Returns
-    ///
-    /// Returns the concatenated decoded bytes for the array entries.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`PdfOperatorError`] if any array element is not a stream, if a
-    /// referenced stream cannot be decoded, or if object resolution fails.
-    fn concatenate_content_stream_array(
-        array: &[ObjectVariant],
-        objects: &dyn ObjectResolver,
-    ) -> Result<Vec<u8>, PdfOperatorError> {
-        let mut combined_data = Vec::new();
-
-        for value_in_array in array {
-            let data = value_in_array.try_stream(objects)?.data()?;
-            if !combined_data.is_empty() {
-                combined_data.push(b'\n');
-            }
-            combined_data.extend_from_slice(&data);
-        }
-
-        Ok(combined_data)
+        Ok(Some(Self::new(contents, objects, id_allocator)?))
     }
 }
 
@@ -178,33 +127,275 @@ impl ContentStream {
 mod tests {
     use std::collections::BTreeMap;
 
+    use crate::ContentStreamIdAllocator;
+    use pdf_content_stream_operators::{
+        TextElement,
+        compatibility_operators::{BeginCompatibility, EndCompatibility},
+        error::PdfOperatorError,
+        graphics_state_operators::{RestoreGraphicsState, SaveGraphicsState},
+        path_operators::{LineTo, MoveTo},
+        recording_pdf_operator_backend::{RecordedOperation, RecordingBackend},
+        text_showing_operators::ShowTextArray,
+        variants::PdfOperatorVariant,
+    };
     use pdf_object::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver,
-        object_variant::ObjectVariant, stream::StreamObject,
+        dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
+        object_resolver::PassthroughResolver, object_variant::ObjectVariant, stream::StreamObject,
     };
 
     use super::ContentStream;
 
+    fn stream_object(object_number: usize, data: &[u8]) -> StreamObject {
+        StreamObject::new(
+            object_number,
+            0,
+            Box::new(Dictionary::new(BTreeMap::new())),
+            data.to_vec(),
+        )
+    }
+
+    struct MapResolver {
+        objects: BTreeMap<usize, ObjectVariant>,
+    }
+
+    impl ObjectResolver for MapResolver {
+        fn resolve_object<'a>(
+            &'a self,
+            obj: &'a ObjectVariant,
+        ) -> Result<&'a ObjectVariant, ObjectError> {
+            match obj {
+                ObjectVariant::Reference(object_number) => self.objects.get(object_number).ok_or(
+                    ObjectError::FailedResolveObjectReference {
+                        obj_num: *object_number,
+                    },
+                ),
+                _ => Ok(obj),
+            }
+        }
+    }
+
     #[test]
-    fn concatenate_content_stream_array_inserts_newline_between_streams() {
-        let array = [
-            ObjectVariant::Stream(StreamObject::new(
+    fn content_stream_new_returns_expected_operators_and_assigns_ids() {
+        let mut ids = ContentStreamIdAllocator::new();
+        let parsed = ContentStream::new(
+            &ObjectVariant::Stream(stream_object(1, b"BX EX 10 20 m 30 40 l")),
+            &PassthroughResolver,
+            &mut ids,
+        )
+        .expect("stream should parse");
+
+        assert_eq!(parsed.id, 0);
+        assert_eq!(
+            parsed.operators,
+            vec![
+                PdfOperatorVariant::BeginCompatibility(BeginCompatibility),
+                PdfOperatorVariant::EndCompatibility(EndCompatibility),
+                PdfOperatorVariant::MoveTo(MoveTo::new(10.0, 20.0)),
+                PdfOperatorVariant::LineTo(LineTo::new(30.0, 40.0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn content_stream_new_handles_bare_sign_text_array_adjustment() {
+        let mut ids = ContentStreamIdAllocator::new();
+        let parsed = ContentStream::new(
+            &ObjectVariant::Stream(stream_object(
                 1,
-                0,
-                Box::new(Dictionary::new(BTreeMap::new())),
-                b"q".to_vec(),
+                b"BT\n/F1 11.67 Tf\n1 0 0 1 10 20 Tm\n[(e)-4(x)12(t)-3(e)-4(n)-4(s)3(i)3(v)-(e)-4(l)3(y)]TJ\nET\n",
             )),
-            ObjectVariant::Stream(StreamObject::new(
-                2,
-                0,
-                Box::new(Dictionary::new(BTreeMap::new())),
-                b"Q".to_vec(),
-            )),
-        ];
+            &PassthroughResolver,
+            &mut ids,
+        )
+        .expect("stream should parse");
 
-        let data = ContentStream::concatenate_content_stream_array(&array, &PassthroughResolver)
-            .expect("array should concatenate");
+        assert!(matches!(
+            parsed.operators.get(3),
+            Some(PdfOperatorVariant::ShowTextArray(op))
+                if op
+                    == &ShowTextArray::new(vec![
+                        TextElement::Text { value: b"e".to_vec() },
+                        TextElement::Adjustment { amount: -4.0 },
+                        TextElement::Text { value: b"x".to_vec() },
+                        TextElement::Adjustment { amount: 12.0 },
+                        TextElement::Text { value: b"t".to_vec() },
+                        TextElement::Adjustment { amount: -3.0 },
+                        TextElement::Text { value: b"e".to_vec() },
+                        TextElement::Adjustment { amount: -4.0 },
+                        TextElement::Text { value: b"n".to_vec() },
+                        TextElement::Adjustment { amount: -4.0 },
+                        TextElement::Text { value: b"s".to_vec() },
+                        TextElement::Adjustment { amount: 3.0 },
+                        TextElement::Text { value: b"i".to_vec() },
+                        TextElement::Adjustment { amount: 3.0 },
+                        TextElement::Text { value: b"v".to_vec() },
+                        TextElement::Adjustment { amount: 0.0 },
+                        TextElement::Text { value: b"e".to_vec() },
+                        TextElement::Adjustment { amount: -4.0 },
+                        TextElement::Text { value: b"l".to_vec() },
+                        TextElement::Adjustment { amount: 3.0 },
+                        TextElement::Text { value: b"y".to_vec() },
+                    ])
+        ));
+    }
 
-        assert_eq!(data, b"q\nQ");
+    #[test]
+    fn parsed_inline_image_can_be_dispatched() {
+        let mut ids = ContentStreamIdAllocator::new();
+        let parsed = ContentStream::new(
+            &ObjectVariant::Stream(stream_object(1, b"BI /W 1 /H 1 ID \x00 EI")),
+            &PassthroughResolver,
+            &mut ids,
+        )
+        .expect("inline image should parse");
+        let inline_image = match parsed.operators.first() {
+            Some(PdfOperatorVariant::InlineImage(image)) => image.clone(),
+            other => panic!("expected inline image, got {other:?}"),
+        };
+
+        let mut backend = RecordingBackend::default();
+        parsed.operators[0]
+            .call(&mut backend)
+            .expect("dispatch should succeed");
+
+        assert_eq!(
+            backend.operations,
+            vec![RecordedOperation::PaintInlineImage {
+                image: inline_image,
+            }]
+        );
+    }
+
+    #[test]
+    fn content_stream_new_skips_unknown_operator_and_recovers() {
+        let mut ids = ContentStreamIdAllocator::new();
+        let parsed = ContentStream::new(
+            &ObjectVariant::Stream(stream_object(1, b"@ q")),
+            &PassthroughResolver,
+            &mut ids,
+        )
+        .expect("stream should parse");
+
+        assert_eq!(
+            parsed.operators,
+            vec![PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState)]
+        );
+    }
+
+    #[test]
+    fn content_stream_new_parses_array_streams_in_order_without_concatenation() {
+        let contents = ObjectVariant::Array(vec![
+            ObjectVariant::Reference(1),
+            ObjectVariant::Reference(2),
+        ]);
+        let mut ids = ContentStreamIdAllocator::new();
+        let resolver = MapResolver {
+            objects: BTreeMap::from([
+                (1, ObjectVariant::Stream(stream_object(1, b"1 2"))),
+                (2, ObjectVariant::Stream(stream_object(2, b"3 4 m"))),
+            ]),
+        };
+
+        let parsed = ContentStream::new(&contents, &resolver, &mut ids)
+            .expect("contents array should parse");
+
+        assert_eq!(parsed.id, 0);
+        assert_eq!(
+            parsed.operators,
+            vec![PdfOperatorVariant::MoveTo(MoveTo::new(3.0, 4.0))]
+        );
+    }
+
+    #[test]
+    fn content_stream_new_rejects_non_stream_array_entries() {
+        let contents = ObjectVariant::Array(vec![ObjectVariant::Null]);
+        let mut ids = ContentStreamIdAllocator::new();
+
+        let err = match ContentStream::new(&contents, &PassthroughResolver, &mut ids) {
+            Ok(_) => panic!("non-stream array entries should fail"),
+            Err(err) => err,
+        };
+
+        assert!(matches!(
+            err,
+            PdfOperatorError::Object(ObjectError::TypeMismatch("Stream", "Null"))
+        ));
+        assert_eq!(ids.next_id().expect("id should remain unconsumed"), 0);
+    }
+
+    #[test]
+    fn content_stream_new_failure_does_not_consume_an_id() {
+        let mut ids = ContentStreamIdAllocator::new();
+        let err = match ContentStream::new(
+            &ObjectVariant::Stream(stream_object(1, b"BI /W 1 /H 1 ID abc")),
+            &PassthroughResolver,
+            &mut ids,
+        ) {
+            Ok(_) => panic!("malformed inline image should fail"),
+            Err(err) => err,
+        };
+
+        assert!(matches!(err, PdfOperatorError::ParserError(_)));
+        assert_eq!(ids.next_id().expect("id should still be zero"), 0);
+    }
+
+    #[test]
+    fn from_dictionary_preserves_allocator_for_missing_contents() {
+        let page = Dictionary::new(BTreeMap::new());
+        let mut ids = ContentStreamIdAllocator::new();
+
+        let contents = ContentStream::from_dictionary(&page, &PassthroughResolver, &mut ids)
+            .expect("missing contents should not error");
+
+        assert!(contents.is_none());
+        assert_eq!(ids.next_id().expect("id should still start at zero"), 0);
+    }
+
+    #[test]
+    fn from_dictionary_parses_stream_arrays_and_allocates_monotonically() {
+        let contents = ObjectVariant::Array(vec![
+            ObjectVariant::Reference(1),
+            ObjectVariant::Reference(2),
+        ]);
+        let page = Dictionary::new(BTreeMap::from([("Contents".to_string(), contents)]));
+        let mut ids = ContentStreamIdAllocator::new();
+        let resolver = MapResolver {
+            objects: BTreeMap::from([
+                (1, ObjectVariant::Stream(stream_object(1, b"q"))),
+                (2, ObjectVariant::Stream(stream_object(2, b"Q"))),
+            ]),
+        };
+
+        let content_stream = ContentStream::from_dictionary(&page, &resolver, &mut ids)
+            .expect("contents array should parse")
+            .expect("page should have a content stream");
+
+        assert_eq!(content_stream.id, 0);
+        assert_eq!(
+            content_stream.operators,
+            vec![
+                PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState),
+                PdfOperatorVariant::RestoreGraphicsState(RestoreGraphicsState),
+            ]
+        );
+
+        let next = ContentStream::new(
+            &ObjectVariant::Stream(stream_object(3, b"q")),
+            &resolver,
+            &mut ids,
+        )
+        .expect("follow-up stream should parse");
+        assert_eq!(next.id, 1);
+    }
+
+    #[test]
+    fn content_stream_is_plain_data_after_parsing() {
+        let content_stream = ContentStream {
+            operators: vec![PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState)],
+            id: 9,
+        };
+
+        assert_eq!(content_stream.id, 9);
+        assert_eq!(content_stream.operators.len(), 1);
     }
 }

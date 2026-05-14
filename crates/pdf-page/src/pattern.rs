@@ -176,9 +176,7 @@ impl Pattern {
                     resources = parsed;
                 }
 
-                let stream_data = object.try_stream(objects)?;
-
-                let content_stream = ContentStream::from_stream(stream_data, id_allocator)?;
+                let content_stream = ContentStream::new(object, objects, id_allocator)?;
 
                 Ok(Pattern::Tiling {
                     paint_type,

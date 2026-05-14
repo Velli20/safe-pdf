@@ -1,8 +1,9 @@
 use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_graphics::rect::Rect;
 use pdf_graphics::transform::Transform;
-use pdf_object::stream::StreamObject;
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+};
 
 use crate::error::PdfPagesError;
 use crate::matrix::Matrix;
@@ -24,8 +25,8 @@ pub struct FormXObject {
 impl FormXObject {
     /// Parses a Form XObject from its dictionary and stream data.
     pub fn read_xobject(
+        content: &ObjectVariant,
         dictionary: &Dictionary,
-        stream_data: &StreamObject,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
         id_allocator: &mut ContentStreamIdAllocator,
@@ -45,7 +46,7 @@ impl FormXObject {
         let resources = Resources::read(dictionary, objects, cache, id_allocator)?;
 
         // Parse the content stream data.
-        let content_stream = ContentStream::from_stream(stream_data, id_allocator)?;
+        let content_stream = ContentStream::new(content, objects, id_allocator)?;
 
         Ok(FormXObject {
             bbox,
@@ -90,8 +91,8 @@ mod tests {
         let mut id_allocator = ContentStreamIdAllocator::new();
 
         let form = FormXObject::read_xobject(
+            &ObjectVariant::Stream(stream),
             &dictionary,
-            &stream,
             &PassthroughResolver,
             &mut cache,
             &mut id_allocator,

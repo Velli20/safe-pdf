@@ -184,12 +184,18 @@ fn read_xobjects(
             continue;
         }
 
-        let resource =
-            match XObject::read_xobject(&stream.dictionary, stream, objects, cache, id_allocator) {
-                Ok(xobject) => Resource::XObject(Rc::new(xobject)),
-                Err(err) if err.is_cyclic_dependency() => continue,
-                Err(err) => return Err(err),
-            };
+        let resource = match XObject::read_xobject(
+            value,
+            &stream.dictionary,
+            stream,
+            objects,
+            cache,
+            id_allocator,
+        ) {
+            Ok(xobject) => Resource::XObject(Rc::new(xobject)),
+            Err(err) if err.is_cyclic_dependency() => continue,
+            Err(err) => return Err(err),
+        };
 
         cache.insert(stream.object_number, resource.clone());
         result.insert(name.clone(), resource);

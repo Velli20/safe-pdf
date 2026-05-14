@@ -1,7 +1,10 @@
 use crate::{error::PdfPagesError, form::FormXObject, resource_cache::ResourceCache};
 use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_image::{ImageXObject, PdfImageError, SoftMaskResolver};
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, stream::StreamObject};
+use pdf_object::{
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    stream::StreamObject,
+};
 
 /// Represents a PDF External Object (XObject).
 ///
@@ -18,6 +21,7 @@ pub enum XObject {
 
 impl XObject {
     pub fn read_xobject(
+        content: &ObjectVariant,
         dictionary: &Dictionary,
         stream_data: &StreamObject,
         objects: &dyn ObjectResolver,
@@ -31,13 +35,20 @@ impl XObject {
             .into());
         }
 
-        let result =
-            Self::read_xobject_inner(dictionary, stream_data, objects, cache, id_allocator);
+        let result = Self::read_xobject_inner(
+            content,
+            dictionary,
+            stream_data,
+            objects,
+            cache,
+            id_allocator,
+        );
         cache.end_read(stream_data.object_number);
         result
     }
 
     fn read_xobject_inner(
+        content: &ObjectVariant,
         dictionary: &Dictionary,
         stream_data: &StreamObject,
         objects: &dyn ObjectResolver,
@@ -61,13 +72,8 @@ impl XObject {
                 Ok(XObject::Image(image_xobject))
             }
             "Form" => {
-                let form_xobject = FormXObject::read_xobject(
-                    dictionary,
-                    stream_data,
-                    objects,
-                    cache,
-                    id_allocator,
-                )?;
+                let form_xobject =
+                    FormXObject::read_xobject(content, dictionary, objects, cache, id_allocator)?;
                 Ok(XObject::Form(Box::new(form_xobject)))
             }
             other => Err(PdfPagesError::UnsupportedXObjectSubtype {
@@ -91,7 +97,14 @@ impl SoftMaskResolver for PageSoftMaskResolver<'_> {
         let cache = &mut *self.cache;
         let id_allocator = &mut *self.id_allocator;
 
-        match XObject::read_xobject(&stream.dictionary, stream, objects, cache, id_allocator) {
+        match XObject::read_xobject(
+            &ObjectVariant::Stream(stream.clone()),
+            &stream.dictionary,
+            stream,
+            objects,
+            cache,
+            id_allocator,
+        ) {
             Ok(XObject::Image(image)) => Ok(Some(image)),
             Ok(_) => Err(PdfImageError::InvalidSoftMaskXObject),
             Err(err) if err.is_cyclic_dependency() => Ok(None),
@@ -163,6 +176,7 @@ mod tests {
         let mut id_allocator = ContentStreamIdAllocator::new();
 
         let xobject = XObject::read_xobject(
+            &ObjectVariant::Stream(stream.clone()),
             &stream.dictionary,
             &stream,
             &resolver,
@@ -229,6 +243,7 @@ mod tests {
         let mut id_allocator = ContentStreamIdAllocator::new();
 
         let xobject = XObject::read_xobject(
+            &ObjectVariant::Stream(image_stream.clone()),
             &image_stream.dictionary,
             &image_stream,
             &resolver,
