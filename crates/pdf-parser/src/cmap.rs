@@ -41,12 +41,50 @@ impl<'a> From<&'a [u8]> for CMapParser<'a> {
 }
 
 impl<'a> CMapParser<'a> {
+    /// Skip whitespace and PostScript/PDF `%...EOL` comments used inside CMaps.
+    ///
+    /// Unlike top-level PDF parsing, embedded CMaps should treat trailing
+    /// `%%EOF` lines as ordinary comments rather than preserving them as PDF
+    /// file markers.
+    fn skip_whitespace_and_comments(&mut self) {
+        loop {
+            let _ = self
+                .parser
+                .tokenizer
+                .read_while_u8(PdfParser::is_pdf_whitespace);
+
+            match self.parser.tokenizer.data().first().copied() {
+                Some(b'%') => {
+                    let _ = self.parser.tokenizer.read();
+                    let _ = self
+                        .parser
+                        .tokenizer
+                        .read_while_u8(|c| c != b'\n' && c != b'\r');
+                    match self.parser.tokenizer.data().first().copied() {
+                        Some(b'\r') => {
+                            let _ = self.parser.tokenizer.read();
+                            if matches!(self.parser.tokenizer.data().first().copied(), Some(b'\n'))
+                            {
+                                let _ = self.parser.tokenizer.read();
+                            }
+                        }
+                        Some(b'\n') => {
+                            let _ = self.parser.tokenizer.read();
+                        }
+                        _ => {}
+                    }
+                }
+                _ => break,
+            }
+        }
+    }
+
     /// Return the next CMap token from the input stream.
     ///
     /// Before reading, this skips PDF whitespace and `%` line comments. Returns
     /// `Ok(None)` after the input is fully consumed.
     pub fn next_token(&mut self) -> Result<Option<CMapToken>, ParserError> {
-        self.parser.skip_whitespace_and_comments();
+        self.skip_whitespace_and_comments();
 
         let Some(byte) = self.parser.tokenizer.data().first().copied() else {
             return Ok(None);
@@ -201,6 +239,21 @@ mod tests {
         assert_eq!(
             parser.next_token().unwrap(),
             Some(CMapToken::DoubleRightAngleBracket)
+        );
+        assert_eq!(parser.next_token().unwrap(), None);
+    }
+
+    #[test]
+    fn treats_double_percent_eof_as_comment_in_embedded_cmaps() {
+        let mut parser = CMapParser::from(b"begincmap\n%%EOF\nendcmap".as_slice());
+
+        assert_eq!(
+            parser.next_token().unwrap(),
+            Some(CMapToken::Operator(b"begincmap".to_vec()))
+        );
+        assert_eq!(
+            parser.next_token().unwrap(),
+            Some(CMapToken::Operator(b"endcmap".to_vec()))
         );
         assert_eq!(parser.next_token().unwrap(), None);
     }
