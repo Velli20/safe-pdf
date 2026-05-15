@@ -54,7 +54,7 @@ impl Dictionary {
     pub fn get_or_err(&self, key: &str) -> Result<&ObjectVariant, ObjectError> {
         self.get(key)
             .ok_or_else(|| ObjectError::MissingRequiredKey {
-                key: key.to_string(),
+                key: key.to_owned(),
             })
     }
 }
