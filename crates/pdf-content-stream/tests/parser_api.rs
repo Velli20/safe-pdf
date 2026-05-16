@@ -4,7 +4,7 @@ use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_content_stream_operators::{
     TextElement,
     compatibility_operators::{BeginCompatibility, EndCompatibility},
-    graphics_state_operators::SaveGraphicsState,
+    graphics_state_operators::{RestoreGraphicsState, SaveGraphicsState},
     path_operators::{LineTo, MoveTo},
     recording_pdf_operator_backend::{RecordedOperation, RecordingBackend},
     text_showing_operators::ShowTextArray,
@@ -220,22 +220,23 @@ fn content_stream_new_rejects_non_stream_array_entries() {
 }
 
 #[test]
-fn content_stream_new_failure_does_not_consume_an_id() {
+fn content_stream_new_skips_malformed_inline_image_and_consumes_an_id() {
     let mut ids = ContentStreamIdAllocator::new();
-    let err = match ContentStream::new(
-        &ObjectVariant::Stream(stream_object(1, b"BI /W 1 /H 1 ID abc")),
+    let parsed = ContentStream::new(
+        &ObjectVariant::Stream(stream_object(1, b"BI /W 1 /H 1 ID abc Q")),
         &PassthroughResolver,
         &mut ids,
-    ) {
-        Ok(_) => panic!("malformed inline image should fail"),
-        Err(err) => err,
-    };
+    )
+    .expect("malformed inline image should be skipped");
 
-    assert!(matches!(
-        err,
-        pdf_content_stream_operators::error::PdfOperatorError::ParserError(_)
-    ));
-    assert_eq!(ids.next_id().expect("id should still be zero"), 0);
+    assert_eq!(parsed.id, 0);
+    assert_eq!(
+        parsed.operators,
+        vec![PdfOperatorVariant::RestoreGraphicsState(
+            RestoreGraphicsState
+        )]
+    );
+    assert_eq!(ids.next_id().expect("next id should advance"), 1);
 }
 
 #[test]
