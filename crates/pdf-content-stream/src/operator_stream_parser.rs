@@ -43,13 +43,24 @@ impl<'a, 'out> OperatorStreamParser<'a, 'out> {
             return Ok(false);
         };
 
-        if next_item_is_operator(next_byte) {
-            self.parse_operator_from_stream()?;
+        let start_position = self.parser.tokenizer.position;
+        let result = if next_item_is_operator(next_byte) {
+            self.parse_operator_from_stream().map(|()| true)
         } else {
-            return self.parse_operand_or_stop();
-        }
+            self.parse_operand_or_stop()
+        };
 
-        Ok(true)
+        match result {
+            Ok(parsed) => Ok(parsed),
+            Err(error) if is_truncated_operand_error(&error) => {
+                self.operands.clear();
+                Ok(false)
+            }
+            Err(_) => {
+                self.recover_after_malformed_item(start_position);
+                Ok(true)
+            }
+        }
     }
 
     /// Skips inter-token whitespace and comments before reading the next item.
@@ -116,6 +127,15 @@ impl<'a, 'out> OperatorStreamParser<'a, 'out> {
     fn push_if_parsed(&mut self, operator: Option<PdfOperatorVariant>) {
         if let Some(operator) = operator {
             self.out.push(operator);
+        }
+    }
+
+    /// Drops malformed syntax and guarantees the parser can try the next byte.
+    fn recover_after_malformed_item(&mut self, start_position: usize) {
+        self.operands.clear();
+
+        if self.parser.tokenizer.position <= start_position {
+            let _ = self.parser.tokenizer.read_exactly(1);
         }
     }
 }
@@ -366,6 +386,78 @@ mod tests {
         assert!(matches!(
             parser.out.get(1),
             Some(PdfOperatorVariant::SetLineCapStyle(_))
+        ));
+    }
+
+    #[test]
+    fn parse_next_item_recovers_from_leading_invalid_delimiter() {
+        let mut out = Vec::new();
+        let mut parser = OperatorStreamParser::new(b") q", &mut out);
+
+        while parser
+            .parse_next_item()
+            .expect("invalid delimiter should be skipped")
+        {}
+
+        assert!(parser.operands.is_empty());
+        assert_eq!(parser.out.len(), 1);
+        assert!(matches!(
+            parser.out.first(),
+            Some(PdfOperatorVariant::SaveGraphicsState(_))
+        ));
+    }
+
+    #[test]
+    fn parse_next_item_recovers_from_corrupt_operand_before_valid_operator() {
+        let mut out = Vec::new();
+        let mut parser = OperatorStreamParser::new(b"[ ) 0 J", &mut out);
+
+        while parser
+            .parse_next_item()
+            .expect("corrupt operand should be skipped")
+        {}
+
+        assert!(parser.operands.is_empty());
+        assert_eq!(parser.out.len(), 1);
+        assert!(matches!(
+            parser.out.first(),
+            Some(PdfOperatorVariant::SetLineCapStyle(_))
+        ));
+    }
+
+    #[test]
+    fn parse_next_item_recovers_from_invalid_operator_operand_value() {
+        let mut out = Vec::new();
+        let mut parser = OperatorStreamParser::new(b"9 J q", &mut out);
+
+        while parser
+            .parse_next_item()
+            .expect("invalid operator operand should be skipped")
+        {}
+
+        assert!(parser.operands.is_empty());
+        assert_eq!(parser.out.len(), 1);
+        assert!(matches!(
+            parser.out.first(),
+            Some(PdfOperatorVariant::SaveGraphicsState(_))
+        ));
+    }
+
+    #[test]
+    fn parse_next_item_recovers_from_malformed_inline_image() {
+        let mut out = Vec::new();
+        let mut parser = OperatorStreamParser::new(b"BI /W 1 /H 1 ID abc Q", &mut out);
+
+        while parser
+            .parse_next_item()
+            .expect("malformed inline image should be skipped")
+        {}
+
+        assert!(parser.operands.is_empty());
+        assert_eq!(parser.out.len(), 1);
+        assert!(matches!(
+            parser.out.first(),
+            Some(PdfOperatorVariant::RestoreGraphicsState(_))
         ));
     }
 }

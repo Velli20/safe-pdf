@@ -24,8 +24,12 @@ impl ContentStream {
     /// decoding and parsing each stream in order into the same operator buffer
     /// without concatenating the decoded bytes first.
     ///
-    /// A content-stream ID is allocated only after parsing succeeds. If
-    /// parsing fails, the allocator is left unchanged.
+    /// Content-stream syntax is parsed best-effort: malformed operators or
+    /// operands are skipped and any recoverable operators are returned.
+    ///
+    /// A content-stream ID is allocated only after the content object resolves
+    /// and decoded bytes are parsed. If resolution or decoding fails, the
+    /// allocator is left unchanged.
     ///
     /// # Parameters
     ///
@@ -42,8 +46,8 @@ impl ContentStream {
     ///
     /// # Errors
     ///
-    /// Returns [`PdfOperatorError`] if parsing fails or if the ID allocator is
-    /// exhausted.
+    /// Returns [`PdfOperatorError`] if content resolution/decoding fails or if
+    /// the ID allocator is exhausted.
     pub fn new(
         content: &ObjectVariant,
         objects: &dyn ObjectResolver,
@@ -89,7 +93,7 @@ impl ContentStream {
     /// - missing `/Contents` returns `Ok(None)` without consuming an ID
     /// - a single stream is parsed directly
     /// - an array of streams is parsed in order without concatenating the
-    ///   decoded bytes first
+    ///   decoded bytes first, skipping malformed content syntax best-effort
     /// - any other resolved type produces a type-mismatch error
     ///
     /// # Parameters
@@ -106,8 +110,8 @@ impl ContentStream {
     ///
     /// # Errors
     ///
-    /// Returns [`PdfOperatorError`] if resolution, decoding, or parsing fails,
-    /// or if `/Contents` resolves to a non-stream, non-array value.
+    /// Returns [`PdfOperatorError`] if resolution or decoding fails, or if
+    /// `/Contents` resolves to a non-stream, non-array value.
     pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
@@ -324,19 +328,23 @@ mod tests {
     }
 
     #[test]
-    fn content_stream_new_failure_does_not_consume_an_id() {
+    fn content_stream_new_skips_malformed_inline_image_and_consumes_an_id() {
         let mut ids = ContentStreamIdAllocator::new();
-        let err = match ContentStream::new(
-            &ObjectVariant::Stream(stream_object(1, b"BI /W 1 /H 1 ID abc")),
+        let parsed = ContentStream::new(
+            &ObjectVariant::Stream(stream_object(1, b"BI /W 1 /H 1 ID abc Q")),
             &PassthroughResolver,
             &mut ids,
-        ) {
-            Ok(_) => panic!("malformed inline image should fail"),
-            Err(err) => err,
-        };
+        )
+        .expect("malformed inline image should be skipped");
 
-        assert!(matches!(err, PdfOperatorError::ParserError(_)));
-        assert_eq!(ids.next_id().expect("id should still be zero"), 0);
+        assert_eq!(parsed.id, 0);
+        assert_eq!(
+            parsed.operators,
+            vec![PdfOperatorVariant::RestoreGraphicsState(
+                RestoreGraphicsState
+            )]
+        );
+        assert_eq!(ids.next_id().expect("next id should advance"), 1);
     }
 
     #[test]
