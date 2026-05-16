@@ -7,56 +7,70 @@ impl PdfParser<'_> {
     ///
     /// Reads the raw bytes of a stream body using the pre-parsed `dictionary` for metadata.
     ///
-    /// Expects the input to be positioned at the `stream` keyword. Reads exactly `/Length`
-    /// bytes, then validates and consumes the surrounding `stream`/`endstream` keywords and
-    /// EOL markers. Filter decoding is the caller's responsibility.
+    /// Expects the input to be positioned at the `stream` keyword. When `/Length` is present,
+    /// reads exactly that many bytes and then validates and consumes the surrounding
+    /// `stream`/`endstream` keywords and EOL markers. When `/Length` is missing, scans forward
+    /// to the first valid `endstream` delimiter and recovers the bytes before it. Filter
+    /// decoding is the caller's responsibility.
     ///
     /// # Errors
     ///
     /// Returns an error if the `stream` or `endstream` keyword is missing or malformed,
-    /// an EOL marker is absent where required, or the `/Length` entry is missing from
-    /// the dictionary.
+    /// an EOL marker is absent where required, or a missing `/Length` cannot be recovered
+    /// by scanning to a valid `endstream` terminator.
     pub fn parse_stream(
         &mut self,
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Vec<u8>, ParserError> {
         const STREAM_START: &[u8] = b"stream";
-        const STREAM_END: &[u8] = b"endstream";
 
         // Read the `stream` keyword .
         self.read_keyword(STREAM_START)?;
 
-        // Find the length of the stream.
-        let length = dictionary
-            .get_or_err("Length")?
-            .try_number::<usize>(objects)?;
-
         let stream_data_start = self.tokenizer.position;
+        let length = dictionary
+            .get("Length")
+            .map(|value| value.try_number::<usize>(objects))
+            .transpose()?;
+
+        match length {
+            Some(length) => self.parse_stream_with_length(stream_data_start, length),
+            None => self.parse_stream_without_length(stream_data_start),
+        }
+    }
+
+    /// Parses a stream body when `/Length` is present in the stream dictionary.
+    ///
+    /// The parser first attempts the exact-length read path. If the declared length
+    /// is wrong or the stream terminator is malformed, it falls back to the existing
+    /// recovery scan that looks for a nearby valid `endstream` delimiter.
+    fn parse_stream_with_length(
+        &mut self,
+        stream_data_start: usize,
+        length: usize,
+    ) -> Result<Vec<u8>, ParserError> {
+        const STREAM_END: &[u8] = b"endstream";
+
         let declared_stream_end = stream_data_start
             .saturating_add(length)
             .min(self.tokenizer.input.len());
 
-        // Read the stream data
+        // Read the stream data.
         let stream_data = match self.tokenizer.read_exactly(length) {
             Ok(stream_data) => stream_data.to_vec(),
             Err(TokenizerError::UnexpectedEndOfFile(_, _)) => {
-                if let Some((recovered_data_end, recovered_endstream_offset)) =
-                    find_nearby_endstream(
-                        self.tokenizer.input,
+                if let Some((recovered_data_end, recovered_endstream_offset)) = find_stream_end(
+                    self.tokenizer.input,
+                    stream_data_start,
+                    Some(declared_stream_end),
+                ) {
+                    return self.finish_recovered_stream(
                         stream_data_start,
-                        declared_stream_end,
-                    )
-                {
-                    let recovered_data = self
-                        .tokenizer
-                        .input
-                        .get(stream_data_start..recovered_data_end)
-                        .unwrap_or(&[])
-                        .to_vec();
-                    self.tokenizer.position = recovered_endstream_offset;
-                    self.read_keyword(STREAM_END)?;
-                    return Ok(recovered_data);
+                        recovered_data_end,
+                        recovered_endstream_offset,
+                        STREAM_END,
+                    );
                 }
 
                 return Err(TokenizerError::UnexpectedEndOfFile(
@@ -71,20 +85,19 @@ impl PdfParser<'_> {
         // There should be an end-of-line marker after the data and before `endstream`.
         self.try_read_end_of_line_marker();
 
-        // Read the `endstream` keyword .
+        // Read the `endstream` keyword.
         if let Err(original_error) = self.read_keyword(STREAM_END) {
-            if let Some((recovered_data_end, recovered_endstream_offset)) =
-                find_nearby_endstream(self.tokenizer.input, stream_data_start, declared_stream_end)
-            {
-                let recovered_data = self
-                    .tokenizer
-                    .input
-                    .get(stream_data_start..recovered_data_end)
-                    .unwrap_or(&[])
-                    .to_vec();
-                self.tokenizer.position = recovered_endstream_offset;
-                self.read_keyword(STREAM_END)?;
-                return Ok(recovered_data);
+            if let Some((recovered_data_end, recovered_endstream_offset)) = find_stream_end(
+                self.tokenizer.input,
+                stream_data_start,
+                Some(declared_stream_end),
+            ) {
+                return self.finish_recovered_stream(
+                    stream_data_start,
+                    recovered_data_end,
+                    recovered_endstream_offset,
+                    STREAM_END,
+                );
             }
 
             return Err(original_error);
@@ -92,12 +105,60 @@ impl PdfParser<'_> {
 
         Ok(stream_data)
     }
+
+    /// Parses a stream body when `/Length` is missing from the stream dictionary.
+    ///
+    /// The parser scans forward for the first valid `endstream` delimiter, trims any
+    /// trailing end-of-line marker before it, and returns the recovered bytes. If no
+    /// valid terminator is found, the parse fails with an EOF-style error.
+    fn parse_stream_without_length(
+        &mut self,
+        stream_data_start: usize,
+    ) -> Result<Vec<u8>, ParserError> {
+        const STREAM_END: &[u8] = b"endstream";
+
+        if let Some((recovered_data_end, recovered_endstream_offset)) =
+            find_stream_end(self.tokenizer.input, stream_data_start, None)
+        {
+            return self.finish_recovered_stream(
+                stream_data_start,
+                recovered_data_end,
+                recovered_endstream_offset,
+                STREAM_END,
+            );
+        }
+
+        Err(ParserError::UnexpectedEndOfFile)
+    }
+
+    /// Finishes a recovered stream by replacing the parser position with the recovered
+    /// `endstream` offset, consuming the terminator, and returning the recovered bytes.
+    ///
+    /// This is shared by both the exact-length recovery path and the missing `/Length`
+    /// scan path so they both normalize stream-body extraction the same way.
+    fn finish_recovered_stream(
+        &mut self,
+        stream_data_start: usize,
+        recovered_data_end: usize,
+        recovered_endstream_offset: usize,
+        stream_end_keyword: &[u8],
+    ) -> Result<Vec<u8>, ParserError> {
+        let recovered_data = self
+            .tokenizer
+            .input
+            .get(stream_data_start..recovered_data_end)
+            .unwrap_or(&[])
+            .to_vec();
+        self.tokenizer.position = recovered_endstream_offset;
+        self.read_keyword(stream_end_keyword)?;
+        Ok(recovered_data)
+    }
 }
 
-fn find_nearby_endstream(
+fn find_stream_end(
     input: &[u8],
     stream_data_start: usize,
-    declared_stream_end: usize,
+    declared_stream_end: Option<usize>,
 ) -> Option<(usize, usize)> {
     const STREAM_END: &[u8] = b"endstream";
 
@@ -122,15 +183,20 @@ fn find_nearby_endstream(
         }
 
         let stream_data_end = trim_stream_data_end(input, stream_data_start, endstream_offset);
-        let distance = endstream_offset.abs_diff(declared_stream_end);
-        match best_candidate {
-            Some((best_offset, _, best_distance))
-                if best_distance < distance
-                    || (best_distance == distance && best_offset <= endstream_offset) => {}
-            _ => {
-                best_candidate = Some((endstream_offset, stream_data_end, distance));
+        if let Some(declared_stream_end) = declared_stream_end {
+            let distance = endstream_offset.abs_diff(declared_stream_end);
+            match best_candidate {
+                Some((best_offset, _, best_distance))
+                    if best_distance < distance
+                        || (best_distance == distance && best_offset <= endstream_offset) => {}
+                _ => {
+                    best_candidate = Some((endstream_offset, stream_data_end, distance));
+                }
             }
+            continue;
         }
+
+        return Some((stream_data_end, endstream_offset));
     }
 
     best_candidate.map(|(endstream_offset, stream_data_end, _)| (stream_data_end, endstream_offset))
@@ -201,6 +267,17 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::new());
 
         let input = b"stream\nHello World\nendstream";
+        let mut parser = PdfParser::from(input.as_slice());
+
+        let result = parser.parse_stream(&dictionary, &PassthroughResolver);
+        assert_eq!(result.unwrap(), b"Hello World");
+    }
+
+    #[test]
+    fn test_parse_stream_missing_length_entry_without_endstream_errors() {
+        let dictionary = Dictionary::new(BTreeMap::new());
+
+        let input = b"stream\nHello World\nendstrm";
         let mut parser = PdfParser::from(input.as_slice());
 
         let result = parser.parse_stream(&dictionary, &PassthroughResolver);
