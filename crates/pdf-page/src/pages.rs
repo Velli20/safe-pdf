@@ -1,6 +1,6 @@
 use crate::{
-    error::PdfPagesError, media_box::MediaBox, page::PdfPage, resource_cache::ResourceCache,
-    resources::Resources,
+    error::PdfPagesError, media_box::MediaBox, object_reader::ReadFromDictionary, page::PdfPage,
+    resource_cache::ResourceCache, resources::Resources,
 };
 
 use pdf_content_stream::ContentStreamIdAllocator;
@@ -10,43 +10,20 @@ pub struct PdfPages;
 
 impl PdfPages {
     pub const KEY: &'static str = "Pages";
+}
 
-    /// Recursively parses a PDF Pages dictionary and returns a flattened list of all leaf `PdfPage` objects.
-    ///
-    /// Detects cycles in the page tree (e.g. a /Pages node that eventually
-    /// references itself) and silently skips the cyclic branch, preserving all
-    /// valid leaf pages that are reachable without following the cycle.
-    ///
-    /// # Parameters
-    ///
-    /// - `dictionary`: The Pages dictionary to parse.
-    /// - `objects`: Resolver for indirect PDF objects.
-    /// - `cache`: Resource cache for page resources.
-    ///
-    /// # Returns
-    ///
-    /// Vector of parsed pages or error.
-    pub fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Vec<PdfPage>, PdfPagesError> {
-        if let Some(obj_num) = dictionary.object_number {
-            if !cache.begin_read(obj_num) {
-                return Ok(vec![]);
-            }
+impl ReadFromDictionary for PdfPages {
+    type Output = Vec<PdfPage>;
 
-            let result = Self::from_dictionary_inner(dictionary, objects, cache, id_allocator);
-            cache.end_read(obj_num);
-            return result;
-        }
-
-        Self::from_dictionary_inner(dictionary, objects, cache, id_allocator)
+    fn cyclic_read(_obj_num: usize) -> Result<Self::Output, PdfPagesError> {
+        // A cycle in the page tree means this branch points back to an ancestor `/Pages`
+        // node. Skipping the branch preserves all other reachable leaf pages instead of
+        // failing the entire document read for a malformed subtree.
+        Ok(vec![])
     }
 
     /// Inner recursive helper for parsing a `/Pages` dictionary.
-    fn from_dictionary_inner(
+    fn read_dictionary_inner(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
@@ -107,7 +84,9 @@ impl PdfPages {
 
         Ok(pages)
     }
+}
 
+impl PdfPages {
     /// Applies inherited `/MediaBox` from an ancestor `/Pages` node to leaf pages
     /// that do not define their own.
     ///

@@ -4,7 +4,8 @@ use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant}
 
 use crate::{
     error::PdfPagesError, external_graphics_state::ExternalGraphicsState, matrix::Matrix,
-    resource_cache::ResourceCache, resources::Resources, shading::Shading,
+    object_reader::ReadFromDictionary, resource_cache::ResourceCache, resources::Resources,
+    shading::Shading,
 };
 
 /// PaintType for tiling patterns.

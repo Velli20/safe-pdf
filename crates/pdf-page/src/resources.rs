@@ -14,6 +14,7 @@ use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 use crate::{
     error::PdfPagesError,
     external_graphics_state::ExternalGraphicsState,
+    object_reader::{ReadFromDictionary, ReadXObject},
     pattern::Pattern,
     resource::Resource,
     resource_cache::{ResourceCache, read_resource_lazy},

@@ -2,7 +2,12 @@ use pdf_object::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
-use crate::{error::PdfPagesError, resource_cache::ResourceCache, xobject::XObject};
+use crate::{
+    error::PdfPagesError,
+    object_reader::{ReadFromDictionary, ReadXObject},
+    resource_cache::ResourceCache,
+    xobject::XObject,
+};
 use num_traits::FromPrimitive;
 use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_graphics::{BlendMode, LineCap, LineJoin, MaskMode};
@@ -87,28 +92,10 @@ pub struct ExternalGraphicsState {
     pub params: Vec<ExternalGraphicsStateKey>,
 }
 
-impl ExternalGraphicsState {
-    /// Parse an ExtGState dictionary into a strongly-typed `ExternalGraphicsState`.
-    pub fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Self, PdfPagesError> {
-        if let Some(obj_num) = dictionary.object_number {
-            if !cache.begin_read(obj_num) {
-                return Err(pdf_object::error::ObjectError::CyclicDependency { obj_num }.into());
-            }
+impl ReadFromDictionary for ExternalGraphicsState {
+    type Output = Self;
 
-            let result = Self::from_dictionary_inner(dictionary, objects, cache, id_allocator);
-            cache.end_read(obj_num);
-            return result;
-        }
-
-        Self::from_dictionary_inner(dictionary, objects, cache, id_allocator)
-    }
-
-    fn from_dictionary_inner(
+    fn read_dictionary_inner(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,

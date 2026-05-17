@@ -15,6 +15,7 @@ use pdf_object::{
     trailer::Trailer,
 };
 use pdf_object_collection::object_collection::ObjectCollection;
+use pdf_page::object_reader::ReadFromDictionary;
 use pdf_page::page::PdfPage;
 use pdf_page::pages::PdfPages;
 use pdf_page::resource_cache::DefaultResourceCache;

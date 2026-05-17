@@ -1,4 +1,7 @@
-use crate::{error::PdfPagesError, form::FormXObject, resource_cache::ResourceCache};
+use crate::{
+    error::PdfPagesError, form::FormXObject, object_reader::ReadXObject,
+    resource_cache::ResourceCache,
+};
 use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_image::{ImageXObject, PdfImageError, SoftMaskResolver};
 use pdf_object::{
@@ -19,34 +22,7 @@ pub enum XObject {
     Form(Box<FormXObject>),
 }
 
-impl XObject {
-    pub fn read_xobject(
-        content: &ObjectVariant,
-        dictionary: &Dictionary,
-        stream_data: &StreamObject,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Self, PdfPagesError> {
-        if !cache.begin_read(stream_data.object_number) {
-            return Err(pdf_object::error::ObjectError::CyclicDependency {
-                obj_num: stream_data.object_number,
-            }
-            .into());
-        }
-
-        let result = Self::read_xobject_inner(
-            content,
-            dictionary,
-            stream_data,
-            objects,
-            cache,
-            id_allocator,
-        );
-        cache.end_read(stream_data.object_number);
-        result
-    }
-
+impl ReadXObject for XObject {
     fn read_xobject_inner(
         content: &ObjectVariant,
         dictionary: &Dictionary,
@@ -126,7 +102,7 @@ mod tests {
     };
     use std::collections::BTreeMap;
 
-    use crate::resource_cache::DefaultResourceCache;
+    use crate::{object_reader::ReadXObject, resource_cache::DefaultResourceCache};
 
     use super::XObject;
 
