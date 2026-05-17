@@ -1,8 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub use crate::lazy_cache_value::LazyCacheValue;
 use crate::{resource::Resource, resources::Resources};
-use pdf_object::cycle_list::ObjectCycleList;
 
 /// A trait for managing cached PDF resources by object number.
 ///
@@ -72,7 +71,7 @@ pub trait ResourceCache {
 pub struct DefaultResourceCache {
     resources: HashMap<usize, Resource>,
     resource_dictionaries: HashMap<usize, Resources>,
-    cycles: ObjectCycleList,
+    in_progress: HashSet<usize>,
 }
 
 impl ResourceCache for DefaultResourceCache {
@@ -101,15 +100,15 @@ impl ResourceCache for DefaultResourceCache {
     }
 
     fn begin_read(&mut self, obj_num: usize) -> bool {
-        self.cycles.begin_read(obj_num).is_ok()
+        self.in_progress.insert(obj_num)
     }
 
     fn end_read(&mut self, obj_num: usize) {
-        self.cycles.end_read(obj_num);
+        self.in_progress.remove(&obj_num);
     }
 
     fn is_being_read(&self, obj_num: &usize) -> bool {
-        self.cycles.is_being_read(*obj_num)
+        self.in_progress.contains(obj_num)
     }
 }
 
