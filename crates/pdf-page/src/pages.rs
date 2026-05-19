@@ -1,5 +1,9 @@
 use crate::{
-    error::PdfPagesError, media_box::MediaBox, page::PdfPage, resource_cache::ResourceCache,
+    error::PdfPagesError,
+    media_box::MediaBox,
+    object_reader::{ReadCycleTracker, ReadFromDictionary},
+    page::PdfPage,
+    resource_cache::ResourceCache,
     resources::Resources,
 };
 
@@ -10,46 +14,17 @@ pub struct PdfPages;
 
 impl PdfPages {
     pub const KEY: &'static str = "Pages";
+}
 
-    /// Recursively parses a PDF Pages dictionary and returns a flattened list of all leaf `PdfPage` objects.
-    ///
-    /// Detects cycles in the page tree (e.g. a /Pages node that eventually
-    /// references itself) and silently skips the cyclic branch, preserving all
-    /// valid leaf pages that are reachable without following the cycle.
-    ///
-    /// # Parameters
-    ///
-    /// - `dictionary`: The Pages dictionary to parse.
-    /// - `objects`: Resolver for indirect PDF objects.
-    /// - `cache`: Resource cache for page resources.
-    ///
-    /// # Returns
-    ///
-    /// Vector of parsed pages or error.
-    pub fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Vec<PdfPage>, PdfPagesError> {
-        if let Some(obj_num) = dictionary.object_number {
-            if !cache.begin_read(obj_num) {
-                return Ok(vec![]);
-            }
-
-            let result = Self::from_dictionary_inner(dictionary, objects, cache, id_allocator);
-            cache.end_read(obj_num);
-            return result;
-        }
-
-        Self::from_dictionary_inner(dictionary, objects, cache, id_allocator)
-    }
+impl ReadFromDictionary for PdfPages {
+    type Output = Vec<PdfPage>;
 
     /// Inner recursive helper for parsing a `/Pages` dictionary.
-    fn from_dictionary_inner(
+    fn read_dictionary_inner(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Vec<PdfPage>, PdfPagesError> {
         // The `/Kids` array is a required entry in a Pages dictionary. It contains
@@ -61,7 +36,7 @@ impl PdfPages {
         // found by traversing the page tree.
         let mut pages = vec![];
 
-        let resources = Resources::read(dictionary, objects, cache, id_allocator)?;
+        let resources = Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?;
 
         // Read the inheritable `/MediaBox` from this /Pages node (ISO 32000-1 §7.7.3.4).
         let media_box = MediaBox::from_dictionary(dictionary, objects)?;
@@ -75,16 +50,25 @@ impl PdfPages {
             match dictionary.get_or_err("Type")?.try_str(objects)?.as_ref() {
                 PdfPage::KEY => {
                     // If the child is a leaf node (`/Type /Page`), parse it as a `PdfPage`.
-                    let page = PdfPage::from_dictionary(dictionary, objects, cache, id_allocator)?;
-                    pages.push(page);
-                }
-                PdfPages::KEY => {
-                    pages.extend(Self::from_dictionary(
+                    let page = PdfPage::from_dictionary(
                         dictionary,
                         objects,
                         cache,
+                        cycle_tracker,
                         id_allocator,
-                    )?);
+                    )?;
+                    pages.push(page);
+                }
+                PdfPages::KEY => {
+                    if let Some(child_pages) = Self::from_dictionary(
+                        dictionary,
+                        objects,
+                        cache,
+                        cycle_tracker,
+                        id_allocator,
+                    )? {
+                        pages.extend(child_pages);
+                    }
                 }
                 obj_type => {
                     // If the child has an unexpected type, return an error.
@@ -107,7 +91,9 @@ impl PdfPages {
 
         Ok(pages)
     }
+}
 
+impl PdfPages {
     /// Applies inherited `/MediaBox` from an ancestor `/Pages` node to leaf pages
     /// that do not define their own.
     ///

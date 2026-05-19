@@ -1,4 +1,9 @@
-use crate::{error::PdfPagesError, form::FormXObject, resource_cache::ResourceCache};
+use crate::{
+    error::PdfPagesError,
+    form::FormXObject,
+    object_reader::{ReadCycleTracker, ReadXObject},
+    resource_cache::ResourceCache,
+};
 use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_image::{ImageXObject, PdfImageError, SoftMaskResolver};
 use pdf_object::{
@@ -19,40 +24,14 @@ pub enum XObject {
     Form(Box<FormXObject>),
 }
 
-impl XObject {
-    pub fn read_xobject(
-        content: &ObjectVariant,
-        dictionary: &Dictionary,
-        stream_data: &StreamObject,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Self, PdfPagesError> {
-        if !cache.begin_read(stream_data.object_number) {
-            return Err(pdf_object::error::ObjectError::CyclicDependency {
-                obj_num: stream_data.object_number,
-            }
-            .into());
-        }
-
-        let result = Self::read_xobject_inner(
-            content,
-            dictionary,
-            stream_data,
-            objects,
-            cache,
-            id_allocator,
-        );
-        cache.end_read(stream_data.object_number);
-        result
-    }
-
+impl ReadXObject for XObject {
     fn read_xobject_inner(
         content: &ObjectVariant,
         dictionary: &Dictionary,
         stream_data: &StreamObject,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, PdfPagesError> {
         let subtype = dictionary.get_or_err("Subtype")?.try_str(objects)?;
@@ -61,6 +40,7 @@ impl XObject {
             "Image" => {
                 let mut soft_mask_resolver = PageSoftMaskResolver {
                     cache,
+                    cycle_tracker,
                     id_allocator,
                 };
                 let image_xobject = ImageXObject::read_xobject(
@@ -72,8 +52,14 @@ impl XObject {
                 Ok(XObject::Image(image_xobject))
             }
             "Form" => {
-                let form_xobject =
-                    FormXObject::read_xobject(content, dictionary, objects, cache, id_allocator)?;
+                let form_xobject = FormXObject::read_xobject(
+                    content,
+                    dictionary,
+                    objects,
+                    cache,
+                    cycle_tracker,
+                    id_allocator,
+                )?;
                 Ok(XObject::Form(Box::new(form_xobject)))
             }
             other => Err(PdfPagesError::UnsupportedXObjectSubtype {
@@ -85,6 +71,7 @@ impl XObject {
 
 struct PageSoftMaskResolver<'a> {
     cache: &'a mut dyn ResourceCache,
+    cycle_tracker: &'a mut ReadCycleTracker,
     id_allocator: &'a mut ContentStreamIdAllocator,
 }
 
@@ -95,6 +82,7 @@ impl SoftMaskResolver for PageSoftMaskResolver<'_> {
         objects: &dyn ObjectResolver,
     ) -> Result<Option<ImageXObject>, PdfImageError> {
         let cache = &mut *self.cache;
+        let cycle_tracker = &mut *self.cycle_tracker;
         let id_allocator = &mut *self.id_allocator;
 
         match XObject::read_xobject(
@@ -103,11 +91,12 @@ impl SoftMaskResolver for PageSoftMaskResolver<'_> {
             stream,
             objects,
             cache,
+            cycle_tracker,
             id_allocator,
         ) {
-            Ok(XObject::Image(image)) => Ok(Some(image)),
-            Ok(_) => Err(PdfImageError::InvalidSoftMaskXObject),
-            Err(err) if err.is_cyclic_dependency() => Ok(None),
+            Ok(Some(XObject::Image(image))) => Ok(Some(image)),
+            Ok(Some(_)) => Err(PdfImageError::InvalidSoftMaskXObject),
+            Ok(None) => Ok(None),
             Err(PdfPagesError::Image(err)) => Err(err),
             Err(PdfPagesError::Object(err)) => Err(err.into()),
             Err(PdfPagesError::ColorSpace(err)) => Err(err.into()),
@@ -126,7 +115,10 @@ mod tests {
     };
     use std::collections::BTreeMap;
 
-    use crate::resource_cache::DefaultResourceCache;
+    use crate::{
+        object_reader::{ReadCycleTracker, ReadXObject},
+        resource_cache::DefaultResourceCache,
+    };
 
     use super::XObject;
 
@@ -173,6 +165,7 @@ mod tests {
             objects: BTreeMap::from([(7, ObjectVariant::Stream(stream.clone()))]),
         };
         let mut cache = DefaultResourceCache::default();
+        let mut cycle_tracker = ReadCycleTracker::default();
         let mut id_allocator = ContentStreamIdAllocator::new();
 
         let xobject = XObject::read_xobject(
@@ -181,9 +174,11 @@ mod tests {
             &stream,
             &resolver,
             &mut cache,
+            &mut cycle_tracker,
             &mut id_allocator,
         )
-        .expect("self-referential soft masks should not fail image parsing");
+        .expect("self-referential soft masks should not fail image parsing")
+        .expect("top-level image should be present");
 
         assert!(matches!(&xobject, XObject::Image(_)));
         if let XObject::Image(image) = xobject {
@@ -240,6 +235,7 @@ mod tests {
             ]),
         };
         let mut cache = DefaultResourceCache::default();
+        let mut cycle_tracker = ReadCycleTracker::default();
         let mut id_allocator = ContentStreamIdAllocator::new();
 
         let xobject = XObject::read_xobject(
@@ -248,9 +244,11 @@ mod tests {
             &image_stream,
             &resolver,
             &mut cache,
+            &mut cycle_tracker,
             &mut id_allocator,
         )
-        .expect("a valid soft mask reference should decode");
+        .expect("a valid soft mask reference should decode")
+        .expect("top-level image should be present");
 
         match xobject {
             XObject::Image(image) => {

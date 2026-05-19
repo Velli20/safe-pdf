@@ -14,6 +14,7 @@ use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 use crate::{
     error::PdfPagesError,
     external_graphics_state::ExternalGraphicsState,
+    object_reader::{ReadCycleTracker, ReadFromDictionary, ReadXObject},
     pattern::Pattern,
     resource::Resource,
     resource_cache::{ResourceCache, read_resource_lazy},
@@ -76,10 +77,12 @@ fn read_font_resource(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
+    cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<Resource, PdfPagesError> {
     let font = Rc::new(Font::from_dictionary(dictionary, objects, id_allocator)?);
-    let resources = Resources::read(dictionary, objects, cache, id_allocator)?.map(Rc::new);
+    let resources =
+        Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?.map(Rc::new);
 
     Ok(Resource::Font { font, resources })
 }
@@ -89,6 +92,7 @@ fn read_fonts(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
+    cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<HashMap<String, Resource>, PdfPagesError> {
     let Some(font_dict) = get_sub_dictionary(resources, Font::KEY, objects)? else {
@@ -99,7 +103,7 @@ fn read_fonts(
     for (name, value) in &font_dict.dictionary {
         let dict = value.try_dictionary(objects)?;
         let resource = read_resource_lazy(cache, dict.object_number, |cache| {
-            read_font_resource(dict, objects, cache, id_allocator)
+            read_font_resource(dict, objects, cache, cycle_tracker, id_allocator)
         })?;
         result.insert(name.clone(), resource);
     }
@@ -111,6 +115,7 @@ fn read_external_graphics_states(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
+    cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<HashMap<String, Resource>, PdfPagesError> {
     let Some(ext_gstate_dict) = get_sub_dictionary(resources, "ExtGState", objects)? else {
@@ -127,12 +132,17 @@ fn read_external_graphics_states(
             continue;
         }
 
-        let resource =
-            match ExternalGraphicsState::from_dictionary(dict, objects, cache, id_allocator) {
-                Ok(ext_g_state) => Resource::ExternalGraphicsState(Rc::new(ext_g_state)),
-                Err(err) if err.is_cyclic_dependency() => continue,
-                Err(err) => return Err(err),
-            };
+        let resource = match ExternalGraphicsState::from_dictionary(
+            dict,
+            objects,
+            cache,
+            cycle_tracker,
+            id_allocator,
+        ) {
+            Ok(Some(ext_g_state)) => Resource::ExternalGraphicsState(Rc::new(ext_g_state)),
+            Ok(None) => continue,
+            Err(err) => return Err(err),
+        };
 
         if let Some(num) = dict.object_number {
             cache.insert(num, resource.clone());
@@ -147,6 +157,7 @@ fn read_patterns(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
+    cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<HashMap<String, Resource>, PdfPagesError> {
     let Some(pattern_dict) = get_sub_dictionary(resources, "Pattern", objects)? else {
@@ -157,7 +168,7 @@ fn read_patterns(
     for (name, value) in &pattern_dict.dictionary {
         let object_number = value.try_object_number()?;
         let resource = read_resource_lazy(cache, Some(object_number), |cache| {
-            let pattern = Pattern::read(value, objects, cache, id_allocator)?;
+            let pattern = Pattern::read(value, objects, cache, cycle_tracker, id_allocator)?;
             Ok::<Resource, PdfPagesError>(Resource::Pattern(Rc::new(pattern)))
         })?;
         result.insert(name.clone(), resource);
@@ -170,6 +181,7 @@ fn read_xobjects(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
+    cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<HashMap<String, Resource>, PdfPagesError> {
     let Some(xobject_dict) = get_sub_dictionary(resources, "XObject", objects)? else {
@@ -190,10 +202,11 @@ fn read_xobjects(
             stream,
             objects,
             cache,
+            cycle_tracker,
             id_allocator,
         ) {
-            Ok(xobject) => Resource::XObject(Rc::new(xobject)),
-            Err(err) if err.is_cyclic_dependency() => continue,
+            Ok(Some(xobject)) => Resource::XObject(Rc::new(xobject)),
+            Ok(None) => continue,
             Err(err) => return Err(err),
         };
 
@@ -389,6 +402,7 @@ impl Resources {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Option<Self>, PdfPagesError> {
         const KEY: &str = "Resources";
@@ -400,15 +414,16 @@ impl Resources {
         let resources = resources_entry.try_dictionary(objects)?;
         read_resource_lazy(cache, resources.object_number, |cache| {
             Ok(Self {
-                fonts: read_fonts(resources, objects, cache, id_allocator)?,
+                fonts: read_fonts(resources, objects, cache, cycle_tracker, id_allocator)?,
                 ext_g_states: read_external_graphics_states(
                     resources,
                     objects,
                     cache,
+                    cycle_tracker,
                     id_allocator,
                 )?,
-                patterns: read_patterns(resources, objects, cache, id_allocator)?,
-                xobjects: read_xobjects(resources, objects, cache, id_allocator)?,
+                patterns: read_patterns(resources, objects, cache, cycle_tracker, id_allocator)?,
+                xobjects: read_xobjects(resources, objects, cache, cycle_tracker, id_allocator)?,
                 shadings: read_shadings(resources, objects, cache)?,
                 color_spaces: read_color_spaces(resources, objects, cache)?,
                 lazy_reference: None,
@@ -466,8 +481,8 @@ mod tests {
     use pdf_object_collection::object_collection::ObjectCollection;
 
     use crate::{
-        pattern::Pattern, resource::Resource, resource_cache::DefaultResourceCache,
-        xobject::XObject,
+        object_reader::ReadCycleTracker, pattern::Pattern, resource::Resource,
+        resource_cache::DefaultResourceCache, xobject::XObject,
     };
 
     use super::{Resources, read_xobjects};
@@ -612,10 +627,17 @@ mod tests {
         ]);
 
         let mut cache = HashMap::new();
+        let mut cycle_tracker = ReadCycleTracker::default();
         let mut ids = ContentStreamIdAllocator::new();
 
-        let parsed = read_xobjects(&resources, &PassthroughResolver, &mut cache, &mut ids)
-            .expect("xobjects should parse");
+        let parsed = read_xobjects(
+            &resources,
+            &PassthroughResolver,
+            &mut cache,
+            &mut cycle_tracker,
+            &mut ids,
+        )
+        .expect("xobjects should parse");
 
         let shared_a = form_content_stream_id(parsed.get("SharedA").expect("SharedA should exist"))
             .expect("SharedA should be a form XObject");
@@ -628,16 +650,28 @@ mod tests {
         assert_eq!(shared_b, shared_a);
         assert_ne!(distinct_id, shared_a);
 
-        let parsed_again = read_xobjects(&resources, &PassthroughResolver, &mut cache, &mut ids)
-            .expect("cached xobjects should parse");
+        let parsed_again = read_xobjects(
+            &resources,
+            &PassthroughResolver,
+            &mut cache,
+            &mut cycle_tracker,
+            &mut ids,
+        )
+        .expect("cached xobjects should parse");
         let shared_again =
             form_content_stream_id(parsed_again.get("SharedA").expect("SharedA should exist"))
                 .expect("SharedA should be a form XObject");
         assert_eq!(shared_again, shared_a);
 
         let later_resources = xobject_resources(vec![("Later", form_xobject_stream(13, b"q Q"))]);
-        let later = read_xobjects(&later_resources, &PassthroughResolver, &mut cache, &mut ids)
-            .expect("later xobject should parse");
+        let later = read_xobjects(
+            &later_resources,
+            &PassthroughResolver,
+            &mut cache,
+            &mut cycle_tracker,
+            &mut ids,
+        )
+        .expect("later xobject should parse");
         let later_id = form_content_stream_id(later.get("Later").expect("Later should exist"))
             .expect("Later should be a form XObject");
 
@@ -686,11 +720,18 @@ mod tests {
             .expect("form xobject should insert");
 
         let mut cache = DefaultResourceCache::default();
+        let mut cycle_tracker = ReadCycleTracker::default();
         let mut ids = ContentStreamIdAllocator::new();
 
-        let resources = Resources::read(&page_dict, &objects, &mut cache, &mut ids)
-            .expect("cyclic resources should parse")
-            .expect("page resources should exist");
+        let resources = Resources::read(
+            &page_dict,
+            &objects,
+            &mut cache,
+            &mut cycle_tracker,
+            &mut ids,
+        )
+        .expect("cyclic resources should parse")
+        .expect("page resources should exist");
 
         let form = resources.xobject("Self");
         assert!(
@@ -753,11 +794,18 @@ mod tests {
             .expect("font should insert");
 
         let mut cache = DefaultResourceCache::default();
+        let mut cycle_tracker = ReadCycleTracker::default();
         let mut ids = ContentStreamIdAllocator::new();
 
-        let resources = Resources::read(&page_dict, &objects, &mut cache, &mut ids)
-            .expect("resources should parse")
-            .expect("page resources should exist");
+        let resources = Resources::read(
+            &page_dict,
+            &objects,
+            &mut cache,
+            &mut cycle_tracker,
+            &mut ids,
+        )
+        .expect("resources should parse")
+        .expect("page resources should exist");
 
         let (font, nested_resources) = resources.font("Self").expect("font should resolve");
         assert!(
@@ -801,11 +849,18 @@ mod tests {
             .expect("pattern should insert");
 
         let mut cache = DefaultResourceCache::default();
+        let mut cycle_tracker = ReadCycleTracker::default();
         let mut ids = ContentStreamIdAllocator::new();
 
-        let resources = Resources::read(&page_dict, &objects, &mut cache, &mut ids)
-            .expect("resources should parse")
-            .expect("page resources should exist");
+        let resources = Resources::read(
+            &page_dict,
+            &objects,
+            &mut cache,
+            &mut cycle_tracker,
+            &mut ids,
+        )
+        .expect("resources should parse")
+        .expect("page resources should exist");
 
         let pattern = resources.pattern("Self").expect("pattern should resolve");
         assert!(

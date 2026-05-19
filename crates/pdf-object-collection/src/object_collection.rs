@@ -1,9 +1,8 @@
-use pdf_object::cycle_list::ObjectCycleList;
 use pdf_object::indirect_object::IndirectObject;
 use pdf_object::object_resolver::ObjectResolver;
 use pdf_object::stream::StreamObject;
 use pdf_object::{error::ObjectError, object_variant::ObjectVariant};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[cfg(feature = "json")]
 use serde_json::{Value as JsonValue, json};
@@ -19,12 +18,16 @@ impl ObjectResolver for ObjectCollection {
         obj: &'a ObjectVariant,
     ) -> Result<&'a ObjectVariant, ObjectError> {
         let mut current_obj = obj;
-        let mut cycle_list = ObjectCycleList::default();
+        let mut in_progress = HashSet::new();
 
         loop {
             match current_obj {
                 ObjectVariant::Reference(object_number) => {
-                    cycle_list.begin_read(*object_number)?;
+                    if !in_progress.insert(*object_number) {
+                        return Err(ObjectError::CyclicDependency {
+                            obj_num: *object_number,
+                        });
+                    }
                     current_obj = self.map.get(object_number).ok_or(
                         ObjectError::FailedResolveObjectReference {
                             obj_num: *object_number,

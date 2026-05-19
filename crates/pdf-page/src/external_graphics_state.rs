@@ -2,7 +2,12 @@ use pdf_object::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
-use crate::{error::PdfPagesError, resource_cache::ResourceCache, xobject::XObject};
+use crate::{
+    error::PdfPagesError,
+    object_reader::{ReadCycleTracker, ReadFromDictionary, ReadXObject},
+    resource_cache::ResourceCache,
+    xobject::XObject,
+};
 use num_traits::FromPrimitive;
 use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_graphics::{BlendMode, LineCap, LineJoin, MaskMode};
@@ -87,31 +92,14 @@ pub struct ExternalGraphicsState {
     pub params: Vec<ExternalGraphicsStateKey>,
 }
 
-impl ExternalGraphicsState {
-    /// Parse an ExtGState dictionary into a strongly-typed `ExternalGraphicsState`.
-    pub fn from_dictionary(
+impl ReadFromDictionary for ExternalGraphicsState {
+    type Output = Self;
+
+    fn read_dictionary_inner(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Self, PdfPagesError> {
-        if let Some(obj_num) = dictionary.object_number {
-            if !cache.begin_read(obj_num) {
-                return Err(pdf_object::error::ObjectError::CyclicDependency { obj_num }.into());
-            }
-
-            let result = Self::from_dictionary_inner(dictionary, objects, cache, id_allocator);
-            cache.end_read(obj_num);
-            return result;
-        }
-
-        Self::from_dictionary_inner(dictionary, objects, cache, id_allocator)
-    }
-
-    fn from_dictionary_inner(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
+        cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, PdfPagesError> {
         let mut params: Vec<ExternalGraphicsStateKey> = Vec::new();
@@ -128,7 +116,9 @@ impl ExternalGraphicsState {
                 _ => value,
             };
 
-            if let Some(param) = parse_entry(name, resolved, objects, cache, id_allocator)? {
+            if let Some(param) =
+                parse_entry(name, resolved, objects, cache, cycle_tracker, id_allocator)?
+            {
                 params.push(param);
             }
         }
@@ -254,6 +244,7 @@ fn parse_soft_mask(
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
+    cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
     let smask = match value {
@@ -269,10 +260,11 @@ fn parse_soft_mask(
                 stream,
                 objects,
                 cache,
+                cycle_tracker,
                 id_allocator,
             ) {
-                Ok(shape) => shape,
-                Err(err) if err.is_cyclic_dependency() => {
+                Ok(Some(shape)) => shape,
+                Ok(None) => {
                     return Ok(ExternalGraphicsStateKey::SoftMask(None));
                 }
                 Err(err) => return Err(err),
@@ -303,6 +295,7 @@ fn parse_entry(
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
+    cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<Option<ExternalGraphicsStateKey>, PdfPagesError> {
     let parsed = match name {
@@ -338,7 +331,7 @@ fn parse_entry(
         "OPM" => ExternalGraphicsStateKey::OverprintMode(value.try_number::<i32>(objects)?),
         "Font" => parse_font(name, value, objects)?,
         "BM" => parse_blend_mode(value, objects)?,
-        "SMask" => parse_soft_mask(name, value, objects, cache, id_allocator)?,
+        "SMask" => parse_soft_mask(name, value, objects, cache, cycle_tracker, id_allocator)?,
         "CA" => ExternalGraphicsStateKey::StrokingAlpha(value.try_number::<f32>(objects)?),
         "ca" => ExternalGraphicsStateKey::NonStrokingAlpha(value.try_number::<f32>(objects)?),
         "SA" => ExternalGraphicsStateKey::StrokeAdjustment(value.try_boolean(objects)?),

@@ -7,6 +7,7 @@ use pdf_object::{
 
 use crate::error::PdfPagesError;
 use crate::matrix::Matrix;
+use crate::object_reader::ReadCycleTracker;
 use crate::resource_cache::ResourceCache;
 use crate::resources::Resources;
 
@@ -29,6 +30,7 @@ impl FormXObject {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, PdfPagesError> {
         // Retrieve the `/BBox` entry.
@@ -43,7 +45,7 @@ impl FormXObject {
         let matrix = Matrix::from_dictionary(dictionary, objects)?;
 
         // Parse the `/Resources` entry if present, mapping any errors.
-        let resources = Resources::read(dictionary, objects, cache, id_allocator)?;
+        let resources = Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?;
 
         // Parse the content stream data.
         let content_stream = ContentStream::new(content, objects, id_allocator)?;
@@ -68,7 +70,7 @@ mod tests {
         object_variant::ObjectVariant, stream::StreamObject,
     };
 
-    use crate::resource_cache::DefaultResourceCache;
+    use crate::{object_reader::ReadCycleTracker, resource_cache::DefaultResourceCache};
 
     use super::FormXObject;
 
@@ -88,6 +90,7 @@ mod tests {
         ]));
         let stream = StreamObject::new(7, 0, Box::new(dictionary.clone()), Vec::new());
         let mut cache = DefaultResourceCache::default();
+        let mut cycle_tracker = ReadCycleTracker::default();
         let mut id_allocator = ContentStreamIdAllocator::new();
 
         let form = FormXObject::read_xobject(
@@ -95,6 +98,7 @@ mod tests {
             &dictionary,
             &PassthroughResolver,
             &mut cache,
+            &mut cycle_tracker,
             &mut id_allocator,
         )
         .expect("form xobject should parse");

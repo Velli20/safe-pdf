@@ -12,6 +12,7 @@ pub mod shading;
 pub mod xobject;
 
 mod lazy_cache_value;
+pub mod object_reader;
 pub mod resource;
 pub mod resource_cache;
 mod resources_reference;
