@@ -139,8 +139,8 @@ fn read_external_graphics_states(
             cycle_tracker,
             id_allocator,
         ) {
-            Ok(ext_g_state) => Resource::ExternalGraphicsState(Rc::new(ext_g_state)),
-            Err(err) if err.is_cyclic_dependency() => continue,
+            Ok(Some(ext_g_state)) => Resource::ExternalGraphicsState(Rc::new(ext_g_state)),
+            Ok(None) => continue,
             Err(err) => return Err(err),
         };
 
@@ -205,8 +205,8 @@ fn read_xobjects(
             cycle_tracker,
             id_allocator,
         ) {
-            Ok(xobject) => Resource::XObject(Rc::new(xobject)),
-            Err(err) if err.is_cyclic_dependency() => continue,
+            Ok(Some(xobject)) => Resource::XObject(Rc::new(xobject)),
+            Ok(None) => continue,
             Err(err) => return Err(err),
         };
 

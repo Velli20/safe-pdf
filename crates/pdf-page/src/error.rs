@@ -8,7 +8,6 @@ use pdf_function::{
 use pdf_image::PdfImageError;
 use pdf_shading::error::PdfShadingError;
 
-use pdf_object::error::ObjectError;
 use thiserror::Error;
 
 /// Errors that can occur during parsing of a PDF Pages object.
@@ -17,7 +16,7 @@ pub enum PdfPagesError {
     #[error("invalid /Kids entry type: expected /Page or /Pages, found '{found_type}'")]
     InvalidKidsEntryType { found_type: String },
     #[error("{0}")]
-    Object(#[from] ObjectError),
+    Object(#[from] pdf_object::error::ObjectError),
     #[error("failed to parse content stream: {0}")]
     ContentStream(#[from] PdfOperatorError),
     #[error("{0}")]
@@ -58,11 +57,4 @@ pub enum PdfPagesError {
     InvalidShadingMeshData { reason: String },
     #[error("{0}")]
     Shading(#[from] PdfShadingError),
-}
-
-impl PdfPagesError {
-    pub(crate) fn is_cyclic_dependency(&self) -> bool {
-        matches!(self, Self::Object(ObjectError::CyclicDependency { .. }))
-            || matches!(self, Self::Image(err) if err.is_cyclic_dependency())
-    }
 }

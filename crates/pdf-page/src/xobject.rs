@@ -94,9 +94,9 @@ impl SoftMaskResolver for PageSoftMaskResolver<'_> {
             cycle_tracker,
             id_allocator,
         ) {
-            Ok(XObject::Image(image)) => Ok(Some(image)),
-            Ok(_) => Err(PdfImageError::InvalidSoftMaskXObject),
-            Err(err) if err.is_cyclic_dependency() => Ok(None),
+            Ok(Some(XObject::Image(image))) => Ok(Some(image)),
+            Ok(Some(_)) => Err(PdfImageError::InvalidSoftMaskXObject),
+            Ok(None) => Ok(None),
             Err(PdfPagesError::Image(err)) => Err(err),
             Err(PdfPagesError::Object(err)) => Err(err.into()),
             Err(PdfPagesError::ColorSpace(err)) => Err(err.into()),
@@ -177,7 +177,8 @@ mod tests {
             &mut cycle_tracker,
             &mut id_allocator,
         )
-        .expect("self-referential soft masks should not fail image parsing");
+        .expect("self-referential soft masks should not fail image parsing")
+        .expect("top-level image should be present");
 
         assert!(matches!(&xobject, XObject::Image(_)));
         if let XObject::Image(image) = xobject {
@@ -246,7 +247,8 @@ mod tests {
             &mut cycle_tracker,
             &mut id_allocator,
         )
-        .expect("a valid soft mask reference should decode");
+        .expect("a valid soft mask reference should decode")
+        .expect("top-level image should be present");
 
         match xobject {
             XObject::Image(image) => {

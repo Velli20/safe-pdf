@@ -19,13 +19,6 @@ impl PdfPages {
 impl ReadFromDictionary for PdfPages {
     type Output = Vec<PdfPage>;
 
-    fn cyclic_read(_obj_num: usize) -> Result<Self::Output, PdfPagesError> {
-        // A cycle in the page tree means this branch points back to an ancestor `/Pages`
-        // node. Skipping the branch preserves all other reachable leaf pages instead of
-        // failing the entire document read for a malformed subtree.
-        Ok(vec![])
-    }
-
     /// Inner recursive helper for parsing a `/Pages` dictionary.
     fn read_dictionary_inner(
         dictionary: &Dictionary,
@@ -67,13 +60,15 @@ impl ReadFromDictionary for PdfPages {
                     pages.push(page);
                 }
                 PdfPages::KEY => {
-                    pages.extend(Self::from_dictionary(
+                    if let Some(child_pages) = Self::from_dictionary(
                         dictionary,
                         objects,
                         cache,
                         cycle_tracker,
                         id_allocator,
-                    )?);
+                    )? {
+                        pages.extend(child_pages);
+                    }
                 }
                 obj_type => {
                     // If the child has an unexpected type, return an error.

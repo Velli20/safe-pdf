@@ -8,8 +8,8 @@
 use crate::{error::PdfPagesError, resource_cache::ResourceCache};
 use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant, stream::StreamObject,
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    stream::StreamObject,
 };
 use std::collections::HashSet;
 
@@ -43,15 +43,6 @@ pub trait ReadFromDictionary {
     /// The value produced by the read.
     type Output;
 
-    /// Handles a repeated read of an object that is already in progress.
-    ///
-    /// The default behavior reports a cyclic dependency error for the object
-    /// number. Implementers can override this when cyclic re-entry should be
-    /// tolerated and mapped to a different result.
-    fn cyclic_read(obj_num: usize) -> Result<Self::Output, PdfPagesError> {
-        Err(ObjectError::CyclicDependency { obj_num }.into())
-    }
-
     /// Reads the object after cycle tracking has been started.
     ///
     /// Implementations should focus only on parsing. They should not call
@@ -77,7 +68,7 @@ pub trait ReadFromDictionary {
         cache: &mut dyn ResourceCache,
         cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Self::Output, PdfPagesError> {
+    ) -> Result<Option<Self::Output>, PdfPagesError> {
         let Some(obj_num) = dictionary.object_number else {
             return Self::read_dictionary_inner(
                 dictionary,
@@ -85,17 +76,18 @@ pub trait ReadFromDictionary {
                 cache,
                 cycle_tracker,
                 id_allocator,
-            );
+            )
+            .map(Some);
         };
 
         if !cycle_tracker.begin_read(obj_num) {
-            return Self::cyclic_read(obj_num);
+            return Ok(None);
         }
 
         let result =
             Self::read_dictionary_inner(dictionary, objects, cache, cycle_tracker, id_allocator);
         cycle_tracker.end_read(obj_num);
-        result
+        result.map(Some)
     }
 }
 
@@ -106,18 +98,6 @@ pub trait ReadFromDictionary {
 /// [`ReadXObject::read_xobject`] wrapper handles cycle tracking using the
 /// stream object's number.
 pub trait ReadXObject {
-    /// Handles a repeated read of an object that is already in progress.
-    ///
-    /// The default behavior reports a cyclic dependency error for the stream's
-    /// object number. Implementers can override this when cyclic re-entry
-    /// should be mapped to a different result.
-    fn cyclic_read(obj_num: usize) -> Result<Self, PdfPagesError>
-    where
-        Self: Sized,
-    {
-        Err(ObjectError::CyclicDependency { obj_num }.into())
-    }
-
     /// Reads the XObject after cycle tracking has been started.
     ///
     /// Implementations should contain only the parsing logic for the XObject
@@ -147,12 +127,12 @@ pub trait ReadXObject {
         cache: &mut dyn ResourceCache,
         cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Self, PdfPagesError>
+    ) -> Result<Option<Self>, PdfPagesError>
     where
         Self: Sized,
     {
         if !cycle_tracker.begin_read(stream_data.object_number) {
-            return Self::cyclic_read(stream_data.object_number);
+            return Ok(None);
         }
 
         let result = Self::read_xobject_inner(
@@ -165,6 +145,6 @@ pub trait ReadXObject {
             id_allocator,
         );
         cycle_tracker.end_read(stream_data.object_number);
-        result
+        result.map(Some)
     }
 }

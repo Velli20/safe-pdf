@@ -207,19 +207,13 @@ impl Pattern {
                     .map(|obj| obj.try_dictionary(objects))
                     .transpose()?
                 {
-                    Some(ext) => {
-                        match ExternalGraphicsState::from_dictionary(
-                            ext,
-                            objects,
-                            cache,
-                            cycle_tracker,
-                            id_allocator,
-                        ) {
-                            Ok(ext_g_state) => Some(ext_g_state),
-                            Err(err) if err.is_cyclic_dependency() => None,
-                            Err(err) => return Err(err),
-                        }
-                    }
+                    Some(ext) => ExternalGraphicsState::from_dictionary(
+                        ext,
+                        objects,
+                        cache,
+                        cycle_tracker,
+                        id_allocator,
+                    )?,
                     None => None,
                 };
 

@@ -127,7 +127,8 @@ fn extract_page_tree(
         &mut cache,
         &mut cycle_tracker,
         &mut content_stream_ids,
-    )?;
+    )?
+    .unwrap_or_default();
     Ok(pages)
 }
 

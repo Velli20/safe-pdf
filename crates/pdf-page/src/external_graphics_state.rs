@@ -263,8 +263,8 @@ fn parse_soft_mask(
                 cycle_tracker,
                 id_allocator,
             ) {
-                Ok(shape) => shape,
-                Err(err) if err.is_cyclic_dependency() => {
+                Ok(Some(shape)) => shape,
+                Ok(None) => {
                     return Ok(ExternalGraphicsStateKey::SoftMask(None));
                 }
                 Err(err) => return Err(err),

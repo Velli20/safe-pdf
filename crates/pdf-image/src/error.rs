@@ -1,14 +1,13 @@
 use pdf_color_space::error::ColorSpaceError;
 use pdf_decode::DecodeError;
 use pdf_filter::error::FilterError;
-use pdf_object::error::ObjectError;
 use thiserror::Error;
 
 /// Errors that can occur while parsing or decoding PDF image data.
 #[derive(Error, Debug)]
 pub enum PdfImageError {
     #[error("{0}")]
-    Object(#[from] ObjectError),
+    Object(#[from] pdf_object::error::ObjectError),
     #[error("{0}")]
     ColorSpace(#[from] ColorSpaceError),
     #[error("{0}")]
@@ -39,12 +38,6 @@ pub enum PdfImageError {
         expected_bytes: usize,
         actual_bytes: usize,
     },
-}
-
-impl PdfImageError {
-    pub fn is_cyclic_dependency(&self) -> bool {
-        matches!(self, Self::Object(ObjectError::CyclicDependency { .. }))
-    }
 }
 
 impl From<DecodeError> for PdfImageError {
