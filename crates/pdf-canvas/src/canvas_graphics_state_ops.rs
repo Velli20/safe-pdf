@@ -6,7 +6,7 @@ use pdf_page::{external_graphics_state::ExternalGraphicsStateKey, xobject::XObje
 
 use crate::{
     canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
-    recording_canvas::RecordingCanvas,
+    recording_canvas::RecordingCanvas, stroke_style::DashPattern,
 };
 
 impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
@@ -51,9 +51,10 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
 
     fn set_dash_pattern(
         &mut self,
-        _dash_array: &[f32],
-        _dash_phase: f32,
+        dash_array: &[f32],
+        dash_phase: f32,
     ) -> Result<(), Self::ErrorType> {
+        self.current_state_mut()?.dash_pattern = DashPattern::new(dash_array, dash_phase)?;
         Ok(())
     }
 
@@ -90,10 +91,8 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                 ExternalGraphicsStateKey::MiterLimit(miter) => {
                     self.current_state_mut()?.miter_limit = *miter;
                 }
-                ExternalGraphicsStateKey::DashPattern(..) => {
-                    return Err(PdfCanvasError::UnsupportedFeature(
-                        "ExtGState: DashPattern".into(),
-                    ));
+                ExternalGraphicsStateKey::DashPattern(dash_array, dash_phase) => {
+                    self.set_dash_pattern(dash_array, *dash_phase)?;
                 }
                 ExternalGraphicsStateKey::RenderingIntent(_) => {
                     return Err(PdfCanvasError::UnsupportedFeature(
@@ -225,6 +224,7 @@ mod tests {
             _path: &pdf_graphics::pdf_path::PdfPath,
             _color: Color,
             _line_width: f32,
+            _stroke_style: &crate::stroke_style::StrokeStyle,
             _shader: &Option<Shader>,
             _blend_mode: Option<pdf_graphics::BlendMode>,
         ) -> Result<(), PdfCanvasError> {
@@ -329,6 +329,42 @@ mod tests {
             )]),
             ..Default::default()
         }
+    }
+
+    fn dash_pattern_resource() -> Resources {
+        let state = ExternalGraphicsState {
+            params: vec![ExternalGraphicsStateKey::DashPattern(vec![3.0, 1.0], 2.0)],
+        };
+
+        Resources {
+            ext_g_states: HashMap::from([(
+                "GS0".to_string(),
+                Resource::ExternalGraphicsState(Rc::new(state)),
+            )]),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn external_graphics_state_dash_pattern_updates_current_state() {
+        let page = page();
+        let resources = dash_pattern_resource();
+        let mut backend = MaskCountingCanvas::default();
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
+        canvas.current_state_mut().expect("state").resources = Some(&resources);
+
+        canvas
+            .set_graphics_state_from_dict("GS0")
+            .expect("dash pattern should be supported");
+
+        let dash_pattern = canvas
+            .current_state()
+            .expect("state")
+            .dash_pattern
+            .as_ref()
+            .expect("dash pattern should be set");
+        assert_eq!(dash_pattern.intervals, vec![3.0, 1.0]);
+        assert_eq!(dash_pattern.phase, 2.0);
     }
 
     #[test]

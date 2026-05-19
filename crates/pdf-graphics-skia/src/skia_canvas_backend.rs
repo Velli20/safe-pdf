@@ -4,6 +4,7 @@ use pdf_canvas::{
     canvas_backend::{CanvasBackend, Image, Shader},
     error::PdfCanvasError,
     recording_canvas::RecordingCanvas,
+    stroke_style::StrokeStyle,
 };
 use pdf_graphics::{
     BlendMode, MaskMode, PathFillType, PixelFormat,
@@ -29,6 +30,8 @@ pub enum SkiaCanvasBackendError {
     RasterImageCreationFailed { width: usize, height: usize },
     #[error("failed to create shader: {shader}")]
     ShaderCreationFailed { shader: &'static str },
+    #[error("failed to create dash path effect")]
+    DashPathEffectCreationFailed,
 }
 
 impl From<SkiaCanvasBackendError> for PdfCanvasError {
@@ -402,6 +405,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         path: &PdfPath,
         color: Color,
         line_width: f32,
+        stroke_style: &StrokeStyle,
         shader: &Option<Shader>,
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
@@ -412,6 +416,11 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
             Some(line_width),
             blend_mode,
         );
+        if let Some(dash_pattern) = &stroke_style.dash_pattern {
+            let effect = skia_safe::PathEffect::dash(&dash_pattern.intervals, dash_pattern.phase)
+                .ok_or(SkiaCanvasBackendError::DashPathEffectCreationFailed)?;
+            paint.set_path_effect(effect);
+        }
         if let Some(shader_spec) = shader {
             let shader = to_skia_shader(shader_spec)?;
             paint.set_shader(shader);

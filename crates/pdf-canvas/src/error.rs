@@ -30,6 +30,8 @@ pub enum PdfCanvasError {
     XObjectNotFound(String),
     #[error("Invalid image data: {0}")]
     InvalidImageData(String),
+    #[error("Invalid dash pattern: {0}")]
+    InvalidDashPattern(String),
     #[error("The current operation requires a color space, but none is set")]
     ColorSpaceNotSet,
     #[error("Unsupported PDF canvas feature: {0}")]
