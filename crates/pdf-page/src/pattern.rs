@@ -3,8 +3,12 @@ use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
 use crate::{
-    error::PdfPagesError, external_graphics_state::ExternalGraphicsState, matrix::Matrix,
-    object_reader::ReadFromDictionary, resource_cache::ResourceCache, resources::Resources,
+    error::PdfPagesError,
+    external_graphics_state::ExternalGraphicsState,
+    matrix::Matrix,
+    object_reader::{ReadCycleTracker, ReadFromDictionary},
+    resource_cache::ResourceCache,
+    resources::Resources,
     shading::Shading,
 };
 
@@ -132,6 +136,7 @@ impl Pattern {
         object: &ObjectVariant,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Pattern, PdfPagesError> {
         let dictionary = object.try_dictionary(objects)?;
@@ -171,7 +176,8 @@ impl Pattern {
                 let y_step = dictionary.get_or_err("YStep")?.try_number::<f32>(objects)?;
 
                 // Read the `/Resources` entry. Needed by the pattern's content stream.
-                let parsed_resources = Resources::read(dictionary, objects, cache, id_allocator)?;
+                let parsed_resources =
+                    Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?;
                 let mut resources = Resources::default();
                 if let Some(parsed) = parsed_resources {
                     resources = parsed;
@@ -206,6 +212,7 @@ impl Pattern {
                             ext,
                             objects,
                             cache,
+                            cycle_tracker,
                             id_allocator,
                         ) {
                             Ok(ext_g_state) => Some(ext_g_state),

@@ -4,7 +4,7 @@ use pdf_object::{
 
 use crate::{
     error::PdfPagesError,
-    object_reader::{ReadFromDictionary, ReadXObject},
+    object_reader::{ReadCycleTracker, ReadFromDictionary, ReadXObject},
     resource_cache::ResourceCache,
     xobject::XObject,
 };
@@ -99,6 +99,7 @@ impl ReadFromDictionary for ExternalGraphicsState {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, PdfPagesError> {
         let mut params: Vec<ExternalGraphicsStateKey> = Vec::new();
@@ -115,7 +116,9 @@ impl ReadFromDictionary for ExternalGraphicsState {
                 _ => value,
             };
 
-            if let Some(param) = parse_entry(name, resolved, objects, cache, id_allocator)? {
+            if let Some(param) =
+                parse_entry(name, resolved, objects, cache, cycle_tracker, id_allocator)?
+            {
                 params.push(param);
             }
         }
@@ -241,6 +244,7 @@ fn parse_soft_mask(
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
+    cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
     let smask = match value {
@@ -256,6 +260,7 @@ fn parse_soft_mask(
                 stream,
                 objects,
                 cache,
+                cycle_tracker,
                 id_allocator,
             ) {
                 Ok(shape) => shape,
@@ -290,6 +295,7 @@ fn parse_entry(
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
+    cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<Option<ExternalGraphicsStateKey>, PdfPagesError> {
     let parsed = match name {
@@ -325,7 +331,7 @@ fn parse_entry(
         "OPM" => ExternalGraphicsStateKey::OverprintMode(value.try_number::<i32>(objects)?),
         "Font" => parse_font(name, value, objects)?,
         "BM" => parse_blend_mode(value, objects)?,
-        "SMask" => parse_soft_mask(name, value, objects, cache, id_allocator)?,
+        "SMask" => parse_soft_mask(name, value, objects, cache, cycle_tracker, id_allocator)?,
         "CA" => ExternalGraphicsStateKey::StrokingAlpha(value.try_number::<f32>(objects)?),
         "ca" => ExternalGraphicsStateKey::NonStrokingAlpha(value.try_number::<f32>(objects)?),
         "SA" => ExternalGraphicsStateKey::StrokeAdjustment(value.try_boolean(objects)?),

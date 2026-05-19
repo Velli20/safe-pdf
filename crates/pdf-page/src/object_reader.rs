@@ -1,6 +1,6 @@
 //! Trait-based readers for page-related PDF objects with shared cycle protection.
 //!
-//! These traits centralize the `ResourceCache::begin_read` / `end_read` pattern
+//! These traits centralize active-read cycle tracking
 //! used when parsing indirect objects that may recursively reference each other.
 //! Implementers provide an inner read method containing the actual parsing logic,
 //! while the default entrypoint methods handle cycle tracking consistently.
@@ -11,6 +11,27 @@ use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
     object_variant::ObjectVariant, stream::StreamObject,
 };
+use std::collections::HashSet;
+
+/// Tracks objects currently being parsed by page-related object readers.
+#[derive(Default)]
+pub struct ReadCycleTracker {
+    in_progress: HashSet<usize>,
+}
+
+impl ReadCycleTracker {
+    /// Marks the object as currently being parsed.
+    ///
+    /// Returns `false` when the object is already in progress, indicating a cycle.
+    fn begin_read(&mut self, obj_num: usize) -> bool {
+        self.in_progress.insert(obj_num)
+    }
+
+    /// Clears the in-progress marker for the object.
+    fn end_read(&mut self, obj_num: usize) {
+        self.in_progress.remove(&obj_num);
+    }
+}
 
 /// Reads a dictionary-backed object with cycle protection.
 ///
@@ -39,6 +60,7 @@ pub trait ReadFromDictionary {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self::Output, PdfPagesError>;
 
@@ -53,18 +75,26 @@ pub trait ReadFromDictionary {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self::Output, PdfPagesError> {
         let Some(obj_num) = dictionary.object_number else {
-            return Self::read_dictionary_inner(dictionary, objects, cache, id_allocator);
+            return Self::read_dictionary_inner(
+                dictionary,
+                objects,
+                cache,
+                cycle_tracker,
+                id_allocator,
+            );
         };
 
-        if !cache.begin_read(obj_num) {
+        if !cycle_tracker.begin_read(obj_num) {
             return Self::cyclic_read(obj_num);
         }
 
-        let result = Self::read_dictionary_inner(dictionary, objects, cache, id_allocator);
-        cache.end_read(obj_num);
+        let result =
+            Self::read_dictionary_inner(dictionary, objects, cache, cycle_tracker, id_allocator);
+        cycle_tracker.end_read(obj_num);
         result
     }
 }
@@ -98,6 +128,7 @@ pub trait ReadXObject {
         stream_data: &StreamObject,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, PdfPagesError>
     where
@@ -114,12 +145,13 @@ pub trait ReadXObject {
         stream_data: &StreamObject,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, PdfPagesError>
     where
         Self: Sized,
     {
-        if !cache.begin_read(stream_data.object_number) {
+        if !cycle_tracker.begin_read(stream_data.object_number) {
             return Self::cyclic_read(stream_data.object_number);
         }
 
@@ -129,9 +161,10 @@ pub trait ReadXObject {
             stream_data,
             objects,
             cache,
+            cycle_tracker,
             id_allocator,
         );
-        cache.end_read(stream_data.object_number);
+        cycle_tracker.end_read(stream_data.object_number);
         result
     }
 }

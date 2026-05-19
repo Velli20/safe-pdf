@@ -1,6 +1,10 @@
 use crate::{
-    error::PdfPagesError, media_box::MediaBox, object_reader::ReadFromDictionary, page::PdfPage,
-    resource_cache::ResourceCache, resources::Resources,
+    error::PdfPagesError,
+    media_box::MediaBox,
+    object_reader::{ReadCycleTracker, ReadFromDictionary},
+    page::PdfPage,
+    resource_cache::ResourceCache,
+    resources::Resources,
 };
 
 use pdf_content_stream::ContentStreamIdAllocator;
@@ -27,6 +31,7 @@ impl ReadFromDictionary for PdfPages {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         cache: &mut dyn ResourceCache,
+        cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Vec<PdfPage>, PdfPagesError> {
         // The `/Kids` array is a required entry in a Pages dictionary. It contains
@@ -38,7 +43,7 @@ impl ReadFromDictionary for PdfPages {
         // found by traversing the page tree.
         let mut pages = vec![];
 
-        let resources = Resources::read(dictionary, objects, cache, id_allocator)?;
+        let resources = Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?;
 
         // Read the inheritable `/MediaBox` from this /Pages node (ISO 32000-1 §7.7.3.4).
         let media_box = MediaBox::from_dictionary(dictionary, objects)?;
@@ -52,7 +57,13 @@ impl ReadFromDictionary for PdfPages {
             match dictionary.get_or_err("Type")?.try_str(objects)?.as_ref() {
                 PdfPage::KEY => {
                     // If the child is a leaf node (`/Type /Page`), parse it as a `PdfPage`.
-                    let page = PdfPage::from_dictionary(dictionary, objects, cache, id_allocator)?;
+                    let page = PdfPage::from_dictionary(
+                        dictionary,
+                        objects,
+                        cache,
+                        cycle_tracker,
+                        id_allocator,
+                    )?;
                     pages.push(page);
                 }
                 PdfPages::KEY => {
@@ -60,6 +71,7 @@ impl ReadFromDictionary for PdfPages {
                         dictionary,
                         objects,
                         cache,
+                        cycle_tracker,
                         id_allocator,
                     )?);
                 }

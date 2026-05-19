@@ -15,7 +15,7 @@ use pdf_object::{
     trailer::Trailer,
 };
 use pdf_object_collection::object_collection::ObjectCollection;
-use pdf_page::object_reader::ReadFromDictionary;
+use pdf_page::object_reader::{ReadCycleTracker, ReadFromDictionary};
 use pdf_page::page::PdfPage;
 use pdf_page::pages::PdfPages;
 use pdf_page::resource_cache::DefaultResourceCache;
@@ -119,9 +119,15 @@ fn extract_page_tree(
     let pages_dict = catalog.get_or_err("Pages")?.try_dictionary(objects)?;
 
     let mut cache = DefaultResourceCache::default();
+    let mut cycle_tracker = ReadCycleTracker::default();
     let mut content_stream_ids = ContentStreamIdAllocator::new();
-    let pages =
-        PdfPages::from_dictionary(pages_dict, objects, &mut cache, &mut content_stream_ids)?;
+    let pages = PdfPages::from_dictionary(
+        pages_dict,
+        objects,
+        &mut cache,
+        &mut cycle_tracker,
+        &mut content_stream_ids,
+    )?;
     Ok(pages)
 }
 

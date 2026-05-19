@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 pub use crate::lazy_cache_value::LazyCacheValue;
 use crate::{resource::Resource, resources::Resources};
@@ -49,21 +49,6 @@ pub trait ResourceCache {
     fn remove_resources(&mut self, _obj_num: &usize) -> Option<Resources> {
         None
     }
-
-    /// Marks the object as currently being parsed.
-    ///
-    /// Returns `false` when the object is already in progress, indicating a cycle.
-    fn begin_read(&mut self, _obj_num: usize) -> bool {
-        true
-    }
-
-    /// Clears the in-progress marker for the object.
-    fn end_read(&mut self, _obj_num: usize) {}
-
-    /// Returns whether the object is currently being parsed.
-    fn is_being_read(&self, _obj_num: &usize) -> bool {
-        false
-    }
 }
 
 /// Default resource cache used during page/resource parsing.
@@ -71,7 +56,6 @@ pub trait ResourceCache {
 pub struct DefaultResourceCache {
     resources: HashMap<usize, Resource>,
     resource_dictionaries: HashMap<usize, Resources>,
-    in_progress: HashSet<usize>,
 }
 
 impl ResourceCache for DefaultResourceCache {
@@ -98,18 +82,6 @@ impl ResourceCache for DefaultResourceCache {
     fn remove_resources(&mut self, obj_num: &usize) -> Option<Resources> {
         self.resource_dictionaries.remove(obj_num)
     }
-
-    fn begin_read(&mut self, obj_num: usize) -> bool {
-        self.in_progress.insert(obj_num)
-    }
-
-    fn end_read(&mut self, obj_num: usize) {
-        self.in_progress.remove(&obj_num);
-    }
-
-    fn is_being_read(&self, obj_num: &usize) -> bool {
-        self.in_progress.contains(obj_num)
-    }
 }
 
 /// Reads a cacheable value while publishing a lazy placeholder in the cache first.
@@ -117,7 +89,7 @@ impl ResourceCache for DefaultResourceCache {
 /// This is useful for resource kinds such as fonts or `/Resources` dictionaries where recursive lookups
 /// should keep the entry alive and resolve it later instead of dropping it
 /// when the same object number is encountered again during parsing.
-pub fn read_resource_lazy<T, E, F>(
+pub(crate) fn read_resource_lazy<T, E, F>(
     cache: &mut dyn ResourceCache,
     obj_num: Option<usize>,
     read: F,
