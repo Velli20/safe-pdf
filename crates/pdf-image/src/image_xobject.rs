@@ -2,23 +2,11 @@ use pdf_color_space::{color_space::ColorSpace, indexed_color_space::IndexedColor
 use pdf_decode::{DecodeMap, SampleLayout, decode_sample_codes};
 use pdf_filter::filter::decode_with_resolver;
 use pdf_graphics::PixelFormat;
-use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-    stream::StreamObject,
-};
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, stream::StreamObject};
 
 use crate::InlineImage;
 use crate::error::PdfImageError;
 use crate::indexed::expand_indexed_values_to_components;
-
-/// Resolves a stream as an image soft mask, or reports a cycle/non-image failure.
-pub trait SoftMaskResolver {
-    fn resolve_soft_mask(
-        &mut self,
-        stream: &StreamObject,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Option<ImageXObject>, PdfImageError>;
-}
 
 /// Represents a PDF Image XObject, which is a self-contained raster image.
 #[derive(Debug, Clone)]
@@ -61,28 +49,23 @@ impl ImageXObject {
         dictionary: &Dictionary,
         stream_data: &StreamObject,
         objects: &dyn ObjectResolver,
-        soft_mask_resolver: &mut dyn SoftMaskResolver,
+        soft_mask: Option<ImageXObject>,
     ) -> Result<Self, PdfImageError> {
         let raw_data = stream_data.data()?;
-        Self::decode_normalized_image(
-            dictionary,
-            raw_data.as_ref(),
-            objects,
-            Some(soft_mask_resolver),
-        )
+        Self::decode_normalized_image(dictionary, raw_data.as_ref(), objects, soft_mask)
     }
 
     /// Decodes an inline image, including its filter chain and normalized sample data.
     pub fn decode_inline_image(
         image: &InlineImage,
         objects: &dyn ObjectResolver,
-        soft_mask_resolver: Option<&mut dyn SoftMaskResolver>,
+        soft_mask: Option<ImageXObject>,
     ) -> Result<Self, PdfImageError> {
         let dictionary = image.normalized_dictionary();
         let stream = StreamObject::new(0, 0, Box::new(dictionary.clone()), image.data().to_vec());
         let decoded = decode_with_resolver(&stream, objects)?;
 
-        Self::decode_normalized_image(&dictionary, decoded.as_ref(), objects, soft_mask_resolver)
+        Self::decode_normalized_image(&dictionary, decoded.as_ref(), objects, soft_mask)
     }
 
     /// Decodes a normalized image dictionary and raw bytes into a raster image.
@@ -93,13 +76,13 @@ impl ImageXObject {
         dictionary: &Dictionary,
         raw_data: &[u8],
         objects: &dyn ObjectResolver,
-        soft_mask_resolver: Option<&mut dyn SoftMaskResolver>,
+        soft_mask: Option<ImageXObject>,
     ) -> Result<Self, PdfImageError> {
         let metadata = Self::read_metadata(dictionary, objects)?;
         let decoded_samples = Self::decode_samples(dictionary, raw_data, objects, &metadata)?;
         Self::validate_decoded_samples(&metadata, &decoded_samples)?;
-        let smask = Self::parse_optional_soft_mask(dictionary, objects, soft_mask_resolver)?;
-        let (data, pixel_format) = Self::assemble_pixel_data(&metadata, &decoded_samples, smask);
+        let (data, pixel_format) =
+            Self::assemble_pixel_data(&metadata, &decoded_samples, soft_mask);
 
         Ok(Self {
             width: metadata.width,
@@ -280,40 +263,6 @@ impl ImageXObject {
         Ok(())
     }
 
-    /// Resolves an optional soft mask if one is available and a resolver was provided.
-    fn parse_optional_soft_mask(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        soft_mask_resolver: Option<&mut dyn SoftMaskResolver>,
-    ) -> Result<Option<ImageXObject>, PdfImageError> {
-        match soft_mask_resolver {
-            Some(resolver) => Self::parse_smask(dictionary, objects, resolver),
-            None => Ok(None),
-        }
-    }
-
-    /// Resolves the `/SMask` entry and treats `/None` as an absent mask.
-    fn parse_smask(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        soft_mask_resolver: &mut dyn SoftMaskResolver,
-    ) -> Result<Option<ImageXObject>, PdfImageError> {
-        let Some(smask_obj) = dictionary.get("SMask") else {
-            return Ok(None);
-        };
-
-        let resolved = objects.resolve_object(smask_obj)?;
-
-        if let ObjectVariant::Name(name) = resolved
-            && name.as_slice() == b"None"
-        {
-            return Ok(None);
-        }
-
-        let stream = resolved.try_stream(objects)?;
-        soft_mask_resolver.resolve_soft_mask(stream, objects)
-    }
-
     /// Returns the maximum encoded sample value for a supported bit depth.
     fn sample_max(bits_per_component: usize) -> Result<u8, PdfImageError> {
         match bits_per_component {
@@ -431,22 +380,8 @@ mod tests {
         dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     };
 
-    use super::{ImageXObject, InlineImage, SoftMaskResolver};
+    use super::{ImageXObject, InlineImage};
     use crate::error::PdfImageError;
-
-    struct TestSoftMaskResolver;
-
-    impl SoftMaskResolver for TestSoftMaskResolver {
-        fn resolve_soft_mask(
-            &mut self,
-            _stream: &StreamObject,
-            _objects: &dyn ObjectResolver,
-        ) -> Result<Option<ImageXObject>, PdfImageError> {
-            Ok(None)
-        }
-    }
-
-    use pdf_object::{object_resolver::ObjectResolver, stream::StreamObject};
 
     #[test]
     fn decode_normalized_1bpc_gray_inverts_samples() {
@@ -591,6 +526,41 @@ mod tests {
     }
 
     #[test]
+    fn decode_normalized_image_applies_resolved_soft_mask() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (
+                "ColorSpace".to_string(),
+                ObjectVariant::Name(b"DeviceGray".to_vec()),
+            ),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(2)),
+        ]));
+        let soft_mask = ImageXObject {
+            width: 2,
+            height: 1,
+            bits_per_component: 8,
+            data: vec![0x10, 0xE0],
+            pixel_format: pdf_graphics::PixelFormat::Gray8,
+            color_space: None,
+        };
+
+        let image = ImageXObject::decode_normalized_image(
+            &dictionary,
+            &[0x20, 0xC0],
+            &PassthroughResolver,
+            Some(soft_mask),
+        )
+        .expect("resolved soft mask should be applied");
+
+        assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
+        assert_eq!(
+            image.data,
+            vec![0x20, 0x20, 0x20, 0x10, 0xC0, 0xC0, 0xC0, 0xE0]
+        );
+    }
+
+    #[test]
     fn decode_inline_image_applies_filter_chain_before_samples() {
         let image = InlineImage::new(
             Dictionary::new(BTreeMap::from([
@@ -614,23 +584,6 @@ mod tests {
 
         assert_eq!(decoded.pixel_format, pdf_graphics::PixelFormat::Gray8);
         assert_eq!(decoded.data, vec![0x2A]);
-    }
-
-    #[test]
-    fn parse_smask_name_none_is_treated_as_absent() {
-        let dictionary = Dictionary::new(BTreeMap::from([(
-            "SMask".to_string(),
-            ObjectVariant::Name(b"None".to_vec()),
-        )]));
-        let mut resolver = TestSoftMaskResolver;
-
-        let smask = ImageXObject::parse_smask(&dictionary, &PassthroughResolver, &mut resolver)
-            .expect("name-valued /SMask should be accepted");
-
-        assert!(
-            smask.is_none(),
-            "/SMask /None should behave like no soft mask"
-        );
     }
 
     #[test]

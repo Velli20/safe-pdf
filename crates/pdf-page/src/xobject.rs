@@ -5,7 +5,7 @@ use crate::{
     resource_cache::ResourceCache,
 };
 use pdf_content_stream::ContentStreamIdAllocator;
-use pdf_image::{ImageXObject, PdfImageError, SoftMaskResolver};
+use pdf_image::{ImageXObject, PdfImageError};
 use pdf_object::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
     stream::StreamObject,
@@ -38,17 +38,15 @@ impl ReadXObject for XObject {
 
         match subtype.as_ref() {
             "Image" => {
-                let mut soft_mask_resolver = PageSoftMaskResolver {
+                let soft_mask = resolve_image_soft_mask(
+                    dictionary,
+                    objects,
                     cache,
                     cycle_tracker,
                     id_allocator,
-                };
-                let image_xobject = ImageXObject::read_xobject(
-                    dictionary,
-                    stream_data,
-                    objects,
-                    &mut soft_mask_resolver,
                 )?;
+                let image_xobject =
+                    ImageXObject::read_xobject(dictionary, stream_data, objects, soft_mask)?;
                 Ok(XObject::Image(image_xobject))
             }
             "Form" => {
@@ -69,39 +67,49 @@ impl ReadXObject for XObject {
     }
 }
 
-struct PageSoftMaskResolver<'a> {
-    cache: &'a mut dyn ResourceCache,
-    cycle_tracker: &'a mut ReadCycleTracker,
-    id_allocator: &'a mut ContentStreamIdAllocator,
-}
+/// Resolves an image XObject `/SMask` entry through the page-level XObject reader.
+///
+/// `pdf-image` only decodes already-resolved image data, so page parsing owns the
+/// PDF object lookup and XObject subtype validation. Routing mask streams through
+/// [`ReadXObject::read_xobject`] keeps soft-mask parsing on the same cycle-tracked
+/// path as ordinary XObjects; recursive masks are therefore treated as absent.
+fn resolve_image_soft_mask(
+    dictionary: &Dictionary,
+    objects: &dyn ObjectResolver,
+    cache: &mut dyn ResourceCache,
+    cycle_tracker: &mut ReadCycleTracker,
+    id_allocator: &mut ContentStreamIdAllocator,
+) -> Result<Option<ImageXObject>, PdfImageError> {
+    let Some(smask_obj) = dictionary.get("SMask") else {
+        return Ok(None);
+    };
 
-impl SoftMaskResolver for PageSoftMaskResolver<'_> {
-    fn resolve_soft_mask(
-        &mut self,
-        stream: &StreamObject,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Option<ImageXObject>, PdfImageError> {
-        let cache = &mut *self.cache;
-        let cycle_tracker = &mut *self.cycle_tracker;
-        let id_allocator = &mut *self.id_allocator;
+    let resolved = objects.resolve_object(smask_obj)?;
 
-        match XObject::read_xobject(
-            &ObjectVariant::Stream(stream.clone()),
-            &stream.dictionary,
-            stream,
-            objects,
-            cache,
-            cycle_tracker,
-            id_allocator,
-        ) {
-            Ok(Some(XObject::Image(image))) => Ok(Some(image)),
-            Ok(Some(_)) => Err(PdfImageError::InvalidSoftMaskXObject),
-            Ok(None) => Ok(None),
-            Err(PdfPagesError::Image(err)) => Err(err),
-            Err(PdfPagesError::Object(err)) => Err(err.into()),
-            Err(PdfPagesError::ColorSpace(err)) => Err(err.into()),
-            Err(_) => Err(PdfImageError::InvalidSoftMaskXObject),
-        }
+    if let ObjectVariant::Name(name) = resolved
+        && name.as_slice() == b"None"
+    {
+        return Ok(None);
+    }
+
+    let stream = resolved.try_stream(objects)?;
+
+    match XObject::read_xobject(
+        &ObjectVariant::Stream(stream.clone()),
+        &stream.dictionary,
+        stream,
+        objects,
+        cache,
+        cycle_tracker,
+        id_allocator,
+    ) {
+        Ok(Some(XObject::Image(image))) => Ok(Some(image)),
+        Ok(Some(_)) => Err(PdfImageError::InvalidSoftMaskXObject),
+        Ok(None) => Ok(None),
+        Err(PdfPagesError::Image(err)) => Err(err),
+        Err(PdfPagesError::Object(err)) => Err(err.into()),
+        Err(PdfPagesError::ColorSpace(err)) => Err(err.into()),
+        Err(_) => Err(PdfImageError::InvalidSoftMaskXObject),
     }
 }
 
