@@ -10,6 +10,7 @@
 //! - **CCITTFaxDecode** — Group 3 / Group 4 fax compression
 //! - **ASCII85Decode** — ASCII base-85 encoding
 //! - **ASCIIHexDecode** — ASCII hexadecimal encoding
+//! - **RunLengthDecode** — PDF run-length encoding
 //!
 //! The main entry point is [`filter::decode`], which accepts a
 //! [`StreamObject`](pdf_object::stream::StreamObject) and applies the full
@@ -25,3 +26,4 @@ pub mod error;
 pub mod filter;
 pub(crate) mod lzw;
 pub(crate) mod predictor;
+pub(crate) mod runlength;
