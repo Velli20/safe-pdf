@@ -19,6 +19,8 @@ pub struct Type0Font {
     pub subtype: CidFontSubType,
     /// Font file containing embedded font data.
     pub font_file: Vec<u8>,
+    /// The embedded Type 1 program format for CIDFontType0 descendants.
+    pub type1_program_format: Option<Type1FontProgramFormat>,
     /// A map of individual glyph widths, overriding the default width for specific CIDs.
     /// This corresponds to the `/W` entry in the CIDFont dictionary.
     pub widths: Option<GlyphWidthsMap>,
@@ -129,21 +131,19 @@ impl Type0Font {
             .transpose()?;
 
         // Process the embedded font data based on the CIDFont subtype:
-        // - Type0 (CFF): Rebuild as a standalone CFF font for rendering libraries.
+        // - Type0 (Type 1/CFF): Keep the embedded Type 1 program and its format.
         // - Type2 (TrueType): Use the raw TrueType data directly.
-        let font_file = match subtype {
+        let (font_file, type1_program_format) = match subtype {
             CidFontSubType::Type0 => {
                 let (font_file, format) = Type1Font::read_font_file(dictionary, objects)?;
-                if format != Type1FontProgramFormat::OpenTypeCff {
-                    return Err(FontError::UnsupportedFontSubtype {
-                        subtype: "FontFile".to_string(),
-                    });
-                }
-                font_file
+                (font_file, Some(format))
             }
-            CidFontSubType::Type2 => TrueTypeFont::read_font_file(dictionary, objects)?
-                .0
-                .to_vec(),
+            CidFontSubType::Type2 => (
+                TrueTypeFont::read_font_file(dictionary, objects)?
+                    .0
+                    .to_vec(),
+                None,
+            ),
         };
 
         // Build reverse glyph→Unicode map from the embedded font's cmap when
@@ -165,6 +165,7 @@ impl Type0Font {
         Ok(Self {
             subtype,
             font_file,
+            type1_program_format,
             widths: widths_map,
             encoding,
             default_width,
@@ -242,6 +243,8 @@ mod tests {
 
     use super::*;
 
+    const EEXEC_SEED: u16 = 55665;
+
     fn make_stream_object(
         object_number: usize,
         dictionary: Dictionary,
@@ -253,6 +256,54 @@ mod tests {
             Box::new(dictionary),
             data,
         ))
+    }
+
+    fn encrypt(bytes: &[u8], seed: u16) -> Vec<u8> {
+        let mut r = seed;
+        let mut out = Vec::with_capacity(bytes.len());
+        for &plain in bytes {
+            let cipher = plain ^ ((r >> 8) as u8);
+            out.push(cipher);
+            r = u16::try_from(
+                (u32::from(cipher) + u32::from(r))
+                    .wrapping_mul(52845)
+                    .wrapping_add(22719)
+                    & 0xFFFF,
+            )
+            .unwrap();
+        }
+        out
+    }
+
+    fn minimal_type1_segments() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+        let cleartext = br#"%!FontType1-1.0: DummyFont 1.0
+10 dict begin
+/FontName /DummyFont def
+/FontType 1 def
+/FontMatrix [0.001 0 0 0.001 0 0] readonly def
+/FontBBox [0 0 0 0] readonly def
+/Encoding StandardEncoding def
+currentdict end
+currentfile eexec
+"#
+        .to_vec();
+
+        let private_plain = b"/Private 1 dict dup begin\n/lenIV -1 def\n/CharStrings 1 dict dup begin\n/.notdef 1 RD \x0E ND\nend\nend\nmark currentfile closefile\n";
+        let mut encrypted_private = vec![0, 0, 0, 0];
+        encrypted_private.extend_from_slice(private_plain);
+        let encrypted_private = encrypt(&encrypted_private, EEXEC_SEED);
+
+        let trailer = b"0000000000000000000000000000000000000000\ncleartomark\n".to_vec();
+        (cleartext, encrypted_private, trailer)
+    }
+
+    fn minimal_pfa_font() -> (Vec<u8>, (usize, usize, usize)) {
+        let (cleartext, encrypted_private, trailer) = minimal_type1_segments();
+        let lengths = (cleartext.len(), encrypted_private.len(), trailer.len());
+        let mut bytes = cleartext;
+        bytes.extend_from_slice(&encrypted_private);
+        bytes.extend_from_slice(&trailer);
+        (bytes, lengths)
     }
 
     #[test]
@@ -398,5 +449,65 @@ mod tests {
             Type0Font::from_dictionary(&Dictionary::new(font_dict), &PassthroughResolver).unwrap();
 
         assert_eq!(font.decode_bytes_to_cids(&[0x00, 0x43]), vec![70]);
+    }
+
+    #[test]
+    fn cidfont_type0_accepts_classic_type1_font_file() {
+        let (font_bytes, (length1, length2, length3)) = minimal_pfa_font();
+
+        let mut descriptor_dict = BTreeMap::new();
+        descriptor_dict.insert(
+            "Length1".to_string(),
+            ObjectVariant::Integer(i64::try_from(length1).unwrap()),
+        );
+        descriptor_dict.insert(
+            "Length2".to_string(),
+            ObjectVariant::Integer(i64::try_from(length2).unwrap()),
+        );
+        descriptor_dict.insert(
+            "Length3".to_string(),
+            ObjectVariant::Integer(i64::try_from(length3).unwrap()),
+        );
+        descriptor_dict.insert(
+            "FontFile".to_string(),
+            ObjectVariant::Stream(StreamObject::new(
+                4,
+                0,
+                Box::new(Dictionary::new(BTreeMap::new())),
+                font_bytes.clone(),
+            )),
+        );
+
+        let mut descendant_dict = BTreeMap::new();
+        descendant_dict.insert(
+            "Subtype".to_string(),
+            ObjectVariant::Name(b"CIDFontType0".to_vec()),
+        );
+        descendant_dict.insert(
+            "FontDescriptor".to_string(),
+            ObjectVariant::Dictionary(Box::new(Dictionary::new(descriptor_dict))),
+        );
+
+        let mut font_dict = BTreeMap::new();
+        font_dict.insert(
+            "Subtype".to_string(),
+            ObjectVariant::Name(b"Type0".to_vec()),
+        );
+        font_dict.insert(
+            "DescendantFonts".to_string(),
+            ObjectVariant::Array(vec![ObjectVariant::Dictionary(Box::new(Dictionary::new(
+                descendant_dict,
+            )))]),
+        );
+
+        let font =
+            Type0Font::from_dictionary(&Dictionary::new(font_dict), &PassthroughResolver).unwrap();
+
+        assert_eq!(font.subtype, CidFontSubType::Type0);
+        assert_eq!(font.font_file, font_bytes);
+        assert_eq!(
+            font.type1_program_format,
+            Some(Type1FontProgramFormat::ClassicType1)
+        );
     }
 }

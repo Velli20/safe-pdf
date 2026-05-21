@@ -146,9 +146,18 @@ mod tests {
     #[test]
     fn parses_single_name_device_color_space_arrays() {
         let cases = [
-            (ObjectVariant::Array(vec![name("DeviceGray")]), ColorSpace::DeviceGray),
-            (ObjectVariant::Array(vec![name("DeviceRGB")]), ColorSpace::DeviceRGB),
-            (ObjectVariant::Array(vec![name("DeviceCMYK")]), ColorSpace::DeviceCMYK),
+            (
+                ObjectVariant::Array(vec![name("DeviceGray")]),
+                ColorSpace::DeviceGray,
+            ),
+            (
+                ObjectVariant::Array(vec![name("DeviceRGB")]),
+                ColorSpace::DeviceRGB,
+            ),
+            (
+                ObjectVariant::Array(vec![name("DeviceCMYK")]),
+                ColorSpace::DeviceCMYK,
+            ),
         ];
 
         for (object, expected) in cases {

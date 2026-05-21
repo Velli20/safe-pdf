@@ -357,11 +357,7 @@ fn merge_xref_chain(
         }
 
         let xref_table = parse_xref_section_with_recovery(parser, current_offset)?;
-        let auxiliary_xref_stream_offset = xref_table
-            .trailer
-            .dictionary
-            .get("XRefStm")
-            .cloned();
+        let auxiliary_xref_stream_offset = xref_table.trailer.dictionary.get("XRefStm").cloned();
 
         // Merge entries: newer entries (already present) take precedence over older ones.
         for (obj_num, entry) in xref_table.entries {
@@ -369,7 +365,8 @@ fn merge_xref_chain(
         }
 
         if let Some(xref_stream_offset) = auxiliary_xref_stream_offset {
-            let xref_stream_offset = xref_stream_offset.try_number::<usize>(&PassthroughResolver)?;
+            let xref_stream_offset =
+                xref_stream_offset.try_number::<usize>(&PassthroughResolver)?;
 
             if visited_offsets.insert(xref_stream_offset) {
                 let auxiliary_xref_table =
@@ -512,8 +509,7 @@ mod tests {
         let object_3 = b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>";
         let object_2_offset = 0usize;
         let object_3_offset = object_2.len().saturating_add(1);
-        let object_stream_header =
-            format!("2 {object_2_offset} 3 {object_3_offset} ").into_bytes();
+        let object_stream_header = format!("2 {object_2_offset} 3 {object_3_offset} ").into_bytes();
         let first = object_stream_header.len();
         let mut object_stream_data = object_stream_header;
         object_stream_data.extend_from_slice(object_2);
