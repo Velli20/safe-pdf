@@ -1,4 +1,5 @@
 use pdf_color_space::error::ColorSpaceError;
+use pdf_graphics::dash_pattern::DashPatternError;
 use thiserror::Error;
 
 /// Defines errors that can occur during PDF canvas operations.
@@ -40,4 +41,10 @@ pub enum PdfCanvasError {
     BackendError(String),
     #[error("Color space error: {0}")]
     ColorSpaceError(#[from] ColorSpaceError),
+}
+
+impl From<DashPatternError> for PdfCanvasError {
+    fn from(error: DashPatternError) -> Self {
+        Self::InvalidDashPattern(error.to_string())
+    }
 }

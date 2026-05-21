@@ -1,11 +1,11 @@
 use pdf_color_space::color_space::ColorSpace;
 use pdf_graphics::{
-    BlendMode, LineCap, LineJoin, TextRenderingMode, color::Color, pdf_path::PdfPath,
+    BlendMode, DashPattern, LineCap, LineJoin, TextRenderingMode, color::Color, pdf_path::PdfPath,
     transform::Transform,
 };
 use pdf_page::{pattern::Pattern, resources::Resources};
 
-use crate::{stroke_style::DashPattern, text_state::TextState};
+use crate::text_state::TextState;
 
 /// Represents the complete graphics state for a PDF canvas, including
 /// transformation, color, stroke, text, and pattern information.

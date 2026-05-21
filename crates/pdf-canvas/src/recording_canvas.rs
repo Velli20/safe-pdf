@@ -99,7 +99,8 @@ impl<'a> Shader<'a> {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::stroke_style::{DashPattern, StrokeStyle};
+    use crate::stroke_style::StrokeStyle;
+    use pdf_graphics::DashPattern;
 
     #[derive(Default)]
     struct StrokeStyleCanvas {

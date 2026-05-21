@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use pdf_content_stream_operators::pdf_operator_backend::GraphicsStateOps;
-use pdf_graphics::{LineCap, LineJoin, transform::Transform};
+use pdf_graphics::{DashPattern, LineCap, LineJoin, transform::Transform};
 use pdf_page::{external_graphics_state::ExternalGraphicsStateKey, xobject::XObject};
 
 use crate::{
     canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
-    recording_canvas::RecordingCanvas, stroke_style::DashPattern,
+    recording_canvas::RecordingCanvas,
 };
 
 impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
@@ -91,8 +91,8 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                 ExternalGraphicsStateKey::MiterLimit(miter) => {
                     self.current_state_mut()?.miter_limit = *miter;
                 }
-                ExternalGraphicsStateKey::DashPattern(dash_array, dash_phase) => {
-                    self.set_dash_pattern(dash_array, *dash_phase)?;
+                ExternalGraphicsStateKey::DashPattern(dash_pattern) => {
+                    self.current_state_mut()?.dash_pattern = Some(dash_pattern.clone());
                 }
                 ExternalGraphicsStateKey::RenderingIntent(_) => {
                     return Err(PdfCanvasError::UnsupportedFeature(
@@ -333,7 +333,11 @@ mod tests {
 
     fn dash_pattern_resource() -> Resources {
         let state = ExternalGraphicsState {
-            params: vec![ExternalGraphicsStateKey::DashPattern(vec![3.0, 1.0], 2.0)],
+            params: vec![ExternalGraphicsStateKey::DashPattern(
+                DashPattern::new(&[3.0, 1.0], 2.0)
+                    .expect("dash pattern should be valid")
+                    .expect("dash pattern should be present"),
+            )],
         };
 
         Resources {
