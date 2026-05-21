@@ -10,7 +10,7 @@ use crate::{
 };
 use num_traits::FromPrimitive;
 use pdf_content_stream::ContentStreamIdAllocator;
-use pdf_graphics::{BlendMode, LineCap, LineJoin, MaskMode};
+use pdf_graphics::{BlendMode, DashPattern, LineCap, LineJoin, MaskMode};
 
 /// Soft mask extracted from an ExtGState `SMask` entry.
 pub struct SoftMask {
@@ -42,7 +42,7 @@ pub enum ExternalGraphicsStateKey {
     MiterLimit(f32),
     /// Dash pattern (`D`). An array of numbers specifying the lengths of alternating dashes and gaps
     /// (the dash array) and a number specifying the phase (the dash phase).
-    DashPattern(Vec<f32>, f32),
+    DashPattern(DashPattern),
     /// Rendering intent (`RI`). A name specifying the color rendering intent.
     RenderingIntent(String),
     /// Overprint for stroke (`OP`). A boolean specifying whether stroking operations are to be
@@ -161,7 +161,7 @@ fn parse_dash_pattern(
     key_name: &str,
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
-) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
+) -> Result<Option<ExternalGraphicsStateKey>, PdfPagesError> {
     let arr = value.try_array(objects)?;
     let [dash_array, dash_phase] = arr else {
         return Err(invalid_ext_gstate_entry_structure(
@@ -173,9 +173,13 @@ fn parse_dash_pattern(
 
     let dash_array = dash_array.try_vec_of::<f32>(objects)?;
     let dash_phase = dash_phase.try_number::<f32>(objects)?;
-    Ok(ExternalGraphicsStateKey::DashPattern(
-        dash_array, dash_phase,
-    ))
+    let Some(dash_pattern) = DashPattern::new(&dash_array, dash_phase)
+        .map_err(|err| invalid_ext_gstate_entry_value(key_name, err.to_string()))?
+    else {
+        return Ok(None);
+    };
+
+    Ok(Some(ExternalGraphicsStateKey::DashPattern(dash_pattern)))
 }
 
 fn parse_font(
@@ -324,7 +328,10 @@ fn parse_entry(
             ExternalGraphicsStateKey::LineJoin(join)
         }
         "ML" => ExternalGraphicsStateKey::MiterLimit(value.try_number::<f32>(objects)?),
-        "D" => parse_dash_pattern(name, value, objects)?,
+        "D" => match parse_dash_pattern(name, value, objects)? {
+            Some(param) => param,
+            None => return Ok(None),
+        },
         "RI" => ExternalGraphicsStateKey::RenderingIntent(value.try_str(objects)?.to_string()),
         "OP" => ExternalGraphicsStateKey::OverprintStroke(value.try_boolean(objects)?),
         "op" => ExternalGraphicsStateKey::OverprintFill(value.try_boolean(objects)?),
@@ -341,4 +348,109 @@ fn parse_entry(
     };
 
     Ok(Some(parsed))
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use pdf_content_stream::ContentStreamIdAllocator;
+    use pdf_object::{
+        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+    };
+
+    use crate::object_reader::ReadFromDictionary;
+    use crate::{
+        error::PdfPagesError, object_reader::ReadCycleTracker, resource_cache::DefaultResourceCache,
+    };
+
+    use super::{ExternalGraphicsState, ExternalGraphicsStateKey};
+
+    fn dash_dict(dash_array: Vec<ObjectVariant>, dash_phase: f32) -> Dictionary {
+        Dictionary::new(BTreeMap::from([(
+            "D".to_string(),
+            ObjectVariant::Array(vec![
+                ObjectVariant::Array(dash_array),
+                ObjectVariant::Real(f64::from(dash_phase)),
+            ]),
+        )]))
+    }
+
+    #[test]
+    fn extgstate_dash_entry_is_typed() {
+        let dictionary = dash_dict(
+            vec![ObjectVariant::Real(3.0), ObjectVariant::Real(1.0)],
+            2.0,
+        );
+        let mut cache = DefaultResourceCache::default();
+        let mut cycle_tracker = ReadCycleTracker::default();
+        let mut id_allocator = ContentStreamIdAllocator::new();
+
+        let ext_gstate = ExternalGraphicsState::from_dictionary(
+            &dictionary,
+            &PassthroughResolver,
+            &mut cache,
+            &mut cycle_tracker,
+            &mut id_allocator,
+        )
+        .expect("extgstate should parse")
+        .expect("extgstate should be present");
+
+        assert_eq!(ext_gstate.params.len(), 1);
+        match &ext_gstate.params[0] {
+            ExternalGraphicsStateKey::DashPattern(pattern) => {
+                assert_eq!(pattern.intervals, vec![3.0, 1.0]);
+                assert_eq!(pattern.phase, 2.0);
+            }
+            _ => panic!("unexpected extgstate entry"),
+        }
+    }
+
+    #[test]
+    fn invalid_dash_entry_surfaces_as_value_error() {
+        let dictionary = dash_dict(
+            vec![ObjectVariant::Real(0.0), ObjectVariant::Real(0.0)],
+            0.0,
+        );
+        let mut cache = DefaultResourceCache::default();
+        let mut cycle_tracker = ReadCycleTracker::default();
+        let mut id_allocator = ContentStreamIdAllocator::new();
+
+        let error = match ExternalGraphicsState::from_dictionary(
+            &dictionary,
+            &PassthroughResolver,
+            &mut cache,
+            &mut cycle_tracker,
+            &mut id_allocator,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("invalid dash pattern should fail"),
+        };
+
+        assert!(matches!(
+            error,
+            PdfPagesError::InvalidExtGStateEntryValue { entry, .. } if entry == "D"
+        ));
+    }
+
+    #[test]
+    fn empty_dash_array_is_ignored() {
+        let dictionary = dash_dict(Vec::new(), 0.0);
+        let mut cache = DefaultResourceCache::default();
+        let mut cycle_tracker = ReadCycleTracker::default();
+        let mut id_allocator = ContentStreamIdAllocator::new();
+
+        let ext_gstate = ExternalGraphicsState::from_dictionary(
+            &dictionary,
+            &PassthroughResolver,
+            &mut cache,
+            &mut cycle_tracker,
+            &mut id_allocator,
+        )
+        .expect("extgstate should parse")
+        .expect("extgstate should be present");
+
+        assert!(ext_gstate.params.is_empty());
+    }
 }

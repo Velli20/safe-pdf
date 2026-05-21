@@ -365,6 +365,7 @@ mod tests {
             _path: &pdf_graphics::pdf_path::PdfPath,
             _color: Color,
             _line_width: f32,
+            _stroke_style: &crate::stroke_style::StrokeStyle,
             _shader: &Option<Shader>,
             _blend_mode: Option<BlendMode>,
         ) -> Result<(), PdfCanvasError> {

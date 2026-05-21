@@ -8,7 +8,7 @@ use pdf_graphics::{
 };
 use pdf_shading::paint::ShadingPaint;
 
-use crate::{error::PdfCanvasError, recording_canvas::RecordingCanvas};
+use crate::{error::PdfCanvasError, recording_canvas::RecordingCanvas, stroke_style::StrokeStyle};
 
 /// Image data storage that supports zero-copy sharing via `Arc`.
 ///
@@ -127,6 +127,7 @@ pub trait CanvasBackend {
     /// - `path`: The path to stroke. The coordinates are in the backend's device space.
     /// - `color`: The color of the stroke.
     /// - `line_width`: The width of the stroke in device units.
+    /// - `stroke_style`: Stroke metadata such as dash pattern.
     /// - `shader`: An optional shader to use for the stroke.
     /// - `blend_mode`: An optional blend mode to use when stroking the path.
     fn stroke_path(
@@ -134,6 +135,7 @@ pub trait CanvasBackend {
         path: &PdfPath,
         color: Color,
         line_width: f32,
+        stroke_style: &StrokeStyle,
         shader: &Option<Shader>,
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError>;

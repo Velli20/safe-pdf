@@ -1,6 +1,6 @@
 use pdf_color_space::color_space::ColorSpace;
 use pdf_graphics::{
-    BlendMode, LineCap, LineJoin, TextRenderingMode, color::Color, pdf_path::PdfPath,
+    BlendMode, DashPattern, LineCap, LineJoin, TextRenderingMode, color::Color, pdf_path::PdfPath,
     transform::Transform,
 };
 use pdf_page::{pattern::Pattern, resources::Resources};
@@ -29,6 +29,8 @@ pub(crate) struct CanvasState<'a> {
     pub line_cap: LineCap,
     /// The current line join style (miter, round, or bevel).
     pub line_join: LineJoin,
+    /// The current dash pattern for stroking paths.
+    pub dash_pattern: Option<DashPattern>,
     /// The current resource dictionary, overriding the page's resources if set.
     pub resources: Option<&'a Resources>,
     /// The current pattern used for filling.
@@ -86,6 +88,7 @@ impl Default for CanvasState<'_> {
             stroke_pattern: None,
             line_cap: LineCap::Butt,
             line_join: LineJoin::Miter,
+            dash_pattern: None,
             blend_mode: None,
             rendering_mode: TextRenderingMode::Fill,
             pending_text_clip: None,

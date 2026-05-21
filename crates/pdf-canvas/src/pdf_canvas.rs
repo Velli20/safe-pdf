@@ -7,6 +7,7 @@ use crate::{
     error::PdfCanvasError,
     pdf_path_pen::PdfPathPen,
     recording_canvas::RecordingCanvas,
+    stroke_style::StrokeStyle,
     text_state::TextState,
 };
 use pdf_content_stream::ContentStream;
@@ -386,6 +387,10 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         let stroke_color = state.stroke_color;
         let blend_mode = state.blend_mode;
         let line_width = state.line_width * state.transform.sx;
+        let stroke_style = StrokeStyle {
+            dash_pattern: state.dash_pattern.clone(),
+        }
+        .scaled(state.transform.sx);
 
         match mode {
             PaintMode::Fill => {
@@ -395,8 +400,14 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             }
             PaintMode::Stroke => {
                 let shader = self.compute_shader(true)?;
-                self.canvas
-                    .stroke_path(path, stroke_color, line_width, &shader, blend_mode)
+                self.canvas.stroke_path(
+                    path,
+                    stroke_color,
+                    line_width,
+                    &stroke_style,
+                    &shader,
+                    blend_mode,
+                )
             }
             PaintMode::FillAndStroke => {
                 // First fill the path using the current fill settings
@@ -406,8 +417,14 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
                 // Then stroke the path using the current stroke settings
                 let stroke_shader = self.compute_shader(true)?;
-                self.canvas
-                    .stroke_path(path, stroke_color, line_width, &stroke_shader, blend_mode)
+                self.canvas.stroke_path(
+                    path,
+                    stroke_color,
+                    line_width,
+                    &stroke_style,
+                    &stroke_shader,
+                    blend_mode,
+                )
             }
         }
     }
@@ -731,9 +748,10 @@ mod tests {
     use std::{collections::HashMap, ops::Deref, rc::Rc, sync::Arc};
 
     use pdf_content_stream::ContentStreamIdAllocator;
+    use pdf_content_stream_operators::pdf_operator_backend::GraphicsStateOps;
     use pdf_graphics::{
-        BlendMode, MaskMode, PathFillType, PixelFormat, color::Color, rect::Rect,
-        transform::Transform,
+        BlendMode, MaskMode, PaintMode, PathFillType, PixelFormat, color::Color, pdf_path::PdfPath,
+        rect::Rect, transform::Transform,
     };
     use pdf_image::InlineImage;
     use pdf_object::{dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject};
@@ -755,6 +773,8 @@ mod tests {
         restore_count: usize,
         draw_image_count: usize,
         draw_inline_image_count: usize,
+        stroke_count: usize,
+        last_stroke_style: Option<crate::stroke_style::StrokeStyle>,
         last_draw_image: Option<DrawnImage>,
         last_draw_inline_image: Option<DrawnImage>,
     }
@@ -787,9 +807,12 @@ mod tests {
             _path: &pdf_graphics::pdf_path::PdfPath,
             _color: Color,
             _line_width: f32,
+            stroke_style: &crate::stroke_style::StrokeStyle,
             _shader: &Option<Shader>,
             _blend_mode: Option<BlendMode>,
         ) -> Result<(), crate::error::PdfCanvasError> {
+            self.stroke_count += 1;
+            self.last_stroke_style = Some(stroke_style.clone());
             Ok(())
         }
 
@@ -931,6 +954,98 @@ mod tests {
             ])),
             vec![0b1010_0000],
         )
+    }
+
+    #[test]
+    fn set_dash_pattern_updates_current_state() {
+        let page = page();
+        let mut backend = CountingCanvas::default();
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
+
+        canvas
+            .set_dash_pattern(&[4.0, 2.0], 1.0)
+            .expect("dash pattern should be valid");
+
+        let dash_pattern = canvas
+            .current_state()
+            .expect("state should exist")
+            .dash_pattern
+            .as_ref()
+            .expect("dash pattern should be stored");
+        assert_eq!(dash_pattern.intervals, vec![4.0, 2.0]);
+        assert_eq!(dash_pattern.phase, 1.0);
+    }
+
+    #[test]
+    fn empty_dash_pattern_clears_current_state() {
+        let page = page();
+        let mut backend = CountingCanvas::default();
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
+
+        canvas
+            .set_dash_pattern(&[4.0, 2.0], 1.0)
+            .expect("dash pattern should be valid");
+        canvas
+            .set_dash_pattern(&[], 3.0)
+            .expect("empty dash pattern should be valid");
+
+        assert!(
+            canvas
+                .current_state()
+                .expect("state should exist")
+                .dash_pattern
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn invalid_dash_pattern_does_not_mutate_current_state() {
+        let page = page();
+        let mut backend = CountingCanvas::default();
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
+
+        canvas
+            .set_dash_pattern(&[4.0, 2.0], 1.0)
+            .expect("dash pattern should be valid");
+        let result = canvas.set_dash_pattern(&[0.0, 0.0], 0.0);
+
+        assert!(result.is_err());
+        let dash_pattern = canvas
+            .current_state()
+            .expect("state should exist")
+            .dash_pattern
+            .as_ref()
+            .expect("previous dash pattern should remain");
+        assert_eq!(dash_pattern.intervals, vec![4.0, 2.0]);
+        assert_eq!(dash_pattern.phase, 1.0);
+    }
+
+    #[test]
+    fn draw_path_forwards_dash_pattern_to_backend() {
+        let page = page();
+        let mut backend = CountingCanvas::default();
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
+        let mut path = PdfPath::default();
+        path.move_to(0.0, 0.0);
+        path.line_to(10.0, 0.0);
+
+        canvas
+            .set_dash_pattern(&[4.0, 2.0], 1.0)
+            .expect("dash pattern should be valid");
+        canvas
+            .draw_path(&path, PaintMode::Stroke, PathFillType::Winding)
+            .expect("stroke should draw");
+        drop(canvas);
+
+        assert_eq!(backend.stroke_count, 1);
+        let stroke_style = backend
+            .last_stroke_style
+            .expect("backend should receive stroke style");
+        let dash_pattern = stroke_style
+            .dash_pattern
+            .expect("backend should receive dash pattern");
+        assert_eq!(dash_pattern.intervals, vec![4.0, 2.0]);
+        assert_eq!(dash_pattern.phase, 1.0);
     }
 
     fn form_resource(name: &str, content_stream: pdf_content_stream::ContentStream) -> Resources {

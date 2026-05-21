@@ -1,4 +1,5 @@
 use pdf_color_space::error::ColorSpaceError;
+use pdf_graphics::dash_pattern::DashPatternError;
 use thiserror::Error;
 
 /// Defines errors that can occur during PDF canvas operations.
@@ -30,6 +31,8 @@ pub enum PdfCanvasError {
     XObjectNotFound(String),
     #[error("Invalid image data: {0}")]
     InvalidImageData(String),
+    #[error("Invalid dash pattern: {0}")]
+    InvalidDashPattern(String),
     #[error("The current operation requires a color space, but none is set")]
     ColorSpaceNotSet,
     #[error("Unsupported PDF canvas feature: {0}")]
@@ -38,4 +41,10 @@ pub enum PdfCanvasError {
     BackendError(String),
     #[error("Color space error: {0}")]
     ColorSpaceError(#[from] ColorSpaceError),
+}
+
+impl From<DashPatternError> for PdfCanvasError {
+    fn from(error: DashPatternError) -> Self {
+        Self::InvalidDashPattern(error.to_string())
+    }
 }

@@ -5,6 +5,7 @@ use pdf_canvas::{
     canvas_backend::{CanvasBackend, Image, Shader},
     error::PdfCanvasError,
     recording_canvas::RecordingCanvas,
+    stroke_style::StrokeStyle,
 };
 use pdf_graphics::{
     BlendMode, MaskMode, PathFillType,
@@ -72,6 +73,7 @@ impl CanvasBackend for CanvasImpl<'_> {
         path: &PdfPath,
         color: pdf_graphics::color::Color,
         line_width: f32,
+        _stroke_style: &StrokeStyle,
         _shader: &Option<Shader>,
         _blend_mode: Option<pdf_graphics::BlendMode>,
     ) -> Result<(), PdfCanvasError> {

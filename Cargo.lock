@@ -1990,6 +1990,7 @@ version = "0.1.0"
 dependencies = [
  "num-derive",
  "num-traits",
+ "thiserror 2.0.12",
 ]
 
 [[package]]

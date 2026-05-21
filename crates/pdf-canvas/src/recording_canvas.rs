@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::{
     canvas_backend::{CanvasBackend, Image as BackendImage, Shader},
     error::PdfCanvasError,
+    stroke_style::StrokeStyle,
 };
 use pdf_graphics::{
     BlendMode, MaskMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
@@ -23,6 +24,7 @@ enum RecordingCommand {
         path: PdfPath,
         color: Color,
         line_width: f32,
+        stroke_style: StrokeStyle,
         shader: Option<Shader<'static>>,
         blend_mode: Option<BlendMode>,
     },
@@ -93,6 +95,127 @@ impl<'a> Shader<'a> {
     }
 }
 
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+    use crate::stroke_style::StrokeStyle;
+    use pdf_graphics::DashPattern;
+
+    #[derive(Default)]
+    struct StrokeStyleCanvas {
+        last_stroke_style: Option<StrokeStyle>,
+    }
+
+    impl CanvasBackend for StrokeStyleCanvas {
+        fn fill_path(
+            &mut self,
+            _path: &PdfPath,
+            _fill_type: PathFillType,
+            _color: Color,
+            _shader: &Option<Shader>,
+            _blend_mode: Option<BlendMode>,
+        ) -> Result<(), PdfCanvasError> {
+            Ok(())
+        }
+
+        fn stroke_path(
+            &mut self,
+            _path: &PdfPath,
+            _color: Color,
+            _line_width: f32,
+            stroke_style: &StrokeStyle,
+            _shader: &Option<Shader>,
+            _blend_mode: Option<BlendMode>,
+        ) -> Result<(), PdfCanvasError> {
+            self.last_stroke_style = Some(stroke_style.clone());
+            Ok(())
+        }
+
+        fn set_clip_region(
+            &mut self,
+            _path: &PdfPath,
+            _mode: PathFillType,
+        ) -> Result<(), PdfCanvasError> {
+            Ok(())
+        }
+
+        fn width(&self) -> f32 {
+            100.0
+        }
+
+        fn height(&self) -> f32 {
+            100.0
+        }
+
+        fn save(&mut self) -> Result<(), PdfCanvasError> {
+            Ok(())
+        }
+
+        fn restore(&mut self) -> Result<(), PdfCanvasError> {
+            Ok(())
+        }
+
+        fn draw_image_rect(
+            &mut self,
+            _image: &BackendImage<'_>,
+            _blend_mode: Option<BlendMode>,
+            _dest_rect: Rect,
+            _image_rotation: Option<f32>,
+        ) -> Result<(), PdfCanvasError> {
+            Ok(())
+        }
+
+        fn begin_mask_layer(
+            &mut self,
+            _mask: &Arc<RecordingCanvas>,
+            _transform: &Transform,
+            _mask_mode: MaskMode,
+        ) -> Result<(), PdfCanvasError> {
+            Ok(())
+        }
+
+        fn end_mask_layer(
+            &mut self,
+            _mask: &Arc<RecordingCanvas>,
+            _transform: &Transform,
+            _mask_mode: MaskMode,
+        ) -> Result<(), PdfCanvasError> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn replay_preserves_stroke_style() {
+        let mut recording = RecordingCanvas::new(100.0, 100.0);
+        let mut path = PdfPath::default();
+        path.move_to(0.0, 0.0);
+        path.line_to(10.0, 0.0);
+        let stroke_style = StrokeStyle {
+            dash_pattern: Some(DashPattern {
+                intervals: vec![4.0, 2.0],
+                phase: 1.0,
+            }),
+        };
+
+        recording
+            .stroke_path(
+                &path,
+                Color::from_rgb(0.0, 0.0, 0.0),
+                1.0,
+                &stroke_style,
+                &None,
+                None,
+            )
+            .expect("stroke should record");
+
+        let mut backend = StrokeStyleCanvas::default();
+        recording.replay(&mut backend).expect("replay should work");
+
+        assert_eq!(backend.last_stroke_style, Some(stroke_style));
+    }
+}
+
 impl RecordingCanvas {
     /// Creates a new recording canvas with the given logical dimensions.
     pub fn new(width: f32, height: f32) -> Self {
@@ -136,10 +259,18 @@ impl RecordingCanvas {
                     path,
                     color,
                     line_width,
+                    stroke_style,
                     shader,
                     blend_mode,
                 } => {
-                    backend.stroke_path(path, *color, *line_width, shader, *blend_mode)?;
+                    backend.stroke_path(
+                        path,
+                        *color,
+                        *line_width,
+                        stroke_style,
+                        shader,
+                        *blend_mode,
+                    )?;
                 }
                 SetClipRegion { path, mode } => backend.set_clip_region(path, *mode)?,
                 Save => backend.save()?,
@@ -204,6 +335,7 @@ impl CanvasBackend for RecordingCanvas {
         path: &PdfPath,
         color: Color,
         line_width: f32,
+        stroke_style: &StrokeStyle,
         shader: &Option<Shader>,
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
@@ -211,6 +343,7 @@ impl CanvasBackend for RecordingCanvas {
             path: path.clone(),
             color,
             line_width,
+            stroke_style: stroke_style.clone(),
             shader: shader.as_ref().map(|s| s.to_static()),
             blend_mode,
         });

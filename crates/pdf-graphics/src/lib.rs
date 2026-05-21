@@ -1,12 +1,14 @@
 pub mod bezier;
 mod bounds_accumulator;
 pub mod color;
+pub mod dash_pattern;
 pub mod pdf_path;
 pub mod point;
 pub mod rect;
 pub mod transform;
 
 pub use bounds_accumulator::BoundsAccumulator;
+pub use dash_pattern::DashPattern;
 use num_derive::FromPrimitive;
 
 /// Specifies the shape to be used at the end of open subpaths when they are stroked.

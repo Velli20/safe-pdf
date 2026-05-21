@@ -17,6 +17,7 @@ mod pdf_path_pen;
 pub mod pdf_canvas;
 pub mod recording_canvas;
 mod shading;
+pub mod stroke_style;
 mod text_renderer;
 mod text_state;
 mod truetype_font_renderer;
