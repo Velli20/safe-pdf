@@ -357,10 +357,31 @@ fn merge_xref_chain(
         }
 
         let xref_table = parse_xref_section_with_recovery(parser, current_offset)?;
+        let auxiliary_xref_stream_offset = xref_table
+            .trailer
+            .dictionary
+            .get("XRefStm")
+            .cloned();
 
         // Merge entries: newer entries (already present) take precedence over older ones.
         for (obj_num, entry) in xref_table.entries {
             entries.entry(obj_num).or_insert(entry);
+        }
+
+        if let Some(xref_stream_offset) = auxiliary_xref_stream_offset {
+            let xref_stream_offset = xref_stream_offset.try_number::<usize>(&PassthroughResolver)?;
+
+            if visited_offsets.insert(xref_stream_offset) {
+                let auxiliary_xref_table =
+                    parse_xref_section_with_recovery(parser, xref_stream_offset)?;
+
+                // Hybrid-reference files use /XRefStm to supplement the traditional xref
+                // section with entries such as compressed objects. Keep the traditional
+                // section authoritative for duplicates within the same revision.
+                for (obj_num, entry) in auxiliary_xref_table.entries {
+                    entries.entry(obj_num).or_insert(entry);
+                }
+            }
         }
 
         let prev_value = xref_table.trailer.dictionary.get("Prev").cloned();
@@ -472,6 +493,77 @@ mod tests {
                 (6, obj6_offset),
             ]),
         )
+    }
+
+    fn build_hybrid_xref_pdf() -> Vec<u8> {
+        fn push_xref_stream_entry(data: &mut Vec<u8>, entry_type: u8, field2: u16, field3: u8) {
+            data.push(entry_type);
+            data.extend_from_slice(&field2.to_be_bytes());
+            data.push(field3);
+        }
+
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%PDF-1.7\n");
+
+        let obj1_offset = data.len();
+        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        let object_2 = b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>";
+        let object_3 = b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>";
+        let object_2_offset = 0usize;
+        let object_3_offset = object_2.len().saturating_add(1);
+        let object_stream_header =
+            format!("2 {object_2_offset} 3 {object_3_offset} ").into_bytes();
+        let first = object_stream_header.len();
+        let mut object_stream_data = object_stream_header;
+        object_stream_data.extend_from_slice(object_2);
+        object_stream_data.push(b' ');
+        object_stream_data.extend_from_slice(object_3);
+
+        let obj4_offset = data.len();
+        data.extend_from_slice(
+            format!(
+                "4 0 obj\n<< /Type /ObjStm /N 2 /First {first} /Length {} >>\nstream\n",
+                object_stream_data.len()
+            )
+            .as_bytes(),
+        );
+        data.extend_from_slice(&object_stream_data);
+        data.extend_from_slice(b"\nendstream\nendobj\n");
+
+        let obj5_offset = data.len();
+        let mut xref_stream_data = Vec::new();
+        push_xref_stream_entry(&mut xref_stream_data, 0, 0, u8::MAX);
+        push_xref_stream_entry(&mut xref_stream_data, 1, obj1_offset as u16, 0);
+        push_xref_stream_entry(&mut xref_stream_data, 2, 4, 0);
+        push_xref_stream_entry(&mut xref_stream_data, 2, 4, 1);
+        push_xref_stream_entry(&mut xref_stream_data, 1, obj4_offset as u16, 0);
+        push_xref_stream_entry(&mut xref_stream_data, 1, obj5_offset as u16, 0);
+        data.extend_from_slice(
+            format!(
+                "5 0 obj\n<< /Type /XRef /Size 6 /W [1 2 1] /Index [0 6] /Length {} >>\nstream\n",
+                xref_stream_data.len()
+            )
+            .as_bytes(),
+        );
+        data.extend_from_slice(&xref_stream_data);
+        data.extend_from_slice(b"\nendstream\nendobj\n");
+
+        let xref_offset = data.len();
+        data.extend_from_slice(b"xref\n0 2\n");
+        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+        data.extend_from_slice(b"4 2\n");
+        data.extend_from_slice(format_xref_entry(obj4_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj5_offset, 0, true).as_bytes());
+        data.extend_from_slice(
+            format!(
+                "trailer\n<< /Size 6 /Root 1 0 R /XRefStm {obj5_offset} >>\nstartxref\n{xref_offset}\n%%EOF"
+            )
+            .as_bytes(),
+        );
+
+        data
     }
 
     #[test]
@@ -775,6 +867,39 @@ mod tests {
                 matches_indirect_object_header(data.as_slice(), byte_offset, object_number, 0),
                 "object {object_number} should point to its indirect object header, got offset {byte_offset}"
             );
+        }
+    }
+
+    #[test]
+    fn test_build_xref_table_merges_hybrid_xref_stream_entries() {
+        let data = build_hybrid_xref_pdf();
+        let mut parser = PdfParser::from(data.as_slice());
+        let table = parser
+            .build_xref_table()
+            .expect("hybrid xref tables should merge /XRefStm entries");
+
+        let pages_entry = table.entries.get(&2).expect("obj 2 should exist");
+        match &pages_entry.entry_type {
+            CrossReferenceEntryType::Compressed {
+                object_stream_number,
+                index_within_stream,
+            } => {
+                assert_eq!(*object_stream_number, 4);
+                assert_eq!(*index_within_stream, 0);
+            }
+            other => panic!("expected compressed xref entry for obj 2, got {other:?}"),
+        }
+
+        let page_entry = table.entries.get(&3).expect("obj 3 should exist");
+        match &page_entry.entry_type {
+            CrossReferenceEntryType::Compressed {
+                object_stream_number,
+                index_within_stream,
+            } => {
+                assert_eq!(*object_stream_number, 4);
+                assert_eq!(*index_within_stream, 1);
+            }
+            other => panic!("expected compressed xref entry for obj 3, got {other:?}"),
         }
     }
 }

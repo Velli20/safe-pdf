@@ -28,11 +28,16 @@ impl PdfParser<'_> {
 
         self.skip_whitespace_and_comments();
 
-        // Read the `startxref` keyword.
-        self.read_keyword(START_XREF_KEYWORD)?;
-
-        // Read the offset of the xref section.
-        let offset = self.read_number::<usize>(true)?;
+        // A trailer located via /Prev may be followed by later body content or another xref
+        // section rather than an immediate startxref footer. When startxref is present,
+        // preserve its offset; otherwise, use 0 because callers only need the dictionary.
+        let mark = self.tokenizer.position;
+        let offset = if self.read_keyword(START_XREF_KEYWORD).is_ok() {
+            self.read_number::<usize>(true)?
+        } else {
+            self.tokenizer.position = mark;
+            0
+        };
 
         Ok(Trailer::new(dictionary, offset))
     }
@@ -81,6 +86,19 @@ mod tests {
             &ObjectVariant::Reference(1)
         );
         assert_eq!(trailer.offset, 187);
+    }
+
+    #[test]
+    fn test_parse_trailer_allows_missing_startxref_for_prev_sections() {
+        let input = b"trailer\n<< /Size 22 /Root 1 0 R /Prev 99 >>\nxref\n0 0\n";
+        let mut parser = PdfParser::from(input.as_slice());
+
+        let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
+        assert_eq!(
+            trailer.dictionary.get("Root").unwrap(),
+            &ObjectVariant::Reference(1)
+        );
+        assert_eq!(trailer.offset, 0);
     }
 
     #[test]
