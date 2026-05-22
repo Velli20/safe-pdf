@@ -54,6 +54,11 @@ pub enum Filter {
     /// Based on variable-length code substitution. This was used in older PDFs
     /// before FlateDecode became the standard. See PDF spec §7.4.4.
     LZWDecode,
+    /// The RunLength filter, a simple byte-oriented compression algorithm.
+    ///
+    /// This filter stores either literal runs or repeated bytes, terminated by
+    /// a dedicated end-of-data marker. See PDF spec §7.4.5.
+    RunLengthDecode,
     /// A filter that is not currently supported by this implementation.
     ///
     /// The contained string holds the original filter name from the PDF,
@@ -75,6 +80,8 @@ impl From<Cow<'_, str>> for Filter {
             "ASCIIHexDecode" => Self::ASCIIHexDecode,
             "LZWDecode" => Self::LZWDecode,
             "LZW" => Self::LZWDecode,
+            "RunLengthDecode" => Self::RunLengthDecode,
+            "RL" => Self::RunLengthDecode,
             _ => Self::Unsupported(name.into_owned()),
         }
     }
@@ -96,6 +103,7 @@ impl fmt::Display for Filter {
             Self::ASCII85Decode => f.write_str("ASCII85Decode"),
             Self::ASCIIHexDecode => f.write_str("ASCIIHexDecode"),
             Self::LZWDecode => f.write_str("LZWDecode"),
+            Self::RunLengthDecode => f.write_str("RunLengthDecode"),
             Self::Unsupported(name) => f.write_str(name),
         }
     }
@@ -296,6 +304,10 @@ pub fn decode_with_resolver<'a>(
                 let decoded = crate::asciihex::decode_ascii_hex(&data)?;
                 data = Cow::Owned(decoded);
             }
+            Filter::RunLengthDecode => {
+                let decoded = crate::runlength::decode_run_length(&data)?;
+                data = Cow::Owned(decoded);
+            }
             Filter::CCITTFaxDecode => {
                 let ccitt_params = match params {
                     DecodeParms::CcittFax(p) => p,
@@ -445,6 +457,13 @@ mod tests {
     }
 
     #[test]
+    fn test_filter_name_round_trip_run_length() {
+        let filter = Filter::from(Cow::Borrowed("RunLengthDecode"));
+        assert_eq!(filter, Filter::RunLengthDecode);
+        assert_eq!(filter.to_string(), "RunLengthDecode");
+    }
+
+    #[test]
     fn test_decode_ascii_hex_stream() {
         let mut dict = BTreeMap::new();
         dict.insert(
@@ -510,5 +529,35 @@ mod tests {
 
         let decoded = decode_with_resolver(&stream, &resolver).expect("decode failed");
         assert_eq!(decoded.as_ref(), b"hello");
+    }
+
+    #[test]
+    fn test_decode_run_length_stream() {
+        let mut dict = BTreeMap::new();
+        dict.insert(
+            "Filter".to_string(),
+            ObjectVariant::Name(b"RunLengthDecode".to_vec()),
+        );
+
+        let stream = StreamObject::new(
+            1,
+            0,
+            Box::new(Dictionary::new(dict)),
+            vec![2, b'A', b'B', b'C', 255, b'!', 128],
+        );
+
+        let decoded = decode(&stream).expect("decode failed");
+        assert_eq!(decoded.as_ref(), b"ABC!!");
+    }
+
+    #[test]
+    fn test_decode_rl_alias_stream() {
+        let mut dict = BTreeMap::new();
+        dict.insert("Filter".to_string(), ObjectVariant::Name(b"RL".to_vec()));
+
+        let stream = StreamObject::new(1, 0, Box::new(Dictionary::new(dict)), vec![0, b'X', 128]);
+
+        let decoded = decode(&stream).expect("decode failed");
+        assert_eq!(decoded.as_ref(), b"X");
     }
 }
