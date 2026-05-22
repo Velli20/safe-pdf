@@ -273,6 +273,7 @@ mod tests {
         let font = Font::Type0(Type0Font {
             subtype: CidFontSubType::Type2,
             font_file: vec![],
+            type1_program_format: None,
             widths: None,
             encoding: None,
             default_width: 1000.0,

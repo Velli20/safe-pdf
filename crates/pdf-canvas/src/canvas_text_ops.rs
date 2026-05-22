@@ -176,12 +176,11 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
                 match font.subtype {
                     CidFontSubType::Type0 => {
                         let program = font.font_file.as_slice();
-                        let mut renderer = Type1FontRenderer::new(
-                            self,
-                            program,
-                            Type1FontProgramFormat::OpenTypeCff,
-                            true,
-                        )?;
+                        let program_format = font
+                            .type1_program_format
+                            .unwrap_or(Type1FontProgramFormat::OpenTypeCff);
+                        let mut renderer =
+                            Type1FontRenderer::new(self, program, program_format, true)?;
                         renderer.render_text(iter)
                     }
                     CidFontSubType::Type2 => {
