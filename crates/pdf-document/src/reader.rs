@@ -1105,4 +1105,67 @@ mod tests {
         let document = result.unwrap();
         assert_eq!(document.page_count(), 1);
     }
+
+    #[test]
+    fn test_sampled_function_shading_with_single_name_array_color_space_loads_normally() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%PDF-1.7\n");
+
+        let obj1_offset = data.len();
+        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        let obj2_offset = data.len();
+        data.extend_from_slice(
+            b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 100 100] >>\nendobj\n",
+        );
+
+        let obj3_offset = data.len();
+        data.extend_from_slice(
+            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Resources 4 0 R >>\nendobj\n",
+        );
+
+        let obj4_offset = data.len();
+        data.extend_from_slice(
+            b"4 0 obj\n<< /Shading << /Sh1 5 0 R >> /ColorSpace << /CS1 [ /DeviceGray ] >> >>\nendobj\n",
+        );
+
+        let obj5_offset = data.len();
+        data.extend_from_slice(
+            b"5 0 obj\n<< /ShadingType 2 /ColorSpace [ /DeviceGray ] /Coords [0 0 100 0] /Function 6 0 R >>\nendobj\n",
+        );
+
+        let obj6_offset = data.len();
+        data.extend_from_slice(
+            b"6 0 obj\n<< /FunctionType 0 /Domain [0 1] /Range [0 1] /Size [4] /BitsPerSample 8 /Length 4 >>\nstream\n",
+        );
+        data.extend_from_slice(&[0x00, 0x55, 0xAA, 0xFF]);
+        data.extend_from_slice(b"\nendstream\nendobj\n");
+
+        let xref_offset = data.len();
+        data.extend_from_slice(b"xref\n0 7\n");
+        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj3_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj4_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj5_offset, 0, true).as_bytes());
+        data.extend_from_slice(format_xref_entry(obj6_offset, 0, true).as_bytes());
+
+        data.extend_from_slice(b"trailer\n<< /Size 7 /Root 1 0 R >>\n");
+        data.extend_from_slice(b"startxref\n");
+        data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
+        data.extend_from_slice(b"%%EOF");
+
+        let reader = PdfReader;
+        let result = reader.read_from_bytes(&data, None);
+
+        assert!(
+            result.is_ok(),
+            "PDF with single-name array color space shading should load: {:?}",
+            result.err()
+        );
+
+        let document = result.unwrap();
+        assert_eq!(document.page_count(), 1);
+    }
 }

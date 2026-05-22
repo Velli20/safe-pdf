@@ -77,6 +77,10 @@ fn parse_color_space_array(
     arr: &[ObjectVariant],
     depth: usize,
 ) -> Result<ColorSpace, ColorSpaceError> {
+    if let [single] = arr {
+        return parse_color_space_name(single.try_str(objects)?.as_ref());
+    }
+
     // Get the color space type (first element)
     let cs_type = arr
         .first()
@@ -126,5 +130,76 @@ fn parse_color_space_name(name: &str) -> Result<ColorSpace, ColorSpaceError> {
         unknown => Err(ColorSpaceError::InvalidColorSpace {
             description: format!("unsupported color space name: /{unknown}"),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
+
+    use crate::{color_space::ColorSpace, error::ColorSpaceError};
+
+    fn name(value: &str) -> ObjectVariant {
+        ObjectVariant::Name(value.as_bytes().to_vec())
+    }
+
+    #[test]
+    fn parses_single_name_device_color_space_arrays() {
+        let cases = [
+            (ObjectVariant::Array(vec![name("DeviceGray")]), ColorSpace::DeviceGray),
+            (ObjectVariant::Array(vec![name("DeviceRGB")]), ColorSpace::DeviceRGB),
+            (ObjectVariant::Array(vec![name("DeviceCMYK")]), ColorSpace::DeviceCMYK),
+        ];
+
+        for (object, expected) in cases {
+            let parsed = ColorSpace::from_object(&object, &PassthroughResolver).unwrap();
+
+            match (parsed, expected) {
+                (ColorSpace::DeviceGray, ColorSpace::DeviceGray)
+                | (ColorSpace::DeviceRGB, ColorSpace::DeviceRGB)
+                | (ColorSpace::DeviceCMYK, ColorSpace::DeviceCMYK) => {}
+                (parsed, expected) => {
+                    panic!("expected {expected:?} for single-name array, got {parsed:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parses_single_name_pattern_array() {
+        let parsed = ColorSpace::from_object(
+            &ObjectVariant::Array(vec![name("Pattern")]),
+            &PassthroughResolver,
+        )
+        .unwrap();
+
+        assert!(matches!(parsed, ColorSpace::Pattern(None)));
+    }
+
+    #[test]
+    fn rejects_empty_color_space_array() {
+        let error =
+            ColorSpace::from_object(&ObjectVariant::Array(Vec::new()), &PassthroughResolver)
+                .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ColorSpaceError::InvalidColorSpace { description } if description == "empty color space array"
+        ));
+    }
+
+    #[test]
+    fn rejects_unsupported_multi_element_color_space_array() {
+        let error = ColorSpace::from_object(
+            &ObjectVariant::Array(vec![name("DeviceGray"), ObjectVariant::Integer(1)]),
+            &PassthroughResolver,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ColorSpaceError::InvalidColorSpace { description }
+                if description == "unsupported color space type: /DeviceGray (array with 2 elements)"
+        ));
     }
 }
