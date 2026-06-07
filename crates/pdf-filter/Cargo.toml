@@ -4,12 +4,16 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bitflags = "2.9.1"
 num-traits = "0.2.19"
 thiserror = "2.0.12"
 flate2 = "1.1.1"
 jpeg2k = "0.10.1"
 image = { version = "0.25.9", default-features = false, features = ["jpeg"] }
+pdf-ccitt = { path = "../pdf-ccitt" }
+pdf-jbig2 = { path = "../pdf-jbig2" }
 pdf-object = { path = "../pdf-object" }
+pdf-utils = { path = "../pdf-utils" }
 
 [lints]
 workspace = true

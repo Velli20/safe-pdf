@@ -18,10 +18,6 @@
 
 pub(crate) mod ascii85;
 pub(crate) mod asciihex;
-mod bitreader;
-pub(crate) mod ccitt;
-pub(crate) mod ccitt_fax_params;
-mod ccitt_tables;
 pub mod error;
 pub mod filter;
 pub(crate) mod lzw;

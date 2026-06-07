@@ -18,8 +18,9 @@
 
 use thiserror::Error;
 
+use pdf_utils::BitReader;
+
 use crate::{
-    bitreader::BitReader,
     ccitt_fax_params::CCITTFaxParams,
     ccitt_tables::{BLACK_RUN_INS, WHITE_RUN_INS},
 };
@@ -386,7 +387,8 @@ fn read_2d_mode(reader: &mut BitReader<'_>) -> Option<TwoDMode> {
 /// Internal decoder state for a single CCITTFaxDecode stream.
 ///
 /// Encapsulates the bit reader, row buffers, and configuration needed to
-/// decode rows sequentially.  Created and consumed by [`decode`].
+/// decode rows sequentially.  Created and consumed by [`decode`] and
+/// [`decode_rows`].
 struct CcittDecoder<'a> {
     reader: BitReader<'a>,
     ref_row: Vec<u8>,
@@ -426,20 +428,21 @@ impl<'a> CcittDecoder<'a> {
         })
     }
 
-    /// Decode all rows and return the concatenated output buffer.
+    /// Decode rows and pass each tight row to `row_sink`.
     ///
     /// The caller specifies `max_rows`; `0` means decode until data exhaustion.
     /// Row-level decode errors (truncated data, invalid codes, etc.) are treated
-    /// as damaged rows: the partial row is included in the output and decoding
+    /// as damaged rows: the partial row is emitted and decoding
     /// continues.  If `damaged_rows_before_error` is non-zero and the number of
     /// damaged rows exceeds that limit, the error is returned.
-    fn decode_all(&mut self, max_rows: usize) -> Result<Vec<u8>, CcittDecodeError> {
-        let row_bytes = self.columns.div_ceil(8);
-        let mut output: Vec<u8> = Vec::with_capacity(
-            max_rows
-                .saturating_mul(row_bytes)
-                .max(row_bytes.saturating_mul(16)),
-        );
+    fn decode_rows_with<F>(
+        &mut self,
+        max_rows: usize,
+        mut row_sink: F,
+    ) -> Result<(), CcittDecodeError>
+    where
+        F: FnMut(&[u8]),
+    {
         let mut decoded_rows: usize = 0;
         let mut damaged_rows: u32 = 0;
 
@@ -461,8 +464,8 @@ impl<'a> CcittDecoder<'a> {
                 // continue or abort based on damaged_rows_before_error.
                 match e {
                     CcittDecodeError::UnexpectedEof => {
-                        // Stream ended mid-row — include partial data, stop.
-                        output.extend_from_slice(&self.row_buf);
+                        // Stream ended mid-row — emit partial data, stop.
+                        self.emit_current_row(&mut row_sink);
                         break;
                     }
                     CcittDecodeError::ZeroColumns => {
@@ -493,15 +496,22 @@ impl<'a> CcittDecoder<'a> {
                 }
             }
 
-            output.extend_from_slice(&self.row_buf);
+            self.emit_current_row(&mut row_sink);
             decoded_rows = decoded_rows.saturating_add(1);
         }
 
-        if self.black_is1 {
-            output.iter_mut().for_each(|b| *b ^= 0xff);
-        }
+        Ok(())
+    }
 
-        Ok(output)
+    /// Emit the current row, applying `BlackIs1` polarity if requested.
+    fn emit_current_row<F>(&mut self, row_sink: &mut F)
+    where
+        F: FnMut(&[u8]),
+    {
+        if self.black_is1 {
+            self.row_buf.iter_mut().for_each(|b| *b ^= 0xff);
+        }
+        row_sink(&self.row_buf);
     }
 
     /// Dispatch a single row based on the `K` parameter.
@@ -654,9 +664,37 @@ impl<'a> CcittDecoder<'a> {
 /// Returns [`CcittDecodeError::ZeroColumns`] if `params.columns` is zero.
 /// Truncated or damaged streams are decoded as-is (matching PDFium behaviour).
 pub fn decode(data: &[u8], params: &CCITTFaxParams) -> Result<Vec<u8>, CcittDecodeError> {
-    let rows = params.rows;
+    let row_bytes = params.columns.div_ceil(8);
+    let mut output: Vec<u8> = Vec::with_capacity(
+        params
+            .rows
+            .saturating_mul(row_bytes)
+            .max(row_bytes.saturating_mul(16)),
+    );
+    decode_rows(data, params, |row| output.extend_from_slice(row))?;
+    Ok(output)
+}
+
+/// Decode a CCITTFaxDecode-compressed byte stream one row at a time.
+///
+/// Supports the same Group 3 1D, Group 3 2D, and Group 4 / MMR modes as
+/// [`decode`]. Each emitted row is tightly packed, MSB-first, and has the same
+/// polarity that [`decode`] would return, including `BlackIs1` handling.
+///
+/// # Errors
+///
+/// Returns [`CcittDecodeError::ZeroColumns`] if `params.columns` is zero.
+/// Truncated or damaged streams are decoded as-is (matching PDFium behaviour).
+pub fn decode_rows<F>(
+    data: &[u8],
+    params: &CCITTFaxParams,
+    row_sink: F,
+) -> Result<(), CcittDecodeError>
+where
+    F: FnMut(&[u8]),
+{
     let mut decoder = CcittDecoder::new(data, params)?;
-    decoder.decode_all(rows)
+    decoder.decode_rows_with(params.rows, row_sink)
 }
 
 #[cfg(test)]
@@ -990,6 +1028,31 @@ mod tests {
         p.black_is1 = true;
         let out = decode(&data, &p).expect("decode failed");
         assert_eq!(out, [0x00]); // inverted: was 0xFF → 0x00
+    }
+
+    #[test]
+    fn decode_rows_matches_decode_for_multi_row_stream() {
+        let data = [0x9cu8, 0xc0u8];
+        let params = params_1d(8, 2);
+        let expected = decode(&data, &params).expect("decode failed");
+        let mut actual = Vec::new();
+
+        decode_rows(&data, &params, |row| actual.extend_from_slice(row))
+            .expect("row decode failed");
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn decode_rows_applies_black_is1_per_row() {
+        let data = [0x98u8];
+        let mut params = params_1d(8, 1);
+        params.black_is1 = true;
+        let mut rows = Vec::new();
+
+        decode_rows(&data, &params, |row| rows.extend_from_slice(row)).expect("row decode failed");
+
+        assert_eq!(rows, [0x00]);
     }
 
     // ── Group 3 2D ───────────────────────────────────────────────────────────

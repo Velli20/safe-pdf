@@ -1,8 +1,9 @@
 use std::borrow::Cow;
 use std::fmt;
 
-use crate::{ccitt_fax_params::CCITTFaxParams, error::FilterError, predictor::PredictorParams};
+use crate::{error::FilterError, predictor::PredictorParams};
 
+use pdf_ccitt::CCITTFaxParams;
 use pdf_object::{
     dictionary::Dictionary,
     object_resolver::{ObjectResolver, PassthroughResolver},
@@ -59,6 +60,11 @@ pub enum Filter {
     /// This filter stores either literal runs or repeated bytes, terminated by
     /// a dedicated end-of-data marker. See PDF spec §7.4.5.
     RunLengthDecode,
+    /// The JBIG2 filter, used for monochrome bi-level images.
+    ///
+    /// JBIG2 decodes to tightly packed 1-bit rows, using the image stream's
+    /// `Width` and `Height` entries to size the output buffer.
+    JBIG2Decode,
     /// A filter that is not currently supported by this implementation.
     ///
     /// The contained string holds the original filter name from the PDF,
@@ -82,6 +88,7 @@ impl From<Cow<'_, str>> for Filter {
             "LZW" => Self::LZWDecode,
             "RunLengthDecode" => Self::RunLengthDecode,
             "RL" => Self::RunLengthDecode,
+            "JBIG2Decode" => Self::JBIG2Decode,
             _ => Self::Unsupported(name.into_owned()),
         }
     }
@@ -104,6 +111,7 @@ impl fmt::Display for Filter {
             Self::ASCIIHexDecode => f.write_str("ASCIIHexDecode"),
             Self::LZWDecode => f.write_str("LZWDecode"),
             Self::RunLengthDecode => f.write_str("RunLengthDecode"),
+            Self::JBIG2Decode => f.write_str("JBIG2Decode"),
             Self::Unsupported(name) => f.write_str(name),
         }
     }
@@ -126,6 +134,8 @@ pub(crate) enum DecodeParms {
     },
     /// Predictor parameters for `FlateDecode`.
     Flate { predictor: PredictorParams },
+    /// JBIG2 globals stream data, if present.
+    Jbig2 { globals: Option<Vec<u8>> },
 }
 
 /// Methods for parsing the `/Filter` entry from a PDF dictionary.
@@ -308,12 +318,21 @@ pub fn decode_with_resolver<'a>(
                 let decoded = crate::runlength::decode_run_length(&data)?;
                 data = Cow::Owned(decoded);
             }
+            Filter::JBIG2Decode => {
+                let (width, height) = resolve_jbig2_dimensions(&stream.dictionary, objects)?;
+                let globals = match params {
+                    DecodeParms::Jbig2 { globals } => globals.as_deref(),
+                    _ => None,
+                };
+                let decoded = pdf_jbig2::decode(&data, width, height, globals)?;
+                data = Cow::Owned(decoded);
+            }
             Filter::CCITTFaxDecode => {
                 let ccitt_params = match params {
                     DecodeParms::CcittFax(p) => p,
                     _ => &CCITTFaxParams::DEFAULT,
                 };
-                let decoded = crate::ccitt::decode(&data, ccitt_params)?;
+                let decoded = pdf_ccitt::decode(&data, ccitt_params)?;
                 data = Cow::Owned(decoded);
             }
             Filter::Unsupported(name) => {
@@ -432,10 +451,48 @@ fn decode_parms_for_filter(
         (Filter::FlateDecode, None) => DecodeParms::Flate {
             predictor: PredictorParams::default(),
         },
+        (Filter::JBIG2Decode, Some(d)) => DecodeParms::Jbig2 {
+            globals: resolve_jbig2_globals(d, objects)?,
+        },
+        (Filter::JBIG2Decode, None) => DecodeParms::Jbig2 { globals: None },
         _ => DecodeParms::None,
     };
 
     Ok(params)
+}
+
+fn resolve_jbig2_dimensions(
+    dict: &Dictionary,
+    objects: &dyn ObjectResolver,
+) -> Result<(u16, u16), FilterError> {
+    let width = dict
+        .get("Width")
+        .ok_or_else(|| FilterError::Decompression("JBIG2Decode requires Width".into()))?
+        .try_number::<u16>(objects)?;
+    let height = dict
+        .get("Height")
+        .ok_or_else(|| FilterError::Decompression("JBIG2Decode requires Height".into()))?
+        .try_number::<u16>(objects)?;
+
+    if width == 0 || height == 0 {
+        return Err(FilterError::Decompression(
+            "JBIG2Decode requires positive Width and Height".into(),
+        ));
+    }
+
+    Ok((width, height))
+}
+
+fn resolve_jbig2_globals(
+    dict: &Dictionary,
+    objects: &dyn ObjectResolver,
+) -> Result<Option<Vec<u8>>, FilterError> {
+    let Some(globals_obj) = dict.get("JBIG2Globals") else {
+        return Ok(None);
+    };
+
+    let globals_stream = globals_obj.try_stream(objects)?;
+    Ok(Some(globals_stream.raw_data().to_vec()))
 }
 
 #[cfg(test)]
@@ -461,6 +518,111 @@ mod tests {
         let filter = Filter::from(Cow::Borrowed("RunLengthDecode"));
         assert_eq!(filter, Filter::RunLengthDecode);
         assert_eq!(filter.to_string(), "RunLengthDecode");
+    }
+
+    #[test]
+    fn test_filter_name_round_trip_jbig2() {
+        let filter = Filter::from(Cow::Borrowed("JBIG2Decode"));
+        assert_eq!(filter, Filter::JBIG2Decode);
+        assert_eq!(filter.to_string(), "JBIG2Decode");
+    }
+
+    #[test]
+    fn test_jbig2_missing_dimensions_returns_decode_error() {
+        let mut dict = BTreeMap::new();
+        dict.insert(
+            "Filter".to_string(),
+            ObjectVariant::Name(b"JBIG2Decode".to_vec()),
+        );
+
+        let stream = StreamObject::new(1, 0, Box::new(Dictionary::new(dict)), Vec::new());
+        let err = decode(&stream).expect_err("expected decode failure");
+        assert!(matches!(err, FilterError::Decompression(_)));
+    }
+
+    #[test]
+    fn test_jbig2_decode_parms_globals_are_resolved() {
+        use std::cell::Cell;
+
+        struct TrackingResolver {
+            objects: BTreeMap<usize, ObjectVariant>,
+            resolved_globals: Cell<bool>,
+        }
+
+        impl ObjectResolver for TrackingResolver {
+            fn resolve_object<'a>(
+                &'a self,
+                obj: &'a ObjectVariant,
+            ) -> Result<&'a ObjectVariant, pdf_object::error::ObjectError> {
+                match obj {
+                    ObjectVariant::Reference(object_number) => {
+                        if *object_number == 3 {
+                            self.resolved_globals.set(true);
+                        }
+                        self.objects.get(object_number).ok_or(
+                            pdf_object::error::ObjectError::FailedResolveObjectReference {
+                                obj_num: *object_number,
+                            },
+                        )
+                    }
+                    other => Ok(other),
+                }
+            }
+        }
+
+        let mut globals_dict = BTreeMap::new();
+        globals_dict.insert(
+            "Filter".to_string(),
+            ObjectVariant::Name(b"JBIG2Decode".to_vec()),
+        );
+        let globals_stream =
+            StreamObject::new(3, 0, Box::new(Dictionary::new(globals_dict)), Vec::new());
+
+        let mut decode_parms = BTreeMap::new();
+        decode_parms.insert("JBIG2Globals".to_string(), ObjectVariant::Reference(3));
+
+        let mut dict = BTreeMap::new();
+        dict.insert(
+            "Filter".to_string(),
+            ObjectVariant::Name(b"JBIG2Decode".to_vec()),
+        );
+        dict.insert("Width".to_string(), ObjectVariant::Integer(8));
+        dict.insert("Height".to_string(), ObjectVariant::Integer(1));
+        dict.insert("DecodeParms".to_string(), ObjectVariant::Reference(2));
+
+        let stream = StreamObject::new(1, 0, Box::new(Dictionary::new(dict)), Vec::new());
+
+        let mut objects = BTreeMap::new();
+        objects.insert(
+            2,
+            ObjectVariant::Dictionary(Box::new(Dictionary::new(decode_parms))),
+        );
+        objects.insert(3, ObjectVariant::Stream(globals_stream));
+
+        let resolver = TrackingResolver {
+            objects,
+            resolved_globals: Cell::new(false),
+        };
+
+        let _ = decode_with_resolver(&stream, &resolver)
+            .expect_err("empty JBIG2 stream should fail after globals resolution");
+        assert!(resolver.resolved_globals.get());
+    }
+
+    #[test]
+    fn test_jbig2_truncated_data_returns_decode_error() {
+        let mut dict = BTreeMap::new();
+        dict.insert(
+            "Filter".to_string(),
+            ObjectVariant::Name(b"JBIG2Decode".to_vec()),
+        );
+        dict.insert("Width".to_string(), ObjectVariant::Integer(8));
+        dict.insert("Height".to_string(), ObjectVariant::Integer(1));
+
+        let stream = StreamObject::new(1, 0, Box::new(Dictionary::new(dict)), vec![0x00]);
+
+        let err = decode(&stream).expect_err("expected decode failure");
+        assert!(matches!(err, FilterError::Decompression(_)));
     }
 
     #[test]
