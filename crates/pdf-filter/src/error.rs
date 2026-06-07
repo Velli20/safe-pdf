@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::ccitt::CcittDecodeError;
+use pdf_ccitt::CcittDecodeError;
 
 /// Errors that can occur during PDF stream filter decoding.
 ///
@@ -20,6 +20,14 @@ pub enum FilterError {
     #[error("unsupported stream filter: {0}")]
     UnsupportedFilter(String),
 
+    /// The stream ended before all required data was available.
+    #[error("stream truncated: {0}")]
+    Truncated(&'static str),
+
+    /// Integer conversion failed because the destination type was too small.
+    #[error("integer conversion overflow: {0}")]
+    Overflow(&'static str),
+
     /// CCITT fax decoding failed.
     #[error(transparent)]
     CcittDecode(#[from] CcittDecodeError),
@@ -28,6 +36,22 @@ pub enum FilterError {
     /// (e.g., resolving the `/Filter` or `/DecodeParms` entries).
     #[error("object error: {0}")]
     Object(String),
+}
+
+impl From<pdf_jbig2::Jbig2Error> for FilterError {
+    fn from(err: pdf_jbig2::Jbig2Error) -> Self {
+        Self::Decompression(err.to_string())
+    }
+}
+
+impl From<pdf_utils::BitReaderError> for FilterError {
+    fn from(err: pdf_utils::BitReaderError) -> Self {
+        match err {
+            pdf_utils::BitReaderError::Truncated(message) => Self::Truncated(message),
+            pdf_utils::BitReaderError::Overflow(message) => Self::Overflow(message),
+            _ => Self::Decompression(err.to_string()),
+        }
+    }
 }
 
 impl From<pdf_object::error::ObjectError> for FilterError {
@@ -41,6 +65,8 @@ impl From<FilterError> for pdf_object::error::ObjectError {
         match err {
             FilterError::Decompression(msg) => Self::DecompressionError(msg),
             FilterError::UnsupportedFilter(name) => Self::UnsupportedFilter(name),
+            FilterError::Truncated(msg) => Self::DecompressionError(msg.to_string()),
+            FilterError::Overflow(msg) => Self::DecompressionError(msg.to_string()),
             FilterError::CcittDecode(e) => Self::DecompressionError(e.to_string()),
             FilterError::Object(msg) => Self::DecompressionError(msg),
         }

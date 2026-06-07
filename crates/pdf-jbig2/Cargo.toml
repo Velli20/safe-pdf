@@ -1,0 +1,25 @@
+[package]
+name = "pdf-jbig2"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+bench-internals = []
+
+[dependencies]
+bitflags = "2.9.1"
+num-traits = "0.2.19"
+pdf-ccitt = { path = "../pdf-ccitt" }
+pdf-utils = { path = "../pdf-utils" }
+thiserror = "2.0.12"
+
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "jbig2"
+harness = false
+required-features = ["bench-internals"]
+
+[lints]
+workspace = true

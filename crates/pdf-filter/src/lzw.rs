@@ -1,4 +1,6 @@
-use crate::{bitreader::BitReader, error::FilterError};
+use crate::error::FilterError;
+
+use pdf_utils::BitReader;
 
 /// Clear-table code (resets the string table).
 const CLEAR_CODE: u16 = 256;
