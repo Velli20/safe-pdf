@@ -19,6 +19,8 @@ pub enum CalcError {
     DivisionByZero,
     #[error("negative sqrt")]
     NegativeSqrt,
+    #[error("invalid log input: expected positive value, got {value}")]
+    LogDomainError { value: f64 },
     #[error("invalid roll count n={n} larger than stack size {size}")]
     RollCountTooLarge { n: usize, size: usize },
     #[error("invalid copy count n={n} larger than stack size {size}")]
@@ -212,6 +214,11 @@ pub fn execute(input_stack: &[f64], ops: &[Operator]) -> Result<Vec<f64>, CalcEr
                 let a = frame.pop()?;
                 frame.push(if a != 0.0 || b != 0.0 { 1.0 } else { 0.0 })?;
             }
+            Operator::Xor => {
+                let b = frame.pop()?;
+                let a = frame.pop()?;
+                frame.push(if (a != 0.0) ^ (b != 0.0) { 1.0 } else { 0.0 })?;
+            }
             Operator::Not => {
                 let a = frame.pop()?;
                 frame.push(if a == 0.0 { 1.0 } else { 0.0 })?;
@@ -311,6 +318,13 @@ pub fn execute(input_stack: &[f64], ops: &[Operator]) -> Result<Vec<f64>, CalcEr
                 let x = frame.pop()?;
                 let y = frame.pop()?;
                 frame.push(y.atan2(x).to_degrees())?;
+            }
+            Operator::Log => {
+                let a = frame.pop()?;
+                if a <= 0.0 {
+                    return Err(CalcError::LogDomainError { value: a });
+                }
+                frame.push(a.ln())?;
             }
             Operator::Mod => {
                 let b = frame.pop()?;
@@ -497,7 +511,9 @@ mod tests {
 
     #[test]
     fn test_parse_logical_operators() {
-        let tokens = vec!["eq", "ne", "gt", "lt", "ge", "le", "and", "or", "not"];
+        let tokens = vec![
+            "eq", "ne", "gt", "lt", "ge", "le", "and", "or", "xor", "not",
+        ];
         let ops = parse_tokens(&tokens).unwrap();
         assert_eq!(
             ops,
@@ -510,7 +526,25 @@ mod tests {
                 Operator::Le,
                 Operator::And,
                 Operator::Or,
+                Operator::Xor,
                 Operator::Not
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_transcendental_operators() {
+        let tokens = vec!["sin", "cos", "tan", "atan", "log", "floor"];
+        let ops = parse_tokens(&tokens).unwrap();
+        assert_eq!(
+            ops,
+            vec![
+                Operator::Sin,
+                Operator::Cos,
+                Operator::Tan,
+                Operator::Atan,
+                Operator::Log,
+                Operator::Floor
             ]
         );
     }
@@ -520,22 +554,6 @@ mod tests {
         let tokens = vec!["cvr"];
         let ops = parse_tokens(&tokens).unwrap();
         assert_eq!(ops, vec![Operator::Cvr]);
-    }
-
-    #[test]
-    fn test_parse_transcendental_operators() {
-        let tokens = vec!["sin", "cos", "tan", "atan", "floor"];
-        let ops = parse_tokens(&tokens).unwrap();
-        assert_eq!(
-            ops,
-            vec![
-                Operator::Sin,
-                Operator::Cos,
-                Operator::Tan,
-                Operator::Atan,
-                Operator::Floor
-            ]
-        );
     }
 
     #[test]
@@ -655,6 +673,16 @@ mod tests {
     }
 
     #[test]
+    fn test_xor() {
+        let result = evaluate_postscript(&[1.0, 0.0], "xor").unwrap();
+        assert_eq!(result, vec![1.0]);
+        let result = evaluate_postscript(&[1.0, 1.0], "xor").unwrap();
+        assert_eq!(result, vec![0.0]);
+        let result = evaluate_postscript(&[0.0, 0.0], "xor").unwrap();
+        assert_eq!(result, vec![0.0]);
+    }
+
+    #[test]
     fn test_not() {
         let result = evaluate_postscript(&[0.0], "not").unwrap();
         assert_eq!(result, vec![1.0]);
@@ -756,6 +784,22 @@ mod tests {
         assert_approx_eq(result[0], 45.0);
         let result = evaluate_postscript(&[1.0, 0.0], "atan").unwrap();
         assert_approx_eq(result[0], 90.0);
+    }
+
+    #[test]
+    fn test_log() {
+        let result = evaluate_postscript(&[std::f64::consts::E], "log").unwrap();
+        assert_approx_eq(result[0], 1.0);
+        let result = evaluate_postscript(&[1.0], "log").unwrap();
+        assert_approx_eq(result[0], 0.0);
+    }
+
+    #[test]
+    fn test_log_domain_error() {
+        let err = evaluate_postscript(&[0.0], "log").unwrap_err();
+        assert!(matches!(err, CalcError::LogDomainError { value } if value == 0.0));
+        let err = evaluate_postscript(&[-1.0], "log").unwrap_err();
+        assert!(matches!(err, CalcError::LogDomainError { value } if value == -1.0));
     }
 
     #[test]
