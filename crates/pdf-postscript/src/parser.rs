@@ -1,4 +1,4 @@
-use crate::{calculator::CalcError, operator::Operator};
+use crate::{calculator::CalcError, operator::Operator, value::Value};
 
 /// Represents a block of operations.
 struct ProgramBlock {
@@ -55,6 +55,7 @@ pub fn parse_tokens(tokens: &[&str]) -> Result<Vec<Operator>, CalcError> {
             "sub" => block_stack.push(Operator::Sub)?,
             "mul" => block_stack.push(Operator::Mul)?,
             "div" => block_stack.push(Operator::Div)?,
+            "idiv" => block_stack.push(Operator::Idiv)?,
             "dup" => block_stack.push(Operator::Dup)?,
             "exch" => block_stack.push(Operator::Exch)?,
             "pop" => block_stack.push(Operator::Pop)?,
@@ -68,6 +69,7 @@ pub fn parse_tokens(tokens: &[&str]) -> Result<Vec<Operator>, CalcError> {
             "or" => block_stack.push(Operator::Or)?,
             "xor" => block_stack.push(Operator::Xor)?,
             "not" => block_stack.push(Operator::Not)?,
+            "bitshift" => block_stack.push(Operator::Bitshift)?,
             "if" => {
                 let block1 = block_stack.pop().ok_or(CalcError::MissingIfBlock)?;
                 block_stack.push(Operator::If(block1))?;
@@ -96,17 +98,33 @@ pub fn parse_tokens(tokens: &[&str]) -> Result<Vec<Operator>, CalcError> {
             "floor" => block_stack.push(Operator::Floor)?,
             "truncate" => block_stack.push(Operator::Truncate)?,
             "abs" => block_stack.push(Operator::Abs)?,
-            "true" => block_stack.push(Operator::Number(1.0))?,
-            "false" => block_stack.push(Operator::Number(0.0))?,
+            "true" => block_stack.push(Operator::Number(Value::Bool(true)))?,
+            "false" => block_stack.push(Operator::Number(Value::Bool(false)))?,
             t => {
-                let num = t
-                    .parse::<f64>()
-                    .map_err(|_| CalcError::InvalidNumber(t.to_string()))?;
-                block_stack.push(Operator::Number(num))?;
+                let value = parse_number(t)?;
+                block_stack.push(Operator::Number(value))?;
             }
         }
         i = i.checked_add(1).ok_or(CalcError::TokenIndexOverflow)?;
     }
 
     block_stack.pop().ok_or(CalcError::EmptyBlockStack)
+}
+
+fn parse_number(token: &str) -> Result<Value, CalcError> {
+    if token.contains('.') || token.contains('e') || token.contains('E') {
+        let value = token
+            .parse::<f64>()
+            .map_err(|_| CalcError::InvalidNumber(token.to_string()))?;
+        if value.is_finite() {
+            Ok(Value::Real(value))
+        } else {
+            Err(CalcError::InvalidNumber(token.to_string()))
+        }
+    } else {
+        token
+            .parse::<i32>()
+            .map(Value::Integer)
+            .map_err(|_| CalcError::InvalidNumber(token.to_string()))
+    }
 }

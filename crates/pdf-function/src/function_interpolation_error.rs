@@ -24,6 +24,8 @@ pub enum FunctionInterpolationError {
     UndefinedExponentiationAtZero,
     #[error("function produced a non-finite numeric value")]
     NonFiniteNumericValue,
+    #[error("PostScript function returned a non-numeric value")]
+    NonNumericPostScriptOutput,
     #[error("sample lookup produced an out-of-bounds coordinate or offset")]
     SampleCoordinateOutOfBounds,
     #[error("sample data is invalid or cannot be decoded")]
