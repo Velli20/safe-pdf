@@ -254,6 +254,7 @@ fn load_objects_with_decryption(
 
     let mut objects = ObjectCollection::default();
     let mut unresolved: Vec<usize> = Vec::new();
+    let mut parsed_obj_streams: HashMap<usize, Vec<(usize, ObjectVariant)>> = HashMap::new();
 
     // Pass 1: Load all type-1 (normal) entries — these are objects at byte offsets,
     // including the object streams themselves.
@@ -279,6 +280,8 @@ fn load_objects_with_decryption(
         }
     }
 
+    load_available_compressed_objects(entries, &mut objects, &mut parsed_obj_streams, false)?;
+
     // Iteratively retry unresolved objects until convergence or the cap is reached.
     // Each iteration may resolve objects whose dependencies were loaded in a prior
     // iteration, unblocking further progress.
@@ -299,8 +302,15 @@ fn load_objects_with_decryption(
             }
         }
 
+        let loaded_compressed = load_available_compressed_objects(
+            entries,
+            &mut objects,
+            &mut parsed_obj_streams,
+            false,
+        )?;
+
         // No progress — the remaining objects are truly unresolvable.
-        if still_unresolved.len() == unresolved.len() {
+        if still_unresolved.len() == unresolved.len() && !loaded_compressed {
             break;
         }
 
@@ -315,9 +325,23 @@ fn load_objects_with_decryption(
         });
     }
 
-    // Pass 2: Unpack type-2 (compressed) entries from object streams.
-    // Cache parsed object streams to avoid re-parsing the same stream multiple times.
-    let mut parsed_obj_streams: HashMap<usize, Vec<(usize, ObjectVariant)>> = HashMap::new();
+    load_available_compressed_objects(entries, &mut objects, &mut parsed_obj_streams, true)?;
+
+    Ok(objects)
+}
+
+/// Unpacks compressed xref entries whose object streams are already available.
+///
+/// Early calls run in best-effort mode because object streams can themselves be
+/// blocked behind normal-object dependencies. The final call is strict and keeps
+/// missing object streams as hard errors.
+fn load_available_compressed_objects(
+    entries: &BTreeMap<usize, CrossReferenceEntry>,
+    objects: &mut ObjectCollection,
+    parsed_obj_streams: &mut HashMap<usize, Vec<(usize, ObjectVariant)>>,
+    strict: bool,
+) -> Result<bool, PdfReaderError> {
+    let mut loaded_any = false;
 
     for (&obj_num, entry) in entries {
         let CrossReferenceEntryType::Compressed {
@@ -328,18 +352,27 @@ fn load_objects_with_decryption(
             continue;
         };
 
+        if objects.get(obj_num).is_some() {
+            continue;
+        }
+
         // Parse the object stream if we haven't already
         if let std::collections::hash_map::Entry::Vacant(e) =
             parsed_obj_streams.entry(object_stream_number)
         {
-            let stream_obj = objects
-                .get(object_stream_number)
-                .ok_or(ObjectError::FailedResolveObjectReference {
-                    obj_num: object_stream_number,
-                })?
-                .try_stream(&objects)?;
+            let Some(stream_obj) = objects.get(object_stream_number) else {
+                if strict {
+                    return Err(ObjectError::FailedResolveObjectReference {
+                        obj_num: object_stream_number,
+                    }
+                    .into());
+                }
+                continue;
+            };
 
-            let unpacked = read_object_stream(stream_obj, &objects)?;
+            let stream_obj = stream_obj.try_stream(&*objects)?;
+
+            let unpacked = read_object_stream(stream_obj, &*objects)?;
             e.insert(unpacked);
         }
 
@@ -349,10 +382,11 @@ fn load_objects_with_decryption(
             && let Some((_cached_num, obj)) = cached.get(index_within_stream)
         {
             objects.insert_compressed(obj_num, obj.clone());
+            loaded_any = true;
         }
     }
 
-    Ok(objects)
+    Ok(loaded_any)
 }
 
 /// Parses a single object at `byte_offset`, validates it, optionally decrypts it,
@@ -933,6 +967,71 @@ mod tests {
         assert!(
             result.is_ok(),
             "Stream with indirect /Length should resolve: {:?}",
+            result.err()
+        );
+
+        let doc = result.unwrap();
+        assert_eq!(doc.page_count(), 0);
+    }
+
+    #[test]
+    fn test_stream_with_compressed_indirect_length_resolves() {
+        fn push_xref_stream_entry(data: &mut Vec<u8>, entry_type: u8, field2: usize, field3: u8) {
+            data.push(entry_type);
+            data.extend_from_slice(&u16::try_from(field2).unwrap().to_be_bytes());
+            data.push(field3);
+        }
+
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%PDF-1.7\n");
+
+        let obj1_offset = data.len();
+        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+        let obj2_offset = data.len();
+        data.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
+
+        let obj4_offset = data.len();
+        data.extend_from_slice(b"4 0 obj\n<< /Length 3 0 R >>\nstream\nHello\nendstream\nendobj\n");
+
+        let object_stream_data = b"3 0 5";
+        let obj5_offset = data.len();
+        data.extend_from_slice(
+            format!(
+                "5 0 obj\n<< /Type /ObjStm /N 1 /First 4 /Length {} >>\nstream\n",
+                object_stream_data.len()
+            )
+            .as_bytes(),
+        );
+        data.extend_from_slice(object_stream_data);
+        data.extend_from_slice(b"\nendstream\nendobj\n");
+
+        let obj6_offset = data.len();
+        let mut xref_stream_data = Vec::new();
+        push_xref_stream_entry(&mut xref_stream_data, 0, 0, u8::MAX);
+        push_xref_stream_entry(&mut xref_stream_data, 1, obj1_offset, 0);
+        push_xref_stream_entry(&mut xref_stream_data, 1, obj2_offset, 0);
+        push_xref_stream_entry(&mut xref_stream_data, 2, 5, 0);
+        push_xref_stream_entry(&mut xref_stream_data, 1, obj4_offset, 0);
+        push_xref_stream_entry(&mut xref_stream_data, 1, obj5_offset, 0);
+        push_xref_stream_entry(&mut xref_stream_data, 1, obj6_offset, 0);
+        data.extend_from_slice(
+            format!(
+                "6 0 obj\n<< /Type /XRef /Size 7 /W [1 2 1] /Root 1 0 R /Length {} >>\nstream\n",
+                xref_stream_data.len()
+            )
+            .as_bytes(),
+        );
+        data.extend_from_slice(&xref_stream_data);
+        data.extend_from_slice(b"\nendstream\nendobj\n");
+        data.extend_from_slice(format!("startxref\n{obj6_offset}\n%%EOF").as_bytes());
+
+        let reader = PdfReader;
+        let result = reader.read_from_bytes(&data, None);
+
+        assert!(
+            result.is_ok(),
+            "stream with compressed indirect /Length should resolve: {:?}",
             result.err()
         );
 
