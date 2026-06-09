@@ -14,6 +14,7 @@ pub(crate) enum SegmentType {
     ImmediateTextRegion,
     ImmediateLosslessTextRegion,
     PatternDictionary,
+    IntermediateHalftoneRegion,
     ImmediateHalftoneRegion,
     ImmediateLosslessHalftoneRegion,
     IntermediateGenericRegion,
@@ -39,6 +40,7 @@ impl SegmentType {
             6 => Some(Self::ImmediateTextRegion),
             7 => Some(Self::ImmediateLosslessTextRegion),
             16 => Some(Self::PatternDictionary),
+            20 => Some(Self::IntermediateHalftoneRegion),
             22 => Some(Self::ImmediateHalftoneRegion),
             23 => Some(Self::ImmediateLosslessHalftoneRegion),
             36 => Some(Self::IntermediateGenericRegion),
@@ -66,6 +68,7 @@ impl SegmentType {
             Self::ImmediateTextRegion => 6,
             Self::ImmediateLosslessTextRegion => 7,
             Self::PatternDictionary => 16,
+            Self::IntermediateHalftoneRegion => 20,
             Self::ImmediateHalftoneRegion => 22,
             Self::ImmediateLosslessHalftoneRegion => 23,
             Self::IntermediateGenericRegion => 36,
@@ -132,6 +135,10 @@ mod tests {
         assert_eq!(
             SegmentType::from_code(48),
             Some(SegmentType::PageInformation)
+        );
+        assert_eq!(
+            SegmentType::from_code(20),
+            Some(SegmentType::IntermediateHalftoneRegion)
         );
         assert_eq!(
             SegmentType::from_code(40),

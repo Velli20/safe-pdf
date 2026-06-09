@@ -201,6 +201,9 @@ impl<'data, 'prior> Jbig2SegmentStreamDecoder<'data, 'prior> {
             SegmentType::ImmediateLosslessGenericRefinementRegion => {
                 self.decode_lossless_generic_refinement_region(segment, segment_end)?;
             }
+            SegmentType::IntermediateHalftoneRegion => {
+                self.decode_intermediate_halftone_region(segment, segment_end)?;
+            }
             SegmentType::ImmediateHalftoneRegion | SegmentType::ImmediateLosslessHalftoneRegion => {
                 self.decode_immediate_halftone_region(segment, segment_end)?;
             }
@@ -396,6 +399,27 @@ impl<'data, 'prior> Jbig2SegmentStreamDecoder<'data, 'prior> {
         Ok(())
     }
 
+    /// Decode an intermediate halftone region and retain its image result.
+    ///
+    /// T.88 section 7.4.5 defines intermediate halftone regions as decoded
+    /// bitmaps that later segments can reference without page composition.
+    fn decode_intermediate_halftone_region(
+        &mut self,
+        segment: &mut ParsedSegment,
+        segment_end: usize,
+    ) -> Result<(), Jbig2Error> {
+        let mut context = SegmentDecodeContext::new(
+            segment,
+            &mut self.stream,
+            segment_end,
+            &self.segments,
+            self.prior_segments,
+        );
+        let decoded = decode_halftone_region_segment(&mut context)?;
+        segment.result = JBig2SegmentResult::Image(decoded.image);
+        Ok(())
+    }
+
     /// Decode an intermediate generic refinement region and retain its image.
     fn decode_intermediate_generic_refinement_region(
         &mut self,
@@ -477,6 +501,7 @@ mod tests {
             StandardHuffmanDecoder, test_support::bits_for_value,
         },
         image::JBig2Image,
+        pattern_dictionary::PatternDictionary,
         segment::{JBig2SegmentResult, ParsedSegment, SegmentType},
         segment_header::UNKNOWN_SEGMENT_DATA_LENGTH,
         symbol_dictionary::SymbolDictionary,
@@ -498,6 +523,10 @@ mod tests {
     }
 
     fn push_u32(bytes: &mut Vec<u8>, value: u32) {
+        bytes.extend_from_slice(&value.to_be_bytes());
+    }
+
+    fn push_i32(bytes: &mut Vec<u8>, value: i32) {
         bytes.extend_from_slice(&value.to_be_bytes());
     }
 
@@ -611,6 +640,23 @@ mod tests {
         bytes
     }
 
+    fn make_minimal_halftone_payload() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        push_u32(&mut bytes, 1);
+        push_u32(&mut bytes, 1);
+        push_u32(&mut bytes, 0);
+        push_u32(&mut bytes, 0);
+        push_u8(&mut bytes, 0);
+        push_u8(&mut bytes, 0);
+        push_u32(&mut bytes, 1);
+        push_u32(&mut bytes, 1);
+        push_i32(&mut bytes, 0);
+        push_i32(&mut bytes, 0);
+        push_u16(&mut bytes, 0);
+        push_u16(&mut bytes, 0);
+        bytes
+    }
+
     #[test]
     fn empty_or_truncated_stream_returns_error() {
         let err = decode_segments(&[], None).expect_err("error");
@@ -706,6 +752,50 @@ mod tests {
         let decoded = decode_segments(&stream, Some((1, 1))).expect("decode");
 
         assert!(decoded.segments.is_empty());
+    }
+
+    #[test]
+    fn intermediate_halftone_region_is_retained_as_image() {
+        let mut pattern = JBig2Image::new(1, 1);
+        pattern.set_pixel(0, 0, 1);
+        let prior = ParsedSegment {
+            number: 1,
+            flags: SegmentType::PatternDictionary.code(),
+            referred_to_segment_numbers: vec![],
+            page_association: 0,
+            data_length: Some(0),
+            result: JBig2SegmentResult::PatternDictionary(PatternDictionary {
+                pattern_width: 1,
+                pattern_height: 1,
+                patterns: vec![pattern],
+            }),
+        };
+        let payload = make_minimal_halftone_payload();
+        let mut stream = make_segment_header(
+            2,
+            SegmentType::IntermediateHalftoneRegion,
+            &[1],
+            1,
+            u32::try_from(payload.len()).expect("payload length"),
+        );
+        stream.extend_from_slice(&payload);
+
+        let decoded = decode_segments_with_prior(&stream, Some((1, 1)), &[prior]).expect("decode");
+
+        assert_eq!(decoded.page.get_pixel(0, 0), 0);
+        assert_eq!(decoded.segments.len(), 1);
+        assert!(matches!(
+            decoded.segments.first().map(|segment| &segment.result),
+            Some(JBig2SegmentResult::Image(_))
+        ));
+        let Some(JBig2SegmentResult::Image(image)) =
+            decoded.segments.first().map(|segment| &segment.result)
+        else {
+            return;
+        };
+        assert_eq!(image.width(), 1);
+        assert_eq!(image.height(), 1);
+        assert_eq!(image.get_pixel(0, 0), 1);
     }
 
     #[test]
