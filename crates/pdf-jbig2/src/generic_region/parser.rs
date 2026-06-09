@@ -1,4 +1,6 @@
-use crate::{compose_op::ComposeOp, error::Jbig2Error, image::JBig2Image, region_info::RegionInfo};
+#[cfg(test)]
+use crate::image::JBig2Image;
+use crate::{error::Jbig2Error, region_info::RegionInfo};
 use pdf_utils::BitReader;
 
 use super::{GenericRegionAdaptiveTemplate, GenericRegionFlags, decode_mmr_region};
@@ -59,7 +61,10 @@ impl GenericRegion {
     /// defines the arithmetic generic-region procedure selected when `MMR = 0`.
     /// The decoded bitmap is placed at the region origin using the compose
     /// operator encoded in the region flags.
+    #[cfg(test)]
     pub(crate) fn compose_to(&self, body: &[u8], dst: &mut JBig2Image) -> Result<(), Jbig2Error> {
+        use crate::compose_op::ComposeOp;
+
         let image = self.decode(body)?;
         image.compose_clipped_to(
             dst,

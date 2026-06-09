@@ -19,6 +19,9 @@ pub(crate) enum SegmentType {
     IntermediateGenericRegion,
     ImmediateGenericRegion,
     ImmediateLosslessGenericRegion,
+    IntermediateGenericRefinementRegion,
+    ImmediateGenericRefinementRegion,
+    ImmediateLosslessGenericRefinementRegion,
     PageInformation,
     EndOfPage,
     EndOfStripe,
@@ -41,6 +44,9 @@ impl SegmentType {
             36 => Some(Self::IntermediateGenericRegion),
             38 => Some(Self::ImmediateGenericRegion),
             39 => Some(Self::ImmediateLosslessGenericRegion),
+            40 => Some(Self::IntermediateGenericRefinementRegion),
+            42 => Some(Self::ImmediateGenericRefinementRegion),
+            43 => Some(Self::ImmediateLosslessGenericRefinementRegion),
             48 => Some(Self::PageInformation),
             49 => Some(Self::EndOfPage),
             50 => Some(Self::EndOfStripe),
@@ -65,6 +71,9 @@ impl SegmentType {
             Self::IntermediateGenericRegion => 36,
             Self::ImmediateGenericRegion => 38,
             Self::ImmediateLosslessGenericRegion => 39,
+            Self::IntermediateGenericRefinementRegion => 40,
+            Self::ImmediateGenericRefinementRegion => 42,
+            Self::ImmediateLosslessGenericRefinementRegion => 43,
             Self::PageInformation => 48,
             Self::EndOfPage => 49,
             Self::EndOfStripe => 50,
@@ -123,6 +132,18 @@ mod tests {
         assert_eq!(
             SegmentType::from_code(48),
             Some(SegmentType::PageInformation)
+        );
+        assert_eq!(
+            SegmentType::from_code(40),
+            Some(SegmentType::IntermediateGenericRefinementRegion)
+        );
+        assert_eq!(
+            SegmentType::from_code(42),
+            Some(SegmentType::ImmediateGenericRefinementRegion)
+        );
+        assert_eq!(
+            SegmentType::from_code(43),
+            Some(SegmentType::ImmediateLosslessGenericRefinementRegion)
         );
         assert_eq!(SegmentType::from_code(63), None);
         assert_eq!(SegmentType::PageInformation.code(), 48);
