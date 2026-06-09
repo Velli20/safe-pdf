@@ -1,6 +1,6 @@
 use pdf_color_space::{color_space::ColorSpace, indexed_color_space::IndexedColorSpace};
 use pdf_decode::{DecodeMap, SampleLayout, decode_sample_codes};
-use pdf_filter::filter::decode_with_resolver;
+use pdf_filter::filter::{Filter, decode_with_resolver};
 use pdf_graphics::PixelFormat;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, stream::StreamObject};
 
@@ -154,12 +154,67 @@ impl ImageXObject {
         objects: &dyn ObjectResolver,
         metadata: &ImageMetadata,
     ) -> Result<DecodedSamples, PdfImageError> {
+        if let Some(decoded_samples) =
+            Self::decode_preconverted_dct_samples(dictionary, raw_data, objects, metadata)?
+        {
+            return Ok(decoded_samples);
+        }
+
         match metadata.color_space.as_ref() {
             Some(ColorSpace::Indexed(indexed)) => {
                 Self::decode_indexed_samples(dictionary, raw_data, objects, metadata, indexed)
             }
             _ => Self::decode_direct_samples(dictionary, raw_data, objects, metadata),
         }
+    }
+
+    /// Uses DCT decoder output as display samples when the JPEG decoder already converted color.
+    fn decode_preconverted_dct_samples(
+        dictionary: &Dictionary,
+        raw_data: &[u8],
+        objects: &dyn ObjectResolver,
+        metadata: &ImageMetadata,
+    ) -> Result<Option<DecodedSamples>, PdfImageError> {
+        if metadata.bits_per_component != 8 || !Self::has_dct_filter(dictionary, objects)? {
+            return Ok(None);
+        }
+
+        let num_pixels = metadata.width.saturating_mul(metadata.height);
+        let Some(num_color_components) = Self::decoded_dct_component_count(raw_data, num_pixels)
+        else {
+            return Ok(None);
+        };
+
+        let stored_color_space = match num_color_components {
+            1 => Some(ColorSpace::DeviceGray),
+            3 => Some(ColorSpace::DeviceRGB),
+            _ => metadata.color_space.clone(),
+        };
+
+        Ok(Some(DecodedSamples {
+            stored_color_space,
+            num_color_components,
+            image_data: raw_data.to_vec(),
+        }))
+    }
+
+    fn has_dct_filter(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+    ) -> Result<bool, PdfImageError> {
+        Ok(
+            Filter::from_dictionary(dictionary, objects)?.is_some_and(|filters| {
+                filters
+                    .iter()
+                    .any(|filter| matches!(filter, Filter::DCTDecode))
+            }),
+        )
+    }
+
+    fn decoded_dct_component_count(raw_data: &[u8], num_pixels: usize) -> Option<usize> {
+        [1, 3, 4]
+            .into_iter()
+            .find(|components| raw_data.len() == num_pixels.saturating_mul(*components))
     }
 
     /// Decodes indexed image samples, applies `/Decode`, and expands palette entries.
@@ -523,6 +578,67 @@ mod tests {
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
         assert_eq!(image.data, vec![12, 34]);
+    }
+
+    #[test]
+    fn decode_normalized_dct_cmyk_accepts_preconverted_rgb_samples() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (
+                "ColorSpace".to_string(),
+                ObjectVariant::Name(b"DeviceCMYK".to_vec()),
+            ),
+            (
+                "Filter".to_string(),
+                ObjectVariant::Name(b"DCTDecode".to_vec()),
+            ),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(2)),
+        ]));
+
+        let image = ImageXObject::decode_normalized_image(
+            &dictionary,
+            &[10, 20, 30, 40, 50, 60],
+            &PassthroughResolver,
+            None,
+        )
+        .expect("DCT-decoded RGB bytes should not be validated as CMYK samples");
+
+        assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
+        assert_eq!(image.data, vec![10, 20, 30, 255, 40, 50, 60, 255]);
+        assert!(matches!(
+            image.color_space,
+            Some(pdf_color_space::color_space::ColorSpace::DeviceRGB)
+        ));
+    }
+
+    #[test]
+    fn decode_normalized_non_dct_cmyk_still_rejects_rgb_sized_samples() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (
+                "ColorSpace".to_string(),
+                ObjectVariant::Name(b"DeviceCMYK".to_vec()),
+            ),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(2)),
+        ]));
+
+        let err = ImageXObject::decode_normalized_image(
+            &dictionary,
+            &[10, 20, 30, 40, 50, 60],
+            &PassthroughResolver,
+            None,
+        )
+        .expect_err("non-DCT CMYK image data should still require four components");
+
+        assert!(matches!(
+            err,
+            PdfImageError::TruncatedImageData {
+                expected_bytes: 8,
+                actual_bytes: 6
+            }
+        ));
     }
 
     #[test]
