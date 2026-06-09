@@ -47,6 +47,14 @@ pub enum Operator {
     Roll,
     /// sqrt (x -- sqrt(x)) square root.
     Sqrt,
+    /// sin (angle -- sin(angle)) sine of an angle in degrees.
+    Sin,
+    /// cos (angle -- cos(angle)) cosine of an angle in degrees.
+    Cos,
+    /// tan (angle -- tan(angle)) tangent of an angle in degrees.
+    Tan,
+    /// atan (y x -- angle) angle in degrees from the positive x-axis to point (x, y).
+    Atan,
     /// abs (x -- |x|) absolute value.
     Abs,
     /// cvi (x -- int) convert to integer (truncate toward zero in PostScript).
@@ -56,6 +64,8 @@ pub enum Operator {
     Cvr,
     /// mod (a b -- a%b) remainder (same sign behavior as PostScript: sign of a).
     Mod,
+    /// floor (x -- floor(x)) greatest integer less than or equal to x.
+    Floor,
     /// truncate (x -- truncated) implementation-specific explicit truncation.
     Truncate,
     /// if (bool proc -- ) executes `proc` iff bool is true. Here stored as

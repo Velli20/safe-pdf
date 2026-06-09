@@ -295,6 +295,23 @@ pub fn execute(input_stack: &[f64], ops: &[Operator]) -> Result<Vec<f64>, CalcEr
                 }
                 frame.push(a.sqrt())?;
             }
+            Operator::Sin => {
+                let angle = frame.pop()?;
+                frame.push(angle.to_radians().sin())?;
+            }
+            Operator::Cos => {
+                let angle = frame.pop()?;
+                frame.push(angle.to_radians().cos())?;
+            }
+            Operator::Tan => {
+                let angle = frame.pop()?;
+                frame.push(angle.to_radians().tan())?;
+            }
+            Operator::Atan => {
+                let x = frame.pop()?;
+                let y = frame.pop()?;
+                frame.push(y.atan2(x).to_degrees())?;
+            }
             Operator::Mod => {
                 let b = frame.pop()?;
                 if b == 0.0 {
@@ -302,6 +319,10 @@ pub fn execute(input_stack: &[f64], ops: &[Operator]) -> Result<Vec<f64>, CalcEr
                 }
                 let a = frame.pop()?;
                 frame.push(a % b)?;
+            }
+            Operator::Floor => {
+                let a = frame.pop()?;
+                frame.push(a.floor())?;
             }
             Operator::Cvi => {
                 let a = frame.pop()?;
@@ -388,6 +409,14 @@ pub fn evaluate_postscript(input_stack: &[f64], code: &str) -> Result<Vec<f64>, 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    fn assert_approx_eq(actual: f64, expected: f64) {
+        let delta = (actual - expected).abs();
+        assert!(
+            delta < 1e-12,
+            "expected {expected}, got {actual}, delta {delta}"
+        );
+    }
 
     #[test]
     fn test_parse_simple_operators() {
@@ -491,6 +520,22 @@ mod tests {
         let tokens = vec!["cvr"];
         let ops = parse_tokens(&tokens).unwrap();
         assert_eq!(ops, vec![Operator::Cvr]);
+    }
+
+    #[test]
+    fn test_parse_transcendental_operators() {
+        let tokens = vec!["sin", "cos", "tan", "atan", "floor"];
+        let ops = parse_tokens(&tokens).unwrap();
+        assert_eq!(
+            ops,
+            vec![
+                Operator::Sin,
+                Operator::Cos,
+                Operator::Tan,
+                Operator::Atan,
+                Operator::Floor
+            ]
+        );
     }
 
     #[test]
@@ -681,6 +726,44 @@ mod tests {
         assert_eq!(result, vec![3.0]);
         let result = evaluate_postscript(&[2.25], "sqrt").unwrap();
         assert_eq!(result, vec![1.5]);
+    }
+
+    #[test]
+    fn test_sin() {
+        let result = evaluate_postscript(&[30.0], "sin").unwrap();
+        assert_approx_eq(result[0], 0.5);
+        let result = evaluate_postscript(&[90.0], "sin").unwrap();
+        assert_approx_eq(result[0], 1.0);
+    }
+
+    #[test]
+    fn test_cos() {
+        let result = evaluate_postscript(&[60.0], "cos").unwrap();
+        assert_approx_eq(result[0], 0.5);
+        let result = evaluate_postscript(&[180.0], "cos").unwrap();
+        assert_approx_eq(result[0], -1.0);
+    }
+
+    #[test]
+    fn test_tan() {
+        let result = evaluate_postscript(&[45.0], "tan").unwrap();
+        assert_approx_eq(result[0], 1.0);
+    }
+
+    #[test]
+    fn test_atan() {
+        let result = evaluate_postscript(&[1.0, 1.0], "atan").unwrap();
+        assert_approx_eq(result[0], 45.0);
+        let result = evaluate_postscript(&[1.0, 0.0], "atan").unwrap();
+        assert_approx_eq(result[0], 90.0);
+    }
+
+    #[test]
+    fn test_floor() {
+        let result = evaluate_postscript(&[3.7], "floor").unwrap();
+        assert_eq!(result, vec![3.0]);
+        let result = evaluate_postscript(&[-2.1], "floor").unwrap();
+        assert_eq!(result, vec![-3.0]);
     }
 
     #[test]

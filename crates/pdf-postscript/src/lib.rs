@@ -1,8 +1,8 @@
 //! A tiny PostScript-inspired stack calculator used inside the PDF processing pipeline.
 //!
 //! This crate provides:
-//! * A small set of PostScript arithmetic, comparison, logical and stack
-//!   manipulation operators (see [`operator::Operator`]).
+//! * A small set of PostScript arithmetic, comparison, logical, transcendental
+//!   and stack manipulation operators (see [`operator::Operator`]).
 //! * A parser (`parser::parse_tokens`) that turns token slices into an
 //!   executable operator list supporting nested procedure blocks for `if` / `ifelse`.
 //! * An interpreter (`calculator::execute` / `calculator::evaluate_postscript`) that
