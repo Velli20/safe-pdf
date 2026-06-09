@@ -37,6 +37,8 @@ pub enum Operator {
     And,
     /// or (x y -- x|y) logical (if both booleans) or bitwise (if numbers) OR.
     Or,
+    /// xor (x y -- x^y) logical exclusive-or on truthy values.
+    Xor,
     /// not (x -- !x) logical (if boolean) or bitwise complement (if integer-like).
     Not,
     /// copy (x1 .. xn n -- x1 .. xn x1 .. xn) duplicates the top `n` elements.
@@ -55,6 +57,8 @@ pub enum Operator {
     Tan,
     /// atan (y x -- angle) angle in degrees from the positive x-axis to point (x, y).
     Atan,
+    /// log (x -- ln(x)) natural logarithm.
+    Log,
     /// abs (x -- |x|) absolute value.
     Abs,
     /// cvi (x -- int) convert to integer (truncate toward zero in PostScript).

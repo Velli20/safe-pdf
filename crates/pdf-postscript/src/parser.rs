@@ -66,6 +66,7 @@ pub fn parse_tokens(tokens: &[&str]) -> Result<Vec<Operator>, CalcError> {
             "le" => block_stack.push(Operator::Le)?,
             "and" => block_stack.push(Operator::And)?,
             "or" => block_stack.push(Operator::Or)?,
+            "xor" => block_stack.push(Operator::Xor)?,
             "not" => block_stack.push(Operator::Not)?,
             "if" => {
                 let block1 = block_stack.pop().ok_or(CalcError::MissingIfBlock)?;
@@ -88,6 +89,7 @@ pub fn parse_tokens(tokens: &[&str]) -> Result<Vec<Operator>, CalcError> {
             "cos" => block_stack.push(Operator::Cos)?,
             "tan" => block_stack.push(Operator::Tan)?,
             "atan" => block_stack.push(Operator::Atan)?,
+            "log" => block_stack.push(Operator::Log)?,
             "cvi" => block_stack.push(Operator::Cvi)?,
             "cvr" => block_stack.push(Operator::Cvr)?,
             "mod" => block_stack.push(Operator::Mod)?,
