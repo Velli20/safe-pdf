@@ -134,6 +134,38 @@ impl<'segment, 'stream, 'data, 'decoded, 'prior>
         }
         Err(Jbig2Error::MissingSegment)
     }
+
+    /// Resolves the first bitmap image referenced by the current segment.
+    ///
+    /// Generic refinement regions refine an already-decoded bitmap segment.
+    /// Missing referred segment numbers are skipped so later references can
+    /// still resolve, matching pattern-dictionary lookup behavior.
+    pub(crate) fn referred_image(&self) -> Result<&JBig2Image, Jbig2Error> {
+        for referred_number in &self.segment.referred_to_segment_numbers {
+            let Some(referred) = self.referred_segment(*referred_number) else {
+                continue;
+            };
+            if let JBig2SegmentResult::Image(image) = &referred.result {
+                return Ok(image);
+            }
+        }
+        Err(Jbig2Error::MissingSegment)
+    }
+
+    /// Resolve the first referenced bitmap, or use `fallback` when the segment
+    /// has no explicit references.
+    pub(crate) fn referred_image_or<'fallback>(
+        &'fallback self,
+        fallback: Option<&'fallback JBig2Image>,
+    ) -> Result<&'fallback JBig2Image, Jbig2Error> {
+        if self.segment.referred_to_segment_numbers.is_empty()
+            && let Some(image) = fallback
+        {
+            return Ok(image);
+        }
+
+        self.referred_image()
+    }
 }
 
 #[cfg(test)]

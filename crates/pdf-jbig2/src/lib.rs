@@ -10,6 +10,7 @@ mod compose_op;
 mod decode;
 pub mod error;
 mod fixed_point;
+mod generic_refinement_region;
 mod generic_region;
 mod halftone_region;
 mod huffman;
