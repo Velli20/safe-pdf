@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use pdf_object::dictionary::Dictionary;
+use pdf_object::{dictionary::Dictionary, object_variant::ObjectVariant};
 
 /// Canonical parsed representation of a PDF inline image.
 #[derive(Debug, Clone, PartialEq)]
@@ -61,14 +61,34 @@ pub fn normalize_inline_image_dictionary(dictionary: &Dictionary) -> Dictionary 
             other => other,
         };
 
+        let canonical_value = normalize_inline_image_value(canonical_key, value);
+
         normalized
             .entry(canonical_key.to_string())
-            .or_insert_with(|| value.clone());
+            .or_insert(canonical_value);
     }
 
     Dictionary {
         dictionary: normalized,
         object_number: dictionary.object_number,
+    }
+}
+
+fn normalize_inline_image_value(key: &str, value: &ObjectVariant) -> ObjectVariant {
+    if key != "ColorSpace" {
+        return value.clone();
+    }
+
+    let ObjectVariant::Name(name) = value else {
+        return value.clone();
+    };
+
+    match name.as_slice() {
+        b"G" => ObjectVariant::Name(b"DeviceGray".to_vec()),
+        b"RGB" => ObjectVariant::Name(b"DeviceRGB".to_vec()),
+        b"CMYK" => ObjectVariant::Name(b"DeviceCMYK".to_vec()),
+        b"I" => ObjectVariant::Name(b"Indexed".to_vec()),
+        _ => value.clone(),
     }
 }
 
@@ -84,7 +104,7 @@ mod tests {
     fn normalize_inline_image_dictionary_expands_abbreviations() {
         let dictionary = pdf_object::dictionary::Dictionary::new(BTreeMap::from([
             ("BPC".to_string(), ObjectVariant::Integer(8)),
-            ("CS".to_string(), ObjectVariant::Name(b"DeviceRGB".to_vec())),
+            ("CS".to_string(), ObjectVariant::Name(b"RGB".to_vec())),
             ("D".to_string(), ObjectVariant::Null),
             ("DP".to_string(), ObjectVariant::Boolean(true)),
             ("F".to_string(), ObjectVariant::Name(b"DCTDecode".to_vec())),
@@ -116,6 +136,30 @@ mod tests {
                 ("Width".to_string(), ObjectVariant::Integer(1)),
             ])
         );
+    }
+
+    #[test]
+    fn normalize_inline_image_dictionary_expands_color_space_values() {
+        let cases = [
+            ("G", "DeviceGray"),
+            ("RGB", "DeviceRGB"),
+            ("CMYK", "DeviceCMYK"),
+            ("I", "Indexed"),
+        ];
+
+        for (abbreviated, canonical) in cases {
+            let dictionary = pdf_object::dictionary::Dictionary::new(BTreeMap::from([(
+                "CS".to_string(),
+                ObjectVariant::Name(abbreviated.as_bytes().to_vec()),
+            )]));
+
+            let normalized = normalize_inline_image_dictionary(&dictionary);
+
+            assert_eq!(
+                normalized.dictionary.get("ColorSpace"),
+                Some(&ObjectVariant::Name(canonical.as_bytes().to_vec()))
+            );
+        }
     }
 
     #[test]

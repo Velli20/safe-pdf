@@ -587,6 +587,25 @@ mod tests {
     }
 
     #[test]
+    fn decode_inline_image_accepts_abbreviated_gray_color_space() {
+        let image = InlineImage::new(
+            Dictionary::new(BTreeMap::from([
+                ("BPC".to_string(), ObjectVariant::Integer(1)),
+                ("CS".to_string(), ObjectVariant::Name(b"G".to_vec())),
+                ("H".to_string(), ObjectVariant::Integer(1)),
+                ("W".to_string(), ObjectVariant::Integer(4)),
+            ])),
+            vec![0b1010_0000],
+        );
+
+        let decoded = ImageXObject::decode_inline_image(&image, &PassthroughResolver, None)
+            .expect("inline image with abbreviated gray color space should decode");
+
+        assert_eq!(decoded.pixel_format, pdf_graphics::PixelFormat::Gray8);
+        assert_eq!(decoded.data, vec![0xFF, 0x00, 0xFF, 0x00]);
+    }
+
+    #[test]
     fn decode_normalized_1bpc_image_expands_samples() {
         let dictionary = Dictionary::new(BTreeMap::from([
             ("BitsPerComponent".to_string(), ObjectVariant::Integer(1)),
