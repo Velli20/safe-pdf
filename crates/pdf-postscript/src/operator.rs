@@ -1,3 +1,5 @@
+use crate::value::Value;
+
 /// Represents a subset of PostScript operators (and literals) supported by the PDF
 /// PostScript-like calculator in this crate. Each variant corresponds to an
 /// operator defined by the PostScript language reference unless otherwise noted.
@@ -15,6 +17,8 @@ pub enum Operator {
     Mul,
     /// div (a b -- a/b)
     Div,
+    /// idiv (a b -- a/b) integer division, truncated toward zero.
+    Idiv,
     /// dup (x -- x x) duplicates the top stack element.
     Dup,
     /// exch (a b -- b a) swaps the top two elements.
@@ -41,6 +45,8 @@ pub enum Operator {
     Xor,
     /// not (x -- !x) logical (if boolean) or bitwise complement (if integer-like).
     Not,
+    /// bitshift (int shift -- shifted) arithmetic shift by `shift` bits.
+    Bitshift,
     /// copy (x1 .. xn n -- x1 .. xn x1 .. xn) duplicates the top `n` elements.
     Copy,
     /// index (x1 .. xn i -- x1 .. xn xi) copies the `i`th element from the top.
@@ -78,6 +84,6 @@ pub enum Operator {
     /// ifelse (bool proc_true proc_false -- ) executes one of the procedures
     /// depending on the boolean value.
     IfElse(Vec<Operator>, Vec<Operator>),
-    /// Numeric literal (integer or real). Kept as f64 for simplicity.
-    Number(f64),
+    /// Literal value.
+    Number(Value),
 }

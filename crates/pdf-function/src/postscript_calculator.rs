@@ -1,6 +1,6 @@
 use num_traits::ToPrimitive;
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
-use pdf_postscript::operator::Operator;
+use pdf_postscript::{operator::Operator, value::Value};
 
 use crate::{
     error::FunctionReadError,
@@ -24,7 +24,7 @@ impl PostScriptCalculatorFunction {
         inputs: &[f32],
         domain: &[f32],
         input_count: usize,
-    ) -> Result<Vec<f64>, FunctionInterpolationError> {
+    ) -> Result<Vec<Value>, FunctionInterpolationError> {
         let mut stack = Vec::with_capacity(input_count);
 
         for i in 0..input_count {
@@ -40,7 +40,7 @@ impl PostScriptCalculatorFunction {
                 })?
                 .clamp(start, end);
 
-            stack.push(f64::from(val));
+            stack.push(Value::Real(f64::from(val)));
         }
 
         Ok(stack)
@@ -48,16 +48,23 @@ impl PostScriptCalculatorFunction {
 
     /// Extracts and clamps outputs from the PostScript result stack.
     fn extract_postscript_outputs(
-        result_stack: &[f64],
+        result_stack: &[Value],
         range: &[f32],
         output_count: usize,
     ) -> Result<Vec<f32>, FunctionInterpolationError> {
         let mut outputs = Vec::with_capacity(output_count);
 
         for i in 0..output_count {
-            let val = *result_stack
+            let val = result_stack
                 .get(i)
                 .ok_or(FunctionInterpolationError::PostScriptResultStackUnderflow)?;
+            let val = match val {
+                Value::Integer(value) => f64::from(*value),
+                Value::Real(value) => *value,
+                Value::Bool(_) => {
+                    return Err(FunctionInterpolationError::NonNumericPostScriptOutput);
+                }
+            };
 
             let (min, max) = get_pair(range, i)
                 .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
