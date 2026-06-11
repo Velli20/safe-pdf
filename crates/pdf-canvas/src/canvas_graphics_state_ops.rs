@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use pdf_content_stream_operators::pdf_operator_backend::GraphicsStateOps;
 use pdf_graphics::{DashPattern, LineCap, LineJoin, transform::Transform};
-use pdf_page::{external_graphics_state::ExternalGraphicsStateKey, xobject::XObject};
+use pdf_page::{
+    external_graphics_state::ExternalGraphicsStateKey, resource::Resource, xobject::XObject,
+};
 
 use crate::{
     canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
@@ -102,8 +104,19 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                 ExternalGraphicsStateKey::OverprintStroke(_) => {}
                 ExternalGraphicsStateKey::OverprintFill(_) => {}
                 ExternalGraphicsStateKey::OverprintMode(_) => {}
-                ExternalGraphicsStateKey::Font(..) => {
-                    return Err(PdfCanvasError::UnsupportedFeature("ExtGState: Font".into()));
+                ExternalGraphicsStateKey::Font(font, font_size) => {
+                    if let Resource::Font { font, resources } = font {
+                        self.current_state_mut()?.text_state.font = Some(font);
+                        if let Some(resources) = resources {
+                            self.current_state_mut()?.text_state.resources = Some(resources);
+                        }
+                    } else {
+                        return Err(PdfCanvasError::UnsupportedFeature(
+                            "ExtGState: Font resource is not a font".into(),
+                        ));
+                    }
+
+                    self.current_state_mut()?.text_state.font_size = *font_size;
                 }
                 ExternalGraphicsStateKey::BlendMode(modes) => {
                     // Store the blend mode(s) in the current graphics state.

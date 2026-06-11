@@ -73,7 +73,7 @@ fn get_sub_dictionary<'a>(
         .map_err(Into::into)
 }
 
-fn read_font_resource(
+pub(crate) fn read_font_resource(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,

@@ -5,7 +5,9 @@ use pdf_object::{
 use crate::{
     error::PdfPagesError,
     object_reader::{ReadCycleTracker, ReadFromDictionary, ReadXObject},
-    resource_cache::ResourceCache,
+    resource::Resource,
+    resource_cache::{ResourceCache, read_resource_lazy},
+    resources::read_font_resource,
     xobject::XObject,
 };
 use num_traits::FromPrimitive;
@@ -55,7 +57,7 @@ pub enum ExternalGraphicsStateKey {
     OverprintMode(i32),
     /// Font (`Font`). An array containing a font dictionary or stream and a font size.
     /// Represented here as the object number of the font resource and the font size.
-    Font(usize, f32),
+    Font(Resource, f32),
     /// Blend mode (`BM`). A name or array of names specifying the blend mode to be used
     /// when compositing objects.
     BlendMode(Vec<BlendMode>),
@@ -186,6 +188,9 @@ fn parse_font(
     key_name: &str,
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
+    cache: &mut dyn ResourceCache,
+    cycle_tracker: &mut ReadCycleTracker,
+    id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
     let arr = value.try_array(objects)?;
     let [font_ref, font_size] = arr else {
@@ -195,9 +200,14 @@ fn parse_font(
             format!("an array with {} elements", arr.len()),
         ));
     };
-    let font_ref = font_ref.try_object_number()?;
     let font_size = font_size.try_number::<f32>(objects)?;
-    Ok(ExternalGraphicsStateKey::Font(font_ref, font_size))
+
+    let dict = font_ref.try_dictionary(objects)?;
+    let resource = read_resource_lazy(cache, dict.object_number, |cache| {
+        read_font_resource(dict, objects, cache, cycle_tracker, id_allocator)
+    })?;
+
+    Ok(ExternalGraphicsStateKey::Font(resource, font_size))
 }
 
 fn to_blend_mode(s: &str) -> Result<BlendMode, PdfPagesError> {
@@ -336,7 +346,7 @@ fn parse_entry(
         "OP" => ExternalGraphicsStateKey::OverprintStroke(value.try_boolean(objects)?),
         "op" => ExternalGraphicsStateKey::OverprintFill(value.try_boolean(objects)?),
         "OPM" => ExternalGraphicsStateKey::OverprintMode(value.try_number::<i32>(objects)?),
-        "Font" => parse_font(name, value, objects)?,
+        "Font" => parse_font(name, value, objects, cache, cycle_tracker, id_allocator)?,
         "BM" => parse_blend_mode(value, objects)?,
         "SMask" => parse_soft_mask(name, value, objects, cache, cycle_tracker, id_allocator)?,
         "CA" => ExternalGraphicsStateKey::StrokingAlpha(value.try_number::<f32>(objects)?),
