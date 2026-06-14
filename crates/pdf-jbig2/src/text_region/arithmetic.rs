@@ -4,6 +4,9 @@ use crate::{
     arith_decoder::{JBig2ArithDecoder, JBig2ArithIntegerContext},
     compose_op::ComposeOp,
     error::Jbig2Error,
+    generic_refinement_region::{
+        GenericRefinementRegionDecode, RefinementAdaptiveTemplate, RefinementTemplate,
+    },
     image::JBig2Image,
     segment_context::SegmentDecodeContext,
     text_region::{
@@ -13,13 +16,20 @@ use crate::{
         parser::ParsedTextRegion,
         state::{TextRegionDecodeState, advance_curs_by_delta_s},
     },
-    util::{INTEGER_CONVERSION_OVERFLOW, ceil_log2},
+    util::{
+        INTEGER_CONVERSION_OVERFLOW, ceil_log2, refined_dimension, refinement_reference_offset,
+    },
 };
 use pdf_utils::BitReader;
 
 const TEXT_REGION_DELTA_T: &str = "text region delta t";
 const TEXT_REGION_FIRST_S_DELTA: &str = "text region first-s delta";
 const TEXT_REGION_INSTANCE_T: &str = "text region instance t";
+const TEXT_REGION_REFINEMENT_FLAG: &str = "text region refinement flag";
+const TEXT_REGION_REFINEMENT_WIDTH: &str = "text region refinement width";
+const TEXT_REGION_REFINEMENT_HEIGHT: &str = "text region refinement height";
+const TEXT_REGION_REFINEMENT_X: &str = "text region refinement x";
+const TEXT_REGION_REFINEMENT_Y: &str = "text region refinement y";
 const TEXT_REGION_SYMBOL_ID: &str = "text region symbol id";
 
 /// Decode an arithmetic-coded JBIG2 text-region body.
@@ -51,17 +61,13 @@ impl<'a> ArithmeticTextRegionDecoder<'a> {
     /// Create an arithmetic text-region decoder from parsed segment state.
     ///
     /// ITU-T T.88 | ISO/IEC 14492 section 7.4.3.1.1 permits refinement text
-    /// regions, but this decoder currently supports only non-refinement input.
+    /// regions. When `SBREFINE` is set, individual instances carry a
+    /// refinement flag and may decode a temporary refinement bitmap before
+    /// composition.
     fn new(
         context: &SegmentDecodeContext<'_, '_, '_, '_, '_>,
         parsed: ParsedTextRegion<'a>,
     ) -> Result<Self, Jbig2Error> {
-        if parsed.flags.contains(TextRegionFlagBits::SBREFINE) {
-            return Err(Jbig2Error::UnsupportedFeature(
-                "arithmetic refinement text regions",
-            ));
-        }
-
         let symbols = context.referred_symbol_images()?;
         if symbols.is_empty() {
             return Err(Jbig2Error::MissingSegment);
@@ -161,7 +167,27 @@ impl<'a> ArithmeticTextRegionDecoder<'a> {
             .ok_or(Jbig2Error::Overflow(INTEGER_CONVERSION_OVERFLOW))?;
         let symbol_id = usize::try_from(decoder.decode_iaid(self.symbol_code_length)?)
             .map_err(|_| Jbig2Error::Overflow(INTEGER_CONVERSION_OVERFLOW))?;
-        self.draw_instance(symbol_id, curs, ti, state)
+        let refined = self.decode_refinement_flag(decoder)?;
+        if refined {
+            self.draw_refined_instance(symbol_id, curs, ti, decoder, state)
+        } else {
+            self.draw_instance(symbol_id, curs, ti, state)
+        }
+    }
+
+    /// Decode the per-instance refinement flag when `SBREFINE` is enabled.
+    fn decode_refinement_flag(
+        &self,
+        decoder: &mut JBig2ArithDecoder<'_, '_>,
+    ) -> Result<bool, Jbig2Error> {
+        if !self.parsed.flags.contains(TextRegionFlagBits::SBREFINE) {
+            return Ok(false);
+        }
+        let value = decoder.decode_required_integer(
+            JBig2ArithIntegerContext::RefinementInstance,
+            TEXT_REGION_REFINEMENT_FLAG,
+        )?;
+        Ok(value != 0)
     }
 
     /// Compose one decoded symbol and return the next `CURS` value.
@@ -191,6 +217,77 @@ impl<'a> ArithmeticTextRegionDecoder<'a> {
             placed_curs,
             symbol.width(),
             symbol.height(),
+        )?;
+        state.record_instance()?;
+        Ok(curs)
+    }
+
+    /// Decode, compose, and advance one refinement-coded symbol instance.
+    fn draw_refined_instance(
+        &mut self,
+        symbol_id: usize,
+        curs: i64,
+        ti: i64,
+        decoder: &mut JBig2ArithDecoder<'_, '_>,
+        state: &mut TextRegionDecodeState,
+    ) -> Result<i64, Jbig2Error> {
+        let reference = self
+            .symbols
+            .get(symbol_id)
+            .ok_or(Jbig2Error::InvalidState(TEXT_REGION_SYMBOL_ID))?;
+        let delta_width = decoder.decode_required_integer(
+            JBig2ArithIntegerContext::RefinementDeltaWidth,
+            TEXT_REGION_REFINEMENT_WIDTH,
+        )?;
+        let delta_height = decoder.decode_required_integer(
+            JBig2ArithIntegerContext::RefinementDeltaHeight,
+            TEXT_REGION_REFINEMENT_HEIGHT,
+        )?;
+        let delta_x = decoder.decode_required_integer(
+            JBig2ArithIntegerContext::RefinementDeltaX,
+            TEXT_REGION_REFINEMENT_X,
+        )?;
+        let delta_y = decoder.decode_required_integer(
+            JBig2ArithIntegerContext::RefinementDeltaY,
+            TEXT_REGION_REFINEMENT_Y,
+        )?;
+        let width =
+            refined_dimension(reference.width(), delta_width, TEXT_REGION_REFINEMENT_WIDTH)?;
+        let height = refined_dimension(
+            reference.height(),
+            delta_height,
+            TEXT_REGION_REFINEMENT_HEIGHT,
+        )?;
+        let template = RefinementTemplate::from_flag(
+            self.parsed.flags.contains(TextRegionFlagBits::SBRTEMPLATE),
+        );
+        let at = self
+            .parsed
+            .refinement_at
+            .unwrap_or_else(|| RefinementAdaptiveTemplate::default_for(template));
+        let reference_dx = refinement_reference_offset(delta_width, delta_x)?;
+        let reference_dy = refinement_reference_offset(delta_height, delta_y)?;
+        let image = GenericRefinementRegionDecode::new(
+            width,
+            height,
+            template,
+            false,
+            at,
+            reference_dx,
+            reference_dy,
+        )
+        .decode(reference, decoder)?;
+        let placed_curs =
+            self.geometry
+                .adjust_curs_before_placement(curs, image.width(), image.height())?;
+        let placement =
+            self.geometry
+                .placement_for(placed_curs, ti, image.width(), image.height())?;
+        image.compose_clipped_to(&mut self.region, placement.x, placement.y, self.compose_op);
+        let curs = self.geometry.advance_curs_after_placement(
+            placed_curs,
+            image.width(),
+            image.height(),
         )?;
         state.record_instance()?;
         Ok(curs)

@@ -8,11 +8,11 @@
 mod arithmetic;
 mod bitmap;
 mod flags;
-mod geometry;
+pub(crate) mod geometry;
 mod huffman;
 mod huffman_flags;
 mod parser;
-mod state;
+pub(crate) mod state;
 
 use crate::{
     error::Jbig2Error,

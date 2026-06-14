@@ -126,7 +126,8 @@ impl<'context, 'segment, 'stream, 'data, 'decoded, 'prior>
     /// contexts for symbol height deltas, width deltas, and export run lengths.
     fn decode_arithmetic_dictionary(&mut self) -> Result<SymbolDictionary, Jbig2Error> {
         let mut decoder = self.context.arithmetic_decoder_until_end()?;
-        let new_symbols = decode_arithmetic_symbol_dictionary(&self.header, &mut decoder)?;
+        let new_symbols =
+            decode_arithmetic_symbol_dictionary(&self.header, &self.input_symbols, &mut decoder)?;
         let export_flags = arithmetic::decode_export_flags(
             &mut decoder,
             self.input_symbols.len(),

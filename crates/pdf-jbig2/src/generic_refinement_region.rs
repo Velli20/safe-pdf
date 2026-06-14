@@ -132,7 +132,16 @@ pub(crate) fn decode_generic_refinement_region_segment(
     let body = context.remaining_body(GENERIC_REFINEMENT_BODY)?;
     let mut stream = pdf_utils::BitReader::new(body);
     let mut decoder = JBig2ArithDecoder::new(&mut stream);
-    let image = header.decode(reference, &mut decoder)?;
+    let image = GenericRefinementRegionDecode::new(
+        header.region.width,
+        header.region.height,
+        header.template,
+        header.tpgron,
+        header.at,
+        0,
+        0,
+    )
+    .decode(reference, &mut decoder)?;
 
     Ok(DecodedGenericRefinementRegionSegment {
         image,
@@ -178,6 +187,41 @@ impl GenericRefinementRegionHeader {
             at,
         })
     }
+}
+
+/// Arithmetic generic-refinement bitmap decode parameters.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct GenericRefinementRegionDecode {
+    width: u16,
+    height: u16,
+    template: RefinementTemplate,
+    tpgron: bool,
+    at: RefinementAdaptiveTemplate,
+    reference_dx: i32,
+    reference_dy: i32,
+}
+
+impl GenericRefinementRegionDecode {
+    /// Create generic-refinement bitmap decode parameters.
+    pub(crate) fn new(
+        width: u16,
+        height: u16,
+        template: RefinementTemplate,
+        tpgron: bool,
+        at: RefinementAdaptiveTemplate,
+        reference_dx: i32,
+        reference_dy: i32,
+    ) -> Self {
+        Self {
+            width,
+            height,
+            template,
+            tpgron,
+            at,
+            reference_dx,
+            reference_dy,
+        }
+    }
 
     /// Decode the refinement bitmap using a referenced bitmap.
     ///
@@ -185,22 +229,22 @@ impl GenericRefinementRegionHeader {
     /// as arithmetic decoding from context bits drawn from the current bitmap
     /// and a reference bitmap. The `TPGRON` row prediction branch is explicitly
     /// rejected until supported.
-    fn decode(
+    pub(crate) fn decode(
         self,
         reference: &JBig2Image,
         decoder: &mut JBig2ArithDecoder<'_, '_>,
     ) -> Result<JBig2Image, Jbig2Error> {
-        if !JBig2Image::is_valid_image_size(self.region.width, self.region.height) {
-            return JBig2Image::try_new(self.region.width, self.region.height, None);
+        if !JBig2Image::is_valid_image_size(self.width, self.height) {
+            return JBig2Image::try_new(self.width, self.height, None);
         }
         if self.tpgron {
             return Err(Jbig2Error::UnsupportedFeature(GENERIC_REFINEMENT_TPGRON));
         }
 
         decoder.ensure_generic_region_contexts()?;
-        let mut image = JBig2Image::try_new(self.region.width, self.region.height, None)?;
-        for y in 0..self.region.height {
-            for x in 0..self.region.width {
+        let mut image = JBig2Image::try_new(self.width, self.height, None)?;
+        for y in 0..self.height {
+            for x in 0..self.width {
                 let context = self.context_label(&image, reference, x, y);
                 let pixel = decoder.decode_prepared_generic_context(context)?;
                 image.set_pixel(x, y, pixel);
@@ -220,7 +264,14 @@ impl GenericRefinementRegionHeader {
             label = (label << 1) | offset.pixel_from(image, x, y);
         }
         for offset in self.template.reference_offsets(self.at) {
-            label = (label << 1) | offset.pixel_from(reference, x, y);
+            label = (label << 1)
+                | offset.pixel_from_with_origin(
+                    reference,
+                    x,
+                    y,
+                    self.reference_dx,
+                    self.reference_dy,
+                );
         }
         label
     }
@@ -231,7 +282,7 @@ impl GenericRefinementRegionHeader {
 /// T.88 / ISO/IEC 14492 section 7.4.7.2 selects between the two generic
 /// refinement templates used by the section 6.3.2 arithmetic context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RefinementTemplate {
+pub(crate) enum RefinementTemplate {
     /// Template 0, which can include adaptive-template pixels.
     ///
     /// T.88 / ISO/IEC 14492 section 6.3.2 defines this as the default generic
@@ -249,7 +300,7 @@ impl RefinementTemplate {
     ///
     /// T.88 / ISO/IEC 14492 section 7.4.7.2 defines `GRTEMPLATE = 0` as
     /// template 0 and `GRTEMPLATE = 1` as template 1.
-    fn from_flag(template_flag: bool) -> Self {
+    pub(crate) fn from_flag(template_flag: bool) -> Self {
         if template_flag {
             Self::Template1
         } else {
@@ -296,7 +347,7 @@ impl RefinementTemplate {
 /// for generic refinement template 0; section 6.3.2 uses those coordinates as
 /// additional arithmetic context pixels.
 #[derive(Debug, Clone, Copy)]
-struct RefinementAdaptiveTemplate {
+pub(crate) struct RefinementAdaptiveTemplate {
     /// Optional current-region adaptive context pixel from section 7.4.7.
     coding: Option<RefinementOffset>,
     /// Optional reference-image adaptive context pixel from section 7.4.7.
@@ -304,11 +355,25 @@ struct RefinementAdaptiveTemplate {
 }
 
 impl RefinementAdaptiveTemplate {
+    /// Return the default adaptive template values used outside segment syntax.
+    pub(crate) fn default_for(template: RefinementTemplate) -> Self {
+        match template {
+            RefinementTemplate::Template0 => Self {
+                coding: Some(RefinementOffset { x: -1, y: -1 }),
+                reference: Some(RefinementOffset { x: -1, y: -1 }),
+            },
+            RefinementTemplate::Template1 => Self {
+                coding: None,
+                reference: None,
+            },
+        }
+    }
+
     /// Parse template-dependent adaptive-template coordinates.
     ///
     /// T.88 / ISO/IEC 14492 section 7.4.7 includes adaptive-template bytes for
     /// template 0 only; template 1 has no adaptive bytes.
-    fn parse(
+    pub(crate) fn parse(
         stream: &mut pdf_utils::BitReader<'_>,
         template: RefinementTemplate,
     ) -> Result<Self, Jbig2Error> {
@@ -382,11 +447,40 @@ impl RefinementOffset {
     fn pixel_from(self, image: &JBig2Image, x: u16, y: u16) -> usize {
         usize::from(image.pixel_at_offset(x, y, self.x, self.y))
     }
+
+    /// Read the template pixel after applying a signed reference-image origin.
+    fn pixel_from_with_origin(
+        self,
+        image: &JBig2Image,
+        x: u16,
+        y: u16,
+        origin_x: i32,
+        origin_y: i32,
+    ) -> usize {
+        let Some(x) = i32::from(x)
+            .checked_add(origin_x)
+            .and_then(|value| value.checked_add(i32::from(self.x)))
+            .and_then(|value| u16::try_from(value).ok())
+        else {
+            return 0;
+        };
+        let Some(y) = i32::from(y)
+            .checked_add(origin_y)
+            .and_then(|value| value.checked_add(i32::from(self.y)))
+            .and_then(|value| u16::try_from(value).ok())
+        else {
+            return 0;
+        };
+        usize::from(image.get_pixel(x, y))
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{GENERIC_REFINEMENT_TPGRON, GenericRefinementRegionHeader, RefinementTemplate};
+    use super::{
+        GENERIC_REFINEMENT_TPGRON, GenericRefinementRegionDecode, GenericRefinementRegionHeader,
+        RefinementTemplate,
+    };
     use crate::{error::Jbig2Error, image::JBig2Image};
     use pdf_utils::BitReader;
 
@@ -433,9 +527,17 @@ mod tests {
         let mut body = BitReader::new(&[0xff]);
         let mut decoder = crate::arith_decoder::JBig2ArithDecoder::new(&mut body);
 
-        let err = header
-            .decode(&JBig2Image::new(1, 1), &mut decoder)
-            .expect_err("tpgron error");
+        let err = GenericRefinementRegionDecode::new(
+            header.region.width,
+            header.region.height,
+            header.template,
+            header.tpgron,
+            header.at,
+            0,
+            0,
+        )
+        .decode(&JBig2Image::new(1, 1), &mut decoder)
+        .expect_err("tpgron error");
 
         assert_eq!(
             err,

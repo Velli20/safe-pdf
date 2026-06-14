@@ -79,6 +79,18 @@ pub(crate) enum JBig2ArithIntegerContext {
     SymbolWidthDelta,
     /// `IAEX`: symbol export run lengths from T.88 section 6.5.8.
     SymbolExportRunLength,
+    /// `IAAI`: refinement aggregate instance counts from T.88 refinement procedures.
+    RefinementAggregateInstances,
+    /// `IARDW`: refinement bitmap width deltas.
+    RefinementDeltaWidth,
+    /// `IARDH`: refinement bitmap height deltas.
+    RefinementDeltaHeight,
+    /// `IARDX`: refinement bitmap x deltas.
+    RefinementDeltaX,
+    /// `IARDY`: refinement bitmap y deltas.
+    RefinementDeltaY,
+    /// `IARI`: text-region refinement flags.
+    RefinementInstance,
 }
 
 impl JBig2ArithDecoder<'_, '_> {

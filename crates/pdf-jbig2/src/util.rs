@@ -39,5 +39,22 @@ pub(crate) fn required_huffman_value(value: HuffmanValue) -> Result<i32, Jbig2Er
     }
 }
 
+pub(crate) fn refinement_reference_offset(size_delta: i32, delta: i32) -> Result<i32, Jbig2Error> {
+    (size_delta >> 1)
+        .checked_add(delta)
+        .ok_or(Jbig2Error::Overflow(INTEGER_CONVERSION_OVERFLOW))
+}
+
+pub(crate) fn refined_dimension(
+    base: u16,
+    delta: i32,
+    label: &'static str,
+) -> Result<u16, Jbig2Error> {
+    let value = i32::from(base)
+        .checked_add(delta)
+        .ok_or(Jbig2Error::Overflow(INTEGER_CONVERSION_OVERFLOW))?;
+    u16::try_from(value).map_err(|_| Jbig2Error::InvalidState(label))
+}
+
 #[cfg(test)]
 mod tests {}
