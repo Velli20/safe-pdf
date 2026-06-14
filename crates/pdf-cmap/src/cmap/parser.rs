@@ -177,7 +177,7 @@ impl<'a> CMapParser<'a> {
     /// Parse and return the ToUnicode mappings from this parser.
     pub fn into_unicode_map(mut self) -> Result<HashMap<u16, Vec<char>>, CMapError> {
         loop {
-            let token = self.next_token()?;
+            let token = self.next_token_lenient()?;
 
             match token {
                 Some(CMapToken::BeginBfChar) => {

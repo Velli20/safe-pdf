@@ -46,6 +46,34 @@ endbfchar
     }
 
     #[test]
+    fn parses_cmap_wrapped_in_postscript_resource_boilerplate() {
+        let map = ToUnicodeCMap::try_from(
+            br"
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo <</Registry (Adobe) /Ordering (Identity) /Supplement 0>> def
+/CMapName /Adobe-Identity def
+/CMapType 2 def
+1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange
+1 beginbfchar
+<0041> <0042>
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+"
+            .as_slice(),
+        )
+        .unwrap();
+
+        assert_eq!(map.map_char_code(0x41), Some(['B'].as_slice()));
+    }
+
+    #[test]
     fn parses_bfrange_array_and_sequential_entries() {
         let map = ToUnicodeCMap::try_from(
             br"
