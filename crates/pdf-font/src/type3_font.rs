@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use pdf_cmap::ToUnicodeCMap;
 use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{
@@ -9,7 +10,6 @@ use pdf_object::{
 use crate::{
     encoding::{Encoding, FontEncoding},
     error::FontError,
-    to_unicode_cmap::ToUnicodeCMap,
 };
 
 /// Represents a Type 3 font in a PDF document.
@@ -80,7 +80,8 @@ impl Type3Font {
             .get("ToUnicode")
             .and_then(|e| e.try_stream(objects).ok())
             .and_then(|s| s.data().ok())
-            .map(|data| ToUnicodeCMap::from_bytes(&data));
+            .map(|data| ToUnicodeCMap::try_from(data.as_ref()))
+            .transpose()?;
 
         Ok(Type3Font {
             font_matrix,

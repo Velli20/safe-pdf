@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use pdf_cmap::ToUnicodeCMap;
 use pdf_object::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
@@ -9,7 +10,6 @@ use crate::{
     encoding::{Encoding, FontEncoding},
     error::FontError,
     simple_font_glyph_map::SimpleFontGlyphWidthsMap,
-    to_unicode_cmap::ToUnicodeCMap,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,7 +67,8 @@ impl Type1Font {
             .get("ToUnicode")
             .and_then(|e| e.try_stream(objects).ok())
             .and_then(|s| s.data().ok())
-            .map(|data| ToUnicodeCMap::from_bytes(&data));
+            .map(|data| ToUnicodeCMap::try_from(data.as_ref()))
+            .transpose()?;
 
         Ok(Self {
             font_file,

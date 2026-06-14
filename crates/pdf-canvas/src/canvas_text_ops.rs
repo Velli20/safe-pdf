@@ -12,7 +12,7 @@ use pdf_content_stream_operators::pdf_operator_backend::{
 };
 use pdf_font::flags::FontFlags;
 use pdf_font::font::Font;
-use pdf_font::type0_font::CidFontSubType;
+use pdf_font::type0_font::Type0FontProgramFormat;
 use pdf_font::type1_font::Type1FontProgramFormat;
 use pdf_graphics::TextRenderingMode;
 use pdf_graphics::transform::Transform;
@@ -166,15 +166,15 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
                 let iter = to_char_iter(text);
                 let is_symbolic = font.flags.contains(FontFlags::SYMBOLIC);
                 let mut renderer =
-                    TrueTypeFontRenderer::new(self, &font.font_file, false, is_symbolic)?;
+                    TrueTypeFontRenderer::new(self, &font.font_file, false, is_symbolic, false)?;
                 renderer.render_text(iter)
             }
             Font::Type0(font) => {
                 let decoded_cids = font.decode_bytes_to_cids(text);
                 let iter = decoded_cids.into_iter();
 
-                match font.subtype {
-                    CidFontSubType::Type0 => {
+                match font.program_format {
+                    Type0FontProgramFormat::OpenTypeCff => {
                         let program = font.font_file.as_slice();
                         let program_format = font
                             .type1_program_format
@@ -183,10 +183,15 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
                             Type1FontRenderer::new(self, program, program_format, true)?;
                         renderer.render_text(iter)
                     }
-                    CidFontSubType::Type2 => {
+                    Type0FontProgramFormat::TrueType { cid_to_unicode } => {
                         // CID TrueType fonts use glyph IDs directly; symbolic flag is irrelevant.
-                        let mut renderer =
-                            TrueTypeFontRenderer::new(self, &font.font_file, true, false)?;
+                        let mut renderer = TrueTypeFontRenderer::new(
+                            self,
+                            &font.font_file,
+                            true,
+                            false,
+                            cid_to_unicode,
+                        )?;
                         renderer.render_text(iter)
                     }
                 }

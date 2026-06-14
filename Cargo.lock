@@ -2027,6 +2027,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdf-cmap"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "pdf-object",
+ "pdf-parser",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "pdf-color-space"
 version = "0.1.0"
 dependencies = [
@@ -2110,6 +2121,7 @@ dependencies = [
  "bitflags 2.9.1",
  "num-derive",
  "num-traits",
+ "pdf-cmap",
  "pdf-content-stream",
  "pdf-content-stream-operators",
  "pdf-graphics",

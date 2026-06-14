@@ -66,6 +66,16 @@ enum Commands {
     },
     /// Clean build artifacts
     Clean,
+    /// Generate compile-time predefined CMap tables from Adobe CMap resources
+    GenerateCmaps {
+        /// Directory containing an Adobe cmap-resources checkout
+        #[arg(long)]
+        source_dir: PathBuf,
+
+        /// Output Rust file
+        #[arg(long, default_value = "crates/pdf-cmap/src/predefined/generated.rs")]
+        output: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -86,6 +96,9 @@ fn main() -> Result<()> {
         }
         Commands::Clean => {
             clean()?;
+        }
+        Commands::GenerateCmaps { source_dir, output } => {
+            generate_cmaps(&source_dir, &output)?;
         }
     }
 
@@ -367,6 +380,34 @@ fn clean() -> Result<()> {
     }
 
     println!("✅ Clean complete!");
+
+    Ok(())
+}
+
+/// Delegate predefined CMap generation to the pdf-cmap helper binary.
+fn generate_cmaps(source_dir: &Path, output: &Path) -> Result<()> {
+    let root = project_root()?;
+
+    let status = Command::new("cargo")
+        .current_dir(&root)
+        .arg("run")
+        .arg("-p")
+        .arg("pdf-cmap")
+        .arg("--bin")
+        .arg("generate-cmaps")
+        .arg("--")
+        .arg("--source-dir")
+        .arg(source_dir)
+        .arg("--output")
+        .arg(output)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .context("Failed to execute pdf-cmap CMap generator")?;
+
+    if !status.success() {
+        bail!("pdf-cmap CMap generator failed with status: {}", status);
+    }
 
     Ok(())
 }

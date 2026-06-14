@@ -24,7 +24,7 @@ impl<'a> From<&'a [u8]> for PdfParser<'a> {
     }
 }
 
-impl PdfParser<'_> {
+impl<'a> PdfParser<'a> {
     /// Maximum nesting depth for PDF objects.
     const MAX_NESTING_DEPTH: usize = 32;
 
@@ -124,7 +124,21 @@ impl PdfParser<'_> {
         }
     }
 
-    fn read_regular_character_token(&mut self) -> Result<&[u8], ParserError> {
+    /// Consumes a `%%EOF` marker as a line comment when parsing embedded grammars.
+    ///
+    /// Normal PDF parsing must preserve `%%EOF`, but embedded streams such as
+    /// CMaps can contain it as ordinary PostScript-style comment text.
+    pub fn skip_eof_marker_as_comment(&mut self) -> bool {
+        if !self.is_at_eof_marker() {
+            return false;
+        }
+
+        self.tokenizer.read();
+        self.skip_comment_body();
+        true
+    }
+
+    fn read_regular_character_token(&mut self) -> Result<&'a [u8], ParserError> {
         let first = self.tokenizer.data().first().copied();
         match first {
             Some(b) if Self::is_pdf_regular_character(b) => {
@@ -139,7 +153,7 @@ impl PdfParser<'_> {
     ///
     /// Content stream operators are PDF keywords, so this reads a single token
     /// consisting of consecutive regular PDF characters.
-    pub fn read_operator_name(&mut self) -> Result<&[u8], ParserError> {
+    pub fn read_operator_name(&mut self) -> Result<&'a [u8], ParserError> {
         self.read_regular_character_token()
     }
 

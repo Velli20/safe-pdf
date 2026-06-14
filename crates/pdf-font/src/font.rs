@@ -1,12 +1,14 @@
 use std::borrow::Cow;
 
+use pdf_cmap::ToUnicodeCMap;
 use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 use crate::{
-    char_vec::CharVec, error::FontError, glyph_name_to_unicode::glyph_name_to_unicode,
-    standard14::Standard14Font, to_unicode_cmap::ToUnicodeCMap, true_type_font::TrueTypeFont,
-    type0_font::Type0Font, type1_font::Type1Font, type3_font::Type3Font,
+    char_vec::CharVec, error::FontError, fallback::fallback_true_type_from_dictionary,
+    glyph_name_to_unicode::glyph_name_to_unicode, standard14::Standard14Font,
+    true_type_font::TrueTypeFont, type0_font::Type0Font, type1_font::Type1Font,
+    type3_font::Type3Font,
 };
 
 /// Represents a font object in a PDF document.
@@ -37,31 +39,13 @@ impl Font {
                 let type0_font = Type0Font::from_dictionary(dictionary, objects)?;
                 Ok(Font::Type0(type0_font))
             }
-            "Type1" => {
-                match Type1Font::from_dictionary(dictionary, objects) {
-                    Err(FontError::MissingFontFile) => {
-                        // No embedded font program — attempt a Standard 14 substitution.
-                        //
-                        // 1. Try matching the `/BaseFont` name to a known Standard 14 font.
-                        // 2. Fall back to a default sans-serif (Helvetica / Roboto-Regular).
-                        let base_font_name = dictionary
-                            .get("BaseFont")
-                            .and_then(|v| v.try_str(objects).ok());
-
-                        let std14 = base_font_name
-                            .as_ref()
-                            .and_then(|name| Standard14Font::from_base_font_name(name.as_ref()))
-                            .unwrap_or_default();
-
-                        Ok(Font::TrueType(TrueTypeFont::from_bytes(
-                            std14.fallback_font_bytes(),
-                            Some(std14),
-                        )))
-                    }
-                    Ok(type1_font) => Ok(Font::Type1(type1_font)),
-                    Err(e) => Err(e),
-                }
-            }
+            "Type1" => match Type1Font::from_dictionary(dictionary, objects) {
+                Err(FontError::MissingFontFile) => Ok(Font::TrueType(
+                    fallback_true_type_from_dictionary(dictionary, objects)?,
+                )),
+                Ok(type1_font) => Ok(Font::Type1(type1_font)),
+                Err(e) => Err(e),
+            },
             "Type3" => {
                 let type3_font = Type3Font::from_dictionary(dictionary, objects, id_allocator)?;
                 Ok(Font::Type3(type3_font))
@@ -182,11 +166,10 @@ impl Font {
 mod tests {
     use std::borrow::Cow;
 
+    use pdf_cmap::Type0EncodingCMap;
+
     use super::*;
-    use crate::{
-        encoding::Encoding, flags::FontFlags, to_unicode_cmap::ToUnicodeCMap,
-        true_type_font::TrueTypeFont, type0_encoding_cmap::Type0EncodingCMap,
-    };
+    use crate::{encoding::Encoding, flags::FontFlags, true_type_font::TrueTypeFont};
 
     #[test]
     fn test_truetype_encoding_fallback() {
@@ -218,7 +201,7 @@ mod tests {
     fn test_ligature_chars_to_unicode() {
         // ToUnicode CMap maps char 1 → fi (U+FB01) + fl (U+FB02) as a ligature pair.
         let cmap_data = b"beginbfchar\n<01> <FB01FB02>\nendbfchar\n";
-        let cmap = ToUnicodeCMap::from_bytes(cmap_data);
+        let cmap = ToUnicodeCMap::try_from(cmap_data.as_slice()).unwrap();
         let font = Font::TrueType(TrueTypeFont {
             font_file: Cow::Owned(vec![]),
             widths: None,
@@ -258,7 +241,7 @@ mod tests {
         <041>
         endbfchar
         "#;
-        let cmap = ToUnicodeCMap::from_bytes(to_unicode_data);
+        let cmap = ToUnicodeCMap::try_from(to_unicode_data.as_slice()).unwrap();
         assert_eq!(cmap.map_char_code(0x01), Some(['\u{0410}'].as_slice()));
     }
 
@@ -266,12 +249,15 @@ mod tests {
     fn test_type0_glyph_to_unicode_fallback() {
         use std::collections::HashMap;
 
-        use crate::type0_font::{CidFontSubType, Type0Font};
+        use crate::type0_font::{CidFontSubType, Type0Font, Type0FontProgramFormat};
 
         let mut glyph_map: HashMap<u16, char> = HashMap::new();
         glyph_map.insert(65u16, 'A');
         let font = Font::Type0(Type0Font {
             subtype: CidFontSubType::Type2,
+            program_format: Type0FontProgramFormat::TrueType {
+                cid_to_unicode: false,
+            },
             font_file: vec![],
             type1_program_format: None,
             widths: None,
