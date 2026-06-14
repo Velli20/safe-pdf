@@ -139,6 +139,12 @@ impl JBig2ArithDecoder<'_, '_> {
             JBig2ArithIntegerContext::SymbolHeightDelta => &mut self.iadh_contexts,
             JBig2ArithIntegerContext::SymbolWidthDelta => &mut self.iadw_contexts,
             JBig2ArithIntegerContext::SymbolExportRunLength => &mut self.iaex_contexts,
+            JBig2ArithIntegerContext::RefinementAggregateInstances => &mut self.iaai_contexts,
+            JBig2ArithIntegerContext::RefinementDeltaWidth => &mut self.iardw_contexts,
+            JBig2ArithIntegerContext::RefinementDeltaHeight => &mut self.iardh_contexts,
+            JBig2ArithIntegerContext::RefinementDeltaX => &mut self.iardx_contexts,
+            JBig2ArithIntegerContext::RefinementDeltaY => &mut self.iardy_contexts,
+            JBig2ArithIntegerContext::RefinementInstance => &mut self.iari_contexts,
         }
     }
 
@@ -154,6 +160,12 @@ impl JBig2ArithDecoder<'_, '_> {
                 JBig2ArithIntegerContext::SymbolHeightDelta => &self.iadh_contexts,
                 JBig2ArithIntegerContext::SymbolWidthDelta => &self.iadw_contexts,
                 JBig2ArithIntegerContext::SymbolExportRunLength => &self.iaex_contexts,
+                JBig2ArithIntegerContext::RefinementAggregateInstances => &self.iaai_contexts,
+                JBig2ArithIntegerContext::RefinementDeltaWidth => &self.iardw_contexts,
+                JBig2ArithIntegerContext::RefinementDeltaHeight => &self.iardh_contexts,
+                JBig2ArithIntegerContext::RefinementDeltaX => &self.iardx_contexts,
+                JBig2ArithIntegerContext::RefinementDeltaY => &self.iardy_contexts,
+                JBig2ArithIntegerContext::RefinementInstance => &self.iari_contexts,
             },
             PoolSelector::Iaid => &self.iaid_contexts,
         }
@@ -171,6 +183,12 @@ impl JBig2ArithDecoder<'_, '_> {
                 JBig2ArithIntegerContext::SymbolHeightDelta => &mut self.iadh_contexts,
                 JBig2ArithIntegerContext::SymbolWidthDelta => &mut self.iadw_contexts,
                 JBig2ArithIntegerContext::SymbolExportRunLength => &mut self.iaex_contexts,
+                JBig2ArithIntegerContext::RefinementAggregateInstances => &mut self.iaai_contexts,
+                JBig2ArithIntegerContext::RefinementDeltaWidth => &mut self.iardw_contexts,
+                JBig2ArithIntegerContext::RefinementDeltaHeight => &mut self.iardh_contexts,
+                JBig2ArithIntegerContext::RefinementDeltaX => &mut self.iardx_contexts,
+                JBig2ArithIntegerContext::RefinementDeltaY => &mut self.iardy_contexts,
+                JBig2ArithIntegerContext::RefinementInstance => &mut self.iari_contexts,
             },
             PoolSelector::Iaid => &mut self.iaid_contexts,
         }

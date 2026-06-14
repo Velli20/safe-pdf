@@ -52,6 +52,18 @@ pub(crate) struct JBig2ArithDecoder<'stream, 'data> {
     pub(super) iadw_contexts: Vec<JBig2ArithCtx>,
     /// `IAEX` contexts for symbol export run-length arithmetic integers.
     pub(super) iaex_contexts: Vec<JBig2ArithCtx>,
+    /// `IAAI` contexts for refinement aggregate instance counts.
+    pub(super) iaai_contexts: Vec<JBig2ArithCtx>,
+    /// `IARDW` contexts for refinement width deltas.
+    pub(super) iardw_contexts: Vec<JBig2ArithCtx>,
+    /// `IARDH` contexts for refinement height deltas.
+    pub(super) iardh_contexts: Vec<JBig2ArithCtx>,
+    /// `IARDX` contexts for refinement x deltas.
+    pub(super) iardx_contexts: Vec<JBig2ArithCtx>,
+    /// `IARDY` contexts for refinement y deltas.
+    pub(super) iardy_contexts: Vec<JBig2ArithCtx>,
+    /// `IARI` contexts for refinement instance flags.
+    pub(super) iari_contexts: Vec<JBig2ArithCtx>,
     /// Annex A.3 IAID context tree.
     pub(super) iaid_contexts: Vec<JBig2ArithCtx>,
     /// Code length used to size the current Annex A.3 IAID context tree.
@@ -102,6 +114,12 @@ impl<'stream, 'data> JBig2ArithDecoder<'stream, 'data> {
             iadh_contexts: Vec::new(),
             iadw_contexts: Vec::new(),
             iaex_contexts: Vec::new(),
+            iaai_contexts: Vec::new(),
+            iardw_contexts: Vec::new(),
+            iardh_contexts: Vec::new(),
+            iardx_contexts: Vec::new(),
+            iardy_contexts: Vec::new(),
+            iari_contexts: Vec::new(),
             iaid_contexts: Vec::new(),
             iaid_code_length: None,
         };

@@ -2,13 +2,13 @@
 
 use crate::{
     error::Jbig2Error,
+    generic_refinement_region::{RefinementAdaptiveTemplate, RefinementTemplate},
     region_info::RegionInfo,
     segment_context::SegmentDecodeContext,
     text_region::{flags::TextRegionFlagBits, huffman_flags::TextRegionHuffmanFlags},
 };
 use pdf_utils::BitReader;
 
-const REFINEMENT_AT_BYTES: usize = 4;
 const TEXT_REGION_BODY: &str = "text region body";
 
 /// Parsed JBIG2 text-region segment header and body slice.
@@ -24,6 +24,8 @@ pub(crate) struct ParsedTextRegion<'a> {
     pub(crate) flags: TextRegionFlagBits,
     /// Optional Huffman table selectors from section 7.4.3.1.2.
     pub(crate) huffman_flags: Option<TextRegionHuffmanFlags>,
+    /// Optional refinement adaptive-template data from section 7.4.3.1.1.
+    pub(crate) refinement_at: Option<RefinementAdaptiveTemplate>,
     /// `SBNUMINSTANCES`, the symbol-instance count used by section 6.4.5.
     pub(crate) symbol_instances: u32,
     /// Encoded text-region data after the segment header.
@@ -73,11 +75,7 @@ impl<'a> ParsedTextRegion<'a> {
             None
         };
 
-        if flags.contains(TextRegionFlagBits::SBREFINE)
-            && !flags.contains(TextRegionFlagBits::SBRTEMPLATE)
-        {
-            Self::skip_refinement_at_bytes(stream)?;
-        }
+        let refinement_at = Self::parse_refinement_at(stream, flags)?;
 
         let symbol_instances = stream.try_read_u32_be::<u32>()?;
         let body = stream
@@ -88,6 +86,7 @@ impl<'a> ParsedTextRegion<'a> {
             region,
             flags,
             huffman_flags,
+            refinement_at,
             symbol_instances,
             body,
         })
@@ -108,14 +107,22 @@ impl<'a> ParsedTextRegion<'a> {
         Ok(())
     }
 
-    /// Skip refinement adaptive-template bytes when `SBREFINE = 1` and `SBRTEMPLATE = 0`.
+    /// Parse refinement adaptive-template bytes when `SBREFINE = 1`.
     ///
-    /// ITU-T T.88 | ISO/IEC 14492 section 7.4.3.1.1 stores four bytes of
-    /// refinement AT coordinates for that flag combination.
-    fn skip_refinement_at_bytes(stream: &mut BitReader<'a>) -> Result<(), Jbig2Error> {
-        for _ in 0..REFINEMENT_AT_BYTES {
-            let _ = stream.try_read_u8::<u8>()?;
+    /// ITU-T T.88 | ISO/IEC 14492 section 7.4.3.1.1 stores refinement AT
+    /// coordinates when template 0 is selected.
+    fn parse_refinement_at(
+        stream: &mut BitReader<'a>,
+        flags: TextRegionFlagBits,
+    ) -> Result<Option<RefinementAdaptiveTemplate>, Jbig2Error> {
+        if !flags.contains(TextRegionFlagBits::SBREFINE) {
+            return Ok(None);
         }
-        Ok(())
+        let template =
+            RefinementTemplate::from_flag(flags.contains(TextRegionFlagBits::SBRTEMPLATE));
+        if template == RefinementTemplate::Template0 {
+            return RefinementAdaptiveTemplate::parse(stream, template).map(Some);
+        }
+        Ok(Some(RefinementAdaptiveTemplate::default_for(template)))
     }
 }

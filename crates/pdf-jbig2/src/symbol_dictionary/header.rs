@@ -1,6 +1,7 @@
 use super::flags::SymbolDictionaryFlagBits;
 use crate::{
     error::Jbig2Error,
+    generic_refinement_region::{RefinementAdaptiveTemplate, RefinementTemplate},
     generic_region::{GenericRegionAdaptiveTemplate, GenericRegionTemplate},
 };
 use pdf_utils::BitReader;
@@ -16,6 +17,8 @@ pub(crate) struct ParsedSymbolDictionaryHeader {
     pub(crate) flags: SymbolDictionaryFlagBits,
     /// Arithmetic generic-region adaptive template parsed when `SDHUFF` is not set.
     pub(super) generic_at: Option<GenericRegionAdaptiveTemplate>,
+    /// Arithmetic refinement adaptive template parsed when `SDREFAGG` is set.
+    pub(super) refinement_at: Option<RefinementAdaptiveTemplate>,
     /// Declared number of exported symbols produced by the segment.
     pub(crate) num_exported: usize,
     /// Declared number of newly decoded symbols carried by the segment.
@@ -43,10 +46,23 @@ impl TryFrom<&mut BitReader<'_>> for ParsedSymbolDictionaryHeader {
                 stream, false, template,
             )?)
         };
+        let refinement_at = if flags.contains(SymbolDictionaryFlagBits::SDREFAGG) {
+            let template = RefinementTemplate::from_flag(
+                flags.contains(SymbolDictionaryFlagBits::SDR_TEMPLATE),
+            );
+            if template == RefinementTemplate::Template0 {
+                Some(RefinementAdaptiveTemplate::parse(stream, template)?)
+            } else {
+                Some(RefinementAdaptiveTemplate::default_for(template))
+            }
+        } else {
+            None
+        };
 
         Self {
             flags,
             generic_at,
+            refinement_at,
             num_exported: stream.try_read_u32_be::<usize>()?,
             num_new_symbols: stream.try_read_u32_be::<usize>()?,
         }
@@ -59,16 +75,10 @@ impl ParsedSymbolDictionaryHeader {
     /// feature set.
     ///
     /// T.88 / ISO 14492 section 7.4.2.1 defines the symbol-dictionary header
-    /// flags. This decoder rejects refinement symbol dictionaries (`SDREFAGG`)
-    /// and the unsupported custom Huffman table variants described by the
-    /// header flags (`SDHUFFDH == 2`, `SDHUFFDW == 2`, or `SDHUFFBMSIZE` set
-    /// with `SDHUFF`).
+    /// flags. This decoder rejects the unsupported custom Huffman table
+    /// variants described by the header flags (`SDHUFFDH == 2`, `SDHUFFDW ==
+    /// 2`, or `SDHUFFBMSIZE` set with `SDHUFF`).
     fn validate_supported(self) -> Result<Self, Jbig2Error> {
-        if self.flags.contains(SymbolDictionaryFlagBits::SDREFAGG) {
-            return Err(Jbig2Error::UnsupportedFeature(
-                "refinement symbol dictionaries",
-            ));
-        }
         if self.flags.contains(SymbolDictionaryFlagBits::SDHUFF)
             && (self.flags.sdhuffdh() == 2 || self.flags.sdhuffdw() == 2)
         {
@@ -112,20 +122,38 @@ mod tests {
     }
 
     #[test]
-    fn header_rejects_refinement_symbol_dictionaries() {
+    fn header_accepts_refinement_symbol_dictionaries() {
         let flags = 1u16 << 1;
         let mut data = Vec::new();
         data.extend_from_slice(&flags.to_be_bytes());
         data.extend_from_slice(&[0u8; 8]);
+        data.extend_from_slice(&[0u8; 4]);
         data.extend_from_slice(&7u32.to_be_bytes());
         data.extend_from_slice(&9u32.to_be_bytes());
 
         let mut reader = BitReader::new(&data);
-        let err = ParsedSymbolDictionaryHeader::try_from(&mut reader).expect_err("header");
-        assert_eq!(
-            err,
-            Jbig2Error::UnsupportedFeature("refinement symbol dictionaries")
-        );
+        let header = ParsedSymbolDictionaryHeader::try_from(&mut reader).expect("header");
+        assert_eq!(header.num_exported, 7);
+        assert_eq!(header.num_new_symbols, 9);
+    }
+
+    #[test]
+    fn refinement_header_reads_refinement_at_bytes_before_symbol_counts() {
+        let flags = 1u16 << 1;
+        let mut data = Vec::new();
+        data.extend_from_slice(&flags.to_be_bytes());
+        data.extend_from_slice(&[3u8, 0xff, 0xfd, 0xff, 2, 0xfe, 0xfe, 0xfe]);
+        data.extend_from_slice(&[0xff, 0xff, 0xff, 0xff]);
+        data.extend_from_slice(&11u32.to_be_bytes());
+        data.extend_from_slice(&4u32.to_be_bytes());
+
+        let mut reader = BitReader::new(&data);
+        let header = ParsedSymbolDictionaryHeader::try_from(&mut reader).expect("header");
+
+        assert!(header.refinement_at.is_some());
+        assert_eq!(header.num_exported, 11);
+        assert_eq!(header.num_new_symbols, 4);
+        assert_eq!(reader.byte_pos(), 22);
     }
 
     #[test]
