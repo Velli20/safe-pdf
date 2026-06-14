@@ -1,7 +1,7 @@
 use crate::{cmap_support::bytes_to_u32, error::CMapError};
 
 /// Token kinds used by embedded font CMap streams.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum CMapToken {
     /// `begincmap`.
     BeginCMap,
@@ -37,6 +37,8 @@ pub enum CMapToken {
     Name(Vec<u8>),
     /// An integer literal.
     Integer(i64),
+    /// A real-number literal.
+    Real(f64),
     /// A PDF hex string decoded into raw bytes.
     HexString(Vec<u8>),
     /// A PDF literal string decoded into raw bytes.

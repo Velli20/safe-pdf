@@ -82,7 +82,7 @@ impl<'a> CMapParser<'a> {
             }
             b'<' => self.parse_left_angle_token()?,
             b'>' => self.parse_right_angle_token(byte)?,
-            b'+' | b'-' | b'0'..=b'9' => self.parse_integer_token(byte)?,
+            b'+' | b'-' | b'0'..=b'9' => self.parse_number_token(byte)?,
             _ if PdfParser::is_pdf_regular_character(byte) => {
                 self.parse_keyword_token(allow_unknown_operators)?
             }
@@ -112,11 +112,12 @@ impl<'a> CMapParser<'a> {
         }
     }
 
-    fn parse_integer_token(&mut self, byte: u8) -> Result<CMapToken, CMapError> {
-        let ObjectVariant::Integer(value) = self.parser.parse_number()? else {
-            return Err(self.unexpected_token(byte).into());
-        };
-        Ok(CMapToken::Integer(value))
+    fn parse_number_token(&mut self, byte: u8) -> Result<CMapToken, CMapError> {
+        match self.parser.parse_number()? {
+            ObjectVariant::Integer(value) => Ok(CMapToken::Integer(value)),
+            ObjectVariant::Real(value) => Ok(CMapToken::Real(value)),
+            _ => Err(self.unexpected_token(byte).into()),
+        }
     }
 
     fn parse_keyword_token(
@@ -216,13 +217,14 @@ mod tests {
 
     #[test]
     fn parses_names_integers_and_brackets() {
-        let mut parser = CMapParser::from(b"/WMode -1 [ ]".as_slice());
+        let mut parser = CMapParser::from(b"/WMode -1 1.000 [ ]".as_slice());
 
         assert_eq!(
             parser.next_token().unwrap(),
             Some(CMapToken::Name(b"WMode".to_vec()))
         );
         assert_eq!(parser.next_token().unwrap(), Some(CMapToken::Integer(-1)));
+        assert_eq!(parser.next_token().unwrap(), Some(CMapToken::Real(1.0)));
         assert_eq!(
             parser.next_token().unwrap(),
             Some(CMapToken::LeftSquareBracket)

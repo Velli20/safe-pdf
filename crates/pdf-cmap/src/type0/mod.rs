@@ -192,6 +192,35 @@ mod tests {
     }
 
     #[test]
+    fn embedded_cmap_accepts_real_number_metadata() {
+        let data = br#"
+        /CIDInit /ProcSet findresource begin
+        12 dict begin
+        begincmap
+        /CMapName /Uni-Utf8-H def
+        /CMapVersion 1.000 def
+        /CMapType 1 def
+        /WMode 0 def
+        2 begincodespacerange
+        <00> <7F>
+        <E08080> <EFBFBF>
+        endcodespacerange
+        2 begincidchar
+        <20> 1
+        <e38081> 38
+        endcidchar
+        endcmap
+        CMapName currentdict /CMap defineresource pop
+        end
+        end
+        "#;
+
+        let cmap = Type0EncodingCMap::from_bytes(data).unwrap();
+
+        assert_eq!(cmap.decode(&[0x20, 0xE3, 0x80, 0x81]), vec![1, 38]);
+    }
+
+    #[test]
     fn embedded_cmap_uses_notdef_for_unmapped_or_invalid_codes() {
         let data = br#"
         begincmap
