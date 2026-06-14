@@ -1,17 +1,17 @@
 use std::{borrow::Cow, collections::HashMap};
 
+use pdf_cmap::ToUnicodeCMap;
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
 use crate::{
     encoding::{Encoding, FontEncoding},
     error::FontError,
+    fallback::fallback_program_from_dictionary,
     flags::FontFlags,
     simple_font_glyph_map::SimpleFontGlyphWidthsMap,
     standard14::Standard14Font,
-    to_unicode_cmap::ToUnicodeCMap,
 };
 
 /// A TrueType font parsed from a PDF font dictionary.
@@ -36,6 +36,12 @@ pub struct TrueTypeFont {
     pub flags: FontFlags,
 }
 
+struct TrueTypeFontProgram {
+    font_file: Cow<'static, [u8]>,
+    standard14: Option<Standard14Font>,
+    flags: FontFlags,
+}
+
 impl TrueTypeFont {
     /// Parses a TrueType font from a PDF font dictionary.
     ///
@@ -45,7 +51,7 @@ impl TrueTypeFont {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, FontError> {
-        let (font_file, flags) = Self::read_font_file(dictionary, objects)?;
+        let program = Self::read_font_program(dictionary, objects)?;
         // Read the `/Widths` entry.
         let widths = SimpleFontGlyphWidthsMap::from_dictionary(dictionary, objects)?;
 
@@ -69,15 +75,16 @@ impl TrueTypeFont {
             .get("ToUnicode")
             .and_then(|e| e.try_stream(objects).ok())
             .and_then(|s| s.data().ok())
-            .map(|data| ToUnicodeCMap::from_bytes(&data));
+            .map(|data| ToUnicodeCMap::try_from(data.as_ref()))
+            .transpose()?;
 
         Ok(Self {
-            font_file,
+            font_file: program.font_file,
             widths,
             encoding,
             to_unicode,
-            standard14: None,
-            flags,
+            standard14: program.standard14,
+            flags: program.flags,
         })
     }
 
@@ -115,14 +122,22 @@ impl TrueTypeFont {
     ///
     /// # Returns
     ///
-    /// Returns the font file bytes as a `Cow<'static, [u8]>` or an [`ObjectError`] if
+    /// Returns the font file bytes as a `Cow<'static, [u8]>` or a [`FontError`] if
     /// reading or decompressing the font stream fails or if the font dictionary or its
     /// `/FontDescriptor` entry is invalid.
     pub(crate) fn read_font_file(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<(Cow<'static, [u8]>, FontFlags), ObjectError> {
-        let flags = if let Some(descriptor) = dictionary
+    ) -> Result<(Cow<'static, [u8]>, FontFlags), FontError> {
+        let program = Self::read_font_program(dictionary, objects)?;
+        Ok((program.font_file, program.flags))
+    }
+
+    fn read_font_program(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+    ) -> Result<TrueTypeFontProgram, FontError> {
+        if let Some(descriptor) = dictionary
             .get("FontDescriptor")
             .map(|obj| obj.try_dictionary(objects))
             .transpose()?
@@ -138,15 +153,20 @@ impl TrueTypeFont {
                 .map(|obj| obj.try_stream(objects))
                 .transpose()?
             {
-                return Ok((Cow::Owned(stream.data()?.to_vec()), flags));
+                return Ok(TrueTypeFontProgram {
+                    font_file: Cow::Owned(stream.data()?.to_vec()),
+                    standard14: None,
+                    flags,
+                });
             }
+        }
 
-            flags
-        } else {
-            FontFlags::empty()
-        };
-
-        Ok((Standard14Font::from(flags).fallback_font_bytes(), flags))
+        let fallback = fallback_program_from_dictionary(dictionary, objects)?;
+        Ok(TrueTypeFontProgram {
+            font_file: fallback.font_file,
+            standard14: Some(fallback.standard14),
+            flags: fallback.flags,
+        })
     }
 }
 

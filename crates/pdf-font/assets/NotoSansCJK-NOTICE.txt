@@ -1,0 +1,8 @@
+Noto Sans CJK Japanese Regular
+
+Source: https://github.com/notofonts/noto-cjk
+File: Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf
+License: SIL Open Font License, Version 1.1
+
+This font is bundled as the deterministic fallback for non-embedded CJK CID
+fonts such as Japan1 Ryumin-Light.

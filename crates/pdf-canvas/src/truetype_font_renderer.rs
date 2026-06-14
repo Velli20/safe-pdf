@@ -31,6 +31,8 @@ pub(crate) struct TrueTypeFontRenderer<'a, 'b, B: CanvasBackend> {
     is_cid: bool,
     /// Whether the font is flagged as symbolic (FontFlags::SYMBOLIC).
     is_symbolic: bool,
+    /// Whether CID values should be mapped through Unicode before glyph lookup.
+    map_cids_to_unicode: bool,
 }
 
 impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
@@ -65,6 +67,7 @@ impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
         stream_object: &'a [u8],
         is_cid: bool,
         is_symbolic: bool,
+        map_cids_to_unicode: bool,
     ) -> Result<Self, PdfCanvasError> {
         let font_ref = FontRef::new(stream_object)
             .map_err(|e| PdfCanvasError::TrueTypeFontParse(e.to_string()))?;
@@ -96,6 +99,7 @@ impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
             units_per_em,
             is_cid,
             is_symbolic,
+            map_cids_to_unicode,
         })
     }
 }
@@ -117,6 +121,13 @@ impl<B: CanvasBackend> TextRenderer for TrueTypeFontRenderer<'_, '_, B> {
             let resolved_glyph_id = if !self.is_cid {
                 let glyph_name = state.text_state.glyph_name(char_code);
                 self.resolve_simple_gid(char_code, glyph_name)
+            } else if self.map_cids_to_unicode {
+                state
+                    .text_state
+                    .font
+                    .and_then(|font| font.char_to_unicode(char_code))
+                    .and_then(|unicode| self.charmap.map(unicode))
+                    .unwrap_or(GlyphId::NOTDEF)
             } else {
                 GlyphId::new(u32::from(char_code))
             };

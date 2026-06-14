@@ -1,3 +1,4 @@
+use pdf_cmap::error::CMapError;
 use pdf_content_stream_operators::error::PdfOperatorError;
 use pdf_object::error::ObjectError;
 use thiserror::Error;
@@ -25,8 +26,6 @@ pub enum FontError {
     InvalidDescendantFonts(&'static str),
     #[error("Unsupported /BaseEncoding value '{0}'")]
     UnsupportedBaseEncoding(String),
-    #[error("Unsupported Type0 /Encoding CMap '{0}'")]
-    UnsupportedType0EncodingCMap(String),
-    #[error("Invalid Type0 /Encoding CMap: {0}")]
-    InvalidType0EncodingCMap(String),
+    #[error("{0}")]
+    CMapError(#[from] CMapError),
 }

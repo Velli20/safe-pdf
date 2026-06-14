@@ -1,0 +1,14 @@
+[package]
+name = "pdf-cmap"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+pdf-parser = { path = "../pdf-parser" }
+pdf-object = { path = "../pdf-object" }
+thiserror = "2.0.12"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }

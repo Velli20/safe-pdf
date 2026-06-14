@@ -140,4 +140,10 @@ These constraints are not cosmetic. They shape the implementation style across t
 
 Safe-PDF is licensed under the MIT License. See [LICENSE](LICENSE).
 
-The repository also embeds Roboto and Roboto Mono font assets under the SIL Open Font License 1.1. See `crates/pdf-font/assets/OFL.txt` for details.
+The repository also embeds fallback font assets under the SIL Open Font
+License 1.1:
+
+- Roboto and Roboto Mono. See `crates/pdf-font/assets/OFL.txt`.
+- Noto Sans CJK Japanese Regular. See
+  `crates/pdf-font/assets/NotoSansCJK-OFL.txt` and
+  `crates/pdf-font/assets/NotoSansCJK-NOTICE.txt`.
