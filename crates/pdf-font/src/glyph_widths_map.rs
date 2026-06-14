@@ -120,7 +120,7 @@ impl GlyphWidthsMap {
         objects: &dyn ObjectResolver,
     ) -> Result<(), GlyphWidthsMapError> {
         if widths_arr.is_empty() {
-            return Err(GlyphWidthsMapError::EmptyWidthsArray { cid });
+            return Ok(());
         }
         let widths = widths_arr
             .iter()
@@ -606,14 +606,29 @@ mod tests {
     }
 
     #[test]
-    fn test_from_array_error_empty_array() {
+    fn test_from_array_empty_widths_array_is_noop() {
         // [ 0 [] ]
         let input_array = vec![num_i64(0), arr(vec![])];
-        let result = GlyphWidthsMap::from_array(&input_array, &PassthroughResolver);
-        assert!(matches!(
-            result,
-            Err(GlyphWidthsMapError::EmptyWidthsArray { cid: 0 })
-        ));
+        let glyph_widths_map =
+            GlyphWidthsMap::from_array(&input_array, &PassthroughResolver).unwrap();
+        assert!(glyph_widths_map.runs.is_empty());
+        assert_eq!(glyph_widths_map.get_width(0), None);
+    }
+
+    #[test]
+    fn test_from_array_continues_after_empty_widths_array() {
+        // [ 0 [] 1 [500] ]
+        let input_array = vec![
+            num_i64(0),
+            arr(vec![]),
+            num_i64(1),
+            arr(vec![num_f32(500.0)]),
+        ];
+        let glyph_widths_map =
+            GlyphWidthsMap::from_array(&input_array, &PassthroughResolver).unwrap();
+        assert_eq!(glyph_widths_map.runs.len(), 1);
+        assert_eq!(glyph_widths_map.get_width(0), None);
+        assert_eq!(glyph_widths_map.get_width(1), Some(500.0));
     }
 
     #[test]
