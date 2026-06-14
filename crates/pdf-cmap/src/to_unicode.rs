@@ -74,6 +74,34 @@ end
     }
 
     #[test]
+    fn parses_cmap_with_real_number_metadata() {
+        let map = ToUnicodeCMap::try_from(
+            br"
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CMapName /Uni-Utf8-H def
+/CMapVersion 1.000 def
+/CMapType 2 def
+1 begincodespacerange
+<00> <7F>
+endcodespacerange
+1 beginbfchar
+<41> <0042>
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+"
+            .as_slice(),
+        )
+        .unwrap();
+
+        assert_eq!(map.map_char_code(0x41), Some(['B'].as_slice()));
+    }
+
+    #[test]
     fn parses_bfrange_array_and_sequential_entries() {
         let map = ToUnicodeCMap::try_from(
             br"
