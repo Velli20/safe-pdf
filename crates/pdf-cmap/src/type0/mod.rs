@@ -167,6 +167,31 @@ mod tests {
     }
 
     #[test]
+    fn embedded_cmap_accepts_postscript_resource_boilerplate() {
+        let data = br#"
+        /CIDInit /ProcSet findresource begin
+        12 dict begin
+        begincmap
+        /WMode 0 def
+        1 begincodespacerange
+        <0000> <00FF>
+        endcodespacerange
+        1 begincidchar
+        <0041> 7
+        endcidchar
+        endcmap
+        CMapName currentdict /CMap defineresource pop
+        end
+        end
+        "#;
+
+        let cmap = Type0EncodingCMap::from_bytes(data).unwrap();
+
+        assert_eq!(cmap.decode(&[0x00, 0x41]), vec![7]);
+        assert_eq!(cmap.writing_mode(), WritingMode::Horizontal);
+    }
+
+    #[test]
     fn embedded_cmap_uses_notdef_for_unmapped_or_invalid_codes() {
         let data = br#"
         begincmap

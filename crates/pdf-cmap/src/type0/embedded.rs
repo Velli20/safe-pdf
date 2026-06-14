@@ -71,7 +71,7 @@ impl TryFrom<&[u8]> for EmbeddedCMap {
     fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
         let mut state = EmbeddedCMapBuilder::from(data);
 
-        while let Some(token) = state.parser.next_token()? {
+        while let Some(token) = state.parser.next_token_lenient()? {
             match token {
                 CMapToken::BeginCodeSpaceRange => {
                     state.parse_codespace_ranges()?;
