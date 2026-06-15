@@ -38,6 +38,7 @@ struct ImageMetadata {
 /// Stores decoded sample bytes before the final pixel format conversion.
 #[derive(Debug, Clone)]
 struct DecodedSamples {
+    bits_per_component: usize,
     stored_color_space: Option<ColorSpace>,
     num_color_components: usize,
     image_data: Vec<u8>,
@@ -87,7 +88,7 @@ impl ImageXObject {
         Ok(Self {
             width: metadata.width,
             height: metadata.height,
-            bits_per_component: metadata.bits_per_component,
+            bits_per_component: decoded_samples.bits_per_component,
             data,
             pixel_format,
             color_space: decoded_samples.stored_color_space,
@@ -110,15 +111,33 @@ impl ImageXObject {
             return Err(PdfImageError::InvalidImageDimensions { width, height });
         }
 
-        let bits_per_component = dictionary
-            .get_or_err("BitsPerComponent")?
-            .try_number::<usize>(objects)?;
-        let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
-        Self::validate_bits_per_component(bits_per_component, color_space.as_ref())?;
-
         let image_mask = dictionary
             .get("ImageMask")
             .map_or(Ok(false), |value| value.try_boolean(objects))?;
+        let (bits_per_component, color_space) = if image_mask {
+            let bits_per_component = dictionary
+                .get("BitsPerComponent")
+                .map_or(Ok(1), |value| value.try_number::<usize>(objects))?;
+            Self::validate_bits_per_component(bits_per_component, image_mask, None)?;
+            (bits_per_component, None)
+        } else {
+            let bits_per_component = if Self::has_jpx_filter(dictionary, objects)? {
+                dictionary
+                    .get("BitsPerComponent")
+                    .map_or(Ok(8), |value| value.try_number::<usize>(objects))?
+            } else {
+                dictionary
+                    .get_or_err("BitsPerComponent")?
+                    .try_number::<usize>(objects)?
+            };
+            let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
+            Self::validate_bits_per_component(
+                bits_per_component,
+                image_mask,
+                color_space.as_ref(),
+            )?;
+            (bits_per_component, color_space)
+        };
 
         Ok(ImageMetadata {
             width,
@@ -132,8 +151,16 @@ impl ImageXObject {
     /// Validates the allowed bit depths for indexed and non-indexed images.
     fn validate_bits_per_component(
         bits_per_component: usize,
+        image_mask: bool,
         color_space: Option<&ColorSpace>,
     ) -> Result<(), PdfImageError> {
+        if image_mask {
+            return match bits_per_component {
+                1 => Ok(()),
+                _ => Err(PdfImageError::UnsupportedImageBitsPerComponent { bits_per_component }),
+            };
+        }
+
         if matches!(color_space, Some(ColorSpace::Indexed(_))) {
             return match bits_per_component {
                 1 | 2 | 4 | 8 => Ok(()),
@@ -154,6 +181,12 @@ impl ImageXObject {
         objects: &dyn ObjectResolver,
         metadata: &ImageMetadata,
     ) -> Result<DecodedSamples, PdfImageError> {
+        if let Some(decoded_samples) =
+            Self::decode_preconverted_jpx_samples(dictionary, raw_data, objects, metadata)?
+        {
+            return Ok(decoded_samples);
+        }
+
         if let Some(decoded_samples) =
             Self::decode_preconverted_dct_samples(dictionary, raw_data, objects, metadata)?
         {
@@ -192,6 +225,42 @@ impl ImageXObject {
         };
 
         Ok(Some(DecodedSamples {
+            bits_per_component: metadata.bits_per_component,
+            stored_color_space,
+            num_color_components,
+            image_data: raw_data.to_vec(),
+        }))
+    }
+
+    /// Uses JPX decoder output as display samples when the decoder already expanded pixels.
+    fn decode_preconverted_jpx_samples(
+        dictionary: &Dictionary,
+        raw_data: &[u8],
+        objects: &dyn ObjectResolver,
+        metadata: &ImageMetadata,
+    ) -> Result<Option<DecodedSamples>, PdfImageError> {
+        if !Self::has_jpx_filter(dictionary, objects)? {
+            return Ok(None);
+        }
+
+        let num_pixels = metadata.width.saturating_mul(metadata.height);
+        let Some(bytes_per_pixel) = raw_data.len().checked_div(num_pixels) else {
+            return Ok(None);
+        };
+        if bytes_per_pixel.saturating_mul(num_pixels) != raw_data.len() {
+            return Ok(None);
+        }
+
+        let (num_color_components, bits_per_component, stored_color_space) = match bytes_per_pixel {
+            1 => (1, 8, Some(ColorSpace::DeviceGray)),
+            2 => (1, 16, Some(ColorSpace::DeviceGray)),
+            3 => (3, 8, Some(ColorSpace::DeviceRGB)),
+            6 => (3, 16, Some(ColorSpace::DeviceRGB)),
+            _ => return Ok(None),
+        };
+
+        Ok(Some(DecodedSamples {
+            bits_per_component,
             stored_color_space,
             num_color_components,
             image_data: raw_data.to_vec(),
@@ -202,13 +271,23 @@ impl ImageXObject {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<bool, PdfImageError> {
-        Ok(
-            Filter::from_dictionary(dictionary, objects)?.is_some_and(|filters| {
-                filters
-                    .iter()
-                    .any(|filter| matches!(filter, Filter::DCTDecode))
-            }),
-        )
+        Self::has_filter(dictionary, objects, Filter::DCTDecode)
+    }
+
+    fn has_jpx_filter(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+    ) -> Result<bool, PdfImageError> {
+        Self::has_filter(dictionary, objects, Filter::JPXDecode)
+    }
+
+    fn has_filter(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+        target: Filter,
+    ) -> Result<bool, PdfImageError> {
+        Ok(Filter::from_dictionary(dictionary, objects)?
+            .is_some_and(|filters| filters.contains(&target)))
     }
 
     fn decoded_dct_component_count(raw_data: &[u8], num_pixels: usize) -> Option<usize> {
@@ -238,6 +317,7 @@ impl ImageXObject {
         )?;
 
         Ok(DecodedSamples {
+            bits_per_component: metadata.bits_per_component,
             stored_color_space: Some(*indexed.base.clone()),
             num_color_components: base_components,
             image_data,
@@ -260,6 +340,7 @@ impl ImageXObject {
             DecodeMap::from_dictionary(dictionary, objects, num_components, metadata.image_mask)?;
 
         Ok(DecodedSamples {
+            bits_per_component: metadata.bits_per_component,
             stored_color_space: metadata.color_space.clone(),
             num_color_components: num_components,
             image_data: decode.apply_to_bytes(
@@ -432,7 +513,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use pdf_object::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+        dictionary::Dictionary, error::ObjectError, object_resolver::PassthroughResolver,
+        object_variant::ObjectVariant,
     };
 
     use super::{ImageXObject, InlineImage};
@@ -578,6 +660,77 @@ mod tests {
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
         assert_eq!(image.data, vec![12, 34]);
+    }
+
+    #[test]
+    fn decode_normalized_image_mask_defaults_bits_per_component_to_one() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            ("ImageMask".to_string(), ObjectVariant::Boolean(true)),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(4)),
+        ]));
+
+        let image = ImageXObject::decode_normalized_image(
+            &dictionary,
+            &[0b1010_0000],
+            &PassthroughResolver,
+            None,
+        )
+        .expect("image masks should default missing BitsPerComponent to 1");
+
+        assert_eq!(image.bits_per_component, 1);
+        assert!(matches!(image.color_space, None));
+        assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
+        assert_eq!(image.data, vec![0x00, 0xFF, 0x00, 0xFF]);
+    }
+
+    #[test]
+    fn decode_normalized_jpx_image_without_bits_per_component_infers_rgb_samples() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            (
+                "Filter".to_string(),
+                ObjectVariant::Name(b"JPXDecode".to_vec()),
+            ),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(2)),
+        ]));
+
+        let image = ImageXObject::decode_normalized_image(
+            &dictionary,
+            &[1, 2, 3, 4, 5, 6],
+            &PassthroughResolver,
+            None,
+        )
+        .expect("JPX images should decode without BitsPerComponent when already expanded");
+
+        assert_eq!(image.bits_per_component, 8);
+        assert!(matches!(
+            image.color_space,
+            Some(pdf_color_space::color_space::ColorSpace::DeviceRGB)
+        ));
+        assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
+        assert_eq!(image.data, vec![1, 2, 3, 255, 4, 5, 6, 255]);
+    }
+
+    #[test]
+    fn decode_normalized_non_mask_image_still_requires_bits_per_component() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            (
+                "ColorSpace".to_string(),
+                ObjectVariant::Name(b"DeviceGray".to_vec()),
+            ),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(1)),
+        ]));
+
+        let err =
+            ImageXObject::decode_normalized_image(&dictionary, &[0], &PassthroughResolver, None)
+                .expect_err("non-mask images should still require BitsPerComponent");
+
+        assert!(matches!(
+            err,
+            PdfImageError::Object(ObjectError::MissingRequiredKey { ref key }) if key == "BitsPerComponent"
+        ));
     }
 
     #[test]
