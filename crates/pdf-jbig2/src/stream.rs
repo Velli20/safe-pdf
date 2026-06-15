@@ -6,6 +6,7 @@ use crate::{
     generic_refinement_region::decode_generic_refinement_region_segment,
     generic_region::GenericRegion,
     halftone_region::decode_halftone_region_segment,
+    huffman::CustomHuffmanDecoder,
     image::JBig2Image,
     page::PageInfo,
     pattern_dictionary::PatternDictionary,
@@ -209,10 +210,8 @@ impl<'data, 'prior> Jbig2SegmentStreamDecoder<'data, 'prior> {
             }
             SegmentType::PageInformation => self.initialize_page_from_info()?,
             SegmentType::EndOfPage | SegmentType::EndOfFile => return Ok(false),
-            SegmentType::EndOfStripe
-            | SegmentType::Profile
-            | SegmentType::CodeTable
-            | SegmentType::Extension => {}
+            SegmentType::CodeTable => self.decode_code_table(segment, segment_end)?,
+            SegmentType::EndOfStripe | SegmentType::Profile | SegmentType::Extension => {}
         }
 
         Ok(true)
@@ -269,6 +268,20 @@ impl<'data, 'prior> Jbig2SegmentStreamDecoder<'data, 'prior> {
         );
         let dict = PatternDictionary::decode(&mut context)?;
         segment.result = JBig2SegmentResult::PatternDictionary(dict);
+        Ok(())
+    }
+
+    /// Decode a JBIG2 Tables segment and retain its custom Huffman table.
+    fn decode_code_table(
+        &mut self,
+        segment: &mut ParsedSegment,
+        segment_end: usize,
+    ) -> Result<(), Jbig2Error> {
+        let data = self
+            .stream
+            .remaining_from_byte_until(segment_end)
+            .ok_or(Jbig2Error::Truncated("Huffman code table segment"))?;
+        segment.result = JBig2SegmentResult::HuffmanTable(CustomHuffmanDecoder::parse(data)?);
         Ok(())
     }
 

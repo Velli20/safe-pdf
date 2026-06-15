@@ -146,7 +146,7 @@ impl StandardHuffmanDecoder {
 /// ITU-T T.88 / ISO/IEC 14492 Annex B names this count `RANGELEN`; bits are
 /// read most-significant first and interpreted as an unsigned integer before
 /// being added to or subtracted from `RANGELOW`.
-fn read_extra_bits(reader: &mut BitReader<'_>, bit_len: u8) -> Result<i32, Jbig2Error> {
+pub(crate) fn read_extra_bits(reader: &mut BitReader<'_>, bit_len: u8) -> Result<i32, Jbig2Error> {
     let mut value = 0i32;
     for _ in 0..bit_len {
         let bit = reader

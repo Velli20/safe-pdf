@@ -8,8 +8,9 @@ use crate::{
         GenericRefinementRegionDecode, RefinementAdaptiveTemplate, RefinementTemplate,
     },
     huffman::{
-        HuffmanTableSelection, HuffmanValue, StandardHuffmanDecoder, SymbolIdHuffmanTable,
-        decode_symbol_id, decode_symbol_id_huffman_table, text_region_refinement_standard_decoder,
+        CustomHuffmanDecoder, HuffmanDecoder, HuffmanTableSelection, HuffmanValue,
+        StandardHuffmanDecoder, SymbolIdHuffmanTable, decode_symbol_id,
+        decode_symbol_id_huffman_table, text_region_refinement_standard_decoder,
         text_region_rsize_standard_decoder,
     },
     image::JBig2Image,
@@ -39,9 +40,9 @@ const TEXT_REGION_REFINEMENT_HEIGHT: &str = "text region refinement height";
 struct TextRegionDecodeContext<'a> {
     parsed: ParsedTextRegion<'a>,
     symbols: Vec<JBig2Image>,
-    fs_table: StandardHuffmanDecoder,
-    ds_table: StandardHuffmanDecoder,
-    dt_table: StandardHuffmanDecoder,
+    fs_table: HuffmanDecoder,
+    ds_table: HuffmanDecoder,
+    dt_table: HuffmanDecoder,
     symbol_id_table: SymbolIdHuffmanTable,
     refinement_tables: Option<TextRegionRefinementTables>,
     compose_op: ComposeOp,
@@ -99,12 +100,23 @@ impl<'a> TextRegionDecodeContext<'a> {
         let huffman_flags = parsed
             .huffman_flags
             .ok_or(Jbig2Error::InvalidState("text region Huffman flags"))?;
-        let fs_table =
-            HuffmanTableSelection::TextRegionFs(huffman_flags.fs_selector).standard_decoder()?;
-        let ds_table =
-            HuffmanTableSelection::TextRegionDs(huffman_flags.ds_selector).standard_decoder()?;
-        let dt_table =
-            HuffmanTableSelection::TextRegionDt(huffman_flags.dt_selector).standard_decoder()?;
+        let custom_tables = referred_huffman_tables(context)?;
+        let mut custom_index = 0usize;
+        let fs_table = text_region_table(
+            HuffmanTableSelection::TextRegionFs(huffman_flags.fs_selector),
+            &custom_tables,
+            &mut custom_index,
+        )?;
+        let ds_table = text_region_table(
+            HuffmanTableSelection::TextRegionDs(huffman_flags.ds_selector),
+            &custom_tables,
+            &mut custom_index,
+        )?;
+        let dt_table = text_region_table(
+            HuffmanTableSelection::TextRegionDt(huffman_flags.dt_selector),
+            &custom_tables,
+            &mut custom_index,
+        )?;
         let mut body_reader = BitReader::new(parsed.body);
         let symbol_id_table = decode_symbol_id_huffman_table(&mut body_reader, symbols.len())?;
         body_reader.align_to_byte_boundary();
@@ -131,6 +143,42 @@ impl<'a> TextRegionDecodeContext<'a> {
             body,
         })
     }
+}
+
+fn text_region_table(
+    selection: HuffmanTableSelection,
+    custom_tables: &[CustomHuffmanDecoder],
+    custom_index: &mut usize,
+) -> Result<HuffmanDecoder, Jbig2Error> {
+    match selection {
+        HuffmanTableSelection::TextRegionFs(3)
+        | HuffmanTableSelection::TextRegionDs(3)
+        | HuffmanTableSelection::TextRegionDt(3) => {
+            let table = custom_tables
+                .get(*custom_index)
+                .cloned()
+                .ok_or(Jbig2Error::MissingSegment)?;
+            *custom_index = custom_index
+                .checked_add(1)
+                .ok_or(Jbig2Error::Overflow("Huffman table index overflow"))?;
+            Ok(HuffmanDecoder::Custom(table))
+        }
+        _ => selection.standard_decoder().map(HuffmanDecoder::Standard),
+    }
+}
+
+fn referred_huffman_tables(
+    context: &SegmentDecodeContext<'_, '_, '_, '_, '_>,
+) -> Result<Vec<CustomHuffmanDecoder>, Jbig2Error> {
+    let mut tables = Vec::new();
+    for index in 0usize.. {
+        match context.referred_huffman_table(index) {
+            Ok(table) => tables.push(table.clone()),
+            Err(Jbig2Error::MissingSegment) => break,
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(tables)
 }
 
 impl TextRegionRefinementTables {
@@ -488,16 +536,16 @@ mod tests {
         writer: &mut BitWriter,
         table: &StandardHuffmanDecoder,
         candidates: &[i32],
-    ) -> i32 {
+    ) -> Result<i32, Jbig2Error> {
         for candidate in candidates {
             let value = HuffmanValue::Value(*candidate);
             if let Some((code, codelen, extra, extra_len)) = bits_for_value(table, value) {
                 writer.push_bits(code, codelen);
                 writer.push_bits(extra, extra_len);
-                return *candidate;
+                return Ok(*candidate);
             }
         }
-        panic!("no encodable candidate value");
+        Err(Jbig2Error::InvalidState("encodable Huffman test value"))
     }
 
     fn push_single_symbol_id_table(writer: &mut BitWriter) {
@@ -833,13 +881,19 @@ mod tests {
         let rsize_table = text_region_rsize_standard_decoder(false).expect("rsize");
         let mut writer = BitWriter::new();
         push_single_symbol_id_table(&mut writer);
-        let _ = push_first_encodable_value(&mut writer, &dt_table, &[1, 0, 2, 3]);
-        let _ = push_first_encodable_value(&mut writer, &fs_table, &[1, 0, 2, 3]);
+        let _ =
+            push_first_encodable_value(&mut writer, &dt_table, &[1, 0, 2, 3]).expect("dt value");
+        let _ =
+            push_first_encodable_value(&mut writer, &fs_table, &[1, 0, 2, 3]).expect("fs value");
         writer.push_bits(0, 1);
-        let _ = push_first_encodable_value(&mut writer, &rdw_table, &[0, 1, 2, 3]);
-        let _ = push_first_encodable_value(&mut writer, &rdh_table, &[0, 1, 2, 3]);
-        let _ = push_first_encodable_value(&mut writer, &rdx_table, &[0, 1, 2, 3]);
-        let _ = push_first_encodable_value(&mut writer, &rdy_table, &[0, 1, 2, 3]);
+        let _ =
+            push_first_encodable_value(&mut writer, &rdw_table, &[0, 1, 2, 3]).expect("rdw value");
+        let _ =
+            push_first_encodable_value(&mut writer, &rdh_table, &[0, 1, 2, 3]).expect("rdh value");
+        let _ =
+            push_first_encodable_value(&mut writer, &rdx_table, &[0, 1, 2, 3]).expect("rdx value");
+        let _ =
+            push_first_encodable_value(&mut writer, &rdy_table, &[0, 1, 2, 3]).expect("rdy value");
         push_huffman_result(&mut writer, &rsize_table, HuffmanValue::Value(4));
         writer.push_bytes(&[0x00, 0x00, 0x00, 0x00]);
 

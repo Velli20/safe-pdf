@@ -3,6 +3,7 @@
 use crate::pattern_dictionary::PatternDictionary;
 use crate::symbol_dictionary::SymbolDictionary;
 
+use super::huffman::CustomHuffmanDecoder;
 use super::image::JBig2Image;
 use super::segment_header::SegmentHeaderFlagBits;
 
@@ -91,6 +92,7 @@ impl SegmentType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum JBig2SegmentResult {
     None,
+    HuffmanTable(CustomHuffmanDecoder),
     Image(JBig2Image),
     PatternDictionary(PatternDictionary),
     SymbolDictionary(SymbolDictionary),

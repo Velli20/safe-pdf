@@ -3,6 +3,7 @@
 use crate::{
     arith_decoder::JBig2ArithDecoder,
     error::Jbig2Error,
+    huffman::CustomHuffmanDecoder,
     image::JBig2Image,
     pattern_dictionary::PatternDictionary,
     segment::{JBig2SegmentResult, ParsedSegment},
@@ -115,6 +116,31 @@ impl<'segment, 'stream, 'data, 'decoded, 'prior>
             }
         }
         Ok(images)
+    }
+
+    /// Resolves a custom Huffman table by index among referenced Tables segments.
+    ///
+    /// JBIG2 Huffman table selectors consume only referenced Code Table
+    /// segments; other referenced segment types are ignored for this lookup.
+    pub(crate) fn referred_huffman_table(
+        &self,
+        table_index: usize,
+    ) -> Result<&CustomHuffmanDecoder, Jbig2Error> {
+        let mut current_index = 0usize;
+        for referred_number in &self.segment.referred_to_segment_numbers {
+            let referred = self
+                .referred_segment(*referred_number)
+                .ok_or(Jbig2Error::MissingSegment)?;
+            if let JBig2SegmentResult::HuffmanTable(table) = &referred.result {
+                if current_index == table_index {
+                    return Ok(table);
+                }
+                current_index = current_index
+                    .checked_add(1)
+                    .ok_or(Jbig2Error::Overflow("Huffman table index overflow"))?;
+            }
+        }
+        Err(Jbig2Error::MissingSegment)
     }
 
     /// Resolves the first pattern dictionary referenced by the current segment.

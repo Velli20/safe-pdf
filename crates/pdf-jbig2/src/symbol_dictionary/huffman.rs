@@ -3,7 +3,10 @@ use pdf_utils::BitReader;
 use crate::{
     error::Jbig2Error,
     generic_region::decode_mmr_region,
-    huffman::{HuffmanTableSelection, HuffmanValue, STANDARD_TABLE_B1, StandardHuffmanDecoder},
+    huffman::{
+        CustomHuffmanDecoder, HuffmanDecoder, HuffmanTableSelection, HuffmanValue,
+        STANDARD_TABLE_B1, StandardHuffmanDecoder,
+    },
     image::JBig2Image,
     symbol_dictionary::{
         collective_bitmap::append_collective_bitmap_symbols,
@@ -29,9 +32,10 @@ const SYMBOL_DICTIONARY_WIDTH_RUN: &str = "symbol dictionary width run";
 /// from Annex B for Huffman-coded symbol dictionaries.
 pub(super) struct HuffmanSymbolDictionaryDecoder<'stream, 'data> {
     stream: &'stream mut BitReader<'data>,
-    dh_table: StandardHuffmanDecoder,
-    dw_table: StandardHuffmanDecoder,
-    bmsize_table: StandardHuffmanDecoder,
+    dh_table: HuffmanDecoder,
+    dw_table: HuffmanDecoder,
+    bmsize_table: HuffmanDecoder,
+    export_table: StandardHuffmanDecoder,
 }
 
 impl<'stream, 'data> HuffmanSymbolDictionaryDecoder<'stream, 'data> {
@@ -42,18 +46,32 @@ impl<'stream, 'data> HuffmanSymbolDictionaryDecoder<'stream, 'data> {
     pub(super) fn new(
         stream: &'stream mut BitReader<'data>,
         flags: SymbolDictionaryFlagBits,
+        custom_tables: &[CustomHuffmanDecoder],
     ) -> Result<Self, Jbig2Error> {
-        let dh_table =
-            HuffmanTableSelection::SymbolDictionaryDh(flags.sdhuffdh()).standard_decoder()?;
-        let dw_table =
-            HuffmanTableSelection::SymbolDictionaryDw(flags.sdhuffdw()).standard_decoder()?;
-        let bmsize_table = StandardHuffmanDecoder::new(STANDARD_TABLE_B1)?;
+        let mut custom_index = 0usize;
+        let dh_table = symbol_dictionary_table(
+            HuffmanTableSelection::SymbolDictionaryDh(flags.sdhuffdh()),
+            custom_tables,
+            &mut custom_index,
+        )?;
+        let dw_table = symbol_dictionary_table(
+            HuffmanTableSelection::SymbolDictionaryDw(flags.sdhuffdw()),
+            custom_tables,
+            &mut custom_index,
+        )?;
+        let bmsize_table = if flags.sdhuffbmsize() {
+            next_custom_table(custom_tables, &mut custom_index)?
+        } else {
+            HuffmanDecoder::Standard(StandardHuffmanDecoder::new(STANDARD_TABLE_B1)?)
+        };
+        let export_table = StandardHuffmanDecoder::new(STANDARD_TABLE_B1)?;
 
         Ok(Self {
             stream,
             dh_table,
             dw_table,
             bmsize_table,
+            export_table,
         })
     }
 
@@ -180,7 +198,7 @@ impl<'stream, 'data> HuffmanSymbolDictionaryDecoder<'stream, 'data> {
         let mut export_index = 0usize;
 
         while export_index < total_symbols {
-            let run_length = required_huffman_value(self.bmsize_table.decode(self.stream)?)?;
+            let run_length = required_huffman_value(self.export_table.decode(self.stream)?)?;
             let run_length = i32_to_usize(run_length)?;
             export_index =
                 fill_export_flag_run(&mut export_flags, export_index, run_length, current_flag)?;
@@ -196,4 +214,32 @@ impl<'stream, 'data> HuffmanSymbolDictionaryDecoder<'stream, 'data> {
 struct HuffmanWidthRun {
     widths: Vec<u16>,
     total_width: usize,
+}
+
+fn symbol_dictionary_table(
+    selection: HuffmanTableSelection,
+    custom_tables: &[CustomHuffmanDecoder],
+    custom_index: &mut usize,
+) -> Result<HuffmanDecoder, Jbig2Error> {
+    match selection {
+        HuffmanTableSelection::SymbolDictionaryDh(3)
+        | HuffmanTableSelection::SymbolDictionaryDw(3) => {
+            next_custom_table(custom_tables, custom_index)
+        }
+        _ => selection.standard_decoder().map(HuffmanDecoder::Standard),
+    }
+}
+
+fn next_custom_table(
+    custom_tables: &[CustomHuffmanDecoder],
+    custom_index: &mut usize,
+) -> Result<HuffmanDecoder, Jbig2Error> {
+    let table = custom_tables
+        .get(*custom_index)
+        .cloned()
+        .ok_or(Jbig2Error::MissingSegment)?;
+    *custom_index = custom_index
+        .checked_add(1)
+        .ok_or(Jbig2Error::Overflow("Huffman table index overflow"))?;
+    Ok(HuffmanDecoder::Custom(table))
 }
