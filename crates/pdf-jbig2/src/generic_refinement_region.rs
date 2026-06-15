@@ -17,12 +17,6 @@ use crate::{
 /// generic refinement region segment header fields.
 const GENERIC_REFINEMENT_BODY: &str = "generic refinement region body";
 
-/// Unsupported-feature label for generic refinement typical prediction.
-///
-/// T.88 / ISO/IEC 14492 section 7.4.7.2 defines the `TPGRON` flag used by
-/// section 6.3.2 line typical prediction.
-const GENERIC_REFINEMENT_TPGRON: &str = "generic refinement TPGRON";
-
 /// Current-region context pixels for refinement template 0.
 ///
 /// T.88 / ISO/IEC 14492 section 6.3.2 defines the current bitmap template
@@ -227,8 +221,9 @@ impl GenericRefinementRegionDecode {
     ///
     /// T.88 / ISO/IEC 14492 section 6.3.2 defines generic refinement decoding
     /// as arithmetic decoding from context bits drawn from the current bitmap
-    /// and a reference bitmap. The `TPGRON` row prediction branch is explicitly
-    /// rejected until supported.
+    /// and a reference bitmap. When `TPGRON` is enabled, each row first
+    /// decodes the line typical prediction flag, then uniform 3x3 reference
+    /// neighborhoods can predict pixels without consuming arithmetic data.
     pub(crate) fn decode(
         self,
         reference: &JBig2Image,
@@ -237,20 +232,79 @@ impl GenericRefinementRegionDecode {
         if !JBig2Image::is_valid_image_size(self.width, self.height) {
             return JBig2Image::try_new(self.width, self.height, None);
         }
-        if self.tpgron {
-            return Err(Jbig2Error::UnsupportedFeature(GENERIC_REFINEMENT_TPGRON));
-        }
-
         decoder.ensure_generic_region_contexts()?;
         let mut image = JBig2Image::try_new(self.width, self.height, None)?;
+        let mut ltp = 0u8;
         for y in 0..self.height {
+            if self.tpgron {
+                ltp ^=
+                    decoder.decode_prepared_generic_context(self.typical_prediction_context())?;
+            }
             for x in 0..self.width {
-                let context = self.context_label(&image, reference, x, y);
-                let pixel = decoder.decode_prepared_generic_context(context)?;
+                let pixel = if ltp != 0
+                    && let Some(pixel) = self.implicit_refinement_pixel(reference, x, y)
+                {
+                    pixel
+                } else {
+                    let context = self.context_label(&image, reference, x, y);
+                    decoder.decode_prepared_generic_context(context)?
+                };
                 image.set_pixel(x, y, pixel);
             }
         }
         Ok(image)
+    }
+
+    /// Return the arithmetic context used to decode `LTP` for this template.
+    fn typical_prediction_context(self) -> usize {
+        match self.template {
+            RefinementTemplate::Template0 => 0x100,
+            RefinementTemplate::Template1 => 0x40,
+        }
+    }
+
+    /// Return an implicit refinement pixel when the aligned reference 3x3 area is uniform.
+    fn implicit_refinement_pixel(self, reference: &JBig2Image, x: u16, y: u16) -> Option<u8> {
+        let center = self.reference_pixel_at_offset(reference, x, y, 0, 0);
+        for y_offset in -1..=1 {
+            for x_offset in -1..=1 {
+                if x_offset == 0 && y_offset == 0 {
+                    continue;
+                }
+                if self.reference_pixel_at_offset(reference, x, y, x_offset, y_offset) != center {
+                    return None;
+                }
+            }
+        }
+        Some(center)
+    }
+
+    /// Read one reference pixel after applying the refinement reference origin.
+    fn reference_pixel_at_offset(
+        self,
+        reference: &JBig2Image,
+        x: u16,
+        y: u16,
+        x_offset: i8,
+        y_offset: i8,
+    ) -> u8 {
+        let Some((x, y)) = self.reference_coord(x, y, x_offset, y_offset) else {
+            return 0;
+        };
+        reference.get_pixel(x, y)
+    }
+
+    /// Resolve an output coordinate to the corresponding reference coordinate.
+    fn reference_coord(self, x: u16, y: u16, x_offset: i8, y_offset: i8) -> Option<(u16, u16)> {
+        let x = i32::from(x)
+            .checked_add(self.reference_dx)?
+            .checked_add(i32::from(x_offset))
+            .and_then(|value| u16::try_from(value).ok())?;
+        let y = i32::from(y)
+            .checked_add(self.reference_dy)?
+            .checked_add(i32::from(y_offset))
+            .and_then(|value| u16::try_from(value).ok())?;
+        Some((x, y))
     }
 
     /// Build the arithmetic context label for one output pixel.
@@ -478,10 +532,10 @@ impl RefinementOffset {
 #[cfg(test)]
 mod tests {
     use super::{
-        GENERIC_REFINEMENT_TPGRON, GenericRefinementRegionDecode, GenericRefinementRegionHeader,
+        GenericRefinementRegionDecode, GenericRefinementRegionHeader, RefinementAdaptiveTemplate,
         RefinementTemplate,
     };
-    use crate::{error::Jbig2Error, image::JBig2Image};
+    use crate::image::JBig2Image;
     use pdf_utils::BitReader;
 
     fn header_bytes(flags: u8) -> Vec<u8> {
@@ -519,15 +573,15 @@ mod tests {
     }
 
     #[test]
-    fn tpgron_is_reported_as_unsupported() {
+    fn tpgron_no_longer_reports_unsupported() -> Result<(), crate::error::Jbig2Error> {
         let mut data = header_bytes(0b10);
         data.extend_from_slice(&[0, 0, 0, 0]);
         let mut stream = BitReader::new(&data);
-        let header = GenericRefinementRegionHeader::parse(&mut stream).expect("header");
-        let mut body = BitReader::new(&[0xff]);
+        let header = GenericRefinementRegionHeader::parse(&mut stream)?;
+        let mut body = BitReader::new(&[0xff; 16]);
         let mut decoder = crate::arith_decoder::JBig2ArithDecoder::new(&mut body);
 
-        let err = GenericRefinementRegionDecode::new(
+        GenericRefinementRegionDecode::new(
             header.region.width,
             header.region.height,
             header.template,
@@ -536,12 +590,76 @@ mod tests {
             0,
             0,
         )
-        .decode(&JBig2Image::new(1, 1), &mut decoder)
-        .expect_err("tpgron error");
+        .decode(&JBig2Image::new(1, 1), &mut decoder)?;
 
-        assert_eq!(
-            err,
-            Jbig2Error::UnsupportedFeature(GENERIC_REFINEMENT_TPGRON)
+        Ok(())
+    }
+
+    #[test]
+    fn implicit_prediction_returns_uniform_reference_center_pixel() {
+        let params = GenericRefinementRegionDecode::new(
+            1,
+            1,
+            RefinementTemplate::Template1,
+            true,
+            RefinementAdaptiveTemplate::default_for(RefinementTemplate::Template1),
+            1,
+            1,
         );
+        let mut reference = JBig2Image::new(3, 3);
+        for y in 0..3 {
+            for x in 0..3 {
+                reference.set_pixel(x, y, 1);
+            }
+        }
+
+        assert_eq!(params.implicit_refinement_pixel(&reference, 0, 0), Some(1));
+    }
+
+    #[test]
+    fn implicit_prediction_returns_none_for_non_uniform_reference_neighborhood() {
+        let params = GenericRefinementRegionDecode::new(
+            1,
+            1,
+            RefinementTemplate::Template1,
+            true,
+            RefinementAdaptiveTemplate::default_for(RefinementTemplate::Template1),
+            1,
+            1,
+        );
+        let mut reference = JBig2Image::new(3, 3);
+        for y in 0..3 {
+            for x in 0..3 {
+                reference.set_pixel(x, y, 1);
+            }
+        }
+        reference.set_pixel(0, 0, 0);
+
+        assert_eq!(params.implicit_refinement_pixel(&reference, 0, 0), None);
+    }
+
+    #[test]
+    fn typical_prediction_context_depends_on_refinement_template() {
+        let template0 = GenericRefinementRegionDecode::new(
+            1,
+            1,
+            RefinementTemplate::Template0,
+            true,
+            RefinementAdaptiveTemplate::default_for(RefinementTemplate::Template0),
+            0,
+            0,
+        );
+        let template1 = GenericRefinementRegionDecode::new(
+            1,
+            1,
+            RefinementTemplate::Template1,
+            true,
+            RefinementAdaptiveTemplate::default_for(RefinementTemplate::Template1),
+            0,
+            0,
+        );
+
+        assert_eq!(template0.typical_prediction_context(), 0x100);
+        assert_eq!(template1.typical_prediction_context(), 0x40);
     }
 }
