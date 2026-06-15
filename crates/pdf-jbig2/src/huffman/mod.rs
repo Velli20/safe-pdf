@@ -16,7 +16,10 @@ mod tree;
 
 pub(crate) use code::HuffmanCode;
 pub(crate) use decoder::{HuffmanValue, StandardHuffmanDecoder};
-pub(crate) use selector::HuffmanTableSelection;
+pub(crate) use selector::{
+    HuffmanTableSelection, text_region_refinement_standard_decoder,
+    text_region_rsize_standard_decoder,
+};
 pub(crate) use standard::STANDARD_TABLE_B1;
 #[cfg(test)]
 pub(crate) use standard::{STANDARD_TABLE_B2, STANDARD_TABLE_B4};

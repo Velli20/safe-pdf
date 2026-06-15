@@ -95,14 +95,12 @@ impl<'a> ParsedTextRegion<'a> {
     /// Validate the currently supported Huffman text-region subset.
     ///
     /// ITU-T T.88 | ISO/IEC 14492 section 7.4.3 permits arithmetic and
-    /// refinement text regions, but this decoder currently supports only
-    /// non-refinement Huffman text regions on the Huffman path.
+    /// refinement text regions. The Huffman path accepts both non-refinement
+    /// and refinement text regions as long as the table selectors are
+    /// supported.
     pub(crate) fn validate_supported_huffman_text_region(&self) -> Result<(), Jbig2Error> {
         if !self.flags.contains(TextRegionFlagBits::SBHUFF) {
             return Err(Jbig2Error::UnsupportedFeature("arithmetic text regions"));
-        }
-        if self.flags.contains(TextRegionFlagBits::SBREFINE) {
-            return Err(Jbig2Error::UnsupportedFeature("refinement text regions"));
         }
         Ok(())
     }

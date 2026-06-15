@@ -38,6 +38,10 @@ pub(crate) const STANDARD_TABLE_B11: StandardTableId = StandardTableId(11);
 pub(crate) const STANDARD_TABLE_B12: StandardTableId = StandardTableId(12);
 /// Standard Huffman table B.13 from ITU-T T.88 / ISO/IEC 14492 Annex B.
 pub(crate) const STANDARD_TABLE_B13: StandardTableId = StandardTableId(13);
+/// Standard Huffman table B.14 from ITU-T T.88 / ISO/IEC 14492 Annex B.
+pub(crate) const STANDARD_TABLE_B14: StandardTableId = StandardTableId(14);
+/// Standard Huffman table B.15 from ITU-T T.88 / ISO/IEC 14492 Annex B.
+pub(crate) const STANDARD_TABLE_B15: StandardTableId = StandardTableId(15);
 impl StandardTableId {
     /// Return the local lookup index for this Annex B standard table.
     pub(crate) fn lookup_index(self) -> usize {
