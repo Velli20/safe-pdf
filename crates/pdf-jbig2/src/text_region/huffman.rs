@@ -1,19 +1,25 @@
 //! JBIG2 Huffman text-region decoder.
 
 use crate::{
+    arith_decoder::JBig2ArithDecoder,
     compose_op::ComposeOp,
     error::Jbig2Error,
+    generic_refinement_region::{
+        GenericRefinementRegionDecode, RefinementAdaptiveTemplate, RefinementTemplate,
+    },
     huffman::{
         HuffmanTableSelection, HuffmanValue, StandardHuffmanDecoder, SymbolIdHuffmanTable,
-        decode_symbol_id, decode_symbol_id_huffman_table,
+        decode_symbol_id, decode_symbol_id_huffman_table, text_region_refinement_standard_decoder,
+        text_region_rsize_standard_decoder,
     },
     image::JBig2Image,
     segment_context::SegmentDecodeContext,
     text_region::{
-        bitmap::initialized_region, geometry::TextRegionGeometry, parser::ParsedTextRegion,
+        bitmap::initialized_region, flags::TextRegionFlagBits, geometry::TextRegionGeometry,
+        huffman_flags::TextRegionHuffmanFlags, parser::ParsedTextRegion,
         state::TextRegionDecodeState,
     },
-    util::{INTEGER_CONVERSION_OVERFLOW, ceil_log2, required_huffman_value},
+    util::{INTEGER_CONVERSION_OVERFLOW, ceil_log2, refined_dimension, required_huffman_value},
 };
 use pdf_utils::BitReader;
 
@@ -21,6 +27,9 @@ const TEXT_REGION_BODY: &str = "text region body";
 const TEXT_REGION_STRIP_INDEX: &str = "text region strip index";
 const TEXT_REGION_SYMBOL_ID: &str = "text region symbol id";
 const TEXT_REGION_REFINEMENT_TABLES: &str = "text-region refinement Huffman tables";
+const TEXT_REGION_REFINEMENT_FLAG: &str = "text region refinement flag";
+const TEXT_REGION_REFINEMENT_WIDTH: &str = "text region refinement width";
+const TEXT_REGION_REFINEMENT_HEIGHT: &str = "text region refinement height";
 
 /// Parsed and resolved state needed by the Huffman text-region procedure.
 ///
@@ -34,6 +43,7 @@ struct TextRegionDecodeContext<'a> {
     ds_table: StandardHuffmanDecoder,
     dt_table: StandardHuffmanDecoder,
     symbol_id_table: SymbolIdHuffmanTable,
+    refinement_tables: Option<TextRegionRefinementTables>,
     compose_op: ComposeOp,
     body: &'a [u8],
 }
@@ -47,6 +57,17 @@ struct DecodedSymbolInstance {
     curs: i64,
     ti: i64,
     symbol_id: usize,
+    refined: bool,
+}
+
+/// Standard Huffman tables used by refinement-coded text regions.
+#[derive(Debug, Clone)]
+struct TextRegionRefinementTables {
+    rsize_table: StandardHuffmanDecoder,
+    rdw_table: StandardHuffmanDecoder,
+    rdh_table: StandardHuffmanDecoder,
+    rdx_table: StandardHuffmanDecoder,
+    rdy_table: StandardHuffmanDecoder,
 }
 
 /// Decode a Huffman-coded JBIG2 text-region body.
@@ -90,16 +111,11 @@ impl<'a> TextRegionDecodeContext<'a> {
         let body = body_reader
             .remaining_from_byte()
             .ok_or(Jbig2Error::Truncated(TEXT_REGION_BODY))?;
-        if huffman_flags.rdw_selector != 0
-            || huffman_flags.rdh_selector != 0
-            || huffman_flags.rdx_selector != 0
-            || huffman_flags.rdy_selector != 0
-            || huffman_flags.rsize_custom
-        {
-            return Err(Jbig2Error::UnsupportedFeature(
-                TEXT_REGION_REFINEMENT_TABLES,
-            ));
-        }
+        let refinement_tables = if parsed.flags.contains(TextRegionFlagBits::SBREFINE) {
+            Some(TextRegionRefinementTables::new(huffman_flags)?)
+        } else {
+            None
+        };
 
         let compose_op = ComposeOp::from(parsed.flags.sbcombop_bits());
 
@@ -110,8 +126,28 @@ impl<'a> TextRegionDecodeContext<'a> {
             ds_table,
             dt_table,
             symbol_id_table,
+            refinement_tables,
             compose_op,
             body,
+        })
+    }
+}
+
+impl TextRegionRefinementTables {
+    /// Resolve the standard Huffman tables used by refinement-coded instances.
+    fn new(huffman_flags: TextRegionHuffmanFlags) -> Result<Self, Jbig2Error> {
+        let rsize_table = text_region_rsize_standard_decoder(huffman_flags.rsize_custom)?;
+        let rdw_table = text_region_refinement_standard_decoder(huffman_flags.rdw_selector)?;
+        let rdh_table = text_region_refinement_standard_decoder(huffman_flags.rdh_selector)?;
+        let rdx_table = text_region_refinement_standard_decoder(huffman_flags.rdx_selector)?;
+        let rdy_table = text_region_refinement_standard_decoder(huffman_flags.rdy_selector)?;
+
+        Ok(Self {
+            rsize_table,
+            rdw_table,
+            rdh_table,
+            rdx_table,
+            rdy_table,
         })
     }
 }
@@ -231,11 +267,24 @@ impl<'a> HuffmanTextRegionDecoder<'a> {
             .checked_add(curt)
             .ok_or(Jbig2Error::Overflow(INTEGER_CONVERSION_OVERFLOW))?;
         let symbol_id = decode_symbol_id(&mut self.body_reader, &self.context.symbol_id_table)?;
+        let refined = if self
+            .context
+            .parsed
+            .flags
+            .contains(TextRegionFlagBits::SBREFINE)
+        {
+            self.body_reader
+                .next_bit()
+                .ok_or(Jbig2Error::Truncated(TEXT_REGION_REFINEMENT_FLAG))?
+        } else {
+            false
+        };
 
         Ok(Some(DecodedSymbolInstance {
             curs: self.state.strip_curs(),
             ti,
             symbol_id,
+            refined,
         }))
     }
 
@@ -249,6 +298,9 @@ impl<'a> HuffmanTextRegionDecoder<'a> {
             .symbols
             .get(instance.symbol_id)
             .ok_or(Jbig2Error::InvalidState(TEXT_REGION_SYMBOL_ID))?;
+        if instance.refined {
+            return self.draw_refined_instance(symbol.clone(), instance.curs, instance.ti);
+        }
         let curs = self.geometry.adjust_curs_before_placement(
             instance.curs,
             symbol.width(),
@@ -266,6 +318,90 @@ impl<'a> HuffmanTextRegionDecoder<'a> {
         self.state.record_instance()?;
         Ok(())
     }
+
+    /// Decode, compose, and advance one refinement-coded symbol instance.
+    fn draw_refined_instance(
+        &mut self,
+        reference: JBig2Image,
+        curs: i64,
+        ti: i64,
+    ) -> Result<(), Jbig2Error> {
+        let tables = self
+            .context
+            .refinement_tables
+            .as_ref()
+            .ok_or(Jbig2Error::InvalidState(TEXT_REGION_REFINEMENT_TABLES))?;
+        let delta_width = required_huffman_value(tables.rdw_table.decode(&mut self.body_reader)?)?;
+        let delta_height = required_huffman_value(tables.rdh_table.decode(&mut self.body_reader)?)?;
+        let delta_x = required_huffman_value(tables.rdx_table.decode(&mut self.body_reader)?)?;
+        let delta_y = required_huffman_value(tables.rdy_table.decode(&mut self.body_reader)?)?;
+        let refinement_size =
+            required_huffman_value(tables.rsize_table.decode(&mut self.body_reader)?)?;
+        let width =
+            refined_dimension(reference.width(), delta_width, TEXT_REGION_REFINEMENT_WIDTH)?;
+        let height = refined_dimension(
+            reference.height(),
+            delta_height,
+            TEXT_REGION_REFINEMENT_HEIGHT,
+        )?;
+        let template = RefinementTemplate::from_flag(
+            self.context
+                .parsed
+                .flags
+                .contains(TextRegionFlagBits::SBRTEMPLATE),
+        );
+        let at = self
+            .context
+            .parsed
+            .refinement_at
+            .unwrap_or_else(|| RefinementAdaptiveTemplate::default_for(template));
+        let reference_dx = delta_width
+            .checked_shr(2)
+            .and_then(|value| value.checked_add(delta_x))
+            .ok_or(Jbig2Error::Overflow(INTEGER_CONVERSION_OVERFLOW))?;
+        let reference_dy = delta_height
+            .checked_shr(2)
+            .and_then(|value| value.checked_add(delta_y))
+            .ok_or(Jbig2Error::Overflow(INTEGER_CONVERSION_OVERFLOW))?;
+        self.body_reader.align_to_byte_boundary();
+        let refinement_size = usize::try_from(refinement_size)
+            .map_err(|_| Jbig2Error::Overflow(INTEGER_CONVERSION_OVERFLOW))?;
+        let refinement_body = self
+            .body_reader
+            .take_from_byte_len(refinement_size)
+            .ok_or(Jbig2Error::Truncated(TEXT_REGION_REFINEMENT_TABLES))?;
+        let image = {
+            let mut refinement_reader = BitReader::new(refinement_body);
+            let mut arith_decoder = JBig2ArithDecoder::new(&mut refinement_reader);
+            GenericRefinementRegionDecode::new(
+                width,
+                height,
+                template,
+                false,
+                at,
+                reference_dx,
+                reference_dy,
+            )
+            .decode(&reference, &mut arith_decoder)?
+        };
+        let placed_curs =
+            self.geometry
+                .adjust_curs_before_placement(curs, image.width(), image.height())?;
+        let placement =
+            self.geometry
+                .placement_for(placed_curs, ti, image.width(), image.height())?;
+        image.compose_clipped_to(
+            &mut self.region,
+            placement.x,
+            placement.y,
+            self.context.compose_op,
+        );
+        self.body_reader.align_to_byte_boundary();
+        self.geometry
+            .advance_curs_after_placement(placed_curs, image.width(), image.height())?;
+        self.state.record_instance()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -276,7 +412,8 @@ mod tests {
         error::Jbig2Error,
         huffman::{
             HuffmanTableSelection, HuffmanValue, StandardHuffmanDecoder,
-            test_support::bits_for_value,
+            test_support::bits_for_value, text_region_refinement_standard_decoder,
+            text_region_rsize_standard_decoder,
         },
         image::JBig2Image,
         segment::{JBig2SegmentResult, ParsedSegment},
@@ -290,6 +427,7 @@ mod tests {
         },
     };
 
+    #[derive(Clone)]
     struct BitWriter {
         bits: Vec<bool>,
     }
@@ -311,6 +449,13 @@ mod tests {
                 for _ in rem..8 {
                     self.bits.push(false);
                 }
+            }
+        }
+
+        fn push_bytes(&mut self, bytes: &[u8]) {
+            self.align_to_byte();
+            for byte in bytes {
+                self.push_bits(u32::from(*byte), 8);
             }
         }
 
@@ -337,6 +482,22 @@ mod tests {
             bits_for_value(table, result).expect("encodable value");
         writer.push_bits(code, codelen);
         writer.push_bits(extra, extra_len);
+    }
+
+    fn push_first_encodable_value(
+        writer: &mut BitWriter,
+        table: &StandardHuffmanDecoder,
+        candidates: &[i32],
+    ) -> i32 {
+        for candidate in candidates {
+            let value = HuffmanValue::Value(*candidate);
+            if let Some((code, codelen, extra, extra_len)) = bits_for_value(table, value) {
+                writer.push_bits(code, codelen);
+                writer.push_bits(extra, extra_len);
+                return *candidate;
+            }
+        }
+        panic!("no encodable candidate value");
     }
 
     fn push_single_symbol_id_table(writer: &mut BitWriter) {
@@ -585,5 +746,115 @@ mod tests {
             .placement_for(0, 0, 2, 2)
             .expect("placement");
         assert_eq!((placement.x, placement.y), (-1, -1));
+    }
+
+    #[test]
+    fn sbrefine_flag_zero_still_places_the_original_symbol() {
+        let (fs_table, _, dt_table) = text_region_tables();
+        let mut writer = BitWriter::new();
+        push_single_symbol_id_table(&mut writer);
+        push_huffman_result(&mut writer, &dt_table, HuffmanValue::Value(1));
+        push_huffman_result(&mut writer, &dt_table, HuffmanValue::Value(1));
+        push_huffman_result(&mut writer, &fs_table, HuffmanValue::Value(1));
+        writer.push_bits(0, 1);
+        writer.align_to_byte();
+
+        let flags = TextRegionFlagBits::SBHUFF.bits()
+            | TextRegionFlagBits::SBREFINE.bits()
+            | TextRegionFlagBits::SBRTEMPLATE.bits()
+            | top_left_corner_bits();
+        let data =
+            build_text_region_data(4, 4, flags, dt_selector_2_bits(), 1, writer.into_bytes());
+        let dict = dictionary_segment(1, vec![solid_symbol(1, 1)]);
+        let segment = text_region_segment(2, 1);
+
+        let image =
+            decode_huffman_text_region_segment(&segment, &data, &[dict]).expect("decode region");
+        assert_eq!(lit_pixels(&image), vec![(1, 0)]);
+    }
+
+    #[test]
+    fn sbrefine_with_standard_tables_is_accepted_for_huffman_text_regions() {
+        let mut writer = BitWriter::new();
+        push_single_symbol_id_table(&mut writer);
+        writer.align_to_byte();
+
+        let flags = TextRegionFlagBits::SBHUFF.bits()
+            | TextRegionFlagBits::SBREFINE.bits()
+            | TextRegionFlagBits::SBRTEMPLATE.bits()
+            | top_left_corner_bits();
+        let data =
+            build_text_region_data(4, 4, flags, dt_selector_2_bits(), 1, writer.into_bytes());
+        let parsed = ParsedTextRegion::try_from(data.as_slice()).expect("parsed");
+        let dict = dictionary_segment(1, vec![solid_symbol(1, 1)]);
+        let segment = text_region_segment(2, 1);
+        let referred_segments = [dict];
+        let mut stream = BitReader::new(&[]);
+        let context = SegmentDecodeContext::new(&segment, &mut stream, 0, &referred_segments, &[]);
+        let context = super::TextRegionDecodeContext::new(&context, parsed).expect("context");
+
+        assert!(context.refinement_tables.is_some());
+        assert!(context.parsed.flags.contains(TextRegionFlagBits::SBREFINE));
+    }
+
+    #[test]
+    fn sbrefine_with_custom_refinement_tables_is_unsupported() {
+        let (fs_table, _, dt_table) = text_region_tables();
+        let mut writer = BitWriter::new();
+        push_single_symbol_id_table(&mut writer);
+        push_huffman_result(&mut writer, &dt_table, HuffmanValue::Value(1));
+        push_huffman_result(&mut writer, &dt_table, HuffmanValue::Value(1));
+        push_huffman_result(&mut writer, &fs_table, HuffmanValue::Value(1));
+        writer.push_bits(1, 1);
+        writer.align_to_byte();
+
+        let flags = TextRegionFlagBits::SBHUFF.bits()
+            | TextRegionFlagBits::SBREFINE.bits()
+            | TextRegionFlagBits::SBRTEMPLATE.bits()
+            | top_left_corner_bits();
+        let data = build_text_region_data(4, 4, flags, 0x0080, 1, writer.into_bytes());
+        let parsed = ParsedTextRegion::try_from(data.as_slice()).expect("parsed");
+        let dict = dictionary_segment(1, vec![solid_symbol(1, 1)]);
+        let segment = text_region_segment(2, 1);
+        let referred_segments = [dict];
+        let mut stream = BitReader::new(&[]);
+        let context = SegmentDecodeContext::new(&segment, &mut stream, 0, &referred_segments, &[]);
+        let err = decode_huffman_text_region(&context, parsed).expect_err("unsupported");
+        assert!(matches!(err, Jbig2Error::UnsupportedFeature(_)));
+    }
+
+    #[test]
+    fn refined_huffman_text_region_decodes_with_full_refinement_size_body() {
+        let (fs_table, _, dt_table) = text_region_tables();
+        let rdw_table = text_region_refinement_standard_decoder(0).expect("rdw");
+        let rdh_table = text_region_refinement_standard_decoder(0).expect("rdh");
+        let rdx_table = text_region_refinement_standard_decoder(0).expect("rdx");
+        let rdy_table = text_region_refinement_standard_decoder(0).expect("rdy");
+        let rsize_table = text_region_rsize_standard_decoder(false).expect("rsize");
+        let mut writer = BitWriter::new();
+        push_single_symbol_id_table(&mut writer);
+        let _ = push_first_encodable_value(&mut writer, &dt_table, &[1, 0, 2, 3]);
+        let _ = push_first_encodable_value(&mut writer, &fs_table, &[1, 0, 2, 3]);
+        writer.push_bits(0, 1);
+        let _ = push_first_encodable_value(&mut writer, &rdw_table, &[0, 1, 2, 3]);
+        let _ = push_first_encodable_value(&mut writer, &rdh_table, &[0, 1, 2, 3]);
+        let _ = push_first_encodable_value(&mut writer, &rdx_table, &[0, 1, 2, 3]);
+        let _ = push_first_encodable_value(&mut writer, &rdy_table, &[0, 1, 2, 3]);
+        push_huffman_result(&mut writer, &rsize_table, HuffmanValue::Value(4));
+        writer.push_bytes(&[0x00, 0x00, 0x00, 0x00]);
+
+        let flags = TextRegionFlagBits::SBHUFF.bits()
+            | TextRegionFlagBits::SBREFINE.bits()
+            | TextRegionFlagBits::SBRTEMPLATE.bits()
+            | top_left_corner_bits();
+        let huffman_flags = 0x0000;
+        let data = build_text_region_data(399, 400, flags, huffman_flags, 1, writer.into_bytes());
+        let dict = dictionary_segment(1, vec![solid_symbol(1, 1)]);
+        let segment = text_region_segment(2, 1);
+
+        let image =
+            decode_huffman_text_region_segment(&segment, &data, &[dict]).expect("decode region");
+        assert_eq!((image.width(), image.height()), (399, 400));
+        assert_eq!(image.to_tight_bytes().len(), 20_000);
     }
 }
