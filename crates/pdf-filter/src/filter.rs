@@ -221,11 +221,11 @@ impl Filter {
             jpeg2k::ImagePixelData::L8(data) | jpeg2k::ImagePixelData::Rgb8(data) => data,
             jpeg2k::ImagePixelData::La8(data) => data
                 .chunks_exact(2)
-                .map(|chunk| chunk[0])
+                .map(|chunk| chunk.iter().next().copied().unwrap_or_default())
                 .collect::<Vec<u8>>(),
             jpeg2k::ImagePixelData::Rgba8(data) => data
                 .chunks_exact(4)
-                .flat_map(|chunk| chunk[..3].iter().copied())
+                .flat_map(|chunk| chunk.iter().take(3).copied())
                 .collect::<Vec<u8>>(),
             jpeg2k::ImagePixelData::L16(data) | jpeg2k::ImagePixelData::Rgb16(data) => data
                 .into_iter()
@@ -233,11 +233,18 @@ impl Filter {
                 .collect::<Vec<u8>>(),
             jpeg2k::ImagePixelData::La16(data) => data
                 .chunks_exact(2)
-                .flat_map(|chunk| chunk[0].to_be_bytes())
+                .flat_map(|chunk| {
+                    chunk
+                        .iter()
+                        .next()
+                        .copied()
+                        .unwrap_or_default()
+                        .to_be_bytes()
+                })
                 .collect::<Vec<u8>>(),
             jpeg2k::ImagePixelData::Rgba16(data) => data
                 .chunks_exact(4)
-                .flat_map(|chunk| chunk[..3].iter().flat_map(|v| v.to_be_bytes()))
+                .flat_map(|chunk| chunk.iter().take(3).flat_map(|v| v.to_be_bytes()))
                 .collect::<Vec<u8>>(),
         };
 
@@ -784,5 +791,18 @@ mod tests {
 
         let decoded = Filter::decode_jpeg2000_pixels(pixels).expect("decode should succeed");
         assert_eq!(decoded, vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
+    }
+
+    #[test]
+    fn test_decode_jpeg2000_pixels_converts_la16_to_l16_bytes() {
+        let pixels = jpeg2k::ImageData {
+            width: 1,
+            height: 2,
+            format: jpeg2k::ImageFormat::La16,
+            data: jpeg2k::ImagePixelData::La16(vec![0x0102, 0x0304, 0x0506, 0x0708]),
+        };
+
+        let decoded = Filter::decode_jpeg2000_pixels(pixels).expect("decode should succeed");
+        assert_eq!(decoded, vec![0x01, 0x02, 0x05, 0x06]);
     }
 }

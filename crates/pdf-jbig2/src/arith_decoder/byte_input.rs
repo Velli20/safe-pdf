@@ -31,17 +31,6 @@ const NORMAL_BYTE_CODE_SHIFT: u32 = 8;
 /// Annex A.1 code-register shift for a byte following `0xff`.
 const STUFFED_BYTE_CODE_SHIFT: u32 = 9;
 
-/// State of Annex A.1 marker-byte completion detection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MarkerState {
-    /// Arithmetic-coded data is still available.
-    DataAvailable,
-    /// A marker was observed once; synthetic bits may still be consumed.
-    DecodingFinished,
-    /// Repeated marker handling has entered the terminal loop state.
-    Looping,
-}
-
 impl JBig2ArithDecoder<'_, '_> {
     /// Return the current byte, respecting the arithmetic segment byte limit.
     pub(super) fn peek_byte_or(
@@ -70,7 +59,14 @@ impl JBig2ArithDecoder<'_, '_> {
         }
     }
 
+    /// Return whether the current byte position contains a real input byte.
+    pub(super) fn has_current_byte(stream: &BitReader<'_>, byte_limit: Option<usize>) -> bool {
+        byte_limit.is_none_or(|limit| stream.byte_pos() < limit)
+            && stream.remaining_from_byte_len(1).is_some()
+    }
+
     /// Return whether Annex A.1 byte input has reached the stream or segment end.
+    #[cfg(test)]
     pub(super) fn stream_exhausted(&self) -> bool {
         self.stream.exhausted()
             || self
@@ -85,10 +81,6 @@ impl JBig2ArithDecoder<'_, '_> {
         } else {
             self.byte_in_regular();
         }
-
-        if self.stream_exhausted() {
-            self.complete = true;
-        }
     }
 
     /// Handle Annex A.1 byte input when the previous byte was `0xff`.
@@ -96,14 +88,6 @@ impl JBig2ArithDecoder<'_, '_> {
         let next = Self::peek_next_byte_or(self.stream, self.byte_limit, ARITHMETIC_BYTE_FALLBACK);
         if next > MARKER_BYTE_THRESHOLD {
             self.bit_count = NORMAL_BYTE_BIT_COUNT;
-            self.marker_state = match self.marker_state {
-                MarkerState::DataAvailable => MarkerState::DecodingFinished,
-                MarkerState::DecodingFinished => MarkerState::Looping,
-                MarkerState::Looping => {
-                    self.complete = true;
-                    MarkerState::Looping
-                }
-            };
         } else {
             self.stream.advance_bytes(1);
             self.current_byte = next;
@@ -150,11 +134,12 @@ mod tests {
     }
 
     #[test]
-    fn new_until_marks_decoder_complete_at_segment_boundary() {
+    fn new_until_keeps_decoder_open_at_segment_boundary() {
         let data = [0x12u8];
         let mut reader = BitReader::new(&data);
         let decoder = JBig2ArithDecoder::new_until(&mut reader, 1).expect("decoder");
 
-        assert!(decoder.complete);
+        assert!(!decoder.complete);
+        assert!(decoder.stream_exhausted());
     }
 }

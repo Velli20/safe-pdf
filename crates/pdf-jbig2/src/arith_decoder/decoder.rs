@@ -6,7 +6,7 @@
 //! procedures are split into sibling modules.
 
 use crate::arith_decoder::{
-    byte_input::{ARITHMETIC_BYTE_FALLBACK, MarkerState},
+    byte_input::ARITHMETIC_BYTE_FALLBACK,
     coding::{DEFAULT_INTERVAL, INITIAL_CODE_REGISTER_SHIFT, POST_BYTE_IN_CODE_SHIFT},
     context::JBig2ArithCtx,
 };
@@ -24,10 +24,8 @@ pub(crate) struct JBig2ArithDecoder<'stream, 'data> {
     pub(super) stream: &'stream mut BitReader<'data>,
     /// Optional exclusive byte position limiting decoding to the current segment.
     pub(super) byte_limit: Option<usize>,
-    /// Whether Annex A.1 byte input has reached terminal completion.
+    /// Whether decoding was initialized without any real arithmetic byte.
     pub(super) complete: bool,
-    /// Marker-consumption state for Annex A.1 `BYTEIN`.
-    pub(super) marker_state: MarkerState,
     /// Most recently loaded byte for Annex A.1 `BYTEIN`.
     pub(super) current_byte: u8,
     /// Annex A.1 code register `C`.
@@ -96,12 +94,12 @@ impl<'stream, 'data> JBig2ArithDecoder<'stream, 'data> {
 
     /// Initialize Annex A.1 decoder state with an optional segment byte limit.
     fn new_with_limit(stream: &'stream mut BitReader<'data>, byte_limit: Option<usize>) -> Self {
+        let has_initial_byte = Self::has_current_byte(stream, byte_limit);
         let current_byte = Self::peek_byte_or(stream, byte_limit, ARITHMETIC_BYTE_FALLBACK);
         let mut decoder = Self {
             stream,
             byte_limit,
-            complete: false,
-            marker_state: MarkerState::DataAvailable,
+            complete: !has_initial_byte,
             current_byte,
             code: u32::from(current_byte ^ ARITHMETIC_BYTE_FALLBACK) << INITIAL_CODE_REGISTER_SHIFT,
             interval: DEFAULT_INTERVAL,
