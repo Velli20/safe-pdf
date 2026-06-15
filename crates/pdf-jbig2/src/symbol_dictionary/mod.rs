@@ -107,8 +107,12 @@ impl<'context, 'segment, 'stream, 'data, 'decoded, 'prior>
     /// selected by the symbol dictionary flags to decode heights, widths,
     /// collective bitmap sizes, and export runs.
     fn decode_huffman_dictionary(&mut self) -> Result<SymbolDictionary, Jbig2Error> {
-        let mut decoder =
-            HuffmanSymbolDictionaryDecoder::new(self.context.stream(), self.header.flags)?;
+        let custom_tables = self.referred_huffman_tables()?;
+        let mut decoder = HuffmanSymbolDictionaryDecoder::new(
+            self.context.stream(),
+            self.header.flags,
+            &custom_tables,
+        )?;
         let new_symbols = decoder.decode_new_symbols(self.header.num_new_symbols)?;
         let export_flags =
             decoder.decode_export_flags(self.input_symbols.len(), new_symbols.len())?;
@@ -118,6 +122,20 @@ impl<'context, 'segment, 'stream, 'data, 'decoded, 'prior>
             &export_flags,
             self.header.num_exported,
         )
+    }
+
+    fn referred_huffman_tables(
+        &self,
+    ) -> Result<Vec<crate::huffman::CustomHuffmanDecoder>, Jbig2Error> {
+        let mut tables = Vec::new();
+        for index in 0usize.. {
+            match self.context.referred_huffman_table(index) {
+                Ok(table) => tables.push(table.clone()),
+                Err(Jbig2Error::MissingSegment) => break,
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(tables)
     }
 
     /// Decode an arithmetic-coded symbol dictionary body.

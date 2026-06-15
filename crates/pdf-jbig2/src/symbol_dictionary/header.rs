@@ -75,20 +75,14 @@ impl ParsedSymbolDictionaryHeader {
     /// feature set.
     ///
     /// T.88 / ISO 14492 section 7.4.2.1 defines the symbol-dictionary header
-    /// flags. This decoder rejects the unsupported custom Huffman table
-    /// variants described by the header flags (`SDHUFFDH == 2`, `SDHUFFDW ==
-    /// 2`, or `SDHUFFBMSIZE` set with `SDHUFF`).
+    /// flags. This decoder rejects the invalid Huffman table selector value
+    /// `2` for `SDHUFFDH` and `SDHUFFDW`.
     fn validate_supported(self) -> Result<Self, Jbig2Error> {
         if self.flags.contains(SymbolDictionaryFlagBits::SDHUFF)
             && (self.flags.sdhuffdh() == 2 || self.flags.sdhuffdw() == 2)
         {
-            return Err(Jbig2Error::UnsupportedFeature(
-                "custom Huffman symbol dictionary tables",
-            ));
-        }
-        if self.flags.contains(SymbolDictionaryFlagBits::SDHUFF) && self.flags.sdhuffbmsize() {
-            return Err(Jbig2Error::UnsupportedFeature(
-                "custom Huffman symbol bitmap-size tables",
+            return Err(Jbig2Error::InvalidTable(
+                "Huffman symbol dictionary selector",
             ));
         }
 
@@ -157,7 +151,7 @@ mod tests {
     }
 
     #[test]
-    fn header_rejects_custom_huffman_symbol_dictionary_tables() {
+    fn header_rejects_invalid_huffman_symbol_dictionary_selectors() {
         let flags = (1u16 << 0) | (2u16 << 2);
         let mut data = Vec::new();
         data.extend_from_slice(&flags.to_be_bytes());
@@ -168,12 +162,12 @@ mod tests {
         let err = ParsedSymbolDictionaryHeader::try_from(&mut reader).expect_err("header");
         assert_eq!(
             err,
-            Jbig2Error::UnsupportedFeature("custom Huffman symbol dictionary tables")
+            Jbig2Error::InvalidTable("Huffman symbol dictionary selector")
         );
     }
 
     #[test]
-    fn header_rejects_custom_huffman_bitmap_size_tables() {
+    fn header_accepts_custom_huffman_bitmap_size_tables() {
         let flags = (1u16 << 0) | (1u16 << 6);
         let mut data = Vec::new();
         data.extend_from_slice(&flags.to_be_bytes());
@@ -181,10 +175,7 @@ mod tests {
         data.extend_from_slice(&9u32.to_be_bytes());
 
         let mut reader = BitReader::new(&data);
-        let err = ParsedSymbolDictionaryHeader::try_from(&mut reader).expect_err("header");
-        assert_eq!(
-            err,
-            Jbig2Error::UnsupportedFeature("custom Huffman symbol bitmap-size tables")
-        );
+        let header = ParsedSymbolDictionaryHeader::try_from(&mut reader).expect("header");
+        assert!(header.flags.sdhuffbmsize());
     }
 }
