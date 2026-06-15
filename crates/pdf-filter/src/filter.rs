@@ -213,21 +213,32 @@ impl Filter {
             .get_pixels(None)
             .map_err(|e| FilterError::Decompression(e.to_string()))?;
 
+        Self::decode_jpeg2000_pixels(pixels)
+    }
+
+    fn decode_jpeg2000_pixels(pixels: jpeg2k::ImageData) -> Result<Vec<u8>, FilterError> {
         let data = match pixels.data {
-            jpeg2k::ImagePixelData::L8(data) => data,
-            jpeg2k::ImagePixelData::Rgb16(data) => data
+            jpeg2k::ImagePixelData::L8(data) | jpeg2k::ImagePixelData::Rgb8(data) => data,
+            jpeg2k::ImagePixelData::La8(data) => data
+                .chunks_exact(2)
+                .map(|chunk| chunk[0])
+                .collect::<Vec<u8>>(),
+            jpeg2k::ImagePixelData::Rgba8(data) => data
+                .chunks_exact(4)
+                .flat_map(|chunk| chunk[..3].iter().copied())
+                .collect::<Vec<u8>>(),
+            jpeg2k::ImagePixelData::L16(data) | jpeg2k::ImagePixelData::Rgb16(data) => data
                 .into_iter()
                 .flat_map(|v| v.to_be_bytes())
                 .collect::<Vec<u8>>(),
-            jpeg2k::ImagePixelData::L16(data) => data
-                .into_iter()
-                .flat_map(|v| v.to_be_bytes())
+            jpeg2k::ImagePixelData::La16(data) => data
+                .chunks_exact(2)
+                .flat_map(|chunk| chunk[0].to_be_bytes())
                 .collect::<Vec<u8>>(),
-            _ => {
-                return Err(FilterError::Decompression(
-                    "unsupported JPEG 2000 pixel format".to_string(),
-                ));
-            }
+            jpeg2k::ImagePixelData::Rgba16(data) => data
+                .chunks_exact(4)
+                .flat_map(|chunk| chunk[..3].iter().flat_map(|v| v.to_be_bytes()))
+                .collect::<Vec<u8>>(),
         };
 
         Ok(data)
@@ -721,5 +732,57 @@ mod tests {
 
         let decoded = decode(&stream).expect("decode failed");
         assert_eq!(decoded.as_ref(), b"X");
+    }
+
+    #[test]
+    fn test_decode_jpeg2000_pixels_accepts_rgb8() {
+        let pixels = jpeg2k::ImageData {
+            width: 1,
+            height: 1,
+            format: jpeg2k::ImageFormat::Rgb8,
+            data: jpeg2k::ImagePixelData::Rgb8(vec![10, 20, 30]),
+        };
+
+        let decoded = Filter::decode_jpeg2000_pixels(pixels).expect("decode should succeed");
+        assert_eq!(decoded, vec![10, 20, 30]);
+    }
+
+    #[test]
+    fn test_decode_jpeg2000_pixels_converts_la8_to_l8() {
+        let pixels = jpeg2k::ImageData {
+            width: 1,
+            height: 2,
+            format: jpeg2k::ImageFormat::La8,
+            data: jpeg2k::ImagePixelData::La8(vec![11, 111, 22, 222]),
+        };
+
+        let decoded = Filter::decode_jpeg2000_pixels(pixels).expect("decode should succeed");
+        assert_eq!(decoded, vec![11, 22]);
+    }
+
+    #[test]
+    fn test_decode_jpeg2000_pixels_converts_rgba8_to_rgb8() {
+        let pixels = jpeg2k::ImageData {
+            width: 1,
+            height: 2,
+            format: jpeg2k::ImageFormat::Rgba8,
+            data: jpeg2k::ImagePixelData::Rgba8(vec![1, 2, 3, 4, 5, 6, 7, 8]),
+        };
+
+        let decoded = Filter::decode_jpeg2000_pixels(pixels).expect("decode should succeed");
+        assert_eq!(decoded, vec![1, 2, 3, 5, 6, 7]);
+    }
+
+    #[test]
+    fn test_decode_jpeg2000_pixels_converts_rgba16_to_rgb16_bytes() {
+        let pixels = jpeg2k::ImageData {
+            width: 1,
+            height: 1,
+            format: jpeg2k::ImageFormat::Rgba16,
+            data: jpeg2k::ImagePixelData::Rgba16(vec![0x0102, 0x0304, 0x0506, 0x0708]),
+        };
+
+        let decoded = Filter::decode_jpeg2000_pixels(pixels).expect("decode should succeed");
+        assert_eq!(decoded, vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
     }
 }
