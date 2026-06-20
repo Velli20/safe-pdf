@@ -54,7 +54,7 @@ impl PdfReader {
 
         // Parse and validate the PDF header when it is present near the start of the file.
         if let Some(version) = parser.parse_header_in_opening_bytes()?
-            && version.major() != 1
+            && version.major() > 2
         {
             return Err(PdfReaderError::UnsupportedVersion(
                 version.major(),
