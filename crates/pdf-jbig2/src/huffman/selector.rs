@@ -3,10 +3,10 @@ use crate::{
     huffman::{
         StandardHuffmanDecoder,
         standard::{
-            STANDARD_TABLE_B1, STANDARD_TABLE_B2, STANDARD_TABLE_B3, STANDARD_TABLE_B4,
-            STANDARD_TABLE_B5, STANDARD_TABLE_B6, STANDARD_TABLE_B7, STANDARD_TABLE_B8,
-            STANDARD_TABLE_B9, STANDARD_TABLE_B10, STANDARD_TABLE_B11, STANDARD_TABLE_B12,
-            STANDARD_TABLE_B13, STANDARD_TABLE_B14, STANDARD_TABLE_B15,
+            STANDARD_TABLE_B2, STANDARD_TABLE_B3, STANDARD_TABLE_B4, STANDARD_TABLE_B5,
+            STANDARD_TABLE_B6, STANDARD_TABLE_B7, STANDARD_TABLE_B8, STANDARD_TABLE_B9,
+            STANDARD_TABLE_B10, STANDARD_TABLE_B11, STANDARD_TABLE_B12, STANDARD_TABLE_B13,
+            STANDARD_TABLE_B14, STANDARD_TABLE_B15,
         },
     },
 };
@@ -14,7 +14,6 @@ use crate::{
 const CUSTOM_SYMBOL_DICTIONARY_TABLES: &str = "custom Huffman symbol dictionary tables";
 const CUSTOM_TEXT_REGION_TABLES: &str = "custom text-region Huffman tables";
 const CUSTOM_TEXT_REGION_REFINEMENT_TABLES: &str = "custom text-region refinement Huffman tables";
-const CUSTOM_TEXT_REGION_RSIZE_TABLES: &str = "custom text-region refinement-size Huffman tables";
 const SELECTOR_STANDARD_ZERO: u8 = 0;
 const SELECTOR_STANDARD_ONE: u8 = 1;
 const SELECTOR_STANDARD_TWO: u8 = 2;
@@ -91,21 +90,6 @@ pub(crate) fn text_region_refinement_standard_decoder(
     StandardHuffmanDecoder::new(table_id)
 }
 
-/// Build the standard Huffman decoder for a text-region refinement-size value.
-///
-/// ITU-T T.88 / ISO/IEC 14492 section 7.4.3.1.2 uses standard table B.1 when
-/// `SBHUFFRSIZE = 0`. Custom refinement-size tables are not supported.
-pub(crate) fn text_region_rsize_standard_decoder(
-    custom: bool,
-) -> Result<StandardHuffmanDecoder, Jbig2Error> {
-    if custom {
-        return Err(Jbig2Error::UnsupportedFeature(
-            CUSTOM_TEXT_REGION_RSIZE_TABLES,
-        ));
-    }
-    StandardHuffmanDecoder::new(STANDARD_TABLE_B1)
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -113,12 +97,12 @@ mod tests {
         huffman::{
             HuffmanTableSelection, StandardHuffmanDecoder,
             standard::{
-                STANDARD_TABLE_B1, STANDARD_TABLE_B2, STANDARD_TABLE_B3, STANDARD_TABLE_B4,
-                STANDARD_TABLE_B5, STANDARD_TABLE_B6, STANDARD_TABLE_B7, STANDARD_TABLE_B8,
-                STANDARD_TABLE_B9, STANDARD_TABLE_B10, STANDARD_TABLE_B11, STANDARD_TABLE_B12,
-                STANDARD_TABLE_B13, STANDARD_TABLE_B14, STANDARD_TABLE_B15,
+                STANDARD_TABLE_B2, STANDARD_TABLE_B3, STANDARD_TABLE_B4, STANDARD_TABLE_B5,
+                STANDARD_TABLE_B6, STANDARD_TABLE_B7, STANDARD_TABLE_B8, STANDARD_TABLE_B9,
+                STANDARD_TABLE_B10, STANDARD_TABLE_B11, STANDARD_TABLE_B12, STANDARD_TABLE_B13,
+                STANDARD_TABLE_B14, STANDARD_TABLE_B15,
             },
-            text_region_refinement_standard_decoder, text_region_rsize_standard_decoder,
+            text_region_refinement_standard_decoder,
         },
     };
 
@@ -196,23 +180,6 @@ mod tests {
             result,
             Err(Jbig2Error::UnsupportedFeature(message))
                 if message == super::CUSTOM_TEXT_REGION_REFINEMENT_TABLES
-        ));
-    }
-
-    #[test]
-    fn selects_standard_rsize_table_b1() {
-        let selected = text_region_rsize_standard_decoder(false).expect("selected");
-        let standard = StandardHuffmanDecoder::new(STANDARD_TABLE_B1).expect("standard table");
-        assert_eq!(selected, standard);
-    }
-
-    #[test]
-    fn rejects_custom_rsize_table() {
-        let result = text_region_rsize_standard_decoder(true);
-        assert!(matches!(
-            result,
-            Err(Jbig2Error::UnsupportedFeature(message))
-                if message == super::CUSTOM_TEXT_REGION_RSIZE_TABLES
         ));
     }
 }

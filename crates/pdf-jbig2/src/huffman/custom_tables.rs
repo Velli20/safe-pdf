@@ -49,6 +49,38 @@ impl CustomHuffmanTableCursor {
         }
     }
 
+    /// Resolve a text-region refinement selector to either a standard or custom table.
+    ///
+    /// Selectors `0` and `1` use the built-in Annex B tables `B.14` and `B.15`.
+    /// Selector `3` consumes the next referred custom table.
+    pub(crate) fn text_region_refinement_table(
+        &mut self,
+        selector: u8,
+    ) -> Result<HuffmanDecoder, Jbig2Error> {
+        match selector {
+            3 => self.next_decoder(),
+            _ => super::text_region_refinement_standard_decoder(selector)
+                .map(HuffmanDecoder::Standard),
+        }
+    }
+
+    /// Resolve the text-region refinement-size table.
+    ///
+    /// `SBHUFFRSIZE = 0` uses the built-in Annex B table `B.1`; otherwise the
+    /// next referred custom table is consumed.
+    pub(crate) fn text_region_rsize_table(
+        &mut self,
+        custom: bool,
+    ) -> Result<HuffmanDecoder, Jbig2Error> {
+        if custom {
+            return self.next_decoder();
+        }
+
+        Ok(HuffmanDecoder::Standard(
+            super::StandardHuffmanDecoder::new(super::STANDARD_TABLE_B1)?,
+        ))
+    }
+
     /// Consume and return the next referred custom Huffman table.
     ///
     /// Returns `MissingSegment` when no more referred tables are available.
@@ -65,7 +97,7 @@ mod tests {
         error::Jbig2Error,
         huffman::{
             CustomHuffmanDecoder, HuffmanDecoder, HuffmanTableSelection, StandardHuffmanDecoder,
-            standard::STANDARD_TABLE_B6,
+            standard::{STANDARD_TABLE_B1, STANDARD_TABLE_B6, STANDARD_TABLE_B14},
             test_support::{bits_to_bytes, push_bits},
         },
     };
@@ -149,6 +181,90 @@ mod tests {
         assert_eq!(
             cursor.next_decoder(),
             Ok(HuffmanDecoder::Custom(tables[0].clone()))
+        );
+    }
+
+    #[test]
+    fn selects_custom_text_region_refinement_table_for_selector_three() {
+        let tables = vec![custom_table(9)];
+        let mut cursor = CustomHuffmanTableCursor::new(tables.clone());
+
+        assert_eq!(
+            cursor.text_region_refinement_table(3),
+            Ok(HuffmanDecoder::Custom(tables[0].clone()))
+        );
+    }
+
+    #[test]
+    fn selects_standard_text_region_refinement_table_without_consuming_custom() {
+        let tables = vec![custom_table(1)];
+        let mut cursor = CustomHuffmanTableCursor::new(tables.clone());
+
+        assert_eq!(
+            cursor.text_region_refinement_table(0),
+            Ok(HuffmanDecoder::Standard(
+                StandardHuffmanDecoder::new(STANDARD_TABLE_B14).expect("standard table")
+            ))
+        );
+        assert_eq!(
+            cursor.next_decoder(),
+            Ok(HuffmanDecoder::Custom(tables[0].clone()))
+        );
+    }
+
+    #[test]
+    fn selects_custom_rsize_table() {
+        let tables = vec![custom_table(11)];
+        let mut cursor = CustomHuffmanTableCursor::new(tables.clone());
+
+        assert_eq!(
+            cursor.text_region_rsize_table(true),
+            Ok(HuffmanDecoder::Custom(tables[0].clone()))
+        );
+    }
+
+    #[test]
+    fn selects_standard_rsize_table_without_consuming_custom() {
+        let tables = vec![custom_table(1)];
+        let mut cursor = CustomHuffmanTableCursor::new(tables.clone());
+
+        assert_eq!(
+            cursor.text_region_rsize_table(false),
+            Ok(HuffmanDecoder::Standard(
+                StandardHuffmanDecoder::new(STANDARD_TABLE_B1).expect("standard table")
+            ))
+        );
+        assert_eq!(
+            cursor.next_decoder(),
+            Ok(HuffmanDecoder::Custom(tables[0].clone()))
+        );
+    }
+
+    #[test]
+    fn consumes_mixed_text_region_custom_tables_in_header_order() {
+        let tables = vec![
+            custom_table(1),
+            custom_table(2),
+            custom_table(3),
+            custom_table(4),
+        ];
+        let mut cursor = CustomHuffmanTableCursor::new(tables.clone());
+
+        assert_eq!(
+            cursor.text_region_table(HuffmanTableSelection::TextRegionFs(3)),
+            Ok(HuffmanDecoder::Custom(tables[0].clone()))
+        );
+        assert_eq!(
+            cursor.text_region_refinement_table(3),
+            Ok(HuffmanDecoder::Custom(tables[1].clone()))
+        );
+        assert_eq!(
+            cursor.text_region_refinement_table(3),
+            Ok(HuffmanDecoder::Custom(tables[2].clone()))
+        );
+        assert_eq!(
+            cursor.text_region_rsize_table(true),
+            Ok(HuffmanDecoder::Custom(tables[3].clone()))
         );
     }
 

@@ -5,9 +5,7 @@ use crate::{
     error::Jbig2Error,
     huffman::{
         CustomHuffmanDecoder, CustomHuffmanTableCursor, HuffmanDecoder, HuffmanTableSelection,
-        HuffmanValue, StandardHuffmanDecoder, SymbolIdHuffmanTable, decode_symbol_id,
-        decode_symbol_id_huffman_table, text_region_refinement_standard_decoder,
-        text_region_rsize_standard_decoder,
+        HuffmanValue, SymbolIdHuffmanTable, decode_symbol_id, decode_symbol_id_huffman_table,
     },
     image::JBig2Image,
     segment_context::SegmentDecodeContext,
@@ -50,11 +48,11 @@ struct HuffmanTextRegionDecodeContext<'a> {
 /// Standard Huffman tables used by refinement-coded text regions.
 #[derive(Debug, Clone)]
 struct TextRegionRefinementTables {
-    rsize_table: StandardHuffmanDecoder,
-    rdw_table: StandardHuffmanDecoder,
-    rdh_table: StandardHuffmanDecoder,
-    rdx_table: StandardHuffmanDecoder,
-    rdy_table: StandardHuffmanDecoder,
+    rsize_table: HuffmanDecoder,
+    rdw_table: HuffmanDecoder,
+    rdh_table: HuffmanDecoder,
+    rdx_table: HuffmanDecoder,
+    rdy_table: HuffmanDecoder,
 }
 
 /// Decode a Huffman-coded JBIG2 text-region body.
@@ -101,7 +99,10 @@ impl<'a> HuffmanTextRegionDecodeContext<'a> {
             .remaining_from_byte()
             .ok_or(Jbig2Error::Truncated(TEXT_REGION_BODY))?;
         let refinement_tables = if parsed.flags.contains(TextRegionFlagBits::SBREFINE) {
-            Some(TextRegionRefinementTables::new(huffman_flags)?)
+            Some(TextRegionRefinementTables::new(
+                &mut custom_tables,
+                huffman_flags,
+            )?)
         } else {
             None
         };
@@ -133,13 +134,16 @@ fn referred_huffman_tables(
 }
 
 impl TextRegionRefinementTables {
-    /// Resolve the standard Huffman tables used by refinement-coded instances.
-    fn new(huffman_flags: TextRegionHuffmanFlags) -> Result<Self, Jbig2Error> {
-        let rsize_table = text_region_rsize_standard_decoder(huffman_flags.rsize_custom)?;
-        let rdw_table = text_region_refinement_standard_decoder(huffman_flags.rdw_selector)?;
-        let rdh_table = text_region_refinement_standard_decoder(huffman_flags.rdh_selector)?;
-        let rdx_table = text_region_refinement_standard_decoder(huffman_flags.rdx_selector)?;
-        let rdy_table = text_region_refinement_standard_decoder(huffman_flags.rdy_selector)?;
+    /// Resolve the Huffman tables used by refinement-coded instances.
+    fn new(
+        custom_tables: &mut CustomHuffmanTableCursor,
+        huffman_flags: TextRegionHuffmanFlags,
+    ) -> Result<Self, Jbig2Error> {
+        let rdw_table = custom_tables.text_region_refinement_table(huffman_flags.rdw_selector)?;
+        let rdh_table = custom_tables.text_region_refinement_table(huffman_flags.rdh_selector)?;
+        let rdx_table = custom_tables.text_region_refinement_table(huffman_flags.rdx_selector)?;
+        let rdy_table = custom_tables.text_region_refinement_table(huffman_flags.rdy_selector)?;
+        let rsize_table = custom_tables.text_region_rsize_table(huffman_flags.rsize_custom)?;
 
         Ok(Self {
             rsize_table,
@@ -331,9 +335,9 @@ mod tests {
     use crate::{
         error::Jbig2Error,
         huffman::{
-            HuffmanTableSelection, HuffmanValue, StandardHuffmanDecoder,
-            test_support::bits_for_value, text_region_refinement_standard_decoder,
-            text_region_rsize_standard_decoder,
+            CustomHuffmanDecoder, HuffmanTableSelection, HuffmanValue, StandardHuffmanDecoder,
+            test_support::{bits_for_value, bits_to_bytes, push_bits},
+            text_region_refinement_standard_decoder,
         },
         image::JBig2Image,
         segment::{JBig2SegmentResult, ParsedSegment},
@@ -430,6 +434,31 @@ mod tests {
         writer.align_to_byte();
     }
 
+    fn push_custom_table_header(
+        bytes: &mut Vec<u8>,
+        flags: u8,
+        lowest_value: i32,
+        highest_value: i32,
+    ) {
+        bytes.push(flags);
+        bytes.extend_from_slice(&lowest_value.to_be_bytes());
+        bytes.extend_from_slice(&highest_value.to_be_bytes());
+    }
+
+    fn single_value_custom_table(value: i32) -> CustomHuffmanDecoder {
+        let highest_value = value.checked_add(1).expect("highest value");
+        let mut data = Vec::new();
+        push_custom_table_header(&mut data, 0b0000_0010, value, highest_value);
+        let mut bits = Vec::new();
+        push_bits(&mut bits, 1, 2);
+        push_bits(&mut bits, 0, 1);
+        push_bits(&mut bits, 2, 2);
+        push_bits(&mut bits, 2, 2);
+        data.extend_from_slice(&bits_to_bytes(&bits));
+
+        CustomHuffmanDecoder::parse(&data).expect("custom table")
+    }
+
     fn solid_symbol(width: u16, height: u16) -> JBig2Image {
         let mut image = JBig2Image::new(width, height);
         for y in 0..height {
@@ -456,6 +485,31 @@ mod tests {
             number,
             flags: 0,
             referred_to_segment_numbers: vec![referred_number],
+            page_association: 0,
+            data_length: None,
+            result: JBig2SegmentResult::None,
+        }
+    }
+
+    fn huffman_table_segment(number: u32, table: CustomHuffmanDecoder) -> ParsedSegment {
+        ParsedSegment {
+            number,
+            flags: 0,
+            referred_to_segment_numbers: Vec::new(),
+            page_association: 0,
+            data_length: None,
+            result: JBig2SegmentResult::HuffmanTable(table),
+        }
+    }
+
+    fn text_region_segment_with_references(
+        number: u32,
+        referred_numbers: Vec<u32>,
+    ) -> ParsedSegment {
+        ParsedSegment {
+            number,
+            flags: 0,
+            referred_to_segment_numbers: referred_numbers,
             page_association: 0,
             data_length: None,
             result: JBig2SegmentResult::None,
@@ -841,29 +895,46 @@ mod tests {
     }
 
     #[test]
-    fn sbrefine_with_custom_refinement_tables_is_unsupported() {
+    fn sbrefine_with_custom_rsize_table_is_accepted_for_huffman_text_regions() {
         let (fs_table, _, dt_table) = text_region_tables();
+        let rdw_table = text_region_refinement_standard_decoder(0).expect("rdw");
+        let rdh_table = text_region_refinement_standard_decoder(0).expect("rdh");
+        let rdx_table = text_region_refinement_standard_decoder(0).expect("rdx");
+        let rdy_table = text_region_refinement_standard_decoder(0).expect("rdy");
         let mut writer = BitWriter::new();
         push_single_symbol_id_table(&mut writer);
-        push_huffman_result(&mut writer, &dt_table, HuffmanValue::Value(1));
-        push_huffman_result(&mut writer, &dt_table, HuffmanValue::Value(1));
-        push_huffman_result(&mut writer, &fs_table, HuffmanValue::Value(1));
+        let _ =
+            push_first_encodable_value(&mut writer, &dt_table, &[1, 0, 2, 3]).expect("dt value");
+        let _ =
+            push_first_encodable_value(&mut writer, &fs_table, &[1, 0, 2, 3]).expect("fs value");
         writer.push_bits(1, 1);
+        let _ =
+            push_first_encodable_value(&mut writer, &rdw_table, &[0, 1, 2, 3]).expect("rdw value");
+        let _ =
+            push_first_encodable_value(&mut writer, &rdh_table, &[0, 1, 2, 3]).expect("rdh value");
+        let _ =
+            push_first_encodable_value(&mut writer, &rdx_table, &[0, 1, 2, 3]).expect("rdx value");
+        let _ =
+            push_first_encodable_value(&mut writer, &rdy_table, &[0, 1, 2, 3]).expect("rdy value");
+        writer.push_bits(0, 1);
         writer.align_to_byte();
+        writer.push_bytes(&[0x00, 0x00, 0x00, 0x00]);
 
         let flags = TextRegionFlagBits::SBHUFF.bits()
             | TextRegionFlagBits::SBREFINE.bits()
             | TextRegionFlagBits::SBRTEMPLATE.bits()
             | top_left_corner_bits();
-        let data = build_text_region_data(4, 4, flags, 0x0080, 1, writer.into_bytes());
+        let data = build_text_region_data(4, 4, flags, 0x4000, 1, writer.into_bytes());
         let parsed = ParsedTextRegion::try_from(data.as_slice()).expect("parsed");
         let dict = dictionary_segment(1, vec![solid_symbol(1, 1)]);
-        let segment = text_region_segment(2, 1);
-        let referred_segments = [dict];
+        let custom_rsize = huffman_table_segment(2, single_value_custom_table(4));
+        let segment = text_region_segment_with_references(3, vec![1, 2]);
+        let referred_segments = [dict, custom_rsize];
         let mut stream = BitReader::new(&[]);
         let context = SegmentDecodeContext::new(&segment, &mut stream, 0, &referred_segments, &[]);
-        let err = decode_huffman_text_region(&context, parsed).expect_err("unsupported");
-        assert!(matches!(err, Jbig2Error::UnsupportedFeature(_)));
+        let image = decode_huffman_text_region(&context, parsed).expect("decode region");
+
+        assert_eq!((image.width(), image.height()), (4, 4));
     }
 
     #[test]
@@ -873,7 +944,8 @@ mod tests {
         let rdh_table = text_region_refinement_standard_decoder(0).expect("rdh");
         let rdx_table = text_region_refinement_standard_decoder(0).expect("rdx");
         let rdy_table = text_region_refinement_standard_decoder(0).expect("rdy");
-        let rsize_table = text_region_rsize_standard_decoder(false).expect("rsize");
+        let rsize_table =
+            StandardHuffmanDecoder::new(crate::huffman::STANDARD_TABLE_B1).expect("rsize");
         let mut writer = BitWriter::new();
         push_single_symbol_id_table(&mut writer);
         let _ =
