@@ -79,7 +79,7 @@ impl<'data> Jbig2DecodeRequest<'data> {
         self.validate_dimensions()?;
         let globals = self.decode_globals()?;
         let decoded = self.decode_page(globals.as_deref().unwrap_or(&[]))?;
-        Ok(Self::pdf_image_bytes(decoded.page))
+        Ok(Self::pdf_image_bytes(&decoded.page))
     }
 
     /// Validate the PDF-supplied page dimensions before allocating a page.
@@ -119,7 +119,7 @@ impl<'data> Jbig2DecodeRequest<'data> {
     /// polarity. The PDF image pipeline consumes tightly packed rows with the
     /// opposite polarity, so the final conversion inverts while removing
     /// internal row alignment padding.
-    fn pdf_image_bytes(page: JBig2Image) -> Vec<u8> {
+    fn pdf_image_bytes(page: &JBig2Image) -> Vec<u8> {
         page.inverted_tight_bytes()
     }
 }

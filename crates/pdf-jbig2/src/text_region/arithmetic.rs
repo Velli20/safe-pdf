@@ -2,23 +2,19 @@
 
 use crate::{
     arith_decoder::{JBig2ArithDecoder, JBig2ArithIntegerContext},
-    compose_op::ComposeOp,
     error::Jbig2Error,
-    generic_refinement_region::{
-        GenericRefinementRegionDecode, RefinementAdaptiveTemplate, RefinementTemplate,
-    },
     image::JBig2Image,
     segment_context::SegmentDecodeContext,
     text_region::{
-        bitmap::initialized_region,
         flags::TextRegionFlagBits,
-        geometry::TextRegionGeometry,
         parser::ParsedTextRegion,
-        state::{TextRegionDecodeState, advance_curs_by_delta_s},
+        refinement::{DecodedTextRegionInstance, TextRegionDecodeContext},
+        state::TextRegionDecodeState,
+        strip_decode_driver::{
+            TextRegionRefinedInstanceDecodeDriver, TextRegionStripDecodeDriver, decode_text_region,
+        },
     },
-    util::{
-        INTEGER_CONVERSION_OVERFLOW, ceil_log2, refined_dimension, refinement_reference_offset,
-    },
+    util::{INTEGER_CONVERSION_OVERFLOW, ceil_log2, refinement_reference_offset},
 };
 use pdf_utils::BitReader;
 
@@ -30,7 +26,6 @@ const TEXT_REGION_REFINEMENT_WIDTH: &str = "text region refinement width";
 const TEXT_REGION_REFINEMENT_HEIGHT: &str = "text region refinement height";
 const TEXT_REGION_REFINEMENT_X: &str = "text region refinement x";
 const TEXT_REGION_REFINEMENT_Y: &str = "text region refinement y";
-const TEXT_REGION_SYMBOL_ID: &str = "text region symbol id";
 
 /// Decode an arithmetic-coded JBIG2 text-region body.
 ///
@@ -49,11 +44,14 @@ pub(crate) fn decode_arithmetic_text_region_segment(
 /// placement loop; arithmetic integer contexts supply `DT`, `DFS`, `IDS`,
 /// `CURT`, and IAID symbol IDs.
 struct ArithmeticTextRegionDecoder<'a> {
-    parsed: ParsedTextRegion<'a>,
-    symbols: Vec<JBig2Image>,
-    compose_op: ComposeOp,
-    geometry: TextRegionGeometry,
-    region: JBig2Image,
+    context: TextRegionDecodeContext<'a>,
+    symbol_code_length: u8,
+}
+
+struct ArithmeticTextRegionStripDecoder<'decoder, 'stream, 'context, 'data> {
+    context: &'decoder mut TextRegionDecodeContext<'data>,
+    decoder: &'decoder mut JBig2ArithDecoder<'stream, 'context>,
+    state: &'decoder mut TextRegionDecodeState,
     symbol_code_length: u8,
 }
 
@@ -68,23 +66,12 @@ impl<'a> ArithmeticTextRegionDecoder<'a> {
         context: &SegmentDecodeContext<'_, '_, '_, '_, '_>,
         parsed: ParsedTextRegion<'a>,
     ) -> Result<Self, Jbig2Error> {
-        let symbols = context.referred_symbol_images()?;
-        if symbols.is_empty() {
-            return Err(Jbig2Error::MissingSegment);
-        }
-
-        let compose_op = ComposeOp::from(parsed.flags.sbcombop_bits());
-        let geometry = TextRegionGeometry::from_flags(parsed.flags)?;
-        let region = initialized_region(&parsed)?;
-        let symbol_code_length = ceil_log2(symbols.len())?;
+        let context = TextRegionDecodeContext::new(context, parsed)?;
+        let symbol_code_length = ceil_log2(context.symbols_len())?;
 
         Ok(Self {
-            parsed,
-            compose_op,
-            geometry,
-            region,
+            context,
             symbol_code_length,
-            symbols,
         })
     }
 
@@ -93,203 +80,134 @@ impl<'a> ArithmeticTextRegionDecoder<'a> {
     /// This implements ITU-T T.88 | ISO/IEC 14492 section 6.4.5 from initial
     /// `STRIPT` setup through the strip and symbol-instance loops.
     fn decode(mut self) -> Result<JBig2Image, Jbig2Error> {
-        let mut body_reader = BitReader::new(self.parsed.body);
+        let mut body_reader = BitReader::new(self.context.parsed().body);
         let mut decoder = JBig2ArithDecoder::new(&mut body_reader);
         let initial_stript = decoder
             .decode_required_integer(JBig2ArithIntegerContext::TextDeltaT, TEXT_REGION_DELTA_T)?;
         let mut state = TextRegionDecodeState::from_initial_delta(
             initial_stript,
-            self.parsed.flags.sbstrips(),
+            self.context.parsed().flags.sbstrips(),
         )?;
-
-        while !state.is_complete(self.parsed.symbol_instances) {
-            self.decode_strip(&mut decoder, &mut state)?;
+        {
+            let mut strip_decoder = ArithmeticTextRegionStripDecoder {
+                context: &mut self.context,
+                decoder: &mut decoder,
+                state: &mut state,
+                symbol_code_length: self.symbol_code_length,
+            };
+            decode_text_region(&mut strip_decoder)?;
         }
 
-        Ok(self.region)
+        Ok(self.context.into_region())
+    }
+}
+
+impl TextRegionRefinedInstanceDecodeDriver for ArithmeticTextRegionStripDecoder<'_, '_, '_, '_> {
+    fn with_context_and_state<T>(
+        &mut self,
+        f: impl FnOnce(&mut TextRegionDecodeContext<'_>, &mut TextRegionDecodeState) -> T,
+    ) -> T {
+        f(self.context, self.state)
     }
 
-    /// Decode one arithmetic strip.
-    ///
-    /// ITU-T T.88 | ISO/IEC 14492 section 6.4.5 step 3(b) decodes `DT`, and
-    /// step 3(c) decodes the first and subsequent symbol instances.
-    fn decode_strip(
+    fn decode_refined_instance_image(
         &mut self,
-        decoder: &mut JBig2ArithDecoder<'_, '_>,
-        state: &mut TextRegionDecodeState,
-    ) -> Result<(), Jbig2Error> {
-        let delta_t = decoder
-            .decode_required_integer(JBig2ArithIntegerContext::TextDeltaT, TEXT_REGION_DELTA_T)?;
-        state.advance_strip(delta_t, self.parsed.flags.sbstrips())?;
-        let delta_first_s = decoder.decode_required_integer(
+        instance: DecodedTextRegionInstance,
+    ) -> Result<JBig2Image, Jbig2Error> {
+        let delta_width = self.decoder.decode_required_integer(
+            JBig2ArithIntegerContext::RefinementDeltaWidth,
+            TEXT_REGION_REFINEMENT_WIDTH,
+        )?;
+        let delta_height = self.decoder.decode_required_integer(
+            JBig2ArithIntegerContext::RefinementDeltaHeight,
+            TEXT_REGION_REFINEMENT_HEIGHT,
+        )?;
+        let delta_x = self.decoder.decode_required_integer(
+            JBig2ArithIntegerContext::RefinementDeltaX,
+            TEXT_REGION_REFINEMENT_X,
+        )?;
+        let delta_y = self.decoder.decode_required_integer(
+            JBig2ArithIntegerContext::RefinementDeltaY,
+            TEXT_REGION_REFINEMENT_Y,
+        )?;
+        self.context.decode_refined_image(
+            instance.symbol_id,
+            delta_width,
+            delta_height,
+            delta_x,
+            delta_y,
+            TEXT_REGION_REFINEMENT_WIDTH,
+            TEXT_REGION_REFINEMENT_HEIGHT,
+            refinement_reference_offset,
+            self.decoder,
+        )
+    }
+}
+
+impl TextRegionStripDecodeDriver for ArithmeticTextRegionStripDecoder<'_, '_, '_, '_> {
+    fn context(&self) -> &TextRegionDecodeContext<'_> {
+        self.context
+    }
+
+    fn state(&self) -> &TextRegionDecodeState {
+        self.state
+    }
+
+    fn state_mut(&mut self) -> &mut TextRegionDecodeState {
+        self.state
+    }
+
+    /// Decode the next strip `DT` header.
+    ///
+    /// ITU-T T.88 | ISO/IEC 14492 sections 6.4.5 step 3(b) and 6.4.6 define
+    /// strip delta decoding and `STRIPT` advancement.
+    fn decode_next_strip_header_delta(&mut self) -> Result<i32, Jbig2Error> {
+        self.decoder
+            .decode_required_integer(JBig2ArithIntegerContext::TextDeltaT, TEXT_REGION_DELTA_T)
+    }
+
+    fn decode_first_symbol_delta(&mut self) -> Result<i32, Jbig2Error> {
+        self.decoder.decode_required_integer(
             JBig2ArithIntegerContext::TextFirstS,
             TEXT_REGION_FIRST_S_DELTA,
-        )?;
-        let mut curs = state.consume_first_s_delta(delta_first_s)?;
-
-        loop {
-            curs = self.decode_instance(decoder, state, curs)?;
-            if state.is_complete(self.parsed.symbol_instances) {
-                break;
-            }
-
-            let Some(delta_s) = decoder.decode_integer(JBig2ArithIntegerContext::TextDeltaS)?
-            else {
-                break;
-            };
-            curs = advance_curs_by_delta_s(curs, delta_s, self.parsed.flags.sbdsoffset())?;
-        }
-
-        Ok(())
+        )
     }
 
-    /// Decode and draw one arithmetic symbol instance.
-    ///
-    /// ITU-T T.88 | ISO/IEC 14492 sections 6.4.9 and 6.4.10 define `CURT`
-    /// and IAID symbol-ID decoding before section 6.4.5 placement.
-    fn decode_instance(
-        &mut self,
-        decoder: &mut JBig2ArithDecoder<'_, '_>,
-        state: &mut TextRegionDecodeState,
-        curs: i64,
-    ) -> Result<i64, Jbig2Error> {
-        let current_t = if self.parsed.flags.sbstrips() == 1 {
+    fn decode_delta_s_or_end(&mut self) -> Result<Option<i32>, Jbig2Error> {
+        self.decoder
+            .decode_integer(JBig2ArithIntegerContext::TextDeltaS)
+    }
+
+    fn decode_current_t(&mut self) -> Result<i64, Jbig2Error> {
+        let current_t = if self.context.parsed().flags.sbstrips() == 1 {
             0
         } else {
-            i64::from(decoder.decode_required_integer(
+            i64::from(self.decoder.decode_required_integer(
                 JBig2ArithIntegerContext::TextInstanceT,
                 TEXT_REGION_INSTANCE_T,
             )?)
         };
-        let ti = state
-            .stript()
-            .checked_add(current_t)
-            .ok_or(Jbig2Error::Overflow(INTEGER_CONVERSION_OVERFLOW))?;
-        let symbol_id = usize::try_from(decoder.decode_iaid(self.symbol_code_length)?)
-            .map_err(|_| Jbig2Error::Overflow(INTEGER_CONVERSION_OVERFLOW))?;
-        let refined = self.decode_refinement_flag(decoder)?;
-        if refined {
-            self.draw_refined_instance(symbol_id, curs, ti, decoder, state)
-        } else {
-            self.draw_instance(symbol_id, curs, ti, state)
-        }
+        Ok(current_t)
     }
 
-    /// Decode the per-instance refinement flag when `SBREFINE` is enabled.
-    fn decode_refinement_flag(
-        &self,
-        decoder: &mut JBig2ArithDecoder<'_, '_>,
-    ) -> Result<bool, Jbig2Error> {
-        if !self.parsed.flags.contains(TextRegionFlagBits::SBREFINE) {
+    fn decode_symbol_id(&mut self) -> Result<usize, Jbig2Error> {
+        usize::try_from(self.decoder.decode_iaid(self.symbol_code_length)?)
+            .map_err(|_| Jbig2Error::Overflow(INTEGER_CONVERSION_OVERFLOW))
+    }
+
+    fn decode_refinement_flag(&mut self) -> Result<bool, Jbig2Error> {
+        if !self
+            .context
+            .parsed()
+            .flags
+            .contains(TextRegionFlagBits::SBREFINE)
+        {
             return Ok(false);
         }
-        let value = decoder.decode_required_integer(
+        let value = self.decoder.decode_required_integer(
             JBig2ArithIntegerContext::RefinementInstance,
             TEXT_REGION_REFINEMENT_FLAG,
         )?;
         Ok(value != 0)
-    }
-
-    /// Compose one decoded symbol and return the next `CURS` value.
-    ///
-    /// ITU-T T.88 | ISO/IEC 14492 section 6.4.5 step 3(c) adjusts `CURS`,
-    /// places the symbol, composes the bitmap, advances `CURS`, and increments
-    /// `NINSTANCES`.
-    fn draw_instance(
-        &mut self,
-        symbol_id: usize,
-        curs: i64,
-        ti: i64,
-        state: &mut TextRegionDecodeState,
-    ) -> Result<i64, Jbig2Error> {
-        let symbol = self
-            .symbols
-            .get(symbol_id)
-            .ok_or(Jbig2Error::InvalidState(TEXT_REGION_SYMBOL_ID))?;
-        let placed_curs =
-            self.geometry
-                .adjust_curs_before_placement(curs, symbol.width(), symbol.height())?;
-        let placement =
-            self.geometry
-                .placement_for(placed_curs, ti, symbol.width(), symbol.height())?;
-        symbol.compose_clipped_to(&mut self.region, placement.x, placement.y, self.compose_op);
-        let curs = self.geometry.advance_curs_after_placement(
-            placed_curs,
-            symbol.width(),
-            symbol.height(),
-        )?;
-        state.record_instance()?;
-        Ok(curs)
-    }
-
-    /// Decode, compose, and advance one refinement-coded symbol instance.
-    fn draw_refined_instance(
-        &mut self,
-        symbol_id: usize,
-        curs: i64,
-        ti: i64,
-        decoder: &mut JBig2ArithDecoder<'_, '_>,
-        state: &mut TextRegionDecodeState,
-    ) -> Result<i64, Jbig2Error> {
-        let reference = self
-            .symbols
-            .get(symbol_id)
-            .ok_or(Jbig2Error::InvalidState(TEXT_REGION_SYMBOL_ID))?;
-        let delta_width = decoder.decode_required_integer(
-            JBig2ArithIntegerContext::RefinementDeltaWidth,
-            TEXT_REGION_REFINEMENT_WIDTH,
-        )?;
-        let delta_height = decoder.decode_required_integer(
-            JBig2ArithIntegerContext::RefinementDeltaHeight,
-            TEXT_REGION_REFINEMENT_HEIGHT,
-        )?;
-        let delta_x = decoder.decode_required_integer(
-            JBig2ArithIntegerContext::RefinementDeltaX,
-            TEXT_REGION_REFINEMENT_X,
-        )?;
-        let delta_y = decoder.decode_required_integer(
-            JBig2ArithIntegerContext::RefinementDeltaY,
-            TEXT_REGION_REFINEMENT_Y,
-        )?;
-        let width =
-            refined_dimension(reference.width(), delta_width, TEXT_REGION_REFINEMENT_WIDTH)?;
-        let height = refined_dimension(
-            reference.height(),
-            delta_height,
-            TEXT_REGION_REFINEMENT_HEIGHT,
-        )?;
-        let template = RefinementTemplate::from_flag(
-            self.parsed.flags.contains(TextRegionFlagBits::SBRTEMPLATE),
-        );
-        let at = self
-            .parsed
-            .refinement_at
-            .unwrap_or_else(|| RefinementAdaptiveTemplate::default_for(template));
-        let reference_dx = refinement_reference_offset(delta_width, delta_x)?;
-        let reference_dy = refinement_reference_offset(delta_height, delta_y)?;
-        let image = GenericRefinementRegionDecode::new(
-            width,
-            height,
-            template,
-            false,
-            at,
-            reference_dx,
-            reference_dy,
-        )
-        .decode(reference, decoder)?;
-        let placed_curs =
-            self.geometry
-                .adjust_curs_before_placement(curs, image.width(), image.height())?;
-        let placement =
-            self.geometry
-                .placement_for(placed_curs, ti, image.width(), image.height())?;
-        image.compose_clipped_to(&mut self.region, placement.x, placement.y, self.compose_op);
-        let curs = self.geometry.advance_curs_after_placement(
-            placed_curs,
-            image.width(),
-            image.height(),
-        )?;
-        state.record_instance()?;
-        Ok(curs)
     }
 }

@@ -147,6 +147,23 @@ impl<'a> BitReader<'a> {
         Some(value)
     }
 
+    /// Reads `n` bits MSB-first and returns them as a `u8`.
+    ///
+    /// Returns [`BitReaderError::Truncated`] with `truncated_label` if fewer
+    /// than `n` bits remain, and [`BitReaderError::Overflow`] if the decoded
+    /// value does not fit in `u8`.
+    pub fn try_read_bits_u8(
+        &mut self,
+        n: u8,
+        truncated_label: &'static str,
+    ) -> Result<u8, crate::error::BitReaderError> {
+        let value = self
+            .read_bits(n)
+            .ok_or(crate::error::BitReaderError::Truncated(truncated_label))?;
+        u8::try_from(value)
+            .map_err(|_| crate::error::BitReaderError::Overflow("integer conversion overflow"))
+    }
+
     /// Reads a big-endian byte-aligned integer from the current byte index.
     ///
     /// This is intended for byte-aligned consumers. The read advances by one
@@ -351,6 +368,38 @@ mod tests {
         let data = [0b1000_0000u8, 0b1000_0000u8];
         let mut r = BitReader::new(&data);
         assert_eq!(r.read_bits(9), Some(0b1_0000_0001)); // 257
+    }
+
+    #[test]
+    fn try_read_bits_u8_returns_value() {
+        let data = [0b1010_0000u8];
+        let mut r = BitReader::new(&data);
+
+        assert_eq!(r.try_read_bits_u8(4, "test bits"), Ok(0b1010));
+    }
+
+    #[test]
+    fn try_read_bits_u8_returns_truncation_error() {
+        let data = [0b1010_0000u8];
+        let mut r = BitReader::new(&data);
+
+        assert_eq!(
+            r.try_read_bits_u8(9, "test bits"),
+            Err(crate::error::BitReaderError::Truncated("test bits"))
+        );
+    }
+
+    #[test]
+    fn try_read_bits_u8_returns_overflow_error() {
+        let data = [0b1000_0000u8, 0b0000_0000u8];
+        let mut r = BitReader::new(&data);
+
+        assert_eq!(
+            r.try_read_bits_u8(9, "test bits"),
+            Err(crate::error::BitReaderError::Overflow(
+                "integer conversion overflow"
+            ))
+        );
     }
 
     #[test]

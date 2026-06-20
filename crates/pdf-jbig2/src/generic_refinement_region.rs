@@ -7,8 +7,9 @@
 use bitflags::bitflags;
 
 use crate::{
-    arith_decoder::JBig2ArithDecoder, compose_op::ComposeOp, error::Jbig2Error, image::JBig2Image,
-    region_info::RegionInfo, segment_context::SegmentDecodeContext,
+    arith_decoder::JBig2ArithDecoder, decoded_region_segment::DecodedRegionSegment,
+    error::Jbig2Error, image::JBig2Image, region_info::RegionInfo,
+    segment_context::SegmentDecodeContext,
 };
 
 /// Error label for the arithmetic-coded refinement bitmap body.
@@ -84,34 +85,6 @@ bitflags! {
     }
 }
 
-/// Decoded JBIG2 generic refinement-region segment.
-///
-/// T.88 / ISO/IEC 14492 section 7.4.7 defines a generic refinement region as
-/// a decoded bitmap plus the common region segment information from section
-/// 7.4.1, which controls page placement and composition.
-pub(crate) struct DecodedGenericRefinementRegionSegment {
-    /// Decoded refinement bitmap produced by the section 6.3.2 procedure.
-    pub(crate) image: JBig2Image,
-    /// Region placement and composition metadata from section 7.4.1.
-    region: RegionInfo,
-}
-
-impl DecodedGenericRefinementRegionSegment {
-    /// Compose the decoded refinement bitmap into `dst` at the region position.
-    ///
-    /// T.88 / ISO/IEC 14492 section 8.2 defines page image composition, while
-    /// section 7.4.1 supplies the region offset and external combination
-    /// operator used here.
-    pub(crate) fn compose_clipped_to(&self, dst: &mut JBig2Image) {
-        self.image.compose_clipped_to(
-            dst,
-            i32::from(self.region.x),
-            i32::from(self.region.y),
-            ComposeOp::from(self.region.flags),
-        );
-    }
-}
-
 /// Decode one JBIG2 generic refinement-region segment.
 ///
 /// T.88 / ISO/IEC 14492 section 7.4.7 defines the segment syntax and reference
@@ -120,7 +93,7 @@ impl DecodedGenericRefinementRegionSegment {
 pub(crate) fn decode_generic_refinement_region_segment(
     context: &mut SegmentDecodeContext<'_, '_, '_, '_, '_>,
     fallback_reference: Option<&JBig2Image>,
-) -> Result<DecodedGenericRefinementRegionSegment, Jbig2Error> {
+) -> Result<DecodedRegionSegment, Jbig2Error> {
     let header = GenericRefinementRegionHeader::parse(context.stream())?;
     let reference = context.referred_image_or(fallback_reference)?;
     let body = context.remaining_body(GENERIC_REFINEMENT_BODY)?;
@@ -137,7 +110,7 @@ pub(crate) fn decode_generic_refinement_region_segment(
     )
     .decode(reference, &mut decoder)?;
 
-    Ok(DecodedGenericRefinementRegionSegment {
+    Ok(DecodedRegionSegment {
         image,
         region: header.region,
     })

@@ -323,7 +323,7 @@ impl<'data, 'prior> Jbig2SegmentStreamDecoder<'data, 'prior> {
             self.prior_segments,
         );
         let decoded = decode_text_region_segment(&mut context)?;
-        decoded.compose_to(&mut self.page);
+        decoded.compose_clipped_to(&mut self.page);
         Ok(())
     }
 

@@ -1,25 +1,20 @@
 use crate::{
     arith_decoder::{JBig2ArithDecoder, JBig2ArithIntegerContext},
-    compose_op::ComposeOp,
     error::Jbig2Error,
-    generic_refinement_region::{
-        GenericRefinementRegionDecode, RefinementAdaptiveTemplate, RefinementTemplate,
-    },
     generic_region::{GenericRegion, GenericRegionTemplate},
     image::JBig2Image,
     symbol_dictionary::{
+        aggregate::decode_aggregate_symbol_instances,
         export::{fill_export_flag_run, total_symbol_count},
         flags::SymbolDictionaryFlagBits,
         header::ParsedSymbolDictionaryHeader,
+        refinement::{
+            AggregateRefinementParams, aggregate_refinement_geometry, aggregate_refinement_params,
+            decode_refinement_symbol_from_deltas,
+        },
     },
-    text_region::{
-        geometry::{TextRegionGeometry, TextRegionRefCorner},
-        state::{TextRegionDecodeState, advance_curs_by_delta_s},
-    },
-    util::{
-        INTEGER_CONVERSION_OVERFLOW, ceil_log2, i32_to_usize, refined_dimension,
-        refinement_reference_offset,
-    },
+    text_region::state::TextRegionDecodeState,
+    util::{INTEGER_CONVERSION_OVERFLOW, ceil_log2, i32_to_usize},
 };
 
 const ARITHMETIC_SYMBOL_HEIGHT: &str = "arithmetic symbol height";
@@ -145,39 +140,62 @@ fn decode_refined_symbol(
         JBig2ArithIntegerContext::RefinementAggregateInstances,
         REFINEMENT_AGGREGATE_INSTANCES,
     )?;
+    let params = aggregate_refinement_params(
+        input_symbols,
+        new_symbols,
+        REFINEMENT_SYMBOL_ID,
+        symbol_code_length,
+        header,
+    );
     if aggregate_instances > 1 {
-        let symbols = CurrentSymbolSet {
-            input_symbols,
-            new_symbols,
-        };
-        let template = RefinementTemplate::from_flag(
-            header
-                .flags
-                .contains(SymbolDictionaryFlagBits::SDR_TEMPLATE),
-        );
-        let at = header
-            .refinement_at
-            .unwrap_or_else(|| RefinementAdaptiveTemplate::default_for(template));
-        return decode_aggregate_refined_symbol(
-            width,
-            height,
-            aggregate_instances,
-            AggregateRefinementParams {
-                symbols,
-                symbol_code_length,
-                template,
-                at,
-            },
+        let symbol_instances = u32::try_from(aggregate_instances)
+            .map_err(|_| Jbig2Error::InvalidState(REFINEMENT_AGGREGATE_INSTANCES))?;
+        let mut image = JBig2Image::try_new(width, height, None)?;
+        let mut state = TextRegionDecodeState::from_initial_delta(
+            decoder.decode_required_integer(
+                JBig2ArithIntegerContext::TextDeltaT,
+                AGGREGATE_SYMBOL_DELTA_T,
+            )?,
+            1,
+        )?;
+        let geometry = aggregate_refinement_geometry();
+
+        decode_aggregate_symbol_instances(
             decoder,
-        );
+            &mut image,
+            geometry,
+            &mut state,
+            symbol_instances,
+            false,
+            |decoder| {
+                decoder.decode_required_integer(
+                    JBig2ArithIntegerContext::TextDeltaT,
+                    AGGREGATE_SYMBOL_DELTA_T,
+                )
+            },
+            |decoder| {
+                decoder.decode_required_integer(
+                    JBig2ArithIntegerContext::TextFirstS,
+                    AGGREGATE_SYMBOL_FIRST_S_DELTA,
+                )
+            },
+            |decoder| decoder.decode_integer(JBig2ArithIntegerContext::TextDeltaS),
+            |decoder| {
+                usize::try_from(decoder.decode_iaid(params.symbol_code_length)?)
+                    .map_err(|_| Jbig2Error::Overflow(INTEGER_CONVERSION_OVERFLOW))
+            },
+            |decoder, symbol_id| decode_aggregate_symbol_instance(params, symbol_id, decoder),
+        )?;
+
+        return Ok(image);
     }
-    if aggregate_instances != 1 {
+    if aggregate_instances < 0 {
         return Err(Jbig2Error::InvalidState(REFINEMENT_AGGREGATE_INSTANCES));
     }
 
     let symbol_id = usize::try_from(decoder.decode_iaid(symbol_code_length)?)
         .map_err(|_| Jbig2Error::Overflow(INTEGER_CONVERSION_OVERFLOW))?;
-    let reference = referenced_symbol(input_symbols, new_symbols, symbol_id)?;
+    let reference = params.symbols.get(symbol_id)?;
     let delta_x = decoder.decode_required_integer(
         JBig2ArithIntegerContext::RefinementDeltaX,
         REFINEMENT_SYMBOL_X,
@@ -186,101 +204,18 @@ fn decode_refined_symbol(
         JBig2ArithIntegerContext::RefinementDeltaY,
         REFINEMENT_SYMBOL_Y,
     )?;
-    let template = RefinementTemplate::from_flag(
-        header
-            .flags
-            .contains(SymbolDictionaryFlagBits::SDR_TEMPLATE),
-    );
-    let reference_dx = delta_x;
-    let reference_dy = delta_y;
-
-    GenericRefinementRegionDecode::new(
-        width,
-        height,
-        template,
-        false,
-        header
-            .refinement_at
-            .unwrap_or_else(|| RefinementAdaptiveTemplate::default_for(template)),
-        reference_dx,
-        reference_dy,
+    decode_refinement_symbol_from_deltas(
+        reference,
+        delta_x,
+        delta_y,
+        delta_x,
+        delta_y,
+        REFINEMENT_SYMBOL_WIDTH,
+        REFINEMENT_SYMBOL_HEIGHT,
+        params.refinement,
+        |_, delta| Ok(delta),
+        decoder,
     )
-    .decode(reference, decoder)
-}
-
-fn decode_aggregate_refined_symbol(
-    width: u16,
-    height: u16,
-    aggregate_instances: i32,
-    params: AggregateRefinementParams<'_>,
-    decoder: &mut JBig2ArithDecoder<'_, '_>,
-) -> Result<JBig2Image, Jbig2Error> {
-    let symbol_instances = u32::try_from(aggregate_instances)
-        .map_err(|_| Jbig2Error::InvalidState(REFINEMENT_AGGREGATE_INSTANCES))?;
-    let geometry = TextRegionGeometry::new(false, TextRegionRefCorner::TopLeft);
-    let mut image = JBig2Image::try_new(width, height, None)?;
-    let initial_stript = decoder.decode_required_integer(
-        JBig2ArithIntegerContext::TextDeltaT,
-        AGGREGATE_SYMBOL_DELTA_T,
-    )?;
-    let mut state = TextRegionDecodeState::from_initial_delta(initial_stript, 1)?;
-
-    while !state.is_complete(symbol_instances) {
-        decode_aggregate_symbol_strip(
-            &mut image,
-            params,
-            geometry,
-            decoder,
-            &mut state,
-            symbol_instances,
-        )?;
-    }
-
-    Ok(image)
-}
-
-fn decode_aggregate_symbol_strip(
-    image: &mut JBig2Image,
-    params: AggregateRefinementParams<'_>,
-    geometry: TextRegionGeometry,
-    decoder: &mut JBig2ArithDecoder<'_, '_>,
-    state: &mut TextRegionDecodeState,
-    symbol_instances: u32,
-) -> Result<(), Jbig2Error> {
-    let delta_t = decoder.decode_required_integer(
-        JBig2ArithIntegerContext::TextDeltaT,
-        AGGREGATE_SYMBOL_DELTA_T,
-    )?;
-    state.advance_strip(delta_t, 1)?;
-    let delta_first_s = decoder.decode_required_integer(
-        JBig2ArithIntegerContext::TextFirstS,
-        AGGREGATE_SYMBOL_FIRST_S_DELTA,
-    )?;
-    let mut curs = state.consume_first_s_delta(delta_first_s)?;
-
-    loop {
-        let symbol_id = usize::try_from(decoder.decode_iaid(params.symbol_code_length)?)
-            .map_err(|_| Jbig2Error::Overflow(INTEGER_CONVERSION_OVERFLOW))?;
-        let symbol = decode_aggregate_symbol_instance(params, symbol_id, decoder)?;
-        let placed_curs =
-            geometry.adjust_curs_before_placement(curs, symbol.width(), symbol.height())?;
-        let placement =
-            geometry.placement_for(placed_curs, state.stript(), symbol.width(), symbol.height())?;
-        symbol.compose_clipped_to(image, placement.x, placement.y, ComposeOp::Or);
-        curs =
-            geometry.advance_curs_after_placement(placed_curs, symbol.width(), symbol.height())?;
-        state.record_instance()?;
-
-        let Some(delta_s) = decoder.decode_integer(JBig2ArithIntegerContext::TextDeltaS)? else {
-            break;
-        };
-        curs = advance_curs_by_delta_s(curs, delta_s, 0)?;
-        if state.is_complete(symbol_instances) {
-            break;
-        }
-    }
-
-    Ok(())
 }
 
 fn decode_aggregate_symbol_instance(
@@ -313,56 +248,18 @@ fn decode_aggregate_symbol_instance(
         JBig2ArithIntegerContext::RefinementDeltaY,
         REFINEMENT_SYMBOL_Y,
     )?;
-    let width = refined_dimension(reference.width(), delta_width, REFINEMENT_SYMBOL_WIDTH)?;
-    let height = refined_dimension(reference.height(), delta_height, REFINEMENT_SYMBOL_HEIGHT)?;
-    let reference_dx = refinement_reference_offset(delta_width, delta_x)?;
-    let reference_dy = refinement_reference_offset(delta_height, delta_y)?;
-    GenericRefinementRegionDecode::new(
-        width,
-        height,
-        params.template,
-        false,
-        params.at,
-        reference_dx,
-        reference_dy,
+    decode_refinement_symbol_from_deltas(
+        reference,
+        delta_width,
+        delta_height,
+        delta_x,
+        delta_y,
+        REFINEMENT_SYMBOL_WIDTH,
+        REFINEMENT_SYMBOL_HEIGHT,
+        params.refinement,
+        |_, delta| Ok(delta),
+        decoder,
     )
-    .decode(reference, decoder)
-}
-
-fn referenced_symbol<'a>(
-    input_symbols: &'a [JBig2Image],
-    new_symbols: &'a [JBig2Image],
-    symbol_id: usize,
-) -> Result<&'a JBig2Image, Jbig2Error> {
-    if let Some(symbol) = input_symbols.get(symbol_id) {
-        return Ok(symbol);
-    }
-    let new_index = symbol_id
-        .checked_sub(input_symbols.len())
-        .ok_or(Jbig2Error::InvalidState(REFINEMENT_SYMBOL_ID))?;
-    new_symbols
-        .get(new_index)
-        .ok_or(Jbig2Error::InvalidState(REFINEMENT_SYMBOL_ID))
-}
-
-#[derive(Debug, Clone, Copy)]
-struct CurrentSymbolSet<'a> {
-    input_symbols: &'a [JBig2Image],
-    new_symbols: &'a [JBig2Image],
-}
-
-#[derive(Debug, Clone, Copy)]
-struct AggregateRefinementParams<'a> {
-    symbols: CurrentSymbolSet<'a>,
-    symbol_code_length: u8,
-    template: RefinementTemplate,
-    at: RefinementAdaptiveTemplate,
-}
-
-impl<'a> CurrentSymbolSet<'a> {
-    fn get(self, symbol_id: usize) -> Result<&'a JBig2Image, Jbig2Error> {
-        referenced_symbol(self.input_symbols, self.new_symbols, symbol_id)
-    }
 }
 
 /// Decode arithmetic-coded symbol export flags.

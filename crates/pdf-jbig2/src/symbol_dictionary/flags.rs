@@ -49,6 +49,11 @@ impl SymbolDictionaryFlagBits {
         self.contains(Self::SDHUFF_BMSIZE)
     }
 
+    /// Return whether `SDHUFFAGGINST` is set as defined by section 7.4.2.1.1.
+    pub(super) fn sdhuffagginst(self) -> bool {
+        self.contains(Self::SDHUFF_AGGINST)
+    }
+
     /// Return `SDTEMPLATE`, the generic-region template selector from section 7.4.2.1.1.
     pub(super) fn sdtemplate(self) -> u8 {
         self.two_bit_selector(Self::SD_TEMPLATE_MASK, SD_TEMPLATE_SHIFT)
@@ -79,6 +84,7 @@ mod tests {
         assert_eq!(bits.sdhuffdh(), 3);
         assert_eq!(bits.sdhuffdw(), 0);
         assert!(bits.sdhuffbmsize());
+        assert!(bits.sdhuffagginst());
         assert_eq!(bits.sdtemplate(), 0);
         assert!(!bits.contains(SymbolDictionaryFlagBits::SDR_TEMPLATE));
     }
