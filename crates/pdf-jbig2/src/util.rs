@@ -1,6 +1,6 @@
 //! Shared JBIG2 decoding helpers.
 
-use crate::{error::Jbig2Error, huffman::HuffmanValue};
+use crate::error::Jbig2Error;
 
 pub(crate) const INTEGER_CONVERSION_OVERFLOW: &str = "integer conversion overflow";
 pub(crate) const IMAGE_DIMENSIONS_OVERFLOW: &str = "image dimensions overflow";
@@ -30,13 +30,6 @@ pub(crate) fn i32_to_u16(value: i32, label: &'static str) -> Result<u16, Jbig2Er
 
 pub(crate) fn usize_to_u16(value: usize, label: &'static str) -> Result<u16, Jbig2Error> {
     u16::try_from(value).map_err(|_| Jbig2Error::InvalidState(label))
-}
-
-pub(crate) fn required_huffman_value(value: HuffmanValue) -> Result<i32, Jbig2Error> {
-    match value {
-        HuffmanValue::Value(value) => Ok(value),
-        HuffmanValue::OutOfBand => Err(Jbig2Error::UnexpectedHuffmanOob),
-    }
 }
 
 pub(crate) fn refinement_reference_offset(size_delta: i32, delta: i32) -> Result<i32, Jbig2Error> {

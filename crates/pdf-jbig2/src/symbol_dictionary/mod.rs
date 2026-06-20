@@ -3,12 +3,15 @@
 //! ITU-T T.88 / ISO/IEC 14492 section 7.4.2 defines symbol dictionary
 //! segments. They produce reusable symbol bitmaps for text-region segments.
 
+mod aggregate;
 mod arithmetic;
 mod collective_bitmap;
+mod current_symbol_set;
 mod export;
 mod flags;
 mod header;
 mod huffman;
+mod refinement;
 
 use self::{
     arithmetic::decode_arithmetic_symbol_dictionary, flags::SymbolDictionaryFlagBits,
@@ -108,20 +111,19 @@ impl<'context, 'segment, 'stream, 'data, 'decoded, 'prior>
     /// collective bitmap sizes, and export runs.
     fn decode_huffman_dictionary(&mut self) -> Result<SymbolDictionary, Jbig2Error> {
         let custom_tables = self.referred_huffman_tables()?;
-        let mut decoder = HuffmanSymbolDictionaryDecoder::new(
-            self.context.stream(),
-            self.header.flags,
-            &custom_tables,
-        )?;
-        let new_symbols = decoder.decode_new_symbols(self.header.num_new_symbols)?;
+        let mut decoder =
+            HuffmanSymbolDictionaryDecoder::new(self.context.stream(), self.header, custom_tables)?;
+        let new_symbols =
+            decoder.decode_new_symbols(&self.input_symbols, self.header.num_new_symbols)?;
         let export_flags =
             decoder.decode_export_flags(self.input_symbols.len(), new_symbols.len())?;
-        SymbolDictionary::from_export_flags(
+        let dictionary = SymbolDictionary::from_export_flags(
             &self.input_symbols,
             &new_symbols,
             &export_flags,
             self.header.num_exported,
-        )
+        )?;
+        Ok(dictionary)
     }
 
     fn referred_huffman_tables(

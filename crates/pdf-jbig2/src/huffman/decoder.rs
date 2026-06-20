@@ -3,15 +3,14 @@ use pdf_utils::BitReader;
 
 use super::{
     code::{HuffmanCode, assign_canonical_codes_from_lengths},
-    standard::{HuffmanRangeEntry, STANDARD_TABLES, StandardTableId},
+    range::{HuffmanRangeEntry, HuffmanRangeKind, decode_range_value},
+    standard::{STANDARD_TABLES, StandardTableId},
     tree::DecodeTree,
 };
 
 const HUFFMAN_STREAM_NAME: &str = "Huffman stream";
 const HUFFMAN_ENTRY_ERROR: &str = "Huffman entry";
 const HUFFMAN_TABLE_ERROR: &str = "Huffman table";
-const EXTRA_BITS_OVERFLOW: &str = "Huffman extra bits overflow";
-const DECODED_VALUE_OVERFLOW: &str = "Huffman decoded value overflow";
 const OOB_ENTRY_FROM_END: usize = 1;
 const LOWER_RANGE_ENTRY_FROM_END_WITH_OOB: usize = 3;
 const LOWER_RANGE_ENTRY_FROM_END_WITHOUT_OOB: usize = 2;
@@ -78,15 +77,20 @@ impl StandardHuffmanDecoder {
             .entries
             .get(index)
             .ok_or(Jbig2Error::InvalidTable(HUFFMAN_ENTRY_ERROR))?;
-        let extra = read_extra_bits(reader, entry.range_len)?;
-        let decoded = if self.is_lower_open_range(index) {
-            entry.range_low.checked_sub(extra)
+        let kind = if self.is_lower_open_range(index) {
+            HuffmanRangeKind::Lower
         } else {
-            entry.range_low.checked_add(extra)
-        }
-        .ok_or(Jbig2Error::Overflow(DECODED_VALUE_OVERFLOW))?;
+            HuffmanRangeKind::Normal
+        };
+        decode_range_value(entry.range_low, entry.range_len, kind, reader)
+    }
 
-        Ok(HuffmanValue::Value(decoded))
+    /// Decode one Huffman-coded integer, rejecting out-of-band markers.
+    pub(crate) fn decode_value(&self, reader: &mut BitReader<'_>) -> Result<i32, Jbig2Error> {
+        match self.decode(reader)? {
+            HuffmanValue::Value(value) => Ok(value),
+            HuffmanValue::OutOfBand => Err(Jbig2Error::UnexpectedHuffmanOob),
+        }
     }
 
     /// Return the canonical codes assigned to this Annex B table.
@@ -141,37 +145,17 @@ impl StandardHuffmanDecoder {
     }
 }
 
-/// Read the extra bits that follow a matched Huffman prefix.
-///
-/// ITU-T T.88 / ISO/IEC 14492 Annex B names this count `RANGELEN`; bits are
-/// read most-significant first and interpreted as an unsigned integer before
-/// being added to or subtracted from `RANGELOW`.
-pub(crate) fn read_extra_bits(reader: &mut BitReader<'_>, bit_len: u8) -> Result<i32, Jbig2Error> {
-    let mut value = 0i32;
-    for _ in 0..bit_len {
-        let bit = reader
-            .next_bit()
-            .ok_or(Jbig2Error::Truncated(HUFFMAN_STREAM_NAME))?;
-        value = value
-            .checked_shl(1)
-            .ok_or(Jbig2Error::Overflow(EXTRA_BITS_OVERFLOW))?;
-        if bit {
-            value = value
-                .checked_add(1)
-                .ok_or(Jbig2Error::Overflow(EXTRA_BITS_OVERFLOW))?;
-        }
-    }
-    Ok(value)
-}
-
 #[cfg(test)]
 mod tests {
     use pdf_utils::BitReader;
 
-    use crate::huffman::{
-        HuffmanValue, StandardHuffmanDecoder,
-        standard::{STANDARD_TABLE_B7, STANDARD_TABLE_B8},
-        test_support::{bits_to_bytes, encode_standard_huffman_value},
+    use crate::{
+        error::Jbig2Error,
+        huffman::{
+            HuffmanValue, StandardHuffmanDecoder,
+            standard::{STANDARD_TABLE_B7, STANDARD_TABLE_B8},
+            test_support::{bits_to_bytes, encode_standard_huffman_value},
+        },
     };
 
     #[test]
@@ -207,5 +191,19 @@ mod tests {
         let result = table.decode(&mut reader).expect("decode");
 
         assert_eq!(result, HuffmanValue::Value(0));
+    }
+
+    #[test]
+    fn decode_value_rejects_standard_table_oob_marker() {
+        let table = StandardHuffmanDecoder::new(STANDARD_TABLE_B8).expect("table");
+        let mut bits = Vec::new();
+        encode_standard_huffman_value(&mut bits, &table, HuffmanValue::OutOfBand)
+            .expect("oob bits");
+        let data = bits_to_bytes(&bits);
+        let mut reader = BitReader::new(&data);
+
+        let result = table.decode_value(&mut reader);
+
+        assert_eq!(result, Err(Jbig2Error::UnexpectedHuffmanOob));
     }
 }

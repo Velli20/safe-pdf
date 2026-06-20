@@ -311,12 +311,10 @@ fn fill_run(
     repeat: usize,
     value: u8,
 ) -> Result<usize, Jbig2Error> {
-    let end = start
+    let unclamped_end = start
         .checked_add(repeat)
         .ok_or(Jbig2Error::Overflow("integer conversion overflow"))?;
-    if end > lengths.len() {
-        return Err(Jbig2Error::InvalidTable(SYMBOL_ID_TABLE_STREAM));
-    }
+    let end = unclamped_end.min(lengths.len());
 
     let run = lengths
         .get_mut(start..end)
@@ -388,18 +386,15 @@ mod tests {
     }
 
     #[test]
-    fn rejects_runs_past_symbol_count() {
+    fn clamps_runs_past_symbol_count() {
         let data = symbol_id_table_stream(
             &[(REPEAT_ZERO_LONG_RUN_CODE, 1)],
             &[(0, 1), (0, REPEAT_ZERO_LONG_EXTRA_BITS)],
         );
         let mut reader = BitReader::new(&data);
-        let result = decode_symbol_id_huffman_table(&mut reader, 10);
+        let table = decode_symbol_id_huffman_table(&mut reader, 10).expect("table");
 
-        assert_eq!(
-            result,
-            Err(Jbig2Error::InvalidTable("symbol-id Huffman table"))
-        );
+        assert_code_lengths(&table, &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
 
     #[test]

@@ -9,7 +9,9 @@ use crate::error::Jbig2Error;
 
 mod code;
 mod custom;
+mod custom_tables;
 mod decoder;
+mod range;
 mod selector;
 mod standard;
 mod symbol_id;
@@ -19,12 +21,13 @@ mod tree;
 
 pub(crate) use code::HuffmanCode;
 pub(crate) use custom::CustomHuffmanDecoder;
+pub(crate) use custom_tables::CustomHuffmanTableCursor;
 pub(crate) use decoder::{HuffmanValue, StandardHuffmanDecoder};
 pub(crate) use selector::{
     HuffmanTableSelection, text_region_refinement_standard_decoder,
     text_region_rsize_standard_decoder,
 };
-pub(crate) use standard::STANDARD_TABLE_B1;
+pub(crate) use standard::{STANDARD_TABLE_B1, STANDARD_TABLE_B15};
 #[cfg(test)]
 pub(crate) use standard::{STANDARD_TABLE_B2, STANDARD_TABLE_B4};
 pub(crate) use symbol_id::{
@@ -49,6 +52,17 @@ impl HuffmanDecoder {
         match self {
             Self::Standard(decoder) => decoder.decode(reader),
             Self::Custom(decoder) => decoder.decode(reader),
+        }
+    }
+
+    /// Decode one Huffman integer from `reader`, rejecting out-of-band markers.
+    pub(crate) fn decode_value(
+        &self,
+        reader: &mut pdf_utils::BitReader<'_>,
+    ) -> Result<i32, Jbig2Error> {
+        match self {
+            Self::Standard(decoder) => decoder.decode_value(reader),
+            Self::Custom(decoder) => decoder.decode_value(reader),
         }
     }
 }

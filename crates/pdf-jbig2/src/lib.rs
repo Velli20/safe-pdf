@@ -8,6 +8,7 @@
 mod arith_decoder;
 mod compose_op;
 mod decode;
+pub(crate) mod decoded_region_segment;
 pub mod error;
 mod fixed_point;
 mod generic_refinement_region;

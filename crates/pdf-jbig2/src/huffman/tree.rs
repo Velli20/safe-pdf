@@ -77,7 +77,7 @@ impl DecodeTree {
                 .ok_or(Jbig2Error::InvalidTable("Huffman decode tree"))?;
             let link = if bit { node.one } else { node.zero };
             match link {
-                Link::Empty => return Err(Jbig2Error::InvalidTable("Huffman decode tree")),
+                Link::Empty => return Err(Jbig2Error::InvalidTable(stream_name)),
                 Link::Node(next) => node_index = next,
                 Link::Leaf(symbol) => return Ok(symbol),
             }

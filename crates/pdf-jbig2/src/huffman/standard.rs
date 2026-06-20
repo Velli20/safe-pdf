@@ -1,3 +1,5 @@
+use super::range::HuffmanRangeEntry;
+
 /// Number of entries in the local standard-table lookup.
 ///
 /// Index zero is intentionally unused so that `STANDARD_TABLE_B1` maps to
@@ -47,20 +49,6 @@ impl StandardTableId {
     pub(crate) fn lookup_index(self) -> usize {
         self.0
     }
-}
-
-/// One range row in a JBIG2 standard Huffman table.
-///
-/// ITU-T T.88 / ISO/IEC 14492 Annex B defines rows by prefix length
-/// (`PREFLEN`), range length (`RANGELEN`), and range base (`RANGELOW`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct HuffmanRangeEntry {
-    /// Prefix length (`PREFLEN`) for the row.
-    pub(crate) prefix_len: u8,
-    /// Number of extra bits (`RANGELEN`) following the prefix.
-    pub(crate) range_len: u8,
-    /// Base value (`RANGELOW`) for the decoded range.
-    pub(crate) range_low: i32,
 }
 
 /// Static definition of one standard Huffman table from Annex B.
