@@ -23,10 +23,7 @@ pub(crate) use code::HuffmanCode;
 pub(crate) use custom::CustomHuffmanDecoder;
 pub(crate) use custom_tables::CustomHuffmanTableCursor;
 pub(crate) use decoder::{HuffmanValue, StandardHuffmanDecoder};
-pub(crate) use selector::{
-    HuffmanTableSelection, text_region_refinement_standard_decoder,
-    text_region_rsize_standard_decoder,
-};
+pub(crate) use selector::{HuffmanTableSelection, text_region_refinement_standard_decoder};
 pub(crate) use standard::{STANDARD_TABLE_B1, STANDARD_TABLE_B15};
 #[cfg(test)]
 pub(crate) use standard::{STANDARD_TABLE_B2, STANDARD_TABLE_B4};
