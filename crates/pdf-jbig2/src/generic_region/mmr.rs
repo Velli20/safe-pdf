@@ -1,6 +1,7 @@
-use pdf_ccitt::{CCITTFaxParams, decode_rows as ccitt_decode_rows};
+use pdf_ccitt::{CCITTFaxParams, decode_rows_from_reader as ccitt_decode_rows_from_reader};
 
 use crate::{error::Jbig2Error, image::JBig2Image, util::packed_row_len};
+use pdf_utils::BitReader;
 
 /// Decode an MMR-coded JBIG2 generic region.
 ///
@@ -11,6 +12,15 @@ pub(crate) fn decode_mmr_region(
     width: u16,
     height: u16,
     data: &[u8],
+) -> Result<JBig2Image, Jbig2Error> {
+    let mut reader = BitReader::new(data);
+    decode_mmr_region_from_reader(width, height, &mut reader)
+}
+
+pub(crate) fn decode_mmr_region_from_reader(
+    width: u16,
+    height: u16,
+    reader: &mut BitReader<'_>,
 ) -> Result<JBig2Image, Jbig2Error> {
     let row_bytes = packed_row_len(width)?;
     let ccitt_params = CCITTFaxParams {
@@ -29,7 +39,7 @@ pub(crate) fn decode_mmr_region(
     let image_data_len = image.data().len();
     let mut row_index = 0usize;
 
-    ccitt_decode_rows(data, &ccitt_params, |src_row| {
+    ccitt_decode_rows_from_reader(reader, &ccitt_params, |src_row| {
         let Some(dst_start) = row_index.checked_mul(stride) else {
             return;
         };
@@ -53,8 +63,23 @@ pub(crate) fn decode_mmr_region(
 
 #[cfg(test)]
 mod tests {
-    use super::decode_mmr_region;
+    use super::{decode_mmr_region, decode_mmr_region_from_reader};
     use crate::error::Jbig2Error;
+    use pdf_utils::BitReader;
+
+    fn bits_to_bytes(bits: &[u8]) -> Vec<u8> {
+        let byte_len = bits.len().div_ceil(8);
+        let mut bytes = vec![0u8; byte_len];
+        for (index, bit) in bits.iter().copied().enumerate() {
+            if bit == 0 {
+                continue;
+            }
+            let byte = index / 8;
+            let offset = 7usize.saturating_sub(index % 8);
+            bytes[byte] |= 1u8 << offset;
+        }
+        bytes
+    }
 
     #[test]
     fn mmr_failure_is_wrapped() {
@@ -69,6 +94,38 @@ mod tests {
         assert_eq!(image.stride(), 4);
         assert_eq!(image.to_tight_bytes(), [0x00, 0x00]);
         assert_eq!(image.data(), [0x00, 0x00, 0x00, 0x00]);
+        Ok(())
+    }
+
+    #[test]
+    fn mmr_reader_decode_advances_past_bitmap_end_of_block() -> Result<(), Jbig2Error> {
+        let mut reader = BitReader::new(&[0x80, 0x00, 0x10, 0x00, 0x01]);
+
+        let image = decode_mmr_region_from_reader(1, 1, &mut reader)?;
+
+        assert_eq!(image.to_tight_bytes(), [0x00]);
+        assert_eq!(reader.pos(), 40);
+        Ok(())
+    }
+
+    #[test]
+    fn mmr_reader_decode_handles_consecutive_bitmaps() -> Result<(), Jbig2Error> {
+        let data = bits_to_bytes(&[
+            1, // first 1x1 white row via V(0)
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, // EOFB EOL #1
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, // EOFB EOL #2
+            1, // second 1x1 white row via V(0)
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, // EOFB EOL #1
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, // EOFB EOL #2
+        ]);
+        let mut reader = BitReader::new(&data);
+
+        let first = decode_mmr_region_from_reader(1, 1, &mut reader)?;
+        let second = decode_mmr_region_from_reader(1, 1, &mut reader)?;
+
+        assert_eq!(first.to_tight_bytes(), [0x00]);
+        assert_eq!(second.to_tight_bytes(), [0x00]);
+        assert_eq!(reader.pos(), 56);
         Ok(())
     }
 }

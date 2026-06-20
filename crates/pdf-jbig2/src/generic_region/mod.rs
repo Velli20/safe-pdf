@@ -10,5 +10,5 @@ pub(crate) mod tables;
 
 pub(crate) use adaptive_template::GenericRegionAdaptiveTemplate;
 pub(crate) use flags::{GenericRegionFlags, GenericRegionTemplate};
-pub(crate) use mmr::decode_mmr_region;
+pub(crate) use mmr::{decode_mmr_region, decode_mmr_region_from_reader};
 pub(crate) use parser::GenericRegion;
