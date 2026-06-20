@@ -389,8 +389,8 @@ fn read_2d_mode(reader: &mut BitReader<'_>) -> Option<TwoDMode> {
 /// Encapsulates the bit reader, row buffers, and configuration needed to
 /// decode rows sequentially.  Created and consumed by [`decode`] and
 /// [`decode_rows`].
-struct CcittDecoder<'a> {
-    reader: BitReader<'a>,
+struct CcittDecoder<'reader, 'data> {
+    reader: &'reader mut BitReader<'data>,
     ref_row: Vec<u8>,
     row_buf: Vec<u8>,
     columns: usize,
@@ -403,20 +403,23 @@ struct CcittDecoder<'a> {
     damaged_rows_before_error: u32,
 }
 
-impl<'a> CcittDecoder<'a> {
+impl<'reader, 'data> CcittDecoder<'reader, 'data> {
     /// Construct a new decoder from raw stream data and CCITT parameters.
     ///
     /// # Errors
     ///
     /// Returns [`CcittDecodeError::ZeroColumns`] if `params.columns` is zero.
-    fn new(data: &'a [u8], params: &CCITTFaxParams) -> Result<Self, CcittDecodeError> {
+    fn new(
+        reader: &'reader mut BitReader<'data>,
+        params: &CCITTFaxParams,
+    ) -> Result<Self, CcittDecodeError> {
         if params.columns == 0 {
             return Err(CcittDecodeError::ZeroColumns);
         }
         let row_bytes = params.columns.div_ceil(8);
 
         Ok(Self {
-            reader: BitReader::new(data),
+            reader,
             ref_row: vec![0xff; row_bytes],
             row_buf: vec![0xff; row_bytes],
             columns: params.columns,
@@ -451,7 +454,9 @@ impl<'a> CcittDecoder<'a> {
                 break;
             }
 
-            skip_eol(&mut self.reader);
+            if self.end_of_line {
+                skip_eol(self.reader);
+            }
 
             if self.reader.exhausted() {
                 break;
@@ -484,8 +489,10 @@ impl<'a> CcittDecoder<'a> {
                 }
             }
 
+            self.consume_post_row_marker();
+
             if self.end_of_line {
-                skip_eol(&mut self.reader);
+                skip_eol(self.reader);
             }
 
             if self.byte_align {
@@ -501,6 +508,30 @@ impl<'a> CcittDecoder<'a> {
         }
 
         Ok(())
+    }
+
+    /// Consume optional zero fill bits and one following EOL marker after a row.
+    ///
+    /// This matches the permissive post-row cleanup used by PDF.js for raw
+    /// CCITT streams with `EndOfLine = false`, including the JBIG2 MMR
+    /// halftone-bitplane case.
+    fn consume_post_row_marker(&mut self) {
+        if self.end_of_line {
+            return;
+        }
+
+        loop {
+            match peek_bits(self.reader, 12) {
+                Some(0) => {
+                    let _ = self.reader.next_bit();
+                }
+                Some(1) => {
+                    self.reader.skip_bits(12);
+                    break;
+                }
+                Some(_) | None => break,
+            }
+        }
     }
 
     /// Emit the current row, applying `BlackIs1` polarity if requested.
@@ -556,7 +587,7 @@ impl<'a> CcittDecoder<'a> {
                 return Err(CcittDecodeError::UnexpectedEof);
             }
 
-            let run_len = decode_run_seq(&mut self.reader, color)?;
+            let run_len = decode_run_seq(self.reader, color)?;
 
             if !color {
                 fill_bits(
@@ -588,7 +619,7 @@ impl<'a> CcittDecoder<'a> {
             }
 
             let (b1, b2) = find_b1_b2(&self.ref_row, self.columns, a0, a0color);
-            let mode = read_2d_mode(&mut self.reader).ok_or(CcittDecodeError::UnexpectedEof)?;
+            let mode = read_2d_mode(self.reader).ok_or(CcittDecodeError::UnexpectedEof)?;
 
             match mode {
                 TwoDMode::VerticalRight(delta) | TwoDMode::VerticalLeft(delta) => {
@@ -612,16 +643,16 @@ impl<'a> CcittDecoder<'a> {
                     a0color = !a0color;
                 }
                 TwoDMode::Horizontal => {
-                    let run_len1 = decode_run_seq(&mut self.reader, a0color)?;
+                    let run_len1 = decode_run_seq(self.reader, a0color)?;
                     let (a0_fill, a1) = match a0 {
-                        None => (0, run_len1.saturating_add(1)),
+                        None => (0, run_len1),
                         Some(pos) => (pos, pos.saturating_add(run_len1)),
                     };
                     if !a0color {
                         fill_bits(&mut self.row_buf, self.columns, a0_fill, a1);
                     }
 
-                    let run_len2 = decode_run_seq(&mut self.reader, !a0color)?;
+                    let run_len2 = decode_run_seq(self.reader, !a0color)?;
                     let a2 = a1.saturating_add(run_len2);
                     if a0color {
                         fill_bits(&mut self.row_buf, self.columns, a1, a2);
@@ -693,8 +724,54 @@ pub fn decode_rows<F>(
 where
     F: FnMut(&[u8]),
 {
-    let mut decoder = CcittDecoder::new(data, params)?;
-    decoder.decode_rows_with(params.rows, row_sink)
+    let mut reader = BitReader::new(data);
+    decode_rows_from_reader(&mut reader, params, row_sink)
+}
+
+/// Decode a CCITTFaxDecode-compressed byte stream from an existing bit reader.
+///
+/// This preserves the caller's bit position, which allows formats such as
+/// JBIG2 to decode consecutive EOFB-delimited MMR bitmaps from one shared
+/// stream without reparsing the already-consumed bytes.
+pub fn decode_rows_from_reader<F>(
+    reader: &mut BitReader<'_>,
+    params: &CCITTFaxParams,
+    row_sink: F,
+) -> Result<(), CcittDecodeError>
+where
+    F: FnMut(&[u8]),
+{
+    let mut decoder = CcittDecoder::new(reader, params)?;
+    decoder.decode_rows_with(params.rows, row_sink)?;
+    if params.k < 0 && params.end_of_block {
+        consume_mmr_end_of_block(decoder.reader);
+    }
+    Ok(())
+}
+
+fn consume_mmr_end_of_block(reader: &mut BitReader<'_>) {
+    let _ = consume_optional_eol(reader);
+    reader.align_to_byte_boundary();
+}
+
+fn consume_optional_eol(reader: &mut BitReader<'_>) -> bool {
+    loop {
+        match peek_bits(reader, 12) {
+            Some(0) => {
+                let _ = reader.next_bit();
+            }
+            Some(1) => {
+                reader.skip_bits(12);
+                return true;
+            }
+            Some(_) | None => return false,
+        }
+    }
+}
+
+fn peek_bits(reader: &BitReader<'_>, bits: u8) -> Option<u16> {
+    let mut clone = reader.clone();
+    clone.read_bits(bits)
 }
 
 #[cfg(test)]
@@ -1074,6 +1151,21 @@ mod tests {
         let out = decode(data, &params_g4(8, 1)).expect("decode failed");
         // No bits → skip_eol reads nothing → exhausted → no rows appended.
         assert_eq!(out.len(), 0);
+    }
+
+    #[test]
+    fn decode_g4_single_black_pixel_from_horizontal_mode_at_row_start() {
+        let data = bits_to_bytes(&[
+            0, 0, 1, // horizontal mode
+            0, 0, 1, 1, 0, 1, 0, 1, // white run 0
+            0, 1, 0, // black run 1
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, // EOFB EOL #1
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, // EOFB EOL #2
+        ]);
+
+        let out = decode(&data, &params_g4(1, 1)).expect("decode failed");
+
+        assert_eq!(out, [0x7f]);
     }
 
     // ── encoded_byte_align ───────────────────────────────────────────────────

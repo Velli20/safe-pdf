@@ -5,14 +5,16 @@ use crate::{
     arith_decoder::JBig2ArithDecoder,
     decoded_region_segment::DecodedRegionSegment,
     error::Jbig2Error,
-    generic_region::{GenericRegion, GenericRegionAdaptiveTemplate, GenericRegionTemplate},
+    generic_region::{
+        GenericRegion, GenericRegionAdaptiveTemplate, GenericRegionTemplate,
+        decode_mmr_region_from_reader,
+    },
     image::JBig2Image,
     segment_context::SegmentDecodeContext,
 };
 use pdf_utils::BitReader;
 
 const HALFTONE_REGION_BODY: &str = "halftone region body";
-const MMR_HALFTONE_REGION: &str = "MMR halftone region";
 const HALFTONE_GRAY_INDEX: &str = "halftone gray index";
 const HALFTONE_PATTERN_INDEX: &str = "halftone pattern index";
 const HALFTONE_BITS_PER_VALUE: &str = "halftone bits per value";
@@ -26,15 +28,12 @@ const HALFTONE_TEMPLATE23_ADAPTIVE_PIXELS: [i8; 8] = [2, -1, -3, -1, 2, -2, -2, 
 ///
 /// ITU-T T.88 / ISO/IEC 14492 section 7.4.5 defines the segment header and
 /// referred pattern dictionary requirements. Section 6.6.5 defines the
-/// halftone-region decoding procedure used here for arithmetic-coded gray
-/// images; MMR halftone gray images remain unsupported.
+/// halftone-region decoding procedure used here for both arithmetic-coded and
+/// MMR-coded gray images.
 pub(crate) fn decode_halftone_region_segment(
     context: &mut SegmentDecodeContext<'_, '_, '_, '_, '_>,
 ) -> Result<DecodedRegionSegment, Jbig2Error> {
     let header = HalftoneRegionHeader::try_from(&mut *context.stream())?;
-    if header.mmr {
-        return Err(Jbig2Error::UnsupportedFeature(MMR_HALFTONE_REGION));
-    }
     let patterns = context.referred_pattern_dictionary()?;
 
     let mut region_image = JBig2Image::try_new(
@@ -57,6 +56,7 @@ pub(crate) fn decode_halftone_region_segment(
         &mut body_reader,
         header.grid_width,
         header.grid_height,
+        header.mmr,
         header.template,
         skip.as_ref(),
         patterns.patterns.len(),
@@ -91,6 +91,7 @@ fn decode_gray_indices<'stream, 'data>(
     stream: &'stream mut BitReader<'data>,
     grid_width: u16,
     grid_height: u16,
+    mmr: bool,
     template: u8,
     skip: Option<&JBig2Image>,
     pattern_count: usize,
@@ -99,6 +100,7 @@ fn decode_gray_indices<'stream, 'data>(
         stream,
         grid_width,
         grid_height,
+        mmr,
         template,
         skip,
         pattern_count,
@@ -130,24 +132,33 @@ impl HalftoneGrayPlanes {
         stream: &'stream mut BitReader<'data>,
         grid_width: u16,
         grid_height: u16,
+        mmr: bool,
         template: u8,
         skip: Option<&JBig2Image>,
         pattern_count: usize,
     ) -> Result<Self, Jbig2Error> {
         let bits_per_value = usize::from(pattern_bits_per_value(pattern_count)?);
-        let template = GenericRegionTemplate::try_from(template)?;
-        let gbat = halftone_template(template);
-        let region = GenericRegion::new_arithmetic(grid_width, grid_height, template, false, gbat)?;
-        let mut decoder = JBig2ArithDecoder::new(stream);
         let mut planes = Vec::new();
         planes
             .try_reserve_exact(bits_per_value)
             .map_err(|_| Jbig2Error::Allocation(HALFTONE_GRAY_PLANES_ALLOCATION))?;
-
-        for _ in (0..bits_per_value).rev() {
-            let mut decoded = region.decode_arithmetic_with_decoder(&mut decoder, skip)?;
-            apply_gray_code_plane_delta(&mut decoded, planes.last());
-            planes.push(decoded);
+        if mmr {
+            for _ in (0..bits_per_value).rev() {
+                let mut decoded = decode_mmr_region_from_reader(grid_width, grid_height, stream)?;
+                apply_gray_code_plane_delta(&mut decoded, planes.last());
+                planes.push(decoded);
+            }
+        } else {
+            let template = GenericRegionTemplate::try_from(template)?;
+            let gbat = halftone_template(template);
+            let region =
+                GenericRegion::new_arithmetic(grid_width, grid_height, template, false, gbat)?;
+            let mut decoder = JBig2ArithDecoder::new(stream);
+            for _ in (0..bits_per_value).rev() {
+                let mut decoded = region.decode_arithmetic_with_decoder(&mut decoder, skip)?;
+                apply_gray_code_plane_delta(&mut decoded, planes.last());
+                planes.push(decoded);
+            }
         }
         planes.reverse();
 
@@ -304,8 +315,22 @@ mod tests {
     fn decode_gray_indices_with_reader(
         mut reader: BitReader<'_>,
     ) -> Result<(Vec<Vec<usize>>, BitReader<'_>), Jbig2Error> {
-        let indices = decode_gray_indices(&mut reader, 8, 4, 0, None, 2)?;
+        let indices = decode_gray_indices(&mut reader, 8, 4, false, 0, None, 2)?;
         Ok((indices, reader))
+    }
+
+    fn bits_to_bytes(bits: &[u8]) -> Vec<u8> {
+        let byte_len = bits.len().div_ceil(8);
+        let mut bytes = vec![0u8; byte_len];
+        for (index, bit) in bits.iter().copied().enumerate() {
+            if bit == 0 {
+                continue;
+            }
+            let byte = index / 8;
+            let offset = 7usize.saturating_sub(index % 8);
+            bytes[byte] |= 1u8 << offset;
+        }
+        bytes
     }
 
     fn plane(width: u16, height: u16, pixels: &[(u16, u16)]) -> JBig2Image {
@@ -395,6 +420,24 @@ mod tests {
         assert_eq!(indices.len(), 4);
         assert!(indices.iter().all(|row| row.len() == 8));
         assert!(reader.byte_pos() > prefix.len());
+    }
+
+    #[test]
+    fn decode_gray_indices_handles_mmr_bitplanes_from_one_stream() {
+        let body = bits_to_bytes(&[
+            1, // plane 1: white 1x1 row via V(0)
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, // EOFB EOL #1
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, // EOFB EOL #2
+            1, // plane 0: white 1x1 row via V(0)
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, // EOFB EOL #1
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, // EOFB EOL #2
+        ]);
+        let mut reader = BitReader::new(&body);
+
+        let indices = decode_gray_indices(&mut reader, 1, 1, true, 0, None, 4).expect("indices");
+
+        assert_eq!(indices, vec![vec![0]]);
+        assert_eq!(reader.pos(), 56);
     }
 
     #[test]
