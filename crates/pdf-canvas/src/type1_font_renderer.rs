@@ -6,6 +6,9 @@ use crate::{error::PdfCanvasError, text_renderer::TextRenderer};
 use pdf_font::type1_font::Type1FontProgramFormat;
 use pdf_graphics::transform::Transform;
 use read_fonts::TableProvider;
+use read_fonts::ps::cff::CffFontRef;
+use read_fonts::ps::cff::charset::Charset as CffCharset;
+use read_fonts::ps::string::Sid;
 use read_fonts::ps::type1::Type1Font as ClassicType1Font;
 use skrifa::outline::{OutlineGlyph, OutlineGlyphCollection};
 use skrifa::{FontRef, GlyphId, MetadataProvider};
@@ -18,6 +21,8 @@ enum Type1RendererFont<'a> {
         font_ref: FontRef<'a>,
         /// The outline collection extracted from the font.
         outlines: OutlineGlyphCollection<'a>,
+        /// CID-to-glyph mapping for CID-keyed CFF fonts.
+        cid_charset: Option<CffCharset<'a>>,
     },
     /// A classic Type 1 font program.
     ClassicType1(ClassicType1Font),
@@ -76,9 +81,12 @@ fn resolve_cff_gid<'a, B: CanvasBackend>(
     is_cid: bool,
     char_code: u16,
     font_ref: &FontRef<'_>,
+    cid_charset: Option<&CffCharset<'_>>,
 ) -> Result<GlyphId, PdfCanvasError> {
     if is_cid {
-        return Ok(GlyphId::new(u32::from(char_code)));
+        return Ok(cid_charset
+            .map(|charset| resolve_cid_cff_gid(char_code, charset))
+            .unwrap_or(GlyphId::NOTDEF));
     }
 
     let cff = font_ref.cff().map_err(|_| {
@@ -105,6 +113,14 @@ fn resolve_cff_gid<'a, B: CanvasBackend>(
         .unwrap_or(GlyphId::NOTDEF))
 }
 
+/// Resolves a CID through the charset of a CID-keyed CFF font.
+///
+/// A CFF CID is not necessarily its glyph index. Missing CIDs use `.notdef`,
+/// consistent with unresolved simple-font glyphs.
+fn resolve_cid_cff_gid(cid: u16, charset: &CffCharset<'_>) -> GlyphId {
+    charset.glyph_id(Sid::new(cid)).unwrap_or(GlyphId::NOTDEF)
+}
+
 /// Resolves the glyph identifier for a classic Type 1 font.
 fn resolve_classic_gid<'a, B: CanvasBackend>(
     canvas: &PdfCanvas<'a, B>,
@@ -121,9 +137,14 @@ fn resolve_classic_gid<'a, B: CanvasBackend>(
     };
     let name = state.text_state.glyph_name(char_code).unwrap_or(".notdef");
 
-    font.glyph_names()
+    if let Some(gid) = font
+        .glyph_names()
         .find_map(|(gid, glyph_name)| (glyph_name == name).then_some(gid))
-        .unwrap_or(GlyphId::NOTDEF)
+    {
+        return gid;
+    }
+
+    GlyphId::NOTDEF
 }
 
 /// Prepares the glyph data needed to render one character code.
@@ -134,8 +155,12 @@ fn prepare_type1_glyph<'font, C: CanvasBackend>(
     char_code: u16,
 ) -> Result<PreparedGlyph<'font>, PdfCanvasError> {
     match font {
-        Type1RendererFont::OpenTypeCff { font_ref, outlines } => {
-            let gid = resolve_cff_gid(canvas, is_cid, char_code, font_ref)?;
+        Type1RendererFont::OpenTypeCff {
+            font_ref,
+            outlines,
+            cid_charset,
+        } => {
+            let gid = resolve_cff_gid(canvas, is_cid, char_code, font_ref, cid_charset.as_ref())?;
             Ok(PreparedGlyph::Cff {
                 gid,
                 outline: outlines.get(gid),
@@ -264,11 +289,27 @@ impl<'a, 'b, B: CanvasBackend> Type1FontRenderer<'a, 'b, B> {
                 let font_ref = FontRef::new(font_bytes).map_err(|_| invalid_type1_font_error())?;
                 let units_per_em =
                     normalized_units_per_em(font_ref.head().ok().map(|head| head.units_per_em()));
+                let cid_charset = if is_cid {
+                    let cff = font_ref.cff().map_err(|_| {
+                        PdfCanvasError::InvalidFont(
+                            "failed to read the CFF table from the Type 1 font".into(),
+                        )
+                    })?;
+                    let cid_font = CffFontRef::new_cff(cff.offset_data().as_bytes(), 0, None)
+                        .map_err(|_| invalid_type1_font_error())?;
+                    cid_font
+                        .charset()
+                        .ok_or_else(invalid_type1_font_error)
+                        .map(Some)?
+                } else {
+                    None
+                };
 
                 (
                     Type1RendererFont::OpenTypeCff {
                         outlines: font_ref.outline_glyphs(),
                         font_ref,
+                        cid_charset,
                     },
                     units_per_em,
                 )
@@ -332,6 +373,7 @@ mod tests {
     };
     use pdf_graphics::{BlendMode, MaskMode, PathFillType, color::Color, rect::Rect};
     use pdf_page::page::PdfPage;
+    use read_fonts::FontData;
 
     use crate::{
         canvas_backend::{CanvasBackend, Image, Shader},
@@ -462,6 +504,17 @@ currentfile eexec
         bytes.extend_from_slice(&encrypted_private);
         bytes.extend_from_slice(b"0000000000000000000000000000000000000000\ncleartomark\n");
         bytes
+    }
+
+    #[test]
+    fn cid_keyed_cff_charset_maps_cids_to_glyph_ids() {
+        // CFF format 0 charset: glyph 1 is CID 7 and glyph 2 is CID 42.
+        const CID_CHARSET: [u8; 8] = [0xFF, 0xFF, 0xFF, 0, 0, 7, 0, 42];
+        let charset = CffCharset::new(FontData::new(&CID_CHARSET), 3, 3).unwrap();
+
+        assert_eq!(resolve_cid_cff_gid(7, &charset), GlyphId::new(1));
+        assert_eq!(resolve_cid_cff_gid(42, &charset), GlyphId::new(2));
+        assert_eq!(resolve_cid_cff_gid(99, &charset), GlyphId::NOTDEF);
     }
 
     fn page() -> PdfPage {
