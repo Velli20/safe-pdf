@@ -74,6 +74,38 @@ end
     }
 
     #[test]
+    fn parses_cmap_with_whitespace_after_name_solidus() {
+        let map = ToUnicodeCMap::try_from(
+            br"
+/ CIDInit / ProcSet findresource begin
+12 dict begin
+begincmap
+/ CIDSystemInfo
+<< / Registry (Adobe)
+/ Ordering (UCS) / Supplement 0 >> def
+/ CMapName / Adobe-Identity-UCS def
+/ CMapType 2 def
+1 begincodespacerange
+<00> <FF>
+endcodespacerange
+1 beginbfchar
+<01> <D83DDCA1>
+endbfchar
+endcmap CMapName currentdict /CMap defineresource pop end end
+"
+            .as_slice(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            map.map_char_code(1)
+                .and_then(|chars| chars.first())
+                .copied(),
+            char::from_u32(0x1F4A1)
+        );
+    }
+
+    #[test]
     fn parses_cmap_with_real_number_metadata() {
         let map = ToUnicodeCMap::try_from(
             br"

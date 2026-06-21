@@ -76,10 +76,7 @@ impl<'a> CMapParser<'a> {
                     .parse_literal_string()
                     .map_err(ParserError::from)?,
             ),
-            b'/' => {
-                let _ = self.parser.tokenizer.read();
-                CMapToken::Name(self.parser.read_operator_name()?.to_vec())
-            }
+            b'/' => self.parse_name_token()?,
             b'<' => self.parse_left_angle_token()?,
             b'>' => self.parse_right_angle_token(byte)?,
             b'+' | b'-' | b'0'..=b'9' => self.parse_number_token(byte)?,
@@ -90,6 +87,12 @@ impl<'a> CMapParser<'a> {
         };
 
         Ok(Some(token))
+    }
+
+    fn parse_name_token(&mut self) -> Result<CMapToken, CMapError> {
+        let _ = self.parser.tokenizer.read();
+        self.parser.skip_whitespace();
+        Ok(CMapToken::Name(self.parser.read_operator_name()?.to_vec()))
     }
 
     fn parse_left_angle_token(&mut self) -> Result<CMapToken, CMapError> {
@@ -232,6 +235,21 @@ mod tests {
         assert_eq!(
             parser.next_token().unwrap(),
             Some(CMapToken::RightSquareBracket)
+        );
+        assert_eq!(parser.next_token().unwrap(), None);
+    }
+
+    #[test]
+    fn tolerates_whitespace_after_name_solidus() {
+        let mut parser = CMapParser::from(b"/ CIDInit / ProcSet".as_slice());
+
+        assert_eq!(
+            parser.next_token().unwrap(),
+            Some(CMapToken::Name(b"CIDInit".to_vec()))
+        );
+        assert_eq!(
+            parser.next_token().unwrap(),
+            Some(CMapToken::Name(b"ProcSet".to_vec()))
         );
         assert_eq!(parser.next_token().unwrap(), None);
     }
