@@ -2,6 +2,7 @@ use crate::{
     canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
     text_renderer::TextRenderer, text_state::TextState,
 };
+use pdf_font::font::Font;
 use pdf_font::glyph_name_to_unicode::glyph_name_to_unicode;
 use pdf_graphics::transform::Transform;
 use read_fonts::TableProvider;
@@ -36,8 +37,18 @@ pub(crate) struct TrueTypeFontRenderer<'a, 'b, B: CanvasBackend> {
 }
 
 impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
-    fn resolve_simple_gid(&self, code: u16, glyph_name: Option<&str>) -> GlyphId {
-        // Non-symbolic path: encoding → glyph name → AGL → Unicode → cmap.
+    fn resolve_simple_gid(
+        &self,
+        font: Option<&Font>,
+        code: u16,
+        glyph_name: Option<&str>,
+    ) -> GlyphId {
+        if let Some(unicode_char) = font.and_then(|current_font| current_font.char_to_unicode(code))
+            && let Some(gid) = self.charmap.map(unicode_char)
+        {
+            return gid;
+        }
+
         if let Some(name) = glyph_name
             && let Some(unicode_char) = glyph_name_to_unicode(name)
             && let Some(gid) = self.charmap.map(unicode_char)
@@ -53,13 +64,15 @@ impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
         }
 
         if self.is_symbolic {
-            // Fall back: treat char_code as a Unicode codepoint directly.
-            // Correct for WinAnsiEncoding (codes 0x20–0xFF ≈ Unicode).
-            GlyphId::new(u32::from(code))
+            if let Some(unicode_char) = char::from_u32(u32::from(code))
+                && let Some(gid) = self.charmap.map(unicode_char)
+            {
+                return gid;
+            }
         } else {
-            // No mapping found.
-            GlyphId::NOTDEF
+            println!("Warning: No glyph found for char code {}", code);
         }
+        GlyphId::NOTDEF
     }
 
     pub fn new(
@@ -119,8 +132,9 @@ impl<B: CanvasBackend> TextRenderer for TrueTypeFontRenderer<'_, '_, B> {
             // For non-CID fonts use the §9.6.6.4 resolver; None means the cmap
             // has no entry for this code — draw nothing but still advance.
             let resolved_glyph_id = if !self.is_cid {
+                let current_font = state.text_state.font;
                 let glyph_name = state.text_state.glyph_name(char_code);
-                self.resolve_simple_gid(char_code, glyph_name)
+                self.resolve_simple_gid(current_font, char_code, glyph_name)
             } else if self.map_cids_to_unicode {
                 state
                     .text_state
@@ -131,7 +145,13 @@ impl<B: CanvasBackend> TextRenderer for TrueTypeFontRenderer<'_, '_, B> {
             } else {
                 GlyphId::new(u32::from(char_code))
             };
-
+            if resolved_glyph_id == GlyphId::NOTDEF {
+                println!(
+                    "Warning: No glyph found for char code {} (glyph name {:?})",
+                    char_code,
+                    state.text_state.glyph_name(char_code)
+                );
+            }
             if resolved_glyph_id != GlyphId::NOTDEF
                 && let Some(outline_glyph) = self.outlines.get(resolved_glyph_id)
             {
@@ -149,5 +169,128 @@ impl<B: CanvasBackend> TextRenderer for TrueTypeFontRenderer<'_, '_, B> {
                 )?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Cow;
+
+    use pdf_font::{encoding::Encoding, flags::FontFlags, standard14::Standard14Font};
+
+    use super::*;
+
+    fn glyph_id_for(character: char) -> GlyphId {
+        let fallback_bytes = Standard14Font::Helvetica.fallback_font_bytes();
+        let font_ref =
+            FontRef::new(fallback_bytes.as_ref()).expect("bundled fallback font must parse");
+        font_ref
+            .charmap()
+            .map(character)
+            .expect("fallback font must cover test character")
+    }
+
+    fn resolve_simple_gid_for_test(
+        font: Option<&Font>,
+        code: u16,
+        glyph_name: Option<&str>,
+        is_symbolic: bool,
+    ) -> GlyphId {
+        let fallback_bytes = Standard14Font::Helvetica.fallback_font_bytes();
+        let font_ref =
+            FontRef::new(fallback_bytes.as_ref()).expect("bundled fallback font must parse");
+        let charmap = font_ref.charmap();
+
+        if let Some(unicode_char) = font.and_then(|current_font| current_font.char_to_unicode(code))
+            && let Some(gid) = charmap.map(unicode_char)
+        {
+            return gid;
+        }
+
+        if let Some(name) = glyph_name
+            && let Some(unicode_char) = glyph_name_to_unicode(name)
+            && let Some(gid) = charmap.map(unicode_char)
+        {
+            return gid;
+        }
+
+        if let Ok(cmap) = font_ref.cmap()
+            && let Some((_, _, subtable)) = cmap.best_subtable()
+            && let Some(id) = subtable.map_codepoint(code)
+        {
+            return id;
+        }
+
+        if is_symbolic
+            && let Some(unicode_char) = char::from_u32(u32::from(code))
+            && let Some(gid) = charmap.map(unicode_char)
+        {
+            return gid;
+        }
+        GlyphId::NOTDEF
+    }
+
+    #[test]
+    fn simple_truetype_prefers_pdf_unicode_mapping() {
+        let font = Font::TrueType(pdf_font::true_type_font::TrueTypeFont {
+            font_file: Standard14Font::Helvetica.fallback_font_bytes(),
+            widths: None,
+            encoding: Some(Encoding::default()),
+            to_unicode: None,
+            standard14: Some(Standard14Font::Helvetica),
+            flags: FontFlags::NON_SYMBOLIC,
+        });
+
+        let gid = resolve_simple_gid_for_test(Some(&font), 82, None, false);
+
+        assert_eq!(gid, glyph_id_for('R'));
+    }
+
+    #[test]
+    fn symbolic_simple_truetype_still_uses_pdf_unicode_mapping() {
+        let font = Font::TrueType(pdf_font::true_type_font::TrueTypeFont {
+            font_file: Standard14Font::Helvetica.fallback_font_bytes(),
+            widths: None,
+            encoding: Some(Encoding::default()),
+            to_unicode: None,
+            standard14: Some(Standard14Font::Helvetica),
+            flags: FontFlags::SYMBOLIC | FontFlags::NON_SYMBOLIC,
+        });
+
+        let gid = resolve_simple_gid_for_test(Some(&font), 0x20, None, true);
+
+        assert_eq!(gid, glyph_id_for(' '));
+    }
+
+    #[test]
+    fn symbolic_simple_truetype_falls_back_to_unicode_codepoint_mapping() {
+        let font = Font::TrueType(pdf_font::true_type_font::TrueTypeFont {
+            font_file: Standard14Font::Helvetica.fallback_font_bytes(),
+            widths: None,
+            encoding: None,
+            to_unicode: None,
+            standard14: None,
+            flags: FontFlags::SYMBOLIC,
+        });
+
+        let gid = resolve_simple_gid_for_test(Some(&font), 82, None, true);
+
+        assert_eq!(gid, glyph_id_for('R'));
+    }
+
+    #[test]
+    fn unmappable_simple_truetype_returns_notdef() {
+        let font = Font::TrueType(pdf_font::true_type_font::TrueTypeFont {
+            font_file: Cow::Owned(vec![]),
+            widths: None,
+            encoding: None,
+            to_unicode: None,
+            standard14: None,
+            flags: FontFlags::SYMBOLIC,
+        });
+
+        let gid = resolve_simple_gid_for_test(Some(&font), 0x01, Some(".notdef"), true);
+
+        assert_eq!(gid, GlyphId::NOTDEF);
     }
 }

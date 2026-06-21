@@ -43,6 +43,20 @@ struct TrueTypeFontProgram {
 }
 
 impl TrueTypeFont {
+    fn default_simple_encoding(
+        flags: FontFlags,
+        standard14: Option<Standard14Font>,
+    ) -> Option<Encoding> {
+        if standard14.is_some()
+            || flags.contains(FontFlags::NON_SYMBOLIC)
+            || !flags.contains(FontFlags::SYMBOLIC)
+        {
+            Some(Encoding::default())
+        } else {
+            None
+        }
+    }
+
     /// Parses a TrueType font from a PDF font dictionary.
     ///
     /// Reads the embedded font program (or falls back to a bundled substitute),
@@ -59,16 +73,19 @@ impl TrueTypeFont {
         // dictionary (with optional BaseEncoding + Differences).  Errors are
         // treated as absent encoding rather than propagated, since TrueType fonts
         // often omit or mis-specify this entry.
-        let encoding: Option<Encoding> = dictionary.get("Encoding").and_then(|enc_obj| {
-            let resolved = objects.resolve_object(enc_obj).ok()?;
-            match resolved {
-                ObjectVariant::Dictionary(d) => Encoding::from_dictionary(d, objects).ok(),
-                _ => {
-                    let base = FontEncoding::from(resolved.try_str(objects).ok()?);
-                    Encoding::from_base_encoding(base).ok()
+        let encoding: Option<Encoding> = dictionary
+            .get("Encoding")
+            .and_then(|enc_obj| {
+                let resolved = objects.resolve_object(enc_obj).ok()?;
+                match resolved {
+                    ObjectVariant::Dictionary(d) => Encoding::from_dictionary(d, objects).ok(),
+                    _ => {
+                        let base = FontEncoding::from(resolved.try_str(objects).ok()?);
+                        Encoding::from_base_encoding(base).ok()
+                    }
                 }
-            }
-        });
+            })
+            .or_else(|| Self::default_simple_encoding(program.flags, program.standard14));
 
         // Parse optional ToUnicode CMap stream.
         let to_unicode = dictionary
@@ -99,7 +116,7 @@ impl TrueTypeFont {
         Self {
             font_file,
             widths: None,
-            encoding: standard14.map(|_| Encoding::default()),
+            encoding: Self::default_simple_encoding(FontFlags::empty(), standard14),
             to_unicode: None,
             standard14,
             flags: FontFlags::empty(),
@@ -172,6 +189,8 @@ impl TrueTypeFont {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use super::*;
 
     #[test]
@@ -187,6 +206,42 @@ mod tests {
                 .and_then(|encoding| encoding.names.get(65))
                 .map(std::borrow::Cow::as_ref),
             Some("A"),
+        );
+    }
+
+    #[test]
+    fn non_symbolic_simple_fonts_default_to_standard_encoding() {
+        let encoding = TrueTypeFont::default_simple_encoding(FontFlags::NON_SYMBOLIC, None);
+
+        assert_eq!(
+            encoding
+                .as_ref()
+                .and_then(|encoding| encoding.names.get(65))
+                .map(Cow::as_ref),
+            Some("A"),
+        );
+    }
+
+    #[test]
+    fn symbolic_simple_fonts_without_fallback_keep_missing_encoding() {
+        let encoding = TrueTypeFont::default_simple_encoding(FontFlags::SYMBOLIC, None);
+
+        assert!(encoding.is_none());
+    }
+
+    #[test]
+    fn contradictory_symbolic_and_non_symbolic_flags_prefer_standard_encoding() {
+        let encoding = TrueTypeFont::default_simple_encoding(
+            FontFlags::SYMBOLIC | FontFlags::NON_SYMBOLIC,
+            None,
+        );
+
+        assert_eq!(
+            encoding
+                .as_ref()
+                .and_then(|value| value.names.get(82))
+                .map(Cow::as_ref),
+            Some("R"),
         );
     }
 }
