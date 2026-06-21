@@ -5,9 +5,16 @@ use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 use crate::{
-    char_vec::CharVec, error::FontError, fallback::fallback_true_type_from_dictionary,
-    glyph_name_to_unicode::glyph_name_to_unicode, standard14::Standard14Font,
-    true_type_font::TrueTypeFont, type0_font::Type0Font, type1_font::Type1Font,
+    char_vec::CharVec,
+    error::FontError,
+    fallback::{
+        fallback_true_type_from_dictionary, fallback_true_type_from_dictionary_best_effort,
+    },
+    glyph_name_to_unicode::glyph_name_to_unicode,
+    standard14::Standard14Font,
+    true_type_font::TrueTypeFont,
+    type0_font::Type0Font,
+    type1_font::Type1Font,
     type3_font::Type3Font,
 };
 
@@ -58,6 +65,27 @@ impl Font {
                 subtype: other.to_string(),
             }),
         }
+    }
+
+    /// Build a minimal Standard 14-backed fallback font for best-effort
+    /// resource recovery.
+    ///
+    /// This is intentionally narrower than the normal font parsing path:
+    /// once the original font dictionary has already failed to parse, this
+    /// fallback does not attempt to preserve `/Widths`, `/Encoding`, or
+    /// `/ToUnicode` data from that failed font. The synthetic font keeps only
+    /// the bundled fallback program and the selected Standard 14 identity.
+    ///
+    /// Callers should use this only at higher-level recovery boundaries, such
+    /// as page resource loading, where replacing an unreadable font is better
+    /// than aborting the entire resource dictionary.
+    pub fn fallback_from_dictionary_best_effort(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+    ) -> Self {
+        Self::TrueType(fallback_true_type_from_dictionary_best_effort(
+            dictionary, objects,
+        ))
     }
 }
 
