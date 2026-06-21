@@ -1,9 +1,13 @@
 use crate::{
-    canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
-    text_renderer::TextRenderer, text_state::TextState,
+    canvas_backend::CanvasBackend,
+    error::PdfCanvasError,
+    font_renderer_support::{
+        glyph_base_transform, normalized_units_per_em, resolve_simple_font_gid,
+    },
+    pdf_canvas::PdfCanvas,
+    text_renderer::TextRenderer,
 };
 use pdf_font::font::Font;
-use pdf_font::glyph_name_to_unicode::glyph_name_to_unicode;
 use pdf_graphics::transform::Transform;
 use read_fonts::TableProvider;
 use skrifa::{
@@ -43,36 +47,20 @@ impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
         code: u16,
         glyph_name: Option<&str>,
     ) -> GlyphId {
-        if let Some(unicode_char) = font.and_then(|current_font| current_font.char_to_unicode(code))
-            && let Some(gid) = self.charmap.map(unicode_char)
-        {
-            return gid;
-        }
+        let glyph_id = resolve_simple_font_gid(
+            font,
+            code,
+            glyph_name,
+            &self.charmap,
+            &self.font_ref,
+            self.is_symbolic,
+        );
 
-        if let Some(name) = glyph_name
-            && let Some(unicode_char) = glyph_name_to_unicode(name)
-            && let Some(gid) = self.charmap.map(unicode_char)
-        {
-            return gid;
-        }
-
-        if let Ok(cmap) = self.font_ref.cmap()
-            && let Some((_, _, subtable)) = cmap.best_subtable()
-            && let Some(id) = subtable.map_codepoint(code)
-        {
-            return id;
-        }
-
-        if self.is_symbolic {
-            if let Some(unicode_char) = char::from_u32(u32::from(code))
-                && let Some(gid) = self.charmap.map(unicode_char)
-            {
-                return gid;
-            }
-        } else {
+        if glyph_id == GlyphId::NOTDEF && !self.is_symbolic {
             println!("Warning: No glyph found for char code {}", code);
         }
-        GlyphId::NOTDEF
+
+        glyph_id
     }
 
     pub fn new(
@@ -86,22 +74,9 @@ impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
             .map_err(|e| PdfCanvasError::TrueTypeFontParse(e.to_string()))?;
         let outlines = font_ref.outline_glyphs();
         let charmap = font_ref.charmap();
-
-        let units_per_em = font_ref
-            .head()
-            .ok()
-            .map(|h| h.units_per_em())
-            .filter(|&upe| {
-                (TextState::MIN_UNITS_PER_EM..=TextState::MAX_UNITS_PER_EM).contains(&upe)
-            })
-            .unwrap_or(TextState::DEFAULT_UNITS_PER_EM);
-
-        let upe_inv = 1.0 / f32::from(units_per_em);
-
-        let glyph_base_transform = canvas
-            .current_state()?
-            .text_state
-            .glyph_base_transform(upe_inv);
+        let units_per_em =
+            normalized_units_per_em(font_ref.head().ok().map(|head| head.units_per_em()));
+        let glyph_base_transform = glyph_base_transform(&*canvas, units_per_em)?;
 
         Ok(Self {
             font_ref,
@@ -201,33 +176,7 @@ mod tests {
             FontRef::new(fallback_bytes.as_ref()).expect("bundled fallback font must parse");
         let charmap = font_ref.charmap();
 
-        if let Some(unicode_char) = font.and_then(|current_font| current_font.char_to_unicode(code))
-            && let Some(gid) = charmap.map(unicode_char)
-        {
-            return gid;
-        }
-
-        if let Some(name) = glyph_name
-            && let Some(unicode_char) = glyph_name_to_unicode(name)
-            && let Some(gid) = charmap.map(unicode_char)
-        {
-            return gid;
-        }
-
-        if let Ok(cmap) = font_ref.cmap()
-            && let Some((_, _, subtable)) = cmap.best_subtable()
-            && let Some(id) = subtable.map_codepoint(code)
-        {
-            return id;
-        }
-
-        if is_symbolic
-            && let Some(unicode_char) = char::from_u32(u32::from(code))
-            && let Some(gid) = charmap.map(unicode_char)
-        {
-            return gid;
-        }
-        GlyphId::NOTDEF
+        resolve_simple_font_gid(font, code, glyph_name, &charmap, &font_ref, is_symbolic)
     }
 
     #[test]

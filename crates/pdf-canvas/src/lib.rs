@@ -12,6 +12,7 @@ mod canvas_path_ops;
 mod canvas_state;
 mod canvas_text_ops;
 pub mod error;
+mod font_renderer_support;
 mod pdf_path_pen;
 
 pub mod pdf_canvas;

@@ -1,7 +1,7 @@
 use crate::canvas_backend::CanvasBackend;
+use crate::font_renderer_support::{glyph_base_transform, normalized_units_per_em};
 use crate::pdf_canvas::PdfCanvas;
 use crate::pdf_path_pen::PdfPathPen;
-use crate::text_state::TextState;
 use crate::{error::PdfCanvasError, text_renderer::TextRenderer};
 use pdf_font::type1_font::Type1FontProgramFormat;
 use pdf_graphics::transform::Transform;
@@ -28,6 +28,11 @@ enum Type1RendererFont<'a> {
     ClassicType1(ClassicType1Font),
 }
 
+struct ParsedType1Font<'a> {
+    font: Type1RendererFont<'a>,
+    units_per_em: u16,
+}
+
 /// The rendering state shared by both Type 1 font formats.
 pub(crate) struct Type1FontRenderer<'a, 'b, B: CanvasBackend> {
     /// The canvas where glyphs are rendered.
@@ -46,71 +51,25 @@ pub(crate) struct Type1FontRenderer<'a, 'b, B: CanvasBackend> {
 #[allow(clippy::large_enum_variant)]
 enum PreparedGlyph<'a> {
     /// CFF/OpenType outline glyph data.
-    Cff {
-        /// Resolved glyph identifier.
-        gid: GlyphId,
-        /// The resolved outline, if the font contains one.
-        outline: Option<OutlineGlyph<'a>>,
-    },
+    Cff(CffPreparedGlyph<'a>),
     /// Classic Type 1 glyph data.
-    Classic {
-        /// The path pen populated by the Type 1 renderer.
-        pen: PdfPathPen,
-        /// Preferred PDF width override, if present.
-        pdf_width: Option<f32>,
-        /// Width reported by the Type 1 draw operation, if available.
-        glyph_width: Option<f32>,
-    },
+    Classic(ClassicPreparedGlyph),
 }
 
-/// Returns the canonical invalid-font error used by this renderer.
-fn invalid_type1_font_error() -> PdfCanvasError {
-    PdfCanvasError::InvalidFont("unrecognized Type 1 font data".into())
+struct CffPreparedGlyph<'a> {
+    /// Resolved glyph identifier.
+    gid: GlyphId,
+    /// The resolved outline, if the font contains one.
+    outline: Option<OutlineGlyph<'a>>,
 }
 
-/// Normalizes a parsed `units_per_em` value into the range accepted by the text state.
-fn normalized_units_per_em(units_per_em: Option<u16>) -> u16 {
-    units_per_em
-        .filter(|&upe| (TextState::MIN_UNITS_PER_EM..=TextState::MAX_UNITS_PER_EM).contains(&upe))
-        .unwrap_or(TextState::DEFAULT_UNITS_PER_EM)
-}
-
-/// Resolves the glyph identifier for a CFF/OpenType Type 1 font.
-fn resolve_cff_gid<'a, B: CanvasBackend>(
-    canvas: &PdfCanvas<'a, B>,
-    is_cid: bool,
-    char_code: u16,
-    font_ref: &FontRef<'_>,
-    cid_charset: Option<&CffCharset<'_>>,
-) -> Result<GlyphId, PdfCanvasError> {
-    if is_cid {
-        return Ok(cid_charset
-            .map(|charset| resolve_cid_cff_gid(char_code, charset))
-            .unwrap_or(GlyphId::NOTDEF));
-    }
-
-    let cff = font_ref.cff().map_err(|_| {
-        PdfCanvasError::InvalidFont("failed to read the CFF table from the Type 1 font".into())
-    })?;
-
-    let charset = cff.charset(0).map_err(|_| {
-        PdfCanvasError::InvalidFont("failed to read the Type 1 font CFF charset".into())
-    })?;
-
-    let state = canvas.current_state()?;
-    let name = state.text_state.glyph_name(char_code).unwrap_or(".notdef");
-
-    Ok(charset
-        .and_then(|charset| {
-            charset.iter().find_map(|(gid, glyph_name)| {
-                let is_match = glyph_name
-                    .resolve_standard()
-                    .map(|standard_name| standard_name == name.as_bytes())
-                    .unwrap_or(false);
-                if is_match { Some(gid) } else { None }
-            })
-        })
-        .unwrap_or(GlyphId::NOTDEF))
+struct ClassicPreparedGlyph {
+    /// The path pen populated by the Type 1 renderer.
+    pen: PdfPathPen,
+    /// Preferred PDF width override, if present.
+    pdf_width: Option<f32>,
+    /// Width reported by the Type 1 draw operation, if available.
+    glyph_width: Option<f32>,
 }
 
 /// Resolves a CID through the charset of a CID-keyed CFF font.
@@ -121,155 +80,250 @@ fn resolve_cid_cff_gid(cid: u16, charset: &CffCharset<'_>) -> GlyphId {
     charset.glyph_id(Sid::new(cid)).unwrap_or(GlyphId::NOTDEF)
 }
 
-/// Resolves the glyph identifier for a classic Type 1 font.
-fn resolve_classic_gid<'a, B: CanvasBackend>(
-    canvas: &PdfCanvas<'a, B>,
-    is_cid: bool,
-    char_code: u16,
-    font: &ClassicType1Font,
-) -> GlyphId {
-    if is_cid {
-        return GlyphId::new(u32::from(char_code));
-    }
-
-    let Ok(state) = canvas.current_state() else {
-        return GlyphId::NOTDEF;
-    };
-    let name = state.text_state.glyph_name(char_code).unwrap_or(".notdef");
-
-    if let Some(gid) = font
-        .glyph_names()
-        .find_map(|(gid, glyph_name)| (glyph_name == name).then_some(gid))
-    {
-        return gid;
-    }
-
-    GlyphId::NOTDEF
-}
-
-/// Prepares the glyph data needed to render one character code.
-fn prepare_type1_glyph<'font, C: CanvasBackend>(
-    font: &Type1RendererFont<'font>,
-    canvas: &PdfCanvas<'_, C>,
-    is_cid: bool,
-    char_code: u16,
-) -> Result<PreparedGlyph<'font>, PdfCanvasError> {
-    match font {
-        Type1RendererFont::OpenTypeCff {
-            font_ref,
-            outlines,
-            cid_charset,
-        } => {
-            let gid = resolve_cff_gid(canvas, is_cid, char_code, font_ref, cid_charset.as_ref())?;
-            Ok(PreparedGlyph::Cff {
-                gid,
-                outline: outlines.get(gid),
-            })
-        }
-        Type1RendererFont::ClassicType1(classic_font) => {
-            let gid = resolve_classic_gid(canvas, is_cid, char_code, classic_font);
-            let state = canvas.current_state()?;
-            let pdf_width = state
-                .text_state
-                .font
-                .and_then(|font| font.glyph_width(char_code));
-
-            let mut pen = PdfPathPen::default();
-            let glyph_width = classic_font.draw(gid, None, &mut pen).ok().flatten();
-
-            Ok(PreparedGlyph::Classic {
-                pen,
-                pdf_width,
-                glyph_width,
-            })
-        }
-    }
-}
-
-/// Draws a prepared glyph using the supplied glyph matrix.
-fn draw_prepared_type1_glyph<'font, C: CanvasBackend>(
-    font: &Type1RendererFont<'font>,
-    canvas: &mut PdfCanvas<'_, C>,
-    glyph_matrix: &Transform,
-    glyph: &mut PreparedGlyph<'font>,
-) -> Result<(), PdfCanvasError> {
-    match (font, glyph) {
-        (Type1RendererFont::OpenTypeCff { .. }, PreparedGlyph::Cff { outline, .. }) => {
-            if let Some(outline_glyph) = outline {
-                canvas.draw_outline_glyph(outline_glyph, glyph_matrix)?;
+impl<'a> PreparedGlyph<'a> {
+    fn draw<C: CanvasBackend>(
+        &mut self,
+        canvas: &mut PdfCanvas<'_, C>,
+        glyph_matrix: &Transform,
+    ) -> Result<(), PdfCanvasError> {
+        match self {
+            Self::Cff(cff_glyph) => {
+                if let Some(outline_glyph) = &cff_glyph.outline {
+                    canvas.draw_outline_glyph(outline_glyph, glyph_matrix)?;
+                }
+            }
+            Self::Classic(classic_glyph) => {
+                classic_glyph.pen.path.transform(glyph_matrix);
+                canvas.draw_glyph_path(&classic_glyph.pen.path)?;
             }
         }
-        (Type1RendererFont::ClassicType1(_), PreparedGlyph::Classic { pen, .. }) => {
-            pen.path.transform(glyph_matrix);
-            canvas.draw_glyph_path(&pen.path)?;
-        }
-        _ => unreachable!("prepared glyph and font format must match"),
+        Ok(())
     }
-    Ok(())
 }
 
-/// Advances the text cursor after a prepared glyph has been drawn.
-fn advance_prepared_type1_glyph<'font, C: CanvasBackend>(
-    font: &Type1RendererFont<'font>,
-    canvas: &mut PdfCanvas<'_, C>,
-    char_code: u16,
-    glyph: &PreparedGlyph<'font>,
-    units_per_em: u16,
-) -> Result<(), PdfCanvasError> {
-    match (font, glyph) {
-        (Type1RendererFont::OpenTypeCff { font_ref, .. }, PreparedGlyph::Cff { gid, .. }) => canvas
-            .current_state_mut()?
-            .text_state
-            .advance_horizontal_glyph(char_code, font_ref, *gid, units_per_em),
-        (
-            Type1RendererFont::ClassicType1(_),
-            PreparedGlyph::Classic {
-                pdf_width,
-                glyph_width,
-                ..
+impl<'a> Type1RendererFont<'a> {
+    fn parse(
+        font_bytes: &'a [u8],
+        program_format: Type1FontProgramFormat,
+        is_cid: bool,
+    ) -> Result<ParsedType1Font<'a>, PdfCanvasError> {
+        match program_format {
+            Type1FontProgramFormat::OpenTypeCff => Self::parse_opentype_cff(font_bytes, is_cid),
+            Type1FontProgramFormat::ClassicType1 => Self::parse_classic_type1(font_bytes),
+        }
+    }
+
+    fn parse_opentype_cff(
+        font_bytes: &'a [u8],
+        is_cid: bool,
+    ) -> Result<ParsedType1Font<'a>, PdfCanvasError> {
+        let font_ref = FontRef::new(font_bytes).map_err(|_| Self::invalid_font_error())?;
+        let units_per_em =
+            normalized_units_per_em(font_ref.head().ok().map(|head| head.units_per_em()));
+        let cid_charset = Self::load_cid_charset(&font_ref, is_cid)?;
+
+        Ok(ParsedType1Font {
+            font: Self::OpenTypeCff {
+                outlines: font_ref.outline_glyphs(),
+                font_ref,
+                cid_charset,
             },
-        ) => {
-            let text_state = &mut canvas.current_state_mut()?.text_state;
-            if let Some(pdf_width) = pdf_width {
-                text_state.advance_horizontal_width(
-                    char_code,
-                    *pdf_width,
-                    TextState::DEFAULT_UNITS_PER_EM,
-                );
-            } else if let Some(glyph_width) = glyph_width {
-                text_state.advance_horizontal_width(char_code, *glyph_width, units_per_em);
-            } else {
-                text_state.advance_horizontal_width(char_code, 0.0, units_per_em);
-            }
-            Ok(())
+            units_per_em,
+        })
+    }
+
+    fn parse_classic_type1(font_bytes: &'a [u8]) -> Result<ParsedType1Font<'a>, PdfCanvasError> {
+        let font = ClassicType1Font::new(font_bytes).map_err(|_| Self::invalid_font_error())?;
+        let units_per_em = normalized_units_per_em(u16::try_from(font.upem()).ok());
+
+        Ok(ParsedType1Font {
+            font: Self::ClassicType1(font),
+            units_per_em,
+        })
+    }
+
+    fn load_cid_charset(
+        font_ref: &FontRef<'a>,
+        is_cid: bool,
+    ) -> Result<Option<CffCharset<'a>>, PdfCanvasError> {
+        if !is_cid {
+            return Ok(None);
         }
-        _ => unreachable!("prepared glyph and font format must match"),
+
+        let cff = font_ref.cff().map_err(|_| Self::cff_table_error())?;
+        let cid_font = CffFontRef::new_cff(cff.offset_data().as_bytes(), 0, None)
+            .map_err(|_| Self::invalid_font_error())?;
+
+        cid_font
+            .charset()
+            .ok_or_else(Self::invalid_font_error)
+            .map(Some)
+    }
+
+    fn invalid_font_error() -> PdfCanvasError {
+        PdfCanvasError::InvalidFont("unrecognized Type 1 font data".into())
+    }
+
+    fn cff_table_error() -> PdfCanvasError {
+        PdfCanvasError::InvalidFont("failed to read the CFF table from the Type 1 font".into())
+    }
+
+    fn cff_charset_error() -> PdfCanvasError {
+        PdfCanvasError::InvalidFont("failed to read the Type 1 font CFF charset".into())
+    }
+
+    fn prepare_glyph<C: CanvasBackend>(
+        &self,
+        canvas: &PdfCanvas<'_, C>,
+        is_cid: bool,
+        char_code: u16,
+    ) -> Result<PreparedGlyph<'a>, PdfCanvasError> {
+        match self {
+            Self::OpenTypeCff {
+                font_ref,
+                outlines,
+                cid_charset,
+            } => {
+                let glyph_id = self.resolve_cff_gid(
+                    canvas,
+                    is_cid,
+                    char_code,
+                    font_ref,
+                    cid_charset.as_ref(),
+                )?;
+                Ok(PreparedGlyph::Cff(CffPreparedGlyph {
+                    gid: glyph_id,
+                    outline: outlines.get(glyph_id),
+                }))
+            }
+            Self::ClassicType1(classic_font) => {
+                self.prepare_classic_glyph(canvas, is_cid, char_code, classic_font)
+            }
+        }
+    }
+
+    fn prepare_classic_glyph<C: CanvasBackend>(
+        &self,
+        canvas: &PdfCanvas<'_, C>,
+        is_cid: bool,
+        char_code: u16,
+        classic_font: &ClassicType1Font,
+    ) -> Result<PreparedGlyph<'a>, PdfCanvasError> {
+        let glyph_id = self.resolve_classic_gid(canvas, is_cid, char_code, classic_font);
+        let pdf_width = canvas
+            .current_state()?
+            .text_state
+            .font
+            .and_then(|font| font.glyph_width(char_code));
+
+        let mut pen = PdfPathPen::default();
+        let glyph_width = classic_font.draw(glyph_id, None, &mut pen).ok().flatten();
+
+        Ok(PreparedGlyph::Classic(ClassicPreparedGlyph {
+            pen,
+            pdf_width,
+            glyph_width,
+        }))
+    }
+
+    fn advance_glyph<C: CanvasBackend>(
+        &self,
+        canvas: &mut PdfCanvas<'_, C>,
+        char_code: u16,
+        glyph: &PreparedGlyph<'a>,
+        units_per_em: u16,
+    ) -> Result<(), PdfCanvasError> {
+        match (self, glyph) {
+            (Self::OpenTypeCff { font_ref, .. }, PreparedGlyph::Cff(cff_glyph)) => canvas
+                .current_state_mut()?
+                .text_state
+                .advance_horizontal_glyph(char_code, font_ref, cff_glyph.gid, units_per_em),
+            (Self::ClassicType1(_), PreparedGlyph::Classic(classic_glyph)) => {
+                classic_glyph.advance(canvas, char_code, units_per_em)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn resolve_cff_gid<C: CanvasBackend>(
+        &self,
+        canvas: &PdfCanvas<'_, C>,
+        is_cid: bool,
+        char_code: u16,
+        font_ref: &FontRef<'_>,
+        cid_charset: Option<&CffCharset<'_>>,
+    ) -> Result<GlyphId, PdfCanvasError> {
+        if is_cid {
+            return Ok(cid_charset
+                .map(|charset| resolve_cid_cff_gid(char_code, charset))
+                .unwrap_or(GlyphId::NOTDEF));
+        }
+
+        let cff = font_ref.cff().map_err(|_| Self::cff_table_error())?;
+        let charset = cff.charset(0).map_err(|_| Self::cff_charset_error())?;
+        let glyph_name = canvas
+            .current_state()?
+            .text_state
+            .glyph_name(char_code)
+            .unwrap_or(".notdef");
+
+        Ok(charset
+            .and_then(|charset| {
+                charset.iter().find_map(|(gid, cff_glyph_name)| {
+                    cff_glyph_name
+                        .resolve_standard()
+                        .ok()
+                        .filter(|standard_name| *standard_name == glyph_name.as_bytes())
+                        .map(|_| gid)
+                })
+            })
+            .unwrap_or(GlyphId::NOTDEF))
+    }
+
+    fn resolve_classic_gid<C: CanvasBackend>(
+        &self,
+        canvas: &PdfCanvas<'_, C>,
+        is_cid: bool,
+        char_code: u16,
+        font: &ClassicType1Font,
+    ) -> GlyphId {
+        if is_cid {
+            return GlyphId::new(u32::from(char_code));
+        }
+
+        let Ok(state) = canvas.current_state() else {
+            return GlyphId::NOTDEF;
+        };
+        let glyph_name = state.text_state.glyph_name(char_code).unwrap_or(".notdef");
+
+        font.glyph_names()
+            .find_map(|(gid, current_name)| (current_name == glyph_name).then_some(gid))
+            .unwrap_or(GlyphId::NOTDEF)
     }
 }
 
-/// Renders text for a Type 1 font using a single shared glyph loop.
-fn render_type1_text<'font, C: CanvasBackend>(
-    font: &Type1RendererFont<'font>,
-    canvas: &mut PdfCanvas<'_, C>,
-    is_cid: bool,
-    glyph_base_transform: Transform,
-    units_per_em: u16,
-    iter: impl Iterator<Item = u16>,
-) -> Result<(), PdfCanvasError> {
-    for char_code in iter {
-        let glyph_matrix = {
-            let state = canvas.current_state()?;
-            state
-                .text_state
-                .compose_glyph_matrix(glyph_base_transform, &state.transform)
-        };
+impl ClassicPreparedGlyph {
+    fn advance<C: CanvasBackend>(
+        &self,
+        canvas: &mut PdfCanvas<'_, C>,
+        char_code: u16,
+        units_per_em: u16,
+    ) -> Result<(), PdfCanvasError> {
+        let text_state = &mut canvas.current_state_mut()?.text_state;
 
-        let mut glyph = prepare_type1_glyph(font, &*canvas, is_cid, char_code)?;
+        if let Some(pdf_width) = self.pdf_width {
+            text_state.advance_horizontal_width(char_code, pdf_width, 1000);
+            return Ok(());
+        }
 
-        draw_prepared_type1_glyph(font, canvas, &glyph_matrix, &mut glyph)?;
-        advance_prepared_type1_glyph(font, canvas, char_code, &glyph, units_per_em)?;
+        if let Some(glyph_width) = self.glyph_width {
+            text_state.advance_horizontal_width(char_code, glyph_width, units_per_em);
+            return Ok(());
+        }
+
+        text_state.advance_horizontal_width(char_code, 0.0, units_per_em);
+        Ok(())
     }
-    Ok(())
 }
 
 impl<'a, 'b, B: CanvasBackend> Type1FontRenderer<'a, 'b, B> {
@@ -284,49 +338,9 @@ impl<'a, 'b, B: CanvasBackend> Type1FontRenderer<'a, 'b, B> {
         program_format: Type1FontProgramFormat,
         is_cid: bool,
     ) -> Result<Self, PdfCanvasError> {
-        let (font, units_per_em) = match program_format {
-            Type1FontProgramFormat::OpenTypeCff => {
-                let font_ref = FontRef::new(font_bytes).map_err(|_| invalid_type1_font_error())?;
-                let units_per_em =
-                    normalized_units_per_em(font_ref.head().ok().map(|head| head.units_per_em()));
-                let cid_charset = if is_cid {
-                    let cff = font_ref.cff().map_err(|_| {
-                        PdfCanvasError::InvalidFont(
-                            "failed to read the CFF table from the Type 1 font".into(),
-                        )
-                    })?;
-                    let cid_font = CffFontRef::new_cff(cff.offset_data().as_bytes(), 0, None)
-                        .map_err(|_| invalid_type1_font_error())?;
-                    cid_font
-                        .charset()
-                        .ok_or_else(invalid_type1_font_error)
-                        .map(Some)?
-                } else {
-                    None
-                };
-
-                (
-                    Type1RendererFont::OpenTypeCff {
-                        outlines: font_ref.outline_glyphs(),
-                        font_ref,
-                        cid_charset,
-                    },
-                    units_per_em,
-                )
-            }
-            Type1FontProgramFormat::ClassicType1 => {
-                let font =
-                    ClassicType1Font::new(font_bytes).map_err(|_| invalid_type1_font_error())?;
-                let units_per_em = normalized_units_per_em(u16::try_from(font.upem()).ok());
-                (Type1RendererFont::ClassicType1(font), units_per_em)
-            }
-        };
-
-        let upe_inv = 1.0 / f32::from(units_per_em);
-        let glyph_base_transform = canvas
-            .current_state()?
-            .text_state
-            .glyph_base_transform(upe_inv);
+        let ParsedType1Font { font, units_per_em } =
+            Type1RendererFont::parse(font_bytes, program_format, is_cid)?;
+        let glyph_base_transform = glyph_base_transform(&*canvas, units_per_em)?;
 
         Ok(Self {
             canvas,
@@ -336,27 +350,51 @@ impl<'a, 'b, B: CanvasBackend> Type1FontRenderer<'a, 'b, B> {
             units_per_em,
         })
     }
+
+    fn glyph_matrix(&self) -> Result<Transform, PdfCanvasError> {
+        let state = self.canvas.current_state()?;
+        Ok(state
+            .text_state
+            .compose_glyph_matrix(self.glyph_base_transform, &state.transform))
+    }
+
+    fn prepare_glyph(&self, char_code: u16) -> Result<PreparedGlyph<'b>, PdfCanvasError> {
+        self.font
+            .prepare_glyph(&*self.canvas, self.is_cid, char_code)
+    }
+
+    fn draw_glyph(
+        &mut self,
+        glyph: &mut PreparedGlyph<'b>,
+        glyph_matrix: &Transform,
+    ) -> Result<(), PdfCanvasError> {
+        glyph.draw(self.canvas, glyph_matrix)
+    }
+
+    fn advance_text_position(
+        &mut self,
+        char_code: u16,
+        glyph: &PreparedGlyph<'b>,
+    ) -> Result<(), PdfCanvasError> {
+        self.font
+            .advance_glyph(self.canvas, char_code, glyph, self.units_per_em)
+    }
+
+    fn render_char(&mut self, char_code: u16) -> Result<(), PdfCanvasError> {
+        let glyph_matrix = self.glyph_matrix()?;
+        let mut glyph = self.prepare_glyph(char_code)?;
+        self.draw_glyph(&mut glyph, &glyph_matrix)?;
+        self.advance_text_position(char_code, &glyph)
+    }
 }
 
 impl<B: CanvasBackend> TextRenderer for Type1FontRenderer<'_, '_, B> {
     /// Renders text using the configured Type 1 font program.
     fn render_text(&mut self, iter: impl Iterator<Item = u16>) -> Result<(), PdfCanvasError> {
-        let Self {
-            canvas,
-            font,
-            is_cid,
-            glyph_base_transform,
-            units_per_em,
-        } = self;
-
-        render_type1_text(
-            font,
-            canvas,
-            *is_cid,
-            *glyph_base_transform,
-            *units_per_em,
-            iter,
-        )
+        for char_code in iter {
+            self.render_char(char_code)?;
+        }
+        Ok(())
     }
 }
 
