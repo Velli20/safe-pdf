@@ -37,22 +37,10 @@ pub(crate) fn fallback_program_from_dictionary(
     objects: &dyn ObjectResolver,
 ) -> Result<FallbackFontProgram, FontError> {
     let flags = descriptor_flags(dictionary, objects)?;
-    let standard14 = dictionary
-        .get("BaseFont")
-        .and_then(|value| value.try_str(objects).ok())
-        .and_then(|name| Standard14Font::from_base_font_name(name.as_ref()))
-        .unwrap_or_else(|| Standard14Font::from(flags));
-    let font_file: Cow<'static, [u8]> = if is_cjk_cid_font(dictionary, objects)? {
-        Cow::Borrowed(include_bytes!("../assets/NotoSansCJKjp-Regular.otf").as_slice())
-    } else {
-        standard14.fallback_font_bytes()
-    };
+    let standard14 = standard14_from_dictionary(dictionary, objects, flags);
+    let is_cjk = is_cjk_cid_font(dictionary, objects)?;
 
-    Ok(FallbackFontProgram {
-        font_file,
-        standard14,
-        flags,
-    })
+    Ok(fallback_program(flags, standard14, is_cjk))
 }
 
 /// Build a synthetic TrueType font from fallback font data.
@@ -83,6 +71,65 @@ pub(crate) fn fallback_true_type_from_dictionary(
         standard14: Some(fallback.standard14),
         flags: fallback.flags,
     })
+}
+
+/// Build a synthetic TrueType font from fallback font data without failing on
+/// malformed optional metadata.
+///
+/// This is used by higher-level resource loading when a font resource is
+/// otherwise unreadable and the parser should preserve best-effort rendering.
+pub(crate) fn fallback_true_type_from_dictionary_best_effort(
+    dictionary: &Dictionary,
+    objects: &dyn ObjectResolver,
+) -> TrueTypeFont {
+    let flags = descriptor_flags(dictionary, objects).unwrap_or_default();
+    let is_cjk = is_cjk_cid_font(dictionary, objects).unwrap_or(false);
+    let standard14 = standard14_from_dictionary(dictionary, objects, flags);
+    let fallback = fallback_program(flags, standard14, is_cjk);
+    let mut font = TrueTypeFont::from_bytes(fallback.font_file, Some(fallback.standard14));
+    font.flags = fallback.flags;
+
+    font
+}
+
+/// Resolve the Standard 14 identity to use for fallback substitution.
+///
+/// This prefers a readable `/BaseFont` name when it maps to a known Standard 14
+/// font. If `/BaseFont` is missing, malformed, or unrecognized, it falls back
+/// to the flag-driven Standard 14 selection.
+fn standard14_from_dictionary(
+    dictionary: &Dictionary,
+    objects: &dyn ObjectResolver,
+    flags: FontFlags,
+) -> Standard14Font {
+    dictionary
+        .get("BaseFont")
+        .and_then(|value| value.try_str(objects).ok())
+        .and_then(|name| Standard14Font::from_base_font_name(name.as_ref()))
+        .unwrap_or_else(|| Standard14Font::from(flags))
+}
+
+/// Build the fallback font program descriptor from already-decided inputs.
+///
+/// `standard14` selects the Standard 14 identity for simple-font fallback,
+/// while `is_cjk` switches the program bytes to the bundled CJK fallback for
+/// CID fonts that declare a supported CJK ordering.
+fn fallback_program(
+    flags: FontFlags,
+    standard14: Standard14Font,
+    is_cjk: bool,
+) -> FallbackFontProgram {
+    let font_file: Cow<'static, [u8]> = if is_cjk {
+        Cow::Borrowed(include_bytes!("../assets/NotoSansCJKjp-Regular.otf").as_slice())
+    } else {
+        standard14.fallback_font_bytes()
+    };
+
+    FallbackFontProgram {
+        font_file,
+        standard14,
+        flags,
+    }
 }
 
 /// Read font descriptor flags from a font dictionary.
