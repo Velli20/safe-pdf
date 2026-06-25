@@ -102,6 +102,43 @@ fn build_issue1293_like_pdf() -> Vec<u8> {
     data
 }
 
+fn build_pdfbox4352_like_pdf() -> Vec<u8> {
+    let mut data = Vec::new();
+    data.extend_from_slice(b"%PDF-1.7\n");
+
+    let obj1_offset = data.len();
+    data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+    let obj2_offset = data.len();
+    data.extend_from_slice(b"2 0 obj\n<< /Count 1 /Kids [3 0 R] /Type /Pages >>\nendobj\n");
+
+    let obj3_offset = data.len();
+    data.extend_from_slice(
+        b"3 0 obj\n<< /Contents 4 0 R /MediaBox [0 0 200 50] /Parent 2 0 R /Type /Page >>\nendobj\n",
+    );
+
+    let obj4_offset = data.len();
+    data.extend_from_slice(b"4 0 obj\n<< /Length 4 /Filter /FlateDecode >>\nstream\n");
+    data.extend_from_slice(&[0, 1, 2, 3]);
+    data.extend_from_slice(b"\nendstream\nendobj\n");
+
+    let obj5_offset = data.len();
+    data.extend_from_slice(b"5 0 obj\nE< /Filter /Standard /V 5 /R 6 /Length 256 >>\nendobj\n");
+
+    let xref_offset = data.len();
+    data.extend_from_slice(b"xref\n0 6\n");
+    data.extend_from_slice(format_xref_entry(0, 65_535, false).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj3_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj4_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj5_offset, 0, true).as_bytes());
+    data.extend_from_slice(b"trailer\n<< /Size 6 /Root 1 0 R /Encrypt 5 0 R >>\n");
+    data.extend_from_slice(format!("startxref\n{xref_offset}\n%%EOF").as_bytes());
+
+    data
+}
+
 fn build_issue10438_like_pdf() -> Vec<u8> {
     let mut data = Vec::new();
     data.extend_from_slice(b"%PDF-1.7\n");
@@ -660,6 +697,21 @@ fn test_issue1293_pdf_loads_normally() {
     assert!(
         result.is_ok(),
         "issue1293r.pdf should load with missing /Length recovery: {:?}",
+        result.err()
+    );
+    let doc = result.unwrap();
+    assert_eq!(doc.page_count(), 1);
+    assert!(doc.get_page(0).is_some());
+}
+
+#[test]
+fn test_pdfbox4352_pdf_loads_normally() {
+    let reader = PdfReader;
+    let data = build_pdfbox4352_like_pdf();
+    let result = reader.read_from_bytes(&data, None);
+    assert!(
+        result.is_ok(),
+        "PDFBOX-4352-style PDF should load despite malformed optional encryption object: {:?}",
         result.err()
     );
     let doc = result.unwrap();

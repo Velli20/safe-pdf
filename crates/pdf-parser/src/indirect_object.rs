@@ -341,6 +341,7 @@ mod tests {
             b"123".as_slice(),
             b"1 0 object".as_slice(),
             b"1 0 Rextra".as_slice(),
+            b"1 0 ]".as_slice(),
         ] {
             let mut parser = PdfParser::from(input);
 

@@ -123,7 +123,13 @@ impl ContentStream {
             return Ok(None);
         };
 
-        Ok(Some(Self::new(contents, objects, id_allocator)?))
+        match Self::new(contents, objects, id_allocator) {
+            Ok(contents) => Ok(Some(contents)),
+            Err(PdfOperatorError::Object(ObjectError::FailedResolveObjectReference { .. })) => {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
     }
 }
 
