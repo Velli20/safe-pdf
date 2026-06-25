@@ -1,11 +1,17 @@
+use std::collections::BTreeMap;
+
 use pdf_object::{
-    cross_reference_table::{CrossReferenceEntry, CrossReferenceStatus, CrossReferenceTable},
+    cross_reference_table::{
+        CrossReferenceEntry, CrossReferenceEntryType, CrossReferenceStatus, CrossReferenceTable,
+    },
     object_resolver::ObjectResolver,
 };
 use pdf_tokenizer::PdfToken;
 use thiserror::Error;
 
 use crate::{error::ParserError, parser::PdfParser};
+
+const XREF_KEYWORD: &[u8] = b"xref";
 
 /// Represents an error that can occur while parsing a cross-reference table.
 #[derive(Debug, PartialEq, Error)]
@@ -21,12 +27,18 @@ impl PdfParser<'_> {
         &mut self,
         objects: &dyn ObjectResolver,
     ) -> Result<CrossReferenceTable, ParserError> {
-        const XREF_KEYWORD: &[u8] = b"xref";
-
         self.read_keyword(XREF_KEYWORD)?;
-        self.skip_whitespace_and_comments();
+        let entries = self.parse_cross_reference_subsections()?;
+        let trailer = self.parse_trailer(objects)?;
 
-        let mut entries = std::collections::BTreeMap::new();
+        Ok(CrossReferenceTable::new(entries, trailer))
+    }
+
+    /// Parses the contiguous subsections that follow an `xref` keyword.
+    pub(crate) fn parse_cross_reference_subsections(
+        &mut self,
+    ) -> Result<BTreeMap<usize, CrossReferenceEntry>, ParserError> {
+        let mut entries = BTreeMap::new();
 
         loop {
             self.skip_whitespace_and_comments();
@@ -34,43 +46,102 @@ impl PdfParser<'_> {
                 break;
             }
 
-            let start_object_number = self.read_number::<usize>(true)?;
-            self.skip_whitespace_and_comments();
-            let count = self.read_number::<usize>(true)?;
-
-            for i in 0..count {
-                self.skip_whitespace_and_comments();
-                let field1 = self.read_number::<usize>(true)?;
-                self.skip_whitespace_and_comments();
-                let field2 = self.read_number::<usize>(true)?;
-                self.skip_whitespace_and_comments();
-
-                let status_byte = match self.tokenizer.read() {
-                    Some(PdfToken::Alphabetic(b)) => b,
-                    _ => return Err(CrossReferenceTableError::MissingStatus.into()),
-                };
-
-                let status = CrossReferenceStatus::from_byte(status_byte).ok_or_else(|| {
-                    CrossReferenceTableError::InvalidCrossReferenceStatus(char::from(status_byte))
-                })?;
-
-                let entry = match status {
-                    CrossReferenceStatus::Normal => CrossReferenceEntry::new_normal(field1, field2),
-                    CrossReferenceStatus::Free | CrossReferenceStatus::Old => {
-                        CrossReferenceEntry::new_free(field1, field2)
-                    }
-                };
-
-                entries.insert(start_object_number.saturating_add(i), entry);
-
-                self.skip_whitespace_and_comments();
-            }
+            let (start_object_number, subsection_entries) =
+                self.parse_cross_reference_subsection()?;
+            entries.extend(normalize_xref_subsection_entries(
+                start_object_number,
+                subsection_entries,
+            ));
         }
 
-        let trailer = self.parse_trailer(objects)?;
-
-        Ok(CrossReferenceTable::new(entries, trailer))
+        Ok(entries)
     }
+
+    /// Parses one xref subsection header and its declared number of entries.
+    fn parse_cross_reference_subsection(
+        &mut self,
+    ) -> Result<(usize, Vec<CrossReferenceEntry>), ParserError> {
+        let start_object_number = self.read_number::<usize>(true)?;
+        self.skip_whitespace_and_comments();
+        let entry_count = self.read_number::<usize>(true)?;
+        let mut entries = Vec::with_capacity(entry_count);
+
+        for _ in 0..entry_count {
+            entries.push(self.parse_cross_reference_entry()?);
+        }
+
+        Ok((start_object_number, entries))
+    }
+
+    /// Parses a traditional xref row into its corresponding entry.
+    pub(crate) fn parse_cross_reference_entry(
+        &mut self,
+    ) -> Result<CrossReferenceEntry, ParserError> {
+        self.skip_whitespace_and_comments();
+        let field1 = self.read_number::<usize>(true)?;
+        self.skip_whitespace_and_comments();
+        let field2 = self.read_number::<usize>(true)?;
+        self.skip_whitespace_and_comments();
+
+        let status_byte = match self.tokenizer.read() {
+            Some(PdfToken::Alphabetic(byte)) => byte,
+            _ => return Err(CrossReferenceTableError::MissingStatus.into()),
+        };
+
+        let status = CrossReferenceStatus::from_byte(status_byte).ok_or_else(|| {
+            CrossReferenceTableError::InvalidCrossReferenceStatus(char::from(status_byte))
+        })?;
+
+        Ok(match status {
+            CrossReferenceStatus::Normal => CrossReferenceEntry::new_normal(field1, field2),
+            CrossReferenceStatus::Free | CrossReferenceStatus::Old => {
+                CrossReferenceEntry::new_free(field1, field2)
+            }
+        })
+    }
+}
+
+/// Normalizes an xref subsection's object numbers, including the malformed
+/// leading free-object-zero pattern encountered in some PDFs.
+fn normalize_xref_subsection_entries(
+    start_object_number: usize,
+    entries: Vec<CrossReferenceEntry>,
+) -> Vec<(usize, CrossReferenceEntry)> {
+    let has_leading_free_object_zero = start_object_number > 0
+        && entries
+            .first()
+            .is_some_and(is_malformed_leading_free_object_zero);
+
+    entries
+        .into_iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            let object_number = if has_leading_free_object_zero {
+                if index == 0 {
+                    0
+                } else {
+                    start_object_number.saturating_add(index.saturating_sub(1))
+                }
+            } else {
+                start_object_number.saturating_add(index)
+            };
+            (object_number, entry)
+        })
+        .collect()
+}
+
+/// Returns whether an entry is the object-zero free entry incorrectly included
+/// at the start of a non-zero xref subsection.
+fn is_malformed_leading_free_object_zero(entry: &CrossReferenceEntry) -> bool {
+    matches!(
+        entry,
+        CrossReferenceEntry {
+            entry_type: CrossReferenceEntryType::Free {
+                next_free_object: 0,
+                generation_number: 65_535,
+            }
+        }
+    )
 }
 
 #[cfg(test)]
@@ -151,5 +222,77 @@ mod tests {
         assert!(table.entries[&0].is_free());
         assert_eq!(table.entries[&1].byte_offset(), Some(17));
         assert_eq!(table.entries[&2].byte_offset(), Some(81));
+    }
+
+    #[test]
+    fn test_parse_old_xref_entry_as_free() {
+        let data = b"xref\n1 1\n0000000017 00000 o\ntrailer\n<< /Size 2 >>\nstartxref\n0\n";
+        let mut parser = PdfParser::from(data.as_slice());
+
+        let table = parser
+            .parse_cross_reference_table(&PassthroughResolver)
+            .unwrap();
+
+        assert!(table.entries[&1].is_free());
+    }
+
+    #[test]
+    fn test_parse_xref_entry_rejects_invalid_status() {
+        let data = b"xref\n0 1\n0000000000 65535 x\n";
+        let mut parser = PdfParser::from(data.as_slice());
+
+        let error = parser
+            .parse_cross_reference_table(&PassthroughResolver)
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            ParserError::CrossReferenceTableError(
+                CrossReferenceTableError::InvalidCrossReferenceStatus('x')
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_xref_entry_requires_status() {
+        let data = b"xref\n0 1\n0000000000 65535";
+        let mut parser = PdfParser::from(data.as_slice());
+
+        let error = parser
+            .parse_cross_reference_table(&PassthroughResolver)
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            ParserError::CrossReferenceTableError(CrossReferenceTableError::MissingStatus)
+        );
+    }
+
+    #[test]
+    fn test_normalize_xref_subsection_entries_uses_declared_range() {
+        let entries = vec![
+            CrossReferenceEntry::new_normal(17, 0),
+            CrossReferenceEntry::new_normal(81, 0),
+        ];
+
+        let normalized = normalize_xref_subsection_entries(4, entries);
+
+        assert_eq!(normalized[0].0, 4);
+        assert_eq!(normalized[1].0, 5);
+    }
+
+    #[test]
+    fn test_normalize_xref_subsection_entries_handles_leading_free_object_zero() {
+        let entries = vec![
+            CrossReferenceEntry::new_free(0, 65_535),
+            CrossReferenceEntry::new_normal(17, 0),
+            CrossReferenceEntry::new_normal(81, 0),
+        ];
+
+        let normalized = normalize_xref_subsection_entries(4, entries);
+
+        assert_eq!(normalized[0].0, 0);
+        assert_eq!(normalized[1].0, 4);
+        assert_eq!(normalized[2].0, 5);
     }
 }

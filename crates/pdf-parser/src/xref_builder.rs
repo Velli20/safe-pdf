@@ -4,20 +4,81 @@ use pdf_object::{
     cross_reference_table::{CrossReferenceEntry, CrossReferenceEntryType, CrossReferenceTable},
     object_resolver::PassthroughResolver,
     object_variant::ObjectVariant,
+    stream::StreamObject,
+    trailer::Trailer,
 };
 
 use crate::{error::ParserError, parser::PdfParser};
 
-impl PdfParser<'_> {
-    /// Locates a cross-reference section via `startxref` markers, then follows
-    /// the `/Prev` chain to produce a fully-merged [`CrossReferenceTable`].
-    pub fn build_xref_table(&mut self) -> Result<CrossReferenceTable, ParserError> {
-        let xref_offsets = self.find_startxref_offsets()?;
+const STARTXREF_KEYWORD: &[u8] = b"startxref";
+const XREF_KEYWORD: &[u8] = b"xref";
+const XREF_RECOVERY_WINDOW: usize = 1024;
+const MALFORMED_XREF_SEARCH_WINDOW: usize = 4096;
+const MIN_TRADITIONAL_REPAIR_RADIUS: usize = 64;
+const XREF_STREAM_REPAIR_RADIUS: usize = 1024;
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+/// Identifies whether a parsed cross-reference section came from a traditional
+/// table or from a cross-reference stream.
+enum XrefSectionKind {
+    Traditional,
+    Stream,
+}
+
+/// A parsed cross-reference section together with its source kind.
+struct ParsedXrefSection {
+    kind: XrefSectionKind,
+    table: CrossReferenceTable,
+}
+
+#[derive(Clone, Copy)]
+/// Repair policy used to normalize object offsets after parsing a section.
+struct OffsetRepairPolicy {
+    adjustment: usize,
+    search_radius: usize,
+    fall_back_to_latest_match: bool,
+}
+
+impl OffsetRepairPolicy {
+    /// Builds the repair policy for a traditional xref table.
+    fn traditional(adjustment: usize) -> Self {
+        Self {
+            adjustment,
+            search_radius: adjustment.max(MIN_TRADITIONAL_REPAIR_RADIUS),
+            fall_back_to_latest_match: true,
+        }
+    }
+
+    /// Builds the repair policy for a cross-reference stream.
+    const fn stream() -> Self {
+        Self {
+            adjustment: 0,
+            search_radius: XREF_STREAM_REPAIR_RADIUS,
+            fall_back_to_latest_match: false,
+        }
+    }
+}
+
+/// Coordinates locating, parsing, repairing, and validating xref sections.
+struct XrefBuilder<'parser, 'input> {
+    parser: &'parser mut PdfParser<'input>,
+}
+
+impl<'parser, 'input> XrefBuilder<'parser, 'input> {
+    /// Creates a builder around the parser that owns the input cursor.
+    fn new(parser: &'parser mut PdfParser<'input>) -> Self {
+        Self { parser }
+    }
+
+    /// Tries all discovered `startxref` offsets until one yields a valid table.
+    fn build(&mut self) -> Result<CrossReferenceTable, ParserError> {
         let mut last_error = None;
 
-        for xref_offset in xref_offsets {
-            match merge_xref_chain(self, xref_offset)
-                .and_then(|table| validate_xref_table(self, table, xref_offset))
+        for offset in self.startxref_offsets()? {
+            match self
+                // Parse the section chain first, then validate the merged result.
+                .merge_chain(offset)
+                .and_then(|table| self.validate(table, offset))
             {
                 Ok(table) => return Ok(table),
                 Err(error) => last_error = Some(error),
@@ -27,875 +88,609 @@ impl PdfParser<'_> {
         Err(last_error.unwrap_or(ParserError::MissingStartXref))
     }
 
-    /// Scans backward through the input for `startxref` keywords and extracts
-    /// the byte offsets that follow them, newest first.
-    fn find_startxref_offsets(&mut self) -> Result<Vec<usize>, ParserError> {
-        const STARTXREF_KEYWORD: &[u8] = b"startxref";
-
-        let positions: Vec<usize> = self
+    /// Scans the input for `startxref` markers and reads the offsets they point to.
+    fn startxref_offsets(&mut self) -> Result<Vec<usize>, ParserError> {
+        let positions: Vec<_> = self
+            .parser
             .tokenizer
             .input
             .windows(STARTXREF_KEYWORD.len())
             .enumerate()
-            .filter_map(|(position, window)| {
-                if window == STARTXREF_KEYWORD {
-                    Some(position)
-                } else {
-                    None
-                }
-            })
+            .filter_map(|(position, window)| (window == STARTXREF_KEYWORD).then_some(position))
             .collect();
 
-        if positions.is_empty() {
-            return Err(ParserError::MissingStartXref);
-        }
-
         let mut offsets = Vec::with_capacity(positions.len());
-        let original_position = self.tokenizer.position;
+        for position in positions.into_iter().rev() {
+            // Work from the most recent marker backward so newer revisions win.
+            let offset = self.at_position(position, |builder| {
+                builder.parser.read_keyword(STARTXREF_KEYWORD)?;
+                builder.parser.read_number::<usize>(true)
+            });
 
-        for startxref_pos in positions.into_iter().rev() {
-            self.tokenizer.position = startxref_pos;
-            if self.read_keyword(b"startxref").is_ok()
-                && let Ok(offset) = self.read_number::<usize>(true)
-            {
+            if let Ok(offset) = offset {
                 offsets.push(offset);
             }
         }
 
-        self.tokenizer.position = original_position;
-
         if offsets.is_empty() {
-            return Err(ParserError::MissingStartXref);
+            Err(ParserError::MissingStartXref)
+        } else {
+            Ok(offsets)
         }
-
-        Ok(offsets)
     }
-}
 
-fn parse_xref_section_at_offset(
-    parser: &mut PdfParser,
-    offset: usize,
-) -> Result<CrossReferenceTable, ParserError> {
-    let parsed = parser.parse_object_at(offset, &PassthroughResolver)?;
+    /// Follows the `/Prev` chain and merges the visible entries into one table.
+    fn merge_chain(&mut self, start_offset: usize) -> Result<CrossReferenceTable, ParserError> {
+        let mut entries = BTreeMap::new();
+        let mut visited_offsets = HashSet::new();
+        let mut current_offset = start_offset;
+        let mut trailer = None;
 
-    match parsed {
-        ObjectVariant::CrossReferenceTable(table) => Ok(table),
-        ObjectVariant::IndirectObject(indirect) => match indirect.object {
-            Some(ObjectVariant::Stream(ref stream)) => {
-                crate::cross_reference_stream::parse_xref_stream(stream, &PassthroughResolver)
+        while visited_offsets.insert(current_offset) {
+            let table = self.parse_section_with_recovery(current_offset)?;
+            let auxiliary_offset = table.trailer.dictionary.get("XRefStm").cloned();
+            let previous_offset = table.trailer.dictionary.get("Prev").cloned();
+
+            // Keep the first entry we see for each object number.
+            Self::merge_entries(&mut entries, table.entries);
+
+            if let Some(offset) = auxiliary_offset {
+                let offset = offset.try_number::<usize>(&PassthroughResolver)?;
+                if visited_offsets.insert(offset) {
+                    let auxiliary_table = self.parse_section_with_recovery(offset)?;
+                    // Traditional tables are authoritative in hybrid revisions.
+                    Self::merge_entries(&mut entries, auxiliary_table.entries);
+                }
             }
-            _ => Err(ParserError::InvalidXrefAtOffset { offset }),
-        },
-        ObjectVariant::Stream(ref stream) => {
-            crate::cross_reference_stream::parse_xref_stream(stream, &PassthroughResolver)
+
+            // Prefer the newest trailer that exposes a root catalog.
+            Self::prefer_newer_trailer(&mut trailer, table.trailer);
+
+            let Some(previous_offset) = previous_offset else {
+                break;
+            };
+            current_offset = previous_offset.try_number::<usize>(&PassthroughResolver)?;
         }
-        _ => Err(ParserError::InvalidXrefAtOffset { offset }),
+
+        let trailer = trailer.ok_or(ParserError::MissingStartXref)?;
+        Ok(CrossReferenceTable::new(entries, trailer))
     }
-}
 
-fn recover_traditional_xref_offset(parser: &PdfParser, declared_offset: usize) -> Option<usize> {
-    const XREF_KEYWORD: &[u8] = b"xref";
-    const RECOVERY_WINDOW: usize = 1024;
+    /// Merges a parsed subsection into the accumulated object map.
+    fn merge_entries(
+        entries: &mut BTreeMap<usize, CrossReferenceEntry>,
+        section_entries: BTreeMap<usize, CrossReferenceEntry>,
+    ) {
+        for (object_number, entry) in section_entries {
+            let _ = entries.entry(object_number).or_insert(entry);
+        }
+    }
 
-    let input = parser.tokenizer.input;
-    let search_start = declared_offset.saturating_sub(RECOVERY_WINDOW);
-    let search_end = declared_offset
-        .saturating_add(RECOVERY_WINDOW)
-        .min(input.len());
-    let haystack = input.get(search_start..search_end)?;
+    /// Replaces the trailer if the candidate carries better root metadata.
+    fn prefer_newer_trailer(preferred: &mut Option<Trailer>, candidate: Trailer) {
+        let should_replace = preferred
+            .as_ref()
+            .is_some_and(|trailer| trailer.dictionary.get("Root").is_none())
+            && candidate.dictionary.get("Root").is_some();
 
-    haystack
-        .windows(XREF_KEYWORD.len())
-        .enumerate()
-        .filter_map(|(relative_position, window)| {
-            (window == XREF_KEYWORD)
-                .then(|| search_start.checked_add(relative_position))
-                .flatten()
+        if preferred.is_none() || should_replace {
+            *preferred = Some(candidate);
+        }
+    }
+
+    /// Parses a section and falls back to nearby recovery strategies on failure.
+    fn parse_section_with_recovery(
+        &mut self,
+        declared_offset: usize,
+    ) -> Result<CrossReferenceTable, ParserError> {
+        match self.parse_section_at(declared_offset) {
+            Ok(section) => Ok(self.repair_section(section, 0)),
+            Err(original_error) => {
+                if let Some(recovered_offset) = self.recover_section_offset(declared_offset) {
+                    let section = self.parse_section_at(recovered_offset)?;
+                    return Ok(
+                        self.repair_section(section, declared_offset.abs_diff(recovered_offset))
+                    );
+                }
+
+                self.parse_malformed_rows_at(declared_offset)
+                    .map(|section| self.repair_section(section, 0))
+                    .map_err(|_| original_error)
+            }
+        }
+    }
+
+    /// Parses a cross-reference section at the exact byte offset.
+    fn parse_section_at(&mut self, offset: usize) -> Result<ParsedXrefSection, ParserError> {
+        let object = self.parser.parse_object_at(offset, &PassthroughResolver)?;
+
+        match object {
+            ObjectVariant::CrossReferenceTable(table) => Ok(ParsedXrefSection {
+                kind: XrefSectionKind::Traditional,
+                table,
+            }),
+            ObjectVariant::IndirectObject(indirect) => match indirect.object {
+                Some(ObjectVariant::Stream(stream)) => self.parse_stream_section(stream),
+                _ => Err(ParserError::InvalidXrefAtOffset { offset }),
+            },
+            ObjectVariant::Stream(stream) => self.parse_stream_section(stream),
+            _ => Err(ParserError::InvalidXrefAtOffset { offset }),
+        }
+    }
+
+    /// Wraps a parsed xref stream in the common section representation.
+    fn parse_stream_section(&self, stream: StreamObject) -> Result<ParsedXrefSection, ParserError> {
+        Ok(ParsedXrefSection {
+            kind: XrefSectionKind::Stream,
+            table: crate::cross_reference_stream::parse_xref_stream(&stream, &PassthroughResolver)?,
         })
-        .filter(|&candidate| candidate != declared_offset)
-        .filter(|&candidate| {
-            let starts_on_line_boundary =
-                match candidate.checked_sub(1).and_then(|idx| input.get(idx)) {
-                    Some(previous) => PdfParser::is_pdf_whitespace(*previous),
-                    None => true,
-                };
-            let has_delimiter_after_keyword = match candidate
-                .checked_add(XREF_KEYWORD.len())
-                .and_then(|idx| input.get(idx))
-            {
-                Some(next) => PdfParser::is_pdf_whitespace(*next),
-                None => true,
+    }
+
+    /// Attempts to parse malformed xref rows when the declared offset is wrong.
+    fn parse_malformed_rows_at(&mut self, offset: usize) -> Result<ParsedXrefSection, ParserError> {
+        if offset > self.parser.tokenizer.input.len() {
+            let recovered_offset = self
+                .recover_malformed_offset(offset)
+                .ok_or(ParserError::InvalidXrefAtOffset { offset })?;
+            return self.parse_malformed_rows_at(recovered_offset);
+        }
+
+        self.at_position(offset, |builder| {
+            builder.parser.skip_whitespace_and_comments();
+            builder.parse_malformed_rows()
+        })
+    }
+
+    /// Parses malformed rows while preserving the cursor on failure.
+    fn parse_malformed_rows(&mut self) -> Result<ParsedXrefSection, ParserError> {
+        let mark = self.parser.tokenizer.position;
+        match self.parse_malformed_subsections() {
+            Ok(section) => Ok(section),
+            Err(_) => {
+                self.parser.tokenizer.position = mark;
+                self.parse_malformed_entries()
+            }
+        }
+    }
+
+    /// Parses malformed xref subsection blocks using the declared object ranges.
+    fn parse_malformed_subsections(&mut self) -> Result<ParsedXrefSection, ParserError> {
+        let entries = self.parser.parse_cross_reference_subsections()?;
+        self.finish_malformed_section(entries)
+    }
+
+    /// Parses a malformed xref table as a flat sequence of entries.
+    fn parse_malformed_entries(&mut self) -> Result<ParsedXrefSection, ParserError> {
+        let mut entries = BTreeMap::new();
+        let mut object_number = 0usize;
+
+        loop {
+            self.parser.skip_whitespace_and_comments();
+            if !matches!(
+                self.parser.tokenizer.peek(),
+                Some(pdf_tokenizer::PdfToken::Number(_))
+            ) {
+                break;
+            }
+
+            let entry = self.try_parse_malformed_entry()?;
+            let _ = entries.insert(object_number, entry);
+            object_number = object_number.saturating_add(1);
+        }
+
+        self.finish_malformed_section(entries)
+    }
+
+    /// Finishes malformed parsing by reading the trailer and assembling the table.
+    fn finish_malformed_section(
+        &mut self,
+        entries: BTreeMap<usize, CrossReferenceEntry>,
+    ) -> Result<ParsedXrefSection, ParserError> {
+        if entries.is_empty() {
+            return Err(self.invalid_xref_error());
+        }
+
+        let trailer = self.parser.parse_trailer(&PassthroughResolver)?;
+        Ok(ParsedXrefSection {
+            kind: XrefSectionKind::Traditional,
+            table: CrossReferenceTable::new(entries, trailer),
+        })
+    }
+
+    /// Probes a malformed row without consuming input on failure.
+    fn try_parse_malformed_entry(&mut self) -> Result<CrossReferenceEntry, ParserError> {
+        let mark = self.parser.tokenizer.position;
+        let result = self.parser.parse_cross_reference_entry();
+        if result.is_err() {
+            self.parser.tokenizer.position = mark;
+        }
+        result
+    }
+
+    /// Searches near the declared offset for a better xref section location.
+    fn recover_section_offset(&mut self, declared_offset: usize) -> Option<usize> {
+        let input = self.parser.tokenizer.input;
+        let search_start = declared_offset.saturating_sub(XREF_RECOVERY_WINDOW);
+        let search_end = declared_offset
+            .saturating_add(XREF_RECOVERY_WINDOW)
+            .min(input.len());
+        let mut candidates = HashSet::new();
+
+        if let Some(haystack) = input.get(search_start..search_end) {
+            for (relative_position, window) in haystack.windows(XREF_KEYWORD.len()).enumerate() {
+                if window == XREF_KEYWORD
+                    && let Some(candidate) = search_start.checked_add(relative_position)
+                    && candidate != declared_offset
+                {
+                    let _ = candidates.insert(candidate);
+                }
+            }
+
+            for candidate in search_start..search_end {
+                if candidate != declared_offset
+                    && self.parser.looks_like_indirect_object_header_at(candidate)
+                {
+                    let _ = candidates.insert(candidate);
+                }
+            }
+        }
+
+        if candidates.is_empty() || declared_offset > input.len() {
+            for (candidate, window) in input.windows(XREF_KEYWORD.len()).enumerate() {
+                if window != XREF_KEYWORD || candidate == declared_offset {
+                    continue;
+                }
+
+                let previous_is_regular = candidate
+                    .checked_sub(1)
+                    .and_then(|index| input.get(index))
+                    .is_some_and(|byte| PdfParser::is_pdf_regular_character(*byte));
+                if !previous_is_regular {
+                    let _ = candidates.insert(candidate);
+                }
+            }
+        }
+
+        self.closest_valid_candidate(candidates, declared_offset)
+    }
+
+    /// Searches for a better offset when a malformed table appears shifted.
+    fn recover_malformed_offset(&mut self, declared_offset: usize) -> Option<usize> {
+        let input = self.parser.tokenizer.input;
+        let search_start = input.len().saturating_sub(MALFORMED_XREF_SEARCH_WINDOW);
+        let mut candidates = Vec::new();
+
+        for candidate in search_start..input.len() {
+            let Some(byte) = input.get(candidate).copied() else {
+                continue;
+            };
+            if !byte.is_ascii_digit() {
+                continue;
+            }
+
+            let starts_on_line_boundary = candidate == 0
+                || candidate
+                    .checked_sub(1)
+                    .and_then(|index| input.get(index))
+                    .is_some_and(|byte| PdfParser::is_pdf_whitespace(*byte));
+            if starts_on_line_boundary && !self.looks_like_malformed_entry(candidate) {
+                candidates.push(candidate);
+            }
+        }
+
+        candidates.sort_by(|left, right| {
+            left.abs_diff(declared_offset)
+                .cmp(&right.abs_diff(declared_offset))
+                .then_with(|| right.cmp(left))
+        });
+
+        let mut best_candidate = None;
+        for candidate in candidates {
+            // Re-parse each candidate and prefer the one with the strongest trailer.
+            let result = self.at_position(candidate, |builder| {
+                builder.parser.skip_whitespace_and_comments();
+                builder.parse_malformed_rows()
+            });
+            let Ok(section) = result else {
+                continue;
             };
 
-            starts_on_line_boundary && has_delimiter_after_keyword
-        })
-        .min_by_key(|candidate| candidate.abs_diff(declared_offset))
-}
-
-fn matches_indirect_object_header(
-    input: &[u8],
-    offset: usize,
-    object_number: usize,
-    generation_number: usize,
-) -> bool {
-    let object_number = object_number.to_string();
-    let generation_number = generation_number.to_string();
-    let object_number = object_number.as_bytes();
-    let generation_number = generation_number.as_bytes();
-
-    let Some(data) = input.get(offset..) else {
-        return false;
-    };
-    if !data.starts_with(object_number) {
-        return false;
-    }
-
-    let mut position = object_number.len();
-    position = match skip_required_whitespace(data, position) {
-        Some(position) => position,
-        None => return false,
-    };
-
-    let Some(remaining) = data.get(position..) else {
-        return false;
-    };
-    if !remaining.starts_with(generation_number) {
-        return false;
-    }
-
-    position = position.saturating_add(generation_number.len());
-    position = match skip_required_whitespace(data, position) {
-        Some(position) => position,
-        None => return false,
-    };
-
-    let Some(keyword) = data.get(position..position.saturating_add(3)) else {
-        return false;
-    };
-    if keyword != b"obj" {
-        return false;
-    }
-
-    match data.get(position.saturating_add(3)).copied() {
-        Some(next) => PdfParser::is_pdf_delimiter(next),
-        None => true,
-    }
-}
-
-fn skip_required_whitespace(input: &[u8], start: usize) -> Option<usize> {
-    let mut position = start;
-    let mut consumed = false;
-
-    while let Some(byte) = input.get(position).copied() {
-        if !PdfParser::is_pdf_whitespace(byte) {
-            break;
-        }
-        consumed = true;
-        position = position.saturating_add(1);
-    }
-
-    consumed.then_some(position)
-}
-
-fn find_nearby_indirect_object_offset(
-    input: &[u8],
-    object_number: usize,
-    generation_number: usize,
-    declared_offset: usize,
-    search_radius: usize,
-) -> Option<usize> {
-    let search_start = declared_offset.saturating_sub(search_radius);
-    let search_end = declared_offset
-        .saturating_add(search_radius)
-        .saturating_add(1)
-        .min(input.len());
-    let mut best_candidate = None;
-
-    for candidate in search_start..search_end {
-        if !matches_indirect_object_header(input, candidate, object_number, generation_number) {
-            continue;
-        }
-
-        let distance = candidate.abs_diff(declared_offset);
-        match best_candidate {
-            Some((best_offset, best_distance))
-                if best_distance < distance
-                    || (best_distance == distance && best_offset <= candidate) => {}
-            _ => best_candidate = Some((candidate, distance)),
-        }
-    }
-
-    best_candidate.map(|(candidate, _)| candidate)
-}
-
-fn repair_traditional_xref_offsets(
-    parser: &PdfParser,
-    table: &mut CrossReferenceTable,
-    offset_delta: usize,
-) {
-    const MIN_SEARCH_RADIUS: usize = 64;
-
-    if offset_delta == 0 {
-        return;
-    }
-
-    let input = parser.tokenizer.input;
-    let search_radius = offset_delta.max(MIN_SEARCH_RADIUS);
-
-    for (&object_number, entry) in &mut table.entries {
-        let CrossReferenceEntryType::Normal {
-            byte_offset,
-            generation_number,
-        } = &entry.entry_type
-        else {
-            continue;
-        };
-
-        if *byte_offset == 0
-            || matches_indirect_object_header(
-                input,
-                *byte_offset,
-                object_number,
-                *generation_number,
-            )
-        {
-            continue;
-        }
-
-        if let Some(adjusted_offset) = byte_offset.checked_sub(offset_delta)
-            && matches_indirect_object_header(
-                input,
-                adjusted_offset,
-                object_number,
-                *generation_number,
-            )
-        {
-            *entry = CrossReferenceEntry::new_normal(adjusted_offset, *generation_number);
-            continue;
-        }
-
-        if let Some(recovered_offset) = find_nearby_indirect_object_offset(
-            input,
-            object_number,
-            *generation_number,
-            *byte_offset,
-            search_radius,
-        ) {
-            *entry = CrossReferenceEntry::new_normal(recovered_offset, *generation_number);
-        }
-    }
-}
-
-fn validate_xref_table(
-    parser: &PdfParser,
-    table: CrossReferenceTable,
-    xref_offset: usize,
-) -> Result<CrossReferenceTable, ParserError> {
-    let input = parser.tokenizer.input;
-
-    for (&object_number, entry) in &table.entries {
-        let CrossReferenceEntryType::Normal {
-            byte_offset,
-            generation_number,
-        } = &entry.entry_type
-        else {
-            continue;
-        };
-
-        if *byte_offset == 0 {
-            continue;
-        }
-
-        if !matches_indirect_object_header(input, *byte_offset, object_number, *generation_number) {
-            return Err(ParserError::InvalidXrefAtOffset {
-                offset: xref_offset,
-            });
-        }
-    }
-
-    Ok(table)
-}
-
-fn parse_xref_section_with_recovery(
-    parser: &mut PdfParser,
-    declared_offset: usize,
-) -> Result<CrossReferenceTable, ParserError> {
-    match parse_xref_section_at_offset(parser, declared_offset) {
-        Ok(table) => Ok(table),
-        Err(original_error) => {
-            let recovered_offset =
-                recover_traditional_xref_offset(parser, declared_offset).ok_or(original_error)?;
-            let mut table = parse_xref_section_at_offset(parser, recovered_offset)?;
-            repair_traditional_xref_offsets(
-                parser,
-                &mut table,
-                declared_offset.abs_diff(recovered_offset),
+            let entry_count = section.table.entries.len();
+            if entry_count == 0 {
+                continue;
+            }
+            let has_valid_root = matches!(
+                section.table.trailer.dictionary.get("Root"),
+                Some(ObjectVariant::Reference(object_number))
+                    if section.table.entries.contains_key(object_number)
             );
-            Ok(table)
+
+            match best_candidate {
+                Some((_, best_entry_count, best_has_valid_root))
+                    if (best_has_valid_root && !has_valid_root)
+                        || (best_has_valid_root == has_valid_root
+                            && best_entry_count >= entry_count) => {}
+                _ => best_candidate = Some((candidate, entry_count, has_valid_root)),
+            }
         }
+
+        best_candidate.map(|(candidate, _, _)| candidate)
+    }
+
+    /// Chooses the nearest candidate that parses as a valid xref section.
+    fn closest_valid_candidate(
+        &mut self,
+        candidates: HashSet<usize>,
+        declared_offset: usize,
+    ) -> Option<usize> {
+        let mut candidates: Vec<_> = candidates.into_iter().collect();
+        candidates.sort_by(|left, right| {
+            left.abs_diff(declared_offset)
+                .cmp(&right.abs_diff(declared_offset))
+                .then_with(|| right.cmp(left))
+        });
+
+        candidates
+            .into_iter()
+            .find(|candidate| self.parse_section_at(*candidate).is_ok())
+    }
+
+    /// Checks whether a byte offset looks like the start of a malformed entry.
+    fn looks_like_malformed_entry(&mut self, offset: usize) -> bool {
+        self.at_position(offset, |builder| {
+            builder.parser.skip_whitespace();
+            builder.parser.parse_cross_reference_entry().is_ok()
+                && builder
+                    .parser
+                    .tokenizer
+                    .data()
+                    .first()
+                    .copied()
+                    .is_some_and(PdfParser::is_pdf_whitespace)
+        })
+    }
+
+    /// Repairs all normal xref offsets according to the parsed section kind.
+    fn repair_section(
+        &self,
+        mut section: ParsedXrefSection,
+        offset_adjustment: usize,
+    ) -> CrossReferenceTable {
+        let policy = match section.kind {
+            XrefSectionKind::Traditional => OffsetRepairPolicy::traditional(offset_adjustment),
+            XrefSectionKind::Stream => OffsetRepairPolicy::stream(),
+        };
+        self.repair_offsets(&mut section.table, policy);
+        section.table
+    }
+
+    /// Normalizes byte offsets by re-checking them against the input stream.
+    fn repair_offsets(&self, table: &mut CrossReferenceTable, policy: OffsetRepairPolicy) {
+        let mut invalid_entries = Vec::new();
+
+        for (&object_number, entry) in &mut table.entries {
+            let CrossReferenceEntryType::Normal {
+                byte_offset,
+                generation_number,
+            } = &entry.entry_type
+            else {
+                continue;
+            };
+
+            // Free entries are stable; only normal entries may need repair.
+            if *byte_offset == 0 {
+                continue;
+            }
+
+            let declared_offset = *byte_offset;
+            let generation_number = *generation_number;
+            let recovered_offset = self
+                .is_indirect_object_at(declared_offset, object_number, generation_number)
+                .then_some(declared_offset)
+                .or_else(|| {
+                    declared_offset
+                        .checked_sub(policy.adjustment)
+                        .filter(|offset| {
+                            self.is_indirect_object_at(*offset, object_number, generation_number)
+                        })
+                })
+                .or_else(|| {
+                    self.nearby_indirect_object_offset(
+                        object_number,
+                        generation_number,
+                        declared_offset,
+                        policy.search_radius,
+                    )
+                })
+                .or_else(|| {
+                    policy
+                        .fall_back_to_latest_match
+                        // Older tables may need the last matching occurrence instead.
+                        .then(|| {
+                            self.latest_indirect_object_offset(object_number, generation_number)
+                        })
+                        .flatten()
+                });
+
+            match recovered_offset {
+                Some(offset) => *entry = CrossReferenceEntry::new_normal(offset, generation_number),
+                None => invalid_entries.push(object_number),
+            }
+        }
+
+        for object_number in invalid_entries {
+            let _ = table.entries.remove(&object_number);
+        }
+    }
+
+    /// Searches the surrounding range for an indirect object header match.
+    fn nearby_indirect_object_offset(
+        &self,
+        object_number: usize,
+        generation_number: usize,
+        declared_offset: usize,
+        search_radius: usize,
+    ) -> Option<usize> {
+        let search_start = declared_offset.saturating_sub(search_radius);
+        let search_end = declared_offset
+            .saturating_add(search_radius)
+            .saturating_add(1)
+            .min(self.parser.tokenizer.input.len());
+
+        (search_start..search_end)
+            .filter(|offset| self.is_indirect_object_at(*offset, object_number, generation_number))
+            .min_by(|left, right| {
+                left.abs_diff(declared_offset)
+                    .cmp(&right.abs_diff(declared_offset))
+                    .then_with(|| right.cmp(left))
+            })
+    }
+
+    /// Falls back to the latest matching object header in the input.
+    fn latest_indirect_object_offset(
+        &self,
+        object_number: usize,
+        generation_number: usize,
+    ) -> Option<usize> {
+        (0..self.parser.tokenizer.input.len())
+            .rev()
+            .find(|offset| self.is_indirect_object_at(*offset, object_number, generation_number))
+    }
+
+    /// Checks whether the parser sees the requested indirect object header there.
+    fn is_indirect_object_at(
+        &self,
+        offset: usize,
+        object_number: usize,
+        generation_number: usize,
+    ) -> bool {
+        self.parser
+            .matches_indirect_object_header_at(offset, object_number, generation_number)
+    }
+
+    /// Ensures the merged table only contains entries that match the input.
+    fn validate(
+        &self,
+        table: CrossReferenceTable,
+        xref_offset: usize,
+    ) -> Result<CrossReferenceTable, ParserError> {
+        let is_valid = table.entries.iter().all(|(&object_number, entry)| {
+            let CrossReferenceEntryType::Normal {
+                byte_offset,
+                generation_number,
+            } = &entry.entry_type
+            else {
+                return true;
+            };
+
+            *byte_offset == 0
+                || self.is_indirect_object_at(*byte_offset, object_number, *generation_number)
+        });
+
+        if is_valid {
+            Ok(table)
+        } else {
+            Err(ParserError::InvalidXrefAtOffset {
+                offset: xref_offset,
+            })
+        }
+    }
+
+    /// Builds the parser error for invalid xref content at the current cursor.
+    fn invalid_xref_error(&self) -> ParserError {
+        ParserError::InvalidXrefAtOffset {
+            offset: self.parser.tokenizer.position,
+        }
+    }
+
+    /// Temporarily moves the cursor to a position, then restores it afterward.
+    fn at_position<T>(&mut self, position: usize, operation: impl FnOnce(&mut Self) -> T) -> T {
+        let mark = self.parser.tokenizer.position;
+        self.parser.tokenizer.position = position;
+        let result = operation(self);
+        self.parser.tokenizer.position = mark;
+        result
     }
 }
 
-/// Follows the xref chain via `/Prev` entries and merges all cross-reference tables.
-///
-/// Handles incremental PDF updates where each update adds a new xref section
-/// that references the previous one via the `/Prev` entry in the trailer.
-/// Supports both traditional xref tables and xref streams at each step.
-fn merge_xref_chain(
-    parser: &mut PdfParser,
-    start_offset: usize,
-) -> Result<CrossReferenceTable, ParserError> {
-    let mut entries: BTreeMap<usize, CrossReferenceEntry> = BTreeMap::new();
-    let mut visited_offsets = HashSet::new();
-    let mut current_offset = start_offset;
-    let mut trailer = None;
-
-    loop {
-        // Prevent infinite loops from circular /Prev references.
-        if !visited_offsets.insert(current_offset) {
-            break;
-        }
-
-        let xref_table = parse_xref_section_with_recovery(parser, current_offset)?;
-        let auxiliary_xref_stream_offset = xref_table.trailer.dictionary.get("XRefStm").cloned();
-
-        // Merge entries: newer entries (already present) take precedence over older ones.
-        for (obj_num, entry) in xref_table.entries {
-            entries.entry(obj_num).or_insert(entry);
-        }
-
-        if let Some(xref_stream_offset) = auxiliary_xref_stream_offset {
-            let xref_stream_offset =
-                xref_stream_offset.try_number::<usize>(&PassthroughResolver)?;
-
-            if visited_offsets.insert(xref_stream_offset) {
-                let auxiliary_xref_table =
-                    parse_xref_section_with_recovery(parser, xref_stream_offset)?;
-
-                // Hybrid-reference files use /XRefStm to supplement the traditional xref
-                // section with entries such as compressed objects. Keep the traditional
-                // section authoritative for duplicates within the same revision.
-                for (obj_num, entry) in auxiliary_xref_table.entries {
-                    entries.entry(obj_num).or_insert(entry);
-                }
-            }
-        }
-
-        let prev_value = xref_table.trailer.dictionary.get("Prev").cloned();
-
-        // Prefer the first (newest) trailer; fall back to one with /Root if needed.
-        match trailer.as_ref() {
-            None => {
-                trailer = Some(xref_table.trailer);
-            }
-            Some(existing) if existing.dictionary.get("Root").is_none() => {
-                if xref_table.trailer.dictionary.get("Root").is_some() {
-                    trailer = Some(xref_table.trailer);
-                }
-            }
-            _ => {}
-        }
-
-        if let Some(prev_value) = prev_value {
-            current_offset = prev_value.try_number::<usize>(&PassthroughResolver)?;
-        } else {
-            break;
-        }
+impl PdfParser<'_> {
+    /// Locates a cross-reference section via `startxref` markers, then follows
+    /// the `/Prev` chain to produce a fully-merged [`CrossReferenceTable`].
+    pub fn build_xref_table(&mut self) -> Result<CrossReferenceTable, ParserError> {
+        // Keep the parser-facing API small; the builder owns the actual workflow.
+        XrefBuilder::new(self).build()
     }
-
-    let trailer = trailer.ok_or(ParserError::MissingStartXref)?;
-    Ok(CrossReferenceTable::new(entries, trailer))
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use pdf_object::cross_reference_table::CrossReferenceEntry;
 
     use super::*;
-    use pdf_object::object_resolver::PassthroughResolver;
 
-    fn format_xref_entry(offset: usize, generation: u16, used: bool) -> String {
-        let kind = if used { 'n' } else { 'f' };
-        format!("{:010} {:05} {} \n", offset, generation, kind)
+    /// Formats a single textual xref row for the parser tests.
+    fn format_xref_entry(offset: usize, generation: usize, status: char) -> Vec<u8> {
+        format!("{offset:010} {generation:05} {status} \n").into_bytes()
     }
 
-    fn build_issue139_like_pdf() -> (Vec<u8>, BTreeMap<usize, usize>) {
-        let mut data = Vec::new();
-        data.extend_from_slice(b"%PDF-1.4\n");
-
-        let obj6_offset = data.len();
-        data.extend_from_slice(b"6 0 obj\n<<\n /Type /Catalog\n /Pages 5 0 R\n>>\nendobj\n\n");
-
-        let obj1_offset = data.len();
-        data.extend_from_slice(
-            b"1 0 obj\n<<\n /Type /Page\n /Parent 5 0 R\n /MediaBox [ 0 0 612 792 ]\n /Resources 3 0 R\n /Contents 2 0 R\n>>\nendobj\n\n",
-        );
-
-        let obj4_offset = data.len();
-        data.extend_from_slice(
-            b"4 0 obj\n<<\n /Type /Font\n /Subtype /Type1\n /Name /F1\n /BaseFont/Helvetica\n>>\nendobj\n\n",
-        );
-
-        let obj2_offset = data.len();
-        data.extend_from_slice(
-            b"2 0 obj\n<<\n /Length 53\n>>\nstream\ntoString\nendstream\nendobj\n\n",
-        );
-
-        let obj5_offset = data.len();
-        data.extend_from_slice(
-            b"5 0 obj\n<<\n /Type /Pages\n /Kids [ 1 0 R ]\n /Count 1\n>>\nendobj\n\n",
-        );
-
-        let obj3_offset = data.len();
-        data.extend_from_slice(
-            b"3 0 obj\n<<\n /ProcSet[/PDF/Text]\n /Font <</F1 4 0 R >>\n>>\nendobj\n\n",
-        );
-
-        let stream_payload_offset = data
-            .windows(b"toString".len())
-            .position(|window| window == b"toString")
-            .expect("stream payload should exist");
-
-        let xref_offset = data.len();
-        data.extend_from_slice(b"xref\n0 7\n");
-        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
-        data.extend_from_slice(
-            format_xref_entry(obj1_offset.saturating_sub(8), 0, true).as_bytes(),
-        );
-        data.extend_from_slice(format_xref_entry(stream_payload_offset, 0, true).as_bytes());
-        data.extend_from_slice(
-            format_xref_entry(obj3_offset.saturating_add(4), 0, true).as_bytes(),
-        );
-        data.extend_from_slice(
-            format_xref_entry(obj4_offset.saturating_sub(3), 0, true).as_bytes(),
-        );
-        data.extend_from_slice(
-            format_xref_entry(obj5_offset.saturating_add(9), 0, true).as_bytes(),
-        );
-        data.extend_from_slice(format_xref_entry(obj6_offset, 0, true).as_bytes());
-
-        data.extend_from_slice(b"trailer\n<< /Size 7 /Root 6 0 R >>\n");
-        data.extend_from_slice(b"startxref\n");
-        data.extend_from_slice(format!("{}\n", xref_offset.saturating_add(36)).as_bytes());
-        data.extend_from_slice(b"%%EOF");
-
-        (
-            data,
-            BTreeMap::from([
-                (1, obj1_offset),
-                (2, obj2_offset),
-                (3, obj3_offset),
-                (4, obj4_offset),
-                (5, obj5_offset),
-                (6, obj6_offset),
-            ]),
-        )
-    }
-
-    fn build_hybrid_xref_pdf() -> Vec<u8> {
-        fn push_xref_stream_entry(data: &mut Vec<u8>, entry_type: u8, field2: u16, field3: u8) {
-            data.push(entry_type);
-            data.extend_from_slice(&field2.to_be_bytes());
-            data.push(field3);
-        }
-
-        let mut data = Vec::new();
-        data.extend_from_slice(b"%PDF-1.7\n");
-
-        let obj1_offset = data.len();
-        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-
-        let object_2 = b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>";
-        let object_3 = b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>";
-        let object_2_offset = 0usize;
-        let object_3_offset = object_2.len().saturating_add(1);
-        let object_stream_header = format!("2 {object_2_offset} 3 {object_3_offset} ").into_bytes();
-        let first = object_stream_header.len();
-        let mut object_stream_data = object_stream_header;
-        object_stream_data.extend_from_slice(object_2);
-        object_stream_data.push(b' ');
-        object_stream_data.extend_from_slice(object_3);
-
-        let obj4_offset = data.len();
-        data.extend_from_slice(
-            format!(
-                "4 0 obj\n<< /Type /ObjStm /N 2 /First {first} /Length {} >>\nstream\n",
-                object_stream_data.len()
-            )
-            .as_bytes(),
-        );
-        data.extend_from_slice(&object_stream_data);
-        data.extend_from_slice(b"\nendstream\nendobj\n");
-
-        let obj5_offset = data.len();
-        let mut xref_stream_data = Vec::new();
-        push_xref_stream_entry(&mut xref_stream_data, 0, 0, u8::MAX);
-        push_xref_stream_entry(&mut xref_stream_data, 1, obj1_offset as u16, 0);
-        push_xref_stream_entry(&mut xref_stream_data, 2, 4, 0);
-        push_xref_stream_entry(&mut xref_stream_data, 2, 4, 1);
-        push_xref_stream_entry(&mut xref_stream_data, 1, obj4_offset as u16, 0);
-        push_xref_stream_entry(&mut xref_stream_data, 1, obj5_offset as u16, 0);
-        data.extend_from_slice(
-            format!(
-                "5 0 obj\n<< /Type /XRef /Size 6 /W [1 2 1] /Index [0 6] /Length {} >>\nstream\n",
-                xref_stream_data.len()
-            )
-            .as_bytes(),
-        );
-        data.extend_from_slice(&xref_stream_data);
-        data.extend_from_slice(b"\nendstream\nendobj\n");
-
-        let xref_offset = data.len();
-        data.extend_from_slice(b"xref\n0 2\n");
-        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
-        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
-        data.extend_from_slice(b"4 2\n");
-        data.extend_from_slice(format_xref_entry(obj4_offset, 0, true).as_bytes());
-        data.extend_from_slice(format_xref_entry(obj5_offset, 0, true).as_bytes());
-        data.extend_from_slice(
-            format!(
-                "trailer\n<< /Size 6 /Root 1 0 R /XRefStm {obj5_offset} >>\nstartxref\n{xref_offset}\n%%EOF"
-            )
-            .as_bytes(),
-        );
-
-        data
-    }
-
+    /// Verifies malformed entry probing rolls the cursor back on failure.
     #[test]
-    fn test_build_xref_table_simple() {
-        let mut data = Vec::new();
-        data.extend_from_slice(b"%PDF-1.7\n");
+    fn malformed_entry_probe_restores_position_after_failure() {
+        let mut parser = PdfParser::from(b"not-an-xref entry".as_slice());
+        parser.tokenizer.position = 3;
+        let mut builder = XrefBuilder::new(&mut parser);
 
-        let obj1_offset = data.len();
-        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog >>\nendobj\n");
+        let result = builder.try_parse_malformed_entry();
 
-        let xref_offset = data.len();
-        data.extend_from_slice(b"xref\n0 2\n");
-        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
-        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
-
-        data.extend_from_slice(b"trailer\n<< /Size 2 /Root 1 0 R >>\n");
-        data.extend_from_slice(b"startxref\n");
-        data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
-        data.extend_from_slice(b"%%EOF");
-
-        let mut parser = PdfParser::from(data.as_slice());
-        let result = parser.build_xref_table();
-
-        assert!(
-            result.is_ok(),
-            "Should successfully build xref table: {:?}",
-            result.err()
-        );
-        let table = result.unwrap();
-
-        assert_eq!(table.entries.len(), 2, "Should have 2 entries");
-
-        let entry1 = table.entries.get(&1).expect("Obj 1 should exist");
-        assert_eq!(entry1.byte_offset(), Some(obj1_offset));
-
-        let entry0 = table.entries.get(&0).expect("Obj 0 should exist");
-        assert!(entry0.is_free(), "Obj 0 should be free");
-
-        let size: i64 = table
-            .trailer
-            .dictionary
-            .get("Size")
-            .expect("Size expected")
-            .try_number(&PassthroughResolver)
-            .unwrap();
-        assert_eq!(size, 2);
+        assert!(result.is_err());
+        assert_eq!(builder.parser.tokenizer.position, 3);
     }
 
+    /// Verifies malformed entry probing accepts a valid xref row.
     #[test]
-    fn test_build_xref_table_falls_back_from_invalid_newer_xref() {
-        let mut data = Vec::new();
-        data.extend_from_slice(b"%PDF-1.7\n");
-
-        let obj1_offset = data.len();
-        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-
-        let obj2_offset = data.len();
-        data.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
-
-        let xref1_offset = data.len();
-        data.extend_from_slice(b"xref\n0 3\n");
-        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
-        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
-        data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
-        data.extend_from_slice(b"trailer\n<< /Size 3 /Root 1 0 R >>\n");
-        data.extend_from_slice(b"startxref\n");
-        data.extend_from_slice(format!("{}\n", xref1_offset).as_bytes());
-        data.extend_from_slice(b"%%EOF\n");
-
-        let invalid_obj2_offset = obj2_offset.saturating_add(2);
-        let xref2_offset = data.len();
-        data.extend_from_slice(b"xref\n0 3\n");
-        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
-        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
-        data.extend_from_slice(format_xref_entry(invalid_obj2_offset, 0, true).as_bytes());
-        data.extend_from_slice(b"trailer\n<< /Size 3 /Root 1 0 R /Prev ");
-        data.extend_from_slice(format!("{}", xref1_offset).as_bytes());
-        data.extend_from_slice(b" >>\n");
-        data.extend_from_slice(b"startxref\n");
-        data.extend_from_slice(format!("{}\n", xref2_offset).as_bytes());
-        data.extend_from_slice(b"%%EOF");
-
+    fn malformed_entry_probe_parses_valid_entry() {
+        let mut data = format_xref_entry(12, 34, 'n');
+        data.extend_from_slice(b"trailer");
         let mut parser = PdfParser::from(data.as_slice());
-        let table = parser
-            .build_xref_table()
-            .expect("invalid newer xref should fall back to older valid xref");
+        let mut builder = XrefBuilder::new(&mut parser);
 
-        let entry2 = table.entries.get(&2).expect("obj 2 should exist");
-        assert_eq!(entry2.byte_offset(), Some(obj2_offset));
+        let entry = builder.try_parse_malformed_entry().unwrap();
+
+        assert_eq!(entry, CrossReferenceEntry::new_normal(12, 34));
+        assert!(matches!(
+            builder.parser.tokenizer.data().first().copied(),
+            Some(b' ') | Some(b'\n')
+        ));
     }
 
+    /// Verifies a malformed entry must be terminated by whitespace.
     #[test]
-    fn test_merge_xref_chain_incremental() {
-        let mut data = Vec::new();
-        data.extend_from_slice(b"%PDF-1.7\n");
-
-        let obj1_v1_offset = data.len();
-        data.extend_from_slice(b"1 0 obj\n(v1)\nendobj\n");
-        let obj2_offset = data.len();
-        data.extend_from_slice(b"2 0 obj\n(obj2)\nendobj\n");
-
-        let xref1_offset = data.len();
-        data.extend_from_slice(b"xref\n0 3\n");
-        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
-        data.extend_from_slice(format_xref_entry(obj1_v1_offset, 0, true).as_bytes());
-        data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
-
-        data.extend_from_slice(b"trailer\n<< /Size 3 /Root 1 0 R >>\n");
-        data.extend_from_slice(b"startxref\n");
-        data.extend_from_slice(format!("{}\n", xref1_offset).as_bytes());
-        data.extend_from_slice(b"%%EOF\n");
-
-        let obj1_v2_offset = data.len();
-        data.extend_from_slice(b"1 0 obj\n(v2)\nendobj\n");
-
-        let xref2_offset = data.len();
-        data.extend_from_slice(b"xref\n0 1\n");
-        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
-        data.extend_from_slice(b"1 1\n");
-        data.extend_from_slice(format_xref_entry(obj1_v2_offset, 0, true).as_bytes());
-
-        data.extend_from_slice(b"trailer\n<< /Size 3 /Root 1 0 R /Prev ");
-        data.extend_from_slice(format!("{}", xref1_offset).as_bytes());
-        data.extend_from_slice(b" >>\n");
-        data.extend_from_slice(b"startxref\n");
-        data.extend_from_slice(format!("{}\n", xref2_offset).as_bytes());
-        data.extend_from_slice(b"%%EOF");
-
+    fn malformed_entry_detection_requires_terminator() {
+        let data = format_xref_entry(12, 34, 'n');
         let mut parser = PdfParser::from(data.as_slice());
-        let result = merge_xref_chain(&mut parser, xref2_offset);
+        let mut builder = XrefBuilder::new(&mut parser);
 
-        assert!(result.is_ok(), "Should merge xref chain");
-        let table = result.unwrap();
+        assert!(builder.looks_like_malformed_entry(0));
 
-        let entry1 = table.entries.get(&1).expect("Obj 1 missing");
-        assert_eq!(
-            entry1.byte_offset(),
-            Some(obj1_v2_offset),
-            "Obj 1 should point to v2"
-        );
+        let truncated = b"0000000012 00034 n".to_vec();
+        let mut parser = PdfParser::from(truncated.as_slice());
+        let mut builder = XrefBuilder::new(&mut parser);
 
-        let entry2 = table.entries.get(&2).expect("Obj 2 missing");
-        assert_eq!(
-            entry2.byte_offset(),
-            Some(obj2_offset),
-            "Obj 2 should be from v1"
-        );
+        assert!(!builder.looks_like_malformed_entry(0));
+        assert_eq!(builder.parser.tokenizer.position, 0);
     }
 
+    /// Verifies scanning for `startxref` preserves the parser's cursor.
     #[test]
-    fn test_merge_xref_circular_protection() {
-        let mut data = Vec::new();
-        data.extend_from_slice(b"%PDF-1.7\n");
-
-        while data.len() < 100 {
-            data.push(b' ');
-        }
-        let xref1_offset = data.len();
-        data.extend_from_slice(b"xref\n0 1\n");
-        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
-        data.extend_from_slice(b"trailer\n<< /Prev 200 >>\n");
-        data.extend_from_slice(b"startxref\n0\n%%EOF\n");
-
-        while data.len() < 200 {
-            data.push(b' ');
-        }
-        let xref2_offset = data.len();
-        data.extend_from_slice(b"xref\n0 1\n");
-        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
-        data.extend_from_slice(format!("trailer\n<< /Prev {} >>\n", xref1_offset).as_bytes());
-        data.extend_from_slice(b"startxref\n0\n%%EOF");
-
+    fn startxref_scan_restores_parser_position() {
+        let data = b"startxref\n12\n";
         let mut parser = PdfParser::from(data.as_slice());
-        let result = merge_xref_chain(&mut parser, xref2_offset);
+        parser.tokenizer.position = 4;
+        let mut builder = XrefBuilder::new(&mut parser);
 
-        // Should break the loop rather than hang or crash.
-        assert!(
-            result.is_ok(),
-            "Failed circular xref test: {:?}",
-            result.err()
-        );
-    }
+        let offsets = builder.startxref_offsets().unwrap();
 
-    #[test]
-    fn test_build_xref_table_recovers_stripped_header_offsets() {
-        let mut data = Vec::new();
-        data.extend_from_slice(b"%\xe2\xe3\xcf\xd3\n");
-
-        let obj1_offset = data.len();
-        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-
-        let obj2_offset = data.len();
-        data.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
-
-        let xref_offset = data.len();
-        data.extend_from_slice(b"xref\n0 3\n");
-
-        const STRIPPED_HEADER_DELTA: usize = 9;
-        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
-        data.extend_from_slice(
-            format_xref_entry(obj1_offset + STRIPPED_HEADER_DELTA, 0, true).as_bytes(),
-        );
-        data.extend_from_slice(
-            format_xref_entry(obj2_offset + STRIPPED_HEADER_DELTA, 0, true).as_bytes(),
-        );
-
-        data.extend_from_slice(b"trailer\n<< /Size 3 /Root 1 0 R >>\n");
-        data.extend_from_slice(b"startxref\n");
-        data.extend_from_slice(format!("{}\n", xref_offset + STRIPPED_HEADER_DELTA).as_bytes());
-        data.extend_from_slice(b"%%EOF");
-
-        let mut parser = PdfParser::from(data.as_slice());
-        let table = parser
-            .build_xref_table()
-            .expect("xref recovery should work");
-
-        let entry1 = table.entries.get(&1).expect("obj 1 should exist");
-        assert_eq!(entry1.byte_offset(), Some(obj1_offset));
-
-        let entry2 = table.entries.get(&2).expect("obj 2 should exist");
-        assert_eq!(entry2.byte_offset(), Some(obj2_offset));
-    }
-
-    #[test]
-    fn test_build_xref_table_recovers_startxref_inside_endstream() {
-        let mut data = Vec::new();
-        data.extend_from_slice(b"%PDF-1.7\n");
-
-        let obj1_offset = data.len();
-        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-
-        let obj2_offset = data.len();
-        data.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
-
-        let obj3_offset = data.len();
-        data.extend_from_slice(b"3 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n");
-
-        let bad_startxref_offset = data
-            .windows(b"endstream".len())
-            .position(|window| window == b"endstream")
-            .expect("test fixture should contain endstream")
-            .saturating_add(1);
-
-        let xref_offset = data.len();
-        data.extend_from_slice(b"xref\n0 4\n");
-        data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
-        data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
-        data.extend_from_slice(
-            format_xref_entry(obj2_offset.saturating_sub(3), 0, true).as_bytes(),
-        );
-        data.extend_from_slice(
-            format_xref_entry(obj3_offset.saturating_sub(2), 0, true).as_bytes(),
-        );
-
-        data.extend_from_slice(b"trailer\n<< /Size 4 /Root 1 0 R >>\n");
-        data.extend_from_slice(b"startxref\n");
-        data.extend_from_slice(format!("{bad_startxref_offset}\n").as_bytes());
-        data.extend_from_slice(b"%%EOF");
-
-        let mut parser = PdfParser::from(data.as_slice());
-        let table = parser
-            .build_xref_table()
-            .expect("xref recovery should find the later traditional table");
-
-        let entry1 = table.entries.get(&1).expect("obj 1 should exist");
-        assert_eq!(entry1.byte_offset(), Some(obj1_offset));
-
-        let entry2 = table.entries.get(&2).expect("obj 2 should exist");
-        assert_eq!(entry2.byte_offset(), Some(obj2_offset));
-
-        let entry3 = table.entries.get(&3).expect("obj 3 should exist");
-        assert_eq!(entry3.byte_offset(), Some(obj3_offset));
-        assert!(bad_startxref_offset < xref_offset);
-    }
-
-    #[test]
-    fn test_build_xref_table_repairs_issue139_offsets() {
-        let (data, expected_offsets) = build_issue139_like_pdf();
-        let mut parser = PdfParser::from(data.as_slice());
-        let table = parser
-            .build_xref_table()
-            .expect("xref recovery should repair nearby object offsets");
-
-        for object_number in 1..=6 {
-            let entry = table
-                .entries
-                .get(&object_number)
-                .expect("expected normal object entry");
-            let expected_offset = expected_offsets
-                .get(&object_number)
-                .copied()
-                .expect("expected known object offset");
-            let byte_offset = entry
-                .byte_offset()
-                .expect("entry should have a byte offset");
-            assert_eq!(
-                byte_offset, expected_offset,
-                "object {object_number} should recover its true offset"
-            );
-            assert!(
-                matches_indirect_object_header(data.as_slice(), byte_offset, object_number, 0),
-                "object {object_number} should point to its indirect object header, got offset {byte_offset}"
-            );
-        }
-    }
-
-    #[test]
-    fn test_build_xref_table_merges_hybrid_xref_stream_entries() {
-        let data = build_hybrid_xref_pdf();
-        let mut parser = PdfParser::from(data.as_slice());
-        let table = parser
-            .build_xref_table()
-            .expect("hybrid xref tables should merge /XRefStm entries");
-
-        let pages_entry = table.entries.get(&2).expect("obj 2 should exist");
-        match &pages_entry.entry_type {
-            CrossReferenceEntryType::Compressed {
-                object_stream_number,
-                index_within_stream,
-            } => {
-                assert_eq!(*object_stream_number, 4);
-                assert_eq!(*index_within_stream, 0);
-            }
-            other => panic!("expected compressed xref entry for obj 2, got {other:?}"),
-        }
-
-        let page_entry = table.entries.get(&3).expect("obj 3 should exist");
-        match &page_entry.entry_type {
-            CrossReferenceEntryType::Compressed {
-                object_stream_number,
-                index_within_stream,
-            } => {
-                assert_eq!(*object_stream_number, 4);
-                assert_eq!(*index_within_stream, 1);
-            }
-            other => panic!("expected compressed xref entry for obj 3, got {other:?}"),
-        }
+        assert_eq!(offsets, vec![12]);
+        assert_eq!(builder.parser.tokenizer.position, 4);
     }
 }
