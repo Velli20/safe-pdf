@@ -1,13 +1,16 @@
 use std::collections::BTreeMap;
 
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+};
 use pdf_tokenizer::PdfToken;
 
 use crate::{error::ParserError, parser::PdfParser};
 
-enum DictionaryTerminator<'a> {
-    DoubleRightAngleBracket,
-    Keyword(&'a [u8]),
+enum DictionaryEntryState {
+    ExpectKeyOrTerminator,
+    ExpectValue { key: String },
+    ContinueNameValue { key: String, value: Vec<u8> },
 }
 
 impl PdfParser<'_> {
@@ -26,10 +29,7 @@ impl PdfParser<'_> {
 
         self.skip_whitespace_and_comments();
 
-        let dictionary = self.parse_dictionary_entries_until(
-            objects,
-            DictionaryTerminator::DoubleRightAngleBracket,
-        )?;
+        let dictionary = self.parse_dictionary_entries(objects)?;
 
         // Consume the closing `>>` of the dictionary.
         self.tokenizer.expect(PdfToken::DoubleRightAngleBracket)?;
@@ -37,40 +37,13 @@ impl PdfParser<'_> {
         Ok(dictionary)
     }
 
-    /// Parses a dictionary entry sequence terminated by the given keyword, then consumes it.
-    ///
-    /// This is used by inline image parsing, where `ID` ends the dictionary and starts data.
-    pub fn parse_dictionary_until_keyword(
+    /// Parses the key-value pairs inside a regular dictionary until `>>`.
+    fn parse_dictionary_entries(
         &mut self,
         objects: &dyn ObjectResolver,
-        keyword: &[u8],
-    ) -> Result<Dictionary, ParserError> {
-        self.parse_dictionary_until_keyword_with_options(objects, keyword, true)
-    }
-
-    /// Parses a dictionary entry sequence terminated by the given keyword, then consumes it.
-    ///
-    /// Callers can opt out of trailing-EOL consumption when the keyword's following
-    /// separator belongs to the next grammar production, such as inline-image data.
-    pub(crate) fn parse_dictionary_until_keyword_with_options(
-        &mut self,
-        objects: &dyn ObjectResolver,
-        keyword: &[u8],
-        consume_trailing_eol: bool,
-    ) -> Result<Dictionary, ParserError> {
-        let dictionary =
-            self.parse_dictionary_entries_until(objects, DictionaryTerminator::Keyword(keyword))?;
-        self.read_keyword_with_optional_eol(keyword, consume_trailing_eol)?;
-
-        Ok(dictionary)
-    }
-
-    fn parse_dictionary_entries_until(
-        &mut self,
-        objects: &dyn ObjectResolver,
-        terminator: DictionaryTerminator<'_>,
     ) -> Result<Dictionary, ParserError> {
         let mut dictionary = BTreeMap::new();
+        let mut state = DictionaryEntryState::ExpectKeyOrTerminator;
 
         loop {
             self.skip_whitespace_and_comments();
@@ -79,42 +52,141 @@ impl PdfParser<'_> {
                 return Err(ParserError::UnexpectedEndOfFile);
             }
 
-            if terminator.is_reached(self) {
+            if matches!(state, DictionaryEntryState::ExpectKeyOrTerminator)
+                && self.is_at_dictionary_end()
+            {
                 return Ok(Dictionary::new(dictionary));
             }
 
-            // Parse key. Dictionary keys are always ASCII per spec; convert at boundary.
-            let key = String::from_utf8_lossy(&self.parse_name()?).into_owned();
+            state = self.next_dictionary_state(objects, &mut dictionary, state)?;
+        }
+    }
 
+    /// Parses the inline-image dictionary that precedes `ID`.
+    ///
+    /// This stops as soon as the next non-whitespace token is no longer a name
+    /// key, leaving `ID` in the input stream for the caller to consume.
+    pub(crate) fn parse_inline_image_dictionary(
+        &mut self,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Dictionary, ParserError> {
+        let mut dictionary = BTreeMap::new();
+
+        loop {
             self.skip_whitespace_and_comments();
 
-            // Parse object.
-            let object = self.parse_object(objects)?;
+            match self.tokenizer.peek() {
+                Some(PdfToken::Solidus) => {}
+                Some(_) => return Ok(Dictionary::new(dictionary)),
+                None => return Err(ParserError::UnexpectedEndOfFile),
+            }
 
+            let key = String::from_utf8_lossy(&self.parse_name()?).into_owned();
+            self.skip_whitespace_and_comments();
+            let object = self.parse_inline_image_dictionary_value(objects)?;
             dictionary.insert(key, object);
         }
     }
-}
 
-impl DictionaryTerminator<'_> {
-    fn is_reached(&self, parser: &mut PdfParser<'_>) -> bool {
-        match self {
-            Self::DoubleRightAngleBracket => {
-                matches!(
-                    parser.tokenizer.peek(),
-                    Some(PdfToken::DoubleRightAngleBracket)
-                )
-            }
-            Self::Keyword(keyword) => has_keyword_ahead(parser, keyword),
+    /// Parses a single inline-image dictionary value.
+    ///
+    /// Inline-image dictionaries allow bare names as values, so this preserves
+    /// the leading slash form when the next token is another name.
+    fn parse_inline_image_dictionary_value(
+        &mut self,
+        objects: &dyn ObjectResolver,
+    ) -> Result<ObjectVariant, ParserError> {
+        match self.tokenizer.peek() {
+            Some(PdfToken::Solidus) => Ok(ObjectVariant::Name(self.parse_name()?)),
+            _ => self.parse_object(objects),
         }
     }
-}
 
-fn has_keyword_ahead(parser: &mut PdfParser<'_>, keyword: &[u8]) -> bool {
-    let mark = parser.tokenizer.position;
-    let is_match = parser.read_keyword(keyword).is_ok();
-    parser.tokenizer.position = mark;
-    is_match
+    /// Advances the regular dictionary state machine by one step.
+    fn next_dictionary_state(
+        &mut self,
+        objects: &dyn ObjectResolver,
+        dictionary: &mut BTreeMap<String, ObjectVariant>,
+        state: DictionaryEntryState,
+    ) -> Result<DictionaryEntryState, ParserError> {
+        match state {
+            DictionaryEntryState::ExpectKeyOrTerminator => self.parse_dictionary_key_state(),
+            DictionaryEntryState::ExpectValue { key } => {
+                self.parse_dictionary_value_state(objects, dictionary, key)
+            }
+            DictionaryEntryState::ContinueNameValue { key, value } => {
+                self.continue_dictionary_name_value(dictionary, key, value)
+            }
+        }
+    }
+
+    /// Reads the next dictionary key and transitions to value parsing.
+    fn parse_dictionary_key_state(&mut self) -> Result<DictionaryEntryState, ParserError> {
+        // Dictionary keys are always ASCII per spec; convert at boundary.
+        let key = String::from_utf8_lossy(&self.parse_name()?).into_owned();
+        Ok(DictionaryEntryState::ExpectValue { key })
+    }
+
+    /// Parses the next value for a regular dictionary entry.
+    ///
+    /// If the value starts with `/`, the parser keeps consuming adjacent regular
+    /// characters so spaced name values remain intact.
+    fn parse_dictionary_value_state(
+        &mut self,
+        objects: &dyn ObjectResolver,
+        dictionary: &mut BTreeMap<String, ObjectVariant>,
+        key: String,
+    ) -> Result<DictionaryEntryState, ParserError> {
+        match self.tokenizer.peek() {
+            Some(PdfToken::Solidus) => {
+                let value = self.parse_name()?;
+                Ok(DictionaryEntryState::ContinueNameValue { key, value })
+            }
+            _ => {
+                let object = self.parse_object(objects)?;
+                dictionary.insert(key, object);
+                Ok(DictionaryEntryState::ExpectKeyOrTerminator)
+            }
+        }
+    }
+
+    /// Extends a spaced name value until it reaches a real delimiter or key boundary.
+    fn continue_dictionary_name_value(
+        &mut self,
+        dictionary: &mut BTreeMap<String, ObjectVariant>,
+        key: String,
+        mut value: Vec<u8>,
+    ) -> Result<DictionaryEntryState, ParserError> {
+        if self.is_at_dictionary_end() || matches!(self.tokenizer.peek(), Some(PdfToken::Solidus)) {
+            dictionary.insert(key, ObjectVariant::Name(value));
+            return Ok(DictionaryEntryState::ExpectKeyOrTerminator);
+        }
+
+        let Some(byte) = self.tokenizer.data().first().copied() else {
+            return Err(ParserError::UnexpectedEndOfFile);
+        };
+
+        if !Self::is_pdf_regular_character(byte) {
+            dictionary.insert(key, ObjectVariant::Name(value));
+            return Ok(DictionaryEntryState::ExpectKeyOrTerminator);
+        }
+
+        let suffix = self.tokenizer.read_while_u8(Self::is_pdf_regular_character);
+        if !suffix.is_empty() {
+            value.push(b' ');
+            value.extend_from_slice(suffix);
+        }
+
+        Ok(DictionaryEntryState::ContinueNameValue { key, value })
+    }
+
+    /// Returns `true` when the next token closes the current dictionary.
+    fn is_at_dictionary_end(&mut self) -> bool {
+        matches!(
+            self.tokenizer.peek(),
+            Some(PdfToken::DoubleRightAngleBracket)
+        )
+    }
 }
 
 #[cfg(test)]
@@ -154,14 +226,50 @@ mod tests {
     }
 
     #[test]
-    fn test_dictionary_until_keyword_valid() {
-        let mut parser = PdfParser::from(b"/IM true /W 1 /H 1 ID \x00\x01".as_slice());
-        let result = parser
-            .parse_dictionary_until_keyword(&PassthroughResolver, b"ID")
-            .unwrap();
+    fn test_dictionary_recovers_spaced_name_value() {
+        let mut parser = PdfParser::from(b"<< /AnyName /A B /Next 1 >>".as_slice());
+        let result = parser.parse_dictionary(&PassthroughResolver).unwrap();
 
-        assert_eq!(result.dictionary.len(), 3);
-        assert!(parser.tokenizer.data().starts_with(b" \x00\x01"));
+        assert_eq!(
+            result.get("AnyName"),
+            Some(&ObjectVariant::Name(b"A B".to_vec()))
+        );
+        assert_eq!(result.get("Next"), Some(&ObjectVariant::Integer(1)));
+    }
+
+    #[test]
+    fn test_dictionary_recovers_multiple_spaced_name_tokens() {
+        let mut parser = PdfParser::from(b"<< /AnyName /A B C /Next 1 >>".as_slice());
+        let result = parser.parse_dictionary(&PassthroughResolver).unwrap();
+
+        assert_eq!(
+            result.get("AnyName"),
+            Some(&ObjectVariant::Name(b"A B C".to_vec()))
+        );
+        assert_eq!(result.get("Next"), Some(&ObjectVariant::Integer(1)));
+    }
+
+    #[test]
+    fn test_dictionary_spaced_name_recovery_stops_at_next_key() {
+        let mut parser = PdfParser::from(b"<< /Name /Value /Next /Other >>".as_slice());
+        let result = parser.parse_dictionary(&PassthroughResolver).unwrap();
+
+        assert_eq!(
+            result.get("Name"),
+            Some(&ObjectVariant::Name(b"Value".to_vec()))
+        );
+        assert_eq!(
+            result.get("Next"),
+            Some(&ObjectVariant::Name(b"Other".to_vec()))
+        );
+    }
+
+    #[test]
+    fn test_dictionary_rejects_bare_regular_token_after_non_name_value() {
+        let mut parser = PdfParser::from(b"<< /Count 1 Foo /Next 2 >>".as_slice());
+        let result = parser.parse_dictionary(&PassthroughResolver);
+
+        assert!(result.is_err());
     }
 
     #[test]
@@ -197,17 +305,34 @@ mod tests {
     }
 
     #[test]
-    fn test_dictionary_until_keyword_invalid_key() {
-        let mut parser = PdfParser::from(b"(Title) /Something ID".as_slice());
-        let result = parser.parse_dictionary_until_keyword(&PassthroughResolver, b"ID");
+    fn test_inline_image_dictionary_stops_before_data_keyword() {
+        let mut parser = PdfParser::from(b"/IM true /W 1 /H 1 ID \x00\x01".as_slice());
+        let result = parser
+            .parse_inline_image_dictionary(&PassthroughResolver)
+            .unwrap();
 
-        assert!(result.is_err());
+        assert_eq!(result.dictionary.len(), 3);
+        assert!(parser.tokenizer.data().starts_with(b"ID \x00\x01"));
     }
 
     #[test]
-    fn test_dictionary_until_keyword_missing_value() {
+    fn test_inline_image_dictionary_name_value_stops_before_data_keyword() {
+        let mut parser = PdfParser::from(b"/CS /DeviceGray ID \x00\x01".as_slice());
+        let result = parser
+            .parse_inline_image_dictionary(&PassthroughResolver)
+            .unwrap();
+
+        assert_eq!(
+            result.get("CS"),
+            Some(&ObjectVariant::Name(b"DeviceGray".to_vec()))
+        );
+        assert!(parser.tokenizer.data().starts_with(b"ID \x00\x01"));
+    }
+
+    #[test]
+    fn test_inline_image_dictionary_missing_value_errors() {
         let mut parser = PdfParser::from(b"/Title ID".as_slice());
-        let result = parser.parse_dictionary_until_keyword(&PassthroughResolver, b"ID");
+        let result = parser.parse_inline_image_dictionary(&PassthroughResolver);
 
         assert!(result.is_err());
     }
