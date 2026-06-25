@@ -14,11 +14,8 @@ impl PdfParser<'_> {
         &mut self,
         objects: &dyn ObjectResolver,
     ) -> Result<InlineImage, ParserError> {
-        let dictionary = self.parse_dictionary_until_keyword_with_options(
-            objects,
-            INLINE_IMAGE_DATA_BEGIN,
-            false,
-        )?;
+        let dictionary = self.parse_inline_image_dictionary(objects)?;
+        self.read_keyword_with_optional_eol(INLINE_IMAGE_DATA_BEGIN, false)?;
         self.consume_inline_image_data_separator()?;
         let data = self.read_inline_image_data_until_end(&dictionary, objects)?;
         Ok(InlineImage::new(dictionary, data))
@@ -241,7 +238,7 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use pdf_object::object_resolver::PassthroughResolver;
+    use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
 
     use super::*;
 
@@ -337,13 +334,34 @@ mod tests {
     }
 
     #[test]
-    fn parse_dictionary_until_keyword_still_consumes_id() {
-        let mut parser = PdfParser::from(b"/W 1 /H 1 ID \x00\x01EI".as_slice());
-        let dictionary = parser
-            .parse_dictionary_until_keyword(&PassthroughResolver, INLINE_IMAGE_DATA_BEGIN)
-            .unwrap();
+    fn parses_empty_inline_image_dictionary() {
+        let mut parser = PdfParser::from(b"ID x\nEI".as_slice());
 
-        assert_eq!(dictionary.dictionary.len(), 2);
-        assert_eq!(parser.tokenizer.data(), b" \x00\x01EI");
+        let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
+
+        assert!(image.dictionary().dictionary.is_empty());
+        assert_eq!(image.data(), b"x\n");
+        assert_eq!(parser.tokenizer.data(), b"");
+    }
+
+    #[test]
+    fn inline_image_dictionary_stops_before_id_after_name_value() {
+        let mut parser = PdfParser::from(b"/CS /DeviceGray ID x\nEI".as_slice());
+
+        let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
+
+        assert_eq!(
+            image.dictionary().get("CS"),
+            Some(&ObjectVariant::Name(b"DeviceGray".to_vec()))
+        );
+        assert_eq!(image.data(), b"x\n");
+        assert_eq!(parser.tokenizer.data(), b"");
+    }
+
+    #[test]
+    fn inline_image_dictionary_rejects_trailing_key_without_value() {
+        let mut parser = PdfParser::from(b"/Title ID x\nEI".as_slice());
+
+        assert!(parser.parse_inline_image(&PassthroughResolver).is_err());
     }
 }
