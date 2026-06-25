@@ -983,6 +983,50 @@ fn build_xref_table_recovers_missing_xref_command() {
 }
 
 #[test]
+fn build_xref_table_recovers_xref_keyword_with_flat_entries() {
+    let mut data = Vec::new();
+    data.extend_from_slice(b"%PDF-1.4\n");
+
+    let obj1_offset = data.len();
+    data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+    let obj2_offset = data.len();
+    data.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+
+    let obj3_offset = data.len();
+    data.extend_from_slice(b"3 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /XObject << /Im 5 0 R >> >> >>\nendobj\n");
+
+    let obj4_offset = data.len();
+    data.extend_from_slice(b"4 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n");
+
+    let obj5_offset = data.len();
+    data.extend_from_slice(b"5 0 obj\n<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\nA\nendstream\nendobj\n");
+
+    let xref_offset = data.len();
+    data.extend_from_slice(b"xref\n");
+    data.extend_from_slice(format_xref_entry(0, 65_535, false).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj3_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj4_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj5_offset, 0, true).as_bytes());
+    data.extend_from_slice(
+        format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF").as_bytes(),
+    );
+
+    let mut parser = PdfParser::from(data.as_slice());
+    let table = parser.build_xref_table().unwrap();
+
+    assert_eq!(
+        table
+            .entries
+            .get(&5)
+            .and_then(CrossReferenceEntry::byte_offset),
+        Some(obj5_offset)
+    );
+}
+
+#[test]
 fn build_xref_table_normalizes_malformed_incremental_subsection_numbering() {
     let (data, expected_offsets) = build_malformed_incremental_xref_subsection_pdf();
     let mut parser = PdfParser::from(data.as_slice());

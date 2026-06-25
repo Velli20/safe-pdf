@@ -269,6 +269,48 @@ fn build_xobject_image_pdf() -> Vec<u8> {
     data
 }
 
+fn build_xobject_image_with_flat_xref_rows_pdf() -> Vec<u8> {
+    let mut data = Vec::new();
+    data.extend_from_slice(b"%PDF-1.4\n");
+
+    let obj1_offset = data.len();
+    data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+    let obj2_offset = data.len();
+    data.extend_from_slice(
+        b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 1 1] >>\nendobj\n",
+    );
+
+    let obj3_offset = data.len();
+    data.extend_from_slice(
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1 1] /Contents 4 0 R /Resources << /XObject << /Im 5 0 R >> >> >>\nendobj\n",
+    );
+
+    let obj4_offset = data.len();
+    data.extend_from_slice(b"4 0 obj\n<< /Length 6 >>\nstream\n/Im Do\nendstream\nendobj\n");
+
+    let obj5_offset = data.len();
+    data.extend_from_slice(
+        b"5 0 obj\n<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\nA\nendstream\nendobj\n",
+    );
+
+    let xref_offset = data.len();
+    data.extend_from_slice(b"xref\n");
+    data.extend_from_slice(format_xref_entry(0, 65_535, false).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj3_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj4_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj5_offset, 0, true).as_bytes());
+
+    data.extend_from_slice(b"trailer\n<< /Size 6 /Root 1 0 R >>\n");
+    data.extend_from_slice(b"startxref\n");
+    data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
+    data.extend_from_slice(b"%%EOF");
+
+    data
+}
+
 fn build_hybrid_xref_pdf() -> Vec<u8> {
     fn push_xref_stream_entry(data: &mut Vec<u8>, entry_type: u8, field2: u16, field3: u8) {
         data.push(entry_type);
@@ -757,6 +799,21 @@ fn test_xobject_image_pdf_loads_normally() {
     assert!(
         result.is_ok(),
         "xobject-image.pdf should load after traditional xref entry repair: {:?}",
+        result.err()
+    );
+    let doc = result.unwrap();
+    assert_eq!(doc.page_count(), 1);
+    assert!(doc.get_page(0).is_some());
+}
+
+#[test]
+fn test_xobject_image_with_flat_xref_rows_pdf_loads_normally() {
+    let reader = PdfReader;
+    let data = build_xobject_image_with_flat_xref_rows_pdf();
+    let result = reader.read_from_bytes(&data, None);
+    assert!(
+        result.is_ok(),
+        "xobject image with xref keyword and flat rows should load: {:?}",
         result.err()
     );
     let doc = result.unwrap();

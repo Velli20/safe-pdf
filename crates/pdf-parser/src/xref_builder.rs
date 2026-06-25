@@ -237,8 +237,17 @@ impl<'parser, 'input> XrefBuilder<'parser, 'input> {
 
         self.at_position(offset, |builder| {
             builder.parser.skip_whitespace_and_comments();
+            builder.skip_optional_xref_keyword();
             builder.parse_malformed_rows()
         })
+    }
+
+    /// Consumes an `xref` keyword when malformed row recovery starts at it.
+    fn skip_optional_xref_keyword(&mut self) {
+        let mark = self.parser.tokenizer.position;
+        if self.parser.read_keyword(XREF_KEYWORD).is_err() {
+            self.parser.tokenizer.position = mark;
+        }
     }
 
     /// Parses malformed rows while preserving the cursor on failure.

@@ -77,7 +77,9 @@ impl ObjectCollection {
                 }
             }
             ObjectVariant::Stream(stream) => {
-                let data = pdf_filter::filter::decode_with_resolver(&stream, self)?.to_vec();
+                let data = pdf_filter::filter::decode_with_resolver(&stream, self)
+                    .map(|data| data.to_vec())
+                    .unwrap_or_else(|_| stream.raw_data().to_vec());
                 let StreamObject {
                     object_number,
                     generation_number,
