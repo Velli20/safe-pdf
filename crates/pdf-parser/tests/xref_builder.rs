@@ -790,6 +790,44 @@ fn build_xref_table_repairs_issue139_offsets() {
 }
 
 #[test]
+fn build_xref_table_repair_ignores_numeric_array_entries() {
+    let mut data = Vec::new();
+    data.extend_from_slice(b"%PDF-1.4\n");
+
+    let obj1_offset = data.len();
+    data.extend_from_slice(
+        b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R /OpenAction [1 0] >>\nendobj\n",
+    );
+
+    let obj2_offset = data.len();
+    data.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
+
+    let false_header_offset = data
+        .windows(b"1 0]".len())
+        .position(|window| window == b"1 0]")
+        .expect("fixture should contain numeric array entry");
+
+    let xref_offset = data.len();
+    data.extend_from_slice(b"xref\n0 3\n");
+    data.extend_from_slice(format_xref_entry(0, 65_535, false).as_bytes());
+    data.extend_from_slice(format_xref_entry(false_header_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
+    data.extend_from_slice(b"trailer\n<< /Size 3 /Root 1 0 R >>\n");
+    data.extend_from_slice(format!("startxref\n{xref_offset}\n%%EOF").as_bytes());
+
+    let mut parser = PdfParser::from(data.as_slice());
+    let table = parser.build_xref_table().unwrap();
+
+    assert_eq!(
+        table
+            .entries
+            .get(&1)
+            .and_then(CrossReferenceEntry::byte_offset),
+        Some(obj1_offset)
+    );
+}
+
+#[test]
 fn build_xref_table_recovers_distant_shifted_xref_offsets() {
     let (data, expected_offsets) = build_far_shifted_xref_pdf(500, 105_359);
     let mut parser = PdfParser::from(data.as_slice());

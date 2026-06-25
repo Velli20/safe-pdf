@@ -70,22 +70,25 @@ impl PdfReader {
 
         // Check for encryption and handle it before loading other objects.
         let decryptor = if let Some(encrypt_ref) = trailer.dictionary.take("Encrypt") {
-            // Load the encryption object first (it's unencrypted per PDF spec).
-            let encryption = load_encrypt_dictionary(encrypt_ref, &entries, &mut parser)?;
+            match load_encrypt_dictionary(encrypt_ref, &entries, &mut parser) {
+                Ok(encryption) => {
+                    // Get the document ID from the trailer (required for encryption)
+                    let document_id = extract_document_id(&trailer)?;
 
-            // Get the document ID from the trailer (required for encryption)
-            let document_id = extract_document_id(&trailer)?;
+                    const EMPTY_PASSWORD: &[u8] = b"";
 
-            const EMPTY_PASSWORD: &[u8] = b"";
+                    // Create the decryptor by authenticating with the password
+                    let decryptor = DocumentDecryptor::new(
+                        &encryption,
+                        &document_id,
+                        password.unwrap_or(EMPTY_PASSWORD),
+                    )?;
 
-            // Create the decryptor by authenticating with the password
-            let decryptor = DocumentDecryptor::new(
-                &encryption,
-                &document_id,
-                password.unwrap_or(EMPTY_PASSWORD),
-            )?;
-
-            Some(decryptor)
+                    Some(decryptor)
+                }
+                Err(error) if is_recoverable_optional_object_error(&error) => None,
+                Err(error) => return Err(error),
+            }
         } else {
             None
         };
@@ -276,6 +279,7 @@ fn load_objects_with_decryption(
             ))) => {
                 unresolved.push(byte_offset);
             }
+            Err(e) if is_recoverable_optional_object_error(&e) => {}
             Err(e) => return Err(e),
         }
     }
@@ -298,6 +302,7 @@ fn load_objects_with_decryption(
                 ))) => {
                     still_unresolved.push(*byte_offset);
                 }
+                Err(e) if is_recoverable_optional_object_error(&e) => {}
                 Err(e) => return Err(e),
             }
         }
@@ -328,6 +333,15 @@ fn load_objects_with_decryption(
     load_available_compressed_objects(entries, &mut objects, &mut parsed_obj_streams, true)?;
 
     Ok(objects)
+}
+
+/// Returns whether a bulk-loaded object can be skipped until a required reference proves otherwise.
+fn is_recoverable_optional_object_error(error: &PdfReaderError) -> bool {
+    matches!(
+        error,
+        PdfReaderError::ParserError(_)
+            | PdfReaderError::ObjectError(ObjectError::DecompressionError(_))
+    )
 }
 
 /// Unpacks compressed xref entries whose object streams are already available.
