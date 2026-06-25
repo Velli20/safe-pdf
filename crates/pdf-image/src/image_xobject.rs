@@ -214,6 +214,7 @@ impl ImageXObject {
 
         let num_pixels = metadata.width.saturating_mul(metadata.height);
         let Some(num_color_components) = Self::decoded_dct_component_count(raw_data, num_pixels)
+            .or_else(|| Self::decoded_single_pixel_component_count(raw_data))
         else {
             return Ok(None);
         };
@@ -223,12 +224,17 @@ impl ImageXObject {
             3 => Some(ColorSpace::DeviceRGB),
             _ => metadata.color_space.clone(),
         };
+        let image_data = if raw_data.len() == num_color_components && num_pixels > 1 {
+            raw_data.repeat(num_pixels)
+        } else {
+            raw_data.to_vec()
+        };
 
         Ok(Some(DecodedSamples {
             bits_per_component: metadata.bits_per_component,
             stored_color_space,
             num_color_components,
-            image_data: raw_data.to_vec(),
+            image_data,
         }))
     }
 
@@ -294,6 +300,12 @@ impl ImageXObject {
         [1, 3, 4]
             .into_iter()
             .find(|components| raw_data.len() == num_pixels.saturating_mul(*components))
+    }
+
+    fn decoded_single_pixel_component_count(raw_data: &[u8]) -> Option<usize> {
+        [1, 3, 4]
+            .into_iter()
+            .find(|components| raw_data.len() == *components)
     }
 
     /// Decodes indexed image samples, applies `/Decode`, and expands palette entries.
@@ -791,6 +803,41 @@ mod tests {
                 expected_bytes: 8,
                 actual_bytes: 6
             }
+        ));
+    }
+
+    #[test]
+    fn decode_normalized_dct_single_pixel_expands_to_declared_size() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (
+                "ColorSpace".to_string(),
+                ObjectVariant::Name(b"DeviceRGB".to_vec()),
+            ),
+            (
+                "Filter".to_string(),
+                ObjectVariant::Name(b"DCTDecode".to_vec()),
+            ),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(2)),
+        ]));
+
+        let image = ImageXObject::decode_normalized_image(
+            &dictionary,
+            &[0xAA, 0x10, 0x20],
+            &PassthroughResolver,
+            None,
+        )
+        .expect("single decoded DCT pixel should expand to the declared image size");
+
+        assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
+        assert_eq!(
+            image.data,
+            vec![0xAA, 0x10, 0x20, 255, 0xAA, 0x10, 0x20, 255]
+        );
+        assert!(matches!(
+            image.color_space,
+            Some(pdf_color_space::color_space::ColorSpace::DeviceRGB)
         ));
     }
 

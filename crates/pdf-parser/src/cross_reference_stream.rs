@@ -23,86 +23,33 @@ pub fn parse_xref_stream(
 ) -> Result<CrossReferenceTable, ParserError> {
     let dict = stream.dictionary.as_ref();
 
-    // Validate /Type is /XRef (optional per some implementations, but expected)
-    if let Some(type_val) = dict.get("Type") {
-        let type_name = type_val.try_str(objects)?;
-        if type_name.as_ref() != "XRef" {
-            return Err(ParserError::InvalidKeyword(
-                "XRef".to_string(),
-                type_name.into_owned(),
-            ));
-        }
-    }
-
-    // Get the number of objects to read.
+    validate_stream_type(stream, objects)?;
     let size = dict.get_or_err("Size")?.try_number::<usize>(objects)?;
+    let layout = XrefStreamLayout::from_dictionary(stream, objects)?;
 
-    // Read the /W array which defines the field widths for each entry.
-    let [w1, w2, w3] = dict.get_or_err("W")?.try_array_of::<usize, 3>(objects)?;
-
-    let entry_size = w1.saturating_add(w2).saturating_add(w3);
-    if entry_size == 0 {
+    if layout.entry_width == 0 {
         return Ok(CrossReferenceTable::new(
             BTreeMap::new(),
             Trailer::new(stream.dictionary.clone(), 0),
         ));
     }
 
-    // Read the /Index array if present, which defines subsections of object numbers.
-    let index_pairs = dict.get("Index").map_or_else(
-        || Ok(vec![0, size]),
-        |index_val| index_val.try_vec_of::<usize>(objects),
-    )?;
-
-    if index_pairs.len() % 2 != 0 {
-        return Err(ParserError::InvalidKeyword(
-            "Index array with even number of elements".to_string(),
-            format!("Index array with {} elements", index_pairs.len()),
-        ));
-    }
-
-    // Decode stream data (applies filters like FlateDecode + predictors)
+    let subsections = parse_subsections(stream, objects, size)?;
     let data = pdf_filter::filter::decode_with_resolver(stream, objects)?;
-
     let mut entries = BTreeMap::new();
-    let mut pos: usize = 0;
 
-    // Process each subsection defined by /Index pairs
-    for pair in index_pairs.chunks(2) {
-        let start = pair.first().copied().unwrap_or(0);
-        let count = pair.get(1).copied().unwrap_or(0);
-
-        for i in 0..count {
-            if pos.saturating_add(entry_size) > data.len() {
-                break;
-            }
-
-            // Read type field (default to 1 if w1 == 0)
-            let entry_type = if w1 == 0 {
-                1
-            } else {
-                read_field(data.get(pos..pos.saturating_add(w1)).unwrap_or(&[]))
-            };
-            let f2_start = pos.saturating_add(w1);
-            let f3_start = f2_start.saturating_add(w2);
-            let field2 = read_field(
-                data.get(f2_start..f2_start.saturating_add(w2))
-                    .unwrap_or(&[]),
-            );
-            let field3 = read_field(
-                data.get(f3_start..f3_start.saturating_add(w3))
-                    .unwrap_or(&[]),
-            );
-
-            let entry = match entry_type {
-                0 => CrossReferenceEntry::new_free(field2, field3),
-                1 => CrossReferenceEntry::new_normal(field2, field3),
-                2 => CrossReferenceEntry::new_compressed(field2, field3),
-                _ => CrossReferenceEntry::new_free(0, 0),
+    let mut decoder = XrefStreamEntryDecoder::new(&data, layout);
+    for subsection in subsections {
+        for object_offset in 0..subsection.count {
+            let Some(entry) = decoder.next_entry() else {
+                return Ok(CrossReferenceTable::new(
+                    entries,
+                    Trailer::new(stream.dictionary.clone(), 0),
+                ));
             };
 
-            entries.insert(start.saturating_add(i), entry);
-            pos = pos.saturating_add(entry_size);
+            let object_number = subsection.start.saturating_add(object_offset);
+            entries.insert(object_number, entry);
         }
     }
 
@@ -110,13 +57,152 @@ pub fn parse_xref_stream(
     Ok(CrossReferenceTable::new(entries, trailer))
 }
 
+/// Validates the optional `/Type` entry when it is present.
+fn validate_stream_type(
+    stream: &StreamObject,
+    objects: &dyn ObjectResolver,
+) -> Result<(), ParserError> {
+    let Some(type_value) = stream.dictionary.get("Type") else {
+        return Ok(());
+    };
+
+    let type_name = type_value.try_str(objects)?;
+    if type_name.as_ref() == "XRef" {
+        Ok(())
+    } else {
+        Err(ParserError::InvalidKeyword(
+            "XRef".to_string(),
+            type_name.into_owned(),
+        ))
+    }
+}
+
+/// Describes the byte layout of one decoded cross-reference stream entry.
+#[derive(Clone, Copy)]
+struct XrefStreamLayout {
+    type_width: usize,
+    second_field_width: usize,
+    third_field_width: usize,
+    entry_width: usize,
+}
+
+impl XrefStreamLayout {
+    /// Reads the `/W` field widths from the stream dictionary.
+    fn from_dictionary(
+        stream: &StreamObject,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Self, ParserError> {
+        let [type_width, second_field_width, third_field_width] = stream
+            .dictionary
+            .get_or_err("W")?
+            .try_array_of::<usize, 3>(objects)?;
+
+        Ok(Self {
+            type_width,
+            second_field_width,
+            third_field_width,
+            entry_width: type_width
+                .saturating_add(second_field_width)
+                .saturating_add(third_field_width),
+        })
+    }
+}
+
+/// A contiguous range of object numbers described by the `/Index` array.
+#[derive(Clone, Copy)]
+struct XrefSubsection {
+    start: usize,
+    count: usize,
+}
+
+/// Resolves `/Index`, defaulting to the full range declared by `/Size`.
+fn parse_subsections(
+    stream: &StreamObject,
+    objects: &dyn ObjectResolver,
+    size: usize,
+) -> Result<Vec<XrefSubsection>, ParserError> {
+    let index_values = stream.dictionary.get("Index").map_or_else(
+        || Ok(vec![0, size]),
+        |index_value| index_value.try_vec_of::<usize>(objects),
+    )?;
+
+    if index_values.len() % 2 != 0 {
+        return Err(ParserError::InvalidKeyword(
+            "Index array with even number of elements".to_string(),
+            format!("Index array with {} elements", index_values.len()),
+        ));
+    }
+
+    Ok(index_values
+        .chunks_exact(2)
+        .filter_map(|pair| match pair {
+            [start, count] => Some(XrefSubsection {
+                start: *start,
+                count: *count,
+            }),
+            _ => None,
+        })
+        .collect())
+}
+
+/// Consumes fixed-width entries from decoded cross-reference stream data.
+struct XrefStreamEntryDecoder<'data> {
+    data: &'data [u8],
+    layout: XrefStreamLayout,
+    position: usize,
+}
+
+impl<'data> XrefStreamEntryDecoder<'data> {
+    /// Creates a decoder at the beginning of the decoded stream data.
+    fn new(data: &'data [u8], layout: XrefStreamLayout) -> Self {
+        Self {
+            data,
+            layout,
+            position: 0,
+        }
+    }
+
+    /// Returns the next complete entry, or `None` when the data is truncated.
+    fn next_entry(&mut self) -> Option<CrossReferenceEntry> {
+        let end = self.position.saturating_add(self.layout.entry_width);
+        let bytes = self.data.get(self.position..end)?;
+        let entry = self.decode_entry(bytes)?;
+        self.position = end;
+        Some(entry)
+    }
+
+    /// Decodes one entry according to the `/W` field widths.
+    fn decode_entry(&self, bytes: &[u8]) -> Option<CrossReferenceEntry> {
+        let type_end = self.layout.type_width;
+        let second_end = type_end.checked_add(self.layout.second_field_width)?;
+        let third_end = second_end.checked_add(self.layout.third_field_width)?;
+
+        let type_field = bytes.get(..type_end)?;
+        let second_field = bytes.get(type_end..second_end)?;
+        let third_field = bytes.get(second_end..third_end)?;
+
+        let entry_type = if self.layout.type_width == 0 {
+            1
+        } else {
+            read_field(type_field)
+        };
+        let second_value = read_field(second_field);
+        let third_value = read_field(third_field);
+
+        Some(match entry_type {
+            0 => CrossReferenceEntry::new_free(second_value, third_value),
+            1 => CrossReferenceEntry::new_normal(second_value, third_value),
+            2 => CrossReferenceEntry::new_compressed(second_value, third_value),
+            _ => CrossReferenceEntry::new_free(0, 0),
+        })
+    }
+}
+
 /// Reads an unsigned integer from big-endian bytes.
 fn read_field(bytes: &[u8]) -> usize {
-    let mut value: usize = 0;
-    for &b in bytes {
-        value = (value << 8) | usize::from(b);
-    }
-    value
+    bytes
+        .iter()
+        .fold(0, |value, &byte| value.wrapping_shl(8) | usize::from(byte))
 }
 
 #[cfg(test)]
@@ -125,7 +211,8 @@ fn read_field(bytes: &[u8]) -> usize {
     clippy::expect_used,
     clippy::indexing_slicing,
     clippy::panic,
-    clippy::as_conversions
+    clippy::as_conversions,
+    clippy::arithmetic_side_effects
 )]
 mod tests {
     use pdf_object::{
@@ -245,6 +332,25 @@ mod tests {
         assert_eq!(table.entries[&10].byte_offset(), Some(100));
         assert!(!table.entries.contains_key(&0));
         assert!(!table.entries.contains_key(&7));
+    }
+
+    #[test]
+    fn test_parse_xref_stream_keeps_complete_entries_from_truncated_data() {
+        let stream = build_xref_stream([1, 1, 1], None, 2, vec![1, 42, 0, 1, 84]);
+
+        let table = parse_xref_stream(&stream, &PassthroughResolver).unwrap();
+
+        assert_eq!(table.entries.len(), 1);
+        assert_eq!(table.entries[&0].byte_offset(), Some(42));
+    }
+
+    #[test]
+    fn test_parse_xref_stream_maps_unknown_entry_types_to_free_entries() {
+        let stream = build_xref_stream([1, 1, 1], None, 1, vec![9, 42, 7]);
+
+        let table = parse_xref_stream(&stream, &PassthroughResolver).unwrap();
+
+        assert_eq!(table.entries[&0], CrossReferenceEntry::new_free(0, 0));
     }
 
     /// Builds a compressed xref stream with FlateDecode + PNG Up predictor,
