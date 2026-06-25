@@ -149,6 +149,7 @@ impl SymbolIdRunCodeTable {
 pub(crate) struct SymbolIdHuffmanTable {
     codes: Vec<HuffmanCode>,
     tree: DecodeTree,
+    fallback_tree: Option<DecodeTree>,
 }
 
 impl SymbolIdHuffmanTable {
@@ -159,7 +160,18 @@ impl SymbolIdHuffmanTable {
     fn new(lengths: &[u8]) -> Result<Self, Jbig2Error> {
         let codes = assign_canonical_codes(lengths)?;
         let tree = DecodeTree::new(&codes)?;
-        Ok(Self { codes, tree })
+        let fallback_tree = shifted_nonzero_lengths(lengths)
+            .filter(|shifted| shifted.as_slice() != lengths)
+            .and_then(|shifted| {
+                assign_canonical_codes(&shifted)
+                    .ok()
+                    .and_then(|codes| DecodeTree::new(&codes).ok())
+            });
+        Ok(Self {
+            codes,
+            tree,
+            fallback_tree,
+        })
     }
 
     /// Decode one symbol ID from a text-region Huffman body.
@@ -167,7 +179,18 @@ impl SymbolIdHuffmanTable {
     /// This is the symbol ID lookup step described by ITU-T T.88 /
     /// ISO/IEC 14492 section 6.4.10.
     fn decode(&self, reader: &mut BitReader<'_>) -> Result<usize, Jbig2Error> {
-        self.tree.decode(reader, SYMBOL_ID_STREAM)
+        let mark = reader.pos();
+        match self.tree.decode(reader, SYMBOL_ID_STREAM) {
+            Ok(symbol) => Ok(symbol),
+            Err(Jbig2Error::InvalidTable(SYMBOL_ID_STREAM)) => {
+                let Some(fallback_tree) = &self.fallback_tree else {
+                    return Err(Jbig2Error::InvalidTable(SYMBOL_ID_STREAM));
+                };
+                reader.set_pos(mark);
+                fallback_tree.decode(reader, SYMBOL_ID_STREAM)
+            }
+            Err(err) => Err(err),
+        }
     }
 
     /// Return canonical symbol-ID codes for focused unit tests.
@@ -203,6 +226,18 @@ pub(crate) fn decode_symbol_id(
     table: &SymbolIdHuffmanTable,
 ) -> Result<usize, Jbig2Error> {
     table.decode(reader)
+}
+
+/// Builds a compatibility table for streams that encode nonzero symbol code
+/// lengths one greater than the effective prefix length.
+fn shifted_nonzero_lengths(lengths: &[u8]) -> Option<Vec<u8>> {
+    lengths
+        .iter()
+        .map(|length| match *length {
+            0 => Some(0),
+            value => value.checked_sub(1),
+        })
+        .collect()
 }
 
 /// Read the 35 run-code table lengths from `reader`.
@@ -395,6 +430,20 @@ mod tests {
         let table = decode_symbol_id_huffman_table(&mut reader, 10).expect("table");
 
         assert_code_lengths(&table, &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn decodes_shifted_nonzero_symbol_lengths_as_fallback() {
+        let mut data = symbol_id_table_stream(&[(0, 1), (2, 1)], &[(1, 1), (0, 1), (1, 1)]);
+        data.push(0b1100_0000);
+        let mut reader = BitReader::new(&data);
+        let table = decode_symbol_id_huffman_table(&mut reader, 3).expect("table");
+        reader.align_to_byte_boundary();
+
+        let symbol_id = decode_symbol_id(&mut reader, &table).expect("symbol id");
+
+        assert_code_lengths(&table, &[2, 0, 2]);
+        assert_eq!(symbol_id, 2);
     }
 
     #[test]

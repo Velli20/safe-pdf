@@ -53,7 +53,20 @@ impl ImageXObject {
         soft_mask: Option<ImageXObject>,
     ) -> Result<Self, PdfImageError> {
         let raw_data = stream_data.data()?;
-        Self::decode_normalized_image(dictionary, raw_data.as_ref(), objects, soft_mask)
+        match Self::decode_normalized_image(
+            dictionary,
+            raw_data.as_ref(),
+            objects,
+            soft_mask.clone(),
+        ) {
+            Ok(image) => Ok(image),
+            Err(original_error) if Filter::from_dictionary(dictionary, objects)?.is_some() => {
+                let decoded = decode_with_resolver(stream_data, objects)?;
+                Self::decode_normalized_image(dictionary, decoded.as_ref(), objects, soft_mask)
+                    .map_err(|_| original_error)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Decodes an inline image, including its filter chain and normalized sample data.

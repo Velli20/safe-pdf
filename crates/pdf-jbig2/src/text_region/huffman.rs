@@ -23,7 +23,6 @@ use crate::{
 };
 use pdf_utils::BitReader;
 
-const TEXT_REGION_BODY: &str = "text region body";
 const TEXT_REGION_STRIP_INDEX: &str = "text region strip index";
 const TEXT_REGION_REFINEMENT_TABLES: &str = "text-region refinement Huffman tables";
 const TEXT_REGION_REFINEMENT_FLAG: &str = "text region refinement flag";
@@ -42,7 +41,7 @@ struct HuffmanTextRegionDecodeContext<'a> {
     dt_table: HuffmanDecoder,
     symbol_id_table: SymbolIdHuffmanTable,
     refinement_tables: Option<TextRegionRefinementTables>,
-    body: &'a [u8],
+    body_reader: BitReader<'a>,
 }
 
 /// Standard Huffman tables used by refinement-coded text regions.
@@ -95,9 +94,6 @@ impl<'a> HuffmanTextRegionDecodeContext<'a> {
         let symbol_id_table =
             decode_symbol_id_huffman_table(&mut body_reader, shared.symbols_len())?;
         body_reader.align_to_byte_boundary();
-        let body = body_reader
-            .remaining_from_byte()
-            .ok_or(Jbig2Error::Truncated(TEXT_REGION_BODY))?;
         let refinement_tables = if parsed.flags.contains(TextRegionFlagBits::SBREFINE) {
             Some(TextRegionRefinementTables::new(
                 &mut custom_tables,
@@ -114,7 +110,7 @@ impl<'a> HuffmanTextRegionDecodeContext<'a> {
             dt_table,
             symbol_id_table,
             refinement_tables,
-            body,
+            body_reader,
         })
     }
 }
@@ -175,7 +171,7 @@ impl<'a> HuffmanTextRegionDecoder<'a> {
         parsed: ParsedTextRegion<'a>,
     ) -> Result<Self, Jbig2Error> {
         let context = HuffmanTextRegionDecodeContext::new(context, parsed)?;
-        let mut body_reader = BitReader::new(context.body);
+        let mut body_reader = context.body_reader.clone();
         let initial_stript = context.dt_table.decode_value(&mut body_reader)?;
         let state = TextRegionDecodeState::from_initial_delta(
             initial_stript,
