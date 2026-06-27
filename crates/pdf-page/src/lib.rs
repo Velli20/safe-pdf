@@ -1,3 +1,4 @@
+pub mod annotations;
 pub mod color_stops;
 pub mod error;
 pub mod external_graphics_state;
