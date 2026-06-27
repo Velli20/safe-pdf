@@ -417,4 +417,21 @@ mod tests {
 
         assert_eq!(err, ObjectError::TypeMismatch("Number", "Array"));
     }
+
+    #[test]
+    fn try_stream_returns_type_mismatch_for_non_stream() {
+        let null_object = ObjectVariant::Null;
+        let null_err = null_object
+            .try_stream(&PassthroughResolver)
+            .expect_err("null object should not decode as a stream");
+        assert_eq!(null_err, ObjectError::TypeMismatch("Stream", "Null"));
+
+        let dict_object = ObjectVariant::Dictionary(Box::new(crate::dictionary::Dictionary::new(
+            std::collections::BTreeMap::new(),
+        )));
+        let dict_err = dict_object
+            .try_stream(&PassthroughResolver)
+            .expect_err("dictionary object should not decode as a stream");
+        assert_eq!(dict_err, ObjectError::TypeMismatch("Stream", "Dictionary"));
+    }
 }
