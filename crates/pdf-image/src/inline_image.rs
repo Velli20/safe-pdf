@@ -79,15 +79,20 @@ fn normalize_inline_image_value(key: &str, value: &ObjectVariant) -> ObjectVaria
         return value.clone();
     }
 
-    let ObjectVariant::Name(name) = value else {
-        return value.clone();
-    };
-
-    match name.as_slice() {
-        b"G" => ObjectVariant::Name(b"DeviceGray".to_vec()),
-        b"RGB" => ObjectVariant::Name(b"DeviceRGB".to_vec()),
-        b"CMYK" => ObjectVariant::Name(b"DeviceCMYK".to_vec()),
-        b"I" => ObjectVariant::Name(b"Indexed".to_vec()),
+    match value {
+        ObjectVariant::Name(name) => match name.as_slice() {
+            b"G" => ObjectVariant::Name(b"DeviceGray".to_vec()),
+            b"RGB" => ObjectVariant::Name(b"DeviceRGB".to_vec()),
+            b"CMYK" => ObjectVariant::Name(b"DeviceCMYK".to_vec()),
+            b"I" => ObjectVariant::Name(b"Indexed".to_vec()),
+            _ => value.clone(),
+        },
+        ObjectVariant::Array(values) => ObjectVariant::Array(
+            values
+                .iter()
+                .map(|item| normalize_inline_image_value("ColorSpace", item))
+                .collect(),
+        ),
         _ => value.clone(),
     }
 }
@@ -160,6 +165,31 @@ mod tests {
                 Some(&ObjectVariant::Name(canonical.as_bytes().to_vec()))
             );
         }
+    }
+
+    #[test]
+    fn normalize_inline_image_dictionary_expands_indexed_color_space_arrays() {
+        let dictionary = pdf_object::dictionary::Dictionary::new(BTreeMap::from([(
+            "CS".to_string(),
+            ObjectVariant::Array(vec![
+                ObjectVariant::Name(b"I".to_vec()),
+                ObjectVariant::Name(b"RGB".to_vec()),
+                ObjectVariant::Integer(1),
+                ObjectVariant::HexString(vec![10, 11, 12, 20, 21, 22]),
+            ]),
+        )]));
+
+        let normalized = normalize_inline_image_dictionary(&dictionary);
+
+        assert_eq!(
+            normalized.dictionary.get("ColorSpace"),
+            Some(&ObjectVariant::Array(vec![
+                ObjectVariant::Name(b"Indexed".to_vec()),
+                ObjectVariant::Name(b"DeviceRGB".to_vec()),
+                ObjectVariant::Integer(1),
+                ObjectVariant::HexString(vec![10, 11, 12, 20, 21, 22]),
+            ]))
+        );
     }
 
     #[test]
