@@ -26,6 +26,7 @@ use md5::{Digest, Md5};
 use thiserror::Error;
 
 use crate::encryption::{EncryptDictionary, EncryptionVersion};
+use pdf_object::{dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject};
 
 /// Errors that can occur during PDF decryption.
 #[derive(Debug, Error)]
@@ -201,6 +202,32 @@ impl DocumentDecryptor {
         }
     }
 
+    /// Decrypts a stream object when PDF encryption rules require it.
+    ///
+    /// Cross-reference streams are not encrypted. Metadata streams are also left
+    /// unchanged when the encryption dictionary sets `/EncryptMetadata false`.
+    pub(crate) fn decrypt_stream_object(
+        &self,
+        stream: &StreamObject,
+    ) -> Result<StreamObject, DecryptionError> {
+        if should_skip_stream_decryption(&stream.dictionary, self.encrypt_metadata) {
+            return Ok(stream.clone());
+        }
+
+        let decrypted_data = self.decrypt_stream(
+            stream.object_number,
+            stream.generation_number,
+            stream.raw_data(),
+        )?;
+
+        Ok(StreamObject::new(
+            stream.object_number,
+            stream.generation_number,
+            stream.dictionary.clone(),
+            decrypted_data,
+        ))
+    }
+
     /// Decrypts a string for a specific object.
     ///
     /// # Arguments
@@ -225,6 +252,14 @@ impl DocumentDecryptor {
     /// Returns whether metadata streams should be encrypted.
     pub fn encrypt_metadata(&self) -> bool {
         self.encrypt_metadata
+    }
+}
+
+fn should_skip_stream_decryption(dictionary: &Dictionary, encrypt_metadata: bool) -> bool {
+    match dictionary.get("Type") {
+        Some(ObjectVariant::Name(name)) if name.as_slice() == b"XRef" => true,
+        Some(ObjectVariant::Name(name)) if name.as_slice() == b"Metadata" => !encrypt_metadata,
+        _ => false,
     }
 }
 
@@ -495,6 +530,25 @@ fn aes_128_cbc_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>, DecryptionErr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+
+    fn make_decryptor(encrypt_metadata: bool) -> DocumentDecryptor {
+        DocumentDecryptor {
+            file_key: vec![0; 16],
+            version: EncryptionVersion::V4,
+            key_length_bytes: 16,
+            encrypt_metadata,
+        }
+    }
+
+    fn make_stream(type_name: Option<&[u8]>, data: Vec<u8>) -> StreamObject {
+        let mut entries = BTreeMap::new();
+        if let Some(type_name) = type_name {
+            entries.insert("Type".to_string(), ObjectVariant::Name(type_name.to_vec()));
+        }
+
+        StreamObject::new(7, 0, Box::new(Dictionary::new(entries)), data)
+    }
 
     #[test]
     fn test_pad_password_empty() {
@@ -608,5 +662,46 @@ mod tests {
 
         // AES adds "sAlT" to the hash, so keys should differ
         assert_ne!(object_key_rc4, object_key_aes);
+    }
+
+    #[test]
+    fn test_xref_stream_decryption_is_skipped() {
+        let decryptor = make_decryptor(true);
+        let data = vec![0x42; 422];
+        let stream = make_stream(Some(b"XRef"), data.clone());
+
+        let decrypted = decryptor.decrypt_stream_object(&stream).unwrap();
+
+        assert_eq!(decrypted.raw_data(), data.as_slice());
+    }
+
+    #[test]
+    fn test_malformed_aes_ordinary_stream_still_errors() {
+        let decryptor = make_decryptor(true);
+        let stream = make_stream(None, vec![0x42; 422]);
+
+        let error = decryptor.decrypt_stream_object(&stream).unwrap_err();
+
+        assert!(
+            matches!(error, DecryptionError::InvalidData(message) if message == "AES ciphertext length must be a multiple of 16")
+        );
+    }
+
+    #[test]
+    fn test_metadata_stream_decryption_is_skipped_only_when_encrypt_metadata_is_false() {
+        let data = vec![0x42; 422];
+        let stream = make_stream(Some(b"Metadata"), data.clone());
+
+        let skipped = make_decryptor(false)
+            .decrypt_stream_object(&stream)
+            .unwrap();
+        assert_eq!(skipped.raw_data(), data.as_slice());
+
+        let error = make_decryptor(true)
+            .decrypt_stream_object(&stream)
+            .unwrap_err();
+        assert!(
+            matches!(error, DecryptionError::InvalidData(message) if message == "AES ciphertext length must be a multiple of 16")
+        );
     }
 }
