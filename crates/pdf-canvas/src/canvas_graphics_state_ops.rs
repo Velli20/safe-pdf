@@ -311,6 +311,7 @@ mod tests {
     fn page() -> PdfPage {
         PdfPage {
             contents: None,
+            annotations: Vec::new(),
             media_box: None,
             resources: None,
         }

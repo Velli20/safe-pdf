@@ -153,6 +153,7 @@ mod tests {
         let mut page = PdfPage {
             resources: None,
             contents: None,
+            annotations: Vec::new(),
             media_box: None,
         };
 
@@ -186,6 +187,7 @@ mod tests {
         let mut page = PdfPage {
             resources: Some(child_res),
             contents: None,
+            annotations: Vec::new(),
             media_box: None,
         };
 
@@ -231,6 +233,7 @@ mod tests {
         let mut page = PdfPage {
             resources: Some(child_res),
             contents: None,
+            annotations: Vec::new(),
             media_box: None,
         };
 
@@ -266,6 +269,7 @@ mod tests {
         let mut page = PdfPage {
             resources: None,
             contents: None,
+            annotations: Vec::new(),
             media_box: None,
         };
 
@@ -297,6 +301,7 @@ mod tests {
         let mut page = PdfPage {
             resources: None,
             contents: None,
+            annotations: Vec::new(),
             media_box: Some(child_mb),
         };
 
