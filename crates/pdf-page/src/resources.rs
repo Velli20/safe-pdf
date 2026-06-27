@@ -245,8 +245,8 @@ fn read_shadings(
 
     let mut result = HashMap::new();
     for (name, value) in &shading_dict.dictionary {
-        let object_number = value.try_object_number()?;
-        let resource = read_resource_lazy(cache, Some(object_number), |_| {
+        let dict = value.try_dictionary(objects)?;
+        let resource = read_resource_lazy(cache, dict.object_number, |_| {
             Ok::<Resource, PdfPagesError>(Resource::Shading(Rc::new(Shading::from_dictionary(
                 value, objects,
             )?)))
@@ -499,7 +499,7 @@ mod tests {
 
     use crate::{
         object_reader::ReadCycleTracker, pattern::Pattern, resource::Resource,
-        resource_cache::DefaultResourceCache, xobject::XObject,
+        resource_cache::DefaultResourceCache, shading::Shading, xobject::XObject,
     };
 
     use super::{Resources, read_xobjects};
@@ -514,6 +514,38 @@ mod tests {
 
     fn name(value: &str) -> ObjectVariant {
         ObjectVariant::Name(value.as_bytes().to_vec())
+    }
+
+    fn array(values: Vec<ObjectVariant>) -> ObjectVariant {
+        ObjectVariant::Array(values)
+    }
+
+    fn type2_function(c0: Vec<ObjectVariant>, c1: Vec<ObjectVariant>) -> ObjectVariant {
+        ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
+            ("FunctionType".to_string(), integer(2)),
+            ("Domain".to_string(), array(vec![real(0.0), real(1.0)])),
+            ("C0".to_string(), array(c0)),
+            ("C1".to_string(), array(c1)),
+            ("N".to_string(), real(1.0)),
+        ]))))
+    }
+
+    fn inline_axial_shading() -> ObjectVariant {
+        ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
+            ("ShadingType".to_string(), integer(2)),
+            ("ColorSpace".to_string(), name("DeviceRGB")),
+            (
+                "Coords".to_string(),
+                array(vec![real(0.0), real(0.0), real(1.0), real(1.0)]),
+            ),
+            (
+                "Function".to_string(),
+                type2_function(
+                    vec![real(0.0), real(0.0), real(0.0)],
+                    vec![real(1.0), real(1.0), real(1.0)],
+                ),
+            ),
+        ]))))
     }
 
     fn form_xobject_stream(object_number: usize, data: &[u8]) -> ObjectVariant {
@@ -542,6 +574,21 @@ mod tests {
         Dictionary::new(BTreeMap::from([(
             "XObject".to_string(),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(xobjects))),
+        )]))
+    }
+
+    fn page_resources(entries: Vec<(&str, ObjectVariant)>) -> Dictionary {
+        let shading_entries = entries
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value))
+            .collect::<BTreeMap<_, _>>();
+
+        Dictionary::new(BTreeMap::from([(
+            "Resources".to_string(),
+            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                "Shading".to_string(),
+                ObjectVariant::Dictionary(Box::new(Dictionary::new(shading_entries))),
+            )])))),
         )]))
     }
 
@@ -693,6 +740,29 @@ mod tests {
             .expect("Later should be a form XObject");
 
         assert_eq!(later_id, 2);
+    }
+
+    #[test]
+    fn inline_shading_resource_without_object_number_parses() {
+        let page_dict = page_resources(vec![("Inline", inline_axial_shading())]);
+        let mut cache = DefaultResourceCache::default();
+        let mut cycle_tracker = ReadCycleTracker::default();
+        let mut ids = ContentStreamIdAllocator::new();
+
+        let resources = Resources::read(
+            &page_dict,
+            &PassthroughResolver,
+            &mut cache,
+            &mut cycle_tracker,
+            &mut ids,
+        )
+        .expect("inline shading resources should parse")
+        .expect("page resources should exist");
+
+        assert!(
+            matches!(resources.shading("Inline"), Some(Shading::Axial { .. })),
+            "expected the inline shading dictionary to parse as an axial shading"
+        );
     }
 
     #[test]
