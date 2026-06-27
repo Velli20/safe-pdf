@@ -23,12 +23,12 @@ impl ReadCycleTracker {
     /// Marks the object as currently being parsed.
     ///
     /// Returns `false` when the object is already in progress, indicating a cycle.
-    fn begin_read(&mut self, obj_num: usize) -> bool {
+    pub(crate) fn begin_read(&mut self, obj_num: usize) -> bool {
         self.in_progress.insert(obj_num)
     }
 
     /// Clears the in-progress marker for the object.
-    fn end_read(&mut self, obj_num: usize) {
+    pub(crate) fn end_read(&mut self, obj_num: usize) {
         self.in_progress.remove(&obj_num);
     }
 }

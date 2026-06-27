@@ -9,7 +9,9 @@ use std::rc::Rc;
 
 use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_font::font::Font;
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+};
 
 use crate::{
     error::PdfPagesError,
@@ -18,12 +20,11 @@ use crate::{
     pattern::Pattern,
     resource::Resource,
     resource_cache::{ResourceCache, read_resource_lazy},
+    resources_reference::ResourcesReference,
     shading::Shading,
     xobject::XObject,
 };
 use pdf_color_space::color_space::ColorSpace;
-
-pub use crate::resources_reference::ResourcesReference;
 
 /// Contains all resources referenced by a PDF content stream, organized per PDF sub-dictionary.
 ///
@@ -194,6 +195,99 @@ fn read_patterns(
 }
 
 /// Parses all XObject resources from the `/XObject` sub-dictionary.
+fn read_xobject_resource(
+    value: &ObjectVariant,
+    objects: &dyn ObjectResolver,
+    cache: &mut dyn ResourceCache,
+    cycle_tracker: &mut ReadCycleTracker,
+    id_allocator: &mut ContentStreamIdAllocator,
+) -> Result<Option<Resource>, PdfPagesError> {
+    let resolved = objects.resolve_object(value)?;
+
+    match resolved {
+        ObjectVariant::Stream(stream) => {
+            if let Some(cached) = cache.get(&stream.object_number) {
+                return Ok(Some(cached.clone()));
+            }
+
+            let resource = match XObject::read_xobject(
+                value,
+                &stream.dictionary,
+                stream,
+                objects,
+                cache,
+                cycle_tracker,
+                id_allocator,
+            ) {
+                Ok(Some(xobject)) => Resource::XObject(Rc::new(xobject)),
+                Ok(None) => return Ok(None),
+                Err(err) => return Err(err),
+            };
+
+            cache.insert(stream.object_number, resource.clone());
+            Ok(Some(resource))
+        }
+        ObjectVariant::Dictionary(dictionary) => {
+            let subtype = dictionary.get_or_err("Subtype")?.try_str(objects)?;
+            if subtype.as_ref() != "Form" {
+                return Err(crate::error::PdfPagesError::UnsupportedXObjectSubtype {
+                    subtype: subtype.into_owned(),
+                });
+            }
+
+            let object_number = dictionary.object_number;
+            if let Some(object_number) = object_number
+                && let Some(cached) = cache.get(&object_number)
+            {
+                return Ok(Some(cached.clone()));
+            }
+
+            let form = if let Some(object_number) = object_number {
+                if !cycle_tracker.begin_read(object_number) {
+                    return Ok(None);
+                }
+
+                let form = crate::form::FormXObject::empty_from_dictionary(
+                    dictionary,
+                    objects,
+                    cache,
+                    cycle_tracker,
+                    id_allocator,
+                );
+                cycle_tracker.end_read(object_number);
+                form?
+            } else {
+                crate::form::FormXObject::empty_from_dictionary(
+                    dictionary,
+                    objects,
+                    cache,
+                    cycle_tracker,
+                    id_allocator,
+                )?
+            };
+
+            let resource = Resource::XObject(Rc::new(XObject::Form(Box::new(form))));
+
+            if let Some(object_number) = object_number {
+                cache.insert(object_number, resource.clone());
+            }
+
+            Ok(Some(resource))
+        }
+        _ => Err(pdf_object::error::ObjectError::TypeMismatch(
+            "Stream or Form Dictionary",
+            resolved.name(),
+        )
+        .into()),
+    }
+}
+
+/// Parses all XObject resources from the `/XObject` sub-dictionary.
+///
+/// Stream-backed XObjects are parsed through the normal XObject reader. If a
+/// resource resolves to a dictionary with `/Subtype /Form`, it is recovered as
+/// an empty Form XObject so the resource remains paintable even without stream
+/// bytes. Any other non-stream entry is rejected with a typed error.
 fn read_xobjects(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
@@ -207,27 +301,11 @@ fn read_xobjects(
 
     let mut result = HashMap::new();
     for (name, value) in &xobject_dict.dictionary {
-        let stream = value.try_stream(objects)?;
-        if let Some(cached) = cache.get(&stream.object_number) {
-            result.insert(name.clone(), cached.clone());
+        let Some(resource) =
+            read_xobject_resource(value, objects, cache, cycle_tracker, id_allocator)?
+        else {
             continue;
-        }
-
-        let resource = match XObject::read_xobject(
-            value,
-            &stream.dictionary,
-            stream,
-            objects,
-            cache,
-            cycle_tracker,
-            id_allocator,
-        ) {
-            Ok(Some(xobject)) => Resource::XObject(Rc::new(xobject)),
-            Ok(None) => continue,
-            Err(err) => return Err(err),
         };
-
-        cache.insert(stream.object_number, resource.clone());
         result.insert(name.clone(), resource);
     }
     Ok(result)
@@ -491,6 +569,7 @@ mod tests {
 
     use pdf_content_stream::ContentStreamIdAllocator;
     use pdf_font::font::Font;
+    use pdf_graphics::transform::Transform;
     use pdf_object::{
         dictionary::Dictionary, indirect_object::IndirectObject,
         object_resolver::PassthroughResolver, object_variant::ObjectVariant, stream::StreamObject,
@@ -740,6 +819,86 @@ mod tests {
             .expect("Later should be a form XObject");
 
         assert_eq!(later_id, 2);
+    }
+
+    #[test]
+    fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
+        let page_dict = Dictionary::new(BTreeMap::from([(
+            "Resources".to_string(),
+            ObjectVariant::Reference(100),
+        )]));
+
+        let resources_dict = Dictionary::new(BTreeMap::from([(
+            "XObject".to_string(),
+            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                "Meta6".to_string(),
+                ObjectVariant::Reference(101),
+            )])))),
+        )]));
+
+        let form_dict = Dictionary::new(BTreeMap::from([
+            ("Subtype".to_string(), ObjectVariant::Name(b"Form".to_vec())),
+            (
+                "BBox".to_string(),
+                ObjectVariant::Array(vec![integer(10), integer(20), integer(30), integer(40)]),
+            ),
+            (
+                "Matrix".to_string(),
+                ObjectVariant::Array(vec![
+                    real(2.0),
+                    real(0.0),
+                    real(0.0),
+                    real(3.0),
+                    real(4.0),
+                    real(5.0),
+                ]),
+            ),
+        ]));
+
+        let mut objects = ObjectCollection::default();
+        objects
+            .insert(ObjectVariant::IndirectObject(Box::new(
+                IndirectObject::new(
+                    100,
+                    0,
+                    Some(ObjectVariant::Dictionary(Box::new(resources_dict))),
+                ),
+            )))
+            .expect("resources dictionary should insert");
+        objects
+            .insert(ObjectVariant::IndirectObject(Box::new(
+                IndirectObject::new(101, 0, Some(ObjectVariant::Dictionary(Box::new(form_dict)))),
+            )))
+            .expect("dictionary-only form should insert");
+
+        let mut cache = DefaultResourceCache::default();
+        let mut cycle_tracker = ReadCycleTracker::default();
+        let mut ids = ContentStreamIdAllocator::new();
+
+        let resources = Resources::read(
+            &page_dict,
+            &objects,
+            &mut cache,
+            &mut cycle_tracker,
+            &mut ids,
+        )
+        .expect("resources should parse")
+        .expect("page resources should exist");
+
+        let Some(XObject::Form(form)) = resources.xobject("Meta6") else {
+            panic!("expected dictionary-only form xobject");
+        };
+
+        assert_eq!(form.bbox.left, 10.0);
+        assert_eq!(form.bbox.top, 20.0);
+        assert_eq!(form.bbox.right, 30.0);
+        assert_eq!(form.bbox.bottom, 40.0);
+        assert_eq!(
+            form.matrix,
+            Some(Transform::from_row(2.0, 0.0, 0.0, 3.0, 4.0, 5.0))
+        );
+        assert_eq!(form.content_stream.id, 0);
+        assert!(form.content_stream.operators.is_empty());
     }
 
     #[test]
