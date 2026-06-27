@@ -11,7 +11,6 @@ use pdf_object::{
     cross_reference_table::{CrossReferenceEntry, CrossReferenceEntryType, CrossReferenceTable},
     error::ObjectError,
     object_variant::ObjectVariant,
-    stream::StreamObject,
     trailer::Trailer,
 };
 use pdf_object_collection::object_collection::ObjectCollection;
@@ -441,7 +440,7 @@ fn decrypt_object(
         ObjectVariant::IndirectObject(indirect) => {
             // Check if the inner object is a stream
             if let Some(ObjectVariant::Stream(stream)) = indirect.object {
-                let decrypted_stream = decrypt_stream_object(&stream, decryptor)?;
+                let decrypted_stream = decryptor.decrypt_stream_object(&stream)?;
                 // Create a new IndirectObject with the decrypted stream
                 let new_indirect = IndirectObject::new(
                     indirect.object_number,
@@ -454,34 +453,10 @@ fn decrypt_object(
             Ok(ObjectVariant::IndirectObject(indirect))
         }
         ObjectVariant::Stream(stream) => {
-            let decrypted = decrypt_stream_object(&stream, decryptor)?;
+            let decrypted = decryptor.decrypt_stream_object(&stream)?;
             Ok(ObjectVariant::Stream(decrypted))
         }
         // Other objects pass through unchanged.
         other => Ok(other),
     }
-}
-
-/// Decrypts a stream object's data.
-fn decrypt_stream_object(
-    stream: &StreamObject,
-    decryptor: &DocumentDecryptor,
-) -> Result<StreamObject, PdfReaderError> {
-    // Get the raw (encrypted) stream data
-    let encrypted_data = stream.raw_data();
-
-    // Decrypt the stream data using the object's number and generation
-    let decrypted_data = decryptor.decrypt_stream(
-        stream.object_number,
-        stream.generation_number,
-        encrypted_data,
-    )?;
-
-    // Create a new stream object with decrypted data
-    Ok(StreamObject::new(
-        stream.object_number,
-        stream.generation_number,
-        stream.dictionary.clone(),
-        decrypted_data,
-    ))
 }
