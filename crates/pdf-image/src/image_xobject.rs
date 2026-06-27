@@ -935,6 +935,38 @@ mod tests {
     }
 
     #[test]
+    fn decode_inline_image_accepts_abbreviated_indexed_color_space() {
+        let image = InlineImage::new(
+            Dictionary::new(BTreeMap::from([
+                ("BPC".to_string(), ObjectVariant::Integer(1)),
+                (
+                    "CS".to_string(),
+                    ObjectVariant::Array(vec![
+                        ObjectVariant::Name(b"I".to_vec()),
+                        ObjectVariant::Name(b"RGB".to_vec()),
+                        ObjectVariant::Integer(1),
+                        ObjectVariant::HexString(vec![10, 11, 12, 20, 21, 22]),
+                    ]),
+                ),
+                ("H".to_string(), ObjectVariant::Integer(1)),
+                ("W".to_string(), ObjectVariant::Integer(4)),
+            ])),
+            vec![0b1010_0000],
+        );
+
+        let decoded = ImageXObject::decode_inline_image(&image, &PassthroughResolver, None)
+            .expect("inline image with abbreviated indexed color space should decode");
+
+        assert_eq!(decoded.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
+        assert_eq!(
+            decoded.data,
+            vec![
+                20, 21, 22, 255, 10, 11, 12, 255, 20, 21, 22, 255, 10, 11, 12, 255
+            ]
+        );
+    }
+
+    #[test]
     fn decode_normalized_1bpc_image_expands_samples() {
         let dictionary = Dictionary::new(BTreeMap::from([
             ("BitsPerComponent".to_string(), ObjectVariant::Integer(1)),
