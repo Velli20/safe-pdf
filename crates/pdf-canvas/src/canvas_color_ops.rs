@@ -279,18 +279,9 @@ mod tests {
         }
     }
 
-    fn page() -> PdfPage {
-        PdfPage {
-            contents: None,
-            annotations: Vec::new(),
-            media_box: None,
-            resources: None,
-        }
-    }
-
     #[test]
     fn default_device_gray_scn_with_three_components_falls_back_to_rgb() {
-        let page = page();
+        let page = PdfPage::default();
         let mut backend = TestCanvas;
         let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
 
@@ -309,7 +300,7 @@ mod tests {
 
     #[test]
     fn device_rgb_scn_with_three_components_still_uses_active_space() {
-        let page = page();
+        let page = PdfPage::default();
         let mut backend = TestCanvas;
         let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
 
@@ -331,7 +322,7 @@ mod tests {
 
     #[test]
     fn invalid_generic_operand_count_still_returns_component_error() {
-        let page = page();
+        let page = PdfPage::default();
         let mut backend = TestCanvas;
         let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
 

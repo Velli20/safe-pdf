@@ -1,0 +1,13 @@
+[package]
+name = "pdf-annotations"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+pdf-object = { path = "../pdf-object" }
+pdf-graphics = { path = "../pdf-graphics" }
+thiserror = "2.0.12"
+num-traits = "0.2.19"
