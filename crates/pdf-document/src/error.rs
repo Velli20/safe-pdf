@@ -1,6 +1,6 @@
 use pdf_object::error::ObjectError;
-use pdf_page::error::PdfPagesError;
 use pdf_parser::{error::ParserError, header::HeaderError};
+use pdf_resources::error::PdfPagesError;
 use thiserror::Error;
 
 use crate::decryption::DecryptionError;

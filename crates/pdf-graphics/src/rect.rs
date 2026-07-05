@@ -1,3 +1,5 @@
+use crate::transform::Transform;
+
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Rect {
     /// The left edge of the rectangle.
@@ -18,6 +20,16 @@ impl Rect {
         bottom: 1.0,
     };
 
+    /// Creates a new rectangle with the given width and height, with the top-left corner at (0, 0).
+    pub const fn new(width: f32, height: f32) -> Self {
+        Self {
+            left: 0.0,
+            top: 0.0,
+            right: width,
+            bottom: height,
+        }
+    }
+
     /// Returns a rectangle whose edges are ordered so width and height are non-negative.
     pub fn normalized(&self) -> Self {
         Self {
@@ -35,6 +47,21 @@ impl Rect {
     pub fn height(&self) -> f32 {
         self.bottom - self.top
     }
+
+    /// Returns whether this rectangle has finite edges and positive dimensions.
+    pub fn is_valid(&self) -> bool {
+        self.left.is_finite()
+            && self.top.is_finite()
+            && self.right.is_finite()
+            && self.bottom.is_finite()
+            && self.width() > 0.0
+            && self.height() > 0.0
+    }
+
+    /// Returns the scale transform produced by dividing this rectangle's size by another.
+    pub fn scale(&self, other: &Self) -> Transform {
+        Transform::from_scale(self.width() / other.width(), self.height() / other.height())
+    }
 }
 
 impl From<[f32; 4]> for Rect {
@@ -50,6 +77,8 @@ impl From<[f32; 4]> for Rect {
 
 #[cfg(test)]
 mod tests {
+    use crate::transform::Transform;
+
     use super::Rect;
 
     #[test]
@@ -70,5 +99,29 @@ mod tests {
                 bottom: 20.0,
             }
         );
+    }
+
+    #[test]
+    fn is_valid_requires_finite_positive_dimensions() {
+        assert!(Rect::new(10.0, 20.0).is_valid());
+        assert!(!Rect::new(0.0, 20.0).is_valid());
+        assert!(!Rect::new(10.0, 0.0).is_valid());
+        assert!(!Rect::new(-10.0, 20.0).is_valid());
+
+        let rect = Rect {
+            left: 0.0,
+            top: 0.0,
+            right: f32::INFINITY,
+            bottom: 20.0,
+        };
+        assert!(!rect.is_valid());
+    }
+
+    #[test]
+    fn scale_returns_size_ratio_transform() {
+        let rect = Rect::new(40.0, 15.0);
+        let other = Rect::new(10.0, 5.0);
+
+        assert_eq!(rect.scale(&other), Transform::from_scale(4.0, 3.0));
     }
 }

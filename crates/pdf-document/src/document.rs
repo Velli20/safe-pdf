@@ -1,4 +1,4 @@
-use pdf_page::page::PdfPage;
+use crate::page::PdfPage;
 
 /// Represents a PDF document.
 pub struct PdfDocument {

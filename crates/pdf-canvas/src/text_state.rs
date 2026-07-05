@@ -1,7 +1,7 @@
 use crate::error::PdfCanvasError;
 use pdf_font::font::Font;
 use pdf_graphics::transform::Transform;
-use pdf_page::resources::Resources;
+use pdf_resources::resources::Resources;
 use read_fonts::TableProvider;
 use skrifa::{FontRef, GlyphId};
 

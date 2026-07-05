@@ -3,7 +3,7 @@ use pdf_graphics::{
     BlendMode, DashPattern, LineCap, LineJoin, TextRenderingMode, color::Color, pdf_path::PdfPath,
     transform::Transform,
 };
-use pdf_page::{pattern::Pattern, resources::Resources};
+use pdf_resources::{pattern::Pattern, resources::Resources};
 
 use crate::text_state::TextState;
 
