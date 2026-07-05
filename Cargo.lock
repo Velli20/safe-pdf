@@ -793,9 +793,9 @@ dependencies = [
  "pdf-graphics-femtovg",
  "pdf-graphics-skia",
  "pdf-object",
- "pdf-page",
  "pdf-parser",
  "pdf-renderer",
+ "pdf-resources",
  "pdf-tokenizer",
  "raw-window-handle",
  "skia-safe",
@@ -1999,12 +1999,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
-name = "pdf-annotations"
+name = "pdf-annotation-types"
 version = "0.1.0"
 dependencies = [
  "num-traits",
+ "pdf-content-stream",
  "pdf-graphics",
  "pdf-object",
+ "pdf-resources",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "pdf-annotations"
+version = "0.1.0"
+dependencies = [
+ "pdf-annotation-types",
+ "pdf-canvas",
+ "pdf-color-space",
+ "pdf-content-stream-operators",
+ "pdf-document",
+ "pdf-graphics",
+ "pdf-object",
+ "pdf-parser",
+ "pdf-resources",
  "thiserror 2.0.12",
 ]
 
@@ -2016,11 +2034,12 @@ dependencies = [
  "pdf-color-space",
  "pdf-content-stream",
  "pdf-content-stream-operators",
+ "pdf-document",
  "pdf-font",
  "pdf-graphics",
  "pdf-image",
  "pdf-object",
- "pdf-page",
+ "pdf-resources",
  "pdf-shading",
  "read-fonts 0.39.2",
  "skrifa",
@@ -2100,11 +2119,13 @@ dependencies = [
  "aes",
  "cbc",
  "md-5",
+ "pdf-annotation-types",
+ "pdf-color-space",
  "pdf-content-stream",
  "pdf-object",
  "pdf-object-collection",
- "pdf-page",
  "pdf-parser",
+ "pdf-resources",
  "thiserror 2.0.12",
 ]
 
@@ -2234,27 +2255,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pdf-page"
-version = "0.1.0"
-dependencies = [
- "num-derive",
- "num-traits",
- "pdf-annotations",
- "pdf-color-space",
- "pdf-content-stream",
- "pdf-content-stream-operators",
- "pdf-decode",
- "pdf-font",
- "pdf-function",
- "pdf-graphics",
- "pdf-image",
- "pdf-object",
- "pdf-object-collection",
- "pdf-shading",
- "thiserror 2.0.12",
-]
-
-[[package]]
 name = "pdf-parser"
 version = "0.1.0"
 dependencies = [
@@ -2278,10 +2278,30 @@ dependencies = [
 name = "pdf-renderer"
 version = "0.1.0"
 dependencies = [
+ "pdf-annotations",
  "pdf-canvas",
  "pdf-content-stream",
  "pdf-document",
- "pdf-page",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "pdf-resources"
+version = "0.1.0"
+dependencies = [
+ "num-derive",
+ "num-traits",
+ "pdf-color-space",
+ "pdf-content-stream",
+ "pdf-content-stream-operators",
+ "pdf-decode",
+ "pdf-font",
+ "pdf-function",
+ "pdf-graphics",
+ "pdf-image",
+ "pdf-object",
+ "pdf-object-collection",
+ "pdf-shading",
  "thiserror 2.0.12",
 ]
 

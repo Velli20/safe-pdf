@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+pdf-annotations = { path = "../pdf-annotations" }
 pdf-content-stream = { path = "../pdf-content-stream" }
-pdf-page = { path = "../pdf-page" }
 pdf-document = { path = "../pdf-document" }
 pdf-canvas = { path = "../pdf-canvas" }
 thiserror = "2.0.12"

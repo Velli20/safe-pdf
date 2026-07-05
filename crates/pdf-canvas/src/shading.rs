@@ -1,5 +1,5 @@
 use pdf_content_stream_operators::pdf_operator_backend::ShadingOps;
-use pdf_graphics::pdf_path::PdfPath;
+use pdf_graphics::{pdf_path::PdfPath, rect::Rect};
 
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
@@ -17,15 +17,7 @@ impl<B: CanvasBackend> ShadingOps for PdfCanvas<'_, B> {
             clip.clone()
         } else {
             // If no clip path exists, the entire page is used.
-            let mut path = PdfPath::default();
-
-            path.move_to(0.0, 0.0);
-            path.line_to(self.canvas.width(), 0.0);
-            path.line_to(self.canvas.width(), self.canvas.height());
-            path.line_to(0.0, self.canvas.height());
-            path.line_to(0.0, 0.0);
-            path.close();
-            path
+            PdfPath::from(&Rect::new(self.canvas.width(), self.canvas.height()))
         };
 
         let fill_color = state.fill_color;

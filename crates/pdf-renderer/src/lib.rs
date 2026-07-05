@@ -1,3 +1,4 @@
+use pdf_annotations::{AnnotationRenderError, AnnotationRenderer};
 use pdf_canvas::{
     canvas_backend::CanvasBackend, pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas,
 };
@@ -15,6 +16,8 @@ pub enum PdfRendererError {
     PageNotFound(usize),
     #[error("PDF canvas error: {0}")]
     PdfCanvasError(#[from] pdf_canvas::error::PdfCanvasError),
+    #[error("Annotation render error: {0}")]
+    AnnotationRenderError(#[from] AnnotationRenderError),
 }
 
 /// Renders pages of a [`PdfDocument`] onto a user supplied [`CanvasBackend`].
@@ -57,9 +60,21 @@ impl PdfRenderer {
         page_index: usize,
     ) -> Result<(), PdfRendererError> {
         let page = self.page(page_index)?;
-        let mut canvas = PdfCanvas::new(canvas_backend, page, None)?;
-        if let Some(cs) = &page.contents {
-            canvas.render_content_stream(cs, None, None, page.resources.as_ref(), None)?;
+        {
+            let canvas = PdfCanvas::new(canvas_backend, page, None)?;
+            let mut annotation_renderer = AnnotationRenderer::new(canvas);
+            if let Some(cs) = &page.contents {
+                annotation_renderer.canvas.render_content_stream(
+                    cs,
+                    None,
+                    None,
+                    page.resources.as_ref(),
+                    None,
+                )?;
+            }
+            if let Some(annotations) = &page.annotations {
+                annotation_renderer.render_annotations(annotations)?;
+            }
         }
         Ok(())
     }
@@ -77,15 +92,25 @@ impl PdfRenderer {
         let page = self.page(page_index)?;
         let mut recording = RecordingCanvas::new(width, height);
         {
-            let mut canvas = PdfCanvas::new(&mut recording, page, None)?;
+            let canvas = PdfCanvas::new(&mut recording, page, None)?;
+            let mut annotation_renderer = AnnotationRenderer::new(canvas);
             if let Some(cs) = &page.contents {
-                canvas.render_content_stream(cs, None, None, page.resources.as_ref(), None)?;
+                annotation_renderer.canvas.render_content_stream(
+                    cs,
+                    None,
+                    None,
+                    page.resources.as_ref(),
+                    None,
+                )?;
+            }
+            if let Some(annotations) = &page.annotations {
+                annotation_renderer.render_annotations(annotations)?;
             }
         }
         Ok(recording)
     }
 
-    fn page(&self, page_index: usize) -> Result<&pdf_page::page::PdfPage, PdfRendererError> {
+    fn page(&self, page_index: usize) -> Result<&pdf_document::page::PdfPage, PdfRendererError> {
         let Some(page) = self.document.pages.get(page_index) else {
             return Err(PdfRendererError::PageNotFound(page_index));
         };

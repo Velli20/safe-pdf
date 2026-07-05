@@ -1,4 +1,4 @@
-use crate::transform::Transform;
+use crate::{rect::Rect, transform::Transform};
 
 /// Represents a single operation in a graphics path.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -49,6 +49,41 @@ pub struct PdfPath {
 }
 
 impl PdfPath {
+    pub fn from(rect: &Rect) -> Self {
+        let mut path = PdfPath::default();
+        path.move_to(rect.left, rect.top);
+        path.line_to(rect.right, rect.top);
+        path.line_to(rect.right, rect.bottom);
+        path.line_to(rect.left, rect.bottom);
+        path.close();
+        path
+    }
+
+    /// Creates a path that approximates an ellipse inscribed in `rect`.
+    ///
+    /// The rectangle is normalized before constructing the ellipse so inverted
+    /// bounds produce the same result as an ordered rectangle.
+    pub fn ellipse(rect: &Rect) -> Self {
+        const KAPPA: f32 = 0.552_284_8;
+
+        let rect = rect.normalized();
+        let rx = rect.width() / 2.0;
+        let ry = rect.height() / 2.0;
+        let cx = rect.left + rx;
+        let cy = rect.top + ry;
+        let ox = rx * KAPPA;
+        let oy = ry * KAPPA;
+
+        let mut path = PdfPath::default();
+        path.move_to(cx + rx, cy);
+        path.curve_to(cx + rx, cy + oy, cx + ox, cy + ry, cx, cy + ry);
+        path.curve_to(cx - ox, cy + ry, cx - rx, cy + oy, cx - rx, cy);
+        path.curve_to(cx - rx, cy - oy, cx - ox, cy - ry, cx, cy - ry);
+        path.curve_to(cx + ox, cy - ry, cx + rx, cy - oy, cx + rx, cy);
+        path.close();
+        path
+    }
+
     /// Returns the current point of the path.
     ///
     /// Returns `None` if the path is empty (i.e., no `MoveTo` has been called yet).
@@ -196,4 +231,67 @@ impl PdfPath {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::{PathVerb, PdfPath};
+    use crate::rect::Rect;
+
+    fn assert_approx_eq(actual: f32, expected: f32) {
+        let delta = (actual - expected).abs();
+        assert!(
+            delta <= f32::EPSILON * 16.0,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn ellipse_builds_expected_verb_sequence() {
+        let rect = Rect {
+            left: 0.0,
+            top: 0.0,
+            right: 2.0,
+            bottom: 4.0,
+        };
+
+        let path = PdfPath::ellipse(&rect);
+
+        assert_eq!(path.verbs.len(), 6);
+        assert_eq!(path.verbs[0], PathVerb::MoveTo { x: 2.0, y: 2.0 });
+
+        match path.verbs[1] {
+            PathVerb::CubicTo {
+                x1,
+                y1,
+                x2,
+                y2,
+                x3,
+                y3,
+            } => {
+                assert_approx_eq(x1, 2.0);
+                assert_approx_eq(y1, 2.0 + 2.0 * 0.552_284_8);
+                assert_approx_eq(x2, 1.0 + 1.0 * 0.552_284_8);
+                assert_approx_eq(y2, 4.0);
+                assert_approx_eq(x3, 1.0);
+                assert_approx_eq(y3, 4.0);
+            }
+            verb => panic!("unexpected verb: {verb:?}"),
+        }
+
+        assert_eq!(path.verbs[5], PathVerb::Close);
+        assert_eq!(path.current_point(), Some((2.0, 2.0)));
+    }
+
+    #[test]
+    fn ellipse_normalizes_inverted_rectangles() {
+        let rect = Rect {
+            left: 10.0,
+            top: 20.0,
+            right: -2.0,
+            bottom: 8.0,
+        };
+
+        let path = PdfPath::ellipse(&rect);
+
+        assert_eq!(path.verbs[0], PathVerb::MoveTo { x: 10.0, y: 14.0 });
+        assert_eq!(path.current_point(), Some((10.0, 14.0)));
+    }
+}

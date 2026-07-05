@@ -5,12 +5,16 @@ edition = "2024"
 
 [dependencies]
 pdf-content-stream = { path = "../pdf-content-stream" }
+pdf-annotation-types = { path = "../pdf-annotation-types" }
 pdf-object-collection = { path = "../pdf-object-collection" }
 pdf-object = { path = "../pdf-object" }
 pdf-parser = { path = "../pdf-parser" }
-pdf-page = { path = "../pdf-page" }
+pdf-resources = { path = "../pdf-resources" }
 thiserror = "2.0.12"
 
 md-5 = "0.10.6"
 aes = "0.8.4"
 cbc = "0.1.2"
+
+[dev-dependencies]
+pdf-color-space = { path = "../pdf-color-space" }

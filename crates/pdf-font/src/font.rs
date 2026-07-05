@@ -124,6 +124,32 @@ impl Font {
         }
     }
 
+    /// Measures encoded text in user-space units for a given font size.
+    ///
+    /// Widths come from the parsed PDF font width data when available. Missing
+    /// simple-font widths fall back to 500 glyph-space units, matching a stable
+    /// half-em approximation for layout decisions.
+    pub fn encoded_text_width(&self, text: &[u8], font_size: f32) -> f32 {
+        const DEFAULT_SIMPLE_WIDTH: f32 = 500.0;
+        const GLYPH_SPACE_UNITS: f32 = 1000.0;
+
+        let glyph_width_sum = match self {
+            Font::Type0(font) => font
+                .decode_bytes_to_cids(text)
+                .into_iter()
+                .map(|cid| self.glyph_width(cid).unwrap_or(DEFAULT_SIMPLE_WIDTH))
+                .sum::<f32>(),
+            _ => text
+                .iter()
+                .copied()
+                .map(u16::from)
+                .map(|code| self.glyph_width(code).unwrap_or(DEFAULT_SIMPLE_WIDTH))
+                .sum::<f32>(),
+        };
+
+        glyph_width_sum / GLYPH_SPACE_UNITS * font_size
+    }
+
     pub fn glyph_name(&self, char_code: u16) -> Option<&str> {
         let index = usize::from(char_code);
         match self {

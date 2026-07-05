@@ -11,14 +11,14 @@ use crate::{
     text_state::TextState,
 };
 use pdf_content_stream::ContentStream;
+use pdf_content_stream_operators::pdf_operator_backend::PathConstructionOps;
 use pdf_content_stream_operators::variants::PdfOperatorVariant;
-use pdf_graphics::TextRenderingMode;
+use pdf_document::page::PdfPage;
 use pdf_graphics::{
-    MaskMode, PaintMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
-    transform::Transform,
+    BlendMode, MaskMode, PaintMode, PathFillType, TextRenderingMode, color::Color,
+    pdf_path::PathVerb, pdf_path::PdfPath, rect::Rect, transform::Transform,
 };
-use pdf_page::{
-    page::PdfPage,
+use pdf_resources::{
     pattern::{PaintType, Pattern},
     resources::Resources,
     shading::Shading,
@@ -429,6 +429,56 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         }
     }
 
+    /// Replays a path into the current graphics path.
+    ///
+    /// This is used by callers that need to materialize a [`PdfPath`] through the
+    /// canvas path-construction API before painting it.
+    pub fn replay_path(&mut self, path: &PdfPath) -> Result<(), PdfCanvasError> {
+        for verb in &path.verbs {
+            match *verb {
+                PathVerb::MoveTo { x, y } => self.move_to(x, y)?,
+                PathVerb::LineTo { x, y } => self.line_to(x, y)?,
+                PathVerb::CubicTo {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    x3,
+                    y3,
+                } => self.curve_to(x1, y1, x2, y2, x3, y3)?,
+                PathVerb::QuadTo { .. } => {
+                    return Err(PdfCanvasError::UnsupportedFeature(
+                        "quadratic annotation paths".to_owned(),
+                    ));
+                }
+                PathVerb::Close => self.close_path()?,
+            }
+        }
+        Ok(())
+    }
+
+    /// Sets the alpha value for subsequent non-stroking paint operations.
+    ///
+    /// This updates only the fill alpha component in the current graphics state.
+    pub fn set_non_stroking_alpha(&mut self, alpha: f32) -> Result<(), PdfCanvasError> {
+        self.current_state_mut()?.fill_color.a = alpha;
+        Ok(())
+    }
+
+    /// Sets the alpha value for subsequent stroking paint operations.
+    ///
+    /// This updates only the stroke alpha component in the current graphics state.
+    pub fn set_stroking_alpha(&mut self, alpha: f32) -> Result<(), PdfCanvasError> {
+        self.current_state_mut()?.stroke_color.a = alpha;
+        Ok(())
+    }
+
+    /// Sets the blend mode for subsequent paint operations.
+    pub fn set_blend_mode(&mut self, blend_mode: Option<BlendMode>) -> Result<(), PdfCanvasError> {
+        self.current_state_mut()?.blend_mode = blend_mode;
+        Ok(())
+    }
+
     /// Paints the current path (if any) using the specified paint mode and fill type, then clears the path.
     ///
     /// # Parameters
@@ -749,15 +799,15 @@ mod tests {
 
     use pdf_content_stream::ContentStreamIdAllocator;
     use pdf_content_stream_operators::pdf_operator_backend::GraphicsStateOps;
+    use pdf_document::page::PdfPage;
     use pdf_graphics::{
         BlendMode, MaskMode, PaintMode, PathFillType, PixelFormat, color::Color, pdf_path::PdfPath,
         rect::Rect, transform::Transform,
     };
     use pdf_image::InlineImage;
     use pdf_object::{dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject};
-    use pdf_page::{
-        form::FormXObject, page::PdfPage, resource::Resource, resources::Resources,
-        xobject::XObject,
+    use pdf_resources::{
+        form::FormXObject, resource::Resource, resources::Resources, xobject::XObject,
     };
 
     use crate::{

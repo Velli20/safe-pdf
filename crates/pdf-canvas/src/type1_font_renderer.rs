@@ -404,13 +404,13 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    use pdf_document::page::PdfPage;
     use pdf_font::{
         encoding::Encoding,
         font::Font,
         type1_font::{Type1Font, Type1FontProgramFormat},
     };
     use pdf_graphics::{BlendMode, MaskMode, PathFillType, color::Color, rect::Rect};
-    use pdf_page::page::PdfPage;
     use read_fonts::FontData;
 
     use crate::{

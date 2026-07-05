@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use pdf_content_stream_operators::pdf_operator_backend::GraphicsStateOps;
 use pdf_graphics::{DashPattern, LineCap, LineJoin, transform::Transform};
-use pdf_page::{
+use pdf_resources::{
     external_graphics_state::ExternalGraphicsStateKey, resource::Resource, xobject::XObject,
 };
 
@@ -201,11 +201,11 @@ mod tests {
     use std::{collections::HashMap, rc::Rc};
 
     use pdf_content_stream::ContentStream;
+    use pdf_document::page::PdfPage;
     use pdf_graphics::{MaskMode, PathFillType, color::Color, rect::Rect};
-    use pdf_page::{
+    use pdf_resources::{
         external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateKey, SoftMask},
         form::FormXObject,
-        page::PdfPage,
         resource::Resource,
         resources::Resources,
         xobject::XObject,

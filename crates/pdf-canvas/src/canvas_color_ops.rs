@@ -175,11 +175,11 @@ impl<B: CanvasBackend> ColorOps for PdfCanvas<'_, B> {
 mod tests {
     use pdf_color_space::error::ColorSpaceError;
     use pdf_content_stream_operators::pdf_operator_backend::ColorOps;
+    use pdf_document::page::PdfPage;
     use pdf_graphics::{
         BlendMode, MaskMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
         transform::Transform,
     };
-    use pdf_page::page::PdfPage;
     use std::sync::Arc;
 
     use crate::{

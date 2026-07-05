@@ -4,6 +4,8 @@ use crate::decryption::DocumentDecryptor;
 use crate::document::PdfDocument;
 use crate::error::PdfReaderError;
 use crate::object_stream::read_object_stream;
+use crate::page::PdfPage;
+use crate::pages::PdfPages;
 use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_object::indirect_object::IndirectObject;
 use pdf_object::object_resolver::{ObjectResolver, PassthroughResolver};
@@ -14,12 +16,10 @@ use pdf_object::{
     trailer::Trailer,
 };
 use pdf_object_collection::object_collection::ObjectCollection;
-use pdf_page::object_reader::{ReadCycleTracker, ReadFromDictionary};
-use pdf_page::page::PdfPage;
-use pdf_page::pages::PdfPages;
-use pdf_page::resource_cache::DefaultResourceCache;
 use pdf_parser::error::ParserError;
 use pdf_parser::parser::PdfParser;
+use pdf_resources::object_reader::{ReadCycleTracker, ReadFromDictionary};
+use pdf_resources::resource_cache::DefaultResourceCache;
 
 use crate::encryption::EncryptDictionary;
 

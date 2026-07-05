@@ -15,9 +15,8 @@ pub enum FunctionReadError {
     /// The `/Bounds` array length must be `number of functions - 1`.
     #[error("Bounds array length must be number of functions - 1")]
     InvalidBoundsLength,
-    /// Failed to parse the `/Domain` array.
-    #[error("Domain parsing error: {0}")]
-    DomainParsingError(#[from] ObjectError),
+    #[error("{0}")]
+    ObjectError(#[from] ObjectError),
     /// Error during PostScript code parsing.
     #[error("PostScript calculator error: {0}")]
     PostScriptCalculatorError(#[from] CalcError),
@@ -58,7 +57,7 @@ impl From<DecodeError> for FunctionReadError {
                 actual: actual_bytes,
             },
             DecodeError::InvalidSampleData => Self::InvalidSampleData,
-            DecodeError::Object(err) => Self::DomainParsingError(err),
+            DecodeError::Object(err) => Self::ObjectError(err),
             DecodeError::InvalidDecodeLength { .. }
             | DecodeError::InvalidDecodeValue
             | DecodeError::InvalidComponentCount
