@@ -201,10 +201,19 @@ fn optional_item_number<T>(
 where
     T: num_traits::FromPrimitive,
 {
-    Ok(values
-        .get(index)
-        .map(|value| value.try_number::<T>(objects))
-        .transpose()?)
+    let Some(value) = values.get(index) else {
+        return Ok(None);
+    };
+    let value = if let ObjectVariant::Reference(_) = value {
+        objects.resolve_object(value)?
+    } else {
+        value
+    };
+
+    match value {
+        ObjectVariant::Null => Ok(None),
+        _ => Ok(Some(value.try_number::<T>(objects)?)),
+    }
 }
 
 fn required_item_number<T>(
