@@ -8,6 +8,7 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+pdf-annotations = { path = "../pdf-annotations" }
 pdf-object = { path = "../pdf-object" }
 pdf-object-collection = { path = "../pdf-object-collection" }
 pdf-content-stream-operators = { path = "../pdf-content-stream-operators" }

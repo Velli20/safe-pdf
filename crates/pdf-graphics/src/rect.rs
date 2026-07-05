@@ -1,8 +1,12 @@
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Rect {
+    /// The left edge of the rectangle.
     pub left: f32,
+    /// The top edge of the rectangle.
     pub top: f32,
+    /// The right edge of the rectangle.
     pub right: f32,
+    /// The bottom edge of the rectangle.
     pub bottom: f32,
 }
 

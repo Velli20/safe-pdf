@@ -324,8 +324,15 @@ impl ObjectVariant {
         match object {
             ObjectVariant::HexString(s) => Ok(s),
             ObjectVariant::Name(s) | ObjectVariant::LiteralString(s) => Ok(s),
-            _ => Err(ObjectError::TypeMismatch("HexString", object.name())),
+            _ => Err(ObjectError::TypeMismatch("Bytes", object.name())),
         }
+    }
+
+    pub fn try_bytes_vec<'a>(
+        &'a self,
+        objects: &'a dyn ObjectResolver,
+    ) -> Result<Vec<u8>, ObjectError> {
+        self.try_bytes(objects).map(|bytes| bytes.to_vec())
     }
 
     /// Resolves an `ObjectVariant` into a boolean value.
@@ -433,5 +440,17 @@ mod tests {
             .try_stream(&PassthroughResolver)
             .expect_err("dictionary object should not decode as a stream");
         assert_eq!(dict_err, ObjectError::TypeMismatch("Stream", "Dictionary"));
+    }
+
+    #[test]
+    fn try_bytes_returns_type_mismatch_for_non_bytes() {
+        let object = ObjectVariant::Dictionary(Box::new(crate::dictionary::Dictionary::new(
+            std::collections::BTreeMap::new(),
+        )));
+        let err = object
+            .try_bytes(&PassthroughResolver)
+            .expect_err("dictionary object should not decode as bytes");
+
+        assert_eq!(err, ObjectError::TypeMismatch("Bytes", "Dictionary"));
     }
 }

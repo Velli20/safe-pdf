@@ -1,3 +1,4 @@
+use pdf_annotations::AnnotationError;
 use pdf_color_space::error::ColorSpaceError;
 use pdf_content_stream_operators::error::PdfOperatorError;
 use pdf_decode::DecodeError;
@@ -45,8 +46,8 @@ pub enum PdfPagesError {
     InvalidShadingType { value: i32 },
     #[error("unsupported XObject /Subtype: '{subtype}'")]
     UnsupportedXObjectSubtype { subtype: String },
-    #[error("missing required dictionary entry '/{entry}'")]
-    MissingRequiredEntry { entry: &'static str },
+    #[error("{0}")]
+    Annotation(#[from] AnnotationError),
     #[error("failed to process image: {0}")]
     Image(#[from] PdfImageError),
     #[error("{0}")]
