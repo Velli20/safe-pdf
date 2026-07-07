@@ -1,4 +1,6 @@
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::{AnnotationColor, AnnotationError, BorderEffect, BorderStyle};
 
@@ -22,10 +24,7 @@ impl CircleAnnotation {
         let border_style = BorderStyle::from_dictionary(dictionary, "BS", objects)?;
         let interior_color = AnnotationColor::from_dictionary(dictionary, "IC", objects)?;
         let border_effect = BorderEffect::from_dictionary(dictionary, "BE", objects)?;
-        let difference_rect = dictionary
-            .get("RD")
-            .map(|value| value.try_array_of::<f32, 4>(objects))
-            .transpose()?;
+        let difference_rect = dictionary.optional_array_of::<f32, 4>("RD", objects)?;
 
         Ok(Self {
             border_style,

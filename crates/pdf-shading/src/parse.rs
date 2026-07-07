@@ -5,7 +5,8 @@ use pdf_color_space::color_space::ColorSpace;
 use pdf_function::function::{Function, FunctionImpl};
 use pdf_graphics::{color::Color, point::Point, rect::Rect};
 use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 
 use crate::{
@@ -20,9 +21,7 @@ pub fn shading_from_dictionary(
     objects: &dyn ObjectResolver,
 ) -> Result<Shading, PdfShadingError> {
     let dictionary = object.try_dictionary(objects)?;
-    let shading_type_value = dictionary
-        .get_or_err("ShadingType")?
-        .try_number::<i32>(objects)?;
+    let shading_type_value = dictionary.required_number::<i32>("ShadingType", objects)?;
     let shading_type = ShadingType::try_from(shading_type_value)?;
 
     match shading_type {
@@ -43,23 +42,12 @@ fn parse_function_based(
     objects: &dyn ObjectResolver,
 ) -> Result<Shading, PdfShadingError> {
     let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
-    let background = dictionary
-        .get("Background")
-        .map(|object| object.try_vec_of::<f32>(objects))
-        .transpose()?;
+    let background = dictionary.optional_vec_of::<f32>("Background", objects)?;
     let bbox = dictionary
-        .get("BBox")
-        .map(|object| object.try_array_of::<f32, 4>(objects))
-        .transpose()?
+        .optional_array_of::<f32, 4>("BBox", objects)?
         .map(Rect::from);
-    let domain = dictionary
-        .get("Domain")
-        .map(|object| object.try_vec_of::<f32>(objects))
-        .transpose()?;
-    let anti_alias = dictionary
-        .get("AntiAlias")
-        .map(|object| object.try_boolean(objects))
-        .transpose()?;
+    let domain = dictionary.optional_vec_of::<f32>("Domain", objects)?;
+    let anti_alias = dictionary.optional_boolean("AntiAlias", objects)?;
     let functions = parse_functions(dictionary, objects)?;
 
     Ok(Shading::FunctionBased {
@@ -77,9 +65,7 @@ fn parse_axial(
     objects: &dyn ObjectResolver,
 ) -> Result<Shading, PdfShadingError> {
     let dictionary = object.try_dictionary(objects)?;
-    let coords = dictionary
-        .get_or_err("Coords")?
-        .try_array_of::<f32, 4>(objects)?;
+    let coords = dictionary.required_array_of::<f32, 4>("Coords", objects)?;
     let color_space = ColorSpace::from_dictionary(dictionary, objects)?.ok_or(
         PdfShadingError::MissingRequiredEntry {
             entry: "ColorSpace",
@@ -101,18 +87,14 @@ fn parse_radial(
     objects: &dyn ObjectResolver,
 ) -> Result<Shading, PdfShadingError> {
     let dictionary = object.try_dictionary(objects)?;
-    let coords = dictionary
-        .get_or_err("Coords")?
-        .try_array_of::<f32, 6>(objects)?;
+    let coords = dictionary.required_array_of::<f32, 6>("Coords", objects)?;
     let color_space = ColorSpace::from_dictionary(dictionary, objects)?.ok_or(
         PdfShadingError::MissingRequiredEntry {
             entry: "ColorSpace",
         },
     )?;
     let bbox = dictionary
-        .get("BBox")
-        .map(|object| object.try_array_of::<f32, 4>(objects))
-        .transpose()?
+        .optional_array_of::<f32, 4>("BBox", objects)?
         .map(Rect::from);
     let function_object = dictionary.get_or_err("Function")?;
     let function = Function::parse(function_object, objects)?;
@@ -138,18 +120,10 @@ fn parse_patch_mesh(
             entry: "ColorSpace",
         },
     )?;
-    let bits_per_coordinate = dictionary
-        .get_or_err("BitsPerCoordinate")?
-        .try_number::<usize>(objects)?;
-    let bits_per_component = dictionary
-        .get_or_err("BitsPerComponent")?
-        .try_number::<usize>(objects)?;
-    let bits_per_flag = dictionary
-        .get_or_err("BitsPerFlag")?
-        .try_number::<usize>(objects)?;
-    let decode_values = dictionary
-        .get_or_err("Decode")?
-        .try_vec_of::<f32>(objects)?;
+    let bits_per_coordinate = dictionary.required_number::<usize>("BitsPerCoordinate", objects)?;
+    let bits_per_component = dictionary.required_number::<usize>("BitsPerComponent", objects)?;
+    let bits_per_flag = dictionary.required_number::<usize>("BitsPerFlag", objects)?;
+    let decode_values = dictionary.required_vec_of::<f32>("Decode", objects)?;
 
     if decode_values.len() < 6 || decode_values.len() % 2 != 0 {
         return Err(PdfShadingError::InvalidShadingMeshData {
@@ -158,14 +132,9 @@ fn parse_patch_mesh(
     }
 
     let bbox = dictionary
-        .get("BBox")
-        .map(|object| object.try_array_of::<f32, 4>(objects))
-        .transpose()?
+        .optional_array_of::<f32, 4>("BBox", objects)?
         .map(Rect::from);
-    let anti_alias = dictionary
-        .get("AntiAlias")
-        .map(|object| object.try_boolean(objects))
-        .transpose()?;
+    let anti_alias = dictionary.optional_boolean("AntiAlias", objects)?;
     let functions = if dictionary.get("Function").is_some() {
         parse_functions(dictionary, objects)?
     } else {

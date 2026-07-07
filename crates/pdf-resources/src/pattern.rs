@@ -1,6 +1,8 @@
 use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_graphics::{rect::Rect, transform::Transform};
-use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object::{
+    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+};
 
 use crate::{
     error::PdfPagesError,
@@ -141,9 +143,7 @@ impl Pattern {
     ) -> Result<Pattern, PdfPagesError> {
         let dictionary = object.try_dictionary(objects)?;
 
-        let pattern_type = dictionary
-            .get_or_err("PatternType")?
-            .try_number::<i32>(objects)?;
+        let pattern_type = dictionary.required_number::<i32>("PatternType", objects)?;
 
         // Read the transformation matrix for the pattern. Defaults to identity.
         let matrix = Matrix::from_dictionary(dictionary, objects)?;
@@ -151,29 +151,24 @@ impl Pattern {
         match PatternType::try_from(pattern_type)? {
             PatternType::Tiling => {
                 // Read the `/PaintType` entry.
-                let paint_type_int = dictionary
-                    .get_or_err("PaintType")?
-                    .try_number::<i32>(objects)?;
+                let paint_type_int = dictionary.required_number::<i32>("PaintType", objects)?;
 
                 let paint_type = PaintType::try_from(paint_type_int)?;
 
                 // Read the `/TilingType` entry.
-                let tiling_type_int = dictionary
-                    .get_or_err("TilingType")?
-                    .try_number::<i32>(objects)?;
+                let tiling_type_int = dictionary.required_number::<i32>("TilingType", objects)?;
                 let tiling_type = TilingType::try_from(tiling_type_int)?;
 
                 // Read the `/BBox` entry.
                 let bbox = dictionary
-                    .get_or_err("BBox")?
-                    .try_array_of::<f32, 4>(objects)?
+                    .required_array_of::<f32, 4>("BBox", objects)?
                     .into();
 
                 // Read the `/XStep` entry.
-                let x_step = dictionary.get_or_err("XStep")?.try_number::<f32>(objects)?;
+                let x_step = dictionary.required_number::<f32>("XStep", objects)?;
 
                 // Read the `/YStep` entry.
-                let y_step = dictionary.get_or_err("YStep")?.try_number::<f32>(objects)?;
+                let y_step = dictionary.required_number::<f32>("YStep", objects)?;
 
                 // Read the `/Resources` entry. Needed by the pattern's content stream.
                 let parsed_resources =

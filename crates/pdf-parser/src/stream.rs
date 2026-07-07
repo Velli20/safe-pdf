@@ -1,5 +1,7 @@
 use crate::{error::ParserError, parser::PdfParser};
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 use pdf_tokenizer::error::TokenizerError;
 
 impl PdfParser<'_> {
@@ -29,10 +31,7 @@ impl PdfParser<'_> {
         self.read_keyword(STREAM_START)?;
 
         let stream_data_start = self.tokenizer.position;
-        let length = dictionary
-            .get("Length")
-            .map(|value| value.try_number::<usize>(objects))
-            .transpose()?;
+        let length = dictionary.optional_number::<usize>("Length", objects)?;
 
         match length {
             Some(length) => self.parse_stream_with_length(stream_data_start, length),

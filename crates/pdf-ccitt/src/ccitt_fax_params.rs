@@ -1,4 +1,7 @@
-use pdf_object::{dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, error::ObjectError, object_lookup::ObjectLookupExt,
+    object_resolver::ObjectResolver,
+};
 
 /// Decode parameters for the `CCITTFaxDecode` filter (PDF spec §7.4.6, Table 11).
 #[derive(Debug, Clone)]
@@ -57,29 +60,29 @@ impl CCITTFaxParams {
     ) -> Result<Self, ObjectError> {
         let mut p = Self::default();
 
-        if let Some(obj) = dict.get("K") {
-            p.k = obj.try_number::<i32>(objects)?;
+        if let Some(value) = dict.optional_number::<i32>("K", objects)? {
+            p.k = value;
         }
-        if let Some(obj) = dict.get("Columns") {
-            p.columns = obj.try_number::<usize>(objects)?;
+        if let Some(value) = dict.optional_number::<usize>("Columns", objects)? {
+            p.columns = value;
         }
-        if let Some(obj) = dict.get("Rows") {
-            p.rows = obj.try_number::<usize>(objects)?;
+        if let Some(value) = dict.optional_number::<usize>("Rows", objects)? {
+            p.rows = value;
         }
-        if let Some(obj) = dict.get("EndOfLine") {
-            p.end_of_line = obj.try_boolean(objects)?;
+        if let Some(obj) = dict.optional_boolean("EndOfLine", objects)? {
+            p.end_of_line = obj;
         }
-        if let Some(obj) = dict.get("EncodedByteAlign") {
-            p.encoded_byte_align = obj.try_boolean(objects)?;
+        if let Some(obj) = dict.optional_boolean("EncodedByteAlign", objects)? {
+            p.encoded_byte_align = obj;
         }
-        if let Some(obj) = dict.get("EndOfBlock") {
-            p.end_of_block = obj.try_boolean(objects)?;
+        if let Some(obj) = dict.optional_boolean("EndOfBlock", objects)? {
+            p.end_of_block = obj;
         }
-        if let Some(obj) = dict.get("BlackIs1") {
-            p.black_is1 = obj.try_boolean(objects)?;
+        if let Some(obj) = dict.optional_boolean("BlackIs1", objects)? {
+            p.black_is1 = obj;
         }
-        if let Some(obj) = dict.get("DamagedRowsBeforeError") {
-            p.damaged_rows_before_error = obj.try_number::<u32>(objects)?;
+        if let Some(value) = dict.optional_number::<u32>("DamagedRowsBeforeError", objects)? {
+            p.damaged_rows_before_error = value;
         }
 
         Ok(p)

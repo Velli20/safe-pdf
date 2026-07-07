@@ -2,7 +2,8 @@ use std::borrow::Cow;
 
 use pdf_cmap::ToUnicodeCMap;
 use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 
 use crate::{
@@ -105,7 +106,7 @@ fn standard14_from_dictionary(
     dictionary
         .get("BaseFont")
         .and_then(|value| value.try_str(objects).ok())
-        .and_then(|name| Standard14Font::from_base_font_name(name.as_ref()))
+        .and_then(Standard14Font::from_base_font_name)
         .unwrap_or_else(|| Standard14Font::from(flags))
 }
 
@@ -147,11 +148,7 @@ pub(crate) fn descriptor_flags(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<FontFlags, FontError> {
-    let Some(descriptor) = dictionary
-        .get("FontDescriptor")
-        .map(|obj| obj.try_dictionary(objects))
-        .transpose()?
-    else {
+    let Some(descriptor) = dictionary.optional_dictionary("FontDescriptor", objects)? else {
         return Ok(FontFlags::empty());
     };
 

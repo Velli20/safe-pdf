@@ -1,4 +1,6 @@
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::{AnnotationColor, AnnotationError, BorderStyle, LineEndingStyle};
 
@@ -33,22 +35,10 @@ impl LineAnnotation {
         let line_endings = super::line_endings(dictionary, objects)?;
         let border_style = BorderStyle::from_dictionary(dictionary, "BS", objects)?;
         let interior_color = AnnotationColor::from_dictionary(dictionary, "IC", objects)?;
-        let leader_line_length = dictionary
-            .get("LL")
-            .map(|value| value.try_number::<f32>(objects))
-            .transpose()?;
-        let leader_line_extension = dictionary
-            .get("LLE")
-            .map(|value| value.try_number::<f32>(objects))
-            .transpose()?;
-        let caption = dictionary
-            .get("Cap")
-            .map(|value| value.try_boolean(objects))
-            .transpose()?;
-        let intent = dictionary
-            .get("IT")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
+        let leader_line_length = dictionary.optional_number::<f32>("LL", objects)?;
+        let leader_line_extension = dictionary.optional_number::<f32>("LLE", objects)?;
+        let caption = dictionary.optional_boolean("Cap", objects)?;
+        let intent = dictionary.optional_bytes_vec("IT", objects)?;
 
         Ok(Self {
             line,

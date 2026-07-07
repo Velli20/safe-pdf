@@ -2,7 +2,10 @@ use pdf_color_space::{color_space::ColorSpace, indexed_color_space::IndexedColor
 use pdf_decode::{DecodeMap, SampleLayout, decode_sample_codes};
 use pdf_filter::filter::{Filter, decode_with_resolver};
 use pdf_graphics::PixelFormat;
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, stream::StreamObject};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    stream::StreamObject,
+};
 
 use crate::InlineImage;
 use crate::error::PdfImageError;
@@ -113,35 +116,29 @@ impl ImageXObject {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<ImageMetadata, PdfImageError> {
-        let width = dictionary
-            .get_or_err("Width")?
-            .try_number::<usize>(objects)?;
-        let height = dictionary
-            .get_or_err("Height")?
-            .try_number::<usize>(objects)?;
+        let width = dictionary.required_number::<usize>("Width", objects)?;
+        let height = dictionary.required_number::<usize>("Height", objects)?;
 
         if width == 0 || height == 0 {
             return Err(PdfImageError::InvalidImageDimensions { width, height });
         }
 
         let image_mask = dictionary
-            .get("ImageMask")
-            .map_or(Ok(false), |value| value.try_boolean(objects))?;
+            .optional_boolean("ImageMask", objects)?
+            .unwrap_or(false);
         let (bits_per_component, color_space) = if image_mask {
             let bits_per_component = dictionary
-                .get("BitsPerComponent")
-                .map_or(Ok(1), |value| value.try_number::<usize>(objects))?;
+                .optional_number::<usize>("BitsPerComponent", objects)?
+                .unwrap_or(1);
             Self::validate_bits_per_component(bits_per_component, image_mask, None)?;
             (bits_per_component, None)
         } else {
             let bits_per_component = if Self::has_jpx_filter(dictionary, objects)? {
                 dictionary
-                    .get("BitsPerComponent")
-                    .map_or(Ok(8), |value| value.try_number::<usize>(objects))?
+                    .optional_number::<usize>("BitsPerComponent", objects)?
+                    .unwrap_or(8)
             } else {
-                dictionary
-                    .get_or_err("BitsPerComponent")?
-                    .try_number::<usize>(objects)?
+                dictionary.required_number::<usize>("BitsPerComponent", objects)?
             };
             let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
             Self::validate_bits_per_component(

@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use pdf_cmap::{ToUnicodeCMap, Type0EncodingCMap};
 use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 use read_fonts::{FontRef, TableProvider};
 
@@ -207,9 +208,7 @@ fn parse_encoding(
                 ObjectVariant::Stream(stream) => {
                     Ok(Type0EncodingCMap::from_bytes(&stream.data()?)?)
                 }
-                _ => Ok(Type0EncodingCMap::from_name(
-                    value.try_str(objects)?.as_ref(),
-                )?),
+                _ => Ok(Type0EncodingCMap::from_name(value.try_str(objects)?)?),
             }
         })
         .transpose()
@@ -253,9 +252,7 @@ fn descendant_font_dictionary<'a>(
     dictionary: &'a Dictionary,
     objects: &'a dyn ObjectResolver,
 ) -> Result<&'a Dictionary, FontError> {
-    let descendant_fonts = dictionary
-        .get_or_err("DescendantFonts")?
-        .try_array(objects)?;
+    let descendant_fonts = dictionary.required_array("DescendantFonts", objects)?;
     if descendant_fonts.len() != 1 {
         return Err(FontError::InvalidDescendantFonts(
             "Expected exactly one descendant font",
@@ -284,7 +281,7 @@ fn cid_font_subtype(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<CidFontSubType, FontError> {
-    match dictionary.get_or_err("Subtype")?.try_str(objects)?.as_ref() {
+    match dictionary.required_str("Subtype", objects)? {
         "CIDFontType0" => Ok(CidFontSubType::Type0),
         "CIDFontType2" => Ok(CidFontSubType::Type2),
         other => Err(FontError::UnsupportedCidFontSubtype {

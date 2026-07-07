@@ -1,5 +1,7 @@
 use pdf_graphics::pdf_path::PdfPath;
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::{AnnotationColor, AnnotationError, BorderStyle, LineEndingStyle, helpers};
 
@@ -29,10 +31,7 @@ impl PolygonAnnotation {
         let line_endings = super::line_endings(dictionary, objects)?;
         let interior_color = AnnotationColor::from_dictionary(dictionary, "IC", objects)?;
         let border_style = BorderStyle::from_dictionary(dictionary, "BS", objects)?;
-        let intent = dictionary
-            .get("IT")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
+        let intent = dictionary.optional_bytes_vec("IT", objects)?;
 
         Ok(Self {
             vertices,

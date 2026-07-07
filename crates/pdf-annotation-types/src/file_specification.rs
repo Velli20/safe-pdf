@@ -1,5 +1,6 @@
 use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 
 use crate::AnnotationError;
@@ -50,34 +51,13 @@ impl FileSpecification {
             return Ok(Self::Path(value.try_bytes(objects)?.to_vec()));
         };
 
-        let file_system = dictionary
-            .get("FS")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let file_name = dictionary
-            .get("F")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let unicode_file_name = dictionary
-            .get("UF")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let mac_file_name = dictionary
-            .get("Mac")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let dos_file_name = dictionary
-            .get("DOS")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let unix_file_name = dictionary
-            .get("Unix")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let volatile = dictionary
-            .get("V")
-            .map(|value| value.try_boolean(objects))
-            .transpose()?;
+        let file_system = dictionary.optional_bytes_vec("FS", objects)?;
+        let file_name = dictionary.optional_bytes_vec("F", objects)?;
+        let unicode_file_name = dictionary.optional_bytes_vec("UF", objects)?;
+        let mac_file_name = dictionary.optional_bytes_vec("Mac", objects)?;
+        let dos_file_name = dictionary.optional_bytes_vec("DOS", objects)?;
+        let unix_file_name = dictionary.optional_bytes_vec("Unix", objects)?;
+        let volatile = dictionary.optional_boolean("V", objects)?;
 
         Ok(Self::Dictionary(FileSpecificationDictionary {
             file_system,

@@ -10,7 +10,8 @@ use std::rc::Rc;
 use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_font::font::Font;
 use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 
 use crate::{
@@ -228,10 +229,10 @@ fn read_xobject_resource(
             Ok(Some(resource))
         }
         ObjectVariant::Dictionary(dictionary) => {
-            let subtype = dictionary.get_or_err("Subtype")?.try_str(objects)?;
-            if subtype.as_ref() != "Form" {
+            let subtype = dictionary.required_str("Subtype", objects)?;
+            if subtype != "Form" {
                 return Err(crate::error::PdfPagesError::UnsupportedXObjectSubtype {
-                    subtype: subtype.into_owned(),
+                    subtype: subtype.to_owned(),
                 });
             }
 

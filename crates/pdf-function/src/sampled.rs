@@ -1,7 +1,9 @@
 use num_derive::FromPrimitive;
 use num_traits::{FromPrimitive, ToPrimitive};
 use pdf_decode::decode_normalized_samples;
-use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object::{
+    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+};
 
 use crate::{
     error::FunctionReadError,
@@ -232,17 +234,13 @@ impl FunctionImpl for SampledFunction {
         let dictionary = &stream.dictionary;
 
         // /Domain: Required. Array of 2*m numbers defining input domain.
-        let domain = dictionary
-            .get_or_err("Domain")?
-            .try_vec_of::<f32>(objects)?;
+        let domain = dictionary.required_vec_of::<f32>("Domain", objects)?;
 
         // /Range: Required for sampled functions. Array of 2*n numbers.
-        let range = dictionary.get_or_err("Range")?.try_vec_of::<f32>(objects)?;
+        let range = dictionary.required_vec_of::<f32>("Range", objects)?;
 
         // /Size: Required. Array of m integers specifying samples per input dimension.
-        let size = dictionary
-            .get_or_err("Size")?
-            .try_vec_of::<usize>(objects)?;
+        let size = dictionary.required_vec_of::<usize>("Size", objects)?;
         if size.is_empty() {
             return Err(FunctionReadError::InvalidSizeArray);
         }
@@ -250,9 +248,7 @@ impl FunctionImpl for SampledFunction {
         let output_count = range.len() / 2;
 
         // /BitsPerSample: Required. Must be 1, 2, 4, 8, 12, 16, 24, or 32.
-        let bits_per_sample = dictionary
-            .get_or_err("BitsPerSample")?
-            .try_number::<usize>(objects)?;
+        let bits_per_sample = dictionary.required_number::<usize>("BitsPerSample", objects)?;
         if !matches!(bits_per_sample, 1 | 2 | 4 | 8 | 12 | 16 | 24 | 32) {
             return Err(FunctionReadError::InvalidBitsPerSample);
         }

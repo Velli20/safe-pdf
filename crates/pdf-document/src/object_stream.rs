@@ -1,5 +1,6 @@
 use pdf_object::{
-    object_resolver::ObjectResolver, object_variant::ObjectVariant, stream::StreamObject,
+    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    stream::StreamObject,
 };
 use pdf_parser::parser::PdfParser;
 
@@ -22,10 +23,10 @@ pub fn read_object_stream(
     let dict = stream.dictionary.as_ref();
 
     // /N: number of objects in this stream (required)
-    let n = dict.get_or_err("N")?.try_number::<usize>(objects)?;
+    let n = dict.required_number::<usize>("N", objects)?;
 
     // /First: byte offset of the first object data within the decoded stream (required)
-    let first = dict.get_or_err("First")?.try_number::<usize>(objects)?;
+    let first = dict.required_number::<usize>("First", objects)?;
 
     // Decode stream data (applies filters)
     let data = stream.data()?;

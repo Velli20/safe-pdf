@@ -6,7 +6,9 @@
 //! - Type 3: Stitching functions (combining multiple functions)
 //! - Type 4: PostScript Calculator functions
 
-use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object::{
+    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+};
 
 use crate::{
     error::FunctionReadError, exponential_interpolation::ExponentialFunction,
@@ -122,8 +124,7 @@ impl FunctionImpl for Function {
     ) -> Result<Function, FunctionReadError> {
         let function_type = object
             .try_dictionary(objects)?
-            .get_or_err("FunctionType")?
-            .try_number::<i32>(objects)
+            .required_number::<i32>("FunctionType", objects)
             .map(FunctionType::from_i32)?
             .ok_or(FunctionReadError::InvalidFunctionType)?;
 

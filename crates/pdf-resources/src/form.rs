@@ -1,6 +1,7 @@
 use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_graphics::rect::Rect;
 use pdf_graphics::transform::Transform;
+use pdf_object::object_lookup::ObjectLookupExt;
 use pdf_object::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
@@ -37,12 +38,8 @@ impl FormXObject {
         content_stream: ContentStream,
     ) -> Result<Self, PdfPagesError> {
         // Retrieve the `/BBox` entry.
-        let bbox = Rect::from(
-            dictionary
-                .get_or_err("BBox")?
-                .try_array_of::<f32, 4>(objects)?,
-        )
-        .normalized();
+        let bbox =
+            Rect::from(dictionary.required_array_of::<f32, 4>("BBox", objects)?).normalized();
 
         // Retrieve the `/Matrix` entry if present.
         let matrix = Matrix::from_dictionary(dictionary, objects)?;

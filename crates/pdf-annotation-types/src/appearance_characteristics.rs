@@ -1,4 +1,6 @@
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::{AnnotationColor, AnnotationError};
 
@@ -28,24 +30,12 @@ impl AppearanceCharacteristics {
         };
 
         let dictionary = value.try_dictionary(objects)?;
-        let rotation = dictionary
-            .get("R")
-            .map(|value| value.try_number::<i32>(objects))
-            .transpose()?;
+        let rotation = dictionary.optional_number::<i32>("R", objects)?;
         let border_color = AnnotationColor::from_dictionary(dictionary, "BC", objects)?;
         let background_color = AnnotationColor::from_dictionary(dictionary, "BG", objects)?;
-        let normal_caption = dictionary
-            .get("CA")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let rollover_caption = dictionary
-            .get("RC")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let alternate_caption = dictionary
-            .get("AC")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
+        let normal_caption = dictionary.optional_bytes_vec("CA", objects)?;
+        let rollover_caption = dictionary.optional_bytes_vec("RC", objects)?;
+        let alternate_caption = dictionary.optional_bytes_vec("AC", objects)?;
 
         Ok(Some(Self {
             rotation,

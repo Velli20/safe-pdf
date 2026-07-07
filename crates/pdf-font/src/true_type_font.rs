@@ -2,7 +2,8 @@ use std::{borrow::Cow, collections::HashMap};
 
 use pdf_cmap::ToUnicodeCMap;
 use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 
 use crate::{
@@ -154,22 +155,14 @@ impl TrueTypeFont {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<TrueTypeFontProgram, FontError> {
-        if let Some(descriptor) = dictionary
-            .get("FontDescriptor")
-            .map(|obj| obj.try_dictionary(objects))
-            .transpose()?
-        {
+        if let Some(descriptor) = dictionary.optional_dictionary("FontDescriptor", objects)? {
             let flags = descriptor
                 .get("Flags")
                 .and_then(|obj| obj.try_number::<u32>(objects).ok())
                 .map(FontFlags::from_bits_truncate)
                 .unwrap_or_default();
 
-            if let Some(stream) = descriptor
-                .get("FontFile2")
-                .map(|obj| obj.try_stream(objects))
-                .transpose()?
-            {
+            if let Some(stream) = descriptor.optional_stream("FontFile2", objects)? {
                 return Ok(TrueTypeFontProgram {
                     font_file: Cow::Owned(stream.data()?.to_vec()),
                     standard14: None,

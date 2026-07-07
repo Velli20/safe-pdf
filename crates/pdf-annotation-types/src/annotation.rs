@@ -1,6 +1,8 @@
 use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_graphics::rect::Rect;
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 use pdf_resources::{object_reader::ReadCycleTracker, resource_cache::ResourceCache};
 
 use crate::{
@@ -82,8 +84,8 @@ impl Annotation {
         // Some PDFs omit `/Type` on annotation dictionaries even though the
         // entry is nominally expected to be `/Annot`, so only validate it when
         // the key is actually present.
-        if let Some(annotation_type) = dictionary.get("Type") {
-            match annotation_type.try_str(objects)?.as_ref() {
+        if let Some(annotation_type) = dictionary.optional_str("Type", objects)? {
+            match annotation_type {
                 "Annot" => {}
                 other => {
                     return Err(AnnotationError::InvalidEntry {
@@ -96,10 +98,7 @@ impl Annotation {
 
         // `/Subtype` identifies the concrete annotation kind and is required
         // for dispatching to the subtype-specific parser.
-        let subtype = dictionary
-            .get_or_err("Subtype")?
-            .try_str(objects)?
-            .into_owned();
+        let subtype = dictionary.required_str("Subtype", objects)?.to_owned();
 
         let rect = dictionary
             .get("Rect")
@@ -118,26 +117,13 @@ impl Annotation {
 
         let kind = AnnotationKind::from_dictionary(&subtype, dictionary, objects)?;
 
-        let contents = dictionary
-            .get("Contents")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let name = dictionary
-            .get("NM")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let flags = dictionary
-            .get("F")
-            .map(|value| value.try_number::<i32>(objects))
-            .transpose()?;
+        let contents = dictionary.optional_bytes_vec("Contents", objects)?;
+        let name = dictionary.optional_bytes_vec("NM", objects)?;
+        let flags = dictionary.optional_number::<i32>("F", objects)?;
         let appearance_state = dictionary
-            .get("AS")
-            .map(|value| value.try_str(objects).map(|s| s.into_owned()))
-            .transpose()?;
-        let struct_parent = dictionary
-            .get("StructParent")
-            .map(|value| value.try_number::<usize>(objects))
-            .transpose()?;
+            .optional_str("AS", objects)?
+            .map(|s| s.to_owned());
+        let struct_parent = dictionary.optional_number::<usize>("StructParent", objects)?;
 
         let appearance = AppearanceDictionary::from_dictionary(
             dictionary,

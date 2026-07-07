@@ -1,5 +1,6 @@
 use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 
 use crate::{
@@ -243,10 +244,10 @@ fn parse_blend_mode(
         value
             .try_array(objects)?
             .iter()
-            .map(|obj| to_blend_mode(obj.try_str(objects)?.as_ref()))
+            .map(|obj| to_blend_mode(obj.try_str(objects)?))
             .collect::<Result<Vec<BlendMode>, _>>()?
     } else {
-        let mode = to_blend_mode(value.try_str(objects)?.as_ref())?;
+        let mode = to_blend_mode(value.try_str(objects)?)?;
         vec![mode]
     };
 
@@ -263,10 +264,10 @@ fn parse_soft_mask(
 ) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
     let smask = match value {
         ObjectVariant::Dictionary(dict) => {
-            let mask_type = parse_mask_mode(dict.get_or_err("S")?.try_str(objects)?.as_ref())?;
+            let mask_type = parse_mask_mode(dict.required_str("S", objects)?)?;
 
             // Parse the "G" key for the `XObject`
-            let stream = dict.get_or_err("G")?.try_stream(objects)?;
+            let stream = dict.required_stream("G", objects)?;
 
             let shape = match XObject::read_xobject(
                 &ObjectVariant::Stream(stream.clone()),
@@ -286,7 +287,7 @@ fn parse_soft_mask(
 
             Some(Box::new(SoftMask { mask_type, shape }))
         }
-        other => match other.try_str(objects)?.as_ref() {
+        other => match other.try_str(objects)? {
             "None" => None,
             _ => {
                 return Err(invalid_ext_gstate_entry_value(

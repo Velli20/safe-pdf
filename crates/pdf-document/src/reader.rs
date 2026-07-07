@@ -8,6 +8,7 @@ use crate::page::PdfPage;
 use crate::pages::PdfPages;
 use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_object::indirect_object::IndirectObject;
+use pdf_object::object_lookup::ObjectLookupExt;
 use pdf_object::object_resolver::{ObjectResolver, PassthroughResolver};
 use pdf_object::{
     cross_reference_table::{CrossReferenceEntry, CrossReferenceEntryType, CrossReferenceTable},
@@ -112,13 +113,10 @@ fn extract_page_tree(
     objects: &mut dyn ObjectResolver,
 ) -> Result<Vec<PdfPage>, PdfReaderError> {
     // Get the document catalog via the /Root entry in the trailer
-    let catalog = trailer
-        .dictionary
-        .get_or_err("Root")?
-        .try_dictionary(objects)?;
+    let catalog = trailer.dictionary.required_dictionary("Root", objects)?;
 
     // Get the page tree via the /Pages entry in the catalog
-    let pages_dict = catalog.get_or_err("Pages")?.try_dictionary(objects)?;
+    let pages_dict = catalog.required_dictionary("Pages", objects)?;
 
     let mut cache = DefaultResourceCache::default();
     let mut cycle_tracker = ReadCycleTracker::default();
@@ -222,8 +220,7 @@ fn extract_document_id(trailer: &Trailer) -> Result<Vec<u8>, PdfReaderError> {
     // Get the first element of the /ID array
     let first_element = trailer
         .dictionary
-        .get_or_err("ID")?
-        .try_array(&PassthroughResolver)?
+        .required_array("ID", &PassthroughResolver)?
         .first()
         .ok_or(PdfReaderError::MissingDocumentId)?;
 

@@ -1,5 +1,7 @@
 use pdf_cmap::predefined::CidOrdering;
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::error::FontError;
 
@@ -18,20 +20,13 @@ pub(crate) fn cid_ordering_from_dictionary(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<Option<CidOrdering>, FontError> {
-    let Some(cid_system_info) = dictionary
-        .get("CIDSystemInfo")
-        .map(|obj| obj.try_dictionary(objects))
-        .transpose()?
-    else {
+    let Some(cid_system_info) = dictionary.optional_dictionary("CIDSystemInfo", objects)? else {
         return Ok(None);
     };
 
-    let Some(ordering) = cid_system_info
-        .get("Ordering")
-        .and_then(|obj| obj.try_str(objects).ok())
-    else {
+    let Some(ordering) = cid_system_info.optional_str("Ordering", objects)? else {
         return Ok(None);
     };
 
-    Ok(CidOrdering::from_name(ordering.as_ref()))
+    Ok(CidOrdering::from_name(ordering))
 }
