@@ -48,7 +48,7 @@ impl ReadFromDictionary for PdfPages {
             let dictionary = value.try_dictionary(objects)?;
 
             // Determine the type of the child object by reading its `/Type` entry.
-            match dictionary.required_str("Type", objects)?.as_ref() {
+            match dictionary.required_str("Type", objects)? {
                 PdfPage::KEY => {
                     // If the child is a leaf node (`/Type /Page`), parse it as a `PdfPage`.
                     let page = PdfPage::from_dictionary(

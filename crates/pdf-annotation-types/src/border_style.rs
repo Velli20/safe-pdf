@@ -28,11 +28,7 @@ impl BorderStyle {
         let width = dictionary.optional_number::<f32>("W", objects)?;
         let style = dictionary
             .get("S")
-            .map(|value| {
-                value
-                    .try_str(objects)
-                    .map(|name| BorderStyleName::from(name.as_ref()))
-            })
+            .map(|value| value.try_str(objects).map(BorderStyleName::from))
             .transpose()?;
         let dash_pattern = dictionary.optional_vec_of::<f32>("D", objects)?;
 

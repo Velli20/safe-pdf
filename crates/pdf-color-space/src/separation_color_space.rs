@@ -34,7 +34,7 @@ pub(crate) fn parse_separation_color_space(
         });
     };
 
-    let name = name.try_str(objects)?.to_string();
+    let name = name.try_str(objects)?.to_owned();
     let alternate_space = parse_color_space_object(objects, alternate_space, depth)?;
     let tint_transform = Function::parse(objects.resolve_object(tint_transform)?, objects)?;
 

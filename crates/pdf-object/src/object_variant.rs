@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use num_traits::FromPrimitive;
 
 use crate::cross_reference_table::CrossReferenceTable;
@@ -137,7 +135,7 @@ impl ObjectVariant {
         }
     }
 
-    /// Resolves an `ObjectVariant` into a `String`.
+    /// Resolves an `ObjectVariant` into UTF-8 text.
     ///
     /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
     /// into a `String`.
@@ -148,12 +146,9 @@ impl ObjectVariant {
     ///
     /// # Returns
     ///
-    /// `String` or `Err` if the object is not a string or if a reference cannot be
+    /// `&str` or `Err` if the object is not a string or if a reference cannot be
     /// resolved.
-    pub fn try_str<'a>(
-        &'a self,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<Cow<'a, str>, ObjectError> {
+    pub fn try_str<'a>(&'a self, objects: &'a dyn ObjectResolver) -> Result<&'a str, ObjectError> {
         let object = if let ObjectVariant::Reference(_) = self {
             objects.resolve_object(self)?
         } else {
@@ -161,12 +156,13 @@ impl ObjectVariant {
         };
 
         match object {
-            ObjectVariant::HexString(s) => {
-                let s = String::from_utf8_lossy(s);
-                Ok(s)
-            }
-            ObjectVariant::LiteralString(s) | ObjectVariant::Name(s) => {
-                Ok(String::from_utf8_lossy(s))
+            ObjectVariant::HexString(s)
+            | ObjectVariant::LiteralString(s)
+            | ObjectVariant::Name(s) => {
+                std::str::from_utf8(s).map_err(|source| ObjectError::InvalidUtf8String {
+                    object_type: object.name(),
+                    source,
+                })
             }
             _ => Err(ObjectError::TypeMismatch("String", object.name())),
         }
@@ -413,6 +409,22 @@ mod tests {
             .expect_err("non-string object should not decode as string");
 
         assert_eq!(err, ObjectError::TypeMismatch("String", "Integer"));
+    }
+
+    #[test]
+    fn try_str_returns_invalid_utf8_error() {
+        let object = ObjectVariant::Name(vec![0xFF]);
+        let err = object
+            .try_str(&PassthroughResolver)
+            .expect_err("invalid utf-8 should fail");
+
+        assert!(matches!(
+            err,
+            ObjectError::InvalidUtf8String {
+                object_type: "Name",
+                ..
+            }
+        ));
     }
 
     #[test]

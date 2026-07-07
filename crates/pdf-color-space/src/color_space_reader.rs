@@ -65,7 +65,7 @@ pub(crate) fn parse_color_space_object(
         ObjectVariant::Array(arr) => {
             parse_color_space_array(objects, arr.as_slice(), depth.saturating_add(1))
         }
-        other => parse_color_space_name(other.try_str(objects)?.as_ref()),
+        other => parse_color_space_name(other.try_str(objects)?),
     }
 }
 
@@ -78,7 +78,7 @@ fn parse_color_space_array(
     depth: usize,
 ) -> Result<ColorSpace, ColorSpaceError> {
     if let [single] = arr {
-        return parse_color_space_name(single.try_str(objects)?.as_ref());
+        return parse_color_space_name(single.try_str(objects)?);
     }
 
     // Get the color space type (first element)
@@ -88,7 +88,7 @@ fn parse_color_space_array(
             description: "empty color space array".into(),
         })?;
 
-    match cs_type.try_str(objects)?.as_ref() {
+    match cs_type.try_str(objects)? {
         "Indexed" => parse_indexed_color_space(objects, arr, depth),
         "ICCBased" => parse_icc_based_color_space(objects, arr, depth),
         "Separation" => parse_separation_color_space(objects, arr, depth),

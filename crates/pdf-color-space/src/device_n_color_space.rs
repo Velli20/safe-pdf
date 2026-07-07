@@ -46,7 +46,7 @@ pub(crate) fn parse_device_n_color_space(
     let names = names_obj
         .try_array(objects)?
         .iter()
-        .map(|n| n.try_str(objects).map(|s| s.into_owned()))
+        .map(|n| n.try_str(objects).map(|s| s.to_owned()))
         .collect::<Result<Vec<_>, _>>()?;
 
     let alternate_space = parse_color_space_object(objects, alt_obj, depth)?;

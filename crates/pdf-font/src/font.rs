@@ -42,7 +42,7 @@ impl Font {
     ) -> Result<Font, FontError> {
         // Determine the font subtype from the dictionary.
         let subtype = dictionary.required_str("Subtype", objects)?;
-        match subtype.as_ref() {
+        match subtype {
             "Type0" => {
                 let type0_font = Type0Font::from_dictionary(dictionary, objects)?;
                 Ok(Font::Type0(type0_font))

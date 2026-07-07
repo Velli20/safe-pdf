@@ -67,12 +67,12 @@ fn validate_stream_type(
         return Ok(());
     };
 
-    if type_name.as_ref() == "XRef" {
+    if type_name == "XRef" {
         Ok(())
     } else {
         Err(ParserError::InvalidKeyword(
             "XRef".to_string(),
-            type_name.into_owned(),
+            type_name.to_owned(),
         ))
     }
 }

@@ -144,7 +144,7 @@ fn explicit_destination(
 
     let page = destination_target(page_item, objects)?;
 
-    match mode_item.try_str(objects)?.as_ref() {
+    match mode_item.try_str(objects)? {
         "XYZ" => Ok(ExplicitDestination::Xyz {
             page,
             left: items.optional_number(2, objects)?,

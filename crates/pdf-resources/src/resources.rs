@@ -230,9 +230,9 @@ fn read_xobject_resource(
         }
         ObjectVariant::Dictionary(dictionary) => {
             let subtype = dictionary.required_str("Subtype", objects)?;
-            if subtype.as_ref() != "Form" {
+            if subtype != "Form" {
                 return Err(crate::error::PdfPagesError::UnsupportedXObjectSubtype {
-                    subtype: subtype.into_owned(),
+                    subtype: subtype.to_owned(),
                 });
             }
 

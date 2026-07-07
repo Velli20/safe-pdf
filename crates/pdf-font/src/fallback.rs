@@ -106,7 +106,7 @@ fn standard14_from_dictionary(
     dictionary
         .get("BaseFont")
         .and_then(|value| value.try_str(objects).ok())
-        .and_then(|name| Standard14Font::from_base_font_name(name.as_ref()))
+        .and_then(Standard14Font::from_base_font_name)
         .unwrap_or_else(|| Standard14Font::from(flags))
 }
 

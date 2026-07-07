@@ -34,8 +34,7 @@ impl ReadXObject for XObject {
         cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, PdfPagesError> {
-        let subtype = dictionary.required_str("Subtype", objects)?;
-        match subtype.as_ref() {
+        match dictionary.required_str("Subtype", objects)? {
             "Image" => {
                 let soft_mask = resolve_image_soft_mask(
                     dictionary,

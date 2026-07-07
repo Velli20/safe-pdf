@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use num_traits::FromPrimitive;
 
 use crate::{
@@ -152,7 +150,7 @@ pub trait ObjectLookupExt<K> {
         objects: &'a dyn ObjectResolver,
     ) -> Result<&'a [ObjectVariant], ObjectError>;
 
-    /// Returns an optional string-like value from this container.
+    /// Returns an optional UTF-8 string value from this container.
     ///
     /// This method looks up a value by key or index and converts it using
     /// [`ObjectVariant::try_str`]. Missing entries and explicit PDF `null`
@@ -166,16 +164,16 @@ pub trait ObjectLookupExt<K> {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(Some(Cow<str>))` when the value exists and converts
+    /// Returns `Ok(Some(&str))` when the value exists and converts
     /// successfully, `Ok(None)` when the value is missing or resolves to
     /// `null`, or `Err` if reference resolution or conversion fails.
     fn optional_str<'a>(
         &'a self,
         key: K,
         objects: &'a dyn ObjectResolver,
-    ) -> Result<Option<Cow<'a, str>>, ObjectError>;
+    ) -> Result<Option<&'a str>, ObjectError>;
 
-    /// Returns a required string-like value from this container.
+    /// Returns a required UTF-8 string value from this container.
     ///
     /// This method looks up a value by key or index and converts it using
     /// [`ObjectVariant::try_str`].
@@ -188,14 +186,14 @@ pub trait ObjectLookupExt<K> {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(Cow<str>)` when the value exists and converts successfully,
-    /// or `Err` if the value is missing, reference resolution fails, or
+    /// Returns `Ok(&str)` when the value exists and converts successfully, or
+    /// `Err` if the value is missing, reference resolution fails, or
     /// conversion fails.
     fn required_str<'a>(
         &'a self,
         key: K,
         objects: &'a dyn ObjectResolver,
-    ) -> Result<Cow<'a, str>, ObjectError>;
+    ) -> Result<&'a str, ObjectError>;
 
     /// Returns an optional byte string value from this container.
     ///
@@ -589,7 +587,7 @@ impl ObjectLookupExt<usize> for [ObjectVariant] {
         &'a self,
         index: usize,
         objects: &'a dyn ObjectResolver,
-    ) -> Result<Option<Cow<'a, str>>, ObjectError> {
+    ) -> Result<Option<&'a str>, ObjectError> {
         optional_resolved_value(self.get(index), objects)?
             .map(|value| value.try_str(objects))
             .transpose()
@@ -599,7 +597,7 @@ impl ObjectLookupExt<usize> for [ObjectVariant] {
         &'a self,
         index: usize,
         objects: &'a dyn ObjectResolver,
-    ) -> Result<Cow<'a, str>, ObjectError> {
+    ) -> Result<&'a str, ObjectError> {
         required_slice_value(self, index)?.try_str(objects)
     }
 
@@ -799,7 +797,7 @@ impl ObjectLookupExt<&str> for Dictionary {
         &'a self,
         key: &str,
         objects: &'a dyn ObjectResolver,
-    ) -> Result<Option<Cow<'a, str>>, ObjectError> {
+    ) -> Result<Option<&'a str>, ObjectError> {
         optional_resolved_value(self.get(key), objects)?
             .map(|value| value.try_str(objects))
             .transpose()
@@ -809,7 +807,7 @@ impl ObjectLookupExt<&str> for Dictionary {
         &'a self,
         key: &str,
         objects: &'a dyn ObjectResolver,
-    ) -> Result<Cow<'a, str>, ObjectError> {
+    ) -> Result<&'a str, ObjectError> {
         self.get_or_err(key)?.try_str(objects)
     }
 
@@ -1154,8 +1152,7 @@ mod tests {
         assert_eq!(
             dictionary
                 .required_str("String", &PassthroughResolver)
-                .expect("string exists")
-                .as_ref(),
+                .expect("string exists"),
             "Name"
         );
         assert_eq!(
@@ -1235,8 +1232,7 @@ mod tests {
         assert_eq!(
             values
                 .required_str(2, &PassthroughResolver)
-                .expect("string exists")
-                .as_ref(),
+                .expect("string exists"),
             "text"
         );
         assert!(
@@ -1272,5 +1268,39 @@ mod tests {
             .expect_err("boolean is not a string");
 
         assert_eq!(error, ObjectError::TypeMismatch("String", "Boolean"));
+    }
+
+    #[test]
+    fn required_str_propagates_invalid_utf8() {
+        let dictionary = dictionary_with("Name", ObjectVariant::Name(vec![0xFF]));
+
+        let error = dictionary
+            .required_str("Name", &PassthroughResolver)
+            .expect_err("invalid utf-8 should fail");
+
+        assert!(matches!(
+            error,
+            ObjectError::InvalidUtf8String {
+                object_type: "Name",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn optional_str_propagates_invalid_utf8() {
+        let dictionary = dictionary_with("Name", ObjectVariant::LiteralString(vec![0xFF]));
+
+        let error = dictionary
+            .optional_str("Name", &PassthroughResolver)
+            .expect_err("invalid utf-8 should fail");
+
+        assert!(matches!(
+            error,
+            ObjectError::InvalidUtf8String {
+                object_type: "LiteralString",
+                ..
+            }
+        ));
     }
 }

@@ -13,6 +13,12 @@ pub enum ObjectError {
     TypeMismatch(&'static str, &'static str),
     #[error("Failed to convert number to the requested type")]
     NumberConversionError,
+    #[error("Invalid UTF-8 in {object_type}")]
+    InvalidUtf8String {
+        object_type: &'static str,
+        #[source]
+        source: std::str::Utf8Error,
+    },
     #[error("Detected a cyclic dependency while reading object {obj_num}")]
     CyclicDependency { obj_num: usize },
     #[error("Failed to resolve an object reference {obj_num}")]

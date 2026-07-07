@@ -119,10 +119,10 @@ impl Type1Font {
 
             let data = stream.data()?;
 
-            return match subtype.as_deref() {
+            return match subtype {
                 Some("Type1C") | Some("CIDFontType0C") => build_cff_font(data.as_ref())
                     .map(|font| (font, Type1FontProgramFormat::OpenTypeCff)),
-                Some("OpenType") => Ok((data.into_owned(), Type1FontProgramFormat::OpenTypeCff)),
+                Some("OpenType") => Ok((data.to_vec(), Type1FontProgramFormat::OpenTypeCff)),
                 Some(other) => Err(FontError::UnsupportedFontSubtype {
                     subtype: other.to_string(),
                 }),

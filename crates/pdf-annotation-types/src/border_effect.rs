@@ -25,11 +25,7 @@ impl BorderEffect {
         let dictionary = value.try_dictionary(objects)?;
         let style = dictionary
             .get("S")
-            .map(|value| {
-                value
-                    .try_str(objects)
-                    .map(|name| BorderEffectStyle::from(name.as_ref()))
-            })
+            .map(|value| value.try_str(objects).map(BorderEffectStyle::from))
             .transpose()?;
         let intensity = dictionary.optional_number::<f32>("I", objects)?;
 

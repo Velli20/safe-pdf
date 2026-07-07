@@ -151,7 +151,7 @@ impl EncryptDictionary {
     ) -> Result<Self, PdfReaderError> {
         let filter = dict
             .required_str("Filter", objects)
-            .map(|obj| EncryptionFilter::from(obj.as_ref()))?;
+            .map(EncryptionFilter::from)?;
 
         let version_num = dict.required_number::<i32>("V", objects)?;
         let version = EncryptionVersion::try_from(version_num)?;

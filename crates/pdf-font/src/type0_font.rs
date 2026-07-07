@@ -208,9 +208,7 @@ fn parse_encoding(
                 ObjectVariant::Stream(stream) => {
                     Ok(Type0EncodingCMap::from_bytes(&stream.data()?)?)
                 }
-                _ => Ok(Type0EncodingCMap::from_name(
-                    value.try_str(objects)?.as_ref(),
-                )?),
+                _ => Ok(Type0EncodingCMap::from_name(value.try_str(objects)?)?),
             }
         })
         .transpose()
@@ -283,7 +281,7 @@ fn cid_font_subtype(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<CidFontSubType, FontError> {
-    match dictionary.required_str("Subtype", objects)?.as_ref() {
+    match dictionary.required_str("Subtype", objects)? {
         "CIDFontType0" => Ok(CidFontSubType::Type0),
         "CIDFontType2" => Ok(CidFontSubType::Type2),
         other => Err(FontError::UnsupportedCidFontSubtype {

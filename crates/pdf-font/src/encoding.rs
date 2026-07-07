@@ -21,14 +21,14 @@ pub enum FontEncoding {
     Unknown(String),
 }
 
-impl From<Cow<'_, str>> for FontEncoding {
-    fn from(name: Cow<'_, str>) -> Self {
-        match name.as_ref() {
+impl From<&str> for FontEncoding {
+    fn from(name: &str) -> Self {
+        match name {
             "MacRomanEncoding" => Self::MacRoman,
             "MacExpertEncoding" => Self::MacExpert,
             "StandardEncoding" => Self::Standard,
             "WinAnsiEncoding" => Self::WinAnsi,
-            _ => Self::Unknown(name.to_string()),
+            _ => Self::Unknown(name.to_owned()),
         }
     }
 }
@@ -74,7 +74,7 @@ impl Encoding {
                 }
                 _ => {
                     if let Some(slot) = self.names.get_mut(current_range_start) {
-                        *slot = Cow::Owned(chunk.try_str(objects)?.to_string());
+                        *slot = Cow::Owned(chunk.try_str(objects)?.to_owned());
                     }
                     current_range_start = current_range_start.saturating_add(1);
                 }

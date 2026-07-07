@@ -32,13 +32,12 @@ impl Operands {
     }
 
     pub fn get_str(&mut self) -> Result<String, PdfOperatorError> {
-        match self.take_next()? {
-            ObjectVariant::HexString(s)
-            | ObjectVariant::Name(s)
-            | ObjectVariant::LiteralString(s) => Ok(String::from_utf8_lossy(&s).into_owned()),
-            other => Err(PdfOperatorError::OperandTypeMismatch {
+        let object = self.take_next()?;
+        match object.try_str(&PassthroughResolver) {
+            Ok(value) => Ok(value.to_owned()),
+            Err(_) => Err(PdfOperatorError::OperandTypeMismatch {
                 expected: "a string operand (HexString, Name, or LiteralString)",
-                found: other.name(),
+                found: object.name(),
             }),
         }
     }

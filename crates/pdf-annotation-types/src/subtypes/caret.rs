@@ -20,11 +20,7 @@ impl CaretAnnotation {
         let difference_rect = dictionary.optional_array_of::<f32, 4>("RD", objects)?;
         let style = dictionary
             .get("Sy")
-            .map(|value| {
-                value
-                    .try_str(objects)
-                    .map(|name| CaretSymbolStyle::from(name.as_ref()))
-            })
+            .map(|value| value.try_str(objects).map(CaretSymbolStyle::from))
             .transpose()?;
 
         Ok(Self {

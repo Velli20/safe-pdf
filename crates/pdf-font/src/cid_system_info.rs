@@ -28,5 +28,5 @@ pub(crate) fn cid_ordering_from_dictionary(
         return Ok(None);
     };
 
-    Ok(CidOrdering::from_name(ordering.as_ref()))
+    Ok(CidOrdering::from_name(ordering))
 }

@@ -84,8 +84,8 @@ impl Annotation {
         // Some PDFs omit `/Type` on annotation dictionaries even though the
         // entry is nominally expected to be `/Annot`, so only validate it when
         // the key is actually present.
-        if let Some(annotation_type) = dictionary.get("Type") {
-            match annotation_type.try_str(objects)?.as_ref() {
+        if let Some(annotation_type) = dictionary.optional_str("Type", objects)? {
+            match annotation_type {
                 "Annot" => {}
                 other => {
                     return Err(AnnotationError::InvalidEntry {
@@ -98,10 +98,7 @@ impl Annotation {
 
         // `/Subtype` identifies the concrete annotation kind and is required
         // for dispatching to the subtype-specific parser.
-        let subtype = dictionary
-            .get_or_err("Subtype")?
-            .try_str(objects)?
-            .into_owned();
+        let subtype = dictionary.required_str("Subtype", objects)?.to_owned();
 
         let rect = dictionary
             .get("Rect")
@@ -125,7 +122,7 @@ impl Annotation {
         let flags = dictionary.optional_number::<i32>("F", objects)?;
         let appearance_state = dictionary
             .optional_str("AS", objects)?
-            .map(|s| s.into_owned());
+            .map(|s| s.to_owned());
         let struct_parent = dictionary.optional_number::<usize>("StructParent", objects)?;
 
         let appearance = AppearanceDictionary::from_dictionary(
