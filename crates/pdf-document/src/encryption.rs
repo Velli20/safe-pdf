@@ -10,7 +10,9 @@
 //! - The encryption dictionary contains parameters needed to decrypt the document.
 //! - Before reading other objects, the encryption dictionary must be resolved first.
 
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::error::PdfReaderError;
 
@@ -148,32 +150,19 @@ impl EncryptDictionary {
         objects: &dyn ObjectResolver,
     ) -> Result<Self, PdfReaderError> {
         let filter = dict
-            .get_or_err("Filter")?
-            .try_str(objects)
+            .required_str("Filter", objects)
             .map(|obj| EncryptionFilter::from(obj.as_ref()))?;
 
-        let version_obj = dict.get_or_err("V")?;
-
-        let version_num = version_obj.try_number::<i32>(objects)?;
+        let version_num = dict.required_number::<i32>("V", objects)?;
         let version = EncryptionVersion::try_from(version_num)?;
 
-        let revision = dict.get_or_err("R")?.try_number::<i32>(objects)?;
-
-        let owner_password_hash = dict.get_or_err("O")?.try_bytes(objects)?.to_vec();
-
-        let user_password_hash = dict.get_or_err("U")?.try_bytes(objects)?.to_vec();
-
-        let permissions = dict.get_or_err("P")?.try_number::<i32>(objects)?;
-
-        let key_length = dict
-            .get("Length")
-            .map(|l| l.try_number::<i32>(objects))
-            .transpose()?;
-
+        let revision = dict.required_number::<i32>("R", objects)?;
+        let owner_password_hash = dict.required_bytes("O", objects)?.to_vec();
+        let user_password_hash = dict.required_bytes("U", objects)?.to_vec();
+        let permissions = dict.required_number::<i32>("P", objects)?;
+        let key_length = dict.optional_number::<i32>("Length", objects)?;
         let encrypt_metadata = dict
-            .get("EncryptMetadata")
-            .map(|em| em.try_boolean(objects))
-            .transpose()?
+            .optional_boolean("EncryptMetadata", objects)?
             .unwrap_or(Self::ENCRYPT_METADATA_DEFAULT);
 
         Ok(EncryptDictionary {

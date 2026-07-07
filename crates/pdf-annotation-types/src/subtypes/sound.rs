@@ -1,4 +1,6 @@
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::{AnnotationError, helpers};
 
@@ -21,14 +23,8 @@ impl SoundAnnotation {
             .get("Sound")
             .map(|value| helpers::dictionary(value, objects))
             .transpose()?;
-        let rate = dictionary
-            .get("R")
-            .map(|value| value.try_number::<f32>(objects))
-            .transpose()?;
-        let channels = dictionary
-            .get("C")
-            .map(|value| value.try_number::<i32>(objects))
-            .transpose()?;
+        let rate = dictionary.optional_number::<f32>("R", objects)?;
+        let channels = dictionary.optional_number::<i32>("C", objects)?;
 
         Ok(Self {
             sound,

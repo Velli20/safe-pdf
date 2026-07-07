@@ -1,6 +1,6 @@
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    dictionary::Dictionary, error::ObjectError, object_lookup::ObjectLookupExt,
+    object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
 use crate::{
@@ -113,10 +113,7 @@ impl AnnotationAction {
         };
 
         let action_dictionary = value.try_dictionary(objects)?.clone();
-        let action_type = action_dictionary
-            .get_or_err("S")?
-            .try_str(objects)?
-            .into_owned();
+        let action_type = action_dictionary.required_str("S", objects)?.into_owned();
 
         let action = match action_type.as_ref() {
             "GoTo" => Self::GoTo {
@@ -135,19 +132,11 @@ impl AnnotationAction {
                     .get("D")
                     .map(|value| AnnotationDestination::from_object(value, "D", objects))
                     .transpose()?,
-                new_window: action_dictionary
-                    .get("NewWindow")
-                    .map(|value| value.try_boolean(objects))
-                    .transpose()?,
+                new_window: action_dictionary.optional_boolean("NewWindow", objects)?,
             },
             "URI" => Self::Uri {
-                uri: action_dictionary
-                    .get_or_err("URI")?
-                    .try_bytes_vec(objects)?,
-                is_map: action_dictionary
-                    .get("IsMap")
-                    .map(|value| value.try_boolean(objects))
-                    .transpose()?,
+                uri: action_dictionary.required_bytes_vec("URI", objects)?,
+                is_map: action_dictionary.optional_boolean("IsMap", objects)?,
             },
             "Launch" => Self::Launch {
                 file_specification: FileSpecification::from_dictionary(
@@ -161,7 +150,7 @@ impl AnnotationAction {
                     .transpose()?,
             },
             "Named" => Self::Named {
-                name: action_dictionary.get_or_err("N")?.try_bytes_vec(objects)?,
+                name: action_dictionary.required_bytes_vec("N", objects)?,
             },
             "SubmitForm" => Self::SubmitForm {
                 file_specification: FileSpecification::from_dictionary(
@@ -170,17 +159,11 @@ impl AnnotationAction {
                     objects,
                 )?,
                 fields: name_list(&action_dictionary, "Fields", objects)?,
-                flags: action_dictionary
-                    .get("Flags")
-                    .map(|value| value.try_number::<i32>(objects))
-                    .transpose()?,
+                flags: action_dictionary.optional_number::<i32>("Flags", objects)?,
             },
             "ResetForm" => Self::ResetForm {
                 fields: name_list(&action_dictionary, "Fields", objects)?,
-                flags: action_dictionary
-                    .get("Flags")
-                    .map(|value| value.try_number::<i32>(objects))
-                    .transpose()?,
+                flags: action_dictionary.optional_number::<i32>("Flags", objects)?,
             },
             "ImportData" => Self::ImportData {
                 file_specification: FileSpecification::from_object(
@@ -193,16 +176,10 @@ impl AnnotationAction {
             },
             "SetOCGState" => Self::SetOCGState {
                 state: name_list(&action_dictionary, "State", objects)?.unwrap_or_default(),
-                preserve_rb: action_dictionary
-                    .get("PreserveRB")
-                    .map(|value| value.try_boolean(objects))
-                    .transpose()?,
+                preserve_rb: action_dictionary.optional_boolean("PreserveRB", objects)?,
             },
             "Rendition" => Self::Rendition {
-                operation: action_dictionary
-                    .get("OP")
-                    .map(|value| value.try_number::<i32>(objects))
-                    .transpose()?,
+                operation: action_dictionary.optional_number::<i32>("OP", objects)?,
                 rendition: Rendition::from_dictionary(&action_dictionary, objects)?,
             },
             "Trans" => Self::Trans {
@@ -210,10 +187,7 @@ impl AnnotationAction {
                     .get("Trans")
                     .map(|value| helpers::dictionary(value, objects))
                     .transpose()?,
-                duration: action_dictionary
-                    .get("D")
-                    .map(|value| value.try_number::<f32>(objects))
-                    .transpose()?,
+                duration: action_dictionary.optional_number::<f32>("D", objects)?,
             },
             "GoTo3DView" => Self::GoTo3DView {
                 view: three_d_view(&action_dictionary, "TA", objects)?,

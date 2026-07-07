@@ -1,4 +1,6 @@
-use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object::{
+    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+};
 
 use crate::{
     error::FunctionReadError,
@@ -86,22 +88,16 @@ impl FunctionImpl for ExponentialFunction {
         objects: &dyn ObjectResolver,
     ) -> Result<Function, FunctionReadError> {
         let dictionary = object.try_dictionary(objects)?;
-        let domain = dictionary
-            .get_or_err("Domain")?
-            .try_array_of::<f32, 2>(objects)?;
+        let domain = dictionary.required_array_of::<f32, 2>("Domain", objects)?;
 
         // /C0: Output values at domain[0]. Defaults to [0.0].
         let c0 = dictionary
-            .get("C0")
-            .map(|o| o.try_vec_of::<f32>(objects))
-            .transpose()?
+            .optional_vec_of::<f32>("C0", objects)?
             .unwrap_or_else(|| vec![0.0]);
 
         // /C1: Output values at domain[1]. Defaults to [1.0].
         let c1 = dictionary
-            .get("C1")
-            .map(|o| o.try_vec_of::<f32>(objects))
-            .transpose()?
+            .optional_vec_of::<f32>("C1", objects)?
             .unwrap_or_else(|| vec![1.0]);
 
         // Validate C0/C1 length match at parse time.
@@ -110,13 +106,10 @@ impl FunctionImpl for ExponentialFunction {
         }
 
         // /N: Interpolation exponent (required).
-        let exponent = dictionary.get_or_err("N")?.try_number::<f32>(objects)?;
+        let exponent = dictionary.required_number::<f32>("N", objects)?;
 
         // /Range: Optional. Output range for clamping (ISO 32000 §7.10.3).
-        let range = dictionary
-            .get("Range")
-            .map(|o| o.try_vec_of::<f32>(objects))
-            .transpose()?;
+        let range = dictionary.optional_vec_of::<f32>("Range", objects)?;
 
         Ok(Function::Exponential(ExponentialFunction {
             c0,

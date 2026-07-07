@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use pdf_cmap::ToUnicodeCMap;
 use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 
 use crate::{
@@ -109,23 +110,12 @@ impl Type1Font {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<(Vec<u8>, Type1FontProgramFormat), FontError> {
-        let descriptor = dictionary
-            .get("FontDescriptor")
-            .map(|obj| obj.try_dictionary(objects))
-            .transpose()?;
-
-        let Some(descriptor) = descriptor else {
-            return Err(FontError::MissingFontFile);
-        };
+        let descriptor = dictionary.required_dictionary("FontDescriptor", objects)?;
 
         // Path 1: FontFile3 stream with subtype-driven handling.
         if let Some(font_file3) = descriptor.get("FontFile3") {
             let stream = font_file3.try_stream(objects)?;
-            let subtype = stream
-                .dictionary
-                .get("Subtype")
-                .map(|obj| obj.try_str(objects))
-                .transpose()?;
+            let subtype = stream.dictionary.optional_str("Subtype", objects)?;
 
             let data = stream.data()?;
 
@@ -178,18 +168,9 @@ fn trim_classic_type1_by_lengths(
     data: &[u8],
     objects: &dyn ObjectResolver,
 ) -> Result<Option<Vec<u8>>, FontError> {
-    let length1 = descriptor
-        .get("Length1")
-        .map(|obj| obj.try_number::<usize>(objects))
-        .transpose()?;
-    let length2 = descriptor
-        .get("Length2")
-        .map(|obj| obj.try_number::<usize>(objects))
-        .transpose()?;
-    let length3 = descriptor
-        .get("Length3")
-        .map(|obj| obj.try_number::<usize>(objects))
-        .transpose()?;
+    let length1 = descriptor.optional_number::<usize>("Length1", objects)?;
+    let length2 = descriptor.optional_number::<usize>("Length2", objects)?;
+    let length3 = descriptor.optional_number::<usize>("Length3", objects)?;
 
     let Some(total_length) = length1
         .zip(length2)

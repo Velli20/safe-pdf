@@ -1,5 +1,7 @@
 use crate::error::FilterError;
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 /// Parameters for the Predictor post-processing step shared by
 /// LZWDecode and FlateDecode (PDF spec §7.4.4.4, Table 10).
@@ -36,17 +38,17 @@ impl PredictorParams {
     ) -> Result<Self, FilterError> {
         let mut p = Self::default();
 
-        if let Some(obj) = dict.get("Predictor") {
-            p.predictor = obj.try_number::<u8>(objects)?;
+        if let Some(value) = dict.optional_number::<u8>("Predictor", objects)? {
+            p.predictor = value;
         }
-        if let Some(obj) = dict.get("Colors") {
-            p.colors = obj.try_number::<usize>(objects)?;
+        if let Some(value) = dict.optional_number::<usize>("Colors", objects)? {
+            p.colors = value;
         }
-        if let Some(obj) = dict.get("BitsPerComponent") {
-            p.bits_per_component = obj.try_number::<usize>(objects)?;
+        if let Some(value) = dict.optional_number::<usize>("BitsPerComponent", objects)? {
+            p.bits_per_component = value;
         }
-        if let Some(obj) = dict.get("Columns") {
-            p.columns = obj.try_number::<usize>(objects)?;
+        if let Some(value) = dict.optional_number::<usize>("Columns", objects)? {
+            p.columns = value;
         }
 
         Ok(p)

@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use pdf_graphics::color::Color;
-use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object::{
+    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+};
 
 use crate::{
     color_space::ColorSpace, color_space_reader::parse_color_space_object, error::ColorSpaceError,
@@ -42,10 +44,7 @@ pub(crate) fn parse_icc_based_color_space(
     };
 
     let stream = icc_stream.try_stream(objects)?;
-    let num_components = stream
-        .dictionary
-        .get_or_err("N")?
-        .try_number::<usize>(objects)?;
+    let num_components = stream.dictionary.required_number::<usize>("N", objects)?;
 
     // N shall be 1, 3, or 4.
     if !matches!(num_components, 1 | 3 | 4) {

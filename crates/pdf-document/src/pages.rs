@@ -1,6 +1,8 @@
 use crate::page::PdfPage;
 use pdf_content_stream::ContentStreamIdAllocator;
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 use pdf_resources::{
     error::PdfPagesError,
     media_box::MediaBox,
@@ -29,7 +31,7 @@ impl ReadFromDictionary for PdfPages {
         // The `/Kids` array is a required entry in a Pages dictionary. It contains
         // indirect references to child objects, which can be either other Pages nodes
         // or leaf Page nodes.
-        let kids_array = dictionary.get_or_err("Kids")?.try_array(objects)?;
+        let kids_array = dictionary.required_array("Kids", objects)?;
 
         // This vector will store the flattened list of all leaf `PdfPage` objects
         // found by traversing the page tree.
@@ -46,7 +48,7 @@ impl ReadFromDictionary for PdfPages {
             let dictionary = value.try_dictionary(objects)?;
 
             // Determine the type of the child object by reading its `/Type` entry.
-            match dictionary.get_or_err("Type")?.try_str(objects)?.as_ref() {
+            match dictionary.required_str("Type", objects)?.as_ref() {
                 PdfPage::KEY => {
                     // If the child is a leaf node (`/Type /Page`), parse it as a `PdfPage`.
                     let page = PdfPage::from_dictionary(

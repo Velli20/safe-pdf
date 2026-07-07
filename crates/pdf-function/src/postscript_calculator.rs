@@ -1,5 +1,7 @@
 use num_traits::ToPrimitive;
-use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object::{
+    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+};
 use pdf_postscript::{operator::Operator, value::Value};
 
 use crate::{
@@ -119,13 +121,9 @@ impl FunctionImpl for PostScriptCalculatorFunction {
         let stream = object.try_stream(objects)?;
         let domain = stream
             .dictionary
-            .get_or_err("Domain")?
-            .try_vec_of::<f32>(objects)?;
+            .required_vec_of::<f32>("Domain", objects)?;
 
-        let range = stream
-            .dictionary
-            .get_or_err("Range")?
-            .try_vec_of::<f32>(objects)?;
+        let range = stream.dictionary.required_vec_of::<f32>("Range", objects)?;
 
         // Parse PostScript code: add spaces around braces for tokenization
         let stream_data = stream.data()?;

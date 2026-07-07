@@ -1,4 +1,6 @@
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::AnnotationError;
 
@@ -13,11 +15,7 @@ impl StampAnnotation {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
-        let name = dictionary
-            .get("Name")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-
+        let name = dictionary.optional_bytes_vec("Name", objects)?;
         Ok(Self { name })
     }
 }

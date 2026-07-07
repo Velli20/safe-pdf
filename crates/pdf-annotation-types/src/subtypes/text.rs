@@ -1,4 +1,6 @@
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::AnnotationError;
 
@@ -23,26 +25,11 @@ impl TextAnnotation {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
-        let open = dictionary
-            .get("Open")
-            .map(|value| value.try_boolean(objects))
-            .transpose()?;
-        let name = dictionary
-            .get("Name")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let state = dictionary
-            .get("State")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let state_model = dictionary
-            .get("StateModel")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let intent = dictionary
-            .get("IT")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
+        let open = dictionary.optional_boolean("Open", objects)?;
+        let name = dictionary.optional_bytes_vec("Name", objects)?;
+        let state = dictionary.optional_bytes_vec("State", objects)?;
+        let state_model = dictionary.optional_bytes_vec("StateModel", objects)?;
+        let intent = dictionary.optional_bytes_vec("IT", objects)?;
         let ex_data = dictionary
             .get("ExData")
             .map(|value| crate::helpers::dictionary(value, objects))

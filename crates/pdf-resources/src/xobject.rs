@@ -7,8 +7,8 @@ use crate::{
 use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_image::{ImageXObject, PdfImageError};
 use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-    stream::StreamObject,
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant, stream::StreamObject,
 };
 
 /// Represents a PDF External Object (XObject).
@@ -34,8 +34,7 @@ impl ReadXObject for XObject {
         cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, PdfPagesError> {
-        let subtype = dictionary.get_or_err("Subtype")?.try_str(objects)?;
-
+        let subtype = dictionary.required_str("Subtype", objects)?;
         match subtype.as_ref() {
             "Image" => {
                 let soft_mask = resolve_image_soft_mask(

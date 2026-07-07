@@ -1,4 +1,6 @@
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::{AnnotationError, BorderEffect};
 
@@ -27,34 +29,13 @@ impl FreeTextAnnotation {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
-        let default_appearance = dictionary
-            .get("DA")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let quadding = dictionary
-            .get("Q")
-            .map(|value| value.try_number::<i32>(objects))
-            .transpose()?;
-        let rich_contents = dictionary
-            .get("RC")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let default_style = dictionary
-            .get("DS")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let callout_line = dictionary
-            .get("CL")
-            .map(|value| value.try_vec_of::<f32>(objects))
-            .transpose()?;
-        let difference_rect = dictionary
-            .get("RD")
-            .map(|value| value.try_array_of::<f32, 4>(objects))
-            .transpose()?;
-        let intent = dictionary
-            .get("IT")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
+        let default_appearance = dictionary.optional_bytes_vec("DA", objects)?;
+        let quadding = dictionary.optional_number::<i32>("Q", objects)?;
+        let rich_contents = dictionary.optional_bytes_vec("RC", objects)?;
+        let default_style = dictionary.optional_bytes_vec("DS", objects)?;
+        let callout_line = dictionary.optional_vec_of::<f32>("CL", objects)?;
+        let difference_rect = dictionary.optional_array_of::<f32, 4>("RD", objects)?;
+        let intent = dictionary.optional_bytes_vec("IT", objects)?;
         let border_effect = BorderEffect::from_dictionary(dictionary, "BE", objects)?;
 
         Ok(Self {

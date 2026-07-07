@@ -4,7 +4,8 @@ use pdf_cmap::ToUnicodeCMap;
 use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 
 use crate::{
@@ -39,14 +40,11 @@ impl Type3Font {
         objects: &dyn ObjectResolver,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, FontError> {
-        let [a, b, c, d, e, f] = dictionary
-            .get_or_err("FontMatrix")?
-            .try_array_of::<f32, 6>(objects)?;
+        let [a, b, c, d, e, f] = dictionary.required_array_of::<f32, 6>("FontMatrix", objects)?;
         let font_matrix = Transform::from_row(a, b, c, d, e, f);
 
-        let [left, top, right, bottom] = dictionary
-            .get_or_err("FontBBox")?
-            .try_array_of::<f32, 4>(objects)?;
+        let [left, top, right, bottom] =
+            dictionary.required_array_of::<f32, 4>("FontBBox", objects)?;
         let bounds = Rect {
             left,
             top,
@@ -65,9 +63,7 @@ impl Type3Font {
             })
             .transpose()?;
 
-        let char_proc_dictionary = dictionary
-            .get_or_err("CharProcs")?
-            .try_dictionary(objects)?;
+        let char_proc_dictionary = dictionary.required_dictionary("CharProcs", objects)?;
 
         let mut char_procs = HashMap::new();
         for (name, value) in char_proc_dictionary.dictionary.iter() {

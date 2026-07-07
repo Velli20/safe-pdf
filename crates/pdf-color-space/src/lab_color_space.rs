@@ -1,5 +1,7 @@
 use pdf_graphics::color::Color;
-use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object::{
+    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+};
 
 use crate::{color_space::ColorSpace, error::ColorSpaceError};
 
@@ -32,18 +34,12 @@ pub(crate) fn parse_lab_color_space(
         });
     };
     let dict = dict_obj.try_dictionary(objects)?;
-    let white_point = dict
-        .get_or_err("WhitePoint")?
-        .try_array_of::<f32, 3>(objects)?;
+    let white_point = dict.required_array_of::<f32, 3>("WhitePoint", objects)?;
     let black_point = dict
-        .get("BlackPoint")
-        .map(|bp| bp.try_array_of::<f32, 3>(objects))
-        .transpose()?
+        .optional_array_of::<f32, 3>("BlackPoint", objects)?
         .unwrap_or([0.0, 0.0, 0.0]);
     let range = dict
-        .get("Range")
-        .map(|r| r.try_array_of::<f32, 4>(objects))
-        .transpose()?
+        .optional_array_of::<f32, 4>("Range", objects)?
         .unwrap_or([-100.0, 100.0, -100.0, 100.0]);
     Ok(ColorSpace::Lab(LabColorSpace {
         white_point,

@@ -1,5 +1,6 @@
 use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 
 use crate::{AnnotationAction, AnnotationError, AppearanceCharacteristics, BorderStyle, helpers};
@@ -51,26 +52,11 @@ impl WidgetAnnotation {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
-        let field_type = dictionary
-            .get("FT")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let field_name = dictionary
-            .get("T")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let alternate_name = dictionary
-            .get("TU")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let mapping_name = dictionary
-            .get("TM")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let field_flags = dictionary
-            .get("Ff")
-            .map(|value| value.try_number::<i32>(objects))
-            .transpose()?;
+        let field_type = dictionary.optional_bytes_vec("FT", objects)?;
+        let field_name = dictionary.optional_bytes_vec("T", objects)?;
+        let alternate_name = dictionary.optional_bytes_vec("TU", objects)?;
+        let mapping_name = dictionary.optional_bytes_vec("TM", objects)?;
+        let field_flags = dictionary.optional_number::<i32>("Ff", objects)?;
         let value = dictionary
             .get("V")
             .map(|value| widget_field_value("V", value, objects))
@@ -79,14 +65,8 @@ impl WidgetAnnotation {
             .get("DV")
             .map(|value| widget_field_value("DV", value, objects))
             .transpose()?;
-        let default_appearance = dictionary
-            .get("DA")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
-        let quadding = dictionary
-            .get("Q")
-            .map(|value| value.try_number::<i32>(objects))
-            .transpose()?;
+        let default_appearance = dictionary.optional_bytes_vec("DA", objects)?;
+        let quadding = dictionary.optional_number::<i32>("Q", objects)?;
         let additional_actions = dictionary
             .get("AA")
             .map(|value| helpers::dictionary(value, objects))

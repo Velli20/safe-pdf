@@ -1,4 +1,6 @@
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::{AnnotationError, BorderStyleName};
 
@@ -23,10 +25,7 @@ impl BorderStyle {
         };
 
         let dictionary = value.try_dictionary(objects)?;
-        let width = dictionary
-            .get("W")
-            .map(|value| value.try_number::<f32>(objects))
-            .transpose()?;
+        let width = dictionary.optional_number::<f32>("W", objects)?;
         let style = dictionary
             .get("S")
             .map(|value| {
@@ -35,10 +34,7 @@ impl BorderStyle {
                     .map(|name| BorderStyleName::from(name.as_ref()))
             })
             .transpose()?;
-        let dash_pattern = dictionary
-            .get("D")
-            .map(|value| value.try_vec_of::<f32>(objects))
-            .transpose()?;
+        let dash_pattern = dictionary.optional_vec_of::<f32>("D", objects)?;
 
         Ok(Some(Self {
             width,

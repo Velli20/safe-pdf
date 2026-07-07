@@ -1,4 +1,6 @@
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::{AnnotationError, BorderEffectStyle};
 
@@ -29,10 +31,7 @@ impl BorderEffect {
                     .map(|name| BorderEffectStyle::from(name.as_ref()))
             })
             .transpose()?;
-        let intensity = dictionary
-            .get("I")
-            .map(|value| value.try_number::<f32>(objects))
-            .transpose()?;
+        let intensity = dictionary.optional_number::<f32>("I", objects)?;
 
         Ok(Some(Self { style, intensity }))
     }

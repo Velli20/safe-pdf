@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::error::FontError;
 
@@ -26,13 +28,8 @@ impl SimpleFontGlyphWidthsMap {
             return Ok(None);
         };
 
-        let first_char = dictionary
-            .get_or_err("FirstChar")?
-            .try_number::<u16>(objects)?;
-
-        let last_char = dictionary
-            .get_or_err("LastChar")?
-            .try_number::<u16>(objects)?;
+        let first_char = dictionary.required_number::<u16>("FirstChar", objects)?;
+        let last_char = dictionary.required_number::<u16>("LastChar", objects)?;
 
         // Validate: FirstChar must not exceed LastChar.
         if first_char > last_char {

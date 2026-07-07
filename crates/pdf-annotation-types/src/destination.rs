@@ -1,6 +1,6 @@
 use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    dictionary::Dictionary, error::ObjectError, object_lookup::ObjectLookupExt,
+    object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
 use crate::AnnotationError;
@@ -147,34 +147,34 @@ fn explicit_destination(
     match mode_item.try_str(objects)?.as_ref() {
         "XYZ" => Ok(ExplicitDestination::Xyz {
             page,
-            left: optional_item_number(items, 2, objects)?,
-            top: optional_item_number(items, 3, objects)?,
-            zoom: optional_item_number(items, 4, objects)?,
+            left: items.optional_number(2, objects)?,
+            top: items.optional_number(3, objects)?,
+            zoom: items.optional_number(4, objects)?,
         }),
         "Fit" => Ok(ExplicitDestination::Fit { page }),
         "FitH" => Ok(ExplicitDestination::FitH {
             page,
-            top: optional_item_number(items, 2, objects)?,
+            top: items.optional_number(2, objects)?,
         }),
         "FitV" => Ok(ExplicitDestination::FitV {
             page,
-            left: optional_item_number(items, 2, objects)?,
+            left: items.optional_number(2, objects)?,
         }),
         "FitR" => Ok(ExplicitDestination::FitR {
             page,
-            left: required_item_number(items, 2, entry, objects)?,
-            bottom: required_item_number(items, 3, entry, objects)?,
-            right: required_item_number(items, 4, entry, objects)?,
-            top: required_item_number(items, 5, entry, objects)?,
+            left: items.required_number(2, objects)?,
+            bottom: items.required_number(3, objects)?,
+            right: items.required_number(4, objects)?,
+            top: items.required_number(5, objects)?,
         }),
         "FitB" => Ok(ExplicitDestination::FitB { page }),
         "FitBH" => Ok(ExplicitDestination::FitBH {
             page,
-            top: optional_item_number(items, 2, objects)?,
+            top: items.optional_number(2, objects)?,
         }),
         "FitBV" => Ok(ExplicitDestination::FitBV {
             page,
-            left: optional_item_number(items, 2, objects)?,
+            left: items.optional_number(2, objects)?,
         }),
         other => Err(AnnotationError::InvalidEntry {
             entry,
@@ -191,42 +191,4 @@ fn destination_target(
         ObjectVariant::Reference(object_number) => DestinationTarget::Reference(*object_number),
         _ => DestinationTarget::Dictionary(value.try_dictionary(objects)?.clone()),
     })
-}
-
-fn optional_item_number<T>(
-    values: &[ObjectVariant],
-    index: usize,
-    objects: &dyn ObjectResolver,
-) -> Result<Option<T>, AnnotationError>
-where
-    T: num_traits::FromPrimitive,
-{
-    let Some(value) = values.get(index) else {
-        return Ok(None);
-    };
-    let value = if let ObjectVariant::Reference(_) = value {
-        objects.resolve_object(value)?
-    } else {
-        value
-    };
-
-    match value {
-        ObjectVariant::Null => Ok(None),
-        _ => Ok(Some(value.try_number::<T>(objects)?)),
-    }
-}
-
-fn required_item_number<T>(
-    values: &[ObjectVariant],
-    index: usize,
-    entry: &'static str,
-    objects: &dyn ObjectResolver,
-) -> Result<T, AnnotationError>
-where
-    T: num_traits::FromPrimitive,
-{
-    Ok(values
-        .get(index)
-        .ok_or(AnnotationError::MissingEntry { entry })?
-        .try_number::<T>(objects)?)
 }

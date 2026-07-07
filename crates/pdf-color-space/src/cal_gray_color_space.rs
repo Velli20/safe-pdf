@@ -1,5 +1,7 @@
 use pdf_graphics::color::Color;
-use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object::{
+    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+};
 
 use crate::{color_space::ColorSpace, error::ColorSpaceError};
 
@@ -28,18 +30,12 @@ pub(crate) fn parse_cal_gray_color_space(
         });
     };
     let dict = dict_obj.try_dictionary(objects)?;
-    let white_point = dict
-        .get_or_err("WhitePoint")?
-        .try_array_of::<f32, 3>(objects)?;
+    let white_point = dict.required_array_of::<f32, 3>("WhitePoint", objects)?;
     let black_point = dict
-        .get("BlackPoint")
-        .map(|bp| bp.try_array_of::<f32, 3>(objects))
-        .transpose()?
+        .optional_array_of::<f32, 3>("BlackPoint", objects)?
         .unwrap_or([0.0, 0.0, 0.0]);
     let gamma = dict
-        .get("Gamma")
-        .map(|g| g.try_number::<f32>(objects))
-        .transpose()?
+        .optional_number::<f32>("Gamma", objects)?
         .unwrap_or(1.0);
     Ok(ColorSpace::CalGray(CalGrayColorSpace {
         white_point,

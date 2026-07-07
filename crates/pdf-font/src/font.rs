@@ -2,7 +2,9 @@ use std::borrow::Cow;
 
 use pdf_cmap::ToUnicodeCMap;
 use pdf_content_stream::ContentStreamIdAllocator;
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::{
     char_vec::CharVec,
@@ -39,8 +41,7 @@ impl Font {
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Font, FontError> {
         // Determine the font subtype from the dictionary.
-        let subtype = dictionary.get_or_err("Subtype")?.try_str(objects)?;
-
+        let subtype = dictionary.required_str("Subtype", objects)?;
         match subtype.as_ref() {
             "Type0" => {
                 let type0_font = Type0Font::from_dictionary(dictionary, objects)?;

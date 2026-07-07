@@ -1,4 +1,6 @@
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::AnnotationError;
 
@@ -19,12 +21,11 @@ impl AnnotationBorder {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, AnnotationError> {
-        let Some(value) = dictionary.get("Border") else {
+        let Some(value) = dictionary.optional_array("Border", objects)? else {
             return Ok(None);
         };
 
-        let [horizontal_radius, vertical_radius, width, rest @ ..] = value.try_array(objects)?
-        else {
+        let [horizontal_radius, vertical_radius, width, rest @ ..] = value else {
             return Err(AnnotationError::InvalidEntry {
                 entry: "Border",
                 reason: "expected an array with at least 3 numbers".to_owned(),

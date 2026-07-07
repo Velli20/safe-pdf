@@ -1,4 +1,6 @@
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::AnnotationError;
 
@@ -19,10 +21,7 @@ impl PopupAnnotation {
             .get("Parent")
             .map(|obj| obj.try_object_number())
             .transpose()?;
-        let open = dictionary
-            .get("Open")
-            .map(|value| value.try_boolean(objects))
-            .transpose()?;
+        let open = dictionary.optional_boolean("Open", objects)?;
 
         Ok(Self { parent, open })
     }

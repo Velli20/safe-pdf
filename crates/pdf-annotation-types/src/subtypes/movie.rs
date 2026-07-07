@@ -1,4 +1,6 @@
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
 
 use crate::{AnnotationError, helpers};
 
@@ -19,10 +21,7 @@ impl MovieAnnotation {
             .get("Movie")
             .map(|value| helpers::dictionary(value, objects))
             .transpose()?;
-        let title = dictionary
-            .get("T")
-            .map(|value| value.try_bytes_vec(objects))
-            .transpose()?;
+        let title = dictionary.optional_bytes_vec("T", objects)?;
 
         Ok(Self { movie, title })
     }

@@ -6,6 +6,7 @@ use crate::{error::FilterError, predictor::PredictorParams};
 use pdf_ccitt::CCITTFaxParams;
 use pdf_object::{
     dictionary::Dictionary,
+    object_lookup::ObjectLookupExt,
     object_resolver::{ObjectResolver, PassthroughResolver},
     object_variant::ObjectVariant,
     stream::StreamObject,
@@ -446,12 +447,7 @@ fn decode_parms_for_filter(
         }
         (Filter::CCITTFaxDecode, None) => DecodeParms::CcittFax(CCITTFaxParams::default()),
         (Filter::LZWDecode, Some(d)) => {
-            let early_change = d
-                .get("EarlyChange")
-                .map(|v| v.try_number::<i64>(objects))
-                .transpose()?
-                .unwrap_or(1)
-                != 0;
+            let early_change = d.optional_number("EarlyChange", objects)?.unwrap_or(1) != 0;
             let predictor = PredictorParams::from_dictionary(d, objects)?;
             DecodeParms::Lzw {
                 early_change,
@@ -483,15 +479,8 @@ fn resolve_jbig2_dimensions(
     dict: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<(u16, u16), FilterError> {
-    let width = dict
-        .get("Width")
-        .ok_or_else(|| FilterError::Decompression("JBIG2Decode requires Width".into()))?
-        .try_number::<u16>(objects)?;
-    let height = dict
-        .get("Height")
-        .ok_or_else(|| FilterError::Decompression("JBIG2Decode requires Height".into()))?
-        .try_number::<u16>(objects)?;
-
+    let width = dict.required_number::<u16>("Width", objects)?;
+    let height = dict.required_number::<u16>("Height", objects)?;
     if width == 0 || height == 0 {
         return Err(FilterError::Decompression(
             "JBIG2Decode requires positive Width and Height".into(),
@@ -505,11 +494,10 @@ fn resolve_jbig2_globals(
     dict: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<Option<Vec<u8>>, FilterError> {
-    let Some(globals_obj) = dict.get("JBIG2Globals") else {
+    let Some(globals_stream) = dict.optional_stream("JBIG2Globals", objects)? else {
         return Ok(None);
     };
 
-    let globals_stream = globals_obj.try_stream(objects)?;
     Ok(Some(globals_stream.raw_data().to_vec()))
 }
 
