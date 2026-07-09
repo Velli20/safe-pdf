@@ -122,13 +122,13 @@ impl IndexedColorSpace {
             .copied()
             .ok_or(ColorSpaceError::InsufficientComponents(1, components.len()))?;
         let rounded = index.round();
-        if !rounded.is_finite() || rounded < 0.0 {
+        if !rounded.is_finite() {
             return Err(ColorSpaceError::Unsupported(format!(
                 "Indexed color index out of range: {rounded}"
             )));
         }
 
-        let bounded = rounded.min(f32::from(self.hival));
+        let bounded = rounded.clamp(0.0, f32::from(self.hival));
         let idx = (0..=self.hival)
             .find(|candidate| f32::from(*candidate) == bounded)
             .map(usize::from)
@@ -146,5 +146,64 @@ impl IndexedColorSpace {
                 ))
             })?;
         indexed_entry_to_color(&self.base, entry)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    fn indexed_rgb() -> IndexedColorSpace {
+        IndexedColorSpace {
+            base: Box::new(ColorSpace::DeviceRGB),
+            hival: 7,
+            lookup: vec![
+                0, 128, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 255, 0,
+                243, 128, 255,
+            ],
+        }
+    }
+
+    #[test]
+    fn apply_clamps_negative_indices_to_zero() {
+        let color = indexed_rgb()
+            .apply(&[-17.0])
+            .expect("negative indexed color should clamp to zero");
+
+        assert_eq!(color, Color::from_rgb(0.0, 128.0 / 255.0, 0.0));
+    }
+
+    #[test]
+    fn apply_clamps_high_indices_to_hival() {
+        let color = indexed_rgb()
+            .apply(&[17.0])
+            .expect("high indexed color should clamp to hival");
+
+        assert_eq!(color, Color::from_rgb(243.0 / 255.0, 128.0 / 255.0, 1.0));
+    }
+
+    #[test]
+    fn apply_rounds_before_clamping_to_hival() {
+        let color = indexed_rgb()
+            .apply(&[6.5])
+            .expect("fractional indexed color should round before clamping");
+
+        assert_eq!(color, Color::from_rgb(243.0 / 255.0, 128.0 / 255.0, 1.0));
+    }
+
+    #[test]
+    fn apply_rejects_non_finite_indices() {
+        let err = indexed_rgb()
+            .apply(&[f32::NAN])
+            .expect_err("nan indexed color should fail");
+
+        assert!(matches!(err, ColorSpaceError::Unsupported(_)));
+
+        let err = indexed_rgb()
+            .apply(&[f32::INFINITY])
+            .expect_err("infinite indexed color should fail");
+
+        assert!(matches!(err, ColorSpaceError::Unsupported(_)));
     }
 }
