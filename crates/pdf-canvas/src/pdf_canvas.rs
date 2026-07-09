@@ -8,6 +8,7 @@ use crate::{
     pdf_path_pen::PdfPathPen,
     recording_canvas::RecordingCanvas,
     stroke_style::StrokeStyle,
+    text::{TextGlyph, TextSink, glyph_bounds, glyph_text},
     text_state::TextState,
 };
 use pdf_content_stream::ContentStream;
@@ -43,6 +44,8 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     pub(crate) canvas_stack: Vec<CanvasState<'a>>,
     /// Content-stream IDs currently being rendered on this canvas stack.
     pub(crate) active_content_stream_ids: HashSet<usize>,
+    /// Optional sink for extracted text glyph positions.
+    pub(crate) text_sink: Option<&'a mut dyn TextSink>,
 }
 
 impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
@@ -115,7 +118,20 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             page,
             canvas_stack,
             active_content_stream_ids: HashSet::new(),
+            text_sink: None,
         })
+    }
+
+    /// Creates a new `PdfCanvas` and emits rendered text spans into `text_sink`.
+    pub fn new_with_text_sink(
+        backend: &'a mut B,
+        page: &'a PdfPage,
+        bb: Option<&Rect>,
+        text_sink: &'a mut dyn TextSink,
+    ) -> Result<Self, PdfCanvasError> {
+        let mut canvas = Self::new(backend, page, bb)?;
+        canvas.text_sink = Some(text_sink);
+        Ok(canvas)
     }
 
     /// Returns whether a form or pattern bbox is safe to materialize as an offscreen recording.
@@ -212,6 +228,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             page: self.page,
             canvas_stack,
             active_content_stream_ids: self.active_content_stream_ids.clone(),
+            text_sink: None,
         };
 
         // Render the form's content stream into the mask canvas.
@@ -790,6 +807,33 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             }
             TextRenderingMode::Clip => self.add_to_text_clip(path),
         }
+    }
+
+    pub(crate) fn record_text_glyph(
+        &mut self,
+        char_code: u16,
+        text_state_before_advance: &TextState<'a>,
+        ctm: &Transform,
+    ) -> Result<(), PdfCanvasError> {
+        if self.text_sink.is_none() {
+            return Ok(());
+        }
+
+        let text_state_after_advance = &self.current_state()?.text_state;
+        let text = glyph_text(text_state_before_advance.font, char_code);
+        if text.is_empty() {
+            return Ok(());
+        }
+
+        let bounds = glyph_bounds(text_state_before_advance, ctm, text_state_after_advance);
+        if bounds.is_valid() {
+            let Some(text_sink) = self.text_sink.as_deref_mut() else {
+                return Ok(());
+            };
+            text_sink.push_glyph(TextGlyph { text, bounds });
+        }
+
+        Ok(())
     }
 }
 

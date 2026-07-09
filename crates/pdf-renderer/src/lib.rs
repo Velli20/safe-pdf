@@ -1,13 +1,23 @@
 use pdf_annotations::{AnnotationRenderError, AnnotationRenderer};
 use pdf_canvas::{
-    canvas_backend::CanvasBackend, pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas,
+    canvas_backend::{CanvasBackend, Image, Shader},
+    error::PdfCanvasError,
+    pdf_canvas::PdfCanvas,
+    recording_canvas::RecordingCanvas,
+    stroke_style::StrokeStyle,
 };
 use pdf_document::document::PdfDocument;
+use pdf_graphics::{
+    BlendMode, MaskMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
+    transform::Transform,
+};
 use thiserror::Error;
 
 pub mod page_cache;
+pub mod text_selection;
 
 pub use page_cache::PageRecordingCache;
+pub use text_selection::PageTextLayout;
 
 /// Errors that can occur while rendering a PDF document onto a canvas backend.
 #[derive(Debug, Error)]
@@ -110,11 +120,120 @@ impl PdfRenderer {
         Ok(recording)
     }
 
+    /// Extracts selectable page text for a specific rendered page size.
+    pub fn text_layout(
+        &self,
+        page_index: usize,
+        width: f32,
+        height: f32,
+    ) -> Result<PageTextLayout, PdfRendererError> {
+        let page = self.page(page_index)?;
+        let mut backend = NoopCanvasBackend { width, height };
+        let mut collector = pdf_canvas::text::TextCollector::new();
+        {
+            let mut canvas =
+                PdfCanvas::new_with_text_sink(&mut backend, page, None, &mut collector)?;
+            if let Some(cs) = &page.contents {
+                canvas.render_content_stream(cs, None, None, page.resources.as_ref(), None)?;
+            }
+        }
+
+        Ok(PageTextLayout::new(
+            collector
+                .into_glyphs()
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        ))
+    }
+
     fn page(&self, page_index: usize) -> Result<&pdf_document::page::PdfPage, PdfRendererError> {
         let Some(page) = self.document.pages.get(page_index) else {
             return Err(PdfRendererError::PageNotFound(page_index));
         };
         Ok(page)
+    }
+}
+
+struct NoopCanvasBackend {
+    width: f32,
+    height: f32,
+}
+
+impl CanvasBackend for NoopCanvasBackend {
+    fn fill_path(
+        &mut self,
+        _path: &PdfPath,
+        _fill_type: PathFillType,
+        _color: Color,
+        _shader: &Option<Shader>,
+        _blend_mode: Option<BlendMode>,
+    ) -> Result<(), PdfCanvasError> {
+        Ok(())
+    }
+
+    fn stroke_path(
+        &mut self,
+        _path: &PdfPath,
+        _color: Color,
+        _line_width: f32,
+        _stroke_style: &StrokeStyle,
+        _shader: &Option<Shader>,
+        _blend_mode: Option<BlendMode>,
+    ) -> Result<(), PdfCanvasError> {
+        Ok(())
+    }
+
+    fn set_clip_region(
+        &mut self,
+        _path: &PdfPath,
+        _mode: PathFillType,
+    ) -> Result<(), PdfCanvasError> {
+        Ok(())
+    }
+
+    fn width(&self) -> f32 {
+        self.width
+    }
+
+    fn height(&self) -> f32 {
+        self.height
+    }
+
+    fn save(&mut self) -> Result<(), PdfCanvasError> {
+        Ok(())
+    }
+
+    fn restore(&mut self) -> Result<(), PdfCanvasError> {
+        Ok(())
+    }
+
+    fn draw_image_rect(
+        &mut self,
+        _image: &Image<'_>,
+        _blend_mode: Option<BlendMode>,
+        _dest_rect: Rect,
+        _image_rotation: Option<f32>,
+    ) -> Result<(), PdfCanvasError> {
+        Ok(())
+    }
+
+    fn begin_mask_layer(
+        &mut self,
+        _mask: &std::sync::Arc<RecordingCanvas>,
+        _transform: &Transform,
+        _mask_mode: MaskMode,
+    ) -> Result<(), PdfCanvasError> {
+        Ok(())
+    }
+
+    fn end_mask_layer(
+        &mut self,
+        _mask: &std::sync::Arc<RecordingCanvas>,
+        _transform: &Transform,
+        _mask_mode: MaskMode,
+    ) -> Result<(), PdfCanvasError> {
+        Ok(())
     }
 }
 
