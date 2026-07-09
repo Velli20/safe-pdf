@@ -351,13 +351,6 @@ impl<'a, 'b, B: CanvasBackend> Type1FontRenderer<'a, 'b, B> {
         })
     }
 
-    fn glyph_matrix(&self) -> Result<Transform, PdfCanvasError> {
-        let state = self.canvas.current_state()?;
-        Ok(state
-            .text_state
-            .compose_glyph_matrix(self.glyph_base_transform, &state.transform))
-    }
-
     fn prepare_glyph(&self, char_code: u16) -> Result<PreparedGlyph<'b>, PdfCanvasError> {
         self.font
             .prepare_glyph(&*self.canvas, self.is_cid, char_code)
@@ -381,10 +374,17 @@ impl<'a, 'b, B: CanvasBackend> Type1FontRenderer<'a, 'b, B> {
     }
 
     fn render_char(&mut self, char_code: u16) -> Result<(), PdfCanvasError> {
-        let glyph_matrix = self.glyph_matrix()?;
+        let state = self.canvas.current_state()?;
+        let text_state_before_advance = state.text_state.clone();
+        let ctm = state.transform;
+        let glyph_matrix = state
+            .text_state
+            .compose_glyph_matrix(self.glyph_base_transform, &state.transform);
         let mut glyph = self.prepare_glyph(char_code)?;
         self.draw_glyph(&mut glyph, &glyph_matrix)?;
-        self.advance_text_position(char_code, &glyph)
+        self.advance_text_position(char_code, &glyph)?;
+        self.canvas
+            .record_text_glyph(char_code, &text_state_before_advance, &ctm)
     }
 }
 
