@@ -55,7 +55,9 @@ impl Annotation {
         let mut annotations = Vec::with_capacity(annots.len());
 
         for annot in annots {
-            let dictionary = annot.try_dictionary(objects)?;
+            let Ok(dictionary) = annot.try_dictionary(objects) else {
+                continue;
+            };
             // A broken annotation can still be useful to preserve the rest of the page,
             // but without `/Subtype` we cannot dispatch it to a concrete parser.
             if dictionary.get("Subtype").is_none() {
