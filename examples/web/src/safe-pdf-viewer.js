@@ -104,6 +104,8 @@ const VIEWER_CSS = /* css */ `
   display: flex;
   align-items: center;
   justify-content: center;
+  user-select: none;
+  cursor: text;
 }
 .spdf-page-placeholder {
   display: flex;
@@ -128,6 +130,18 @@ const VIEWER_CSS = /* css */ `
   width: 100%;
   height: 100%;
   display: block;
+}
+.spdf-selection-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 2;
+}
+.spdf-selection-rect {
+  position: absolute;
+  background: rgba(51, 122, 255, 0.28);
+  mix-blend-mode: multiply;
 }
 .spdf-loading-overlay {
   position: absolute;
@@ -233,6 +247,12 @@ export class SafePdfViewer extends EventTarget {
   #prefetchQueue = [];
   #isPrefetching = false;
 
+  // ---- Text selection ----
+  #selectionAnchor = null;
+  #selectionFocus = null;
+  #isSelecting = false;
+  #selectedText = '';
+
   // ---- Scroll ----
   #scrollTimeout = null;
 
@@ -248,6 +268,10 @@ export class SafePdfViewer extends EventTarget {
   #boundHandleScroll;
   #boundHandleKeydown;
   #boundHandleResize;
+  #boundHandlePointerDown;
+  #boundHandlePointerMove;
+  #boundHandlePointerUp;
+  #boundHandleCopy;
 
   /**
    * Create a new SafePdfViewer.
@@ -275,6 +299,10 @@ export class SafePdfViewer extends EventTarget {
     this.#boundHandleScroll = this.#handleScroll.bind(this);
     this.#boundHandleKeydown = this.#handleKeydown.bind(this);
     this.#boundHandleResize = this.#handleResize.bind(this);
+    this.#boundHandlePointerDown = this.#handlePointerDown.bind(this);
+    this.#boundHandlePointerMove = this.#handlePointerMove.bind(this);
+    this.#boundHandlePointerUp = this.#handlePointerUp.bind(this);
+    this.#boundHandleCopy = this.#handleCopy.bind(this);
 
     injectCSS();
     this.#buildDOM();
@@ -418,6 +446,8 @@ export class SafePdfViewer extends EventTarget {
     // Flush caches.
     this.#imageCache.clear();
     this.#renderer.clearCache();
+    this.#renderer.clearTextLayoutCache();
+    this.#clearSelection();
 
     const savedPage = this.#currentPage;
 
@@ -476,6 +506,36 @@ export class SafePdfViewer extends EventTarget {
   }
 
   /**
+   * Return the currently selected text, or an empty string.
+   * @returns {string}
+   */
+  getSelectedText() {
+    if (this.#selectedText) return this.#selectedText;
+
+    const ranges = this.#selectedPageRanges();
+    if (ranges.length === 0) return '';
+
+    const parts = [];
+    for (const range of ranges) {
+      const { width, height } = this.#scaledPageSizeForPage(range.pageIndex);
+      const text = this.#renderer.getSelectedText(
+        range.pageIndex,
+        width,
+        height,
+        range.startIndex,
+        range.endIndex
+      );
+      if (text) parts.push(text);
+    }
+    return parts.join('\n');
+  }
+
+  /** Clear the current text selection. */
+  clearSelection() {
+    this.#clearSelection();
+  }
+
+  /**
    * Access the underlying {@link SafePdfRenderer} for advanced usage.
    * @returns {SafePdfRenderer}
    */
@@ -488,6 +548,7 @@ export class SafePdfViewer extends EventTarget {
    */
   destroy() {
     this.#detachEventListeners();
+    this.#clearSelection();
     this.#renderer.destroy();
     this.#container.innerHTML = '';
     this.#imageCache.clear();
@@ -504,6 +565,7 @@ export class SafePdfViewer extends EventTarget {
     // Scroll container
     this.#scrollContainer = document.createElement('div');
     this.#scrollContainer.className = 'spdf-scroll-container';
+    this.#scrollContainer.tabIndex = 0;
 
     // Loading overlay
     this.#loadingOverlay = document.createElement('div');
@@ -545,6 +607,10 @@ export class SafePdfViewer extends EventTarget {
       placeholder.textContent = `Page ${i + 1}`;
       wrapper.appendChild(placeholder);
 
+      const selectionLayer = document.createElement('div');
+      selectionLayer.className = 'spdf-selection-layer';
+      wrapper.appendChild(selectionLayer);
+
       const label = document.createElement('div');
       label.className = 'spdf-page-number';
       label.textContent = `Page ${i + 1}`;
@@ -567,17 +633,45 @@ export class SafePdfViewer extends EventTarget {
       { passive: true }
     );
 
-    if (this.#options.keyboardNav !== false) {
-      document.addEventListener('keydown', this.#boundHandleKeydown);
-    }
-
+    document.addEventListener('keydown', this.#boundHandleKeydown, true);
     window.addEventListener('resize', this.#boundHandleResize);
+    this.#scrollContent.addEventListener(
+      'pointerdown',
+      this.#boundHandlePointerDown
+    );
+    this.#scrollContainer.addEventListener(
+      'pointermove',
+      this.#boundHandlePointerMove
+    );
+    this.#scrollContainer.addEventListener('pointerup', this.#boundHandlePointerUp);
+    this.#scrollContainer.addEventListener(
+      'pointercancel',
+      this.#boundHandlePointerUp
+    );
+    document.addEventListener('copy', this.#boundHandleCopy, true);
   }
 
   #detachEventListeners() {
     this.#scrollContainer?.removeEventListener('scroll', this.#boundHandleScroll);
-    document.removeEventListener('keydown', this.#boundHandleKeydown);
+    document.removeEventListener('keydown', this.#boundHandleKeydown, true);
     window.removeEventListener('resize', this.#boundHandleResize);
+    this.#scrollContent?.removeEventListener(
+      'pointerdown',
+      this.#boundHandlePointerDown
+    );
+    this.#scrollContainer?.removeEventListener(
+      'pointermove',
+      this.#boundHandlePointerMove
+    );
+    this.#scrollContainer?.removeEventListener(
+      'pointerup',
+      this.#boundHandlePointerUp
+    );
+    this.#scrollContainer?.removeEventListener(
+      'pointercancel',
+      this.#boundHandlePointerUp
+    );
+    document.removeEventListener('copy', this.#boundHandleCopy, true);
   }
 
   // ==================================================================
@@ -590,6 +684,7 @@ export class SafePdfViewer extends EventTarget {
    */
   #loadBuffer(buffer) {
     this.#imageCache.clear();
+    this.#clearSelection();
     const { pageCount } = this.#renderer.loadPdf(buffer);
     this.#pageCount = pageCount;
     this.#currentPage = 0;
@@ -775,6 +870,160 @@ export class SafePdfViewer extends EventTarget {
 
     // Kick off background prefetch.
     this.#schedulePrefetch(this.#currentPage);
+    this.#renderSelectionHighlights();
+  }
+
+  // ==================================================================
+  // Text Selection
+  // ==================================================================
+
+  #clearSelection() {
+    this.#selectionAnchor = null;
+    this.#selectionFocus = null;
+    this.#isSelecting = false;
+    this.#selectedText = '';
+    this.#clearSelectionLayers();
+  }
+
+  #clearSelectionLayers() {
+    for (const wrapper of this.#scrollContent?.children ?? []) {
+      const layer = wrapper.querySelector?.('.spdf-selection-layer');
+      if (layer) layer.innerHTML = '';
+    }
+  }
+
+  #selectedPageRanges() {
+    if (!this.#selectionAnchor || !this.#selectionFocus) return [];
+
+    const anchorBeforeFocus =
+      this.#compareSelectionPoints(this.#selectionAnchor, this.#selectionFocus) <= 0;
+    const start = anchorBeforeFocus ? this.#selectionAnchor : this.#selectionFocus;
+    const end = anchorBeforeFocus ? this.#selectionFocus : this.#selectionAnchor;
+    const ranges = [];
+
+    for (let pageIndex = start.pageIndex; pageIndex <= end.pageIndex; pageIndex++) {
+      const { width, height } = this.#scaledPageSizeForPage(pageIndex);
+      const glyphCount = this.#renderer.getTextGlyphCount(pageIndex, width, height);
+      if (glyphCount === 0) continue;
+
+      const startIndex = pageIndex === start.pageIndex ? start.glyphIndex : 0;
+      const endIndex =
+        pageIndex === end.pageIndex ? end.glyphIndex : glyphCount - 1;
+      ranges.push({ pageIndex, startIndex, endIndex });
+    }
+
+    return ranges;
+  }
+
+  #renderSelectionHighlights() {
+    this.#clearSelectionLayers();
+
+    for (const range of this.#selectedPageRanges()) {
+      const wrapper = this.#scrollContent.children[range.pageIndex];
+      if (!wrapper) continue;
+
+      const layer = wrapper.querySelector('.spdf-selection-layer');
+      if (!layer) continue;
+
+      const { width, height } = this.#scaledPageSizeForPage(range.pageIndex);
+      const rects = this.#renderer.getTextSelectionRects(
+        range.pageIndex,
+        width,
+        height,
+        range.startIndex,
+        range.endIndex
+      );
+
+      for (const rect of rects) {
+        const left = Math.min(rect.left, rect.right);
+        const top = Math.min(rect.top, rect.bottom);
+        const rectWidth = Math.abs(rect.right - rect.left);
+        const rectHeight = Math.abs(rect.bottom - rect.top);
+        if (rectWidth <= 0 || rectHeight <= 0) continue;
+
+        const el = document.createElement('div');
+        el.className = 'spdf-selection-rect';
+        el.style.left = `${left}px`;
+        el.style.top = `${top}px`;
+        el.style.width = `${rectWidth}px`;
+        el.style.height = `${rectHeight}px`;
+        layer.appendChild(el);
+      }
+    }
+  }
+
+  #refreshSelectedText() {
+    const ranges = this.#selectedPageRanges();
+    if (ranges.length === 0) {
+      this.#selectedText = '';
+      return;
+    }
+
+    const parts = [];
+    for (const range of ranges) {
+      const { width, height } = this.#scaledPageSizeForPage(range.pageIndex);
+      const text = this.#renderer.getSelectedText(
+        range.pageIndex,
+        width,
+        height,
+        range.startIndex,
+        range.endIndex
+      );
+      if (text) parts.push(text);
+    }
+    this.#selectedText = parts.join('\n');
+  }
+
+  #compareSelectionPoints(a, b) {
+    if (a.pageIndex !== b.pageIndex) {
+      return a.pageIndex - b.pageIndex;
+    }
+    return a.glyphIndex - b.glyphIndex;
+  }
+
+  #selectionHitFromEvent(e) {
+    const pagePoint = this.#pagePointFromClientPoint(e.clientX, e.clientY);
+    if (!pagePoint) return null;
+
+    const { width, height } = this.#scaledPageSizeForPage(pagePoint.pageIndex);
+    const glyphIndex = this.#renderer.hitTestText(
+      pagePoint.pageIndex,
+      width,
+      height,
+      pagePoint.x,
+      pagePoint.y
+    );
+    if (glyphIndex === null) return null;
+
+    return { pageIndex: pagePoint.pageIndex, glyphIndex };
+  }
+
+  #pagePointFromClientPoint(clientX, clientY) {
+    let nearest = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    for (const wrapper of this.#scrollContent.children) {
+      if (!wrapper.classList?.contains('spdf-page-wrapper')) continue;
+      const pageIndex = Number(wrapper.dataset.pageIndex);
+      if (!Number.isInteger(pageIndex)) continue;
+
+      const rect = wrapper.getBoundingClientRect();
+      const x = Math.min(Math.max(clientX - rect.left, 0), rect.width);
+      const y = Math.min(Math.max(clientY - rect.top, 0), rect.height);
+
+      if (clientY >= rect.top && clientY <= rect.bottom) {
+        return { pageIndex, x, y };
+      }
+
+      const distance =
+        clientY < rect.top ? rect.top - clientY : clientY - rect.bottom;
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearest = { pageIndex, x, y };
+      }
+    }
+
+    return nearest;
   }
 
   // ==================================================================
@@ -835,6 +1084,58 @@ export class SafePdfViewer extends EventTarget {
   // Event Handlers
   // ==================================================================
 
+  #handlePointerDown(e) {
+    if (this.#pageCount === 0 || e.button !== 0) return;
+
+    const hit = this.#selectionHitFromEvent(e);
+    if (!hit) {
+      this.#clearSelection();
+      return;
+    }
+
+    e.preventDefault();
+    this.#scrollContainer.focus({ preventScroll: true });
+    this.#isSelecting = true;
+    this.#selectionAnchor = hit;
+    this.#selectionFocus = hit;
+    this.#scrollContainer.setPointerCapture?.(e.pointerId);
+    this.#refreshSelectedText();
+    this.#renderSelectionHighlights();
+  }
+
+  #handlePointerMove(e) {
+    if (!this.#isSelecting) return;
+
+    const hit = this.#selectionHitFromEvent(e);
+    if (!hit) return;
+
+    e.preventDefault();
+    this.#selectionFocus = hit;
+    this.#refreshSelectedText();
+    this.#renderSelectionHighlights();
+  }
+
+  #handlePointerUp(e) {
+    if (!this.#isSelecting) return;
+
+    this.#isSelecting = false;
+    this.#scrollContainer.releasePointerCapture?.(e.pointerId);
+  }
+
+  #handleCopy(e) {
+    if (this.#isEditableEventTarget(e.target)) return;
+
+    const text = this.#selectedText || this.getSelectedText();
+    if (!text) return;
+
+    e.preventDefault();
+    if (e.clipboardData) {
+      e.clipboardData.setData('text/plain', text);
+    } else {
+      this.#writeTextToClipboard(text);
+    }
+  }
+
   #handleScroll() {
     if (this.#scrollTimeout) clearTimeout(this.#scrollTimeout);
 
@@ -853,10 +1154,19 @@ export class SafePdfViewer extends EventTarget {
 
     // Guard: e.target can be null or a non-HTMLElement for document-level
     // key events. Also skip text-input elements to avoid hijacking typing.
-    if (e.target instanceof HTMLElement) {
-      const tag = e.target.tagName;
-      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-      if (e.target.isContentEditable) return;
+    if (this.#isEditableEventTarget(e.target)) return;
+
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'c') {
+      const text = this.#selectedText || this.getSelectedText();
+      if (text) {
+        e.preventDefault();
+        this.#writeTextToClipboard(text);
+      }
+      return;
+    }
+
+    if (this.#options.keyboardNav === false) {
+      return;
     }
 
     switch (e.key) {
@@ -893,6 +1203,47 @@ export class SafePdfViewer extends EventTarget {
 
   #showLoading(show) {
     this.#loadingOverlay?.classList.toggle('spdf-hidden', !show);
+  }
+
+  #isEditableEventTarget(target) {
+    if (!(target instanceof HTMLElement)) return false;
+
+    const tag = target.tagName;
+    return (
+      tag === 'INPUT' ||
+      tag === 'SELECT' ||
+      tag === 'TEXTAREA' ||
+      target.isContentEditable
+    );
+  }
+
+  #writeTextToClipboard(text) {
+    const copied = this.#copyTextWithTextarea(text);
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+
+    return copied;
+  }
+
+  #copyTextWithTextarea(text) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '0';
+    textarea.style.left = '-9999px';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    try {
+      return document.execCommand('copy');
+    } catch {
+      return false;
+    } finally {
+      textarea.remove();
+    }
   }
 
   /** Update current page and dispatch event. */

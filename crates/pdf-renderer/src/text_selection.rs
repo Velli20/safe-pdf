@@ -61,12 +61,14 @@ impl PageTextLayout {
 
     /// Builds a normalized inclusive selection between two hits.
     pub fn selection_between(&self, anchor: TextHit, focus: TextHit) -> Option<TextSelection> {
-        if self.glyphs.is_empty() {
-            return None;
-        }
+        self.selection_from_indices(anchor.index, focus.index)
+    }
+
+    /// Builds a normalized inclusive selection from glyph indices.
+    pub fn selection_from_indices(&self, anchor: usize, focus: usize) -> Option<TextSelection> {
         let last_index = self.glyphs.len().checked_sub(1)?;
-        let start = anchor.index.min(focus.index).min(last_index);
-        let end = anchor.index.max(focus.index).min(last_index);
+        let start = anchor.min(focus).min(last_index);
+        let end = anchor.max(focus).min(last_index);
         Some(TextSelection { start, end })
     }
 
@@ -103,7 +105,10 @@ impl PageTextLayout {
             .checked_add(1)
             .map(|end| end.min(self.glyphs.len()))
             .unwrap_or(self.glyphs.len());
-        self.glyphs[start..end_exclusive].iter()
+        self.glyphs
+            .iter()
+            .skip(start)
+            .take(end_exclusive.saturating_sub(start))
     }
 }
 
@@ -200,6 +205,27 @@ mod tests {
 
         assert_eq!(selection.range(), (0, 1));
         assert_eq!(layout.selected_text(selection), "ab");
+    }
+
+    #[test]
+    fn selection_from_indices_clamps_to_layout() {
+        let layout = PageTextLayout::new(vec![
+            glyph("a", 0.0, 0.0, 10.0, 10.0),
+            glyph("b", 12.0, 0.0, 20.0, 10.0),
+        ]);
+
+        let selection = layout
+            .selection_from_indices(usize::MAX, 0)
+            .expect("selection should exist");
+
+        assert_eq!(selection.range(), (0, 1));
+    }
+
+    #[test]
+    fn selection_from_indices_returns_none_for_empty_layout() {
+        let layout = PageTextLayout::new(Vec::new());
+
+        assert_eq!(layout.selection_from_indices(0, 0), None);
     }
 
     #[test]
