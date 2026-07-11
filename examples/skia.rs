@@ -9,6 +9,8 @@ use glutin::{
     surface::{Surface as GlutinSurface, SurfaceAttributesBuilder, WindowSurface},
 };
 use glutin_winit::DisplayBuilder;
+use pdf_canvas::canvas_backend::{CanvasBackend, Shader};
+use pdf_graphics::{BlendMode, PathFillType, color::Color, pdf_path::PdfPath};
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
 use raw_window_handle::HasWindowHandle;
 use skia_safe::{Color as SkiaColor, Surface};
@@ -17,14 +19,17 @@ use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::{ElementState, KeyEvent, WindowEvent},
+    event::{ElementState, KeyEvent, MouseButton, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowAttributes},
 };
 
 use pdf_document::{document::PdfDocument, reader::PdfReader};
 use pdf_graphics_skia::gpu_state::SkiaGpuState;
-use pdf_renderer::PdfRenderer;
+use pdf_renderer::{
+    PdfRenderer,
+    text_selection::{PageTextLayout, TextHit, TextSelection},
+};
 
 const DEFAULT_INITIAL_WINDOW_SIZE: (u32, u32) = (800, 600);
 const MAX_INITIAL_WINDOW_WIDTH: f32 = 1200.0;
@@ -44,6 +49,8 @@ pub enum AppError {
     ParsePdf(#[from] pdf_document::error::PdfReaderError),
     #[error("Failed to render PDF page: {0}")]
     PdfRendererError(#[from] pdf_renderer::PdfRendererError),
+    #[error("Failed to draw PDF canvas overlay: {0}")]
+    PdfCanvasError(#[from] pdf_canvas::error::PdfCanvasError),
     #[error("Failed to create event loop: {0}")]
     EventLoop(#[from] winit::error::EventLoopError),
     #[error("Failed to create window: {0}")]
@@ -105,21 +112,37 @@ struct Application {
     renderer: PdfRenderer,
     current_page: usize,
     modifiers: ModifiersState,
+    text_layout: Option<PageTextLayout>,
+    selection_anchor: Option<TextHit>,
+    selection_focus: Option<TextHit>,
+    selection: Option<TextSelection>,
+    cursor_position: Option<(f32, f32)>,
+    clipboard: Option<arboard::Clipboard>,
     render_error: Option<AppError>,
 }
 
 impl Application {
     fn render(&mut self) -> Result<(), AppError> {
         let size = self.window.inner_size();
+        let width = size.width as f32;
+        let height = size.height as f32;
+        self.ensure_text_layout(width, height)?;
         self.surface.canvas().clear(SkiaColor::WHITE);
 
         if self.renderer.document().page_count() > 0 {
+            let selection_rects = self
+                .text_layout
+                .as_ref()
+                .zip(self.selection)
+                .map(|(layout, selection)| layout.selection_rects(selection))
+                .unwrap_or_default();
             let mut backend = SkiaCanvasBackend {
                 surface: &mut self.surface,
-                width: size.width as f32,
-                height: size.height as f32,
+                width,
+                height,
             };
             self.renderer.render(&mut backend, self.current_page)?;
+            draw_selection_rects(&mut backend, &selection_rects)?;
         }
 
         self.gpu_state.context.flush_and_submit();
@@ -128,27 +151,115 @@ impl Application {
         Ok(())
     }
 
+    fn ensure_text_layout(&mut self, width: f32, height: f32) -> Result<(), AppError> {
+        if self.text_layout.is_some() || self.renderer.document().page_count() == 0 {
+            return Ok(());
+        }
+        self.text_layout = Some(
+            self.renderer
+                .text_layout(self.current_page, width, height)?,
+        );
+        Ok(())
+    }
+
+    fn invalidate_text_layout(&mut self) {
+        self.text_layout = None;
+    }
+
+    fn clear_selection(&mut self) {
+        self.selection_anchor = None;
+        self.selection_focus = None;
+        self.selection = None;
+    }
+
+    fn begin_selection(&mut self, x: f32, y: f32) {
+        let Some(layout) = &self.text_layout else {
+            self.clear_selection();
+            return;
+        };
+        let Some(hit) = layout.hit_test(x, y) else {
+            self.clear_selection();
+            return;
+        };
+        self.selection_anchor = Some(hit);
+        self.selection_focus = Some(hit);
+        self.selection = layout.selection_between(hit, hit);
+        self.window.request_redraw();
+    }
+
+    fn update_selection(&mut self, x: f32, y: f32) {
+        let (Some(layout), Some(anchor)) = (&self.text_layout, self.selection_anchor) else {
+            return;
+        };
+        let Some(focus) = layout.hit_test(x, y) else {
+            return;
+        };
+        self.selection_focus = Some(focus);
+        self.selection = layout.selection_between(anchor, focus);
+        self.window.request_redraw();
+    }
+
+    fn copy_selection(&mut self) {
+        let (Some(layout), Some(selection)) = (&self.text_layout, self.selection) else {
+            return;
+        };
+        let text = layout.selected_text(selection);
+        if text.is_empty() {
+            return;
+        }
+        let Some(clipboard) = self.clipboard.as_mut() else {
+            eprintln!("Clipboard unavailable");
+            return;
+        };
+        if let Err(error) = clipboard.set_text(text) {
+            eprintln!("Failed to copy selected text: {error}");
+        }
+    }
+
     fn next_page(&mut self) {
-        let document = self.renderer.document();
-        if document.page_count() > 0 {
-            self.current_page = (self.current_page + 1) % document.page_count();
-            println!("Page {}/{}", self.current_page + 1, document.page_count());
+        let page_count = self.renderer.document().page_count();
+        if page_count > 0 {
+            self.current_page = (self.current_page + 1) % page_count;
+            self.clear_selection();
+            self.invalidate_text_layout();
+            println!("Page {}/{}", self.current_page + 1, page_count);
             self.window.request_redraw();
         }
     }
 
     fn prev_page(&mut self) {
-        let document = self.renderer.document();
-        if document.page_count() > 0 {
+        let page_count = self.renderer.document().page_count();
+        if page_count > 0 {
             self.current_page = if self.current_page == 0 {
-                document.page_count() - 1
+                page_count - 1
             } else {
                 self.current_page - 1
             };
-            println!("Page {}/{}", self.current_page + 1, document.page_count());
+            self.clear_selection();
+            self.invalidate_text_layout();
+            println!("Page {}/{}", self.current_page + 1, page_count);
             self.window.request_redraw();
         }
     }
+}
+
+fn draw_selection_rects(
+    backend: &mut SkiaCanvasBackend<'_>,
+    rects: &[pdf_graphics::rect::Rect],
+) -> Result<(), AppError> {
+    let color = Color::from_rgba(0.20, 0.48, 1.0, 0.28);
+    let shader: Option<Shader<'_>> = None;
+    for rect in rects {
+        let path = PdfPath::from(rect);
+        backend.fill_path(
+            &path,
+            PathFillType::Winding,
+            color,
+            &shader,
+            Some(BlendMode::Normal),
+        )?;
+    }
+    Ok(())
 }
 
 impl ApplicationHandler for Application {
@@ -175,6 +286,8 @@ impl ApplicationHandler for Application {
                         return;
                     }
                 }
+                self.clear_selection();
+                self.invalidate_text_layout();
                 if let (Some(w), Some(h)) =
                     (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
                 {
@@ -184,6 +297,41 @@ impl ApplicationHandler for Application {
             }
 
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
+
+            WindowEvent::CursorMoved { position, .. } => {
+                let x = position.x as f32;
+                let y = position.y as f32;
+                self.cursor_position = Some((x, y));
+                if self.selection_anchor.is_some() {
+                    self.update_selection(x, y);
+                }
+            }
+
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } => match state {
+                ElementState::Pressed => {
+                    if let Some((x, y)) = self.cursor_position {
+                        if self.text_layout.is_none() {
+                            let size = self.window.inner_size();
+                            if let Err(e) =
+                                self.ensure_text_layout(size.width as f32, size.height as f32)
+                            {
+                                self.render_error = Some(e);
+                                event_loop.exit();
+                                return;
+                            }
+                        }
+                        self.begin_selection(x, y);
+                    }
+                }
+                ElementState::Released => {
+                    self.selection_anchor = None;
+                    self.selection_focus = None;
+                }
+            },
 
             WindowEvent::KeyboardInput {
                 event:
@@ -196,6 +344,12 @@ impl ApplicationHandler for Application {
             } => match &logical_key {
                 Key::Named(NamedKey::ArrowRight) => self.next_page(),
                 Key::Named(NamedKey::ArrowLeft) => self.prev_page(),
+                Key::Character(c)
+                    if (self.modifiers.super_key() || self.modifiers.control_key())
+                        && c.eq_ignore_ascii_case("c") =>
+                {
+                    self.copy_selection();
+                }
                 Key::Character(c) if self.modifiers.super_key() && c.eq_ignore_ascii_case("q") => {
                     event_loop.exit();
                 }
@@ -281,6 +435,12 @@ fn run(document: PdfDocument) -> Result<(), AppError> {
         renderer,
         current_page: 0,
         modifiers: ModifiersState::default(),
+        text_layout: None,
+        selection_anchor: None,
+        selection_focus: None,
+        selection: None,
+        cursor_position: None,
+        clipboard: arboard::Clipboard::new().ok(),
         render_error: None,
     };
 

@@ -15,6 +15,7 @@ pdf-tokenizer        = { path = "../crates/pdf-tokenizer" }
 pdf-font             = { path = "../crates/pdf-font" }
 pdf-renderer         = { path = "../crates/pdf-renderer" }
 pdf-canvas         = { path = "../crates/pdf-canvas" }
+pdf-graphics       = { path = "../crates/pdf-graphics" }
 pdf-graphics-femtovg = { path = "../crates/pdf-graphics-femtovg", optional = true  }
 pdf-graphics-skia    = { path = "../crates/pdf-graphics-skia", optional = true, features = ["gl"]  }
 
@@ -30,6 +31,7 @@ glutin             = { version = "0.32.0", optional = true }
 glutin-winit       = { version = "0.5.0", optional = true }
 raw-window-handle  = { version = "0.6.0", optional = true }
 winit              = { version = "0.30.2", optional = true }
+arboard            = { version = "3.6.1", optional = true }
 femtovg            = { version = "0.14.0", features = ["wgpu"], optional = true }
 wgpu               = { version = "24.0.3", optional = true }
 
@@ -48,6 +50,7 @@ skia = [
     "dep:glutin-winit",
     "dep:raw-window-handle",
     "dep:winit",
+    "dep:arboard",
 ]
 
 # Emscripten/WebGL build (no winit/glutin deps)

@@ -61,6 +61,13 @@ export class SafePdfRenderer {
   // ---- Extra WASM function bindings ----
   #sk_get_page_width = null;
   #sk_get_page_height = null;
+  #sk_clear_text_layout_cache = null;
+  #sk_get_text_glyph_count = null;
+  #sk_hit_test_text = null;
+  #sk_build_text_selection_rects = null;
+  #sk_get_text_selection_rects_ptr = null;
+  #sk_build_selected_text = null;
+  #sk_get_selected_text_ptr = null;
 
   /** @type {object|null} Reference to the Emscripten `Module` object. */
   #wasmModule = null;
@@ -271,6 +278,125 @@ export class SafePdfRenderer {
   }
 
   /**
+   * Clear cached text layouts used for selection and copy.
+   */
+  clearTextLayoutCache() {
+    this.#assertReady();
+    this.#sk_clear_text_layout_cache();
+  }
+
+  /**
+   * Return the number of selectable glyph spans on a rendered page.
+   *
+   * @param {number} pageIndex
+   * @param {number} width
+   * @param {number} height
+   * @returns {number}
+   */
+  getTextGlyphCount(pageIndex, width, height) {
+    this.#assertReady();
+    this.#assertPdfLoaded();
+    this.#assertPageIndex(pageIndex);
+    return this.#sk_get_text_glyph_count(
+      pageIndex,
+      Math.round(width),
+      Math.round(height)
+    );
+  }
+
+  /**
+   * Hit-test a rendered page point against selectable text.
+   *
+   * @param {number} pageIndex
+   * @param {number} width
+   * @param {number} height
+   * @param {number} x
+   * @param {number} y
+   * @returns {number|null} Glyph index, or `null` when no text is available.
+   */
+  hitTestText(pageIndex, width, height, x, y) {
+    this.#assertReady();
+    this.#assertPdfLoaded();
+    this.#assertPageIndex(pageIndex);
+
+    const hit = this.#sk_hit_test_text(
+      pageIndex,
+      Math.round(width),
+      Math.round(height),
+      x,
+      y
+    );
+    return hit === 0xFFFFFFFF ? null : hit;
+  }
+
+  /**
+   * Return selection highlight rectangles for one rendered page.
+   *
+   * @param {number} pageIndex
+   * @param {number} width
+   * @param {number} height
+   * @param {number} startIndex Inclusive glyph index.
+   * @param {number} endIndex Inclusive glyph index.
+   * @returns {Array<{left: number, top: number, right: number, bottom: number}>}
+   */
+  getTextSelectionRects(pageIndex, width, height, startIndex, endIndex) {
+    this.#assertReady();
+    this.#assertPdfLoaded();
+    this.#assertPageIndex(pageIndex);
+
+    const count = this.#sk_build_text_selection_rects(
+      pageIndex,
+      Math.round(width),
+      Math.round(height),
+      startIndex,
+      endIndex
+    );
+    if (count === 0) return [];
+
+    const ptr = this.#sk_get_text_selection_rects_ptr();
+    const values = this.#wasmModule.HEAPF32.subarray(ptr / 4, ptr / 4 + count * 4);
+    const rects = [];
+    for (let i = 0; i < values.length; i += 4) {
+      rects.push({
+        left: values[i],
+        top: values[i + 1],
+        right: values[i + 2],
+        bottom: values[i + 3],
+      });
+    }
+    return rects;
+  }
+
+  /**
+   * Return selected text for one rendered page.
+   *
+   * @param {number} pageIndex
+   * @param {number} width
+   * @param {number} height
+   * @param {number} startIndex Inclusive glyph index.
+   * @param {number} endIndex Inclusive glyph index.
+   * @returns {string}
+   */
+  getSelectedText(pageIndex, width, height, startIndex, endIndex) {
+    this.#assertReady();
+    this.#assertPdfLoaded();
+    this.#assertPageIndex(pageIndex);
+
+    const length = this.#sk_build_selected_text(
+      pageIndex,
+      Math.round(width),
+      Math.round(height),
+      startIndex,
+      endIndex
+    );
+    if (length === 0) return '';
+
+    const ptr = this.#sk_get_selected_text_ptr();
+    const bytes = this.#wasmModule.HEAPU8.slice(ptr, ptr + length);
+    return new TextDecoder('utf-8').decode(bytes);
+  }
+
+  /**
    * Return an ordered list of page indices that should be prefetched given
    * the user's current reading position.
    *
@@ -349,6 +475,14 @@ export class SafePdfRenderer {
     }
   }
 
+  #assertPageIndex(pageIndex) {
+    if (pageIndex < 0 || pageIndex >= this.#pageCount) {
+      throw new RangeError(
+        `Page index ${pageIndex} out of range [0, ${this.#pageCount - 1}]`
+      );
+    }
+  }
+
   /**
    * Dynamically load the Emscripten-generated JS file and wait for the
    * WASM module to finish initialising.
@@ -388,11 +522,7 @@ export class SafePdfRenderer {
     this.#assertReady();
     this.#assertPdfLoaded();
 
-    if (pageIndex < 0 || pageIndex >= this.#pageCount) {
-      throw new RangeError(
-        `Page index ${pageIndex} out of range [0, ${this.#pageCount - 1}]`
-      );
-    }
+    this.#assertPageIndex(pageIndex);
 
     // Resize the canvas (and reinitialise WebGL) when the target size changes.
     if (this.#canvas.width !== width || this.#canvas.height !== height) {
@@ -463,5 +593,12 @@ export class SafePdfRenderer {
     this.#sk_get_prefetch_page  = M.cwrap('sk_get_prefetch_page',  'number', ['number', 'number']);
     this.#sk_get_page_width     = M.cwrap('sk_get_page_width',     'number', ['number']);
     this.#sk_get_page_height    = M.cwrap('sk_get_page_height',    'number', ['number']);
+    this.#sk_clear_text_layout_cache = M.cwrap('sk_clear_text_layout_cache', null, []);
+    this.#sk_get_text_glyph_count = M.cwrap('sk_get_text_glyph_count', 'number', ['number', 'number', 'number']);
+    this.#sk_hit_test_text = M.cwrap('sk_hit_test_text', 'number', ['number', 'number', 'number', 'number', 'number']);
+    this.#sk_build_text_selection_rects = M.cwrap('sk_build_text_selection_rects', 'number', ['number', 'number', 'number', 'number', 'number']);
+    this.#sk_get_text_selection_rects_ptr = M.cwrap('sk_get_text_selection_rects_ptr', 'number', []);
+    this.#sk_build_selected_text = M.cwrap('sk_build_selected_text', 'number', ['number', 'number', 'number', 'number', 'number']);
+    this.#sk_get_selected_text_ptr = M.cwrap('sk_get_selected_text_ptr', 'number', []);
   }
 }
