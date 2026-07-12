@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, convert::TryFrom};
 
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
@@ -29,6 +29,40 @@ impl From<&str> for FontEncoding {
             "StandardEncoding" => Self::Standard,
             "WinAnsiEncoding" => Self::WinAnsi,
             _ => Self::Unknown(name.to_owned()),
+        }
+    }
+}
+
+impl FontEncoding {
+    /// Encodes UTF-8 text using the font encoding.
+    pub fn encode(&self, text: &str) -> Result<Vec<u8>, FontError> {
+        text.chars()
+            .map(|character| self.encode_char(character))
+            .collect()
+    }
+
+    /// Encodes a single Unicode scalar value using the font encoding.
+    pub fn encode_char(&self, character: char) -> Result<u8, FontError> {
+        match self {
+            Self::WinAnsi => encode_win_ansi_char(character),
+            _ => Err(FontError::UnsupportedTextEncoding(self.clone())),
+        }
+    }
+
+    /// Decodes bytes using the font encoding.
+    pub fn decode(&self, bytes: &[u8]) -> Result<String, FontError> {
+        bytes
+            .iter()
+            .copied()
+            .map(|byte| self.decode_byte(byte))
+            .collect()
+    }
+
+    /// Decodes a single encoded byte using the font encoding.
+    pub fn decode_byte(&self, byte: u8) -> Result<char, FontError> {
+        match self {
+            Self::WinAnsi => decode_win_ansi_byte(byte),
+            _ => Err(FontError::UnsupportedTextEncoding(self.clone())),
         }
     }
 }
@@ -108,6 +142,83 @@ impl Encoding {
 
 fn names_from_base(base: &[&'static str]) -> Vec<Cow<'static, str>> {
     base.iter().map(|&nm| Cow::Borrowed(nm)).collect()
+}
+
+fn encode_win_ansi_char(character: char) -> Result<u8, FontError> {
+    let code = u32::from(character);
+    if code <= 0x7f || (0xa0..=0xff).contains(&code) {
+        return u8::try_from(code)
+            .map_err(|_| FontError::UnsupportedWinAnsiCharacter { character });
+    }
+
+    let byte = match character {
+        '\u{20ac}' => 0x80,
+        '\u{201a}' => 0x82,
+        '\u{0192}' => 0x83,
+        '\u{201e}' => 0x84,
+        '\u{2026}' => 0x85,
+        '\u{2020}' => 0x86,
+        '\u{2021}' => 0x87,
+        '\u{02c6}' => 0x88,
+        '\u{2030}' => 0x89,
+        '\u{0160}' => 0x8a,
+        '\u{2039}' => 0x8b,
+        '\u{0152}' => 0x8c,
+        '\u{017d}' => 0x8e,
+        '\u{2018}' => 0x91,
+        '\u{2019}' => 0x92,
+        '\u{201c}' => 0x93,
+        '\u{201d}' => 0x94,
+        '\u{2022}' => 0x95,
+        '\u{2013}' => 0x96,
+        '\u{2014}' => 0x97,
+        '\u{02dc}' => 0x98,
+        '\u{2122}' => 0x99,
+        '\u{0161}' => 0x9a,
+        '\u{203a}' => 0x9b,
+        '\u{0153}' => 0x9c,
+        '\u{017e}' => 0x9e,
+        '\u{0178}' => 0x9f,
+        _ => return Err(FontError::UnsupportedWinAnsiCharacter { character }),
+    };
+    Ok(byte)
+}
+
+fn decode_win_ansi_byte(byte: u8) -> Result<char, FontError> {
+    let character = match byte {
+        0x80 => '\u{20ac}',
+        0x82 => '\u{201a}',
+        0x83 => '\u{0192}',
+        0x84 => '\u{201e}',
+        0x85 => '\u{2026}',
+        0x86 => '\u{2020}',
+        0x87 => '\u{2021}',
+        0x88 => '\u{02c6}',
+        0x89 => '\u{2030}',
+        0x8a => '\u{0160}',
+        0x8b => '\u{2039}',
+        0x8c => '\u{0152}',
+        0x8e => '\u{017d}',
+        0x91 => '\u{2018}',
+        0x92 => '\u{2019}',
+        0x93 => '\u{201c}',
+        0x94 => '\u{201d}',
+        0x95 => '\u{2022}',
+        0x96 => '\u{2013}',
+        0x97 => '\u{2014}',
+        0x98 => '\u{02dc}',
+        0x99 => '\u{2122}',
+        0x9a => '\u{0161}',
+        0x9b => '\u{203a}',
+        0x9c => '\u{0153}',
+        0x9e => '\u{017e}',
+        0x9f => '\u{0178}',
+        0x81 | 0x8d | 0x8f | 0x90 | 0x9d => {
+            return Err(FontError::InvalidWinAnsiByte { byte });
+        }
+        _ => char::from_u32(u32::from(byte)).ok_or(FontError::InvalidWinAnsiByte { byte })?,
+    };
+    Ok(character)
 }
 
 const STANDARD_NAMES: [&str; 256] = [
@@ -1145,3 +1256,59 @@ const MAC_EXPERT_NAMES: [&str; 256] = [
     ".notdef",
     ".notdef",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::{FontEncoding, FontError};
+
+    #[test]
+    fn win_ansi_round_trips_supported_text() {
+        let text = "Euro \u{20ac}, caf\u{e9}, \u{201c}quoted\u{201d}";
+        let encoded = FontEncoding::WinAnsi.encode(text).expect("encode");
+        assert_eq!(
+            FontEncoding::WinAnsi.decode(&encoded).expect("decode"),
+            text
+        );
+    }
+
+    #[test]
+    fn win_ansi_encodes_special_characters() {
+        assert_eq!(FontEncoding::WinAnsi.encode_char('\u{20ac}'), Ok(0x80));
+        assert_eq!(FontEncoding::WinAnsi.encode_char('\u{201c}'), Ok(0x93));
+        assert_eq!(FontEncoding::WinAnsi.encode_char('\u{201d}'), Ok(0x94));
+    }
+
+    #[test]
+    fn win_ansi_rejects_unrepresentable_characters() {
+        assert_eq!(
+            FontEncoding::WinAnsi.encode_char('\u{1f642}'),
+            Err(FontError::UnsupportedWinAnsiCharacter {
+                character: '\u{1f642}'
+            })
+        );
+    }
+
+    #[test]
+    fn win_ansi_rejects_undefined_bytes() {
+        assert_eq!(
+            FontEncoding::WinAnsi.decode_byte(0x81),
+            Err(FontError::InvalidWinAnsiByte { byte: 0x81 })
+        );
+        assert_eq!(
+            FontEncoding::WinAnsi.decode_byte(0x9d),
+            Err(FontError::InvalidWinAnsiByte { byte: 0x9d })
+        );
+    }
+
+    #[test]
+    fn non_win_ansi_variants_are_rejected() {
+        assert_eq!(
+            FontEncoding::Standard.encode("test"),
+            Err(FontError::UnsupportedTextEncoding(FontEncoding::Standard))
+        );
+        assert_eq!(
+            FontEncoding::None.decode(b"test"),
+            Err(FontError::UnsupportedTextEncoding(FontEncoding::None))
+        );
+    }
+}
