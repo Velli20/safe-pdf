@@ -26,8 +26,10 @@ pub enum PdfReaderError {
     InvalidXrefAtOffset { offset: usize },
     #[error("unsupported encryption version: {version}")]
     UnsupportedEncryptionVersion { version: i32 },
-    #[error("decryption error: {0}")]
-    DecryptionError(#[from] DecryptionError),
+    #[error("incorrect password")]
+    IncorrectPassword,
+    #[error("unable to initialize document decryption: {0}")]
+    DecryptionSetup(String),
     #[error("missing document ID required for encryption")]
     MissingDocumentId,
     #[error(
@@ -39,4 +41,14 @@ pub enum PdfReaderError {
         iterations: usize,
         first_offset: usize,
     },
+}
+
+impl PdfReaderError {
+    /// Converts a fatal encryption setup failure into the reader's public error model.
+    pub(crate) fn from_decryption_setup(error: DecryptionError) -> Self {
+        match error {
+            DecryptionError::IncorrectPassword => Self::IncorrectPassword,
+            error => Self::DecryptionSetup(error.to_string()),
+        }
+    }
 }

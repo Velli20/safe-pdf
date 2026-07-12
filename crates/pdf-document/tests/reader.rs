@@ -6,7 +6,7 @@
     clippy::as_conversions
 )]
 
-use pdf_document::reader::PdfReader;
+use pdf_document::{diagnostic::PdfReadDiagnosticKind, reader::PdfReader};
 
 fn format_xref_entry(offset: usize, generation: u16, used: bool) -> String {
     let kind = if used { 'n' } else { 'f' };
@@ -750,15 +750,21 @@ fn test_issue1293_pdf_loads_normally() {
 fn test_pdfbox4352_pdf_loads_normally() {
     let reader = PdfReader;
     let data = build_pdfbox4352_like_pdf();
-    let result = reader.read_from_bytes(&data, None);
+    let result = reader.read_with_report(&data, None);
     assert!(
         result.is_ok(),
         "PDFBOX-4352-style PDF should load despite malformed optional encryption object: {:?}",
         result.err()
     );
-    let doc = result.unwrap();
-    assert_eq!(doc.page_count(), 1);
-    assert!(doc.get_page(0).is_some());
+    let report = result.unwrap();
+    assert_eq!(report.document().page_count(), 1);
+    assert!(report.document().get_page(0).is_some());
+    assert!(
+        report
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.kind == PdfReadDiagnosticKind::MalformedEncryption)
+    );
 }
 
 #[test]
