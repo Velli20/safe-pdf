@@ -24,7 +24,7 @@ impl SimpleFontGlyphWidthsMap {
         // Check /Widths first — Standard 14 fonts may lack both /Widths and
         // /FirstChar, so we must not error on a missing /FirstChar when there
         // are no widths to parse.
-        let Some(widths_obj) = dictionary.get(Self::KEY) else {
+        let Some(arr) = dictionary.optional_array(Self::KEY, objects)? else {
             return Ok(None);
         };
 
@@ -37,8 +37,6 @@ impl SimpleFontGlyphWidthsMap {
             // returning an empty map that could be misinterpreted as "has widths".
             return Ok(None);
         }
-
-        let arr = widths_obj.try_array(objects)?;
 
         // Per spec the array should have (LastChar - FirstChar + 1) entries.
         // Be lenient: use the minimum of the actual length and the expected
