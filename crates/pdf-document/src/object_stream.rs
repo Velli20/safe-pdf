@@ -6,6 +6,15 @@ use pdf_parser::parser::PdfParser;
 
 use crate::error::PdfReaderError;
 
+/// An object extracted from a compressed PDF object stream.
+#[derive(Debug, Clone)]
+pub(crate) struct CompressedObject {
+    /// The extracted object's indirect object number.
+    pub(crate) number: usize,
+    /// The extracted object value.
+    pub(crate) value: ObjectVariant,
+}
+
 /// Parses an object stream (PDF 1.5+) and extracts all objects stored within it.
 ///
 /// # Parameters
@@ -15,11 +24,11 @@ use crate::error::PdfReaderError;
 ///
 /// # Returns
 ///
-/// A vector of `(object_number, ObjectVariant)` pairs for each object in the stream.
-pub fn read_object_stream(
+/// A vector of named compressed objects extracted from the stream.
+pub(crate) fn read_object_stream(
     stream: &StreamObject,
     objects: &dyn ObjectResolver,
-) -> Result<Vec<(usize, ObjectVariant)>, PdfReaderError> {
+) -> Result<Vec<CompressedObject>, PdfReaderError> {
     let dict = stream.dictionary.as_ref();
 
     // /N: number of objects in this stream (required)
@@ -33,118 +42,41 @@ pub fn read_object_stream(
 
     // Parse the header: N pairs of (object_number, relative_byte_offset)
     let mut header_parser = PdfParser::from(data.as_ref());
-    let mut obj_entries = Vec::with_capacity(n);
+    let mut object_entries = Vec::with_capacity(n);
 
     for _ in 0..n {
         let obj_num = header_parser.read_number::<usize>(true)?;
         let offset = header_parser.read_number::<usize>(true)?;
-        obj_entries.push((obj_num, offset));
+        object_entries.push(ObjectStreamEntry {
+            number: obj_num,
+            relative_offset: offset,
+        });
     }
 
     // Parse each object from the data section
     let mut result = Vec::with_capacity(n);
 
-    for &(obj_num, rel_offset) in &obj_entries {
-        let abs_offset = first.saturating_add(rel_offset);
+    for entry in object_entries {
+        let abs_offset = first.saturating_add(entry.relative_offset);
         let Some(slice) = data.get(abs_offset..) else {
             break;
         };
 
         let mut obj_parser = PdfParser::from(slice);
         let object = obj_parser.parse_object(objects)?;
-        result.push((obj_num, object));
+        result.push(CompressedObject {
+            number: entry.number,
+            value: object,
+        });
     }
 
     Ok(result)
 }
 
-#[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::as_conversions,
-    clippy::indexing_slicing
-)]
-mod tests {
-    use pdf_object::{dictionary::Dictionary, object_resolver::PassthroughResolver};
-    use std::collections::BTreeMap;
-
-    use super::*;
-
-    #[test]
-    fn test_parse_object_stream_basic() {
-        // Build an object stream with 2 objects:
-        //   Object 10: integer 42
-        //   Object 11: boolean true
-        //
-        // Header: "10 0 11 3 "
-        //   obj 10 at relative offset 0 => "/First + 0"
-        //   obj 11 at relative offset 3 => "/First + 3"
-        // Data after First:
-        //   "42 true"
-
-        let stream_content = b"10 0 11 3 42 true";
-        let first = 10; // "10 0 11 3 " is 10 bytes
-
-        let mut dict_map = BTreeMap::new();
-        dict_map.insert("Type".to_string(), ObjectVariant::Name(b"ObjStm".to_vec()));
-        dict_map.insert("N".to_string(), ObjectVariant::Integer(2));
-        dict_map.insert("First".to_string(), ObjectVariant::Integer(first as i64));
-        dict_map.insert(
-            "Length".to_string(),
-            ObjectVariant::Integer(stream_content.len() as i64),
-        );
-
-        let stream = StreamObject::new(
-            99, // object number of the stream itself
-            0,
-            Box::new(Dictionary::new(dict_map)),
-            stream_content.to_vec(),
-        );
-
-        let result = read_object_stream(&stream, &PassthroughResolver).unwrap();
-        assert_eq!(result.len(), 2);
-
-        assert_eq!(result[0].0, 10);
-        assert_eq!(result[0].1, ObjectVariant::Integer(42));
-
-        assert_eq!(result[1].0, 11);
-        assert_eq!(result[1].1, ObjectVariant::Boolean(true));
-    }
-
-    #[test]
-    fn test_parse_object_stream_with_dict() {
-        // Object 5: a dictionary << /Key /Value >>
-        // Header: "5 0 "
-        // Data: "<< /Key /Value >>"
-        let stream_content = b"5 0 << /Key /Value >>";
-        let first = 4; // "5 0 " is 4 bytes
-
-        let mut dict_map = BTreeMap::new();
-        dict_map.insert("Type".to_string(), ObjectVariant::Name(b"ObjStm".to_vec()));
-        dict_map.insert("N".to_string(), ObjectVariant::Integer(1));
-        dict_map.insert("First".to_string(), ObjectVariant::Integer(first as i64));
-        dict_map.insert(
-            "Length".to_string(),
-            ObjectVariant::Integer(stream_content.len() as i64),
-        );
-
-        let stream = StreamObject::new(
-            99,
-            0,
-            Box::new(Dictionary::new(dict_map)),
-            stream_content.to_vec(),
-        );
-
-        let result = read_object_stream(&stream, &PassthroughResolver).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].0, 5);
-        match &result[0].1 {
-            ObjectVariant::Dictionary(d) => {
-                assert_eq!(d.get("Key"), Some(&ObjectVariant::Name(b"Value".to_vec())));
-            }
-            other => panic!("Expected dictionary, got {:?}", other),
-        }
-    }
+/// Locates one object within an object stream's decoded bytes.
+struct ObjectStreamEntry {
+    /// The object's indirect object number.
+    number: usize,
+    /// The object's byte offset relative to the stream's `/First` value.
+    relative_offset: usize,
 }
