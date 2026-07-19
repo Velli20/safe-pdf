@@ -81,7 +81,7 @@ impl<'a> Tokenizer<'a> {
 
     /// Consume and return the next byte.
     #[inline]
-    fn next_byte(&mut self) -> Option<u8> {
+    pub fn next_byte(&mut self) -> Option<u8> {
         let b = self.peek_byte()?;
         let _ = self.advance(1); // safe advance after peek
         Some(b)

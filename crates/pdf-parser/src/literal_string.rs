@@ -40,16 +40,10 @@ impl PdfParser<'_> {
         //   are preserved as-is.
         loop {
             // Read exactly one byte; reaching EOF without closing means unbalanced parentheses
-            let b = self
-                .tokenizer
-                .read_exactly(1)?
-                .first()
-                .copied()
-                .ok_or(LiteralStringObjectError::UnbalancedParentheses)?;
-
+            let b = self.tokenizer.next_byte();
             match (escaped, b) {
                 // Previous char was a backslash: take this byte literally and clear escape state
-                (true, byte) => {
+                (true, Some(byte)) => {
                     // Interpret common escapes and special pairs. For any other byte, we
                     // preserve the backslash and the byte literally (treat as not an escape).
                     match byte {
@@ -97,28 +91,31 @@ impl PdfParser<'_> {
                     escaped = false;
                 }
                 // Start escape sequence; do NOT keep the backslash in output
-                (false, b'\\') => {
+                (false, Some(b'\\')) => {
                     escaped = true;
                 }
                 // Nested opening parenthesis
-                (false, b'(') => {
+                (false, Some(b'(')) => {
                     depth = depth
                         .checked_add(1)
                         .ok_or(LiteralStringObjectError::TooManyOpeningParentheses)?;
                     characters.push(b'(');
                 }
                 // Possible closing of the literal or a nested close
-                (false, b')') if depth == 0 => {
+                (false, Some(b')')) if depth == 0 => {
                     return Ok(characters);
                 }
-                (false, b')') => {
+                (false, Some(b')')) => {
                     depth = depth
                         .checked_sub(1)
                         .ok_or(LiteralStringObjectError::UnbalancedParentheses)?;
                     characters.push(b')');
                 }
                 // Regular byte
-                (false, byte) => characters.push(byte),
+                (false, Some(byte)) => characters.push(byte),
+                (_, None) => {
+                    return Err(LiteralStringObjectError::UnbalancedParentheses);
+                }
             }
         }
     }
