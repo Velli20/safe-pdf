@@ -80,6 +80,13 @@ impl Default for Encoding {
 }
 
 impl Encoding {
+    /// Returns the built-in WinAnsi glyph-name table.
+    pub fn win_ansi() -> Self {
+        Self {
+            names: names_from_base(&WIN_ANSI_NAMES),
+        }
+    }
+
     pub(crate) fn from_base_encoding(encoding: FontEncoding) -> Result<Self, FontError> {
         let names = match encoding {
             FontEncoding::Standard => names_from_base(&STANDARD_NAMES),

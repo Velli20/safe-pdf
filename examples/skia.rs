@@ -1,4 +1,4 @@
-use std::{ffi::CString, num::NonZeroU32, path::PathBuf};
+use std::{ffi::CString, num::NonZeroU32, path::PathBuf, time::Instant};
 
 use gl_rs as gl;
 use glutin::{
@@ -9,8 +9,12 @@ use glutin::{
     surface::{Surface as GlutinSurface, SurfaceAttributesBuilder, WindowSurface},
 };
 use glutin_winit::DisplayBuilder;
+use pdf_annotation_form::{
+    AnnotationController, AnnotationEditCommand, AnnotationInteractionError, AnnotationPointerMove,
+    AnnotationPointerPress, AnnotationViewport,
+};
 use pdf_canvas::canvas_backend::{CanvasBackend, Shader};
-use pdf_graphics::{BlendMode, PathFillType, color::Color, pdf_path::PdfPath};
+use pdf_graphics::{BlendMode, PathFillType, color::Color, pdf_path::PdfPath, point::Point};
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
 use raw_window_handle::HasWindowHandle;
 use skia_safe::{Color as SkiaColor, Surface};
@@ -51,6 +55,8 @@ pub enum AppError {
     PdfRendererError(#[from] pdf_renderer::PdfRendererError),
     #[error("Failed to draw PDF canvas overlay: {0}")]
     PdfCanvasError(#[from] pdf_canvas::error::PdfCanvasError),
+    #[error("Failed to interact with PDF annotation: {0}")]
+    AnnotationInteraction(#[from] AnnotationInteractionError),
     #[error("Failed to create event loop: {0}")]
     EventLoop(#[from] winit::error::EventLoopError),
     #[error("Failed to create window: {0}")]
@@ -117,6 +123,7 @@ struct Application {
     selection_focus: Option<TextHit>,
     selection: Option<TextSelection>,
     cursor_position: Option<(f32, f32)>,
+    annotations: AnnotationController,
     clipboard: Option<arboard::Clipboard>,
     render_error: Option<AppError>,
 }
@@ -143,6 +150,12 @@ impl Application {
             };
             self.renderer.render(&mut backend, self.current_page)?;
             draw_selection_rects(&mut backend, &selection_rects)?;
+            if let Some(page) = self.renderer.document().get_page(self.current_page)
+                && let Some(viewport) = AnnotationViewport::from_page(page, width, height)
+            {
+                self.annotations
+                    .draw_overlay(&mut backend, page, viewport)?;
+            }
         }
 
         self.gpu_state.context.flush_and_submit();
@@ -221,6 +234,7 @@ impl Application {
         if page_count > 0 {
             self.current_page = (self.current_page + 1) % page_count;
             self.clear_selection();
+            self.annotations.page_changed();
             self.invalidate_text_layout();
             println!("Page {}/{}", self.current_page + 1, page_count);
             self.window.request_redraw();
@@ -236,6 +250,7 @@ impl Application {
                 self.current_page - 1
             };
             self.clear_selection();
+            self.annotations.page_changed();
             self.invalidate_text_layout();
             println!("Page {}/{}", self.current_page + 1, page_count);
             self.window.request_redraw();
@@ -262,6 +277,39 @@ fn draw_selection_rects(
     Ok(())
 }
 
+fn annotation_edit_command<'a>(
+    event: &'a KeyEvent,
+    modifiers: ModifiersState,
+) -> Option<AnnotationEditCommand<'a>> {
+    match &event.logical_key {
+        Key::Named(NamedKey::Escape) => Some(AnnotationEditCommand::Cancel),
+        Key::Named(NamedKey::Enter) if modifiers.shift_key() => {
+            Some(AnnotationEditCommand::Newline)
+        }
+        Key::Named(NamedKey::Enter) => Some(AnnotationEditCommand::Commit),
+        Key::Named(NamedKey::ArrowLeft) => Some(AnnotationEditCommand::MoveLeft),
+        Key::Named(NamedKey::ArrowRight) => Some(AnnotationEditCommand::MoveRight),
+        Key::Named(NamedKey::Home) => Some(AnnotationEditCommand::MoveToStart),
+        Key::Named(NamedKey::End) => Some(AnnotationEditCommand::MoveToEnd),
+        Key::Named(NamedKey::Backspace) => Some(AnnotationEditCommand::DeleteBackward),
+        Key::Named(NamedKey::Delete) => Some(AnnotationEditCommand::DeleteForward),
+        _ if !modifiers.control_key() && !modifiers.super_key() => event
+            .text
+            .as_deref()
+            .filter(|text| !text.chars().any(char::is_control))
+            .map(|text| AnnotationEditCommand::Insert { text }),
+        _ => None,
+    }
+}
+
+fn is_quit_shortcut(event: &KeyEvent, modifiers: ModifiersState) -> bool {
+    matches!(
+        &event.logical_key,
+        Key::Character(character)
+            if modifiers.super_key() && character.eq_ignore_ascii_case("q")
+    )
+}
+
 impl ApplicationHandler for Application {
     fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
 
@@ -275,6 +323,7 @@ impl ApplicationHandler for Application {
             WindowEvent::CloseRequested => event_loop.exit(),
 
             WindowEvent::Resized(size) => {
+                self.annotations.pointer_released();
                 match self
                     .gpu_state
                     .create_target_surface(size.width as i32, size.height as i32)
@@ -302,7 +351,37 @@ impl ApplicationHandler for Application {
                 let x = position.x as f32;
                 let y = position.y as f32;
                 self.cursor_position = Some((x, y));
-                if self.selection_anchor.is_some() {
+                let size = self.window.inner_size();
+                let viewport = self
+                    .renderer
+                    .document()
+                    .get_page(self.current_page)
+                    .and_then(|page| {
+                        AnnotationViewport::from_page(page, size.width as f32, size.height as f32)
+                    });
+                let interaction = viewport.map(|viewport| {
+                    self.annotations.pointer_moved(
+                        self.renderer.document_mut(),
+                        AnnotationPointerMove {
+                            page_index: self.current_page,
+                            viewport,
+                            position: Point::new(x, y),
+                        },
+                    )
+                });
+                let outcome = match interaction.transpose() {
+                    Ok(Some(outcome)) => outcome,
+                    Ok(None) => Default::default(),
+                    Err(error) => {
+                        self.render_error = Some(error.into());
+                        event_loop.exit();
+                        return;
+                    }
+                };
+                if outcome.redraw {
+                    self.window.request_redraw();
+                }
+                if !outcome.consumed && self.selection_anchor.is_some() {
                     self.update_selection(x, y);
                 }
             }
@@ -314,47 +393,105 @@ impl ApplicationHandler for Application {
             } => match state {
                 ElementState::Pressed => {
                     if let Some((x, y)) = self.cursor_position {
-                        if self.text_layout.is_none() {
-                            let size = self.window.inner_size();
-                            if let Err(e) =
-                                self.ensure_text_layout(size.width as f32, size.height as f32)
+                        let size = self.window.inner_size();
+                        let viewport = self
+                            .renderer
+                            .document()
+                            .get_page(self.current_page)
+                            .and_then(|page| {
+                                AnnotationViewport::from_page(
+                                    page,
+                                    size.width as f32,
+                                    size.height as f32,
+                                )
+                            });
+                        let interaction = viewport.map(|viewport| {
+                            self.annotations.pointer_pressed(
+                                self.renderer.document_mut(),
+                                AnnotationPointerPress {
+                                    page_index: self.current_page,
+                                    viewport,
+                                    position: Point::new(x, y),
+                                    timestamp: Instant::now(),
+                                },
+                            )
+                        });
+                        let outcome = match interaction.transpose() {
+                            Ok(Some(outcome)) => outcome,
+                            Ok(None) => Default::default(),
+                            Err(error) => {
+                                self.render_error = Some(error.into());
+                                event_loop.exit();
+                                return;
+                            }
+                        };
+                        if outcome.redraw {
+                            self.window.request_redraw();
+                        }
+                        if outcome.consumed {
+                            self.clear_selection();
+                        } else {
+                            if self.text_layout.is_none()
+                                && let Err(e) =
+                                    self.ensure_text_layout(size.width as f32, size.height as f32)
                             {
                                 self.render_error = Some(e);
                                 event_loop.exit();
                                 return;
                             }
+                            self.begin_selection(x, y);
                         }
-                        self.begin_selection(x, y);
                     }
                 }
                 ElementState::Released => {
+                    self.annotations.pointer_released();
                     self.selection_anchor = None;
                     self.selection_focus = None;
                 }
             },
 
-            WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        logical_key,
-                        state: ElementState::Pressed,
-                        ..
-                    },
-                ..
-            } => match &logical_key {
-                Key::Named(NamedKey::ArrowRight) => self.next_page(),
-                Key::Named(NamedKey::ArrowLeft) => self.prev_page(),
-                Key::Character(c)
-                    if (self.modifiers.super_key() || self.modifiers.control_key())
-                        && c.eq_ignore_ascii_case("c") =>
-                {
-                    self.copy_selection();
+            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+                if self.annotations.is_editing() && !is_quit_shortcut(&event, self.modifiers) {
+                    if let Some(command) = annotation_edit_command(&event, self.modifiers) {
+                        let result = self
+                            .renderer
+                            .document_mut()
+                            .pages
+                            .get_mut(self.current_page)
+                            .map(|page| self.annotations.handle_edit_command(page, command));
+                        match result.transpose() {
+                            Ok(Some(outcome)) => {
+                                if outcome.redraw {
+                                    self.window.request_redraw();
+                                }
+                            }
+                            Ok(None) => {}
+                            Err(error) => {
+                                self.render_error = Some(error.into());
+                                event_loop.exit();
+                            }
+                        }
+                    }
+                    event_loop.set_control_flow(ControlFlow::Wait);
+                    return;
                 }
-                Key::Character(c) if self.modifiers.super_key() && c.eq_ignore_ascii_case("q") => {
-                    event_loop.exit();
+                match &event.logical_key {
+                    Key::Named(NamedKey::ArrowRight) => self.next_page(),
+                    Key::Named(NamedKey::ArrowLeft) => self.prev_page(),
+                    Key::Character(c)
+                        if (self.modifiers.super_key() || self.modifiers.control_key())
+                            && c.eq_ignore_ascii_case("c") =>
+                    {
+                        self.copy_selection();
+                    }
+                    Key::Character(c)
+                        if self.modifiers.super_key() && c.eq_ignore_ascii_case("q") =>
+                    {
+                        event_loop.exit();
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
 
             WindowEvent::RedrawRequested => {
                 if let Err(e) = self.render() {
@@ -440,6 +577,7 @@ fn run(document: PdfDocument) -> Result<(), AppError> {
         selection_focus: None,
         selection: None,
         cursor_position: None,
+        annotations: AnnotationController::default(),
         clipboard: arboard::Clipboard::new().ok(),
         render_error: None,
     };

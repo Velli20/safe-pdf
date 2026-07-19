@@ -7,11 +7,15 @@ use pdf_resources::{object_reader::ReadCycleTracker, resource_cache::ResourceCac
 
 use crate::{
     AnnotationBorder, AnnotationColor, AnnotationError, AnnotationKind, AppearanceDictionary,
-    OptionalContent,
+    AppearanceField, ButtonStateError, FreeTextAnnotation, OptionalContent, WidgetFieldValue,
+    annotation_id::AnnotationId,
 };
+
+const OFF_STATE: &str = "Off";
 
 /// A typed page annotation.
 pub struct Annotation {
+    id: AnnotationId,
     /// The annotation subtype name.
     pub subtype: String,
     /// The optional annotation rectangle from `/Rect`.
@@ -39,6 +43,93 @@ pub struct Annotation {
 }
 
 impl Annotation {
+    /// Returns this annotation's stable, page-scoped runtime identifier.
+    pub const fn id(&self) -> AnnotationId {
+        self.id
+    }
+
+    /// Returns this button's active non-`/Off` normal appearance state.
+    ///
+    /// A valid current `/AS` state is preferred. Otherwise, this selects the
+    /// first non-`/Off` key from the normal appearance subdictionary. Returns
+    /// [`ButtonStateError::MissingOnState`] when no such state is available.
+    pub fn button_on_state(&self) -> Result<String, ButtonStateError> {
+        let Some(appearance) = self.appearance.as_ref() else {
+            return Err(ButtonStateError::MissingOnState { id: self.id });
+        };
+
+        let Some(AppearanceField::Subdictionary(states)) = appearance.normal.as_ref() else {
+            return Err(ButtonStateError::MissingOnState { id: self.id });
+        };
+
+        if let Some(state) = self
+            .appearance_state
+            .as_deref()
+            .filter(|state| *state != OFF_STATE && states.contains_key(*state))
+        {
+            return Ok(state.to_owned());
+        }
+
+        states
+            .keys()
+            .find(|state| state.as_str() != OFF_STATE)
+            .cloned()
+            .ok_or(ButtonStateError::MissingOnState { id: self.id })
+    }
+
+    /// Applies a button appearance state to this annotation's `/AS` entry.
+    ///
+    /// `None` represents the PDF button off state and is stored as `/Off`.
+    pub fn set_button_appearance_state(&mut self, state: Option<&str>) {
+        self.appearance_state = Some(state.unwrap_or(OFF_STATE).to_owned());
+    }
+
+    /// Synchronizes this widget annotation's `/V` field with a button state.
+    ///
+    /// `None` represents the PDF button off state and is stored as `/Off`.
+    /// This method leaves non-widget annotations unchanged.
+    pub fn set_button_value(&mut self, state: Option<&str>) {
+        let AnnotationKind::Widget(widget) = &mut self.kind else {
+            return;
+        };
+        widget.value = Some(WidgetFieldValue::Bytes(
+            state.unwrap_or(OFF_STATE).as_bytes().to_vec(),
+        ));
+    }
+
+    /// Assigns an identifier when attaching an annotation to a page.
+    #[doc(hidden)]
+    pub fn set_id(&mut self, id: AnnotationId) {
+        self.id = id;
+    }
+
+    /// Creates a detached free text annotation with generated appearance data.
+    #[doc(hidden)]
+    pub fn new_free_text(
+        rect: Rect,
+        contents: Vec<u8>,
+        appearance: AppearanceDictionary,
+        border: Option<AnnotationBorder>,
+        color: Option<AnnotationColor>,
+        free_text: FreeTextAnnotation,
+    ) -> Self {
+        Self {
+            id: AnnotationId::from_page_value(0),
+            subtype: "FreeText".to_owned(),
+            rect: Some(rect),
+            contents: Some(contents),
+            name: None,
+            flags: None,
+            appearance: Some(appearance),
+            appearance_state: None,
+            border,
+            color,
+            struct_parent: None,
+            optional_content: None,
+            kind: AnnotationKind::FreeText(free_text),
+        }
+    }
+
     /// Reads all page annotations from the optional `/Annots` array.
     pub fn from_page_dictionary(
         dictionary: &Dictionary,
@@ -63,13 +154,10 @@ impl Annotation {
             if dictionary.get("Subtype").is_none() {
                 continue;
             }
-            annotations.push(Self::from_dictionary(
-                dictionary,
-                objects,
-                cache,
-                cycle_tracker,
-                id_allocator,
-            )?);
+            let mut annotation =
+                Self::from_dictionary(dictionary, objects, cache, cycle_tracker, id_allocator)?;
+            annotation.id = AnnotationId::from_page_value(annotations.len());
+            annotations.push(annotation);
         }
 
         Ok(Some(annotations))
@@ -139,6 +227,7 @@ impl Annotation {
         let color = AnnotationColor::from_dictionary(dictionary, "C", objects)?;
 
         Ok(Self {
+            id: AnnotationId::from_page_value(0),
             subtype,
             rect,
             contents,
@@ -164,6 +253,7 @@ mod tests {
         error::ObjectError,
         object_resolver::{ObjectResolver, PassthroughResolver},
         object_variant::ObjectVariant,
+        stream::StreamObject,
     };
     use pdf_resources::{object_reader::ReadCycleTracker, resource_cache::DefaultResourceCache};
 
@@ -218,6 +308,72 @@ mod tests {
         Dictionary::new(values)
     }
 
+    fn appearance_stream(object_number: usize) -> ObjectVariant {
+        let dictionary = Dictionary::new(BTreeMap::from([(
+            "BBox".to_owned(),
+            ObjectVariant::Array(vec![
+                ObjectVariant::Integer(0),
+                ObjectVariant::Integer(0),
+                ObjectVariant::Integer(1),
+                ObjectVariant::Integer(1),
+            ]),
+        )]));
+        ObjectVariant::Stream(StreamObject::new(
+            object_number,
+            0,
+            Box::new(dictionary),
+            Vec::new(),
+        ))
+    }
+
+    fn button_annotation(appearance_state: Option<&str>, states: &[&str]) -> Annotation {
+        let states = states
+            .iter()
+            .enumerate()
+            .map(|(index, state)| {
+                (
+                    (*state).to_owned(),
+                    appearance_stream(index.saturating_add(1)),
+                )
+            })
+            .collect();
+        let normal = ObjectVariant::Dictionary(Box::new(Dictionary::new(states)));
+        let appearance = ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+            "N".to_owned(),
+            normal,
+        )]))));
+
+        let mut entries = vec![
+            ("Subtype", ObjectVariant::Name(b"Widget".to_vec())),
+            ("FT", ObjectVariant::Name(b"Btn".to_vec())),
+            ("AP", appearance),
+        ];
+        if let Some(appearance_state) = appearance_state {
+            entries.push((
+                "AS",
+                ObjectVariant::Name(appearance_state.as_bytes().to_vec()),
+            ));
+        }
+
+        parse_annotation(Dictionary::new(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key.to_owned(), value))
+                .collect(),
+        ))
+        .expect("button annotation should parse")
+    }
+
+    fn widget_value(annotation: &Annotation) -> Option<&[u8]> {
+        let AnnotationKind::Widget(widget) = &annotation.kind else {
+            return None;
+        };
+        let WidgetFieldValue::Bytes(value) = widget.value.as_ref()? else {
+            return None;
+        };
+        Some(value)
+    }
+
     #[test]
     fn missing_type_is_preserved_as_none() {
         let dictionary = annotation_dictionary(vec![("Parent", ObjectVariant::Reference(3))]);
@@ -247,6 +403,47 @@ mod tests {
         let annotation = parse_annotation(dictionary).expect("annotation should parse");
 
         assert!(annotation.rect.is_none());
+    }
+
+    #[test]
+    fn button_on_state_prefers_the_current_valid_appearance_state() {
+        let annotation = button_annotation(Some("B"), &["Off", "A", "B"]);
+
+        assert_eq!(annotation.button_on_state(), Ok("B".to_owned()));
+    }
+
+    #[test]
+    fn button_on_state_falls_back_to_the_first_non_off_state() {
+        let annotation = button_annotation(Some("Missing"), &["Off", "B", "A"]);
+
+        assert_eq!(annotation.button_on_state(), Ok("A".to_owned()));
+    }
+
+    #[test]
+    fn button_on_state_requires_a_non_off_normal_appearance() {
+        let annotation = button_annotation(None, &["Off"]);
+
+        assert_eq!(
+            annotation.button_on_state(),
+            Err(ButtonStateError::MissingOnState {
+                id: annotation.id()
+            })
+        );
+    }
+
+    #[test]
+    fn button_appearance_and_field_values_are_updated_independently() {
+        let mut annotation = button_annotation(None, &[]);
+
+        annotation.set_button_appearance_state(Some("Yes"));
+        annotation.set_button_value(Some("Yes"));
+        assert_eq!(annotation.appearance_state.as_deref(), Some("Yes"));
+        assert_eq!(widget_value(&annotation), Some(b"Yes".as_slice()));
+
+        annotation.set_button_appearance_state(None);
+        annotation.set_button_value(None);
+        assert_eq!(annotation.appearance_state.as_deref(), Some(OFF_STATE));
+        assert_eq!(widget_value(&annotation), Some(OFF_STATE.as_bytes()));
     }
 
     #[test]
@@ -334,5 +531,6 @@ mod tests {
         // The broken object is skipped, but the valid annotation remains available.
         assert_eq!(annotations.len(), 1);
         assert_eq!(annotations[0].subtype, "Popup");
+        assert_eq!(annotations[0].id().get(), 0);
     }
 }

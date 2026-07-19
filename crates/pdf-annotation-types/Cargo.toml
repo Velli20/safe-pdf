@@ -7,6 +7,7 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+bitflags = "2.9.1"
 pdf-object = { path = "../pdf-object" }
 pdf-graphics = { path = "../pdf-graphics" }
 pdf-content-stream = { path = "../pdf-content-stream" }

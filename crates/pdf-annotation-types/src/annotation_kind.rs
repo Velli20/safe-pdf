@@ -67,6 +67,23 @@ pub enum AnnotationKind {
 }
 
 impl AnnotationKind {
+    /// Returns whether this annotation kind supports dragging.
+    #[must_use]
+    pub fn is_draggable(&self) -> bool {
+        matches!(
+            self,
+            Self::FreeText(_)
+                | Self::Text(_)
+                | Self::Stamp(_)
+                | Self::Line(_)
+                | Self::Square(_)
+                | Self::Circle(_)
+                | Self::Polygon(_)
+                | Self::PolyLine(_)
+                | Self::Ink(_)
+        )
+    }
+
     pub(crate) fn from_dictionary(
         subtype: &str,
         dictionary: &Dictionary,

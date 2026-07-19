@@ -49,6 +49,11 @@ impl PdfRenderer {
         &self.document
     }
 
+    /// Returns the owned document mutably for in-memory editing.
+    pub fn document_mut(&mut self) -> &mut PdfDocument {
+        &mut self.document
+    }
+
     /// Returns the owned document after rendering is complete.
     pub fn into_document(self) -> PdfDocument {
         self.document
@@ -74,7 +79,7 @@ impl PdfRenderer {
             let canvas = PdfCanvas::new(canvas_backend, page, None)?;
             let mut annotation_renderer = AnnotationRenderer::new(canvas);
             if let Some(cs) = &page.contents {
-                annotation_renderer.canvas.render_content_stream(
+                annotation_renderer.canvas_mut().render_content_stream(
                     cs,
                     None,
                     None,
@@ -83,7 +88,7 @@ impl PdfRenderer {
                 )?;
             }
             if let Some(annotations) = &page.annotations {
-                annotation_renderer.render_annotations(annotations)?;
+                annotation_renderer.render_all(annotations)?;
             }
         }
         Ok(())
@@ -105,7 +110,7 @@ impl PdfRenderer {
             let canvas = PdfCanvas::new(&mut recording, page, None)?;
             let mut annotation_renderer = AnnotationRenderer::new(canvas);
             if let Some(cs) = &page.contents {
-                annotation_renderer.canvas.render_content_stream(
+                annotation_renderer.canvas_mut().render_content_stream(
                     cs,
                     None,
                     None,
@@ -114,7 +119,7 @@ impl PdfRenderer {
                 )?;
             }
             if let Some(annotations) = &page.annotations {
-                annotation_renderer.render_annotations(annotations)?;
+                annotation_renderer.render_all(annotations)?;
             }
         }
         Ok(recording)

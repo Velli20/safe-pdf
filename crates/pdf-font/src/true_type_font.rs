@@ -123,6 +123,23 @@ impl TrueTypeFont {
             flags: FontFlags::empty(),
         }
     }
+
+    /// Builds a synthetic simple font backed by one of the bundled Standard 14
+    /// font programs.
+    ///
+    /// This constructor is intended for generated appearances and other
+    /// in-memory fonts that need a stable font resource without parsing a PDF
+    /// font dictionary.
+    pub fn synthetic_standard14_font(standard14: Standard14Font) -> Self {
+        Self {
+            font_file: standard14.fallback_font_bytes(),
+            widths: None,
+            encoding: Some(Encoding::win_ansi()),
+            to_unicode: None,
+            standard14: Some(standard14),
+            flags: FontFlags::NON_SYMBOLIC,
+        }
+    }
 }
 
 impl TrueTypeFont {

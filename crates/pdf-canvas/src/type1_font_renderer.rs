@@ -561,6 +561,7 @@ currentfile eexec
             annotations: None,
             media_box: None,
             resources: None,
+            annotation_id_high_watermark: 0,
         }
     }
 

@@ -3,6 +3,7 @@ use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 use crate::AnnotationError;
 
 /// A parsed annotation color array.
+#[derive(Clone, Debug, PartialEq)]
 pub struct AnnotationColor {
     /// Raw numeric color components.
     pub components: Vec<f32>,

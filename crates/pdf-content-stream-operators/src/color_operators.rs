@@ -18,6 +18,11 @@ impl SetGrayFill {
     pub fn new(gray: f32) -> Self {
         Self { gray }
     }
+
+    /// Returns the gray component.
+    pub const fn gray(&self) -> f32 {
+        self.gray
+    }
 }
 
 impl PdfOperator for SetGrayFill {
@@ -79,6 +84,11 @@ pub struct SetRGBFill {
 impl SetRGBFill {
     pub fn new(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b }
+    }
+
+    /// Returns the RGB components.
+    pub const fn components(&self) -> [f32; 3] {
+        [self.r, self.g, self.b]
     }
 }
 
@@ -151,6 +161,11 @@ pub struct SetCMYKFill {
 impl SetCMYKFill {
     pub fn new(c: f32, m: f32, y: f32, k: f32) -> Self {
         Self { c, m, y, k }
+    }
+
+    /// Returns the CMYK components.
+    pub const fn components(&self) -> [f32; 4] {
+        [self.c, self.m, self.y, self.k]
     }
 }
 

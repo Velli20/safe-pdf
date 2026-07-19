@@ -1,4 +1,4 @@
-use crate::transform::Transform;
+use crate::{point::Point, transform::Transform};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Rect {
@@ -58,6 +58,15 @@ impl Rect {
             && self.height() > 0.0
     }
 
+    /// Returns whether a point lies inside or on this rectangle's boundary.
+    pub fn contains(&self, point: Point) -> bool {
+        let rect = self.normalized();
+        point.x >= rect.left
+            && point.x <= rect.right
+            && point.y >= rect.top
+            && point.y <= rect.bottom
+    }
+
     /// Returns the scale transform produced by dividing this rectangle's size by another.
     pub fn scale(&self, other: &Self) -> Transform {
         Transform::from_scale(self.width() / other.width(), self.height() / other.height())
@@ -77,7 +86,7 @@ impl From<[f32; 4]> for Rect {
 
 #[cfg(test)]
 mod tests {
-    use crate::transform::Transform;
+    use crate::{point::Point, transform::Transform};
 
     use super::Rect;
 
@@ -115,6 +124,22 @@ mod tests {
             bottom: 20.0,
         };
         assert!(!rect.is_valid());
+    }
+
+    #[test]
+    fn contains_includes_boundaries_and_normalizes_edges() {
+        let rect = Rect {
+            left: 10.0,
+            top: 20.0,
+            right: 0.0,
+            bottom: 5.0,
+        };
+
+        assert!(rect.contains(Point::new(5.0, 10.0)));
+        assert!(rect.contains(Point::new(0.0, 5.0)));
+        assert!(rect.contains(Point::new(10.0, 20.0)));
+        assert!(!rect.contains(Point::new(-1.0, 10.0)));
+        assert!(!rect.contains(Point::new(5.0, 21.0)));
     }
 
     #[test]

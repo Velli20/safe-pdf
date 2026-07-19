@@ -103,8 +103,14 @@ pub struct SetLeading {
 }
 
 impl SetLeading {
+    /// Creates a leading operator with the given baseline distance.
     pub fn new(leading: f32) -> Self {
         Self { leading }
+    }
+
+    /// Returns the baseline distance in unscaled text-space units.
+    pub const fn leading(&self) -> f32 {
+        self.leading
     }
 }
 
@@ -136,6 +142,16 @@ pub struct SetFont {
 impl SetFont {
     pub fn new(name: String, size: f32) -> Self {
         Self { name, size }
+    }
+
+    /// Returns the font resource name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the font size.
+    pub const fn size(&self) -> f32 {
+        self.size
     }
 }
 

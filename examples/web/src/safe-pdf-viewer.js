@@ -253,6 +253,11 @@ export class SafePdfViewer extends EventTarget {
   #isSelecting = false;
   #selectedText = '';
 
+  // ---- Annotation interaction ----
+  #annotationPointerActive = false;
+  #annotationPointerId = null;
+  #annotationPageIndex = null;
+
   // ---- Scroll ----
   #scrollTimeout = null;
 
@@ -424,6 +429,8 @@ export class SafePdfViewer extends EventTarget {
    *   strings `'fit-width'` / `'fit-page'`.
    */
   setZoom(value) {
+    this.#endAnnotationPointerGesture();
+
     // Use the first page as the reference for fit calculations; fall back to
     // defaults when no PDF is loaded yet.
     const refW = this.#pageSizes[0]?.width ?? DEFAULT_PAGE_WIDTH;
@@ -548,6 +555,7 @@ export class SafePdfViewer extends EventTarget {
    */
   destroy() {
     this.#detachEventListeners();
+    this.#endAnnotationPointerGesture();
     this.#clearSelection();
     this.#renderer.destroy();
     this.#container.innerHTML = '';
@@ -683,7 +691,10 @@ export class SafePdfViewer extends EventTarget {
    * internal state.
    */
   #loadBuffer(buffer) {
+    this.#endAnnotationPointerGesture();
     this.#imageCache.clear();
+    this.#annotationPointerActive = false;
+    this.#annotationPageIndex = null;
     this.#clearSelection();
     const { pageCount } = this.#renderer.loadPdf(buffer);
     this.#pageCount = pageCount;
@@ -787,6 +798,30 @@ export class SafePdfViewer extends EventTarget {
     displayCanvas.getContext('2d').drawImage(this.#renderer.canvas, 0, 0);
 
     this.#imageCache.add(key);
+  }
+
+  #invalidatePageImage(pageIndex) {
+    const prefix = `${pageIndex}-`;
+    for (const key of this.#imageCache) {
+      if (key.startsWith(prefix)) this.#imageCache.delete(key);
+    }
+  }
+
+  #refreshAfterAnnotationInteraction(outcome, pageIndex, invalidateAll) {
+    if (!outcome.redraw) return;
+
+    if (invalidateAll) {
+      this.#imageCache.clear();
+      this.#renderVisiblePages();
+      return;
+    }
+
+    this.#invalidatePageImage(pageIndex);
+    try {
+      this.#renderAndDisplay(pageIndex);
+    } catch (err) {
+      this.#emitError('Failed to redraw annotation interaction', err);
+    }
   }
 
   // ==================================================================
@@ -1026,6 +1061,41 @@ export class SafePdfViewer extends EventTarget {
     return nearest;
   }
 
+  #pagePointForPage(pageIndex, clientX, clientY) {
+    const wrapper = this.#scrollContent.children[pageIndex];
+    if (!wrapper?.classList.contains('spdf-page-wrapper')) return null;
+
+    const rect = wrapper.getBoundingClientRect();
+    return {
+      pageIndex,
+      x: clientX - rect.left,
+      y: clientY - rect.top,
+    };
+  }
+
+  #pagePointAtClientPoint(clientX, clientY) {
+    for (const wrapper of this.#scrollContent.children) {
+      if (!wrapper.classList?.contains('spdf-page-wrapper')) continue;
+      const pageIndex = Number(wrapper.dataset.pageIndex);
+      if (!Number.isInteger(pageIndex)) continue;
+
+      const rect = wrapper.getBoundingClientRect();
+      if (
+        clientX >= rect.left &&
+        clientX <= rect.right &&
+        clientY >= rect.top &&
+        clientY <= rect.bottom
+      ) {
+        return {
+          pageIndex,
+          x: clientX - rect.left,
+          y: clientY - rect.top,
+        };
+      }
+    }
+    return null;
+  }
+
   // ==================================================================
   // Prefetching
   // ==================================================================
@@ -1085,7 +1155,65 @@ export class SafePdfViewer extends EventTarget {
   // ==================================================================
 
   #handlePointerDown(e) {
-    if (this.#pageCount === 0 || e.button !== 0) return;
+    if (
+      this.#pageCount === 0 ||
+      e.button !== 0 ||
+      e.isPrimary === false
+    ) return;
+
+    const annotationPoint =
+      this.#pagePointAtClientPoint(e.clientX, e.clientY) ??
+      (this.#annotationPageIndex === null
+        ? null
+        : this.#pagePointForPage(
+            this.#annotationPageIndex,
+            e.clientX,
+            e.clientY
+          ));
+
+    if (annotationPoint) {
+      const { width, height } = this.#scaledPageSizeForPage(
+        annotationPoint.pageIndex
+      );
+      let annotationOutcome;
+      try {
+        annotationOutcome = this.#renderer.annotationPointerDown(
+          annotationPoint.pageIndex,
+          width,
+          height,
+          annotationPoint.x,
+          annotationPoint.y
+        );
+      } catch (err) {
+        this.#emitError('Failed to interact with PDF annotation', err);
+        return;
+      }
+
+      this.#annotationPageIndex = annotationOutcome.consumed
+        ? annotationPoint.pageIndex
+        : null;
+
+      if (annotationOutcome.consumed) {
+        e.preventDefault();
+        this.#scrollContainer.focus({ preventScroll: true });
+        this.#clearSelection();
+        this.#annotationPointerActive = true;
+        this.#annotationPointerId = e.pointerId;
+        this.#scrollContainer.setPointerCapture?.(e.pointerId);
+        this.#refreshAfterAnnotationInteraction(
+          annotationOutcome,
+          annotationPoint.pageIndex,
+          true
+        );
+        return;
+      }
+
+      this.#refreshAfterAnnotationInteraction(
+        annotationOutcome,
+        annotationPoint.pageIndex,
+        true
+      );
+    }
 
     const hit = this.#selectionHitFromEvent(e);
     if (!hit) {
@@ -1104,6 +1232,36 @@ export class SafePdfViewer extends EventTarget {
   }
 
   #handlePointerMove(e) {
+    if (this.#annotationPointerActive && this.#annotationPageIndex !== null) {
+      const pagePoint = this.#pagePointForPage(
+        this.#annotationPageIndex,
+        e.clientX,
+        e.clientY
+      );
+      if (!pagePoint) return;
+
+      const { width, height } = this.#scaledPageSizeForPage(pagePoint.pageIndex);
+      try {
+        const outcome = this.#renderer.annotationPointerMove(
+          pagePoint.pageIndex,
+          width,
+          height,
+          pagePoint.x,
+          pagePoint.y
+        );
+        e.preventDefault();
+        this.#refreshAfterAnnotationInteraction(
+          outcome,
+          pagePoint.pageIndex,
+          false
+        );
+      } catch (err) {
+        this.#emitError('Failed to drag PDF annotation', err);
+        this.#endAnnotationPointerGesture(e.pointerId);
+      }
+      return;
+    }
+
     if (!this.#isSelecting) return;
 
     const hit = this.#selectionHitFromEvent(e);
@@ -1116,6 +1274,21 @@ export class SafePdfViewer extends EventTarget {
   }
 
   #handlePointerUp(e) {
+    if (this.#annotationPointerActive) {
+      try {
+        this.#renderer.annotationPointerUp();
+      } catch (err) {
+        this.#emitError('Failed to finish PDF annotation interaction', err);
+      } finally {
+        this.#annotationPointerActive = false;
+        if (this.#scrollContainer.hasPointerCapture?.(e.pointerId)) {
+          this.#scrollContainer.releasePointerCapture(e.pointerId);
+        }
+        this.#annotationPointerId = null;
+      }
+      return;
+    }
+
     if (!this.#isSelecting) return;
 
     this.#isSelecting = false;
@@ -1155,6 +1328,31 @@ export class SafePdfViewer extends EventTarget {
     // Guard: e.target can be null or a non-HTMLElement for document-level
     // key events. Also skip text-input elements to avoid hijacking typing.
     if (this.#isEditableEventTarget(e.target)) return;
+
+    if (
+      this.#annotationPageIndex !== null &&
+      this.#renderer.isAnnotationEditing()
+    ) {
+      const edit = this.#annotationEditCommandFromEvent(e);
+      if (edit) {
+        e.preventDefault();
+        try {
+          const outcome = this.#renderer.handleAnnotationEditCommand(
+            this.#annotationPageIndex,
+            edit.command,
+            edit.text
+          );
+          this.#refreshAfterAnnotationInteraction(
+            outcome,
+            this.#annotationPageIndex,
+            false
+          );
+        } catch (err) {
+          this.#emitError('Failed to edit PDF annotation', err);
+        }
+      }
+      return;
+    }
 
     if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'c') {
       const text = this.#selectedText || this.getSelectedText();
@@ -1203,6 +1401,58 @@ export class SafePdfViewer extends EventTarget {
 
   #showLoading(show) {
     this.#loadingOverlay?.classList.toggle('spdf-hidden', !show);
+  }
+
+  #annotationEditCommandFromEvent(e) {
+    switch (e.key) {
+      case 'Escape':
+        return { command: 'cancel' };
+      case 'Enter':
+        return { command: e.shiftKey ? 'newline' : 'commit' };
+      case 'ArrowLeft':
+        return { command: 'move-left' };
+      case 'ArrowRight':
+        return { command: 'move-right' };
+      case 'Home':
+        return { command: 'move-to-start' };
+      case 'End':
+        return { command: 'move-to-end' };
+      case 'Backspace':
+        return { command: 'delete-backward' };
+      case 'Delete':
+        return { command: 'delete-forward' };
+      default:
+        if (
+          !e.ctrlKey &&
+          !e.metaKey &&
+          !e.isComposing &&
+          [...e.key].length === 1 &&
+          !/\p{Cc}/u.test(e.key)
+        ) {
+          return { command: 'insert', text: e.key };
+        }
+        return null;
+    }
+  }
+
+  #endAnnotationPointerGesture(pointerId) {
+    if (!this.#annotationPointerActive) return;
+    if (this.#renderer.isReady && this.#pageCount > 0) {
+      try {
+        this.#renderer.annotationPointerUp();
+      } catch (err) {
+        this.#emitError('Failed to finish PDF annotation interaction', err);
+      }
+    }
+    this.#annotationPointerActive = false;
+    const capturedPointerId = pointerId ?? this.#annotationPointerId;
+    if (
+      capturedPointerId !== null &&
+      this.#scrollContainer.hasPointerCapture?.(capturedPointerId)
+    ) {
+      this.#scrollContainer.releasePointerCapture(capturedPointerId);
+    }
+    this.#annotationPointerId = null;
   }
 
   #isEditableEventTarget(target) {

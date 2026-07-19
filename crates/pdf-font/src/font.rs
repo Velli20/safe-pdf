@@ -5,6 +5,8 @@ use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_object::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
 };
+use read_fonts::TableProvider;
+use skrifa::{FontRef, MetadataProvider};
 
 use crate::{
     char_vec::CharVec,
@@ -144,11 +146,30 @@ impl Font {
                 .iter()
                 .copied()
                 .map(u16::from)
-                .map(|code| self.glyph_width(code).unwrap_or(DEFAULT_SIMPLE_WIDTH))
+                .map(|code| {
+                    self.glyph_width(code)
+                        .or_else(|| self.open_type_glyph_width(code))
+                        .unwrap_or(DEFAULT_SIMPLE_WIDTH)
+                })
                 .sum::<f32>(),
         };
 
         glyph_width_sum / GLYPH_SPACE_UNITS * font_size
+    }
+
+    fn open_type_glyph_width(&self, char_code: u16) -> Option<f32> {
+        let Font::TrueType(font) = self else {
+            return None;
+        };
+        let font_ref = FontRef::new(font.font_file.as_ref()).ok()?;
+        let unicode = self.char_to_unicode(char_code)?;
+        let glyph_id = font_ref.charmap().map(unicode)?;
+        let advance = font_ref.hmtx().ok()?.advance(glyph_id)?;
+        let units_per_em = font_ref.head().ok()?.units_per_em();
+        if units_per_em == 0 {
+            return None;
+        }
+        Some(f32::from(advance) / f32::from(units_per_em) * 1000.0)
     }
 
     pub fn glyph_name(&self, char_code: u16) -> Option<&str> {

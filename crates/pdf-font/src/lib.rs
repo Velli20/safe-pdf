@@ -10,6 +10,7 @@ pub mod glyph_name_to_unicode;
 pub mod glyph_widths_map;
 pub mod simple_font_glyph_map;
 pub mod standard14;
+pub mod text_string;
 pub mod true_type_font;
 pub mod type0_font;
 pub mod type1_font;

@@ -1,11 +1,33 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use gl_rs as gl;
+use pdf_annotation_form::{
+    AnnotationController, AnnotationEditCommand, AnnotationInteractionResult,
+    AnnotationPointerMove, AnnotationPointerPress, AnnotationViewport,
+};
 use pdf_document::reader::PdfReader;
+use pdf_graphics::point::Point;
 use pdf_graphics_skia::gpu_state::SkiaGpuState;
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
 use pdf_renderer::{PageRecordingCache, PageTextLayout, PdfRenderer, render_page_cached};
-use std::{cell::RefCell, collections::HashMap};
+use std::{cell::RefCell, collections::HashMap, time::Instant};
+
+const INTERACTION_CONSUMED: i32 = 1;
+const INTERACTION_REDRAW: i32 = 2;
+const INTERACTION_EDITING: i32 = 4;
+const INTERACTION_ERROR: i32 = -1;
+const INTERACTION_INVALID_INPUT: i32 = -2;
+
+const EDIT_INSERT: i32 = 0;
+const EDIT_NEWLINE: i32 = 1;
+const EDIT_MOVE_LEFT: i32 = 2;
+const EDIT_MOVE_RIGHT: i32 = 3;
+const EDIT_MOVE_TO_START: i32 = 4;
+const EDIT_MOVE_TO_END: i32 = 5;
+const EDIT_DELETE_BACKWARD: i32 = 6;
+const EDIT_DELETE_FORWARD: i32 = 7;
+const EDIT_COMMIT: i32 = 8;
+const EDIT_CANCEL: i32 = 9;
 
 // Thread-local storage for the currently loaded PDF renderer.
 // Using RefCell for interior mutability since WASM is single-threaded.
@@ -19,6 +41,9 @@ thread_local! {
         RefCell::new(HashMap::new());
     static TEXT_SELECTION_RECTS: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
     static SELECTED_TEXT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    static ANNOTATION_CONTROLLER: RefCell<AnnotationController> =
+        RefCell::new(AnnotationController::default());
+    static ANNOTATION_PAGE_INDEX: RefCell<Option<usize>> = const { RefCell::new(None) };
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -38,6 +63,56 @@ fn clear_text_selection_state() {
     SELECTED_TEXT.with(|text| {
         text.borrow_mut().clear();
     });
+}
+
+fn clear_annotation_interaction_state() {
+    ANNOTATION_CONTROLLER.with(|controller| {
+        *controller.borrow_mut() = AnnotationController::default();
+    });
+    ANNOTATION_PAGE_INDEX.with(|page_index| {
+        *page_index.borrow_mut() = None;
+    });
+}
+
+fn encode_interaction_result(result: AnnotationInteractionResult) -> i32 {
+    let editing = ANNOTATION_CONTROLLER.with(|controller| controller.borrow().is_editing());
+    let mut encoded = 0;
+    if result.consumed {
+        encoded |= INTERACTION_CONSUMED;
+    }
+    if result.redraw {
+        encoded |= INTERACTION_REDRAW;
+    }
+    if editing {
+        encoded |= INTERACTION_EDITING;
+    }
+    encoded
+}
+
+fn combine_interaction_results(
+    first: AnnotationInteractionResult,
+    second: AnnotationInteractionResult,
+) -> AnnotationInteractionResult {
+    AnnotationInteractionResult {
+        consumed: first.consumed || second.consumed,
+        redraw: first.redraw || second.redraw,
+    }
+}
+
+fn annotation_edit_command<'a>(code: i32, text: &'a str) -> Option<AnnotationEditCommand<'a>> {
+    match code {
+        EDIT_INSERT => Some(AnnotationEditCommand::Insert { text }),
+        EDIT_NEWLINE => Some(AnnotationEditCommand::Newline),
+        EDIT_MOVE_LEFT => Some(AnnotationEditCommand::MoveLeft),
+        EDIT_MOVE_RIGHT => Some(AnnotationEditCommand::MoveRight),
+        EDIT_MOVE_TO_START => Some(AnnotationEditCommand::MoveToStart),
+        EDIT_MOVE_TO_END => Some(AnnotationEditCommand::MoveToEnd),
+        EDIT_DELETE_BACKWARD => Some(AnnotationEditCommand::DeleteBackward),
+        EDIT_DELETE_FORWARD => Some(AnnotationEditCommand::DeleteForward),
+        EDIT_COMMIT => Some(AnnotationEditCommand::Commit),
+        EDIT_CANCEL => Some(AnnotationEditCommand::Cancel),
+        _ => None,
+    }
 }
 
 fn with_text_layout<R>(
@@ -131,6 +206,7 @@ pub unsafe extern "C" fn sk_load_pdf(data_ptr: *const u8, data_len: usize) -> i3
                 cache.borrow_mut().clear();
             });
             clear_text_selection_state();
+            clear_annotation_interaction_state();
             CURRENT_RENDERER.with(|renderer| {
                 *renderer.borrow_mut() = Some(PdfRenderer::new(document));
             });
@@ -231,6 +307,32 @@ pub extern "C" fn sk_render_page(width: i32, height: i32, page_index: usize) -> 
                 }
             });
 
+            if result != 0 {
+                return result;
+            }
+
+            let Some(page) = renderer.document().get_page(page_index) else {
+                return -1;
+            };
+            let Some(viewport) = AnnotationViewport::from_page(page, width as f32, height as f32)
+            else {
+                return -3;
+            };
+            let active_page = ANNOTATION_PAGE_INDEX.with(|active_page| *active_page.borrow());
+            let overlay_result = if active_page == Some(page_index) {
+                ANNOTATION_CONTROLLER.with(|controller| {
+                    controller
+                        .borrow()
+                        .draw_overlay(&mut skia_backend, page, viewport)
+                })
+            } else {
+                AnnotationController::default().draw_overlay(&mut skia_backend, page, viewport)
+            };
+            if let Err(error) = overlay_result {
+                eprintln!("Annotation overlay error: {error:?}");
+                return -3;
+            }
+
             // Flush and submit to ensure GPU commands are executed
             gpu_state.context.flush_and_submit();
 
@@ -246,6 +348,7 @@ pub extern "C" fn sk_free_pdf() {
         cache.borrow_mut().clear();
     });
     clear_text_selection_state();
+    clear_annotation_interaction_state();
     CURRENT_RENDERER.with(|renderer| {
         *renderer.borrow_mut() = None;
     });
@@ -355,6 +458,197 @@ pub extern "C" fn sk_clear_cache() {
 #[unsafe(export_name = "sk_clear_text_layout_cache")]
 pub extern "C" fn sk_clear_text_layout_cache() {
     clear_text_selection_state();
+}
+
+/// Handles a primary annotation pointer press in device coordinates.
+#[unsafe(export_name = "sk_annotation_pointer_pressed")]
+pub extern "C" fn sk_annotation_pointer_pressed(
+    page_index: usize,
+    width: i32,
+    height: i32,
+    x: f32,
+    y: f32,
+) -> i32 {
+    if width <= 0 || height <= 0 || !x.is_finite() || !y.is_finite() {
+        return INTERACTION_INVALID_INPUT;
+    }
+
+    let previous_page = ANNOTATION_PAGE_INDEX.with(|active_page| *active_page.borrow());
+    let page_change = if previous_page.is_some() && previous_page != Some(page_index) {
+        ANNOTATION_CONTROLLER.with(|controller| controller.borrow_mut().page_changed())
+    } else {
+        AnnotationInteractionResult::IGNORED
+    };
+
+    let interaction = CURRENT_RENDERER.with(|renderer| {
+        let mut renderer = renderer.borrow_mut();
+        let renderer = renderer.as_mut()?;
+        let viewport = renderer
+            .document()
+            .get_page(page_index)
+            .and_then(|page| AnnotationViewport::from_page(page, width as f32, height as f32))?;
+        Some(ANNOTATION_CONTROLLER.with(|controller| {
+            controller.borrow_mut().pointer_pressed(
+                renderer.document_mut(),
+                AnnotationPointerPress {
+                    page_index,
+                    viewport,
+                    position: Point::new(x, y),
+                    timestamp: Instant::now(),
+                },
+            )
+        }))
+    });
+    let Some(interaction) = interaction else {
+        return INTERACTION_INVALID_INPUT;
+    };
+    let outcome = match interaction {
+        Ok(outcome) => combine_interaction_results(page_change, outcome),
+        Err(error) => {
+            eprintln!("Annotation pointer press error: {error:?}");
+            return INTERACTION_ERROR;
+        }
+    };
+
+    let selected =
+        ANNOTATION_CONTROLLER.with(|controller| controller.borrow().selected().is_some());
+    ANNOTATION_PAGE_INDEX.with(|active_page| {
+        *active_page.borrow_mut() = selected.then_some(page_index);
+    });
+    if outcome.redraw {
+        PAGE_CACHE.with(|cache| cache.borrow_mut().clear());
+    }
+    encode_interaction_result(outcome)
+}
+
+/// Handles primary annotation pointer movement in device coordinates.
+#[unsafe(export_name = "sk_annotation_pointer_moved")]
+pub extern "C" fn sk_annotation_pointer_moved(
+    page_index: usize,
+    width: i32,
+    height: i32,
+    x: f32,
+    y: f32,
+) -> i32 {
+    if width <= 0 || height <= 0 || !x.is_finite() || !y.is_finite() {
+        return INTERACTION_INVALID_INPUT;
+    }
+
+    let interaction = CURRENT_RENDERER.with(|renderer| {
+        let mut renderer = renderer.borrow_mut();
+        let renderer = renderer.as_mut()?;
+        let viewport = renderer
+            .document()
+            .get_page(page_index)
+            .and_then(|page| AnnotationViewport::from_page(page, width as f32, height as f32))?;
+        Some(ANNOTATION_CONTROLLER.with(|controller| {
+            controller.borrow_mut().pointer_moved(
+                renderer.document_mut(),
+                AnnotationPointerMove {
+                    page_index,
+                    viewport,
+                    position: Point::new(x, y),
+                },
+            )
+        }))
+    });
+    let Some(interaction) = interaction else {
+        return INTERACTION_INVALID_INPUT;
+    };
+    let outcome = match interaction {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            eprintln!("Annotation pointer move error: {error:?}");
+            return INTERACTION_ERROR;
+        }
+    };
+    if outcome.redraw {
+        PAGE_CACHE.with(|cache| {
+            cache.borrow_mut().remove(page_index);
+        });
+    }
+    encode_interaction_result(outcome)
+}
+
+/// Ends the current primary annotation pointer gesture.
+#[unsafe(export_name = "sk_annotation_pointer_released")]
+pub extern "C" fn sk_annotation_pointer_released() -> i32 {
+    let outcome =
+        ANNOTATION_CONTROLLER.with(|controller| controller.borrow_mut().pointer_released());
+    encode_interaction_result(outcome)
+}
+
+/// Returns whether free-text annotation editing is active.
+#[unsafe(export_name = "sk_annotation_is_editing")]
+pub extern "C" fn sk_annotation_is_editing() -> i32 {
+    ANNOTATION_CONTROLLER.with(|controller| i32::from(controller.borrow().is_editing()))
+}
+
+/// Applies a semantic editing command to the active free-text annotation.
+///
+/// # Safety
+///
+/// For insert commands, `text_ptr` must address `text_len` readable UTF-8 bytes
+/// for the duration of this call. Other command types ignore the text buffer.
+#[unsafe(export_name = "sk_annotation_edit")]
+pub unsafe extern "C" fn sk_annotation_edit(
+    page_index: usize,
+    command: i32,
+    text_ptr: *const u8,
+    text_len: usize,
+) -> i32 {
+    let active_page = ANNOTATION_PAGE_INDEX.with(|active_page| *active_page.borrow());
+    if active_page != Some(page_index) {
+        return INTERACTION_INVALID_INPUT;
+    }
+
+    let text = if command == EDIT_INSERT {
+        if text_ptr.is_null() && text_len != 0 {
+            return INTERACTION_INVALID_INPUT;
+        }
+        let bytes = if text_len == 0 {
+            &[]
+        } else {
+            // SAFETY: The caller guarantees the pointer is readable for
+            // `text_len` bytes, and the slice is used only during this call.
+            unsafe { std::slice::from_raw_parts(text_ptr, text_len) }
+        };
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            return INTERACTION_INVALID_INPUT;
+        };
+        text
+    } else {
+        ""
+    };
+    let Some(command) = annotation_edit_command(command, text) else {
+        return INTERACTION_INVALID_INPUT;
+    };
+
+    let interaction = CURRENT_RENDERER.with(|renderer| {
+        let mut renderer = renderer.borrow_mut();
+        let renderer = renderer.as_mut()?;
+        let page = renderer.document_mut().pages.get_mut(page_index)?;
+        Some(
+            ANNOTATION_CONTROLLER
+                .with(|controller| controller.borrow_mut().handle_edit_command(page, command)),
+        )
+    });
+    let Some(interaction) = interaction else {
+        return INTERACTION_INVALID_INPUT;
+    };
+    let outcome = match interaction {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            eprintln!("Annotation edit error: {error:?}");
+            return INTERACTION_ERROR;
+        }
+    };
+    if outcome.redraw {
+        PAGE_CACHE.with(|cache| {
+            cache.borrow_mut().remove(page_index);
+        });
+    }
+    encode_interaction_result(outcome)
 }
 
 /// Returns the number of selectable glyph spans on a rendered page.

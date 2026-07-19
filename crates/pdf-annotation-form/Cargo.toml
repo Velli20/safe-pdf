@@ -1,0 +1,18 @@
+[package]
+name = "pdf-annotation-form"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+pdf-annotation-types = { path = "../pdf-annotation-types" }
+pdf-canvas = { path = "../pdf-canvas" }
+pdf-content-stream-operators = { path = "../pdf-content-stream-operators" }
+pdf-content-stream = { path = "../pdf-content-stream" }
+pdf-document = { path = "../pdf-document" }
+pdf-font = { path = "../pdf-font" }
+pdf-graphics = { path = "../pdf-graphics" }
+pdf-resources = { path = "../pdf-resources" }
+thiserror = "2.0.12"
