@@ -4,6 +4,39 @@ use pdf_object::{
 
 use crate::{AnnotationError, BorderEffect};
 
+/// Horizontal alignment for generated free text appearances.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum FreeTextAlignment {
+    /// Align lines with the left edge of the padded content area.
+    #[default]
+    Left,
+    /// Center lines within the padded content area.
+    Center,
+    /// Align lines with the right edge of the padded content area.
+    Right,
+}
+
+impl FreeTextAlignment {
+    /// Converts a PDF `/Q` value into a supported alignment.
+    pub const fn from_quadding(value: i32) -> Option<Self> {
+        match value {
+            0 => Some(Self::Left),
+            1 => Some(Self::Center),
+            2 => Some(Self::Right),
+            _ => None,
+        }
+    }
+
+    /// Returns the PDF `/Q` value for this alignment.
+    pub const fn quadding(self) -> i32 {
+        match self {
+            Self::Left => 0,
+            Self::Center => 1,
+            Self::Right => 2,
+        }
+    }
+}
+
 /// Annotation-specific free text state.
 pub struct FreeTextAnnotation {
     /// The default appearance string.

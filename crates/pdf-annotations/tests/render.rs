@@ -1,15 +1,9 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::indexing_slicing,
-    clippy::as_conversions
-)]
+#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::unwrap_used)]
 
 use std::sync::Arc;
 
 use pdf_annotation_types::Annotation;
-use pdf_annotations::{AnnotationInteractionState, AnnotationRenderError, AnnotationRenderer};
+use pdf_annotations::{AnnotationAppearanceState, AnnotationRenderer};
 use pdf_canvas::{
     canvas_backend::{CanvasBackend, Image, Shader},
     pdf_canvas::PdfCanvas,
@@ -26,7 +20,7 @@ use pdf_graphics::{
 struct CountingCanvas {
     fill_count: usize,
     stroke_count: usize,
-    last_fill_path: Option<PdfPath>,
+    fill_paths: Vec<PdfPath>,
     fill_colors: Vec<Color>,
 }
 
@@ -40,7 +34,7 @@ impl CanvasBackend for CountingCanvas {
         _blend_mode: Option<BlendMode>,
     ) -> Result<(), pdf_canvas::error::PdfCanvasError> {
         self.fill_count += 1;
-        self.last_fill_path = Some(path.clone());
+        self.fill_paths.push(path.clone());
         self.fill_colors.push(color);
         Ok(())
     }
@@ -111,65 +105,39 @@ impl CanvasBackend for CountingCanvas {
     }
 }
 
-fn render_first_page(pdf: &[u8]) -> CountingCanvas {
-    try_render_first_page(pdf).expect("annotations should render")
-}
-
-fn render_first_page_with_state(
-    pdf: &[u8],
-    interaction_state: AnnotationInteractionState,
-) -> CountingCanvas {
-    try_render_first_page_with_state(pdf, interaction_state).expect("annotations should render")
-}
-
-fn try_render_first_page(pdf: &[u8]) -> Result<CountingCanvas, AnnotationRenderError> {
-    try_render_first_page_with_state(pdf, AnnotationInteractionState::Normal)
-}
-
-fn try_render_first_page_with_state(
-    pdf: &[u8],
-    interaction_state: AnnotationInteractionState,
-) -> Result<CountingCanvas, AnnotationRenderError> {
-    try_render_first_page_with_state_resolver(pdf, |_, _| interaction_state)
-}
-
-fn render_first_page_with_state_resolver<F>(pdf: &[u8], resolver: F) -> CountingCanvas
+fn render_with_resolver<F>(pdf: &[u8], resolver: F) -> CountingCanvas
 where
-    F: FnMut(usize, &Annotation) -> AnnotationInteractionState,
-{
-    try_render_first_page_with_state_resolver(pdf, resolver).expect("annotations should render")
-}
-
-fn try_render_first_page_with_state_resolver<F>(
-    pdf: &[u8],
-    resolver: F,
-) -> Result<CountingCanvas, AnnotationRenderError>
-where
-    F: FnMut(usize, &Annotation) -> AnnotationInteractionState,
+    F: FnMut(&Annotation) -> AnnotationAppearanceState,
 {
     let document = PdfReader
         .read_from_bytes(pdf, None)
         .expect("PDF should parse");
-    let page = document.pages.get(0).expect("page should exist");
+    let page = document.pages.first().expect("page should exist");
     let mut backend = CountingCanvas::default();
     let canvas = PdfCanvas::new(&mut backend, page, None).expect("canvas should build");
     let mut renderer = AnnotationRenderer::new(canvas);
     if let Some(annotations) = &page.annotations {
-        renderer.render_annotations_with_state_resolver(annotations, resolver)?;
+        renderer
+            .render_all_with_state(annotations, resolver)
+            .expect("annotations should render");
     }
     drop(renderer);
-    Ok(backend)
+    backend
 }
 
-fn build_pdf(annotation_body: &[u8], appearance_objects: Vec<(usize, Vec<u8>)>) -> Vec<u8> {
-    build_pdf_with_annotations(vec![(4, annotation_body.to_vec())], appearance_objects)
+fn render(pdf: &[u8], state: AnnotationAppearanceState) -> CountingCanvas {
+    render_with_resolver(pdf, |_| state)
+}
+
+fn build_pdf(annotation: &[u8], appearances: Vec<(usize, Vec<u8>)>) -> Vec<u8> {
+    build_pdf_with_annotations(vec![(4, annotation.to_vec())], appearances)
 }
 
 fn build_pdf_with_annotations(
-    annotation_objects: Vec<(usize, Vec<u8>)>,
-    appearance_objects: Vec<(usize, Vec<u8>)>,
+    annotations: Vec<(usize, Vec<u8>)>,
+    appearances: Vec<(usize, Vec<u8>)>,
 ) -> Vec<u8> {
-    let annotation_refs = annotation_objects
+    let annotation_refs = annotations
         .iter()
         .map(|(number, _)| format!("{number} 0 R"))
         .collect::<Vec<_>>()
@@ -185,14 +153,12 @@ fn build_pdf_with_annotations(
             .into_bytes(),
         ),
     ];
-    objects.extend(annotation_objects);
-    objects.extend(appearance_objects);
+    objects.extend(annotations);
+    objects.extend(appearances);
 
     let max_object_number = objects.iter().map(|(number, _)| *number).max().unwrap_or(0);
     let mut offsets = vec![0; max_object_number + 1];
-    let mut data = Vec::new();
-    data.extend_from_slice(b"%PDF-1.7\n");
-
+    let mut data = b"%PDF-1.7\n".to_vec();
     for (number, body) in objects {
         offsets[number] = data.len();
         data.extend_from_slice(format!("{number} 0 obj\n").as_bytes());
@@ -216,27 +182,24 @@ fn build_pdf_with_annotations(
     data
 }
 
-fn appearance_stream(content: &[u8], resources: &[u8]) -> Vec<u8> {
-    let mut stream = Vec::new();
-    stream.extend_from_slice(
-        format!(
-            "<< /Type /XObject /Subtype /Form /BBox [0 0 100 30] /Resources {} /Length {} >>\nstream\n",
-            String::from_utf8_lossy(resources),
-            content.len()
-        )
-        .as_bytes(),
-    );
+fn appearance_stream(content: &[u8]) -> Vec<u8> {
+    let mut stream = format!(
+        "<< /Type /XObject /Subtype /Form /BBox [0 0 100 30] /Resources << >> /Length {} >>\nstream\n",
+        content.len()
+    )
+    .into_bytes();
     stream.extend_from_slice(content);
     stream.extend_from_slice(b"\nendstream");
     stream
 }
 
 fn path_bounds(path: &PdfPath) -> Rect {
-    let mut left = f32::INFINITY;
-    let mut top = f32::INFINITY;
-    let mut right = f32::NEG_INFINITY;
-    let mut bottom = f32::NEG_INFINITY;
-
+    let mut bounds = Rect {
+        left: f32::INFINITY,
+        top: f32::INFINITY,
+        right: f32::NEG_INFINITY,
+        bottom: f32::NEG_INFINITY,
+    };
     for verb in &path.verbs {
         let points: &[(f32, f32)] = match *verb {
             PathVerb::MoveTo { x, y } | PathVerb::LineTo { x, y } => &[(x, y)],
@@ -252,197 +215,130 @@ fn path_bounds(path: &PdfPath) -> Rect {
             PathVerb::Close => &[],
         };
         for (x, y) in points {
-            left = left.min(*x);
-            top = top.min(*y);
-            right = right.max(*x);
-            bottom = bottom.max(*y);
+            bounds.left = bounds.left.min(*x);
+            bounds.top = bounds.top.min(*y);
+            bounds.right = bounds.right.max(*x);
+            bounds.bottom = bounds.bottom.max(*y);
         }
     }
-
-    Rect {
-        left,
-        top,
-        right,
-        bottom,
-    }
-}
-
-fn approx_eq(actual: f32, expected: f32) {
-    assert!(
-        (actual - expected).abs() <= 0.001,
-        "expected {actual} to be approximately {expected}"
-    );
+    bounds
 }
 
 fn assert_color(actual: Color, expected: (f32, f32, f32)) {
-    approx_eq(actual.r, expected.0);
-    approx_eq(actual.g, expected.1);
-    approx_eq(actual.b, expected.2);
+    assert!((actual.r - expected.0).abs() <= 0.001);
+    assert!((actual.g - expected.1).abs() <= 0.001);
+    assert!((actual.b - expected.2).abs() <= 0.001);
 }
 
 #[test]
-fn uses_normal_appearance_when_present() {
+fn renders_and_places_normal_appearance() {
     let annotation =
         b"<< /Type /Annot /Subtype /FreeText /Rect [10 20 110 50] /AP << /N 5 0 R >> >>";
-    let appearance = appearance_stream(b"1 0 0 rg 0 0 100 30 re f", b"<< >>");
-    let pdf = build_pdf(annotation, vec![(5, appearance)]);
-
-    let backend = render_first_page(&pdf);
-
-    assert_eq!(backend.fill_count, 1);
-    assert_eq!(backend.stroke_count, 0);
-    assert_color(backend.fill_colors[0], (1.0, 0.0, 0.0));
-}
-
-#[test]
-fn maps_appearance_bbox_into_annotation_rect() {
-    let annotation = b"<< /Type /Annot /Subtype /Widget /Rect [10 20 110 50] /AP << /N 5 0 R >> >>";
-    let appearance = appearance_stream(b"0 0 100 30 re f", b"<< >>");
-    let pdf = build_pdf(annotation, vec![(5, appearance)]);
-
-    let backend = render_first_page(&pdf);
-    let bounds = path_bounds(
-        backend
-            .last_fill_path
-            .as_ref()
-            .expect("appearance should fill a path"),
+    let pdf = build_pdf(
+        annotation,
+        vec![(5, appearance_stream(b"1 0 0 rg 0 0 100 30 re f"))],
     );
 
-    approx_eq(bounds.left, 10.0);
-    approx_eq(bounds.right, 110.0);
-    approx_eq(bounds.top, 50.0);
-    approx_eq(bounds.bottom, 80.0);
-}
-
-#[test]
-fn selects_subdictionary_appearance_by_state() {
-    let annotation = b"<< /Type /Annot /Subtype /Widget /Rect [10 20 110 50] /AS /On /AP << /N << /On 5 0 R /Off 6 0 R >> >> >>";
-    let on_appearance = appearance_stream(b"0 1 0 rg 0 0 100 30 re f", b"<< >>");
-    let off_appearance = appearance_stream(b"1 0 0 rg 0 0 100 30 re f", b"<< >>");
-    let pdf = build_pdf(annotation, vec![(5, on_appearance), (6, off_appearance)]);
-
-    let backend = render_first_page(&pdf);
-
+    let backend = render(&pdf, AnnotationAppearanceState::Normal);
     assert_eq!(backend.fill_count, 1);
-    assert_color(backend.fill_colors[0], (0.0, 1.0, 0.0));
+    assert_color(backend.fill_colors[0], (1.0, 0.0, 0.0));
+    let bounds = path_bounds(&backend.fill_paths[0]);
+    assert_eq!(bounds.left, 10.0);
+    assert_eq!(bounds.right, 110.0);
+    assert_eq!(bounds.top, 50.0);
+    assert_eq!(bounds.bottom, 80.0);
 }
 
 #[test]
-fn skips_unmatched_subdictionary_appearance_state() {
-    let annotation = b"<< /Type /Annot /Subtype /Widget /Rect [10 20 110 50] /AS /Missing /AP << /N << /On 5 0 R >> >> >>";
-    let appearance = appearance_stream(b"0 0 100 30 re f", b"<< >>");
-    let pdf = build_pdf(annotation, vec![(5, appearance)]);
+fn selects_named_and_rollover_appearances_with_fallback() {
+    let named = b"<< /Type /Annot /Subtype /Widget /Rect [10 20 110 50] /AS /On /AP << /N << /On 5 0 R /Off 6 0 R >> >> >>";
+    let pdf = build_pdf(
+        named,
+        vec![
+            (5, appearance_stream(b"0 1 0 rg 0 0 100 30 re f")),
+            (6, appearance_stream(b"1 0 0 rg 0 0 100 30 re f")),
+        ],
+    );
+    assert_color(
+        render(&pdf, AnnotationAppearanceState::Normal).fill_colors[0],
+        (0.0, 1.0, 0.0),
+    );
 
-    let backend = render_first_page(&pdf);
-
-    assert_eq!(backend.fill_count, 0);
-    assert_eq!(backend.stroke_count, 0);
-}
-
-#[test]
-fn uses_rollover_appearance_when_requested() {
-    let annotation =
+    let rollover =
         b"<< /Type /Annot /Subtype /Widget /Rect [10 20 110 50] /AP << /N 5 0 R /R 6 0 R >> >>";
-    let normal_appearance = appearance_stream(b"1 0 0 rg 0 0 100 30 re f", b"<< >>");
-    let rollover_appearance = appearance_stream(b"0 1 0 rg 0 0 100 30 re f", b"<< >>");
     let pdf = build_pdf(
-        annotation,
-        vec![(5, normal_appearance), (6, rollover_appearance)],
+        rollover,
+        vec![
+            (5, appearance_stream(b"1 0 0 rg 0 0 100 30 re f")),
+            (6, appearance_stream(b"0 1 0 rg 0 0 100 30 re f")),
+        ],
+    );
+    assert_color(
+        render(&pdf, AnnotationAppearanceState::Rollover).fill_colors[0],
+        (0.0, 1.0, 0.0),
     );
 
-    let backend = render_first_page_with_state(&pdf, AnnotationInteractionState::Rollover);
-
-    assert_eq!(backend.fill_count, 1);
-    assert_eq!(backend.stroke_count, 0);
-    assert_color(backend.fill_colors[0], (0.0, 1.0, 0.0));
-}
-
-#[test]
-fn rollover_falls_back_to_normal_appearance_without_extra_cue() {
-    let annotation = b"<< /Type /Annot /Subtype /Widget /Rect [10 20 110 50] /AP << /N 5 0 R >> >>";
-    let normal_appearance = appearance_stream(b"1 0 0 rg 0 0 100 30 re f", b"<< >>");
-    let pdf = build_pdf(annotation, vec![(5, normal_appearance)]);
-
-    let backend = render_first_page_with_state(&pdf, AnnotationInteractionState::Rollover);
-
-    assert_eq!(backend.fill_count, 1);
-    assert_eq!(backend.stroke_count, 0);
-    assert_color(backend.fill_colors[0], (1.0, 0.0, 0.0));
-}
-
-#[test]
-fn annotation_without_appearance_renders_nothing() {
-    let annotation =
-        b"<< /Type /Annot /Subtype /Highlight /Rect [10 60 60 80] /QuadPoints [10 80 60 80 10 60 60 60] >>";
-    let pdf = build_pdf(annotation, Vec::new());
-
-    let backend = render_first_page(&pdf);
-
-    assert_eq!(backend.fill_count, 0);
-    assert_eq!(backend.stroke_count, 0);
-}
-
-#[test]
-fn annotation_without_rect_renders_nothing() {
-    let annotation = b"<< /Type /Annot /Subtype /Popup /AP << /N 5 0 R >> >>";
-    let appearance = appearance_stream(b"1 0 0 rg 0 0 100 30 re f", b"<< >>");
-    let pdf = build_pdf(annotation, vec![(5, appearance)]);
-
-    let backend = render_first_page(&pdf);
-
-    assert_eq!(backend.fill_count, 0);
-    assert_eq!(backend.stroke_count, 0);
-}
-
-#[test]
-fn unknown_annotation_uses_appearance_when_present() {
-    let annotation =
-        b"<< /Type /Annot /Subtype /VendorThing /Rect [10 20 110 50] /AP << /N 5 0 R /R 6 0 R >> >>";
-    let normal_appearance = appearance_stream(b"1 0 0 rg 0 0 100 30 re f", b"<< >>");
-    let rollover_appearance = appearance_stream(b"0 1 0 rg 0 0 100 30 re f", b"<< >>");
+    let fallback = b"<< /Type /Annot /Subtype /Widget /Rect [10 20 110 50] /AP << /N 5 0 R >> >>";
     let pdf = build_pdf(
-        annotation,
-        vec![(5, normal_appearance), (6, rollover_appearance)],
+        fallback,
+        vec![(5, appearance_stream(b"1 0 0 rg 0 0 100 30 re f"))],
+    );
+    assert_color(
+        render(&pdf, AnnotationAppearanceState::Rollover).fill_colors[0],
+        (1.0, 0.0, 0.0),
+    );
+}
+
+#[test]
+fn skips_annotations_without_usable_appearance_or_rect() {
+    let cases: &[&[u8]] = &[
+        b"<< /Type /Annot /Subtype /Highlight /Rect [10 60 60 80] /QuadPoints [10 80 60 80 10 60 60 60] >>",
+        b"<< /Type /Annot /Subtype /Popup /AP << /N 5 0 R >> >>",
+        b"<< /Type /Annot /Subtype /Widget /Rect [10 20 110 50] /AS /Missing /AP << /N << /On 5 0 R >> >> >>",
+    ];
+    for annotation in cases {
+        let pdf = build_pdf(annotation, vec![(5, appearance_stream(b"0 0 100 30 re f"))]);
+        let backend = render(&pdf, AnnotationAppearanceState::Normal);
+        assert_eq!(backend.fill_count, 0);
+        assert_eq!(backend.stroke_count, 0);
+    }
+}
+
+#[test]
+fn renders_unknown_annotations_and_resolves_state_per_annotation() {
+    let unknown = b"<< /Type /Annot /Subtype /VendorThing /Rect [10 20 110 50] /AP << /N 5 0 R /R 6 0 R >> >>";
+    let pdf = build_pdf(
+        unknown,
+        vec![
+            (5, appearance_stream(b"1 0 0 rg 0 0 100 30 re f")),
+            (6, appearance_stream(b"0 1 0 rg 0 0 100 30 re f")),
+        ],
+    );
+    assert_color(
+        render(&pdf, AnnotationAppearanceState::Rollover).fill_colors[0],
+        (0.0, 1.0, 0.0),
     );
 
-    let backend = render_first_page_with_state(&pdf, AnnotationInteractionState::Rollover);
-
-    assert_eq!(backend.fill_count, 1);
-    assert_eq!(backend.stroke_count, 0);
-    assert_color(backend.fill_colors[0], (0.0, 1.0, 0.0));
-}
-
-#[test]
-fn state_resolver_selects_appearance_per_annotation() {
-    let first_annotation =
+    let first =
         b"<< /Type /Annot /Subtype /Widget /Rect [10 20 60 50] /AP << /N 6 0 R /R 7 0 R >> >>";
-    let second_annotation =
+    let second =
         b"<< /Type /Annot /Subtype /Widget /Rect [70 20 120 50] /AP << /N 8 0 R /D 9 0 R >> >>";
-    let first_normal = appearance_stream(b"1 0 0 rg 0 0 100 30 re f", b"<< >>");
-    let first_rollover = appearance_stream(b"0 1 0 rg 0 0 100 30 re f", b"<< >>");
-    let second_normal = appearance_stream(b"0 0 1 rg 0 0 100 30 re f", b"<< >>");
-    let second_down = appearance_stream(b"0 0 0 rg 0 0 100 30 re f", b"<< >>");
     let pdf = build_pdf_with_annotations(
+        vec![(4, first.to_vec()), (5, second.to_vec())],
         vec![
-            (4, first_annotation.to_vec()),
-            (5, second_annotation.to_vec()),
-        ],
-        vec![
-            (6, first_normal),
-            (7, first_rollover),
-            (8, second_normal),
-            (9, second_down),
+            (6, appearance_stream(b"1 0 0 rg 0 0 100 30 re f")),
+            (7, appearance_stream(b"0 1 0 rg 0 0 100 30 re f")),
+            (8, appearance_stream(b"0 0 1 rg 0 0 100 30 re f")),
+            (9, appearance_stream(b"0 0 0 rg 0 0 100 30 re f")),
         ],
     );
-
-    let backend = render_first_page_with_state_resolver(&pdf, |index, _annotation| {
-        if index == 0 {
-            AnnotationInteractionState::Rollover
+    let backend = render_with_resolver(&pdf, |annotation| {
+        if annotation.id().get() == 0 {
+            AnnotationAppearanceState::Rollover
         } else {
-            AnnotationInteractionState::Down
+            AnnotationAppearanceState::Down
         }
     });
-
     assert_eq!(backend.fill_count, 2);
     assert_color(backend.fill_colors[0], (0.0, 1.0, 0.0));
     assert_color(backend.fill_colors[1], (0.0, 0.0, 0.0));

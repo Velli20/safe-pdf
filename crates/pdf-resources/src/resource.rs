@@ -79,7 +79,8 @@ impl Resource {
         }
     }
 
-    pub(crate) fn as_font(&self) -> Option<(&Font, Option<&Resources>)> {
+    /// Returns this resource as a font and any resources nested beneath it.
+    pub fn as_font(&self) -> Option<(&Font, Option<&Resources>)> {
         let Self::Font { font, resources } = self.resolved()? else {
             return None;
         };

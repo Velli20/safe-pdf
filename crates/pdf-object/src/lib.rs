@@ -7,5 +7,6 @@ pub mod object_lookup;
 pub mod object_resolver;
 pub mod object_variant;
 pub mod stream;
+pub mod text_encoding;
 pub mod trailer;
 pub mod version;

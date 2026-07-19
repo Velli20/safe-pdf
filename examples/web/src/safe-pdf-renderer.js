@@ -41,6 +41,23 @@ const DEFAULT_GL_ATTRIBUTES = {
   renderViaOffscreenBackBuffer: false,
 };
 
+const ANNOTATION_RESULT_CONSUMED = 1;
+const ANNOTATION_RESULT_REDRAW = 2;
+const ANNOTATION_RESULT_EDITING = 4;
+
+const ANNOTATION_EDIT_COMMANDS = Object.freeze({
+  insert: 0,
+  newline: 1,
+  'move-left': 2,
+  'move-right': 3,
+  'move-to-start': 4,
+  'move-to-end': 5,
+  'delete-backward': 6,
+  'delete-forward': 7,
+  commit: 8,
+  cancel: 9,
+});
+
 /**
  * Low-level PDF rendering engine.
  *
@@ -68,6 +85,11 @@ export class SafePdfRenderer {
   #sk_get_text_selection_rects_ptr = null;
   #sk_build_selected_text = null;
   #sk_get_selected_text_ptr = null;
+  #sk_annotation_pointer_pressed = null;
+  #sk_annotation_pointer_moved = null;
+  #sk_annotation_pointer_released = null;
+  #sk_annotation_is_editing = null;
+  #sk_annotation_edit = null;
 
   /** @type {object|null} Reference to the Emscripten `Module` object. */
   #wasmModule = null;
@@ -397,6 +419,98 @@ export class SafePdfRenderer {
   }
 
   /**
+   * Send a primary-pointer press to annotation interaction.
+   *
+   * @returns {{consumed: boolean, redraw: boolean, editing: boolean}}
+   */
+  annotationPointerDown(pageIndex, width, height, x, y) {
+    this.#assertAnnotationPointerInput(pageIndex, width, height, x, y);
+    const result = this.#sk_annotation_pointer_pressed(
+      pageIndex,
+      Math.round(width),
+      Math.round(height),
+      x,
+      y
+    );
+    return this.#decodeAnnotationResult(result, 'pointer press');
+  }
+
+  /**
+   * Send primary-pointer movement to annotation interaction.
+   *
+   * @returns {{consumed: boolean, redraw: boolean, editing: boolean}}
+   */
+  annotationPointerMove(pageIndex, width, height, x, y) {
+    this.#assertAnnotationPointerInput(pageIndex, width, height, x, y);
+    const result = this.#sk_annotation_pointer_moved(
+      pageIndex,
+      Math.round(width),
+      Math.round(height),
+      x,
+      y
+    );
+    return this.#decodeAnnotationResult(result, 'pointer movement');
+  }
+
+  /**
+   * End the active primary-pointer annotation gesture.
+   *
+   * @returns {{consumed: boolean, redraw: boolean, editing: boolean}}
+   */
+  annotationPointerUp() {
+    this.#assertReady();
+    this.#assertPdfLoaded();
+    const result = this.#sk_annotation_pointer_released();
+    return this.#decodeAnnotationResult(result, 'pointer release');
+  }
+
+  /** Whether a free-text annotation edit session is active. */
+  isAnnotationEditing() {
+    this.#assertReady();
+    this.#assertPdfLoaded();
+    return this.#sk_annotation_is_editing() === 1;
+  }
+
+  /**
+   * Apply a semantic command to the active free-text annotation editor.
+   *
+   * @param {number} pageIndex
+   * @param {'insert'|'newline'|'move-left'|'move-right'|'move-to-start'|
+   *   'move-to-end'|'delete-backward'|'delete-forward'|'commit'|'cancel'} command
+   * @param {string} [text=''] Text used by the `insert` command.
+   * @returns {{consumed: boolean, redraw: boolean, editing: boolean}}
+   */
+  handleAnnotationEditCommand(pageIndex, command, text = '') {
+    this.#assertReady();
+    this.#assertPdfLoaded();
+    this.#assertPageIndex(pageIndex);
+
+    if (!Object.hasOwn(ANNOTATION_EDIT_COMMANDS, command)) {
+      throw new TypeError(`Unknown annotation edit command: ${command}`);
+    }
+    if (command === 'insert' && typeof text !== 'string') {
+      throw new TypeError('Annotation insert text must be a string');
+    }
+
+    const bytes = command === 'insert' ? new TextEncoder().encode(text) : null;
+    const ptr = bytes?.length ? this.#wasmModule._malloc(bytes.length) : 0;
+    try {
+      if (bytes?.length) {
+        this.#wasmModule.HEAPU8.set(bytes, ptr);
+      }
+      const result = this.#sk_annotation_edit(
+        pageIndex,
+        ANNOTATION_EDIT_COMMANDS[command],
+        ptr,
+        bytes?.length ?? 0
+      );
+      return this.#decodeAnnotationResult(result, `edit command '${command}'`);
+    } finally {
+      if (ptr !== 0) this.#wasmModule._free(ptr);
+    }
+  }
+
+  /**
    * Return an ordered list of page indices that should be prefetched given
    * the user's current reading position.
    *
@@ -481,6 +595,33 @@ export class SafePdfRenderer {
         `Page index ${pageIndex} out of range [0, ${this.#pageCount - 1}]`
       );
     }
+  }
+
+  #assertAnnotationPointerInput(pageIndex, width, height, x, y) {
+    this.#assertReady();
+    this.#assertPdfLoaded();
+    this.#assertPageIndex(pageIndex);
+    if (
+      !Number.isFinite(width) ||
+      !Number.isFinite(height) ||
+      width <= 0 ||
+      height <= 0 ||
+      !Number.isFinite(x) ||
+      !Number.isFinite(y)
+    ) {
+      throw new RangeError('Annotation pointer coordinates and dimensions must be finite');
+    }
+  }
+
+  #decodeAnnotationResult(result, action) {
+    if (result < 0) {
+      throw new Error(`Annotation ${action} failed (code ${result})`);
+    }
+    return {
+      consumed: (result & ANNOTATION_RESULT_CONSUMED) !== 0,
+      redraw: (result & ANNOTATION_RESULT_REDRAW) !== 0,
+      editing: (result & ANNOTATION_RESULT_EDITING) !== 0,
+    };
   }
 
   /**
@@ -600,5 +741,10 @@ export class SafePdfRenderer {
     this.#sk_get_text_selection_rects_ptr = M.cwrap('sk_get_text_selection_rects_ptr', 'number', []);
     this.#sk_build_selected_text = M.cwrap('sk_build_selected_text', 'number', ['number', 'number', 'number', 'number', 'number']);
     this.#sk_get_selected_text_ptr = M.cwrap('sk_get_selected_text_ptr', 'number', []);
+    this.#sk_annotation_pointer_pressed = M.cwrap('sk_annotation_pointer_pressed', 'number', ['number', 'number', 'number', 'number', 'number']);
+    this.#sk_annotation_pointer_moved = M.cwrap('sk_annotation_pointer_moved', 'number', ['number', 'number', 'number', 'number', 'number']);
+    this.#sk_annotation_pointer_released = M.cwrap('sk_annotation_pointer_released', 'number', []);
+    this.#sk_annotation_is_editing = M.cwrap('sk_annotation_is_editing', 'number', []);
+    this.#sk_annotation_edit = M.cwrap('sk_annotation_edit', 'number', ['number', 'number', 'number', 'number']);
   }
 }

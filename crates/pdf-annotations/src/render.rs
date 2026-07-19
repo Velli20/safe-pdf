@@ -7,7 +7,7 @@ use crate::AppearanceField;
 
 /// The interactive annotation appearance state to render.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
-pub enum AnnotationInteractionState {
+pub enum AnnotationAppearanceState {
     /// Render the annotation's normal `/N` appearance.
     #[default]
     Normal,
@@ -29,9 +29,8 @@ pub enum AnnotationRenderError {
 ///
 /// Annotations without a usable `/Rect` or `/AP` appearance stream are ignored.
 pub struct AnnotationRenderer<'a, B: CanvasBackend> {
-    /// Canvas used to render annotations and surrounding page content.
-    pub canvas: PdfCanvas<'a, B>,
-    interaction_state: AnnotationInteractionState,
+    canvas: PdfCanvas<'a, B>,
+    appearance_state: AnnotationAppearanceState,
 }
 
 impl<'a, B: CanvasBackend> AnnotationRenderer<'a, B> {
@@ -39,19 +38,24 @@ impl<'a, B: CanvasBackend> AnnotationRenderer<'a, B> {
     pub fn new(canvas: PdfCanvas<'a, B>) -> Self {
         Self {
             canvas,
-            interaction_state: AnnotationInteractionState::Normal,
+            appearance_state: AnnotationAppearanceState::Normal,
         }
     }
 
     /// Creates a renderer around an existing PDF canvas for an interaction state.
     pub fn with_interaction_state(
         canvas: PdfCanvas<'a, B>,
-        interaction_state: AnnotationInteractionState,
+        appearance_state: AnnotationAppearanceState,
     ) -> Self {
         Self {
             canvas,
-            interaction_state,
+            appearance_state,
         }
+    }
+
+    /// Returns mutable access to the wrapped PDF canvas.
+    pub fn canvas_mut(&mut self) -> &mut PdfCanvas<'a, B> {
+        &mut self.canvas
     }
 
     /// Returns the wrapped canvas after annotation rendering is complete.
@@ -60,7 +64,7 @@ impl<'a, B: CanvasBackend> AnnotationRenderer<'a, B> {
     }
 
     /// Renders annotations in document order.
-    pub fn render_annotations(
+    pub fn render_all(
         &mut self,
         annotations: &'a [Annotation],
     ) -> Result<(), AnnotationRenderError> {
@@ -71,48 +75,45 @@ impl<'a, B: CanvasBackend> AnnotationRenderer<'a, B> {
     }
 
     /// Renders annotations in document order with per-annotation interaction states.
-    pub fn render_annotations_with_state_resolver<F>(
+    pub fn render_all_with_state<F>(
         &mut self,
         annotations: &'a [Annotation],
         mut resolver: F,
     ) -> Result<(), AnnotationRenderError>
     where
-        F: FnMut(usize, &Annotation) -> AnnotationInteractionState,
+        F: FnMut(&Annotation) -> AnnotationAppearanceState,
     {
-        let previous_state = self.interaction_state;
+        let previous_state = self.appearance_state;
 
         let result = (|| {
-            for (index, annotation) in annotations.iter().enumerate() {
-                self.interaction_state = resolver(index, annotation);
+            for annotation in annotations {
+                self.appearance_state = resolver(annotation);
                 self.render_annotation_current_state(annotation)?;
             }
             Ok(())
         })();
 
-        self.interaction_state = previous_state;
+        self.appearance_state = previous_state;
         result
     }
 
     /// Renders one annotation.
-    pub fn render_annotation(
-        &mut self,
-        annotation: &'a Annotation,
-    ) -> Result<(), AnnotationRenderError> {
+    pub fn render(&mut self, annotation: &'a Annotation) -> Result<(), AnnotationRenderError> {
         self.render_annotation_current_state(annotation)
     }
 
     /// Renders one annotation for an interaction state.
-    pub fn render_annotation_with_state(
+    pub fn render_with_state(
         &mut self,
         annotation: &'a Annotation,
-        interaction_state: AnnotationInteractionState,
+        appearance_state: AnnotationAppearanceState,
     ) -> Result<(), AnnotationRenderError> {
-        let previous_state = self.interaction_state;
-        self.interaction_state = interaction_state;
+        let previous_state = self.appearance_state;
+        self.appearance_state = appearance_state;
 
         let result = self.render_annotation_current_state(annotation);
 
-        self.interaction_state = previous_state;
+        self.appearance_state = previous_state;
         result
     }
 
@@ -132,10 +133,10 @@ impl<'a, B: CanvasBackend> AnnotationRenderer<'a, B> {
             return Ok(false);
         };
 
-        let requested = match self.interaction_state {
-            AnnotationInteractionState::Normal => appearance_dictionary.normal.as_ref(),
-            AnnotationInteractionState::Rollover => appearance_dictionary.rollover.as_ref(),
-            AnnotationInteractionState::Down => appearance_dictionary.down.as_ref(),
+        let requested = match self.appearance_state {
+            AnnotationAppearanceState::Normal => appearance_dictionary.normal.as_ref(),
+            AnnotationAppearanceState::Rollover => appearance_dictionary.rollover.as_ref(),
+            AnnotationAppearanceState::Down => appearance_dictionary.down.as_ref(),
         };
 
         let Some(appearance) = AppearanceField::selected_appearance(

@@ -26,7 +26,7 @@ mod widget;
 pub use self::caret::CaretAnnotation;
 pub use self::circle::CircleAnnotation;
 pub use self::file_attachment::FileAttachmentAnnotation;
-pub use self::free_text::FreeTextAnnotation;
+pub use self::free_text::{FreeTextAlignment, FreeTextAnnotation};
 pub use self::highlight::HighlightAnnotation;
 pub use self::ink::InkAnnotation;
 pub use self::line::LineAnnotation;
@@ -46,7 +46,7 @@ pub use self::text::TextAnnotation;
 pub use self::trap_net::TrapNetAnnotation;
 pub use self::underline::UnderlineAnnotation;
 pub use self::watermark::WatermarkAnnotation;
-pub use self::widget::{WidgetAnnotation, WidgetFieldValue};
+pub use self::widget::{WidgetAnnotation, WidgetChoiceOption, WidgetFieldFlags, WidgetFieldValue};
 
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 

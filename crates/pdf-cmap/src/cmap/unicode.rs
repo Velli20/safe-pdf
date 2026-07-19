@@ -1,3 +1,5 @@
+use pdf_object::text_encoding::BigEndianU16Units;
+
 use crate::cmap_support::bytes_to_u32;
 
 /// Convert a ToUnicode source hex string into the parser's `u16` character code.
@@ -10,7 +12,7 @@ pub(super) fn bytes_to_char_code(bytes: &[u8]) -> u16 {
     match bytes {
         [] => 0,
         [byte] => u16::from(*byte),
-        [hi, lo] => pack_big_endian_u16(*hi, *lo),
+        [hi, lo] => u16::from_be_bytes([*hi, *lo]),
         _ => trailing_char_code(bytes),
     }
 }
@@ -23,11 +25,11 @@ pub(super) fn bytes_to_char_code(bytes: &[u8]) -> u16 {
 /// the whole CMap parse.
 pub(super) fn utf16_bytes_to_chars(bytes: &[u8]) -> Vec<char> {
     let mut chars = Vec::new();
-    let mut offset = 0usize;
+    let mut units = BigEndianU16Units::from(bytes).units.into_iter();
 
-    while let Some(unit) = next_utf16_code_unit(bytes, &mut offset) {
+    while let Some(unit) = units.next() {
         if is_high_surrogate(unit) {
-            if let Some(low) = next_utf16_code_unit(bytes, &mut offset)
+            if let Some(low) = units.next()
                 && let Some(c) = surrogate_pair_to_char(unit, low)
             {
                 chars.push(c);
@@ -69,13 +71,6 @@ pub(super) fn sequential_base_code(bytes: &[u8]) -> u32 {
     bytes_to_u32(bytes)
 }
 
-/// Pack two bytes as a big-endian `u16`.
-fn pack_big_endian_u16(hi: u8, lo: u8) -> u16 {
-    const BITS_PER_BYTE: u16 = 8;
-
-    u16::from(hi) << BITS_PER_BYTE | u16::from(lo)
-}
-
 /// Return the final two bytes of an overlong source code as a `u16`.
 fn trailing_char_code(bytes: &[u8]) -> u16 {
     const PDF_CHAR_CODE_BYTES: usize = 2;
@@ -88,24 +83,7 @@ fn trailing_char_code(bytes: &[u8]) -> u16 {
         return u16::from(lo);
     };
 
-    pack_big_endian_u16(hi, lo)
-}
-
-/// Read the next complete big-endian UTF-16 code unit and advance `offset`.
-///
-/// Returns `None` when fewer than two bytes remain, which intentionally ignores
-/// odd trailing bytes in malformed PDF strings.
-fn next_utf16_code_unit(bytes: &[u8], offset: &mut usize) -> Option<u16> {
-    const UTF16_CODE_UNIT_BYTES: usize = 2;
-
-    let end = offset.checked_add(UTF16_CODE_UNIT_BYTES)?;
-    let unit = bytes.get(*offset..end)?;
-    let mut unit_bytes = unit.iter();
-    let hi = unit_bytes.next().copied()?;
-    let lo = unit_bytes.next().copied()?;
-
-    *offset = end;
-    Some(pack_big_endian_u16(hi, lo))
+    u16::from_be_bytes([hi, lo])
 }
 
 /// Return whether `unit` is a UTF-16 high surrogate.

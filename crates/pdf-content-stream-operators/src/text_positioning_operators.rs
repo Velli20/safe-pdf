@@ -92,6 +92,11 @@ impl SetTextMatrix {
             ),
         }
     }
+
+    /// Returns the text matrix.
+    pub const fn matrix(&self) -> &Transform {
+        &self.matrix
+    }
 }
 
 impl PdfOperator for SetTextMatrix {

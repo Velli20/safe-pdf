@@ -227,6 +227,9 @@ impl PdfPath {
                 PathVerb::Close => {}
             }
         }
+        let (current_x, current_y) = transform.transform_point(self.current_x, self.current_y);
+        self.current_x = current_x;
+        self.current_y = current_y;
     }
 }
 
@@ -241,6 +244,24 @@ mod tests {
             delta <= f32::EPSILON * 16.0,
             "expected {expected}, got {actual}"
         );
+    }
+
+    #[test]
+    fn transform_updates_verbs_and_current_point() {
+        let mut path = PdfPath::default();
+        path.move_to(1.0, 2.0);
+        path.line_to(3.0, 4.0);
+
+        path.transform(&crate::transform::Transform::from_translate(10.0, 20.0));
+
+        assert_eq!(
+            path.verbs,
+            vec![
+                PathVerb::MoveTo { x: 11.0, y: 22.0 },
+                PathVerb::LineTo { x: 13.0, y: 24.0 },
+            ]
+        );
+        assert_eq!(path.current_point(), Some((13.0, 24.0)));
     }
 
     #[test]

@@ -5,6 +5,7 @@ use pdf_object::{
 use crate::AnnotationError;
 
 /// A border array value.
+#[derive(Clone, Debug, PartialEq)]
 pub struct AnnotationBorder {
     /// Horizontal corner radius.
     pub horizontal_radius: f32,

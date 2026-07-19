@@ -14,6 +14,8 @@ pdf-parser           = { path = "../crates/pdf-parser" }
 pdf-tokenizer        = { path = "../crates/pdf-tokenizer" }
 pdf-font             = { path = "../crates/pdf-font" }
 pdf-renderer         = { path = "../crates/pdf-renderer" }
+pdf-annotation-form  = { path = "../crates/pdf-annotation-form" }
+pdf-annotations      = { path = "../crates/pdf-annotations" }
 pdf-canvas         = { path = "../crates/pdf-canvas" }
 pdf-graphics       = { path = "../crates/pdf-graphics" }
 pdf-graphics-femtovg = { path = "../crates/pdf-graphics-femtovg", optional = true  }
@@ -68,7 +70,6 @@ femtovg = [
 [[example]]
 name = "skia"
 path = "skia.rs"
-test = false
 required-features = ["skia"]
 
 [[bin]]

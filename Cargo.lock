@@ -822,6 +822,8 @@ dependencies = [
  "gl",
  "glutin",
  "glutin-winit",
+ "pdf-annotation-form",
+ "pdf-annotations",
  "pdf-canvas",
  "pdf-content-stream",
  "pdf-document",
@@ -2068,9 +2070,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
+name = "pdf-annotation-form"
+version = "0.1.0"
+dependencies = [
+ "pdf-annotation-types",
+ "pdf-canvas",
+ "pdf-content-stream",
+ "pdf-content-stream-operators",
+ "pdf-document",
+ "pdf-font",
+ "pdf-graphics",
+ "pdf-resources",
+ "thiserror 2.0.12",
+]
+
+[[package]]
 name = "pdf-annotation-types"
 version = "0.1.0"
 dependencies = [
+ "bitflags 2.9.1",
  "num-traits",
  "pdf-content-stream",
  "pdf-graphics",
@@ -2085,13 +2103,8 @@ version = "0.1.0"
 dependencies = [
  "pdf-annotation-types",
  "pdf-canvas",
- "pdf-color-space",
- "pdf-content-stream-operators",
  "pdf-document",
  "pdf-graphics",
- "pdf-object",
- "pdf-parser",
- "pdf-resources",
  "thiserror 2.0.12",
 ]
 
@@ -2229,6 +2242,7 @@ dependencies = [
  "pdf-object",
  "pdf-parser",
  "read-fonts 0.39.2",
+ "skrifa",
  "thiserror 2.0.12",
  "write-fonts",
 ]

@@ -2,6 +2,8 @@
 
 use std::convert::TryFrom;
 
+use pdf_object::text_encoding::BigEndianU16Units;
+
 mod embedded;
 mod parser;
 
@@ -47,30 +49,17 @@ impl Type0EncodingCMap {
     /// Identity CMaps define fixed-width 2-byte big-endian character codes,
     /// and each code maps directly to the resulting CID.
     pub fn decode_identity(text: &[u8]) -> Vec<u16> {
-        // `chunks_exact(2)` gives us only complete 2-byte codes during the
-        // normal decoding pass, which matches the PDF definition of Identity-H
-        // and Identity-V character codes.
-        let mut decoded = Vec::with_capacity(text.len().saturating_add(1) / 2);
-        let mut chunks = text.chunks_exact(2);
-
-        for pair in &mut chunks {
-            let Some(first) = pair.first().copied() else {
-                continue;
-            };
-            let Some(second) = pair.get(1).copied() else {
-                continue;
-            };
-            decoded.push(u16::from_be_bytes([first, second]));
-        }
+        let decoded = BigEndianU16Units::from(text);
+        let mut units = decoded.units;
 
         // A non-empty remainder means the source text ended with an incomplete
         // final code. That is malformed input, but we keep the decode
         // infallible and emit CID 0 (`.notdef`) as the best-effort replacement.
-        if !chunks.remainder().is_empty() {
-            decoded.push(0);
+        if decoded.trailing_byte.is_some() {
+            units.push(0);
         }
 
-        decoded
+        units
     }
 
     /// Decode raw text bytes into CIDs using this CMap.
