@@ -1,0 +1,12 @@
+[package]
+name = "safe-pdf-profile"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dhat = "0.3"
+pdf-document = { path = "@REPO_ROOT@/crates/pdf-document" }
+
+[[bin]]
+name = "heap-profile"
+path = "src/heap_profile.rs"

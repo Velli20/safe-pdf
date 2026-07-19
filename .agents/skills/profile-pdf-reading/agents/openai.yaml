@@ -1,0 +1,4 @@
+interface:
+  display_name: "Profile PDF Reading"
+  short_description: "Profile Safe-PDF document loading bottlenecks"
+  default_prompt: "Use $profile-pdf-reading to profile document loading for a provided PDF and rank CPU and memory bottlenecks."
