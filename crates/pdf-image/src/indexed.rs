@@ -1,6 +1,6 @@
 //! Utilities for expanding indexed image data.
 
-use pdf_decode::{SampleLayout, decode_sample_codes, expand_indexed_values};
+use pdf_decode::{SampleLayout, decode_sample_bytes, expand_indexed_values};
 
 use crate::PdfImageError;
 
@@ -13,7 +13,7 @@ fn decode_indices(
     height: usize,
     bits_per_component: usize,
 ) -> Result<Vec<u8>, PdfImageError> {
-    let codes = decode_sample_codes(
+    Ok(decode_sample_bytes(
         indexed_data,
         bits_per_component,
         SampleLayout::RowAligned {
@@ -21,15 +21,7 @@ fn decode_indices(
             height,
             samples_per_pixel: 1,
         },
-    )?;
-
-    codes.into_iter().map(sample_code_to_u8).collect()
-}
-
-fn sample_code_to_u8(code: u32) -> Result<u8, PdfImageError> {
-    u8::try_from(code).map_err(|_| {
-        PdfImageError::InvalidImageData("packed sample value cannot fit in a byte".to_string())
-    })
+    )?)
 }
 
 /// Expands indexed color values into palette component bytes.

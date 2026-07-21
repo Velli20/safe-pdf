@@ -46,6 +46,43 @@ pub fn decode_sample_codes(
     }
 }
 
+/// Decodes packed sample codes into byte-sized sample values.
+///
+/// Eight-bit samples use a direct copy path. Wider sample codes are decoded
+/// normally and return an error when a value cannot fit in a byte.
+pub fn decode_sample_bytes(
+    data: &[u8],
+    bits_per_sample: usize,
+    layout: SampleLayout,
+) -> Result<Vec<u8>, DecodeError> {
+    validate_bits_per_sample(bits_per_sample)?;
+
+    if bits_per_sample == 8 {
+        let sample_count = match layout {
+            SampleLayout::Contiguous { sample_count } => sample_count,
+            SampleLayout::RowAligned {
+                width,
+                height,
+                samples_per_pixel,
+            } => width
+                .saturating_mul(height)
+                .saturating_mul(samples_per_pixel),
+        };
+        let samples = data
+            .get(..sample_count)
+            .ok_or(DecodeError::InsufficientData {
+                expected_bytes: sample_count,
+                actual_bytes: data.len(),
+            })?;
+        return Ok(samples.to_vec());
+    }
+
+    decode_sample_codes(data, bits_per_sample, layout)?
+        .into_iter()
+        .map(|sample| u8::try_from(sample).map_err(|_| DecodeError::InvalidSampleData))
+        .collect()
+}
+
 /// Decodes packed sample codes and normalizes them to the `0.0..=1.0` range.
 pub fn decode_normalized_samples(
     data: &[u8],
@@ -138,6 +175,15 @@ fn decode_row_aligned_samples(
     total_samples: usize,
 ) -> Result<Vec<u32>, DecodeError> {
     let samples_per_row = width.saturating_mul(samples_per_pixel);
+
+    if bits_per_sample == 8 {
+        return Ok(data
+            .iter()
+            .take(total_samples)
+            .map(|byte| u32::from(*byte))
+            .collect());
+    }
+
     let bytes_per_sample = bits_per_sample / 8;
     let is_byte_aligned = bytes_per_sample.saturating_mul(8) == bits_per_sample;
 
@@ -311,6 +357,84 @@ mod tests {
         .unwrap();
 
         assert_eq!(samples, vec![0x10, 0x20, 0x30, 0x40]);
+    }
+
+    #[test]
+    fn decode_contiguous_8_bit_sample_bytes() {
+        let samples = decode_sample_bytes(
+            &[0x12, 0x34, 0x56, 0x78],
+            8,
+            SampleLayout::Contiguous { sample_count: 3 },
+        )
+        .unwrap();
+
+        assert_eq!(samples, vec![0x12, 0x34, 0x56]);
+    }
+
+    #[test]
+    fn decode_row_aligned_8_bit_sample_bytes() {
+        let samples = decode_sample_bytes(
+            &[0x10, 0x20, 0x30, 0x40],
+            8,
+            SampleLayout::RowAligned {
+                width: 1,
+                height: 2,
+                samples_per_pixel: 2,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(samples, vec![0x10, 0x20, 0x30, 0x40]);
+    }
+
+    #[test]
+    fn decode_packed_sample_bytes_respect_row_padding() {
+        let samples = decode_sample_bytes(
+            &[0b1010_0000, 0b0110_0000],
+            1,
+            SampleLayout::RowAligned {
+                width: 3,
+                height: 2,
+                samples_per_pixel: 1,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(samples, vec![1, 0, 1, 0, 1, 1]);
+    }
+
+    #[test]
+    fn decode_sample_bytes_reports_truncated_8_bit_data() {
+        let err = decode_sample_bytes(
+            &[0x10, 0x20, 0x30],
+            8,
+            SampleLayout::RowAligned {
+                width: 2,
+                height: 2,
+                samples_per_pixel: 1,
+            },
+        )
+        .expect_err("four byte samples require four input bytes");
+
+        assert!(matches!(
+            err,
+            DecodeError::InsufficientData {
+                expected_bytes: 4,
+                actual_bytes: 3
+            }
+        ));
+    }
+
+    #[test]
+    fn decode_sample_bytes_rejects_wide_values() {
+        let err = decode_sample_bytes(
+            &[0xAB, 0xC0],
+            12,
+            SampleLayout::Contiguous { sample_count: 1 },
+        )
+        .expect_err("12-bit sample does not fit in a byte");
+
+        assert!(matches!(err, DecodeError::InvalidSampleData));
     }
 
     #[test]

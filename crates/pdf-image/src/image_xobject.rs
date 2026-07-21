@@ -1,5 +1,5 @@
 use pdf_color_space::{color_space::ColorSpace, indexed_color_space::IndexedColorSpace};
-use pdf_decode::{DecodeMap, SampleLayout, decode_sample_codes};
+use pdf_decode::{DecodeMap, SampleLayout, decode_sample_bytes};
 use pdf_filter::filter::{Filter, decode_data_with_resolver, decode_with_resolver};
 use pdf_graphics::PixelFormat;
 use pdf_object::{
@@ -376,7 +376,7 @@ impl ImageXObject {
         samples_per_pixel: usize,
         metadata: &ImageMetadata,
     ) -> Result<Vec<u8>, PdfImageError> {
-        let sample_codes = decode_sample_codes(
+        Ok(decode_sample_bytes(
             raw_data,
             metadata.bits_per_component,
             SampleLayout::RowAligned {
@@ -384,18 +384,7 @@ impl ImageXObject {
                 height: metadata.height,
                 samples_per_pixel,
             },
-        )?;
-
-        sample_codes
-            .into_iter()
-            .map(|sample| {
-                u8::try_from(sample).map_err(|_| {
-                    PdfImageError::InvalidImageData(
-                        "packed sample value cannot fit in a byte".to_string(),
-                    )
-                })
-            })
-            .collect()
+        )?)
     }
 
     /// Ensures the decoded component stream is large enough for the declared dimensions.

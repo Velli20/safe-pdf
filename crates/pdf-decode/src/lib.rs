@@ -16,4 +16,4 @@ pub use indexed::expand_indexed_values;
 pub use layout::SampleLayout;
 pub use map::DecodeMap;
 pub use range::DecodeRange;
-pub use samples::{decode_normalized_samples, decode_sample_codes};
+pub use samples::{decode_normalized_samples, decode_sample_bytes, decode_sample_codes};
