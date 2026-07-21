@@ -298,10 +298,8 @@ impl FunctionImpl for SampledFunction {
             .checked_mul(output_count)
             .ok_or(FunctionReadError::InvalidSizeArray)?;
 
-        let stream = stream.data()?;
-
         // Decode samples from the stream
-        let samples = decode_normalized_samples(&stream, bits_per_sample, samples_count)?;
+        let samples = decode_normalized_samples(stream.raw_data(), bits_per_sample, samples_count)?;
 
         Ok(Function::Sampled(SampledFunction {
             size,

@@ -206,7 +206,7 @@ fn parse_encoding(
             let resolved = objects.resolve_object(value)?;
             match resolved {
                 ObjectVariant::Stream(stream) => {
-                    Ok(Type0EncodingCMap::from_bytes(&stream.data()?)?)
+                    Ok(Type0EncodingCMap::from_bytes(stream.raw_data())?)
                 }
                 _ => Ok(Type0EncodingCMap::from_name(value.try_str(objects)?)?),
             }

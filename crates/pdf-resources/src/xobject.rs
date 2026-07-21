@@ -93,7 +93,7 @@ fn resolve_image_soft_mask(
     let stream = resolved.try_stream(objects)?;
 
     match XObject::read_xobject(
-        &ObjectVariant::Stream(stream.clone()),
+        resolved,
         &stream.dictionary,
         stream,
         objects,

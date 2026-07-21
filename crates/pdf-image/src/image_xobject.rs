@@ -1,6 +1,6 @@
 use pdf_color_space::{color_space::ColorSpace, indexed_color_space::IndexedColorSpace};
 use pdf_decode::{DecodeMap, SampleLayout, decode_sample_codes};
-use pdf_filter::filter::{Filter, decode_with_resolver};
+use pdf_filter::filter::{Filter, decode_data_with_resolver, decode_with_resolver};
 use pdf_graphics::PixelFormat;
 use pdf_object::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
@@ -55,10 +55,9 @@ impl ImageXObject {
         objects: &dyn ObjectResolver,
         soft_mask: Option<ImageXObject>,
     ) -> Result<Self, PdfImageError> {
-        let raw_data = stream_data.data()?;
         match Self::decode_normalized_image(
             dictionary,
-            raw_data.as_ref(),
+            stream_data.raw_data(),
             objects,
             soft_mask.clone(),
         ) {
@@ -79,8 +78,7 @@ impl ImageXObject {
         soft_mask: Option<ImageXObject>,
     ) -> Result<Self, PdfImageError> {
         let dictionary = image.normalized_dictionary();
-        let stream = StreamObject::new(0, 0, Box::new(dictionary.clone()), image.data().to_vec());
-        let decoded = decode_with_resolver(&stream, objects)?;
+        let decoded = decode_data_with_resolver(&dictionary, image.data(), objects)?;
 
         Self::decode_normalized_image(&dictionary, decoded.as_ref(), objects, soft_mask)
     }

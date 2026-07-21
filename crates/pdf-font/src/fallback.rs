@@ -199,8 +199,7 @@ fn to_unicode_cmap(
     dictionary
         .get("ToUnicode")
         .and_then(|e| e.try_stream(objects).ok())
-        .and_then(|s| s.data().ok())
-        .map(|data| ToUnicodeCMap::try_from(data.as_ref()))
+        .map(|s| ToUnicodeCMap::try_from(s.raw_data()))
         .transpose()
         .map_err(FontError::from)
 }

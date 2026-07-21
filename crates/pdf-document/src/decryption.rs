@@ -212,10 +212,10 @@ impl DocumentDecryptor {
     /// unchanged when the encryption dictionary sets `/EncryptMetadata false`.
     pub(crate) fn decrypt_stream_object(
         &self,
-        stream: &StreamObject,
+        stream: StreamObject,
     ) -> Result<StreamObject, DecryptionError> {
         if should_skip_stream_decryption(&stream.dictionary, self.encrypt_metadata) {
-            return Ok(stream.clone());
+            return Ok(stream);
         }
 
         let decrypted_data = self.decrypt_stream(
@@ -227,7 +227,7 @@ impl DocumentDecryptor {
         Ok(StreamObject::new(
             stream.object_number,
             stream.generation_number,
-            stream.dictionary.clone(),
+            stream.dictionary,
             decrypted_data,
         ))
     }
@@ -342,7 +342,7 @@ impl DocumentDecryptor {
     fn decrypt_stream_value(&self, stream: StreamObject) -> Result<ObjectVariant, DecryptionError> {
         let object_number = stream.object_number;
         let generation_number = stream.generation_number;
-        let stream = self.decrypt_stream_object(&stream)?;
+        let stream = self.decrypt_stream_object(stream)?;
         let dictionary =
             self.decrypt_dictionary(*stream.dictionary, object_number, generation_number)?;
         Ok(ObjectVariant::Stream(StreamObject::new(
@@ -851,10 +851,12 @@ mod tests {
         let decryptor = make_decryptor(true);
         let data = vec![0x42; 422];
         let stream = make_stream(Some(b"XRef"), data.clone());
+        let data_ptr = stream.raw_data().as_ptr();
 
-        let decrypted = decryptor.decrypt_stream_object(&stream).unwrap();
+        let decrypted = decryptor.decrypt_stream_object(stream).unwrap();
 
         assert_eq!(decrypted.raw_data(), data.as_slice());
+        assert_eq!(decrypted.raw_data().as_ptr(), data_ptr);
     }
 
     #[test]
@@ -862,7 +864,7 @@ mod tests {
         let decryptor = make_decryptor(true);
         let stream = make_stream(None, vec![0x42; 422]);
 
-        let error = decryptor.decrypt_stream_object(&stream).unwrap_err();
+        let error = decryptor.decrypt_stream_object(stream).unwrap_err();
 
         assert!(
             matches!(error, DecryptionError::InvalidData(message) if message == "AES ciphertext length must be a multiple of 16")
@@ -872,15 +874,16 @@ mod tests {
     #[test]
     fn test_metadata_stream_decryption_is_skipped_only_when_encrypt_metadata_is_false() {
         let data = vec![0x42; 422];
-        let stream = make_stream(Some(b"Metadata"), data.clone());
+        let skipped_stream = make_stream(Some(b"Metadata"), data.clone());
 
         let skipped = make_decryptor(false)
-            .decrypt_stream_object(&stream)
+            .decrypt_stream_object(skipped_stream)
             .unwrap();
         assert_eq!(skipped.raw_data(), data.as_slice());
 
+        let encrypted_stream = make_stream(Some(b"Metadata"), data);
         let error = make_decryptor(true)
-            .decrypt_stream_object(&stream)
+            .decrypt_stream_object(encrypted_stream)
             .unwrap_err();
         assert!(
             matches!(error, DecryptionError::InvalidData(message) if message == "AES ciphertext length must be a multiple of 16")
