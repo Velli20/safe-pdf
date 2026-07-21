@@ -65,7 +65,7 @@ pub(crate) fn parse_color_space_object(
         ObjectVariant::Array(arr) => {
             parse_color_space_array(objects, arr.as_slice(), depth.saturating_add(1))
         }
-        other => parse_color_space_name(other.try_str(objects)?),
+        other => ColorSpace::try_from(other.try_str(objects)?),
     }
 }
 
@@ -78,7 +78,7 @@ fn parse_color_space_array(
     depth: usize,
 ) -> Result<ColorSpace, ColorSpaceError> {
     if let [single] = arr {
-        return parse_color_space_name(single.try_str(objects)?);
+        return ColorSpace::try_from(single.try_str(objects)?);
     }
 
     // Get the color space type (first element)
@@ -110,25 +110,6 @@ fn parse_color_space_array(
                 "unsupported color space type: /{unknown} (array with {} elements)",
                 arr.len()
             ),
-        }),
-    }
-}
-
-/// Parses a simple named color space (e.g., `/DeviceRGB`).
-fn parse_color_space_name(name: &str) -> Result<ColorSpace, ColorSpaceError> {
-    match name {
-        "DeviceRGB" => Ok(ColorSpace::DeviceRGB),
-        "DeviceCMYK" => Ok(ColorSpace::DeviceCMYK),
-        "DeviceGray" => Ok(ColorSpace::DeviceGray),
-        // Default color spaces substitute for the device spaces when a resource-level
-        // override is not available. Without access to the resource dictionary here,
-        // we fall back to the corresponding device space.
-        "DefaultGray" => Ok(ColorSpace::DeviceGray),
-        "DefaultRGB" => Ok(ColorSpace::DeviceRGB),
-        "DefaultCMYK" => Ok(ColorSpace::DeviceCMYK),
-        "Pattern" => Ok(ColorSpace::Pattern(None)),
-        unknown => Err(ColorSpaceError::InvalidColorSpace {
-            description: format!("unsupported color space name: /{unknown}"),
         }),
     }
 }
