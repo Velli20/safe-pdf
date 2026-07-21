@@ -60,7 +60,7 @@ pub(crate) fn parse_icc_based_color_space(
         .transpose()?
         .map(Box::new);
 
-    let profile_data: Arc<[u8]> = stream.data()?.into_owned().into();
+    let profile_data: Arc<[u8]> = stream.raw_data().to_vec().into();
 
     Ok(ColorSpace::ICCBased(ICCBasedColorSpace {
         num_components,

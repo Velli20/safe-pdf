@@ -260,29 +260,31 @@ impl Filter {
     }
 }
 
-/// Decodes a [`StreamObject`] by applying its full filter chain.
+/// Decodes borrowed stream data by applying the filter chain from its dictionary.
 ///
-/// Reads the `/Filter` entry from the stream's dictionary and applies each
-/// filter in order. Returns the fully decoded bytes, or `Cow::Borrowed` if
-/// no filters are present.
+/// Reads the `/Filter` entry from `dictionary` and applies each filter in order.
+/// Returns the fully decoded bytes, or `Cow::Borrowed` if no filters are present.
 ///
-/// This is the main entry point for stream decoding in the `pdf-filter` crate.
+/// This entry point accepts a dictionary and data slice separately so callers
+/// such as inline-image decoders do not need to construct a temporary
+/// [`StreamObject`].
 ///
 /// # Errors
 ///
 /// Returns [`FilterError`] if any filter in the chain fails or is unsupported.
-pub fn decode_with_resolver<'a>(
-    stream: &'a StreamObject,
+pub fn decode_data_with_resolver<'a>(
+    dictionary: &Dictionary,
+    stream_data: &'a [u8],
     objects: &dyn ObjectResolver,
 ) -> Result<Cow<'a, [u8]>, FilterError> {
-    let mut data: Cow<'a, [u8]> = Cow::Borrowed(&stream.data);
-    let filters = Filter::from_dictionary(&stream.dictionary, objects)?;
+    let mut data: Cow<'a, [u8]> = Cow::Borrowed(stream_data);
+    let filters = Filter::from_dictionary(dictionary, objects)?;
 
     let Some(filters) = &filters else {
         return Ok(data);
     };
 
-    let decode_params = parse_decode_params(&stream.dictionary, filters, objects)?;
+    let decode_params = parse_decode_params(dictionary, filters, objects)?;
 
     for (filter, params) in filters.iter().zip(decode_params.iter()) {
         match filter {
@@ -332,7 +334,7 @@ pub fn decode_with_resolver<'a>(
                 data = Cow::Owned(decoded);
             }
             Filter::JBIG2Decode => {
-                let (width, height) = resolve_jbig2_dimensions(&stream.dictionary, objects)?;
+                let (width, height) = resolve_jbig2_dimensions(dictionary, objects)?;
                 let globals = match params {
                     DecodeParms::Jbig2 { globals } => globals.as_deref(),
                     _ => None,
@@ -354,6 +356,21 @@ pub fn decode_with_resolver<'a>(
         }
     }
     Ok(data)
+}
+
+/// Decodes a [`StreamObject`] by applying its full filter chain.
+///
+/// This compatibility entry point forwards the stream's dictionary and raw
+/// data to [`decode_data_with_resolver`].
+///
+/// # Errors
+///
+/// Returns [`FilterError`] if any filter in the chain fails or is unsupported.
+pub fn decode_with_resolver<'a>(
+    stream: &'a StreamObject,
+    objects: &dyn ObjectResolver,
+) -> Result<Cow<'a, [u8]>, FilterError> {
+    decode_data_with_resolver(&stream.dictionary, stream.raw_data(), objects)
 }
 
 /// Decodes a [`StreamObject`] by applying its full filter chain.
@@ -530,6 +547,34 @@ mod tests {
         let filter = Filter::from("JBIG2Decode");
         assert_eq!(filter, Filter::JBIG2Decode);
         assert_eq!(filter.to_string(), "JBIG2Decode");
+    }
+
+    #[test]
+    fn decode_data_without_filters_borrows_input() {
+        let dictionary = Dictionary::new(BTreeMap::new());
+        let data = b"borrowed stream data";
+
+        let decoded = decode_data_with_resolver(&dictionary, data, &PassthroughResolver)
+            .expect("unfiltered data should decode");
+
+        assert!(matches!(&decoded, Cow::Borrowed(_)));
+        assert_eq!(decoded.as_ref().as_ptr(), data.as_ptr());
+        assert_eq!(decoded.as_ref(), data);
+    }
+
+    #[test]
+    fn decode_data_with_filter_returns_decoded_owned_data() {
+        let dictionary = Dictionary::new(BTreeMap::from([(
+            "Filter".to_string(),
+            ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
+        )]));
+
+        let decoded =
+            decode_data_with_resolver(&dictionary, b"48 65 6c 6c 6f>", &PassthroughResolver)
+                .expect("filtered data should decode");
+
+        assert!(matches!(&decoded, Cow::Owned(_)));
+        assert_eq!(decoded.as_ref(), b"Hello");
     }
 
     #[test]

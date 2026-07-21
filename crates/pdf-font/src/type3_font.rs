@@ -75,8 +75,7 @@ impl Type3Font {
         let to_unicode = dictionary
             .get("ToUnicode")
             .and_then(|e| e.try_stream(objects).ok())
-            .and_then(|s| s.data().ok())
-            .map(|data| ToUnicodeCMap::try_from(data.as_ref()))
+            .map(|s| ToUnicodeCMap::try_from(s.raw_data()))
             .transpose()?;
 
         Ok(Type3Font {

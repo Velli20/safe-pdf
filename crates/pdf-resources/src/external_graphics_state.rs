@@ -267,10 +267,11 @@ fn parse_soft_mask(
             let mask_type = parse_mask_mode(dict.required_str("S", objects)?)?;
 
             // Parse the "G" key for the `XObject`
-            let stream = dict.required_stream("G", objects)?;
+            let content = dict.get_or_err("G")?;
+            let stream = content.try_stream(objects)?;
 
             let shape = match XObject::read_xobject(
-                &ObjectVariant::Stream(stream.clone()),
+                content,
                 &stream.dictionary,
                 stream,
                 objects,

@@ -126,9 +126,7 @@ impl FunctionImpl for PostScriptCalculatorFunction {
         let range = stream.dictionary.required_vec_of::<f32>("Range", objects)?;
 
         // Parse PostScript code: add spaces around braces for tokenization
-        let stream_data = stream.data()?;
-
-        let code_str = String::from_utf8_lossy(&stream_data);
+        let code_str = String::from_utf8_lossy(stream.raw_data());
         let code_with_spaces = code_str.replace('{', " { ").replace('}', " } ");
         let tokens: Vec<&str> = code_with_spaces.split_whitespace().collect();
         let operators = pdf_postscript::parser::parse_tokens(&tokens)?;

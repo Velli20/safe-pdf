@@ -38,10 +38,10 @@ pub(crate) fn read_object_stream(
     let first = dict.required_number::<usize>("First", objects)?;
 
     // Decode stream data (applies filters)
-    let data = stream.data()?;
+    let data = stream.raw_data();
 
     // Parse the header: N pairs of (object_number, relative_byte_offset)
-    let mut header_parser = PdfParser::from(data.as_ref());
+    let mut header_parser = PdfParser::from(data);
     let mut object_entries = Vec::with_capacity(n);
 
     for _ in 0..n {
