@@ -10,6 +10,7 @@ pdf-object-collection = { path = "../pdf-object-collection" }
 pdf-object = { path = "../pdf-object" }
 pdf-parser = { path = "../pdf-parser" }
 pdf-resources = { path = "../pdf-resources" }
+pdf-graphics = { path = "../pdf-graphics" }
 thiserror = "2.0.12"
 
 md-5 = "0.10.6"

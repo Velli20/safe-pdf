@@ -16,7 +16,6 @@ use pdf_annotation_form::{
 use pdf_annotation_types::{AnnotationKind, annotation_id::AnnotationId};
 use pdf_document::{document::PdfDocument, page::PdfPage};
 use pdf_graphics::{point::Point, rect::Rect};
-use pdf_resources::media_box::MediaBox;
 
 trait TestAnnotationController {
     fn test_pointer_pressed(
@@ -77,11 +76,11 @@ impl TestAnnotationController for AnnotationController {
 
 fn document_with_free_text(rect: Rect) -> (PdfDocument, AnnotationId) {
     let mut page = PdfPage {
-        media_box: Some(MediaBox {
+        media_box: Some(Rect {
             left: 0.0,
-            top: 100.0,
+            top: 0.0,
             right: 200.0,
-            bottom: 0.0,
+            bottom: 100.0,
         }),
         ..Default::default()
     };

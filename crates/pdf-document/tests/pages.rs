@@ -194,7 +194,7 @@ fn inherited_resources_and_media_box_apply_to_leaf_pages() {
         .as_ref()
         .expect("page should inherit media box");
     assert_eq!(media_box.right, 595.0);
-    assert_eq!(media_box.top, 842.0);
+    assert_eq!(media_box.bottom, 842.0);
 }
 
 #[test]
@@ -257,5 +257,5 @@ fn child_resources_keep_their_own_entries_while_inheriting_missing_ones() {
         .as_ref()
         .expect("page should keep own media box");
     assert_eq!(media_box.right, 200.0);
-    assert_eq!(media_box.top, 300.0);
+    assert_eq!(media_box.bottom, 300.0);
 }

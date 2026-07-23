@@ -1,5 +1,6 @@
 use pdf_annotation_types::{Annotation, AnnotationError, annotation_id::AnnotationId};
 use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
+use pdf_graphics::rect::Rect;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 use pdf_resources::{
     error::PdfPagesError, media_box::MediaBox, object_reader::ReadCycleTracker,
@@ -19,7 +20,7 @@ pub struct PdfPage {
     /// The raw annotation dictionaries attached to the page.
     pub annotations: Option<Vec<Annotation>>,
     /// `/MediaBox` attribute which defines the page boundaries.
-    pub media_box: Option<MediaBox>,
+    pub media_box: Option<Rect>,
     /// `/Resources` attribute which defines the resources used by the page.
     pub resources: Option<Resources>,
     /// Next page-scoped annotation identifier.
