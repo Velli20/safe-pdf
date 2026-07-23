@@ -37,6 +37,7 @@ pub struct ObservingCanvas {
     pub inline_images: Vec<ObservedImage>,
     pub save_count: usize,
     pub restore_count: usize,
+    pub begin_mask_count: usize,
 }
 
 impl ObservingCanvas {
@@ -148,6 +149,7 @@ impl CanvasBackend for ObservingCanvas {
         _transform: &Transform,
         _mask_mode: MaskMode,
     ) -> Result<(), PdfCanvasError> {
+        self.begin_mask_count += 1;
         Ok(())
     }
 
@@ -161,6 +163,7 @@ impl CanvasBackend for ObservingCanvas {
     }
 }
 
+#[allow(dead_code)]
 pub fn content_stream(object_number: usize, data: &[u8]) -> ContentStream {
     let stream = StreamObject::new(
         object_number,
