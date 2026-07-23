@@ -1,5 +1,6 @@
 use crate::page::PdfPage;
 use pdf_content_stream::ContentStreamIdAllocator;
+use pdf_graphics::rect::Rect;
 use pdf_object::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
 };
@@ -101,10 +102,10 @@ impl PdfPages {
     /// Per PDF spec §7.7.3.4, `/MediaBox` is an inheritable attribute.  A page
     /// that does not carry its own `/MediaBox` receives the nearest ancestor's
     /// value.  Pages that already have a `/MediaBox` are left unchanged.
-    fn apply_media_box_inheritance(pages: &mut [PdfPage], media_box: &MediaBox) {
+    fn apply_media_box_inheritance(pages: &mut [PdfPage], media_box: &Rect) {
         for page in pages {
             if page.media_box.is_none() {
-                page.media_box = Some(media_box.clone());
+                page.media_box = Some(*media_box);
             }
         }
     }
@@ -263,11 +264,11 @@ mod tests {
 
     #[test]
     fn leaf_page_without_media_box_inherits_parent_media_box() {
-        let parent_mb = MediaBox {
+        let parent_mb = Rect {
             left: 0.0,
-            bottom: 0.0,
+            top: 0.0,
             right: 595.0,
-            top: 842.0,
+            bottom: 842.0,
         };
 
         let mut page = PdfPage {
@@ -284,23 +285,23 @@ mod tests {
             .media_box
             .expect("page should have inherited media box");
         assert_eq!(inherited.right, 595.0);
-        assert_eq!(inherited.top, 842.0);
+        assert_eq!(inherited.bottom, 842.0);
     }
 
     #[test]
     fn leaf_page_with_own_media_box_is_not_overwritten() {
-        let parent_mb = MediaBox {
+        let parent_mb = Rect {
             left: 0.0,
-            bottom: 0.0,
+            top: 0.0,
             right: 595.0,
-            top: 842.0,
+            bottom: 842.0,
         };
 
-        let child_mb = MediaBox {
+        let child_mb = Rect {
             left: 0.0,
-            bottom: 0.0,
+            top: 0.0,
             right: 200.0,
-            top: 300.0,
+            bottom: 300.0,
         };
 
         let mut page = PdfPage {
@@ -319,7 +320,7 @@ mod tests {
             "child MediaBox should not be overwritten"
         );
         assert_eq!(
-            result.top, 300.0,
+            result.bottom, 300.0,
             "child MediaBox should not be overwritten"
         );
     }

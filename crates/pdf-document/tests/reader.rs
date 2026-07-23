@@ -1090,7 +1090,7 @@ fn test_cyclic_page_tree_does_not_overflow() {
         .as_ref()
         .expect("page should inherit MediaBox from parent /Pages");
     assert_eq!(mb.right, 595.0);
-    assert_eq!(mb.top, 842.0);
+    assert_eq!(mb.bottom, 842.0);
 }
 
 #[test]

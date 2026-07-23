@@ -39,7 +39,7 @@ impl AnnotationViewport {
         let page_units_per_device_x = media_width / width;
         let page_units_per_device_y = media_height / height;
         let device_origin_x = -(media_box.left * device_units_per_page_x);
-        let device_origin_y = height + media_box.bottom * device_units_per_page_y;
+        let device_origin_y = height + media_box.top * device_units_per_page_y;
         if !device_units_per_page_x.is_finite()
             || !device_units_per_page_y.is_finite()
             || !page_units_per_device_x.is_finite()
@@ -59,13 +59,7 @@ impl AnnotationViewport {
                 device_origin_x,
                 device_origin_y,
             ),
-            page_bounds: Rect {
-                left: media_box.left,
-                top: media_box.bottom,
-                right: media_box.right,
-                bottom: media_box.top,
-            }
-            .normalized(),
+            page_bounds: media_box.normalized(),
             page_units_per_device_x,
             page_units_per_device_y,
         })
@@ -99,18 +93,16 @@ impl AnnotationViewport {
 
 #[cfg(test)]
 mod tests {
-    use pdf_resources::media_box::MediaBox;
-
     use super::*;
 
     #[test]
     fn maps_media_boxes_with_nonzero_origins() {
         let page = PdfPage {
-            media_box: Some(MediaBox {
+            media_box: Some(Rect {
                 left: 50.0,
-                top: 125.0,
+                top: 25.0,
                 right: 250.0,
-                bottom: 25.0,
+                bottom: 125.0,
             }),
             ..Default::default()
         };
@@ -131,22 +123,22 @@ mod tests {
     #[test]
     fn rejects_non_finite_derived_scale() {
         let page = PdfPage {
-            media_box: Some(MediaBox {
+            media_box: Some(Rect {
                 left: 0.0,
-                top: f32::MAX,
+                top: 0.0,
                 right: f32::MAX,
-                bottom: 0.0,
+                bottom: f32::MAX,
             }),
             ..Default::default()
         };
         assert!(AnnotationViewport::from_page(&page, f32::MIN_POSITIVE, 1.0).is_none());
 
         let page = PdfPage {
-            media_box: Some(MediaBox {
+            media_box: Some(Rect {
                 left: 1.0e30,
-                top: 100.0,
+                top: 0.0,
                 right: 1.000_001e30,
-                bottom: 0.0,
+                bottom: 100.0,
             }),
             ..Default::default()
         };
