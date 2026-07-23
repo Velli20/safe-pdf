@@ -155,7 +155,7 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
                 renderer.render_text(iter)
             }
             Font::Type1(type1_font) => {
-                let program = type1_font.font_file.as_slice();
+                let program = type1_font.font_file.as_ref();
                 let iter = to_char_iter(text);
 
                 let mut renderer =
@@ -175,7 +175,7 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
 
                 match font.program_format {
                     Type0FontProgramFormat::OpenTypeCff => {
-                        let program = font.font_file.as_slice();
+                        let program = font.font_file.as_ref();
                         let program_format = font
                             .type1_program_format
                             .unwrap_or(Type1FontProgramFormat::OpenTypeCff);

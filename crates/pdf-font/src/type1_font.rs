@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use pdf_cmap::ToUnicodeCMap;
 use pdf_object::{
@@ -10,6 +10,7 @@ use crate::{
     cff_builder::build_cff_font,
     encoding::{Encoding, FontEncoding},
     error::FontError,
+    font_data::FontData,
     simple_font_glyph_map::SimpleFontGlyphWidthsMap,
 };
 
@@ -25,7 +26,7 @@ pub enum Type1FontProgramFormat {
 /// and defers actual glyph rendering or embedded program parsing.
 pub struct Type1Font {
     /// A stream containing the font program.
-    pub font_file: Vec<u8>,
+    pub font_file: FontData,
     /// The format of `font_file`.
     pub program_format: Type1FontProgramFormat,
     /// Widths map for character codes.
@@ -108,7 +109,7 @@ impl Type1Font {
     pub(crate) fn read_font_file(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<(Vec<u8>, Type1FontProgramFormat), FontError> {
+    ) -> Result<(FontData, Type1FontProgramFormat), FontError> {
         let descriptor = dictionary.required_dictionary("FontDescriptor", objects)?;
 
         // Path 1: FontFile3 stream with subtype-driven handling.
@@ -116,12 +117,13 @@ impl Type1Font {
             let stream = font_file3.try_stream(objects)?;
             let subtype = stream.dictionary.optional_str("Subtype", objects)?;
 
-            let data = stream.data()?;
-
             return match subtype {
-                Some("Type1C") | Some("CIDFontType0C") => build_cff_font(data.as_ref())
-                    .map(|font| (font, Type1FontProgramFormat::OpenTypeCff)),
-                Some("OpenType") => Ok((data.to_vec(), Type1FontProgramFormat::OpenTypeCff)),
+                Some("Type1C") | Some("CIDFontType0C") => build_cff_font(stream.raw_data())
+                    .map(|font| (font.into(), Type1FontProgramFormat::OpenTypeCff)),
+                Some("OpenType") => Ok((
+                    FontData::shared(stream.shared_data()),
+                    Type1FontProgramFormat::OpenTypeCff,
+                )),
                 Some(other) => Err(FontError::UnsupportedFontSubtype {
                     subtype: other.to_string(),
                 }),
@@ -134,9 +136,9 @@ impl Type1Font {
         // Path 2: classic Type 1 in FontFile.
         if let Some(font_file) = descriptor.get("FontFile") {
             let stream = font_file.try_stream(objects)?;
-            let data = stream.data()?;
-            let normalized = normalize_classic_type1_bytes(descriptor, data.as_ref(), objects)?;
-            read_fonts::ps::type1::Type1Font::new(&normalized).map_err(|_| {
+            let normalized =
+                normalize_classic_type1_bytes(descriptor, stream.shared_data(), objects)?;
+            read_fonts::ps::type1::Type1Font::new(normalized.as_ref()).map_err(|_| {
                 FontError::UnsupportedFontSubtype {
                     subtype: "FontFile".to_string(),
                 }
@@ -151,22 +153,22 @@ impl Type1Font {
 
 fn normalize_classic_type1_bytes(
     descriptor: &Dictionary,
-    data: &[u8],
+    data: Arc<Vec<u8>>,
     objects: &dyn ObjectResolver,
-) -> Result<Vec<u8>, FontError> {
-    if is_pfb(data) {
-        return Ok(data.to_vec());
+) -> Result<FontData, FontError> {
+    if is_pfb(data.as_slice()) {
+        return Ok(FontData::shared(data));
     }
 
-    let trimmed = trim_classic_type1_by_lengths(descriptor, data, objects)?;
-    Ok(trimmed.unwrap_or_else(|| data.to_vec()))
+    let visible_len = classic_type1_length(descriptor, data.len(), objects)?.unwrap_or(data.len());
+    Ok(FontData::shared_prefix(data, visible_len))
 }
 
-fn trim_classic_type1_by_lengths(
+fn classic_type1_length(
     descriptor: &Dictionary,
-    data: &[u8],
+    data_len: usize,
     objects: &dyn ObjectResolver,
-) -> Result<Option<Vec<u8>>, FontError> {
+) -> Result<Option<usize>, FontError> {
     let length1 = descriptor.optional_number::<usize>("Length1", objects)?;
     let length2 = descriptor.optional_number::<usize>("Length2", objects)?;
     let length3 = descriptor.optional_number::<usize>("Length3", objects)?;
@@ -183,9 +185,7 @@ fn trim_classic_type1_by_lengths(
         return Ok(None);
     };
 
-    Ok(data
-        .get(..total_length.min(data.len()))
-        .map(ToOwned::to_owned))
+    Ok(Some(total_length.min(data_len)))
 }
 
 fn is_pfb(data: &[u8]) -> bool {
@@ -337,17 +337,27 @@ currentfile eexec
         let (parsed, format) = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap();
         let expected = build_cff_font(&cff_bytes).unwrap();
         assert_eq!(format, Type1FontProgramFormat::OpenTypeCff);
-        assert_eq!(parsed, expected);
+        assert_eq!(parsed.as_ref(), expected.as_slice());
+        assert!(matches!(parsed, FontData::Owned(_)));
     }
 
     #[test]
     fn font_file3_opentype_is_returned_as_is() {
         let opentype_bytes = vec![0, 1, 2, 3, 4, 5];
         let dict = make_font_dict_with_font_file3(Some("OpenType"), opentype_bytes.clone());
+        let stream_bytes = dict
+            .required_dictionary("FontDescriptor", &PassthroughResolver)
+            .unwrap()
+            .required_stream("FontFile3", &PassthroughResolver)
+            .unwrap()
+            .raw_data()
+            .as_ptr();
 
         let (parsed, format) = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap();
         assert_eq!(format, Type1FontProgramFormat::OpenTypeCff);
-        assert_eq!(parsed, opentype_bytes);
+        assert_eq!(parsed.as_ref(), opentype_bytes.as_slice());
+        assert_eq!(parsed.as_ptr(), stream_bytes);
+        assert!(matches!(parsed, FontData::Shared(_)));
     }
 
     #[test]
@@ -380,20 +390,36 @@ currentfile eexec
     fn font_file_pfa_is_returned_as_classic_type1() {
         let (bytes, lengths) = minimal_pfa_font();
         let dict = make_font_dict_with_font_file(bytes.clone(), Some(lengths));
+        let stream_bytes = dict
+            .required_dictionary("FontDescriptor", &PassthroughResolver)
+            .unwrap()
+            .required_stream("FontFile", &PassthroughResolver)
+            .unwrap()
+            .raw_data()
+            .as_ptr();
 
         let (parsed, format) = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap();
         assert_eq!(format, Type1FontProgramFormat::ClassicType1);
-        assert_eq!(parsed, bytes);
+        assert_eq!(parsed.as_ref(), bytes.as_slice());
+        assert_eq!(parsed.as_ptr(), stream_bytes);
     }
 
     #[test]
     fn font_file_pfb_is_returned_as_classic_type1() {
         let bytes = minimal_pfb_font();
         let dict = make_font_dict_with_font_file(bytes.clone(), None);
+        let stream_bytes = dict
+            .required_dictionary("FontDescriptor", &PassthroughResolver)
+            .unwrap()
+            .required_stream("FontFile", &PassthroughResolver)
+            .unwrap()
+            .raw_data()
+            .as_ptr();
 
         let (parsed, format) = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap();
         assert_eq!(format, Type1FontProgramFormat::ClassicType1);
-        assert_eq!(parsed, bytes);
+        assert_eq!(parsed.as_ref(), bytes.as_slice());
+        assert_eq!(parsed.as_ptr(), stream_bytes);
     }
 
     #[test]
@@ -401,11 +427,19 @@ currentfile eexec
         let (mut bytes, lengths) = minimal_pfa_font();
         bytes.extend_from_slice(b"trailing junk");
         let dict = make_font_dict_with_font_file(bytes, Some(lengths));
+        let stream_bytes = dict
+            .required_dictionary("FontDescriptor", &PassthroughResolver)
+            .unwrap()
+            .required_stream("FontFile", &PassthroughResolver)
+            .unwrap()
+            .raw_data()
+            .as_ptr();
 
         let (parsed, format) = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap();
         assert_eq!(format, Type1FontProgramFormat::ClassicType1);
         let expected_len = lengths.0 + lengths.1 + lengths.2;
         assert_eq!(parsed.len(), expected_len);
+        assert_eq!(parsed.as_ptr(), stream_bytes);
     }
 
     #[test]

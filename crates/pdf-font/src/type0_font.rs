@@ -11,6 +11,7 @@ use crate::{
     cid_system_info::cid_ordering_from_dictionary,
     error::FontError,
     fallback::fallback_program_from_dictionary,
+    font_data::FontData,
     glyph_widths_map::GlyphWidthsMap,
     true_type_font::TrueTypeFont,
     type1_font::{Type1Font, Type1FontProgramFormat},
@@ -24,7 +25,7 @@ pub struct Type0Font {
     /// The actual font program format used for rendering.
     pub program_format: Type0FontProgramFormat,
     /// Font file containing embedded font data.
-    pub font_file: Vec<u8>,
+    pub font_file: FontData,
     /// The embedded Type 1 program format for CIDFontType0 descendants.
     pub type1_program_format: Option<Type1FontProgramFormat>,
     /// A map of individual glyph widths, overriding the default width for specific CIDs.
@@ -97,7 +98,7 @@ impl Type0Font {
         } = read_type0_font_program(descendant.dictionary, descendant.subtype, objects)?;
         let glyph_to_unicode = glyph_to_unicode_map(
             fallback_cid_to_unicode,
-            &font_file,
+            font_file.as_ref(),
             descendant.subtype,
             encoding.as_ref(),
             to_unicode.as_ref(),
@@ -181,7 +182,7 @@ impl<'a> Type0DescendantFont<'a> {
 }
 
 struct Type0FontProgram {
-    font_file: Vec<u8>,
+    font_file: FontData,
     program_format: Type0FontProgramFormat,
     fallback_cid_to_unicode: Option<HashMap<u16, char>>,
 }
@@ -231,8 +232,7 @@ fn parse_to_unicode(
     dictionary
         .get("ToUnicode")
         .and_then(|e| e.try_stream(objects).ok())
-        .and_then(|s| s.data().ok())
-        .map(|data| ToUnicodeCMap::try_from(data.as_ref()))
+        .map(|s| ToUnicodeCMap::try_from(s.raw_data()))
         .transpose()
         .map_err(FontError::from)
 }
@@ -351,9 +351,7 @@ fn read_type0_font_program(
     match subtype {
         CidFontSubType::Type0 => read_cid_font_type0_program(dictionary, objects),
         CidFontSubType::Type2 => Ok(Type0FontProgram {
-            font_file: TrueTypeFont::read_font_file(dictionary, objects)?
-                .0
-                .to_vec(),
+            font_file: TrueTypeFont::read_font_file(dictionary, objects)?.0,
             program_format: Type0FontProgramFormat::TrueType {
                 cid_to_unicode: false,
             },
@@ -410,7 +408,7 @@ fn fallback_type0_program(
     let fallback_cid_to_unicode = cid_to_unicode_map(dictionary, objects)?;
 
     Ok(Type0FontProgram {
-        font_file: fallback.font_file.into_owned(),
+        font_file: fallback.font_file.into(),
         program_format: Type0FontProgramFormat::TrueType {
             cid_to_unicode: fallback_cid_to_unicode.is_some(),
         },
@@ -568,12 +566,10 @@ mod tests {
             "Subtype".to_string(),
             ObjectVariant::Name(b"OpenType".to_vec()),
         );
-        let font_file3 = ObjectVariant::Stream(StreamObject::new(
-            3,
-            0,
-            Box::new(Dictionary::new(file3_dict)),
-            vec![0, 1, 2],
-        ));
+        let font_file3_stream =
+            StreamObject::new(3, 0, Box::new(Dictionary::new(file3_dict)), vec![0, 1, 2]);
+        let font_file3_bytes = font_file3_stream.raw_data().as_ptr();
+        let font_file3 = ObjectVariant::Stream(font_file3_stream);
 
         let mut descriptor_dict = BTreeMap::new();
         descriptor_dict.insert("FontFile3".to_string(), font_file3);
@@ -615,6 +611,8 @@ mod tests {
             Type0Font::from_dictionary(&Dictionary::new(font_dict), &PassthroughResolver).unwrap();
 
         assert_eq!(font.program_format, Type0FontProgramFormat::OpenTypeCff);
+        assert!(matches!(&font.font_file, FontData::Shared(_)));
+        assert_eq!(font.font_file.as_ptr(), font_file3_bytes);
         assert!(font.encoding.is_some());
         assert_eq!(
             font.to_unicode

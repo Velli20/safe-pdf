@@ -252,7 +252,7 @@ mod tests {
         {
             assert_eq!(stream.object_number, 1);
             assert_eq!(stream.generation_number, 0);
-            assert_eq!(stream.data, b"Hello");
+            assert_eq!(stream.raw_data(), b"Hello");
         } else {
             panic!("Expected Stream variant");
         }

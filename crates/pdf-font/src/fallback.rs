@@ -65,7 +65,7 @@ pub(crate) fn fallback_true_type_from_dictionary(
     let to_unicode = to_unicode_cmap(dictionary, objects)?;
 
     Ok(TrueTypeFont {
-        font_file: fallback.font_file,
+        font_file: fallback.font_file.into(),
         widths,
         encoding,
         to_unicode,

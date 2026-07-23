@@ -245,7 +245,9 @@ mod tests {
     use pdf_cmap::Type0EncodingCMap;
 
     use super::*;
-    use crate::{encoding::Encoding, flags::FontFlags, true_type_font::TrueTypeFont};
+    use crate::{
+        encoding::Encoding, flags::FontFlags, font_data::FontData, true_type_font::TrueTypeFont,
+    };
 
     #[test]
     fn test_truetype_encoding_fallback() {
@@ -262,7 +264,7 @@ mod tests {
             .collect();
         let enc = Encoding { names };
         let font = Font::TrueType(TrueTypeFont {
-            font_file: Cow::Owned(vec![]),
+            font_file: FontData::Owned(vec![]),
             widths: None,
             encoding: Some(enc),
             to_unicode: None,
@@ -279,7 +281,7 @@ mod tests {
         let cmap_data = b"beginbfchar\n<01> <FB01FB02>\nendbfchar\n";
         let cmap = ToUnicodeCMap::try_from(cmap_data.as_slice()).unwrap();
         let font = Font::TrueType(TrueTypeFont {
-            font_file: Cow::Owned(vec![]),
+            font_file: FontData::Owned(vec![]),
             widths: None,
             encoding: None,
             to_unicode: Some(cmap),
@@ -334,7 +336,7 @@ mod tests {
             program_format: Type0FontProgramFormat::TrueType {
                 cid_to_unicode: false,
             },
-            font_file: vec![],
+            font_file: FontData::Owned(vec![]),
             type1_program_format: None,
             widths: None,
             encoding: None,

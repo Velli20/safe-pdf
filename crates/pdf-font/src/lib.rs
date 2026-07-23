@@ -6,6 +6,7 @@ pub mod error;
 mod fallback;
 pub mod flags;
 pub mod font;
+pub mod font_data;
 pub mod glyph_name_to_unicode;
 pub mod glyph_widths_map;
 pub mod simple_font_glyph_map;
