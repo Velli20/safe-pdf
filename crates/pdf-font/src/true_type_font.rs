@@ -11,6 +11,7 @@ use crate::{
     error::FontError,
     fallback::fallback_program_from_dictionary,
     flags::FontFlags,
+    font_data::FontData,
     simple_font_glyph_map::SimpleFontGlyphWidthsMap,
     standard14::Standard14Font,
 };
@@ -19,10 +20,9 @@ use crate::{
 pub struct TrueTypeFont {
     /// Font program bytes.
     ///
-    /// `Cow::Borrowed` for bundled Standard 14 fallback fonts (avoids copying
-    /// the static `include_bytes!` data), `Cow::Owned` for fonts embedded in
-    /// the PDF stream.
-    pub font_file: Cow<'static, [u8]>,
+    /// Bundled fallback fonts borrow static data, while embedded fonts share
+    /// the decoded PDF stream allocation.
+    pub font_file: FontData,
     /// Widths for character codes.
     pub widths: Option<HashMap<u16, f32>>,
     /// Optional glyph name encoding, used as AGL fallback when ToUnicode is absent.
@@ -38,7 +38,7 @@ pub struct TrueTypeFont {
 }
 
 struct TrueTypeFontProgram {
-    font_file: Cow<'static, [u8]>,
+    font_file: FontData,
     standard14: Option<Standard14Font>,
     flags: FontFlags,
 }
@@ -114,7 +114,7 @@ impl TrueTypeFont {
     /// when the PDF omitted an explicit `/Encoding`.
     pub fn from_bytes(font_file: Cow<'static, [u8]>, standard14: Option<Standard14Font>) -> Self {
         Self {
-            font_file,
+            font_file: font_file.into(),
             widths: None,
             encoding: Self::default_simple_encoding(FontFlags::empty(), standard14),
             to_unicode: None,
@@ -131,7 +131,7 @@ impl TrueTypeFont {
     /// font dictionary.
     pub fn synthetic_standard14_font(standard14: Standard14Font) -> Self {
         Self {
-            font_file: standard14.fallback_font_bytes(),
+            font_file: standard14.fallback_font_bytes().into(),
             widths: None,
             encoding: Some(Encoding::win_ansi()),
             to_unicode: None,
@@ -156,13 +156,13 @@ impl TrueTypeFont {
     ///
     /// # Returns
     ///
-    /// Returns the font file bytes as a `Cow<'static, [u8]>` or a [`FontError`] if
+    /// Returns the font file bytes as [`FontData`] or a [`FontError`] if
     /// reading or decompressing the font stream fails or if the font dictionary or its
     /// `/FontDescriptor` entry is invalid.
     pub(crate) fn read_font_file(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<(Cow<'static, [u8]>, FontFlags), FontError> {
+    ) -> Result<(FontData, FontFlags), FontError> {
         let program = Self::read_font_program(dictionary, objects)?;
         Ok((program.font_file, program.flags))
     }
@@ -180,7 +180,7 @@ impl TrueTypeFont {
 
             if let Some(stream) = descriptor.optional_stream("FontFile2", objects)? {
                 return Ok(TrueTypeFontProgram {
-                    font_file: Cow::Owned(stream.data()?.to_vec()),
+                    font_file: FontData::shared(stream.shared_data()),
                     standard14: None,
                     flags,
                 });
@@ -189,7 +189,7 @@ impl TrueTypeFont {
 
         let fallback = fallback_program_from_dictionary(dictionary, objects)?;
         Ok(TrueTypeFontProgram {
-            font_file: fallback.font_file,
+            font_file: fallback.font_file.into(),
             standard14: Some(fallback.standard14),
             flags: fallback.flags,
         })
@@ -198,9 +198,48 @@ impl TrueTypeFont {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
+    use std::{borrow::Cow, collections::BTreeMap};
+
+    use pdf_object::{
+        object_resolver::PassthroughResolver, object_variant::ObjectVariant, stream::StreamObject,
+    };
 
     use super::*;
+
+    #[test]
+    fn embedded_font_program_shares_stream_bytes() {
+        let stream = StreamObject::new(
+            1,
+            0,
+            Box::new(Dictionary::new(BTreeMap::new())),
+            vec![1, 2, 3, 4],
+        );
+        let stream_bytes = stream.raw_data().as_ptr();
+        let descriptor = Dictionary::new(BTreeMap::from([(
+            "FontFile2".to_string(),
+            ObjectVariant::Stream(stream),
+        )]));
+        let dictionary = Dictionary::new(BTreeMap::from([(
+            "FontDescriptor".to_string(),
+            ObjectVariant::Dictionary(Box::new(descriptor)),
+        )]));
+
+        let font = TrueTypeFont::from_dictionary(&dictionary, &PassthroughResolver)
+            .expect("embedded TrueType font should parse");
+
+        assert!(matches!(&font.font_file, FontData::Shared(_)));
+        assert_eq!(font.font_file.as_ptr(), stream_bytes);
+    }
+
+    #[test]
+    fn bundled_font_program_borrows_static_bytes() {
+        let fallback = Standard14Font::Helvetica.fallback_font_bytes();
+        let fallback_bytes = fallback.as_ptr();
+        let font = TrueTypeFont::from_bytes(fallback, Some(Standard14Font::Helvetica));
+
+        assert!(matches!(&font.font_file, FontData::Borrowed(_)));
+        assert_eq!(font.font_file.as_ptr(), fallback_bytes);
+    }
 
     #[test]
     fn standard14_fallback_fonts_default_to_standard_encoding() {

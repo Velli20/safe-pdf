@@ -2,6 +2,7 @@ use pdf_object::indirect_object::IndirectObject;
 use pdf_object::object_resolver::ObjectResolver;
 use pdf_object::stream::StreamObject;
 use pdf_object::{error::ObjectError, object_variant::ObjectVariant};
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 #[cfg(feature = "json")]
@@ -78,8 +79,11 @@ impl ObjectCollection {
             }
             ObjectVariant::Stream(stream) => {
                 let data = pdf_filter::filter::decode_with_resolver(&stream, self)
-                    .map(|data| data.into_owned())
-                    .unwrap_or_else(|_| stream.raw_data().to_vec());
+                    .map(|data| match data {
+                        Cow::Borrowed(_) => stream.shared_data(),
+                        Cow::Owned(data) => data.into(),
+                    })
+                    .unwrap_or_else(|_| stream.shared_data());
                 let StreamObject {
                     object_number,
                     generation_number,
@@ -261,7 +265,32 @@ impl ObjectCollection {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use pdf_object::{dictionary::Dictionary, stream::StreamObject};
+
     use super::*;
+
+    #[test]
+    fn inserting_unfiltered_stream_preserves_the_byte_allocation() {
+        let data = vec![1, 2, 3, 4];
+        let original = data.as_ptr();
+        let stream = StreamObject::new(1, 0, Box::new(Dictionary::new(BTreeMap::new())), data);
+        let mut collection = ObjectCollection::default();
+
+        collection
+            .insert(ObjectVariant::Stream(stream))
+            .expect("stream insert failed");
+
+        let stored = collection
+            .get(1)
+            .and_then(|object| match object {
+                ObjectVariant::Stream(stream) => Some(stream),
+                _ => None,
+            })
+            .expect("inserted stream should be present");
+        assert_eq!(stored.raw_data().as_ptr(), original);
+    }
 
     #[test]
     fn resolve_object_reports_direct_self_reference_cycle() {
@@ -291,10 +320,7 @@ mod tests {
 
     #[test]
     fn insert_decodes_stream_with_indirect_decode_parms() {
-        use pdf_object::{
-            dictionary::Dictionary, indirect_object::IndirectObject, stream::StreamObject,
-        };
-        use std::collections::BTreeMap;
+        use pdf_object::indirect_object::IndirectObject;
         use std::io::Write;
 
         let mut encoded_row = Vec::from([2u8]);

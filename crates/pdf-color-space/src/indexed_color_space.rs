@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use pdf_graphics::color::Color;
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
@@ -16,7 +18,7 @@ pub struct IndexedColorSpace {
     /// Maximum valid index value (0 to 255). The palette contains `hival + 1` entries.
     pub hival: u8,
     /// Raw lookup table bytes. Each entry contains `base.num_color_components()` bytes.
-    pub lookup: Vec<u8>,
+    pub lookup: Arc<Vec<u8>>,
 }
 
 /// Parses an Indexed color space: `[/Indexed base hival lookup]`
@@ -53,11 +55,11 @@ pub(crate) fn parse_indexed_color_space(
 fn extract_lookup_table(
     objects: &dyn ObjectResolver,
     lookup: &ObjectVariant,
-) -> Result<Vec<u8>, ColorSpaceError> {
+) -> Result<Arc<Vec<u8>>, ColorSpaceError> {
     if let Ok(data) = lookup.try_bytes(objects) {
-        return Ok(data.to_vec());
+        return Ok(Arc::new(data.to_vec()));
     }
-    Ok(lookup.try_stream(objects)?.data()?.into_owned())
+    Ok(lookup.try_stream(objects)?.shared_data())
 }
 
 /// Converts a raw palette entry (byte slice) to a [`Color`] using the given base color space.
@@ -152,16 +154,56 @@ impl IndexedColorSpace {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use pdf_object::{
+        dictionary::Dictionary, object_resolver::PassthroughResolver, stream::StreamObject,
+    };
+
     use super::*;
+
+    #[test]
+    fn stream_lookup_shares_decoded_stream_bytes() {
+        let stream = StreamObject::new(
+            1,
+            0,
+            Box::new(Dictionary::new(BTreeMap::new())),
+            vec![1, 2, 3, 4],
+        );
+        let stream_data = stream.shared_data();
+        let lookup = ObjectVariant::Stream(stream);
+
+        let extracted = extract_lookup_table(&PassthroughResolver, &lookup)
+            .expect("stream lookup table should parse");
+
+        assert!(Arc::ptr_eq(&extracted, &stream_data));
+    }
+
+    #[test]
+    fn string_lookups_preserve_their_bytes() {
+        for lookup in [
+            ObjectVariant::LiteralString(vec![1, 2, 3]),
+            ObjectVariant::HexString(vec![4, 5, 6]),
+        ] {
+            let expected = lookup
+                .try_bytes(&PassthroughResolver)
+                .expect("test lookup should contain bytes")
+                .to_vec();
+            let extracted = extract_lookup_table(&PassthroughResolver, &lookup)
+                .expect("string lookup table should parse");
+
+            assert_eq!(extracted.as_slice(), expected.as_slice());
+        }
+    }
 
     fn indexed_rgb() -> IndexedColorSpace {
         IndexedColorSpace {
             base: Box::new(ColorSpace::DeviceRGB),
             hival: 7,
-            lookup: vec![
+            lookup: Arc::new(vec![
                 0, 128, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 255, 0,
                 243, 128, 255,
-            ],
+            ]),
         }
     }
 

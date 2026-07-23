@@ -568,7 +568,7 @@ currentfile eexec
     #[test]
     fn classic_type1_renderer_uses_pdf_widths_for_advance() {
         let font = Font::Type1(Type1Font {
-            font_file: minimal_classic_type1_font(),
+            font_file: minimal_classic_type1_font().into(),
             program_format: Type1FontProgramFormat::ClassicType1,
             widths: Some(HashMap::from([(65, 500.0)])),
             encoding: Encoding::default(),
@@ -587,7 +587,7 @@ currentfile eexec
         let mut renderer = Type1FontRenderer::new(
             &mut canvas,
             match &font {
-                Font::Type1(font) => font.font_file.as_slice(),
+                Font::Type1(font) => font.font_file.as_ref(),
                 _ => unreachable!(),
             },
             Type1FontProgramFormat::ClassicType1,

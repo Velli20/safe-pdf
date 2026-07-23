@@ -153,9 +153,9 @@ impl<B: CanvasBackend> TextRenderer for TrueTypeFontRenderer<'_, '_, B> {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
-
-    use pdf_font::{encoding::Encoding, flags::FontFlags, standard14::Standard14Font};
+    use pdf_font::{
+        encoding::Encoding, flags::FontFlags, font_data::FontData, standard14::Standard14Font,
+    };
 
     use super::*;
 
@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn simple_truetype_prefers_pdf_unicode_mapping() {
         let font = Font::TrueType(pdf_font::true_type_font::TrueTypeFont {
-            font_file: Standard14Font::Helvetica.fallback_font_bytes(),
+            font_file: Standard14Font::Helvetica.fallback_font_bytes().into(),
             widths: None,
             encoding: Some(Encoding::default()),
             to_unicode: None,
@@ -202,7 +202,7 @@ mod tests {
     #[test]
     fn symbolic_simple_truetype_still_uses_pdf_unicode_mapping() {
         let font = Font::TrueType(pdf_font::true_type_font::TrueTypeFont {
-            font_file: Standard14Font::Helvetica.fallback_font_bytes(),
+            font_file: Standard14Font::Helvetica.fallback_font_bytes().into(),
             widths: None,
             encoding: Some(Encoding::default()),
             to_unicode: None,
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn symbolic_simple_truetype_falls_back_to_unicode_codepoint_mapping() {
         let font = Font::TrueType(pdf_font::true_type_font::TrueTypeFont {
-            font_file: Standard14Font::Helvetica.fallback_font_bytes(),
+            font_file: Standard14Font::Helvetica.fallback_font_bytes().into(),
             widths: None,
             encoding: None,
             to_unicode: None,
@@ -234,7 +234,7 @@ mod tests {
     #[test]
     fn unmappable_simple_truetype_returns_notdef() {
         let font = Font::TrueType(pdf_font::true_type_font::TrueTypeFont {
-            font_file: Cow::Owned(vec![]),
+            font_file: FontData::Owned(vec![]),
             widths: None,
             encoding: None,
             to_unicode: None,
