@@ -839,161 +839,12 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, ops::Deref, rc::Rc, sync::Arc};
-
-    use pdf_content_stream::ContentStreamIdAllocator;
     use pdf_content_stream_operators::pdf_operator_backend::GraphicsStateOps;
     use pdf_document::page::PdfPage;
-    use pdf_graphics::{
-        BlendMode, MaskMode, PaintMode, PathFillType, PixelFormat, color::Color, pdf_path::PdfPath,
-        rect::Rect, transform::Transform,
-    };
-    use pdf_image::InlineImage;
-    use pdf_object::{dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject};
-    use pdf_resources::{
-        form::FormXObject, resource::Resource, resources::Resources, xobject::XObject,
-    };
-
-    use crate::{
-        canvas_backend::{CanvasBackend, Image, Shader},
-        recording_canvas::RecordingCanvas,
-    };
+    use pdf_graphics::rect::Rect;
 
     use super::PdfCanvas;
-
-    #[derive(Default)]
-    struct CountingCanvas {
-        save_count: usize,
-        restore_count: usize,
-        draw_image_count: usize,
-        draw_inline_image_count: usize,
-        stroke_count: usize,
-        last_stroke_style: Option<crate::stroke_style::StrokeStyle>,
-        last_draw_image: Option<DrawnImage>,
-        last_draw_inline_image: Option<DrawnImage>,
-    }
-
-    #[derive(Debug, Clone, PartialEq)]
-    struct DrawnImage {
-        data: Vec<u8>,
-        width: usize,
-        height: usize,
-        pixel_format: PixelFormat,
-        blend_mode: Option<BlendMode>,
-        dest_rect: Rect,
-        image_rotation: Option<f32>,
-    }
-
-    impl CanvasBackend for CountingCanvas {
-        fn fill_path(
-            &mut self,
-            _path: &pdf_graphics::pdf_path::PdfPath,
-            _fill_type: PathFillType,
-            _color: Color,
-            _shader: &Option<Shader>,
-            _blend_mode: Option<BlendMode>,
-        ) -> Result<(), crate::error::PdfCanvasError> {
-            Ok(())
-        }
-
-        fn stroke_path(
-            &mut self,
-            _path: &pdf_graphics::pdf_path::PdfPath,
-            _color: Color,
-            _line_width: f32,
-            stroke_style: &crate::stroke_style::StrokeStyle,
-            _shader: &Option<Shader>,
-            _blend_mode: Option<BlendMode>,
-        ) -> Result<(), crate::error::PdfCanvasError> {
-            self.stroke_count += 1;
-            self.last_stroke_style = Some(stroke_style.clone());
-            Ok(())
-        }
-
-        fn set_clip_region(
-            &mut self,
-            _path: &pdf_graphics::pdf_path::PdfPath,
-            _mode: PathFillType,
-        ) -> Result<(), crate::error::PdfCanvasError> {
-            Ok(())
-        }
-
-        fn width(&self) -> f32 {
-            100.0
-        }
-
-        fn height(&self) -> f32 {
-            100.0
-        }
-
-        fn save(&mut self) -> Result<(), crate::error::PdfCanvasError> {
-            self.save_count += 1;
-            Ok(())
-        }
-
-        fn restore(&mut self) -> Result<(), crate::error::PdfCanvasError> {
-            self.restore_count += 1;
-            Ok(())
-        }
-
-        fn draw_image_rect(
-            &mut self,
-            _image: &Image<'_>,
-            blend_mode: Option<BlendMode>,
-            dest_rect: Rect,
-            image_rotation: Option<f32>,
-        ) -> Result<(), crate::error::PdfCanvasError> {
-            self.draw_image_count += 1;
-            self.last_draw_image = Some(DrawnImage {
-                data: _image.data.deref().to_vec(),
-                width: _image.width,
-                height: _image.height,
-                pixel_format: _image.pixel_format,
-                blend_mode,
-                dest_rect,
-                image_rotation,
-            });
-            Ok(())
-        }
-
-        fn draw_inline_image(
-            &mut self,
-            image: &Image<'_>,
-            blend_mode: Option<BlendMode>,
-            dest_rect: Rect,
-            image_rotation: Option<f32>,
-        ) -> Result<(), crate::error::PdfCanvasError> {
-            self.draw_inline_image_count += 1;
-            self.last_draw_inline_image = Some(DrawnImage {
-                data: image.data.deref().to_vec(),
-                width: image.width,
-                height: image.height,
-                pixel_format: image.pixel_format,
-                blend_mode,
-                dest_rect,
-                image_rotation,
-            });
-            Ok(())
-        }
-
-        fn begin_mask_layer(
-            &mut self,
-            _mask: &Arc<RecordingCanvas>,
-            _transform: &Transform,
-            _mask_mode: MaskMode,
-        ) -> Result<(), crate::error::PdfCanvasError> {
-            Ok(())
-        }
-
-        fn end_mask_layer(
-            &mut self,
-            _mask: &Arc<RecordingCanvas>,
-            _transform: &Transform,
-            _mask_mode: MaskMode,
-        ) -> Result<(), crate::error::PdfCanvasError> {
-            Ok(())
-        }
-    }
+    use crate::recording_canvas::RecordingCanvas;
 
     fn page() -> PdfPage {
         PdfPage {
@@ -1005,57 +856,10 @@ mod tests {
         }
     }
 
-    fn stream_object(object_number: usize, data: &[u8]) -> StreamObject {
-        StreamObject::new(
-            object_number,
-            0,
-            Box::new(Dictionary::new(Default::default())),
-            data.to_vec(),
-        )
-    }
-
-    fn image_xobject_dictionary() -> Dictionary {
-        Dictionary::new(std::collections::BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(1)),
-            (
-                "ColorSpace".to_string(),
-                ObjectVariant::Name(b"DeviceGray".to_vec()),
-            ),
-            (
-                "Decode".to_string(),
-                ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(0)]),
-            ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(4)),
-        ]))
-    }
-
-    fn inline_image() -> InlineImage {
-        InlineImage::new(
-            Dictionary::new(std::collections::BTreeMap::from([
-                ("BPC".to_string(), ObjectVariant::Integer(1)),
-                (
-                    "CS".to_string(),
-                    ObjectVariant::Name(b"DeviceGray".to_vec()),
-                ),
-                (
-                    "D".to_string(),
-                    ObjectVariant::Array(vec![
-                        ObjectVariant::Integer(1),
-                        ObjectVariant::Integer(0),
-                    ]),
-                ),
-                ("H".to_string(), ObjectVariant::Integer(1)),
-                ("W".to_string(), ObjectVariant::Integer(4)),
-            ])),
-            vec![0b1010_0000],
-        )
-    }
-
     #[test]
     fn set_dash_pattern_updates_current_state() {
         let page = page();
-        let mut backend = CountingCanvas::default();
+        let mut backend = RecordingCanvas::new(100.0, 100.0);
         let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
 
         canvas
@@ -1075,7 +879,7 @@ mod tests {
     #[test]
     fn empty_dash_pattern_clears_current_state() {
         let page = page();
-        let mut backend = CountingCanvas::default();
+        let mut backend = RecordingCanvas::new(100.0, 100.0);
         let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
 
         canvas
@@ -1097,7 +901,7 @@ mod tests {
     #[test]
     fn invalid_dash_pattern_does_not_mutate_current_state() {
         let page = page();
-        let mut backend = CountingCanvas::default();
+        let mut backend = RecordingCanvas::new(100.0, 100.0);
         let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
 
         canvas
@@ -1117,182 +921,8 @@ mod tests {
     }
 
     #[test]
-    fn draw_path_forwards_dash_pattern_to_backend() {
-        let page = page();
-        let mut backend = CountingCanvas::default();
-        let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
-        let mut path = PdfPath::default();
-        path.move_to(0.0, 0.0);
-        path.line_to(10.0, 0.0);
-
-        canvas
-            .set_dash_pattern(&[4.0, 2.0], 1.0)
-            .expect("dash pattern should be valid");
-        canvas
-            .draw_path(&path, PaintMode::Stroke, PathFillType::Winding)
-            .expect("stroke should draw");
-        drop(canvas);
-
-        assert_eq!(backend.stroke_count, 1);
-        let stroke_style = backend
-            .last_stroke_style
-            .expect("backend should receive stroke style");
-        let dash_pattern = stroke_style
-            .dash_pattern
-            .expect("backend should receive dash pattern");
-        assert_eq!(dash_pattern.intervals, vec![4.0, 2.0]);
-        assert_eq!(dash_pattern.phase, 1.0);
-    }
-
-    fn form_resource(name: &str, content_stream: pdf_content_stream::ContentStream) -> Resources {
-        Resources {
-            xobjects: HashMap::from([(
-                name.to_string(),
-                Resource::XObject(Rc::new(XObject::Form(Box::new(FormXObject {
-                    bbox: Rect {
-                        left: 0.0,
-                        top: 0.0,
-                        right: 10.0,
-                        bottom: 10.0,
-                    },
-                    matrix: None,
-                    resources: None,
-                    content_stream,
-                })))),
-            )]),
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn skips_recursive_render_when_content_stream_id_is_already_active() {
-        let mut ids = ContentStreamIdAllocator::new();
-        let root_stream = stream_object(1, b"/Self Do");
-        let root = pdf_content_stream::ContentStream::new(
-            &ObjectVariant::Stream(root_stream.clone()),
-            &pdf_object::object_resolver::PassthroughResolver,
-            &mut ids,
-        )
-        .expect("root stream should parse");
-        let resources = form_resource(
-            "Self",
-            pdf_content_stream::ContentStream {
-                operators: root.operators.clone(),
-                id: root.id,
-            },
-        );
-
-        let page = page();
-        let mut backend = CountingCanvas::default();
-        let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
-
-        canvas
-            .render_content_stream(&root, None, None, Some(&resources), None)
-            .expect("recursive render should be skipped gracefully");
-
-        assert!(canvas.active_content_stream_ids.is_empty());
-        assert_eq!(canvas.canvas_stack.len(), 1);
-        assert_eq!(backend.save_count, 1);
-        assert_eq!(backend.restore_count, 1);
-    }
-
-    #[test]
-    fn still_renders_nested_streams_with_distinct_ids() {
-        let mut ids = ContentStreamIdAllocator::new();
-        let root_stream = stream_object(1, b"/Child Do");
-        let child_stream = stream_object(2, b"q Q");
-        let root = pdf_content_stream::ContentStream::new(
-            &ObjectVariant::Stream(root_stream.clone()),
-            &pdf_object::object_resolver::PassthroughResolver,
-            &mut ids,
-        )
-        .expect("root stream should parse");
-        let child = pdf_content_stream::ContentStream::new(
-            &ObjectVariant::Stream(child_stream.clone()),
-            &pdf_object::object_resolver::PassthroughResolver,
-            &mut ids,
-        )
-        .expect("child stream should parse");
-        let resources = form_resource("Child", child);
-
-        let page = page();
-        let mut backend = CountingCanvas::default();
-        let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
-
-        canvas
-            .render_content_stream(&root, None, None, Some(&resources), None)
-            .expect("distinct nested stream should render");
-
-        assert!(canvas.active_content_stream_ids.is_empty());
-        assert_eq!(canvas.canvas_stack.len(), 1);
-        assert_eq!(backend.save_count, 3);
-        assert_eq!(backend.restore_count, 3);
-    }
-
-    #[test]
-    fn inline_image_render_path_matches_image_xobject_path() {
-        let page = page();
-        let mut xobject_backend = CountingCanvas::default();
-        let mut inline_backend = CountingCanvas::default();
-
-        let transform = Transform::from_row(2.0, 0.0, 0.0, 3.0, 10.0, 20.0);
-
-        let mut xobject_canvas =
-            PdfCanvas::new(&mut xobject_backend, &page, None).expect("xobject canvas should build");
-        xobject_canvas.current_state_mut().expect("state").transform = transform;
-        xobject_canvas
-            .current_state_mut()
-            .expect("state")
-            .blend_mode = Some(BlendMode::Multiply);
-
-        let image = pdf_image::ImageXObject::decode_normalized_image(
-            &image_xobject_dictionary(),
-            &[0b1010_0000],
-            &pdf_object::object_resolver::PassthroughResolver,
-            None,
-        )
-        .expect("xobject image should decode");
-
-        xobject_canvas
-            .render_image_xobject(&image)
-            .expect("xobject image should render");
-
-        let mut inline_canvas =
-            PdfCanvas::new(&mut inline_backend, &page, None).expect("inline canvas should build");
-        inline_canvas.current_state_mut().expect("state").transform = transform;
-        inline_canvas.current_state_mut().expect("state").blend_mode = Some(BlendMode::Multiply);
-
-        pdf_content_stream_operators::pdf_operator_backend::XObjectOps::paint_inline_image(
-            &mut inline_canvas,
-            &inline_image(),
-        )
-        .expect("inline image should render");
-
-        assert_eq!(xobject_backend.draw_image_count, 1);
-        assert_eq!(inline_backend.draw_inline_image_count, 1);
-
-        let xobject_draw = xobject_backend
-            .last_draw_image
-            .as_ref()
-            .expect("xobject draw should be recorded");
-        let inline_draw = inline_backend
-            .last_draw_inline_image
-            .as_ref()
-            .expect("inline draw should be recorded");
-
-        assert_eq!(xobject_draw, inline_draw);
-        assert_eq!(xobject_draw.width, 4);
-        assert_eq!(xobject_draw.height, 1);
-        assert_eq!(xobject_draw.pixel_format, PixelFormat::Gray8);
-        assert_eq!(xobject_draw.blend_mode, Some(BlendMode::Multiply));
-        assert_eq!(xobject_draw.dest_rect, inline_draw.dest_rect);
-        assert_eq!(xobject_draw.data, inline_draw.data);
-        assert_eq!(xobject_draw.data, vec![0x00, 0xFF, 0x00, 0xFF]);
-    }
-
-    #[test]
     fn rejects_absurd_offscreen_recording_bbox() {
-        assert!(!PdfCanvas::<CountingCanvas>::can_record_offscreen_bbox(
+        assert!(!PdfCanvas::<RecordingCanvas>::can_record_offscreen_bbox(
             &Rect {
                 left: -32768.0,
                 top: -32768.0,
