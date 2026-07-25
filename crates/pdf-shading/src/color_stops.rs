@@ -1,5 +1,7 @@
 //! Color-stop sampling helpers for PDF shadings.
 
+use std::sync::Arc;
+
 use pdf_color_space::color_space::ColorSpace;
 use pdf_function::function::{Function, FunctionImpl};
 use pdf_graphics::color::Color;
@@ -13,9 +15,9 @@ const DEFAULT_DOMAIN: [f32; 2] = [0.0, 1.0];
 #[derive(Debug, Clone, Default)]
 pub struct ColorStops {
     /// The colors at each stop position.
-    pub colors: Vec<Color>,
+    pub colors: Arc<[Color]>,
     /// The normalized stop positions in the inclusive `0.0..=1.0` range.
-    pub positions: Vec<f32>,
+    pub positions: Arc<[f32]>,
 }
 
 impl ColorStops {
@@ -47,7 +49,10 @@ impl ColorStops {
             colors.push(color);
         }
 
-        Ok(Self { colors, positions })
+        Ok(Self {
+            colors: colors.into(),
+            positions: positions.into(),
+        })
     }
 }
 

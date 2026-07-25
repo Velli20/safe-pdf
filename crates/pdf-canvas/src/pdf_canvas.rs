@@ -267,11 +267,11 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// # Returns
     ///
     /// An appropriate `Shader` if supported, or an error if not implemented.
-    pub(crate) fn build_shading_shader<'b>(
+    pub(crate) fn build_shading_shader(
         &mut self,
-        shading: &'b Shading,
+        shading: &Shading,
         transform: &Option<Transform>,
-    ) -> Result<Shader<'b>, PdfCanvasError> {
+    ) -> Result<Shader, PdfCanvasError> {
         build_shading_paint(shading, *transform)
             .map(Shader::Shading)
             .map_err(|error| PdfCanvasError::UnsupportedFeature(error.to_string()))
@@ -282,7 +282,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// # Returns
     ///
     /// An optional `Shader` or an error if pattern rendering fails.
-    fn compute_shader(&mut self, for_stroke: bool) -> Result<Option<Shader<'a>>, PdfCanvasError> {
+    fn compute_shader(&mut self, for_stroke: bool) -> Result<Option<Shader>, PdfCanvasError> {
         let state: &CanvasState<'_> = self.current_state()?;
         let pattern = if for_stroke {
             &state.stroke_pattern

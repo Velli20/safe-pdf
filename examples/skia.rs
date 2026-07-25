@@ -263,7 +263,7 @@ fn draw_selection_rects(
     rects: &[pdf_graphics::rect::Rect],
 ) -> Result<(), AppError> {
     let color = Color::from_rgba(0.20, 0.48, 1.0, 0.28);
-    let shader: Option<Shader<'_>> = None;
+    let shader: Option<Shader> = None;
     for rect in rects {
         let path = PdfPath::from(rect);
         backend.fill_path(
