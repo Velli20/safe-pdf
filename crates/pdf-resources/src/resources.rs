@@ -754,7 +754,7 @@ mod tests {
         match resource {
             Resource::XObject(xobject) => match xobject.as_ref() {
                 XObject::Form(form) => Some(form.content_stream.id),
-                XObject::Image(_) => None,
+                XObject::Image(_) | XObject::UnavailableImage => None,
             },
             _ => None,
         }
