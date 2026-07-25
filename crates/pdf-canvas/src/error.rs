@@ -23,8 +23,6 @@ pub enum PdfCanvasError {
     PatternNotFound(String),
     #[error("Graphics state stack is empty while accessing the current state")]
     EmptyGraphicsStateStack,
-    #[error("Cannot restore graphics state because the stack is already at its base state")]
-    GraphicsStateStackUnderflow,
     #[error("Failed to parse TrueType font data: {0}")]
     TrueTypeFontParse(String),
     #[error("External object (XObject) '{0}' was not found in page resources")]

@@ -34,6 +34,7 @@ impl<B: CanvasBackend> ShadingOps for PdfCanvas<'_, B> {
             blend_mode,
         )?;
 
-        self.restore()
+        self.restore();
+        Ok(())
     }
 }
