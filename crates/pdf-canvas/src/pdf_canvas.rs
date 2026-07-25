@@ -653,7 +653,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             op.call(self)?;
         }
 
-        self.restore()?;
+        self.restore();
 
         let _ = self.active_content_stream_ids.remove(&content_stream.id);
         Ok(())
@@ -672,19 +672,19 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// Restores the most recently saved graphics state from the stack.
     ///
     /// If the restored state included a clipping path, the clipping path is reset on the backend.
-    pub(crate) fn restore(&mut self) -> Result<(), PdfCanvasError> {
+    pub(crate) fn restore(&mut self) {
         // Do not allow popping the initial/base graphics state. There is no
-        // corresponding backend `save()` for it, so treating this as an
-        // underflow keeps the canvas stack and backend stack in sync.
+        // corresponding backend `save()` for it, so ignore unmatched restore
+        // operations to keep the canvas stack and backend stack in sync.
         if self.canvas_stack.len() <= 1 {
-            return Err(PdfCanvasError::GraphicsStateStackUnderflow);
+            return;
         }
 
         // At this point there is at least one saved state beyond the base,
         // so popping is safe and has a matching backend `save()`.
         let _ = self.canvas_stack.pop();
 
-        self.canvas.restore()
+        let _ = self.canvas.restore();
     }
 
     /// Sets the current color space for stroking or filling operations.

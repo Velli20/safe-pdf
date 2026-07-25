@@ -41,6 +41,18 @@ fn graphics_state_resource(params: Vec<ExternalGraphicsStateKey>) -> Resources {
 }
 
 #[test]
+fn unmatched_restore_graphics_state_is_ignored() {
+    let resources = Resources::default();
+    let stream = content_stream(1, b"Q q Q Q");
+
+    let recording = render(&stream, &resources).expect("unmatched restores should be ignored");
+
+    let observer = replay(&recording);
+    assert_eq!(observer.save_count, 2);
+    assert_eq!(observer.restore_count, 2);
+}
+
+#[test]
 fn external_graphics_state_dash_pattern_is_used_for_strokes() {
     let resources = graphics_state_resource(vec![ExternalGraphicsStateKey::DashPattern(
         DashPattern::new(&[3.0, 1.0], 2.0)

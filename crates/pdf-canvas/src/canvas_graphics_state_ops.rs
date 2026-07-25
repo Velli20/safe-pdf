@@ -18,7 +18,8 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
     }
 
     fn restore_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
-        self.restore()
+        self.restore();
+        Ok(())
     }
 
     fn concat_matrix(&mut self, transform: &Transform) -> Result<(), Self::ErrorType> {
