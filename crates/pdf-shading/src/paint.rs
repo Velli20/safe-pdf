@@ -1,6 +1,6 @@
 //! Backend-facing shading paint descriptions and builders.
 
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 
 use pdf_graphics::{color::Color, rect::Rect, transform::Transform};
 
@@ -12,7 +12,7 @@ use crate::{
 
 /// A backend-ready representation of a parsed PDF shading.
 #[derive(Clone)]
-pub enum ShadingPaint<'a> {
+pub enum ShadingPaint {
     /// A linear gradient shading paint.
     LinearGradient {
         /// Gradient start point x-coordinate.
@@ -26,9 +26,9 @@ pub enum ShadingPaint<'a> {
         /// Optional transform mapping shading space into device space.
         transform: Option<Transform>,
         /// Gradient colors.
-        colors: Cow<'a, [Color]>,
+        colors: Arc<[Color]>,
         /// Gradient stop positions.
-        positions: Cow<'a, [f32]>,
+        positions: Arc<[f32]>,
     },
     /// A radial gradient shading paint.
     RadialGradient {
@@ -45,9 +45,9 @@ pub enum ShadingPaint<'a> {
         /// End circle radius.
         end_r: f32,
         /// Gradient colors.
-        colors: Cow<'a, [Color]>,
+        colors: Arc<[Color]>,
         /// Gradient stop positions.
-        positions: Cow<'a, [f32]>,
+        positions: Arc<[f32]>,
         /// Optional transform mapping shading space into device space.
         transform: Option<Transform>,
     },
@@ -66,70 +66,11 @@ pub enum ShadingPaint<'a> {
     },
 }
 
-impl<'a> ShadingPaint<'a> {
-    /// Converts this shading paint into an owned `'static` value.
-    pub fn to_static(&self) -> ShadingPaint<'static> {
-        match self {
-            Self::LinearGradient {
-                x0,
-                y0,
-                x1,
-                y1,
-                transform,
-                colors,
-                positions,
-            } => ShadingPaint::LinearGradient {
-                x0: *x0,
-                y0: *y0,
-                x1: *x1,
-                y1: *y1,
-                transform: *transform,
-                colors: Cow::Owned(colors.to_vec()),
-                positions: Cow::Owned(positions.to_vec()),
-            },
-            Self::RadialGradient {
-                start_x,
-                start_y,
-                start_r,
-                end_x,
-                end_y,
-                end_r,
-                colors,
-                positions,
-                transform,
-            } => ShadingPaint::RadialGradient {
-                start_x: *start_x,
-                start_y: *start_y,
-                start_r: *start_r,
-                end_x: *end_x,
-                end_y: *end_y,
-                end_r: *end_r,
-                colors: Cow::Owned(colors.to_vec()),
-                positions: Cow::Owned(positions.to_vec()),
-                transform: *transform,
-            },
-            Self::RasterImage {
-                pixels,
-                width,
-                height,
-                dest_rect,
-                transform,
-            } => ShadingPaint::RasterImage {
-                pixels: Arc::clone(pixels),
-                width: *width,
-                height: *height,
-                dest_rect: *dest_rect,
-                transform: *transform,
-            },
-        }
-    }
-}
-
 /// Builds backend-facing paint data for a parsed shading and optional transform.
-pub fn build_shading_paint<'a>(
-    shading: &'a Shading,
+pub fn build_shading_paint(
+    shading: &Shading,
     transform: Option<Transform>,
-) -> Result<ShadingPaint<'a>, PdfShadingError> {
+) -> Result<ShadingPaint, PdfShadingError> {
     match shading {
         Shading::Axial {
             coords: [x0, y0, x1, y1],
@@ -140,8 +81,8 @@ pub fn build_shading_paint<'a>(
             y0: *y0,
             x1: *x1,
             y1: *y1,
-            colors: Cow::Borrowed(&color_stops.colors),
-            positions: Cow::Borrowed(&color_stops.positions),
+            colors: Arc::clone(&color_stops.colors),
+            positions: Arc::clone(&color_stops.positions),
             transform,
         }),
         Shading::Radial {
@@ -155,8 +96,8 @@ pub fn build_shading_paint<'a>(
             end_x: *end_x,
             end_y: *end_y,
             end_r: *end_r,
-            colors: Cow::Borrowed(&color_stops.colors),
-            positions: Cow::Borrowed(&color_stops.positions),
+            colors: Arc::clone(&color_stops.colors),
+            positions: Arc::clone(&color_stops.positions),
             transform,
         }),
         Shading::FunctionBased { .. } => Err(PdfShadingError::UnsupportedFeature(
@@ -201,32 +142,5 @@ pub fn build_shading_paint<'a>(
         Shading::Unsupported { name } => Err(PdfShadingError::UnsupportedFeature(format!(
             "Shading type '{name}' not implemented"
         ))),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn raster_image_to_static_shares_pixels() {
-        let pixels: Arc<[u8]> = vec![1, 2, 3, 4].into();
-        let paint = ShadingPaint::RasterImage {
-            pixels: Arc::clone(&pixels),
-            width: 1,
-            height: 1,
-            dest_rect: Rect::UNIT_RECT,
-            transform: None,
-        };
-
-        let static_paint = paint.to_static();
-        assert!(matches!(&static_paint, ShadingPaint::RasterImage { .. }));
-        if let ShadingPaint::RasterImage {
-            pixels: static_pixels,
-            ..
-        } = static_paint
-        {
-            assert!(Arc::ptr_eq(&static_pixels, &pixels));
-        }
     }
 }

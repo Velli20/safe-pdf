@@ -17,7 +17,7 @@ enum RecordingCommand {
         path: PdfPath,
         fill_type: PathFillType,
         color: Color,
-        shader: Option<Shader<'static>>,
+        shader: Option<Shader>,
         blend_mode: Option<BlendMode>,
     },
     StrokePath {
@@ -25,7 +25,7 @@ enum RecordingCommand {
         color: Color,
         line_width: f32,
         stroke_style: StrokeStyle,
-        shader: Option<Shader<'static>>,
+        shader: Option<Shader>,
         blend_mode: Option<BlendMode>,
     },
     SetClipRegion {
@@ -71,28 +71,6 @@ pub struct RecordingCanvas {
     pub height: f32,
     /// Ordered list of recorded drawing commands.
     commands: Vec<RecordingCommand>,
-}
-
-impl<'a> Shader<'a> {
-    /// Converts this shader into a `Shader<'static>` by performing a deep clone
-    /// of all borrowed data into owned storage. This is useful for storing
-    /// shaders in recording commands that must outlive the original borrow.
-    fn to_static(&self) -> Shader<'static> {
-        match self {
-            Shader::Shading(shading) => Shader::Shading(shading.to_static()),
-            Shader::TilingPatternImage {
-                image,
-                transform,
-                x_step,
-                y_step,
-            } => Shader::TilingPatternImage {
-                image: Arc::clone(image),
-                transform: *transform,
-                x_step: *x_step,
-                y_step: *y_step,
-            },
-        }
-    }
 }
 
 impl RecordingCanvas {
@@ -203,7 +181,7 @@ impl CanvasBackend for RecordingCanvas {
             path: path.clone(),
             fill_type,
             color,
-            shader: shader.as_ref().map(|s| s.to_static()),
+            shader: shader.clone(),
             blend_mode,
         });
         Ok(())
@@ -223,7 +201,7 @@ impl CanvasBackend for RecordingCanvas {
             color,
             line_width,
             stroke_style: stroke_style.clone(),
-            shader: shader.as_ref().map(|s| s.to_static()),
+            shader: shader.clone(),
             blend_mode,
         });
         Ok(())
@@ -323,6 +301,7 @@ impl CanvasBackend for RecordingCanvas {
 #[cfg(test)]
 mod tests {
     use pdf_graphics::PixelFormat;
+    use pdf_shading::paint::ShadingPaint;
 
     use super::*;
 
@@ -348,5 +327,54 @@ mod tests {
                     if Arc::ptr_eq(&image.data, &data)
             )
         }));
+    }
+
+    #[test]
+    fn recorded_gradient_and_canvas_clone_share_color_stops() {
+        let colors: Arc<[Color]> = [
+            Color::from_rgb(0.0, 0.0, 0.0),
+            Color::from_rgb(1.0, 1.0, 1.0),
+        ]
+        .into();
+        let positions: Arc<[f32]> = [0.0, 1.0].into();
+        let shader = Some(Shader::Shading(ShadingPaint::LinearGradient {
+            x0: 0.0,
+            y0: 0.0,
+            x1: 1.0,
+            y1: 1.0,
+            transform: None,
+            colors: Arc::clone(&colors),
+            positions: Arc::clone(&positions),
+        }));
+        let mut canvas = RecordingCanvas::new(1.0, 1.0);
+
+        canvas
+            .fill_path(
+                &PdfPath::default(),
+                PathFillType::Winding,
+                Color::from_rgb(0.0, 0.0, 0.0),
+                &shader,
+                None,
+            )
+            .expect("gradient should be recorded");
+        let cloned_canvas = canvas.clone();
+
+        for recording in [&canvas, &cloned_canvas] {
+            assert!(recording.commands.iter().any(|command| {
+                matches!(
+                    command,
+                    RecordingCommand::FillPath {
+                        shader:
+                            Some(Shader::Shading(ShadingPaint::LinearGradient {
+                                colors: recorded_colors,
+                                positions: recorded_positions,
+                                ..
+                            })),
+                        ..
+                    } if Arc::ptr_eq(recorded_colors, &colors)
+                        && Arc::ptr_eq(recorded_positions, &positions)
+                )
+            }));
+        }
     }
 }

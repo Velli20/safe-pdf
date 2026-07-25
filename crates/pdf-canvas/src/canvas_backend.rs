@@ -10,9 +10,9 @@ use crate::{error::PdfCanvasError, recording_canvas::RecordingCanvas, stroke_sty
 
 /// Represents a shader used for advanced fill and stroke operations in PDF rendering.
 #[derive(Clone)]
-pub enum Shader<'a> {
+pub enum Shader {
     /// A shading-backed shader such as an axial gradient, radial gradient, or mesh raster.
-    Shading(ShadingPaint<'a>),
+    Shading(ShadingPaint),
     /// Represents a tiling pattern image shader for filling or stroking paths with a repeated image.
     ///
     /// Used to define how an image is tiled across a region, with optional transformation and spacing.
