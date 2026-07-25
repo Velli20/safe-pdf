@@ -6,13 +6,14 @@
 //! - Standard security handler (password-based encryption)
 //! - RC4 encryption (V1, V2)
 //! - AES-128 encryption (V4)
+//! - AES-256 encryption (V5, revisions 5 and 6)
 //!
 //! # PDF Encryption Overview
 //!
 //! PDF encryption works as follows:
 //! 1. The encryption dictionary specifies the algorithm and parameters
 //! 2. A file encryption key is derived from the password + document ID
-//! 3. Each object has a unique key derived from the file key + object number
+//! 3. For V=1 through V=4, each object has a unique key derived from the file key
 //! 4. Streams and strings are encrypted/decrypted with the object key
 //!
 //! # Algorithm Selection
@@ -20,16 +21,24 @@
 //! - V=1, R=2: RC4 with 40-bit key (Algorithm 1)
 //! - V=2, R=3: RC4 with variable length key up to 128-bit (Algorithm 1)
 //! - V=4, R=4: AES-128 in CBC mode (Algorithm 1 for key, AES for encryption)
+//! - V=5, R=5/6: AES-256 in CBC mode with a password-wrapped file key
 
-use aes::cipher::{BlockDecryptMut, KeyIvInit, block_padding::Pkcs7};
+use aes::cipher::{
+    BlockDecrypt, BlockDecryptMut, BlockEncryptMut, KeyInit, KeyIvInit,
+    block_padding::{NoPadding, Pkcs7},
+    generic_array::GenericArray,
+};
 use md5::{Digest, Md5};
 use rc4::{
-    Key, KeyInit, Rc4, StreamCipher,
+    Key, Rc4, StreamCipher,
     consts::{U1, U2, U3, U4, U5, U6, U7, U8, U9, U10, U11, U12, U13, U14, U15, U16},
 };
+use sha2::{Sha256, Sha384, Sha512};
 use thiserror::Error;
 
-use crate::encryption::{EncryptDictionary, EncryptionVersion};
+use crate::encryption::{
+    CryptFilterMethod, EncryptDictionary, EncryptionFilter, EncryptionVersion,
+};
 use pdf_object::{
     dictionary::Dictionary, indirect_object::IndirectObject, object_variant::ObjectVariant,
     stream::StreamObject,
@@ -42,6 +51,8 @@ pub enum DecryptionError {
     IncorrectPassword,
     #[error("unsupported encryption algorithm: V={version} ")]
     UnsupportedAlgorithm { version: EncryptionVersion },
+    #[error("unsupported security handler: {0}")]
+    UnsupportedSecurityHandler(String),
     #[error("AES decryption failed: {0}")]
     AesDecryptionFailed(String),
     #[error("invalid encrypted data: {0}")]
@@ -73,6 +84,10 @@ pub struct DocumentDecryptor {
     key_length_bytes: usize,
     /// Whether metadata streams should be encrypted.
     encrypt_metadata: bool,
+    /// Default crypt filter used for streams.
+    stream_method: CryptFilterMethod,
+    /// Default crypt filter used for strings.
+    string_method: CryptFilterMethod,
 }
 
 impl DocumentDecryptor {
@@ -97,6 +112,13 @@ impl DocumentDecryptor {
         document_id: &[u8],
         password: &[u8],
     ) -> Result<Self, DecryptionError> {
+        if let EncryptionFilter::Other(filter) = &encrypt.filter {
+            return Err(DecryptionError::UnsupportedSecurityHandler(filter.clone()));
+        }
+        if encrypt.version == EncryptionVersion::V5 {
+            return Self::new_v5(encrypt, password);
+        }
+
         let revision = encrypt.revision;
         let owner_hash = encrypt.owner_password_hash.as_ref();
         let user_hash = encrypt.user_password_hash.as_ref();
@@ -137,6 +159,8 @@ impl DocumentDecryptor {
                 version: encrypt.version,
                 key_length_bytes,
                 encrypt_metadata: encrypt.encrypt_metadata,
+                stream_method: encrypt.stream_method,
+                string_method: encrypt.string_method,
             });
         }
 
@@ -166,10 +190,70 @@ impl DocumentDecryptor {
                 version: encrypt.version,
                 key_length_bytes,
                 encrypt_metadata: encrypt.encrypt_metadata,
+                stream_method: encrypt.stream_method,
+                string_method: encrypt.string_method,
             });
         }
 
         Err(DecryptionError::IncorrectPassword)
+    }
+
+    /// Creates a V=5 decryptor by retrieving the AES-256 file key.
+    fn new_v5(encrypt: &EncryptDictionary, password: &[u8]) -> Result<Self, DecryptionError> {
+        if !matches!(encrypt.revision, 5 | 6) {
+            return Err(DecryptionError::InvalidData(format!(
+                "V=5 requires security handler revision 5 or 6, found {}",
+                encrypt.revision
+            )));
+        }
+        if encrypt.key_length.is_some_and(|length| length != 256) {
+            return Err(DecryptionError::InvalidData(
+                "V=5 encryption dictionary /Length must be 256 bits".to_string(),
+            ));
+        }
+        if !matches!(
+            (encrypt.stream_method, encrypt.string_method),
+            (
+                CryptFilterMethod::Aes256 | CryptFilterMethod::Identity,
+                CryptFilterMethod::Aes256 | CryptFilterMethod::Identity
+            )
+        ) {
+            return Err(DecryptionError::InvalidData(
+                "V=5 requires AESV3 or Identity crypt filters".to_string(),
+            ));
+        }
+
+        let owner_encrypted_key = required_v5_entry(&encrypt.owner_encrypted_key, "OE", 32)?;
+        let user_encrypted_key = required_v5_entry(&encrypt.user_encrypted_key, "UE", 32)?;
+        let encrypted_permissions = required_v5_entry(&encrypt.encrypted_permissions, "Perms", 16)?;
+        validate_v5_entry(&encrypt.owner_password_hash, "O", 48)?;
+        validate_v5_entry(&encrypt.user_password_hash, "U", 48)?;
+
+        let password = prepare_v5_password(password)?;
+        let file_key = authenticate_v5_password(
+            &password,
+            encrypt.revision,
+            &encrypt.owner_password_hash,
+            &encrypt.user_password_hash,
+            owner_encrypted_key,
+            user_encrypted_key,
+        )?
+        .ok_or(DecryptionError::IncorrectPassword)?;
+        validate_permissions(
+            &file_key,
+            encrypted_permissions,
+            encrypt.permissions,
+            encrypt.encrypt_metadata,
+        )?;
+
+        Ok(Self {
+            file_key,
+            version: encrypt.version,
+            key_length_bytes: 32,
+            encrypt_metadata: encrypt.encrypt_metadata,
+            stream_method: encrypt.stream_method,
+            string_method: encrypt.string_method,
+        })
     }
 
     /// Decrypts stream data for a specific object.
@@ -189,21 +273,12 @@ impl DocumentDecryptor {
         generation_number: usize,
         encrypted_data: &[u8],
     ) -> Result<Vec<u8>, DecryptionError> {
-        // Derive the object-specific key
-        let object_key = compute_object_key(
-            &self.file_key,
+        self.decrypt_data(
+            self.stream_method,
             object_number,
             generation_number,
-            self.version,
-        )?;
-
-        match self.version {
-            EncryptionVersion::V1 | EncryptionVersion::V2 => rc4_crypt(&object_key, encrypted_data),
-            EncryptionVersion::V4 => aes_128_cbc_decrypt(&object_key, encrypted_data),
-            _ => Err(DecryptionError::UnsupportedAlgorithm {
-                version: self.version,
-            }),
-        }
+            encrypted_data,
+        )
     }
 
     /// Decrypts a stream object when PDF encryption rules require it.
@@ -249,8 +324,43 @@ impl DocumentDecryptor {
         generation_number: usize,
         encrypted_string: &[u8],
     ) -> Result<Vec<u8>, DecryptionError> {
-        // String decryption uses the same algorithm as stream decryption
-        self.decrypt_stream(object_number, generation_number, encrypted_string)
+        self.decrypt_data(
+            self.string_method,
+            object_number,
+            generation_number,
+            encrypted_string,
+        )
+    }
+
+    /// Decrypts data using the selected document-default crypt filter.
+    fn decrypt_data(
+        &self,
+        method: CryptFilterMethod,
+        object_number: usize,
+        generation_number: usize,
+        encrypted_data: &[u8],
+    ) -> Result<Vec<u8>, DecryptionError> {
+        match method {
+            CryptFilterMethod::Identity => Ok(encrypted_data.to_vec()),
+            CryptFilterMethod::Aes256 => aes_256_cbc_decrypt(&self.file_key, encrypted_data),
+            CryptFilterMethod::Rc4 | CryptFilterMethod::Aes128 => {
+                let object_key = compute_object_key(
+                    &self.file_key,
+                    object_number,
+                    generation_number,
+                    self.version,
+                )?;
+                match method {
+                    CryptFilterMethod::Rc4 => rc4_crypt(&object_key, encrypted_data),
+                    CryptFilterMethod::Aes128 => aes_128_cbc_decrypt(&object_key, encrypted_data),
+                    CryptFilterMethod::Identity | CryptFilterMethod::Aes256 => {
+                        Err(DecryptionError::InvalidData(
+                            "invalid legacy crypt filter selection".to_string(),
+                        ))
+                    }
+                }
+            }
+        }
     }
 
     /// Decrypts every encrypted string and stream contained in an indirect PDF object.
@@ -371,6 +481,222 @@ fn should_skip_stream_decryption(dictionary: &Dictionary, encrypt_metadata: bool
         Some(ObjectVariant::Name(name)) if name.as_slice() == b"Metadata" => !encrypt_metadata,
         _ => false,
     }
+}
+
+/// Returns a required V=5 encryption dictionary entry with its expected length.
+fn required_v5_entry<'a>(
+    entry: &'a Option<Vec<u8>>,
+    name: &str,
+    expected_length: usize,
+) -> Result<&'a [u8], DecryptionError> {
+    let value = entry.as_deref().ok_or_else(|| {
+        DecryptionError::InvalidData(format!("V=5 encryption dictionary is missing /{name}"))
+    })?;
+    validate_v5_entry(value, name, expected_length)?;
+    Ok(value)
+}
+
+/// Validates the exact length of a V=5 encryption dictionary byte string.
+fn validate_v5_entry(
+    value: &[u8],
+    name: &str,
+    expected_length: usize,
+) -> Result<(), DecryptionError> {
+    if value.len() != expected_length {
+        return Err(DecryptionError::InvalidData(format!(
+            "V=5 /{name} entry must contain {expected_length} bytes"
+        )));
+    }
+    Ok(())
+}
+
+/// Applies the Unicode password preparation required by revisions 5 and 6.
+fn prepare_v5_password(password: &[u8]) -> Result<Vec<u8>, DecryptionError> {
+    let password = std::str::from_utf8(password).map_err(|error| {
+        DecryptionError::InvalidData(format!("V=5 password is not valid UTF-8: {error}"))
+    })?;
+    let prepared = stringprep::saslprep(password).map_err(|error| {
+        DecryptionError::InvalidData(format!("V=5 password failed SASLprep: {error}"))
+    })?;
+    Ok(prepared.as_bytes().iter().copied().take(127).collect())
+}
+
+/// Authenticates a V=5 password and retrieves the 256-bit file encryption key.
+fn authenticate_v5_password(
+    password: &[u8],
+    revision: i32,
+    owner_hash: &[u8],
+    user_hash: &[u8],
+    owner_encrypted_key: &[u8],
+    user_encrypted_key: &[u8],
+) -> Result<Option<Vec<u8>>, DecryptionError> {
+    if validate_v5_password(password, revision, user_hash, None)? {
+        let key = derive_v5_password_key(password, revision, user_hash, None)?;
+        return aes_256_cbc_decrypt_without_padding(&key, &[0; 16], user_encrypted_key).map(Some);
+    }
+
+    if validate_v5_password(password, revision, owner_hash, Some(user_hash))? {
+        let key = derive_v5_password_key(password, revision, owner_hash, Some(user_hash))?;
+        return aes_256_cbc_decrypt_without_padding(&key, &[0; 16], owner_encrypted_key).map(Some);
+    }
+
+    Ok(None)
+}
+
+/// Checks a password against the validation hash stored in an O or U entry.
+fn validate_v5_password(
+    password: &[u8],
+    revision: i32,
+    password_entry: &[u8],
+    user_hash: Option<&[u8]>,
+) -> Result<bool, DecryptionError> {
+    let expected_hash = password_entry.get(..32).ok_or_else(|| {
+        DecryptionError::InvalidData("V=5 password entry is too short".to_string())
+    })?;
+    let validation_salt = password_entry.get(32..40).ok_or_else(|| {
+        DecryptionError::InvalidData("V=5 validation salt is missing".to_string())
+    })?;
+    let computed_hash = compute_v5_hash(password, validation_salt, user_hash, revision)?;
+    Ok(computed_hash.get(..32) == Some(expected_hash))
+}
+
+/// Derives the key used to decrypt an OE or UE entry.
+fn derive_v5_password_key(
+    password: &[u8],
+    revision: i32,
+    password_entry: &[u8],
+    user_hash: Option<&[u8]>,
+) -> Result<Vec<u8>, DecryptionError> {
+    let key_salt = password_entry
+        .get(40..48)
+        .ok_or_else(|| DecryptionError::InvalidData("V=5 key salt is missing".to_string()))?;
+    compute_v5_hash(password, key_salt, user_hash, revision)
+}
+
+/// Computes the revision-specific V=5 password hash.
+fn compute_v5_hash(
+    password: &[u8],
+    salt: &[u8],
+    user_hash: Option<&[u8]>,
+    revision: i32,
+) -> Result<Vec<u8>, DecryptionError> {
+    if revision == 5 {
+        let mut hasher = Sha256::new();
+        hasher.update(password);
+        hasher.update(salt);
+        if let Some(user_hash) = user_hash {
+            hasher.update(user_hash);
+        }
+        return Ok(hasher.finalize().to_vec());
+    }
+    revision_6_hash(password, salt, user_hash)
+}
+
+/// Implements ISO 32000-2 Algorithm 2.B for revision 6 passwords.
+fn revision_6_hash(
+    password: &[u8],
+    salt: &[u8],
+    user_hash: Option<&[u8]>,
+) -> Result<Vec<u8>, DecryptionError> {
+    let mut hasher = Sha256::new();
+    hasher.update(password);
+    hasher.update(salt);
+    if let Some(user_hash) = user_hash {
+        hasher.update(user_hash);
+    }
+    let mut hash = hasher.finalize().to_vec();
+    let mut round = 0usize;
+
+    loop {
+        let user_hash_length = user_hash.map_or(0, <[u8]>::len);
+        let sequence_length = password
+            .len()
+            .checked_add(hash.len())
+            .and_then(|length| length.checked_add(user_hash_length))
+            .ok_or_else(|| {
+                DecryptionError::InvalidData(
+                    "revision 6 password hash input is too large".to_string(),
+                )
+            })?;
+        let buffer_length = sequence_length.checked_mul(64).ok_or_else(|| {
+            DecryptionError::InvalidData("revision 6 password hash buffer is too large".to_string())
+        })?;
+        let mut buffer = Vec::with_capacity(buffer_length);
+        for _ in 0..64 {
+            buffer.extend_from_slice(password);
+            buffer.extend_from_slice(&hash);
+            if let Some(user_hash) = user_hash {
+                buffer.extend_from_slice(user_hash);
+            }
+        }
+
+        let key = hash.get(..16).ok_or_else(|| {
+            DecryptionError::InvalidData("revision 6 hash did not contain an AES key".to_string())
+        })?;
+        let iv = hash.get(16..32).ok_or_else(|| {
+            DecryptionError::InvalidData("revision 6 hash did not contain an AES IV".to_string())
+        })?;
+        let encrypted = aes_128_cbc_encrypt_without_padding(key, iv, &buffer)?;
+        let selector = encrypted
+            .get(..16)
+            .ok_or_else(|| {
+                DecryptionError::InvalidData(
+                    "revision 6 encrypted hash input is too short".to_string(),
+                )
+            })?
+            .iter()
+            .copied()
+            .map(usize::from)
+            .fold(0usize, usize::saturating_add)
+            % 3;
+        hash = match selector {
+            0 => Sha256::digest(&encrypted).to_vec(),
+            1 => Sha384::digest(&encrypted).to_vec(),
+            _ => Sha512::digest(&encrypted).to_vec(),
+        };
+
+        round = round.saturating_add(1);
+        let last_byte = encrypted.last().copied().ok_or_else(|| {
+            DecryptionError::InvalidData("revision 6 encrypted hash input is empty".to_string())
+        })?;
+        if round >= 64 && usize::from(last_byte) <= round.saturating_sub(32) {
+            return hash.get(..32).map(<[u8]>::to_vec).ok_or_else(|| {
+                DecryptionError::InvalidData("revision 6 hash result is too short".to_string())
+            });
+        }
+    }
+}
+
+/// Validates the encrypted V=5 permissions block.
+fn validate_permissions(
+    file_key: &[u8],
+    encrypted_permissions: &[u8],
+    permissions: i32,
+    encrypt_metadata: bool,
+) -> Result<(), DecryptionError> {
+    let decrypted = aes_256_ecb_decrypt(file_key, encrypted_permissions)?;
+    let permissions_bytes: [u8; 4] = decrypted
+        .get(..4)
+        .ok_or_else(|| {
+            DecryptionError::InvalidData("decrypted permissions block is too short".to_string())
+        })?
+        .try_into()
+        .map_err(|_| {
+            DecryptionError::InvalidData(
+                "decrypted permissions value must contain four bytes".to_string(),
+            )
+        })?;
+    let metadata_marker = if encrypt_metadata { b'T' } else { b'F' };
+    let valid = i32::from_le_bytes(permissions_bytes) == permissions
+        && decrypted.get(4..8) == Some(&[0xff; 4])
+        && decrypted.get(8) == Some(&metadata_marker)
+        && decrypted.get(9..12) == Some(b"adb");
+    if !valid {
+        return Err(DecryptionError::InvalidData(
+            "V=5 permissions validation failed".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Computes the file encryption key from the user password.
@@ -669,6 +995,80 @@ fn aes_128_cbc_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>, DecryptionErr
     Ok(decrypted.to_vec())
 }
 
+/// AES-256 CBC decryption for PDF strings and streams.
+///
+/// The first 16 bytes of the input are the IV and the remaining bytes use
+/// PKCS#7 padding.
+fn aes_256_cbc_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>, DecryptionError> {
+    let Some((iv, ciphertext)) = data.split_at_checked(16) else {
+        return Err(DecryptionError::InvalidData(
+            "AES data too short (need at least 16 bytes for IV)".to_string(),
+        ));
+    };
+    if ciphertext.is_empty() {
+        return Ok(Vec::new());
+    }
+    if !ciphertext.len().is_multiple_of(16) {
+        return Err(DecryptionError::InvalidData(
+            "AES ciphertext length must be a multiple of 16".to_string(),
+        ));
+    }
+
+    let mut buffer = ciphertext.to_vec();
+    let decryptor = cbc::Decryptor::<aes::Aes256>::new_from_slices(key, iv).map_err(|_| {
+        DecryptionError::InvalidData("AES-256 requires a 32-byte key and a 16-byte IV".to_string())
+    })?;
+    let decrypted = decryptor
+        .decrypt_padded_mut::<Pkcs7>(&mut buffer)
+        .map_err(|error| DecryptionError::AesDecryptionFailed(error.to_string()))?;
+    Ok(decrypted.to_vec())
+}
+
+/// AES-128 CBC encryption without padding, used by revision 6 hashing.
+fn aes_128_cbc_encrypt_without_padding(
+    key: &[u8],
+    iv: &[u8],
+    data: &[u8],
+) -> Result<Vec<u8>, DecryptionError> {
+    let mut buffer = data.to_vec();
+    let encryptor = cbc::Encryptor::<aes::Aes128>::new_from_slices(key, iv).map_err(|_| {
+        DecryptionError::InvalidData("AES-128 requires a 16-byte key and a 16-byte IV".to_string())
+    })?;
+    let data_length = buffer.len();
+    let encrypted = encryptor
+        .encrypt_padded_mut::<NoPadding>(&mut buffer, data_length)
+        .map_err(|error| DecryptionError::AesDecryptionFailed(error.to_string()))?;
+    Ok(encrypted.to_vec())
+}
+
+/// AES-256 CBC decryption without padding, used for OE and UE entries.
+fn aes_256_cbc_decrypt_without_padding(
+    key: &[u8],
+    iv: &[u8],
+    data: &[u8],
+) -> Result<Vec<u8>, DecryptionError> {
+    let mut buffer = data.to_vec();
+    let decryptor = cbc::Decryptor::<aes::Aes256>::new_from_slices(key, iv).map_err(|_| {
+        DecryptionError::InvalidData("AES-256 requires a 32-byte key and a 16-byte IV".to_string())
+    })?;
+    let decrypted = decryptor
+        .decrypt_padded_mut::<NoPadding>(&mut buffer)
+        .map_err(|error| DecryptionError::AesDecryptionFailed(error.to_string()))?;
+    Ok(decrypted.to_vec())
+}
+
+/// Decrypts the single AES-256 ECB permissions block.
+fn aes_256_ecb_decrypt(key: &[u8], data: &[u8]) -> Result<Vec<u8>, DecryptionError> {
+    let cipher = aes::Aes256::new_from_slice(key)
+        .map_err(|_| DecryptionError::InvalidData("AES-256 requires a 32-byte key".to_string()))?;
+    let block: [u8; 16] = data.try_into().map_err(|_| {
+        DecryptionError::InvalidData("AES-256 permissions data must contain 16 bytes".to_string())
+    })?;
+    let mut block = GenericArray::from(block);
+    cipher.decrypt_block(&mut block);
+    Ok(block.to_vec())
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -681,12 +1081,87 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    fn decode_hex(value: &str) -> Vec<u8> {
+        value
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|pair| {
+                let pair = std::str::from_utf8(pair).expect("test hex is ASCII");
+                u8::from_str_radix(pair, 16).expect("test hex is valid")
+            })
+            .collect()
+    }
+
+    fn aes_256_encrypt_without_padding(key: &[u8], data: &[u8]) -> Vec<u8> {
+        let iv = [0u8; 16];
+        let encryptor = cbc::Encryptor::<aes::Aes256>::new_from_slices(key, &iv)
+            .expect("test AES key and IV are valid");
+        let mut buffer = data.to_vec();
+        let data_length = buffer.len();
+        encryptor
+            .encrypt_padded_mut::<NoPadding>(&mut buffer, data_length)
+            .expect("test data is block aligned")
+            .to_vec()
+    }
+
+    fn aes_256_encrypt_permissions(key: &[u8], permissions: &[u8; 16]) -> Vec<u8> {
+        use aes::cipher::BlockEncrypt;
+
+        let cipher = aes::Aes256::new_from_slice(key).expect("test AES key is valid");
+        let mut block = GenericArray::from(*permissions);
+        cipher.encrypt_block(&mut block);
+        block.to_vec()
+    }
+
+    fn make_encrypted_permissions(
+        file_key: &[u8],
+        permissions: i32,
+        encrypt_metadata: bool,
+    ) -> Vec<u8> {
+        let mut block = [0x33; 16];
+        block
+            .get_mut(..4)
+            .expect("permissions block has four bytes")
+            .copy_from_slice(&permissions.to_le_bytes());
+        block
+            .get_mut(4..8)
+            .expect("permissions block has reserved bytes")
+            .fill(0xff);
+        if let Some(marker) = block.get_mut(8) {
+            *marker = if encrypt_metadata { b'T' } else { b'F' };
+        }
+        block
+            .get_mut(9..12)
+            .expect("permissions block has marker bytes")
+            .copy_from_slice(b"adb");
+        aes_256_encrypt_permissions(file_key, &block)
+    }
+
+    fn aes_256_encrypt_content(key: &[u8], plaintext: &[u8]) -> Vec<u8> {
+        let iv = [0x5a; 16];
+        let encryptor = cbc::Encryptor::<aes::Aes256>::new_from_slices(key, &iv)
+            .expect("test AES key and IV are valid");
+        let mut buffer = vec![0; plaintext.len().saturating_add(16)];
+        buffer
+            .get_mut(..plaintext.len())
+            .expect("test encryption buffer contains plaintext")
+            .copy_from_slice(plaintext);
+        let encrypted = encryptor
+            .encrypt_padded_mut::<Pkcs7>(&mut buffer, plaintext.len())
+            .expect("test encryption buffer contains padding space");
+        let mut result = iv.to_vec();
+        result.extend_from_slice(encrypted);
+        result
+    }
+
     fn make_decryptor(encrypt_metadata: bool) -> DocumentDecryptor {
         DocumentDecryptor {
             file_key: vec![0; 16],
             version: EncryptionVersion::V4,
             key_length_bytes: 16,
             encrypt_metadata,
+            stream_method: CryptFilterMethod::Aes128,
+            string_method: CryptFilterMethod::Aes128,
         }
     }
 
@@ -820,6 +1295,181 @@ mod tests {
 
         let result = aes_128_cbc_decrypt(&key, &short_data);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn revision_6_hash_matches_real_world_empty_password_vector() {
+        let user_hash = decode_hex(
+            "3ceaf18c38452ccc258275458c1e863b552e70ee48e00c1cf\
+             b959cc264b945a0f546dd2b31571c100cfd45f9050c8af4",
+        );
+        let salt = user_hash
+            .get(32..40)
+            .expect("test U entry contains validation salt");
+
+        let hash = revision_6_hash(b"", salt, None).expect("revision 6 hash succeeds");
+
+        assert_eq!(
+            hash.as_slice(),
+            user_hash.get(..32).expect("test U entry contains hash")
+        );
+    }
+
+    #[test]
+    fn v5_revision_6_authenticates_real_world_empty_password_dictionary() {
+        let encrypt = EncryptDictionary {
+            filter: EncryptionFilter::Standard,
+            version: EncryptionVersion::V5,
+            revision: 6,
+            owner_password_hash: decode_hex(
+                "1ffdfac277b56426755751c05029c2d24b4077755ca77a13e\
+                 e9954fb3d05d0355095c697a02f954255b54a8660535597",
+            ),
+            user_password_hash: decode_hex(
+                "3ceaf18c38452ccc258275458c1e863b552e70ee48e00c1cf\
+                 b959cc264b945a0f546dd2b31571c100cfd45f9050c8af4",
+            ),
+            permissions: -1036,
+            key_length: Some(256),
+            encrypt_metadata: true,
+            owner_encrypted_key: Some(decode_hex(
+                "6cee633cb6d1a74393e058eb620c25535415de81351febac9\
+                 30e3df4b703ecc0",
+            )),
+            user_encrypted_key: Some(decode_hex(
+                "a19c8b31f295ac244fd8dcca14f8dc8affdd9f6933e6ce5\
+                 633723f3fee662b21",
+            )),
+            encrypted_permissions: Some(decode_hex("14fedcd8c9c8396d24d9315383dff971")),
+            stream_method: CryptFilterMethod::Aes256,
+            string_method: CryptFilterMethod::Aes256,
+        };
+
+        let decryptor = DocumentDecryptor::new(&encrypt, b"unused-for-v5", b"").unwrap();
+
+        assert_eq!(decryptor.file_key.len(), 32);
+        assert_eq!(decryptor.version, EncryptionVersion::V5);
+    }
+
+    #[test]
+    fn v5_revision_5_authenticates_and_decrypts_aes_256_content() {
+        let password =
+            prepare_v5_password("pässword".as_bytes()).expect("test password passes SASLprep");
+        let file_key = vec![0x42; 32];
+        let validation_salt = b"validate";
+        let key_salt = b"key-salt";
+        let mut user_hash =
+            compute_v5_hash(&password, validation_salt, None, 5).expect("revision 5 hash succeeds");
+        user_hash.extend_from_slice(validation_salt);
+        user_hash.extend_from_slice(key_salt);
+        let wrapping_key =
+            compute_v5_hash(&password, key_salt, None, 5).expect("key hash succeeds");
+        let user_encrypted_key = aes_256_encrypt_without_padding(&wrapping_key, &file_key);
+        let permissions = -4i32;
+        let encrypt = EncryptDictionary {
+            filter: EncryptionFilter::Standard,
+            version: EncryptionVersion::V5,
+            revision: 5,
+            owner_password_hash: vec![0; 48],
+            user_password_hash: user_hash,
+            permissions,
+            key_length: Some(256),
+            encrypt_metadata: true,
+            owner_encrypted_key: Some(vec![0; 32]),
+            user_encrypted_key: Some(user_encrypted_key),
+            encrypted_permissions: Some(make_encrypted_permissions(&file_key, permissions, true)),
+            stream_method: CryptFilterMethod::Aes256,
+            string_method: CryptFilterMethod::Identity,
+        };
+        let decryptor =
+            DocumentDecryptor::new(&encrypt, b"document-id-is-unused", "pässword".as_bytes())
+                .expect("revision 5 user password authenticates");
+        let plaintext = b"AES-256 stream contents";
+        let ciphertext = aes_256_encrypt_content(&file_key, plaintext);
+
+        assert_eq!(
+            decryptor
+                .decrypt_stream(17, 2, &ciphertext)
+                .expect("AES-256 content decrypts"),
+            plaintext
+        );
+        assert_eq!(
+            decryptor
+                .decrypt_string(17, 2, b"identity")
+                .expect("Identity string passes through"),
+            b"identity"
+        );
+        assert!(matches!(
+            DocumentDecryptor::new(&encrypt, b"unused", b"wrong"),
+            Err(DecryptionError::IncorrectPassword)
+        ));
+
+        let mut malformed = encrypt;
+        malformed.user_encrypted_key = Some(vec![0; 31]);
+        assert!(matches!(
+            DocumentDecryptor::new(&malformed, b"unused", "pässword".as_bytes()),
+            Err(DecryptionError::InvalidData(message))
+                if message == "V=5 /UE entry must contain 32 bytes"
+        ));
+    }
+
+    #[test]
+    fn v5_revision_6_authenticates_owner_and_rejects_corrupt_permissions() {
+        let user_password = prepare_v5_password(b"user").expect("user password passes SASLprep");
+        let owner_password = prepare_v5_password(b"owner").expect("owner password passes SASLprep");
+        let file_key = vec![0x73; 32];
+        let mut user_hash =
+            compute_v5_hash(&user_password, b"user-val", None, 6).expect("user hash succeeds");
+        user_hash.extend_from_slice(b"user-val");
+        user_hash.extend_from_slice(b"user-key");
+        let mut owner_hash = compute_v5_hash(&owner_password, b"ownerval", Some(&user_hash), 6)
+            .expect("owner hash succeeds");
+        owner_hash.extend_from_slice(b"ownerval");
+        owner_hash.extend_from_slice(b"ownerkey");
+        let owner_wrapping_key = compute_v5_hash(&owner_password, b"ownerkey", Some(&user_hash), 6)
+            .expect("owner key succeeds");
+        let permissions = -44;
+        let encrypt = EncryptDictionary {
+            filter: EncryptionFilter::Standard,
+            version: EncryptionVersion::V5,
+            revision: 6,
+            owner_password_hash: owner_hash,
+            user_password_hash: user_hash,
+            permissions,
+            key_length: Some(256),
+            encrypt_metadata: false,
+            owner_encrypted_key: Some(aes_256_encrypt_without_padding(
+                &owner_wrapping_key,
+                &file_key,
+            )),
+            user_encrypted_key: Some(vec![0; 32]),
+            encrypted_permissions: Some(make_encrypted_permissions(&file_key, permissions, false)),
+            stream_method: CryptFilterMethod::Aes256,
+            string_method: CryptFilterMethod::Aes256,
+        };
+
+        let decryptor = DocumentDecryptor::new(&encrypt, b"unused", b"owner")
+            .expect("revision 6 owner password authenticates");
+        assert_eq!(decryptor.file_key, file_key);
+
+        let mut corrupt = encrypt;
+        corrupt.encrypted_permissions = Some(vec![0; 16]);
+        assert!(matches!(
+            DocumentDecryptor::new(&corrupt, b"unused", b"owner"),
+            Err(DecryptionError::InvalidData(message))
+                if message == "V=5 permissions validation failed"
+        ));
+    }
+
+    #[test]
+    fn v5_password_preparation_applies_saslprep_and_truncation() {
+        let prepared = prepare_v5_password("pass\u{00ad}word\u{00a0}x".as_bytes())
+            .expect("test password passes SASLprep");
+        let long_password =
+            prepare_v5_password(&[b'a'; 200]).expect("ASCII password passes SASLprep");
+
+        assert_eq!(prepared, b"password x");
+        assert_eq!(long_password.len(), 127);
     }
 
     #[test]
