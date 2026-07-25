@@ -269,6 +269,48 @@ fn build_xobject_image_pdf() -> Vec<u8> {
     data
 }
 
+fn build_xobject_with_malformed_dimensions_pdf() -> Vec<u8> {
+    let mut data = Vec::new();
+    data.extend_from_slice(b"%PDF-1.7\n");
+
+    let obj1_offset = data.len();
+    data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+    let obj2_offset = data.len();
+    data.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+
+    let obj3_offset = data.len();
+    data.extend_from_slice(
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 50] /Resources << /XObject << /I1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n",
+    );
+
+    let obj4_offset = data.len();
+    data.extend_from_slice(
+        b"4 0 obj\n<< /Type /XObject /Subtype /Image /Width /Height /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>\nstream\nA\nendstream\nendobj\n",
+    );
+
+    let obj5_offset = data.len();
+    data.extend_from_slice(
+        b"5 0 obj\n<< /Length 12 >>\nstream\nq\n/I1 Do\nQ\n\nendstream\nendobj\n",
+    );
+
+    let xref_offset = data.len();
+    data.extend_from_slice(b"xref\n0 6\n");
+    data.extend_from_slice(format_xref_entry(0, 65_535, false).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj3_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj4_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj5_offset, 0, true).as_bytes());
+
+    data.extend_from_slice(b"trailer\n<< /Size 6 /Root 1 0 R >>\n");
+    data.extend_from_slice(b"startxref\n");
+    data.extend_from_slice(format!("{}\n", xref_offset).as_bytes());
+    data.extend_from_slice(b"%%EOF");
+
+    data
+}
+
 fn build_xobject_image_with_flat_xref_rows_pdf() -> Vec<u8> {
     let mut data = Vec::new();
     data.extend_from_slice(b"%PDF-1.4\n");
@@ -810,6 +852,25 @@ fn test_xobject_image_pdf_loads_normally() {
     let doc = result.unwrap();
     assert_eq!(doc.page_count(), 1);
     assert!(doc.get_page(0).is_some());
+}
+
+#[test]
+fn test_xobject_with_malformed_dimensions_loads_normally() {
+    let data = build_xobject_with_malformed_dimensions_pdf();
+    let doc = PdfReader
+        .read_from_bytes(&data, None)
+        .expect("a malformed image should not prevent the document from loading");
+    let page = doc.get_page(0).expect("the page should remain available");
+    let xobject = page
+        .resources
+        .as_ref()
+        .and_then(|resources| resources.xobject("I1"));
+
+    assert!(matches!(
+        xobject,
+        Some(pdf_resources::xobject::XObject::UnavailableImage)
+    ));
+    assert!(page.contents.is_some());
 }
 
 #[test]

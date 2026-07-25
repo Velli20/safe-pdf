@@ -141,6 +141,26 @@ fn still_renders_nested_streams_with_distinct_ids() {
 }
 
 #[test]
+fn unavailable_image_xobject_is_a_no_op() {
+    let stream = content_stream(1, b"/Im Do");
+    let resources = Resources {
+        xobjects: HashMap::from([(
+            "Im".to_string(),
+            Resource::XObject(Rc::new(XObject::UnavailableImage)),
+        )]),
+        ..Default::default()
+    };
+    let mut recording = RecordingCanvas::new(100.0, 100.0);
+
+    render(&mut recording, &stream, Some(&resources))
+        .expect("an unavailable image should not abort page rendering");
+
+    let observer = replay(&recording);
+    assert!(observer.images.is_empty());
+    assert!(observer.inline_images.is_empty());
+}
+
+#[test]
 fn inline_image_render_path_matches_image_xobject_path() {
     let image = pdf_image::ImageXObject::decode_normalized_image(
         &image_dictionary(),

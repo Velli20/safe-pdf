@@ -86,6 +86,7 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
 
         match xobj {
             XObject::Image(image) => self.render_image_xobject(image)?,
+            XObject::UnavailableImage => {}
             XObject::Form(form) => self.render_content_stream(
                 &form.content_stream,
                 form.matrix,
