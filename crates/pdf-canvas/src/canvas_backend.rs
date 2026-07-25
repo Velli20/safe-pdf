@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use pdf_graphics::{
@@ -9,56 +7,6 @@ use pdf_graphics::{
 use pdf_shading::paint::ShadingPaint;
 
 use crate::{error::PdfCanvasError, recording_canvas::RecordingCanvas, stroke_style::StrokeStyle};
-
-/// Image data storage that supports zero-copy sharing via `Arc`.
-///
-/// `ImageData` replaces `Cow<'a, [u8]>` for image pixel buffers, adding
-/// a `Shared` variant backed by `Arc<[u8]>`. Once an image is recorded,
-/// all subsequent clones of the recording share the same allocation
-/// instead of deep-copying the pixel buffer.
-#[derive(Clone)]
-pub enum ImageData<'a> {
-    /// Borrowed pixel data (zero-copy reference into an existing buffer).
-    Borrowed(&'a [u8]),
-    /// Owned pixel data (unique allocation).
-    Owned(Vec<u8>),
-    /// Reference-counted pixel data shared across recordings.
-    Shared(Arc<[u8]>),
-}
-
-impl Deref for ImageData<'_> {
-    type Target = [u8];
-
-    fn deref(&self) -> &[u8] {
-        match self {
-            ImageData::Borrowed(b) => b,
-            ImageData::Owned(v) => v,
-            ImageData::Shared(a) => a,
-        }
-    }
-}
-
-impl ImageData<'_> {
-    /// Returns a `Shared` variant that can be cheaply cloned.
-    ///
-    /// - `Borrowed` / `Owned`: copies the data into a new `Arc<[u8]>` once.
-    /// - `Shared`: bumps the reference count (no copy).
-    pub fn to_shared(&self) -> ImageData<'static> {
-        match self {
-            ImageData::Shared(a) => ImageData::Shared(Arc::clone(a)),
-            other => ImageData::Shared(Arc::from(&**other)),
-        }
-    }
-}
-
-impl<'a> From<Cow<'a, [u8]>> for ImageData<'a> {
-    fn from(cow: Cow<'a, [u8]>) -> Self {
-        match cow {
-            Cow::Borrowed(b) => ImageData::Borrowed(b),
-            Cow::Owned(v) => ImageData::Owned(v),
-        }
-    }
-}
 
 /// Represents a shader used for advanced fill and stroke operations in PDF rendering.
 #[derive(Clone)]
@@ -85,9 +33,9 @@ pub enum Shader<'a> {
 /// The `Image` struct encapsulates raw image data, dimensions, encoding, and optional
 /// transformation or masking information.
 #[derive(Clone)]
-pub struct Image<'a> {
-    /// The raw image data.
-    pub data: ImageData<'a>,
+pub struct Image {
+    /// Shared raw image data.
+    pub data: Arc<[u8]>,
     /// The width of the image in pixels.
     pub width: usize,
     /// The height of the image in pixels.
@@ -173,7 +121,7 @@ pub trait CanvasBackend {
     /// - `image_rotation`: An optional rotation (in degrees) to apply to the image.
     fn draw_image_rect(
         &mut self,
-        image: &Image<'_>,
+        image: &Image,
         blend_mode: Option<BlendMode>,
         dest_rect: Rect,
         image_rotation: Option<f32>,
@@ -184,7 +132,7 @@ pub trait CanvasBackend {
     /// The default implementation forwards to [`CanvasBackend::draw_image_rect`].
     fn draw_inline_image(
         &mut self,
-        image: &Image<'_>,
+        image: &Image,
         blend_mode: Option<BlendMode>,
         dest_rect: Rect,
         image_rotation: Option<f32>,

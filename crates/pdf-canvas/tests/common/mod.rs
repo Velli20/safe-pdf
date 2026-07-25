@@ -1,6 +1,6 @@
 #![allow(clippy::arithmetic_side_effects, clippy::expect_used)]
 
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 
 use pdf_canvas::{
     canvas_backend::{CanvasBackend, Image, Shader},
@@ -42,13 +42,13 @@ pub struct ObservingCanvas {
 
 impl ObservingCanvas {
     fn observed_image(
-        image: &Image<'_>,
+        image: &Image,
         blend_mode: Option<BlendMode>,
         dest_rect: Rect,
         image_rotation: Option<f32>,
     ) -> ObservedImage {
         ObservedImage {
-            data: image.data.deref().to_vec(),
+            data: image.data.to_vec(),
             width: image.width,
             height: image.height,
             pixel_format: image.pixel_format,
@@ -113,7 +113,7 @@ impl CanvasBackend for ObservingCanvas {
 
     fn draw_image_rect(
         &mut self,
-        image: &Image<'_>,
+        image: &Image,
         blend_mode: Option<BlendMode>,
         dest_rect: Rect,
         image_rotation: Option<f32>,
@@ -129,7 +129,7 @@ impl CanvasBackend for ObservingCanvas {
 
     fn draw_inline_image(
         &mut self,
-        image: &Image<'_>,
+        image: &Image,
         blend_mode: Option<BlendMode>,
         dest_rect: Rect,
         image_rotation: Option<f32>,

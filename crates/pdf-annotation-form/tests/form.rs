@@ -145,7 +145,7 @@ impl CanvasBackend for CountingCanvas {
 
     fn draw_image_rect(
         &mut self,
-        _image: &Image<'_>,
+        _image: &Image,
         _blend_mode: Option<BlendMode>,
         _dest_rect: Rect,
         _image_rotation: Option<f32>,

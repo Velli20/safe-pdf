@@ -97,7 +97,7 @@ fn to_skia_a8_mask_image(
 /// # Returns
 ///
 /// - A Skia `Image` ready to be drawn with `draw_image`/`draw_image_rect`.
-fn to_skia_image(image: &Image<'_>) -> Result<skia_safe::Image, PdfCanvasError> {
+fn to_skia_image(image: &Image) -> Result<skia_safe::Image, PdfCanvasError> {
     let width = image.width;
     let height = image.height;
     let pixel_format = image.pixel_format;
@@ -317,7 +317,7 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, PdfCanvasError> 
             transform,
         }) => {
             let image = to_skia_image(&Image {
-                data: pixels.clone().into(),
+                data: Arc::clone(pixels),
                 width: *width,
                 height: *height,
                 pixel_format: PixelFormat::RGBA8888,
@@ -461,7 +461,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
 
     fn draw_image_rect(
         &mut self,
-        image: &Image<'_>,
+        image: &Image,
         blend_mode: Option<BlendMode>,
         dest_rect: pdf_graphics::rect::Rect,
         image_rotation: Option<f32>,

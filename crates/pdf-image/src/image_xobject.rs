@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use pdf_color_space::{color_space::ColorSpace, indexed_color_space::IndexedColorSpace};
 use pdf_decode::{DecodeMap, SampleLayout, decode_sample_bytes};
 use pdf_filter::filter::{Filter, decode_data_with_resolver, decode_with_resolver};
@@ -20,8 +22,8 @@ pub struct ImageXObject {
     pub height: usize,
     /// The number of bits used to represent each color component.
     pub bits_per_component: usize,
-    /// The raw image stream data (with soft mask alpha applied if present).
-    pub data: Vec<u8>,
+    /// The shared image stream data (with soft mask alpha applied if present).
+    pub data: Arc<[u8]>,
     /// The pixel format of the image data.
     pub pixel_format: PixelFormat,
     /// The color space of the image samples.
@@ -103,7 +105,7 @@ impl ImageXObject {
             width: metadata.width,
             height: metadata.height,
             bits_per_component: decoded_samples.bits_per_component,
-            data,
+            data: data.into(),
             pixel_format,
             color_space: decoded_samples.stored_color_space,
         })
@@ -519,7 +521,7 @@ impl ImageXObject {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, sync::Arc};
 
     use pdf_object::{
         dictionary::Dictionary, error::ObjectError, object_resolver::PassthroughResolver,
@@ -528,6 +530,23 @@ mod tests {
 
     use super::{ImageXObject, InlineImage};
     use crate::error::PdfImageError;
+
+    #[test]
+    fn cloned_image_xobject_shares_data() {
+        let data: Arc<[u8]> = vec![1, 2, 3, 4].into();
+        let image = ImageXObject {
+            width: 1,
+            height: 1,
+            bits_per_component: 8,
+            data: Arc::clone(&data),
+            pixel_format: pdf_graphics::PixelFormat::RGBA8888,
+            color_space: None,
+        };
+
+        let cloned = image.clone();
+
+        assert!(Arc::ptr_eq(&cloned.data, &data));
+    }
 
     #[test]
     fn decode_normalized_1bpc_gray_inverts_samples() {
@@ -554,7 +573,7 @@ mod tests {
         .expect("1-bpc decoded grayscale image should decode");
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
-        assert_eq!(image.data, vec![0x00, 0xFF, 0x00, 0xFF]);
+        assert_eq!(image.data.as_ref(), &[0x00, 0xFF, 0x00, 0xFF]);
     }
 
     #[test]
@@ -582,7 +601,7 @@ mod tests {
         .expect("8-bpc decoded grayscale image should decode");
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
-        assert_eq!(image.data, vec![0x00, 0x80]);
+        assert_eq!(image.data.as_ref(), &[0x00, 0x80]);
     }
 
     #[test]
@@ -615,7 +634,7 @@ mod tests {
         .expect("decoded indexed image should decode");
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
-        assert_eq!(image.data, vec![10, 11, 12, 255, 20, 21, 22, 255]);
+        assert_eq!(image.data.as_ref(), &[10, 11, 12, 255, 20, 21, 22, 255]);
     }
 
     #[test]
@@ -668,7 +687,7 @@ mod tests {
         .expect("grayscale image without /Decode should decode");
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
-        assert_eq!(image.data, vec![12, 34]);
+        assert_eq!(image.data.as_ref(), &[12, 34]);
     }
 
     #[test]
@@ -688,9 +707,9 @@ mod tests {
         .expect("image masks should default missing BitsPerComponent to 1");
 
         assert_eq!(image.bits_per_component, 1);
-        assert!(matches!(image.color_space, None));
+        assert!(image.color_space.is_none());
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
-        assert_eq!(image.data, vec![0x00, 0xFF, 0x00, 0xFF]);
+        assert_eq!(image.data.as_ref(), &[0x00, 0xFF, 0x00, 0xFF]);
     }
 
     #[test]
@@ -718,7 +737,7 @@ mod tests {
             Some(pdf_color_space::color_space::ColorSpace::DeviceRGB)
         ));
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
-        assert_eq!(image.data, vec![1, 2, 3, 255, 4, 5, 6, 255]);
+        assert_eq!(image.data.as_ref(), &[1, 2, 3, 255, 4, 5, 6, 255]);
     }
 
     #[test]
@@ -767,7 +786,7 @@ mod tests {
         .expect("DCT-decoded RGB bytes should not be validated as CMYK samples");
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
-        assert_eq!(image.data, vec![10, 20, 30, 255, 40, 50, 60, 255]);
+        assert_eq!(image.data.as_ref(), &[10, 20, 30, 255, 40, 50, 60, 255]);
         assert!(matches!(
             image.color_space,
             Some(pdf_color_space::color_space::ColorSpace::DeviceRGB)
@@ -829,8 +848,8 @@ mod tests {
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
         assert_eq!(
-            image.data,
-            vec![0xAA, 0x10, 0x20, 255, 0xAA, 0x10, 0x20, 255]
+            image.data.as_ref(),
+            &[0xAA, 0x10, 0x20, 255, 0xAA, 0x10, 0x20, 255]
         );
         assert!(matches!(
             image.color_space,
@@ -853,7 +872,7 @@ mod tests {
             width: 2,
             height: 1,
             bits_per_component: 8,
-            data: vec![0x10, 0xE0],
+            data: vec![0x10, 0xE0].into(),
             pixel_format: pdf_graphics::PixelFormat::Gray8,
             color_space: None,
         };
@@ -868,8 +887,8 @@ mod tests {
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
         assert_eq!(
-            image.data,
-            vec![0x20, 0x20, 0x20, 0x10, 0xC0, 0xC0, 0xC0, 0xE0]
+            image.data.as_ref(),
+            &[0x20, 0x20, 0x20, 0x10, 0xC0, 0xC0, 0xC0, 0xE0]
         );
     }
 
@@ -896,7 +915,7 @@ mod tests {
             .expect("inline image should decode");
 
         assert_eq!(decoded.pixel_format, pdf_graphics::PixelFormat::Gray8);
-        assert_eq!(decoded.data, vec![0x2A]);
+        assert_eq!(decoded.data.as_ref(), &[0x2A]);
     }
 
     #[test]
@@ -915,7 +934,7 @@ mod tests {
             .expect("inline image with abbreviated gray color space should decode");
 
         assert_eq!(decoded.pixel_format, pdf_graphics::PixelFormat::Gray8);
-        assert_eq!(decoded.data, vec![0xFF, 0x00, 0xFF, 0x00]);
+        assert_eq!(decoded.data.as_ref(), &[0xFF, 0x00, 0xFF, 0x00]);
     }
 
     #[test]
@@ -943,8 +962,8 @@ mod tests {
 
         assert_eq!(decoded.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
         assert_eq!(
-            decoded.data,
-            vec![
+            decoded.data.as_ref(),
+            &[
                 20, 21, 22, 255, 10, 11, 12, 255, 20, 21, 22, 255, 10, 11, 12, 255
             ]
         );
@@ -972,8 +991,8 @@ mod tests {
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
         assert_eq!(
-            image.data,
-            vec![0xFF, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0x00]
+            image.data.as_ref(),
+            &[0xFF, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0xFF, 0x00]
         );
     }
 
@@ -990,8 +1009,8 @@ mod tests {
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
         assert_eq!(
-            image.data,
-            vec![
+            image.data.as_ref(),
+            &[
                 20, 21, 22, 255, 10, 11, 12, 255, 20, 21, 22, 255, 10, 11, 12, 255
             ]
         );
@@ -1006,8 +1025,8 @@ mod tests {
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
         assert_eq!(
-            image.data,
-            vec![
+            image.data.as_ref(),
+            &[
                 10, 11, 12, 255, 20, 21, 22, 255, 30, 31, 32, 255, 40, 41, 42, 255,
             ]
         );
@@ -1026,8 +1045,8 @@ mod tests {
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
         assert_eq!(
-            image.data,
-            vec![
+            image.data.as_ref(),
+            &[
                 10, 11, 12, 255, 20, 21, 22, 255, 30, 31, 32, 255, 40, 41, 42, 255
             ]
         );
@@ -1046,8 +1065,8 @@ mod tests {
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
         assert_eq!(
-            image.data,
-            vec![
+            image.data.as_ref(),
+            &[
                 10, 11, 12, 255, 20, 21, 22, 255, 30, 31, 32, 255, 40, 41, 42, 255
             ]
         );
