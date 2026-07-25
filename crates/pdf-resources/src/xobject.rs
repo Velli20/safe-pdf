@@ -212,7 +212,7 @@ mod tests {
             assert_eq!(image.width, 1);
             assert_eq!(image.height, 1);
             assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
-            assert_eq!(image.data, vec![0xAA]);
+            assert_eq!(image.data.as_ref(), &[0xAA]);
         }
     }
 
@@ -281,8 +281,8 @@ mod tests {
             XObject::Image(image) => {
                 assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
                 assert_eq!(
-                    image.data,
-                    vec![0x20, 0x20, 0x20, 0x10, 0xC0, 0xC0, 0xC0, 0xE0]
+                    image.data.as_ref(),
+                    &[0x20, 0x20, 0x20, 0x10, 0xC0, 0xC0, 0xC0, 0xE0]
                 );
             }
             XObject::UnavailableImage => panic!("expected a decoded image xobject"),

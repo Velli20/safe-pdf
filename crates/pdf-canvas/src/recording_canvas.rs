@@ -35,13 +35,13 @@ enum RecordingCommand {
     Save,
     Restore,
     DrawImage {
-        image: BackendImage<'static>,
+        image: BackendImage,
         blend_mode: Option<BlendMode>,
         dest_rect: Rect,
         image_rotation: Option<f32>,
     },
     DrawInlineImage {
-        image: BackendImage<'static>,
+        image: BackendImage,
         blend_mode: Option<BlendMode>,
         dest_rect: Rect,
         image_rotation: Option<f32>,
@@ -261,18 +261,13 @@ impl CanvasBackend for RecordingCanvas {
 
     fn draw_image_rect(
         &mut self,
-        image: &BackendImage<'_>,
+        image: &BackendImage,
         blend_mode: Option<BlendMode>,
         dest_rect: Rect,
         image_rotation: Option<f32>,
     ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::DrawImage {
-            image: BackendImage {
-                data: image.data.to_shared(),
-                width: image.width,
-                height: image.height,
-                pixel_format: image.pixel_format,
-            },
+            image: image.clone(),
             blend_mode,
             dest_rect,
             image_rotation,
@@ -282,18 +277,13 @@ impl CanvasBackend for RecordingCanvas {
 
     fn draw_inline_image(
         &mut self,
-        image: &BackendImage<'_>,
+        image: &BackendImage,
         blend_mode: Option<BlendMode>,
         dest_rect: Rect,
         image_rotation: Option<f32>,
     ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::DrawInlineImage {
-            image: BackendImage {
-                data: image.data.to_shared(),
-                width: image.width,
-                height: image.height,
-                pixel_format: image.pixel_format,
-            },
+            image: image.clone(),
             blend_mode,
             dest_rect,
             image_rotation,
@@ -327,5 +317,36 @@ impl CanvasBackend for RecordingCanvas {
             mask: Arc::clone(mask),
         });
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pdf_graphics::PixelFormat;
+
+    use super::*;
+
+    #[test]
+    fn recorded_image_shares_pixel_data() {
+        let data: Arc<[u8]> = vec![1, 2, 3, 4].into();
+        let image = BackendImage {
+            data: Arc::clone(&data),
+            width: 1,
+            height: 1,
+            pixel_format: PixelFormat::RGBA8888,
+        };
+        let mut canvas = RecordingCanvas::new(1.0, 1.0);
+
+        canvas
+            .draw_image_rect(&image, None, Rect::UNIT_RECT, None)
+            .expect("image should be recorded");
+
+        assert!(canvas.commands.iter().any(|command| {
+            matches!(
+                command,
+                RecordingCommand::DrawImage { image, .. }
+                    if Arc::ptr_eq(&image.data, &data)
+            )
+        }));
     }
 }

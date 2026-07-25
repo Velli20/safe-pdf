@@ -8,6 +8,8 @@
 //! between PDF image space (top-left origin, Y down) and PDF user space
 //! (bottom-left origin, Y up).
 
+use std::sync::Arc;
+
 use pdf_content_stream_operators::pdf_operator_backend::XObjectOps;
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_image::{ImageXObject, InlineImage};
@@ -15,7 +17,7 @@ use pdf_object::object_resolver::PassthroughResolver;
 use pdf_resources::xobject::XObject;
 
 use crate::{
-    canvas_backend::{CanvasBackend, Image, ImageData},
+    canvas_backend::{CanvasBackend, Image},
     error::PdfCanvasError,
     pdf_canvas::PdfCanvas,
 };
@@ -127,7 +129,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         let dest_rect = Self::compute_destination_rect(&transform, rotation_degrees);
 
         let rendered_image = Image {
-            data: ImageData::Owned(image.data.clone()),
+            data: Arc::clone(&image.data),
             width: image.width,
             height: image.height,
             pixel_format: image.pixel_format,

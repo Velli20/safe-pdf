@@ -1,6 +1,6 @@
 //! Backend-facing shading paint descriptions and builders.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::Arc};
 
 use pdf_graphics::{color::Color, rect::Rect, transform::Transform};
 
@@ -53,8 +53,8 @@ pub enum ShadingPaint<'a> {
     },
     /// A rasterized mesh shading paint.
     RasterImage {
-        /// RGBA8 image data for the rasterized shading.
-        pixels: Cow<'a, [u8]>,
+        /// Shared RGBA8 image data for the rasterized shading.
+        pixels: Arc<[u8]>,
         /// Raster width in pixels.
         width: usize,
         /// Raster height in pixels.
@@ -115,7 +115,7 @@ impl<'a> ShadingPaint<'a> {
                 dest_rect,
                 transform,
             } => ShadingPaint::RasterImage {
-                pixels: Cow::Owned(pixels.to_vec()),
+                pixels: Arc::clone(pixels),
                 width: *width,
                 height: *height,
                 dest_rect: *dest_rect,
@@ -191,7 +191,7 @@ pub fn build_shading_paint<'a>(
             );
 
             Ok(ShadingPaint::RasterImage {
-                pixels: Cow::Owned(raster.pixels),
+                pixels: raster.pixels.into(),
                 width: raster.width,
                 height: raster.height,
                 dest_rect: raster.bounds,
@@ -201,5 +201,32 @@ pub fn build_shading_paint<'a>(
         Shading::Unsupported { name } => Err(PdfShadingError::UnsupportedFeature(format!(
             "Shading type '{name}' not implemented"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raster_image_to_static_shares_pixels() {
+        let pixels: Arc<[u8]> = vec![1, 2, 3, 4].into();
+        let paint = ShadingPaint::RasterImage {
+            pixels: Arc::clone(&pixels),
+            width: 1,
+            height: 1,
+            dest_rect: Rect::UNIT_RECT,
+            transform: None,
+        };
+
+        let static_paint = paint.to_static();
+        assert!(matches!(&static_paint, ShadingPaint::RasterImage { .. }));
+        if let ShadingPaint::RasterImage {
+            pixels: static_pixels,
+            ..
+        } = static_paint
+        {
+            assert!(Arc::ptr_eq(&static_pixels, &pixels));
+        }
     }
 }
