@@ -25,6 +25,19 @@ pub(crate) enum EncryptionFilter {
     Other(String),
 }
 
+/// Encryption method selected by a document-default crypt filter.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum CryptFilterMethod {
+    /// The data is not encrypted.
+    Identity,
+    /// RC4 encryption used by V=1 and V=2.
+    Rc4,
+    /// AES-128 encryption used by V=4.
+    Aes128,
+    /// AES-256 encryption used by V=5.
+    Aes256,
+}
+
 impl From<&str> for EncryptionFilter {
     fn from(s: &str) -> Self {
         match s {
@@ -104,8 +117,7 @@ impl TryFrom<i32> for EncryptionVersion {
 #[derive(Debug, Clone)]
 pub(crate) struct EncryptDictionary {
     /// The security handler filter (e.g., Standard).
-    #[allow(dead_code)]
-    filter: EncryptionFilter,
+    pub filter: EncryptionFilter,
     /// The encryption algorithm version (V entry).
     pub version: EncryptionVersion,
     /// The revision of the standard security handler (R entry).
@@ -127,6 +139,16 @@ pub(crate) struct EncryptDictionary {
     /// Encryption metadata flag (EncryptMetadata entry).
     /// If true (default), document metadata is encrypted.
     pub encrypt_metadata: bool,
+    /// Encrypted file key for the owner password (OE entry).
+    pub owner_encrypted_key: Option<Vec<u8>>,
+    /// Encrypted file key for the user password (UE entry).
+    pub user_encrypted_key: Option<Vec<u8>>,
+    /// Encrypted permissions block (Perms entry).
+    pub encrypted_permissions: Option<Vec<u8>>,
+    /// Default method used to encrypt streams.
+    pub stream_method: CryptFilterMethod,
+    /// Default method used to encrypt strings.
+    pub string_method: CryptFilterMethod,
 }
 
 impl EncryptDictionary {
@@ -164,6 +186,20 @@ impl EncryptDictionary {
         let encrypt_metadata = dict
             .optional_boolean("EncryptMetadata", objects)?
             .unwrap_or(Self::ENCRYPT_METADATA_DEFAULT);
+        let owner_encrypted_key = dict.optional_bytes_vec("OE", objects)?;
+        let user_encrypted_key = dict.optional_bytes_vec("UE", objects)?;
+        let encrypted_permissions = dict.optional_bytes_vec("Perms", objects)?;
+        let (stream_method, string_method) = match version {
+            EncryptionVersion::V1 | EncryptionVersion::V2 => {
+                (CryptFilterMethod::Rc4, CryptFilterMethod::Rc4)
+            }
+            EncryptionVersion::V4 => (CryptFilterMethod::Aes128, CryptFilterMethod::Aes128),
+            EncryptionVersion::V5 => (
+                parse_v5_crypt_filter(dict, "StmF", objects)?,
+                parse_v5_crypt_filter(dict, "StrF", objects)?,
+            ),
+            EncryptionVersion::V3 => (CryptFilterMethod::Identity, CryptFilterMethod::Identity),
+        };
 
         Ok(EncryptDictionary {
             filter,
@@ -174,6 +210,11 @@ impl EncryptDictionary {
             permissions,
             key_length,
             encrypt_metadata,
+            owner_encrypted_key,
+            user_encrypted_key,
+            encrypted_permissions,
+            stream_method,
+            string_method,
         })
     }
 
@@ -190,6 +231,37 @@ impl EncryptDictionary {
             EncryptionVersion::V4 => self.key_length.unwrap_or(128),
             EncryptionVersion::V5 => 256,
         }
+    }
+}
+
+/// Resolves one of the document-default V=5 crypt filters.
+fn parse_v5_crypt_filter(
+    dictionary: &Dictionary,
+    entry: &str,
+    objects: &dyn ObjectResolver,
+) -> Result<CryptFilterMethod, PdfReaderError> {
+    let filter_name = dictionary
+        .optional_str(entry, objects)?
+        .unwrap_or("Identity");
+    if filter_name == "Identity" {
+        return Ok(CryptFilterMethod::Identity);
+    }
+
+    let crypt_filters = dictionary.required_dictionary("CF", objects)?;
+    let crypt_filter = crypt_filters.required_dictionary(filter_name, objects)?;
+    match crypt_filter.required_str("CFM", objects)? {
+        "AESV3" => {
+            let key_length = crypt_filter.optional_number::<i32>("Length", objects)?;
+            if key_length.is_some_and(|length| length != 32) {
+                return Err(PdfReaderError::DecryptionSetup(
+                    "AESV3 crypt filter /Length must be 32 bytes".to_string(),
+                ));
+            }
+            Ok(CryptFilterMethod::Aes256)
+        }
+        method => Err(PdfReaderError::DecryptionSetup(format!(
+            "unsupported V=5 crypt filter method: {method}"
+        ))),
     }
 }
 
@@ -273,5 +345,43 @@ mod tests {
         assert_eq!(encrypt.permissions, -1);
         assert_eq!(encrypt.key_length, Some(128));
         assert!(!encrypt.encrypt_metadata);
+        assert_eq!(encrypt.stream_method, CryptFilterMethod::Aes128);
+        assert_eq!(encrypt.string_method, CryptFilterMethod::Aes128);
+        assert_eq!(encrypt.owner_encrypted_key, None);
+        assert_eq!(encrypt.user_encrypted_key, None);
+        assert_eq!(encrypt.encrypted_permissions, None);
+    }
+
+    #[test]
+    fn test_parse_v5_aes_256_crypt_filters() {
+        let std_cf = make_dictionary(vec![
+            ("CFM", ObjectVariant::Name(b"AESV3".to_vec())),
+            ("Length", ObjectVariant::Integer(32)),
+        ]);
+        let crypt_filters =
+            make_dictionary(vec![("StdCF", ObjectVariant::Dictionary(Box::new(std_cf)))]);
+        let dict = make_dictionary(vec![
+            ("Filter", ObjectVariant::Name(b"Standard".to_vec())),
+            ("V", ObjectVariant::Integer(5)),
+            ("R", ObjectVariant::Integer(6)),
+            ("O", ObjectVariant::HexString(vec![0u8; 48])),
+            ("U", ObjectVariant::HexString(vec![0u8; 48])),
+            ("OE", ObjectVariant::HexString(vec![0u8; 32])),
+            ("UE", ObjectVariant::HexString(vec![0u8; 32])),
+            ("Perms", ObjectVariant::HexString(vec![0u8; 16])),
+            ("P", ObjectVariant::Integer(-4)),
+            ("CF", ObjectVariant::Dictionary(Box::new(crypt_filters))),
+            ("StmF", ObjectVariant::Name(b"StdCF".to_vec())),
+            ("StrF", ObjectVariant::Name(b"Identity".to_vec())),
+        ]);
+
+        let encrypt = EncryptDictionary::from_dictionary(&dict, &PassthroughResolver).unwrap();
+
+        assert_eq!(encrypt.version, EncryptionVersion::V5);
+        assert_eq!(encrypt.stream_method, CryptFilterMethod::Aes256);
+        assert_eq!(encrypt.string_method, CryptFilterMethod::Identity);
+        assert_eq!(encrypt.owner_encrypted_key, Some(vec![0u8; 32]));
+        assert_eq!(encrypt.user_encrypted_key, Some(vec![0u8; 32]));
+        assert_eq!(encrypt.encrypted_permissions, Some(vec![0u8; 16]));
     }
 }
