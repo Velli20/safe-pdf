@@ -118,8 +118,14 @@ impl Type1Font {
             let subtype = stream.dictionary.optional_str("Subtype", objects)?;
 
             return match subtype {
-                Some("Type1C") | Some("CIDFontType0C") => build_cff_font(stream.raw_data())
-                    .map(|font| (font.into(), Type1FontProgramFormat::OpenTypeCff)),
+                Some("Type1C") | Some("CIDFontType0C") => {
+                    let cff_data = stream.raw_data();
+                    if cff_data.is_empty() {
+                        return Err(FontError::MissingFontFile);
+                    }
+                    build_cff_font(cff_data)
+                        .map(|font| (font.into(), Type1FontProgramFormat::OpenTypeCff))
+                }
                 Some("OpenType") => Ok((
                     FontData::shared(stream.shared_data()),
                     Type1FontProgramFormat::OpenTypeCff,
@@ -197,11 +203,13 @@ fn is_pfb(data: &[u8]) -> bool {
 mod tests {
     use std::collections::BTreeMap;
 
+    use pdf_content_stream::ContentStreamIdAllocator;
     use pdf_object::{
         object_resolver::PassthroughResolver, object_variant::ObjectVariant, stream::StreamObject,
     };
 
     use super::*;
+    use crate::{font::Font, standard14::Standard14Font};
 
     const EEXEC_SEED: u16 = 55665;
 
@@ -339,6 +347,37 @@ currentfile eexec
         assert_eq!(format, Type1FontProgramFormat::OpenTypeCff);
         assert_eq!(parsed.as_ref(), expected.as_slice());
         assert!(matches!(parsed, FontData::Owned(_)));
+    }
+
+    #[test]
+    fn empty_compact_font_file_is_treated_as_missing() {
+        for subtype in ["Type1C", "CIDFontType0C"] {
+            let dict = make_font_dict_with_font_file3(Some(subtype), Vec::new());
+
+            let err = Type1Font::read_font_file(&dict, &PassthroughResolver).unwrap_err();
+            assert_eq!(err, FontError::MissingFontFile);
+        }
+    }
+
+    #[test]
+    fn empty_type1c_uses_standard14_fallback() {
+        let mut dict = make_font_dict_with_font_file3(Some("Type1C"), Vec::new());
+        dict.dictionary.insert(
+            "Subtype".to_string(),
+            ObjectVariant::Name(b"Type1".to_vec()),
+        );
+        dict.dictionary.insert(
+            "BaseFont".to_string(),
+            ObjectVariant::Name(b"Helvetica".to_vec()),
+        );
+        let mut id_allocator = ContentStreamIdAllocator::new();
+
+        let font = Font::from_dictionary(&dict, &PassthroughResolver, &mut id_allocator).unwrap();
+
+        let Font::TrueType(font) = font else {
+            panic!("empty Type1C font should use a TrueType fallback");
+        };
+        assert_eq!(font.standard14, Some(Standard14Font::Helvetica));
     }
 
     #[test]
