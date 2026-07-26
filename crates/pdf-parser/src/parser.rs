@@ -56,11 +56,11 @@ impl<'a> PdfParser<'a> {
     /// Valid EOL sequences are `\r\n` (CRLF), `\r` (CR), or `\n` (LF), consumed in that
     /// priority order. If no EOL marker is present at the current position, does nothing.
     pub fn try_read_end_of_line_marker(&mut self) {
-        match self.tokenizer.data().first().copied() {
+        match self.tokenizer.peek_byte() {
             Some(b'\r') => {
                 let _ = self.tokenizer.read();
                 // Consume a following LF to handle the CRLF sequence.
-                if matches!(self.tokenizer.data().first().copied(), Some(b'\n')) {
+                if matches!(self.tokenizer.peek_byte(), Some(b'\n')) {
                     let _ = self.tokenizer.read();
                 }
             }
@@ -139,8 +139,7 @@ impl<'a> PdfParser<'a> {
     }
 
     fn read_regular_character_token(&mut self) -> Result<&'a [u8], ParserError> {
-        let first = self.tokenizer.data().first().copied();
-        match first {
+        match self.tokenizer.peek_byte() {
             Some(b) if Self::is_pdf_regular_character(b) => {
                 Ok(self.tokenizer.read_while_u8(Self::is_pdf_regular_character))
             }
