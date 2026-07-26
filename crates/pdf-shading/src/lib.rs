@@ -2,7 +2,11 @@
 
 pub mod color_stops;
 pub mod error;
+mod free_form_mesh;
 pub mod mesh;
+mod mesh_decoder;
+mod mesh_sample_reader;
 pub mod model;
 pub mod paint;
 mod parse;
+mod patch_mesh;

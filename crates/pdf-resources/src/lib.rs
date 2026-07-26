@@ -6,7 +6,6 @@ pub mod matrix;
 pub mod media_box;
 pub mod pattern;
 pub mod resources;
-pub mod shading;
 pub mod xobject;
 
 mod lazy_cache_value;

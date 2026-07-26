@@ -343,7 +343,7 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, PdfCanvasError> 
 
             image
                 .to_shader(
-                    (skia_safe::TileMode::Clamp, skia_safe::TileMode::Clamp),
+                    (skia_safe::TileMode::Decal, skia_safe::TileMode::Decal),
                     skia_safe::SamplingOptions::default(),
                     Some(&matrix),
                 )

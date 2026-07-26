@@ -22,9 +22,8 @@ use pdf_graphics::{
 use pdf_resources::{
     pattern::{PaintType, Pattern},
     resources::Resources,
-    shading::Shading,
 };
-use pdf_shading::paint::build_shading_paint;
+use pdf_shading::{model::Shading, paint::build_shading_paint};
 use skrifa::{
     OutlineGlyph,
     outline::DrawSettings,

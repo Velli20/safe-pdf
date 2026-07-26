@@ -1,9 +1,10 @@
 use crate::{
     external_graphics_state::ExternalGraphicsState, pattern::Pattern, resources::Resources,
-    shading::Shading, xobject::XObject,
+    xobject::XObject,
 };
 use pdf_color_space::color_space::ColorSpace;
 use pdf_font::font::Font;
+use pdf_shading::model::Shading;
 use std::{cell::OnceCell, rc::Rc};
 
 /// Lazily-resolved handle to a resource that is still being constructed.

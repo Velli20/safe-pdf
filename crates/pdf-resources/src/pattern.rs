@@ -3,6 +3,7 @@ use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{
     object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
+use pdf_shading::model::Shading;
 
 use crate::{
     error::PdfPagesError,
@@ -11,7 +12,6 @@ use crate::{
     object_reader::{ReadCycleTracker, ReadFromDictionary},
     resource_cache::ResourceCache,
     resources::Resources,
-    shading::Shading,
 };
 
 /// PaintType for tiling patterns.

@@ -97,6 +97,17 @@ pub enum Shading {
         /// Optional bounding box in shading space.
         bbox: Option<Rect>,
     },
+    /// Type 4 free-form Gouraud-shaded triangle mesh.
+    FreeFormTriangleMesh {
+        /// The shading color space.
+        color_space: ColorSpace,
+        /// Optional mesh bounding box in shading space.
+        bbox: Option<Rect>,
+        /// Optional anti-aliasing preference.
+        anti_alias: Option<bool>,
+        /// Parsed vertex-colored triangles.
+        triangles: Vec<MeshTriangle>,
+    },
     /// Type 6 or 7 patch mesh shading.
     PatchMesh {
         /// The original mesh shading subtype.
@@ -115,6 +126,22 @@ pub enum Shading {
         /// The unsupported shading type name.
         name: String,
     },
+}
+
+/// A vertex in a PDF triangle mesh.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MeshVertex {
+    /// The vertex position in shading space.
+    pub point: Point,
+    /// The decoded vertex color.
+    pub color: Color,
+}
+
+/// A Gouraud-shaded triangle from a PDF triangle mesh.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MeshTriangle {
+    /// The triangle vertices in stream order.
+    pub vertices: [MeshVertex; 3],
 }
 
 /// A parsed patch from a PDF mesh shading.
@@ -143,6 +170,7 @@ impl Shading {
             Self::FunctionBased { color_space, .. } => color_space.as_ref(),
             Self::Axial { color_space, .. }
             | Self::Radial { color_space, .. }
+            | Self::FreeFormTriangleMesh { color_space, .. }
             | Self::PatchMesh { color_space, .. } => Some(color_space),
             Self::Unsupported { .. } => None,
         }
@@ -153,6 +181,7 @@ impl Shading {
         match self {
             Self::FunctionBased { bbox, .. }
             | Self::Radial { bbox, .. }
+            | Self::FreeFormTriangleMesh { bbox, .. }
             | Self::PatchMesh { bbox, .. } => bbox.as_ref(),
             Self::Axial { .. } | Self::Unsupported { .. } => None,
         }
