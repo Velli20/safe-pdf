@@ -32,15 +32,8 @@ pub enum PdfReaderError {
     DecryptionSetup(String),
     #[error("missing document ID required for encryption")]
     MissingDocumentId,
-    #[error(
-        "failed to resolve {count} object(s) after {iterations} iteration(s); \
-         first unresolved at byte offset {first_offset}"
-    )]
-    UnresolvedObjects {
-        count: usize,
-        iterations: usize,
-        first_offset: usize,
-    },
+    #[error("failed to resolve {count} object(s); first unresolved at byte offset {first_offset}")]
+    UnresolvedObjects { count: usize, first_offset: usize },
 }
 
 impl PdfReaderError {
@@ -49,6 +42,24 @@ impl PdfReaderError {
         match error {
             DecryptionError::IncorrectPassword => Self::IncorrectPassword,
             error => Self::DecryptionSetup(error.to_string()),
+        }
+    }
+
+    pub(crate) fn is_recoverable_optional_object_error(&self) -> bool {
+        matches!(
+            self,
+            PdfReaderError::ParserError(_)
+                | PdfReaderError::ObjectError(ObjectError::DecompressionError(_))
+        )
+    }
+
+    /// Returns the missing object number when an object failure can be retried later.
+    pub(crate) fn unresolved_object_number(&self) -> Option<usize> {
+        match self {
+            PdfReaderError::ParserError(ParserError::ObjectError(
+                ObjectError::FailedResolveObjectReference { obj_num },
+            )) => Some(*obj_num),
+            _ => None,
         }
     }
 }

@@ -42,6 +42,13 @@ impl ObjectResolver for ObjectCollection {
 }
 
 impl ObjectCollection {
+    /// Creates an empty object collection with space for at least `capacity` objects.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            map: HashMap::with_capacity(capacity),
+        }
+    }
+
     /// Inserts a PDF object into the collection.
     ///
     /// This method handles different object variants and stores them using their
@@ -376,5 +383,13 @@ mod tests {
         });
 
         assert_eq!(decoded, Some(b"hello".as_slice()));
+    }
+
+    #[test]
+    fn with_capacity_preallocates_the_object_map() {
+        let collection = ObjectCollection::with_capacity(12);
+
+        assert!(collection.map.capacity() >= 12);
+        assert!(collection.map.is_empty());
     }
 }
