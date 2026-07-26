@@ -6,7 +6,10 @@ use pdf_graphics::{color::Color, rect::Rect, transform::Transform};
 
 use crate::{
     error::PdfShadingError,
-    mesh::{MeshPatchRef, patch_mesh_bounds, rasterize_mesh_patches},
+    mesh::{
+        MeshPatchRef, patch_mesh_bounds, rasterize_mesh_patches, rasterize_mesh_triangles,
+        triangle_mesh_bounds,
+    },
     model::Shading,
 };
 
@@ -103,6 +106,32 @@ pub fn build_shading_paint(
         Shading::FunctionBased { .. } => Err(PdfShadingError::UnsupportedFeature(
             "FunctionBased shading not implemented".to_string(),
         )),
+        Shading::FreeFormTriangleMesh {
+            bbox, triangles, ..
+        } => {
+            let mesh_transform = match transform {
+                Some(value) => value,
+                None => Transform::identity(),
+            };
+            let bounds = bbox
+                .map(|rect| mesh_transform.map_rect(&rect))
+                .filter(has_paintable_bounds)
+                .or_else(|| triangle_mesh_bounds(triangles, &mesh_transform))
+                .filter(has_paintable_bounds);
+            let Some(bounds) = bounds.map(|value| value.normalized()) else {
+                return Ok(transparent_raster_paint());
+            };
+
+            let raster = rasterize_mesh_triangles(triangles, bounds, &mesh_transform);
+
+            Ok(ShadingPaint::RasterImage {
+                pixels: raster.pixels.into(),
+                width: raster.width,
+                height: raster.height,
+                dest_rect: raster.bounds,
+                transform: None,
+            })
+        }
         Shading::PatchMesh { bbox, patches, .. } => {
             let mesh_transform = match transform {
                 Some(value) => value,
@@ -142,5 +171,30 @@ pub fn build_shading_paint(
         Shading::Unsupported { name } => Err(PdfShadingError::UnsupportedFeature(format!(
             "Shading type '{name}' not implemented"
         ))),
+    }
+}
+
+fn has_paintable_bounds(bounds: &Rect) -> bool {
+    let normalized = bounds.normalized();
+    normalized.left.is_finite()
+        && normalized.top.is_finite()
+        && normalized.right.is_finite()
+        && normalized.bottom.is_finite()
+        && normalized.width() > 0.0
+        && normalized.height() > 0.0
+}
+
+fn transparent_raster_paint() -> ShadingPaint {
+    ShadingPaint::RasterImage {
+        pixels: Arc::from([0_u8, 0, 0, 0]),
+        width: 1,
+        height: 1,
+        dest_rect: Rect {
+            left: 0.0,
+            top: 0.0,
+            right: 1.0,
+            bottom: 1.0,
+        },
+        transform: None,
     }
 }

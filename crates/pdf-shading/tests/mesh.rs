@@ -1,7 +1,12 @@
-use pdf_graphics::{color::Color, point::Point, rect::Rect, transform::Transform};
+#![allow(clippy::arithmetic_side_effects, clippy::expect_used)]
 
-use super::{
-    MeshPatchRef, patch_mesh_bounds, patch_subdivision, rasterize_patch_mesh, rasterize_triangle,
+use pdf_graphics::{color::Color, point::Point, rect::Rect, transform::Transform};
+use pdf_shading::{
+    mesh::{
+        MeshPatchRef, patch_mesh_bounds, patch_subdivision, rasterize_patch_mesh,
+        rasterize_triangle, rasterize_triangle_mesh, triangle_mesh_bounds,
+    },
+    model::{MeshTriangle, MeshVertex},
 };
 
 fn coons_patch() -> MeshPatchRef<'static> {
@@ -84,15 +89,15 @@ fn rasterize_triangle_writes_pixels() {
         bottom: 4.0,
     };
     let triangle = [
-        super::MeshVertex {
+        MeshVertex {
             point: Point::new(0.0, 0.0),
             color: Color::from_rgb(1.0, 0.0, 0.0),
         },
-        super::MeshVertex {
+        MeshVertex {
             point: Point::new(3.0, 0.0),
             color: Color::from_rgb(0.0, 1.0, 0.0),
         },
-        super::MeshVertex {
+        MeshVertex {
             point: Point::new(0.0, 3.0),
             color: Color::from_rgb(0.0, 0.0, 1.0),
         },
@@ -101,4 +106,51 @@ fn rasterize_triangle_writes_pixels() {
     rasterize_triangle(&mut pixels, 4, 4, &bounds, triangle);
 
     assert!(pixels.iter().any(|component| *component != 255));
+}
+
+#[test]
+fn triangle_mesh_bounds_and_raster_preserve_transparent_unpainted_pixels() {
+    let triangle = MeshTriangle {
+        vertices: [
+            MeshVertex {
+                point: Point::new(0.0, 0.0),
+                color: Color::from_rgb(1.0, 0.0, 0.0),
+            },
+            MeshVertex {
+                point: Point::new(4.0, 0.0),
+                color: Color::from_rgb(0.0, 1.0, 0.0),
+            },
+            MeshVertex {
+                point: Point::new(0.0, 4.0),
+                color: Color::from_rgb(0.0, 0.0, 1.0),
+            },
+        ],
+    };
+    let transform = Transform::from_translate(2.0, 3.0);
+    let bounds = triangle_mesh_bounds(std::iter::once(&triangle), &transform)
+        .expect("triangle should have bounds");
+    assert_eq!(
+        bounds,
+        Rect {
+            left: 2.0,
+            top: 3.0,
+            right: 6.0,
+            bottom: 7.0,
+        }
+    );
+
+    let raster = rasterize_triangle_mesh(std::iter::once(&triangle), bounds, &transform, 16);
+    let painted = raster
+        .pixels
+        .chunks_exact(4)
+        .next()
+        .expect("raster should contain a first pixel");
+    let unpainted = raster
+        .pixels
+        .chunks_exact(4)
+        .last()
+        .expect("raster should contain a last pixel");
+
+    assert_eq!(painted.get(3), Some(&u8::MAX));
+    assert_eq!(unpainted, [0, 0, 0, 0]);
 }

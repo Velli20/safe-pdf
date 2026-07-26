@@ -2,6 +2,7 @@
 name = "pdf-shading"
 version = "0.1.0"
 edition = "2024"
+autotests = false
 
 [lints]
 workspace = true
@@ -14,3 +15,15 @@ pdf-function = { path = "../pdf-function" }
 pdf-graphics = { path = "../pdf-graphics" }
 pdf-object = { path = "../pdf-object" }
 thiserror = "2.0.12"
+
+[[test]]
+name = "mesh"
+path = "tests/mesh.rs"
+
+[[test]]
+name = "paint"
+path = "tests/paint.rs"
+
+[[test]]
+name = "parse"
+path = "tests/parse.rs"

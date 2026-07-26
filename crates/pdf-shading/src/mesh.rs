@@ -10,7 +10,9 @@ use pdf_graphics::{
     transform::Transform,
 };
 
-use crate::model::MeshPatch;
+use crate::model::{MeshPatch, MeshTriangle};
+
+pub use crate::model::MeshVertex;
 
 const DEFAULT_SUBDIVISION: usize = 8;
 const MAX_SUBDIVISION: f32 = 32.0;
@@ -35,16 +37,7 @@ pub enum MeshPatchRef<'a> {
     },
 }
 
-/// A tessellated mesh vertex with a device-space position and interpolated color.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct MeshVertex {
-    /// The device-space point.
-    pub point: Point,
-    /// The interpolated vertex color.
-    pub color: Color,
-}
-
-/// A rasterized patch mesh in device space.
+/// A rasterized mesh in device space.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RasterizedPatchMesh {
     /// Packed RGBA8 pixels in row-major order.
@@ -165,6 +158,22 @@ where
     bounds.finish()
 }
 
+/// Computes device-space bounds for parsed triangles after applying `transform`.
+pub fn triangle_mesh_bounds<'a, I>(triangles: I, transform: &Transform) -> Option<Rect>
+where
+    I: IntoIterator<Item = &'a MeshTriangle>,
+{
+    let mut bounds = BoundsAccumulator::new();
+
+    for triangle in triangles {
+        for vertex in triangle.vertices {
+            bounds.include(transformed_point(vertex.point, transform));
+        }
+    }
+
+    bounds.finish()
+}
+
 /// Chooses a tessellation subdivision count for one patch in device space.
 pub fn patch_subdivision(patch: MeshPatchRef<'_>, transform: &Transform) -> usize {
     let Some(bounds) = patch_mesh_bounds(std::iter::once(patch), transform) else {
@@ -228,7 +237,7 @@ where
     let bounds = bounds.normalized();
     let width = bounded_raster_dimension(bounds.width(), max_dimension);
     let height = bounded_raster_dimension(bounds.height(), max_dimension);
-    let mut pixels = vec![255_u8; width.saturating_mul(height).saturating_mul(4)];
+    let mut pixels = vec![0_u8; width.saturating_mul(height).saturating_mul(4)];
 
     for patch in patches {
         let subdivision = patch_subdivision(patch, transform);
@@ -236,6 +245,36 @@ where
         for triangle in triangles {
             rasterize_triangle(&mut pixels, width, height, &bounds, triangle);
         }
+    }
+
+    RasterizedPatchMesh {
+        pixels,
+        bounds,
+        width,
+        height,
+    }
+}
+
+/// Rasterizes parsed Gouraud-shaded triangles into an RGBA8 image.
+pub fn rasterize_triangle_mesh<'a, I>(
+    triangles: I,
+    bounds: Rect,
+    transform: &Transform,
+    max_dimension: usize,
+) -> RasterizedPatchMesh
+where
+    I: IntoIterator<Item = &'a MeshTriangle>,
+{
+    let bounds = bounds.normalized();
+    let width = bounded_raster_dimension(bounds.width(), max_dimension);
+    let height = bounded_raster_dimension(bounds.height(), max_dimension);
+    let mut pixels = vec![0_u8; width.saturating_mul(height).saturating_mul(4)];
+
+    for triangle in triangles {
+        let vertices = triangle
+            .vertices
+            .map(|vertex| transform_mesh_vertex(vertex, transform));
+        rasterize_triangle(&mut pixels, width, height, &bounds, vertices);
     }
 
     RasterizedPatchMesh {
@@ -291,6 +330,18 @@ where
     I: IntoIterator<Item = MeshPatchRef<'a>>,
 {
     rasterize_patch_mesh(patches, bounds, transform, MAX_RASTER_DIMENSION)
+}
+
+/// Builds a raster image for triangle mesh shading paint with the default size cap.
+pub fn rasterize_mesh_triangles<'a, I>(
+    triangles: I,
+    bounds: Rect,
+    transform: &Transform,
+) -> RasterizedPatchMesh
+where
+    I: IntoIterator<Item = &'a MeshTriangle>,
+{
+    rasterize_triangle_mesh(triangles, bounds, transform, MAX_RASTER_DIMENSION)
 }
 
 fn transformed_point(point: Point, transform: &Transform) -> Point {
@@ -519,6 +570,3 @@ fn triangle_scan_bounds(
         bottom: (max_y - bounds.top).max(0.0).min(max_height),
     })
 }
-
-#[cfg(test)]
-mod tests;

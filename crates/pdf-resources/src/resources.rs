@@ -13,6 +13,7 @@ use pdf_object::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
     object_variant::ObjectVariant,
 };
+use pdf_shading::model::Shading;
 
 use crate::{
     error::PdfPagesError,
@@ -22,7 +23,6 @@ use crate::{
     resource::Resource,
     resource_cache::{ResourceCache, read_resource_lazy},
     resources_reference::ResourcesReference,
-    shading::Shading,
     xobject::XObject,
 };
 use pdf_color_space::color_space::ColorSpace;
@@ -579,8 +579,9 @@ mod tests {
 
     use crate::{
         object_reader::ReadCycleTracker, pattern::Pattern, resource::Resource,
-        resource_cache::DefaultResourceCache, shading::Shading, xobject::XObject,
+        resource_cache::DefaultResourceCache, xobject::XObject,
     };
+    use pdf_shading::model::Shading;
 
     use super::{Resources, read_xobjects};
 
