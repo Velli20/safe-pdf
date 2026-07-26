@@ -15,6 +15,14 @@ pub(crate) struct CompressedObject {
     pub(crate) value: ObjectVariant,
 }
 
+/// Locates one object within an object stream's decoded bytes.
+struct ObjectStreamEntry {
+    /// The object's indirect object number.
+    number: usize,
+    /// The object's byte offset relative to the stream's `/First` value.
+    relative_offset: usize,
+}
+
 /// Parses an object stream (PDF 1.5+) and extracts all objects stored within it.
 ///
 /// # Parameters
@@ -71,12 +79,4 @@ pub(crate) fn read_object_stream(
     }
 
     Ok(result)
-}
-
-/// Locates one object within an object stream's decoded bytes.
-struct ObjectStreamEntry {
-    /// The object's indirect object number.
-    number: usize,
-    /// The object's byte offset relative to the stream's `/First` value.
-    relative_offset: usize,
 }

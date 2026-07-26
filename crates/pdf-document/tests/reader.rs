@@ -6,7 +6,8 @@
     clippy::as_conversions
 )]
 
-use pdf_document::{diagnostic::PdfReadDiagnosticKind, reader::PdfReader};
+use pdf_document::{diagnostic::PdfReadDiagnosticKind, error::PdfReaderError, reader::PdfReader};
+use pdf_object::error::ObjectError;
 
 fn format_xref_entry(offset: usize, generation: u16, used: bool) -> String {
     let kind = if used { 'n' } else { 'f' };
@@ -615,7 +616,12 @@ fn test_encrypted_document_detection() {
 
     let reader = PdfReader;
     let result = reader.read_from_bytes(&data, None);
-    assert!(result.is_err());
+    assert!(matches!(
+        result,
+        Err(PdfReaderError::ObjectError(
+            ObjectError::MissingRequiredKey { ref key }
+        )) if key == "ID"
+    ));
 }
 
 #[test]
@@ -1050,13 +1056,13 @@ fn test_unresolvable_reference_returns_error() {
 
     let reader = PdfReader;
     let result = reader.read_from_bytes(&data, None);
-    assert!(result.is_err(), "Should fail for unresolvable reference");
-
-    let err_msg = match result {
-        Err(err) => err.to_string(),
-        Ok(_) => unreachable!(),
-    };
-    assert!(err_msg.contains("failed to resolve"));
+    assert!(matches!(
+        result,
+        Err(PdfReaderError::UnresolvedObjects {
+            count: 1,
+            first_offset,
+        }) if first_offset == obj4_offset
+    ));
 }
 
 #[test]
