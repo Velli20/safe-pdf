@@ -71,7 +71,7 @@ mod tests {
         let mut parser = PdfParser::from(b"[]0".as_slice());
         let result = parser.parse_array(&PassthroughResolver).unwrap();
         assert!(result.is_empty());
-        assert_eq!(parser.tokenizer.data(), b"0");
+        assert_eq!(parser.tokenizer.peek_byte(), Some(b'0'));
     }
 
     #[test]

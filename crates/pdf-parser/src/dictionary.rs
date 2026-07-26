@@ -162,7 +162,7 @@ impl PdfParser<'_> {
             return Ok(DictionaryEntryState::ExpectKeyOrTerminator);
         }
 
-        let Some(byte) = self.tokenizer.data().first().copied() else {
+        let Some(byte) = self.tokenizer.peek_byte() else {
             return Err(ParserError::UnexpectedEndOfFile);
         };
 

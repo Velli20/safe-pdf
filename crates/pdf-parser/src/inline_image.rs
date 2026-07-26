@@ -27,7 +27,7 @@ impl PdfParser<'_> {
     /// Enforcing this avoids ambiguous parses where data bytes could be mistaken for
     /// dictionary or operator content.
     fn consume_inline_image_data_separator(&mut self) -> Result<(), ParserError> {
-        let Some(first) = self.tokenizer.data().first().copied() else {
+        let Some(first) = self.tokenizer.peek_byte() else {
             return Err(ParserError::InlineImageMissingDataEnd);
         };
 

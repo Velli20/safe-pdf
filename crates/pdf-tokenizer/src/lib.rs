@@ -75,7 +75,7 @@ impl<'a> Tokenizer<'a> {
 
     /// Peek the current byte without consuming it.
     #[inline]
-    fn peek_byte(&self) -> Option<u8> {
+    pub fn peek_byte(&self) -> Option<u8> {
         self.input.get(self.position).copied()
     }
 

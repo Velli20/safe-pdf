@@ -58,7 +58,7 @@ impl<'a> CMapParser<'a> {
     ) -> Result<Option<CMapToken>, CMapError> {
         self.skip_cmap_whitespace_and_comments();
 
-        let Some(byte) = self.parser.tokenizer.data().first().copied() else {
+        let Some(byte) = self.parser.tokenizer.peek_byte() else {
             return Ok(None);
         };
 

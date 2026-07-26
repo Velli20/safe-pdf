@@ -70,7 +70,7 @@ impl<'a, 'out> OperatorStreamParser<'a, 'out> {
 
     /// Returns the next raw byte without advancing the parser.
     fn peek_next_byte(&self) -> Option<u8> {
-        self.parser.tokenizer.data().first().copied()
+        self.parser.tokenizer.peek_byte()
     }
 
     /// Parses one operand object and appends it to the reusable operand buffer.
