@@ -6,7 +6,6 @@
 
 use pdf_color_space::color_space::ColorSpace;
 use pdf_function::function::{Function, FunctionImpl};
-use pdf_graphics::rect::Rect;
 use pdf_object::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
     object_variant::ObjectVariant,
@@ -67,7 +66,7 @@ fn parse_function_based(
 ) -> Result<Shading, PdfShadingError> {
     let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
     let background = dictionary.optional_vec_of::<f32>("Background", objects)?;
-    let bbox = optional_bbox(dictionary, objects)?;
+    let bbox = dictionary.optional_bbox(objects)?;
     let domain = dictionary.optional_vec_of::<f32>("Domain", objects)?;
     let anti_alias = dictionary.optional_boolean("AntiAlias", objects)?;
     let functions = parse_functions(dictionary, objects)?;
@@ -106,7 +105,7 @@ fn parse_radial(
 ) -> Result<Shading, PdfShadingError> {
     let coords = dictionary.required_array_of::<f32, 6>("Coords", objects)?;
     let color_space = required_color_space(dictionary, objects)?;
-    let bbox = optional_bbox(dictionary, objects)?;
+    let bbox = dictionary.optional_bbox(objects)?;
     let function = Function::parse(dictionary.get_or_err("Function")?, objects)?;
     let color_stops = ColorStops::from_function(&function, &color_space)?;
 
@@ -126,14 +125,4 @@ pub(crate) fn required_color_space(
     ColorSpace::from_dictionary(dictionary, objects)?.ok_or(PdfShadingError::MissingRequiredEntry {
         entry: "ColorSpace",
     })
-}
-
-/// Reads the optional shading bounding box.
-pub(crate) fn optional_bbox(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> Result<Option<Rect>, PdfShadingError> {
-    Ok(dictionary
-        .optional_array_of::<f32, 4>("BBox", objects)?
-        .map(Rect::from))
 }

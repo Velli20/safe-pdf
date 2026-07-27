@@ -12,4 +12,5 @@ default = []
 
 [dependencies]
 num-traits = "0.2.19"
+pdf-graphics = { path = "../pdf-graphics" }
 thiserror = "2.0.12"

@@ -14,7 +14,7 @@ use crate::{
     error::PdfShadingError,
     mesh_decoder::{MeshBitWidths, MeshDecoder, read_mesh_bits},
     model::{MeshTriangle, MeshVertex, Shading},
-    parse::{optional_bbox, parse_functions, required_color_space},
+    parse::{parse_functions, required_color_space},
 };
 
 /// Errors produced while reconstructing a Type 4 free-form triangle mesh.
@@ -80,7 +80,7 @@ impl FreeFormMeshConfig {
             dictionary.required_number::<usize>("BitsPerFlag", objects)?,
         )?;
         let decode = dictionary.required_vec_of::<f32>("Decode", objects)?;
-        let bbox = optional_bbox(dictionary, objects)?;
+        let bbox = dictionary.optional_bbox(objects)?;
         let anti_alias = dictionary.optional_boolean("AntiAlias", objects)?;
         let functions = optional_functions(dictionary, objects)?;
 
