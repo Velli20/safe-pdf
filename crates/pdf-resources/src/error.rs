@@ -51,8 +51,6 @@ pub enum PdfPagesError {
     FunctionRead(#[from] FunctionReadError),
     #[error("{0}")]
     Decode(#[from] DecodeError),
-    #[error("invalid shading mesh data: {reason}")]
-    InvalidShadingMeshData { reason: String },
     #[error("{0}")]
     Shading(#[from] PdfShadingError),
     #[error("invalid annotation entry '/{entry}': {reason}")]

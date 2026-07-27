@@ -9,7 +9,7 @@ use pdf_object::{
     stream::StreamObject,
 };
 use pdf_shading::{
-    error::PdfShadingError,
+    error::{FreeFormMeshError, MeshDecoderError, PatchMeshError, PdfShadingError},
     model::{MeshTriangle, Shading},
 };
 
@@ -290,20 +290,43 @@ fn applies_optional_function_to_vertex_parameter() {
 
 #[test]
 fn rejects_invalid_or_incomplete_triangle_streams() {
-    let error_cases = [
-        free_form_stream(Vec::new(), 2, 3, None),
-        free_form_stream(encode_vertex(1, [0, 0], &[15, 0, 0], 2), 2, 3, None),
-        free_form_stream(encode_vertex(3, [0, 0], &[15, 0, 0], 2), 2, 3, None),
-        free_form_stream(encode_vertex(0, [0, 0], &[15, 0, 0], 2), 2, 3, None),
-        free_form_stream(vec![0], 2, 3, None),
-    ];
+    let empty = free_form_stream(Vec::new(), 2, 3, None);
+    assert!(matches!(
+        Shading::from_dictionary(&empty, &PassthroughResolver),
+        Err(PdfShadingError::FreeFormMesh(FreeFormMeshError::EmptyMesh))
+    ));
 
-    for object in error_cases {
-        assert!(matches!(
-            Shading::from_dictionary(&object, &PassthroughResolver),
-            Err(PdfShadingError::InvalidShadingMeshData { .. })
-        ));
-    }
+    let missing_previous = free_form_stream(encode_vertex(1, [0, 0], &[15, 0, 0], 2), 2, 3, None);
+    assert!(matches!(
+        Shading::from_dictionary(&missing_previous, &PassthroughResolver),
+        Err(PdfShadingError::FreeFormMesh(
+            FreeFormMeshError::ContinuationWithoutPreviousTriangle { flag: 1 }
+        ))
+    ));
+
+    let invalid_flag = free_form_stream(encode_vertex(3, [0, 0], &[15, 0, 0], 2), 2, 3, None);
+    assert!(matches!(
+        Shading::from_dictionary(&invalid_flag, &PassthroughResolver),
+        Err(PdfShadingError::FreeFormMesh(
+            FreeFormMeshError::InvalidEdgeFlag { flag: 3 }
+        ))
+    ));
+
+    let incomplete = free_form_stream(encode_vertex(0, [0, 0], &[15, 0, 0], 2), 2, 3, None);
+    assert!(matches!(
+        Shading::from_dictionary(&incomplete, &PassthroughResolver),
+        Err(PdfShadingError::FreeFormMesh(
+            FreeFormMeshError::IncompleteTriangle
+        ))
+    ));
+
+    let truncated = free_form_stream(vec![0], 2, 3, None);
+    assert!(matches!(
+        Shading::from_dictionary(&truncated, &PassthroughResolver),
+        Err(PdfShadingError::MeshDecoder(
+            MeshDecoderError::TruncatedSample
+        ))
+    ));
 }
 
 #[test]
@@ -341,30 +364,83 @@ fn patch_parser_uses_only_the_low_two_flag_bits() {
 
 #[test]
 fn rejects_invalid_patch_widths_and_decode_arity() {
-    let error_cases = [
-        patch_stream(6, Vec::new(), [3, 8, 8], patch_decode(), None),
-        patch_stream(6, Vec::new(), [8, 3, 8], patch_decode(), None),
-        patch_stream(6, Vec::new(), [8, 8, 1], patch_decode(), None),
-        patch_stream(
-            6,
-            Vec::new(),
-            [8, 8, 8],
-            vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
-            None,
-        ),
-        patch_stream(
-            6,
-            Vec::new(),
-            [8, 8, 8],
-            patch_decode(),
-            Some(type_2_rgb_function()),
-        ),
-    ];
+    let coordinate_width = patch_stream(6, Vec::new(), [3, 8, 8], patch_decode(), None);
+    assert!(matches!(
+        Shading::from_dictionary(&coordinate_width, &PassthroughResolver),
+        Err(PdfShadingError::MeshDecoder(
+            MeshDecoderError::InvalidBitsPerCoordinate { value: 3 }
+        ))
+    ));
 
-    for object in error_cases {
-        assert!(matches!(
-            Shading::from_dictionary(&object, &PassthroughResolver),
-            Err(PdfShadingError::InvalidShadingMeshData { .. })
-        ));
-    }
+    let component_width = patch_stream(6, Vec::new(), [8, 3, 8], patch_decode(), None);
+    assert!(matches!(
+        Shading::from_dictionary(&component_width, &PassthroughResolver),
+        Err(PdfShadingError::MeshDecoder(
+            MeshDecoderError::InvalidBitsPerComponent { value: 3 }
+        ))
+    ));
+
+    let flag_width = patch_stream(6, Vec::new(), [8, 8, 1], patch_decode(), None);
+    assert!(matches!(
+        Shading::from_dictionary(&flag_width, &PassthroughResolver),
+        Err(PdfShadingError::MeshDecoder(
+            MeshDecoderError::InvalidBitsPerFlag { value: 1 }
+        ))
+    ));
+
+    let short_decode = patch_stream(
+        6,
+        Vec::new(),
+        [8, 8, 8],
+        vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        None,
+    );
+    assert!(matches!(
+        Shading::from_dictionary(&short_decode, &PassthroughResolver),
+        Err(PdfShadingError::MeshDecoder(
+            MeshDecoderError::InvalidDecodeLength {
+                expected: 10,
+                actual: 6,
+                ..
+            }
+        ))
+    ));
+
+    let function_decode = patch_stream(
+        6,
+        Vec::new(),
+        [8, 8, 8],
+        patch_decode(),
+        Some(type_2_rgb_function()),
+    );
+    assert!(matches!(
+        Shading::from_dictionary(&function_decode, &PassthroughResolver),
+        Err(PdfShadingError::MeshDecoder(
+            MeshDecoderError::InvalidDecodeLength {
+                expected: 6,
+                actual: 10,
+                ..
+            }
+        ))
+    ));
+}
+
+#[test]
+fn rejects_empty_patch_stream_and_continuation_without_previous_patch() {
+    let empty = patch_stream(6, Vec::new(), [8, 8, 8], patch_decode(), None);
+    assert!(matches!(
+        Shading::from_dictionary(&empty, &PassthroughResolver),
+        Err(PdfShadingError::PatchMesh(PatchMeshError::EmptyMesh))
+    ));
+
+    let continuation = patch_stream(6, vec![1], [8, 8, 8], patch_decode(), None);
+    assert!(matches!(
+        Shading::from_dictionary(&continuation, &PassthroughResolver),
+        Err(PdfShadingError::PatchMesh(
+            PatchMeshError::ContinuationWithoutPreviousPatch {
+                kind: "Coons",
+                flag: 1
+            }
+        ))
+    ));
 }

@@ -8,6 +8,7 @@ use pdf_object::{
     object_variant::ObjectVariant,
 };
 use pdf_utils::BitReader;
+use thiserror::Error;
 
 use crate::{
     error::PdfShadingError,
@@ -19,6 +20,29 @@ use crate::{
 const COONS_CONTROL_POINTS: usize = 12;
 const TENSOR_CONTROL_POINTS: usize = 16;
 const CORNER_COLORS: usize = 4;
+
+/// Errors produced while reconstructing Type 6 and Type 7 patch meshes.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum PatchMeshError {
+    /// Patch parsing was requested for a non-patch shading type.
+    #[error("{shading_type} is not a patch-mesh shading type")]
+    UnsupportedShadingType { shading_type: ShadingType },
+    /// A decoded flag did not fit into the representation used by the parser.
+    #[error("patch flag value {value} does not fit into u8")]
+    FlagOutOfRange { value: u32 },
+    /// A continuation record appeared without a compatible preceding patch.
+    #[error("{kind} continuation flag {flag} used without a previous patch")]
+    ContinuationWithoutPreviousPatch { kind: &'static str, flag: u8 },
+    /// A continuation record used a flag not defined for the patch type.
+    #[error("unsupported {kind} continuation flag {flag}")]
+    InvalidContinuationFlag { kind: &'static str, flag: u8 },
+    /// Patch reconstruction did not produce the required fixed-size data.
+    #[error("patch did not contain {expected}")]
+    IncompletePatch { expected: &'static str },
+    /// The stream did not contain any complete patches.
+    #[error("stream did not contain any patches")]
+    EmptyMesh,
+}
 
 /// Parses a Type 6 or Type 7 patch-mesh shading stream.
 pub(crate) fn parse_patch_mesh(
@@ -52,9 +76,7 @@ impl PatchKind {
         match shading_type {
             ShadingType::CoonsPatchMesh => Ok(Self::Coons),
             ShadingType::TensorProductPatchMesh => Ok(Self::Tensor),
-            _ => Err(invalid_mesh_data(format!(
-                "{shading_type} is not a patch-mesh shading type"
-            ))),
+            _ => Err(PatchMeshError::UnsupportedShadingType { shading_type }.into()),
         }
     }
 }
@@ -131,16 +153,16 @@ impl<'a> PatchMeshParser<'a> {
         let mut patches = Vec::new();
 
         while let Some(flag) = read_mesh_bits(&mut self.reader, self.flag_width)? {
-            let flag = u8::try_from(flag & 0b11)
-                .map_err(|_| invalid_mesh_data("Patch flag does not fit into u8"))?;
+            let flag_value = flag & 0b11;
+            let flag = u8::try_from(flag_value).map_err(|_| {
+                PdfShadingError::from(PatchMeshError::FlagOutOfRange { value: flag_value })
+            })?;
             let patch = self.read_patch(flag, patches.last())?;
             patches.push(patch);
         }
 
         if patches.is_empty() {
-            return Err(invalid_mesh_data(
-                "Patch mesh stream did not contain any patches",
-            ));
+            return Err(PatchMeshError::EmptyMesh.into());
         }
 
         Ok(patches)
@@ -229,7 +251,13 @@ fn initial_coons_points(
         1 => [p3, p4, p5, p6],
         2 => [p6, p7, p8, p9],
         3 => [p9, p10, p11, p0],
-        _ => return Err(invalid_continuation("Coons", flag)),
+        _ => {
+            return Err(PatchMeshError::InvalidContinuationFlag {
+                kind: "Coons",
+                flag,
+            }
+            .into());
+        }
     };
     Ok(Vec::from(shared))
 }
@@ -275,7 +303,13 @@ fn initial_tensor_points(
         1 => [p3, p7, p11, p15],
         2 => [p15, p14, p13, p12],
         3 => [p12, p8, p4, p0],
-        _ => return Err(invalid_continuation("Tensor", flag)),
+        _ => {
+            return Err(PatchMeshError::InvalidContinuationFlag {
+                kind: "Tensor",
+                flag,
+            }
+            .into());
+        }
     };
     Ok(Vec::from(shared))
 }
@@ -294,13 +328,13 @@ fn initial_tensor_colors(
 fn shared_colors(
     flag: u8,
     [c0, c1, c2, c3]: [Color; 4],
-    kind: &str,
+    kind: &'static str,
 ) -> Result<[Color; 2], PdfShadingError> {
     match flag {
         1 => Ok([c1, c2]),
         2 => Ok([c2, c3]),
         3 => Ok([c3, c0]),
-        _ => Err(invalid_continuation(kind, flag)),
+        _ => Err(PatchMeshError::InvalidContinuationFlag { kind, flag }.into()),
     }
 }
 
@@ -313,7 +347,11 @@ fn previous_coons_patch(
             control_points,
             corner_colors,
         }) => Ok((control_points, corner_colors)),
-        _ => Err(missing_previous_patch("Coons", flag)),
+        _ => Err(PatchMeshError::ContinuationWithoutPreviousPatch {
+            kind: "Coons",
+            flag,
+        }
+        .into()),
     }
 }
 
@@ -326,14 +364,21 @@ fn previous_tensor_patch(
             control_points,
             corner_colors,
         }) => Ok((control_points, corner_colors)),
-        _ => Err(missing_previous_patch("Tensor", flag)),
+        _ => Err(PatchMeshError::ContinuationWithoutPreviousPatch {
+            kind: "Tensor",
+            flag,
+        }
+        .into()),
     }
 }
 
-fn try_array<T, const N: usize>(values: Vec<T>, expected: &str) -> Result<[T; N], PdfShadingError> {
+fn try_array<T, const N: usize>(
+    values: Vec<T>,
+    expected: &'static str,
+) -> Result<[T; N], PdfShadingError> {
     values
         .try_into()
-        .map_err(|_| invalid_mesh_data(format!("Patch did not contain {expected}")))
+        .map_err(|_| PdfShadingError::from(PatchMeshError::IncompletePatch { expected }))
 }
 
 fn optional_functions(
@@ -344,21 +389,5 @@ fn optional_functions(
         parse_functions(dictionary, objects)
     } else {
         Ok(Vec::new())
-    }
-}
-
-fn missing_previous_patch(kind: &str, flag: u8) -> PdfShadingError {
-    invalid_mesh_data(format!(
-        "{kind} continuation flag {flag} used without a previous patch"
-    ))
-}
-
-fn invalid_continuation(kind: &str, flag: u8) -> PdfShadingError {
-    invalid_mesh_data(format!("Unsupported {kind} continuation flag {flag}"))
-}
-
-fn invalid_mesh_data(reason: impl Into<String>) -> PdfShadingError {
-    PdfShadingError::InvalidShadingMeshData {
-        reason: reason.into(),
     }
 }
