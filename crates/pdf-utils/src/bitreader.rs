@@ -129,15 +129,29 @@ impl<'a> BitReader<'a> {
 
     /// Read `n` bits MSB-first and return them as a `u16`.
     ///
-    /// Returns `None` if there are fewer than `n` bits remaining. `n` must be
-    /// at most 16.
-    #[allow(clippy::arithmetic_side_effects)]
+    /// Returns `None` if there are fewer than `n` bits remaining or `n` exceeds
+    /// 16. The reader position is unchanged when the read fails.
     pub fn read_bits(&mut self, n: u8) -> Option<u16> {
+        if n > 16 {
+            return None;
+        }
+        u16::try_from(self.read_bits_u32(n)?).ok()
+    }
+
+    /// Read `n` bits MSB-first and return them as a `u32`.
+    ///
+    /// Returns `None` if there are fewer than `n` bits remaining or `n` exceeds
+    /// 32. The reader position is unchanged when the read fails.
+    #[allow(clippy::arithmetic_side_effects)]
+    pub fn read_bits_u32(&mut self, n: u8) -> Option<u32> {
+        if n > 32 {
+            return None;
+        }
         let total_bits = self.src.len().saturating_mul(8);
         if self.bit_pos.saturating_add(usize::from(n)) > total_bits {
             return None;
         }
-        let mut value: u16 = 0;
+        let mut value: u32 = 0;
         for _ in 0..n {
             value <<= 1;
             if self.next_bit()? {
@@ -358,6 +372,7 @@ mod tests {
         let data = [0xFFu8];
         let mut r = BitReader::new(&data);
         assert_eq!(r.read_bits(9), None);
+        assert_eq!(r.pos(), 0);
     }
 
     #[test]
@@ -368,6 +383,42 @@ mod tests {
         let data = [0b1000_0000u8, 0b1000_0000u8];
         let mut r = BitReader::new(&data);
         assert_eq!(r.read_bits(9), Some(0b1_0000_0001)); // 257
+    }
+
+    #[test]
+    fn read_bits_u32_reads_wide_fields() {
+        let data = [0xabu8, 0xcdu8, 0xefu8, 0x12u8];
+        let mut r = BitReader::new(&data);
+
+        assert_eq!(r.read_bits_u32(24), Some(0x00ab_cdef));
+        assert_eq!(r.read_bits_u32(8), Some(0x12));
+    }
+
+    #[test]
+    fn read_bits_u32_reads_all_32_bits() {
+        let data = [0x89u8, 0xabu8, 0xcdu8, 0xefu8];
+        let mut r = BitReader::new(&data);
+
+        assert_eq!(r.read_bits_u32(32), Some(0x89ab_cdef));
+    }
+
+    #[test]
+    fn read_bits_u32_rejects_excessive_width_without_advancing() {
+        let data = [0xffu8; 5];
+        let mut r = BitReader::new(&data);
+
+        assert_eq!(r.read_bits_u32(33), None);
+        assert_eq!(r.pos(), 0);
+    }
+
+    #[test]
+    fn read_bits_u32_preserves_position_when_truncated() {
+        let data = [0xffu8; 3];
+        let mut r = BitReader::new(&data);
+        r.skip_bits(1);
+
+        assert_eq!(r.read_bits_u32(24), None);
+        assert_eq!(r.pos(), 1);
     }
 
     #[test]

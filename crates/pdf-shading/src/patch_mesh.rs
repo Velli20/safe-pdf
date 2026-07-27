@@ -7,11 +7,11 @@ use pdf_object::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
     object_variant::ObjectVariant,
 };
+use pdf_utils::BitReader;
 
 use crate::{
     error::PdfShadingError,
-    mesh_decoder::{MeshBitWidths, MeshDecoder},
-    mesh_sample_reader::MeshSampleReader,
+    mesh_decoder::{MeshBitWidths, MeshDecoder, read_mesh_bits},
     model::{MeshPatch, Shading, ShadingType},
     parse::{optional_bbox, parse_functions, required_color_space},
 };
@@ -99,7 +99,7 @@ impl PatchMeshConfig {
 
 /// Stateful reconstruction of patches and their implicit shared edges.
 struct PatchMeshParser<'a> {
-    reader: MeshSampleReader<'a>,
+    reader: BitReader<'a>,
     decoder: MeshDecoder<'a>,
     flag_width: usize,
     kind: PatchKind,
@@ -113,7 +113,7 @@ impl<'a> PatchMeshParser<'a> {
         kind: PatchKind,
     ) -> Result<Self, PdfShadingError> {
         Ok(Self {
-            reader: MeshSampleReader::new(data),
+            reader: BitReader::new(data),
             decoder: MeshDecoder::new(
                 config.widths,
                 &config.decode,
@@ -130,7 +130,7 @@ impl<'a> PatchMeshParser<'a> {
     fn parse(mut self) -> Result<Vec<MeshPatch>, PdfShadingError> {
         let mut patches = Vec::new();
 
-        while let Some(flag) = self.reader.read_bits(self.flag_width)? {
+        while let Some(flag) = read_mesh_bits(&mut self.reader, self.flag_width)? {
             let flag = u8::try_from(flag & 0b11)
                 .map_err(|_| invalid_mesh_data("Patch flag does not fit into u8"))?;
             let patch = self.read_patch(flag, patches.last())?;

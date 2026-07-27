@@ -7,11 +7,11 @@ use pdf_object::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
     object_variant::ObjectVariant,
 };
+use pdf_utils::BitReader;
 
 use crate::{
     error::PdfShadingError,
-    mesh_decoder::{MeshBitWidths, MeshDecoder},
-    mesh_sample_reader::MeshSampleReader,
+    mesh_decoder::{MeshBitWidths, MeshDecoder, read_mesh_bits},
     model::{MeshTriangle, MeshVertex, Shading},
     parse::{optional_bbox, parse_functions, required_color_space},
 };
@@ -73,7 +73,7 @@ impl FreeFormMeshConfig {
 
 /// Stateful reconstruction of triangles from Type 4 vertex records.
 struct FreeFormMeshParser<'a> {
-    reader: MeshSampleReader<'a>,
+    reader: BitReader<'a>,
     decoder: MeshDecoder<'a>,
     flag_width: usize,
 }
@@ -82,7 +82,7 @@ impl<'a> FreeFormMeshParser<'a> {
     /// Creates a parser borrowing the stream and its validated configuration.
     fn new(data: &'a [u8], config: &'a FreeFormMeshConfig) -> Result<Self, PdfShadingError> {
         Ok(Self {
-            reader: MeshSampleReader::new(data),
+            reader: BitReader::new(data),
             decoder: MeshDecoder::new(
                 config.widths,
                 &config.decode,
@@ -145,14 +145,14 @@ impl<'a> FreeFormMeshParser<'a> {
 
     /// Reads one byte-aligned Type 4 vertex record.
     fn read_vertex(&mut self) -> Result<Option<(u8, MeshVertex)>, PdfShadingError> {
-        let Some(flag) = self.reader.read_bits(self.flag_width)? else {
+        let Some(flag) = read_mesh_bits(&mut self.reader, self.flag_width)? else {
             return Ok(None);
         };
         let flag = u8::try_from(flag & 0b11)
             .map_err(|_| invalid_mesh_data("Free-form triangle flag does not fit into u8"))?;
         let point = self.decoder.read_point(&mut self.reader)?;
         let color = self.decoder.read_color(&mut self.reader)?;
-        self.reader.align_to_byte();
+        self.reader.align_to_byte_boundary();
 
         Ok(Some((flag, MeshVertex { point, color })))
     }

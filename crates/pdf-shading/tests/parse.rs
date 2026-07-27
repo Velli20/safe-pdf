@@ -108,12 +108,22 @@ fn push_field(bits: &mut Vec<bool>, value: u32, width: usize) {
 }
 
 fn encode_vertex(flag: u32, point: [u32; 2], components: &[u32], bits_per_flag: usize) -> Vec<u8> {
+    encode_vertex_with_widths(flag, point, components, [4, 4, bits_per_flag])
+}
+
+fn encode_vertex_with_widths(
+    flag: u32,
+    point: [u32; 2],
+    components: &[u32],
+    widths: [usize; 3],
+) -> Vec<u8> {
+    let [coordinate_width, component_width, flag_width] = widths;
     let mut bits = Vec::new();
-    push_field(&mut bits, flag, bits_per_flag);
-    push_field(&mut bits, point[0], 4);
-    push_field(&mut bits, point[1], 4);
+    push_field(&mut bits, flag, flag_width);
+    push_field(&mut bits, point[0], coordinate_width);
+    push_field(&mut bits, point[1], coordinate_width);
     for component in components {
-        push_field(&mut bits, *component, 4);
+        push_field(&mut bits, *component, component_width);
     }
 
     bits.chunks(8)
@@ -190,6 +200,47 @@ fn parses_byte_aligned_free_form_triangle_vertices() {
     assert_eq!(
         blue.color,
         pdf_graphics::color::Color::from_rgb(0.0, 0.0, 1.0)
+    );
+}
+
+#[test]
+fn parses_32_bit_mesh_coordinates() {
+    let widths = [32, 8, 2];
+    let mut data = Vec::new();
+    data.extend(encode_vertex_with_widths(0, [0, 0], &[255, 0, 0], widths));
+    data.extend(encode_vertex_with_widths(
+        0,
+        [u32::MAX, 0],
+        &[0, 255, 0],
+        widths,
+    ));
+    data.extend(encode_vertex_with_widths(
+        0,
+        [0, u32::MAX],
+        &[0, 0, 255],
+        widths,
+    ));
+    let object = shading_stream(
+        mesh_entries(
+            4,
+            32,
+            8,
+            2,
+            vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        ),
+        data,
+    );
+
+    let triangles = parsed_triangles(&object);
+    let triangle = triangles.first().expect("triangle should exist");
+
+    assert_eq!(
+        triangle.vertices[1].point,
+        pdf_graphics::point::Point::new(1.0, 0.0)
+    );
+    assert_eq!(
+        triangle.vertices[2].point,
+        pdf_graphics::point::Point::new(0.0, 1.0)
     );
 }
 

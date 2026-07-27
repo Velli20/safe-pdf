@@ -4,8 +4,9 @@ use num_traits::ToPrimitive;
 use pdf_color_space::color_space::ColorSpace;
 use pdf_function::function::Function;
 use pdf_graphics::{color::Color, point::Point};
+use pdf_utils::BitReader;
 
-use crate::{error::PdfShadingError, mesh_sample_reader::MeshSampleReader};
+use crate::error::PdfShadingError;
 
 const VALID_COORDINATE_WIDTHS: [usize; 8] = [1, 2, 4, 8, 12, 16, 24, 32];
 const VALID_COMPONENT_WIDTHS: [usize; 6] = [1, 2, 4, 8, 12, 16];
@@ -101,10 +102,7 @@ impl<'a> MeshDecoder<'a> {
     }
 
     /// Reads and decodes one `(x, y)` coordinate pair.
-    pub(crate) fn read_point(
-        &self,
-        reader: &mut MeshSampleReader<'_>,
-    ) -> Result<Point, PdfShadingError> {
+    pub(crate) fn read_point(&self, reader: &mut BitReader<'_>) -> Result<Point, PdfShadingError> {
         let (x_min, x_max) = decode_pair(self.decode, 0, "X")?;
         let (y_min, y_max) = decode_pair(self.decode, 1, "Y")?;
         let x = self.read_sample(reader, self.widths.coordinate, x_min, x_max)?;
@@ -114,10 +112,7 @@ impl<'a> MeshDecoder<'a> {
 
     /// Reads mesh color inputs, applies optional functions, and converts them
     /// into the shading color space.
-    pub(crate) fn read_color(
-        &self,
-        reader: &mut MeshSampleReader<'_>,
-    ) -> Result<Color, PdfShadingError> {
+    pub(crate) fn read_color(&self, reader: &mut BitReader<'_>) -> Result<Color, PdfShadingError> {
         let inputs = (0..self.color_input_count)
             .map(|component| {
                 let (min, max) =
@@ -132,12 +127,17 @@ impl<'a> MeshDecoder<'a> {
 
     fn read_sample(
         &self,
-        reader: &mut MeshSampleReader<'_>,
+        reader: &mut BitReader<'_>,
         width: usize,
         min: f32,
         max: f32,
     ) -> Result<f32, PdfShadingError> {
-        decode_sample(reader.read_required_bits(width)?.into(), width, min, max)
+        decode_sample(
+            read_required_mesh_bits(reader, width)?.into(),
+            width,
+            min,
+            max,
+        )
     }
 
     fn apply_functions(&self, inputs: &[f32]) -> Result<Vec<f32>, PdfShadingError> {
@@ -156,6 +156,37 @@ impl<'a> MeshDecoder<'a> {
                 .collect(),
         }
     }
+}
+
+/// Reads an optional mesh field while distinguishing clean EOF from truncation.
+pub(crate) fn read_mesh_bits(
+    reader: &mut BitReader<'_>,
+    width: usize,
+) -> Result<Option<u32>, PdfShadingError> {
+    if !(1..=32).contains(&width) {
+        return Err(invalid_mesh_data(
+            "Mesh bit-field widths must be in 1..=32".to_string(),
+        ));
+    }
+    let width = u8::try_from(width)
+        .map_err(|_| invalid_mesh_data("Mesh sample width is too large".to_string()))?;
+    if reader.exhausted() {
+        return Ok(None);
+    }
+
+    reader
+        .read_bits_u32(width)
+        .map(Some)
+        .ok_or_else(|| invalid_mesh_data("Mesh stream ended in the middle of a sample".to_string()))
+}
+
+/// Reads a mesh field that is required to complete the current record.
+fn read_required_mesh_bits(
+    reader: &mut BitReader<'_>,
+    width: usize,
+) -> Result<u32, PdfShadingError> {
+    read_mesh_bits(reader, width)?
+        .ok_or_else(|| invalid_mesh_data("Mesh stream ended unexpectedly".to_string()))
 }
 
 fn validate_allowed_width(
