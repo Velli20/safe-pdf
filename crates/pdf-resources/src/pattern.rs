@@ -8,7 +8,6 @@ use pdf_shading::model::Shading;
 use crate::{
     error::PdfPagesError,
     external_graphics_state::ExternalGraphicsState,
-    matrix::Matrix,
     object_reader::{ReadCycleTracker, ReadFromDictionary},
     resource_cache::ResourceCache,
     resources::Resources,
@@ -146,7 +145,7 @@ impl Pattern {
         let pattern_type = dictionary.required_number::<i32>("PatternType", objects)?;
 
         // Read the transformation matrix for the pattern. Defaults to identity.
-        let matrix = Matrix::from_dictionary(dictionary, objects)?;
+        let matrix = dictionary.optional_matrix(objects)?;
 
         match PatternType::try_from(pattern_type)? {
             PatternType::Tiling => {
