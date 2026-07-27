@@ -6,7 +6,6 @@ use pdf_object::{
 };
 
 use crate::error::PdfPagesError;
-use crate::matrix::Matrix;
 use crate::object_reader::ReadCycleTracker;
 use crate::resource_cache::ResourceCache;
 use crate::resources::Resources;
@@ -40,7 +39,7 @@ impl FormXObject {
         let bbox = dictionary.required_bbox(objects)?.normalized();
 
         // Retrieve the `/Matrix` entry if present.
-        let matrix = Matrix::from_dictionary(dictionary, objects)?;
+        let matrix = dictionary.optional_matrix(objects)?;
 
         // Parse the `/Resources` entry if present, mapping any errors.
         let resources = Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?;

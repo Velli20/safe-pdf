@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use pdf_graphics::rect::Rect;
+use pdf_graphics::{rect::Rect, transform::Transform};
 
 use crate::{
     error::ObjectError, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
@@ -99,6 +99,25 @@ impl Dictionary {
     pub fn required_bbox(&self, objects: &dyn ObjectResolver) -> Result<Rect, ObjectError> {
         self.required_array_of::<f32, 4>("BBox", objects)
             .map(Rect::from)
+    }
+
+    /// Reads the optional `/Matrix` entry as an affine transform.
+    ///
+    /// Missing entries and explicit PDF `null` values are treated as absent.
+    pub fn optional_matrix(
+        &self,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Option<Transform>, ObjectError> {
+        Ok(self
+            .optional_array_of::<f32, 6>("Matrix", objects)?
+            .map(|[sx, ky, kx, sy, tx, ty]| Transform::from_row(sx, ky, kx, sy, tx, ty)))
+    }
+
+    /// Reads the required `/Matrix` entry as an affine transform.
+    pub fn required_matrix(&self, objects: &dyn ObjectResolver) -> Result<Transform, ObjectError> {
+        let [sx, ky, kx, sy, tx, ty] = self.required_array_of::<f32, 6>("Matrix", objects)?;
+
+        Ok(Transform::from_row(sx, ky, kx, sy, tx, ty))
     }
 }
 
@@ -255,6 +274,95 @@ mod tests {
             ObjectError::InvalidArrayLength {
                 expected: 4,
                 found: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn optional_matrix_parses_transform() {
+        let dictionary = dictionary_with(
+            "Matrix",
+            ObjectVariant::Array(vec![
+                ObjectVariant::Real(1.0),
+                ObjectVariant::Real(2.0),
+                ObjectVariant::Real(3.0),
+                ObjectVariant::Real(4.0),
+                ObjectVariant::Real(5.0),
+                ObjectVariant::Real(6.0),
+            ]),
+        );
+
+        let matrix = dictionary
+            .optional_matrix(&PassthroughResolver)
+            .expect("matrix parses");
+
+        assert_eq!(
+            matrix,
+            Some(Transform::from_row(1.0, 2.0, 3.0, 4.0, 5.0, 6.0))
+        );
+    }
+
+    #[test]
+    fn optional_matrix_returns_none_for_missing_or_null_entry() {
+        let missing = Dictionary::new(BTreeMap::new());
+        let null = dictionary_with("Matrix", ObjectVariant::Null);
+
+        assert_eq!(
+            missing
+                .optional_matrix(&PassthroughResolver)
+                .expect("missing matrix is optional"),
+            None
+        );
+        assert_eq!(
+            null.optional_matrix(&PassthroughResolver)
+                .expect("null matrix is optional"),
+            None
+        );
+    }
+
+    #[test]
+    fn required_matrix_parses_transform() {
+        let dictionary = dictionary_with(
+            "Matrix",
+            ObjectVariant::Array(vec![
+                ObjectVariant::Integer(1),
+                ObjectVariant::Integer(2),
+                ObjectVariant::Integer(3),
+                ObjectVariant::Integer(4),
+                ObjectVariant::Integer(5),
+                ObjectVariant::Integer(6),
+            ]),
+        );
+
+        let matrix = dictionary
+            .required_matrix(&PassthroughResolver)
+            .expect("matrix parses");
+
+        assert_eq!(matrix, Transform::from_row(1.0, 2.0, 3.0, 4.0, 5.0, 6.0));
+    }
+
+    #[test]
+    fn required_matrix_propagates_invalid_array_length() {
+        let dictionary = dictionary_with(
+            "Matrix",
+            ObjectVariant::Array(vec![
+                ObjectVariant::Integer(1),
+                ObjectVariant::Integer(2),
+                ObjectVariant::Integer(3),
+                ObjectVariant::Integer(4),
+                ObjectVariant::Integer(5),
+            ]),
+        );
+
+        let error = dictionary
+            .required_matrix(&PassthroughResolver)
+            .expect_err("matrix must contain six numbers");
+
+        assert_eq!(
+            error,
+            ObjectError::InvalidArrayLength {
+                expected: 6,
+                found: 5,
             }
         );
     }
