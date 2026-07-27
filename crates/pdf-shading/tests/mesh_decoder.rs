@@ -1,6 +1,12 @@
 //! Unit tests for private mesh decoding helpers.
 
-use super::{MeshBitWidths, decode_sample};
+use pdf_utils::BitReader;
+
+use crate::error::PdfShadingError;
+
+use super::{
+    MeshBitWidths, MeshDecoderError, decode_sample, read_mesh_bits, read_required_mesh_bits,
+};
 
 #[test]
 fn decodes_sample_range_endpoints_and_midpoint() {
@@ -13,7 +19,64 @@ fn decodes_sample_range_endpoints_and_midpoint() {
 #[test]
 fn validates_pdf_mesh_bit_widths() {
     assert!(MeshBitWidths::new(12, 4, 2).is_ok());
-    assert!(MeshBitWidths::new(3, 4, 2).is_err());
-    assert!(MeshBitWidths::new(8, 32, 2).is_err());
-    assert!(MeshBitWidths::new(8, 8, 1).is_err());
+    assert!(matches!(
+        MeshBitWidths::new(3, 4, 2),
+        Err(PdfShadingError::MeshDecoder(
+            MeshDecoderError::InvalidBitsPerCoordinate { value: 3 }
+        ))
+    ));
+    assert!(matches!(
+        MeshBitWidths::new(8, 32, 2),
+        Err(PdfShadingError::MeshDecoder(
+            MeshDecoderError::InvalidBitsPerComponent { value: 32 }
+        ))
+    ));
+    assert!(matches!(
+        MeshBitWidths::new(8, 8, 1),
+        Err(PdfShadingError::MeshDecoder(
+            MeshDecoderError::InvalidBitsPerFlag { value: 1 }
+        ))
+    ));
+}
+
+#[test]
+fn mesh_reads_distinguish_clean_eof_from_truncation() {
+    let mut empty = BitReader::new(&[]);
+    assert!(matches!(read_mesh_bits(&mut empty, 8), Ok(None)));
+
+    let mut truncated = BitReader::new(&[0]);
+    assert!(matches!(
+        read_mesh_bits(&mut truncated, 9),
+        Err(PdfShadingError::MeshDecoder(
+            MeshDecoderError::TruncatedSample
+        ))
+    ));
+    assert_eq!(truncated.pos(), 0);
+
+    let mut required = BitReader::new(&[]);
+    assert!(matches!(
+        read_required_mesh_bits(&mut required, 8),
+        Err(PdfShadingError::MeshDecoder(
+            MeshDecoderError::UnexpectedEndOfStream
+        ))
+    ));
+}
+
+#[test]
+fn mesh_reads_reject_invalid_widths() {
+    let mut reader = BitReader::new(&[0]);
+
+    assert!(matches!(
+        read_mesh_bits(&mut reader, 0),
+        Err(PdfShadingError::MeshDecoder(
+            MeshDecoderError::InvalidBitFieldWidth { width: 0 }
+        ))
+    ));
+    assert!(matches!(
+        read_mesh_bits(&mut reader, 33),
+        Err(PdfShadingError::MeshDecoder(
+            MeshDecoderError::InvalidBitFieldWidth { width: 33 }
+        ))
+    ));
+    assert_eq!(reader.pos(), 0);
 }

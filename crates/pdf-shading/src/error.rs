@@ -6,6 +6,10 @@ use pdf_function::{
 use pdf_object::error::ObjectError;
 use thiserror::Error;
 
+pub use crate::{
+    free_form_mesh::FreeFormMeshError, mesh_decoder::MeshDecoderError, patch_mesh::PatchMeshError,
+};
+
 /// Errors that can occur while parsing or preparing PDF shadings.
 #[derive(Debug, Error)]
 pub enum PdfShadingError {
@@ -23,8 +27,12 @@ pub enum PdfShadingError {
     MissingRequiredEntry { entry: &'static str },
     #[error("invalid /ShadingType value: {value}")]
     InvalidShadingType { value: i32 },
-    #[error("invalid shading mesh data: {reason}")]
-    InvalidShadingMeshData { reason: String },
+    #[error("invalid shading mesh data: {0}")]
+    MeshDecoder(#[from] MeshDecoderError),
+    #[error("invalid shading mesh data: {0}")]
+    FreeFormMesh(#[from] FreeFormMeshError),
+    #[error("invalid shading mesh data: {0}")]
+    PatchMesh(#[from] PatchMeshError),
     #[error("unsupported shading feature: {0}")]
     UnsupportedFeature(String),
 }

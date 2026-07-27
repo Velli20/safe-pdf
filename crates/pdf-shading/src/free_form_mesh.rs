@@ -7,14 +7,38 @@ use pdf_object::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
     object_variant::ObjectVariant,
 };
+use pdf_utils::BitReader;
+use thiserror::Error;
 
 use crate::{
     error::PdfShadingError,
-    mesh_decoder::{MeshBitWidths, MeshDecoder},
-    mesh_sample_reader::MeshSampleReader,
+    mesh_decoder::{MeshBitWidths, MeshDecoder, read_mesh_bits},
     model::{MeshTriangle, MeshVertex, Shading},
     parse::{optional_bbox, parse_functions, required_color_space},
 };
+
+/// Errors produced while reconstructing a Type 4 free-form triangle mesh.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum FreeFormMeshError {
+    /// A continuation record appeared before any complete triangle.
+    #[error("continuation flag {flag} used without a previous triangle")]
+    ContinuationWithoutPreviousTriangle { flag: u8 },
+    /// A vertex record used an edge flag that is not defined for a Type 4 mesh.
+    #[error("invalid edge flag {flag}")]
+    InvalidEdgeFlag { flag: u8 },
+    /// An internal continuation request did not use flag 1 or 2.
+    #[error("invalid continuation flag {flag}")]
+    InvalidContinuationFlag { flag: u8 },
+    /// A decoded flag did not fit into the representation used by the parser.
+    #[error("triangle flag value {value} does not fit into u8")]
+    FlagOutOfRange { value: u32 },
+    /// The stream ended before all three vertices of a triangle were decoded.
+    #[error("stream ended before completing a triangle")]
+    IncompleteTriangle,
+    /// The stream did not contain any complete triangles.
+    #[error("stream did not contain any triangles")]
+    EmptyMesh,
+}
 
 /// Parses a Type 4 shading stream into independent mesh triangles.
 pub(crate) fn parse_free_form_triangle_mesh(
@@ -73,7 +97,7 @@ impl FreeFormMeshConfig {
 
 /// Stateful reconstruction of triangles from Type 4 vertex records.
 struct FreeFormMeshParser<'a> {
-    reader: MeshSampleReader<'a>,
+    reader: BitReader<'a>,
     decoder: MeshDecoder<'a>,
     flag_width: usize,
 }
@@ -82,7 +106,7 @@ impl<'a> FreeFormMeshParser<'a> {
     /// Creates a parser borrowing the stream and its validated configuration.
     fn new(data: &'a [u8], config: &'a FreeFormMeshConfig) -> Result<Self, PdfShadingError> {
         Ok(Self {
-            reader: MeshSampleReader::new(data),
+            reader: BitReader::new(data),
             decoder: MeshDecoder::new(
                 config.widths,
                 &config.decode,
@@ -103,25 +127,21 @@ impl<'a> FreeFormMeshParser<'a> {
                 0 => self.read_new_triangle(vertex)?,
                 1 | 2 => {
                     let previous = triangles.last().ok_or_else(|| {
-                        invalid_mesh_data(format!(
-                            "Free-form triangle continuation flag {flag} used without a previous triangle"
-                        ))
+                        PdfShadingError::from(
+                            FreeFormMeshError::ContinuationWithoutPreviousTriangle { flag },
+                        )
                     })?;
                     continue_triangle(flag, previous, vertex)?
                 }
                 _ => {
-                    return Err(invalid_mesh_data(format!(
-                        "Invalid free-form triangle edge flag {flag}"
-                    )));
+                    return Err(FreeFormMeshError::InvalidEdgeFlag { flag }.into());
                 }
             };
             triangles.push(triangle);
         }
 
         if triangles.is_empty() {
-            return Err(invalid_mesh_data(
-                "Free-form triangle mesh stream did not contain any triangles",
-            ));
+            return Err(FreeFormMeshError::EmptyMesh.into());
         }
 
         Ok(triangles)
@@ -138,21 +158,22 @@ impl<'a> FreeFormMeshParser<'a> {
 
     /// Reads a vertex that must exist to complete the current triangle.
     fn read_required_vertex(&mut self) -> Result<(u8, MeshVertex), PdfShadingError> {
-        self.read_vertex()?.ok_or_else(|| {
-            invalid_mesh_data("Free-form triangle mesh stream ended before completing a triangle")
-        })
+        self.read_vertex()?
+            .ok_or_else(|| PdfShadingError::from(FreeFormMeshError::IncompleteTriangle))
     }
 
     /// Reads one byte-aligned Type 4 vertex record.
     fn read_vertex(&mut self) -> Result<Option<(u8, MeshVertex)>, PdfShadingError> {
-        let Some(flag) = self.reader.read_bits(self.flag_width)? else {
+        let Some(flag) = read_mesh_bits(&mut self.reader, self.flag_width)? else {
             return Ok(None);
         };
-        let flag = u8::try_from(flag & 0b11)
-            .map_err(|_| invalid_mesh_data("Free-form triangle flag does not fit into u8"))?;
+        let flag_value = flag & 0b11;
+        let flag = u8::try_from(flag_value).map_err(|_| {
+            PdfShadingError::from(FreeFormMeshError::FlagOutOfRange { value: flag_value })
+        })?;
         let point = self.decoder.read_point(&mut self.reader)?;
         let color = self.decoder.read_color(&mut self.reader)?;
-        self.reader.align_to_byte();
+        self.reader.align_to_byte_boundary();
 
         Ok(Some((flag, MeshVertex { point, color })))
     }
@@ -169,9 +190,7 @@ fn continue_triangle(
         1 => [second, third, vertex],
         2 => [first, third, vertex],
         _ => {
-            return Err(invalid_mesh_data(format!(
-                "Invalid free-form triangle continuation flag {flag}"
-            )));
+            return Err(FreeFormMeshError::InvalidContinuationFlag { flag }.into());
         }
     };
     Ok(MeshTriangle { vertices })
@@ -185,11 +204,5 @@ fn optional_functions(
         parse_functions(dictionary, objects)
     } else {
         Ok(Vec::new())
-    }
-}
-
-fn invalid_mesh_data(reason: impl Into<String>) -> PdfShadingError {
-    PdfShadingError::InvalidShadingMeshData {
-        reason: reason.into(),
     }
 }

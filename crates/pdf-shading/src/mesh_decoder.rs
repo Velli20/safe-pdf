@@ -4,12 +4,62 @@ use num_traits::ToPrimitive;
 use pdf_color_space::color_space::ColorSpace;
 use pdf_function::function::Function;
 use pdf_graphics::{color::Color, point::Point};
+use pdf_utils::BitReader;
+use thiserror::Error;
 
-use crate::{error::PdfShadingError, mesh_sample_reader::MeshSampleReader};
+use crate::error::PdfShadingError;
 
 const VALID_COORDINATE_WIDTHS: [usize; 8] = [1, 2, 4, 8, 12, 16, 24, 32];
 const VALID_COMPONENT_WIDTHS: [usize; 6] = [1, 2, 4, 8, 12, 16];
 const VALID_FLAG_WIDTHS: [usize; 3] = [2, 4, 8];
+
+/// Errors produced while validating and decoding packed mesh samples.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum MeshDecoderError {
+    /// `/BitsPerCoordinate` is not one of the widths permitted by the PDF specification.
+    #[error("invalid /BitsPerCoordinate value {value}")]
+    InvalidBitsPerCoordinate { value: usize },
+    /// `/BitsPerComponent` is not one of the widths permitted by the PDF specification.
+    #[error("invalid /BitsPerComponent value {value}")]
+    InvalidBitsPerComponent { value: usize },
+    /// `/BitsPerFlag` is not one of the widths permitted by the PDF specification.
+    #[error("invalid /BitsPerFlag value {value}")]
+    InvalidBitsPerFlag { value: usize },
+    /// The selected color space does not define any color components.
+    #[error("{mesh} color space requires at least one component")]
+    MissingColorComponents { mesh: &'static str },
+    /// `/Decode` does not contain exactly the required coordinate and component ranges.
+    #[error("{mesh} Decode array contains {actual} values; expected {expected}")]
+    InvalidDecodeLength {
+        mesh: &'static str,
+        expected: usize,
+        actual: usize,
+    },
+    /// A shading function did not produce its required color component.
+    #[error("mesh shading function did not return a color component")]
+    MissingFunctionColorComponent,
+    /// A requested packed field width cannot be read by the mesh decoder.
+    #[error("invalid mesh bit-field width {width}; expected 1..=32")]
+    InvalidBitFieldWidth { width: usize },
+    /// The stream ended after only part of a packed sample was available.
+    #[error("mesh stream ended in the middle of a sample")]
+    TruncatedSample,
+    /// The stream ended before a required sample began.
+    #[error("mesh stream ended unexpectedly")]
+    UnexpectedEndOfStream,
+    /// A `/Decode` range does not include its minimum value.
+    #[error("Decode array is missing {label} minimum")]
+    MissingDecodeMinimum { label: &'static str },
+    /// A `/Decode` range does not include its maximum value.
+    #[error("Decode array is missing {label} maximum")]
+    MissingDecodeMaximum { label: &'static str },
+    /// A sample value cannot be represented by the decoder's floating-point type.
+    #[error("mesh sample is not representable as f32")]
+    SampleNotRepresentable,
+    /// A sample's maximum encoded value cannot be represented by the decoder's floating-point type.
+    #[error("mesh sample range is not representable as f32")]
+    SampleRangeNotRepresentable,
+}
 
 /// Validated bit widths from a Type 4, 6, or 7 mesh dictionary.
 #[derive(Debug, Clone, Copy)]
@@ -29,14 +79,18 @@ impl MeshBitWidths {
         validate_allowed_width(
             coordinate,
             &VALID_COORDINATE_WIDTHS,
-            "BitsPerCoordinate must be 1, 2, 4, 8, 12, 16, 24, or 32",
+            MeshDecoderError::InvalidBitsPerCoordinate { value: coordinate },
         )?;
         validate_allowed_width(
             component,
             &VALID_COMPONENT_WIDTHS,
-            "BitsPerComponent must be 1, 2, 4, 8, 12, or 16",
+            MeshDecoderError::InvalidBitsPerComponent { value: component },
         )?;
-        validate_allowed_width(flag, &VALID_FLAG_WIDTHS, "BitsPerFlag must be 2, 4, or 8")?;
+        validate_allowed_width(
+            flag,
+            &VALID_FLAG_WIDTHS,
+            MeshDecoderError::InvalidBitsPerFlag { value: flag },
+        )?;
 
         Ok(Self {
             coordinate,
@@ -71,7 +125,7 @@ impl<'a> MeshDecoder<'a> {
         decode: &'a [f32],
         functions: &'a [Function],
         color_space: &'a ColorSpace,
-        mesh_name: &str,
+        mesh_name: &'static str,
     ) -> Result<Self, PdfShadingError> {
         let color_input_count = if functions.is_empty() {
             color_space.num_color_components()
@@ -79,16 +133,17 @@ impl<'a> MeshDecoder<'a> {
             1
         };
         if color_input_count == 0 {
-            return Err(invalid_mesh_data(format!(
-                "{mesh_name} color space requires at least one component"
-            )));
+            return Err(MeshDecoderError::MissingColorComponents { mesh: mesh_name }.into());
         }
 
         let expected_values = color_input_count.saturating_add(2).saturating_mul(2);
         if decode.len() != expected_values {
-            return Err(invalid_mesh_data(format!(
-                "{mesh_name} Decode array must contain {expected_values} values"
-            )));
+            return Err(MeshDecoderError::InvalidDecodeLength {
+                mesh: mesh_name,
+                expected: expected_values,
+                actual: decode.len(),
+            }
+            .into());
         }
 
         Ok(Self {
@@ -101,10 +156,7 @@ impl<'a> MeshDecoder<'a> {
     }
 
     /// Reads and decodes one `(x, y)` coordinate pair.
-    pub(crate) fn read_point(
-        &self,
-        reader: &mut MeshSampleReader<'_>,
-    ) -> Result<Point, PdfShadingError> {
+    pub(crate) fn read_point(&self, reader: &mut BitReader<'_>) -> Result<Point, PdfShadingError> {
         let (x_min, x_max) = decode_pair(self.decode, 0, "X")?;
         let (y_min, y_max) = decode_pair(self.decode, 1, "Y")?;
         let x = self.read_sample(reader, self.widths.coordinate, x_min, x_max)?;
@@ -114,10 +166,7 @@ impl<'a> MeshDecoder<'a> {
 
     /// Reads mesh color inputs, applies optional functions, and converts them
     /// into the shading color space.
-    pub(crate) fn read_color(
-        &self,
-        reader: &mut MeshSampleReader<'_>,
-    ) -> Result<Color, PdfShadingError> {
+    pub(crate) fn read_color(&self, reader: &mut BitReader<'_>) -> Result<Color, PdfShadingError> {
         let inputs = (0..self.color_input_count)
             .map(|component| {
                 let (min, max) =
@@ -132,12 +181,17 @@ impl<'a> MeshDecoder<'a> {
 
     fn read_sample(
         &self,
-        reader: &mut MeshSampleReader<'_>,
+        reader: &mut BitReader<'_>,
         width: usize,
         min: f32,
         max: f32,
     ) -> Result<f32, PdfShadingError> {
-        decode_sample(reader.read_required_bits(width)?.into(), width, min, max)
+        decode_sample(
+            read_required_mesh_bits(reader, width)?.into(),
+            width,
+            min,
+            max,
+        )
     }
 
     fn apply_functions(&self, inputs: &[f32]) -> Result<Vec<f32>, PdfShadingError> {
@@ -148,9 +202,7 @@ impl<'a> MeshDecoder<'a> {
                 .iter()
                 .map(|function| {
                     function.apply(inputs)?.first().copied().ok_or_else(|| {
-                        invalid_mesh_data(
-                            "Mesh shading function did not return a color component".to_string(),
-                        )
+                        PdfShadingError::from(MeshDecoderError::MissingFunctionColorComponent)
                     })
                 })
                 .collect(),
@@ -158,57 +210,80 @@ impl<'a> MeshDecoder<'a> {
     }
 }
 
+/// Reads an optional mesh field while distinguishing clean EOF from truncation.
+pub(crate) fn read_mesh_bits(
+    reader: &mut BitReader<'_>,
+    width: usize,
+) -> Result<Option<u32>, PdfShadingError> {
+    if !(1..=32).contains(&width) {
+        return Err(MeshDecoderError::InvalidBitFieldWidth { width }.into());
+    }
+    let width = u8::try_from(width)
+        .map_err(|_| PdfShadingError::from(MeshDecoderError::InvalidBitFieldWidth { width }))?;
+    if reader.exhausted() {
+        return Ok(None);
+    }
+
+    reader
+        .read_bits_u32(width)
+        .map(Some)
+        .ok_or_else(|| PdfShadingError::from(MeshDecoderError::TruncatedSample))
+}
+
+/// Reads a mesh field that is required to complete the current record.
+fn read_required_mesh_bits(
+    reader: &mut BitReader<'_>,
+    width: usize,
+) -> Result<u32, PdfShadingError> {
+    read_mesh_bits(reader, width)?
+        .ok_or_else(|| PdfShadingError::from(MeshDecoderError::UnexpectedEndOfStream))
+}
+
 fn validate_allowed_width(
     width: usize,
     allowed: &[usize],
-    reason: &str,
+    error: MeshDecoderError,
 ) -> Result<(), PdfShadingError> {
     if allowed.contains(&width) {
         Ok(())
     } else {
-        Err(invalid_mesh_data(reason.to_string()))
+        Err(error.into())
     }
 }
 
 fn decode_pair(
     decode: &[f32],
     pair_index: usize,
-    label: &str,
+    label: &'static str,
 ) -> Result<(f32, f32), PdfShadingError> {
     let first_index = pair_index.saturating_mul(2);
     let second_index = first_index.saturating_add(1);
     let min = decode
         .get(first_index)
         .copied()
-        .ok_or_else(|| invalid_mesh_data(format!("Decode array is missing {label} minimum")))?;
+        .ok_or_else(|| PdfShadingError::from(MeshDecoderError::MissingDecodeMinimum { label }))?;
     let max = decode
         .get(second_index)
         .copied()
-        .ok_or_else(|| invalid_mesh_data(format!("Decode array is missing {label} maximum")))?;
+        .ok_or_else(|| PdfShadingError::from(MeshDecoderError::MissingDecodeMaximum { label }))?;
     Ok((min, max))
 }
 
 fn decode_sample(code: u64, width: usize, min: f32, max: f32) -> Result<f32, PdfShadingError> {
     let shift = u32::try_from(width)
-        .map_err(|_| invalid_mesh_data("Mesh sample width is too large".to_string()))?;
+        .map_err(|_| PdfShadingError::from(MeshDecoderError::InvalidBitFieldWidth { width }))?;
     let code_max = 1_u64
         .checked_shl(shift)
-        .ok_or_else(|| invalid_mesh_data("Mesh sample width overflowed".to_string()))?
+        .ok_or_else(|| PdfShadingError::from(MeshDecoderError::InvalidBitFieldWidth { width }))?
         .saturating_sub(1);
     let code = code
         .to_f32()
-        .ok_or_else(|| invalid_mesh_data("Mesh sample is not representable as f32".to_string()))?;
-    let code_max = code_max.to_f32().ok_or_else(|| {
-        invalid_mesh_data("Mesh sample range is not representable as f32".to_string())
-    })?;
+        .ok_or_else(|| PdfShadingError::from(MeshDecoderError::SampleNotRepresentable))?;
+    let code_max = code_max
+        .to_f32()
+        .ok_or_else(|| PdfShadingError::from(MeshDecoderError::SampleRangeNotRepresentable))?;
 
     Ok(min + (code / code_max) * (max - min))
-}
-
-fn invalid_mesh_data(reason: impl Into<String>) -> PdfShadingError {
-    PdfShadingError::InvalidShadingMeshData {
-        reason: reason.into(),
-    }
 }
 
 #[cfg(test)]
