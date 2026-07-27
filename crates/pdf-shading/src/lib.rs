@@ -9,3 +9,6 @@ pub mod model;
 pub mod paint;
 mod parse;
 mod patch_mesh;
+mod patch_mesh_config;
+mod patch_mesh_kind;
+mod patch_mesh_parser;
