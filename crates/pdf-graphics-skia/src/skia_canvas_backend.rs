@@ -519,8 +519,12 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         &mut self,
         mask: &Arc<RecordingCanvas>,
         transform: &Transform,
-        _mask_mode: MaskMode,
+        mask_mode: MaskMode,
     ) -> Result<(), PdfCanvasError> {
+        if matches!(mask_mode, MaskMode::Unknown(_)) {
+            return Ok(());
+        }
+
         self.surface.canvas().save();
         let mat = to_skia_matrix(transform);
         let rect = skia_safe::Rect::from_xywh(0.0, 0.0, mask.width(), mask.height());
@@ -540,6 +544,10 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         transform: &Transform,
         mask_mode: MaskMode,
     ) -> Result<(), PdfCanvasError> {
+        if matches!(&mask_mode, MaskMode::Unknown(_)) {
+            return Ok(());
+        }
+
         // Render mask into a temporary surface depending on the requested mask mode.
         // - Alpha: render directly into an A8 mask surface.
         // - Luminosity: render into RGBA and then convert RGB luminance into an A8 mask.
@@ -555,7 +563,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
             };
 
         // Create appropriate surface
-        let mut surface = match mask_mode {
+        let mut surface = match &mask_mode {
             MaskMode::Alpha => {
                 let info =
                     skia_safe::ImageInfo::new_a8((mask.width() as i32, mask.height() as i32));
@@ -571,6 +579,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
                 );
                 make_surface(info)?
             }
+            MaskMode::Unknown(_) => return Ok(()),
         };
 
         // Replay the recorded mask drawing operations into the temporary surface.
