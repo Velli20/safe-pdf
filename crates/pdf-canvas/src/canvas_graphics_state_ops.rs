@@ -129,7 +129,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                         ));
                     }
                     if let Some(mode) = modes.first() {
-                        self.current_state_mut()?.blend_mode = Some(*mode);
+                        self.current_state_mut()?.blend_mode = Some(mode.clone());
                     }
                 }
                 ExternalGraphicsStateKey::SoftMask(smask) => {

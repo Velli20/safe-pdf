@@ -110,7 +110,7 @@ impl RecordingCanvas {
                     shader,
                     blend_mode,
                 } => {
-                    backend.fill_path(path, *fill_type, *color, shader, *blend_mode)?;
+                    backend.fill_path(path, *fill_type, *color, shader, blend_mode.clone())?;
                 }
                 StrokePath {
                     path,
@@ -126,7 +126,7 @@ impl RecordingCanvas {
                         *line_width,
                         stroke_style,
                         shader,
-                        *blend_mode,
+                        blend_mode.clone(),
                     )?;
                 }
                 SetClipRegion { path, mode } => backend.set_clip_region(path, *mode)?,
@@ -138,7 +138,12 @@ impl RecordingCanvas {
                     dest_rect,
                     image_rotation,
                 } => {
-                    backend.draw_image_rect(image, *blend_mode, *dest_rect, *image_rotation)?;
+                    backend.draw_image_rect(
+                        image,
+                        blend_mode.clone(),
+                        *dest_rect,
+                        *image_rotation,
+                    )?;
                 }
                 DrawInlineImage {
                     image,
@@ -146,7 +151,12 @@ impl RecordingCanvas {
                     dest_rect,
                     image_rotation,
                 } => {
-                    backend.draw_inline_image(image, *blend_mode, *dest_rect, *image_rotation)?;
+                    backend.draw_inline_image(
+                        image,
+                        blend_mode.clone(),
+                        *dest_rect,
+                        *image_rotation,
+                    )?;
                 }
                 BeginMaskLayer {
                     transform,
