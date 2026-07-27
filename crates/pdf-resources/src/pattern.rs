@@ -160,9 +160,7 @@ impl Pattern {
                 let tiling_type = TilingType::try_from(tiling_type_int)?;
 
                 // Read the `/BBox` entry.
-                let bbox = dictionary
-                    .required_array_of::<f32, 4>("BBox", objects)?
-                    .into();
+                let bbox = dictionary.required_bbox(objects)?;
 
                 // Read the `/XStep` entry.
                 let x_step = dictionary.required_number::<f32>("XStep", objects)?;

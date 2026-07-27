@@ -2325,6 +2325,7 @@ name = "pdf-object"
 version = "0.1.0"
 dependencies = [
  "num-traits",
+ "pdf-graphics",
  "thiserror 2.0.12",
 ]
 

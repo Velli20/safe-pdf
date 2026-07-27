@@ -1,6 +1,11 @@
 use std::collections::BTreeMap;
 
-use crate::{error::ObjectError, object_variant::ObjectVariant};
+use pdf_graphics::rect::Rect;
+
+use crate::{
+    error::ObjectError, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
+};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Dictionary {
@@ -77,11 +82,31 @@ impl Dictionary {
                 key: key.to_owned(),
             })
     }
+
+    /// Reads the optional `/BBox` entry as a rectangle.
+    ///
+    /// Missing entries and explicit PDF `null` values are treated as absent.
+    /// The coordinates are returned in their original order.
+    pub fn optional_bbox(&self, objects: &dyn ObjectResolver) -> Result<Option<Rect>, ObjectError> {
+        Ok(self
+            .optional_array_of::<f32, 4>("BBox", objects)?
+            .map(Rect::from))
+    }
+
+    /// Reads the required `/BBox` entry as a rectangle.
+    ///
+    /// The coordinates are returned in their original order.
+    pub fn required_bbox(&self, objects: &dyn ObjectResolver) -> Result<Rect, ObjectError> {
+        self.required_array_of::<f32, 4>("BBox", objects)
+            .map(Rect::from)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+
+    use crate::object_resolver::PassthroughResolver;
 
     use super::*;
 
@@ -136,5 +161,101 @@ mod tests {
             .expect_err("name is not an integer");
 
         assert_eq!(error, "expected integer");
+    }
+
+    #[test]
+    fn optional_bbox_parses_rectangle() {
+        let dictionary = dictionary_with(
+            "BBox",
+            ObjectVariant::Array(vec![
+                ObjectVariant::Integer(1),
+                ObjectVariant::Real(2.5),
+                ObjectVariant::Integer(3),
+                ObjectVariant::Real(4.5),
+            ]),
+        );
+
+        let bbox = dictionary
+            .optional_bbox(&PassthroughResolver)
+            .expect("bounding box parses");
+
+        assert_eq!(
+            bbox,
+            Some(Rect {
+                left: 1.0,
+                top: 2.5,
+                right: 3.0,
+                bottom: 4.5,
+            })
+        );
+    }
+
+    #[test]
+    fn optional_bbox_returns_none_for_missing_or_null_entry() {
+        let missing = Dictionary::new(BTreeMap::new());
+        let null = dictionary_with("BBox", ObjectVariant::Null);
+
+        assert_eq!(
+            missing
+                .optional_bbox(&PassthroughResolver)
+                .expect("missing bounding box is optional"),
+            None
+        );
+        assert_eq!(
+            null.optional_bbox(&PassthroughResolver)
+                .expect("null bounding box is optional"),
+            None
+        );
+    }
+
+    #[test]
+    fn required_bbox_parses_rectangle() {
+        let dictionary = dictionary_with(
+            "BBox",
+            ObjectVariant::Array(vec![
+                ObjectVariant::Integer(1),
+                ObjectVariant::Integer(2),
+                ObjectVariant::Integer(3),
+                ObjectVariant::Integer(4),
+            ]),
+        );
+
+        let bbox = dictionary
+            .required_bbox(&PassthroughResolver)
+            .expect("bounding box parses");
+
+        assert_eq!(
+            bbox,
+            Rect {
+                left: 1.0,
+                top: 2.0,
+                right: 3.0,
+                bottom: 4.0,
+            }
+        );
+    }
+
+    #[test]
+    fn required_bbox_propagates_invalid_array_length() {
+        let dictionary = dictionary_with(
+            "BBox",
+            ObjectVariant::Array(vec![
+                ObjectVariant::Integer(1),
+                ObjectVariant::Integer(2),
+                ObjectVariant::Integer(3),
+            ]),
+        );
+
+        let error = dictionary
+            .required_bbox(&PassthroughResolver)
+            .expect_err("bounding box must contain four numbers");
+
+        assert_eq!(
+            error,
+            ObjectError::InvalidArrayLength {
+                expected: 4,
+                found: 3,
+            }
+        );
     }
 }

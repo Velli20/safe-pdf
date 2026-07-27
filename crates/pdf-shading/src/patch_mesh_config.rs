@@ -11,7 +11,7 @@ use crate::{
     error::PdfShadingError,
     mesh_decoder::{MeshBitWidths, MeshDecoder},
     model::{MeshPatch, Shading, ShadingType},
-    parse::{optional_bbox, parse_functions, required_color_space},
+    parse::{parse_functions, required_color_space},
 };
 
 /// Validated, owned values from a patch-mesh shading dictionary.
@@ -40,7 +40,7 @@ impl PatchMeshConfig {
             dictionary.required_number::<usize>("BitsPerFlag", objects)?,
         )?;
         let decode = dictionary.required_vec_of::<f32>("Decode", objects)?;
-        let bbox = optional_bbox(dictionary, objects)?;
+        let bbox = dictionary.optional_bbox(objects)?;
         let anti_alias = dictionary.optional_boolean("AntiAlias", objects)?;
         let functions = optional_functions(dictionary, objects)?;
 
