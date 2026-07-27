@@ -401,7 +401,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
         let fill_color = state.fill_color;
         let stroke_color = state.stroke_color;
-        let blend_mode = state.blend_mode;
+        let blend_mode = state.blend_mode.clone();
         let line_width = state.line_width * state.transform.sx;
         let stroke_style = StrokeStyle {
             dash_pattern: state.dash_pattern.clone(),
@@ -428,8 +428,13 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             PaintMode::FillAndStroke => {
                 // First fill the path using the current fill settings
                 let fill_shader = self.compute_shader(false)?;
-                self.canvas
-                    .fill_path(path, fill_type, fill_color, &fill_shader, blend_mode)?;
+                self.canvas.fill_path(
+                    path,
+                    fill_type,
+                    fill_color,
+                    &fill_shader,
+                    blend_mode.clone(),
+                )?;
 
                 // Then stroke the path using the current stroke settings
                 let stroke_shader = self.compute_shader(true)?;

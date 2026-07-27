@@ -200,6 +200,7 @@ fn to_skia_blend_mode(mode: BlendMode) -> skia_safe::BlendMode {
         BlendMode::Color => skia_safe::BlendMode::Color,
         BlendMode::Luminosity => skia_safe::BlendMode::Luminosity,
         BlendMode::DestinationIn => skia_safe::BlendMode::DstIn,
+        BlendMode::Unknown(_) => skia_safe::BlendMode::SrcOver,
     }
 }
 
@@ -655,5 +656,20 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         self.surface.canvas().restore();
         self.surface.canvas().restore();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pdf_graphics::BlendMode;
+
+    use super::to_skia_blend_mode;
+
+    #[test]
+    fn unknown_blend_mode_uses_normal_compositing() {
+        assert_eq!(
+            to_skia_blend_mode(BlendMode::Unknown("VendorBlend".to_owned())),
+            skia_safe::BlendMode::SrcOver
+        );
     }
 }

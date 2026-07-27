@@ -1,4 +1,5 @@
 pub mod bezier;
+pub mod blend_mode;
 mod bounds_accumulator;
 pub mod color;
 pub mod dash_pattern;
@@ -7,6 +8,7 @@ pub mod point;
 pub mod rect;
 pub mod transform;
 
+pub use blend_mode::BlendMode;
 pub use bounds_accumulator::BoundsAccumulator;
 pub use dash_pattern::DashPattern;
 use num_derive::FromPrimitive;
@@ -31,32 +33,6 @@ pub enum LineJoin {
     Round = 1,
     /// Beveled (flattened) join at the corner.
     Bevel = 2,
-}
-
-/// Represents the standard blend modes allowed in PDF for compositing graphics.
-///
-/// Blend modes determine how colors from different layers are combined:
-/// - `Normal`: No blending, just overlays the color.
-/// - `Multiply`, `Screen`, `Overlay`, etc.: Various blending effects as defined by the PDF specification.
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum BlendMode {
-    Normal,
-    Multiply,
-    Screen,
-    Overlay,
-    Darken,
-    Lighten,
-    ColorDodge,
-    ColorBurn,
-    HardLight,
-    SoftLight,
-    Difference,
-    Exclusion,
-    Hue,
-    Saturation,
-    Color,
-    Luminosity,
-    DestinationIn,
 }
 
 /// Specifies how a path should be painted in PDF graphics operations.

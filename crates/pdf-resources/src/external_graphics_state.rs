@@ -211,31 +211,6 @@ fn parse_font(
     Ok(ExternalGraphicsStateKey::Font(resource, font_size))
 }
 
-fn to_blend_mode(s: &str) -> Result<BlendMode, PdfPagesError> {
-    match s {
-        "Normal" => Ok(BlendMode::Normal),
-        "Multiply" => Ok(BlendMode::Multiply),
-        "Screen" => Ok(BlendMode::Screen),
-        "Overlay" => Ok(BlendMode::Overlay),
-        "Darken" => Ok(BlendMode::Darken),
-        "Lighten" => Ok(BlendMode::Lighten),
-        "ColorDodge" => Ok(BlendMode::ColorDodge),
-        "ColorBurn" => Ok(BlendMode::ColorBurn),
-        "HardLight" => Ok(BlendMode::HardLight),
-        "SoftLight" => Ok(BlendMode::SoftLight),
-        "Difference" => Ok(BlendMode::Difference),
-        "Exclusion" => Ok(BlendMode::Exclusion),
-        "Hue" => Ok(BlendMode::Hue),
-        "Saturation" => Ok(BlendMode::Saturation),
-        "Color" => Ok(BlendMode::Color),
-        "Luminosity" => Ok(BlendMode::Luminosity),
-        _ => Err(invalid_ext_gstate_entry_value(
-            "BM",
-            format!("unsupported blend mode '{s}'"),
-        )),
-    }
-}
-
 fn parse_blend_mode(
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
@@ -244,10 +219,10 @@ fn parse_blend_mode(
         value
             .try_array(objects)?
             .iter()
-            .map(|obj| to_blend_mode(obj.try_str(objects)?))
+            .map(|obj| obj.try_str(objects).map(BlendMode::from))
             .collect::<Result<Vec<BlendMode>, _>>()?
     } else {
-        let mode = to_blend_mode(value.try_str(objects)?)?;
+        let mode = BlendMode::from(value.try_str(objects)?);
         vec![mode]
     };
 

@@ -135,7 +135,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             pixel_format: image.pixel_format,
         };
 
-        let blend_mode = self.current_state()?.blend_mode;
+        let blend_mode = self.current_state()?.blend_mode.clone();
         if inline_image {
             self.canvas.draw_inline_image(
                 &rendered_image,
