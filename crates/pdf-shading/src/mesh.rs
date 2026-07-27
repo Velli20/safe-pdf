@@ -467,36 +467,13 @@ fn write_rgba_pixel(pixels: &mut [u8], width: usize, x: f32, y: f32, color: Colo
     let Some(pixel) = pixels.get_mut(pixel_index..end_index) else {
         return;
     };
-    let [red, green, blue, alpha] = color_to_rgba8(color);
+    let [red, green, blue, alpha] = color.to_rgba8();
 
     if let [r, g, b, a] = pixel {
         *r = red;
         *g = green;
         *b = blue;
         *a = alpha;
-    }
-}
-
-fn color_to_rgba8(color: Color) -> [u8; 4] {
-    [
-        float_channel_to_u8(color.r),
-        float_channel_to_u8(color.g),
-        float_channel_to_u8(color.b),
-        float_channel_to_u8(color.a),
-    ]
-}
-
-fn float_channel_to_u8(channel: f32) -> u8 {
-    let scaled = (channel.clamp(0.0, 1.0) * 255.0).round();
-    match scaled.to_u8() {
-        Some(value) => value,
-        None => {
-            if scaled.is_sign_negative() {
-                0
-            } else {
-                u8::MAX
-            }
-        }
     }
 }
 

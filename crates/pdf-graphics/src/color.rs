@@ -1,3 +1,5 @@
+use num_traits::ToPrimitive;
+
 /// Unpremultiplied color with RGBA channel
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Color {
@@ -22,6 +24,19 @@ impl Color {
 
     pub const fn from_rgb(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b, a: 1.0 }
+    }
+
+    /// Converts the color to 8-bit RGBA channel values.
+    ///
+    /// Each channel is clamped to `[0.0, 1.0]`, scaled to `[0, 255]`, and
+    /// rounded to the nearest integer.
+    pub fn to_rgba8(self) -> [u8; 4] {
+        [
+            float_channel_to_u8(self.r),
+            float_channel_to_u8(self.g),
+            float_channel_to_u8(self.b),
+            float_channel_to_u8(self.a),
+        ]
     }
 
     /// Returns a grayscale color from a single luminance value.
@@ -113,6 +128,20 @@ impl Color {
     }
 }
 
+fn float_channel_to_u8(channel: f32) -> u8 {
+    let scaled = (channel.clamp(0.0, 1.0) * 255.0).round();
+    match scaled.to_u8() {
+        Some(value) => value,
+        None => {
+            if scaled.is_sign_negative() {
+                0
+            } else {
+                u8::MAX
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Color;
@@ -151,6 +180,20 @@ mod tests {
 
         let white = Color::from_gray(1.0);
         assert!(approx_eq(white.r, 1.0) && approx_eq(white.g, 1.0) && approx_eq(white.b, 1.0));
+    }
+
+    #[test]
+    fn converts_to_rgba8() {
+        let color = Color::from_rgba(1.0, 0.5, 0.0, 0.25);
+
+        assert_eq!(color.to_rgba8(), [255, 128, 0, 64]);
+    }
+
+    #[test]
+    fn rgba8_conversion_clamps_channels() {
+        let color = Color::from_rgba(-0.5, 1.5, 0.0, 1.0);
+
+        assert_eq!(color.to_rgba8(), [0, 255, 0, 255]);
     }
 
     #[test]
