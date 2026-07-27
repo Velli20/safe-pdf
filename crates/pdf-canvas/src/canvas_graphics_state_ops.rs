@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use pdf_content_stream_operators::pdf_operator_backend::GraphicsStateOps;
-use pdf_graphics::{DashPattern, LineCap, LineJoin, transform::Transform};
+use pdf_graphics::{DashPattern, LineCap, LineJoin, MaskMode, transform::Transform};
 use pdf_resources::{
     external_graphics_state::ExternalGraphicsStateKey, resource::Resource, xobject::XObject,
 };
@@ -135,6 +135,10 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                 ExternalGraphicsStateKey::SoftMask(smask) => {
                     // Handle the `/SMask` entry from an `ExtGState` dictionary.
                     if let Some(smask) = smask.as_ref() {
+                        if matches!(&smask.mask_type, MaskMode::Unknown(_)) {
+                            continue;
+                        }
+
                         if let XObject::Image(_) = &smask.shape {
                             return Err(PdfCanvasError::UnsupportedFeature(
                                 "SoftMask with Image shape".into(),
@@ -166,11 +170,15 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
 
                             // Enable the mask on the main canvas. Subsequent drawing operations
                             // will be modulated by this mask.
-                            self.canvas
-                                .begin_mask_layer(&arc, &transform, smask.mask_type)?;
+                            self.canvas.begin_mask_layer(
+                                &arc,
+                                &transform,
+                                smask.mask_type.clone(),
+                            )?;
 
                             // Store the mask in the current canvas state to be used until it's finished.
-                            self.mask = Some((Arc::clone(&arc), smask.mask_type, transform));
+                            self.mask =
+                                Some((Arc::clone(&arc), smask.mask_type.clone(), transform));
                         }
                     } else if let Some((mask, mask_type, transform)) = self.mask.take() {
                         // This branch handles the case where `/SMask` is set to `/None` in the `ExtGState`,

@@ -3,6 +3,7 @@ pub mod blend_mode;
 mod bounds_accumulator;
 pub mod color;
 pub mod dash_pattern;
+pub mod mask_mode;
 pub mod pdf_path;
 pub mod point;
 pub mod rect;
@@ -11,6 +12,7 @@ pub mod transform;
 pub use blend_mode::BlendMode;
 pub use bounds_accumulator::BoundsAccumulator;
 pub use dash_pattern::DashPattern;
+pub use mask_mode::MaskMode;
 use num_derive::FromPrimitive;
 
 /// Specifies the shape to be used at the end of open subpaths when they are stroked.
@@ -68,15 +70,6 @@ pub enum TextRenderingMode {
     StrokeClip,
     FillStrokeClip,
     Clip,
-}
-
-/// Specifies the mode for applying a soft mask in PDF graphics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MaskMode {
-    /// The soft mask is applied to the alpha channel only.
-    Alpha,
-    /// The soft mask is applied to the luminosity channel.
-    Luminosity,
 }
 
 /// Represents the pixel format of image data in PDF graphics.

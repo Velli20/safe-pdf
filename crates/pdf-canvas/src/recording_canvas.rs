@@ -163,14 +163,14 @@ impl RecordingCanvas {
                     mask_mode,
                     mask,
                 } => {
-                    backend.begin_mask_layer(mask, transform, *mask_mode)?;
+                    backend.begin_mask_layer(mask, transform, mask_mode.clone())?;
                 }
                 EndMaskLayer {
                     mask,
                     transform,
                     mask_mode,
                 } => {
-                    backend.end_mask_layer(mask, transform, *mask_mode)?;
+                    backend.end_mask_layer(mask, transform, mask_mode.clone())?;
                 }
             }
         }

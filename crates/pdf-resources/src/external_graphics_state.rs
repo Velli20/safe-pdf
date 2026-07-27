@@ -149,17 +149,6 @@ fn invalid_ext_gstate_entry_value(entry: &str, reason: impl Into<String>) -> Pdf
     }
 }
 
-fn parse_mask_mode(value: &str) -> Result<MaskMode, PdfPagesError> {
-    match value {
-        "Luminosity" => Ok(MaskMode::Luminosity),
-        "Alpha" => Ok(MaskMode::Alpha),
-        other => Err(invalid_ext_gstate_entry_value(
-            "SMask/S",
-            format!("unsupported soft mask mode '{other}' (expected 'Alpha' or 'Luminosity')"),
-        )),
-    }
-}
-
 fn parse_dash_pattern(
     key_name: &str,
     value: &ObjectVariant,
@@ -239,7 +228,7 @@ fn parse_soft_mask(
 ) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
     let smask = match value {
         ObjectVariant::Dictionary(dict) => {
-            let mask_type = parse_mask_mode(dict.required_str("S", objects)?)?;
+            let mask_type = MaskMode::from(dict.required_str("S", objects)?);
 
             // Parse the "G" key for the `XObject`
             let content = dict.get_or_err("G")?;
