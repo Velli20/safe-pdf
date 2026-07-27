@@ -6,7 +6,6 @@ use pdf_object::{
 };
 use pdf_resources::{
     error::PdfPagesError,
-    media_box::MediaBox,
     object_reader::{ReadCycleTracker, ReadFromDictionary},
     resource_cache::ResourceCache,
     resources::Resources,
@@ -41,7 +40,7 @@ impl ReadFromDictionary for PdfPages {
         let resources = Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?;
 
         // Read the inheritable `/MediaBox` from this /Pages node (ISO 32000-1 §7.7.3.4).
-        let media_box = MediaBox::from_dictionary(dictionary, objects)?;
+        let media_box = dictionary.optional_media_box(objects)?;
 
         // Iterate over each entry in the `/Kids` array.
         for value in kids_array {

@@ -2,7 +2,6 @@ pub mod color_stops;
 pub mod error;
 pub mod external_graphics_state;
 pub mod form;
-pub mod media_box;
 pub mod pattern;
 pub mod resources;
 pub mod xobject;

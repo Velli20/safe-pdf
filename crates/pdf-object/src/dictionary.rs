@@ -101,6 +101,19 @@ impl Dictionary {
             .map(Rect::from)
     }
 
+    /// Reads the optional `/MediaBox` entry as a rectangle.
+    ///
+    /// Missing entries and explicit PDF `null` values are treated as absent.
+    /// The coordinates are returned in their original order.
+    pub fn optional_media_box(
+        &self,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Option<Rect>, ObjectError> {
+        Ok(self
+            .optional_array_of::<f32, 4>("MediaBox", objects)?
+            .map(Rect::from))
+    }
+
     /// Reads the optional `/Matrix` entry as an affine transform.
     ///
     /// Missing entries and explicit PDF `null` values are treated as absent.
@@ -268,6 +281,75 @@ mod tests {
         let error = dictionary
             .required_bbox(&PassthroughResolver)
             .expect_err("bounding box must contain four numbers");
+
+        assert_eq!(
+            error,
+            ObjectError::InvalidArrayLength {
+                expected: 4,
+                found: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn optional_media_box_parses_rectangle() {
+        let dictionary = dictionary_with(
+            "MediaBox",
+            ObjectVariant::Array(vec![
+                ObjectVariant::Integer(10),
+                ObjectVariant::Integer(20),
+                ObjectVariant::Integer(210),
+                ObjectVariant::Integer(320),
+            ]),
+        );
+
+        let media_box = dictionary
+            .optional_media_box(&PassthroughResolver)
+            .expect("media box parses");
+
+        assert_eq!(
+            media_box,
+            Some(Rect {
+                left: 10.0,
+                top: 20.0,
+                right: 210.0,
+                bottom: 320.0,
+            })
+        );
+    }
+
+    #[test]
+    fn optional_media_box_returns_none_for_missing_or_null_entry() {
+        let missing = Dictionary::new(BTreeMap::new());
+        let null = dictionary_with("MediaBox", ObjectVariant::Null);
+
+        assert_eq!(
+            missing
+                .optional_media_box(&PassthroughResolver)
+                .expect("missing media box is optional"),
+            None
+        );
+        assert_eq!(
+            null.optional_media_box(&PassthroughResolver)
+                .expect("null media box is optional"),
+            None
+        );
+    }
+
+    #[test]
+    fn optional_media_box_propagates_invalid_array_length() {
+        let dictionary = dictionary_with(
+            "MediaBox",
+            ObjectVariant::Array(vec![
+                ObjectVariant::Integer(10),
+                ObjectVariant::Integer(20),
+                ObjectVariant::Integer(210),
+            ]),
+        );
+
+        let error = dictionary
+            .optional_media_box(&PassthroughResolver)
+            .expect_err("media box must contain four numbers");
 
         assert_eq!(
             error,

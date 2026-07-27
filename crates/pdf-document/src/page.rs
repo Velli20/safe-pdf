@@ -3,8 +3,8 @@ use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_graphics::rect::Rect;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 use pdf_resources::{
-    error::PdfPagesError, media_box::MediaBox, object_reader::ReadCycleTracker,
-    resource_cache::ResourceCache, resources::Resources,
+    error::PdfPagesError, object_reader::ReadCycleTracker, resource_cache::ResourceCache,
+    resources::Resources,
 };
 
 /// Represents a single page in a PDF document.
@@ -39,7 +39,7 @@ impl PdfPage {
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, PdfPagesError> {
         let contents = ContentStream::from_dictionary(dictionary, objects, id_allocator)?;
-        let media_box = MediaBox::from_dictionary(dictionary, objects)?;
+        let media_box = dictionary.optional_media_box(objects)?;
         let resources = Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?;
 
         let annotations = Annotation::from_page_dictionary(
