@@ -350,8 +350,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     )
                 };
 
-                let filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool)> = match paint_type
-                {
+                let filter: Option<&mut dyn FnMut(&PdfOperatorVariant) -> bool> = match paint_type {
                     PaintType::Colored => None,
                     PaintType::Uncolored => Some(&mut uncolored_filter),
                 };

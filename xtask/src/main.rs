@@ -132,6 +132,8 @@ fn build_emscripten(
     let emsdk_path = get_emsdk_path(emsdk_override)?;
 
     // Set EMCC_CFLAGS
+    // Keep setjmp/longjmp on the JavaScript ABI used by rust-skia's
+    // precompiled Emscripten libraries.
     let emcc_cflags = [
         "--no-entry",
         "-sASSERTIONS=1",
@@ -140,6 +142,7 @@ fn build_emscripten(
         "-sENVIRONMENT=web",
         "-sERROR_ON_UNDEFINED_SYMBOLS=0",
         "-sMAX_WEBGL_VERSION=2",
+        "-sSUPPORT_LONGJMP=emscripten",
     ]
     .join(" ");
 
@@ -161,6 +164,7 @@ fn build_emscripten(
         "-C link-args=-sINITIAL_MEMORY=134217728",
         "-C link-args=-sSTACK_SIZE=2097152",
         "-C link-args=-sALLOW_MEMORY_GROWTH=1",
+        "-C link-args=-sSUPPORT_LONGJMP=emscripten",
     ]
     .join(" ");
 
@@ -206,7 +210,7 @@ fn build_emscripten(
         .context("Failed to execute cargo build")?;
 
     if !status.success() {
-        bail!("Cargo build failed with status: {}", status);
+        bail!("Cargo build failed with status: {status}");
     }
 
     // Copy artifacts
@@ -289,7 +293,7 @@ fn copy_artifacts(from: &Path, to: &Path) -> Result<()> {
 
         fs::copy(&src, &dst)
             .with_context(|| format!("Failed to copy {} to {}", src.display(), dst.display()))?;
-        println!("   ✓ {}", artifact);
+        println!("   ✓ {artifact}");
     }
 
     Ok(())
@@ -317,7 +321,7 @@ fn serve_examples(port: u16) -> Result<()> {
     let web_dir = root.join("examples").join("web");
 
     println!();
-    println!("🌐 Starting dev server at http://localhost:{}", port);
+    println!("🌐 Starting dev server at http://localhost:{port}");
     println!("   Press Ctrl+C to stop");
     println!();
 
@@ -332,7 +336,7 @@ fn serve_examples(port: u16) -> Result<()> {
         .context("Failed to start HTTP server. Make sure Python 3 is installed.")?;
 
     if !status.success() {
-        bail!("HTTP server exited with status: {}", status);
+        bail!("HTTP server exited with status: {status}");
     }
 
     Ok(())
@@ -364,7 +368,7 @@ fn clean() -> Result<()> {
         if path.exists() {
             fs::remove_file(&path)
                 .with_context(|| format!("Failed to remove {}", path.display()))?;
-            println!("   ✓ Removed examples/web/dist/{}", artifact);
+            println!("   ✓ Removed examples/web/dist/{artifact}");
         }
     }
 
@@ -375,7 +379,7 @@ fn clean() -> Result<()> {
         if path.exists() {
             fs::remove_file(&path)
                 .with_context(|| format!("Failed to remove {}", path.display()))?;
-            println!("   ✓ Removed examples/{}", artifact);
+            println!("   ✓ Removed examples/{artifact}");
         }
     }
 
@@ -406,7 +410,7 @@ fn generate_cmaps(source_dir: &Path, output: &Path) -> Result<()> {
         .context("Failed to execute pdf-cmap CMap generator")?;
 
     if !status.success() {
-        bail!("pdf-cmap CMap generator failed with status: {}", status);
+        bail!("pdf-cmap CMap generator failed with status: {status}");
     }
 
     Ok(())

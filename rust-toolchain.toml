@@ -1,4 +1,5 @@
 [toolchain]
-channel = "1.89.0"
+# rust-skia 0.91's Emscripten binaries use the pre-1.89 JavaScript exception ABI.
+channel = "1.88"
 components = ["clippy", "rustfmt"]
 profile = "minimal"

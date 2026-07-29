@@ -319,7 +319,7 @@ impl<'a> PdfParser<'a> {
             PdfToken::LeftParenthesis => ObjectVariant::LiteralString(self.parse_literal_string()?),
             token => {
                 return Err(ParserError::UnexpectedTokenAt {
-                    token: format!("{:?}", token),
+                    token: format!("{token:?}"),
                     position: self.tokenizer.position,
                 });
             }
