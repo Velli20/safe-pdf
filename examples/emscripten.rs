@@ -144,7 +144,7 @@ fn with_text_layout<R>(
                 let layout = match renderer.text_layout(page_index, width as f32, height as f32) {
                     Ok(layout) => layout,
                     Err(e) => {
-                        eprintln!("Text layout error: {:?}", e);
+                        eprintln!("Text layout error: {e:?}");
                         return None;
                     }
                 };
@@ -213,7 +213,7 @@ pub unsafe extern "C" fn sk_load_pdf(data_ptr: *const u8, data_len: usize) -> i3
             0
         }
         Err(e) => {
-            eprintln!("Failed to parse PDF: {:?}", e);
+            eprintln!("Failed to parse PDF: {e:?}");
             -1
         }
     }
@@ -301,7 +301,7 @@ pub extern "C" fn sk_render_page(width: i32, height: i32, page_index: usize) -> 
                 match render_page_cached(renderer, page_index, &mut cache, &mut skia_backend) {
                     Ok(()) => 0,
                     Err(e) => {
-                        eprintln!("Render error: {:?}", e);
+                        eprintln!("Render error: {e:?}");
                         -3
                     }
                 }

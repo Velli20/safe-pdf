@@ -78,7 +78,7 @@ impl std::fmt::Display for EncryptionVersion {
             EncryptionVersion::V4 => 4,
             EncryptionVersion::V5 => 5,
         };
-        write!(f, "{}", version_num)
+        write!(f, "{version_num}")
     }
 }
 

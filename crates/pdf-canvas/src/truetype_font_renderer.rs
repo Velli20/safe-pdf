@@ -57,7 +57,7 @@ impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
         );
 
         if glyph_id == GlyphId::NOTDEF && !self.is_symbolic {
-            println!("Warning: No glyph found for char code {}", code);
+            println!("Warning: No glyph found for char code {code}");
         }
 
         glyph_id

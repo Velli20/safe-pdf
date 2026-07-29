@@ -201,7 +201,7 @@ impl ObjectCollection {
                 // Encode hex string as base64 for JSON compatibility
                 use std::fmt::Write;
                 let hex: String = bytes.iter().fold(String::new(), |mut acc, b| {
-                    let _ = write!(acc, "{:02x}", b);
+                    let _ = write!(acc, "{b:02x}");
                     acc
                 });
                 json!({ "type": "HexString", "value": hex })

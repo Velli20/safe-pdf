@@ -152,7 +152,7 @@ fn map_operator_name_error(error: ParserError) -> PdfOperatorError {
         ParserError::UnexpectedEndOfFile => {
             PdfOperatorError::UnknownOperator("(end of input)".to_string())
         }
-        ParserError::InvalidToken(c) => PdfOperatorError::UnknownOperator(format!("{:?}", c)),
+        ParserError::InvalidToken(c) => PdfOperatorError::UnknownOperator(format!("{c:?}")),
         other => PdfOperatorError::ParserError(other),
     }
 }
