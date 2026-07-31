@@ -2,7 +2,6 @@ use pdf_object::indirect_object::IndirectObject;
 use pdf_object::object_resolver::ObjectResolver;
 use pdf_object::stream::StreamObject;
 use pdf_object::{error::ObjectError, object_variant::ObjectVariant};
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 #[cfg(feature = "json")]
@@ -86,10 +85,6 @@ impl ObjectCollection {
             }
             ObjectVariant::Stream(stream) => {
                 let data = pdf_filter::filter::decode_with_resolver(&stream, self)
-                    .map(|data| match data {
-                        Cow::Borrowed(_) => stream.shared_data(),
-                        Cow::Owned(data) => data.into(),
-                    })
                     .unwrap_or_else(|_| stream.shared_data());
                 let StreamObject {
                     object_number,

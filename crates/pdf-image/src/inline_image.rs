@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use pdf_object::{dictionary::Dictionary, object_variant::ObjectVariant};
 
@@ -6,13 +7,16 @@ use pdf_object::{dictionary::Dictionary, object_variant::ObjectVariant};
 #[derive(Debug, Clone, PartialEq)]
 pub struct InlineImage {
     dictionary: Dictionary,
-    data: Vec<u8>,
+    data: Arc<Vec<u8>>,
 }
 
 impl InlineImage {
     /// Creates a new inline image from its parsed dictionary and raw payload bytes.
-    pub fn new(dictionary: Dictionary, data: Vec<u8>) -> Self {
-        Self { dictionary, data }
+    pub fn new(dictionary: Dictionary, data: impl Into<Arc<Vec<u8>>>) -> Self {
+        Self {
+            dictionary,
+            data: data.into(),
+        }
     }
 
     /// Returns the parsed inline-image dictionary.
@@ -22,11 +26,16 @@ impl InlineImage {
 
     /// Returns the raw inline-image payload bytes.
     pub fn data(&self) -> &[u8] {
-        &self.data
+        self.data.as_slice()
     }
 
-    /// Splits the inline image into its parsed dictionary and raw payload.
-    pub fn into_parts(self) -> (Dictionary, Vec<u8>) {
+    /// Returns shared ownership of the raw inline-image payload bytes.
+    pub fn shared_data(&self) -> Arc<Vec<u8>> {
+        Arc::clone(&self.data)
+    }
+
+    /// Splits the inline image into its parsed dictionary and shared raw payload.
+    pub fn into_parts(self) -> (Dictionary, Arc<Vec<u8>>) {
         (self.dictionary, self.data)
     }
 
@@ -100,10 +109,26 @@ fn normalize_inline_image_value(key: &str, value: &ObjectVariant) -> ObjectVaria
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::sync::Arc;
 
     use pdf_object::object_variant::ObjectVariant;
 
     use super::{InlineImage, normalize_inline_image_dictionary};
+
+    #[test]
+    fn inline_image_shares_payload_data() {
+        let data = Arc::new(vec![1, 2, 3, 4]);
+        let image = InlineImage::new(
+            pdf_object::dictionary::Dictionary::new(BTreeMap::new()),
+            Arc::clone(&data),
+        );
+
+        assert!(Arc::ptr_eq(&image.shared_data(), &data));
+        assert_eq!(image.data(), data.as_slice());
+
+        let (_, payload) = image.into_parts();
+        assert!(Arc::ptr_eq(&payload, &data));
+    }
 
     #[test]
     fn normalize_inline_image_dictionary_expands_abbreviations() {

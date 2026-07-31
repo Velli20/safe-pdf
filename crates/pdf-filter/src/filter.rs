@@ -1,5 +1,5 @@
-use std::borrow::Cow;
 use std::fmt;
+use std::sync::Arc;
 
 use crate::{error::FilterError, predictor::PredictorParams};
 
@@ -260,24 +260,25 @@ impl Filter {
     }
 }
 
-/// Decodes borrowed stream data by applying the filter chain from its dictionary.
+/// Decodes stream data by applying the filter chain from its dictionary.
 ///
 /// Reads the `/Filter` entry from `dictionary` and applies each filter in order.
-/// Returns the fully decoded bytes, or `Cow::Borrowed` if no filters are present.
+/// Returns shared ownership of the fully decoded bytes.
+/// Unfiltered input retains the original shared allocation.
 ///
-/// This entry point accepts a dictionary and data slice separately so callers
+/// This entry point accepts a dictionary and shared data separately so callers
 /// such as inline-image decoders do not need to construct a temporary
 /// [`StreamObject`].
 ///
 /// # Errors
 ///
 /// Returns [`FilterError`] if any filter in the chain fails or is unsupported.
-pub fn decode_data_with_resolver<'a>(
+pub fn decode_data_with_resolver(
     dictionary: &Dictionary,
-    stream_data: &'a [u8],
+    stream_data: Arc<Vec<u8>>,
     objects: &dyn ObjectResolver,
-) -> Result<Cow<'a, [u8]>, FilterError> {
-    let mut data: Cow<'a, [u8]> = Cow::Borrowed(stream_data);
+) -> Result<Arc<Vec<u8>>, FilterError> {
+    let mut data = stream_data;
     let filters = Filter::from_dictionary(dictionary, objects)?;
 
     let Some(filters) = &filters else {
@@ -289,14 +290,14 @@ pub fn decode_data_with_resolver<'a>(
     for (filter, params) in filters.iter().zip(decode_params.iter()) {
         match filter {
             Filter::FlateDecode => {
-                let decoded = Filter::decode_flate(&data)?;
+                let decoded = Filter::decode_flate(data.as_slice())?;
                 let decoded = match params {
                     DecodeParms::Flate { predictor } if !predictor.is_none() => {
                         crate::predictor::apply_predictor(&decoded, predictor)?
                     }
                     _ => decoded,
                 };
-                data = Cow::Owned(decoded);
+                data = Arc::new(decoded);
             }
             Filter::LZWDecode => {
                 let (early_change, predictor) = match params {
@@ -306,32 +307,32 @@ pub fn decode_data_with_resolver<'a>(
                     } => (*early_change, Some(predictor)),
                     _ => (true, None),
                 };
-                let decoded = crate::lzw::decode(&data, early_change)?;
+                let decoded = crate::lzw::decode(data.as_slice(), early_change)?;
                 let decoded = match predictor {
                     Some(p) if !p.is_none() => crate::predictor::apply_predictor(&decoded, p)?,
                     _ => decoded,
                 };
-                data = Cow::Owned(decoded);
+                data = Arc::new(decoded);
             }
             Filter::JPXDecode => {
-                let decoded = Filter::decode_jpeg2000(&data)?;
-                data = Cow::Owned(decoded);
+                let decoded = Filter::decode_jpeg2000(data.as_slice())?;
+                data = Arc::new(decoded);
             }
             Filter::DCTDecode => {
-                let decoded = Filter::decode_jpeg_baseline(&data)?;
-                data = Cow::Owned(decoded);
+                let decoded = Filter::decode_jpeg_baseline(data.as_slice())?;
+                data = Arc::new(decoded);
             }
             Filter::ASCII85Decode => {
-                let decoded = crate::ascii85::decode_ascii85(&data)?;
-                data = Cow::Owned(decoded);
+                let decoded = crate::ascii85::decode_ascii85(data.as_slice())?;
+                data = Arc::new(decoded);
             }
             Filter::ASCIIHexDecode => {
-                let decoded = crate::asciihex::decode_ascii_hex(&data)?;
-                data = Cow::Owned(decoded);
+                let decoded = crate::asciihex::decode_ascii_hex(data.as_slice())?;
+                data = Arc::new(decoded);
             }
             Filter::RunLengthDecode => {
-                let decoded = crate::runlength::decode_run_length(&data)?;
-                data = Cow::Owned(decoded);
+                let decoded = crate::runlength::decode_run_length(data.as_slice())?;
+                data = Arc::new(decoded);
             }
             Filter::JBIG2Decode => {
                 let (width, height) = resolve_jbig2_dimensions(dictionary, objects)?;
@@ -339,16 +340,16 @@ pub fn decode_data_with_resolver<'a>(
                     DecodeParms::Jbig2 { globals } => globals.as_deref(),
                     _ => None,
                 };
-                let decoded = pdf_jbig2::decode(&data, width, height, globals)?;
-                data = Cow::Owned(decoded);
+                let decoded = pdf_jbig2::decode(data.as_slice(), width, height, globals)?;
+                data = Arc::new(decoded);
             }
             Filter::CCITTFaxDecode => {
                 let ccitt_params = match params {
                     DecodeParms::CcittFax(p) => p,
                     _ => &CCITTFaxParams::DEFAULT,
                 };
-                let decoded = pdf_ccitt::decode(&data, ccitt_params)?;
-                data = Cow::Owned(decoded);
+                let decoded = pdf_ccitt::decode(data.as_slice(), ccitt_params)?;
+                data = Arc::new(decoded);
             }
             Filter::Unsupported(name) => {
                 return Err(FilterError::UnsupportedFilter(name.clone()));
@@ -360,24 +361,24 @@ pub fn decode_data_with_resolver<'a>(
 
 /// Decodes a [`StreamObject`] by applying its full filter chain.
 ///
-/// This compatibility entry point forwards the stream's dictionary and raw
-/// data to [`decode_data_with_resolver`].
+/// Unfiltered data shares the stream's existing allocation. Filtered data is
+/// returned in a newly allocated shared buffer.
 ///
 /// # Errors
 ///
 /// Returns [`FilterError`] if any filter in the chain fails or is unsupported.
-pub fn decode_with_resolver<'a>(
-    stream: &'a StreamObject,
+pub fn decode_with_resolver(
+    stream: &StreamObject,
     objects: &dyn ObjectResolver,
-) -> Result<Cow<'a, [u8]>, FilterError> {
-    decode_data_with_resolver(&stream.dictionary, stream.raw_data(), objects)
+) -> Result<Arc<Vec<u8>>, FilterError> {
+    decode_data_with_resolver(&stream.dictionary, stream.shared_data(), objects)
 }
 
 /// Decodes a [`StreamObject`] by applying its full filter chain.
 ///
 /// This convenience wrapper uses a passthrough resolver, so it only supports
 /// direct `/Filter` and `/DecodeParms` values.
-pub fn decode(stream: &StreamObject) -> Result<Cow<'_, [u8]>, FilterError> {
+pub fn decode(stream: &StreamObject) -> Result<Arc<Vec<u8>>, FilterError> {
     let objects = PassthroughResolver;
     decode_with_resolver(stream, &objects)
 }
@@ -550,31 +551,49 @@ mod tests {
     }
 
     #[test]
-    fn decode_data_without_filters_borrows_input() {
+    fn decode_data_without_filters_preserves_shared_data() {
         let dictionary = Dictionary::new(BTreeMap::new());
-        let data = b"borrowed stream data";
+        let data = Arc::new(b"stream data".to_vec());
 
-        let decoded = decode_data_with_resolver(&dictionary, data, &PassthroughResolver)
-            .expect("unfiltered data should decode");
+        let decoded =
+            decode_data_with_resolver(&dictionary, Arc::clone(&data), &PassthroughResolver)
+                .expect("unfiltered data should decode");
 
-        assert!(matches!(&decoded, Cow::Borrowed(_)));
-        assert_eq!(decoded.as_ref().as_ptr(), data.as_ptr());
-        assert_eq!(decoded.as_ref(), data);
+        assert!(Arc::ptr_eq(&decoded, &data));
+        assert_eq!(decoded.as_slice(), b"stream data");
     }
 
     #[test]
-    fn decode_data_with_filter_returns_decoded_owned_data() {
+    fn decode_data_with_filter_returns_shared_decoded_data() {
         let dictionary = Dictionary::new(BTreeMap::from([(
             "Filter".to_string(),
             ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
         )]));
 
+        let encoded = Arc::new(b"48 65 6c 6c 6f>".to_vec());
         let decoded =
-            decode_data_with_resolver(&dictionary, b"48 65 6c 6c 6f>", &PassthroughResolver)
+            decode_data_with_resolver(&dictionary, Arc::clone(&encoded), &PassthroughResolver)
                 .expect("filtered data should decode");
 
-        assert!(matches!(&decoded, Cow::Owned(_)));
-        assert_eq!(decoded.as_ref(), b"Hello");
+        assert_eq!(Arc::strong_count(&decoded), 1);
+        assert!(!Arc::ptr_eq(&decoded, &encoded));
+        assert_eq!(decoded.as_slice(), b"Hello");
+    }
+
+    #[test]
+    fn decode_unfiltered_stream_shares_data() {
+        let stream = StreamObject::new(
+            1,
+            0,
+            Box::new(Dictionary::new(BTreeMap::new())),
+            b"shared stream data".to_vec(),
+        );
+
+        let decoded = decode_with_resolver(&stream, &PassthroughResolver)
+            .expect("unfiltered data should decode");
+
+        assert!(Arc::ptr_eq(&decoded, &stream.data));
+        assert_eq!(decoded.as_slice(), b"shared stream data");
     }
 
     #[test]

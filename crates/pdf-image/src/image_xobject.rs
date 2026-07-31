@@ -80,7 +80,7 @@ impl ImageXObject {
         soft_mask: Option<ImageXObject>,
     ) -> Result<Self, PdfImageError> {
         let dictionary = image.normalized_dictionary();
-        let decoded = decode_data_with_resolver(&dictionary, image.data(), objects)?;
+        let decoded = decode_data_with_resolver(&dictionary, image.shared_data(), objects)?;
 
         Self::decode_normalized_image(&dictionary, decoded.as_ref(), objects, soft_mask)
     }
