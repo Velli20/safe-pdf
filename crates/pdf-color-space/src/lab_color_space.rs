@@ -3,7 +3,9 @@ use pdf_object::{
     object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
-use crate::{color_space::ColorSpace, error::ColorSpaceError};
+use crate::{
+    cie_color_space::CieColorSpaceParams, color_space::ColorSpace, error::ColorSpaceError,
+};
 
 /// CIE 1976 L*a*b* color space.
 ///
@@ -34,10 +36,10 @@ pub(crate) fn parse_lab_color_space(
         });
     };
     let dict = dict_obj.try_dictionary(objects)?;
-    let white_point = dict.required_array_of::<f32, 3>("WhitePoint", objects)?;
-    let black_point = dict
-        .optional_array_of::<f32, 3>("BlackPoint", objects)?
-        .unwrap_or([0.0, 0.0, 0.0]);
+    let CieColorSpaceParams {
+        white_point,
+        black_point,
+    } = CieColorSpaceParams::from_dictionary(dict, objects)?;
     let range = dict
         .optional_array_of::<f32, 4>("Range", objects)?
         .unwrap_or([-100.0, 100.0, -100.0, 100.0]);

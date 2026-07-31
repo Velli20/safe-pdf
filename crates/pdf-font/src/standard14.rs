@@ -3,7 +3,7 @@
 /// The PDF spec guarantees that viewers can render these 14 Type 1 fonts
 /// without an embedded font program.  When a document references one by
 /// name alone we substitute a metrically-similar bundled TrueType font.
-use std::{borrow::Cow, fmt};
+use std::fmt;
 
 use crate::flags::FontFlags;
 
@@ -170,8 +170,8 @@ impl Standard14Font {
     }
 
     /// Return bundled TrueType font bytes that serve as a visual substitute.
-    pub fn fallback_font_bytes(&self) -> Cow<'static, [u8]> {
-        let bytes: &'static [u8] = match self {
+    pub fn fallback_font_bytes(&self) -> &'static [u8] {
+        match self {
             Self::Courier => include_bytes!("../assets/RobotoMono-Regular.ttf"),
             Self::CourierBold => include_bytes!("../assets/RobotoMono-Bold.ttf"),
             Self::CourierOblique => include_bytes!("../assets/RobotoMono-Italic.ttf"),
@@ -189,8 +189,7 @@ impl Standard14Font {
             Self::TimesBold => include_bytes!("../assets/Roboto-Bold.ttf"),
             Self::TimesItalic => include_bytes!("../assets/Roboto-Italic.ttf"),
             Self::TimesBoldItalic => include_bytes!("../assets/Roboto-BoldItalic.ttf"),
-        };
-        Cow::Borrowed(bytes)
+        }
     }
 }
 

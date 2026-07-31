@@ -153,9 +153,7 @@ impl<B: CanvasBackend> TextRenderer for TrueTypeFontRenderer<'_, '_, B> {
 
 #[cfg(test)]
 mod tests {
-    use pdf_font::{
-        encoding::Encoding, flags::FontFlags, font_data::FontData, standard14::Standard14Font,
-    };
+    use pdf_font::{encoding::Encoding, flags::FontFlags, standard14::Standard14Font};
 
     use super::*;
 
@@ -234,7 +232,7 @@ mod tests {
     #[test]
     fn unmappable_simple_truetype_returns_notdef() {
         let font = Font::TrueType(pdf_font::true_type_font::TrueTypeFont {
-            font_file: FontData::Owned(vec![]),
+            font_file: Vec::new().into(),
             widths: None,
             encoding: None,
             to_unicode: None,
