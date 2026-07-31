@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use pdf_cmap::ToUnicodeCMap;
 use pdf_object::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
@@ -17,7 +15,7 @@ use crate::{
 };
 
 pub(crate) struct FallbackFontProgram {
-    pub(crate) font_file: Cow<'static, [u8]>,
+    pub(crate) font_file: &'static [u8],
     pub(crate) standard14: Standard14Font,
     pub(crate) flags: FontFlags,
 }
@@ -120,8 +118,8 @@ fn fallback_program(
     standard14: Standard14Font,
     is_cjk: bool,
 ) -> FallbackFontProgram {
-    let font_file: Cow<'static, [u8]> = if is_cjk {
-        Cow::Borrowed(include_bytes!("../assets/NotoSansCJKjp-Regular.otf").as_slice())
+    let font_file = if is_cjk {
+        include_bytes!("../assets/NotoSansCJKjp-Regular.otf").as_slice()
     } else {
         standard14.fallback_font_bytes()
     };

@@ -346,7 +346,7 @@ currentfile eexec
         let expected = build_cff_font(&cff_bytes).unwrap();
         assert_eq!(format, Type1FontProgramFormat::OpenTypeCff);
         assert_eq!(parsed.as_ref(), expected.as_slice());
-        assert!(matches!(parsed, FontData::Owned(_)));
+        assert!(matches!(parsed, FontData::Shared(_)));
     }
 
     #[test]

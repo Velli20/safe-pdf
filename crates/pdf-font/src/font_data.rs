@@ -1,12 +1,10 @@
-use std::{borrow::Cow, ops::Deref, sync::Arc};
+use std::{ops::Deref, sync::Arc};
 
 /// Storage for a parsed or synthesized font program.
 #[derive(Debug, Clone)]
 pub enum FontData {
     /// Bundled font bytes with static storage duration.
-    Borrowed(&'static [u8]),
-    /// Independently owned font bytes.
-    Owned(Vec<u8>),
+    Static(&'static [u8]),
     /// Font bytes shared with a decoded PDF stream.
     Shared(SharedFontData),
 }
@@ -39,8 +37,7 @@ impl Deref for FontData {
 
     fn deref(&self) -> &Self::Target {
         match self {
-            Self::Borrowed(data) => data,
-            Self::Owned(data) => data.as_slice(),
+            Self::Static(data) => data,
             Self::Shared(data) => data.data.get(..data.visible_len).unwrap_or_default(),
         }
     }
@@ -54,22 +51,19 @@ impl AsRef<[u8]> for FontData {
 
 impl From<Vec<u8>> for FontData {
     fn from(data: Vec<u8>) -> Self {
-        Self::Owned(data)
+        Self::shared(Arc::new(data))
+    }
+}
+
+impl From<&'static [u8]> for FontData {
+    fn from(data: &'static [u8]) -> Self {
+        Self::Static(data)
     }
 }
 
 impl From<Arc<Vec<u8>>> for FontData {
     fn from(data: Arc<Vec<u8>>) -> Self {
         Self::shared(data)
-    }
-}
-
-impl From<Cow<'static, [u8]>> for FontData {
-    fn from(data: Cow<'static, [u8]>) -> Self {
-        match data {
-            Cow::Borrowed(data) => Self::Borrowed(data),
-            Cow::Owned(data) => Self::Owned(data),
-        }
     }
 }
 
@@ -88,5 +82,16 @@ mod tests {
 
         let full = FontData::shared_prefix(data, usize::MAX);
         assert_eq!(full.as_ref(), [1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn vec_conversion_reuses_allocation() {
+        let data = vec![1, 2, 3, 4];
+        let original = data.as_ptr();
+
+        let font_data = FontData::from(data);
+
+        assert!(matches!(&font_data, FontData::Shared(_)));
+        assert_eq!(font_data.as_ptr(), original);
     }
 }

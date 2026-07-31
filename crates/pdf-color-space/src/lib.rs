@@ -1,5 +1,6 @@
 pub mod cal_gray_color_space;
 pub mod cal_rgb_color_space;
+mod cie_color_space;
 pub mod color_space;
 pub mod color_space_reader;
 pub mod device_n_color_space;

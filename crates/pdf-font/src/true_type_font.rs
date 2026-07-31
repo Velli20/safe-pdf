@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap};
+use std::collections::HashMap;
 
 use pdf_cmap::ToUnicodeCMap;
 use pdf_object::{
@@ -108,11 +108,11 @@ impl TrueTypeFont {
     /// Creates a minimal `TrueTypeFont` from raw font bytes with no
     /// widths or ToUnicode map.
     ///
-    /// Used for Standard 14 fallback fonts where the bundled bytes are
-    /// `Cow::Borrowed` (zero-copy from `include_bytes!`). Those fallback fonts
-    /// behave like simple Type 1 fonts, so they default to StandardEncoding
-    /// when the PDF omitted an explicit `/Encoding`.
-    pub fn from_bytes(font_file: Cow<'static, [u8]>, standard14: Option<Standard14Font>) -> Self {
+    /// Used for Standard 14 fallback fonts where the bundled bytes have static
+    /// storage duration. Those fallback fonts behave like simple Type 1 fonts,
+    /// so they default to StandardEncoding when the PDF omitted an explicit
+    /// `/Encoding`.
+    pub fn from_bytes(font_file: &'static [u8], standard14: Option<Standard14Font>) -> Self {
         Self {
             font_file: font_file.into(),
             widths: None,
@@ -232,12 +232,12 @@ mod tests {
     }
 
     #[test]
-    fn bundled_font_program_borrows_static_bytes() {
+    fn bundled_font_program_uses_static_bytes() {
         let fallback = Standard14Font::Helvetica.fallback_font_bytes();
         let fallback_bytes = fallback.as_ptr();
         let font = TrueTypeFont::from_bytes(fallback, Some(Standard14Font::Helvetica));
 
-        assert!(matches!(&font.font_file, FontData::Borrowed(_)));
+        assert!(matches!(&font.font_file, FontData::Static(_)));
         assert_eq!(font.font_file.as_ptr(), fallback_bytes);
     }
 

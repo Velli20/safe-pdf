@@ -3,7 +3,9 @@ use pdf_object::object_lookup::ObjectLookupExt;
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
 use crate::cal_gray_color_space::xyz_to_srgb;
-use crate::{color_space::ColorSpace, error::ColorSpaceError};
+use crate::{
+    cie_color_space::CieColorSpaceParams, color_space::ColorSpace, error::ColorSpaceError,
+};
 
 /// Calibrated RGB color space.
 ///
@@ -35,10 +37,10 @@ pub(crate) fn parse_cal_rgb_color_space(
         });
     };
     let dict = dict_obj.try_dictionary(objects)?;
-    let white_point = dict.required_array_of::<f32, 3>("WhitePoint", objects)?;
-    let black_point = dict
-        .optional_array_of::<f32, 3>("BlackPoint", objects)?
-        .unwrap_or_default();
+    let CieColorSpaceParams {
+        white_point,
+        black_point,
+    } = CieColorSpaceParams::from_dictionary(dict, objects)?;
     let gamma = dict
         .optional_array_of::<f32, 3>("Gamma", objects)?
         .unwrap_or([1.0, 1.0, 1.0]);
