@@ -24,20 +24,41 @@ impl DecodedSamples {
         objects: &dyn ObjectResolver,
         metadata: &ImageMetadata,
     ) -> Result<Self, PdfImageError> {
-        if let Some(decoded_samples) = Self::decode_preconverted_jpx(raw_data, metadata) {
-            return Ok(decoded_samples);
+        let decoded_samples = if let Some(decoded_samples) =
+            Self::decode_preconverted_jpx(raw_data, metadata)
+        {
+            decoded_samples
+        } else if let Some(decoded_samples) = Self::decode_preconverted_dct(raw_data, metadata) {
+            decoded_samples
+        } else {
+            match metadata.color_space.as_ref() {
+                Some(ColorSpace::Indexed(indexed)) => {
+                    Self::decode_indexed(dictionary, raw_data, objects, metadata, indexed)
+                }
+                _ => Self::decode_direct(dictionary, raw_data, objects, metadata),
+            }?
+        };
+
+        decoded_samples.validate(metadata)?;
+        Ok(decoded_samples)
+    }
+
+    /// Ensures the decoded component stream is large enough for the declared dimensions.
+    fn validate(&self, metadata: &ImageMetadata) -> Result<(), PdfImageError> {
+        if self.num_color_components == 0 {
+            return Err(PdfImageError::InvalidColorComponentCount);
         }
 
-        if let Some(decoded_samples) = Self::decode_preconverted_dct(raw_data, metadata) {
-            return Ok(decoded_samples);
+        let num_pixels = metadata.width.saturating_mul(metadata.height);
+        let expected_bytes = num_pixels.saturating_mul(self.num_color_components);
+        if self.image_data.len() < expected_bytes {
+            return Err(PdfImageError::TruncatedImageData {
+                expected_bytes,
+                actual_bytes: self.image_data.len(),
+            });
         }
 
-        match metadata.color_space.as_ref() {
-            Some(ColorSpace::Indexed(indexed)) => {
-                Self::decode_indexed(dictionary, raw_data, objects, metadata, indexed)
-            }
-            _ => Self::decode_direct(dictionary, raw_data, objects, metadata),
-        }
+        Ok(())
     }
 
     /// Uses DCT decoder output as display samples when the JPEG decoder already converted color.
