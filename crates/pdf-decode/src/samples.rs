@@ -1,5 +1,7 @@
 //! Sample code unpacking and normalization helpers.
 
+use std::borrow::Cow;
+
 use num_traits::ToPrimitive;
 use pdf_utils::BitReader;
 
@@ -49,13 +51,14 @@ pub fn decode_sample_codes(
 
 /// Decodes packed sample codes into byte-sized sample values.
 ///
-/// Eight-bit samples use a direct copy path. Wider sample codes are decoded
-/// normally and return an error when a value cannot fit in a byte.
-pub fn decode_sample_bytes(
-    data: &[u8],
+/// Eight-bit samples borrow directly from the input. Other sample sizes are
+/// decoded into an owned buffer and return an error when a value cannot fit in
+/// a byte.
+pub fn decode_sample_bytes<'a>(
+    data: &'a [u8],
     bits_per_sample: usize,
     layout: SampleLayout,
-) -> Result<Vec<u8>, DecodeError> {
+) -> Result<Cow<'a, [u8]>, DecodeError> {
     validate_bits_per_sample(bits_per_sample)?;
 
     if bits_per_sample == 8 {
@@ -75,13 +78,14 @@ pub fn decode_sample_bytes(
                 expected_bytes: sample_count,
                 actual_bytes: data.len(),
             })?;
-        return Ok(samples.to_vec());
+        return Ok(Cow::Borrowed(samples));
     }
 
-    decode_sample_codes(data, bits_per_sample, layout)?
+    let samples = decode_sample_codes(data, bits_per_sample, layout)?
         .into_iter()
         .map(|sample| u8::try_from(sample).map_err(|_| DecodeError::InvalidSampleData))
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Cow::Owned(samples))
 }
 
 /// Decodes packed sample codes and normalizes them to the `0.0..=1.0` range.
@@ -368,14 +372,12 @@ mod tests {
 
     #[test]
     fn decode_contiguous_8_bit_sample_bytes() {
-        let samples = decode_sample_bytes(
-            &[0x12, 0x34, 0x56, 0x78],
-            8,
-            SampleLayout::Contiguous { sample_count: 3 },
-        )
-        .unwrap();
+        let data = [0x12, 0x34, 0x56, 0x78];
+        let samples =
+            decode_sample_bytes(&data, 8, SampleLayout::Contiguous { sample_count: 3 }).unwrap();
 
-        assert_eq!(samples, vec![0x12, 0x34, 0x56]);
+        assert!(matches!(samples, Cow::Borrowed(_)));
+        assert_eq!(samples.as_ref(), &data[..3]);
     }
 
     #[test]
@@ -391,7 +393,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(samples, vec![0x10, 0x20, 0x30, 0x40]);
+        assert!(matches!(samples, Cow::Borrowed(_)));
+        assert_eq!(samples.as_ref(), &[0x10, 0x20, 0x30, 0x40]);
     }
 
     #[test]
@@ -407,7 +410,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(samples, vec![1, 0, 1, 0, 1, 1]);
+        assert!(matches!(samples, Cow::Owned(_)));
+        assert_eq!(samples.as_ref(), &[1, 0, 1, 0, 1, 1]);
     }
 
     #[test]

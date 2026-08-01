@@ -1,7 +1,7 @@
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use pdf_color_space::{color_space::ColorSpace, indexed_color_space::IndexedColorSpace};
-use pdf_decode::{DecodeMap, SampleLayout, decode_sample_bytes};
+use pdf_decode::{DecodeMap, SampleLayout, decode_sample_bytes, expand_indexed_values};
 use pdf_filter::filter::{Filter, decode_data_with_resolver, decode_with_resolver};
 use pdf_graphics::PixelFormat;
 use pdf_object::{
@@ -11,7 +11,6 @@ use pdf_object::{
 
 use crate::InlineImage;
 use crate::error::PdfImageError;
-use crate::indexed::expand_indexed_values_to_components;
 
 /// Represents a PDF Image XObject, which is a self-contained raster image.
 #[derive(Debug, Clone)]
@@ -329,9 +328,10 @@ impl ImageXObject {
         let sample_codes = Self::decode_image_sample_codes(raw_data, 1, metadata)?;
         let sample_max = Self::sample_max(metadata.bits_per_component)?;
         let decode = DecodeMap::from_dictionary(dictionary, objects, 1, metadata.image_mask)?;
-        let decoded_indices = decode.apply_to_bytes(&sample_codes, sample_max, sample_max);
+        let decoded_indices = decode.apply_to_bytes(sample_codes.as_ref(), sample_max, sample_max);
         let base_components = indexed.base.num_color_components();
-        let image_data = expand_indexed_values_to_components(
+
+        let image_data = expand_indexed_values(
             &decoded_indices,
             &indexed.lookup,
             indexed.hival,
@@ -366,18 +366,18 @@ impl ImageXObject {
             stored_color_space: metadata.color_space.clone(),
             num_color_components: num_components,
             image_data: decode.apply_to_bytes(
-                &sample_codes,
+                sample_codes.as_ref(),
                 Self::sample_max(metadata.bits_per_component)?,
                 255,
             ),
         })
     }
 
-    fn decode_image_sample_codes(
-        raw_data: &[u8],
+    fn decode_image_sample_codes<'a>(
+        raw_data: &'a [u8],
         samples_per_pixel: usize,
         metadata: &ImageMetadata,
-    ) -> Result<Vec<u8>, PdfImageError> {
+    ) -> Result<Cow<'a, [u8]>, PdfImageError> {
         Ok(decode_sample_bytes(
             raw_data,
             metadata.bits_per_component,
