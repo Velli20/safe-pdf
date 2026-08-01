@@ -216,7 +216,7 @@ impl ObjectCollection {
                         (
                             k.to_string(),
                             json!({
-                                "entry_type": format!("{:?}", v.entry_type)
+                                "entry_type": format!("{v:?}")
                             }),
                         )
                     })

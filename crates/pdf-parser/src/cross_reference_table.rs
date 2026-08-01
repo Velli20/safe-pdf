@@ -1,9 +1,7 @@
 use std::collections::BTreeMap;
 
 use pdf_object::{
-    cross_reference_table::{
-        CrossReferenceEntry, CrossReferenceEntryType, CrossReferenceStatus, CrossReferenceTable,
-    },
+    cross_reference_table::{CrossReferenceEntryType, CrossReferenceStatus, CrossReferenceTable},
     object_resolver::ObjectResolver,
 };
 use pdf_tokenizer::PdfToken;
@@ -37,7 +35,7 @@ impl PdfParser<'_> {
     /// Parses the contiguous subsections that follow an `xref` keyword.
     pub(crate) fn parse_cross_reference_subsections(
         &mut self,
-    ) -> Result<BTreeMap<usize, CrossReferenceEntry>, ParserError> {
+    ) -> Result<BTreeMap<usize, CrossReferenceEntryType>, ParserError> {
         let mut entries = BTreeMap::new();
 
         loop {
@@ -60,7 +58,7 @@ impl PdfParser<'_> {
     /// Parses one xref subsection header and its declared number of entries.
     fn parse_cross_reference_subsection(
         &mut self,
-    ) -> Result<(usize, Vec<CrossReferenceEntry>), ParserError> {
+    ) -> Result<(usize, Vec<CrossReferenceEntryType>), ParserError> {
         let start_object_number = self.read_number::<usize>(true)?;
         self.skip_whitespace_and_comments();
         let entry_count = self.read_number::<usize>(true)?;
@@ -76,7 +74,7 @@ impl PdfParser<'_> {
     /// Parses a traditional xref row into its corresponding entry.
     pub(crate) fn parse_cross_reference_entry(
         &mut self,
-    ) -> Result<CrossReferenceEntry, ParserError> {
+    ) -> Result<CrossReferenceEntryType, ParserError> {
         self.skip_whitespace_and_comments();
         let field1 = self.read_number::<usize>(true)?;
         self.skip_whitespace_and_comments();
@@ -93,9 +91,9 @@ impl PdfParser<'_> {
         })?;
 
         Ok(match status {
-            CrossReferenceStatus::Normal => CrossReferenceEntry::new_normal(field1, field2),
+            CrossReferenceStatus::Normal => CrossReferenceEntryType::new_normal(field1, field2),
             CrossReferenceStatus::Free | CrossReferenceStatus::Old => {
-                CrossReferenceEntry::new_free(field1, field2)
+                CrossReferenceEntryType::new_free(field1, field2)
             }
         })
     }
@@ -105,8 +103,8 @@ impl PdfParser<'_> {
 /// leading free-object-zero pattern encountered in some PDFs.
 fn normalize_xref_subsection_entries(
     start_object_number: usize,
-    entries: Vec<CrossReferenceEntry>,
-) -> Vec<(usize, CrossReferenceEntry)> {
+    entries: Vec<CrossReferenceEntryType>,
+) -> Vec<(usize, CrossReferenceEntryType)> {
     let has_leading_free_object_zero = start_object_number > 0
         && entries
             .first()
@@ -132,14 +130,12 @@ fn normalize_xref_subsection_entries(
 
 /// Returns whether an entry is the object-zero free entry incorrectly included
 /// at the start of a non-zero xref subsection.
-fn is_malformed_leading_free_object_zero(entry: &CrossReferenceEntry) -> bool {
+fn is_malformed_leading_free_object_zero(entry: &CrossReferenceEntryType) -> bool {
     matches!(
         entry,
-        CrossReferenceEntry {
-            entry_type: CrossReferenceEntryType::Free {
-                next_free_object: 0,
-                generation_number: 65_535,
-            }
+        CrossReferenceEntryType::Free {
+            next_free_object: 0,
+            generation_number: 65_535,
         }
     )
 }
@@ -271,8 +267,8 @@ mod tests {
     #[test]
     fn test_normalize_xref_subsection_entries_uses_declared_range() {
         let entries = vec![
-            CrossReferenceEntry::new_normal(17, 0),
-            CrossReferenceEntry::new_normal(81, 0),
+            CrossReferenceEntryType::new_normal(17, 0),
+            CrossReferenceEntryType::new_normal(81, 0),
         ];
 
         let normalized = normalize_xref_subsection_entries(4, entries);
@@ -284,9 +280,9 @@ mod tests {
     #[test]
     fn test_normalize_xref_subsection_entries_handles_leading_free_object_zero() {
         let entries = vec![
-            CrossReferenceEntry::new_free(0, 65_535),
-            CrossReferenceEntry::new_normal(17, 0),
-            CrossReferenceEntry::new_normal(81, 0),
+            CrossReferenceEntryType::new_free(0, 65_535),
+            CrossReferenceEntryType::new_normal(17, 0),
+            CrossReferenceEntryType::new_normal(81, 0),
         ];
 
         let normalized = normalize_xref_subsection_entries(4, entries);

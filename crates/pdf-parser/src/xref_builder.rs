@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use pdf_object::{
-    cross_reference_table::{CrossReferenceEntry, CrossReferenceEntryType, CrossReferenceTable},
+    cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
     object_resolver::PassthroughResolver,
     object_variant::ObjectVariant,
     stream::StreamObject,
@@ -158,8 +158,8 @@ impl<'parser, 'input> XrefBuilder<'parser, 'input> {
 
     /// Merges a parsed subsection into the accumulated object map.
     fn merge_entries(
-        entries: &mut BTreeMap<usize, CrossReferenceEntry>,
-        section_entries: BTreeMap<usize, CrossReferenceEntry>,
+        entries: &mut BTreeMap<usize, CrossReferenceEntryType>,
+        section_entries: BTreeMap<usize, CrossReferenceEntryType>,
     ) {
         for (object_number, entry) in section_entries {
             let _ = entries.entry(object_number).or_insert(entry);
@@ -293,7 +293,7 @@ impl<'parser, 'input> XrefBuilder<'parser, 'input> {
     /// Finishes malformed parsing by reading the trailer and assembling the table.
     fn finish_malformed_section(
         &mut self,
-        entries: BTreeMap<usize, CrossReferenceEntry>,
+        entries: BTreeMap<usize, CrossReferenceEntryType>,
     ) -> Result<ParsedXrefSection, ParserError> {
         if entries.is_empty() {
             return Err(self.invalid_xref_error());
@@ -307,7 +307,7 @@ impl<'parser, 'input> XrefBuilder<'parser, 'input> {
     }
 
     /// Probes a malformed row without consuming input on failure.
-    fn try_parse_malformed_entry(&mut self) -> Result<CrossReferenceEntry, ParserError> {
+    fn try_parse_malformed_entry(&mut self) -> Result<CrossReferenceEntryType, ParserError> {
         let mark = self.parser.tokenizer.position;
         let result = self.parser.parse_cross_reference_entry();
         if result.is_err() {
@@ -481,7 +481,7 @@ impl<'parser, 'input> XrefBuilder<'parser, 'input> {
             let CrossReferenceEntryType::Normal {
                 byte_offset,
                 generation_number,
-            } = &entry.entry_type
+            } = entry
             else {
                 continue;
             };
@@ -522,7 +522,9 @@ impl<'parser, 'input> XrefBuilder<'parser, 'input> {
                 });
 
             match recovered_offset {
-                Some(offset) => *entry = CrossReferenceEntry::new_normal(offset, generation_number),
+                Some(offset) => {
+                    *entry = CrossReferenceEntryType::new_normal(offset, generation_number)
+                }
                 None => invalid_entries.push(object_number),
             }
         }
@@ -587,7 +589,7 @@ impl<'parser, 'input> XrefBuilder<'parser, 'input> {
             let CrossReferenceEntryType::Normal {
                 byte_offset,
                 generation_number,
-            } = &entry.entry_type
+            } = entry
             else {
                 return true;
             };
@@ -633,7 +635,7 @@ impl PdfParser<'_> {
 
 #[cfg(test)]
 mod tests {
-    use pdf_object::cross_reference_table::CrossReferenceEntry;
+    use pdf_object::cross_reference_table::CrossReferenceEntryType;
 
     use super::*;
 
@@ -665,7 +667,7 @@ mod tests {
 
         let entry = builder.try_parse_malformed_entry().unwrap();
 
-        assert_eq!(entry, CrossReferenceEntry::new_normal(12, 34));
+        assert_eq!(entry, CrossReferenceEntryType::new_normal(12, 34));
         assert!(matches!(
             builder.parser.tokenizer.data().first().copied(),
             Some(b' ') | Some(b'\n')

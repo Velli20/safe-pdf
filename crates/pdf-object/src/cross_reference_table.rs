@@ -11,18 +11,18 @@ use crate::trailer::Trailer;
 #[derive(Debug, PartialEq, Clone)]
 pub struct CrossReferenceTable {
     /// The map of object numbers to cross-reference entries.
-    pub entries: BTreeMap<usize, CrossReferenceEntry>,
+    pub entries: BTreeMap<usize, CrossReferenceEntryType>,
     /// The trailer associated with this cross-reference table.
     pub trailer: Trailer,
 }
 
 impl CrossReferenceTable {
-    pub fn new(entries: BTreeMap<usize, CrossReferenceEntry>, trailer: Trailer) -> Self {
+    pub fn new(entries: BTreeMap<usize, CrossReferenceEntryType>, trailer: Trailer) -> Self {
         CrossReferenceTable { entries, trailer }
     }
 }
 
-/// Distinguishes the type of a cross-reference entry.
+/// Represents a cross-reference entry.
 #[derive(Debug, PartialEq, Clone)]
 pub enum CrossReferenceEntryType {
     /// Type 1: object at a byte offset in the file (traditional).
@@ -42,42 +42,34 @@ pub enum CrossReferenceEntryType {
     },
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct CrossReferenceEntry {
-    pub entry_type: CrossReferenceEntryType,
-}
-
-impl CrossReferenceEntry {
+impl CrossReferenceEntryType {
+    /// Creates a normal entry for an uncompressed object at a byte offset.
     pub fn new_normal(byte_offset: usize, generation_number: usize) -> Self {
-        CrossReferenceEntry {
-            entry_type: CrossReferenceEntryType::Normal {
-                byte_offset,
-                generation_number,
-            },
+        CrossReferenceEntryType::Normal {
+            byte_offset,
+            generation_number,
         }
     }
 
+    /// Creates an entry for an object stored within a compressed object stream.
     pub fn new_compressed(object_stream_number: usize, index_within_stream: usize) -> Self {
-        CrossReferenceEntry {
-            entry_type: CrossReferenceEntryType::Compressed {
-                object_stream_number,
-                index_within_stream,
-            },
+        CrossReferenceEntryType::Compressed {
+            object_stream_number,
+            index_within_stream,
         }
     }
 
+    /// Creates an entry for a free object.
     pub fn new_free(next_free_object: usize, generation_number: usize) -> Self {
-        CrossReferenceEntry {
-            entry_type: CrossReferenceEntryType::Free {
-                next_free_object,
-                generation_number,
-            },
+        CrossReferenceEntryType::Free {
+            next_free_object,
+            generation_number,
         }
     }
 
     /// Returns the byte offset if this is a Normal entry.
     pub fn byte_offset(&self) -> Option<usize> {
-        match &self.entry_type {
+        match self {
             CrossReferenceEntryType::Normal { byte_offset, .. } => Some(*byte_offset),
             _ => None,
         }
@@ -85,17 +77,17 @@ impl CrossReferenceEntry {
 
     /// Returns true if this is a Normal (in-use, uncompressed) entry.
     pub fn is_normal(&self) -> bool {
-        matches!(self.entry_type, CrossReferenceEntryType::Normal { .. })
+        matches!(self, CrossReferenceEntryType::Normal { .. })
     }
 
     /// Returns true if this is a Free entry.
     pub fn is_free(&self) -> bool {
-        matches!(self.entry_type, CrossReferenceEntryType::Free { .. })
+        matches!(self, CrossReferenceEntryType::Free { .. })
     }
 
     /// Returns true if this is a Compressed entry.
     pub fn is_compressed(&self) -> bool {
-        matches!(self.entry_type, CrossReferenceEntryType::Compressed { .. })
+        matches!(self, CrossReferenceEntryType::Compressed { .. })
     }
 }
 

@@ -14,7 +14,7 @@ use pdf_object::object_id::PdfObjectId;
 use pdf_object::object_lookup::ObjectLookupExt;
 use pdf_object::object_resolver::{ObjectResolver, PassthroughResolver};
 use pdf_object::{
-    cross_reference_table::{CrossReferenceEntry, CrossReferenceTable},
+    cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
     error::ObjectError,
     object_variant::ObjectVariant,
     trailer::Trailer,
@@ -94,7 +94,7 @@ impl EncryptionContext {
     /// Creates decryption state from the trailer's optional encryption entry.
     fn from_trailer(
         trailer: &mut Trailer,
-        entries: &BTreeMap<usize, CrossReferenceEntry>,
+        entries: &BTreeMap<usize, CrossReferenceEntryType>,
         parser: &mut PdfParser,
         password: &[u8],
         diagnostics: &mut Vec<PdfReadDiagnostic>,
@@ -171,7 +171,7 @@ fn extract_page_tree(
 /// Resolves and parses the trailer's encryption dictionary without decrypting it.
 fn load_encrypt_dictionary(
     encrypt_reference: ObjectVariant,
-    entries: &BTreeMap<usize, CrossReferenceEntry>,
+    entries: &BTreeMap<usize, CrossReferenceEntryType>,
     parser: &mut PdfParser,
 ) -> Result<EncryptDictionary, PdfReaderError> {
     let object = match encrypt_reference {
