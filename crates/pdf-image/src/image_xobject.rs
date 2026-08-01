@@ -1,16 +1,14 @@
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 
-use pdf_color_space::{color_space::ColorSpace, indexed_color_space::IndexedColorSpace};
-use pdf_decode::{DecodeMap, SampleLayout, decode_sample_bytes, expand_indexed_values};
-use pdf_filter::filter::{Filter, decode_data_with_resolver, decode_with_resolver};
+use pdf_color_space::color_space::ColorSpace;
+use pdf_filter::filter::{decode_data_with_resolver, decode_with_resolver};
 use pdf_graphics::PixelFormat;
-use pdf_object::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-    stream::StreamObject,
-};
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, stream::StreamObject};
 
 use crate::InlineImage;
+use crate::decoded_samples::DecodedSamples;
 use crate::error::PdfImageError;
+use crate::image_metadata::ImageMetadata;
 
 /// Represents a PDF Image XObject, which is a self-contained raster image.
 #[derive(Debug, Clone)]
@@ -29,25 +27,6 @@ pub struct ImageXObject {
     pub color_space: Option<ColorSpace>,
 }
 
-/// Stores the normalized metadata needed to decode an image stream.
-#[derive(Debug, Clone)]
-struct ImageMetadata {
-    width: usize,
-    height: usize,
-    bits_per_component: usize,
-    color_space: Option<ColorSpace>,
-    image_mask: bool,
-}
-
-/// Stores decoded sample bytes before the final pixel format conversion.
-#[derive(Debug, Clone)]
-struct DecodedSamples {
-    bits_per_component: usize,
-    stored_color_space: Option<ColorSpace>,
-    num_color_components: usize,
-    image_data: Vec<u8>,
-}
-
 impl ImageXObject {
     /// Parses an Image XObject from a PDF stream dictionary and data.
     pub fn read_xobject(
@@ -56,17 +35,25 @@ impl ImageXObject {
         objects: &dyn ObjectResolver,
         soft_mask: Option<ImageXObject>,
     ) -> Result<Self, PdfImageError> {
-        match Self::decode_normalized_image(
+        let metadata = ImageMetadata::from_dictionary(dictionary, objects)?;
+        match Self::decode_normalized_image_with_metadata(
             dictionary,
             stream_data.raw_data(),
             objects,
             soft_mask.clone(),
+            &metadata,
         ) {
             Ok(image) => Ok(image),
-            Err(original_error) if Filter::from_dictionary(dictionary, objects)?.is_some() => {
+            Err(original_error) if metadata.filters.is_some() => {
                 let decoded = decode_with_resolver(stream_data, objects)?;
-                Self::decode_normalized_image(dictionary, decoded.as_ref(), objects, soft_mask)
-                    .map_err(|_| original_error)
+                Self::decode_normalized_image_with_metadata(
+                    dictionary,
+                    decoded.as_ref(),
+                    objects,
+                    soft_mask,
+                    &metadata,
+                )
+                .map_err(|_| original_error)
             }
             Err(error) => Err(error),
         }
@@ -94,11 +81,22 @@ impl ImageXObject {
         objects: &dyn ObjectResolver,
         soft_mask: Option<ImageXObject>,
     ) -> Result<Self, PdfImageError> {
-        let metadata = Self::read_metadata(dictionary, objects)?;
-        let decoded_samples = Self::decode_samples(dictionary, raw_data, objects, &metadata)?;
-        Self::validate_decoded_samples(&metadata, &decoded_samples)?;
-        let (data, pixel_format) =
-            Self::assemble_pixel_data(&metadata, &decoded_samples, soft_mask);
+        let metadata = ImageMetadata::from_dictionary(dictionary, objects)?;
+        Self::decode_normalized_image_with_metadata(
+            dictionary, raw_data, objects, soft_mask, &metadata,
+        )
+    }
+
+    fn decode_normalized_image_with_metadata(
+        dictionary: &Dictionary,
+        raw_data: &[u8],
+        objects: &dyn ObjectResolver,
+        soft_mask: Option<ImageXObject>,
+        metadata: &ImageMetadata,
+    ) -> Result<Self, PdfImageError> {
+        let decoded_samples = DecodedSamples::decode(dictionary, raw_data, objects, metadata)?;
+        Self::validate_decoded_samples(metadata, &decoded_samples)?;
+        let (data, pixel_format) = Self::assemble_pixel_data(metadata, &decoded_samples, soft_mask);
 
         Ok(Self {
             width: metadata.width,
@@ -108,285 +106,6 @@ impl ImageXObject {
             pixel_format,
             color_space: decoded_samples.stored_color_space,
         })
-    }
-
-    /// Reads and validates the normalized image metadata from the image dictionary.
-    fn read_metadata(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<ImageMetadata, PdfImageError> {
-        let width = dictionary.required_number::<usize>("Width", objects)?;
-        let height = dictionary.required_number::<usize>("Height", objects)?;
-
-        if width == 0 || height == 0 {
-            return Err(PdfImageError::InvalidImageDimensions { width, height });
-        }
-
-        let image_mask = dictionary
-            .optional_boolean("ImageMask", objects)?
-            .unwrap_or(false);
-        let (bits_per_component, color_space) = if image_mask {
-            let bits_per_component = dictionary
-                .optional_number::<usize>("BitsPerComponent", objects)?
-                .unwrap_or(1);
-            Self::validate_bits_per_component(bits_per_component, image_mask, None)?;
-            (bits_per_component, None)
-        } else {
-            let bits_per_component = if Self::has_jpx_filter(dictionary, objects)? {
-                dictionary
-                    .optional_number::<usize>("BitsPerComponent", objects)?
-                    .unwrap_or(8)
-            } else {
-                dictionary.required_number::<usize>("BitsPerComponent", objects)?
-            };
-            let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
-            Self::validate_bits_per_component(
-                bits_per_component,
-                image_mask,
-                color_space.as_ref(),
-            )?;
-            (bits_per_component, color_space)
-        };
-
-        Ok(ImageMetadata {
-            width,
-            height,
-            bits_per_component,
-            color_space,
-            image_mask,
-        })
-    }
-
-    /// Validates the allowed bit depths for indexed and non-indexed images.
-    fn validate_bits_per_component(
-        bits_per_component: usize,
-        image_mask: bool,
-        color_space: Option<&ColorSpace>,
-    ) -> Result<(), PdfImageError> {
-        if image_mask {
-            return match bits_per_component {
-                1 => Ok(()),
-                _ => Err(PdfImageError::UnsupportedImageBitsPerComponent { bits_per_component }),
-            };
-        }
-
-        if matches!(color_space, Some(ColorSpace::Indexed(_))) {
-            return match bits_per_component {
-                1 | 2 | 4 | 8 => Ok(()),
-                _ => Err(PdfImageError::UnsupportedIndexedBits { bits_per_component }),
-            };
-        }
-
-        match bits_per_component {
-            1 | 8 => Ok(()),
-            _ => Err(PdfImageError::UnsupportedImageBitsPerComponent { bits_per_component }),
-        }
-    }
-
-    /// Decodes raw image bytes into component samples based on the configured color space.
-    fn decode_samples(
-        dictionary: &Dictionary,
-        raw_data: &[u8],
-        objects: &dyn ObjectResolver,
-        metadata: &ImageMetadata,
-    ) -> Result<DecodedSamples, PdfImageError> {
-        if let Some(decoded_samples) =
-            Self::decode_preconverted_jpx_samples(dictionary, raw_data, objects, metadata)?
-        {
-            return Ok(decoded_samples);
-        }
-
-        if let Some(decoded_samples) =
-            Self::decode_preconverted_dct_samples(dictionary, raw_data, objects, metadata)?
-        {
-            return Ok(decoded_samples);
-        }
-
-        match metadata.color_space.as_ref() {
-            Some(ColorSpace::Indexed(indexed)) => {
-                Self::decode_indexed_samples(dictionary, raw_data, objects, metadata, indexed)
-            }
-            _ => Self::decode_direct_samples(dictionary, raw_data, objects, metadata),
-        }
-    }
-
-    /// Uses DCT decoder output as display samples when the JPEG decoder already converted color.
-    fn decode_preconverted_dct_samples(
-        dictionary: &Dictionary,
-        raw_data: &[u8],
-        objects: &dyn ObjectResolver,
-        metadata: &ImageMetadata,
-    ) -> Result<Option<DecodedSamples>, PdfImageError> {
-        if metadata.bits_per_component != 8 || !Self::has_dct_filter(dictionary, objects)? {
-            return Ok(None);
-        }
-
-        let num_pixels = metadata.width.saturating_mul(metadata.height);
-        let Some(num_color_components) = Self::decoded_dct_component_count(raw_data, num_pixels)
-            .or_else(|| Self::decoded_single_pixel_component_count(raw_data))
-        else {
-            return Ok(None);
-        };
-
-        let stored_color_space = match num_color_components {
-            1 => Some(ColorSpace::DeviceGray),
-            3 => Some(ColorSpace::DeviceRGB),
-            _ => metadata.color_space.clone(),
-        };
-        let image_data = if raw_data.len() == num_color_components && num_pixels > 1 {
-            raw_data.repeat(num_pixels)
-        } else {
-            raw_data.to_vec()
-        };
-
-        Ok(Some(DecodedSamples {
-            bits_per_component: metadata.bits_per_component,
-            stored_color_space,
-            num_color_components,
-            image_data,
-        }))
-    }
-
-    /// Uses JPX decoder output as display samples when the decoder already expanded pixels.
-    fn decode_preconverted_jpx_samples(
-        dictionary: &Dictionary,
-        raw_data: &[u8],
-        objects: &dyn ObjectResolver,
-        metadata: &ImageMetadata,
-    ) -> Result<Option<DecodedSamples>, PdfImageError> {
-        if !Self::has_jpx_filter(dictionary, objects)? {
-            return Ok(None);
-        }
-
-        let num_pixels = metadata.width.saturating_mul(metadata.height);
-        let Some(bytes_per_pixel) = raw_data.len().checked_div(num_pixels) else {
-            return Ok(None);
-        };
-        if bytes_per_pixel.saturating_mul(num_pixels) != raw_data.len() {
-            return Ok(None);
-        }
-
-        let (num_color_components, bits_per_component, stored_color_space) = match bytes_per_pixel {
-            1 => (1, 8, Some(ColorSpace::DeviceGray)),
-            2 => (1, 16, Some(ColorSpace::DeviceGray)),
-            3 => (3, 8, Some(ColorSpace::DeviceRGB)),
-            6 => (3, 16, Some(ColorSpace::DeviceRGB)),
-            _ => return Ok(None),
-        };
-
-        Ok(Some(DecodedSamples {
-            bits_per_component,
-            stored_color_space,
-            num_color_components,
-            image_data: raw_data.to_vec(),
-        }))
-    }
-
-    fn has_dct_filter(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<bool, PdfImageError> {
-        Self::has_filter(dictionary, objects, Filter::DCTDecode)
-    }
-
-    fn has_jpx_filter(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<bool, PdfImageError> {
-        Self::has_filter(dictionary, objects, Filter::JPXDecode)
-    }
-
-    fn has_filter(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        target: Filter,
-    ) -> Result<bool, PdfImageError> {
-        Ok(Filter::from_dictionary(dictionary, objects)?
-            .is_some_and(|filters| filters.contains(&target)))
-    }
-
-    fn decoded_dct_component_count(raw_data: &[u8], num_pixels: usize) -> Option<usize> {
-        [1, 3, 4]
-            .into_iter()
-            .find(|components| raw_data.len() == num_pixels.saturating_mul(*components))
-    }
-
-    fn decoded_single_pixel_component_count(raw_data: &[u8]) -> Option<usize> {
-        [1, 3, 4]
-            .into_iter()
-            .find(|components| raw_data.len() == *components)
-    }
-
-    /// Decodes indexed image samples, applies `/Decode`, and expands palette entries.
-    fn decode_indexed_samples(
-        dictionary: &Dictionary,
-        raw_data: &[u8],
-        objects: &dyn ObjectResolver,
-        metadata: &ImageMetadata,
-        indexed: &IndexedColorSpace,
-    ) -> Result<DecodedSamples, PdfImageError> {
-        let sample_codes = Self::decode_image_sample_codes(raw_data, 1, metadata)?;
-        let sample_max = Self::sample_max(metadata.bits_per_component)?;
-        let decode = DecodeMap::from_dictionary(dictionary, objects, 1, metadata.image_mask)?;
-        let decoded_indices = decode.apply_to_bytes(sample_codes.as_ref(), sample_max, sample_max);
-        let base_components = indexed.base.num_color_components();
-
-        let image_data = expand_indexed_values(
-            &decoded_indices,
-            &indexed.lookup,
-            indexed.hival,
-            base_components,
-        )?;
-
-        Ok(DecodedSamples {
-            bits_per_component: metadata.bits_per_component,
-            stored_color_space: Some(*indexed.base.clone()),
-            num_color_components: base_components,
-            image_data,
-        })
-    }
-
-    /// Decodes non-indexed image samples and applies the `/Decode` transform.
-    fn decode_direct_samples(
-        dictionary: &Dictionary,
-        raw_data: &[u8],
-        objects: &dyn ObjectResolver,
-        metadata: &ImageMetadata,
-    ) -> Result<DecodedSamples, PdfImageError> {
-        let num_components = metadata
-            .color_space
-            .as_ref()
-            .map_or(1, ColorSpace::num_color_components);
-        let sample_codes = Self::decode_image_sample_codes(raw_data, num_components, metadata)?;
-        let decode =
-            DecodeMap::from_dictionary(dictionary, objects, num_components, metadata.image_mask)?;
-
-        Ok(DecodedSamples {
-            bits_per_component: metadata.bits_per_component,
-            stored_color_space: metadata.color_space.clone(),
-            num_color_components: num_components,
-            image_data: decode.apply_to_bytes(
-                sample_codes.as_ref(),
-                Self::sample_max(metadata.bits_per_component)?,
-                255,
-            ),
-        })
-    }
-
-    fn decode_image_sample_codes<'a>(
-        raw_data: &'a [u8],
-        samples_per_pixel: usize,
-        metadata: &ImageMetadata,
-    ) -> Result<Cow<'a, [u8]>, PdfImageError> {
-        Ok(decode_sample_bytes(
-            raw_data,
-            metadata.bits_per_component,
-            SampleLayout::RowAligned {
-                width: metadata.width,
-                height: metadata.height,
-                samples_per_pixel,
-            },
-        )?)
     }
 
     /// Ensures the decoded component stream is large enough for the declared dimensions.
@@ -408,17 +127,6 @@ impl ImageXObject {
         }
 
         Ok(())
-    }
-
-    /// Returns the maximum encoded sample value for a supported bit depth.
-    fn sample_max(bits_per_component: usize) -> Result<u8, PdfImageError> {
-        match bits_per_component {
-            1 => Ok(1),
-            2 => Ok(3),
-            4 => Ok(15),
-            8 => Ok(255),
-            _ => Err(PdfImageError::UnsupportedImageBitsPerComponent { bits_per_component }),
-        }
     }
 
     /// Builds the final pixel buffer and pixel format after optional soft-mask application.

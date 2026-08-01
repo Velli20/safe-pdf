@@ -73,6 +73,81 @@ pub enum Filter {
     Unsupported(String),
 }
 
+/// An ordered chain of filters applied to a PDF stream.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Filters {
+    filters: Vec<Filter>,
+}
+
+impl Filters {
+    const KEY: &'static str = "Filter";
+
+    /// Returns whether the chain contains `filter`.
+    pub fn has_filter(&self, filter: &Filter) -> bool {
+        self.filters.contains(filter)
+    }
+
+    /// Returns whether the chain contains a JPEG 2000 decoding filter.
+    pub fn has_jpx_filter(&self) -> bool {
+        self.has_filter(&Filter::JPXDecode)
+    }
+
+    /// Returns whether the chain contains a JPEG decoding filter.
+    pub fn has_dct_filter(&self) -> bool {
+        self.has_filter(&Filter::DCTDecode)
+    }
+
+    /// Parses the `/Filter` entry from a PDF object dictionary.
+    ///
+    /// Returns `Ok(None)` when no `/Filter` key is present, or
+    /// `Ok(Some(filters))` with the ordered chain of filters to apply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FilterError::Object`] if an object reference cannot be
+    /// resolved or a name cannot be extracted.
+    pub fn from_dictionary(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Option<Self>, FilterError> {
+        let Some(filter_obj) = dictionary.get(Self::KEY) else {
+            return Ok(None);
+        };
+
+        let resolved = objects.resolve_object(filter_obj)?;
+
+        // Parse the `/Filter` entry: can be either a single Name or an Array of Names.
+        // Per PDF spec, filters are applied in order when multiple are present.
+        let filters = match resolved {
+            ObjectVariant::Array(arr) => arr
+                .iter()
+                .map(|item| item.try_str(objects).map(Filter::from))
+                .collect::<Result<Vec<_>, _>>()?,
+            other => {
+                // Handle single name that wasn't parsed as Name variant
+                vec![Filter::from(other.try_str(objects)?)]
+            }
+        };
+
+        Ok(Some(Self { filters }))
+    }
+}
+
+impl From<Vec<Filter>> for Filters {
+    fn from(filters: Vec<Filter>) -> Self {
+        Self { filters }
+    }
+}
+
+impl<'a> IntoIterator for &'a Filters {
+    type Item = &'a Filter;
+    type IntoIter = std::slice::Iter<'a, Filter>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.filters.iter()
+    }
+}
+
 impl From<&str> for Filter {
     fn from(name: &str) -> Self {
         match name {
@@ -114,8 +189,6 @@ impl fmt::Display for Filter {
 
 /// Methods for parsing the `/Filter` entry from a PDF dictionary.
 impl Filter {
-    const KEY: &'static str = "Filter";
-
     /// Parses the `/Filter` entry from a PDF object dictionary.
     ///
     /// Returns `Ok(None)` when no `/Filter` key is present, or
@@ -129,26 +202,7 @@ impl Filter {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Vec<Filter>>, FilterError> {
-        let Some(filter_obj) = dictionary.get(Self::KEY) else {
-            return Ok(None);
-        };
-
-        let resolved = objects.resolve_object(filter_obj)?;
-
-        // Parse the `/Filter` entry: can be either a single Name or an Array of Names.
-        // Per PDF spec, filters are applied in order when multiple are present.
-        let filters = match resolved {
-            ObjectVariant::Array(arr) => arr
-                .iter()
-                .map(|item| item.try_str(objects).map(Filter::from))
-                .collect::<Result<Vec<_>, _>>()?,
-            other => {
-                // Handle single name that wasn't parsed as Name variant
-                vec![Filter::from(other.try_str(objects)?)]
-            }
-        };
-
-        Ok(Some(filters))
+        Ok(Filters::from_dictionary(dictionary, objects)?.map(|filters| filters.filters))
     }
 }
 
@@ -258,7 +312,7 @@ pub fn decode_data_with_resolver(
     objects: &dyn ObjectResolver,
 ) -> Result<Arc<Vec<u8>>, FilterError> {
     let mut data = stream_data;
-    let filters = Filter::from_dictionary(dictionary, objects)?;
+    let filters = Filters::from_dictionary(dictionary, objects)?;
 
     let Some(filters) = &filters else {
         return Ok(data);
@@ -269,7 +323,7 @@ pub fn decode_data_with_resolver(
         .map(|entry| objects.resolve_object(entry))
         .transpose()?;
 
-    for (index, filter) in filters.iter().enumerate() {
+    for (index, filter) in filters.into_iter().enumerate() {
         let param_dict = match decode_parms {
             None => None,
             Some(ObjectVariant::Dictionary(dictionary)) => Some(dictionary.as_ref()),
@@ -450,6 +504,15 @@ mod tests {
         let filter = Filter::from("JBIG2Decode");
         assert_eq!(filter, Filter::JBIG2Decode);
         assert_eq!(filter.to_string(), "JBIG2Decode");
+    }
+
+    #[test]
+    fn filter_chain_queries_detect_corresponding_variants() {
+        let filters = Filters::from(vec![Filter::ASCII85Decode, Filter::JPXDecode]);
+
+        assert!(filters.has_filter(&Filter::ASCII85Decode));
+        assert!(filters.has_jpx_filter());
+        assert!(!filters.has_dct_filter());
     }
 
     #[test]
