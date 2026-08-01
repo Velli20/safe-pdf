@@ -2191,6 +2191,7 @@ version = "0.1.0"
 dependencies = [
  "num-traits",
  "pdf-object",
+ "pdf-utils",
  "thiserror 2.0.12",
 ]
 

@@ -1,6 +1,7 @@
 //! Sample code unpacking and normalization helpers.
 
 use num_traits::ToPrimitive;
+use pdf_utils::BitReader;
 
 use crate::{error::DecodeError, layout::SampleLayout};
 
@@ -161,7 +162,7 @@ fn decode_contiguous_samples(
             }
             _ => 0,
         }),
-        _ => decode_packed_samples(data, bits_per_sample, sample_count, 0),
+        _ => decode_packed_samples(data, bits_per_sample, sample_count),
     }
 }
 
@@ -217,7 +218,6 @@ fn decode_row_aligned_samples(
                 row_data,
                 bits_per_sample,
                 samples_per_row,
-                0,
             )?);
         }
     }
@@ -245,37 +245,25 @@ fn decode_packed_samples(
     data: &[u8],
     bits_per_sample: usize,
     sample_count: usize,
-    initial_bit_offset: usize,
 ) -> Result<Vec<u32>, DecodeError> {
     let total_bits = sample_count.saturating_mul(bits_per_sample);
-    let required_bits = initial_bit_offset.saturating_add(total_bits);
-    let required_bytes = required_bits.div_ceil(8);
+    let required_bytes = total_bits.div_ceil(8);
     ensure_len(data, required_bytes)?;
+    let bit_width = u8::try_from(bits_per_sample)
+        .map_err(|_| DecodeError::InvalidBitsPerSample { bits_per_sample })?;
 
+    let mut reader = BitReader::new(data);
     let mut out = Vec::with_capacity(sample_count);
-    let mut bit_offset = initial_bit_offset;
     for _ in 0..sample_count {
-        out.push(read_bits(data, bit_offset, bits_per_sample));
-        bit_offset = bit_offset.saturating_add(bits_per_sample);
+        let sample = reader
+            .read_bits_u32(bit_width)
+            .ok_or(DecodeError::InsufficientData {
+                expected_bytes: required_bytes,
+                actual_bytes: data.len(),
+            })?;
+        out.push(sample);
     }
     Ok(out)
-}
-
-/// Reads one packed sample value from the input bit stream.
-fn read_bits(data: &[u8], bit_offset: usize, bits_per_sample: usize) -> u32 {
-    let mut value = 0u32;
-
-    for bit_index in 0..bits_per_sample {
-        let absolute_bit = bit_offset.saturating_add(bit_index);
-        let byte_index = absolute_bit / 8;
-        let bit_in_byte = absolute_bit % 8;
-        let byte = data.get(byte_index).copied().unwrap_or_default();
-        let bit = (byte >> (7usize.saturating_sub(bit_in_byte))) & 1;
-        value <<= 1;
-        value |= u32::from(bit);
-    }
-
-    value
 }
 
 #[cfg(test)]
@@ -293,6 +281,25 @@ mod tests {
         .unwrap();
 
         assert_eq!(samples, vec![1, 0, 1, 1, 0, 0, 1, 0]);
+    }
+
+    #[test]
+    fn decode_contiguous_2_and_4_bit_samples() {
+        let two_bit_samples = decode_sample_codes(
+            &[0b00_01_10_11],
+            2,
+            SampleLayout::Contiguous { sample_count: 4 },
+        )
+        .unwrap();
+        let four_bit_samples = decode_sample_codes(
+            &[0x1F, 0xA0],
+            4,
+            SampleLayout::Contiguous { sample_count: 3 },
+        )
+        .unwrap();
+
+        assert_eq!(two_bit_samples, vec![0, 1, 2, 3]);
+        assert_eq!(four_bit_samples, vec![1, 15, 10]);
     }
 
     #[test]
@@ -473,6 +480,20 @@ mod tests {
     fn decode_reports_truncated_data() {
         let err = decode_sample_codes(&[0xFF], 16, SampleLayout::Contiguous { sample_count: 1 })
             .expect_err("16-bit sample requires two bytes");
+
+        assert!(matches!(
+            err,
+            DecodeError::InsufficientData {
+                expected_bytes: 2,
+                actual_bytes: 1
+            }
+        ));
+    }
+
+    #[test]
+    fn decode_reports_truncated_packed_data() {
+        let err = decode_sample_codes(&[0xFF], 12, SampleLayout::Contiguous { sample_count: 1 })
+            .expect_err("12-bit sample requires two bytes");
 
         assert!(matches!(
             err,
