@@ -95,7 +95,6 @@ impl ImageXObject {
         metadata: &ImageMetadata,
     ) -> Result<Self, PdfImageError> {
         let decoded_samples = DecodedSamples::decode(dictionary, raw_data, objects, metadata)?;
-        Self::validate_decoded_samples(metadata, &decoded_samples)?;
         let (data, pixel_format) = Self::assemble_pixel_data(metadata, &decoded_samples, soft_mask);
 
         Ok(Self {
@@ -106,27 +105,6 @@ impl ImageXObject {
             pixel_format,
             color_space: decoded_samples.stored_color_space,
         })
-    }
-
-    /// Ensures the decoded component stream is large enough for the declared dimensions.
-    fn validate_decoded_samples(
-        metadata: &ImageMetadata,
-        decoded_samples: &DecodedSamples,
-    ) -> Result<(), PdfImageError> {
-        if decoded_samples.num_color_components == 0 {
-            return Err(PdfImageError::InvalidColorComponentCount);
-        }
-
-        let num_pixels = metadata.width.saturating_mul(metadata.height);
-        let expected_bytes = num_pixels.saturating_mul(decoded_samples.num_color_components);
-        if decoded_samples.image_data.len() < expected_bytes {
-            return Err(PdfImageError::TruncatedImageData {
-                expected_bytes,
-                actual_bytes: decoded_samples.image_data.len(),
-            });
-        }
-
-        Ok(())
     }
 
     /// Builds the final pixel buffer and pixel format after optional soft-mask application.
