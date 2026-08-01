@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use pdf_object::{
-    cross_reference_table::{CrossReferenceEntry, CrossReferenceTable},
+    cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
     object_lookup::ObjectLookupExt,
     object_resolver::ObjectResolver,
     stream::StreamObject,
@@ -162,7 +162,7 @@ impl<'data> XrefStreamEntryDecoder<'data> {
     }
 
     /// Returns the next complete entry, or `None` when the data is truncated.
-    fn next_entry(&mut self) -> Option<CrossReferenceEntry> {
+    fn next_entry(&mut self) -> Option<CrossReferenceEntryType> {
         let end = self.position.saturating_add(self.layout.entry_width);
         let bytes = self.data.get(self.position..end)?;
         let entry = self.decode_entry(bytes)?;
@@ -171,7 +171,7 @@ impl<'data> XrefStreamEntryDecoder<'data> {
     }
 
     /// Decodes one entry according to the `/W` field widths.
-    fn decode_entry(&self, bytes: &[u8]) -> Option<CrossReferenceEntry> {
+    fn decode_entry(&self, bytes: &[u8]) -> Option<CrossReferenceEntryType> {
         let type_end = self.layout.type_width;
         let second_end = type_end.checked_add(self.layout.second_field_width)?;
         let third_end = second_end.checked_add(self.layout.third_field_width)?;
@@ -189,10 +189,10 @@ impl<'data> XrefStreamEntryDecoder<'data> {
         let third_value = read_field(third_field);
 
         Some(match entry_type {
-            0 => CrossReferenceEntry::new_free(second_value, third_value),
-            1 => CrossReferenceEntry::new_normal(second_value, third_value),
-            2 => CrossReferenceEntry::new_compressed(second_value, third_value),
-            _ => CrossReferenceEntry::new_free(0, 0),
+            0 => CrossReferenceEntryType::new_free(second_value, third_value),
+            1 => CrossReferenceEntryType::new_normal(second_value, third_value),
+            2 => CrossReferenceEntryType::new_compressed(second_value, third_value),
+            _ => CrossReferenceEntryType::new_free(0, 0),
         })
     }
 }
@@ -284,7 +284,7 @@ mod tests {
 
         let e2 = &table.entries[&2];
         assert!(e2.is_compressed());
-        match &e2.entry_type {
+        match e2 {
             CrossReferenceEntryType::Compressed {
                 object_stream_number,
                 index_within_stream,
@@ -349,7 +349,7 @@ mod tests {
 
         let table = parse_xref_stream(&stream, &PassthroughResolver).unwrap();
 
-        assert_eq!(table.entries[&0], CrossReferenceEntry::new_free(0, 0));
+        assert_eq!(table.entries[&0], CrossReferenceEntryType::new_free(0, 0));
     }
 
     /// Builds a compressed xref stream with FlateDecode + PNG Up predictor,
@@ -469,7 +469,7 @@ mod tests {
 
         let e3 = &table.entries[&3];
         assert!(e3.is_compressed());
-        match &e3.entry_type {
+        match e3 {
             CrossReferenceEntryType::Compressed {
                 object_stream_number,
                 index_within_stream,

@@ -9,8 +9,7 @@
 use std::collections::BTreeMap;
 
 use pdf_object::{
-    cross_reference_table::{CrossReferenceEntry, CrossReferenceEntryType},
-    object_resolver::PassthroughResolver,
+    cross_reference_table::CrossReferenceEntryType, object_resolver::PassthroughResolver,
     object_variant::ObjectVariant,
 };
 use pdf_parser::parser::PdfParser;
@@ -425,7 +424,7 @@ fn build_xref_table_simple() {
         table
             .entries
             .get(&1)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj1_offset)
     );
     assert!(table.entries.get(&0).expect("obj 0 should exist").is_free());
@@ -477,7 +476,7 @@ fn build_xref_table_falls_back_from_invalid_newer_xref() {
         table
             .entries
             .get(&2)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj2_offset)
     );
 }
@@ -526,14 +525,14 @@ fn build_xref_table_repairs_valid_section_with_shifted_entry_offsets() {
         table
             .entries
             .get(&1)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj1_offset)
     );
     assert_eq!(
         table
             .entries
             .get(&5)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj5_offset)
     );
 }
@@ -568,21 +567,21 @@ fn build_xref_table_recovers_missing_xref_keyword_with_subsection_header() {
         table
             .entries
             .get(&1)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj1_offset)
     );
     assert_eq!(
         table
             .entries
             .get(&2)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj2_offset)
     );
     assert_eq!(
         table
             .entries
             .get(&3)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj3_offset)
     );
 }
@@ -620,14 +619,14 @@ fn build_xref_table_recovers_stripped_header_offsets() {
         table
             .entries
             .get(&1)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj1_offset)
     );
     assert_eq!(
         table
             .entries
             .get(&2)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj2_offset)
     );
 }
@@ -668,21 +667,21 @@ fn build_xref_table_recovers_startxref_inside_endstream() {
         table
             .entries
             .get(&1)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj1_offset)
     );
     assert_eq!(
         table
             .entries
             .get(&2)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj2_offset)
     );
     assert_eq!(
         table
             .entries
             .get(&3)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj3_offset)
     );
     assert!(bad_startxref_offset < xref_offset);
@@ -733,35 +732,35 @@ fn build_xref_table_recovers_nearby_xref_without_line_boundary() {
         table
             .entries
             .get(&1)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj1_offset)
     );
     assert_eq!(
         table
             .entries
             .get(&2)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj2_offset)
     );
     assert_eq!(
         table
             .entries
             .get(&3)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj3_offset)
     );
     assert_eq!(
         table
             .entries
             .get(&4)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj4_offset)
     );
     assert_eq!(
         table
             .entries
             .get(&5)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj5_offset)
     );
 }
@@ -822,7 +821,7 @@ fn build_xref_table_repair_ignores_numeric_array_entries() {
         table
             .entries
             .get(&1)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj1_offset)
     );
 }
@@ -856,7 +855,7 @@ fn build_xref_table_merges_hybrid_xref_stream_entries() {
     let table = parser.build_xref_table().unwrap();
 
     let pages_entry = table.entries.get(&2).expect("obj 2 should exist");
-    match &pages_entry.entry_type {
+    match pages_entry {
         CrossReferenceEntryType::Compressed {
             object_stream_number,
             index_within_stream,
@@ -868,7 +867,7 @@ fn build_xref_table_merges_hybrid_xref_stream_entries() {
     }
 
     let page_entry = table.entries.get(&3).expect("obj 3 should exist");
-    match &page_entry.entry_type {
+    match page_entry {
         CrossReferenceEntryType::Compressed {
             object_stream_number,
             index_within_stream,
@@ -890,14 +889,14 @@ fn build_xref_table_drops_invalid_normal_entry_from_xref_stream() {
         table
             .entries
             .get(&1)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(9)
     );
     assert!(
         table
             .entries
             .get(&6)
-            .and_then(CrossReferenceEntry::byte_offset)
+            .and_then(CrossReferenceEntryType::byte_offset)
             .is_some()
     );
     assert!(
@@ -963,21 +962,21 @@ fn build_xref_table_recovers_missing_xref_command() {
         table
             .entries
             .get(&1)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj1_offset)
     );
     assert_eq!(
         table
             .entries
             .get(&3)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj3_offset)
     );
     assert_eq!(
         table
             .entries
             .get(&5)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj5_offset)
     );
 }
@@ -1021,7 +1020,7 @@ fn build_xref_table_recovers_xref_keyword_with_flat_entries() {
         table
             .entries
             .get(&5)
-            .and_then(CrossReferenceEntry::byte_offset),
+            .and_then(CrossReferenceEntryType::byte_offset),
         Some(obj5_offset)
     );
 }

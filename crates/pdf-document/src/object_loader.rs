@@ -19,8 +19,7 @@ use crate::error::PdfReaderError;
 use crate::object_stream::read_object_stream;
 use crate::reader::{EncryptionContext, object_id};
 use pdf_object::{
-    cross_reference_table::{CrossReferenceEntry, CrossReferenceEntryType},
-    error::ObjectError,
+    cross_reference_table::CrossReferenceEntryType, error::ObjectError,
     object_variant::ObjectVariant,
 };
 use pdf_object_collection::object_collection::ObjectCollection;
@@ -45,12 +44,12 @@ struct LoadPlan {
 
 impl LoadPlan {
     /// Partitions live xref entries into normal objects and compressed-stream batches.
-    fn from_entries(entries: &BTreeMap<usize, CrossReferenceEntry>) -> Self {
+    fn from_entries(entries: &BTreeMap<usize, CrossReferenceEntryType>) -> Self {
         let mut normal_objects = entries
             .values()
-            .filter_map(|entry| match entry.entry_type {
-                CrossReferenceEntryType::Normal { byte_offset, .. } if byte_offset != 0 => {
-                    Some(byte_offset)
+            .filter_map(|entry| match entry {
+                CrossReferenceEntryType::Normal { byte_offset, .. } if *byte_offset != 0 => {
+                    Some(*byte_offset)
                 }
                 _ => None,
             })
@@ -67,14 +66,14 @@ impl LoadPlan {
             let CrossReferenceEntryType::Compressed {
                 object_stream_number,
                 index_within_stream,
-            } = entry.entry_type
+            } = entry
             else {
                 continue;
             };
             compressed_streams
-                .entry(object_stream_number)
+                .entry(*object_stream_number)
                 .or_default()
-                .entry(index_within_stream)
+                .entry(*index_within_stream)
                 .or_default()
                 .push(object_number);
         }
@@ -264,7 +263,7 @@ pub(super) struct ObjectLoader<'input, 'loader> {
 impl<'input, 'loader> ObjectLoader<'input, 'loader> {
     /// Creates an object loader for one parsed cross-reference table.
     pub(super) fn new(
-        entries: &BTreeMap<usize, CrossReferenceEntry>,
+        entries: &BTreeMap<usize, CrossReferenceEntryType>,
         parser: &'loader mut PdfParser<'input>,
         encryption: EncryptionContext,
         diagnostics: &'loader mut Vec<PdfReadDiagnostic>,
@@ -476,12 +475,12 @@ mod tests {
     #[test]
     fn load_plan_partitions_entries_and_groups_compressed_indexes() {
         let entries = BTreeMap::from([
-            (0, CrossReferenceEntry::new_free(0, 65_535)),
-            (1, CrossReferenceEntry::new_normal(10, 0)),
-            (2, CrossReferenceEntry::new_compressed(5, 1)),
-            (3, CrossReferenceEntry::new_compressed(5, 1)),
-            (4, CrossReferenceEntry::new_normal(0, 0)),
-            (5, CrossReferenceEntry::new_normal(50, 0)),
+            (0, CrossReferenceEntryType::new_free(0, 65_535)),
+            (1, CrossReferenceEntryType::new_normal(10, 0)),
+            (2, CrossReferenceEntryType::new_compressed(5, 1)),
+            (3, CrossReferenceEntryType::new_compressed(5, 1)),
+            (4, CrossReferenceEntryType::new_normal(0, 0)),
+            (5, CrossReferenceEntryType::new_normal(50, 0)),
         ]);
 
         let plan = LoadPlan::from_entries(&entries);
