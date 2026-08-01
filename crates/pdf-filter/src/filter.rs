@@ -112,27 +112,6 @@ impl fmt::Display for Filter {
     }
 }
 
-/// Per-filter decoded parameters extracted from `/DecodeParms`.
-///
-/// Each variant holds the strongly-typed parameters for one filter in the
-/// chain.  Variants are added as new filters gain parameter support.
-#[derive(Debug, Clone)]
-pub(crate) enum DecodeParms {
-    /// No parameters needed or provided for this filter.
-    None,
-    /// Parameters for the `CCITTFaxDecode` filter.
-    CcittFax(CCITTFaxParams),
-    /// Parameters for `LZWDecode`: EarlyChange flag + optional predictor.
-    Lzw {
-        early_change: bool,
-        predictor: PredictorParams,
-    },
-    /// Predictor parameters for `FlateDecode`.
-    Flate { predictor: PredictorParams },
-    /// JBIG2 globals stream data, if present.
-    Jbig2 { globals: Option<Vec<u8>> },
-}
-
 /// Methods for parsing the `/Filter` entry from a PDF dictionary.
 impl Filter {
     const KEY: &'static str = "Filter";
@@ -285,32 +264,58 @@ pub fn decode_data_with_resolver(
         return Ok(data);
     };
 
-    let decode_params = parse_decode_params(dictionary, filters, objects)?;
+    let decode_parms = dictionary
+        .get("DecodeParms")
+        .map(|entry| objects.resolve_object(entry))
+        .transpose()?;
 
-    for (filter, params) in filters.iter().zip(decode_params.iter()) {
+    for (index, filter) in filters.iter().enumerate() {
+        let param_dict = match decode_parms {
+            None => None,
+            Some(ObjectVariant::Dictionary(dictionary)) => Some(dictionary.as_ref()),
+            Some(ObjectVariant::Array(array)) => {
+                array.as_slice().optional_dictionary(index, objects)?
+            }
+            Some(other) => {
+                return Err(FilterError::from(
+                    pdf_object::error::ObjectError::TypeMismatch(
+                        "Dictionary or Array",
+                        other.name(),
+                    ),
+                ));
+            }
+        };
+
         match filter {
             Filter::FlateDecode => {
                 let decoded = Filter::decode_flate(data.as_slice())?;
-                let decoded = match params {
-                    DecodeParms::Flate { predictor } if !predictor.is_none() => {
-                        crate::predictor::apply_predictor(&decoded, predictor)?
-                    }
-                    _ => decoded,
+                let predictor = match param_dict {
+                    Some(dictionary) => PredictorParams::from_dictionary(dictionary, objects)?,
+                    None => PredictorParams::default(),
+                };
+                let decoded = if predictor.is_none() {
+                    decoded
+                } else {
+                    crate::predictor::apply_predictor(&decoded, &predictor)?
                 };
                 data = Arc::new(decoded);
             }
             Filter::LZWDecode => {
-                let (early_change, predictor) = match params {
-                    DecodeParms::Lzw {
-                        early_change,
-                        predictor,
-                    } => (*early_change, Some(predictor)),
-                    _ => (true, None),
+                let (early_change, predictor) = match param_dict {
+                    Some(dictionary) => (
+                        dictionary
+                            .optional_number("EarlyChange", objects)?
+                            .unwrap_or(1)
+                            != 0,
+                        PredictorParams::from_dictionary(dictionary, objects)?,
+                    ),
+                    None => (true, PredictorParams::default()),
                 };
                 let decoded = crate::lzw::decode(data.as_slice(), early_change)?;
-                let decoded = match predictor {
-                    Some(p) if !p.is_none() => crate::predictor::apply_predictor(&decoded, p)?,
-                    _ => decoded,
+                let decoded = if predictor.is_none() {
+                    decoded
+                } else {
+                    crate::predictor::apply_predictor(&decoded, &predictor)?
                 };
                 data = Arc::new(decoded);
             }
@@ -336,19 +341,20 @@ pub fn decode_data_with_resolver(
             }
             Filter::JBIG2Decode => {
                 let (width, height) = resolve_jbig2_dimensions(dictionary, objects)?;
-                let globals = match params {
-                    DecodeParms::Jbig2 { globals } => globals.as_deref(),
-                    _ => None,
+                let globals = match param_dict {
+                    Some(dictionary) => resolve_jbig2_globals(dictionary, objects)?,
+                    None => None,
                 };
-                let decoded = pdf_jbig2::decode(data.as_slice(), width, height, globals)?;
+                let decoded =
+                    pdf_jbig2::decode(data.as_slice(), width, height, globals.as_deref())?;
                 data = Arc::new(decoded);
             }
             Filter::CCITTFaxDecode => {
-                let ccitt_params = match params {
-                    DecodeParms::CcittFax(p) => p,
-                    _ => &CCITTFaxParams::DEFAULT,
+                let ccitt_params = match param_dict {
+                    Some(dictionary) => CCITTFaxParams::from_dictionary(dictionary, objects)?,
+                    None => CCITTFaxParams::default(),
                 };
-                let decoded = pdf_ccitt::decode(data.as_slice(), ccitt_params)?;
+                let decoded = pdf_ccitt::decode(data.as_slice(), &ccitt_params)?;
                 data = Arc::new(decoded);
             }
             Filter::Unsupported(name) => {
@@ -381,110 +387,6 @@ pub fn decode_with_resolver(
 pub fn decode(stream: &StreamObject) -> Result<Arc<Vec<u8>>, FilterError> {
     let objects = PassthroughResolver;
     decode_with_resolver(stream, &objects)
-}
-
-/// Parses the `/DecodeParms` entry from a stream dictionary into a
-/// [`Vec<DecodeParms>`] aligned 1-to-1 with `filters`.
-///
-/// Per PDF spec §7.3.8.2, `/DecodeParms` is either a single dictionary (when
-/// there is one filter) or an array of dictionaries (one per filter).
-fn parse_decode_params(
-    dict: &Dictionary,
-    filters: &[Filter],
-    objects: &dyn ObjectResolver,
-) -> Result<Vec<DecodeParms>, FilterError> {
-    let param_dicts = resolve_decode_parms_dicts(dict, filters, objects)?;
-
-    filters
-        .iter()
-        .zip(param_dicts.iter().copied())
-        .map(|(filter, param_dict)| decode_parms_for_filter(filter, param_dict, objects))
-        .collect()
-}
-
-fn resolve_decode_parms_dicts<'a>(
-    dict: &'a Dictionary,
-    filters: &[Filter],
-    objects: &'a dyn ObjectResolver,
-) -> Result<Vec<Option<&'a Dictionary>>, FilterError> {
-    let Some(entry) = dict.get("DecodeParms") else {
-        return Ok(vec![None; filters.len()]);
-    };
-
-    let resolved = objects.resolve_object(entry)?;
-
-    match resolved {
-        ObjectVariant::Dictionary(d) => Ok(vec![Some(d.as_ref()); filters.len()]),
-        ObjectVariant::Array(arr) => {
-            resolve_decode_parms_array(arr.as_slice(), filters.len(), objects)
-        }
-        other => Err(FilterError::from(
-            pdf_object::error::ObjectError::TypeMismatch("Dictionary or Array", other.name()),
-        )),
-    }
-}
-
-fn resolve_decode_parms_array<'a>(
-    arr: &'a [ObjectVariant],
-    filter_count: usize,
-    objects: &'a dyn ObjectResolver,
-) -> Result<Vec<Option<&'a Dictionary>>, FilterError> {
-    (0..filter_count)
-        .map(|index| {
-            let Some(item) = arr.get(index) else {
-                return Ok(None);
-            };
-
-            let resolved = objects.resolve_object(item)?;
-            match resolved {
-                ObjectVariant::Dictionary(d) => Ok(Some(d.as_ref())),
-                ObjectVariant::Null => Ok(None),
-                other => Err(FilterError::from(
-                    pdf_object::error::ObjectError::TypeMismatch("Dictionary", other.name()),
-                )),
-            }
-        })
-        .collect()
-}
-
-fn decode_parms_for_filter(
-    filter: &Filter,
-    param_dict: Option<&Dictionary>,
-    objects: &dyn ObjectResolver,
-) -> Result<DecodeParms, FilterError> {
-    let params = match (filter, param_dict) {
-        (Filter::CCITTFaxDecode, Some(d)) => {
-            let p = CCITTFaxParams::from_dictionary(d, objects)?;
-            DecodeParms::CcittFax(p)
-        }
-        (Filter::CCITTFaxDecode, None) => DecodeParms::CcittFax(CCITTFaxParams::default()),
-        (Filter::LZWDecode, Some(d)) => {
-            let early_change = d.optional_number("EarlyChange", objects)?.unwrap_or(1) != 0;
-            let predictor = PredictorParams::from_dictionary(d, objects)?;
-            DecodeParms::Lzw {
-                early_change,
-                predictor,
-            }
-        }
-        (Filter::LZWDecode, None) => DecodeParms::Lzw {
-            early_change: true,
-            predictor: PredictorParams::default(),
-        },
-        (Filter::FlateDecode, Some(d)) => {
-            let predictor = PredictorParams::from_dictionary(d, objects)?;
-            DecodeParms::Flate { predictor }
-        }
-        (Filter::FlateDecode, None) => DecodeParms::Flate {
-            predictor: PredictorParams::default(),
-        },
-        (Filter::JBIG2Decode, Some(d)) => DecodeParms::Jbig2 {
-            globals: resolve_jbig2_globals(d, objects)?,
-        },
-        (Filter::JBIG2Decode, None) => DecodeParms::Jbig2 { globals: None },
-        _ => DecodeParms::None,
-    };
-
-    Ok(params)
 }
 
 fn resolve_jbig2_dimensions(
@@ -759,6 +661,81 @@ mod tests {
         let resolver = TestResolver { objects };
 
         let decoded = decode_with_resolver(&stream, &resolver).expect("decode failed");
+        assert_eq!(decoded.as_ref(), b"hello");
+    }
+
+    #[test]
+    fn test_decode_with_sparse_decode_parms_array() {
+        use flate2::{Compression, write::ZlibEncoder};
+        use std::fmt::Write as _;
+        use std::io::Write as _;
+
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(b"hello").expect("zlib write failed");
+        let compressed = encoder.finish().expect("zlib finish failed");
+
+        let mut encoded = String::new();
+        for byte in compressed {
+            write!(&mut encoded, "{byte:02x}").expect("hex write failed");
+        }
+        encoded.push('>');
+
+        let dictionary = Dictionary::new(BTreeMap::from([
+            (
+                "Filter".to_string(),
+                ObjectVariant::Array(vec![
+                    ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
+                    ObjectVariant::Name(b"FlateDecode".to_vec()),
+                ]),
+            ),
+            (
+                "DecodeParms".to_string(),
+                ObjectVariant::Array(vec![ObjectVariant::Null]),
+            ),
+        ]));
+
+        let decoded = decode_data_with_resolver(
+            &dictionary,
+            Arc::new(encoded.into_bytes()),
+            &PassthroughResolver,
+        )
+        .expect("decode failed");
+
+        assert_eq!(decoded.as_ref(), b"hello");
+    }
+
+    #[test]
+    fn test_decode_parms_array_accepts_indirect_dictionary_object() {
+        use flate2::{Compression, write::ZlibEncoder};
+        use pdf_object::indirect_object::IndirectObject;
+        use std::io::Write;
+
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(b"hello").expect("zlib write failed");
+        let compressed = encoder.finish().expect("zlib finish failed");
+
+        let decode_parms = ObjectVariant::IndirectObject(Box::new(IndirectObject::new(
+            2,
+            0,
+            Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
+                BTreeMap::new(),
+            )))),
+        )));
+        let dictionary = Dictionary::new(BTreeMap::from([
+            (
+                "Filter".to_string(),
+                ObjectVariant::Name(b"FlateDecode".to_vec()),
+            ),
+            (
+                "DecodeParms".to_string(),
+                ObjectVariant::Array(vec![decode_parms]),
+            ),
+        ]));
+
+        let decoded =
+            decode_data_with_resolver(&dictionary, Arc::new(compressed), &PassthroughResolver)
+                .expect("decode failed");
+
         assert_eq!(decoded.as_ref(), b"hello");
     }
 
