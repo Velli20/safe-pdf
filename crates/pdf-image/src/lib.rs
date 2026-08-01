@@ -1,6 +1,5 @@
 pub mod error;
 pub mod image_xobject;
-pub mod indexed;
 pub mod inline_image;
 
 pub use error::PdfImageError;

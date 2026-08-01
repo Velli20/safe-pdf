@@ -2,7 +2,18 @@
 
 use crate::error::DecodeError;
 
-/// Expands indexed palette values into their base component bytes.
+/// Expands indexed palette values into their base color component bytes.
+///
+/// Each value in `indices` selects one `base_components`-wide entry from
+/// `lookup`. Indices above `hival` are clamped to `hival`, as required for PDF
+/// indexed color spaces. The returned bytes contain the selected entries in
+/// the same order as the input indices.
+///
+/// # Errors
+///
+/// Returns [`DecodeError::InvalidComponentCount`] when `base_components` is
+/// zero. Returns [`DecodeError::PaletteLookupOutOfBounds`] when `lookup` does
+/// not contain a complete entry for a selected index.
 pub fn expand_indexed_values(
     indices: &[u8],
     lookup: &[u8],
