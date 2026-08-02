@@ -5,6 +5,8 @@
 /// name alone we substitute a metrically-similar bundled TrueType font.
 use std::fmt;
 
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+
 use crate::flags::FontFlags;
 
 /// One of the 14 standard Type 1 fonts defined by the PDF specification
@@ -119,6 +121,19 @@ impl From<FontFlags> for Standard14Font {
 }
 
 impl Standard14Font {
+    /// Resolve the Standard 14 identity to use for fallback substitution.
+    pub(crate) fn from_dictionary(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+        flags: FontFlags,
+    ) -> Self {
+        dictionary
+            .get("BaseFont")
+            .and_then(|value| value.try_str(objects).ok())
+            .and_then(Self::from_base_font_name)
+            .unwrap_or_else(|| Self::from(flags))
+    }
+
     /// Try to match a `/BaseFont` name to a Standard 14 font.
     ///
     /// Recognises both the canonical names and common aliases

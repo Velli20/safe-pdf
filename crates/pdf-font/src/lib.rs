@@ -1,5 +1,6 @@
 mod cff_builder;
 pub mod char_vec;
+pub mod cid_font_subtype;
 mod cid_system_info;
 pub mod encoding;
 pub mod error;

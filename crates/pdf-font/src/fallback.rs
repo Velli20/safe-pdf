@@ -5,7 +5,7 @@ use pdf_object::{
 };
 
 use crate::{
-    cid_system_info::cid_ordering_from_dictionary,
+    cid_system_info::CidOrdering,
     encoding::{Encoding, FontEncoding},
     error::FontError,
     flags::FontFlags,
@@ -20,26 +20,18 @@ pub(crate) struct FallbackFontProgram {
     pub(crate) flags: FontFlags,
 }
 
-/// Select fallback font bytes and metadata for a font dictionary.
-///
-/// # Paramaters
-///
-/// - `dictionary`: The PDF font dictionary that needs fallback font data.
-/// - `objects`: The resolver used to dereference indirect PDF objects.
-///
-/// # Returns
-///
-/// A fallback font program with borrowed bundled bytes, the selected Standard
-/// 14 identity, and descriptor flags.
-pub(crate) fn fallback_program_from_dictionary(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> Result<FallbackFontProgram, FontError> {
-    let flags = descriptor_flags(dictionary, objects)?;
-    let standard14 = standard14_from_dictionary(dictionary, objects, flags);
-    let is_cjk = is_cjk_cid_font(dictionary, objects)?;
+impl FallbackFontProgram {
+    /// Select fallback font bytes and metadata for a font dictionary.
+    pub(crate) fn from_dictionary(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Self, FontError> {
+        let flags = descriptor_flags(dictionary, objects)?;
+        let standard14 = Standard14Font::from_dictionary(dictionary, objects, flags);
+        let is_cjk = is_cjk_cid_font(dictionary, objects)?;
 
-    Ok(fallback_program(flags, standard14, is_cjk))
+        Ok(fallback_program(flags, standard14, is_cjk))
+    }
 }
 
 /// Build a synthetic TrueType font from fallback font data.
@@ -57,7 +49,7 @@ pub(crate) fn fallback_true_type_from_dictionary(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<TrueTypeFont, FontError> {
-    let fallback = fallback_program_from_dictionary(dictionary, objects)?;
+    let fallback = FallbackFontProgram::from_dictionary(dictionary, objects)?;
     let widths = SimpleFontGlyphWidthsMap::from_dictionary(dictionary, objects)?;
     let encoding = simple_font_encoding(dictionary, objects);
     let to_unicode = to_unicode_cmap(dictionary, objects)?;
@@ -83,29 +75,12 @@ pub(crate) fn fallback_true_type_from_dictionary_best_effort(
 ) -> TrueTypeFont {
     let flags = descriptor_flags(dictionary, objects).unwrap_or_default();
     let is_cjk = is_cjk_cid_font(dictionary, objects).unwrap_or(false);
-    let standard14 = standard14_from_dictionary(dictionary, objects, flags);
+    let standard14 = Standard14Font::from_dictionary(dictionary, objects, flags);
     let fallback = fallback_program(flags, standard14, is_cjk);
     let mut font = TrueTypeFont::from_bytes(fallback.font_file, Some(fallback.standard14));
     font.flags = fallback.flags;
 
     font
-}
-
-/// Resolve the Standard 14 identity to use for fallback substitution.
-///
-/// This prefers a readable `/BaseFont` name when it maps to a known Standard 14
-/// font. If `/BaseFont` is missing, malformed, or unrecognized, it falls back
-/// to the flag-driven Standard 14 selection.
-fn standard14_from_dictionary(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-    flags: FontFlags,
-) -> Standard14Font {
-    dictionary
-        .get("BaseFont")
-        .and_then(|value| value.try_str(objects).ok())
-        .and_then(Standard14Font::from_base_font_name)
-        .unwrap_or_else(|| Standard14Font::from(flags))
 }
 
 /// Build the fallback font program descriptor from already-decided inputs.
@@ -217,5 +192,5 @@ fn is_cjk_cid_font(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<bool, FontError> {
-    Ok(cid_ordering_from_dictionary(dictionary, objects)?.is_some())
+    Ok(CidOrdering::from_dictionary(dictionary, objects)?.is_some())
 }
