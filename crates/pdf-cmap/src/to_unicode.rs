@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+
 use crate::{cmap::parser::CMapParser, error::CMapError};
 
 /// A parsed ToUnicode CMap that maps PDF character codes to Unicode scalar values.
@@ -7,6 +9,18 @@ use crate::{cmap::parser::CMapParser, error::CMapError};
 pub struct ToUnicodeCMap(HashMap<u16, Vec<char>>);
 
 impl ToUnicodeCMap {
+    /// Parse the optional `/ToUnicode` CMap from a font dictionary.
+    pub fn from_dictionary(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Option<Self>, CMapError> {
+        dictionary
+            .get("ToUnicode")
+            .and_then(|value| value.try_stream(objects).ok())
+            .map(|stream| Self::try_from(stream.raw_data()))
+            .transpose()
+    }
+
     /// Look up the Unicode characters for the given PDF character code.
     pub fn map_char_code(&self, code: u16) -> Option<&[char]> {
         self.0.get(&code).map(Vec::as_slice)

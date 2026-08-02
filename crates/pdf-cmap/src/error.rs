@@ -3,6 +3,8 @@ use thiserror::Error;
 /// Errors that can occur while parsing or resolving PDF CMaps.
 #[derive(Debug, Error, PartialEq)]
 pub enum CMapError {
+    #[error("Object error while reading a CMap: {0}")]
+    ObjectError(#[from] pdf_object::error::ObjectError),
     #[error("Unsupported Type0 /Encoding CMap '{0}'")]
     UnsupportedType0EncodingCMap(String),
     #[error("Invalid Type0 /Encoding CMap: {0}")]

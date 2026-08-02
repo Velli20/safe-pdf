@@ -3,14 +3,15 @@ use std::collections::HashMap;
 use pdf_cmap::{ToUnicodeCMap, Type0EncodingCMap};
 use pdf_object::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
 };
 use read_fonts::{FontRef, TableProvider};
 
+pub use crate::cid_font_subtype::CidFontSubType;
+
 use crate::{
-    cid_system_info::cid_ordering_from_dictionary,
+    cid_system_info::CidOrdering,
     error::FontError,
-    fallback::fallback_program_from_dictionary,
+    fallback::FallbackFontProgram,
     font_data::FontData,
     glyph_widths_map::GlyphWidthsMap,
     true_type_font::TrueTypeFont,
@@ -51,15 +52,6 @@ impl Type0Font {
     const DEFAULT_WIDTH: f32 = 1000.0;
 }
 
-/// CIDFont subtypes supported by the parser.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum CidFontSubType {
-    /// Type 1/CFF based CID-keyed font
-    Type0,
-    /// TrueType based CID-keyed font
-    Type2,
-}
-
 /// Font program format resolved for a Type0 descendant font.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Type0FontProgramFormat {
@@ -88,8 +80,8 @@ impl Type0Font {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, FontError> {
-        let encoding = parse_encoding(dictionary, objects)?;
-        let to_unicode = parse_to_unicode(dictionary, objects)?;
+        let encoding = Type0EncodingCMap::from_dictionary(dictionary, objects)?;
+        let to_unicode = ToUnicodeCMap::from_dictionary(dictionary, objects)?;
         let descendant = Type0DescendantFont::from_dictionary(dictionary, objects)?;
         let Type0FontProgram {
             font_file,
@@ -171,11 +163,13 @@ impl<'a> Type0DescendantFont<'a> {
         objects: &'a dyn ObjectResolver,
     ) -> Result<Self, FontError> {
         let dictionary = descendant_font_dictionary(dictionary, objects)?;
-
+        let default_width = dictionary
+            .optional_number::<f32>("DW", objects)?
+            .unwrap_or(Type0Font::DEFAULT_WIDTH);
         Ok(Self {
             dictionary,
-            subtype: cid_font_subtype(dictionary, objects)?,
-            default_width: default_width(dictionary, objects)?,
+            subtype: CidFontSubType::from_dictionary(dictionary, objects)?,
+            default_width,
             widths: widths_map(dictionary, objects)?,
         })
     }
@@ -185,56 +179,6 @@ struct Type0FontProgram {
     font_file: FontData,
     program_format: Type0FontProgramFormat,
     fallback_cid_to_unicode: Option<HashMap<u16, char>>,
-}
-
-/// Parse the optional `/Encoding` entry of a Type0 font dictionary.
-///
-/// # Paramaters
-///
-/// - `dictionary`: The top-level Type0 font dictionary.
-/// - `objects`: The resolver used to dereference indirect PDF objects.
-///
-/// # Returns
-///
-/// The parsed Type0 encoding CMap when the dictionary contains `/Encoding`.
-fn parse_encoding(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> Result<Option<Type0EncodingCMap>, FontError> {
-    dictionary
-        .get("Encoding")
-        .map(|value| {
-            let resolved = objects.resolve_object(value)?;
-            match resolved {
-                ObjectVariant::Stream(stream) => {
-                    Ok(Type0EncodingCMap::from_bytes(stream.raw_data())?)
-                }
-                _ => Ok(Type0EncodingCMap::from_name(value.try_str(objects)?)?),
-            }
-        })
-        .transpose()
-}
-
-/// Parse the optional `/ToUnicode` CMap from a Type0 font dictionary.
-///
-/// # Paramaters
-///
-/// - `dictionary`: The top-level Type0 font dictionary.
-/// - `objects`: The resolver used to dereference indirect PDF objects.
-///
-/// # Returns
-///
-/// The parsed ToUnicode CMap when a valid `/ToUnicode` stream is present.
-fn parse_to_unicode(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> Result<Option<ToUnicodeCMap>, FontError> {
-    dictionary
-        .get("ToUnicode")
-        .and_then(|e| e.try_stream(objects).ok())
-        .map(|s| ToUnicodeCMap::try_from(s.raw_data()))
-        .transpose()
-        .map_err(FontError::from)
 }
 
 /// Resolve the sole descendant CIDFont dictionary from `/DescendantFonts`.
@@ -264,48 +208,6 @@ fn descendant_font_dictionary<'a>(
         .ok_or(FontError::InvalidDescendantFonts("Array is empty"))?
         .try_dictionary(objects)
         .map_err(FontError::from)
-}
-
-/// Parse the CIDFont subtype from a descendant font dictionary.
-///
-/// # Paramaters
-///
-/// - `dictionary`: The descendant CIDFont dictionary.
-/// - `objects`: The resolver used to dereference indirect PDF objects.
-///
-/// # Returns
-///
-/// The supported CIDFont subtype, or an unsupported-subtype error for unknown
-/// subtype names.
-fn cid_font_subtype(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> Result<CidFontSubType, FontError> {
-    match dictionary.required_str("Subtype", objects)? {
-        "CIDFontType0" => Ok(CidFontSubType::Type0),
-        "CIDFontType2" => Ok(CidFontSubType::Type2),
-        other => Err(FontError::UnsupportedCidFontSubtype {
-            subtype: other.to_string(),
-        }),
-    }
-}
-
-/// Parse the default glyph width from a descendant font dictionary.
-///
-/// # Paramaters
-///
-/// - `dictionary`: The descendant CIDFont dictionary.
-/// - `objects`: The resolver used to dereference indirect PDF objects.
-///
-/// # Returns
-///
-/// The `/DW` value, or [`Type0Font::DEFAULT_WIDTH`] when `/DW` is absent.
-fn default_width(dictionary: &Dictionary, objects: &dyn ObjectResolver) -> Result<f32, FontError> {
-    Ok(dictionary
-        .get("DW")
-        .map(|dw| dw.try_number::<f32>(objects))
-        .transpose()?
-        .unwrap_or(Type0Font::DEFAULT_WIDTH))
 }
 
 /// Parse explicit CID width overrides from a descendant font dictionary.
@@ -404,7 +306,7 @@ fn fallback_type0_program(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<Type0FontProgram, FontError> {
-    let fallback = fallback_program_from_dictionary(dictionary, objects)?;
+    let fallback = FallbackFontProgram::from_dictionary(dictionary, objects)?;
     let fallback_cid_to_unicode = cid_to_unicode_map(dictionary, objects)?;
 
     Ok(Type0FontProgram {
@@ -499,7 +401,7 @@ fn cid_to_unicode_map(
     descendant_font: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<Option<HashMap<u16, char>>, FontError> {
-    let Some(ordering) = cid_ordering_from_dictionary(descendant_font, objects)? else {
+    let Some(ordering) = CidOrdering::from_dictionary(descendant_font, objects)? else {
         return Ok(None);
     };
 

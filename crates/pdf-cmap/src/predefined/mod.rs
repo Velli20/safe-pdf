@@ -58,52 +58,6 @@ pub struct PredefinedCMap {
     maps: Vec<&'static GeneratedCMap>,
 }
 
-/// Known Adobe CIDSystemInfo ordering values with bundled Unicode CMap support.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CidOrdering {
-    /// Adobe-Japan1 character collection.
-    Japan1,
-    /// Adobe-GB1 character collection.
-    GB1,
-    /// Adobe-CNS1 character collection.
-    CNS1,
-    /// Adobe-Korea1 character collection.
-    Korea1,
-}
-
-impl CidOrdering {
-    /// Resolve a known Adobe CIDSystemInfo ordering value.
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "Japan1" => Some(Self::Japan1),
-            "GB1" => Some(Self::GB1),
-            "CNS1" => Some(Self::CNS1),
-            "Korea1" => Some(Self::Korea1),
-            _ => None,
-        }
-    }
-
-    /// Return whether an ordering name has bundled CJK fallback support.
-    pub fn is_known_cjk_name(name: &str) -> bool {
-        Self::from_name(name).is_some()
-    }
-
-    /// Build a best-effort CID to Unicode map for this ordering.
-    pub fn cid_to_unicode_map(self) -> Result<Option<HashMap<u16, char>>, CMapError> {
-        Ok(PredefinedCMap::from_name(self.unicode_cmap_name())?
-            .map(|cmap| cmap.cid_to_unicode_map()))
-    }
-
-    fn unicode_cmap_name(self) -> &'static str {
-        match self {
-            Self::Japan1 => "UniJIS-UCS2-HW-H",
-            Self::GB1 => "UniGB-UCS2-H",
-            Self::CNS1 => "UniCNS-UCS2-H",
-            Self::Korea1 => "UniKS-UCS2-H",
-        }
-    }
-}
-
 impl PredefinedCMap {
     /// Resolve a predefined CMap by name.
     pub fn from_name(name: &str) -> Result<Option<Self>, CMapError> {
@@ -200,17 +154,6 @@ impl Type0CodeMap for PredefinedCMap {
     }
 }
 
-/// Build a best-effort CID to Unicode map for a known Adobe CIDSystemInfo ordering.
-pub fn cid_to_unicode_map_for_ordering(
-    ordering: &str,
-) -> Result<Option<HashMap<u16, char>>, CMapError> {
-    let Some(ordering) = CidOrdering::from_name(ordering) else {
-        return Ok(None);
-    };
-
-    ordering.cid_to_unicode_map()
-}
-
 /// Find a generated CMap by resource name.
 fn find_cmap(name: &str) -> Option<&'static GeneratedCMap> {
     generated::CMAPS
@@ -277,20 +220,12 @@ mod tests {
 
     #[test]
     fn japan1_cid_to_unicode_includes_half_width_ascii_and_space_variants() {
-        let map = cid_to_unicode_map_for_ordering("Japan1").unwrap().unwrap();
+        let map = PredefinedCMap::from_name("UniJIS-UCS2-HW-H")
+            .unwrap()
+            .unwrap()
+            .cid_to_unicode_map();
 
         assert_eq!(map.get(&231), Some(&' '));
         assert_eq!(map.get(&633), Some(&'\u{2003}'));
-    }
-
-    #[test]
-    fn cid_ordering_rejects_unknown_orderings() {
-        assert!(CidOrdering::from_name("Unknown").is_none());
-        assert!(!CidOrdering::is_known_cjk_name("Unknown"));
-        assert!(
-            cid_to_unicode_map_for_ordering("Unknown")
-                .unwrap()
-                .is_none()
-        );
     }
 }

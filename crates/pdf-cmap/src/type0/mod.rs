@@ -2,7 +2,10 @@
 
 use std::convert::TryFrom;
 
-use pdf_object::text_encoding::BigEndianU16Units;
+use pdf_object::{
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    text_encoding::BigEndianU16Units,
+};
 
 mod embedded;
 mod parser;
@@ -25,6 +28,23 @@ pub enum Type0EncodingCMap {
 }
 
 impl Type0EncodingCMap {
+    /// Parse the optional `/Encoding` entry of a Type0 font dictionary.
+    pub fn from_dictionary(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Option<Self>, CMapError> {
+        dictionary
+            .get("Encoding")
+            .map(|value| {
+                let resolved = objects.resolve_object(value)?;
+                match resolved {
+                    ObjectVariant::Stream(stream) => Self::from_bytes(stream.raw_data()),
+                    _ => Self::from_name(value.try_str(objects)?),
+                }
+            })
+            .transpose()
+    }
+
     /// Build a Type0 encoding CMap from a predefined CMap name.
     pub fn from_name(name: &str) -> Result<Self, CMapError> {
         if let Ok(writing_mode) = WritingMode::try_from(name) {
