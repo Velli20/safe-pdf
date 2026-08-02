@@ -14,6 +14,8 @@ pub(crate) struct FallbackFontProgram {
 }
 
 impl FallbackFontProgram {
+    const NOTO_SANS_CJK_JP_REGULAR: &[u8] = include_bytes!("../assets/NotoSansCJKjp-Regular.otf");
+
     /// Select fallback font bytes and metadata for a font dictionary.
     pub(crate) fn from_dictionary(
         dictionary: &Dictionary,
@@ -22,8 +24,17 @@ impl FallbackFontProgram {
         let flags = FontFlags::from_dictionary(dictionary, objects)?;
         let standard14 = Standard14Font::from_dictionary(dictionary, objects, flags);
         let is_cjk = is_cjk_cid_font(dictionary, objects)?;
+        let font_file = if is_cjk {
+            Self::NOTO_SANS_CJK_JP_REGULAR
+        } else {
+            standard14.fallback_font_bytes()
+        };
 
-        Ok(fallback_program(flags, standard14, is_cjk))
+        Ok(Self {
+            font_file,
+            standard14,
+            flags,
+        })
     }
 }
 
@@ -47,7 +58,7 @@ pub(crate) fn fallback_true_type_from_dictionary(
     let encoding = Encoding::from_dictionary(dictionary, objects)
         .ok()
         .flatten();
-    let to_unicode = to_unicode_cmap(dictionary, objects)?;
+    let to_unicode = ToUnicodeCMap::from_dictionary(dictionary, objects)?;
 
     Ok(TrueTypeFont {
         font_file: fallback.font_file.into(),
@@ -71,56 +82,20 @@ pub(crate) fn fallback_true_type_from_dictionary_best_effort(
     let flags = FontFlags::from_dictionary(dictionary, objects).unwrap_or_default();
     let is_cjk = is_cjk_cid_font(dictionary, objects).unwrap_or(false);
     let standard14 = Standard14Font::from_dictionary(dictionary, objects, flags);
-    let fallback = fallback_program(flags, standard14, is_cjk);
+    let font_file = if is_cjk {
+        FallbackFontProgram::NOTO_SANS_CJK_JP_REGULAR
+    } else {
+        standard14.fallback_font_bytes()
+    };
+    let fallback = FallbackFontProgram {
+        font_file,
+        standard14,
+        flags,
+    };
     let mut font = TrueTypeFont::from_bytes(fallback.font_file, Some(fallback.standard14));
     font.flags = fallback.flags;
 
     font
-}
-
-/// Build the fallback font program descriptor from already-decided inputs.
-///
-/// `standard14` selects the Standard 14 identity for simple-font fallback,
-/// while `is_cjk` switches the program bytes to the bundled CJK fallback for
-/// CID fonts that declare a supported CJK ordering.
-fn fallback_program(
-    flags: FontFlags,
-    standard14: Standard14Font,
-    is_cjk: bool,
-) -> FallbackFontProgram {
-    let font_file = if is_cjk {
-        include_bytes!("../assets/NotoSansCJKjp-Regular.otf").as_slice()
-    } else {
-        standard14.fallback_font_bytes()
-    };
-
-    FallbackFontProgram {
-        font_file,
-        standard14,
-        flags,
-    }
-}
-
-/// Parse an optional ToUnicode CMap from a font dictionary.
-///
-/// # Paramaters
-///
-/// - `dictionary`: The PDF font dictionary that may contain `/ToUnicode`.
-/// - `objects`: The resolver used to dereference indirect PDF objects.
-///
-/// # Returns
-///
-/// The parsed ToUnicode CMap when a readable `/ToUnicode` stream is present.
-fn to_unicode_cmap(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> Result<Option<ToUnicodeCMap>, FontError> {
-    dictionary
-        .get("ToUnicode")
-        .and_then(|e| e.try_stream(objects).ok())
-        .map(|s| ToUnicodeCMap::try_from(s.raw_data()))
-        .transpose()
-        .map_err(FontError::from)
 }
 
 /// Detect whether a CID font dictionary uses a known CJK CID ordering.
