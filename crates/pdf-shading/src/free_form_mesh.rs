@@ -12,7 +12,8 @@ use thiserror::Error;
 
 use crate::{
     error::PdfShadingError,
-    mesh_decoder::{MeshBitWidths, MeshDecoder, read_mesh_bits},
+    mesh_bit_widths::MeshBitWidths,
+    mesh_decoder::{MeshDecoder, read_mesh_bits},
     model::{MeshTriangle, MeshVertex, Shading},
     parse::{parse_functions, required_color_space},
 };
@@ -74,11 +75,7 @@ impl FreeFormMeshConfig {
         objects: &dyn ObjectResolver,
     ) -> Result<Self, PdfShadingError> {
         let color_space = required_color_space(dictionary, objects)?;
-        let widths = MeshBitWidths::new(
-            dictionary.required_number::<usize>("BitsPerCoordinate", objects)?,
-            dictionary.required_number::<usize>("BitsPerComponent", objects)?,
-            dictionary.required_number::<usize>("BitsPerFlag", objects)?,
-        )?;
+        let widths = MeshBitWidths::from_dictionary(dictionary, objects)?;
         let decode = dictionary.required_vec_of::<f32>("Decode", objects)?;
         let bbox = dictionary.optional_bbox(objects)?;
         let anti_alias = dictionary.optional_boolean("AntiAlias", objects)?;

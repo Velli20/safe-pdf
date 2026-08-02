@@ -4,6 +4,7 @@ pub mod color_stops;
 pub mod error;
 mod free_form_mesh;
 pub mod mesh;
+mod mesh_bit_widths;
 mod mesh_decoder;
 pub mod model;
 pub mod paint;
