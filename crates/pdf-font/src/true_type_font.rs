@@ -3,16 +3,11 @@ use std::collections::HashMap;
 use pdf_cmap::ToUnicodeCMap;
 use pdf_object::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
 };
 
 use crate::{
-    encoding::{Encoding, FontEncoding},
-    error::FontError,
-    fallback::FallbackFontProgram,
-    flags::FontFlags,
-    font_data::FontData,
-    simple_font_glyph_map::SimpleFontGlyphWidthsMap,
+    encoding::Encoding, error::FontError, fallback::FallbackFontProgram, flags::FontFlags,
+    font_data::FontData, simple_font_glyph_map::SimpleFontGlyphWidthsMap,
     standard14::Standard14Font,
 };
 
@@ -37,8 +32,8 @@ pub struct TrueTypeFont {
     pub flags: FontFlags,
 }
 
-struct TrueTypeFontProgram {
-    font_file: FontData,
+pub(crate) struct TrueTypeFontProgram {
+    pub(crate) font_file: FontData,
     standard14: Option<Standard14Font>,
     flags: FontFlags,
 }
@@ -66,7 +61,7 @@ impl TrueTypeFont {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, FontError> {
-        let program = Self::read_font_program(dictionary, objects)?;
+        let program = Self::read_font_file(dictionary, objects)?;
         // Read the `/Widths` entry.
         let widths = SimpleFontGlyphWidthsMap::from_dictionary(dictionary, objects)?;
 
@@ -74,18 +69,9 @@ impl TrueTypeFont {
         // dictionary (with optional BaseEncoding + Differences).  Errors are
         // treated as absent encoding rather than propagated, since TrueType fonts
         // often omit or mis-specify this entry.
-        let encoding: Option<Encoding> = dictionary
-            .get("Encoding")
-            .and_then(|enc_obj| {
-                let resolved = objects.resolve_object(enc_obj).ok()?;
-                match resolved {
-                    ObjectVariant::Dictionary(d) => Encoding::from_dictionary(d, objects).ok(),
-                    _ => {
-                        let base = FontEncoding::from(resolved.try_str(objects).ok()?);
-                        Encoding::from_base_encoding(base).ok()
-                    }
-                }
-            })
+        let encoding = Encoding::from_dictionary(dictionary, objects)
+            .ok()
+            .flatten()
             .or_else(|| Self::default_simple_encoding(program.flags, program.standard14));
 
         // Parse optional ToUnicode CMap stream.
@@ -156,28 +142,15 @@ impl TrueTypeFont {
     ///
     /// # Returns
     ///
-    /// Returns the font file bytes as [`FontData`] or a [`FontError`] if
-    /// reading or decompressing the font stream fails or if the font dictionary or its
-    /// `/FontDescriptor` entry is invalid.
+    /// Returns the resolved font program and its fallback metadata, or a
+    /// [`FontError`] if reading the font dictionary or stream fails.
     pub(crate) fn read_font_file(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
-    ) -> Result<(FontData, FontFlags), FontError> {
-        let program = Self::read_font_program(dictionary, objects)?;
-        Ok((program.font_file, program.flags))
-    }
-
-    fn read_font_program(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
     ) -> Result<TrueTypeFontProgram, FontError> {
-        if let Some(descriptor) = dictionary.optional_dictionary("FontDescriptor", objects)? {
-            let flags = descriptor
-                .get("Flags")
-                .and_then(|obj| obj.try_number::<u32>(objects).ok())
-                .map(FontFlags::from_bits_truncate)
-                .unwrap_or_default();
+        let flags = FontFlags::from_dictionary(dictionary, objects)?;
 
+        if let Some(descriptor) = dictionary.optional_dictionary("FontDescriptor", objects)? {
             if let Some(stream) = descriptor.optional_stream("FontFile2", objects)? {
                 return Ok(TrueTypeFontProgram {
                     font_file: FontData::shared(stream.shared_data()),

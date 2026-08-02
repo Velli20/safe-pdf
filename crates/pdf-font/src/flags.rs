@@ -1,4 +1,9 @@
 use bitflags::bitflags;
+use pdf_object::{
+    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+};
+
+use crate::error::FontError;
 
 bitflags! {
     /// Font descriptor flags as defined in ISO 32000-1, Table 123.
@@ -18,5 +23,23 @@ bitflags! {
         const ALL_CAP      = 1 << 16; // spec bit 17
         const SMALL_CAP    = 1 << 17; // spec bit 18
         const FORCE_BOLD   = 1 << 18; // spec bit 19
+    }
+}
+
+impl FontFlags {
+    /// Read font descriptor flags from a font dictionary.
+    pub(crate) fn from_dictionary(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Self, FontError> {
+        let Some(descriptor) = dictionary.optional_dictionary("FontDescriptor", objects)? else {
+            return Ok(Self::empty());
+        };
+
+        Ok(descriptor
+            .get("Flags")
+            .and_then(|value| value.try_number::<u32>(objects).ok())
+            .map(Self::from_bits_truncate)
+            .unwrap_or_default())
     }
 }

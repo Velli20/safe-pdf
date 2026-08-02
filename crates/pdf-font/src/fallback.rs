@@ -1,16 +1,9 @@
 use pdf_cmap::ToUnicodeCMap;
-use pdf_object::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
-};
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 use crate::{
-    cid_system_info::CidOrdering,
-    encoding::{Encoding, FontEncoding},
-    error::FontError,
-    flags::FontFlags,
-    simple_font_glyph_map::SimpleFontGlyphWidthsMap,
-    standard14::Standard14Font,
+    cid_system_info::CidOrdering, encoding::Encoding, error::FontError, flags::FontFlags,
+    simple_font_glyph_map::SimpleFontGlyphWidthsMap, standard14::Standard14Font,
     true_type_font::TrueTypeFont,
 };
 
@@ -26,7 +19,7 @@ impl FallbackFontProgram {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, FontError> {
-        let flags = descriptor_flags(dictionary, objects)?;
+        let flags = FontFlags::from_dictionary(dictionary, objects)?;
         let standard14 = Standard14Font::from_dictionary(dictionary, objects, flags);
         let is_cjk = is_cjk_cid_font(dictionary, objects)?;
 
@@ -51,7 +44,9 @@ pub(crate) fn fallback_true_type_from_dictionary(
 ) -> Result<TrueTypeFont, FontError> {
     let fallback = FallbackFontProgram::from_dictionary(dictionary, objects)?;
     let widths = SimpleFontGlyphWidthsMap::from_dictionary(dictionary, objects)?;
-    let encoding = simple_font_encoding(dictionary, objects);
+    let encoding = Encoding::from_dictionary(dictionary, objects)
+        .ok()
+        .flatten();
     let to_unicode = to_unicode_cmap(dictionary, objects)?;
 
     Ok(TrueTypeFont {
@@ -73,7 +68,7 @@ pub(crate) fn fallback_true_type_from_dictionary_best_effort(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> TrueTypeFont {
-    let flags = descriptor_flags(dictionary, objects).unwrap_or_default();
+    let flags = FontFlags::from_dictionary(dictionary, objects).unwrap_or_default();
     let is_cjk = is_cjk_cid_font(dictionary, objects).unwrap_or(false);
     let standard14 = Standard14Font::from_dictionary(dictionary, objects, flags);
     let fallback = fallback_program(flags, standard14, is_cjk);
@@ -104,55 +99,6 @@ fn fallback_program(
         standard14,
         flags,
     }
-}
-
-/// Read font descriptor flags from a font dictionary.
-///
-/// # Paramaters
-///
-/// - `dictionary`: The PDF font dictionary that may contain `/FontDescriptor`.
-/// - `objects`: The resolver used to dereference indirect PDF objects.
-///
-/// # Returns
-///
-/// The parsed descriptor flags, or empty flags when the descriptor or `/Flags`
-/// entry is absent.
-pub(crate) fn descriptor_flags(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> Result<FontFlags, FontError> {
-    let Some(descriptor) = dictionary.optional_dictionary("FontDescriptor", objects)? else {
-        return Ok(FontFlags::empty());
-    };
-
-    Ok(descriptor
-        .get("Flags")
-        .and_then(|obj| obj.try_number::<u32>(objects).ok())
-        .map(FontFlags::from_bits_truncate)
-        .unwrap_or_default())
-}
-
-/// Parse a simple font encoding from a font dictionary.
-///
-/// # Paramaters
-///
-/// - `dictionary`: The PDF font dictionary that may contain `/Encoding`.
-/// - `objects`: The resolver used to dereference indirect PDF objects.
-///
-/// # Returns
-///
-/// The parsed encoding when `/Encoding` is present and supported.
-fn simple_font_encoding(dictionary: &Dictionary, objects: &dyn ObjectResolver) -> Option<Encoding> {
-    dictionary.get("Encoding").and_then(|enc_obj| {
-        let resolved = objects.resolve_object(enc_obj).ok()?;
-        match resolved {
-            ObjectVariant::Dictionary(d) => Encoding::from_dictionary(d, objects).ok(),
-            _ => {
-                let base = FontEncoding::from(resolved.try_str(objects).ok()?);
-                Encoding::from_base_encoding(base).ok()
-            }
-        }
-    })
 }
 
 /// Parse an optional ToUnicode CMap from a font dictionary.

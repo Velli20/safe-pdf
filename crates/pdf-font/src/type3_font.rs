@@ -5,13 +5,9 @@ use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
 };
 
-use crate::{
-    encoding::{Encoding, FontEncoding},
-    error::FontError,
-};
+use crate::{encoding::Encoding, error::FontError};
 
 /// Represents a Type 3 font in a PDF document.
 ///
@@ -52,16 +48,7 @@ impl Type3Font {
             bottom,
         };
 
-        // Read optional `/Encoding` entry. This is either a name or a dictionary.
-        let encoding = dictionary
-            .get("Encoding")
-            .map(|enc_obj| match objects.resolve_object(enc_obj)? {
-                ObjectVariant::Dictionary(enc_dictionary) => {
-                    Encoding::from_dictionary(enc_dictionary, objects)
-                }
-                other => Encoding::from_base_encoding(FontEncoding::from(other.try_str(objects)?)),
-            })
-            .transpose()?;
+        let encoding = Encoding::from_dictionary(dictionary, objects)?;
 
         let char_proc_dictionary = dictionary.required_dictionary("CharProcs", objects)?;
 

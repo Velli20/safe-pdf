@@ -3,14 +3,10 @@ use std::{collections::HashMap, sync::Arc};
 use pdf_cmap::ToUnicodeCMap;
 use pdf_object::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
 };
 
 use crate::{
-    cff_builder::build_cff_font,
-    encoding::{Encoding, FontEncoding},
-    error::FontError,
-    font_data::FontData,
+    cff_builder::build_cff_font, encoding::Encoding, error::FontError, font_data::FontData,
     simple_font_glyph_map::SimpleFontGlyphWidthsMap,
 };
 
@@ -48,21 +44,7 @@ impl Type1Font {
         // Read the `/Widths` entry.
         let widths = SimpleFontGlyphWidthsMap::from_dictionary(dictionary, objects)?;
 
-        // Read optional `/Encoding` entry. This is either a name or a dictionary.
-        let encoding = if let Some(enc_obj) = dictionary.get("Encoding") {
-            let enc_obj = objects.resolve_object(enc_obj)?;
-            match enc_obj {
-                ObjectVariant::Dictionary(enc_dictionary) => {
-                    Encoding::from_dictionary(enc_dictionary, objects)?
-                }
-                _ => {
-                    let base = FontEncoding::from(enc_obj.try_str(objects)?);
-                    Encoding::from_base_encoding(base)?
-                }
-            }
-        } else {
-            Encoding::default()
-        };
+        let encoding = Encoding::from_dictionary(dictionary, objects)?.unwrap_or_default();
 
         // Parse optional ToUnicode CMap stream.
         let to_unicode = dictionary
