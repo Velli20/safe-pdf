@@ -1,6 +1,8 @@
 use std::{borrow::Cow, convert::TryFrom};
 
-use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object::{
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+};
 
 use crate::error::FontError;
 
@@ -127,8 +129,24 @@ impl Encoding {
 }
 
 impl Encoding {
+    /// Parse the optional `/Encoding` entry from a font dictionary.
     pub fn from_dictionary(
-        dictionary: &pdf_object::dictionary::Dictionary,
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Option<Self>, FontError> {
+        dictionary
+            .get("Encoding")
+            .map(|value| match objects.resolve_object(value)? {
+                ObjectVariant::Dictionary(encoding_dictionary) => {
+                    Self::from_encoding_dictionary(encoding_dictionary, objects)
+                }
+                other => Self::from_base_encoding(FontEncoding::from(other.try_str(objects)?)),
+            })
+            .transpose()
+    }
+
+    fn from_encoding_dictionary(
+        dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, FontError> {
         let mut encoding = match dictionary.get("BaseEncoding") {

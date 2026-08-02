@@ -253,7 +253,7 @@ fn read_type0_font_program(
     match subtype {
         CidFontSubType::Type0 => read_cid_font_type0_program(dictionary, objects),
         CidFontSubType::Type2 => Ok(Type0FontProgram {
-            font_file: TrueTypeFont::read_font_file(dictionary, objects)?.0,
+            font_file: TrueTypeFont::read_font_file(dictionary, objects)?.font_file,
             program_format: Type0FontProgramFormat::TrueType {
                 cid_to_unicode: false,
             },
