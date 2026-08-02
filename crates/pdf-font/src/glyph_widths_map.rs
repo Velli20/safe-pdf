@@ -1,8 +1,11 @@
 use pdf_object::{
-    error::ObjectError, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 use std::collections::BTreeMap;
 use thiserror::Error;
+
+use crate::error::FontError;
 
 /// Errors that can occur during GlyphWidthsMap parsing from a /W array.
 #[derive(Debug, Error, Clone, PartialEq)]
@@ -58,6 +61,20 @@ pub struct GlyphWidthsMap {
 }
 
 impl GlyphWidthsMap {
+    /// Parse the optional `/W` width map from a descendant CIDFont dictionary.
+    pub fn from_dictionary(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Option<Self>, FontError> {
+        dictionary
+            .get("W")
+            .map(|value| {
+                let widths = value.try_array(objects)?;
+                Self::from_array(widths, objects).map_err(FontError::from)
+            })
+            .transpose()
+    }
+
     /// Parses a PDF /W array into a `GlyphWidthsMap`.
     ///
     /// The /W array can contain entries of the form:

@@ -74,12 +74,7 @@ impl TrueTypeFont {
             .flatten()
             .or_else(|| Self::default_simple_encoding(program.flags, program.standard14));
 
-        // Parse optional ToUnicode CMap stream.
-        let to_unicode = dictionary
-            .get("ToUnicode")
-            .and_then(|e| e.try_stream(objects).ok())
-            .map(|s| ToUnicodeCMap::try_from(s.raw_data()))
-            .transpose()?;
+        let to_unicode = ToUnicodeCMap::from_dictionary(dictionary, objects)?;
 
         Ok(Self {
             font_file: program.font_file,

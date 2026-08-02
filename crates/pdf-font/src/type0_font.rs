@@ -170,7 +170,7 @@ impl<'a> Type0DescendantFont<'a> {
             dictionary,
             subtype: CidFontSubType::from_dictionary(dictionary, objects)?,
             default_width,
-            widths: widths_map(dictionary, objects)?,
+            widths: GlyphWidthsMap::from_dictionary(dictionary, objects)?,
         })
     }
 }
@@ -208,29 +208,6 @@ fn descendant_font_dictionary<'a>(
         .ok_or(FontError::InvalidDescendantFonts("Array is empty"))?
         .try_dictionary(objects)
         .map_err(FontError::from)
-}
-
-/// Parse explicit CID width overrides from a descendant font dictionary.
-///
-/// # Paramaters
-///
-/// - `dictionary`: The descendant CIDFont dictionary.
-/// - `objects`: The resolver used to dereference indirect PDF objects.
-///
-/// # Returns
-///
-/// The parsed `/W` width map when the dictionary contains width overrides.
-fn widths_map(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> Result<Option<GlyphWidthsMap>, FontError> {
-    dictionary
-        .get("W")
-        .map(|obj| {
-            let widths = obj.try_array(objects)?;
-            GlyphWidthsMap::from_array(widths, objects).map_err(FontError::from)
-        })
-        .transpose()
 }
 
 /// Read or synthesize the font program for a Type0 descendant font.

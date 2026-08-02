@@ -10,6 +10,15 @@ pub struct ToUnicodeCMap(HashMap<u16, Vec<char>>);
 
 impl ToUnicodeCMap {
     /// Parse the optional `/ToUnicode` CMap from a font dictionary.
+    ///
+    /// # Paramaters
+    ///
+    /// - `dictionary`: The PDF font dictionary that may contain `/ToUnicode`.
+    /// - `objects`: The resolver used to dereference indirect PDF objects.
+    ///
+    /// # Returns
+    ///
+    /// The parsed ToUnicode CMap when a readable `/ToUnicode` stream is present.
     pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,

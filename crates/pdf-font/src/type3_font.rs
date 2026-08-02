@@ -58,12 +58,7 @@ impl Type3Font {
             char_procs.insert(name.to_owned(), content_stream);
         }
 
-        // Parse optional ToUnicode CMap stream.
-        let to_unicode = dictionary
-            .get("ToUnicode")
-            .and_then(|e| e.try_stream(objects).ok())
-            .map(|s| ToUnicodeCMap::try_from(s.raw_data()))
-            .transpose()?;
+        let to_unicode = ToUnicodeCMap::from_dictionary(dictionary, objects)?;
 
         Ok(Type3Font {
             font_matrix,
