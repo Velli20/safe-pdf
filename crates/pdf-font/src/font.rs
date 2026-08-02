@@ -9,16 +9,9 @@ use read_fonts::TableProvider;
 use skrifa::{FontRef, MetadataProvider};
 
 use crate::{
-    char_vec::CharVec,
-    error::FontError,
-    fallback::{
-        fallback_true_type_from_dictionary, fallback_true_type_from_dictionary_best_effort,
-    },
-    glyph_name_to_unicode::glyph_name_to_unicode,
-    standard14::Standard14Font,
-    true_type_font::TrueTypeFont,
-    type0_font::Type0Font,
-    type1_font::Type1Font,
+    char_vec::CharVec, error::FontError, fallback::fallback_true_type_from_dictionary,
+    glyph_name_to_unicode::glyph_name_to_unicode, standard14::Standard14Font,
+    true_type_font::TrueTypeFont, type0_font::Type0Font, type1_font::Type1Font,
     type3_font::Type3Font,
 };
 
@@ -51,7 +44,7 @@ impl Font {
             }
             "Type1" => match Type1Font::from_dictionary(dictionary, objects) {
                 Err(FontError::MissingFontFile) => Ok(Font::TrueType(
-                    fallback_true_type_from_dictionary(dictionary, objects)?,
+                    fallback_true_type_from_dictionary(dictionary, objects),
                 )),
                 Ok(type1_font) => Ok(Font::Type1(type1_font)),
                 Err(e) => Err(e),
@@ -70,14 +63,12 @@ impl Font {
         }
     }
 
-    /// Build a minimal Standard 14-backed fallback font for best-effort
-    /// resource recovery.
+    /// Build a Standard 14-backed fallback font for best-effort resource
+    /// recovery.
     ///
-    /// This is intentionally narrower than the normal font parsing path:
-    /// once the original font dictionary has already failed to parse, this
-    /// fallback does not attempt to preserve `/Widths`, `/Encoding`, or
-    /// `/ToUnicode` data from that failed font. The synthetic font keeps only
-    /// the bundled fallback program and the selected Standard 14 identity.
+    /// Valid `/Widths`, `/Encoding`, and `/ToUnicode` entries are retained
+    /// independently. Malformed metadata is treated as absent so an unreadable
+    /// font cannot prevent the rest of the resource dictionary from loading.
     ///
     /// Callers should use this only at higher-level recovery boundaries, such
     /// as page resource loading, where replacing an unreadable font is better
@@ -86,9 +77,7 @@ impl Font {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Self {
-        Self::TrueType(fallback_true_type_from_dictionary_best_effort(
-            dictionary, objects,
-        ))
+        Self::TrueType(fallback_true_type_from_dictionary(dictionary, objects))
     }
 }
 

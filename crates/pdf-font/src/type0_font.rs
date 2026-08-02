@@ -11,7 +11,7 @@ pub use crate::cid_font_subtype::CidFontSubType;
 use crate::{
     cid_system_info::CidOrdering,
     error::FontError,
-    fallback::FallbackFontProgram,
+    fallback::fallback_true_type_from_dictionary,
     font_data::FontData,
     glyph_widths_map::GlyphWidthsMap,
     true_type_font::TrueTypeFont,
@@ -263,7 +263,7 @@ fn read_cid_font_type0_program(
         Ok((_, Type1FontProgramFormat::ClassicType1)) => Err(FontError::UnsupportedFontSubtype {
             subtype: "FontFile".to_string(),
         }),
-        Err(FontError::MissingFontFile) => fallback_type0_program(dictionary, objects),
+        Err(FontError::MissingFontFile) => Ok(fallback_type0_program(dictionary, objects)),
         Err(err) => Err(err),
     }
 }
@@ -282,17 +282,17 @@ fn read_cid_font_type0_program(
 fn fallback_type0_program(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
-) -> Result<Type0FontProgram, FontError> {
-    let fallback = FallbackFontProgram::from_dictionary(dictionary, objects)?;
-    let fallback_cid_to_unicode = cid_to_unicode_map(dictionary, objects)?;
+) -> Type0FontProgram {
+    let fallback = fallback_true_type_from_dictionary(dictionary, objects);
+    let fallback_cid_to_unicode = cid_to_unicode_map(dictionary, objects).ok().flatten();
 
-    Ok(Type0FontProgram {
-        font_file: fallback.font_file.into(),
+    Type0FontProgram {
+        font_file: fallback.font_file,
         program_format: Type0FontProgramFormat::TrueType {
             cid_to_unicode: fallback_cid_to_unicode.is_some(),
         },
         fallback_cid_to_unicode,
-    })
+    }
 }
 
 /// Select the Unicode fallback map for decoded Type0 CIDs.
@@ -621,6 +621,42 @@ mod tests {
             font.decode_bytes_to_cids(&[0x00, 0x41, 0x12, 0x34, 0xFF]),
             vec![65, 0x1234, 0]
         );
+    }
+
+    #[test]
+    fn cid_font_type0_fallback_ignores_malformed_cid_system_info() {
+        let descendant = Dictionary::new(BTreeMap::from([
+            (
+                "Subtype".to_string(),
+                ObjectVariant::Name(b"CIDFontType0".to_vec()),
+            ),
+            (
+                "FontDescriptor".to_string(),
+                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::new()))),
+            ),
+            ("CIDSystemInfo".to_string(), ObjectVariant::Integer(1)),
+        ]));
+        let dictionary = Dictionary::new(BTreeMap::from([
+            (
+                "Subtype".to_string(),
+                ObjectVariant::Name(b"Type0".to_vec()),
+            ),
+            (
+                "DescendantFonts".to_string(),
+                ObjectVariant::Array(vec![ObjectVariant::Dictionary(Box::new(descendant))]),
+            ),
+        ]));
+
+        let font = Type0Font::from_dictionary(&dictionary, &PassthroughResolver).unwrap();
+
+        assert_eq!(
+            font.program_format,
+            Type0FontProgramFormat::TrueType {
+                cid_to_unicode: false
+            }
+        );
+        assert!(font.glyph_to_unicode.is_none());
+        assert!(!font.font_file.is_empty());
     }
 
     #[test]

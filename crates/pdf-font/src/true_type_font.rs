@@ -6,8 +6,8 @@ use pdf_object::{
 };
 
 use crate::{
-    encoding::Encoding, error::FontError, fallback::FallbackFontProgram, flags::FontFlags,
-    font_data::FontData, simple_font_glyph_map::SimpleFontGlyphWidthsMap,
+    encoding::Encoding, error::FontError, fallback::fallback_true_type_from_dictionary,
+    flags::FontFlags, font_data::FontData, simple_font_glyph_map::SimpleFontGlyphWidthsMap,
     standard14::Standard14Font,
 };
 
@@ -155,10 +155,10 @@ impl TrueTypeFont {
             }
         }
 
-        let fallback = FallbackFontProgram::from_dictionary(dictionary, objects)?;
+        let fallback = fallback_true_type_from_dictionary(dictionary, objects);
         Ok(TrueTypeFontProgram {
-            font_file: fallback.font_file.into(),
-            standard14: Some(fallback.standard14),
+            font_file: fallback.font_file,
+            standard14: fallback.standard14,
             flags: fallback.flags,
         })
     }
