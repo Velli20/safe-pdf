@@ -82,22 +82,13 @@ pub(crate) fn read_font_resource(
     cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<Resource, PdfPagesError> {
-    // Font resources are loaded best-effort: if parsing the original font
-    // fails, keep the resource name resolvable by substituting a minimal
-    // Standard 14-backed fallback instead of aborting the whole /Resources
-    // dictionary. Nested font resources are only preserved for successfully
-    // parsed fonts.
-    let (font, resources) = match Font::from_dictionary(dictionary, objects, id_allocator) {
-        Ok(font) => {
-            let resources =
-                Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?
-                    .map(Rc::new);
-            (font, resources)
-        }
-        Err(_) => (
-            Font::fallback_from_dictionary_best_effort(dictionary, objects),
-            None,
-        ),
+    // Font construction is best-effort and infallible. Only successfully
+    // parsed Type3 fonts consume nested resources; whole-font fallbacks do not.
+    let font = Font::from_dictionary(dictionary, objects, id_allocator);
+    let resources = if matches!(&font, Font::Type3(_)) {
+        Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?.map(Rc::new)
+    } else {
+        None
     };
 
     Ok(Resource::Font {

@@ -6,9 +6,8 @@ use pdf_object::{
 };
 
 use crate::{
-    encoding::Encoding, error::FontError, fallback::fallback_true_type_from_dictionary,
-    flags::FontFlags, font_data::FontData, simple_font_glyph_map::SimpleFontGlyphWidthsMap,
-    standard14::Standard14Font,
+    encoding::Encoding, error::FontError, flags::FontFlags, font_data::FontData,
+    simple_font_glyph_map::SimpleFontGlyphWidthsMap, standard14::Standard14Font,
 };
 
 /// A TrueType font parsed from a PDF font dictionary.
@@ -34,7 +33,6 @@ pub struct TrueTypeFont {
 
 pub(crate) struct TrueTypeFontProgram {
     pub(crate) font_file: FontData,
-    standard14: Option<Standard14Font>,
     flags: FontFlags,
 }
 
@@ -55,8 +53,9 @@ impl TrueTypeFont {
 
     /// Parses a TrueType font from a PDF font dictionary.
     ///
-    /// Reads the embedded font program (or falls back to a bundled substitute),
-    /// optional `/Widths`, `/Encoding`, and `/ToUnicode` entries.
+    /// Reads the embedded font program and optional `/Widths`, `/Encoding`, and
+    /// `/ToUnicode` entries. Missing or unreadable programs remain errors so
+    /// [`Font`](crate::font::Font) can apply whole-font fallback consistently.
     pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
@@ -72,7 +71,7 @@ impl TrueTypeFont {
         let encoding = Encoding::from_dictionary(dictionary, objects)
             .ok()
             .flatten()
-            .or_else(|| Self::default_simple_encoding(program.flags, program.standard14));
+            .or_else(|| Self::default_simple_encoding(program.flags, None));
 
         let to_unicode = ToUnicodeCMap::from_dictionary(dictionary, objects)?;
 
@@ -81,23 +80,18 @@ impl TrueTypeFont {
             widths,
             encoding,
             to_unicode,
-            standard14: program.standard14,
+            standard14: None,
             flags: program.flags,
         })
     }
 
-    /// Creates a minimal `TrueTypeFont` from raw font bytes with no
-    /// widths or ToUnicode map.
-    ///
-    /// Used for Standard 14 fallback fonts where the bundled bytes have static
-    /// storage duration. Those fallback fonts behave like simple Type 1 fonts,
-    /// so they default to StandardEncoding when the PDF omitted an explicit
-    /// `/Encoding`.
+    /// Creates a minimal `TrueTypeFont` from raw font bytes without PDF width,
+    /// encoding, ToUnicode, or descriptor metadata.
     pub fn from_bytes(font_file: &'static [u8], standard14: Option<Standard14Font>) -> Self {
         Self {
             font_file: font_file.into(),
             widths: None,
-            encoding: Self::default_simple_encoding(FontFlags::empty(), standard14),
+            encoding: None,
             to_unicode: None,
             standard14,
             flags: FontFlags::empty(),
@@ -127,8 +121,7 @@ impl TrueTypeFont {
     ///
     /// This method expects the full font dictionary, looks up its `/FontDescriptor`
     /// entry, and then attempts to read the font data from the descriptor's
-    /// `FontFile2` stream entry. If no embedded font is present, it falls back to a
-    /// bundled built-in TrueType font.
+    /// `FontFile2` stream entry.
     ///
     /// # Parameters
     ///
@@ -137,29 +130,24 @@ impl TrueTypeFont {
     ///
     /// # Returns
     ///
-    /// Returns the resolved font program and its fallback metadata, or a
-    /// [`FontError`] if reading the font dictionary or stream fails.
+    /// Returns the embedded font program or a [`FontError`] if the descriptor
+    /// or `FontFile2` stream is missing or unreadable.
     pub(crate) fn read_font_file(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<TrueTypeFontProgram, FontError> {
         let flags = FontFlags::from_dictionary(dictionary, objects)?;
 
-        if let Some(descriptor) = dictionary.optional_dictionary("FontDescriptor", objects)? {
-            if let Some(stream) = descriptor.optional_stream("FontFile2", objects)? {
-                return Ok(TrueTypeFontProgram {
-                    font_file: FontData::shared(stream.shared_data()),
-                    standard14: None,
-                    flags,
-                });
-            }
-        }
+        let descriptor = dictionary
+            .optional_dictionary("FontDescriptor", objects)?
+            .ok_or(FontError::MissingFontFile)?;
+        let stream = descriptor
+            .optional_stream("FontFile2", objects)?
+            .ok_or(FontError::MissingFontFile)?;
 
-        let fallback = fallback_true_type_from_dictionary(dictionary, objects);
         Ok(TrueTypeFontProgram {
-            font_file: fallback.font_file,
-            standard14: fallback.standard14,
-            flags: fallback.flags,
+            font_file: FontData::shared(stream.shared_data()),
+            flags,
         })
     }
 }
@@ -210,19 +198,16 @@ mod tests {
     }
 
     #[test]
-    fn standard14_fallback_fonts_default_to_standard_encoding() {
+    fn raw_font_bytes_do_not_install_pdf_encoding_metadata() {
         let font = TrueTypeFont::from_bytes(
             Standard14Font::Helvetica.fallback_font_bytes(),
             Some(Standard14Font::Helvetica),
         );
 
-        assert_eq!(
-            font.encoding
-                .as_ref()
-                .and_then(|encoding| encoding.names.get(65))
-                .map(std::borrow::Cow::as_ref),
-            Some("A"),
-        );
+        assert!(font.widths.is_none());
+        assert!(font.encoding.is_none());
+        assert!(font.to_unicode.is_none());
+        assert!(font.flags.is_empty());
     }
 
     #[test]

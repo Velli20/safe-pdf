@@ -41,9 +41,9 @@ pub struct Type0Font {
     pub to_unicode: Option<ToUnicodeCMap>,
     /// Reverse Unicode cmap built from the embedded font's cmap tables.
     ///
-    /// Only populated for Identity-H/V encoded fonts that lack a ToUnicode
-    /// stream.  Maps glyph ID (= CID = char code for Identity encoding) to
-    /// the Unicode scalar value found in the font's best cmap subtable.
+    /// For substituted CJK fonts this is derived from the descendant's CID
+    /// ordering. For embedded Identity-H/V Type2 fonts without ToUnicode, it
+    /// reverses the font's best cmap subtable.
     pub glyph_to_unicode: Option<HashMap<u16, char>>,
 }
 
@@ -87,7 +87,8 @@ impl Type0Font {
             font_file,
             program_format,
             fallback_cid_to_unicode,
-        } = read_type0_font_program(descendant.dictionary, descendant.subtype, objects)?;
+        } = read_type0_font_program(descendant.dictionary, descendant.subtype, objects)
+            .unwrap_or_else(|_| fallback_type0_program(descendant.dictionary, objects));
         let glyph_to_unicode = glyph_to_unicode_map(
             fallback_cid_to_unicode,
             font_file.as_ref(),
@@ -210,7 +211,7 @@ fn descendant_font_dictionary<'a>(
         .map_err(FontError::from)
 }
 
-/// Read or synthesize the font program for a Type0 descendant font.
+/// Read the embedded font program for a Type0 descendant font.
 ///
 /// # Paramaters
 ///
@@ -220,8 +221,7 @@ fn descendant_font_dictionary<'a>(
 ///
 /// # Returns
 ///
-/// The resolved font bytes, rendering program format, and any synthetic
-/// CID-to-Unicode fallback map.
+/// The resolved font bytes and rendering program format.
 fn read_type0_font_program(
     dictionary: &Dictionary,
     subtype: CidFontSubType,
@@ -248,8 +248,9 @@ fn read_type0_font_program(
 ///
 /// # Returns
 ///
-/// An OpenType/CFF program when embedded, or a synthesized TrueType fallback
-/// program when the embedded font file is missing.
+/// An embedded OpenType/CFF program. Program-resolution errors are returned so
+/// Type0 construction can substitute a bundled program without discarding the
+/// composite font's encoding and metrics.
 fn read_cid_font_type0_program(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
@@ -263,22 +264,11 @@ fn read_cid_font_type0_program(
         Ok((_, Type1FontProgramFormat::ClassicType1)) => Err(FontError::UnsupportedFontSubtype {
             subtype: "FontFile".to_string(),
         }),
-        Err(FontError::MissingFontFile) => Ok(fallback_type0_program(dictionary, objects)),
         Err(err) => Err(err),
     }
 }
 
-/// Build the fallback program used when a CIDFontType0 has no embedded font.
-///
-/// # Paramaters
-///
-/// - `dictionary`: The descendant CIDFont dictionary.
-/// - `objects`: The resolver used to dereference indirect PDF objects.
-///
-/// # Returns
-///
-/// A synthetic TrueType-backed Type0 program plus an optional CID-to-Unicode
-/// map derived from the CIDSystemInfo ordering.
+/// Build a TrueType-backed fallback program while preserving Type0 semantics.
 fn fallback_type0_program(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
@@ -295,12 +285,11 @@ fn fallback_type0_program(
     }
 }
 
-/// Select the Unicode fallback map for decoded Type0 CIDs.
+/// Select the Unicode map for decoded Type0 CIDs.
 ///
 /// # Paramaters
 ///
-/// - `fallback_cid_to_unicode`: A synthetic fallback map from CJK CID ordering.
-/// - `font_file`: The resolved embedded or fallback font bytes.
+/// - `font_file`: The resolved embedded font bytes.
 /// - `subtype`: The parsed CIDFont subtype.
 /// - `encoding`: The parsed Type0 encoding CMap, when present.
 /// - `to_unicode`: The parsed ToUnicode CMap, when present.
@@ -328,6 +317,18 @@ fn glyph_to_unicode_map(
     } else {
         None
     }
+}
+
+/// Build a fallback CID-to-Unicode map from a descendant font's CID ordering.
+fn cid_to_unicode_map(
+    descendant_font: &Dictionary,
+    objects: &dyn ObjectResolver,
+) -> Result<Option<HashMap<u16, char>>, FontError> {
+    let Some(ordering) = CidOrdering::from_dictionary(descendant_font, objects)? else {
+        return Ok(None);
+    };
+
+    Ok(ordering.cid_to_unicode_map()?)
 }
 
 /// Build a reverse cmap table: glyph ID → Unicode char.
@@ -363,33 +364,12 @@ fn build_glyph_to_unicode(font_data: &[u8]) -> Option<HashMap<u16, char>> {
     if map.is_empty() { None } else { Some(map) }
 }
 
-/// Build a fallback CID-to-Unicode map from a descendant font's CID ordering.
-///
-/// # Paramaters
-///
-/// - `descendant_font`: The descendant CIDFont dictionary.
-/// - `objects`: The resolver used to dereference indirect PDF objects.
-///
-/// # Returns
-///
-/// A CID-to-Unicode map for known CJK orderings, or `None` when the ordering is
-/// absent or unsupported.
-fn cid_to_unicode_map(
-    descendant_font: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> Result<Option<HashMap<u16, char>>, FontError> {
-    let Some(ordering) = CidOrdering::from_dictionary(descendant_font, objects)? else {
-        return Ok(None);
-    };
-
-    Ok(ordering.cid_to_unicode_map()?)
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use std::collections::BTreeMap;
 
+    use pdf_content_stream::ContentStreamIdAllocator;
     use pdf_object::{
         dictionary::Dictionary, object_resolver::PassthroughResolver,
         object_variant::ObjectVariant, stream::StreamObject,
@@ -397,6 +377,7 @@ mod tests {
     use read_fonts::TableProvider;
 
     use super::*;
+    use crate::font::Font;
 
     fn make_stream_object(
         object_number: usize,
@@ -565,49 +546,8 @@ mod tests {
     }
 
     #[test]
-    fn cid_font_type0_missing_font_file_uses_truetype_fallback() {
-        let mut descriptor_dict = BTreeMap::new();
-        descriptor_dict.insert("Flags".to_string(), ObjectVariant::Integer(0));
-
-        let mut descendant_dict = BTreeMap::new();
-        descendant_dict.insert(
-            "Subtype".to_string(),
-            ObjectVariant::Name(b"CIDFontType0".to_vec()),
-        );
-        descendant_dict.insert(
-            "BaseFont".to_string(),
-            ObjectVariant::Name(b"Ryumin-Light".to_vec()),
-        );
-        descendant_dict.insert(
-            "FontDescriptor".to_string(),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(descriptor_dict))),
-        );
-        descendant_dict.insert(
-            "CIDSystemInfo".to_string(),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-                "Ordering".to_string(),
-                ObjectVariant::LiteralString(b"Japan1".to_vec()),
-            )])))),
-        );
-
-        let mut font_dict = BTreeMap::new();
-        font_dict.insert(
-            "Subtype".to_string(),
-            ObjectVariant::Name(b"Type0".to_vec()),
-        );
-        font_dict.insert(
-            "BaseFont".to_string(),
-            ObjectVariant::Name(b"Ryumin-Light-90ms-RKSJ-H".to_vec()),
-        );
-        font_dict.insert(
-            "DescendantFonts".to_string(),
-            ObjectVariant::Array(vec![ObjectVariant::Dictionary(Box::new(Dictionary::new(
-                descendant_dict,
-            )))]),
-        );
-
-        let font =
-            Type0Font::from_dictionary(&Dictionary::new(font_dict), &PassthroughResolver).unwrap();
+    fn cid_font_type0_missing_font_file_preserves_composite_font_semantics() {
+        let font = issue_13343_font();
 
         assert_eq!(font.subtype, CidFontSubType::Type0);
         assert_eq!(
@@ -617,9 +557,13 @@ mod tests {
             }
         );
         assert!(!font.font_file.is_empty());
+        assert!(font.encoding.is_some());
+        assert_eq!(font.default_width, 1180.0);
         assert_eq!(
-            font.decode_bytes_to_cids(&[0x00, 0x41, 0x12, 0x34, 0xFF]),
-            vec![65, 0x1234, 0]
+            font.widths
+                .as_ref()
+                .and_then(|widths| widths.get_width(231)),
+            Some(590.0)
         );
     }
 
@@ -657,6 +601,41 @@ mod tests {
         );
         assert!(font.glyph_to_unicode.is_none());
         assert!(!font.font_file.is_empty());
+    }
+
+    #[test]
+    fn cid_font_type0_fallback_ignores_unknown_cid_ordering() {
+        let descendant = missing_descendant_with_ordering("CIDFontType0", "Unknown");
+        let dictionary = type0_dictionary(descendant);
+
+        let font = Type0Font::from_dictionary(&dictionary, &PassthroughResolver).unwrap();
+
+        assert_eq!(
+            font.program_format,
+            Type0FontProgramFormat::TrueType {
+                cid_to_unicode: false
+            }
+        );
+        assert!(font.glyph_to_unicode.is_none());
+        assert!(!font.font_file.is_empty());
+    }
+
+    #[test]
+    fn cid_font_type2_missing_font_file_preserves_composite_font_semantics() {
+        let descendant = missing_cjk_descendant("CIDFontType2");
+        let dictionary = type0_dictionary(descendant);
+
+        let font = Type0Font::from_dictionary(&dictionary, &PassthroughResolver).unwrap();
+
+        assert_eq!(font.subtype, CidFontSubType::Type2);
+        assert_eq!(
+            font.program_format,
+            Type0FontProgramFormat::TrueType {
+                cid_to_unicode: true
+            }
+        );
+        assert!(font.glyph_to_unicode.is_some());
+        assert_eq!(font.decode_bytes_to_cids(&[0x81, 0x79]), vec![690]);
     }
 
     #[test]
@@ -704,51 +683,86 @@ mod tests {
     }
 
     fn issue_13343_font() -> Type0Font {
-        let mut descriptor_dict = BTreeMap::new();
-        descriptor_dict.insert("Flags".to_string(), ObjectVariant::Integer(6));
+        let mut descendant = missing_cjk_descendant("CIDFontType0");
+        descendant.insert("DW".to_string(), ObjectVariant::Integer(1180));
+        descendant.insert(
+            "W".to_string(),
+            ObjectVariant::Array(vec![
+                ObjectVariant::Integer(231),
+                ObjectVariant::Integer(389),
+                ObjectVariant::Integer(590),
+                ObjectVariant::Integer(516),
+                ObjectVariant::Integer(570),
+                ObjectVariant::Integer(590),
+                ObjectVariant::Integer(631),
+                ObjectVariant::Array(vec![ObjectVariant::Integer(590)]),
+            ]),
+        );
+        let dictionary = type0_dictionary(descendant);
+        let mut id_allocator = ContentStreamIdAllocator::new();
 
-        let mut descendant_dict = BTreeMap::new();
-        descendant_dict.insert(
-            "Subtype".to_string(),
-            ObjectVariant::Name(b"CIDFontType0".to_vec()),
-        );
-        descendant_dict.insert(
-            "BaseFont".to_string(),
-            ObjectVariant::Name(b"Ryumin-Light".to_vec()),
-        );
-        descendant_dict.insert(
-            "FontDescriptor".to_string(),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(descriptor_dict))),
-        );
-        descendant_dict.insert(
-            "CIDSystemInfo".to_string(),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-                "Ordering".to_string(),
-                ObjectVariant::LiteralString(b"Japan1".to_vec()),
-            )])))),
-        );
+        let font = Font::from_dictionary(&dictionary, &PassthroughResolver, &mut id_allocator);
+        let Font::Type0(font) = font else {
+            panic!("valid Type0 metadata should preserve the composite font fallback");
+        };
+        font
+    }
 
-        let mut font_dict = BTreeMap::new();
-        font_dict.insert(
-            "Subtype".to_string(),
-            ObjectVariant::Name(b"Type0".to_vec()),
-        );
-        font_dict.insert(
-            "BaseFont".to_string(),
-            ObjectVariant::Name(b"Ryumin-Light-90ms-RKSJ-H".to_vec()),
-        );
-        font_dict.insert(
-            "Encoding".to_string(),
-            ObjectVariant::Name(b"90ms-RKSJ-H".to_vec()),
-        );
-        font_dict.insert(
-            "DescendantFonts".to_string(),
-            ObjectVariant::Array(vec![ObjectVariant::Dictionary(Box::new(Dictionary::new(
-                descendant_dict,
-            )))]),
-        );
+    fn missing_cjk_descendant(subtype: &str) -> BTreeMap<String, ObjectVariant> {
+        missing_descendant_with_ordering(subtype, "Japan1")
+    }
 
-        Type0Font::from_dictionary(&Dictionary::new(font_dict), &PassthroughResolver).unwrap()
+    fn missing_descendant_with_ordering(
+        subtype: &str,
+        ordering: &str,
+    ) -> BTreeMap<String, ObjectVariant> {
+        BTreeMap::from([
+            (
+                "Subtype".to_string(),
+                ObjectVariant::Name(subtype.as_bytes().to_vec()),
+            ),
+            (
+                "BaseFont".to_string(),
+                ObjectVariant::Name(b"Ryumin-Light".to_vec()),
+            ),
+            (
+                "FontDescriptor".to_string(),
+                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                    "Flags".to_string(),
+                    ObjectVariant::Integer(6),
+                )])))),
+            ),
+            (
+                "CIDSystemInfo".to_string(),
+                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                    "Ordering".to_string(),
+                    ObjectVariant::LiteralString(ordering.as_bytes().to_vec()),
+                )])))),
+            ),
+        ])
+    }
+
+    fn type0_dictionary(descendant: BTreeMap<String, ObjectVariant>) -> Dictionary {
+        Dictionary::new(BTreeMap::from([
+            (
+                "Subtype".to_string(),
+                ObjectVariant::Name(b"Type0".to_vec()),
+            ),
+            (
+                "BaseFont".to_string(),
+                ObjectVariant::Name(b"Ryumin-Light-90ms-RKSJ-H".to_vec()),
+            ),
+            (
+                "Encoding".to_string(),
+                ObjectVariant::Name(b"90ms-RKSJ-H".to_vec()),
+            ),
+            (
+                "DescendantFonts".to_string(),
+                ObjectVariant::Array(vec![ObjectVariant::Dictionary(Box::new(Dictionary::new(
+                    descendant,
+                )))]),
+            ),
+        ]))
     }
 
     fn issue_13343_text_to_unicode(font: &Type0Font, text: &[u8]) -> String {

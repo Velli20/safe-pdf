@@ -349,7 +349,7 @@ currentfile eexec
         );
         let mut id_allocator = ContentStreamIdAllocator::new();
 
-        let font = Font::from_dictionary(&dict, &PassthroughResolver, &mut id_allocator).unwrap();
+        let font = Font::from_dictionary(&dict, &PassthroughResolver, &mut id_allocator);
 
         let Font::TrueType(font) = font else {
             panic!("empty Type1C font should use a TrueType fallback");
