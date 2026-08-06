@@ -10,10 +10,11 @@ use pdf_content_stream::ContentStream;
 use pdf_document::page::PdfPage;
 use pdf_graphics::{DashPattern, MaskMode, rect::Rect};
 use pdf_resources::{
-    external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateKey, SoftMask},
+    external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateKey},
     form::FormXObject,
     resource::Resource,
     resources::Resources,
+    soft_mask::SoftMask,
     xobject::XObject,
 };
 
