@@ -1,29 +1,18 @@
 use pdf_object::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
 use crate::{
     error::PdfPagesError,
-    object_reader::{ReadCycleTracker, ReadFromDictionary, ReadXObject},
+    object_reader::{ReadCycleTracker, ReadFromDictionary},
     resource::Resource,
     resource_cache::{ResourceCache, read_resource_lazy},
     resources::read_font_resource,
-    xobject::XObject,
+    soft_mask::SoftMask,
 };
 use num_traits::FromPrimitive;
 use pdf_content_stream::ContentStreamIdAllocator;
-use pdf_graphics::{BlendMode, DashPattern, LineCap, LineJoin, MaskMode};
-
-/// Soft mask extracted from an ExtGState `SMask` entry.
-pub struct SoftMask {
-    /// How the mask is derived from the transparency group output: from color
-    /// luminance (`Luminosity`) or from alpha/shape (`Alpha`).
-    pub mask_type: MaskMode,
-    /// The transparency group XObject (`G`) whose rendered result provides the
-    /// input used to compute the soft mask.
-    pub shape: XObject,
-}
+use pdf_graphics::{BlendMode, DashPattern, LineCap, LineJoin};
 
 /// Represents a key-value pair from a PDF External Graphics State dictionary (`ExtGState`).
 ///
@@ -218,54 +207,6 @@ fn parse_blend_mode(
     Ok(ExternalGraphicsStateKey::BlendMode(blend_modes_vec))
 }
 
-fn parse_soft_mask(
-    key_name: &str,
-    value: &ObjectVariant,
-    objects: &dyn ObjectResolver,
-    cache: &mut dyn ResourceCache,
-    cycle_tracker: &mut ReadCycleTracker,
-    id_allocator: &mut ContentStreamIdAllocator,
-) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
-    let smask = match value {
-        ObjectVariant::Dictionary(dict) => {
-            let mask_type = MaskMode::from(dict.required_str("S", objects)?);
-
-            // Parse the "G" key for the `XObject`
-            let content = dict.get_or_err("G")?;
-            let stream = content.try_stream(objects)?;
-
-            let shape = match XObject::read_xobject(
-                content,
-                &stream.dictionary,
-                stream,
-                objects,
-                cache,
-                cycle_tracker,
-                id_allocator,
-            ) {
-                Ok(Some(shape)) => shape,
-                Ok(None) => {
-                    return Ok(ExternalGraphicsStateKey::SoftMask(None));
-                }
-                Err(err) => return Err(err),
-            };
-
-            Some(Box::new(SoftMask { mask_type, shape }))
-        }
-        other => match other.try_str(objects)? {
-            "None" => None,
-            _ => {
-                return Err(invalid_ext_gstate_entry_value(
-                    key_name,
-                    "expected a soft mask dictionary or the name 'None'",
-                ));
-            }
-        },
-    };
-
-    Ok(ExternalGraphicsStateKey::SoftMask(smask))
-}
-
 /// Parse a single key/value pair of the ExtGState dictionary.
 ///
 /// Returns `Ok(None)` for unrecognized keys, which are silently ignored
@@ -314,7 +255,28 @@ fn parse_entry(
         "OPM" => ExternalGraphicsStateKey::OverprintMode(value.try_number::<i32>(objects)?),
         "Font" => parse_font(name, value, objects, cache, cycle_tracker, id_allocator)?,
         "BM" => parse_blend_mode(value, objects)?,
-        "SMask" => parse_soft_mask(name, value, objects, cache, cycle_tracker, id_allocator)?,
+        "SMask" => {
+            let soft_mask = match value {
+                ObjectVariant::Dictionary(dictionary) => SoftMask::from_dictionary(
+                    dictionary,
+                    objects,
+                    cache,
+                    cycle_tracker,
+                    id_allocator,
+                )?
+                .map(Box::new),
+                other => match other.try_str(objects)? {
+                    "None" => None,
+                    _ => {
+                        return Err(invalid_ext_gstate_entry_value(
+                            name,
+                            "expected a soft mask dictionary or the name 'None'",
+                        ));
+                    }
+                },
+            };
+            ExternalGraphicsStateKey::SoftMask(soft_mask)
+        }
         "CA" => ExternalGraphicsStateKey::StrokingAlpha(value.try_number::<f32>(objects)?),
         "ca" => ExternalGraphicsStateKey::NonStrokingAlpha(value.try_number::<f32>(objects)?),
         "SA" => ExternalGraphicsStateKey::StrokeAdjustment(value.try_boolean(objects)?),
@@ -351,6 +313,22 @@ mod tests {
                 ObjectVariant::Real(f64::from(dash_phase)),
             ]),
         )]))
+    }
+
+    fn parse_ext_gstate(
+        dictionary: &Dictionary,
+    ) -> Result<Option<ExternalGraphicsState>, PdfPagesError> {
+        let mut cache = DefaultResourceCache::default();
+        let mut cycle_tracker = ReadCycleTracker::default();
+        let mut id_allocator = ContentStreamIdAllocator::new();
+
+        ExternalGraphicsState::from_dictionary(
+            dictionary,
+            &PassthroughResolver,
+            &mut cache,
+            &mut cycle_tracker,
+            &mut id_allocator,
+        )
     }
 
     #[test]
@@ -428,5 +406,40 @@ mod tests {
         .expect("extgstate should be present");
 
         assert!(ext_gstate.params.is_empty());
+    }
+
+    #[test]
+    fn soft_mask_none_is_preserved() {
+        let dictionary = Dictionary::new(BTreeMap::from([(
+            "SMask".to_string(),
+            ObjectVariant::Name(b"None".to_vec()),
+        )]));
+
+        let ext_gstate = parse_ext_gstate(&dictionary)
+            .expect("extgstate should parse")
+            .expect("extgstate should be present");
+
+        assert!(matches!(
+            ext_gstate.params.as_slice(),
+            [ExternalGraphicsStateKey::SoftMask(None)]
+        ));
+    }
+
+    #[test]
+    fn invalid_soft_mask_name_is_rejected() {
+        let dictionary = Dictionary::new(BTreeMap::from([(
+            "SMask".to_string(),
+            ObjectVariant::Name(b"Invalid".to_vec()),
+        )]));
+
+        let error = match parse_ext_gstate(&dictionary) {
+            Err(error) => error,
+            Ok(_) => panic!("invalid soft mask should fail"),
+        };
+
+        assert!(matches!(
+            error,
+            PdfPagesError::InvalidExtGStateEntryValue { entry, .. } if entry == "SMask"
+        ));
     }
 }
