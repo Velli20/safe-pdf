@@ -14,24 +14,19 @@ pub struct DecodeMap {
 
 impl DecodeMap {
     /// Builds a decode map from a PDF dictionary and object resolver.
+    ///
+    /// Returns `None` when the dictionary does not contain a `/Decode` entry.
     pub fn from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         component_count: usize,
-        default_inverted: bool,
-    ) -> Result<Self, DecodeError> {
-        let default_range = if default_inverted {
-            DecodeRange::inverted_identity()
-        } else {
-            DecodeRange::identity()
+    ) -> Result<Option<Self>, DecodeError> {
+        let Some(value) = dictionary.get("Decode") else {
+            return Ok(None);
         };
+        let ranges = Self::parse_object(value, objects, component_count)?;
 
-        let ranges = match dictionary.get("Decode") {
-            Some(value) => Self::parse_object(value, objects, component_count)?,
-            None => vec![default_range; component_count],
-        };
-
-        Ok(Self { ranges })
+        Ok(Some(Self { ranges }))
     }
 
     /// Parses a `/Decode` array into per-component ranges.
@@ -92,21 +87,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn decode_map_defaults_to_identity() {
+    fn decode_map_is_absent_without_decode_entry() {
         let dictionary = Dictionary::new(BTreeMap::new());
-        let map = DecodeMap::from_dictionary(&dictionary, &PassthroughResolver, 2, false).unwrap();
-        let out = map.apply_to_bytes(&[0, 255, 128, 64], 255, 255);
+        let map = DecodeMap::from_dictionary(&dictionary, &PassthroughResolver, 2).unwrap();
 
-        assert_eq!(out, vec![0, 255, 128, 64]);
-    }
-
-    #[test]
-    fn decode_map_supports_inverted_default() {
-        let dictionary = Dictionary::new(BTreeMap::new());
-        let map = DecodeMap::from_dictionary(&dictionary, &PassthroughResolver, 1, true).unwrap();
-        let out = map.apply_to_bytes(&[0, 1], 1, 255);
-
-        assert_eq!(out, vec![255, 0]);
+        assert!(map.is_none());
     }
 
     #[test]
@@ -118,7 +103,6 @@ mod tests {
             )])),
             &PassthroughResolver,
             1,
-            false,
         )
         .expect_err("invalid decode length should fail");
 
@@ -143,7 +127,6 @@ mod tests {
             )])),
             &PassthroughResolver,
             1,
-            false,
         )
         .expect_err("nan decode values should fail");
 
@@ -161,7 +144,9 @@ mod tests {
                 ObjectVariant::Integer(0),
             ]),
         )]));
-        let map = DecodeMap::from_dictionary(&dictionary, &PassthroughResolver, 2, false).unwrap();
+        let map = DecodeMap::from_dictionary(&dictionary, &PassthroughResolver, 2)
+            .unwrap()
+            .expect("explicit /Decode should create a map");
         let out = map.apply_to_bytes(&[255, 0, 0, 255], 255, 255);
 
         assert_eq!(out, vec![128, 255, 0, 0]);

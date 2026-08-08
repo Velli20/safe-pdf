@@ -1,7 +1,9 @@
 use std::borrow::Cow;
 
 use pdf_color_space::{color_space::ColorSpace, indexed_color_space::IndexedColorSpace};
-use pdf_decode::{DecodeMap, SampleLayout, decode_sample_bytes, expand_indexed_values};
+use pdf_decode::{
+    DecodeMap, DecodeRange, SampleLayout, decode_sample_bytes, expand_indexed_values,
+};
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 use crate::error::PdfImageError;
@@ -148,12 +150,18 @@ impl DecodedSamples {
     ) -> Result<Self, PdfImageError> {
         let sample_codes = Self::decode_image_sample_codes(raw_data, 1, metadata)?;
         let sample_max = Self::sample_max(metadata.bits_per_component)?;
-        let decode = DecodeMap::from_dictionary(dictionary, objects, 1, metadata.image_mask)?;
-        let decoded_indices = decode.apply_to_bytes(sample_codes.as_ref(), sample_max, sample_max);
+        let decode = DecodeMap::from_dictionary(dictionary, objects, 1)?;
+        let decoded_indices = Self::apply_decode(
+            sample_codes,
+            decode.as_ref(),
+            sample_max,
+            sample_max,
+            metadata.image_mask,
+        );
         let base_components = indexed.base.num_color_components();
 
         let image_data = expand_indexed_values(
-            &decoded_indices,
+            decoded_indices.as_ref(),
             &indexed.lookup,
             indexed.hival,
             base_components,
@@ -179,19 +187,54 @@ impl DecodedSamples {
             .as_ref()
             .map_or(1, ColorSpace::num_color_components);
         let sample_codes = Self::decode_image_sample_codes(raw_data, num_components, metadata)?;
-        let decode =
-            DecodeMap::from_dictionary(dictionary, objects, num_components, metadata.image_mask)?;
+        let decode = DecodeMap::from_dictionary(dictionary, objects, num_components)?;
+        let sample_max = Self::sample_max(metadata.bits_per_component)?;
 
         Ok(Self {
             bits_per_component: metadata.bits_per_component,
             stored_color_space: metadata.color_space.clone(),
             num_color_components: num_components,
-            image_data: decode.apply_to_bytes(
-                sample_codes.as_ref(),
-                Self::sample_max(metadata.bits_per_component)?,
+            image_data: Self::apply_decode(
+                sample_codes,
+                decode.as_ref(),
+                sample_max,
                 255,
-            ),
+                metadata.image_mask,
+            )
+            .into_owned(),
         })
+    }
+
+    /// Applies an explicit decode map or the implicit PDF identity/inverted default.
+    fn apply_decode<'a>(
+        sample_codes: Cow<'a, [u8]>,
+        decode: Option<&DecodeMap>,
+        sample_max: u8,
+        output_max: u8,
+        default_inverted: bool,
+    ) -> Cow<'a, [u8]> {
+        if let Some(decode) = decode {
+            return Cow::Owned(decode.apply_to_bytes(
+                sample_codes.as_ref(),
+                sample_max,
+                output_max,
+            ));
+        }
+
+        if sample_max == output_max && !default_inverted {
+            return sample_codes;
+        }
+
+        let mut decoded = sample_codes.into_owned();
+        let default_range = if default_inverted {
+            DecodeRange::inverted_identity()
+        } else {
+            DecodeRange::identity()
+        };
+        for sample in &mut decoded {
+            *sample = default_range.map_byte(*sample, sample_max, output_max);
+        }
+        Cow::Owned(decoded)
     }
 
     fn decode_image_sample_codes<'a>(
@@ -219,5 +262,21 @@ impl DecodedSamples {
             8 => Ok(255),
             _ => Err(PdfImageError::UnsupportedImageBitsPerComponent { bits_per_component }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_decode_preserves_borrowed_identity_samples() {
+        let samples = [12, 34];
+        let decoded = DecodedSamples::apply_decode(Cow::Borrowed(&samples), None, 255, 255, false);
+
+        assert!(matches!(
+            decoded,
+            Cow::Borrowed(values) if std::ptr::eq(values, samples.as_slice())
+        ));
     }
 }

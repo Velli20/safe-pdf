@@ -95,38 +95,46 @@ impl ImageXObject {
         metadata: &ImageMetadata,
     ) -> Result<Self, PdfImageError> {
         let decoded_samples = DecodedSamples::decode(dictionary, raw_data, objects, metadata)?;
-        let (data, pixel_format) = Self::assemble_pixel_data(metadata, &decoded_samples, soft_mask);
+        let DecodedSamples {
+            bits_per_component,
+            stored_color_space,
+            num_color_components,
+            image_data,
+        } = decoded_samples;
+        let (data, pixel_format) =
+            Self::assemble_pixel_data(metadata, image_data, num_color_components, soft_mask);
 
         Ok(Self {
             width: metadata.size.width(),
             height: metadata.size.height(),
-            bits_per_component: decoded_samples.bits_per_component,
+            bits_per_component,
             data: data.into(),
             pixel_format,
-            color_space: decoded_samples.stored_color_space,
+            color_space: stored_color_space,
         })
     }
 
     /// Builds the final pixel buffer and pixel format after optional soft-mask application.
     fn assemble_pixel_data(
         metadata: &ImageMetadata,
-        decoded_samples: &DecodedSamples,
+        image_data: Vec<u8>,
+        num_color_components: usize,
         smask: Option<ImageXObject>,
     ) -> (Vec<u8>, PixelFormat) {
-        if smask.is_some() || decoded_samples.num_color_components != 1 {
+        if smask.is_some() || num_color_components != 1 {
             return (
                 Self::to_rgba(
-                    &decoded_samples.image_data,
+                    &image_data,
                     metadata.size.width(),
                     metadata.size.height(),
-                    decoded_samples.num_color_components,
+                    num_color_components,
                     smask.as_ref(),
                 ),
                 PixelFormat::RGBA8888,
             );
         }
 
-        (decoded_samples.image_data.clone(), PixelFormat::Gray8)
+        (image_data, PixelFormat::Gray8)
     }
 
     /// Converts decoded image samples into RGBA pixels with an optional soft-mask alpha channel.
