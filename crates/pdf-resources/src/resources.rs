@@ -18,12 +18,12 @@ use pdf_shading::model::Shading;
 use crate::{
     error::PdfPagesError,
     external_graphics_state::ExternalGraphicsState,
-    object_reader::{ReadCycleTracker, ReadFromDictionary, ReadXObject},
+    object_reader::{ReadCycleTracker, ReadFromDictionary},
     pattern::Pattern,
     resource::Resource,
     resource_cache::{ResourceCache, read_resource_lazy},
     resources_reference::ResourcesReference,
-    xobject::XObject,
+    xobject::read_xobject,
 };
 use pdf_color_space::color_space::ColorSpace;
 
@@ -209,7 +209,7 @@ fn read_xobject_resource(
                 return Ok(Some(cached.clone()));
             }
 
-            let resource = match XObject::read_xobject(
+            let resource = match read_xobject(
                 value,
                 &stream.dictionary,
                 stream,
@@ -218,7 +218,7 @@ fn read_xobject_resource(
                 cycle_tracker,
                 id_allocator,
             ) {
-                Ok(Some(xobject)) => Resource::XObject(Rc::new(xobject)),
+                Ok(Some(resource)) => resource,
                 Ok(None) => return Ok(None),
                 Err(err) => return Err(err),
             };
@@ -265,7 +265,7 @@ fn read_xobject_resource(
                 )?
             };
 
-            let resource = Resource::XObject(Rc::new(XObject::Form(Box::new(form))));
+            let resource = Resource::from(form);
 
             if let Some(object_number) = object_number {
                 cache.insert(object_number, resource.clone());
@@ -424,10 +424,10 @@ impl Resources {
     ///
     /// # Returns
     ///
-    /// An `Option` containing a reference to the [`XObject`] if found, or `None`
-    /// if not present or not an XObject.
-    pub fn xobject(&self, name: &str) -> Option<&XObject> {
-        self.resolved()?.xobjects.get(name)?.as_xobject()
+    /// An `Option` containing the resolved [`Resource::Image`],
+    /// [`Resource::UnavailableImage`], or [`Resource::Form`] entry if found.
+    pub fn xobject(&self, name: &str) -> Option<&Resource> {
+        self.resolved()?.xobjects.get(name)?.resolved()
     }
 
     /// Returns a reference to a pattern resource by name, if it exists.

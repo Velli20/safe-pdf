@@ -15,7 +15,6 @@ use pdf_resources::{
     resource::Resource,
     resources::Resources,
     soft_mask::SoftMask,
-    xobject::XObject,
 };
 
 fn render(
@@ -95,7 +94,7 @@ fn soft_mask_form_with_zero_area_bbox_is_ignored() {
     let resources = graphics_state_resource(vec![ExternalGraphicsStateKey::SoftMask(Some(
         Box::new(SoftMask {
             mask_type: MaskMode::Alpha,
-            shape: XObject::Form(Box::new(form)),
+            shape: Rc::new(form),
         }),
     ))]);
     let stream = content_stream(1, b"/GS0 gs");

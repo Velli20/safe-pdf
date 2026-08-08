@@ -4,10 +4,10 @@ pub mod form;
 pub mod pattern;
 pub mod resources;
 pub mod soft_mask;
-pub mod xobject;
 
 mod lazy_cache_value;
 pub mod object_reader;
 pub mod resource;
 pub mod resource_cache;
 mod resources_reference;
+mod xobject;

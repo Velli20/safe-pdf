@@ -17,7 +17,6 @@ use pdf_resources::{
     form::FormXObject,
     resource::Resource,
     resources::Resources,
-    xobject::XObject,
 };
 
 fn render(
@@ -34,7 +33,7 @@ fn form_resource(name: &str, stream: ContentStream) -> Resources {
     Resources {
         xobjects: HashMap::from([(
             name.to_string(),
-            Resource::XObject(Rc::new(XObject::Form(Box::new(FormXObject {
+            Resource::from(FormXObject {
                 bbox: Rect {
                     left: 0.0,
                     top: 0.0,
@@ -44,7 +43,7 @@ fn form_resource(name: &str, stream: ContentStream) -> Resources {
                 matrix: None,
                 resources: None,
                 content_stream: stream,
-            })))),
+            }),
         )]),
         ..Default::default()
     }
@@ -144,10 +143,7 @@ fn still_renders_nested_streams_with_distinct_ids() {
 fn unavailable_image_xobject_is_a_no_op() {
     let stream = content_stream(1, b"/Im Do");
     let resources = Resources {
-        xobjects: HashMap::from([(
-            "Im".to_string(),
-            Resource::XObject(Rc::new(XObject::UnavailableImage)),
-        )]),
+        xobjects: HashMap::from([("Im".to_string(), Resource::UnavailableImage)]),
         ..Default::default()
     };
     let mut recording = RecordingCanvas::new(100.0, 100.0);
@@ -176,10 +172,7 @@ fn inline_image_render_path_matches_image_xobject_path() {
     }));
     let resources = Resources {
         ext_g_states: HashMap::from([("GS".to_string(), graphics_state)]),
-        xobjects: HashMap::from([(
-            "Im".to_string(),
-            Resource::XObject(Rc::new(XObject::Image(image))),
-        )]),
+        xobjects: HashMap::from([("Im".to_string(), Resource::from(image))]),
         ..Default::default()
     };
 

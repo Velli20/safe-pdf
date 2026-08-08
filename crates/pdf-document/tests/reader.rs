@@ -874,7 +874,7 @@ fn test_xobject_with_malformed_dimensions_loads_normally() {
 
     assert!(matches!(
         xobject,
-        Some(pdf_resources::xobject::XObject::UnavailableImage)
+        Some(pdf_resources::resource::Resource::UnavailableImage)
     ));
     assert!(page.contents.is_some());
 }

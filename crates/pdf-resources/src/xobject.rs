@@ -1,7 +1,5 @@
 use crate::{
-    error::PdfPagesError,
-    form::FormXObject,
-    object_reader::{ReadCycleTracker, ReadXObject},
+    error::PdfPagesError, form::FormXObject, object_reader::ReadCycleTracker, resource::Resource,
     resource_cache::ResourceCache,
 };
 use pdf_content_stream::ContentStreamIdAllocator;
@@ -10,64 +8,71 @@ use pdf_object::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
     object_variant::ObjectVariant, stream::StreamObject,
 };
+use std::rc::Rc;
 
-/// Represents a PDF External Object (XObject).
-///
-/// XObjects are reusable resources within a PDF file. They can be images,
-/// self-contained graphical forms, or other types of external content.
-#[allow(clippy::large_enum_variant)]
-pub enum XObject {
-    /// An image XObject, representing a raster image.
-    Image(ImageXObject),
-    /// An image XObject whose dimensions are malformed and cannot be rendered.
-    UnavailableImage,
-    /// A form XObject, which is a self-contained sequence of graphics objects
-    /// that can be painted as a single unit.
-    Form(Box<FormXObject>),
+/// Reads a stream-backed XObject with cycle protection.
+pub(crate) fn read_xobject(
+    content: &ObjectVariant,
+    dictionary: &Dictionary,
+    stream_data: &StreamObject,
+    objects: &dyn ObjectResolver,
+    cache: &mut dyn ResourceCache,
+    cycle_tracker: &mut ReadCycleTracker,
+    id_allocator: &mut ContentStreamIdAllocator,
+) -> Result<Option<Resource>, PdfPagesError> {
+    if !cycle_tracker.begin_read(stream_data.object_number) {
+        return Ok(None);
+    }
+
+    let result = read_xobject_inner(
+        content,
+        dictionary,
+        stream_data,
+        objects,
+        cache,
+        cycle_tracker,
+        id_allocator,
+    );
+    cycle_tracker.end_read(stream_data.object_number);
+    result.map(Some)
 }
 
-impl ReadXObject for XObject {
-    fn read_xobject_inner(
-        content: &ObjectVariant,
-        dictionary: &Dictionary,
-        stream_data: &StreamObject,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        cycle_tracker: &mut ReadCycleTracker,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Self, PdfPagesError> {
-        match dictionary.required_str("Subtype", objects)? {
-            "Image" => {
-                if !has_valid_image_dimensions(dictionary, objects) {
-                    return Ok(XObject::UnavailableImage);
-                }
+fn read_xobject_inner(
+    content: &ObjectVariant,
+    dictionary: &Dictionary,
+    stream_data: &StreamObject,
+    objects: &dyn ObjectResolver,
+    cache: &mut dyn ResourceCache,
+    cycle_tracker: &mut ReadCycleTracker,
+    id_allocator: &mut ContentStreamIdAllocator,
+) -> Result<Resource, PdfPagesError> {
+    match dictionary.required_str("Subtype", objects)? {
+        "Image" => {
+            if !has_valid_image_dimensions(dictionary, objects) {
+                return Ok(Resource::UnavailableImage);
+            }
 
-                let soft_mask = resolve_image_soft_mask(
-                    dictionary,
-                    objects,
-                    cache,
-                    cycle_tracker,
-                    id_allocator,
-                )?;
-                let image_xobject =
-                    ImageXObject::read_xobject(dictionary, stream_data, objects, soft_mask)?;
-                Ok(XObject::Image(image_xobject))
-            }
-            "Form" => {
-                let form_xobject = FormXObject::read_xobject(
-                    content,
-                    dictionary,
-                    objects,
-                    cache,
-                    cycle_tracker,
-                    id_allocator,
-                )?;
-                Ok(XObject::Form(Box::new(form_xobject)))
-            }
-            other => Err(PdfPagesError::UnsupportedXObjectSubtype {
-                subtype: other.to_string(),
-            }),
+            let soft_mask =
+                resolve_image_soft_mask(dictionary, objects, cache, cycle_tracker, id_allocator)?;
+            Ok(Resource::from(ImageXObject::read_xobject(
+                dictionary,
+                stream_data,
+                objects,
+                soft_mask,
+            )?))
         }
+        "Form" => FormXObject::read_xobject(
+            content,
+            dictionary,
+            objects,
+            cache,
+            cycle_tracker,
+            id_allocator,
+        )
+        .map(Resource::from),
+        other => Err(PdfPagesError::UnsupportedXObjectSubtype {
+            subtype: other.to_string(),
+        }),
     }
 }
 
@@ -89,7 +94,7 @@ fn has_valid_image_dimensions(dictionary: &Dictionary, objects: &dyn ObjectResol
 ///
 /// `pdf-image` only decodes already-resolved image data, so page parsing owns the
 /// PDF object lookup and XObject subtype validation. Routing mask streams through
-/// [`ReadXObject::read_xobject`] keeps soft-mask parsing on the same cycle-tracked
+/// [`read_xobject`] keeps soft-mask parsing on the same cycle-tracked
 /// path as ordinary XObjects; recursive masks are therefore treated as absent.
 fn resolve_image_soft_mask(
     dictionary: &Dictionary,
@@ -112,7 +117,7 @@ fn resolve_image_soft_mask(
 
     let stream = resolved.try_stream(objects)?;
 
-    match XObject::read_xobject(
+    match read_xobject(
         resolved,
         &stream.dictionary,
         stream,
@@ -121,8 +126,10 @@ fn resolve_image_soft_mask(
         cycle_tracker,
         id_allocator,
     ) {
-        Ok(Some(XObject::Image(image))) => Ok(Some(image)),
-        Ok(Some(XObject::UnavailableImage)) => Ok(None),
+        Ok(Some(Resource::Image(image))) => Rc::try_unwrap(image)
+            .map(Some)
+            .map_err(|_| PdfImageError::InvalidSoftMaskXObject),
+        Ok(Some(Resource::UnavailableImage)) => Ok(None),
         Ok(Some(_)) => Err(PdfImageError::InvalidSoftMaskXObject),
         Ok(None) => Ok(None),
         Err(PdfPagesError::Image(err)) => Err(err),
@@ -143,11 +150,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     use crate::{
-        object_reader::{ReadCycleTracker, ReadXObject},
-        resource_cache::DefaultResourceCache,
+        object_reader::ReadCycleTracker, resource::Resource, resource_cache::DefaultResourceCache,
     };
 
-    use super::{XObject, has_valid_image_dimensions};
+    use super::{has_valid_image_dimensions, read_xobject};
 
     struct MapResolver {
         objects: BTreeMap<usize, ObjectVariant>,
@@ -195,7 +201,7 @@ mod tests {
         let mut cycle_tracker = ReadCycleTracker::default();
         let mut id_allocator = ContentStreamIdAllocator::new();
 
-        let xobject = XObject::read_xobject(
+        let xobject = read_xobject(
             &ObjectVariant::Stream(stream.clone()),
             &stream.dictionary,
             &stream,
@@ -207,8 +213,8 @@ mod tests {
         .expect("self-referential soft masks should not fail image parsing")
         .expect("top-level image should be present");
 
-        assert!(matches!(&xobject, XObject::Image(_)));
-        if let XObject::Image(image) = xobject {
+        assert!(matches!(&xobject, Resource::Image(_)));
+        if let Resource::Image(image) = xobject {
             assert_eq!(image.width, 1);
             assert_eq!(image.height, 1);
             assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
@@ -265,7 +271,7 @@ mod tests {
         let mut cycle_tracker = ReadCycleTracker::default();
         let mut id_allocator = ContentStreamIdAllocator::new();
 
-        let xobject = XObject::read_xobject(
+        let xobject = read_xobject(
             &ObjectVariant::Stream(image_stream.clone()),
             &image_stream.dictionary,
             &image_stream,
@@ -278,15 +284,15 @@ mod tests {
         .expect("top-level image should be present");
 
         match xobject {
-            XObject::Image(image) => {
+            Resource::Image(image) => {
                 assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
                 assert_eq!(
                     image.data.as_ref(),
                     &[0x20, 0x20, 0x20, 0x10, 0xC0, 0xC0, 0xC0, 0xE0]
                 );
             }
-            XObject::UnavailableImage => panic!("expected a decoded image xobject"),
-            XObject::Form(_) => panic!("expected an image xobject"),
+            Resource::UnavailableImage => panic!("expected a decoded image xobject"),
+            _ => panic!("expected an image xobject"),
         }
     }
 
@@ -316,7 +322,7 @@ mod tests {
         let mut cycle_tracker = ReadCycleTracker::default();
         let mut id_allocator = ContentStreamIdAllocator::new();
 
-        let xobject = XObject::read_xobject(
+        let xobject = read_xobject(
             &ObjectVariant::Stream(stream.clone()),
             &stream.dictionary,
             &stream,
@@ -328,7 +334,7 @@ mod tests {
         .expect("malformed image dimensions should be recoverable")
         .expect("the unavailable image resource should be preserved");
 
-        assert!(matches!(xobject, XObject::UnavailableImage));
+        assert!(matches!(xobject, Resource::UnavailableImage));
     }
 
     #[test]
