@@ -1,16 +1,11 @@
-//! Trait-based readers for page-related PDF objects with shared cycle protection.
+//! Page-related PDF object reading with shared cycle protection.
 //!
-//! These traits centralize active-read cycle tracking
-//! used when parsing indirect objects that may recursively reference each other.
-//! Implementers provide an inner read method containing the actual parsing logic,
-//! while the default entrypoint methods handle cycle tracking consistently.
+//! This module centralizes active-read cycle tracking used when parsing indirect
+//! objects that may recursively reference each other.
 
 use crate::{error::PdfPagesError, resource_cache::ResourceCache};
 use pdf_content_stream::ContentStreamIdAllocator;
-use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-    stream::StreamObject,
-};
+use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 use std::collections::HashSet;
 
 /// Tracks objects currently being parsed by page-related object readers.
@@ -87,64 +82,6 @@ pub trait ReadFromDictionary {
         let result =
             Self::read_dictionary_inner(dictionary, objects, cache, cycle_tracker, id_allocator);
         cycle_tracker.end_read(obj_num);
-        result.map(Some)
-    }
-}
-
-/// Reads a stream-backed XObject with cycle protection.
-///
-/// Implementers provide [`ReadXObject::read_xobject_inner`] with the parsing
-/// logic for the stream and dictionary pair. The default
-/// [`ReadXObject::read_xobject`] wrapper handles cycle tracking using the
-/// stream object's number.
-pub trait ReadXObject {
-    /// Reads the XObject after cycle tracking has been started.
-    ///
-    /// Implementations should contain only the parsing logic for the XObject
-    /// and should not call `begin_read` or `end_read` directly.
-    fn read_xobject_inner(
-        content: &ObjectVariant,
-        dictionary: &Dictionary,
-        stream_data: &StreamObject,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        cycle_tracker: &mut ReadCycleTracker,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Self, PdfPagesError>
-    where
-        Self: Sized;
-
-    /// Reads an XObject and wraps the read in begin/end cycle tracking.
-    ///
-    /// This method marks `stream_data.object_number` as in-progress, delegates
-    /// to [`ReadXObject::read_xobject_inner`], and clears the in-progress marker
-    /// before returning.
-    fn read_xobject(
-        content: &ObjectVariant,
-        dictionary: &Dictionary,
-        stream_data: &StreamObject,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        cycle_tracker: &mut ReadCycleTracker,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Option<Self>, PdfPagesError>
-    where
-        Self: Sized,
-    {
-        if !cycle_tracker.begin_read(stream_data.object_number) {
-            return Ok(None);
-        }
-
-        let result = Self::read_xobject_inner(
-            content,
-            dictionary,
-            stream_data,
-            objects,
-            cache,
-            cycle_tracker,
-            id_allocator,
-        );
-        cycle_tracker.end_read(stream_data.object_number);
         result.map(Some)
     }
 }

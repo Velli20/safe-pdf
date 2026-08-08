@@ -2,9 +2,7 @@ use std::sync::Arc;
 
 use pdf_content_stream_operators::pdf_operator_backend::GraphicsStateOps;
 use pdf_graphics::{DashPattern, LineCap, LineJoin, MaskMode, transform::Transform};
-use pdf_resources::{
-    external_graphics_state::ExternalGraphicsStateKey, resource::Resource, xobject::XObject,
-};
+use pdf_resources::{external_graphics_state::ExternalGraphicsStateKey, resource::Resource};
 
 use crate::{
     canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
@@ -139,47 +137,38 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                             continue;
                         }
 
-                        if let XObject::Image(_) = &smask.shape {
-                            return Err(PdfCanvasError::UnsupportedFeature(
-                                "SoftMask with Image shape".into(),
-                            ));
-                        } else if let XObject::Form(form) = &smask.shape {
-                            // The soft mask is defined by a Form XObject.
-                            // We need to render this form's content into a separate mask surface.
-                            if !Self::can_record_offscreen_bbox(&form.bbox) {
-                                continue;
-                            }
-
-                            // Create a recording canvas to act as the mask layer.
-                            let mut recording_canvas =
-                                RecordingCanvas::new(form.bbox.width(), form.bbox.height());
-
-                            // Render the form's content stream into the mask canvas.
-                            self.record_content_stream(
-                                &mut recording_canvas,
-                                &form.content_stream,
-                                form.matrix,
-                                &form.bbox,
-                                form.resources.as_deref(),
-                                None,
-                            )?;
-
-                            let transform = self.current_state()?.transform;
-
-                            let arc = Arc::new(recording_canvas);
-
-                            // Enable the mask on the main canvas. Subsequent drawing operations
-                            // will be modulated by this mask.
-                            self.canvas.begin_mask_layer(
-                                &arc,
-                                &transform,
-                                smask.mask_type.clone(),
-                            )?;
-
-                            // Store the mask in the current canvas state to be used until it's finished.
-                            self.mask =
-                                Some((Arc::clone(&arc), smask.mask_type.clone(), transform));
+                        let form = &smask.shape;
+                        // The soft mask is defined by a Form XObject.
+                        // We need to render this form's content into a separate mask surface.
+                        if !Self::can_record_offscreen_bbox(&form.bbox) {
+                            continue;
                         }
+
+                        // Create a recording canvas to act as the mask layer.
+                        let mut recording_canvas =
+                            RecordingCanvas::new(form.bbox.width(), form.bbox.height());
+
+                        // Render the form's content stream into the mask canvas.
+                        self.record_content_stream(
+                            &mut recording_canvas,
+                            &form.content_stream,
+                            form.matrix,
+                            &form.bbox,
+                            form.resources.as_deref(),
+                            None,
+                        )?;
+
+                        let transform = self.current_state()?.transform;
+
+                        let arc = Arc::new(recording_canvas);
+
+                        // Enable the mask on the main canvas. Subsequent drawing operations
+                        // will be modulated by this mask.
+                        self.canvas
+                            .begin_mask_layer(&arc, &transform, smask.mask_type.clone())?;
+
+                        // Store the mask in the current canvas state to be used until it's finished.
+                        self.mask = Some((Arc::clone(&arc), smask.mask_type.clone(), transform));
                     } else if let Some((mask, mask_type, transform)) = self.mask.take() {
                         // This branch handles the case where `/SMask` is set to `/None` in the `ExtGState`,
                         // which signals the end of the current soft mask application.

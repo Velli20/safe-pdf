@@ -1,9 +1,10 @@
 use crate::{
-    external_graphics_state::ExternalGraphicsState, pattern::Pattern, resources::Resources,
-    xobject::XObject,
+    external_graphics_state::ExternalGraphicsState, form::FormXObject, pattern::Pattern,
+    resources::Resources,
 };
 use pdf_color_space::color_space::ColorSpace;
 use pdf_font::font::Font;
+use pdf_image::ImageXObject;
 use pdf_shading::model::Shading;
 use std::{cell::OnceCell, rc::Rc};
 
@@ -45,8 +46,12 @@ pub enum Resource {
     },
     /// An external graphics state resource.
     ExternalGraphicsState(Rc<ExternalGraphicsState>),
-    /// An XObject resource, such as an image or form object.
-    XObject(Rc<XObject>),
+    /// An image XObject resource.
+    Image(Rc<ImageXObject>),
+    /// An image XObject whose dimensions are malformed and cannot be rendered.
+    UnavailableImage,
+    /// A form XObject resource.
+    Form(Rc<FormXObject>),
     /// A pattern resource, used for tiling or shading fills.
     Pattern(Rc<Pattern>),
     /// A shading resource, used for gradient fills and complex color transitions.
@@ -95,13 +100,6 @@ impl Resource {
         Some(state)
     }
 
-    pub(crate) fn as_xobject(&self) -> Option<&XObject> {
-        let Self::XObject(xobject) = self.resolved()? else {
-            return None;
-        };
-        Some(xobject)
-    }
-
     pub(crate) fn as_pattern(&self) -> Option<&Pattern> {
         let Self::Pattern(pattern) = self.resolved()? else {
             return None;
@@ -121,5 +119,17 @@ impl Resource {
             return None;
         };
         Some(color_space)
+    }
+}
+
+impl From<ImageXObject> for Resource {
+    fn from(image: ImageXObject) -> Self {
+        Self::Image(Rc::new(image))
+    }
+}
+
+impl From<FormXObject> for Resource {
+    fn from(form: FormXObject) -> Self {
+        Self::Form(Rc::new(form))
     }
 }

@@ -1,5 +1,7 @@
 //! External graphics-state soft mask parsing.
 
+use std::rc::Rc;
+
 use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_graphics::MaskMode;
 use pdf_object::{
@@ -7,10 +9,8 @@ use pdf_object::{
 };
 
 use crate::{
-    error::PdfPagesError,
-    object_reader::{ReadCycleTracker, ReadXObject},
-    resource_cache::ResourceCache,
-    xobject::XObject,
+    error::PdfPagesError, form::FormXObject, object_reader::ReadCycleTracker, resource::Resource,
+    resource_cache::ResourceCache, xobject::read_xobject,
 };
 
 /// Soft mask extracted from an ExtGState `SMask` entry.
@@ -20,7 +20,7 @@ pub struct SoftMask {
     pub mask_type: MaskMode,
     /// The transparency group XObject (`G`) whose rendered result provides the
     /// input used to compute the soft mask.
-    pub shape: XObject,
+    pub shape: Rc<FormXObject>,
 }
 
 impl SoftMask {
@@ -39,7 +39,15 @@ impl SoftMask {
 
         let content = dictionary.get_or_err("G")?;
         let stream = content.try_stream(objects)?;
-        let Some(shape) = XObject::read_xobject(
+        let subtype = stream.dictionary.required_str("Subtype", objects)?;
+        if subtype != "Form" {
+            return Err(PdfPagesError::InvalidExtGStateEntryValue {
+                entry: "SMask".to_string(),
+                reason: format!("group XObject must have /Subtype /Form, found /{subtype}"),
+            });
+        }
+
+        let Some(shape) = read_xobject(
             content,
             &stream.dictionary,
             stream,
@@ -50,6 +58,13 @@ impl SoftMask {
         )?
         else {
             return Ok(None);
+        };
+
+        let Resource::Form(shape) = shape else {
+            return Err(PdfPagesError::InvalidExtGStateEntryValue {
+                entry: "SMask".to_string(),
+                reason: "group XObject did not produce a Form resource".to_string(),
+            });
         };
 
         Ok(Some(Self { mask_type, shape }))
@@ -69,12 +84,12 @@ mod tests {
     };
 
     use crate::{
-        object_reader::ReadCycleTracker, resource_cache::DefaultResourceCache, xobject::XObject,
+        error::PdfPagesError, object_reader::ReadCycleTracker, resource_cache::DefaultResourceCache,
     };
 
     use super::SoftMask;
 
-    fn soft_mask_dictionary(stream_object_number: usize) -> Dictionary {
+    fn soft_mask_dictionary(stream_object_number: usize, subtype: &str) -> Dictionary {
         let form_dictionary = Dictionary::new(BTreeMap::from([
             (
                 "BBox".to_string(),
@@ -85,7 +100,10 @@ mod tests {
                     ObjectVariant::Integer(10),
                 ]),
             ),
-            ("Subtype".to_string(), ObjectVariant::Name(b"Form".to_vec())),
+            (
+                "Subtype".to_string(),
+                ObjectVariant::Name(subtype.as_bytes().to_vec()),
+            ),
         ]));
         let stream = StreamObject::new(
             stream_object_number,
@@ -102,7 +120,7 @@ mod tests {
 
     #[test]
     fn parses_soft_mask_dictionary() {
-        let dictionary = soft_mask_dictionary(7);
+        let dictionary = soft_mask_dictionary(7, "Form");
         let mut cache = DefaultResourceCache::default();
         let mut cycle_tracker = ReadCycleTracker::default();
         let mut id_allocator = ContentStreamIdAllocator::new();
@@ -118,12 +136,12 @@ mod tests {
         .expect("soft mask should be present");
 
         assert_eq!(soft_mask.mask_type, MaskMode::Alpha);
-        assert!(matches!(soft_mask.shape, XObject::Form(_)));
+        assert_eq!(soft_mask.shape.content_stream.id, 0);
     }
 
     #[test]
     fn cycle_suppressed_shape_returns_none() {
-        let dictionary = soft_mask_dictionary(7);
+        let dictionary = soft_mask_dictionary(7, "Form");
         let mut cache = DefaultResourceCache::default();
         let mut cycle_tracker = ReadCycleTracker::default();
         let mut id_allocator = ContentStreamIdAllocator::new();
@@ -139,5 +157,29 @@ mod tests {
         .expect("cycle-suppressed soft mask should not fail");
 
         assert!(soft_mask.is_none());
+    }
+
+    #[test]
+    fn non_form_shape_is_rejected() {
+        let dictionary = soft_mask_dictionary(7, "Image");
+        let mut cache = DefaultResourceCache::default();
+        let mut cycle_tracker = ReadCycleTracker::default();
+        let mut id_allocator = ContentStreamIdAllocator::new();
+
+        let error = match SoftMask::from_dictionary(
+            &dictionary,
+            &PassthroughResolver,
+            &mut cache,
+            &mut cycle_tracker,
+            &mut id_allocator,
+        ) {
+            Err(error) => error,
+            Ok(_) => panic!("an image cannot be used as an ExtGState soft-mask group"),
+        };
+
+        assert!(matches!(
+            error,
+            PdfPagesError::InvalidExtGStateEntryValue { entry, .. } if entry == "SMask"
+        ));
     }
 }

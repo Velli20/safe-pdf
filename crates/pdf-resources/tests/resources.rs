@@ -10,8 +10,8 @@ use pdf_object::{
 use pdf_object_collection::object_collection::ObjectCollection;
 
 use pdf_resources::{
-    object_reader::ReadCycleTracker, pattern::Pattern, resource_cache::DefaultResourceCache,
-    resources::Resources, xobject::XObject,
+    object_reader::ReadCycleTracker, pattern::Pattern, resource::Resource,
+    resource_cache::DefaultResourceCache, resources::Resources,
 };
 use pdf_shading::model::Shading;
 
@@ -184,10 +184,10 @@ fn self_referential_tiling_pattern(object_number: usize) -> ObjectVariant {
     ))
 }
 
-fn form_content_stream_id(xobject: &XObject) -> Option<usize> {
+fn form_content_stream_id(xobject: &Resource) -> Option<usize> {
     match xobject {
-        XObject::Form(form) => Some(form.content_stream.id),
-        XObject::Image(_) | XObject::UnavailableImage => None,
+        Resource::Form(form) => Some(form.content_stream.id),
+        _ => None,
     }
 }
 
@@ -325,10 +325,10 @@ fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
 
     let xobject = resources.xobject("Meta6");
     assert!(
-        matches!(xobject, Some(XObject::Form(_))),
+        matches!(xobject, Some(Resource::Form(_))),
         "expected dictionary-only form xobject"
     );
-    let Some(XObject::Form(form)) = xobject else {
+    let Some(Resource::Form(form)) = xobject else {
         return;
     };
 
@@ -435,10 +435,10 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
 
     let form = resources.xobject("Self");
     assert!(
-        matches!(form, Some(XObject::Form(_))),
+        matches!(form, Some(Resource::Form(_))),
         "expected the self-referential form xobject to be parsed"
     );
-    let Some(XObject::Form(form)) = form else {
+    let Some(Resource::Form(form)) = form else {
         return;
     };
 
@@ -450,10 +450,10 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
         .xobject("Self")
         .expect("recursive lookup should resolve the same form");
     assert!(
-        matches!(nested_form, XObject::Form(_)),
+        matches!(nested_form, Resource::Form(_)),
         "expected the recursive lookup to resolve the cached form xobject"
     );
-    let XObject::Form(nested_form) = nested_form else {
+    let Resource::Form(nested_form) = nested_form else {
         return;
     };
 

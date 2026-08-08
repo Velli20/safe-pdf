@@ -14,7 +14,7 @@ use pdf_content_stream_operators::pdf_operator_backend::XObjectOps;
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_image::{ImageXObject, InlineImage};
 use pdf_object::object_resolver::PassthroughResolver;
-use pdf_resources::xobject::XObject;
+use pdf_resources::resource::Resource;
 
 use crate::{
     canvas_backend::{CanvasBackend, Image},
@@ -87,15 +87,16 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
             .ok_or_else(|| PdfCanvasError::XObjectNotFound(xobject_name.to_string()))?;
 
         match xobj {
-            XObject::Image(image) => self.render_image_xobject(image)?,
-            XObject::UnavailableImage => {}
-            XObject::Form(form) => self.render_content_stream(
+            Resource::Image(image) => self.render_image_xobject(image)?,
+            Resource::UnavailableImage => {}
+            Resource::Form(form) => self.render_content_stream(
                 &form.content_stream,
                 form.matrix,
                 Some(&form.bbox),
                 form.resources.as_deref(),
                 None,
             )?,
+            _ => return Err(PdfCanvasError::XObjectNotFound(xobject_name.to_string())),
         }
 
         Ok(())
