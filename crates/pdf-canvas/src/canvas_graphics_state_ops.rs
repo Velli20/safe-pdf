@@ -160,7 +160,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                                 &form.content_stream,
                                 form.matrix,
                                 &form.bbox,
-                                form.resources.as_ref(),
+                                form.resources.as_deref(),
                                 None,
                             )?;
 

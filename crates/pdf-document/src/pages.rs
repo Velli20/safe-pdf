@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::page::PdfPage;
 use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_graphics::rect::Rect;
@@ -115,12 +117,14 @@ impl PdfPages {
     /// - A page with no `/Resources` inherits the ancestor's resources directly.
     /// - A page with its own `/Resources` keeps its own entries and fills in any
     ///   categories or names that are absent from the ancestor.
-    fn apply_resource_inheritance(pages: &mut [PdfPage], resources: &Resources) {
+    fn apply_resource_inheritance(pages: &mut [PdfPage], resources: &Rc<Resources>) {
         for page in pages {
-            if let Some(page_resources) = page.resources.as_mut() {
-                page_resources.merge_from_parent(resources);
+            if let Some(page_resources) = page.resources.as_ref() {
+                if let Some(merged) = page_resources.merged_with_parent(resources) {
+                    page.resources = Some(Rc::new(merged));
+                }
             } else {
-                page.resources = Some(resources.clone());
+                page.resources = Some(Rc::clone(resources));
             }
         }
     }
@@ -149,7 +153,7 @@ mod tests {
 
     #[test]
     fn leaf_page_with_no_resources_inherits_parent_resources() {
-        let parent = resources_with_color_space("CS1");
+        let parent = Rc::new(resources_with_color_space("CS1"));
 
         let mut page = PdfPage {
             resources: None,
@@ -163,7 +167,10 @@ mod tests {
 
         let inherited = page
             .resources
+            .as_ref()
             .expect("page should have inherited resources");
+        assert!(Rc::ptr_eq(inherited, &parent));
+
         assert!(
             inherited.color_spaces.contains_key("CS1"),
             "inherited resources should contain the parent color space"
@@ -173,7 +180,7 @@ mod tests {
     #[test]
     fn leaf_page_child_entries_take_priority_during_inheritance() {
         // Parent has a color space "CS1" (DeviceGray).
-        let parent = resources_with_color_space("CS1");
+        let parent = Rc::new(resources_with_color_space("CS1"));
 
         // Child already defines "CS1" (DeviceRGB) and also has "CS2".
         let mut child_res = Resources::default();
@@ -186,8 +193,9 @@ mod tests {
             Resource::ColorSpace(Rc::new(ColorSpace::DeviceGray)),
         );
 
+        let child_res = Rc::new(child_res);
         let mut page = PdfPage {
-            resources: Some(child_res),
+            resources: Some(Rc::clone(&child_res)),
             contents: None,
             annotations: None,
             media_box: None,
@@ -200,6 +208,7 @@ mod tests {
             .resources
             .as_ref()
             .expect("page should still have resources");
+        assert!(!Rc::ptr_eq(result, &child_res));
 
         // "CS1" must remain the child's version (DeviceRGB), not replaced by the parent's (DeviceGray).
         assert!(
@@ -225,6 +234,7 @@ mod tests {
             "CS2".to_owned(),
             Resource::ColorSpace(Rc::new(ColorSpace::DeviceRGB)),
         );
+        let parent = Rc::new(parent);
 
         // Child only defines "CS1" (DeviceRGB); it is missing "CS2".
         let mut child_res = Resources::default();
@@ -234,7 +244,7 @@ mod tests {
         );
 
         let mut page = PdfPage {
-            resources: Some(child_res),
+            resources: Some(Rc::new(child_res)),
             contents: None,
             annotations: None,
             media_box: None,

@@ -364,7 +364,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     content_stream,
                     None,
                     &bbox,
-                    Some(resources),
+                    Some(resources.as_ref()),
                     filter,
                 )?;
 

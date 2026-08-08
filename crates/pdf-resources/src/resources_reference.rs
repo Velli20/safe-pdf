@@ -11,7 +11,7 @@ use crate::resources::Resources;
 /// value has been fully parsed.
 #[derive(Clone)]
 pub struct ResourcesReference {
-    resources: Rc<OnceCell<Resources>>,
+    resources: Rc<OnceCell<Rc<Resources>>>,
 }
 
 impl ResourcesReference {
@@ -27,12 +27,12 @@ impl ResourcesReference {
     }
 
     /// Publishes the parsed `/Resources` dictionary to all clones of this handle.
-    pub(crate) fn resolve(&self, resources: Resources) {
+    pub(crate) fn resolve(&self, resources: Rc<Resources>) {
         let _ = self.resources.set(resources);
     }
 
     /// Returns the parsed `/Resources` dictionary once it has been published.
     pub(crate) fn resolved(&self) -> Option<&Resources> {
-        self.resources.get()
+        self.resources.get().map(Rc::as_ref)
     }
 }

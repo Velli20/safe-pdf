@@ -83,7 +83,7 @@ impl PdfRenderer {
                     cs,
                     None,
                     None,
-                    page.resources.as_ref(),
+                    page.resources.as_deref(),
                     None,
                 )?;
             }
@@ -114,7 +114,7 @@ impl PdfRenderer {
                     cs,
                     None,
                     None,
-                    page.resources.as_ref(),
+                    page.resources.as_deref(),
                     None,
                 )?;
             }
@@ -139,7 +139,7 @@ impl PdfRenderer {
             let mut canvas =
                 PdfCanvas::new_with_text_sink(&mut backend, page, None, &mut collector)?;
             if let Some(cs) = &page.contents {
-                canvas.render_content_stream(cs, None, None, page.resources.as_ref(), None)?;
+                canvas.render_content_stream(cs, None, None, page.resources.as_deref(), None)?;
             }
         }
 
