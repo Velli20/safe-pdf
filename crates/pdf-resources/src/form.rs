@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_graphics::rect::Rect;
 use pdf_graphics::transform::Transform;
@@ -17,7 +19,7 @@ pub struct FormXObject {
     /// Optional transformation matrix.
     pub matrix: Option<Transform>,
     /// Resources used by the form.
-    pub resources: Option<Resources>,
+    pub resources: Option<Rc<Resources>>,
     /// The content stream that defines the graphics of the pattern cell.
     pub content_stream: ContentStream,
 }

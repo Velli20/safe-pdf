@@ -33,7 +33,14 @@ use pdf_color_space::color_space::ColorSpace;
 /// (PDF spec §7.8.3). Keeping them separate ensures that resource names are scoped per
 /// category: a font named `"F1"` and an XObject named `"F1"` are independent entries and
 /// will never collide during page-tree resource inheritance (PDF spec §7.7.4).
-#[derive(Default, Clone)]
+///
+/// ```compile_fail
+/// use pdf_resources::resources::Resources;
+///
+/// fn requires_clone<T: Clone>() {}
+/// requires_clone::<Resources>();
+/// ```
+#[derive(Default)]
 pub struct Resources {
     /// Resources from the `/Font` sub-dictionary.
     pub fonts: HashMap<String, Resource>,
@@ -86,7 +93,7 @@ pub(crate) fn read_font_resource(
     // parsed Type3 fonts consume nested resources; whole-font fallbacks do not.
     let font = Font::from_dictionary(dictionary, objects, id_allocator);
     let resources = if matches!(&font, Font::Type3(_)) {
-        Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?.map(Rc::new)
+        Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?
     } else {
         None
     };
@@ -479,8 +486,8 @@ impl Resources {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(Some(Resources))` if resources are found and parsed successfully, `Ok(None)`
-    /// if no `/Resources` entry exists, or an error if parsing fails for any resource type.
+    /// Returns a shared [`Resources`] value when resources are found, `None` if no
+    /// `/Resources` entry exists, or an error if parsing fails for any resource type.
     ///
     /// # Errors
     ///
@@ -491,7 +498,7 @@ impl Resources {
         cache: &mut dyn ResourceCache,
         cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Option<Self>, PdfPagesError> {
+    ) -> Result<Option<Rc<Self>>, PdfPagesError> {
         const KEY: &str = "Resources";
 
         let Some(resources_entry) = dictionary.get(KEY) else {
@@ -519,7 +526,7 @@ impl Resources {
         .map(Some)
     }
 
-    /// Merges inherited resources from a parent `/Pages` node into `self`.
+    /// Returns a resource dictionary containing `self` and inherited parent entries.
     ///
     /// Per PDF spec §7.7.4, child-defined entries always take precedence. Only
     /// entries that are absent in `self` are inherited from `parent`. Merging is
@@ -527,30 +534,37 @@ impl Resources {
     /// in one category (e.g. a font named `"F1"`) never blocks inheritance of a
     /// parent entry of a different category with the same name (e.g. an XObject
     /// named `"F1"`).
-    pub fn merge_from_parent(&mut self, parent: &Self) {
-        let Some(parent) = parent.resolved() else {
-            return;
-        };
-        let Some(mut child) = self.resolved().cloned() else {
-            return;
-        };
+    pub fn merged_with_parent(&self, parent: &Self) -> Option<Self> {
+        let parent = parent.resolved()?;
+        let child = self.resolved()?;
 
-        Self::inherit_category(&mut child.fonts, &parent.fonts);
-        Self::inherit_category(&mut child.ext_g_states, &parent.ext_g_states);
-        Self::inherit_category(&mut child.patterns, &parent.patterns);
-        Self::inherit_category(&mut child.xobjects, &parent.xobjects);
-        Self::inherit_category(&mut child.shadings, &parent.shadings);
-        Self::inherit_category(&mut child.color_spaces, &parent.color_spaces);
-        *self = child;
+        Some(Self {
+            fonts: Self::merged_category(&child.fonts, &parent.fonts),
+            ext_g_states: Self::merged_category(&child.ext_g_states, &parent.ext_g_states),
+            patterns: Self::merged_category(&child.patterns, &parent.patterns),
+            xobjects: Self::merged_category(&child.xobjects, &parent.xobjects),
+            shadings: Self::merged_category(&child.shadings, &parent.shadings),
+            color_spaces: Self::merged_category(&child.color_spaces, &parent.color_spaces),
+            lazy_reference: None,
+        })
     }
 
-    /// Copies entries from `parent` into `child` for a single resource category,
-    /// inserting only names that are not already present in `child`.
-    fn inherit_category(child: &mut HashMap<String, Resource>, parent: &HashMap<String, Resource>) {
+    /// Returns one merged resource category with child entries taking precedence.
+    fn merged_category(
+        child: &HashMap<String, Resource>,
+        parent: &HashMap<String, Resource>,
+    ) -> HashMap<String, Resource> {
+        let mut merged = HashMap::with_capacity(child.len().saturating_add(parent.len()));
+        merged.extend(
+            child
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone())),
+        );
         for (k, v) in parent {
-            if !child.contains_key(k) {
-                child.insert(k.clone(), v.clone());
+            if !merged.contains_key(k) {
+                merged.insert(k.clone(), v.clone());
             }
         }
+        merged
     }
 }

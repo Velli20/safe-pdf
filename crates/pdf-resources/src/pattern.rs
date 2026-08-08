@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object::{
@@ -102,7 +104,7 @@ pub enum Pattern {
         /// An optional transformation matrix to be applied to the pattern.
         matrix: Option<Transform>,
         /// A dictionary of resources required by the pattern's content stream.
-        resources: Resources,
+        resources: Rc<Resources>,
         /// The content stream that defines the graphics of the pattern cell.
         content_stream: ContentStream,
     },
@@ -170,10 +172,7 @@ impl Pattern {
                 // Read the `/Resources` entry. Needed by the pattern's content stream.
                 let parsed_resources =
                     Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?;
-                let mut resources = Resources::default();
-                if let Some(parsed) = parsed_resources {
-                    resources = parsed;
-                }
+                let resources = parsed_resources.unwrap_or_else(|| Rc::new(Resources::default()));
 
                 let content_stream = ContentStream::new(object, objects, id_allocator)?;
 

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, rc::Rc};
 
 use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_font::font::Font;
@@ -421,6 +421,17 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
     )
     .expect("cyclic resources should parse")
     .expect("page resources should exist");
+
+    let cached_resources = Resources::read(
+        &page_dict,
+        &objects,
+        &mut cache,
+        &mut cycle_tracker,
+        &mut ids,
+    )
+    .expect("cached resources should parse")
+    .expect("cached page resources should exist");
+    assert!(Rc::ptr_eq(&resources, &cached_resources));
 
     let form = resources.xobject("Self");
     assert!(

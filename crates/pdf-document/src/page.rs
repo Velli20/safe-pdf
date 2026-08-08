@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use pdf_annotation_types::{Annotation, AnnotationError, annotation_id::AnnotationId};
 use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_graphics::rect::Rect;
@@ -22,7 +24,7 @@ pub struct PdfPage {
     /// `/MediaBox` attribute which defines the page boundaries.
     pub media_box: Option<Rect>,
     /// `/Resources` attribute which defines the resources used by the page.
-    pub resources: Option<Resources>,
+    pub resources: Option<Rc<Resources>>,
     /// Next page-scoped annotation identifier.
     #[doc(hidden)]
     pub annotation_id_high_watermark: usize,

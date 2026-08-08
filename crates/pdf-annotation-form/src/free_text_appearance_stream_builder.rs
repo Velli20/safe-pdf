@@ -158,7 +158,7 @@ impl<'a> FreeTextAppearanceStreamBuilder<'a> {
         let form = FormXObject {
             bbox: Rect::new(bounds.width(), bounds.height()),
             matrix: None,
-            resources: Some(resources),
+            resources: Some(Rc::new(resources)),
             content_stream: ContentStream { operators, id: 0 },
         };
         AppearanceDictionary {

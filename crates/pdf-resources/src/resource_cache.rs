@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 
 pub use crate::lazy_cache_value::LazyCacheValue;
 use crate::{resource::Resource, resources::Resources};
@@ -33,12 +33,12 @@ pub trait ResourceCache {
     fn insert(&mut self, obj_num: usize, resource: Resource);
 
     /// Retrieves a reference to a parsed `/Resources` dictionary associated with the object number.
-    fn get_resources(&self, _obj_num: &usize) -> Option<&Resources> {
+    fn get_resources(&self, _obj_num: &usize) -> Option<&Rc<Resources>> {
         None
     }
 
     /// Inserts a parsed `/Resources` dictionary into the cache.
-    fn insert_resources(&mut self, _obj_num: usize, _resources: Resources) {}
+    fn insert_resources(&mut self, _obj_num: usize, _resources: Rc<Resources>) {}
 
     /// Removes a cached resource for the given object number, if present.
     fn remove(&mut self, _obj_num: &usize) -> Option<Resource> {
@@ -46,7 +46,7 @@ pub trait ResourceCache {
     }
 
     /// Removes a cached `/Resources` dictionary for the given object number, if present.
-    fn remove_resources(&mut self, _obj_num: &usize) -> Option<Resources> {
+    fn remove_resources(&mut self, _obj_num: &usize) -> Option<Rc<Resources>> {
         None
     }
 }
@@ -55,7 +55,7 @@ pub trait ResourceCache {
 #[derive(Default)]
 pub struct DefaultResourceCache {
     resources: HashMap<usize, Resource>,
-    resource_dictionaries: HashMap<usize, Resources>,
+    resource_dictionaries: HashMap<usize, Rc<Resources>>,
 }
 
 impl ResourceCache for DefaultResourceCache {
@@ -67,11 +67,11 @@ impl ResourceCache for DefaultResourceCache {
         self.resources.insert(obj_num, resource);
     }
 
-    fn get_resources(&self, obj_num: &usize) -> Option<&Resources> {
+    fn get_resources(&self, obj_num: &usize) -> Option<&Rc<Resources>> {
         self.resource_dictionaries.get(obj_num)
     }
 
-    fn insert_resources(&mut self, obj_num: usize, resources: Resources) {
+    fn insert_resources(&mut self, obj_num: usize, resources: Rc<Resources>) {
         self.resource_dictionaries.insert(obj_num, resources);
     }
 
@@ -79,7 +79,7 @@ impl ResourceCache for DefaultResourceCache {
         self.resources.remove(obj_num)
     }
 
-    fn remove_resources(&mut self, obj_num: &usize) -> Option<Resources> {
+    fn remove_resources(&mut self, obj_num: &usize) -> Option<Rc<Resources>> {
         self.resource_dictionaries.remove(obj_num)
     }
 }
@@ -93,13 +93,13 @@ pub(crate) fn read_resource_lazy<T, E, F>(
     cache: &mut dyn ResourceCache,
     obj_num: Option<usize>,
     read: F,
-) -> Result<T, E>
+) -> Result<T::Shared, E>
 where
     T: LazyCacheValue,
     F: FnOnce(&mut dyn ResourceCache) -> Result<T, E>,
 {
     let Some(obj_num) = obj_num else {
-        return read(cache);
+        return read(cache).map(T::into_shared);
     };
 
     if let Some(cached) = T::get_cached(cache, &obj_num) {
@@ -111,7 +111,8 @@ where
 
     match read(cache) {
         Ok(value) => {
-            T::resolve(&reference, value.clone());
+            let value = T::into_shared(value);
+            T::resolve(&reference, &value);
             T::insert_cached(cache, obj_num, value.clone());
             Ok(value)
         }
