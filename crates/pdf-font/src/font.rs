@@ -30,7 +30,20 @@ pub enum Font {
 impl Font {
     pub const KEY: &'static str = "Font";
 
+    /// Parse a font dictionary, replacing any unreadable font with a bundled
+    /// whole-font TrueType fallback.
     pub fn from_dictionary(
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+        id_allocator: &mut ContentStreamIdAllocator,
+    ) -> Font {
+        match Self::try_from_dictionary(dictionary, objects, id_allocator) {
+            Ok(font) => font,
+            Err(_) => Font::TrueType(fallback_true_type_from_dictionary(dictionary, objects)),
+        }
+    }
+
+    fn try_from_dictionary(
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
         id_allocator: &mut ContentStreamIdAllocator,
@@ -42,13 +55,7 @@ impl Font {
                 let type0_font = Type0Font::from_dictionary(dictionary, objects)?;
                 Ok(Font::Type0(type0_font))
             }
-            "Type1" => match Type1Font::from_dictionary(dictionary, objects) {
-                Err(FontError::MissingFontFile) => Ok(Font::TrueType(
-                    fallback_true_type_from_dictionary(dictionary, objects),
-                )),
-                Ok(type1_font) => Ok(Font::Type1(type1_font)),
-                Err(e) => Err(e),
-            },
+            "Type1" => Type1Font::from_dictionary(dictionary, objects).map(Font::Type1),
             "Type3" => {
                 let type3_font = Type3Font::from_dictionary(dictionary, objects, id_allocator)?;
                 Ok(Font::Type3(type3_font))
@@ -61,23 +68,6 @@ impl Font {
                 subtype: other.to_string(),
             }),
         }
-    }
-
-    /// Build a Standard 14-backed fallback font for best-effort resource
-    /// recovery.
-    ///
-    /// Valid `/Widths`, `/Encoding`, and `/ToUnicode` entries are retained
-    /// independently. Malformed metadata is treated as absent so an unreadable
-    /// font cannot prevent the rest of the resource dictionary from loading.
-    ///
-    /// Callers should use this only at higher-level recovery boundaries, such
-    /// as page resource loading, where replacing an unreadable font is better
-    /// than aborting the entire resource dictionary.
-    pub fn fallback_from_dictionary_best_effort(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Self {
-        Self::TrueType(fallback_true_type_from_dictionary(dictionary, objects))
     }
 }
 
@@ -183,7 +173,8 @@ impl Font {
     /// 1. ToUnicode CMap — returns the full slice (handles ligatures such as "fi"
     ///    mapped to `['f','i']`).
     /// 2. Glyph name → Adobe Glyph List (Type1 / Type3 / TrueType with encodings).
-    /// 3. Type0/CID reverse-cmap fallback (Identity-H/V fonts without ToUnicode).
+    /// 3. Bundled fallback font cmap.
+    /// 4. Type0/CID reverse-cmap fallback (Identity-H/V fonts without ToUnicode).
     ///
     /// Returns an empty [`CharVec`] when no mapping is found.
     pub fn chars_to_unicode(&self, char_code: u16) -> CharVec {
@@ -207,7 +198,19 @@ impl Font {
             return CharVec::from(c);
         }
 
-        // Priority 3: Type0 reverse-cmap (Identity-H/V without ToUnicode)
+        // Priority 3: bundled fallback font cmap.
+        if let Font::TrueType(font) = self
+            && font.standard14.is_some()
+            && let Some(c) = char::from_u32(u32::from(char_code))
+            && FontRef::new(font.font_file.as_ref())
+                .ok()
+                .and_then(|font_ref| font_ref.charmap().map(c))
+                .is_some()
+        {
+            return CharVec::from(c);
+        }
+
+        // Priority 4: Type0 reverse-cmap (Identity-H/V without ToUnicode)
         if let Font::Type0(f) = self
             && let Some(map) = &f.glyph_to_unicode
             && let Some(&c) = map.get(&char_code)

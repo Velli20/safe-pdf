@@ -520,6 +520,44 @@ fn self_referential_font_resources_resolve_lazily() {
 }
 
 #[test]
+fn fallback_fonts_do_not_read_nested_type3_resources() {
+    let malformed_type3 = ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
+        (
+            "Subtype".to_string(),
+            ObjectVariant::Name(b"Type3".to_vec()),
+        ),
+        ("Resources".to_string(), ObjectVariant::Integer(1)),
+    ]))));
+    let page_dict = Dictionary::new(BTreeMap::from([(
+        "Resources".to_string(),
+        ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+            "Font".to_string(),
+            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                "F1".to_string(),
+                malformed_type3,
+            )])))),
+        )])))),
+    )]));
+    let mut cache = DefaultResourceCache::default();
+    let mut cycle_tracker = ReadCycleTracker::default();
+    let mut ids = ContentStreamIdAllocator::new();
+
+    let resources = Resources::read(
+        &page_dict,
+        &PassthroughResolver,
+        &mut cache,
+        &mut cycle_tracker,
+        &mut ids,
+    )
+    .expect("fallback font resources should parse")
+    .expect("page resources should exist");
+    let (font, nested_resources) = resources.font("F1").expect("font should resolve");
+
+    assert!(matches!(font, Font::TrueType(_)));
+    assert!(nested_resources.is_none());
+}
+
+#[test]
 fn self_referential_pattern_resources_resolve_lazily() {
     let page_dict = Dictionary::new(BTreeMap::from([(
         "Resources".to_string(),

@@ -7,7 +7,7 @@ use pdf_object::{
 
 use crate::error::FontError;
 
-/// Known Adobe CIDSystemInfo ordering values with bundled Unicode CMap support.
+/// Known Adobe CIDSystemInfo ordering values with bundled CJK font support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CidOrdering {
     /// Adobe-Japan1 character collection.
