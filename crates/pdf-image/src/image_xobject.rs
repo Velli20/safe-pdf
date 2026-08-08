@@ -98,8 +98,8 @@ impl ImageXObject {
         let (data, pixel_format) = Self::assemble_pixel_data(metadata, &decoded_samples, soft_mask);
 
         Ok(Self {
-            width: metadata.width,
-            height: metadata.height,
+            width: metadata.size.width(),
+            height: metadata.size.height(),
             bits_per_component: decoded_samples.bits_per_component,
             data: data.into(),
             pixel_format,
@@ -117,8 +117,8 @@ impl ImageXObject {
             return (
                 Self::to_rgba(
                     &decoded_samples.image_data,
-                    metadata.width,
-                    metadata.height,
+                    metadata.size.width(),
+                    metadata.size.height(),
                     decoded_samples.num_color_components,
                     smask.as_ref(),
                 ),

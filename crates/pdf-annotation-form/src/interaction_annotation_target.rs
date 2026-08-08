@@ -22,7 +22,7 @@ impl AnnotationTarget {
             .is_draggable()
             .then(|| annotation.rect.map(|rect| rect.normalized()))
             .flatten()
-            .filter(Rect::is_valid);
+            .filter(|rect| rect.is_valid());
         Some(Self {
             free_text: matches!(annotation.kind, AnnotationKind::FreeText(_)),
             draggable_rect,

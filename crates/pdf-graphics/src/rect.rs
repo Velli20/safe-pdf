@@ -1,18 +1,19 @@
 use crate::{point::Point, transform::Transform};
 
+/// An axis-aligned rectangle whose edge coordinate type defaults to `f32`.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
-pub struct Rect {
+pub struct Rect<T = f32> {
     /// The left edge of the rectangle.
-    pub left: f32,
+    pub left: T,
     /// The top edge of the rectangle.
-    pub top: f32,
+    pub top: T,
     /// The right edge of the rectangle.
-    pub right: f32,
+    pub right: T,
     /// The bottom edge of the rectangle.
-    pub bottom: f32,
+    pub bottom: T,
 }
 
-impl Rect {
+impl Rect<f32> {
     pub const UNIT_RECT: Rect = Rect {
         left: 0.0,
         top: 0.0,
@@ -70,6 +71,33 @@ impl Rect {
     /// Returns the scale transform produced by dividing this rectangle's size by another.
     pub fn scale(&self, other: &Self) -> Transform {
         Transform::from_scale(self.width() / other.width(), self.height() / other.height())
+    }
+}
+
+impl Rect<usize> {
+    /// Creates an integer rectangle with the given size and its top-left corner at the origin.
+    pub const fn from_size(width: usize, height: usize) -> Self {
+        Self {
+            left: 0,
+            top: 0,
+            right: width,
+            bottom: height,
+        }
+    }
+
+    /// Returns the rectangle width without underflowing for inverted edges.
+    pub const fn width(&self) -> usize {
+        self.right.saturating_sub(self.left)
+    }
+
+    /// Returns the rectangle height without underflowing for inverted edges.
+    pub const fn height(&self) -> usize {
+        self.bottom.saturating_sub(self.top)
+    }
+
+    /// Returns whether the rectangle has positive width and height.
+    pub const fn is_valid(&self) -> bool {
+        self.width() > 0 && self.height() > 0
     }
 }
 
@@ -148,5 +176,39 @@ mod tests {
         let other = Rect::new(10.0, 5.0);
 
         assert_eq!(rect.scale(&other), Transform::from_scale(4.0, 3.0));
+    }
+
+    #[test]
+    fn integer_rect_from_size_uses_origin_and_reports_dimensions() {
+        let rect = Rect::<usize>::from_size(40, 15);
+
+        assert_eq!(
+            rect,
+            Rect {
+                left: 0,
+                top: 0,
+                right: 40,
+                bottom: 15,
+            }
+        );
+        assert_eq!(rect.width(), 40);
+        assert_eq!(rect.height(), 15);
+        assert!(rect.is_valid());
+    }
+
+    #[test]
+    fn integer_rect_dimensions_saturate_for_inverted_edges() {
+        let rect = Rect {
+            left: 10_usize,
+            top: 20_usize,
+            right: 5_usize,
+            bottom: 15_usize,
+        };
+
+        assert_eq!(rect.width(), 0);
+        assert_eq!(rect.height(), 0);
+        assert!(!rect.is_valid());
+        assert!(!Rect::<usize>::from_size(0, 15).is_valid());
+        assert!(!Rect::<usize>::from_size(40, 0).is_valid());
     }
 }
