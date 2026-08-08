@@ -14,6 +14,9 @@ pub struct Dictionary {
 }
 
 impl Dictionary {
+    const HEIGHT_KEY: &'static str = "Height";
+    const WIDTH_KEY: &'static str = "Width";
+
     pub fn new(dictionary: BTreeMap<String, ObjectVariant>) -> Self {
         Dictionary {
             dictionary,
@@ -101,6 +104,39 @@ impl Dictionary {
             .map(Rect::from)
     }
 
+    /// Reads optional `/Width` and `/Height` entries as an origin-based integer rectangle.
+    ///
+    /// Returns `None` when both entries are missing or `null`. If only one dimension is
+    /// available, the missing counterpart is reported as a required-key error.
+    pub fn optional_size(
+        &self,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Option<Rect<usize>>, ObjectError> {
+        let width = self.optional_number::<usize>(Self::WIDTH_KEY, objects)?;
+        let height = self.optional_number::<usize>(Self::HEIGHT_KEY, objects)?;
+
+        if width.is_none() && height.is_none() {
+            return Ok(None);
+        }
+
+        let width = width.ok_or_else(|| ObjectError::MissingRequiredKey {
+            key: Self::WIDTH_KEY.to_owned(),
+        })?;
+        let height = height.ok_or_else(|| ObjectError::MissingRequiredKey {
+            key: Self::HEIGHT_KEY.to_owned(),
+        })?;
+
+        Ok(Some(Rect::<usize>::from_size(width, height)))
+    }
+
+    /// Reads required `/Width` and `/Height` entries as an origin-based integer rectangle.
+    pub fn required_size(&self, objects: &dyn ObjectResolver) -> Result<Rect<usize>, ObjectError> {
+        let width = self.required_number::<usize>(Self::WIDTH_KEY, objects)?;
+        let height = self.required_number::<usize>(Self::HEIGHT_KEY, objects)?;
+
+        Ok(Rect::<usize>::from_size(width, height))
+    }
+
     /// Reads the optional `/MediaBox` entry as a rectangle.
     ///
     /// Missing entries and explicit PDF `null` values are treated as absent.
@@ -160,6 +196,13 @@ mod tests {
         let mut values = BTreeMap::new();
         values.insert(key.to_owned(), value);
         Dictionary::new(values)
+    }
+
+    fn size_dictionary(width: ObjectVariant, height: ObjectVariant) -> Dictionary {
+        Dictionary::new(BTreeMap::from([
+            ("Height".to_owned(), height),
+            ("Width".to_owned(), width),
+        ]))
     }
 
     #[test]
@@ -288,6 +331,91 @@ mod tests {
                 expected: 4,
                 found: 3,
             }
+        );
+    }
+
+    #[test]
+    fn optional_size_parses_width_and_height() {
+        let dictionary = size_dictionary(ObjectVariant::Integer(40), ObjectVariant::Integer(15));
+
+        let size = dictionary
+            .optional_size(&PassthroughResolver)
+            .expect("size parses");
+
+        assert_eq!(size, Some(Rect::<usize>::from_size(40, 15)));
+    }
+
+    #[test]
+    fn optional_size_returns_none_when_both_dimensions_are_absent() {
+        let missing = Dictionary::new(BTreeMap::new());
+        let null = size_dictionary(ObjectVariant::Null, ObjectVariant::Null);
+
+        assert_eq!(
+            missing
+                .optional_size(&PassthroughResolver)
+                .expect("missing dimensions are optional"),
+            None
+        );
+        assert_eq!(
+            null.optional_size(&PassthroughResolver)
+                .expect("null dimensions are optional"),
+            None
+        );
+    }
+
+    #[test]
+    fn optional_size_rejects_partial_dimensions() {
+        let width_only = dictionary_with("Width", ObjectVariant::Integer(40));
+        let height_only = dictionary_with("Height", ObjectVariant::Integer(15));
+
+        assert_eq!(
+            width_only
+                .optional_size(&PassthroughResolver)
+                .expect_err("height is required when width is present"),
+            ObjectError::MissingRequiredKey {
+                key: "Height".to_owned(),
+            }
+        );
+        assert_eq!(
+            height_only
+                .optional_size(&PassthroughResolver)
+                .expect_err("width is required when height is present"),
+            ObjectError::MissingRequiredKey {
+                key: "Width".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn required_size_parses_width_and_height() {
+        let dictionary = size_dictionary(ObjectVariant::Integer(40), ObjectVariant::Integer(15));
+
+        let size = dictionary
+            .required_size(&PassthroughResolver)
+            .expect("required size parses");
+
+        assert_eq!(size, Rect::<usize>::from_size(40, 15));
+    }
+
+    #[test]
+    fn required_size_rejects_missing_or_invalid_dimensions() {
+        let missing_height = dictionary_with("Width", ObjectVariant::Integer(40));
+        let negative_width =
+            size_dictionary(ObjectVariant::Integer(-1), ObjectVariant::Integer(15));
+
+        assert_eq!(
+            missing_height
+                .required_size(&PassthroughResolver)
+                .expect_err("height is required"),
+            ObjectError::MissingRequiredKey {
+                key: "Height".to_owned(),
+            }
+        );
+        assert_eq!(
+            negative_width
+                .required_size(&PassthroughResolver)
+                .expect_err("negative width cannot convert to usize"),
+            ObjectError::NumberConversionError
         );
     }
 

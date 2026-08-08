@@ -49,7 +49,7 @@ impl DecodedSamples {
             return Err(PdfImageError::InvalidColorComponentCount);
         }
 
-        let num_pixels = metadata.width.saturating_mul(metadata.height);
+        let num_pixels = metadata.size.width().saturating_mul(metadata.size.height());
         let expected_bytes = num_pixels.saturating_mul(self.num_color_components);
         if self.image_data.len() < expected_bytes {
             return Err(PdfImageError::TruncatedImageData {
@@ -71,7 +71,7 @@ impl DecodedSamples {
             return None;
         }
 
-        let num_pixels = metadata.width.saturating_mul(metadata.height);
+        let num_pixels = metadata.size.width().saturating_mul(metadata.size.height());
         let num_color_components = Self::decoded_dct_component_count(raw_data, num_pixels)
             .or_else(|| Self::decoded_single_pixel_component_count(raw_data))?;
 
@@ -104,7 +104,7 @@ impl DecodedSamples {
             return None;
         }
 
-        let num_pixels = metadata.width.saturating_mul(metadata.height);
+        let num_pixels = metadata.size.width().saturating_mul(metadata.size.height());
         let bytes_per_pixel = raw_data.len().checked_div(num_pixels)?;
         if bytes_per_pixel.saturating_mul(num_pixels) != raw_data.len() {
             return None;
@@ -203,8 +203,8 @@ impl DecodedSamples {
             raw_data,
             metadata.bits_per_component,
             SampleLayout::RowAligned {
-                width: metadata.width,
-                height: metadata.height,
+                width: metadata.size.width(),
+                height: metadata.size.height(),
                 samples_per_pixel,
             },
         )?)

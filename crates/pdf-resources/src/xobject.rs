@@ -48,7 +48,12 @@ fn read_xobject_inner(
 ) -> Result<Resource, PdfPagesError> {
     match dictionary.required_str("Subtype", objects)? {
         "Image" => {
-            if !has_valid_image_dimensions(dictionary, objects) {
+            // Malformed dimensions make the image impossible to decode, but should not
+            // prevent otherwise valid page content from being loaded and rendered.
+            if !dictionary
+                .required_size(objects)
+                .is_ok_and(|size| size.is_valid())
+            {
                 return Ok(Resource::UnavailableImage);
             }
 
@@ -74,20 +79,6 @@ fn read_xobject_inner(
             subtype: other.to_string(),
         }),
     }
-}
-
-/// Returns whether an image dictionary contains usable dimensions.
-///
-/// Malformed dimensions make the image impossible to decode, but should not
-/// prevent otherwise valid page content from being loaded and rendered.
-fn has_valid_image_dimensions(dictionary: &Dictionary, objects: &dyn ObjectResolver) -> bool {
-    matches!(
-        (
-            dictionary.required_number::<usize>("Width", objects),
-            dictionary.required_number::<usize>("Height", objects),
-        ),
-        (Ok(width), Ok(height)) if width > 0 && height > 0
-    )
 }
 
 /// Resolves an image XObject `/SMask` entry through the page-level XObject reader.
@@ -153,7 +144,7 @@ mod tests {
         object_reader::ReadCycleTracker, resource::Resource, resource_cache::DefaultResourceCache,
     };
 
-    use super::{has_valid_image_dimensions, read_xobject};
+    use super::read_xobject;
 
     struct MapResolver {
         objects: BTreeMap<usize, ObjectVariant>,
@@ -335,36 +326,5 @@ mod tests {
         .expect("the unavailable image resource should be preserved");
 
         assert!(matches!(xobject, Resource::UnavailableImage));
-    }
-
-    #[test]
-    fn image_dimensions_must_be_positive_numbers() {
-        let valid = Dictionary::new(BTreeMap::from([
-            ("Width".to_string(), ObjectVariant::Integer(2)),
-            ("Height".to_string(), ObjectVariant::Integer(3)),
-        ]));
-        let named_width = Dictionary::new(BTreeMap::from([
-            ("Width".to_string(), ObjectVariant::Name(b"Height".to_vec())),
-            ("Height".to_string(), ObjectVariant::Integer(3)),
-        ]));
-        let missing_height = Dictionary::new(BTreeMap::from([(
-            "Width".to_string(),
-            ObjectVariant::Integer(2),
-        )]));
-        let zero_width = Dictionary::new(BTreeMap::from([
-            ("Width".to_string(), ObjectVariant::Integer(0)),
-            ("Height".to_string(), ObjectVariant::Integer(3)),
-        ]));
-        let negative_height = Dictionary::new(BTreeMap::from([
-            ("Width".to_string(), ObjectVariant::Integer(2)),
-            ("Height".to_string(), ObjectVariant::Integer(-1)),
-        ]));
-
-        let resolver = pdf_object::object_resolver::PassthroughResolver;
-        assert!(has_valid_image_dimensions(&valid, &resolver));
-        assert!(!has_valid_image_dimensions(&named_width, &resolver));
-        assert!(!has_valid_image_dimensions(&missing_height, &resolver));
-        assert!(!has_valid_image_dimensions(&zero_width, &resolver));
-        assert!(!has_valid_image_dimensions(&negative_height, &resolver));
     }
 }
