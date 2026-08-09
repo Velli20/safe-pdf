@@ -58,30 +58,6 @@ pub struct Resources {
     pub lazy_reference: Option<ResourcesReference>,
 }
 
-/// Attempts to retrieve a sub-dictionary from the resources dictionary.
-///
-/// # Parameters
-///
-/// - `resources`: The main resources dictionary to search within.
-/// - `key`: The key of the sub-dictionary to retrieve (e.g., "Font", "Pattern").
-/// - `objects`: The object resolver to resolve indirect references if necessary.
-///
-/// # Returns
-///
-/// Returns `Ok(None)` if the key doesn't exist, `Ok(Some(dict))` if found,
-/// or an error if the value exists but isn't a valid dictionary.
-fn get_sub_dictionary<'a>(
-    resources: &'a Dictionary,
-    key: &str,
-    objects: &'a dyn ObjectResolver,
-) -> Result<Option<&'a Dictionary>, PdfPagesError> {
-    resources
-        .get(key)
-        .map(|entry| entry.try_dictionary(objects))
-        .transpose()
-        .map_err(Into::into)
-}
-
 pub(crate) fn read_font_resource(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
@@ -112,7 +88,7 @@ fn read_fonts(
     cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<HashMap<String, Resource>, PdfPagesError> {
-    let Some(font_dict) = get_sub_dictionary(resources, Font::KEY, objects)? else {
+    let Some(font_dict) = resources.optional_dictionary(Font::KEY, objects)? else {
         return Ok(HashMap::new());
     };
 
@@ -135,7 +111,7 @@ fn read_external_graphics_states(
     cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<HashMap<String, Resource>, PdfPagesError> {
-    let Some(ext_gstate_dict) = get_sub_dictionary(resources, "ExtGState", objects)? else {
+    let Some(ext_gstate_dict) = resources.optional_dictionary("ExtGState", objects)? else {
         return Ok(HashMap::new());
     };
 
@@ -177,7 +153,7 @@ fn read_patterns(
     cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<HashMap<String, Resource>, PdfPagesError> {
-    let Some(pattern_dict) = get_sub_dictionary(resources, "Pattern", objects)? else {
+    let Some(pattern_dict) = resources.optional_dictionary("Pattern", objects)? else {
         return Ok(HashMap::new());
     };
 
@@ -294,7 +270,7 @@ fn read_xobjects(
     cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<HashMap<String, Resource>, PdfPagesError> {
-    let Some(xobject_dict) = get_sub_dictionary(resources, "XObject", objects)? else {
+    let Some(xobject_dict) = resources.optional_dictionary("XObject", objects)? else {
         return Ok(HashMap::new());
     };
 
@@ -316,7 +292,7 @@ fn read_shadings(
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
 ) -> Result<HashMap<String, Resource>, PdfPagesError> {
-    let Some(shading_dict) = get_sub_dictionary(resources, "Shading", objects)? else {
+    let Some(shading_dict) = resources.optional_dictionary("Shading", objects)? else {
         return Ok(HashMap::new());
     };
 
@@ -339,7 +315,7 @@ fn read_color_spaces(
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
 ) -> Result<HashMap<String, Resource>, PdfPagesError> {
-    let Some(color_space_dict) = get_sub_dictionary(resources, "ColorSpace", objects)? else {
+    let Some(color_space_dict) = resources.optional_dictionary("ColorSpace", objects)? else {
         return Ok(HashMap::new());
     };
 

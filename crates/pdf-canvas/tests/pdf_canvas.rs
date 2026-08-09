@@ -2,7 +2,7 @@
 
 mod common;
 
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use common::{content_stream, replay};
 use pdf_canvas::{pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas};
@@ -160,7 +160,7 @@ fn unavailable_image_xobject_is_a_no_op() {
 fn inline_image_render_path_matches_image_xobject_path() {
     let image = pdf_image::ImageXObject::decode_normalized_image(
         &image_dictionary(),
-        &[0b1010_0000],
+        Arc::new(vec![0b1010_0000]),
         &pdf_object::object_resolver::PassthroughResolver,
         &None,
     )

@@ -35,7 +35,7 @@ pub enum Shader {
 #[derive(Clone)]
 pub struct Image {
     /// Shared raw image data.
-    pub data: Arc<[u8]>,
+    pub data: Arc<Vec<u8>>,
     /// The width of the image in pixels.
     pub width: usize,
     /// The height of the image in pixels.
