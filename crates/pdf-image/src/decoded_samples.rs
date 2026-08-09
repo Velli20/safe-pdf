@@ -11,18 +11,18 @@ use crate::image_metadata::ImageMetadata;
 
 /// Stores decoded sample bytes before the final pixel format conversion.
 #[derive(Debug, Clone)]
-pub(crate) struct DecodedSamples {
+pub(crate) struct DecodedSamples<'data> {
     pub(crate) bits_per_component: usize,
     pub(crate) stored_color_space: Option<ColorSpace>,
     pub(crate) num_color_components: usize,
-    pub(crate) image_data: Vec<u8>,
+    pub(crate) image_data: Cow<'data, [u8]>,
 }
 
-impl DecodedSamples {
+impl<'data> DecodedSamples<'data> {
     /// Decodes raw image bytes into component samples based on the configured color space.
     pub(crate) fn decode(
         dictionary: &Dictionary,
-        raw_data: &[u8],
+        raw_data: &'data [u8],
         objects: &dyn ObjectResolver,
         metadata: &ImageMetadata,
     ) -> Result<Self, PdfImageError> {
@@ -64,7 +64,7 @@ impl DecodedSamples {
     }
 
     /// Uses DCT decoder output as display samples when the JPEG decoder already converted color.
-    fn decode_preconverted_dct(raw_data: &[u8], metadata: &ImageMetadata) -> Option<Self> {
+    fn decode_preconverted_dct(raw_data: &'data [u8], metadata: &ImageMetadata) -> Option<Self> {
         let has_dct_filter = metadata
             .filters
             .as_ref()
@@ -83,9 +83,9 @@ impl DecodedSamples {
             _ => metadata.color_space.clone(),
         };
         let image_data = if raw_data.len() == num_color_components && num_pixels > 1 {
-            raw_data.repeat(num_pixels)
+            Cow::Owned(raw_data.repeat(num_pixels))
         } else {
-            raw_data.to_vec()
+            Cow::Borrowed(raw_data)
         };
 
         Some(Self {
@@ -97,7 +97,7 @@ impl DecodedSamples {
     }
 
     /// Uses JPX decoder output as display samples when the decoder already expanded pixels.
-    fn decode_preconverted_jpx(raw_data: &[u8], metadata: &ImageMetadata) -> Option<Self> {
+    fn decode_preconverted_jpx(raw_data: &'data [u8], metadata: &ImageMetadata) -> Option<Self> {
         let has_jpx_filter = metadata
             .filters
             .as_ref()
@@ -124,7 +124,7 @@ impl DecodedSamples {
             bits_per_component,
             stored_color_space,
             num_color_components,
-            image_data: raw_data.to_vec(),
+            image_data: Cow::Borrowed(raw_data),
         })
     }
 
@@ -143,7 +143,7 @@ impl DecodedSamples {
     /// Decodes indexed image samples, applies `/Decode`, and expands palette entries.
     fn decode_indexed(
         dictionary: &Dictionary,
-        raw_data: &[u8],
+        raw_data: &'data [u8],
         objects: &dyn ObjectResolver,
         metadata: &ImageMetadata,
         indexed: &IndexedColorSpace,
@@ -171,14 +171,14 @@ impl DecodedSamples {
             bits_per_component: metadata.bits_per_component,
             stored_color_space: Some(*indexed.base.clone()),
             num_color_components: base_components,
-            image_data,
+            image_data: Cow::Owned(image_data),
         })
     }
 
     /// Decodes non-indexed image samples and applies the `/Decode` transform.
     fn decode_direct(
         dictionary: &Dictionary,
-        raw_data: &[u8],
+        raw_data: &'data [u8],
         objects: &dyn ObjectResolver,
         metadata: &ImageMetadata,
     ) -> Result<Self, PdfImageError> {
@@ -200,8 +200,7 @@ impl DecodedSamples {
                 sample_max,
                 255,
                 metadata.image_mask,
-            )
-            .into_owned(),
+            ),
         })
     }
 
@@ -267,6 +266,10 @@ impl DecodedSamples {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
+
     use super::*;
 
     #[test]
@@ -276,6 +279,31 @@ mod tests {
 
         assert!(matches!(
             decoded,
+            Cow::Borrowed(values) if std::ptr::eq(values, samples.as_slice())
+        ));
+    }
+
+    #[test]
+    fn decode_direct_preserves_borrowed_identity_samples() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (
+                "ColorSpace".to_string(),
+                ObjectVariant::Name(b"DeviceGray".to_vec()),
+            ),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(2)),
+        ]));
+        let metadata = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
+            .expect("direct image metadata should be valid");
+        let samples = [12, 34];
+
+        let decoded =
+            DecodedSamples::decode_direct(&dictionary, &samples, &PassthroughResolver, &metadata)
+                .expect("identity samples should decode");
+
+        assert!(matches!(
+            decoded.image_data,
             Cow::Borrowed(values) if std::ptr::eq(values, samples.as_slice())
         ));
     }

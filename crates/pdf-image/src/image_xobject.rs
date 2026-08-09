@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use pdf_color_space::color_space::ColorSpace;
 use pdf_filter::filter::{decode_data_with_resolver, decode_with_resolver};
@@ -40,7 +40,7 @@ impl ImageXObject {
             dictionary,
             stream_data.raw_data(),
             objects,
-            soft_mask.clone(),
+            &soft_mask,
             &metadata,
         ) {
             Ok(image) => Ok(image),
@@ -50,7 +50,7 @@ impl ImageXObject {
                     dictionary,
                     decoded.as_ref(),
                     objects,
-                    soft_mask,
+                    &soft_mask,
                     &metadata,
                 )
                 .map_err(|_| original_error)
@@ -68,7 +68,7 @@ impl ImageXObject {
         let dictionary = image.normalized_dictionary();
         let decoded = decode_data_with_resolver(&dictionary, image.shared_data(), objects)?;
 
-        Self::decode_normalized_image(&dictionary, decoded.as_ref(), objects, soft_mask)
+        Self::decode_normalized_image(&dictionary, decoded.as_ref(), objects, &soft_mask)
     }
 
     /// Decodes a normalized image dictionary and raw bytes into a raster image.
@@ -79,7 +79,7 @@ impl ImageXObject {
         dictionary: &Dictionary,
         raw_data: &[u8],
         objects: &dyn ObjectResolver,
-        soft_mask: Option<ImageXObject>,
+        soft_mask: &Option<ImageXObject>,
     ) -> Result<Self, PdfImageError> {
         let metadata = ImageMetadata::from_dictionary(dictionary, objects)?;
         Self::decode_normalized_image_with_metadata(
@@ -91,7 +91,7 @@ impl ImageXObject {
         dictionary: &Dictionary,
         raw_data: &[u8],
         objects: &dyn ObjectResolver,
-        soft_mask: Option<ImageXObject>,
+        soft_mask: &Option<ImageXObject>,
         metadata: &ImageMetadata,
     ) -> Result<Self, PdfImageError> {
         let decoded_samples = DecodedSamples::decode(dictionary, raw_data, objects, metadata)?;
@@ -117,14 +117,14 @@ impl ImageXObject {
     /// Builds the final pixel buffer and pixel format after optional soft-mask application.
     fn assemble_pixel_data(
         metadata: &ImageMetadata,
-        image_data: Vec<u8>,
+        image_data: Cow<'_, [u8]>,
         num_color_components: usize,
-        smask: Option<ImageXObject>,
+        smask: &Option<ImageXObject>,
     ) -> (Vec<u8>, PixelFormat) {
         if smask.is_some() || num_color_components != 1 {
             return (
                 Self::to_rgba(
-                    &image_data,
+                    image_data.as_ref(),
                     metadata.size.width(),
                     metadata.size.height(),
                     num_color_components,
@@ -134,7 +134,7 @@ impl ImageXObject {
             );
         }
 
-        (image_data, PixelFormat::Gray8)
+        (image_data.into_owned(), PixelFormat::Gray8)
     }
 
     /// Converts decoded image samples into RGBA pixels with an optional soft-mask alpha channel.
@@ -262,7 +262,7 @@ mod tests {
             &dictionary,
             &[0b1010_0000],
             &PassthroughResolver,
-            None,
+            &None,
         )
         .expect("1-bpc decoded grayscale image should decode");
 
@@ -290,7 +290,7 @@ mod tests {
             &dictionary,
             &[0, 255],
             &PassthroughResolver,
-            None,
+            &None,
         )
         .expect("8-bpc decoded grayscale image should decode");
 
@@ -323,7 +323,7 @@ mod tests {
             &dictionary,
             &[0b1000_0000],
             &PassthroughResolver,
-            None,
+            &None,
         )
         .expect("decoded indexed image should decode");
 
@@ -348,7 +348,7 @@ mod tests {
         ]));
 
         let err =
-            ImageXObject::decode_normalized_image(&dictionary, &[0], &PassthroughResolver, None)
+            ImageXObject::decode_normalized_image(&dictionary, &[0], &PassthroughResolver, &None)
                 .expect_err("invalid /Decode length should fail");
 
         assert!(matches!(
@@ -376,7 +376,7 @@ mod tests {
             &dictionary,
             &[12, 34],
             &PassthroughResolver,
-            None,
+            &None,
         )
         .expect("grayscale image without /Decode should decode");
 
@@ -396,7 +396,7 @@ mod tests {
             &dictionary,
             &[0b1010_0000],
             &PassthroughResolver,
-            None,
+            &None,
         )
         .expect("image masks should default missing BitsPerComponent to 1");
 
@@ -421,7 +421,7 @@ mod tests {
             &dictionary,
             &[1, 2, 3, 4, 5, 6],
             &PassthroughResolver,
-            None,
+            &None,
         )
         .expect("JPX images should decode without BitsPerComponent when already expanded");
 
@@ -446,7 +446,7 @@ mod tests {
         ]));
 
         let err =
-            ImageXObject::decode_normalized_image(&dictionary, &[0], &PassthroughResolver, None)
+            ImageXObject::decode_normalized_image(&dictionary, &[0], &PassthroughResolver, &None)
                 .expect_err("non-mask images should still require BitsPerComponent");
 
         assert!(matches!(
@@ -475,7 +475,7 @@ mod tests {
             &dictionary,
             &[10, 20, 30, 40, 50, 60],
             &PassthroughResolver,
-            None,
+            &None,
         )
         .expect("DCT-decoded RGB bytes should not be validated as CMYK samples");
 
@@ -503,7 +503,7 @@ mod tests {
             &dictionary,
             &[10, 20, 30, 40, 50, 60],
             &PassthroughResolver,
-            None,
+            &None,
         )
         .expect_err("non-DCT CMYK image data should still require four components");
 
@@ -536,7 +536,7 @@ mod tests {
             &dictionary,
             &[0xAA, 0x10, 0x20],
             &PassthroughResolver,
-            None,
+            &None,
         )
         .expect("single decoded DCT pixel should expand to the declared image size");
 
@@ -575,7 +575,7 @@ mod tests {
             &dictionary,
             &[0x20, 0xC0],
             &PassthroughResolver,
-            Some(soft_mask),
+            &Some(soft_mask),
         )
         .expect("resolved soft mask should be applied");
 
@@ -679,7 +679,7 @@ mod tests {
             &dictionary,
             &[0b1011_0010],
             &PassthroughResolver,
-            None,
+            &None,
         )
         .expect("1-bpc image should decode");
 
@@ -697,7 +697,7 @@ mod tests {
             &dictionary,
             &[0b1010_0000],
             &PassthroughResolver,
-            None,
+            &None,
         )
         .expect("1-bpc indexed image should decode");
 
@@ -713,9 +713,13 @@ mod tests {
     #[test]
     fn decode_normalized_indexed_image_2bpc_expands_samples() {
         let dictionary = indexed_dictionary(2);
-        let image =
-            ImageXObject::decode_normalized_image(&dictionary, &[0x1B], &PassthroughResolver, None)
-                .expect("2-bpc indexed image should decode");
+        let image = ImageXObject::decode_normalized_image(
+            &dictionary,
+            &[0x1B],
+            &PassthroughResolver,
+            &None,
+        )
+        .expect("2-bpc indexed image should decode");
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
         assert_eq!(
@@ -733,7 +737,7 @@ mod tests {
             &dictionary,
             &[0x01, 0x23],
             &PassthroughResolver,
-            None,
+            &None,
         )
         .expect("4-bpc indexed image should decode");
 
@@ -753,7 +757,7 @@ mod tests {
             &dictionary,
             &[0, 1, 2, 3],
             &PassthroughResolver,
-            None,
+            &None,
         )
         .expect("8-bpc indexed image should decode");
 
