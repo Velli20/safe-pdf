@@ -162,7 +162,7 @@ fn inline_image_render_path_matches_image_xobject_path() {
         &image_dictionary(),
         &[0b1010_0000],
         &pdf_object::object_resolver::PassthroughResolver,
-        None,
+        &None,
     )
     .expect("image XObject should decode");
     let graphics_state = Resource::ExternalGraphicsState(Rc::new(ExternalGraphicsState {

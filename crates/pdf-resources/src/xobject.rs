@@ -93,7 +93,7 @@ fn resolve_image_soft_mask(
     cache: &mut dyn ResourceCache,
     cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
-) -> Result<Option<ImageXObject>, PdfImageError> {
+) -> Result<Option<ImageXObject>, PdfPagesError> {
     let Some(smask_obj) = dictionary.get("SMask") else {
         return Ok(None);
     };
@@ -116,17 +116,12 @@ fn resolve_image_soft_mask(
         cache,
         cycle_tracker,
         id_allocator,
-    ) {
-        Ok(Some(Resource::Image(image))) => Rc::try_unwrap(image)
+    )? {
+        Some(Resource::Image(image)) => Rc::try_unwrap(image)
             .map(Some)
-            .map_err(|_| PdfImageError::InvalidSoftMaskXObject),
-        Ok(Some(Resource::UnavailableImage)) => Ok(None),
-        Ok(Some(_)) => Err(PdfImageError::InvalidSoftMaskXObject),
-        Ok(None) => Ok(None),
-        Err(PdfPagesError::Image(err)) => Err(err),
-        Err(PdfPagesError::Object(err)) => Err(err.into()),
-        Err(PdfPagesError::ColorSpace(err)) => Err(err.into()),
-        Err(_) => Err(PdfImageError::InvalidSoftMaskXObject),
+            .map_err(|_| PdfImageError::InvalidSoftMaskXObject.into()),
+        Some(Resource::UnavailableImage) | None => Ok(None),
+        Some(_) => Err(PdfImageError::InvalidSoftMaskXObject.into()),
     }
 }
 
@@ -141,7 +136,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use crate::{
-        object_reader::ReadCycleTracker, resource::Resource, resource_cache::DefaultResourceCache,
+        error::PdfPagesError, object_reader::ReadCycleTracker, resource::Resource,
+        resource_cache::DefaultResourceCache,
     };
 
     use super::read_xobject;
@@ -285,6 +281,42 @@ mod tests {
             Resource::UnavailableImage => panic!("expected a decoded image xobject"),
             _ => panic!("expected an image xobject"),
         }
+    }
+
+    #[test]
+    fn soft_mask_xobject_error_is_propagated() {
+        let image_stream = StreamObject::new(1, 0, Box::new(image_dictionary(2)), vec![0xAA]);
+        let mask_stream = StreamObject::new(
+            2,
+            0,
+            Box::new(Dictionary::new(BTreeMap::from([(
+                "Subtype".to_string(),
+                ObjectVariant::Name(b"Unsupported".to_vec()),
+            )]))),
+            vec![],
+        );
+        let resolver = MapResolver {
+            objects: BTreeMap::from([(2, ObjectVariant::Stream(mask_stream))]),
+        };
+        let mut cache = DefaultResourceCache::default();
+        let mut cycle_tracker = ReadCycleTracker::default();
+        let mut id_allocator = ContentStreamIdAllocator::new();
+
+        let result = read_xobject(
+            &ObjectVariant::Stream(image_stream.clone()),
+            &image_stream.dictionary,
+            &image_stream,
+            &resolver,
+            &mut cache,
+            &mut cycle_tracker,
+            &mut id_allocator,
+        );
+
+        assert!(matches!(
+            result,
+            Err(PdfPagesError::UnsupportedXObjectSubtype { subtype })
+                if subtype == "Unsupported"
+        ));
     }
 
     #[test]
