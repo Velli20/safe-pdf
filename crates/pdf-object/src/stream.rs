@@ -16,13 +16,15 @@ pub struct StreamObject {
     pub generation_number: usize,
     /// The dictionary associated with this stream.
     pub dictionary: Box<Dictionary>,
-    /// Shared decoded (decompressed) byte data of the stream.
+    /// Shared byte data of the stream.
     ///
-    /// Filter chains declared in the `/Filter` dictionary entry are applied
-    /// when the stream is first inserted into the object collection, so this
-    /// field always holds the final, usable bytes. Cloning the [`Arc`] shares
-    /// the allocation rather than copying the bytes.
+    /// The bytes may still be encoded when the stream was created directly
+    /// from PDF input and filter decoding has not yet succeeded. Cloning the
+    /// [`Arc`] shares the allocation rather than copying the bytes.
     pub data: Arc<Vec<u8>>,
+    /// Indicates whether the stream's declared filter chain has been applied to
+    /// the current bytes.
+    filters_applied: bool,
 }
 
 impl StreamObject {
@@ -38,21 +40,78 @@ impl StreamObject {
             generation_number,
             dictionary,
             data: data.into(),
+            filters_applied: true,
         }
+    }
+
+    /// Creates a new [`StreamObject`] whose declared filter chain has not been applied.
+    pub fn new_encoded(
+        object_number: usize,
+        generation_number: usize,
+        dictionary: Box<Dictionary>,
+        data: impl Into<Arc<Vec<u8>>>,
+    ) -> Self {
+        StreamObject {
+            object_number,
+            generation_number,
+            dictionary,
+            data: data.into(),
+            filters_applied: false,
+        }
+    }
+
+    /// Returns whether the stream's declared filter chain has been applied.
+    pub fn filters_applied(&self) -> bool {
+        self.filters_applied
+    }
+
+    /// Replaces the stream bytes with the result of applying its filter chain.
+    pub fn set_filtered_data(&mut self, data: impl Into<Arc<Vec<u8>>>) {
+        self.data = data.into();
+        self.filters_applied = true;
     }
 
     /// Returns a reference to the stream bytes.
     ///
-    /// Because stream data is decoded at insertion time, this always returns
-    /// the fully decompressed content.
+    /// Use [`Self::filters_applied`] when the distinction between encoded and
+    /// decoded bytes matters to the caller.
     pub fn raw_data(&self) -> &[u8] {
         self.data.as_slice()
     }
 
-    /// Returns shared ownership of the decoded stream bytes.
+    /// Returns shared ownership of the current stream bytes.
     ///
     /// Cloning the returned [`Arc`] does not copy the underlying byte buffer.
     pub fn shared_data(&self) -> Arc<Vec<u8>> {
         Arc::clone(&self.data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::StreamObject;
+    use crate::dictionary::Dictionary;
+
+    #[test]
+    fn constructors_record_filter_state() {
+        let decoded = StreamObject::new(1, 0, Box::new(Dictionary::new(BTreeMap::new())), vec![1]);
+        let encoded =
+            StreamObject::new_encoded(2, 0, Box::new(Dictionary::new(BTreeMap::new())), vec![2]);
+
+        assert!(decoded.filters_applied());
+        assert!(!encoded.filters_applied());
+    }
+
+    #[test]
+    fn setting_filtered_data_updates_bytes_and_state() {
+        let mut stream =
+            StreamObject::new_encoded(1, 0, Box::new(Dictionary::new(BTreeMap::new())), vec![1]);
+
+        stream.set_filtered_data(vec![2, 3]);
+
+        assert!(stream.filters_applied());
+        assert_eq!(stream.raw_data(), &[2, 3]);
     }
 }

@@ -36,27 +36,19 @@ impl ImageXObject {
         soft_mask: Option<ImageXObject>,
     ) -> Result<Self, PdfImageError> {
         let metadata = ImageMetadata::from_dictionary(dictionary, objects)?;
-        match Self::decode_normalized_image_with_metadata(
+        let decoded = if stream_data.filters_applied() {
+            stream_data.shared_data()
+        } else {
+            decode_with_resolver(stream_data, objects)?
+        };
+
+        Self::decode_normalized_image_with_metadata(
             dictionary,
-            stream_data.raw_data(),
+            decoded.as_ref(),
             objects,
             &soft_mask,
             &metadata,
-        ) {
-            Ok(image) => Ok(image),
-            Err(original_error) if metadata.filters.is_some() => {
-                let decoded = decode_with_resolver(stream_data, objects)?;
-                Self::decode_normalized_image_with_metadata(
-                    dictionary,
-                    decoded.as_ref(),
-                    objects,
-                    &soft_mask,
-                    &metadata,
-                )
-                .map_err(|_| original_error)
-            }
-            Err(error) => Err(error),
-        }
+        )
     }
 
     /// Decodes an inline image, including its filter chain and normalized sample data.
@@ -219,7 +211,7 @@ mod tests {
 
     use pdf_object::{
         dictionary::Dictionary, error::ObjectError, object_resolver::PassthroughResolver,
-        object_variant::ObjectVariant,
+        object_variant::ObjectVariant, stream::StreamObject,
     };
 
     use super::{ImageXObject, InlineImage};
@@ -240,6 +232,28 @@ mod tests {
         let cloned = image.clone();
 
         assert!(Arc::ptr_eq(&cloned.data, &data));
+    }
+
+    #[test]
+    fn read_xobject_uses_predecoded_filtered_stream_data() {
+        let dictionary = filtered_gray_dictionary();
+        let stream = StreamObject::new(1, 0, Box::new(dictionary.clone()), vec![0x2A]);
+
+        let image = ImageXObject::read_xobject(&dictionary, &stream, &PassthroughResolver, None)
+            .expect("predecoded image data should not be filtered again");
+
+        assert_eq!(image.data.as_ref(), &[0x2A]);
+    }
+
+    #[test]
+    fn read_xobject_decodes_encoded_stream_data() {
+        let dictionary = filtered_gray_dictionary();
+        let stream = StreamObject::new_encoded(1, 0, Box::new(dictionary.clone()), b"2A>".to_vec());
+
+        let image = ImageXObject::read_xobject(&dictionary, &stream, &PassthroughResolver, None)
+            .expect("encoded image data should have its filter applied");
+
+        assert_eq!(image.data.as_ref(), &[0x2A]);
     }
 
     #[test]
@@ -787,6 +801,22 @@ mod tests {
             ),
             ("Height".to_string(), ObjectVariant::Integer(1)),
             ("Width".to_string(), ObjectVariant::Integer(4)),
+        ]))
+    }
+
+    fn filtered_gray_dictionary() -> Dictionary {
+        Dictionary::new(BTreeMap::from([
+            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (
+                "ColorSpace".to_string(),
+                ObjectVariant::Name(b"DeviceGray".to_vec()),
+            ),
+            (
+                "Filter".to_string(),
+                ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
+            ),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(1)),
         ]))
     }
 }

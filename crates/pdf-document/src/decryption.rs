@@ -299,7 +299,7 @@ impl DocumentDecryptor {
             stream.raw_data(),
         )?;
 
-        Ok(StreamObject::new(
+        Ok(StreamObject::new_encoded(
             stream.object_number,
             stream.generation_number,
             stream.dictionary,
@@ -455,7 +455,7 @@ impl DocumentDecryptor {
         let stream = self.decrypt_stream_object(stream)?;
         let dictionary =
             self.decrypt_dictionary(*stream.dictionary, object_number, generation_number)?;
-        Ok(ObjectVariant::Stream(StreamObject::new(
+        Ok(ObjectVariant::Stream(StreamObject::new_encoded(
             object_number,
             generation_number,
             Box::new(dictionary),
