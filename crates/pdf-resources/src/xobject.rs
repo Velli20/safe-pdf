@@ -130,9 +130,10 @@ fn resolve_image_soft_mask(
 mod tests {
     use pdf_content_stream::ContentStreamIdAllocator;
     use pdf_object::{
-        dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
-        object_variant::ObjectVariant, stream::StreamObject,
+        dictionary::Dictionary, error::ObjectError, indirect_object::IndirectObject,
+        object_resolver::ObjectResolver, object_variant::ObjectVariant, stream::StreamObject,
     };
+    use pdf_object_collection::object_collection::ObjectCollection;
     use std::collections::BTreeMap;
 
     use crate::{
@@ -317,6 +318,71 @@ mod tests {
             Err(PdfPagesError::UnsupportedXObjectSubtype { subtype })
                 if subtype == "Unsupported"
         ));
+    }
+
+    #[test]
+    fn encoded_image_retries_filters_after_dependencies_are_resolved() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (
+                "ColorSpace".to_string(),
+                ObjectVariant::Name(b"DeviceGray".to_vec()),
+            ),
+            ("DecodeParms".to_string(), ObjectVariant::Reference(2)),
+            (
+                "Filter".to_string(),
+                ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
+            ),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            (
+                "Subtype".to_string(),
+                ObjectVariant::Name(b"Image".to_vec()),
+            ),
+            ("Width".to_string(), ObjectVariant::Integer(1)),
+        ]));
+        let stream = StreamObject::new_encoded(1, 0, Box::new(dictionary), b"2A>".to_vec());
+        let mut objects = ObjectCollection::default();
+
+        objects
+            .insert(ObjectVariant::Stream(stream))
+            .expect("unresolved filter parameters should preserve the image stream");
+        objects
+            .insert(ObjectVariant::IndirectObject(Box::new(
+                IndirectObject::new(
+                    2,
+                    0,
+                    Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
+                        BTreeMap::new(),
+                    )))),
+                ),
+            )))
+            .expect("decode parameters should be inserted");
+
+        let content = objects.get(1).expect("image stream should be retained");
+        let ObjectVariant::Stream(stream) = content else {
+            panic!("expected an image stream");
+        };
+        assert!(!stream.filters_applied());
+
+        let mut cache = DefaultResourceCache::default();
+        let mut cycle_tracker = ReadCycleTracker::default();
+        let mut id_allocator = ContentStreamIdAllocator::new();
+        let xobject = read_xobject(
+            content,
+            &stream.dictionary,
+            stream,
+            &objects,
+            &mut cache,
+            &mut cycle_tracker,
+            &mut id_allocator,
+        )
+        .expect("image decoding should retry the filter chain")
+        .expect("image should remain available");
+
+        let Resource::Image(image) = xobject else {
+            panic!("expected a decoded image xobject");
+        };
+        assert_eq!(image.data.as_ref(), &[0x2A]);
     }
 
     #[test]

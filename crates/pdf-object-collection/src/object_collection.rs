@@ -1,6 +1,5 @@
 use pdf_object::indirect_object::IndirectObject;
 use pdf_object::object_resolver::ObjectResolver;
-use pdf_object::stream::StreamObject;
 use pdf_object::{error::ObjectError, object_variant::ObjectVariant};
 use std::collections::{HashMap, HashSet};
 
@@ -83,21 +82,17 @@ impl ObjectCollection {
                     return Err(ObjectError::DuplicateKeyInObjectCollection(object_number));
                 }
             }
-            ObjectVariant::Stream(stream) => {
-                let data = pdf_filter::filter::decode_with_resolver(&stream, self)
-                    .unwrap_or_else(|_| stream.shared_data());
-                let StreamObject {
-                    object_number,
-                    generation_number,
-                    dictionary,
-                    ..
-                } = stream;
+            ObjectVariant::Stream(mut stream) => {
+                if !stream.filters_applied()
+                    && let Ok(data) = pdf_filter::filter::decode_with_resolver(&stream, self)
+                {
+                    stream.set_filtered_data(data);
+                }
 
-                let obj = StreamObject::new(object_number, generation_number, dictionary, data);
-
+                let object_number = stream.object_number;
                 if self
                     .map
-                    .insert(object_number, ObjectVariant::Stream(obj))
+                    .insert(object_number, ObjectVariant::Stream(stream))
                     .is_some()
                 {
                     return Err(ObjectError::DuplicateKeyInObjectCollection(object_number));
@@ -363,7 +358,7 @@ mod tests {
             ObjectVariant::Integer(compressed.len() as i64),
         );
 
-        let stream = ObjectVariant::Stream(StreamObject::new(
+        let stream = ObjectVariant::Stream(StreamObject::new_encoded(
             1,
             0,
             Box::new(Dictionary::new(stream_dict)),
@@ -373,11 +368,62 @@ mod tests {
         collection.insert(stream).expect("stream insert failed");
 
         let decoded = collection.get(1).and_then(|obj| match obj {
-            ObjectVariant::Stream(stream) => Some(stream.raw_data()),
+            ObjectVariant::Stream(stream) => Some((stream.raw_data(), stream.filters_applied())),
             _ => None,
         });
 
-        assert_eq!(decoded, Some(b"hello".as_slice()));
+        assert_eq!(decoded, Some((b"hello".as_slice(), true)));
+    }
+
+    #[test]
+    fn insert_preserves_encoded_state_when_filter_dependencies_are_unresolved() {
+        use pdf_object::indirect_object::IndirectObject;
+
+        let stream_dictionary = Dictionary::new(BTreeMap::from([
+            ("DecodeParms".to_string(), ObjectVariant::Reference(2)),
+            (
+                "Filter".to_string(),
+                ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
+            ),
+        ]));
+        let stream = StreamObject::new_encoded(1, 0, Box::new(stream_dictionary), b"2A>".to_vec());
+        let mut collection = ObjectCollection::default();
+
+        collection
+            .insert(ObjectVariant::Stream(stream))
+            .expect("encoded stream insertion should be recoverable");
+        let stored = collection
+            .get(1)
+            .and_then(|object| match object {
+                ObjectVariant::Stream(stream) => Some(stream),
+                _ => None,
+            })
+            .expect("stream should remain in the collection");
+        assert!(!stored.filters_applied());
+        assert_eq!(stored.raw_data(), b"2A>");
+
+        collection
+            .insert(ObjectVariant::IndirectObject(Box::new(
+                IndirectObject::new(
+                    2,
+                    0,
+                    Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
+                        BTreeMap::new(),
+                    )))),
+                ),
+            )))
+            .expect("decode parameters should be inserted");
+
+        let stored = collection
+            .get(1)
+            .and_then(|object| match object {
+                ObjectVariant::Stream(stream) => Some(stream),
+                _ => None,
+            })
+            .expect("stream should remain in the collection");
+        let decoded = pdf_filter::filter::decode_with_resolver(stored, &collection)
+            .expect("filter retry should succeed after dependency insertion");
+        assert_eq!(decoded.as_slice(), &[0x2A]);
     }
 
     #[test]

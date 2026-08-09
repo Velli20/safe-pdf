@@ -176,7 +176,7 @@ impl PdfParser<'_> {
             self.skip_whitespace_and_comments();
             self.read_keyword(ENDOBJ_KEYWORD)?;
 
-            return Ok(ObjectVariant::Stream(StreamObject::new(
+            return Ok(ObjectVariant::Stream(StreamObject::new_encoded(
                 header.object_number,
                 header.generation_number,
                 dictionary,
@@ -253,6 +253,7 @@ mod tests {
             assert_eq!(stream.object_number, 1);
             assert_eq!(stream.generation_number, 0);
             assert_eq!(stream.raw_data(), b"Hello");
+            assert!(!stream.filters_applied());
         } else {
             panic!("Expected Stream variant");
         }
