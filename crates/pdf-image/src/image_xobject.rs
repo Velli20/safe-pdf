@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 
 use pdf_color_space::color_space::ColorSpace;
 use pdf_filter::filter::{decode_data_with_resolver, decode_with_resolver};
@@ -20,7 +20,7 @@ pub struct ImageXObject {
     /// The number of bits used to represent each color component.
     pub bits_per_component: usize,
     /// The shared image stream data (with soft mask alpha applied if present).
-    pub data: Arc<[u8]>,
+    pub data: Arc<Vec<u8>>,
     /// The pixel format of the image data.
     pub pixel_format: PixelFormat,
     /// The color space of the image samples.
@@ -43,11 +43,7 @@ impl ImageXObject {
         };
 
         Self::decode_normalized_image_with_metadata(
-            dictionary,
-            decoded.as_ref(),
-            objects,
-            &soft_mask,
-            &metadata,
+            dictionary, decoded, objects, &soft_mask, &metadata,
         )
     }
 
@@ -60,16 +56,16 @@ impl ImageXObject {
         let dictionary = image.normalized_dictionary();
         let decoded = decode_data_with_resolver(&dictionary, image.shared_data(), objects)?;
 
-        Self::decode_normalized_image(&dictionary, decoded.as_ref(), objects, &soft_mask)
+        Self::decode_normalized_image(&dictionary, decoded, objects, &soft_mask)
     }
 
-    /// Decodes a normalized image dictionary and raw bytes into a raster image.
+    /// Decodes a normalized image dictionary and shared raw bytes into a raster image.
     ///
     /// The dictionary must already use canonical image keys such as `Width`,
     /// `Height`, `BitsPerComponent`, and `ColorSpace`.
     pub fn decode_normalized_image(
         dictionary: &Dictionary,
-        raw_data: &[u8],
+        raw_data: Arc<Vec<u8>>,
         objects: &dyn ObjectResolver,
         soft_mask: &Option<ImageXObject>,
     ) -> Result<Self, PdfImageError> {
@@ -81,7 +77,7 @@ impl ImageXObject {
 
     fn decode_normalized_image_with_metadata(
         dictionary: &Dictionary,
-        raw_data: &[u8],
+        raw_data: Arc<Vec<u8>>,
         objects: &dyn ObjectResolver,
         soft_mask: &Option<ImageXObject>,
         metadata: &ImageMetadata,
@@ -93,40 +89,32 @@ impl ImageXObject {
             num_color_components,
             image_data,
         } = decoded_samples;
-        let (data, pixel_format) =
-            Self::assemble_pixel_data(metadata, image_data, num_color_components, soft_mask);
+        let convert_to_rgba = soft_mask.is_some() || num_color_components != 1;
+        let pixel_format = if convert_to_rgba {
+            PixelFormat::RGBA8888
+        } else {
+            PixelFormat::Gray8
+        };
+        let data = if convert_to_rgba {
+            Arc::new(Self::to_rgba(
+                image_data.as_ref(),
+                metadata.size.width(),
+                metadata.size.height(),
+                num_color_components,
+                soft_mask.as_ref(),
+            ))
+        } else {
+            image_data
+        };
 
         Ok(Self {
             width: metadata.size.width(),
             height: metadata.size.height(),
             bits_per_component,
-            data: data.into(),
+            data,
             pixel_format,
             color_space: stored_color_space,
         })
-    }
-
-    /// Builds the final pixel buffer and pixel format after optional soft-mask application.
-    fn assemble_pixel_data(
-        metadata: &ImageMetadata,
-        image_data: Cow<'_, [u8]>,
-        num_color_components: usize,
-        smask: &Option<ImageXObject>,
-    ) -> (Vec<u8>, PixelFormat) {
-        if smask.is_some() || num_color_components != 1 {
-            return (
-                Self::to_rgba(
-                    image_data.as_ref(),
-                    metadata.size.width(),
-                    metadata.size.height(),
-                    num_color_components,
-                    smask.as_ref(),
-                ),
-                PixelFormat::RGBA8888,
-            );
-        }
-
-        (image_data.into_owned(), PixelFormat::Gray8)
     }
 
     /// Converts decoded image samples into RGBA pixels with an optional soft-mask alpha channel.
@@ -219,7 +207,7 @@ mod tests {
 
     #[test]
     fn cloned_image_xobject_shares_data() {
-        let data: Arc<[u8]> = vec![1, 2, 3, 4].into();
+        let data = Arc::new(vec![1, 2, 3, 4]);
         let image = ImageXObject {
             width: 1,
             height: 1,
@@ -242,6 +230,7 @@ mod tests {
         let image = ImageXObject::read_xobject(&dictionary, &stream, &PassthroughResolver, None)
             .expect("predecoded image data should not be filtered again");
 
+        assert!(Arc::ptr_eq(&image.data, &stream.data));
         assert_eq!(image.data.as_ref(), &[0x2A]);
     }
 
@@ -274,7 +263,7 @@ mod tests {
 
         let image = ImageXObject::decode_normalized_image(
             &dictionary,
-            &[0b1010_0000],
+            Arc::new(vec![0b1010_0000]),
             &PassthroughResolver,
             &None,
         )
@@ -302,7 +291,7 @@ mod tests {
 
         let image = ImageXObject::decode_normalized_image(
             &dictionary,
-            &[0, 255],
+            Arc::new(vec![0, 255]),
             &PassthroughResolver,
             &None,
         )
@@ -335,7 +324,7 @@ mod tests {
 
         let image = ImageXObject::decode_normalized_image(
             &dictionary,
-            &[0b1000_0000],
+            Arc::new(vec![0b1000_0000]),
             &PassthroughResolver,
             &None,
         )
@@ -361,9 +350,13 @@ mod tests {
             ("Width".to_string(), ObjectVariant::Integer(1)),
         ]));
 
-        let err =
-            ImageXObject::decode_normalized_image(&dictionary, &[0], &PassthroughResolver, &None)
-                .expect_err("invalid /Decode length should fail");
+        let err = ImageXObject::decode_normalized_image(
+            &dictionary,
+            Arc::new(vec![0]),
+            &PassthroughResolver,
+            &None,
+        )
+        .expect_err("invalid /Decode length should fail");
 
         assert!(matches!(
             err,
@@ -386,15 +379,42 @@ mod tests {
             ("Width".to_string(), ObjectVariant::Integer(2)),
         ]));
 
+        let samples = Arc::new(vec![12, 34]);
         let image = ImageXObject::decode_normalized_image(
             &dictionary,
-            &[12, 34],
+            Arc::clone(&samples),
             &PassthroughResolver,
             &None,
         )
         .expect("grayscale image without /Decode should decode");
 
+        assert!(Arc::ptr_eq(&image.data, &samples));
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
+        assert_eq!(image.data.as_ref(), &[12, 34]);
+    }
+
+    #[test]
+    fn decode_normalized_image_trims_trailing_samples() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (
+                "ColorSpace".to_string(),
+                ObjectVariant::Name(b"DeviceGray".to_vec()),
+            ),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(2)),
+        ]));
+        let samples = Arc::new(vec![12, 34, 56]);
+
+        let image = ImageXObject::decode_normalized_image(
+            &dictionary,
+            Arc::clone(&samples),
+            &PassthroughResolver,
+            &None,
+        )
+        .expect("trailing samples should be ignored");
+
+        assert!(!Arc::ptr_eq(&image.data, &samples));
         assert_eq!(image.data.as_ref(), &[12, 34]);
     }
 
@@ -408,7 +428,7 @@ mod tests {
 
         let image = ImageXObject::decode_normalized_image(
             &dictionary,
-            &[0b1010_0000],
+            Arc::new(vec![0b1010_0000]),
             &PassthroughResolver,
             &None,
         )
@@ -433,7 +453,7 @@ mod tests {
 
         let image = ImageXObject::decode_normalized_image(
             &dictionary,
-            &[1, 2, 3, 4, 5, 6],
+            Arc::new(vec![1, 2, 3, 4, 5, 6]),
             &PassthroughResolver,
             &None,
         )
@@ -459,9 +479,13 @@ mod tests {
             ("Width".to_string(), ObjectVariant::Integer(1)),
         ]));
 
-        let err =
-            ImageXObject::decode_normalized_image(&dictionary, &[0], &PassthroughResolver, &None)
-                .expect_err("non-mask images should still require BitsPerComponent");
+        let err = ImageXObject::decode_normalized_image(
+            &dictionary,
+            Arc::new(vec![0]),
+            &PassthroughResolver,
+            &None,
+        )
+        .expect_err("non-mask images should still require BitsPerComponent");
 
         assert!(matches!(
             err,
@@ -487,7 +511,7 @@ mod tests {
 
         let image = ImageXObject::decode_normalized_image(
             &dictionary,
-            &[10, 20, 30, 40, 50, 60],
+            Arc::new(vec![10, 20, 30, 40, 50, 60]),
             &PassthroughResolver,
             &None,
         )
@@ -515,7 +539,7 @@ mod tests {
 
         let err = ImageXObject::decode_normalized_image(
             &dictionary,
-            &[10, 20, 30, 40, 50, 60],
+            Arc::new(vec![10, 20, 30, 40, 50, 60]),
             &PassthroughResolver,
             &None,
         )
@@ -548,7 +572,7 @@ mod tests {
 
         let image = ImageXObject::decode_normalized_image(
             &dictionary,
-            &[0xAA, 0x10, 0x20],
+            Arc::new(vec![0xAA, 0x10, 0x20]),
             &PassthroughResolver,
             &None,
         )
@@ -587,7 +611,7 @@ mod tests {
 
         let image = ImageXObject::decode_normalized_image(
             &dictionary,
-            &[0x20, 0xC0],
+            Arc::new(vec![0x20, 0xC0]),
             &PassthroughResolver,
             &Some(soft_mask),
         )
@@ -646,6 +670,26 @@ mod tests {
     }
 
     #[test]
+    fn decode_inline_image_preserves_unfiltered_shared_samples() {
+        let image = InlineImage::new(
+            Dictionary::new(BTreeMap::from([
+                ("BPC".to_string(), ObjectVariant::Integer(8)),
+                ("CS".to_string(), ObjectVariant::Name(b"G".to_vec())),
+                ("H".to_string(), ObjectVariant::Integer(1)),
+                ("W".to_string(), ObjectVariant::Integer(2)),
+            ])),
+            vec![12, 34],
+        );
+        let samples = image.shared_data();
+
+        let decoded = ImageXObject::decode_inline_image(&image, &PassthroughResolver, None)
+            .expect("unfiltered inline image should decode");
+
+        assert!(Arc::ptr_eq(&decoded.data, &samples));
+        assert_eq!(decoded.data.as_ref(), &[12, 34]);
+    }
+
+    #[test]
     fn decode_inline_image_accepts_abbreviated_indexed_color_space() {
         let image = InlineImage::new(
             Dictionary::new(BTreeMap::from([
@@ -691,7 +735,7 @@ mod tests {
 
         let image = ImageXObject::decode_normalized_image(
             &dictionary,
-            &[0b1011_0010],
+            Arc::new(vec![0b1011_0010]),
             &PassthroughResolver,
             &None,
         )
@@ -709,7 +753,7 @@ mod tests {
         let dictionary = indexed_dictionary(1);
         let image = ImageXObject::decode_normalized_image(
             &dictionary,
-            &[0b1010_0000],
+            Arc::new(vec![0b1010_0000]),
             &PassthroughResolver,
             &None,
         )
@@ -729,7 +773,7 @@ mod tests {
         let dictionary = indexed_dictionary(2);
         let image = ImageXObject::decode_normalized_image(
             &dictionary,
-            &[0x1B],
+            Arc::new(vec![0x1B]),
             &PassthroughResolver,
             &None,
         )
@@ -749,7 +793,7 @@ mod tests {
         let dictionary = indexed_dictionary(4);
         let image = ImageXObject::decode_normalized_image(
             &dictionary,
-            &[0x01, 0x23],
+            Arc::new(vec![0x01, 0x23]),
             &PassthroughResolver,
             &None,
         )
@@ -769,7 +813,7 @@ mod tests {
         let dictionary = indexed_dictionary(8);
         let image = ImageXObject::decode_normalized_image(
             &dictionary,
-            &[0, 1, 2, 3],
+            Arc::new(vec![0, 1, 2, 3]),
             &PassthroughResolver,
             &None,
         )

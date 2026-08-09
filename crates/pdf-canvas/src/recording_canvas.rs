@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn recorded_image_shares_pixel_data() {
-        let data: Arc<[u8]> = vec![1, 2, 3, 4].into();
+        let data = Arc::new(vec![1, 2, 3, 4]);
         let image = BackendImage {
             data: Arc::clone(&data),
             width: 1,
