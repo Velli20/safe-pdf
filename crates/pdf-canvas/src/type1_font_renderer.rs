@@ -163,13 +163,12 @@ impl<B: CanvasBackend> TextRenderer for Type1FontRenderer<'_, '_, B> {
         } = self;
 
         for char_code in iter {
+            let text_glyph_start = canvas.text_glyph_start()?;
             let state = canvas.current_state()?;
-            let text_state_before_advance = state.text_state.clone();
-            let ctm = state.transform;
             let glyph_matrix = state
                 .text_state
                 .compose_glyph_matrix(*glyph_base_transform, &state.transform);
-            let glyph_name = text_state_before_advance.glyph_name(char_code);
+            let glyph_name = state.text_state.glyph_name(char_code);
 
             match &*font {
                 Type1RendererFont::OpenTypeCff {
@@ -194,7 +193,8 @@ impl<B: CanvasBackend> TextRenderer for Type1FontRenderer<'_, '_, B> {
                 }
                 Type1RendererFont::ClassicType1(classic_font) => {
                     let gid = classic_gid(classic_font, *is_cid, char_code, glyph_name);
-                    let pdf_width = text_state_before_advance
+                    let pdf_width = state
+                        .text_state
                         .font
                         .and_then(|font| font.glyph_width(char_code));
                     let mut pen = PdfPathPen::default();
@@ -216,7 +216,7 @@ impl<B: CanvasBackend> TextRenderer for Type1FontRenderer<'_, '_, B> {
                 }
             }
 
-            canvas.record_text_glyph(char_code, &text_state_before_advance, &ctm)?;
+            canvas.record_text_glyph(char_code, text_glyph_start)?;
         }
         Ok(())
     }

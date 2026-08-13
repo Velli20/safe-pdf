@@ -1,18 +1,11 @@
 use pdf_graphics::rect::Rect;
 
+pub use pdf_canvas::text::TextGlyph;
+
 /// Ordered text layout for one rendered page size.
 #[derive(Debug, Clone, Default)]
 pub struct PageTextLayout {
     glyphs: Vec<TextGlyph>,
-}
-
-/// One selectable text span in device coordinates.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TextGlyph {
-    /// Unicode text represented by this span.
-    pub text: String,
-    /// Axis-aligned device-space bounds.
-    pub bounds: Rect,
 }
 
 /// A hit-testable text position.
@@ -91,7 +84,7 @@ impl PageTextLayout {
             {
                 result.push('\n');
             }
-            result.push_str(&glyph.text);
+            result.extend(glyph.unicode.iter());
             previous = Some(glyph);
         }
 
@@ -123,15 +116,6 @@ impl TextSelection {
     /// Returns the inclusive glyph-index range.
     pub fn range(self) -> (usize, usize) {
         (self.start, self.end)
-    }
-}
-
-impl From<pdf_canvas::text::TextGlyph> for TextGlyph {
-    fn from(value: pdf_canvas::text::TextGlyph) -> Self {
-        Self {
-            text: value.text,
-            bounds: value.bounds,
-        }
     }
 }
 
@@ -169,10 +153,15 @@ fn is_new_line(previous: &TextGlyph, current: &TextGlyph) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pdf_font::char_vec::CharVec;
 
     fn glyph(text: &str, left: f32, top: f32, right: f32, bottom: f32) -> TextGlyph {
+        let mut unicode = CharVec::new();
+        for character in text.chars() {
+            unicode.push(character);
+        }
         TextGlyph {
-            text: text.to_string(),
+            unicode,
             bounds: Rect {
                 left,
                 top,
@@ -239,5 +228,15 @@ mod tests {
             .expect("selection should exist");
 
         assert_eq!(layout.selected_text(selection), "a\nb");
+    }
+
+    #[test]
+    fn selected_text_preserves_multi_scalar_glyphs() {
+        let layout = PageTextLayout::new(vec![glyph("fi", 0.0, 0.0, 10.0, 10.0)]);
+        let selection = layout
+            .selection_from_indices(0, 0)
+            .expect("selection should exist");
+
+        assert_eq!(layout.selected_text(selection), "fi");
     }
 }

@@ -2112,6 +2112,7 @@ dependencies = [
 name = "pdf-canvas"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "num-traits",
  "pdf-color-space",
  "pdf-content-stream",
@@ -2371,6 +2372,7 @@ dependencies = [
  "pdf-canvas",
  "pdf-content-stream",
  "pdf-document",
+ "pdf-font",
  "pdf-graphics",
  "thiserror 2.0.12",
 ]

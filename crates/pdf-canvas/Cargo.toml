@@ -22,3 +22,10 @@ thiserror = "2.0.12"
 num-traits = "0.2.19"
 read-fonts = "0.39.2"
 skrifa =  "0.42.1"
+
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "text_recording"
+harness = false

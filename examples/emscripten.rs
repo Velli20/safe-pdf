@@ -10,7 +10,7 @@ use pdf_graphics::point::Point;
 use pdf_graphics_skia::gpu_state::SkiaGpuState;
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
 use pdf_renderer::{PageRecordingCache, PageTextLayout, PdfRenderer, render_page_cached};
-use std::{cell::RefCell, collections::HashMap, time::Instant};
+use std::{cell::RefCell, time::Instant};
 
 const INTERACTION_CONSUMED: i32 = 1;
 const INTERACTION_REDRAW: i32 = 2;
@@ -35,10 +35,8 @@ thread_local! {
     static CURRENT_RENDERER: RefCell<Option<PdfRenderer>> = const { RefCell::new(None) };
     static GPU_STATE: RefCell<Option<SkiaGpuState>> = const { RefCell::new(None) };
     /// Page recording cache for efficient re-rendering.
-    /// Caches up to 5 pages as resolution-independent drawing commands.
+    /// Caches up to 5 dimension-specific pages with drawing commands and text layout.
     static PAGE_CACHE: RefCell<PageRecordingCache> = RefCell::new(PageRecordingCache::new(5));
-    static TEXT_LAYOUT_CACHE: RefCell<HashMap<TextLayoutCacheKey, PageTextLayout>> =
-        RefCell::new(HashMap::new());
     static TEXT_SELECTION_RECTS: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
     static SELECTED_TEXT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     static ANNOTATION_CONTROLLER: RefCell<AnnotationController> =
@@ -46,17 +44,7 @@ thread_local! {
     static ANNOTATION_PAGE_INDEX: RefCell<Option<usize>> = const { RefCell::new(None) };
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct TextLayoutCacheKey {
-    page_index: usize,
-    width: i32,
-    height: i32,
-}
-
 fn clear_text_selection_state() {
-    TEXT_LAYOUT_CACHE.with(|cache| {
-        cache.borrow_mut().clear();
-    });
     TEXT_SELECTION_RECTS.with(|rects| {
         rects.borrow_mut().clear();
     });
@@ -132,26 +120,23 @@ fn with_text_layout<R>(
             return None;
         }
 
-        TEXT_LAYOUT_CACHE.with(|cache| {
+        PAGE_CACHE.with(|cache| {
             let mut cache = cache.borrow_mut();
-            let key = TextLayoutCacheKey {
-                page_index,
-                width,
-                height,
-            };
-
-            if let std::collections::hash_map::Entry::Vacant(e) = cache.entry(key) {
-                let layout = match renderer.text_layout(page_index, width as f32, height as f32) {
-                    Ok(layout) => layout,
+            let width = width as f32;
+            let height = height as f32;
+            if cache.get(page_index, width, height).is_none() {
+                let recorded = match renderer.render_page_to_recording(page_index, width, height) {
+                    Ok(recorded) => recorded,
                     Err(e) => {
                         eprintln!("Text layout error: {e:?}");
                         return None;
                     }
                 };
-                e.insert(layout);
+                cache.insert(page_index, recorded);
             }
-
-            cache.get(&key).map(f)
+            cache
+                .get(page_index, width, height)
+                .map(|recorded| f(recorded.text_layout()))
         })
     })
 }
@@ -457,6 +442,7 @@ pub extern "C" fn sk_clear_cache() {
 /// Clears cached text layouts and temporary selection buffers.
 #[unsafe(export_name = "sk_clear_text_layout_cache")]
 pub extern "C" fn sk_clear_text_layout_cache() {
+    PAGE_CACHE.with(|cache| cache.borrow_mut().clear());
     clear_text_selection_state();
 }
 

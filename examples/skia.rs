@@ -133,7 +133,6 @@ impl Application {
         let size = self.window.inner_size();
         let width = size.width as f32;
         let height = size.height as f32;
-        self.ensure_text_layout(width, height)?;
         self.surface.canvas().clear(SkiaColor::WHITE);
 
         if self.renderer.document().page_count() > 0 {
@@ -148,7 +147,14 @@ impl Application {
                 width,
                 height,
             };
-            self.renderer.render(&mut backend, self.current_page)?;
+            if self.text_layout.is_none() {
+                self.text_layout = Some(
+                    self.renderer
+                        .render_with_text_layout(&mut backend, self.current_page)?,
+                );
+            } else {
+                self.renderer.render(&mut backend, self.current_page)?;
+            }
             draw_selection_rects(&mut backend, &selection_rects)?;
             if let Some(page) = self.renderer.document().get_page(self.current_page)
                 && let Some(viewport) = AnnotationViewport::from_page(page, width, height)
@@ -170,7 +176,9 @@ impl Application {
         }
         self.text_layout = Some(
             self.renderer
-                .text_layout(self.current_page, width, height)?,
+                .render_page_to_recording(self.current_page, width, height)?
+                .text_layout()
+                .clone(),
         );
         Ok(())
     }

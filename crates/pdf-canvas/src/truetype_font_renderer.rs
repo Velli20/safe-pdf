@@ -98,9 +98,8 @@ impl<B: CanvasBackend> TextRenderer for TrueTypeFontRenderer<'_, '_, B> {
         text: impl Iterator<Item = u16>,
     ) -> Result<(), crate::error::PdfCanvasError> {
         for char_code in text {
+            let text_glyph_start = self.canvas.text_glyph_start()?;
             let state = self.canvas.current_state()?;
-            let text_state_before_advance = state.text_state.clone();
-            let ctm = state.transform;
             let glyph_matrix_for_char = state
                 .text_state
                 .compose_glyph_matrix(self.glyph_base_transform, &state.transform);
@@ -144,8 +143,7 @@ impl<B: CanvasBackend> TextRenderer for TrueTypeFontRenderer<'_, '_, B> {
                     resolved_glyph_id,
                     self.units_per_em,
                 )?;
-            self.canvas
-                .record_text_glyph(char_code, &text_state_before_advance, &ctm)?;
+            self.canvas.record_text_glyph(char_code, text_glyph_start)?;
         }
         Ok(())
     }

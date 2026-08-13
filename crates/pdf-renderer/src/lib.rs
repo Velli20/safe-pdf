@@ -1,23 +1,45 @@
 use pdf_annotations::{AnnotationRenderError, AnnotationRenderer};
 use pdf_canvas::{
-    canvas_backend::{CanvasBackend, Image, Shader},
-    error::PdfCanvasError,
-    pdf_canvas::PdfCanvas,
+    canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
     recording_canvas::RecordingCanvas,
-    stroke_style::StrokeStyle,
 };
 use pdf_document::document::PdfDocument;
-use pdf_graphics::{
-    BlendMode, MaskMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
-    transform::Transform,
-};
 use thiserror::Error;
 
 pub mod page_cache;
 pub mod text_selection;
 
 pub use page_cache::PageRecordingCache;
-pub use text_selection::PageTextLayout;
+pub use text_selection::{PageTextLayout, TextGlyph};
+
+/// A page's drawing commands and selectable text captured in one render pass.
+#[derive(Clone)]
+pub struct RecordedPage {
+    recording: RecordingCanvas,
+    text_layout: PageTextLayout,
+}
+
+impl RecordedPage {
+    /// Returns the recorded drawing commands.
+    pub fn recording(&self) -> &RecordingCanvas {
+        &self.recording
+    }
+
+    /// Returns the selectable text layout captured with the drawing commands.
+    pub fn text_layout(&self) -> &PageTextLayout {
+        &self.text_layout
+    }
+
+    /// Replays this page onto a concrete backend.
+    pub fn replay<B: CanvasBackend>(&self, backend: &mut B) -> Result<(), PdfCanvasError> {
+        self.recording.replay(backend)
+    }
+
+    /// Consumes this page and returns its drawing commands and text layout.
+    pub fn into_parts(self) -> (RecordingCanvas, PageTextLayout) {
+        (self.recording, self.text_layout)
+    }
+}
 
 /// Errors that can occur while rendering a PDF document onto a canvas backend.
 #[derive(Debug, Error)]
@@ -94,20 +116,45 @@ impl PdfRenderer {
         Ok(())
     }
 
-    /// Renders a PDF page into a [`RecordingCanvas`] for caching.
+    /// Renders a page and returns selectable text captured during the same pass.
+    pub fn render_with_text_layout<B: CanvasBackend>(
+        &self,
+        canvas_backend: &mut B,
+        page_index: usize,
+    ) -> Result<PageTextLayout, PdfRendererError> {
+        let page = self.page(page_index)?;
+        let canvas = PdfCanvas::new(canvas_backend, page, None)?.with_text_recording();
+        let mut annotation_renderer = AnnotationRenderer::new(canvas);
+        if let Some(cs) = &page.contents {
+            annotation_renderer.canvas_mut().render_content_stream(
+                cs,
+                None,
+                None,
+                page.resources.as_deref(),
+                None,
+            )?;
+        }
+        let glyphs = annotation_renderer.canvas_mut().take_text_glyphs();
+        if let Some(annotations) = &page.annotations {
+            annotation_renderer.render_all(annotations)?;
+        }
+        Ok(PageTextLayout::new(glyphs))
+    }
+
+    /// Renders a PDF page into combined drawing and text recordings for caching.
     ///
-    /// This records all drawing commands for a page into a resolution-independent
-    /// `RecordingCanvas` that can be replayed to any backend at any size.
+    /// Drawing commands and glyph bounds use the requested device dimensions;
+    /// replay the result only onto a backend with the same dimensions.
     pub fn render_page_to_recording(
         &self,
         page_index: usize,
         width: f32,
         height: f32,
-    ) -> Result<RecordingCanvas, PdfRendererError> {
+    ) -> Result<RecordedPage, PdfRendererError> {
         let page = self.page(page_index)?;
         let mut recording = RecordingCanvas::new(width, height);
-        {
-            let canvas = PdfCanvas::new(&mut recording, page, None)?;
+        let glyphs = {
+            let canvas = PdfCanvas::new(&mut recording, page, None)?.with_text_recording();
             let mut annotation_renderer = AnnotationRenderer::new(canvas);
             if let Some(cs) = &page.contents {
                 annotation_renderer.canvas_mut().render_content_stream(
@@ -118,38 +165,16 @@ impl PdfRenderer {
                     None,
                 )?;
             }
+            let glyphs = annotation_renderer.canvas_mut().take_text_glyphs();
             if let Some(annotations) = &page.annotations {
                 annotation_renderer.render_all(annotations)?;
             }
-        }
-        Ok(recording)
-    }
-
-    /// Extracts selectable page text for a specific rendered page size.
-    pub fn text_layout(
-        &self,
-        page_index: usize,
-        width: f32,
-        height: f32,
-    ) -> Result<PageTextLayout, PdfRendererError> {
-        let page = self.page(page_index)?;
-        let mut backend = NoopCanvasBackend { width, height };
-        let mut collector = pdf_canvas::text::TextCollector::new();
-        {
-            let mut canvas =
-                PdfCanvas::new_with_text_sink(&mut backend, page, None, &mut collector)?;
-            if let Some(cs) = &page.contents {
-                canvas.render_content_stream(cs, None, None, page.resources.as_deref(), None)?;
-            }
-        }
-
-        Ok(PageTextLayout::new(
-            collector
-                .into_glyphs()
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-        ))
+            glyphs
+        };
+        Ok(RecordedPage {
+            recording,
+            text_layout: PageTextLayout::new(glyphs),
+        })
     }
 
     fn page(&self, page_index: usize) -> Result<&pdf_document::page::PdfPage, PdfRendererError> {
@@ -160,89 +185,7 @@ impl PdfRenderer {
     }
 }
 
-struct NoopCanvasBackend {
-    width: f32,
-    height: f32,
-}
-
-impl CanvasBackend for NoopCanvasBackend {
-    fn fill_path(
-        &mut self,
-        _path: &PdfPath,
-        _fill_type: PathFillType,
-        _color: Color,
-        _shader: &Option<Shader>,
-        _blend_mode: Option<BlendMode>,
-    ) -> Result<(), PdfCanvasError> {
-        Ok(())
-    }
-
-    fn stroke_path(
-        &mut self,
-        _path: &PdfPath,
-        _color: Color,
-        _line_width: f32,
-        _stroke_style: &StrokeStyle,
-        _shader: &Option<Shader>,
-        _blend_mode: Option<BlendMode>,
-    ) -> Result<(), PdfCanvasError> {
-        Ok(())
-    }
-
-    fn set_clip_region(
-        &mut self,
-        _path: &PdfPath,
-        _mode: PathFillType,
-    ) -> Result<(), PdfCanvasError> {
-        Ok(())
-    }
-
-    fn width(&self) -> f32 {
-        self.width
-    }
-
-    fn height(&self) -> f32 {
-        self.height
-    }
-
-    fn save(&mut self) -> Result<(), PdfCanvasError> {
-        Ok(())
-    }
-
-    fn restore(&mut self) -> Result<(), PdfCanvasError> {
-        Ok(())
-    }
-
-    fn draw_image_rect(
-        &mut self,
-        _image: &Image,
-        _blend_mode: Option<BlendMode>,
-        _dest_rect: Rect,
-        _image_rotation: Option<f32>,
-    ) -> Result<(), PdfCanvasError> {
-        Ok(())
-    }
-
-    fn begin_mask_layer(
-        &mut self,
-        _mask: &std::sync::Arc<RecordingCanvas>,
-        _transform: &Transform,
-        _mask_mode: MaskMode,
-    ) -> Result<(), PdfCanvasError> {
-        Ok(())
-    }
-
-    fn end_mask_layer(
-        &mut self,
-        _mask: &std::sync::Arc<RecordingCanvas>,
-        _transform: &Transform,
-        _mask_mode: MaskMode,
-    ) -> Result<(), PdfCanvasError> {
-        Ok(())
-    }
-}
-
-/// Renders a cached [`RecordingCanvas`] to a backend, or renders the page
+/// Renders a cached [`RecordedPage`] to a backend, or records the page
 /// directly if not cached.
 ///
 /// This is a convenience function that handles the cache lookup and fallback
@@ -272,7 +215,7 @@ pub fn render_page_cached<B: CanvasBackend>(
     let height = backend.height();
 
     // Check cache first
-    if let Some(recording) = cache.get(page_index) {
+    if let Some(recording) = cache.get(page_index, width, height) {
         // Replay directly from the cached recording.
         recording.replay(backend)?;
         return Ok(());
