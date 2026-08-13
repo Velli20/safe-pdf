@@ -13,6 +13,12 @@ pub enum PdfCanvasError {
     CurrentFontRequired,
     #[error("Page resources are missing")]
     PageResourcesMissing,
+    #[error("Invalid font data: unrecognized Type 1 font data")]
+    UnrecognizedType1Font,
+    #[error("Invalid font data: failed to read the CFF table from the Type 1 font")]
+    InvalidType1CffTable,
+    #[error("Invalid font data: failed to read the Type 1 font CFF charset")]
+    InvalidType1CffCharset,
     #[error("Invalid font data: {0}")]
     InvalidFont(String),
     #[error("Font resource '{0}' was not found")]
