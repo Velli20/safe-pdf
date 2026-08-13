@@ -8,7 +8,7 @@ use crate::{
     pdf_path_pen::PdfPathPen,
     recording_canvas::RecordingCanvas,
     stroke_style::StrokeStyle,
-    text::{TextGlyph, TextSink, glyph_bounds, glyph_text},
+    text::{TextGlyph, TextGlyphStart, glyph_bounds, glyph_unicode},
     text_state::TextState,
 };
 use pdf_content_stream::ContentStream;
@@ -43,8 +43,8 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     pub(crate) canvas_stack: Vec<CanvasState<'a>>,
     /// Content-stream IDs currently being rendered on this canvas stack.
     pub(crate) active_content_stream_ids: HashSet<usize>,
-    /// Optional sink for extracted text glyph positions.
-    pub(crate) text_sink: Option<&'a mut dyn TextSink>,
+    /// Optional owned buffer for extracted text glyph positions.
+    pub(crate) text_glyphs: Option<Vec<TextGlyph>>,
 }
 
 impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
@@ -117,20 +117,22 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             page,
             canvas_stack,
             active_content_stream_ids: HashSet::new(),
-            text_sink: None,
+            text_glyphs: None,
         })
     }
 
-    /// Creates a new `PdfCanvas` and emits rendered text spans into `text_sink`.
-    pub fn new_with_text_sink(
-        backend: &'a mut B,
-        page: &'a PdfPage,
-        bb: Option<&Rect>,
-        text_sink: &'a mut dyn TextSink,
-    ) -> Result<Self, PdfCanvasError> {
-        let mut canvas = Self::new(backend, page, bb)?;
-        canvas.text_sink = Some(text_sink);
-        Ok(canvas)
+    /// Enables collection of selectable glyph metadata during rendering.
+    #[must_use]
+    pub fn with_text_recording(mut self) -> Self {
+        self.text_glyphs = Some(Vec::new());
+        self
+    }
+
+    /// Takes the glyph metadata collected by [`Self::with_text_recording`].
+    ///
+    /// Returns an empty vector when recording was not enabled.
+    pub fn take_text_glyphs(&mut self) -> Vec<TextGlyph> {
+        self.text_glyphs.take().unwrap_or_default()
     }
 
     /// Returns whether a form or pattern bbox is safe to materialize as an offscreen recording.
@@ -227,7 +229,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             page: self.page,
             canvas_stack,
             active_content_stream_ids: self.active_content_stream_ids.clone(),
-            text_sink: None,
+            text_glyphs: None,
         };
 
         // Render the form's content stream into the mask canvas.
@@ -812,30 +814,38 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         }
     }
 
+    pub(crate) fn text_glyph_start(&self) -> Result<Option<TextGlyphStart<'a>>, PdfCanvasError> {
+        if self.text_glyphs.is_none() {
+            return Ok(None);
+        }
+        let state = self.current_state()?;
+        let mut transform = state.text_state.matrix;
+        transform.concat(&state.transform);
+        Ok(Some(TextGlyphStart {
+            transform,
+            font_size: state.text_state.font_size,
+            font: state.text_state.font,
+        }))
+    }
+
     pub(crate) fn record_text_glyph(
         &mut self,
         char_code: u16,
-        text_state_before_advance: &TextState<'a>,
-        ctm: &Transform,
+        start: Option<TextGlyphStart<'a>>,
     ) -> Result<(), PdfCanvasError> {
-        if self.text_sink.is_none() {
+        let Some(start) = start else {
             return Ok(());
-        }
-
-        let text_state_after_advance = &self.current_state()?.text_state;
-        let text = glyph_text(text_state_before_advance.font, char_code);
-        if text.is_empty() {
-            return Ok(());
-        }
-
-        let bounds = glyph_bounds(text_state_before_advance, ctm, text_state_after_advance);
+        };
+        let state = self.current_state()?;
+        let mut after = state.text_state.matrix;
+        after.concat(&state.transform);
+        let bounds = glyph_bounds(&start.transform, start.font_size, &after);
         if bounds.is_valid() {
-            let Some(text_sink) = self.text_sink.as_deref_mut() else {
-                return Ok(());
-            };
-            text_sink.push_glyph(TextGlyph { text, bounds });
+            let unicode = glyph_unicode(start.font, char_code);
+            if let Some(glyphs) = &mut self.text_glyphs {
+                glyphs.push(TextGlyph { unicode, bounds });
+            }
         }
-
         Ok(())
     }
 }

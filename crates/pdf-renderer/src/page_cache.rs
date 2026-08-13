@@ -1,199 +1,141 @@
-//! Page caching using [`RecordingCanvas`] for efficient re-rendering.
-//!
-//! This module provides an LRU cache for storing pre-recorded PDF page drawing
-//! commands. Since [`RecordingCanvas`] stores resolution-independent vector
-//! commands, cached pages can be replayed to any backend at any size without
-//! re-parsing the PDF content stream.
-//!
-//! # Example
-//!
-//! ```ignore
-//! use pdf_renderer::{page_cache::PageRecordingCache, PdfRenderer};
-//!
-//! let mut cache = PageRecordingCache::new(5); // Cache up to 5 pages
-//! let renderer = PdfRenderer::new(document);
-//!
-//! // Check if page is cached
-//! if let Some(recording) = cache.get(page_index) {
-//!     recording.replay(&mut backend)?;
-//! } else {
-//!     // Render to RecordingCanvas and cache it
-//!     let recording = renderer.render_page_to_recording(page_index, width, height)?;
-//!     cache.insert(page_index, recording.clone());
-//!     recording.replay(&mut backend)?;
-//! }
-//! ```
+//! Dimension-aware LRU caching for recorded pages and their text layouts.
 
-use pdf_canvas::recording_canvas::RecordingCanvas;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
-/// LRU cache for storing pre-recorded PDF page drawing commands.
+use crate::RecordedPage;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct CacheKey {
+    page_index: usize,
+    width_bits: u32,
+    height_bits: u32,
+}
+
+impl CacheKey {
+    fn new(page_index: usize, width: f32, height: f32) -> Self {
+        Self {
+            page_index,
+            width_bits: width.to_bits(),
+            height_bits: height.to_bits(),
+        }
+    }
+}
+
+/// LRU cache of combined drawing recordings and selectable text layouts.
 ///
-/// `PageRecordingCache` stores [`RecordingCanvas`] instances keyed by page index.
-/// When the cache reaches its capacity, the least recently accessed page is evicted.
-///
-/// # Benefits
-///
-/// - **Resolution-independent**: Cached commands can be replayed at any zoom level.
-/// - **Memory efficient**: Stores vector commands instead of pixel data.
-/// - **Backend agnostic**: Same cache works for Skia, FemtoVG, or any `CanvasBackend`.
+/// Entries are keyed by page index and exact canvas dimensions because both
+/// drawing commands and glyph bounds are stored in device coordinates.
 pub struct PageRecordingCache {
-    /// Maps page_index -> recorded drawing commands.
-    recordings: HashMap<usize, RecordingCanvas>,
-    /// Maximum number of pages to cache.
+    recordings: HashMap<CacheKey, RecordedPage>,
     max_entries: usize,
-    /// Access order for LRU eviction (most recent at back).
-    access_order: Vec<usize>,
+    access_order: VecDeque<CacheKey>,
 }
 
 impl PageRecordingCache {
-    /// Creates a new page cache with the specified capacity.
-    ///
-    /// # Parameters
-    ///
-    /// - `max_entries`: Maximum number of pages to keep in the cache.
-    ///   When this limit is reached, the least recently accessed page is evicted.
+    /// Creates a cache retaining at most `max_entries` page/size combinations.
     pub fn new(max_entries: usize) -> Self {
         Self {
             recordings: HashMap::with_capacity(max_entries),
             max_entries,
-            access_order: Vec::with_capacity(max_entries),
+            access_order: VecDeque::with_capacity(max_entries),
         }
     }
 
-    /// Gets a cached page recording, updating LRU order.
-    ///
-    /// # Parameters
-    ///
-    /// - `page_index`: Zero-based index of the page to retrieve.
-    ///
-    /// # Returns
-    ///
-    /// `Some(&RecordingCanvas)` if the page is cached, `None` otherwise.
-    pub fn get(&mut self, page_index: usize) -> Option<&RecordingCanvas> {
-        if self.recordings.contains_key(&page_index) {
-            // Move to end of access order (most recently used)
-            self.access_order.retain(|&i| i != page_index);
-            self.access_order.push(page_index);
-            self.recordings.get(&page_index)
-        } else {
-            None
+    /// Returns the recorded page for an exact page/size combination.
+    pub fn get(&mut self, page_index: usize, width: f32, height: f32) -> Option<&RecordedPage> {
+        let key = CacheKey::new(page_index, width, height);
+        if !self.recordings.contains_key(&key) {
+            return None;
         }
+        self.access_order.retain(|candidate| *candidate != key);
+        self.access_order.push_back(key);
+        self.recordings.get(&key)
     }
 
-    /// Inserts a recorded page into the cache.
-    ///
-    /// If the cache is at capacity, the least recently accessed page is evicted
-    /// before inserting the new one.
-    ///
-    /// # Parameters
-    ///
-    /// - `page_index`: Zero-based index of the page.
-    /// - `recording`: The recorded drawing commands for the page.
-    pub fn insert(&mut self, page_index: usize, recording: RecordingCanvas) {
-        // A zero-capacity cache never stores anything.
+    /// Inserts a recorded page, deriving its cache dimensions from the recording.
+    pub fn insert(&mut self, page_index: usize, recorded_page: RecordedPage) {
         if self.max_entries == 0 {
             return;
         }
-
-        // If already present, just update the recording and access order
-        if self.recordings.contains_key(&page_index) {
-            self.access_order.retain(|&i| i != page_index);
-            self.access_order.push(page_index);
-            self.recordings.insert(page_index, recording);
-            return;
+        let key = CacheKey::new(
+            page_index,
+            recorded_page.recording().width,
+            recorded_page.recording().height,
+        );
+        self.access_order.retain(|candidate| *candidate != key);
+        while self.recordings.len() >= self.max_entries && !self.recordings.contains_key(&key) {
+            let Some(oldest) = self.access_order.pop_front() else {
+                break;
+            };
+            self.recordings.remove(&oldest);
         }
-
-        // Evict oldest entries if at capacity
-        while self.recordings.len() >= self.max_entries && !self.access_order.is_empty() {
-            if let Some(oldest) = self.access_order.first().copied() {
-                self.recordings.remove(&oldest);
-                self.access_order.remove(0);
-            }
-        }
-
-        self.recordings.insert(page_index, recording);
-        self.access_order.push(page_index);
+        self.access_order.push_back(key);
+        self.recordings.insert(key, recorded_page);
     }
 
-    /// Removes a specific page from the cache.
-    ///
-    /// # Parameters
-    ///
-    /// - `page_index`: Zero-based index of the page to remove.
-    ///
-    /// # Returns
-    ///
-    /// The removed `RecordingCanvas` if it was cached, `None` otherwise.
-    pub fn remove(&mut self, page_index: usize) -> Option<RecordingCanvas> {
-        self.access_order.retain(|&i| i != page_index);
-        self.recordings.remove(&page_index)
+    /// Removes every cached size for `page_index`.
+    pub fn remove(&mut self, page_index: usize) -> Vec<RecordedPage> {
+        let keys: Vec<CacheKey> = self
+            .recordings
+            .keys()
+            .filter(|key| key.page_index == page_index)
+            .copied()
+            .collect();
+        self.access_order.retain(|key| key.page_index != page_index);
+        keys.into_iter()
+            .filter_map(|key| self.recordings.remove(&key))
+            .collect()
     }
 
     /// Clears all cached pages.
-    ///
-    /// Call this when loading a new document or when memory needs to be freed.
     pub fn clear(&mut self) {
         self.recordings.clear();
         self.access_order.clear();
     }
 
-    /// Returns the number of pages currently in the cache.
+    /// Returns the number of cached page/size combinations.
     pub fn len(&self) -> usize {
         self.recordings.len()
     }
 
-    /// Returns `true` if the cache is empty.
+    /// Returns whether the cache is empty.
     pub fn is_empty(&self) -> bool {
         self.recordings.is_empty()
     }
 
-    /// Returns `true` if the specified page is cached.
-    ///
-    /// Note: This does not update the LRU order. Use [`get`](Self::get) if you
-    /// intend to access the cached data.
+    /// Returns whether any size of `page_index` is cached.
     pub fn contains(&self, page_index: usize) -> bool {
-        self.recordings.contains_key(&page_index)
+        self.recordings
+            .keys()
+            .any(|key| key.page_index == page_index)
     }
 
-    /// Returns page indices that should be prefetched for smooth navigation.
-    ///
-    /// Given the current page, this returns adjacent pages that are not yet
-    /// cached, prioritized by distance from the current page.
-    ///
-    /// # Parameters
-    ///
-    /// - `current_page`: The currently visible page index.
-    /// - `page_count`: Total number of pages in the document.
-    ///
-    /// # Returns
-    ///
-    /// A vector of page indices to prefetch, ordered by priority.
+    /// Returns uncached neighboring page indices in prefetch order.
     pub fn pages_to_prefetch(&self, current_page: usize, page_count: usize) -> Vec<usize> {
         let mut pages = Vec::new();
-
-        // Prioritize: next page, previous page, then further pages
-        for offset in [1i32, -1, 2, -2, 3, -3] {
-            let idx = current_page as i32 + offset;
-            if idx >= 0 && (idx as usize) < page_count {
-                let page_idx = idx as usize;
-                if !self.recordings.contains_key(&page_idx) {
-                    pages.push(page_idx);
-                }
+        for offset in [1_usize, 2, 3] {
+            if let Some(next) = current_page.checked_add(offset)
+                && next < page_count
+                && !self.contains(next)
+            {
+                pages.push(next);
+            }
+            if let Some(previous) = current_page.checked_sub(offset)
+                && !self.contains(previous)
+            {
+                pages.push(previous);
             }
         }
-
         pages
     }
 
-    /// Returns the maximum capacity of the cache.
+    /// Returns the maximum number of retained entries.
     pub fn capacity(&self) -> usize {
         self.max_entries
     }
 }
 
 impl Default for PageRecordingCache {
-    /// Creates a cache with a default capacity of 5 pages.
     fn default() -> Self {
         Self::new(5)
     }
@@ -202,73 +144,62 @@ impl Default for PageRecordingCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PageTextLayout;
+    use pdf_canvas::recording_canvas::RecordingCanvas;
 
-    #[test]
-    fn test_cache_insert_and_get() {
-        let mut cache = PageRecordingCache::new(3);
-        let recording = RecordingCanvas::new(100.0, 100.0);
-
-        cache.insert(0, recording.clone());
-        assert!(cache.contains(0));
-        assert!(cache.get(0).is_some());
+    fn recorded(width: f32, height: f32) -> RecordedPage {
+        RecordedPage {
+            recording: RecordingCanvas::new(width, height),
+            text_layout: PageTextLayout::default(),
+        }
     }
 
     #[test]
-    fn test_cache_lru_eviction() {
+    fn cache_keys_entries_by_dimensions() {
+        let mut cache = PageRecordingCache::new(3);
+        cache.insert(0, recorded(100.0, 100.0));
+
+        assert!(cache.get(0, 100.0, 100.0).is_some());
+        assert!(cache.get(0, 200.0, 100.0).is_none());
+    }
+
+    #[test]
+    fn cache_evicts_least_recent_entry() {
         let mut cache = PageRecordingCache::new(2);
-
-        cache.insert(0, RecordingCanvas::new(100.0, 100.0));
-        cache.insert(1, RecordingCanvas::new(100.0, 100.0));
-
-        // Access page 0 to make it more recent
-        let _ = cache.get(0);
-
-        // Insert page 2 - should evict page 1 (least recently used)
-        cache.insert(2, RecordingCanvas::new(100.0, 100.0));
+        cache.insert(0, recorded(100.0, 100.0));
+        cache.insert(1, recorded(100.0, 100.0));
+        let _ = cache.get(0, 100.0, 100.0);
+        cache.insert(2, recorded(100.0, 100.0));
 
         assert!(cache.contains(0));
-        assert!(!cache.contains(1)); // Evicted
+        assert!(!cache.contains(1));
         assert!(cache.contains(2));
     }
 
     #[test]
-    fn test_pages_to_prefetch() {
-        let mut cache = PageRecordingCache::new(5);
-        cache.insert(5, RecordingCanvas::new(100.0, 100.0));
-
-        let to_prefetch = cache.pages_to_prefetch(5, 10);
-
-        // Should suggest pages 6, 4, 7, 3, 8, 2 (adjacent pages not in cache)
-        assert!(to_prefetch.contains(&6));
-        assert!(to_prefetch.contains(&4));
-        assert!(!to_prefetch.contains(&5)); // Already cached
-    }
-
-    #[test]
-    fn test_zero_capacity_cache_is_always_empty() {
-        let mut cache = PageRecordingCache::new(0);
-
-        cache.insert(0, RecordingCanvas::new(100.0, 100.0));
-        cache.insert(1, RecordingCanvas::new(200.0, 200.0));
-
-        assert!(cache.is_empty());
-        assert!(!cache.contains(0));
-        assert!(!cache.contains(1));
-        assert_eq!(cache.len(), 0);
-        assert!(cache.get(0).is_none());
-    }
-
-    #[test]
-    fn test_cache_clear() {
+    fn remove_drops_every_size_for_page() {
         let mut cache = PageRecordingCache::new(3);
-        cache.insert(0, RecordingCanvas::new(100.0, 100.0));
-        cache.insert(1, RecordingCanvas::new(100.0, 100.0));
+        cache.insert(0, recorded(100.0, 100.0));
+        cache.insert(0, recorded(200.0, 100.0));
 
-        assert_eq!(cache.len(), 2);
-
-        cache.clear();
-
-        assert!(cache.is_empty());
+        assert_eq!(cache.remove(0).len(), 2);
         assert!(!cache.contains(0));
+    }
+
+    #[test]
+    fn zero_capacity_cache_is_always_empty() {
+        let mut cache = PageRecordingCache::new(0);
+        cache.insert(0, recorded(100.0, 100.0));
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn pages_to_prefetch_skip_cached_pages() {
+        let mut cache = PageRecordingCache::new(5);
+        cache.insert(5, recorded(100.0, 100.0));
+        let pages = cache.pages_to_prefetch(5, 10);
+        assert!(pages.contains(&6));
+        assert!(pages.contains(&4));
+        assert!(!pages.contains(&5));
     }
 }

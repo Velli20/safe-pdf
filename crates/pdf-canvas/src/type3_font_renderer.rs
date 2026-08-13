@@ -41,9 +41,8 @@ impl<B: CanvasBackend> TextRenderer for Type3FontRenderer<'_, '_, B> {
         iter: impl Iterator<Item = u16>,
     ) -> Result<(), crate::error::PdfCanvasError> {
         for char_code_byte in iter {
+            let text_glyph_start = self.canvas.text_glyph_start()?;
             let state = self.canvas.current_state()?;
-            let text_state_before_advance = state.text_state.clone();
-            let ctm = state.transform;
 
             // Compute a relative glyph matrix (Tm × S × FontMatrix) without the CTM.
             // render_content_stream will post-concatenate this onto the current CTM,
@@ -112,7 +111,7 @@ impl<B: CanvasBackend> TextRenderer for Type3FontRenderer<'_, '_, B> {
 
                 text_state.advance_text_cursor(char_code_byte, glyph_width_x, glyph_width_y);
                 self.canvas
-                    .record_text_glyph(char_code_byte, &text_state_before_advance, &ctm)?;
+                    .record_text_glyph(char_code_byte, text_glyph_start)?;
             }
         }
 

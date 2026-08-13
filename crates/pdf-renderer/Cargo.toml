@@ -10,3 +10,6 @@ pdf-document = { path = "../pdf-document" }
 pdf-canvas = { path = "../pdf-canvas" }
 pdf-graphics = { path = "../pdf-graphics" }
 thiserror = "2.0.12"
+
+[dev-dependencies]
+pdf-font = { path = "../pdf-font" }
