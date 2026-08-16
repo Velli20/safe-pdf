@@ -1,4 +1,4 @@
-use crate::{TextElement, error::PdfOperatorError};
+use crate::error::PdfOperatorError;
 use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
 
 pub struct Operands(pub Vec<ObjectVariant>);
@@ -16,7 +16,7 @@ impl Operands {
     }
 
     /// Pops and returns the next operand, advancing the internal slice.
-    fn take_next(&mut self) -> Result<ObjectVariant, PdfOperatorError> {
+    pub(crate) fn take_next(&mut self) -> Result<ObjectVariant, PdfOperatorError> {
         if !self.0.is_empty() {
             Ok(self.0.remove(0))
         } else {
@@ -58,28 +58,6 @@ impl Operands {
     pub fn get_u8(&mut self) -> Result<u8, PdfOperatorError> {
         let value = self.take_next()?.try_number::<u8>(&PassthroughResolver)?;
         Ok(value)
-    }
-
-    pub fn get_text_element_array(&mut self) -> Result<Vec<TextElement>, PdfOperatorError> {
-        let object = self.take_next()?;
-        let array_values = object.try_array(&PassthroughResolver)?;
-
-        let mut elements = Vec::with_capacity(array_values.len());
-        for val_obj in array_values {
-            match val_obj {
-                ObjectVariant::HexString(s) => {
-                    elements.push(TextElement::HexString { value: s.clone() })
-                }
-                ObjectVariant::LiteralString(s) => {
-                    elements.push(TextElement::Text { value: s.clone() })
-                }
-                _ => {
-                    let amount = val_obj.try_number::<f32>(&PassthroughResolver)?;
-                    elements.push(TextElement::Adjustment { amount });
-                }
-            }
-        }
-        Ok(elements)
     }
 
     pub fn get_f32_array(&mut self) -> Result<Vec<f32>, PdfOperatorError> {
