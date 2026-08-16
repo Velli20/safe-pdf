@@ -208,8 +208,7 @@ fn parse_operator(
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use pdf_content_stream_operators::{
-        graphics_state_operators::RestoreGraphicsState, path_operators::MoveTo,
-        variants::PdfOperatorVariant,
+        graphics_state_operators::RestoreGraphicsState, variants::PdfOperatorVariant,
     };
 
     use super::*;
@@ -276,10 +275,7 @@ mod tests {
 
         let operator = parse_operator(descriptor, &mut operands).expect("operator should parse");
 
-        assert_eq!(
-            operator,
-            Some(PdfOperatorVariant::MoveTo(MoveTo::new(10.0, 20.0)))
-        );
+        assert!(matches!(operator, Some(PdfOperatorVariant::MoveTo(_))));
         assert!(operands.is_empty());
         assert!(operands.capacity() >= original_capacity);
     }
@@ -297,7 +293,7 @@ mod tests {
         let operator = parse_operator(descriptor, &mut operands)
             .expect("malformed operator should be skipped");
 
-        assert_eq!(operator, None);
+        assert!(operator.is_none());
         assert_eq!(
             operands,
             vec![
@@ -338,7 +334,8 @@ mod tests {
     #[test]
     fn parse_next_item_uses_parse_hook_and_resumes_after_inline_image() {
         let mut out = Vec::new();
-        let mut parser = OperatorStreamParser::new(b"BI ID x\nEI Q", &mut out);
+        let mut parser =
+            OperatorStreamParser::new(b"BI /W 1 /H 1 /BPC 8 /CS /G ID x\nEI Q", &mut out);
 
         assert!(
             parser
@@ -346,10 +343,18 @@ mod tests {
                 .expect("inline image should parse through hook")
         );
         assert_eq!(parser.out.len(), 1);
-        match parser.out.first() {
-            Some(PdfOperatorVariant::InlineImage(image)) => {
-                assert!(image.dictionary().dictionary.is_empty());
-                assert_eq!(image.data(), b"x\n");
+        let cloned = parser
+            .out
+            .first()
+            .cloned()
+            .expect("parsed operator should be present");
+        match (parser.out.first(), &cloned) {
+            (
+                Some(PdfOperatorVariant::InlineImage(image)),
+                PdfOperatorVariant::InlineImage(cloned_image),
+            ) => {
+                assert_eq!(image.shared_data().as_slice(), b"x\n");
+                assert!(std::rc::Rc::ptr_eq(image, cloned_image));
             }
             other => panic!("expected inline image, got {other:?}"),
         }

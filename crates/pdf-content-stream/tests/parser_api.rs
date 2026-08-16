@@ -3,9 +3,7 @@ use std::collections::BTreeMap;
 use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_content_stream_operators::{
     TextElement,
-    compatibility_operators::{BeginCompatibility, EndCompatibility},
-    graphics_state_operators::{RestoreGraphicsState, SaveGraphicsState},
-    path_operators::{LineTo, MoveTo},
+    graphics_state_operators::SaveGraphicsState,
     recording_pdf_operator_backend::{RecordedOperation, RecordingBackend},
     text_showing_operators::ShowTextArray,
     variants::PdfOperatorVariant,
@@ -22,6 +20,16 @@ fn stream_object(object_number: usize, data: &[u8]) -> StreamObject {
         Box::new(Dictionary::new(BTreeMap::new())),
         data.to_vec(),
     )
+}
+
+fn recorded_operations(operators: &[PdfOperatorVariant]) -> Vec<RecordedOperation> {
+    let mut backend = RecordingBackend::default();
+    for operator in operators {
+        operator
+            .call(&mut backend)
+            .expect("operator should dispatch");
+    }
+    backend.operations
 }
 
 struct MapResolver {
@@ -57,13 +65,19 @@ fn content_stream_new_returns_expected_operators_and_assigns_ids() {
     .expect("stream should parse");
 
     assert_eq!(parsed.id, 0);
+    assert!(matches!(
+        parsed.operators.first(),
+        Some(PdfOperatorVariant::BeginCompatibility(_))
+    ));
+    assert!(matches!(
+        parsed.operators.get(1),
+        Some(PdfOperatorVariant::EndCompatibility(_))
+    ));
     assert_eq!(
-        parsed.operators,
+        recorded_operations(&parsed.operators),
         vec![
-            PdfOperatorVariant::BeginCompatibility(BeginCompatibility),
-            PdfOperatorVariant::EndCompatibility(EndCompatibility),
-            PdfOperatorVariant::MoveTo(MoveTo::new(10.0, 20.0)),
-            PdfOperatorVariant::LineTo(LineTo::new(30.0, 40.0)),
+            RecordedOperation::MoveTo { x: 10.0, y: 20.0 },
+            RecordedOperation::LineTo { x: 30.0, y: 40.0 },
         ]
     );
 }
@@ -115,7 +129,7 @@ fn content_stream_new_handles_bare_sign_text_array_adjustment() {
 fn parsed_inline_image_can_be_dispatched() {
     let mut ids = ContentStreamIdAllocator::new();
     let parsed = ContentStream::new(
-        &ObjectVariant::Stream(stream_object(1, b"BI /W 1 /H 1 ID \x00 EI")),
+        &ObjectVariant::Stream(stream_object(1, b"BI /W 1 /H 1 /BPC 8 /CS /G ID \x00 EI")),
         &PassthroughResolver,
         &mut ids,
     )
@@ -133,7 +147,7 @@ fn parsed_inline_image_can_be_dispatched() {
     assert_eq!(
         backend.operations,
         vec![RecordedOperation::PaintInlineImage {
-            image: inline_image,
+            data: inline_image.shared_data(),
         }]
     );
 }
@@ -149,8 +163,8 @@ fn content_stream_new_skips_unknown_operator_and_recovers() {
     .expect("stream should parse");
 
     assert_eq!(
-        parsed.operators,
-        vec![PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState)]
+        recorded_operations(&parsed.operators),
+        vec![RecordedOperation::SaveGraphicsState]
     );
 }
 
@@ -187,8 +201,8 @@ fn from_dictionary_parses_stream_arrays_and_allocates_monotonically() {
 
     assert_eq!(content_stream.id, 0);
     assert_eq!(
-        content_stream.operators,
-        vec![PdfOperatorVariant::MoveTo(MoveTo::new(3.0, 4.0))]
+        recorded_operations(&content_stream.operators),
+        vec![RecordedOperation::MoveTo { x: 3.0, y: 4.0 }]
     );
 
     let next = ContentStream::new(
@@ -231,10 +245,8 @@ fn content_stream_new_skips_malformed_inline_image_and_consumes_an_id() {
 
     assert_eq!(parsed.id, 0);
     assert_eq!(
-        parsed.operators,
-        vec![PdfOperatorVariant::RestoreGraphicsState(
-            RestoreGraphicsState
-        )]
+        recorded_operations(&parsed.operators),
+        vec![RecordedOperation::RestoreGraphicsState]
     );
     assert_eq!(ids.next_id().expect("next id should advance"), 1);
 }

@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use crate::{
-    canvas_backend::{CanvasBackend, Image as BackendImage, Shader},
+    canvas_backend::{CanvasBackend, Shader},
     error::PdfCanvasError,
     stroke_style::StrokeStyle,
 };
 use pdf_graphics::{
-    BlendMode, MaskMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
-    transform::Transform,
+    BlendMode, Image as BackendImage, MaskMode, PathFillType, color::Color, pdf_path::PdfPath,
+    rect::Rect, transform::Transform,
 };
 
 /// Enum representing each drawing command that can be recorded.

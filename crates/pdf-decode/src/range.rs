@@ -5,7 +5,7 @@ use num_traits::ToPrimitive;
 use crate::error::DecodeError;
 
 /// Represents a `/Decode` range for a single PDF sample component.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DecodeRange {
     min: f32,
     max: f32,

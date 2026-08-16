@@ -140,10 +140,8 @@ mod tests {
     use crate::ContentStreamIdAllocator;
     use pdf_content_stream_operators::{
         TextElement,
-        compatibility_operators::{BeginCompatibility, EndCompatibility},
         error::PdfOperatorError,
-        graphics_state_operators::{RestoreGraphicsState, SaveGraphicsState},
-        path_operators::{LineTo, MoveTo},
+        graphics_state_operators::SaveGraphicsState,
         recording_pdf_operator_backend::{RecordedOperation, RecordingBackend},
         text_showing_operators::ShowTextArray,
         variants::PdfOperatorVariant,
@@ -162,6 +160,16 @@ mod tests {
             Box::new(Dictionary::new(BTreeMap::new())),
             data.to_vec(),
         )
+    }
+
+    fn recorded_operations(operators: &[PdfOperatorVariant]) -> Vec<RecordedOperation> {
+        let mut backend = RecordingBackend::default();
+        for operator in operators {
+            operator
+                .call(&mut backend)
+                .expect("operator should dispatch");
+        }
+        backend.operations
     }
 
     struct MapResolver {
@@ -195,13 +203,19 @@ mod tests {
         .expect("stream should parse");
 
         assert_eq!(parsed.id, 0);
+        assert!(matches!(
+            parsed.operators.first(),
+            Some(PdfOperatorVariant::BeginCompatibility(_))
+        ));
+        assert!(matches!(
+            parsed.operators.get(1),
+            Some(PdfOperatorVariant::EndCompatibility(_))
+        ));
         assert_eq!(
-            parsed.operators,
+            recorded_operations(&parsed.operators),
             vec![
-                PdfOperatorVariant::BeginCompatibility(BeginCompatibility),
-                PdfOperatorVariant::EndCompatibility(EndCompatibility),
-                PdfOperatorVariant::MoveTo(MoveTo::new(10.0, 20.0)),
-                PdfOperatorVariant::LineTo(LineTo::new(30.0, 40.0)),
+                RecordedOperation::MoveTo { x: 10.0, y: 20.0 },
+                RecordedOperation::LineTo { x: 30.0, y: 40.0 },
             ]
         );
     }
@@ -253,7 +267,7 @@ mod tests {
     fn parsed_inline_image_can_be_dispatched() {
         let mut ids = ContentStreamIdAllocator::new();
         let parsed = ContentStream::new(
-            &ObjectVariant::Stream(stream_object(1, b"BI /W 1 /H 1 ID \x00 EI")),
+            &ObjectVariant::Stream(stream_object(1, b"BI /W 1 /H 1 /BPC 8 /CS /G ID \x00 EI")),
             &PassthroughResolver,
             &mut ids,
         )
@@ -271,7 +285,7 @@ mod tests {
         assert_eq!(
             backend.operations,
             vec![RecordedOperation::PaintInlineImage {
-                image: inline_image,
+                data: inline_image.shared_data(),
             }]
         );
     }
@@ -287,8 +301,8 @@ mod tests {
         .expect("stream should parse");
 
         assert_eq!(
-            parsed.operators,
-            vec![PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState)]
+            recorded_operations(&parsed.operators),
+            vec![RecordedOperation::SaveGraphicsState]
         );
     }
 
@@ -311,8 +325,8 @@ mod tests {
 
         assert_eq!(parsed.id, 0);
         assert_eq!(
-            parsed.operators,
-            vec![PdfOperatorVariant::MoveTo(MoveTo::new(3.0, 4.0))]
+            recorded_operations(&parsed.operators),
+            vec![RecordedOperation::MoveTo { x: 3.0, y: 4.0 }]
         );
     }
 
@@ -345,10 +359,8 @@ mod tests {
 
         assert_eq!(parsed.id, 0);
         assert_eq!(
-            parsed.operators,
-            vec![PdfOperatorVariant::RestoreGraphicsState(
-                RestoreGraphicsState
-            )]
+            recorded_operations(&parsed.operators),
+            vec![RecordedOperation::RestoreGraphicsState]
         );
         assert_eq!(ids.next_id().expect("next id should advance"), 1);
     }
@@ -386,10 +398,10 @@ mod tests {
 
         assert_eq!(content_stream.id, 0);
         assert_eq!(
-            content_stream.operators,
+            recorded_operations(&content_stream.operators),
             vec![
-                PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState),
-                PdfOperatorVariant::RestoreGraphicsState(RestoreGraphicsState),
+                RecordedOperation::SaveGraphicsState,
+                RecordedOperation::RestoreGraphicsState,
             ]
         );
 

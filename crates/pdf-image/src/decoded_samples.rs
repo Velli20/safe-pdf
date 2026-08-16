@@ -1,10 +1,8 @@
 use std::{borrow::Cow, sync::Arc};
 
-use pdf_color_space::{color_space::ColorSpace, indexed_color_space::IndexedColorSpace};
 use pdf_decode::{
     DecodeMap, DecodeRange, SampleLayout, decode_sample_bytes, expand_indexed_values,
 };
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 use crate::error::PdfImageError;
 use crate::image_metadata::ImageMetadata;
@@ -12,8 +10,6 @@ use crate::image_metadata::ImageMetadata;
 /// Stores decoded sample bytes before the final pixel format conversion.
 #[derive(Debug, Clone)]
 pub(crate) struct DecodedSamples {
-    pub(crate) bits_per_component: usize,
-    pub(crate) stored_color_space: Option<ColorSpace>,
     pub(crate) num_color_components: usize,
     pub(crate) image_data: Arc<Vec<u8>>,
 }
@@ -21,9 +17,7 @@ pub(crate) struct DecodedSamples {
 impl DecodedSamples {
     /// Decodes raw image bytes into component samples based on the configured color space.
     pub(crate) fn decode(
-        dictionary: &Dictionary,
         raw_data: Arc<Vec<u8>>,
-        objects: &dyn ObjectResolver,
         metadata: &ImageMetadata,
     ) -> Result<Self, PdfImageError> {
         let decoded_samples = if let Some(decoded_samples) =
@@ -33,11 +27,20 @@ impl DecodedSamples {
         } else if let Some(decoded_samples) = Self::decode_preconverted_dct(&raw_data, metadata) {
             decoded_samples
         } else {
-            match metadata.color_space.as_ref() {
-                Some(ColorSpace::Indexed(indexed)) => {
-                    Self::decode_indexed(dictionary, raw_data, objects, metadata, indexed)
+            match &metadata.color_space {
+                Some(pdf_color_space::color_space::ColorSpace::Indexed(indexed)) => {
+                    Self::decode_indexed(
+                        raw_data,
+                        metadata,
+                        indexed.base.num_color_components(),
+                        indexed.hival,
+                        &indexed.lookup,
+                    )
                 }
-                _ => Self::decode_direct(dictionary, raw_data, objects, metadata),
+                Some(color_space) => {
+                    Self::decode_direct(raw_data, metadata, color_space.num_color_components())
+                }
+                None => Self::decode_direct(raw_data, metadata, 1),
             }?
         };
 
@@ -78,11 +81,6 @@ impl DecodedSamples {
             Self::decoded_dct_component_count(raw_data.as_slice(), num_pixels)
                 .or_else(|| Self::decoded_single_pixel_component_count(raw_data.as_slice()))?;
 
-        let stored_color_space = match num_color_components {
-            1 => Some(ColorSpace::DeviceGray),
-            3 => Some(ColorSpace::DeviceRGB),
-            _ => metadata.color_space.clone(),
-        };
         let image_data = if raw_data.len() == num_color_components && num_pixels > 1 {
             Arc::new(raw_data.repeat(num_pixels))
         } else {
@@ -90,8 +88,6 @@ impl DecodedSamples {
         };
 
         Some(Self {
-            bits_per_component: metadata.bits_per_component,
-            stored_color_space,
             num_color_components,
             image_data,
         })
@@ -113,17 +109,13 @@ impl DecodedSamples {
             return None;
         }
 
-        let (num_color_components, bits_per_component, stored_color_space) = match bytes_per_pixel {
-            1 => (1, 8, Some(ColorSpace::DeviceGray)),
-            2 => (1, 16, Some(ColorSpace::DeviceGray)),
-            3 => (3, 8, Some(ColorSpace::DeviceRGB)),
-            6 => (3, 16, Some(ColorSpace::DeviceRGB)),
+        let num_color_components = match bytes_per_pixel {
+            1 | 2 => 1,
+            3 | 6 => 3,
             _ => return None,
         };
 
         Some(Self {
-            bits_per_component,
-            stored_color_space,
             num_color_components,
             image_data: Arc::clone(raw_data),
         })
@@ -143,61 +135,50 @@ impl DecodedSamples {
 
     /// Decodes indexed image samples, applies `/Decode`, and expands palette entries.
     fn decode_indexed(
-        dictionary: &Dictionary,
         raw_data: Arc<Vec<u8>>,
-        objects: &dyn ObjectResolver,
         metadata: &ImageMetadata,
-        indexed: &IndexedColorSpace,
+        base_color_components: usize,
+        hival: u8,
+        lookup: &Arc<Vec<u8>>,
     ) -> Result<Self, PdfImageError> {
         let sample_codes = Self::decode_image_sample_codes(raw_data, 1, metadata)?;
         let sample_max = Self::sample_max(metadata.bits_per_component)?;
-        let decode = DecodeMap::from_dictionary(dictionary, objects, 1)?;
         let decoded_indices = Self::apply_decode(
             sample_codes,
-            decode.as_ref(),
+            metadata.decode.as_ref(),
             sample_max,
             sample_max,
             metadata.image_mask,
         );
-        let base_components = indexed.base.num_color_components();
 
         let image_data = expand_indexed_values(
             decoded_indices.as_ref(),
-            &indexed.lookup,
-            indexed.hival,
-            base_components,
+            lookup,
+            hival,
+            base_color_components,
         )?;
 
         Ok(Self {
-            bits_per_component: metadata.bits_per_component,
-            stored_color_space: Some(*indexed.base.clone()),
-            num_color_components: base_components,
+            num_color_components: base_color_components,
             image_data: Arc::new(image_data),
         })
     }
 
     /// Decodes non-indexed image samples and applies the `/Decode` transform.
     fn decode_direct(
-        dictionary: &Dictionary,
         raw_data: Arc<Vec<u8>>,
-        objects: &dyn ObjectResolver,
         metadata: &ImageMetadata,
+        num_color_components: usize,
     ) -> Result<Self, PdfImageError> {
-        let num_components = metadata
-            .color_space
-            .as_ref()
-            .map_or(1, ColorSpace::num_color_components);
-        let sample_codes = Self::decode_image_sample_codes(raw_data, num_components, metadata)?;
-        let decode = DecodeMap::from_dictionary(dictionary, objects, num_components)?;
+        let sample_codes =
+            Self::decode_image_sample_codes(raw_data, num_color_components, metadata)?;
         let sample_max = Self::sample_max(metadata.bits_per_component)?;
 
         Ok(Self {
-            bits_per_component: metadata.bits_per_component,
-            stored_color_space: metadata.color_space.clone(),
-            num_color_components: num_components,
+            num_color_components,
             image_data: Self::apply_decode(
                 sample_codes,
-                decode.as_ref(),
+                metadata.decode.as_ref(),
                 sample_max,
                 255,
                 metadata.image_mask,
@@ -271,7 +252,9 @@ impl DecodedSamples {
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
+    use pdf_object::{
+        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+    };
 
     use super::*;
 
@@ -298,13 +281,8 @@ mod tests {
             .expect("direct image metadata should be valid");
         let samples = Arc::new(vec![12, 34]);
 
-        let decoded = DecodedSamples::decode_direct(
-            &dictionary,
-            Arc::clone(&samples),
-            &PassthroughResolver,
-            &metadata,
-        )
-        .expect("identity samples should decode");
+        let decoded = DecodedSamples::decode_direct(Arc::clone(&samples), &metadata, 1)
+            .expect("identity samples should decode");
 
         assert!(Arc::ptr_eq(&decoded.image_data, &samples));
     }

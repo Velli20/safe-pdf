@@ -7,7 +7,7 @@ use pdf_object::{
 use crate::{error::DecodeError, range::DecodeRange};
 
 /// Stores the per-component decode ranges used to transform packed samples.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DecodeMap {
     ranges: Vec<DecodeRange>,
 }

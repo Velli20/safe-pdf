@@ -5,14 +5,14 @@ use std::sync::Arc;
 use pdf_annotation_types::Annotation;
 use pdf_annotations::{AnnotationAppearanceState, AnnotationRenderer};
 use pdf_canvas::{
-    canvas_backend::{CanvasBackend, Image, Shader},
+    canvas_backend::{CanvasBackend, Shader},
     pdf_canvas::PdfCanvas,
     recording_canvas::RecordingCanvas,
     stroke_style::StrokeStyle,
 };
 use pdf_document::reader::PdfReader;
 use pdf_graphics::{
-    BlendMode, MaskMode, PathFillType, color::Color, pdf_path::PathVerb, pdf_path::PdfPath,
+    BlendMode, Image, MaskMode, PathFillType, color::Color, pdf_path::PathVerb, pdf_path::PdfPath,
     rect::Rect, transform::Transform,
 };
 

@@ -3,15 +3,15 @@
 use std::sync::Arc;
 
 use pdf_canvas::{
-    canvas_backend::{CanvasBackend, Image, Shader},
+    canvas_backend::{CanvasBackend, Shader},
     error::PdfCanvasError,
     recording_canvas::RecordingCanvas,
     stroke_style::StrokeStyle,
 };
 use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_graphics::{
-    BlendMode, MaskMode, PathFillType, PixelFormat, color::Color, pdf_path::PdfPath, rect::Rect,
-    transform::Transform,
+    BlendMode, Image, MaskMode, PathFillType, PixelFormat, color::Color, pdf_path::PdfPath,
+    rect::Rect, transform::Transform,
 };
 use pdf_object::{
     dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,

@@ -11,3 +11,10 @@ workspace = true
 num-traits = "0.2"
 num-derive = "0.4"
 thiserror = "2.0.12"
+
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "image_conversion"
+harness = false

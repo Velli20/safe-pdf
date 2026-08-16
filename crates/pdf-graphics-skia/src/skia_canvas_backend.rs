@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
 use pdf_canvas::{
-    canvas_backend::{CanvasBackend, Image, Shader},
+    canvas_backend::{CanvasBackend, Shader},
     error::PdfCanvasError,
     recording_canvas::RecordingCanvas,
     stroke_style::StrokeStyle,
 };
 use pdf_graphics::{
-    BlendMode, MaskMode, PathFillType, PixelFormat,
+    BlendMode, Image, MaskMode, PathFillType, PixelFormat,
     color::Color,
     pdf_path::{PathVerb, PdfPath},
     transform::Transform,

@@ -1,51 +1,41 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use pdf_object::{dictionary::Dictionary, object_variant::ObjectVariant};
+use pdf_filter::filter::decode_data_with_resolver;
+use pdf_object::{
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+};
+
+use crate::{error::PdfImageError, image_metadata::ImageMetadata};
 
 /// Canonical parsed representation of a PDF inline image.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub struct InlineImage {
-    dictionary: Dictionary,
+    metadata: ImageMetadata,
     data: Arc<Vec<u8>>,
 }
 
 impl InlineImage {
-    /// Creates a new inline image from its parsed dictionary and raw payload bytes.
-    pub fn new(dictionary: Dictionary, data: impl Into<Arc<Vec<u8>>>) -> Self {
-        Self {
-            dictionary,
-            data: data.into(),
-        }
+    /// Creates an inline image from its parsed dictionary and encoded payload bytes.
+    pub fn new(
+        dictionary: Dictionary,
+        data: impl Into<Arc<Vec<u8>>>,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Self, PdfImageError> {
+        let dictionary = normalize_inline_image_dictionary(&dictionary);
+        let metadata = ImageMetadata::from_dictionary(&dictionary, objects)?;
+        let data = decode_data_with_resolver(&dictionary, data.into(), objects)?;
+
+        Ok(Self { metadata, data })
     }
 
-    /// Returns the parsed inline-image dictionary.
-    pub fn dictionary(&self) -> &Dictionary {
-        &self.dictionary
-    }
-
-    /// Returns the raw inline-image payload bytes.
-    pub fn data(&self) -> &[u8] {
-        self.data.as_slice()
-    }
-
-    /// Returns shared ownership of the raw inline-image payload bytes.
+    /// Returns shared ownership of the filter-decoded inline-image samples.
     pub fn shared_data(&self) -> Arc<Vec<u8>> {
         Arc::clone(&self.data)
     }
 
-    /// Splits the inline image into its parsed dictionary and shared raw payload.
-    pub fn into_parts(self) -> (Dictionary, Arc<Vec<u8>>) {
-        (self.dictionary, self.data)
-    }
-
-    /// Returns a normalized copy of the inline-image dictionary.
-    ///
-    /// PDF inline images use abbreviated keys such as `W`, `H`, and `BPC`.
-    /// Normalization maps those abbreviations to the canonical image keys so the
-    /// downstream image decoder can share the same path as image XObjects.
-    pub fn normalized_dictionary(&self) -> Dictionary {
-        normalize_inline_image_dictionary(&self.dictionary)
+    pub(crate) fn metadata(&self) -> &ImageMetadata {
+        &self.metadata
     }
 }
 
@@ -53,7 +43,7 @@ impl InlineImage {
 ///
 /// The parser preserves the abbreviated inline-image keys from the content stream.
 /// This helper expands the keys that are commonly shared with image XObjects.
-pub fn normalize_inline_image_dictionary(dictionary: &Dictionary) -> Dictionary {
+fn normalize_inline_image_dictionary(dictionary: &Dictionary) -> Dictionary {
     let mut normalized = BTreeMap::new();
 
     for (key, value) in &dictionary.dictionary {
@@ -108,27 +98,13 @@ fn normalize_inline_image_value(key: &str, value: &ObjectVariant) -> ObjectVaria
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-    use std::sync::Arc;
+    use std::{collections::BTreeMap, sync::Arc};
 
-    use pdf_object::object_variant::ObjectVariant;
+    use pdf_object::{
+        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+    };
 
     use super::{InlineImage, normalize_inline_image_dictionary};
-
-    #[test]
-    fn inline_image_shares_payload_data() {
-        let data = Arc::new(vec![1, 2, 3, 4]);
-        let image = InlineImage::new(
-            pdf_object::dictionary::Dictionary::new(BTreeMap::new()),
-            Arc::clone(&data),
-        );
-
-        assert!(Arc::ptr_eq(&image.shared_data(), &data));
-        assert_eq!(image.data(), data.as_slice());
-
-        let (_, payload) = image.into_parts();
-        assert!(Arc::ptr_eq(&payload, &data));
-    }
 
     #[test]
     fn normalize_inline_image_dictionary_expands_abbreviations() {
@@ -218,18 +194,46 @@ mod tests {
     }
 
     #[test]
-    fn inline_image_normalized_dictionary_matches_helper() {
-        let inline = InlineImage::new(
-            pdf_object::dictionary::Dictionary::new(BTreeMap::from([(
-                "W".to_string(),
-                ObjectVariant::Integer(1),
-            )])),
-            vec![1],
+    fn inline_image_shares_unfiltered_samples() {
+        let data = Arc::new(vec![1, 2]);
+        let image = InlineImage::new(gray_dictionary(), Arc::clone(&data), &PassthroughResolver)
+            .expect("unfiltered image should be constructed");
+
+        assert!(Arc::ptr_eq(&image.shared_data(), &data));
+    }
+
+    #[test]
+    fn inline_image_applies_filters_during_construction() {
+        let mut dictionary = gray_dictionary();
+        dictionary.dictionary.insert(
+            "F".to_string(),
+            ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
         );
 
-        assert_eq!(
-            inline.normalized_dictionary().dictionary,
-            normalize_inline_image_dictionary(inline.dictionary()).dictionary
-        );
+        let image = InlineImage::new(dictionary, b"2A>".to_vec(), &PassthroughResolver)
+            .expect("filter should decode during construction");
+
+        assert_eq!(image.shared_data().as_ref(), &[0x2A]);
+    }
+
+    #[test]
+    fn invalid_metadata_is_rejected_during_construction() {
+        let error = InlineImage::new(
+            Dictionary::new(BTreeMap::new()),
+            vec![1],
+            &PassthroughResolver,
+        )
+        .expect_err("invalid metadata should prevent construction");
+
+        assert!(matches!(error, crate::error::PdfImageError::Object(_)));
+    }
+
+    fn gray_dictionary() -> Dictionary {
+        Dictionary::new(BTreeMap::from([
+            ("BPC".to_string(), ObjectVariant::Integer(8)),
+            ("CS".to_string(), ObjectVariant::Name(b"G".to_vec())),
+            ("H".to_string(), ObjectVariant::Integer(1)),
+            ("W".to_string(), ObjectVariant::Integer(2)),
+        ]))
     }
 }

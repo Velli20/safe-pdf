@@ -18,7 +18,8 @@ impl PdfParser<'_> {
         self.read_keyword_with_optional_eol(INLINE_IMAGE_DATA_BEGIN, false)?;
         self.consume_inline_image_data_separator()?;
         let data = self.read_inline_image_data_until_end(&dictionary, objects)?;
-        Ok(InlineImage::new(dictionary, data))
+        InlineImage::new(dictionary, data, objects)
+            .map_err(|error| ParserError::InlineImageError(error.to_string()))
     }
 
     /// Consumes the mandatory separator immediately after the `ID` keyword.
@@ -237,7 +238,7 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
+    use pdf_object::object_resolver::PassthroughResolver;
 
     use super::*;
 
@@ -265,11 +266,11 @@ mod tests {
 
     #[test]
     fn ignores_embedded_ei_without_whitespace_boundary() {
-        let mut parser = PdfParser::from(b"/W 1 /H 1 ID abcEIxdef\nEI Q".as_slice());
+        let mut parser = PdfParser::from(b"/W 1 /H 1 /BPC 8 /CS /G ID abcEIxdef\nEI Q".as_slice());
 
         let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
 
-        assert_eq!(image.data(), b"abcEIxdef\n");
+        assert_eq!(image.shared_data().as_slice(), b"abcEIxdef\n");
         assert_eq!(parser.tokenizer.data(), b" Q");
     }
 
@@ -282,8 +283,14 @@ mod tests {
         let mut parser = PdfParser::from(input.as_slice());
         let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
 
-        assert_eq!(image.data().len(), 34);
-        assert!(image.data().iter().all(|byte| *byte == 0xFF));
+        assert_eq!(image.shared_data().as_slice().len(), 34);
+        assert!(
+            image
+                .shared_data()
+                .as_slice()
+                .iter()
+                .all(|byte| *byte == 0xFF)
+        );
         assert_eq!(parser.tokenizer.data(), b" Q");
     }
 
@@ -294,7 +301,7 @@ mod tests {
 
         let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
 
-        assert_eq!(image.data(), b"abc EIxyzj");
+        assert_eq!(image.shared_data().as_slice(), b"abc EIxyzj");
         assert_eq!(parser.tokenizer.data(), b" Q");
     }
 
@@ -304,7 +311,7 @@ mod tests {
 
         let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
 
-        assert_eq!(image.data(), b"\x00\n");
+        assert_eq!(image.shared_data().as_slice(), b"\x00\n");
         assert_eq!(parser.tokenizer.data(), b" Q");
     }
 
@@ -317,43 +324,36 @@ mod tests {
         let mut parser = PdfParser::from(input.as_slice());
         let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
 
-        assert_eq!(image.data(), &[0xFF, 0x80, b'\n']);
+        assert_eq!(image.shared_data().as_slice(), &[0xFF, 0x80, b'\n']);
         assert_eq!(parser.tokenizer.data(), b" Q");
     }
 
     #[test]
-    fn filtered_inline_image_still_uses_scan_terminator_detection() {
-        let mut parser =
-            PdfParser::from(b"/W 1 /H 1 /BPC 8 /F /ASCIIHexDecode ID aa EIxyz\nEI Q".as_slice());
+    fn filtered_inline_image_scans_to_the_terminator_before_filtering() {
+        let mut parser = PdfParser::from(
+            b"/W 1 /H 1 /BPC 8 /CS /G /F /ASCIIHexDecode ID aa EIxyz\nEI Q".as_slice(),
+        );
 
-        let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
+        assert!(parser.parse_inline_image(&PassthroughResolver).is_err());
 
-        assert_eq!(image.data(), b"aa EIxyz\n");
         assert_eq!(parser.tokenizer.data(), b" Q");
     }
 
     #[test]
-    fn parses_empty_inline_image_dictionary() {
+    fn rejects_empty_inline_image_dictionary() {
         let mut parser = PdfParser::from(b"ID x\nEI".as_slice());
 
-        let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
-
-        assert!(image.dictionary().dictionary.is_empty());
-        assert_eq!(image.data(), b"x\n");
+        assert!(parser.parse_inline_image(&PassthroughResolver).is_err());
         assert_eq!(parser.tokenizer.data(), b"");
     }
 
     #[test]
-    fn inline_image_dictionary_stops_before_id_after_name_value() {
-        let mut parser = PdfParser::from(b"/CS /DeviceGray ID x\nEI".as_slice());
+    fn inline_image_metadata_stops_before_id_after_name_value() {
+        let mut parser = PdfParser::from(b"/W 1 /H 1 /BPC 8 /CS /DeviceGray ID x\nEI".as_slice());
 
         let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
 
-        assert_eq!(
-            image.dictionary().get("CS"),
-            Some(&ObjectVariant::Name(b"DeviceGray".to_vec()))
-        );
-        assert_eq!(image.data(), b"x\n");
+        assert_eq!(image.shared_data().as_slice(), b"x\n");
         assert_eq!(parser.tokenizer.data(), b"");
     }
 

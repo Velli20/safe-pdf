@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use femtovg::{Canvas, Color, FillRule, Paint, Path};
 use pdf_canvas::{
-    canvas_backend::{CanvasBackend, Image, Shader},
+    canvas_backend::{CanvasBackend, Shader},
     error::PdfCanvasError,
     recording_canvas::RecordingCanvas,
     stroke_style::StrokeStyle,
 };
 use pdf_graphics::{
-    BlendMode, MaskMode, PathFillType,
+    BlendMode, Image, MaskMode, PathFillType,
     pdf_path::{PathVerb, PdfPath},
 };
 
