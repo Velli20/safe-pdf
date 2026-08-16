@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use pdf_graphics::{
-    BlendMode, MaskMode, PathFillType, PixelFormat, color::Color, pdf_path::PdfPath, rect::Rect,
+    BlendMode, Image, MaskMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
     transform::Transform,
 };
 use pdf_shading::paint::ShadingPaint;
@@ -26,22 +26,6 @@ pub enum Shader {
         /// The vertical spacing between tiles.
         y_step: f32,
     },
-}
-
-/// Represents an image resource for drawing or pattern tiling in the PDF canvas backend.
-///
-/// The `Image` struct encapsulates raw image data, dimensions, encoding, and optional
-/// transformation or masking information.
-#[derive(Clone)]
-pub struct Image {
-    /// Shared raw image data.
-    pub data: Arc<Vec<u8>>,
-    /// The width of the image in pixels.
-    pub width: usize,
-    /// The height of the image in pixels.
-    pub height: usize,
-    /// The pixel format of the image data.
-    pub pixel_format: PixelFormat,
 }
 
 /// A low-level drawing backend for rendering PDF graphics.

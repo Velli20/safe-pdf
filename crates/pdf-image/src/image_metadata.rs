@@ -1,4 +1,5 @@
 use pdf_color_space::color_space::ColorSpace;
+use pdf_decode::DecodeMap;
 use pdf_filter::filter::Filters;
 use pdf_graphics::rect::Rect;
 use pdf_object::{
@@ -10,11 +11,21 @@ use crate::error::PdfImageError;
 /// Stores the normalized metadata needed to decode an image stream.
 #[derive(Debug, Clone)]
 pub(crate) struct ImageMetadata {
+    /// Image dimensions in pixels.
     pub(crate) size: Rect<usize>,
+    /// Number of bits used to encode each color component.
     pub(crate) bits_per_component: usize,
+    /// Color space used to interpret component samples, or `None` for an image mask.
     pub(crate) color_space: Option<ColorSpace>,
+    /// Whether the image samples form a stencil mask instead of color values.
     pub(crate) image_mask: bool,
+    /// Filter chain declared by the image dictionary.
+    ///
+    /// The chain is retained after filtering because some decoders, such as DCT and JPX,
+    /// produce samples that require filter-specific handling.
     pub(crate) filters: Option<Filters>,
+    /// Optional mapping from encoded component samples to decoded component values.
+    pub(crate) decode: Option<DecodeMap>,
 }
 
 impl ImageMetadata {
@@ -49,6 +60,10 @@ impl ImageMetadata {
             ColorSpace::from_dictionary(dictionary, objects)?
         };
         validate_bits_per_component(bits_per_component, image_mask, color_space.as_ref())?;
+        let num_color_components = color_space
+            .as_ref()
+            .map_or(1, ColorSpace::num_color_components);
+        let decode = DecodeMap::from_dictionary(dictionary, objects, num_color_components)?;
 
         Ok(Self {
             size,
@@ -56,6 +71,7 @@ impl ImageMetadata {
             color_space,
             image_mask,
             filters,
+            decode,
         })
     }
 }

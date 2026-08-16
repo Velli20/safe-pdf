@@ -14,13 +14,13 @@ use pdf_annotation_form::{
 };
 use pdf_annotation_types::{Annotation, AnnotationKind, WidgetFieldValue};
 use pdf_canvas::{
-    canvas_backend::{CanvasBackend, Image, Shader},
+    canvas_backend::{CanvasBackend, Shader},
     recording_canvas::RecordingCanvas,
     stroke_style::StrokeStyle,
 };
 use pdf_document::reader::PdfReader;
 use pdf_graphics::{
-    BlendMode, MaskMode, PathFillType, color::Color, pdf_path::PathVerb, pdf_path::PdfPath,
+    BlendMode, Image, MaskMode, PathFillType, color::Color, pdf_path::PathVerb, pdf_path::PdfPath,
     point::Point, rect::Rect, transform::Transform,
 };
 

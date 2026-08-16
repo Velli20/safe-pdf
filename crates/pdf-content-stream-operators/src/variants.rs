@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use pdf_image::InlineImage;
 
 use crate::compatibility_operators::{BeginCompatibility, EndCompatibility};
@@ -19,7 +21,7 @@ use crate::{
     xobject_and_image_operators::*,
 };
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum PdfOperatorVariant {
     LineTo(LineTo),
     MoveTo(MoveTo),
@@ -77,7 +79,7 @@ pub enum PdfOperatorVariant {
     SetTextRise(SetTextRise),
     InvokeXObject(InvokeXObject),
     BeginCompatibility(BeginCompatibility),
-    InlineImage(InlineImage),
+    InlineImage(Rc<InlineImage>),
     EndCompatibility(EndCompatibility),
     PaintShading(PaintShading),
     SetCharWidthAndBoundingBox(SetCharWidthAndBoundingBox),

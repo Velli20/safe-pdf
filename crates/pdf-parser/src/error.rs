@@ -60,4 +60,6 @@ pub enum ParserError {
     InvalidXrefAtOffset { offset: usize },
     #[error("Filter error: {0}")]
     FilterError(#[from] FilterError),
+    #[error("Inline image error: {0}")]
+    InlineImageError(String),
 }

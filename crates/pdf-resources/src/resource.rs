@@ -4,7 +4,7 @@ use crate::{
 };
 use pdf_color_space::color_space::ColorSpace;
 use pdf_font::font::Font;
-use pdf_image::ImageXObject;
+use pdf_graphics::Image;
 use pdf_shading::model::Shading;
 use std::{cell::OnceCell, rc::Rc};
 
@@ -47,7 +47,7 @@ pub enum Resource {
     /// An external graphics state resource.
     ExternalGraphicsState(Rc<ExternalGraphicsState>),
     /// An image XObject resource.
-    Image(Rc<ImageXObject>),
+    Image(Rc<Image>),
     /// An image XObject whose dimensions are malformed and cannot be rendered.
     UnavailableImage,
     /// A form XObject resource.
@@ -122,8 +122,8 @@ impl Resource {
     }
 }
 
-impl From<ImageXObject> for Resource {
-    fn from(image: ImageXObject) -> Self {
+impl From<Image> for Resource {
+    fn from(image: Image) -> Self {
         Self::Image(Rc::new(image))
     }
 }

@@ -3,7 +3,8 @@ use crate::{
     resource_cache::ResourceCache,
 };
 use pdf_content_stream::ContentStreamIdAllocator;
-use pdf_image::{ImageXObject, PdfImageError};
+use pdf_graphics::Image;
+use pdf_image::{PdfImageError, read_xobject as decode_image_xobject};
 use pdf_object::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
     object_variant::ObjectVariant, stream::StreamObject,
@@ -59,11 +60,11 @@ fn read_xobject_inner(
 
             let soft_mask =
                 resolve_image_soft_mask(dictionary, objects, cache, cycle_tracker, id_allocator)?;
-            Ok(Resource::from(ImageXObject::read_xobject(
+            Ok(Resource::from(decode_image_xobject(
                 dictionary,
                 stream_data,
                 objects,
-                soft_mask,
+                soft_mask.as_ref(),
             )?))
         }
         "Form" => FormXObject::read_xobject(
@@ -93,7 +94,7 @@ fn resolve_image_soft_mask(
     cache: &mut dyn ResourceCache,
     cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
-) -> Result<Option<ImageXObject>, PdfPagesError> {
+) -> Result<Option<Image>, PdfPagesError> {
     let Some(smask_obj) = dictionary.get("SMask") else {
         return Ok(None);
     };

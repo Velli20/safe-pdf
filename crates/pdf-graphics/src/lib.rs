@@ -3,6 +3,7 @@ pub mod blend_mode;
 mod bounds_accumulator;
 pub mod color;
 pub mod dash_pattern;
+mod image;
 pub mod mask_mode;
 pub mod pdf_path;
 pub mod point;
@@ -12,6 +13,7 @@ pub mod transform;
 pub use blend_mode::BlendMode;
 pub use bounds_accumulator::BoundsAccumulator;
 pub use dash_pattern::DashPattern;
+pub use image::Image;
 pub use mask_mode::MaskMode;
 use num_derive::FromPrimitive;
 

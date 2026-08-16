@@ -11,7 +11,9 @@ use pdf_content_stream_operators::variants::PdfOperatorVariant;
 use pdf_document::page::PdfPage;
 use pdf_graphics::{BlendMode, PixelFormat, rect::Rect};
 use pdf_image::InlineImage;
-use pdf_object::{dictionary::Dictionary, object_variant::ObjectVariant};
+use pdf_object::{
+    dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+};
 use pdf_resources::{
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateKey},
     form::FormXObject,
@@ -81,7 +83,9 @@ fn inline_image() -> InlineImage {
             ("W".to_string(), ObjectVariant::Integer(4)),
         ])),
         vec![0b1010_0000],
+        &PassthroughResolver,
     )
+    .expect("inline image should be constructed")
 }
 
 #[test]
@@ -158,11 +162,11 @@ fn unavailable_image_xobject_is_a_no_op() {
 
 #[test]
 fn inline_image_render_path_matches_image_xobject_path() {
-    let image = pdf_image::ImageXObject::decode_normalized_image(
+    let image = pdf_image::decode_normalized_image(
         &image_dictionary(),
         Arc::new(vec![0b1010_0000]),
         &pdf_object::object_resolver::PassthroughResolver,
-        &None,
+        None,
     )
     .expect("image XObject should decode");
     let graphics_state = Resource::ExternalGraphicsState(Rc::new(ExternalGraphicsState {
@@ -180,7 +184,7 @@ fn inline_image_render_path_matches_image_xobject_path() {
     let mut inline_stream = content_stream(2, b"/GS gs 2 0 0 3 10 20 cm");
     inline_stream
         .operators
-        .push(PdfOperatorVariant::InlineImage(inline_image()));
+        .push(PdfOperatorVariant::InlineImage(Rc::new(inline_image())));
 
     let mut xobject_recording = RecordingCanvas::new(100.0, 100.0);
     render(&mut xobject_recording, &xobject_stream, Some(&resources))

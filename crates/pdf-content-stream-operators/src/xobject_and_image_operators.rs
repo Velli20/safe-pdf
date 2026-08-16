@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use pdf_image::InlineImage;
 use pdf_object::object_resolver::PassthroughResolver;
 use pdf_parser::parser::PdfParser;
@@ -52,7 +54,7 @@ impl PdfOperator for InlineImage {
         parser: &mut PdfParser<'a>,
     ) -> Result<Option<PdfOperatorVariant>, PdfOperatorError> {
         let image = parser.parse_inline_image(&PassthroughResolver)?;
-        Ok(Some(PdfOperatorVariant::InlineImage(image)))
+        Ok(Some(PdfOperatorVariant::InlineImage(Rc::new(image))))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
@@ -65,7 +67,9 @@ mod tests {
     use std::collections::BTreeMap;
 
     use pdf_image::InlineImage;
-    use pdf_object::dictionary::Dictionary;
+    use pdf_object::{
+        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+    };
 
     use crate::{
         operator_trait::PdfOperator,
@@ -74,7 +78,17 @@ mod tests {
 
     #[test]
     fn inline_image_call_dispatches_to_backend_hook() {
-        let image = InlineImage::new(Dictionary::new(BTreeMap::new()), vec![0x01, 0x02]);
+        let image = InlineImage::new(
+            Dictionary::new(BTreeMap::from([
+                ("BPC".to_string(), ObjectVariant::Integer(8)),
+                ("CS".to_string(), ObjectVariant::Name(b"G".to_vec())),
+                ("H".to_string(), ObjectVariant::Integer(1)),
+                ("W".to_string(), ObjectVariant::Integer(2)),
+            ])),
+            vec![0x01, 0x02],
+            &PassthroughResolver,
+        )
+        .expect("unfiltered inline image should be constructed");
         let mut backend = RecordingBackend::default();
 
         image
@@ -84,7 +98,7 @@ mod tests {
         assert_eq!(
             backend.operations,
             vec![RecordedOperation::PaintInlineImage {
-                image: image.clone()
+                data: image.shared_data()
             }]
         );
     }

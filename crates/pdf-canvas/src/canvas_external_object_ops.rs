@@ -8,19 +8,12 @@
 //! between PDF image space (top-left origin, Y down) and PDF user space
 //! (bottom-left origin, Y up).
 
-use std::sync::Arc;
-
 use pdf_content_stream_operators::pdf_operator_backend::XObjectOps;
-use pdf_graphics::{rect::Rect, transform::Transform};
-use pdf_image::{ImageXObject, InlineImage};
-use pdf_object::object_resolver::PassthroughResolver;
+use pdf_graphics::{Image, rect::Rect, transform::Transform};
+use pdf_image::{InlineImage, decode_inline_image};
 use pdf_resources::resource::Resource;
 
-use crate::{
-    canvas_backend::{CanvasBackend, Image},
-    error::PdfCanvasError,
-    pdf_canvas::PdfCanvas,
-};
+use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
 /// Tolerance in degrees for detecting right-angle rotations.
 const ROTATION_TOLERANCE_DEGREES: f32 = 1e-3;
@@ -103,7 +96,7 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
     }
 
     fn paint_inline_image(&mut self, image: &InlineImage) -> Result<(), Self::ErrorType> {
-        let decoded = ImageXObject::decode_inline_image(image, &PassthroughResolver, None)
+        let decoded = decode_inline_image(image, None)
             .map_err(|e| PdfCanvasError::InvalidImageData(e.to_string()))?;
 
         self.render_decoded_image(&decoded, true)
@@ -112,16 +105,13 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
 
 impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Renders an image XObject to the canvas.
-    pub(crate) fn render_image_xobject(
-        &mut self,
-        image: &ImageXObject,
-    ) -> Result<(), PdfCanvasError> {
+    pub(crate) fn render_image_xobject(&mut self, image: &Image) -> Result<(), PdfCanvasError> {
         self.render_decoded_image(image, false)
     }
 
     fn render_decoded_image(
         &mut self,
-        image: &ImageXObject,
+        image: &Image,
         inline_image: bool,
     ) -> Result<(), PdfCanvasError> {
         let transform = self.current_state()?.transform;
@@ -129,28 +119,13 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         let transform = generate_image_orientation_matrix(transform);
         let dest_rect = Self::compute_destination_rect(&transform, rotation_degrees);
 
-        let rendered_image = Image {
-            data: Arc::clone(&image.data),
-            width: image.width,
-            height: image.height,
-            pixel_format: image.pixel_format,
-        };
-
         let blend_mode = self.current_state()?.blend_mode.clone();
         if inline_image {
-            self.canvas.draw_inline_image(
-                &rendered_image,
-                blend_mode,
-                dest_rect,
-                Some(rotation_degrees),
-            )
+            self.canvas
+                .draw_inline_image(image, blend_mode, dest_rect, Some(rotation_degrees))
         } else {
-            self.canvas.draw_image_rect(
-                &rendered_image,
-                blend_mode,
-                dest_rect,
-                Some(rotation_degrees),
-            )
+            self.canvas
+                .draw_image_rect(image, blend_mode, dest_rect, Some(rotation_degrees))
         }
     }
 
