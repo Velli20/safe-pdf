@@ -6,6 +6,9 @@ use crate::{
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
+use pdf_object::{
+    error::ObjectError, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+};
 
 /// Shows a text string.
 #[derive(Debug, Clone, PartialEq)]
@@ -132,7 +135,27 @@ impl PdfOperator for ShowTextArray {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let elements = operands.get_text_element_array()?;
+        let object = operands.take_next()?;
+        let ObjectVariant::Array(values) = object else {
+            return Err(ObjectError::TypeMismatch("Array", object.name()).into());
+        };
+
+        let mut elements = Vec::with_capacity(values.len());
+        for value in values {
+            match value {
+                ObjectVariant::HexString(value) => {
+                    elements.push(TextElement::HexString { value });
+                }
+                ObjectVariant::LiteralString(value) => {
+                    elements.push(TextElement::Text { value });
+                }
+                other => {
+                    let amount = other.try_number::<f32>(&PassthroughResolver)?;
+                    elements.push(TextElement::Adjustment { amount });
+                }
+            }
+        }
+
         Ok(PdfOperatorVariant::ShowTextArray(Self::new(elements)))
     }
 
