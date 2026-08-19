@@ -33,11 +33,16 @@ impl DecodeRange {
 
     /// Maps one packed sample byte into the requested output range.
     pub fn map_byte(&self, sample: u8, sample_max: u8, output_max: u8) -> u8 {
-        let sample_max = f32::from(sample_max.max(1));
-        let normalized = f32::from(sample) / sample_max;
-        let decoded = self.min + normalized * (self.max - self.min);
+        let decoded = self.map_f32(sample, sample_max);
         let scaled = decoded * f32::from(output_max);
         let clamped = scaled.clamp(0.0, f32::from(output_max));
         clamped.round().to_u8().unwrap_or(u8::MAX)
+    }
+
+    /// Maps one packed sample byte into this range without quantizing the result.
+    pub fn map_f32(&self, sample: u8, sample_max: u8) -> f32 {
+        let sample_max = f32::from(sample_max.max(1));
+        let normalized = f32::from(sample) / sample_max;
+        self.min + normalized * (self.max - self.min)
     }
 }
