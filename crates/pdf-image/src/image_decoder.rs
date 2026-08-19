@@ -57,7 +57,16 @@ fn decode_normalized_image_with_metadata(
     let DecodedSamples {
         num_color_components,
         image_data,
+        is_rgba,
     } = decoded_samples;
+    if is_rgba {
+        return Ok(image_from_rgba(
+            image_data,
+            metadata.size.width(),
+            metadata.size.height(),
+            soft_mask,
+        ));
+    }
     Ok(Image::from_decoded_samples(
         image_data,
         metadata.size.width(),
@@ -65,6 +74,58 @@ fn decode_normalized_image_with_metadata(
         num_color_components,
         soft_mask,
     ))
+}
+
+/// Builds a render image from color-space-converted RGBA and combines its alpha with `/SMask`.
+fn image_from_rgba(
+    data: Arc<Vec<u8>>,
+    width: usize,
+    height: usize,
+    soft_mask: Option<&Image>,
+) -> Image {
+    let byte_len = width
+        .saturating_mul(height)
+        .saturating_mul(4)
+        .min(data.len());
+    if soft_mask.is_none() && byte_len == data.len() {
+        return Image {
+            data,
+            width,
+            height,
+            pixel_format: pdf_graphics::PixelFormat::RGBA8888,
+        };
+    }
+
+    let mut rgba = data.get(..byte_len).map_or_else(Vec::new, <[u8]>::to_vec);
+    if let Some(mask) = soft_mask {
+        for (pixel, mask_alpha) in rgba.chunks_exact_mut(4).zip(soft_mask_alphas(mask)) {
+            if let [_, _, _, alpha] = pixel {
+                let combined = u16::from(*alpha).saturating_mul(u16::from(mask_alpha)) / 255;
+                *alpha = u8::try_from(combined).unwrap_or(u8::MAX);
+            }
+        }
+    }
+    Image {
+        data: Arc::new(rgba),
+        width,
+        height,
+        pixel_format: pdf_graphics::PixelFormat::RGBA8888,
+    }
+}
+
+fn soft_mask_alphas(mask: &Image) -> Box<dyn Iterator<Item = u8> + '_> {
+    match mask.pixel_format {
+        pdf_graphics::PixelFormat::Gray8 => Box::new(mask.data.iter().copied()),
+        pdf_graphics::PixelFormat::RGBA8888 => {
+            Box::new(mask.data.chunks_exact(4).filter_map(|pixel| match pixel {
+                [gray, _, _, alpha] => {
+                    let combined = u16::from(*gray).saturating_mul(u16::from(*alpha)) / 255;
+                    Some(u8::try_from(combined).unwrap_or(u8::MAX))
+                }
+                _ => None,
+            }))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -81,6 +142,74 @@ mod tests {
 
     use super::{InlineImage, decode_inline_image, decode_normalized_image, read_xobject};
     use crate::error::PdfImageError;
+
+    fn name(value: &str) -> ObjectVariant {
+        ObjectVariant::Name(value.as_bytes().to_vec())
+    }
+
+    fn fixture_cal_rgb() -> ObjectVariant {
+        ObjectVariant::Array(vec![
+            name("CalRGB"),
+            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
+                (
+                    "WhitePoint".to_string(),
+                    ObjectVariant::Array(vec![
+                        ObjectVariant::Real(0.9505),
+                        ObjectVariant::Real(1.0),
+                        ObjectVariant::Real(1.089),
+                    ]),
+                ),
+                (
+                    "Matrix".to_string(),
+                    ObjectVariant::Array(vec![
+                        ObjectVariant::Real(0.9505),
+                        ObjectVariant::Real(1.0),
+                        ObjectVariant::Real(1.089),
+                        ObjectVariant::Integer(0),
+                        ObjectVariant::Integer(0),
+                        ObjectVariant::Integer(0),
+                        ObjectVariant::Integer(0),
+                        ObjectVariant::Integer(0),
+                        ObjectVariant::Integer(0),
+                    ]),
+                ),
+            ])))),
+        ])
+    }
+
+    fn fixture_device_n() -> ObjectVariant {
+        let function = StreamObject::new(
+            1,
+            0,
+            Box::new(Dictionary::new(BTreeMap::from([
+                ("FunctionType".to_string(), ObjectVariant::Integer(4)),
+                (
+                    "Domain".to_string(),
+                    ObjectVariant::Array(
+                        (0..4)
+                            .flat_map(|_| [ObjectVariant::Integer(0), ObjectVariant::Integer(1)])
+                            .collect(),
+                    ),
+                ),
+                (
+                    "Range".to_string(),
+                    ObjectVariant::Array(
+                        (0..3)
+                            .flat_map(|_| [ObjectVariant::Integer(0), ObjectVariant::Integer(1)])
+                            .collect(),
+                    ),
+                ),
+            ]))),
+            b"4 3 roll pop".to_vec(),
+        );
+
+        ObjectVariant::Array(vec![
+            name("DeviceN"),
+            ObjectVariant::Array(vec![name("IBM"), name("None"), name("None"), name("None")]),
+            fixture_cal_rgb(),
+            ObjectVariant::Stream(function),
+        ])
+    }
 
     #[test]
     fn read_xobject_uses_predecoded_filtered_stream_data() {
@@ -192,6 +321,132 @@ mod tests {
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
         assert_eq!(image.data.as_ref(), &[10, 11, 12, 255, 20, 21, 22, 255]);
+    }
+
+    #[test]
+    fn indexed_device_n_palette_is_converted_through_cal_rgb() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (
+                "ColorSpace".to_string(),
+                ObjectVariant::Array(vec![
+                    name("Indexed"),
+                    fixture_device_n(),
+                    ObjectVariant::Integer(0),
+                    ObjectVariant::HexString(vec![0, 255, 255, 255]),
+                ]),
+            ),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(1)),
+        ]));
+
+        let image =
+            decode_normalized_image(&dictionary, Arc::new(vec![0]), &PassthroughResolver, None)
+                .expect("Indexed DeviceN image should convert through its alternate space");
+
+        assert_eq!(image.pixel_format, PixelFormat::RGBA8888);
+        assert_eq!(image.data.as_ref(), &[255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn direct_four_component_device_n_is_not_interpreted_as_cmyk() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            ("ColorSpace".to_string(), fixture_device_n()),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(1)),
+        ]));
+
+        let image = decode_normalized_image(
+            &dictionary,
+            Arc::new(vec![0, 255, 255, 255]),
+            &PassthroughResolver,
+            None,
+        )
+        .expect("DeviceN image should convert through its tint transform");
+
+        assert_eq!(image.data.as_ref(), &[255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn indexed_device_cmyk_keeps_device_fast_path() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (
+                "ColorSpace".to_string(),
+                ObjectVariant::Array(vec![
+                    name("Indexed"),
+                    name("DeviceCMYK"),
+                    ObjectVariant::Integer(0),
+                    ObjectVariant::HexString(vec![0, 0, 0, 0]),
+                ]),
+            ),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(1)),
+        ]));
+
+        let image =
+            decode_normalized_image(&dictionary, Arc::new(vec![0]), &PassthroughResolver, None)
+                .expect("Indexed DeviceCMYK image should retain its existing conversion");
+
+        assert_eq!(image.data.as_ref(), &[255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn color_space_alpha_is_combined_with_soft_mask() {
+        let tint_function = StreamObject::new(
+            2,
+            0,
+            Box::new(Dictionary::new(BTreeMap::from([
+                ("FunctionType".to_string(), ObjectVariant::Integer(4)),
+                (
+                    "Domain".to_string(),
+                    ObjectVariant::Array(vec![
+                        ObjectVariant::Integer(0),
+                        ObjectVariant::Integer(1),
+                    ]),
+                ),
+                (
+                    "Range".to_string(),
+                    ObjectVariant::Array(
+                        (0..3)
+                            .flat_map(|_| [ObjectVariant::Integer(0), ObjectVariant::Integer(1)])
+                            .collect(),
+                    ),
+                ),
+            ]))),
+            b"pop 1 1 1".to_vec(),
+        );
+        let dictionary = Dictionary::new(BTreeMap::from([
+            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (
+                "ColorSpace".to_string(),
+                ObjectVariant::Array(vec![
+                    name("Separation"),
+                    name("None"),
+                    name("DeviceRGB"),
+                    ObjectVariant::Stream(tint_function),
+                ]),
+            ),
+            ("Height".to_string(), ObjectVariant::Integer(1)),
+            ("Width".to_string(), ObjectVariant::Integer(1)),
+        ]));
+        let soft_mask = Image {
+            data: Arc::new(vec![128]),
+            width: 1,
+            height: 1,
+            pixel_format: PixelFormat::Gray8,
+        };
+
+        let image = decode_normalized_image(
+            &dictionary,
+            Arc::new(vec![255]),
+            &PassthroughResolver,
+            Some(&soft_mask),
+        )
+        .expect("Separation alpha should survive soft-mask application");
+
+        assert_eq!(image.data.as_ref(), &[0, 0, 0, 0]);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use std::{borrow::Cow, sync::Arc};
 
+use pdf_color_space::color_space::ColorSpace;
 use pdf_decode::{
     DecodeMap, DecodeRange, SampleLayout, decode_sample_bytes, expand_indexed_values,
 };
@@ -12,6 +13,8 @@ use crate::image_metadata::ImageMetadata;
 pub(crate) struct DecodedSamples {
     pub(crate) num_color_components: usize,
     pub(crate) image_data: Arc<Vec<u8>>,
+    /// Whether `image_data` is already render-ready RGBA rather than source components.
+    pub(crate) is_rgba: bool,
 }
 
 impl DecodedSamples {
@@ -28,14 +31,21 @@ impl DecodedSamples {
             decoded_samples
         } else {
             match &metadata.color_space {
-                Some(pdf_color_space::color_space::ColorSpace::Indexed(indexed)) => {
-                    Self::decode_indexed(
-                        raw_data,
-                        metadata,
-                        indexed.base.num_color_components(),
-                        indexed.hival,
-                        &indexed.lookup,
-                    )
+                Some(ColorSpace::Indexed(indexed)) => {
+                    if indexed.base.is_device_space() {
+                        Self::decode_indexed(
+                            raw_data,
+                            metadata,
+                            indexed.base.num_color_components(),
+                            indexed.hival,
+                            &indexed.lookup,
+                        )
+                    } else {
+                        Self::decode_indexed_rgba(raw_data, metadata, indexed)
+                    }
+                }
+                Some(color_space) if !color_space.is_device_space() => {
+                    Self::decode_direct_rgba(raw_data, metadata, color_space)
                 }
                 Some(color_space) => {
                     Self::decode_direct(raw_data, metadata, color_space.num_color_components())
@@ -90,6 +100,7 @@ impl DecodedSamples {
         Some(Self {
             num_color_components,
             image_data,
+            is_rgba: false,
         })
     }
 
@@ -118,6 +129,7 @@ impl DecodedSamples {
         Some(Self {
             num_color_components,
             image_data: Arc::clone(raw_data),
+            is_rgba: false,
         })
     }
 
@@ -161,6 +173,47 @@ impl DecodedSamples {
         Ok(Self {
             num_color_components: base_color_components,
             image_data: Arc::new(image_data),
+            is_rgba: false,
+        })
+    }
+
+    /// Converts an Indexed palette through a non-device base once, then maps pixels to RGBA.
+    fn decode_indexed_rgba(
+        raw_data: Arc<Vec<u8>>,
+        metadata: &ImageMetadata,
+        indexed: &pdf_color_space::indexed_color_space::IndexedColorSpace,
+    ) -> Result<Self, PdfImageError> {
+        let sample_codes = Self::decode_image_sample_codes(raw_data, 1, metadata)?;
+        let sample_max = Self::sample_max(metadata.bits_per_component)?;
+        let indices = Self::apply_decode(
+            sample_codes,
+            metadata.decode.as_ref(),
+            sample_max,
+            sample_max,
+            metadata.image_mask,
+        );
+
+        let indexed_color_space = ColorSpace::Indexed(indexed.clone());
+        let mut palette = Vec::with_capacity(usize::from(indexed.hival).saturating_add(1));
+        for index in 0..=indexed.hival {
+            palette.push(indexed_color_space.apply(&[f32::from(index)])?.to_rgba8());
+        }
+
+        let mut image_data = Vec::with_capacity(indices.len().saturating_mul(4));
+        for index in indices.iter().copied() {
+            let bounded = index.min(indexed.hival);
+            let rgba = palette.get(usize::from(bounded)).ok_or_else(|| {
+                PdfImageError::InvalidImageData(format!(
+                    "Indexed RGBA palette entry {bounded} is unavailable"
+                ))
+            })?;
+            image_data.extend_from_slice(rgba);
+        }
+
+        Ok(Self {
+            num_color_components: 4,
+            image_data: Arc::new(image_data),
+            is_rgba: true,
         })
     }
 
@@ -183,7 +236,69 @@ impl DecodedSamples {
                 255,
                 metadata.image_mask,
             ),
+            is_rgba: false,
         })
+    }
+
+    /// Converts decoded samples through their declared non-device color space.
+    fn decode_direct_rgba(
+        raw_data: Arc<Vec<u8>>,
+        metadata: &ImageMetadata,
+        color_space: &ColorSpace,
+    ) -> Result<Self, PdfImageError> {
+        let components = color_space.num_color_components();
+        let sample_codes = Self::decode_image_sample_codes(raw_data, components, metadata)?;
+        let sample_max = Self::sample_max(metadata.bits_per_component)?;
+        let decoded = metadata.decode.as_ref().map_or_else(
+            || Self::default_color_components(sample_codes.as_ref(), sample_max, color_space),
+            |decode| decode.apply_to_f32(sample_codes.as_ref(), sample_max),
+        );
+        let mut image_data = Vec::with_capacity(
+            decoded
+                .len()
+                .checked_div(components)
+                .unwrap_or(0)
+                .saturating_mul(4),
+        );
+        for pixel in decoded.chunks_exact(components) {
+            image_data.extend_from_slice(&color_space.apply(pixel)?.to_rgba8());
+        }
+
+        Ok(Self {
+            num_color_components: 4,
+            image_data: Arc::new(image_data),
+            is_rgba: true,
+        })
+    }
+
+    /// Applies the implicit decode domains for non-device color spaces.
+    fn default_color_components(
+        samples: &[u8],
+        sample_max: u8,
+        color_space: &ColorSpace,
+    ) -> Vec<f32> {
+        let denominator = f32::from(sample_max.max(1));
+        match color_space {
+            ColorSpace::Lab(lab) => samples
+                .chunks_exact(3)
+                .flat_map(|pixel| {
+                    let [l, a, b] = pixel else {
+                        return [0.0; 3];
+                    };
+                    let [amin, amax, bmin, bmax] = lab.range;
+                    let normalized = |sample| f32::from(sample) / denominator;
+                    [
+                        normalized(*l) * 100.0,
+                        amin + normalized(*a) * (amax - amin),
+                        bmin + normalized(*b) * (bmax - bmin),
+                    ]
+                })
+                .collect(),
+            _ => samples
+                .iter()
+                .map(|sample| f32::from(*sample) / denominator)
+                .collect(),
+        }
     }
 
     /// Applies an explicit decode map or the implicit PDF identity/inverted default.

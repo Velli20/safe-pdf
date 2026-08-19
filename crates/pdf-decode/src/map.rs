@@ -73,6 +73,20 @@ impl DecodeMap {
         }
         out
     }
+
+    /// Applies the decode ranges while retaining their floating-point component domains.
+    #[must_use]
+    pub fn apply_to_f32(&self, samples: &[u8], sample_max: u8) -> Vec<f32> {
+        if self.ranges.is_empty() {
+            return Vec::new();
+        }
+
+        samples
+            .iter()
+            .zip(self.ranges.iter().cycle())
+            .map(|(sample, range)| range.map_f32(*sample, sample_max))
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -150,5 +164,14 @@ mod tests {
         let out = map.apply_to_bytes(&[255, 0, 0, 255], 255, 255);
 
         assert_eq!(out, vec![128, 255, 0, 0]);
+    }
+
+    #[test]
+    fn decode_map_preserves_non_normalized_float_ranges() {
+        let map = DecodeMap {
+            ranges: vec![DecodeRange::new(-100.0, 100.0).unwrap()],
+        };
+
+        assert_eq!(map.apply_to_f32(&[0, 255], 255), vec![-100.0, 100.0]);
     }
 }
