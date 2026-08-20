@@ -102,22 +102,61 @@ impl ColorSpace {
             ColorSpace::CalGray(cal_gray) => cal_gray.apply(components),
             ColorSpace::CalRGB(cal_rgb) => cal_rgb.apply(components),
             ColorSpace::DeviceN(dn) => dn.apply(components),
-            ColorSpace::DeviceGray => match *components {
-                [g] => Ok(Color::from_gray(g)),
-                _ => Err(ColorSpaceError::InsufficientComponents(1, components.len())),
-            },
-            ColorSpace::DeviceRGB => match *components {
-                [r, g, b] => Ok(Color::from_rgb(r, g, b)),
-                _ => Err(ColorSpaceError::InsufficientComponents(3, components.len())),
-            },
-            ColorSpace::DeviceCMYK => match *components {
-                [c, m, y, k] => Ok(Color::from_cmyk(c, m, y, k)),
-                _ => Err(ColorSpaceError::InsufficientComponents(4, components.len())),
-            },
+            device_space @ (ColorSpace::DeviceGray
+            | ColorSpace::DeviceRGB
+            | ColorSpace::DeviceCMYK) => {
+                let expected_components = device_space.num_color_components();
+                Color::from_device_components(components)
+                    .filter(|_| components.len() == expected_components)
+                    .ok_or(ColorSpaceError::InsufficientComponents(
+                        expected_components,
+                        components.len(),
+                    ))
+            }
             ColorSpace::Pattern(_) => Err(ColorSpaceError::Unsupported(
                 "Pattern color space: color is set by the pattern resource, not by components"
                     .into(),
             )),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pdf_graphics::color::Color;
+
+    use super::ColorSpace;
+    use crate::error::ColorSpaceError;
+
+    #[test]
+    fn applies_device_color_space_components() {
+        assert_eq!(
+            ColorSpace::DeviceGray.apply(&[0.5]).expect("valid gray"),
+            Color::from_gray(0.5)
+        );
+        assert_eq!(
+            ColorSpace::DeviceRGB
+                .apply(&[0.1, 0.2, 0.3])
+                .expect("valid RGB"),
+            Color::from_rgb(0.1, 0.2, 0.3)
+        );
+        assert_eq!(
+            ColorSpace::DeviceCMYK
+                .apply(&[0.1, 0.2, 0.3, 0.4])
+                .expect("valid CMYK"),
+            Color::from_cmyk(0.1, 0.2, 0.3, 0.4)
+        );
+    }
+
+    #[test]
+    fn device_color_space_remains_strict_about_component_count() {
+        let error = ColorSpace::DeviceRGB
+            .apply(&[0.5])
+            .expect_err("DeviceRGB must not interpret one component as gray");
+
+        assert!(matches!(
+            error,
+            ColorSpaceError::InsufficientComponents(3, 1)
+        ));
     }
 }

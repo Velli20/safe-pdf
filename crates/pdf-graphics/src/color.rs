@@ -69,6 +69,21 @@ impl Color {
         Self { r, g, b, a: 1.0 }
     }
 
+    /// Creates a color from device color-space components.
+    ///
+    /// The component count determines the device color space: one component
+    /// is grayscale, three components are RGB, and four components are CMYK.
+    /// Returns `None` for any other component count.
+    #[must_use]
+    pub fn from_device_components(components: &[f32]) -> Option<Self> {
+        match *components {
+            [gray] => Some(Self::from_gray(gray)),
+            [r, g, b] => Some(Self::from_rgb(r, g, b)),
+            [c, m, y, k] => Some(Self::from_cmyk(c, m, y, k)),
+            _ => None,
+        }
+    }
+
     /// Converts a CIE L\*a\*b\* color to sRGB.
     ///
     /// Implements the standard pipeline: LAB → XYZ (using the PDF-provided white point)
@@ -180,6 +195,32 @@ mod tests {
 
         let white = Color::from_gray(1.0);
         assert!(approx_eq(white.r, 1.0) && approx_eq(white.g, 1.0) && approx_eq(white.b, 1.0));
+    }
+
+    #[test]
+    fn creates_colors_from_device_components() {
+        assert_eq!(
+            Color::from_device_components(&[0.5]),
+            Some(Color::from_gray(0.5))
+        );
+        assert_eq!(
+            Color::from_device_components(&[0.1, 0.2, 0.3]),
+            Some(Color::from_rgb(0.1, 0.2, 0.3))
+        );
+        assert_eq!(
+            Color::from_device_components(&[0.1, 0.2, 0.3, 0.4]),
+            Some(Color::from_cmyk(0.1, 0.2, 0.3, 0.4))
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_device_component_counts() {
+        assert_eq!(Color::from_device_components(&[]), None);
+        assert_eq!(Color::from_device_components(&[0.1, 0.2]), None);
+        assert_eq!(
+            Color::from_device_components(&[0.1, 0.2, 0.3, 0.4, 0.5]),
+            None
+        );
     }
 
     #[test]

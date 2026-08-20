@@ -53,6 +53,7 @@ Supporting crates:
 
 - Idiomatic Rust: iterators, ownership, lifetimes over cloning
 - Small, composable functions over monolithic ones
+- Do not add trivial helper functions whose only purpose is to construct and return a single error variant; inline the error construction at the call site
 - Avoid unnecessary heap allocations; prefer references and slices
 - Document public functions, structs, and enums with `///` comments
 - Unit tests go in `mod tests {}` within the same file
