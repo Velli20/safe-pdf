@@ -20,11 +20,11 @@ pub struct ICCBasedColorSpace {
     ///
     /// If absent, the device-equivalent for `num_components` is used instead.
     pub alternate_space: Option<Box<ColorSpace>>,
-    /// Raw ICC profile bytes.
+    /// Shared raw ICC profile bytes.
     ///
     /// ICC colour management is not yet implemented. The alternate space (or a
     /// device-equivalent) is used for rendering until ICC support is added.
-    pub profile_data: Arc<[u8]>,
+    pub profile_data: Arc<Vec<u8>>,
 }
 
 /// Parses an ICCBased color space: `[/ICCBased stream]`
@@ -60,7 +60,7 @@ pub(crate) fn parse_icc_based_color_space(
         .transpose()?
         .map(Box::new);
 
-    let profile_data: Arc<[u8]> = stream.raw_data().to_vec().into();
+    let profile_data = stream.shared_data();
 
     Ok(ColorSpace::ICCBased(ICCBasedColorSpace {
         num_components,
@@ -82,13 +82,78 @@ impl ICCBasedColorSpace {
         if let Some(alt) = &self.alternate_space {
             return alt.apply(components);
         }
-        match (self.num_components, components) {
-            (1, [g]) => Ok(Color::from_gray(*g)),
-            (3, [r, g, b]) => Ok(Color::from_rgb(*r, *g, *b)),
-            (4, [c, m, y, k]) => Ok(Color::from_cmyk(*c, *m, *y, *k)),
-            (n, _) => Err(ColorSpaceError::Unsupported(format!(
-                "ICCBased with {n} components has no alternate space"
-            ))),
+        Color::from_device_components(components).ok_or_else(|| {
+            ColorSpaceError::Unsupported(format!(
+                "ICCBased with {} components has no alternate space",
+                self.num_components
+            ))
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::BTreeMap, sync::Arc};
+
+    use pdf_graphics::color::Color;
+    use pdf_object::{
+        dictionary::Dictionary, object_resolver::PassthroughResolver,
+        object_variant::ObjectVariant, stream::StreamObject,
+    };
+
+    use super::{ICCBasedColorSpace, parse_icc_based_color_space};
+
+    fn icc_based(num_components: usize) -> ICCBasedColorSpace {
+        ICCBasedColorSpace {
+            num_components,
+            alternate_space: None,
+            profile_data: Arc::new(Vec::new()),
         }
+    }
+
+    #[test]
+    fn parsed_profile_shares_stream_data() {
+        let stream = StreamObject::new(
+            1,
+            0,
+            Box::new(Dictionary::new(BTreeMap::from([(
+                "N".to_string(),
+                ObjectVariant::Integer(3),
+            )]))),
+            vec![1, 2, 3, 4],
+        );
+        let stream_data = stream.shared_data();
+        let array = [
+            ObjectVariant::Name(b"ICCBased".to_vec()),
+            ObjectVariant::Stream(stream),
+        ];
+
+        let parsed = parse_icc_based_color_space(&PassthroughResolver, &array, 0)
+            .expect("ICCBased color space should parse");
+        let crate::color_space::ColorSpace::ICCBased(icc_based) = parsed else {
+            panic!("expected ICCBased color space");
+        };
+
+        assert!(Arc::ptr_eq(&icc_based.profile_data, &stream_data));
+    }
+
+    #[test]
+    fn uses_device_equivalent_without_an_alternate_space() {
+        assert_eq!(
+            icc_based(1).apply(&[0.5]).expect("valid gray fallback"),
+            Color::from_gray(0.5)
+        );
+        assert_eq!(
+            icc_based(3)
+                .apply(&[0.1, 0.2, 0.3])
+                .expect("valid RGB fallback"),
+            Color::from_rgb(0.1, 0.2, 0.3)
+        );
+        assert_eq!(
+            icc_based(4)
+                .apply(&[0.1, 0.2, 0.3, 0.4])
+                .expect("valid CMYK fallback"),
+            Color::from_cmyk(0.1, 0.2, 0.3, 0.4)
+        );
     }
 }

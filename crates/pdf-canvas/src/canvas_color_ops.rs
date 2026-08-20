@@ -8,25 +8,20 @@ use crate::{
 };
 use pdf_graphics::color::Color;
 
-fn color_from_generic_components(components: &[f32]) -> Option<Color> {
-    match *components {
-        [gray] => Some(Color::from_gray(gray)),
-        [r, g, b] => Some(Color::from_rgb(r, g, b)),
-        [c, m, y, k] => Some(Color::from_cmyk(c, m, y, k)),
-        _ => None,
-    }
-}
-
 fn apply_content_stream_color(
     color_space: &ColorSpace,
     components: &[f32],
 ) -> Result<Color, ColorSpaceError> {
+    // Honor the declared color space whenever its component count is valid.
     match color_space.apply(components) {
         Ok(color) => Ok(color),
+        // Some malformed content streams use SC/sc/SCN/scn operands whose count
+        // identifies a different device color space than the active one. Recover
+        // only from that arity mismatch; other color spaces and errors stay strict.
         Err(err @ ColorSpaceError::InsufficientComponents(_, _))
             if color_space.is_device_space() =>
         {
-            color_from_generic_components(components).ok_or(err)
+            Color::from_device_components(components).ok_or(err)
         }
         Err(err) => Err(err),
     }
