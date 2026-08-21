@@ -121,8 +121,7 @@ fn appearance_field(
                     return Err(AnnotationError::InvalidEntry {
                         entry,
                         reason: format!(
-                            "expected appearance stream in subdictionary entry /{:?}",
-                            name
+                            "expected appearance stream in subdictionary entry /{name:?}"
                         ),
                     });
                 };

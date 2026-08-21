@@ -122,7 +122,7 @@ impl WidgetAnnotation {
 
         loop {
             if field_type.is_none() {
-                field_type = current.optional_name(b"FT", objects)?.map(Vec::from);
+                field_type = current.optional_bytes(b"FT", objects)?.map(Vec::from);
             }
             if field_name.is_none() {
                 field_name = current.optional_bytes_vec(b"T", objects)?;

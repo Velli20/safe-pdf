@@ -251,7 +251,10 @@ impl ObjectCollection {
     fn dictionary_to_json(dict: &pdf_object::dictionary::Dictionary) -> JsonValue {
         let mut map = serde_json::Map::new();
         for (key, value) in &dict.dictionary {
-            map.insert(key.clone(), Self::object_variant_to_json(value));
+            map.insert(
+                String::from_utf8_lossy(key).into_owned(),
+                Self::object_variant_to_json(value),
+            );
         }
         json!({
             "type": "Dictionary",

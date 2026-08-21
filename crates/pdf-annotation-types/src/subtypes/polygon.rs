@@ -31,7 +31,7 @@ impl PolygonAnnotation {
         let line_endings = super::line_endings(dictionary, objects)?;
         let interior_color = AnnotationColor::from_dictionary(dictionary, b"IC", objects)?;
         let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
-        let intent = dictionary.optional_name(b"IT", objects)?.map(Vec::from);
+        let intent = dictionary.optional_bytes(b"IT", objects)?.map(Vec::from);
 
         Ok(Self {
             vertices,

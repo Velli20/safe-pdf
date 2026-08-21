@@ -172,7 +172,7 @@ impl Annotation {
         // Some PDFs omit `/Type` on annotation dictionaries even though the
         // entry is nominally expected to be `/Annot`, so only validate it when
         // the key is actually present.
-        if let Some(annotation_type) = dictionary.optional_name(b"Type", objects)? {
+        if let Some(annotation_type) = dictionary.optional_bytes(b"Type", objects)? {
             match annotation_type {
                 b"Annot" => {}
                 other => {
@@ -188,7 +188,7 @@ impl Annotation {
         // for dispatching to the subtype-specific parser.
         let subtype = dictionary
             .get_or_err(b"Subtype")?
-            .try_name(objects)?
+            .try_bytes(objects)?
             .to_vec();
 
         let rect = dictionary
@@ -213,7 +213,7 @@ impl Annotation {
         let flags = dictionary.optional_number::<i32>(b"F", objects)?;
         let appearance_state = dictionary
             .get(b"AS")
-            .map(|value| value.try_name(objects).map(Vec::from))
+            .map(|value| value.try_bytes(objects).map(Vec::from))
             .transpose()?;
         let struct_parent = dictionary.optional_number::<usize>(b"StructParent", objects)?;
 

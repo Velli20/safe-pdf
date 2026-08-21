@@ -63,7 +63,7 @@ fn validate_stream_type(
     stream: &StreamObject,
     objects: &dyn ObjectResolver,
 ) -> Result<(), ParserError> {
-    let Some(type_name) = stream.dictionary.optional_name(b"Type", objects)? else {
+    let Some(type_name) = stream.dictionary.optional_bytes(b"Type", objects)? else {
         return Ok(());
     };
 

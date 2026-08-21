@@ -68,7 +68,7 @@ impl FreeTextAnnotation {
         let default_style = dictionary.optional_bytes_vec(b"DS", objects)?;
         let callout_line = dictionary.optional_vec_of::<f32>(b"CL", objects)?;
         let difference_rect = dictionary.optional_array_of::<f32, 4>(b"RD", objects)?;
-        let intent = dictionary.optional_name(b"IT", objects)?.map(Vec::from);
+        let intent = dictionary.optional_bytes(b"IT", objects)?.map(Vec::from);
         let border_effect = BorderEffect::from_dictionary(dictionary, b"BE", objects)?;
 
         Ok(Self {

@@ -121,11 +121,11 @@ impl Filters {
         let filters = match resolved {
             ObjectVariant::Array(arr) => arr
                 .iter()
-                .map(|item| item.try_name(objects).map(Filter::from))
+                .map(|item| item.try_bytes(objects).map(Filter::from))
                 .collect::<Result<Vec<_>, _>>()?,
             other => {
-                // Handle single name that wasn't parsed as Name variant
-                vec![Filter::from(other.try_name(objects)?)]
+                // Accept a malformed string where the filter Name is expected.
+                vec![Filter::from(other.try_bytes(objects)?)]
             }
         };
 

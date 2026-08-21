@@ -119,7 +119,7 @@ impl Encoding {
                 }
                 _ => {
                     if let Some(slot) = self.names.get_mut(current_range_start) {
-                        *slot = Cow::Owned(Vec::from(chunk.try_name(objects)?));
+                        *slot = Cow::Owned(Vec::from(chunk.try_bytes(objects)?));
                     }
                     current_range_start = current_range_start.saturating_add(1);
                 }
@@ -142,7 +142,7 @@ impl Encoding {
                 ObjectVariant::Dictionary(encoding_dictionary) => {
                     Self::from_encoding_dictionary(encoding_dictionary, objects)
                 }
-                other => Self::from_base_encoding(FontEncoding::from(other.try_name(objects)?)),
+                other => Self::from_base_encoding(FontEncoding::from(other.try_bytes(objects)?)),
             })
             .transpose()
     }
@@ -153,7 +153,7 @@ impl Encoding {
     ) -> Result<Self, FontError> {
         let mut encoding = match dictionary.get(b"BaseEncoding") {
             Some(base) => {
-                let base_encoding = FontEncoding::from(base.try_name(objects)?);
+                let base_encoding = FontEncoding::from(base.try_bytes(objects)?);
                 Encoding::from_base_encoding(base_encoding)?
             }
             None => Self::default(),

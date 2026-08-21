@@ -56,7 +56,7 @@ fn extract_lookup_table(
     objects: &dyn ObjectResolver,
     lookup: &ObjectVariant,
 ) -> Result<Arc<Vec<u8>>, ColorSpaceError> {
-    if let Ok(data) = lookup.try_string_bytes(objects) {
+    if let Ok(data) = lookup.try_bytes(objects) {
         return Ok(Arc::new(data.to_vec()));
     }
     Ok(lookup.try_stream(objects)?.shared_data())

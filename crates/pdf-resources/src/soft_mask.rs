@@ -35,11 +35,11 @@ impl SoftMask {
         cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Option<Self>, PdfPagesError> {
-        let mask_type = MaskMode::from(dictionary.required_name(b"S", objects)?);
+        let mask_type = MaskMode::from(dictionary.required_bytes(b"S", objects)?);
 
         let content = dictionary.get_or_err(b"G")?;
         let stream = content.try_stream(objects)?;
-        let subtype = stream.dictionary.required_name(b"Subtype", objects)?;
+        let subtype = stream.dictionary.required_bytes(b"Subtype", objects)?;
         if subtype != b"Form" {
             return Err(PdfPagesError::InvalidExtGStateEntryValue {
                 entry: "SMask".to_string(),

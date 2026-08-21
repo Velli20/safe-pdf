@@ -19,7 +19,7 @@ impl FileAttachmentAnnotation {
     ) -> Result<Self, AnnotationError> {
         let file_specification = FileSpecification::from_dictionary(dictionary, b"FS", objects)?
             .ok_or(AnnotationError::MissingEntry { entry: b"FS" })?;
-        let name = dictionary.optional_name(b"Name", objects)?.map(Vec::from);
+        let name = dictionary.optional_bytes(b"Name", objects)?.map(Vec::from);
 
         Ok(Self {
             file_specification,

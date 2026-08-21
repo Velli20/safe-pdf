@@ -150,47 +150,12 @@ pub trait ObjectLookupExt<K> {
         objects: &'a dyn ObjectResolver,
     ) -> Result<&'a [ObjectVariant], ObjectError>;
 
-    /// Returns the raw bytes of a required PDF string value from this container.
+    /// Returns an optional byte-backed value from this container.
     ///
     /// This method looks up a value by key or index and converts it using
-    /// [`ObjectVariant::try_string_bytes`].
-    ///
-    /// # Parameters
-    ///
-    /// - `key`: The dictionary key or array index to look up.
-    /// - `objects`: The object resolver used when the looked-up value is an
-    ///   indirect reference.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(&[u8])` when the value exists and converts successfully, or
-    /// `Err` if the value is missing, reference resolution fails, or
-    /// conversion fails.
-    fn required_string_bytes<'a>(
-        &'a self,
-        key: K,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a [u8], ObjectError>;
-
-    /// Returns an optional PDF Name as raw bytes.
-    fn optional_name<'a>(
-        &'a self,
-        key: K,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<Option<&'a [u8]>, ObjectError>;
-
-    /// Returns a required PDF Name as raw bytes.
-    fn required_name<'a>(
-        &'a self,
-        key: K,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a [u8], ObjectError>;
-
-    /// Returns an optional byte string value from this container.
-    ///
-    /// This method looks up a value by key or index and converts it using
-    /// [`ObjectVariant::try_bytes`]. Missing entries and explicit PDF `null`
-    /// values are treated as absent.
+    /// [`ObjectVariant::try_bytes`]. PDF Names and strings are both accepted to
+    /// tolerate malformed PDFs. Missing entries and explicit PDF `null` values
+    /// are treated as absent.
     ///
     /// # Parameters
     ///
@@ -209,7 +174,7 @@ pub trait ObjectLookupExt<K> {
         objects: &'a dyn ObjectResolver,
     ) -> Result<Option<&'a [u8]>, ObjectError>;
 
-    /// Returns a required byte string value from this container.
+    /// Returns a required byte-backed value from this container.
     ///
     /// This method looks up a value by key or index and converts it using
     /// [`ObjectVariant::try_bytes`].
@@ -231,7 +196,7 @@ pub trait ObjectLookupExt<K> {
         objects: &'a dyn ObjectResolver,
     ) -> Result<&'a [u8], ObjectError>;
 
-    /// Returns an optional owned byte string value from this container.
+    /// Returns an optional owned byte-backed value from this container.
     ///
     /// This method looks up a value by key or index and converts it using
     /// [`ObjectVariant::try_bytes_vec`]. Missing entries and explicit PDF
@@ -254,7 +219,7 @@ pub trait ObjectLookupExt<K> {
         objects: &'a dyn ObjectResolver,
     ) -> Result<Option<Vec<u8>>, ObjectError>;
 
-    /// Returns a required owned byte string value from this container.
+    /// Returns a required owned byte-backed value from this container.
     ///
     /// This method looks up a value by key or index and converts it using
     /// [`ObjectVariant::try_bytes_vec`].
@@ -574,32 +539,6 @@ impl ObjectLookupExt<usize> for [ObjectVariant] {
         required_slice_value(self, index)?.try_array(objects)
     }
 
-    fn required_string_bytes<'a>(
-        &'a self,
-        index: usize,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a [u8], ObjectError> {
-        required_slice_value(self, index)?.try_string_bytes(objects)
-    }
-
-    fn optional_name<'a>(
-        &'a self,
-        index: usize,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<Option<&'a [u8]>, ObjectError> {
-        optional_resolved_value(self.get(index), objects)?
-            .map(|value| value.try_name(objects))
-            .transpose()
-    }
-
-    fn required_name<'a>(
-        &'a self,
-        index: usize,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a [u8], ObjectError> {
-        required_slice_value(self, index)?.try_name(objects)
-    }
-
     fn optional_bytes<'a>(
         &'a self,
         index: usize,
@@ -790,32 +729,6 @@ impl ObjectLookupExt<&[u8]> for Dictionary {
         objects: &'a dyn ObjectResolver,
     ) -> Result<&'a [ObjectVariant], ObjectError> {
         self.get_or_err(key)?.try_array(objects)
-    }
-
-    fn required_string_bytes<'a>(
-        &'a self,
-        key: &[u8],
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a [u8], ObjectError> {
-        self.get_or_err(key)?.try_string_bytes(objects)
-    }
-
-    fn optional_name<'a>(
-        &'a self,
-        key: &[u8],
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<Option<&'a [u8]>, ObjectError> {
-        optional_resolved_value(self.get(key), objects)?
-            .map(|value| value.try_name(objects))
-            .transpose()
-    }
-
-    fn required_name<'a>(
-        &'a self,
-        key: &[u8],
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a [u8], ObjectError> {
-        self.get_or_err(key)?.try_name(objects)
     }
 
     fn optional_bytes<'a>(
@@ -1158,7 +1071,7 @@ mod tests {
         );
         assert_eq!(
             dictionary
-                .required_name(b"String", &PassthroughResolver)
+                .required_bytes(b"String", &PassthroughResolver)
                 .expect("string exists"),
             b"Name"
         );
@@ -1238,7 +1151,7 @@ mod tests {
         );
         assert_eq!(
             values
-                .required_string_bytes(2, &PassthroughResolver)
+                .required_bytes(2, &PassthroughResolver)
                 .expect("string exists"),
             b"text"
         );
@@ -1271,21 +1184,54 @@ mod tests {
         let dictionary = dictionary_with(b"Boolean", ObjectVariant::Boolean(true));
 
         let error = dictionary
-            .required_string_bytes(b"Boolean", &PassthroughResolver)
+            .required_bytes(b"Boolean", &PassthroughResolver)
             .expect_err("boolean is not a string");
 
-        assert_eq!(error, ObjectError::TypeMismatch("String", "Boolean"));
+        assert_eq!(error, ObjectError::TypeMismatch("Bytes", "Boolean"));
     }
 
     #[test]
-    fn required_name_preserves_non_utf8_bytes() {
-        let dictionary = dictionary_with(b"Name", ObjectVariant::Name(vec![0xFF]));
+    fn byte_lookups_accept_names_and_strings() {
+        let dictionary = Dictionary::from_entries([
+            (b"Name".as_slice(), ObjectVariant::Name(vec![0xFF])),
+            (
+                b"Literal".as_slice(),
+                ObjectVariant::LiteralString(vec![0xFE]),
+            ),
+            (b"Hex".as_slice(), ObjectVariant::HexString(vec![0xFD])),
+            (b"Null".as_slice(), ObjectVariant::Null),
+        ]);
+
+        for (key, expected) in [
+            (b"Name".as_slice(), &[0xFF][..]),
+            (b"Literal".as_slice(), &[0xFE][..]),
+            (b"Hex".as_slice(), &[0xFD][..]),
+        ] {
+            assert_eq!(
+                dictionary
+                    .required_bytes(key, &PassthroughResolver)
+                    .expect("required byte-backed value should be accepted"),
+                expected
+            );
+            assert_eq!(
+                dictionary
+                    .optional_bytes(key, &PassthroughResolver)
+                    .expect("optional byte-backed value should be accepted"),
+                Some(expected)
+            );
+        }
 
         assert_eq!(
             dictionary
-                .required_name(b"Name", &PassthroughResolver)
-                .expect("raw name bytes should be preserved"),
-            [0xFF]
+                .optional_bytes(b"Null", &PassthroughResolver)
+                .expect("null should be absent"),
+            None
+        );
+        assert_eq!(
+            dictionary
+                .optional_bytes(b"Missing", &PassthroughResolver)
+                .expect("a missing key should be absent"),
+            None
         );
     }
 }

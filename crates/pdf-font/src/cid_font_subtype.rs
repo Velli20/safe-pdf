@@ -21,7 +21,7 @@ impl CidFontSubType {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, FontError> {
-        match dictionary.required_name(b"Subtype", objects)? {
+        match dictionary.required_bytes(b"Subtype", objects)? {
             b"CIDFontType0" => Ok(Self::Type0),
             b"CIDFontType2" => Ok(Self::Type2),
             other => Err(FontError::UnsupportedCidFontSubtype {

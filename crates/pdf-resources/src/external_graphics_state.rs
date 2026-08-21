@@ -197,10 +197,10 @@ fn parse_blend_mode(
         value
             .try_array(objects)?
             .iter()
-            .map(|obj| obj.try_name(objects).map(BlendMode::from))
+            .map(|obj| obj.try_bytes(objects).map(BlendMode::from))
             .collect::<Result<Vec<BlendMode>, _>>()?
     } else {
-        let mode = BlendMode::from(value.try_name(objects)?);
+        let mode = BlendMode::from(value.try_bytes(objects)?);
         vec![mode]
     };
 
@@ -249,7 +249,7 @@ fn parse_entry(
             Some(param) => param,
             None => return Ok(None),
         },
-        b"RI" => ExternalGraphicsStateKey::RenderingIntent(Vec::from(value.try_name(objects)?)),
+        b"RI" => ExternalGraphicsStateKey::RenderingIntent(Vec::from(value.try_bytes(objects)?)),
         b"OP" => ExternalGraphicsStateKey::OverprintStroke(value.try_boolean(objects)?),
         b"op" => ExternalGraphicsStateKey::OverprintFill(value.try_boolean(objects)?),
         b"OPM" => ExternalGraphicsStateKey::OverprintMode(value.try_number::<i32>(objects)?),
@@ -265,7 +265,7 @@ fn parse_entry(
                     id_allocator,
                 )?
                 .map(Box::new),
-                other => match other.try_name(objects)? {
+                other => match other.try_bytes(objects)? {
                     b"None" => None,
                     _ => {
                         return Err(invalid_ext_gstate_entry_value(

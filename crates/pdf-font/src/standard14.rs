@@ -129,7 +129,7 @@ impl Standard14Font {
     ) -> Self {
         dictionary
             .get(b"BaseFont")
-            .and_then(|value| value.try_name(objects).ok())
+            .and_then(|value| value.try_bytes(objects).ok())
             .and_then(Self::from_base_font_name)
             .unwrap_or_else(|| Self::from(flags))
     }

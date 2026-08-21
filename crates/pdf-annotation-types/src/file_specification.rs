@@ -51,7 +51,7 @@ impl FileSpecification {
             return Ok(Self::Path(value.try_bytes(objects)?.to_vec()));
         };
 
-        let file_system = dictionary.optional_name(b"FS", objects)?.map(Vec::from);
+        let file_system = dictionary.optional_bytes(b"FS", objects)?.map(Vec::from);
         let file_name = dictionary.optional_bytes_vec(b"F", objects)?;
         let unicode_file_name = dictionary.optional_bytes_vec(b"UF", objects)?;
         let mac_file_name = dictionary.optional_bytes_vec(b"Mac", objects)?;

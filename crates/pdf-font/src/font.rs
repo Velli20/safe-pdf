@@ -49,7 +49,7 @@ impl Font {
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Font, FontError> {
         // Determine the font subtype from the dictionary.
-        let subtype = dictionary.required_name(b"Subtype", objects)?;
+        let subtype = dictionary.required_bytes(b"Subtype", objects)?;
         match subtype {
             b"Type0" => {
                 let type0_font = Type0Font::from_dictionary(dictionary, objects)?;

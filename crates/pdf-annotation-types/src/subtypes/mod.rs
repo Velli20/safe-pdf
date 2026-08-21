@@ -70,7 +70,7 @@ pub(crate) fn line_endings(
 
     let mut parsed = [LineEndingStyle::None, LineEndingStyle::None];
     for (slot, item) in parsed.iter_mut().zip(endings.iter()) {
-        *slot = LineEndingStyle::from(item.try_name(objects)?);
+        *slot = LineEndingStyle::from(item.try_bytes(objects)?);
     }
 
     Ok(Some(parsed))

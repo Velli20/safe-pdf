@@ -192,7 +192,7 @@ impl PdfParser<'_> {
             .get(b"CS")
             .or_else(|| dictionary.get(b"ColorSpace"))?;
 
-        match color_space.try_name(objects).ok()? {
+        match color_space.try_bytes(objects).ok()? {
             b"G" | b"DeviceGray" => Some(1),
             b"RGB" | b"DeviceRGB" => Some(3),
             b"CMYK" | b"DeviceCMYK" => Some(4),

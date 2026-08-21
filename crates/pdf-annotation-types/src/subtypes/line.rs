@@ -38,7 +38,7 @@ impl LineAnnotation {
         let leader_line_length = dictionary.optional_number::<f32>(b"LL", objects)?;
         let leader_line_extension = dictionary.optional_number::<f32>(b"LLE", objects)?;
         let caption = dictionary.optional_boolean(b"Cap", objects)?;
-        let intent = dictionary.optional_name(b"IT", objects)?.map(Vec::from);
+        let intent = dictionary.optional_bytes(b"IT", objects)?.map(Vec::from);
 
         Ok(Self {
             line,

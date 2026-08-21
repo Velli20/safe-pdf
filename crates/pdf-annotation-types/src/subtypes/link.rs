@@ -28,7 +28,7 @@ impl LinkAnnotation {
     ) -> Result<Self, AnnotationError> {
         let highlight_mode = dictionary
             .get(b"H")
-            .map(|value| value.try_name(objects).map(LinkHighlightMode::from))
+            .map(|value| value.try_bytes(objects).map(LinkHighlightMode::from))
             .transpose()?;
         let destination = AnnotationDestination::from_dictionary(dictionary, b"Dest", objects)?;
         let action = AnnotationAction::from_dictionary(dictionary, b"A", objects)?;

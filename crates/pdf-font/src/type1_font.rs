@@ -92,7 +92,7 @@ impl Type1Font {
         // Path 1: FontFile3 stream with subtype-driven handling.
         if let Some(font_file3) = descriptor.get(b"FontFile3") {
             let stream = font_file3.try_stream(objects)?;
-            let subtype = stream.dictionary.optional_name(b"Subtype", objects)?;
+            let subtype = stream.dictionary.optional_bytes(b"Subtype", objects)?;
 
             return match subtype {
                 Some(b"Type1C") | Some(b"CIDFontType0C") => {

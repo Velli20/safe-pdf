@@ -39,7 +39,7 @@ impl Type0EncodingCMap {
                 let resolved = objects.resolve_object(value)?;
                 match resolved {
                     ObjectVariant::Stream(stream) => Self::from_bytes(stream.raw_data()),
-                    _ => Self::from_name(value.try_name(objects)?),
+                    _ => Self::from_name(value.try_bytes(objects)?),
                 }
             })
             .transpose()

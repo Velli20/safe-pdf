@@ -172,7 +172,7 @@ impl EncryptDictionary {
         objects: &dyn ObjectResolver,
     ) -> Result<Self, PdfReaderError> {
         let filter = dict
-            .required_name(b"Filter", objects)
+            .required_bytes(b"Filter", objects)
             .map(EncryptionFilter::from)?;
 
         let version_num = dict.required_number::<i32>(b"V", objects)?;
@@ -241,7 +241,7 @@ fn parse_v5_crypt_filter(
     objects: &dyn ObjectResolver,
 ) -> Result<CryptFilterMethod, PdfReaderError> {
     let filter_name = dictionary
-        .optional_name(entry, objects)?
+        .optional_bytes(entry, objects)?
         .unwrap_or(b"Identity");
     if filter_name == b"Identity" {
         return Ok(CryptFilterMethod::Identity);
@@ -249,7 +249,7 @@ fn parse_v5_crypt_filter(
 
     let crypt_filters = dictionary.required_dictionary(b"CF", objects)?;
     let crypt_filter = crypt_filters.required_dictionary(filter_name, objects)?;
-    match crypt_filter.required_name(b"CFM", objects)? {
+    match crypt_filter.required_bytes(b"CFM", objects)? {
         b"AESV3" => {
             let key_length = crypt_filter.optional_number::<i32>(b"Length", objects)?;
             if key_length.is_some_and(|length| length != 32) {

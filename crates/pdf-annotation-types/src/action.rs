@@ -112,7 +112,7 @@ impl AnnotationAction {
             return Ok(None);
         };
 
-        let action = match action_dictionary.required_name(b"S", objects)? {
+        let action = match action_dictionary.required_bytes(b"S", objects)? {
             b"GoTo" => Self::GoTo {
                 destination: AnnotationDestination::from_object(
                     action_dictionary.get_or_err(b"D")?,
@@ -147,7 +147,7 @@ impl AnnotationAction {
                     .transpose()?,
             },
             b"Named" => Self::Named {
-                name: Vec::from(action_dictionary.required_name(b"N", objects)?),
+                name: Vec::from(action_dictionary.required_bytes(b"N", objects)?),
             },
             b"SubmitForm" => Self::SubmitForm {
                 file_specification: FileSpecification::from_dictionary(

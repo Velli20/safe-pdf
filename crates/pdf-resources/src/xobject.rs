@@ -47,7 +47,7 @@ fn read_xobject_inner(
     cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<Resource, PdfPagesError> {
-    match dictionary.required_name(b"Subtype", objects)? {
+    match dictionary.required_bytes(b"Subtype", objects)? {
         b"Image" => {
             // Malformed dimensions make the image impossible to decode, but should not
             // prevent otherwise valid page content from being loaded and rendered.
