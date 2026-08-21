@@ -31,7 +31,7 @@ pub struct PdfPage {
 }
 
 impl PdfPage {
-    pub const KEY: &'static str = "Page";
+    pub const KEY: &'static [u8] = b"Page";
 
     pub fn from_dictionary(
         dictionary: &Dictionary,

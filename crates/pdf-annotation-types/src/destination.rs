@@ -91,7 +91,7 @@ pub enum ExplicitDestination {
 impl AnnotationDestination {
     pub(crate) fn from_dictionary(
         dictionary: &Dictionary,
-        key: &'static str,
+        key: &'static [u8],
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, AnnotationError> {
         dictionary
@@ -102,7 +102,7 @@ impl AnnotationDestination {
 
     pub(crate) fn from_object(
         value: &ObjectVariant,
-        entry: &'static str,
+        entry: &'static [u8],
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
         Ok(match value {
@@ -124,7 +124,7 @@ impl AnnotationDestination {
 
 fn explicit_destination(
     value: &ObjectVariant,
-    entry: &'static str,
+    entry: &'static [u8],
     objects: &dyn ObjectResolver,
 ) -> Result<ExplicitDestination, AnnotationError> {
     let items = value.try_array(objects)?;
@@ -144,41 +144,41 @@ fn explicit_destination(
 
     let page = destination_target(page_item, objects)?;
 
-    match mode_item.try_str(objects)? {
-        "XYZ" => Ok(ExplicitDestination::Xyz {
+    match mode_item.try_name(objects)? {
+        b"XYZ" => Ok(ExplicitDestination::Xyz {
             page,
             left: items.optional_number(2, objects)?,
             top: items.optional_number(3, objects)?,
             zoom: items.optional_number(4, objects)?,
         }),
-        "Fit" => Ok(ExplicitDestination::Fit { page }),
-        "FitH" => Ok(ExplicitDestination::FitH {
+        b"Fit" => Ok(ExplicitDestination::Fit { page }),
+        b"FitH" => Ok(ExplicitDestination::FitH {
             page,
             top: items.optional_number(2, objects)?,
         }),
-        "FitV" => Ok(ExplicitDestination::FitV {
+        b"FitV" => Ok(ExplicitDestination::FitV {
             page,
             left: items.optional_number(2, objects)?,
         }),
-        "FitR" => Ok(ExplicitDestination::FitR {
+        b"FitR" => Ok(ExplicitDestination::FitR {
             page,
             left: items.required_number(2, objects)?,
             bottom: items.required_number(3, objects)?,
             right: items.required_number(4, objects)?,
             top: items.required_number(5, objects)?,
         }),
-        "FitB" => Ok(ExplicitDestination::FitB { page }),
-        "FitBH" => Ok(ExplicitDestination::FitBH {
+        b"FitB" => Ok(ExplicitDestination::FitB { page }),
+        b"FitBH" => Ok(ExplicitDestination::FitBH {
             page,
             top: items.optional_number(2, objects)?,
         }),
-        "FitBV" => Ok(ExplicitDestination::FitBV {
+        b"FitBV" => Ok(ExplicitDestination::FitBV {
             page,
             left: items.optional_number(2, objects)?,
         }),
         other => Err(AnnotationError::InvalidEntry {
             entry,
-            reason: format!("unsupported destination type '{other}'"),
+            reason: format!("unsupported destination type '{other:?}'"),
         }),
     }
 }

@@ -99,7 +99,7 @@ impl EncryptionContext {
         password: &[u8],
         diagnostics: &mut Vec<PdfReadDiagnostic>,
     ) -> Result<Self, PdfReaderError> {
-        let Some(encrypt_reference) = trailer.dictionary.take("Encrypt") else {
+        let Some(encrypt_reference) = trailer.dictionary.take(b"Encrypt") else {
             return Ok(Self {
                 decryptor: None,
                 dictionary_object_number: None,
@@ -153,8 +153,8 @@ fn extract_page_tree(
     trailer: &Trailer,
     objects: &mut dyn ObjectResolver,
 ) -> Result<Vec<PdfPage>, PdfReaderError> {
-    let catalog = trailer.dictionary.required_dictionary("Root", objects)?;
-    let pages = catalog.required_dictionary("Pages", objects)?;
+    let catalog = trailer.dictionary.required_dictionary(b"Root", objects)?;
+    let pages = catalog.required_dictionary(b"Pages", objects)?;
     let mut cache = DefaultResourceCache::default();
     let mut cycle_tracker = ReadCycleTracker::default();
     let mut content_stream_ids = ContentStreamIdAllocator::new();
@@ -200,7 +200,7 @@ fn load_encrypt_dictionary(
 fn extract_document_id(trailer: &Trailer) -> Result<&[u8], PdfReaderError> {
     let identifier = trailer
         .dictionary
-        .required_array("ID", &PassthroughResolver)?
+        .required_array(b"ID", &PassthroughResolver)?
         .first()
         .ok_or(PdfReaderError::MissingDocumentId)?;
     Ok(identifier.try_bytes(&PassthroughResolver)?)

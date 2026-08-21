@@ -30,7 +30,7 @@ impl PdfOperator for ShowText {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let text = operands.get_bytes()?;
+        let text = operands.get_string_bytes()?;
         Ok(PdfOperatorVariant::ShowText(Self::new(text)))
     }
 
@@ -58,7 +58,7 @@ impl PdfOperator for MoveNextLineShowText {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let text = operands.get_bytes()?;
+        let text = operands.get_string_bytes()?;
         Ok(PdfOperatorVariant::MoveNextLineShowText(Self::new(text)))
     }
 
@@ -96,7 +96,7 @@ impl PdfOperator for SetSpacingMoveShowText {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let [word_spacing, char_spacing] = operands.try_array_of::<f32, 2>()?;
-        let text = operands.get_bytes()?;
+        let text = operands.get_string_bytes()?;
 
         Ok(PdfOperatorVariant::SetSpacingMoveShowText(Self::new(
             word_spacing,

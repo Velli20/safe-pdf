@@ -63,7 +63,7 @@ pub enum AnnotationKind {
     /// A 3D annotation.
     ThreeD(ThreeDAnnotation),
     /// A vendor or future annotation subtype not covered by PDF 1.7 base types.
-    Unknown { subtype: String },
+    Unknown { subtype: Vec<u8> },
 }
 
 impl AnnotationKind {
@@ -85,53 +85,59 @@ impl AnnotationKind {
     }
 
     pub(crate) fn from_dictionary(
-        subtype: &str,
+        subtype: &[u8],
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
         Ok(match subtype {
-            "Text" => Self::Text(TextAnnotation::from_dictionary(dictionary, objects)?),
-            "Link" => Self::Link(LinkAnnotation::from_dictionary(dictionary, objects)?),
-            "FreeText" => Self::FreeText(FreeTextAnnotation::from_dictionary(dictionary, objects)?),
-            "Line" => Self::Line(LineAnnotation::from_dictionary(dictionary, objects)?),
-            "Square" => Self::Square(SquareAnnotation::from_dictionary(dictionary, objects)?),
-            "Circle" => Self::Circle(CircleAnnotation::from_dictionary(dictionary, objects)?),
-            "Polygon" => Self::Polygon(PolygonAnnotation::from_dictionary(dictionary, objects)?),
-            "PolyLine" => Self::PolyLine(PolyLineAnnotation::from_dictionary(dictionary, objects)?),
-            "Highlight" => {
+            b"Text" => Self::Text(TextAnnotation::from_dictionary(dictionary, objects)?),
+            b"Link" => Self::Link(LinkAnnotation::from_dictionary(dictionary, objects)?),
+            b"FreeText" => {
+                Self::FreeText(FreeTextAnnotation::from_dictionary(dictionary, objects)?)
+            }
+            b"Line" => Self::Line(LineAnnotation::from_dictionary(dictionary, objects)?),
+            b"Square" => Self::Square(SquareAnnotation::from_dictionary(dictionary, objects)?),
+            b"Circle" => Self::Circle(CircleAnnotation::from_dictionary(dictionary, objects)?),
+            b"Polygon" => Self::Polygon(PolygonAnnotation::from_dictionary(dictionary, objects)?),
+            b"PolyLine" => {
+                Self::PolyLine(PolyLineAnnotation::from_dictionary(dictionary, objects)?)
+            }
+            b"Highlight" => {
                 Self::Highlight(HighlightAnnotation::from_dictionary(dictionary, objects)?)
             }
-            "Underline" => {
+            b"Underline" => {
                 Self::Underline(UnderlineAnnotation::from_dictionary(dictionary, objects)?)
             }
-            "Squiggly" => Self::Squiggly(SquigglyAnnotation::from_dictionary(dictionary, objects)?),
-            "StrikeOut" => {
+            b"Squiggly" => {
+                Self::Squiggly(SquigglyAnnotation::from_dictionary(dictionary, objects)?)
+            }
+            b"StrikeOut" => {
                 Self::StrikeOut(StrikeOutAnnotation::from_dictionary(dictionary, objects)?)
             }
-            "Stamp" => Self::Stamp(StampAnnotation::from_dictionary(dictionary, objects)?),
-            "Caret" => Self::Caret(CaretAnnotation::from_dictionary(dictionary, objects)?),
-            "Ink" => Self::Ink(InkAnnotation::from_dictionary(dictionary, objects)?),
-            "Popup" => Self::Popup(PopupAnnotation::from_dictionary(dictionary, objects)?),
-            "FileAttachment" => Self::FileAttachment(FileAttachmentAnnotation::from_dictionary(
+            b"Stamp" => Self::Stamp(StampAnnotation::from_dictionary(dictionary, objects)?),
+            b"Caret" => Self::Caret(CaretAnnotation::from_dictionary(dictionary, objects)?),
+            b"Ink" => Self::Ink(InkAnnotation::from_dictionary(dictionary, objects)?),
+            b"Popup" => Self::Popup(PopupAnnotation::from_dictionary(dictionary, objects)?),
+            b"FileAttachment" => Self::FileAttachment(FileAttachmentAnnotation::from_dictionary(
                 dictionary, objects,
             )?),
-            "Sound" => Self::Sound(SoundAnnotation::from_dictionary(dictionary, objects)?),
-            "Movie" => Self::Movie(MovieAnnotation::from_dictionary(dictionary, objects)?),
-            "Widget" => Self::Widget(WidgetAnnotation::from_dictionary(dictionary, objects)?),
-            "Screen" => Self::Screen(ScreenAnnotation::from_dictionary(dictionary, objects)?),
-            "PrinterMark" => {
+            b"Sound" => Self::Sound(SoundAnnotation::from_dictionary(dictionary, objects)?),
+            b"Movie" => Self::Movie(MovieAnnotation::from_dictionary(dictionary, objects)?),
+            b"Widget" => Self::Widget(WidgetAnnotation::from_dictionary(dictionary, objects)?),
+            b"Screen" => Self::Screen(ScreenAnnotation::from_dictionary(dictionary, objects)?),
+            b"PrinterMark" => {
                 Self::PrinterMark(PrinterMarkAnnotation::from_dictionary(dictionary, objects)?)
             }
-            "TrapNet" => Self::TrapNet(TrapNetAnnotation::from_dictionary(dictionary, objects)?),
-            "Watermark" => {
+            b"TrapNet" => Self::TrapNet(TrapNetAnnotation::from_dictionary(dictionary, objects)?),
+            b"Watermark" => {
                 Self::Watermark(WatermarkAnnotation::from_dictionary(dictionary, objects)?)
             }
-            "3D" => Self::ThreeD(
+            b"3D" => Self::ThreeD(
                 ThreeDAnnotation::from_dictionary(dictionary, objects)?
-                    .ok_or(AnnotationError::MissingEntry { entry: "3D" })?,
+                    .ok_or(AnnotationError::MissingEntry { entry: b"3D" })?,
             ),
             _ => Self::Unknown {
-                subtype: subtype.to_owned(),
+                subtype: subtype.to_vec(),
             },
         })
     }

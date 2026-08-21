@@ -11,11 +11,11 @@ use crate::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct BeginMarkedContent {
     /// The tag indicating the role or nature of the marked-content sequence.
-    tag: String,
+    tag: Vec<u8>,
 }
 
 impl BeginMarkedContent {
-    pub fn new(tag: String) -> Self {
+    pub fn new(tag: Vec<u8>) -> Self {
         Self { tag }
     }
 }
@@ -26,7 +26,7 @@ impl PdfOperator for BeginMarkedContent {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let tag = operands.get_str()?;
+        let tag = operands.get_name_bytes()?;
         Ok(PdfOperatorVariant::BeginMarkedContent(Self::new(tag)))
     }
 
@@ -41,11 +41,11 @@ impl PdfOperator for BeginMarkedContent {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BeginMarkedContentWithProps {
     /// The tag indicating the role or nature of the marked-content sequence.
-    tag: String,
+    tag: Vec<u8>,
 }
 
 impl BeginMarkedContentWithProps {
-    pub fn new(tag: String) -> Self {
+    pub fn new(tag: Vec<u8>) -> Self {
         Self { tag }
     }
 }
@@ -56,7 +56,7 @@ impl PdfOperator for BeginMarkedContentWithProps {
     const OPERAND_COUNT: Option<usize> = Some(2);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let tag = operands.get_str()?;
+        let tag = operands.get_name_bytes()?;
         Ok(PdfOperatorVariant::BeginMarkedContentWithProps(Self::new(
             tag,
         )))

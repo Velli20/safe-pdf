@@ -2163,6 +2163,7 @@ dependencies = [
 name = "pdf-content-stream"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "num-traits",
  "pdf-content-stream-operators",
  "pdf-graphics",
@@ -2268,6 +2269,7 @@ dependencies = [
 name = "pdf-graphics"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "num-derive",
  "num-traits",
  "thiserror 2.0.12",

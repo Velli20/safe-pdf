@@ -37,7 +37,7 @@ pub(crate) fn parse_cal_gray_color_space(
         black_point,
     } = CieColorSpaceParams::from_dictionary(dict, objects)?;
     let gamma = dict
-        .optional_number::<f32>("Gamma", objects)?
+        .optional_number::<f32>(b"Gamma", objects)?
         .unwrap_or(1.0);
     Ok(ColorSpace::CalGray(CalGrayColorSpace {
         white_point,

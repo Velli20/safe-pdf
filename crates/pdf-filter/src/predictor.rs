@@ -38,16 +38,16 @@ impl PredictorParams {
     ) -> Result<Self, FilterError> {
         let mut p = Self::default();
 
-        if let Some(value) = dict.optional_number::<u8>("Predictor", objects)? {
+        if let Some(value) = dict.optional_number::<u8>(b"Predictor", objects)? {
             p.predictor = value;
         }
-        if let Some(value) = dict.optional_number::<usize>("Colors", objects)? {
+        if let Some(value) = dict.optional_number::<usize>(b"Colors", objects)? {
             p.colors = value;
         }
-        if let Some(value) = dict.optional_number::<usize>("BitsPerComponent", objects)? {
+        if let Some(value) = dict.optional_number::<usize>(b"BitsPerComponent", objects)? {
             p.bits_per_component = value;
         }
-        if let Some(value) = dict.optional_number::<usize>("Columns", objects)? {
+        if let Some(value) = dict.optional_number::<usize>(b"Columns", objects)? {
             p.columns = value;
         }
 

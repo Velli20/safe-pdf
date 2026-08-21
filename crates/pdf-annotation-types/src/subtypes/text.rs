@@ -25,13 +25,13 @@ impl TextAnnotation {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
-        let open = dictionary.optional_boolean("Open", objects)?;
-        let name = dictionary.optional_bytes_vec("Name", objects)?;
-        let state = dictionary.optional_bytes_vec("State", objects)?;
-        let state_model = dictionary.optional_bytes_vec("StateModel", objects)?;
-        let intent = dictionary.optional_bytes_vec("IT", objects)?;
+        let open = dictionary.optional_boolean(b"Open", objects)?;
+        let name = dictionary.optional_name(b"Name", objects)?.map(Vec::from);
+        let state = dictionary.optional_bytes_vec(b"State", objects)?;
+        let state_model = dictionary.optional_bytes_vec(b"StateModel", objects)?;
+        let intent = dictionary.optional_name(b"IT", objects)?.map(Vec::from);
         let ex_data = dictionary
-            .get("ExData")
+            .get(b"ExData")
             .map(|value| crate::helpers::dictionary(value, objects))
             .transpose()?;
 

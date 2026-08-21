@@ -43,17 +43,17 @@ use pdf_color_space::color_space::ColorSpace;
 #[derive(Default)]
 pub struct Resources {
     /// Resources from the `/Font` sub-dictionary.
-    pub fonts: HashMap<String, Resource>,
+    pub fonts: HashMap<Vec<u8>, Resource>,
     /// Resources from the `/ExtGState` sub-dictionary.
-    pub ext_g_states: HashMap<String, Resource>,
+    pub ext_g_states: HashMap<Vec<u8>, Resource>,
     /// Resources from the `/Pattern` sub-dictionary.
-    pub patterns: HashMap<String, Resource>,
+    pub patterns: HashMap<Vec<u8>, Resource>,
     /// Resources from the `/XObject` sub-dictionary.
-    pub xobjects: HashMap<String, Resource>,
+    pub xobjects: HashMap<Vec<u8>, Resource>,
     /// Resources from the `/Shading` sub-dictionary.
-    pub shadings: HashMap<String, Resource>,
+    pub shadings: HashMap<Vec<u8>, Resource>,
     /// Resources from the `/ColorSpace` sub-dictionary.
-    pub color_spaces: HashMap<String, Resource>,
+    pub color_spaces: HashMap<Vec<u8>, Resource>,
     #[doc(hidden)]
     pub lazy_reference: Option<ResourcesReference>,
 }
@@ -87,7 +87,7 @@ fn read_fonts(
     cache: &mut dyn ResourceCache,
     cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
-) -> Result<HashMap<String, Resource>, PdfPagesError> {
+) -> Result<HashMap<Vec<u8>, Resource>, PdfPagesError> {
     let Some(font_dict) = resources.optional_dictionary(Font::KEY, objects)? else {
         return Ok(HashMap::new());
     };
@@ -110,8 +110,8 @@ fn read_external_graphics_states(
     cache: &mut dyn ResourceCache,
     cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
-) -> Result<HashMap<String, Resource>, PdfPagesError> {
-    let Some(ext_gstate_dict) = resources.optional_dictionary("ExtGState", objects)? else {
+) -> Result<HashMap<Vec<u8>, Resource>, PdfPagesError> {
+    let Some(ext_gstate_dict) = resources.optional_dictionary(b"ExtGState", objects)? else {
         return Ok(HashMap::new());
     };
 
@@ -152,8 +152,8 @@ fn read_patterns(
     cache: &mut dyn ResourceCache,
     cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
-) -> Result<HashMap<String, Resource>, PdfPagesError> {
-    let Some(pattern_dict) = resources.optional_dictionary("Pattern", objects)? else {
+) -> Result<HashMap<Vec<u8>, Resource>, PdfPagesError> {
+    let Some(pattern_dict) = resources.optional_dictionary(b"Pattern", objects)? else {
         return Ok(HashMap::new());
     };
 
@@ -203,10 +203,10 @@ fn read_xobject_resource(
             Ok(Some(resource))
         }
         ObjectVariant::Dictionary(dictionary) => {
-            let subtype = dictionary.required_str("Subtype", objects)?;
-            if subtype != "Form" {
+            let subtype = dictionary.required_name(b"Subtype", objects)?;
+            if subtype != b"Form" {
                 return Err(crate::error::PdfPagesError::UnsupportedXObjectSubtype {
-                    subtype: subtype.to_owned(),
+                    subtype: String::from_utf8_lossy(subtype).into_owned(),
                 });
             }
 
@@ -269,8 +269,8 @@ fn read_xobjects(
     cache: &mut dyn ResourceCache,
     cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
-) -> Result<HashMap<String, Resource>, PdfPagesError> {
-    let Some(xobject_dict) = resources.optional_dictionary("XObject", objects)? else {
+) -> Result<HashMap<Vec<u8>, Resource>, PdfPagesError> {
+    let Some(xobject_dict) = resources.optional_dictionary(b"XObject", objects)? else {
         return Ok(HashMap::new());
     };
 
@@ -291,8 +291,8 @@ fn read_shadings(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
-) -> Result<HashMap<String, Resource>, PdfPagesError> {
-    let Some(shading_dict) = resources.optional_dictionary("Shading", objects)? else {
+) -> Result<HashMap<Vec<u8>, Resource>, PdfPagesError> {
+    let Some(shading_dict) = resources.optional_dictionary(b"Shading", objects)? else {
         return Ok(HashMap::new());
     };
 
@@ -314,8 +314,8 @@ fn read_color_spaces(
     resources: &Dictionary,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
-) -> Result<HashMap<String, Resource>, PdfPagesError> {
-    let Some(color_space_dict) = resources.optional_dictionary("ColorSpace", objects)? else {
+) -> Result<HashMap<Vec<u8>, Resource>, PdfPagesError> {
+    let Some(color_space_dict) = resources.optional_dictionary(b"ColorSpace", objects)? else {
         return Ok(HashMap::new());
     };
 
@@ -371,8 +371,8 @@ impl Resources {
     ///
     /// An `Option` containing a reference to the [`Font`] if found, or `None`
     /// if not present or not a font.
-    pub fn font(&self, name: &str) -> Option<(&Font, Option<&Resources>)> {
-        self.resolved()?.fonts.get(name)?.as_font()
+    pub fn font<N: AsRef<[u8]>>(&self, name: N) -> Option<(&Font, Option<&Resources>)> {
+        self.resolved()?.fonts.get(name.as_ref())?.as_font()
     }
 
     /// Returns a reference to an external graphics state resource by name, if it exists.
@@ -385,10 +385,13 @@ impl Resources {
     ///
     /// An `Option` containing a reference to the [`ExternalGraphicsState`] if found,
     /// or `None` if not present or not an external graphics state.
-    pub fn external_graphics_state(&self, name: &str) -> Option<&ExternalGraphicsState> {
+    pub fn external_graphics_state<N: AsRef<[u8]>>(
+        &self,
+        name: N,
+    ) -> Option<&ExternalGraphicsState> {
         self.resolved()?
             .ext_g_states
-            .get(name)?
+            .get(name.as_ref())?
             .as_external_graphics_state()
     }
 
@@ -402,8 +405,8 @@ impl Resources {
     ///
     /// An `Option` containing the resolved [`Resource::Image`],
     /// [`Resource::UnavailableImage`], or [`Resource::Form`] entry if found.
-    pub fn xobject(&self, name: &str) -> Option<&Resource> {
-        self.resolved()?.xobjects.get(name)?.resolved()
+    pub fn xobject<N: AsRef<[u8]>>(&self, name: N) -> Option<&Resource> {
+        self.resolved()?.xobjects.get(name.as_ref())?.resolved()
     }
 
     /// Returns a reference to a pattern resource by name, if it exists.
@@ -416,8 +419,8 @@ impl Resources {
     ///
     /// An `Option` containing a reference to the [`Pattern`] if found, or `None`
     /// if not present or not a pattern.
-    pub fn pattern(&self, name: &str) -> Option<&Pattern> {
-        self.resolved()?.patterns.get(name)?.as_pattern()
+    pub fn pattern<N: AsRef<[u8]>>(&self, name: N) -> Option<&Pattern> {
+        self.resolved()?.patterns.get(name.as_ref())?.as_pattern()
     }
 
     /// Returns a reference to a shading resource by name, if it exists.
@@ -430,8 +433,8 @@ impl Resources {
     ///
     /// An `Option` containing a reference to the [`Shading`] if found, or `None`
     /// if not present or not a shading.
-    pub fn shading(&self, name: &str) -> Option<&Shading> {
-        self.resolved()?.shadings.get(name)?.as_shading()
+    pub fn shading<N: AsRef<[u8]>>(&self, name: N) -> Option<&Shading> {
+        self.resolved()?.shadings.get(name.as_ref())?.as_shading()
     }
 
     /// Returns a reference to a color space resource by name, if it exists.
@@ -444,8 +447,11 @@ impl Resources {
     ///
     /// An `Option` containing a reference to the [`ColorSpace`] if found, or `None`
     /// if not present or not a color space.
-    pub fn color_space(&self, name: &str) -> Option<&ColorSpace> {
-        self.resolved()?.color_spaces.get(name)?.as_color_space()
+    pub fn color_space<N: AsRef<[u8]>>(&self, name: N) -> Option<&ColorSpace> {
+        self.resolved()?
+            .color_spaces
+            .get(name.as_ref())?
+            .as_color_space()
     }
 
     /// Reads the `/Resources` dictionary.
@@ -475,7 +481,7 @@ impl Resources {
         cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Option<Rc<Self>>, PdfPagesError> {
-        const KEY: &str = "Resources";
+        const KEY: &[u8] = b"Resources";
 
         let Some(resources_entry) = dictionary.get(KEY) else {
             return Ok(None);
@@ -527,9 +533,9 @@ impl Resources {
 
     /// Returns one merged resource category with child entries taking precedence.
     fn merged_category(
-        child: &HashMap<String, Resource>,
-        parent: &HashMap<String, Resource>,
-    ) -> HashMap<String, Resource> {
+        child: &HashMap<Vec<u8>, Resource>,
+        parent: &HashMap<Vec<u8>, Resource>,
+    ) -> HashMap<Vec<u8>, Resource> {
         let mut merged = HashMap::with_capacity(child.len().saturating_add(parent.len()));
         merged.extend(
             child

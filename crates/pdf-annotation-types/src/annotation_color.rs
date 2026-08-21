@@ -12,7 +12,7 @@ pub struct AnnotationColor {
 impl AnnotationColor {
     pub(crate) fn from_dictionary(
         dictionary: &Dictionary,
-        key: &'static str,
+        key: &'static [u8],
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, AnnotationError> {
         dictionary

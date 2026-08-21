@@ -36,7 +36,7 @@ pub enum ExternalGraphicsStateKey {
     /// (the dash array) and a number specifying the phase (the dash phase).
     DashPattern(DashPattern),
     /// Rendering intent (`RI`). A name specifying the color rendering intent.
-    RenderingIntent(String),
+    RenderingIntent(Vec<u8>),
     /// Overprint for stroke (`OP`). A boolean specifying whether stroking operations are to be
     /// performed in overprint mode.
     OverprintStroke(bool),
@@ -97,7 +97,7 @@ impl ReadFromDictionary for ExternalGraphicsState {
         let mut params: Vec<ExternalGraphicsStateKey> = Vec::new();
 
         for (name, value) in &dictionary.dictionary {
-            if name == "Type" {
+            if name == b"Type" {
                 // The "Type" entry is optional and, if present, must be "ExtGState".
                 // We can safely ignore it during parsing.
                 continue;
@@ -120,26 +120,26 @@ impl ReadFromDictionary for ExternalGraphicsState {
 }
 
 fn invalid_ext_gstate_entry_structure(
-    entry: &str,
+    entry: &[u8],
     expected_structure: &'static str,
     actual_structure: String,
 ) -> PdfPagesError {
     PdfPagesError::InvalidExtGStateEntryStructure {
-        entry: entry.to_string(),
+        entry: String::from_utf8_lossy(entry).into_owned(),
         expected_structure,
         actual_structure,
     }
 }
 
-fn invalid_ext_gstate_entry_value(entry: &str, reason: impl Into<String>) -> PdfPagesError {
+fn invalid_ext_gstate_entry_value(entry: &[u8], reason: impl Into<String>) -> PdfPagesError {
     PdfPagesError::InvalidExtGStateEntryValue {
-        entry: entry.to_string(),
+        entry: String::from_utf8_lossy(entry).into_owned(),
         reason: reason.into(),
     }
 }
 
 fn parse_dash_pattern(
-    key_name: &str,
+    key_name: &[u8],
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
 ) -> Result<Option<ExternalGraphicsStateKey>, PdfPagesError> {
@@ -164,7 +164,7 @@ fn parse_dash_pattern(
 }
 
 fn parse_font(
-    key_name: &str,
+    key_name: &[u8],
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
@@ -197,10 +197,10 @@ fn parse_blend_mode(
         value
             .try_array(objects)?
             .iter()
-            .map(|obj| obj.try_str(objects).map(BlendMode::from))
+            .map(|obj| obj.try_name(objects).map(BlendMode::from))
             .collect::<Result<Vec<BlendMode>, _>>()?
     } else {
-        let mode = BlendMode::from(value.try_str(objects)?);
+        let mode = BlendMode::from(value.try_name(objects)?);
         vec![mode]
     };
 
@@ -212,7 +212,7 @@ fn parse_blend_mode(
 /// Returns `Ok(None)` for unrecognized keys, which are silently ignored
 /// per the PDF specification.
 fn parse_entry(
-    name: &str,
+    name: &[u8],
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
@@ -220,11 +220,11 @@ fn parse_entry(
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<Option<ExternalGraphicsStateKey>, PdfPagesError> {
     let parsed = match name {
-        "TR" => ExternalGraphicsStateKey::TransferFunction,
-        "TR2" => ExternalGraphicsStateKey::TransferFunctionNew,
-        "SM" => ExternalGraphicsStateKey::SmoothnessTolerance(value.try_number::<f32>(objects)?),
-        "LW" => ExternalGraphicsStateKey::LineWidth(value.try_number::<f32>(objects)?),
-        "LC" => {
+        b"TR" => ExternalGraphicsStateKey::TransferFunction,
+        b"TR2" => ExternalGraphicsStateKey::TransferFunctionNew,
+        b"SM" => ExternalGraphicsStateKey::SmoothnessTolerance(value.try_number::<f32>(objects)?),
+        b"LW" => ExternalGraphicsStateKey::LineWidth(value.try_number::<f32>(objects)?),
+        b"LC" => {
             let cap_val = value.try_number::<i32>(objects)?;
             let cap = LineCap::from_i32(cap_val).ok_or_else(|| {
                 invalid_ext_gstate_entry_value(
@@ -234,7 +234,7 @@ fn parse_entry(
             })?;
             ExternalGraphicsStateKey::LineCap(cap)
         }
-        "LJ" => {
+        b"LJ" => {
             let join_val = value.try_number::<i32>(objects)?;
             let join = LineJoin::from_i32(join_val).ok_or_else(|| {
                 invalid_ext_gstate_entry_value(
@@ -244,18 +244,18 @@ fn parse_entry(
             })?;
             ExternalGraphicsStateKey::LineJoin(join)
         }
-        "ML" => ExternalGraphicsStateKey::MiterLimit(value.try_number::<f32>(objects)?),
-        "D" => match parse_dash_pattern(name, value, objects)? {
+        b"ML" => ExternalGraphicsStateKey::MiterLimit(value.try_number::<f32>(objects)?),
+        b"D" => match parse_dash_pattern(name, value, objects)? {
             Some(param) => param,
             None => return Ok(None),
         },
-        "RI" => ExternalGraphicsStateKey::RenderingIntent(value.try_str(objects)?.to_string()),
-        "OP" => ExternalGraphicsStateKey::OverprintStroke(value.try_boolean(objects)?),
-        "op" => ExternalGraphicsStateKey::OverprintFill(value.try_boolean(objects)?),
-        "OPM" => ExternalGraphicsStateKey::OverprintMode(value.try_number::<i32>(objects)?),
-        "Font" => parse_font(name, value, objects, cache, cycle_tracker, id_allocator)?,
-        "BM" => parse_blend_mode(value, objects)?,
-        "SMask" => {
+        b"RI" => ExternalGraphicsStateKey::RenderingIntent(Vec::from(value.try_name(objects)?)),
+        b"OP" => ExternalGraphicsStateKey::OverprintStroke(value.try_boolean(objects)?),
+        b"op" => ExternalGraphicsStateKey::OverprintFill(value.try_boolean(objects)?),
+        b"OPM" => ExternalGraphicsStateKey::OverprintMode(value.try_number::<i32>(objects)?),
+        b"Font" => parse_font(name, value, objects, cache, cycle_tracker, id_allocator)?,
+        b"BM" => parse_blend_mode(value, objects)?,
+        b"SMask" => {
             let soft_mask = match value {
                 ObjectVariant::Dictionary(dictionary) => SoftMask::from_dictionary(
                     dictionary,
@@ -265,8 +265,8 @@ fn parse_entry(
                     id_allocator,
                 )?
                 .map(Box::new),
-                other => match other.try_str(objects)? {
-                    "None" => None,
+                other => match other.try_name(objects)? {
+                    b"None" => None,
                     _ => {
                         return Err(invalid_ext_gstate_entry_value(
                             name,
@@ -277,11 +277,11 @@ fn parse_entry(
             };
             ExternalGraphicsStateKey::SoftMask(soft_mask)
         }
-        "CA" => ExternalGraphicsStateKey::StrokingAlpha(value.try_number::<f32>(objects)?),
-        "ca" => ExternalGraphicsStateKey::NonStrokingAlpha(value.try_number::<f32>(objects)?),
-        "SA" => ExternalGraphicsStateKey::StrokeAdjustment(value.try_boolean(objects)?),
-        "AAPL:AA" => ExternalGraphicsStateKey::AppleAntiAliasing(value.try_boolean(objects)?),
-        "AIS" => ExternalGraphicsStateKey::AlphaIsShape(value.try_boolean(objects)?),
+        b"CA" => ExternalGraphicsStateKey::StrokingAlpha(value.try_number::<f32>(objects)?),
+        b"ca" => ExternalGraphicsStateKey::NonStrokingAlpha(value.try_number::<f32>(objects)?),
+        b"SA" => ExternalGraphicsStateKey::StrokeAdjustment(value.try_boolean(objects)?),
+        b"AAPL:AA" => ExternalGraphicsStateKey::AppleAntiAliasing(value.try_boolean(objects)?),
+        b"AIS" => ExternalGraphicsStateKey::AlphaIsShape(value.try_boolean(objects)?),
         _ => return Ok(None),
     };
 
@@ -307,7 +307,7 @@ mod tests {
 
     fn dash_dict(dash_array: Vec<ObjectVariant>, dash_phase: f32) -> Dictionary {
         Dictionary::new(BTreeMap::from([(
-            "D".to_string(),
+            Vec::from(b"D"),
             ObjectVariant::Array(vec![
                 ObjectVariant::Array(dash_array),
                 ObjectVariant::Real(f64::from(dash_phase)),
@@ -411,7 +411,7 @@ mod tests {
     #[test]
     fn soft_mask_none_is_preserved() {
         let dictionary = Dictionary::new(BTreeMap::from([(
-            "SMask".to_string(),
+            Vec::from(b"SMask"),
             ObjectVariant::Name(b"None".to_vec()),
         )]));
 
@@ -428,7 +428,7 @@ mod tests {
     #[test]
     fn invalid_soft_mask_name_is_rejected() {
         let dictionary = Dictionary::new(BTreeMap::from([(
-            "SMask".to_string(),
+            Vec::from(b"SMask"),
             ObjectVariant::Name(b"Invalid".to_vec()),
         )]));
 

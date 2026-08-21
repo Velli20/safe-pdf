@@ -47,8 +47,8 @@ fn read_xobject_inner(
     cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<Resource, PdfPagesError> {
-    match dictionary.required_str("Subtype", objects)? {
-        "Image" => {
+    match dictionary.required_name(b"Subtype", objects)? {
+        b"Image" => {
             // Malformed dimensions make the image impossible to decode, but should not
             // prevent otherwise valid page content from being loaded and rendered.
             if !dictionary
@@ -67,7 +67,7 @@ fn read_xobject_inner(
                 soft_mask.as_ref(),
             )?))
         }
-        "Form" => FormXObject::read_xobject(
+        b"Form" => FormXObject::read_xobject(
             content,
             dictionary,
             objects,
@@ -77,7 +77,7 @@ fn read_xobject_inner(
         )
         .map(Resource::from),
         other => Err(PdfPagesError::UnsupportedXObjectSubtype {
-            subtype: other.to_string(),
+            subtype: String::from_utf8_lossy(other).into_owned(),
         }),
     }
 }
@@ -95,7 +95,7 @@ fn resolve_image_soft_mask(
     cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<Option<Image>, PdfPagesError> {
-    let Some(smask_obj) = dictionary.get("SMask") else {
+    let Some(smask_obj) = dictionary.get(b"SMask") else {
         return Ok(None);
     };
 
@@ -166,17 +166,17 @@ mod tests {
     fn image_dictionary(object_number: usize) -> Dictionary {
         Dictionary::new(BTreeMap::from([
             (
-                "Subtype".to_string(),
+                Vec::from(b"Subtype"),
                 ObjectVariant::Name(b"Image".to_vec()),
             ),
-            ("Width".to_string(), ObjectVariant::Integer(1)),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Name(b"DeviceGray".to_vec()),
             ),
-            ("SMask".to_string(), ObjectVariant::Reference(object_number)),
+            (Vec::from(b"SMask"), ObjectVariant::Reference(object_number)),
         ]))
     }
 
@@ -218,17 +218,17 @@ mod tests {
             0,
             Box::new(Dictionary::new(BTreeMap::from([
                 (
-                    "Subtype".to_string(),
+                    Vec::from(b"Subtype"),
                     ObjectVariant::Name(b"Image".to_vec()),
                 ),
-                ("Width".to_string(), ObjectVariant::Integer(2)),
-                ("Height".to_string(), ObjectVariant::Integer(1)),
-                ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+                (Vec::from(b"Width"), ObjectVariant::Integer(2)),
+                (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+                (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
                 (
-                    "ColorSpace".to_string(),
+                    Vec::from(b"ColorSpace"),
                     ObjectVariant::Name(b"DeviceGray".to_vec()),
                 ),
-                ("SMask".to_string(), ObjectVariant::Reference(2)),
+                (Vec::from(b"SMask"), ObjectVariant::Reference(2)),
             ]))),
             vec![0x20, 0xC0],
         );
@@ -237,14 +237,14 @@ mod tests {
             0,
             Box::new(Dictionary::new(BTreeMap::from([
                 (
-                    "Subtype".to_string(),
+                    Vec::from(b"Subtype"),
                     ObjectVariant::Name(b"Image".to_vec()),
                 ),
-                ("Width".to_string(), ObjectVariant::Integer(2)),
-                ("Height".to_string(), ObjectVariant::Integer(1)),
-                ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+                (Vec::from(b"Width"), ObjectVariant::Integer(2)),
+                (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+                (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
                 (
-                    "ColorSpace".to_string(),
+                    Vec::from(b"ColorSpace"),
                     ObjectVariant::Name(b"DeviceGray".to_vec()),
                 ),
             ]))),
@@ -292,7 +292,7 @@ mod tests {
             2,
             0,
             Box::new(Dictionary::new(BTreeMap::from([(
-                "Subtype".to_string(),
+                Vec::from(b"Subtype"),
                 ObjectVariant::Name(b"Unsupported".to_vec()),
             )]))),
             vec![],
@@ -324,22 +324,22 @@ mod tests {
     #[test]
     fn encoded_image_retries_filters_after_dependencies_are_resolved() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Name(b"DeviceGray".to_vec()),
             ),
-            ("DecodeParms".to_string(), ObjectVariant::Reference(2)),
+            (Vec::from(b"DecodeParms"), ObjectVariant::Reference(2)),
             (
-                "Filter".to_string(),
+                Vec::from(b"Filter"),
                 ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (
-                "Subtype".to_string(),
+                Vec::from(b"Subtype"),
                 ObjectVariant::Name(b"Image".to_vec()),
             ),
-            ("Width".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
         let stream = StreamObject::new_encoded(1, 0, Box::new(dictionary), b"2A>".to_vec());
         let mut objects = ObjectCollection::default();
@@ -353,7 +353,7 @@ mod tests {
                     2,
                     0,
                     Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
-                        BTreeMap::new(),
+                        BTreeMap::<Vec<u8>, ObjectVariant>::new(),
                     )))),
                 ),
             )))
@@ -393,13 +393,13 @@ mod tests {
             0,
             Box::new(Dictionary::new(BTreeMap::from([
                 (
-                    "Subtype".to_string(),
+                    Vec::from(b"Subtype"),
                     ObjectVariant::Name(b"Image".to_vec()),
                 ),
-                ("Width".to_string(), ObjectVariant::Name(b"Height".to_vec())),
-                ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+                (Vec::from(b"Width"), ObjectVariant::Name(b"Height".to_vec())),
+                (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
                 (
-                    "ColorSpace".to_string(),
+                    Vec::from(b"ColorSpace"),
                     ObjectVariant::Name(b"DeviceGray".to_vec()),
                 ),
             ]))),

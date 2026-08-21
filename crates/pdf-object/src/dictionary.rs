@@ -9,19 +9,32 @@ use crate::{
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Dictionary {
-    pub dictionary: BTreeMap<String, ObjectVariant>,
+    pub dictionary: BTreeMap<Vec<u8>, ObjectVariant>,
     pub object_number: Option<usize>,
 }
 
 impl Dictionary {
-    const HEIGHT_KEY: &'static str = "Height";
-    const WIDTH_KEY: &'static str = "Width";
+    const HEIGHT_KEY: &'static [u8] = b"Height";
+    const WIDTH_KEY: &'static [u8] = b"Width";
 
-    pub fn new(dictionary: BTreeMap<String, ObjectVariant>) -> Self {
+    /// Creates a dictionary from already-owned PDF Name keys.
+    pub fn new(dictionary: BTreeMap<Vec<u8>, ObjectVariant>) -> Self {
         Dictionary {
             dictionary,
             object_number: None,
         }
+    }
+
+    /// Creates a hand-built dictionary from borrowed PDF Name keys.
+    ///
+    /// This keeps the unavoidable ownership copy at the dictionary boundary.
+    pub fn from_entries<const N: usize>(entries: [(&[u8], ObjectVariant); N]) -> Self {
+        Self::new(
+            entries
+                .into_iter()
+                .map(|(key, value)| (Vec::from(key), value))
+                .collect(),
+        )
     }
 
     /// Returns a reference to the value associated with the given key, if present.
@@ -33,7 +46,7 @@ impl Dictionary {
     /// # Returns
     ///
     /// Returns an optional reference to [`ObjectVariant`] when the key exists, or `None` if it does not.
-    pub fn get(&self, key: &str) -> Option<&ObjectVariant> {
+    pub fn get(&self, key: &[u8]) -> Option<&ObjectVariant> {
         self.dictionary.get(key)
     }
 
@@ -49,7 +62,7 @@ impl Dictionary {
     /// key is absent, or `Err(T::Error)` when conversion fails.
     pub fn try_get_as<T>(
         &self,
-        key: &str,
+        key: &[u8],
     ) -> Result<Option<T>, <T as TryFrom<&ObjectVariant>>::Error>
     where
         for<'a> T: TryFrom<&'a ObjectVariant>,
@@ -66,7 +79,7 @@ impl Dictionary {
     /// # Returns
     ///
     /// Returns an `Option` containing the [`ObjectVariant`] if the key exists, or `None` if it does not.
-    pub fn take(&mut self, key: &str) -> Option<ObjectVariant> {
+    pub fn take(&mut self, key: &[u8]) -> Option<ObjectVariant> {
         self.dictionary.remove(key)
     }
 
@@ -79,10 +92,10 @@ impl Dictionary {
     /// # Returns
     ///
     /// Returns `Ok(&ObjectVariant)` if the key exists, or an [`ObjectError::MissingRequiredKey`] if it does not.
-    pub fn get_or_err(&self, key: &str) -> Result<&ObjectVariant, ObjectError> {
+    pub fn get_or_err(&self, key: &[u8]) -> Result<&ObjectVariant, ObjectError> {
         self.get(key)
             .ok_or_else(|| ObjectError::MissingRequiredKey {
-                key: key.to_owned(),
+                key: String::from_utf8_lossy(key).into_owned(),
             })
     }
 
@@ -92,7 +105,7 @@ impl Dictionary {
     /// The coordinates are returned in their original order.
     pub fn optional_bbox(&self, objects: &dyn ObjectResolver) -> Result<Option<Rect>, ObjectError> {
         Ok(self
-            .optional_array_of::<f32, 4>("BBox", objects)?
+            .optional_array_of::<f32, 4>(b"BBox", objects)?
             .map(Rect::from))
     }
 
@@ -100,7 +113,7 @@ impl Dictionary {
     ///
     /// The coordinates are returned in their original order.
     pub fn required_bbox(&self, objects: &dyn ObjectResolver) -> Result<Rect, ObjectError> {
-        self.required_array_of::<f32, 4>("BBox", objects)
+        self.required_array_of::<f32, 4>(b"BBox", objects)
             .map(Rect::from)
     }
 
@@ -120,10 +133,10 @@ impl Dictionary {
         }
 
         let width = width.ok_or_else(|| ObjectError::MissingRequiredKey {
-            key: Self::WIDTH_KEY.to_owned(),
+            key: String::from_utf8_lossy(Self::WIDTH_KEY).into_owned(),
         })?;
         let height = height.ok_or_else(|| ObjectError::MissingRequiredKey {
-            key: Self::HEIGHT_KEY.to_owned(),
+            key: String::from_utf8_lossy(Self::HEIGHT_KEY).into_owned(),
         })?;
 
         Ok(Some(Rect::<usize>::from_size(width, height)))
@@ -146,7 +159,7 @@ impl Dictionary {
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Rect>, ObjectError> {
         Ok(self
-            .optional_array_of::<f32, 4>("MediaBox", objects)?
+            .optional_array_of::<f32, 4>(b"MediaBox", objects)?
             .map(Rect::from))
     }
 
@@ -158,13 +171,13 @@ impl Dictionary {
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Transform>, ObjectError> {
         Ok(self
-            .optional_array_of::<f32, 6>("Matrix", objects)?
+            .optional_array_of::<f32, 6>(b"Matrix", objects)?
             .map(|[sx, ky, kx, sy, tx, ty]| Transform::from_row(sx, ky, kx, sy, tx, ty)))
     }
 
     /// Reads the required `/Matrix` entry as an affine transform.
     pub fn required_matrix(&self, objects: &dyn ObjectResolver) -> Result<Transform, ObjectError> {
-        let [sx, ky, kx, sy, tx, ty] = self.required_array_of::<f32, 6>("Matrix", objects)?;
+        let [sx, ky, kx, sy, tx, ty] = self.required_array_of::<f32, 6>(b"Matrix", objects)?;
 
         Ok(Transform::from_row(sx, ky, kx, sy, tx, ty))
     }
@@ -192,25 +205,20 @@ mod tests {
         }
     }
 
-    fn dictionary_with(key: &str, value: ObjectVariant) -> Dictionary {
-        let mut values = BTreeMap::new();
-        values.insert(key.to_owned(), value);
-        Dictionary::new(values)
+    fn dictionary_with(key: &[u8], value: ObjectVariant) -> Dictionary {
+        Dictionary::from_entries([(key, value)])
     }
 
     fn size_dictionary(width: ObjectVariant, height: ObjectVariant) -> Dictionary {
-        Dictionary::new(BTreeMap::from([
-            ("Height".to_owned(), height),
-            ("Width".to_owned(), width),
-        ]))
+        Dictionary::from_entries([(b"Height", height), (b"Width", width)])
     }
 
     #[test]
     fn try_get_as_converts_existing_value() {
-        let dictionary = dictionary_with("Count", ObjectVariant::Integer(42));
+        let dictionary = dictionary_with(b"Count", ObjectVariant::Integer(42));
 
         let value = dictionary
-            .try_get_as::<ParsedInteger>("Count")
+            .try_get_as::<ParsedInteger>(b"Count")
             .expect("integer parses");
 
         assert_eq!(value, Some(ParsedInteger(42)));
@@ -218,10 +226,10 @@ mod tests {
 
     #[test]
     fn try_get_as_returns_none_for_missing_key() {
-        let dictionary = Dictionary::new(BTreeMap::new());
+        let dictionary = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
 
         let value = dictionary
-            .try_get_as::<ParsedInteger>("Count")
+            .try_get_as::<ParsedInteger>(b"Count")
             .expect("missing key is not an error");
 
         assert_eq!(value, None);
@@ -229,10 +237,10 @@ mod tests {
 
     #[test]
     fn try_get_as_propagates_conversion_error() {
-        let dictionary = dictionary_with("Count", ObjectVariant::Name(b"Count".to_vec()));
+        let dictionary = dictionary_with(b"Count", ObjectVariant::Name(b"Count".to_vec()));
 
         let error = dictionary
-            .try_get_as::<ParsedInteger>("Count")
+            .try_get_as::<ParsedInteger>(b"Count")
             .expect_err("name is not an integer");
 
         assert_eq!(error, "expected integer");
@@ -241,7 +249,7 @@ mod tests {
     #[test]
     fn optional_bbox_parses_rectangle() {
         let dictionary = dictionary_with(
-            "BBox",
+            b"BBox",
             ObjectVariant::Array(vec![
                 ObjectVariant::Integer(1),
                 ObjectVariant::Real(2.5),
@@ -267,8 +275,8 @@ mod tests {
 
     #[test]
     fn optional_bbox_returns_none_for_missing_or_null_entry() {
-        let missing = Dictionary::new(BTreeMap::new());
-        let null = dictionary_with("BBox", ObjectVariant::Null);
+        let missing = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
+        let null = dictionary_with(b"BBox", ObjectVariant::Null);
 
         assert_eq!(
             missing
@@ -286,7 +294,7 @@ mod tests {
     #[test]
     fn required_bbox_parses_rectangle() {
         let dictionary = dictionary_with(
-            "BBox",
+            b"BBox",
             ObjectVariant::Array(vec![
                 ObjectVariant::Integer(1),
                 ObjectVariant::Integer(2),
@@ -313,7 +321,7 @@ mod tests {
     #[test]
     fn required_bbox_propagates_invalid_array_length() {
         let dictionary = dictionary_with(
-            "BBox",
+            b"BBox",
             ObjectVariant::Array(vec![
                 ObjectVariant::Integer(1),
                 ObjectVariant::Integer(2),
@@ -347,7 +355,7 @@ mod tests {
 
     #[test]
     fn optional_size_returns_none_when_both_dimensions_are_absent() {
-        let missing = Dictionary::new(BTreeMap::new());
+        let missing = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
         let null = size_dictionary(ObjectVariant::Null, ObjectVariant::Null);
 
         assert_eq!(
@@ -365,8 +373,8 @@ mod tests {
 
     #[test]
     fn optional_size_rejects_partial_dimensions() {
-        let width_only = dictionary_with("Width", ObjectVariant::Integer(40));
-        let height_only = dictionary_with("Height", ObjectVariant::Integer(15));
+        let width_only = dictionary_with(b"Width", ObjectVariant::Integer(40));
+        let height_only = dictionary_with(b"Height", ObjectVariant::Integer(15));
 
         assert_eq!(
             width_only
@@ -399,7 +407,7 @@ mod tests {
 
     #[test]
     fn required_size_rejects_missing_or_invalid_dimensions() {
-        let missing_height = dictionary_with("Width", ObjectVariant::Integer(40));
+        let missing_height = dictionary_with(b"Width", ObjectVariant::Integer(40));
         let negative_width =
             size_dictionary(ObjectVariant::Integer(-1), ObjectVariant::Integer(15));
 
@@ -422,7 +430,7 @@ mod tests {
     #[test]
     fn optional_media_box_parses_rectangle() {
         let dictionary = dictionary_with(
-            "MediaBox",
+            b"MediaBox",
             ObjectVariant::Array(vec![
                 ObjectVariant::Integer(10),
                 ObjectVariant::Integer(20),
@@ -448,8 +456,8 @@ mod tests {
 
     #[test]
     fn optional_media_box_returns_none_for_missing_or_null_entry() {
-        let missing = Dictionary::new(BTreeMap::new());
-        let null = dictionary_with("MediaBox", ObjectVariant::Null);
+        let missing = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
+        let null = dictionary_with(b"MediaBox", ObjectVariant::Null);
 
         assert_eq!(
             missing
@@ -467,7 +475,7 @@ mod tests {
     #[test]
     fn optional_media_box_propagates_invalid_array_length() {
         let dictionary = dictionary_with(
-            "MediaBox",
+            b"MediaBox",
             ObjectVariant::Array(vec![
                 ObjectVariant::Integer(10),
                 ObjectVariant::Integer(20),
@@ -491,7 +499,7 @@ mod tests {
     #[test]
     fn optional_matrix_parses_transform() {
         let dictionary = dictionary_with(
-            "Matrix",
+            b"Matrix",
             ObjectVariant::Array(vec![
                 ObjectVariant::Real(1.0),
                 ObjectVariant::Real(2.0),
@@ -514,8 +522,8 @@ mod tests {
 
     #[test]
     fn optional_matrix_returns_none_for_missing_or_null_entry() {
-        let missing = Dictionary::new(BTreeMap::new());
-        let null = dictionary_with("Matrix", ObjectVariant::Null);
+        let missing = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
+        let null = dictionary_with(b"Matrix", ObjectVariant::Null);
 
         assert_eq!(
             missing
@@ -533,7 +541,7 @@ mod tests {
     #[test]
     fn required_matrix_parses_transform() {
         let dictionary = dictionary_with(
-            "Matrix",
+            b"Matrix",
             ObjectVariant::Array(vec![
                 ObjectVariant::Integer(1),
                 ObjectVariant::Integer(2),
@@ -554,7 +562,7 @@ mod tests {
     #[test]
     fn required_matrix_propagates_invalid_array_length() {
         let dictionary = dictionary_with(
-            "Matrix",
+            b"Matrix",
             ObjectVariant::Array(vec![
                 ObjectVariant::Integer(1),
                 ObjectVariant::Integer(2),

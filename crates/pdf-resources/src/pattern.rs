@@ -144,7 +144,7 @@ impl Pattern {
     ) -> Result<Pattern, PdfPagesError> {
         let dictionary = object.try_dictionary(objects)?;
 
-        let pattern_type = dictionary.required_number::<i32>("PatternType", objects)?;
+        let pattern_type = dictionary.required_number::<i32>(b"PatternType", objects)?;
 
         // Read the transformation matrix for the pattern. Defaults to identity.
         let matrix = dictionary.optional_matrix(objects)?;
@@ -152,22 +152,22 @@ impl Pattern {
         match PatternType::try_from(pattern_type)? {
             PatternType::Tiling => {
                 // Read the `/PaintType` entry.
-                let paint_type_int = dictionary.required_number::<i32>("PaintType", objects)?;
+                let paint_type_int = dictionary.required_number::<i32>(b"PaintType", objects)?;
 
                 let paint_type = PaintType::try_from(paint_type_int)?;
 
                 // Read the `/TilingType` entry.
-                let tiling_type_int = dictionary.required_number::<i32>("TilingType", objects)?;
+                let tiling_type_int = dictionary.required_number::<i32>(b"TilingType", objects)?;
                 let tiling_type = TilingType::try_from(tiling_type_int)?;
 
                 // Read the `/BBox` entry.
                 let bbox = dictionary.required_bbox(objects)?;
 
                 // Read the `/XStep` entry.
-                let x_step = dictionary.required_number::<f32>("XStep", objects)?;
+                let x_step = dictionary.required_number::<f32>(b"XStep", objects)?;
 
                 // Read the `/YStep` entry.
-                let y_step = dictionary.required_number::<f32>("YStep", objects)?;
+                let y_step = dictionary.required_number::<f32>(b"YStep", objects)?;
 
                 // Read the `/Resources` entry. Needed by the pattern's content stream.
                 let parsed_resources =
@@ -188,13 +188,13 @@ impl Pattern {
                 })
             }
             PatternType::Shading => {
-                let shading_object = dictionary.get_or_err("Shading")?;
+                let shading_object = dictionary.get_or_err(b"Shading")?;
                 // Read the shading object that defines the gradient fill.
                 let shading = Shading::from_dictionary(shading_object, objects)?;
 
                 // Read an external graphics state dictionary to apply when painting the pattern.
                 let ext_g_state = match dictionary
-                    .get("ExtGState")
+                    .get(b"ExtGState")
                     .map(|obj| obj.try_dictionary(objects))
                     .transpose()?
                 {

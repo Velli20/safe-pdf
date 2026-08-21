@@ -124,7 +124,7 @@ impl FunctionImpl for Function {
     ) -> Result<Function, FunctionReadError> {
         let function_type = object
             .try_dictionary(objects)?
-            .required_number::<i32>("FunctionType", objects)
+            .required_number::<i32>(b"FunctionType", objects)
             .map(FunctionType::from_i32)?
             .ok_or(FunctionReadError::InvalidFunctionType)?;
 

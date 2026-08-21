@@ -22,13 +22,13 @@ impl AnnotationBorder {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, AnnotationError> {
-        let Some(value) = dictionary.optional_array("Border", objects)? else {
+        let Some(value) = dictionary.optional_array(b"Border", objects)? else {
             return Ok(None);
         };
 
         let [horizontal_radius, vertical_radius, width, rest @ ..] = value else {
             return Err(AnnotationError::InvalidEntry {
-                entry: "Border",
+                entry: b"Border",
                 reason: "expected an array with at least 3 numbers".to_owned(),
             });
         };

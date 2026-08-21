@@ -12,11 +12,11 @@ use crate::{
 pub struct PaintShading {
     /// The name of the shading dictionary resource from the Shading subdictionary
     /// of the current resource dictionary.
-    name: String,
+    name: Vec<u8>,
 }
 
 impl PaintShading {
-    pub fn new(name: String) -> Self {
+    pub fn new(name: Vec<u8>) -> Self {
         Self { name }
     }
 }
@@ -27,7 +27,7 @@ impl PdfOperator for PaintShading {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let name = operands.get_str()?;
+        let name = operands.get_name_bytes()?;
         Ok(PdfOperatorVariant::PaintShading(Self::new(name)))
     }
 

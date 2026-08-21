@@ -34,26 +34,28 @@ impl Type0EncodingCMap {
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, CMapError> {
         dictionary
-            .get("Encoding")
+            .get(b"Encoding")
             .map(|value| {
                 let resolved = objects.resolve_object(value)?;
                 match resolved {
                     ObjectVariant::Stream(stream) => Self::from_bytes(stream.raw_data()),
-                    _ => Self::from_name(value.try_str(objects)?),
+                    _ => Self::from_name(value.try_name(objects)?),
                 }
             })
             .transpose()
     }
 
     /// Build a Type0 encoding CMap from a predefined CMap name.
-    pub fn from_name(name: &str) -> Result<Self, CMapError> {
+    pub fn from_name(name: &[u8]) -> Result<Self, CMapError> {
         if let Ok(writing_mode) = WritingMode::try_from(name) {
             return Ok(Self::Identity { writing_mode });
         }
 
         PredefinedCMap::from_name(name)?
             .map(Self::Predefined)
-            .ok_or_else(|| CMapError::UnsupportedType0EncodingCMap(name.to_string()))
+            .ok_or_else(|| {
+                CMapError::UnsupportedType0EncodingCMap(String::from_utf8_lossy(name).into_owned())
+            })
     }
 
     /// Parse an embedded Type0 encoding CMap stream.
@@ -113,7 +115,7 @@ mod tests {
 
     #[test]
     fn identity_h_decodes_big_endian_pairs() {
-        let cmap = Type0EncodingCMap::from_name("Identity-H").unwrap();
+        let cmap = Type0EncodingCMap::from_name(b"Identity-H").unwrap();
 
         assert_eq!(cmap.decode(&[0x00, 0x01, 0x12, 0x34]), vec![1, 0x1234]);
         assert!(cmap.is_identity());
@@ -122,7 +124,7 @@ mod tests {
 
     #[test]
     fn identity_h_decodes_trailing_incomplete_code_as_notdef() {
-        let cmap = Type0EncodingCMap::from_name("Identity-H").unwrap();
+        let cmap = Type0EncodingCMap::from_name(b"Identity-H").unwrap();
 
         assert_eq!(cmap.decode(&[0x00, 0x01, 0xFF]), vec![1, 0]);
     }
@@ -139,7 +141,7 @@ mod tests {
 
     #[test]
     fn identity_v_decodes_like_identity_h_with_vertical_writing_mode() {
-        let cmap = Type0EncodingCMap::from_name("Identity-V").unwrap();
+        let cmap = Type0EncodingCMap::from_name(b"Identity-V").unwrap();
 
         assert_eq!(
             cmap.decode(&[0x00, 0x01, 0x12, 0x34, 0xFF]),
@@ -272,7 +274,7 @@ mod tests {
 
     #[test]
     fn predefined_japanese_shift_jis_cmap_decodes_single_and_double_byte_codes() {
-        let cmap = Type0EncodingCMap::from_name("90ms-RKSJ-H").unwrap();
+        let cmap = Type0EncodingCMap::from_name(b"90ms-RKSJ-H").unwrap();
 
         assert_eq!(cmap.decode(&[0x20, 0x81, 0x40, 0x7E]), vec![231, 633, 631]);
         assert_eq!(cmap.writing_mode(), WritingMode::Horizontal);
@@ -280,7 +282,7 @@ mod tests {
 
     #[test]
     fn predefined_vertical_cmap_uses_horizontal_base_cmap() {
-        let cmap = Type0EncodingCMap::from_name("90ms-RKSJ-V").unwrap();
+        let cmap = Type0EncodingCMap::from_name(b"90ms-RKSJ-V").unwrap();
 
         assert_eq!(cmap.decode(&[0x20, 0x81, 0x40]), vec![231, 633]);
         assert_eq!(cmap.writing_mode(), WritingMode::Vertical);

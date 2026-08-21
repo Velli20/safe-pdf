@@ -27,14 +27,14 @@ impl LinkAnnotation {
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
         let highlight_mode = dictionary
-            .get("H")
-            .map(|value| value.try_str(objects).map(LinkHighlightMode::from))
+            .get(b"H")
+            .map(|value| value.try_name(objects).map(LinkHighlightMode::from))
             .transpose()?;
-        let destination = AnnotationDestination::from_dictionary(dictionary, "Dest", objects)?;
-        let action = AnnotationAction::from_dictionary(dictionary, "A", objects)?;
+        let destination = AnnotationDestination::from_dictionary(dictionary, b"Dest", objects)?;
+        let action = AnnotationAction::from_dictionary(dictionary, b"A", objects)?;
         let quad_points = QuadPoints::from_dictionary(dictionary, objects)?;
-        let border_style = BorderStyle::from_dictionary(dictionary, "BS", objects)?;
-        let border_effect = BorderEffect::from_dictionary(dictionary, "BE", objects)?;
+        let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
+        let border_effect = BorderEffect::from_dictionary(dictionary, b"BE", objects)?;
 
         Ok(Self {
             highlight_mode,

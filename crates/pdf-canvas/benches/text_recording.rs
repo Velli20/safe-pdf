@@ -79,7 +79,7 @@ fn benchmark(c: &mut Criterion) {
     });
     let resources = Resources {
         fonts: HashMap::from([(
-            "F1".to_string(),
+            b"F1".to_vec(),
             Resource::Font {
                 font: Rc::new(font),
                 resources: None,

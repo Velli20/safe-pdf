@@ -142,8 +142,7 @@ impl ObjectVariant {
 
     /// Resolves an `ObjectVariant` into UTF-8 text.
     ///
-    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
-    /// into a `String`.
+    /// Resolves an object into the raw bytes of a PDF string object.
     ///
     /// # Parameters
     ///
@@ -151,9 +150,11 @@ impl ObjectVariant {
     ///
     /// # Returns
     ///
-    /// `&str` or `Err` if the object is not a string or if a reference cannot be
-    /// resolved.
-    pub fn try_str<'a>(&'a self, objects: &'a dyn ObjectResolver) -> Result<&'a str, ObjectError> {
+    /// Returns an error if the object is not a string or a reference cannot be resolved.
+    pub fn try_string_bytes<'a>(
+        &'a self,
+        objects: &'a dyn ObjectResolver,
+    ) -> Result<&'a [u8], ObjectError> {
         let object = if let ObjectVariant::Reference(_) = self {
             objects.resolve_object(self)?
         } else {
@@ -161,16 +162,35 @@ impl ObjectVariant {
         };
 
         match object {
-            ObjectVariant::HexString(s)
-            | ObjectVariant::LiteralString(s)
-            | ObjectVariant::Name(s) => {
-                std::str::from_utf8(s).map_err(|source| ObjectError::InvalidUtf8String {
-                    object_type: object.name(),
-                    source,
-                })
-            }
+            ObjectVariant::HexString(s) | ObjectVariant::LiteralString(s) => Ok(s),
             _ => Err(ObjectError::TypeMismatch("String", object.name())),
         }
+    }
+
+    /// Resolves an object into the raw bytes of a PDF Name object.
+    pub fn try_name<'a>(
+        &'a self,
+        objects: &'a dyn ObjectResolver,
+    ) -> Result<&'a [u8], ObjectError> {
+        let object = if let ObjectVariant::Reference(_) = self {
+            objects.resolve_object(self)?
+        } else {
+            self
+        };
+
+        match object {
+            ObjectVariant::Name(name) => Ok(name),
+            _ => Err(ObjectError::TypeMismatch("Name", object.name())),
+        }
+    }
+
+    /// Creates an owned PDF Name from borrowed bytes.
+    ///
+    /// Parsed names should be moved directly into [`ObjectVariant::Name`].
+    /// This constructor is intended for hand-built objects whose source is a
+    /// borrowed byte literal or slice.
+    pub fn name_from_bytes(name: &[u8]) -> Self {
+        Self::Name(Vec::from(name))
     }
 
     /// Resolves an `ObjectVariant` into a `Vec<T>` of numeric values.
@@ -302,7 +322,7 @@ impl ObjectVariant {
     /// Resolves an `ObjectVariant` into raw bytes.
     ///
     /// This function attempts to extract the underlying byte representation from
-    /// string-like objects (`HexString`, `LiteralString`, or `Name`).
+    /// PDF string objects (`HexString` or `LiteralString`).
     ///
     /// # Parameters
     ///
@@ -310,7 +330,7 @@ impl ObjectVariant {
     ///
     /// # Returns
     ///
-    /// `&[u8]` or `Err` if the object is not a string-like type or if a reference
+    /// `&[u8]` or `Err` if the object is not a PDF string or if a reference
     /// cannot be resolved.
     pub fn try_bytes<'a>(
         &'a self,
@@ -323,8 +343,7 @@ impl ObjectVariant {
         };
 
         match object {
-            ObjectVariant::HexString(s) => Ok(s),
-            ObjectVariant::Name(s) | ObjectVariant::LiteralString(s) => Ok(s),
+            ObjectVariant::HexString(s) | ObjectVariant::LiteralString(s) => Ok(s),
             _ => Err(ObjectError::TypeMismatch("Bytes", object.name())),
         }
     }
@@ -427,7 +446,7 @@ mod tests {
             1,
             0,
             Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
-                std::collections::BTreeMap::new(),
+                std::collections::BTreeMap::<Vec<u8>, ObjectVariant>::new(),
             )))),
         )));
 
@@ -455,29 +474,47 @@ mod tests {
     }
 
     #[test]
-    fn try_str_returns_type_mismatch_for_non_string() {
+    fn try_string_bytes_returns_type_mismatch_for_non_string() {
         let object = ObjectVariant::Integer(7);
         let err = object
-            .try_str(&PassthroughResolver)
+            .try_string_bytes(&PassthroughResolver)
             .expect_err("non-string object should not decode as string");
 
         assert_eq!(err, ObjectError::TypeMismatch("String", "Integer"));
     }
 
     #[test]
-    fn try_str_returns_invalid_utf8_error() {
+    fn try_string_bytes_rejects_name_objects() {
         let object = ObjectVariant::Name(vec![0xFF]);
         let err = object
-            .try_str(&PassthroughResolver)
-            .expect_err("invalid utf-8 should fail");
+            .try_string_bytes(&PassthroughResolver)
+            .expect_err("a PDF Name is not a PDF string");
 
-        assert!(matches!(
-            err,
-            ObjectError::InvalidUtf8String {
-                object_type: "Name",
-                ..
-            }
-        ));
+        assert_eq!(err, ObjectError::TypeMismatch("String", "Name"));
+    }
+
+    #[test]
+    fn try_string_bytes_preserves_non_utf8_bytes() {
+        let object = ObjectVariant::LiteralString(vec![0xFF]);
+
+        assert_eq!(
+            object
+                .try_string_bytes(&PassthroughResolver)
+                .expect("PDF strings may contain arbitrary bytes"),
+            [0xFF]
+        );
+    }
+
+    #[test]
+    fn try_name_rejects_string_objects() {
+        let object = ObjectVariant::LiteralString(Vec::from(b"Name"));
+
+        assert_eq!(
+            object
+                .try_name(&PassthroughResolver)
+                .expect_err("a PDF string is not a PDF Name"),
+            ObjectError::TypeMismatch("Name", "LiteralString")
+        );
     }
 
     #[test]
@@ -499,7 +536,7 @@ mod tests {
         assert_eq!(null_err, ObjectError::TypeMismatch("Stream", "Null"));
 
         let dict_object = ObjectVariant::Dictionary(Box::new(crate::dictionary::Dictionary::new(
-            std::collections::BTreeMap::new(),
+            std::collections::BTreeMap::<Vec<u8>, ObjectVariant>::new(),
         )));
         let dict_err = dict_object
             .try_stream(&PassthroughResolver)
@@ -510,12 +547,24 @@ mod tests {
     #[test]
     fn try_bytes_returns_type_mismatch_for_non_bytes() {
         let object = ObjectVariant::Dictionary(Box::new(crate::dictionary::Dictionary::new(
-            std::collections::BTreeMap::new(),
+            std::collections::BTreeMap::<Vec<u8>, ObjectVariant>::new(),
         )));
         let err = object
             .try_bytes(&PassthroughResolver)
             .expect_err("dictionary object should not decode as bytes");
 
         assert_eq!(err, ObjectError::TypeMismatch("Bytes", "Dictionary"));
+    }
+
+    #[test]
+    fn try_bytes_rejects_name_objects() {
+        let object = ObjectVariant::name_from_bytes(b"Name");
+
+        assert_eq!(
+            object
+                .try_bytes(&PassthroughResolver)
+                .expect_err("a PDF Name is not a PDF string"),
+            ObjectError::TypeMismatch("Bytes", "Name")
+        );
     }
 }

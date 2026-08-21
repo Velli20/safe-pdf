@@ -70,7 +70,7 @@ pub enum Filter {
     ///
     /// The contained string holds the original filter name from the PDF,
     /// allowing for future expansion or debugging purposes.
-    Unsupported(String),
+    Unsupported(Vec<u8>),
 }
 
 /// An ordered chain of filters applied to a PDF stream.
@@ -80,7 +80,7 @@ pub struct Filters {
 }
 
 impl Filters {
-    const KEY: &'static str = "Filter";
+    const KEY: &'static [u8] = b"Filter";
 
     /// Returns whether the chain contains `filter`.
     pub fn has_filter(&self, filter: &Filter) -> bool {
@@ -121,11 +121,11 @@ impl Filters {
         let filters = match resolved {
             ObjectVariant::Array(arr) => arr
                 .iter()
-                .map(|item| item.try_str(objects).map(Filter::from))
+                .map(|item| item.try_name(objects).map(Filter::from))
                 .collect::<Result<Vec<_>, _>>()?,
             other => {
                 // Handle single name that wasn't parsed as Name variant
-                vec![Filter::from(other.try_str(objects)?)]
+                vec![Filter::from(other.try_name(objects)?)]
             }
         };
 
@@ -148,24 +148,19 @@ impl<'a> IntoIterator for &'a Filters {
     }
 }
 
-impl From<&str> for Filter {
-    fn from(name: &str) -> Self {
+impl From<&[u8]> for Filter {
+    fn from(name: &[u8]) -> Self {
         match name {
-            "DCTDecode" => Self::DCTDecode,
-            "DCT" => Self::DCTDecode,
-            "FlateDecode" => Self::FlateDecode,
-            "Fl" => Self::FlateDecode,
-            "JPXDecode" => Self::JPXDecode,
-            "CCITTFaxDecode" => Self::CCITTFaxDecode,
-            "CCF" => Self::CCITTFaxDecode,
-            "ASCII85Decode" => Self::ASCII85Decode,
-            "ASCIIHexDecode" => Self::ASCIIHexDecode,
-            "LZWDecode" => Self::LZWDecode,
-            "LZW" => Self::LZWDecode,
-            "RunLengthDecode" => Self::RunLengthDecode,
-            "RL" => Self::RunLengthDecode,
-            "JBIG2Decode" => Self::JBIG2Decode,
-            _ => Self::Unsupported(name.to_owned()),
+            b"DCTDecode" | b"DCT" => Self::DCTDecode,
+            b"FlateDecode" | b"Fl" => Self::FlateDecode,
+            b"JPXDecode" => Self::JPXDecode,
+            b"CCITTFaxDecode" | b"CCF" => Self::CCITTFaxDecode,
+            b"ASCII85Decode" => Self::ASCII85Decode,
+            b"ASCIIHexDecode" => Self::ASCIIHexDecode,
+            b"LZWDecode" | b"LZW" => Self::LZWDecode,
+            b"RunLengthDecode" | b"RL" => Self::RunLengthDecode,
+            b"JBIG2Decode" => Self::JBIG2Decode,
+            _ => Self::Unsupported(Vec::from(name)),
         }
     }
 }
@@ -182,7 +177,7 @@ impl fmt::Display for Filter {
             Self::LZWDecode => f.write_str("LZWDecode"),
             Self::RunLengthDecode => f.write_str("RunLengthDecode"),
             Self::JBIG2Decode => f.write_str("JBIG2Decode"),
-            Self::Unsupported(name) => f.write_str(name),
+            Self::Unsupported(name) => write!(f, "{}", String::from_utf8_lossy(name)),
         }
     }
 }
@@ -319,7 +314,7 @@ pub fn decode_data_with_resolver(
     };
 
     let decode_parms = dictionary
-        .get("DecodeParms")
+        .get(b"DecodeParms")
         .map(|entry| objects.resolve_object(entry))
         .transpose()?;
 
@@ -358,7 +353,7 @@ pub fn decode_data_with_resolver(
                 let (early_change, predictor) = match param_dict {
                     Some(dictionary) => (
                         dictionary
-                            .optional_number("EarlyChange", objects)?
+                            .optional_number(b"EarlyChange", objects)?
                             .unwrap_or(1)
                             != 0,
                         PredictorParams::from_dictionary(dictionary, objects)?,
@@ -412,7 +407,9 @@ pub fn decode_data_with_resolver(
                 data = Arc::new(decoded);
             }
             Filter::Unsupported(name) => {
-                return Err(FilterError::UnsupportedFilter(name.clone()));
+                return Err(FilterError::UnsupportedFilter(
+                    String::from_utf8_lossy(name).into_owned(),
+                ));
             }
         }
     }
@@ -451,10 +448,10 @@ fn resolve_jbig2_dimensions(
         || FilterError::Decompression("JBIG2Decode requires positive Width and Height".into());
 
     let width = dict
-        .optional_number::<u16>("Width", objects)?
+        .optional_number::<u16>(b"Width", objects)?
         .ok_or_else(missing_dimensions_error)?;
     let height = dict
-        .optional_number::<u16>("Height", objects)?
+        .optional_number::<u16>(b"Height", objects)?
         .ok_or_else(missing_dimensions_error)?;
     if width == 0 || height == 0 {
         return Err(missing_dimensions_error());
@@ -467,7 +464,7 @@ fn resolve_jbig2_globals(
     dict: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<Option<Vec<u8>>, FilterError> {
-    let Some(globals_stream) = dict.optional_stream("JBIG2Globals", objects)? else {
+    let Some(globals_stream) = dict.optional_stream(b"JBIG2Globals", objects)? else {
         return Ok(None);
     };
 
@@ -487,21 +484,21 @@ mod tests {
 
     #[test]
     fn test_filter_name_round_trip_ascii_hex() {
-        let filter = Filter::from("ASCIIHexDecode");
+        let filter = Filter::from(b"ASCIIHexDecode".as_slice());
         assert_eq!(filter, Filter::ASCIIHexDecode);
         assert_eq!(filter.to_string(), "ASCIIHexDecode");
     }
 
     #[test]
     fn test_filter_name_round_trip_run_length() {
-        let filter = Filter::from("RunLengthDecode");
+        let filter = Filter::from(b"RunLengthDecode".as_slice());
         assert_eq!(filter, Filter::RunLengthDecode);
         assert_eq!(filter.to_string(), "RunLengthDecode");
     }
 
     #[test]
     fn test_filter_name_round_trip_jbig2() {
-        let filter = Filter::from("JBIG2Decode");
+        let filter = Filter::from(b"JBIG2Decode".as_slice());
         assert_eq!(filter, Filter::JBIG2Decode);
         assert_eq!(filter.to_string(), "JBIG2Decode");
     }
@@ -517,7 +514,7 @@ mod tests {
 
     #[test]
     fn decode_data_without_filters_preserves_shared_data() {
-        let dictionary = Dictionary::new(BTreeMap::new());
+        let dictionary = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
         let data = Arc::new(b"stream data".to_vec());
 
         let decoded =
@@ -531,7 +528,7 @@ mod tests {
     #[test]
     fn decode_data_with_filter_returns_shared_decoded_data() {
         let dictionary = Dictionary::new(BTreeMap::from([(
-            "Filter".to_string(),
+            Vec::from(b"Filter"),
             ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
         )]));
 
@@ -550,7 +547,7 @@ mod tests {
         let stream = StreamObject::new(
             1,
             0,
-            Box::new(Dictionary::new(BTreeMap::new())),
+            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
             b"shared stream data".to_vec(),
         );
 
@@ -565,7 +562,7 @@ mod tests {
     fn test_jbig2_missing_dimensions_returns_decode_error() {
         let mut dict = BTreeMap::new();
         dict.insert(
-            "Filter".to_string(),
+            Vec::from(b"Filter"),
             ObjectVariant::Name(b"JBIG2Decode".to_vec()),
         );
 
@@ -606,23 +603,23 @@ mod tests {
 
         let mut globals_dict = BTreeMap::new();
         globals_dict.insert(
-            "Filter".to_string(),
+            Vec::from(b"Filter"),
             ObjectVariant::Name(b"JBIG2Decode".to_vec()),
         );
         let globals_stream =
             StreamObject::new(3, 0, Box::new(Dictionary::new(globals_dict)), Vec::new());
 
         let mut decode_parms = BTreeMap::new();
-        decode_parms.insert("JBIG2Globals".to_string(), ObjectVariant::Reference(3));
+        decode_parms.insert(Vec::from(b"JBIG2Globals"), ObjectVariant::Reference(3));
 
         let mut dict = BTreeMap::new();
         dict.insert(
-            "Filter".to_string(),
+            Vec::from(b"Filter"),
             ObjectVariant::Name(b"JBIG2Decode".to_vec()),
         );
-        dict.insert("Width".to_string(), ObjectVariant::Integer(8));
-        dict.insert("Height".to_string(), ObjectVariant::Integer(1));
-        dict.insert("DecodeParms".to_string(), ObjectVariant::Reference(2));
+        dict.insert(Vec::from(b"Width"), ObjectVariant::Integer(8));
+        dict.insert(Vec::from(b"Height"), ObjectVariant::Integer(1));
+        dict.insert(Vec::from(b"DecodeParms"), ObjectVariant::Reference(2));
 
         let stream = StreamObject::new(1, 0, Box::new(Dictionary::new(dict)), Vec::new());
 
@@ -647,11 +644,11 @@ mod tests {
     fn test_jbig2_truncated_data_returns_decode_error() {
         let mut dict = BTreeMap::new();
         dict.insert(
-            "Filter".to_string(),
+            Vec::from(b"Filter"),
             ObjectVariant::Name(b"JBIG2Decode".to_vec()),
         );
-        dict.insert("Width".to_string(), ObjectVariant::Integer(8));
-        dict.insert("Height".to_string(), ObjectVariant::Integer(1));
+        dict.insert(Vec::from(b"Width"), ObjectVariant::Integer(8));
+        dict.insert(Vec::from(b"Height"), ObjectVariant::Integer(1));
 
         let stream = StreamObject::new(1, 0, Box::new(Dictionary::new(dict)), vec![0x00]);
 
@@ -663,7 +660,7 @@ mod tests {
     fn test_decode_ascii_hex_stream() {
         let mut dict = BTreeMap::new();
         dict.insert(
-            "Filter".to_string(),
+            Vec::from(b"Filter"),
             ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
         );
 
@@ -708,9 +705,9 @@ mod tests {
         let compressed = encoder.finish().expect("zlib finish failed");
 
         let mut dict = BTreeMap::new();
-        dict.insert("Filter".to_string(), ObjectVariant::Reference(3));
+        dict.insert(Vec::from(b"Filter"), ObjectVariant::Reference(3));
         dict.insert(
-            "Length".to_string(),
+            Vec::from(b"Length"),
             ObjectVariant::Integer(compressed.len() as i64),
         );
 
@@ -745,14 +742,14 @@ mod tests {
 
         let dictionary = Dictionary::new(BTreeMap::from([
             (
-                "Filter".to_string(),
+                Vec::from(b"Filter"),
                 ObjectVariant::Array(vec![
                     ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
                     ObjectVariant::Name(b"FlateDecode".to_vec()),
                 ]),
             ),
             (
-                "DecodeParms".to_string(),
+                Vec::from(b"DecodeParms"),
                 ObjectVariant::Array(vec![ObjectVariant::Null]),
             ),
         ]));
@@ -781,16 +778,16 @@ mod tests {
             2,
             0,
             Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
-                BTreeMap::new(),
+                BTreeMap::<Vec<u8>, ObjectVariant>::new(),
             )))),
         )));
         let dictionary = Dictionary::new(BTreeMap::from([
             (
-                "Filter".to_string(),
+                Vec::from(b"Filter"),
                 ObjectVariant::Name(b"FlateDecode".to_vec()),
             ),
             (
-                "DecodeParms".to_string(),
+                Vec::from(b"DecodeParms"),
                 ObjectVariant::Array(vec![decode_parms]),
             ),
         ]));
@@ -806,7 +803,7 @@ mod tests {
     fn test_decode_run_length_stream() {
         let mut dict = BTreeMap::new();
         dict.insert(
-            "Filter".to_string(),
+            Vec::from(b"Filter"),
             ObjectVariant::Name(b"RunLengthDecode".to_vec()),
         );
 
@@ -824,7 +821,7 @@ mod tests {
     #[test]
     fn test_decode_rl_alias_stream() {
         let mut dict = BTreeMap::new();
-        dict.insert("Filter".to_string(), ObjectVariant::Name(b"RL".to_vec()));
+        dict.insert(Vec::from(b"Filter"), ObjectVariant::Name(b"RL".to_vec()));
 
         let stream = StreamObject::new(1, 0, Box::new(Dictionary::new(dict)), vec![0, b'X', 128]);
 

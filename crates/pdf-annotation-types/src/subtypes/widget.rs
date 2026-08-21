@@ -10,8 +10,6 @@ use crate::{
     Annotation, AnnotationAction, AnnotationError, AppearanceCharacteristics, BorderStyle, helpers,
 };
 
-const OFF_STATE: &str = "Off";
-
 bitflags! {
     /// Widget form field flags parsed from the inherited `/Ff` entry.
     ///
@@ -103,7 +101,7 @@ impl WidgetAnnotation {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
-        let field_id = match dictionary.get("Parent") {
+        let field_id = match dictionary.get(b"Parent") {
             Some(ObjectVariant::Reference(parent_id)) => Some(*parent_id),
             _ => None,
         };
@@ -124,57 +122,57 @@ impl WidgetAnnotation {
 
         loop {
             if field_type.is_none() {
-                field_type = current.optional_bytes_vec("FT", objects)?;
+                field_type = current.optional_name(b"FT", objects)?.map(Vec::from);
             }
             if field_name.is_none() {
-                field_name = current.optional_bytes_vec("T", objects)?;
+                field_name = current.optional_bytes_vec(b"T", objects)?;
             }
             if alternate_name.is_none() {
-                alternate_name = current.optional_bytes_vec("TU", objects)?;
+                alternate_name = current.optional_bytes_vec(b"TU", objects)?;
             }
             if mapping_name.is_none() {
-                mapping_name = current.optional_bytes_vec("TM", objects)?;
+                mapping_name = current.optional_bytes_vec(b"TM", objects)?;
             }
             if field_flags.is_none() {
                 field_flags = current
-                    .optional_number::<i32>("Ff", objects)?
+                    .optional_number::<i32>(b"Ff", objects)?
                     .map(WidgetFieldFlags::from_bits_retain);
             }
             if value.is_none() {
                 value = current
-                    .get("V")
-                    .map(|value| widget_field_value("V", value, objects))
+                    .get(b"V")
+                    .map(|value| widget_field_value(b"V", value, objects))
                     .transpose()?;
             }
             if default_value.is_none() {
                 default_value = current
-                    .get("DV")
-                    .map(|value| widget_field_value("DV", value, objects))
+                    .get(b"DV")
+                    .map(|value| widget_field_value(b"DV", value, objects))
                     .transpose()?;
             }
             if default_appearance.is_none() {
-                default_appearance = current.optional_bytes_vec("DA", objects)?;
+                default_appearance = current.optional_bytes_vec(b"DA", objects)?;
             }
             if quadding.is_none() {
-                quadding = current.optional_number::<i32>("Q", objects)?;
+                quadding = current.optional_number::<i32>(b"Q", objects)?;
             }
             if options.is_none()
-                && let Some(value) = current.get("Opt")
+                && let Some(value) = current.get(b"Opt")
             {
                 options = Some(choice_options(value, objects)?);
             }
             if selected_indices.is_none()
-                && let Some(value) = current.get("I")
+                && let Some(value) = current.get(b"I")
             {
-                selected_indices = Some(choice_indices("I", value, objects)?);
+                selected_indices = Some(choice_indices(b"I", value, objects)?);
             }
             if top_index.is_none()
-                && let Some(value) = current.get("TI")
+                && let Some(value) = current.get(b"TI")
             {
-                top_index = Some(choice_index("TI", value, objects)?);
+                top_index = Some(choice_index(b"TI", value, objects)?);
             }
 
-            let Some(parent @ ObjectVariant::Reference(parent_id)) = current.get("Parent") else {
+            let Some(parent @ ObjectVariant::Reference(parent_id)) = current.get(b"Parent") else {
                 break;
             };
             if !visited_parents.insert(*parent_id) {
@@ -184,14 +182,14 @@ impl WidgetAnnotation {
         }
 
         let additional_actions = dictionary
-            .get("AA")
+            .get(b"AA")
             .map(|value| helpers::dictionary(value, objects))
             .transpose()?;
 
         let appearance_characteristics =
             AppearanceCharacteristics::from_dictionary(dictionary, objects)?;
-        let border_style = BorderStyle::from_dictionary(dictionary, "BS", objects)?;
-        let action = AnnotationAction::from_dictionary(dictionary, "A", objects)?;
+        let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
+        let action = AnnotationAction::from_dictionary(dictionary, b"A", objects)?;
 
         Ok(Self {
             field_id,
@@ -222,11 +220,11 @@ impl WidgetAnnotation {
 
     /// Returns this button widget's active non-`/Off` appearance state.
     #[must_use]
-    pub fn active_button_state<'a>(&self, annotation: &'a Annotation) -> Option<&'a str> {
+    pub fn active_button_state<'a>(&self, annotation: &'a Annotation) -> Option<&'a [u8]> {
         annotation
             .appearance_state
             .as_deref()
-            .filter(|state| *state != OFF_STATE)
+            .filter(|state| *state != b"Off")
     }
 
     /// Returns whether this widget is a checkbox button.
@@ -346,7 +344,7 @@ fn choice_options(
             let pair = resolved.try_array(objects)?;
             if pair.len() != 2 {
                 return Err(AnnotationError::InvalidEntry {
-                    entry: "Opt",
+                    entry: b"Opt",
                     reason: "expected each option pair to contain an export and display value"
                         .to_owned(),
                 });
@@ -354,14 +352,14 @@ fn choice_options(
             let export_value = pair
                 .first()
                 .ok_or_else(|| AnnotationError::InvalidEntry {
-                    entry: "Opt",
+                    entry: b"Opt",
                     reason: "missing option export value".to_owned(),
                 })?
                 .try_bytes_vec(objects)?;
             let display_value = pair
                 .get(1)
                 .ok_or_else(|| AnnotationError::InvalidEntry {
-                    entry: "Opt",
+                    entry: b"Opt",
                     reason: "missing option display value".to_owned(),
                 })?
                 .try_bytes_vec(objects)?;
@@ -374,7 +372,7 @@ fn choice_options(
 }
 
 fn choice_indices(
-    entry: &'static str,
+    entry: &'static [u8],
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
 ) -> Result<Vec<usize>, AnnotationError> {
@@ -386,7 +384,7 @@ fn choice_indices(
 }
 
 fn choice_index(
-    entry: &'static str,
+    entry: &'static [u8],
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
 ) -> Result<usize, AnnotationError> {
@@ -404,7 +402,7 @@ fn option_index(options: &[WidgetChoiceOption], value: &[u8]) -> Option<usize> {
 }
 
 fn widget_field_value(
-    entry: &'static str,
+    entry: &'static [u8],
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
 ) -> Result<WidgetFieldValue, AnnotationError> {

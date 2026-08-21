@@ -128,8 +128,8 @@ impl<'parser, 'input> XrefBuilder<'parser, 'input> {
 
         while visited_offsets.insert(current_offset) {
             let table = self.parse_section_with_recovery(current_offset)?;
-            let auxiliary_offset = table.trailer.dictionary.get("XRefStm").cloned();
-            let previous_offset = table.trailer.dictionary.get("Prev").cloned();
+            let auxiliary_offset = table.trailer.dictionary.get(b"XRefStm").cloned();
+            let previous_offset = table.trailer.dictionary.get(b"Prev").cloned();
 
             // Keep the first entry we see for each object number.
             Self::merge_entries(&mut entries, table.entries);
@@ -170,8 +170,8 @@ impl<'parser, 'input> XrefBuilder<'parser, 'input> {
     fn prefer_newer_trailer(preferred: &mut Option<Trailer>, candidate: Trailer) {
         let should_replace = preferred
             .as_ref()
-            .is_some_and(|trailer| trailer.dictionary.get("Root").is_none())
-            && candidate.dictionary.get("Root").is_some();
+            .is_some_and(|trailer| trailer.dictionary.get(b"Root").is_none())
+            && candidate.dictionary.get(b"Root").is_some();
 
         if preferred.is_none() || should_replace {
             *preferred = Some(candidate);
@@ -409,7 +409,7 @@ impl<'parser, 'input> XrefBuilder<'parser, 'input> {
                 continue;
             }
             let has_valid_root = matches!(
-                section.table.trailer.dictionary.get("Root"),
+                section.table.trailer.dictionary.get(b"Root"),
                 Some(ObjectVariant::Reference(object_number))
                     if section.table.entries.contains_key(object_number)
             );

@@ -62,14 +62,14 @@ impl FreeTextAnnotation {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
-        let default_appearance = dictionary.optional_bytes_vec("DA", objects)?;
-        let quadding = dictionary.optional_number::<i32>("Q", objects)?;
-        let rich_contents = dictionary.optional_bytes_vec("RC", objects)?;
-        let default_style = dictionary.optional_bytes_vec("DS", objects)?;
-        let callout_line = dictionary.optional_vec_of::<f32>("CL", objects)?;
-        let difference_rect = dictionary.optional_array_of::<f32, 4>("RD", objects)?;
-        let intent = dictionary.optional_bytes_vec("IT", objects)?;
-        let border_effect = BorderEffect::from_dictionary(dictionary, "BE", objects)?;
+        let default_appearance = dictionary.optional_bytes_vec(b"DA", objects)?;
+        let quadding = dictionary.optional_number::<i32>(b"Q", objects)?;
+        let rich_contents = dictionary.optional_bytes_vec(b"RC", objects)?;
+        let default_style = dictionary.optional_bytes_vec(b"DS", objects)?;
+        let callout_line = dictionary.optional_vec_of::<f32>(b"CL", objects)?;
+        let difference_rect = dictionary.optional_array_of::<f32, 4>(b"RD", objects)?;
+        let intent = dictionary.optional_name(b"IT", objects)?.map(Vec::from);
+        let border_effect = BorderEffect::from_dictionary(dictionary, b"BE", objects)?;
 
         Ok(Self {
             default_appearance,

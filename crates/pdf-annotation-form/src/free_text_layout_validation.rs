@@ -156,7 +156,7 @@ impl<'a> StyleValidator<'a> {
         let name = &self.style.font.resource_name;
         if name.is_empty()
             || name
-                .bytes()
+                .iter()
                 .any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control())
         {
             Err(FreeTextEditError::invalid_input(
@@ -253,7 +253,7 @@ mod tests {
             text: "text".to_owned(),
             style: FreeTextStyle::default(),
         };
-        free_text.style.font.resource_name = "bad name".to_owned();
+        free_text.style.font.resource_name = Vec::from(b"bad name");
 
         assert!(matches!(
             ValidatedFreeText::try_from(&free_text),
@@ -263,7 +263,7 @@ mod tests {
             })
         ));
 
-        free_text.style.font.resource_name = "Helv".to_owned();
+        free_text.style.font.resource_name = Vec::from(b"Helv");
         free_text.style.insets.left = -1.0;
         assert!(matches!(
             ValidatedFreeText::try_from(&free_text),

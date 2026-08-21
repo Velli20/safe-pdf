@@ -18,10 +18,10 @@ impl PopupAnnotation {
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
         let parent = dictionary
-            .get("Parent")
+            .get(b"Parent")
             .map(|obj| obj.try_object_number())
             .transpose()?;
-        let open = dictionary.optional_boolean("Open", objects)?;
+        let open = dictionary.optional_boolean(b"Open", objects)?;
 
         Ok(Self { parent, open })
     }

@@ -397,7 +397,7 @@ mod tests {
         assert_eq!(
             error,
             ParserError::MissingDelimiterAfterKeyword {
-                keyword: "true".to_string(),
+                keyword: "true".to_owned(),
                 found: b'f',
                 position: 4,
             }

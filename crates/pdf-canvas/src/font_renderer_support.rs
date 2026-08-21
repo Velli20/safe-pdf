@@ -61,7 +61,7 @@ pub(crate) fn glyph_base_transform<B: CanvasBackend>(
 pub(crate) fn resolve_simple_font_gid(
     font: Option<&Font>,
     code: u16,
-    glyph_name: Option<&str>,
+    glyph_name: Option<&[u8]>,
     charmap: &Charmap<'_>,
     font_ref: &FontRef<'_>,
     is_symbolic: bool,
@@ -78,7 +78,7 @@ fn pdf_unicode_gid(font: Option<&Font>, code: u16, charmap: &Charmap<'_>) -> Opt
         .and_then(|unicode_char| charmap.map(unicode_char))
 }
 
-fn glyph_name_gid(glyph_name: Option<&str>, charmap: &Charmap<'_>) -> Option<GlyphId> {
+fn glyph_name_gid(glyph_name: Option<&[u8]>, charmap: &Charmap<'_>) -> Option<GlyphId> {
     glyph_name
         .and_then(glyph_name_to_unicode)
         .and_then(|unicode_char| charmap.map(unicode_char))

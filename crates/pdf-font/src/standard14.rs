@@ -128,8 +128,8 @@ impl Standard14Font {
         flags: FontFlags,
     ) -> Self {
         dictionary
-            .get("BaseFont")
-            .and_then(|value| value.try_str(objects).ok())
+            .get(b"BaseFont")
+            .and_then(|value| value.try_name(objects).ok())
             .and_then(Self::from_base_font_name)
             .unwrap_or_else(|| Self::from(flags))
     }
@@ -138,47 +138,54 @@ impl Standard14Font {
     ///
     /// Recognises both the canonical names and common aliases
     /// (e.g. "TimesNewRomanPSMT" maps to `TimesRoman`).
-    pub fn from_base_font_name(name: &str) -> Option<Self> {
+    pub fn from_base_font_name(name: &[u8]) -> Option<Self> {
         // Strip a subset prefix like "ABCDEF+" that some PDF producers add.
-        let name = name.find('+').map_or(name, |pos| {
-            name.get(pos.saturating_add(1)..).unwrap_or(name)
-        });
+        let name = name
+            .iter()
+            .position(|byte| *byte == b'+')
+            .map_or(name, |pos| {
+                name.get(pos.saturating_add(1)..).unwrap_or(name)
+            });
 
         match name {
-            "Courier" | "CourierNew" | "CourierNewPSMT" => Some(Self::Courier),
-            "Courier-Bold" | "CourierNew,Bold" | "CourierNewPS-BoldMT" => Some(Self::CourierBold),
-            "Courier-Oblique"
-            | "Courier-Italic"
-            | "CourierNew,Italic"
-            | "CourierNewPS-ItalicMT" => Some(Self::CourierOblique),
-            "Courier-BoldOblique"
-            | "Courier-BoldItalic"
-            | "CourierNew,BoldItalic"
-            | "CourierNewPS-BoldItalicMT" => Some(Self::CourierBoldOblique),
+            b"Courier" | b"CourierNew" | b"CourierNewPSMT" => Some(Self::Courier),
+            b"Courier-Bold" | b"CourierNew,Bold" | b"CourierNewPS-BoldMT" => {
+                Some(Self::CourierBold)
+            }
+            b"Courier-Oblique"
+            | b"Courier-Italic"
+            | b"CourierNew,Italic"
+            | b"CourierNewPS-ItalicMT" => Some(Self::CourierOblique),
+            b"Courier-BoldOblique"
+            | b"Courier-BoldItalic"
+            | b"CourierNew,BoldItalic"
+            | b"CourierNewPS-BoldItalicMT" => Some(Self::CourierBoldOblique),
 
-            "Helvetica" | "ArialMT" | "Arial" => Some(Self::Helvetica),
-            "Helvetica-Bold" | "Arial-BoldMT" | "Arial,Bold" => Some(Self::HelveticaBold),
-            "Helvetica-Oblique" | "Helvetica-Italic" | "Arial-ItalicMT" | "Arial,Italic" => {
+            b"Helvetica" | b"ArialMT" | b"Arial" => Some(Self::Helvetica),
+            b"Helvetica-Bold" | b"Arial-BoldMT" | b"Arial,Bold" => Some(Self::HelveticaBold),
+            b"Helvetica-Oblique" | b"Helvetica-Italic" | b"Arial-ItalicMT" | b"Arial,Italic" => {
                 Some(Self::HelveticaOblique)
             }
-            "Helvetica-BoldOblique"
-            | "Helvetica-BoldItalic"
-            | "Arial-BoldItalicMT"
-            | "Arial,BoldItalic" => Some(Self::HelveticaBoldOblique),
+            b"Helvetica-BoldOblique"
+            | b"Helvetica-BoldItalic"
+            | b"Arial-BoldItalicMT"
+            | b"Arial,BoldItalic" => Some(Self::HelveticaBoldOblique),
 
-            "Times-Roman" | "TimesNewRomanPSMT" | "TimesNewRoman" | "TimesNewRomanPS" => {
+            b"Times-Roman" | b"TimesNewRomanPSMT" | b"TimesNewRoman" | b"TimesNewRomanPS" => {
                 Some(Self::TimesRoman)
             }
-            "Times-Bold" | "TimesNewRomanPS-BoldMT" | "TimesNewRoman,Bold" => Some(Self::TimesBold),
-            "Times-Italic" | "TimesNewRomanPS-ItalicMT" | "TimesNewRoman,Italic" => {
+            b"Times-Bold" | b"TimesNewRomanPS-BoldMT" | b"TimesNewRoman,Bold" => {
+                Some(Self::TimesBold)
+            }
+            b"Times-Italic" | b"TimesNewRomanPS-ItalicMT" | b"TimesNewRoman,Italic" => {
                 Some(Self::TimesItalic)
             }
-            "Times-BoldItalic" | "TimesNewRomanPS-BoldItalicMT" | "TimesNewRoman,BoldItalic" => {
+            b"Times-BoldItalic" | b"TimesNewRomanPS-BoldItalicMT" | b"TimesNewRoman,BoldItalic" => {
                 Some(Self::TimesBoldItalic)
             }
 
-            "Symbol" | "SymbolMT" => Some(Self::Symbol),
-            "ZapfDingbats" | "Wingdings" | "Wingdings-Regular" => Some(Self::ZapfDingbats),
+            b"Symbol" | b"SymbolMT" => Some(Self::Symbol),
+            b"ZapfDingbats" | b"Wingdings" | b"Wingdings-Regular" => Some(Self::ZapfDingbats),
 
             _ => None,
         }
@@ -215,30 +222,30 @@ mod tests {
     /// Every canonical Standard 14 name must be recognised.
     #[test]
     fn canonical_names() {
-        let cases = [
-            ("Courier", Standard14Font::Courier),
-            ("Courier-Bold", Standard14Font::CourierBold),
-            ("Courier-Oblique", Standard14Font::CourierOblique),
-            ("Courier-BoldOblique", Standard14Font::CourierBoldOblique),
-            ("Helvetica", Standard14Font::Helvetica),
-            ("Helvetica-Bold", Standard14Font::HelveticaBold),
-            ("Helvetica-Oblique", Standard14Font::HelveticaOblique),
+        let cases: [(&[u8], Standard14Font); 14] = [
+            (b"Courier", Standard14Font::Courier),
+            (b"Courier-Bold", Standard14Font::CourierBold),
+            (b"Courier-Oblique", Standard14Font::CourierOblique),
+            (b"Courier-BoldOblique", Standard14Font::CourierBoldOblique),
+            (b"Helvetica", Standard14Font::Helvetica),
+            (b"Helvetica-Bold", Standard14Font::HelveticaBold),
+            (b"Helvetica-Oblique", Standard14Font::HelveticaOblique),
             (
-                "Helvetica-BoldOblique",
+                b"Helvetica-BoldOblique",
                 Standard14Font::HelveticaBoldOblique,
             ),
-            ("Times-Roman", Standard14Font::TimesRoman),
-            ("Times-Bold", Standard14Font::TimesBold),
-            ("Times-Italic", Standard14Font::TimesItalic),
-            ("Times-BoldItalic", Standard14Font::TimesBoldItalic),
-            ("Symbol", Standard14Font::Symbol),
-            ("ZapfDingbats", Standard14Font::ZapfDingbats),
+            (b"Times-Roman", Standard14Font::TimesRoman),
+            (b"Times-Bold", Standard14Font::TimesBold),
+            (b"Times-Italic", Standard14Font::TimesItalic),
+            (b"Times-BoldItalic", Standard14Font::TimesBoldItalic),
+            (b"Symbol", Standard14Font::Symbol),
+            (b"ZapfDingbats", Standard14Font::ZapfDingbats),
         ];
         for (name, expected) in cases {
             assert_eq!(
                 Standard14Font::from_base_font_name(name),
                 Some(expected),
-                "failed for {name}"
+                "failed for {name:?}"
             );
         }
     }
@@ -247,15 +254,15 @@ mod tests {
     #[test]
     fn common_aliases() {
         assert_eq!(
-            Standard14Font::from_base_font_name("ArialMT"),
+            Standard14Font::from_base_font_name(b"ArialMT"),
             Some(Standard14Font::Helvetica)
         );
         assert_eq!(
-            Standard14Font::from_base_font_name("TimesNewRomanPSMT"),
+            Standard14Font::from_base_font_name(b"TimesNewRomanPSMT"),
             Some(Standard14Font::TimesRoman)
         );
         assert_eq!(
-            Standard14Font::from_base_font_name("CourierNewPSMT"),
+            Standard14Font::from_base_font_name(b"CourierNewPSMT"),
             Some(Standard14Font::Courier)
         );
     }
@@ -264,11 +271,11 @@ mod tests {
     #[test]
     fn subset_prefix() {
         assert_eq!(
-            Standard14Font::from_base_font_name("ABCDEF+Helvetica"),
+            Standard14Font::from_base_font_name(b"ABCDEF+Helvetica"),
             Some(Standard14Font::Helvetica)
         );
         assert_eq!(
-            Standard14Font::from_base_font_name("GHIJKL+Courier-Bold"),
+            Standard14Font::from_base_font_name(b"GHIJKL+Courier-Bold"),
             Some(Standard14Font::CourierBold)
         );
     }
@@ -276,8 +283,8 @@ mod tests {
     /// Unknown font names must return `None`.
     #[test]
     fn unknown_name() {
-        assert_eq!(Standard14Font::from_base_font_name("FooBarFont"), None);
-        assert_eq!(Standard14Font::from_base_font_name(""), None);
+        assert_eq!(Standard14Font::from_base_font_name(b"FooBarFont"), None);
+        assert_eq!(Standard14Font::from_base_font_name(b""), None);
     }
 
     /// Every variant must return non-empty fallback bytes.

@@ -72,7 +72,7 @@ fn classic_type1_renderer_uses_pdf_widths_for_advance() {
     });
     let resources = Resources {
         fonts: HashMap::from([(
-            "F1".to_string(),
+            b"F1".to_vec(),
             Resource::Font {
                 font: Rc::new(font),
                 resources: None,
@@ -117,7 +117,7 @@ fn classic_type1_renderer_does_not_collect_text_by_default() {
     });
     let resources = Resources {
         fonts: HashMap::from([(
-            "F1".to_string(),
+            b"F1".to_vec(),
             Resource::Font {
                 font: Rc::new(font),
                 resources: None,
@@ -148,7 +148,7 @@ fn text_recording_includes_nested_form_xobjects() {
     });
     let form_resources = Rc::new(Resources {
         fonts: HashMap::from([(
-            "F1".to_string(),
+            b"F1".to_vec(),
             Resource::Font {
                 font: Rc::new(font),
                 resources: None,
@@ -163,7 +163,7 @@ fn text_recording_includes_nested_form_xobjects() {
         content_stream: content_stream(2, b"BT /F1 10 Tf (A) Tj ET"),
     };
     let resources = Resources {
-        xobjects: HashMap::from([("Form".to_string(), Resource::from(form))]),
+        xobjects: HashMap::from([(b"Form".to_vec(), Resource::from(form))]),
         ..Default::default()
     };
     let stream = content_stream(1, b"/Form Do");

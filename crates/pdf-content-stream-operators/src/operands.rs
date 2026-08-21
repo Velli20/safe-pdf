@@ -96,38 +96,25 @@ impl Operands {
         Ok(self.take_next()?.try_number::<f32>(&PassthroughResolver)?)
     }
 
-    /// Reads the next string-like operand as an owned UTF-8 string.
-    ///
-    /// The underlying byte allocation is moved into the returned `String`.
-    pub fn get_str(&mut self) -> Result<String, PdfOperatorError> {
-        let object = self.take_next()?;
-        let (value, found) = match object {
-            ObjectVariant::HexString(value) => (value, "HexString"),
-            ObjectVariant::Name(value) => (value, "Name"),
-            ObjectVariant::LiteralString(value) => (value, "LiteralString"),
-            other => {
-                return Err(PdfOperatorError::OperandTypeMismatch {
-                    expected: "a string operand (HexString, Name, or LiteralString)",
-                    found: other.name(),
-                });
-            }
-        };
-
-        String::from_utf8(value).map_err(|_| PdfOperatorError::OperandTypeMismatch {
-            expected: "a string operand (HexString, Name, or LiteralString)",
-            found,
-        })
-    }
-
-    /// Reads the next string-like operand as owned bytes.
-    pub fn get_bytes(&mut self) -> Result<Vec<u8>, PdfOperatorError> {
+    /// Reads the next PDF string operand as owned bytes.
+    pub fn get_string_bytes(&mut self) -> Result<Vec<u8>, PdfOperatorError> {
         let object = self.take_next()?;
         match object {
-            ObjectVariant::HexString(value)
-            | ObjectVariant::Name(value)
-            | ObjectVariant::LiteralString(value) => Ok(value),
+            ObjectVariant::HexString(value) | ObjectVariant::LiteralString(value) => Ok(value),
             other => Err(PdfOperatorError::OperandTypeMismatch {
-                expected: "a byte string operand (HexString, Name, or LiteralString)",
+                expected: "a PDF string operand (HexString or LiteralString)",
+                found: other.name(),
+            }),
+        }
+    }
+
+    /// Reads the next PDF Name operand as owned bytes.
+    pub fn get_name_bytes(&mut self) -> Result<Vec<u8>, PdfOperatorError> {
+        let object = self.take_next()?;
+        match object {
+            ObjectVariant::Name(value) => Ok(value),
+            other => Err(PdfOperatorError::OperandTypeMismatch {
+                expected: "a Name operand",
                 found: other.name(),
             }),
         }
@@ -227,14 +214,14 @@ mod tests {
     }
 
     #[test]
-    fn get_str_reuses_the_operand_byte_allocation() {
-        let bytes = b"ResourceName".to_vec();
-        let original_pointer = bytes.as_ptr();
-        let mut operands = Operands::from(vec![ObjectVariant::Name(bytes)]);
+    fn name_operand_preserves_non_utf8_bytes() {
+        let mut operands = Operands::from(vec![ObjectVariant::Name(vec![0xFF])]);
 
-        let value = operands.get_str().expect("name should be valid UTF-8");
-
-        assert_eq!(value, "ResourceName");
-        assert_eq!(value.as_ptr(), original_pointer);
+        assert_eq!(
+            operands
+                .get_name_bytes()
+                .expect("PDF Names may contain arbitrary bytes"),
+            [0xFF]
+        );
     }
 }

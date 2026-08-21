@@ -42,11 +42,11 @@ pub(crate) fn parse_cal_rgb_color_space(
         black_point,
     } = CieColorSpaceParams::from_dictionary(dict, objects)?;
     let gamma = dict
-        .optional_array_of::<f32, 3>("Gamma", objects)?
+        .optional_array_of::<f32, 3>(b"Gamma", objects)?
         .unwrap_or([1.0, 1.0, 1.0]);
     // Column-major 3×3: [Xa Ya Za Xb Yb Zb Xc Yc Zc], default identity.
     let matrix = dict
-        .optional_array_of::<f32, 9>("Matrix", objects)?
+        .optional_array_of::<f32, 9>(b"Matrix", objects)?
         .unwrap_or([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
     Ok(ColorSpace::CalRGB(CalRGBColorSpace {
         white_point,

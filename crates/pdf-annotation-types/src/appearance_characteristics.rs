@@ -25,17 +25,17 @@ impl AppearanceCharacteristics {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, AnnotationError> {
-        let Some(value) = dictionary.get("MK") else {
+        let Some(value) = dictionary.get(b"MK") else {
             return Ok(None);
         };
 
         let dictionary = value.try_dictionary(objects)?;
-        let rotation = dictionary.optional_number::<i32>("R", objects)?;
-        let border_color = AnnotationColor::from_dictionary(dictionary, "BC", objects)?;
-        let background_color = AnnotationColor::from_dictionary(dictionary, "BG", objects)?;
-        let normal_caption = dictionary.optional_bytes_vec("CA", objects)?;
-        let rollover_caption = dictionary.optional_bytes_vec("RC", objects)?;
-        let alternate_caption = dictionary.optional_bytes_vec("AC", objects)?;
+        let rotation = dictionary.optional_number::<i32>(b"R", objects)?;
+        let border_color = AnnotationColor::from_dictionary(dictionary, b"BC", objects)?;
+        let background_color = AnnotationColor::from_dictionary(dictionary, b"BG", objects)?;
+        let normal_caption = dictionary.optional_bytes_vec(b"CA", objects)?;
+        let rollover_caption = dictionary.optional_bytes_vec(b"RC", objects)?;
+        let alternate_caption = dictionary.optional_bytes_vec(b"AC", objects)?;
 
         Ok(Some(Self {
             rotation,

@@ -12,7 +12,7 @@ use crate::{
 ///
 /// # Type Parameters
 ///
-/// - `K`: The lookup key type used by the container. Dictionaries use `&str`
+/// - `K`: The lookup key type used by the container. Dictionaries use `&[u8]`
 ///   keys and arrays use `usize` indexes.
 pub trait ObjectLookupExt<K> {
     /// Returns an optional dictionary value from this container.
@@ -150,11 +150,10 @@ pub trait ObjectLookupExt<K> {
         objects: &'a dyn ObjectResolver,
     ) -> Result<&'a [ObjectVariant], ObjectError>;
 
-    /// Returns an optional UTF-8 string value from this container.
+    /// Returns the raw bytes of a required PDF string value from this container.
     ///
     /// This method looks up a value by key or index and converts it using
-    /// [`ObjectVariant::try_str`]. Missing entries and explicit PDF `null`
-    /// values are treated as absent.
+    /// [`ObjectVariant::try_string_bytes`].
     ///
     /// # Parameters
     ///
@@ -164,36 +163,28 @@ pub trait ObjectLookupExt<K> {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(Some(&str))` when the value exists and converts
-    /// successfully, `Ok(None)` when the value is missing or resolves to
-    /// `null`, or `Err` if reference resolution or conversion fails.
-    fn optional_str<'a>(
-        &'a self,
-        key: K,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<Option<&'a str>, ObjectError>;
-
-    /// Returns a required UTF-8 string value from this container.
-    ///
-    /// This method looks up a value by key or index and converts it using
-    /// [`ObjectVariant::try_str`].
-    ///
-    /// # Parameters
-    ///
-    /// - `key`: The dictionary key or array index to look up.
-    /// - `objects`: The object resolver used when the looked-up value is an
-    ///   indirect reference.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(&str)` when the value exists and converts successfully, or
+    /// Returns `Ok(&[u8])` when the value exists and converts successfully, or
     /// `Err` if the value is missing, reference resolution fails, or
     /// conversion fails.
-    fn required_str<'a>(
+    fn required_string_bytes<'a>(
         &'a self,
         key: K,
         objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a str, ObjectError>;
+    ) -> Result<&'a [u8], ObjectError>;
+
+    /// Returns an optional PDF Name as raw bytes.
+    fn optional_name<'a>(
+        &'a self,
+        key: K,
+        objects: &'a dyn ObjectResolver,
+    ) -> Result<Option<&'a [u8]>, ObjectError>;
+
+    /// Returns a required PDF Name as raw bytes.
+    fn required_name<'a>(
+        &'a self,
+        key: K,
+        objects: &'a dyn ObjectResolver,
+    ) -> Result<&'a [u8], ObjectError>;
 
     /// Returns an optional byte string value from this container.
     ///
@@ -583,22 +574,30 @@ impl ObjectLookupExt<usize> for [ObjectVariant] {
         required_slice_value(self, index)?.try_array(objects)
     }
 
-    fn optional_str<'a>(
+    fn required_string_bytes<'a>(
         &'a self,
         index: usize,
         objects: &'a dyn ObjectResolver,
-    ) -> Result<Option<&'a str>, ObjectError> {
+    ) -> Result<&'a [u8], ObjectError> {
+        required_slice_value(self, index)?.try_string_bytes(objects)
+    }
+
+    fn optional_name<'a>(
+        &'a self,
+        index: usize,
+        objects: &'a dyn ObjectResolver,
+    ) -> Result<Option<&'a [u8]>, ObjectError> {
         optional_resolved_value(self.get(index), objects)?
-            .map(|value| value.try_str(objects))
+            .map(|value| value.try_name(objects))
             .transpose()
     }
 
-    fn required_str<'a>(
+    fn required_name<'a>(
         &'a self,
         index: usize,
         objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a str, ObjectError> {
-        required_slice_value(self, index)?.try_str(objects)
+    ) -> Result<&'a [u8], ObjectError> {
+        required_slice_value(self, index)?.try_name(objects)
     }
 
     fn optional_bytes<'a>(
@@ -738,10 +737,10 @@ impl ObjectLookupExt<usize> for [ObjectVariant] {
     }
 }
 
-impl ObjectLookupExt<&str> for Dictionary {
+impl ObjectLookupExt<&[u8]> for Dictionary {
     fn optional_dictionary<'a>(
         &'a self,
-        key: &str,
+        key: &[u8],
         objects: &'a dyn ObjectResolver,
     ) -> Result<Option<&'a Dictionary>, ObjectError> {
         optional_resolved_value(self.get(key), objects)?
@@ -751,7 +750,7 @@ impl ObjectLookupExt<&str> for Dictionary {
 
     fn required_dictionary<'a>(
         &'a self,
-        key: &str,
+        key: &[u8],
         objects: &'a dyn ObjectResolver,
     ) -> Result<&'a Dictionary, ObjectError> {
         self.get_or_err(key)?.try_dictionary(objects)
@@ -759,7 +758,7 @@ impl ObjectLookupExt<&str> for Dictionary {
 
     fn optional_stream<'a>(
         &'a self,
-        key: &str,
+        key: &[u8],
         objects: &'a dyn ObjectResolver,
     ) -> Result<Option<&'a StreamObject>, ObjectError> {
         optional_resolved_value(self.get(key), objects)?
@@ -769,7 +768,7 @@ impl ObjectLookupExt<&str> for Dictionary {
 
     fn required_stream<'a>(
         &'a self,
-        key: &str,
+        key: &[u8],
         objects: &'a dyn ObjectResolver,
     ) -> Result<&'a StreamObject, ObjectError> {
         self.get_or_err(key)?.try_stream(objects)
@@ -777,7 +776,7 @@ impl ObjectLookupExt<&str> for Dictionary {
 
     fn optional_array<'a>(
         &'a self,
-        key: &str,
+        key: &[u8],
         objects: &'a dyn ObjectResolver,
     ) -> Result<Option<&'a [ObjectVariant]>, ObjectError> {
         optional_resolved_value(self.get(key), objects)?
@@ -787,33 +786,41 @@ impl ObjectLookupExt<&str> for Dictionary {
 
     fn required_array<'a>(
         &'a self,
-        key: &str,
+        key: &[u8],
         objects: &'a dyn ObjectResolver,
     ) -> Result<&'a [ObjectVariant], ObjectError> {
         self.get_or_err(key)?.try_array(objects)
     }
 
-    fn optional_str<'a>(
+    fn required_string_bytes<'a>(
         &'a self,
-        key: &str,
+        key: &[u8],
         objects: &'a dyn ObjectResolver,
-    ) -> Result<Option<&'a str>, ObjectError> {
+    ) -> Result<&'a [u8], ObjectError> {
+        self.get_or_err(key)?.try_string_bytes(objects)
+    }
+
+    fn optional_name<'a>(
+        &'a self,
+        key: &[u8],
+        objects: &'a dyn ObjectResolver,
+    ) -> Result<Option<&'a [u8]>, ObjectError> {
         optional_resolved_value(self.get(key), objects)?
-            .map(|value| value.try_str(objects))
+            .map(|value| value.try_name(objects))
             .transpose()
     }
 
-    fn required_str<'a>(
+    fn required_name<'a>(
         &'a self,
-        key: &str,
+        key: &[u8],
         objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a str, ObjectError> {
-        self.get_or_err(key)?.try_str(objects)
+    ) -> Result<&'a [u8], ObjectError> {
+        self.get_or_err(key)?.try_name(objects)
     }
 
     fn optional_bytes<'a>(
         &'a self,
-        key: &str,
+        key: &[u8],
         objects: &'a dyn ObjectResolver,
     ) -> Result<Option<&'a [u8]>, ObjectError> {
         optional_resolved_value(self.get(key), objects)?
@@ -823,7 +830,7 @@ impl ObjectLookupExt<&str> for Dictionary {
 
     fn required_bytes<'a>(
         &'a self,
-        key: &str,
+        key: &[u8],
         objects: &'a dyn ObjectResolver,
     ) -> Result<&'a [u8], ObjectError> {
         self.get_or_err(key)?.try_bytes(objects)
@@ -831,7 +838,7 @@ impl ObjectLookupExt<&str> for Dictionary {
 
     fn optional_bytes_vec<'a>(
         &'a self,
-        key: &str,
+        key: &[u8],
         objects: &'a dyn ObjectResolver,
     ) -> Result<Option<Vec<u8>>, ObjectError> {
         optional_resolved_value(self.get(key), objects)?
@@ -841,7 +848,7 @@ impl ObjectLookupExt<&str> for Dictionary {
 
     fn required_bytes_vec<'a>(
         &'a self,
-        key: &str,
+        key: &[u8],
         objects: &'a dyn ObjectResolver,
     ) -> Result<Vec<u8>, ObjectError> {
         self.get_or_err(key)?.try_bytes_vec(objects)
@@ -849,7 +856,7 @@ impl ObjectLookupExt<&str> for Dictionary {
 
     fn optional_number<T>(
         &self,
-        key: &str,
+        key: &[u8],
         objects: &dyn ObjectResolver,
     ) -> Result<Option<T>, ObjectError>
     where
@@ -860,7 +867,7 @@ impl ObjectLookupExt<&str> for Dictionary {
             .transpose()
     }
 
-    fn required_number<T>(&self, key: &str, objects: &dyn ObjectResolver) -> Result<T, ObjectError>
+    fn required_number<T>(&self, key: &[u8], objects: &dyn ObjectResolver) -> Result<T, ObjectError>
     where
         T: FromPrimitive,
     {
@@ -869,7 +876,7 @@ impl ObjectLookupExt<&str> for Dictionary {
 
     fn optional_vec_of<T>(
         &self,
-        key: &str,
+        key: &[u8],
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Vec<T>>, ObjectError>
     where
@@ -882,7 +889,7 @@ impl ObjectLookupExt<&str> for Dictionary {
 
     fn required_vec_of<T>(
         &self,
-        key: &str,
+        key: &[u8],
         objects: &dyn ObjectResolver,
     ) -> Result<Vec<T>, ObjectError>
     where
@@ -893,7 +900,7 @@ impl ObjectLookupExt<&str> for Dictionary {
 
     fn optional_array_of<T, const N: usize>(
         &self,
-        key: &str,
+        key: &[u8],
         objects: &dyn ObjectResolver,
     ) -> Result<Option<[T; N]>, ObjectError>
     where
@@ -906,7 +913,7 @@ impl ObjectLookupExt<&str> for Dictionary {
 
     fn required_array_of<T, const N: usize>(
         &self,
-        key: &str,
+        key: &[u8],
         objects: &dyn ObjectResolver,
     ) -> Result<[T; N], ObjectError>
     where
@@ -917,7 +924,7 @@ impl ObjectLookupExt<&str> for Dictionary {
 
     fn optional_boolean(
         &self,
-        key: &str,
+        key: &[u8],
         objects: &dyn ObjectResolver,
     ) -> Result<Option<bool>, ObjectError> {
         optional_resolved_value(self.get(key), objects)?
@@ -927,19 +934,19 @@ impl ObjectLookupExt<&str> for Dictionary {
 
     fn required_boolean(
         &self,
-        key: &str,
+        key: &[u8],
         objects: &dyn ObjectResolver,
     ) -> Result<bool, ObjectError> {
         self.get_or_err(key)?.try_boolean(objects)
     }
 
-    fn optional_object_number(&self, key: &str) -> Result<Option<usize>, ObjectError> {
+    fn optional_object_number(&self, key: &[u8]) -> Result<Option<usize>, ObjectError> {
         optional_direct_value(self.get(key))?
             .map(ObjectVariant::try_object_number)
             .transpose()
     }
 
-    fn required_object_number(&self, key: &str) -> Result<usize, ObjectError> {
+    fn required_object_number(&self, key: &[u8]) -> Result<usize, ObjectError> {
         self.get_or_err(key)?.try_object_number()
     }
 }
@@ -1008,8 +1015,8 @@ mod tests {
 
     static NULL_OBJECT: ObjectVariant = ObjectVariant::Null;
 
-    fn dictionary_with(key: &str, value: ObjectVariant) -> Dictionary {
-        Dictionary::new(BTreeMap::from([(key.to_owned(), value)]))
+    fn dictionary_with(key: &[u8], value: ObjectVariant) -> Dictionary {
+        Dictionary::from_entries([(key, value)])
     }
 
     #[test]
@@ -1061,10 +1068,10 @@ mod tests {
 
     #[test]
     fn dictionary_optional_number_converts_existing_value() {
-        let dictionary = dictionary_with("Count", ObjectVariant::Real(12.0));
+        let dictionary = dictionary_with(b"Count", ObjectVariant::Real(12.0));
 
         let value = dictionary
-            .optional_number::<f32>("Count", &PassthroughResolver)
+            .optional_number::<f32>(b"Count", &PassthroughResolver)
             .expect("real converts to f32");
 
         assert_eq!(value, Some(12.0));
@@ -1072,13 +1079,13 @@ mod tests {
 
     #[test]
     fn dictionary_optional_number_returns_none_for_missing_or_null() {
-        let dictionary = dictionary_with("Null", ObjectVariant::Null);
+        let dictionary = dictionary_with(b"Null", ObjectVariant::Null);
 
         let missing = dictionary
-            .optional_number::<u16>("Missing", &PassthroughResolver)
+            .optional_number::<u16>(b"Missing", &PassthroughResolver)
             .expect("missing optional key is absent");
         let direct_null = dictionary
-            .optional_number::<u16>("Null", &PassthroughResolver)
+            .optional_number::<u16>(b"Null", &PassthroughResolver)
             .expect("null optional key is absent");
 
         assert_eq!(missing, None);
@@ -1087,10 +1094,10 @@ mod tests {
 
     #[test]
     fn dictionary_required_number_reports_missing_key() {
-        let dictionary = Dictionary::new(BTreeMap::new());
+        let dictionary = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
 
         let error = dictionary
-            .required_number::<u16>("Count", &PassthroughResolver)
+            .required_number::<u16>(b"Count", &PassthroughResolver)
             .expect_err("missing required key fails");
 
         assert_eq!(
@@ -1103,78 +1110,78 @@ mod tests {
 
     #[test]
     fn dictionary_lookup_methods_convert_common_types() {
-        let nested = Dictionary::new(BTreeMap::new());
+        let nested = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
         let dictionary = Dictionary::new(BTreeMap::from([
             (
-                "Dictionary".to_owned(),
+                b"Dictionary".to_vec(),
                 ObjectVariant::Dictionary(Box::new(nested.clone())),
             ),
             (
-                "Stream".to_owned(),
+                b"Stream".to_vec(),
                 ObjectVariant::Stream(StreamObject::new(
                     7,
                     0,
-                    Box::new(Dictionary::new(BTreeMap::new())),
+                    Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
                     Vec::new(),
                 )),
             ),
             (
-                "Array".to_owned(),
+                b"Array".to_vec(),
                 ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(2)]),
             ),
-            ("String".to_owned(), ObjectVariant::Name(b"Name".to_vec())),
+            (b"String".to_vec(), ObjectVariant::Name(b"Name".to_vec())),
             (
-                "Bytes".to_owned(),
+                b"Bytes".to_vec(),
                 ObjectVariant::LiteralString(b"abc".to_vec()),
             ),
-            ("Boolean".to_owned(), ObjectVariant::Boolean(true)),
-            ("Reference".to_owned(), ObjectVariant::Reference(9)),
+            (b"Boolean".to_vec(), ObjectVariant::Boolean(true)),
+            (b"Reference".to_vec(), ObjectVariant::Reference(9)),
         ]));
 
         let stream = dictionary
-            .required_stream("Stream", &PassthroughResolver)
+            .required_stream(b"Stream", &PassthroughResolver)
             .expect("stream exists");
 
         assert_eq!(
             dictionary
-                .required_dictionary("Dictionary", &PassthroughResolver)
+                .required_dictionary(b"Dictionary", &PassthroughResolver)
                 .expect("dictionary exists"),
             &nested
         );
         assert_eq!(stream.object_number, 7);
         assert_eq!(
             dictionary
-                .required_array("Array", &PassthroughResolver)
+                .required_array(b"Array", &PassthroughResolver)
                 .expect("array exists")
                 .len(),
             2
         );
         assert_eq!(
             dictionary
-                .required_str("String", &PassthroughResolver)
+                .required_name(b"String", &PassthroughResolver)
                 .expect("string exists"),
-            "Name"
+            b"Name"
         );
         assert_eq!(
             dictionary
-                .required_bytes("Bytes", &PassthroughResolver)
+                .required_bytes(b"Bytes", &PassthroughResolver)
                 .expect("bytes exist"),
             b"abc"
         );
         assert_eq!(
             dictionary
-                .required_bytes_vec("Bytes", &PassthroughResolver)
+                .required_bytes_vec(b"Bytes", &PassthroughResolver)
                 .expect("bytes exist"),
             b"abc".to_vec()
         );
         assert!(
             dictionary
-                .required_boolean("Boolean", &PassthroughResolver)
+                .required_boolean(b"Boolean", &PassthroughResolver)
                 .expect("boolean exists")
         );
         assert_eq!(
             dictionary
-                .required_object_number("Reference")
+                .required_object_number(b"Reference")
                 .expect("reference object number exists"),
             9
         );
@@ -1183,7 +1190,7 @@ mod tests {
     #[test]
     fn dictionary_lookup_methods_convert_numeric_arrays() {
         let dictionary = Dictionary::new(BTreeMap::from([(
-            "Numbers".to_owned(),
+            b"Numbers".to_vec(),
             ObjectVariant::Array(vec![
                 ObjectVariant::Integer(1),
                 ObjectVariant::Integer(2),
@@ -1193,13 +1200,13 @@ mod tests {
 
         assert_eq!(
             dictionary
-                .required_vec_of::<u8>("Numbers", &PassthroughResolver)
+                .required_vec_of::<u8>(b"Numbers", &PassthroughResolver)
                 .expect("numeric vector converts"),
             vec![1, 2, 3]
         );
         assert_eq!(
             dictionary
-                .required_array_of::<u8, 3>("Numbers", &PassthroughResolver)
+                .required_array_of::<u8, 3>(b"Numbers", &PassthroughResolver)
                 .expect("numeric array converts"),
             [1, 2, 3]
         );
@@ -1207,7 +1214,7 @@ mod tests {
 
     #[test]
     fn slice_lookup_methods_convert_common_types() {
-        let nested = Dictionary::new(BTreeMap::new());
+        let nested = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
         let values = [
             ObjectVariant::Dictionary(Box::new(nested.clone())),
             ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(2)]),
@@ -1231,9 +1238,9 @@ mod tests {
         );
         assert_eq!(
             values
-                .required_str(2, &PassthroughResolver)
+                .required_string_bytes(2, &PassthroughResolver)
                 .expect("string exists"),
-            "text"
+            b"text"
         );
         assert!(
             !values
@@ -1261,46 +1268,24 @@ mod tests {
 
     #[test]
     fn required_lookup_propagates_type_mismatch() {
-        let dictionary = dictionary_with("Boolean", ObjectVariant::Boolean(true));
+        let dictionary = dictionary_with(b"Boolean", ObjectVariant::Boolean(true));
 
         let error = dictionary
-            .required_str("Boolean", &PassthroughResolver)
+            .required_string_bytes(b"Boolean", &PassthroughResolver)
             .expect_err("boolean is not a string");
 
         assert_eq!(error, ObjectError::TypeMismatch("String", "Boolean"));
     }
 
     #[test]
-    fn required_str_propagates_invalid_utf8() {
-        let dictionary = dictionary_with("Name", ObjectVariant::Name(vec![0xFF]));
+    fn required_name_preserves_non_utf8_bytes() {
+        let dictionary = dictionary_with(b"Name", ObjectVariant::Name(vec![0xFF]));
 
-        let error = dictionary
-            .required_str("Name", &PassthroughResolver)
-            .expect_err("invalid utf-8 should fail");
-
-        assert!(matches!(
-            error,
-            ObjectError::InvalidUtf8String {
-                object_type: "Name",
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn optional_str_propagates_invalid_utf8() {
-        let dictionary = dictionary_with("Name", ObjectVariant::LiteralString(vec![0xFF]));
-
-        let error = dictionary
-            .optional_str("Name", &PassthroughResolver)
-            .expect_err("invalid utf-8 should fail");
-
-        assert!(matches!(
-            error,
-            ObjectError::InvalidUtf8String {
-                object_type: "LiteralString",
-                ..
-            }
-        ));
+        assert_eq!(
+            dictionary
+                .required_name(b"Name", &PassthroughResolver)
+                .expect("raw name bytes should be preserved"),
+            [0xFF]
+        );
     }
 }

@@ -117,7 +117,7 @@ impl ContentStream {
         objects: &dyn ObjectResolver,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Option<Self>, PdfOperatorError> {
-        const KEY: &str = "Contents";
+        const KEY: &[u8] = b"Contents";
 
         let Some(contents) = dictionary.get(KEY) else {
             return Ok(None);
@@ -157,7 +157,7 @@ mod tests {
         StreamObject::new(
             object_number,
             0,
-            Box::new(Dictionary::new(BTreeMap::new())),
+            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
             data.to_vec(),
         )
     }
@@ -367,7 +367,7 @@ mod tests {
 
     #[test]
     fn from_dictionary_preserves_allocator_for_missing_contents() {
-        let page = Dictionary::new(BTreeMap::new());
+        let page = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
         let mut ids = ContentStreamIdAllocator::new();
 
         let contents = ContentStream::from_dictionary(&page, &PassthroughResolver, &mut ids)
@@ -383,7 +383,7 @@ mod tests {
             ObjectVariant::Reference(1),
             ObjectVariant::Reference(2),
         ]);
-        let page = Dictionary::new(BTreeMap::from([("Contents".to_string(), contents)]));
+        let page = Dictionary::new(BTreeMap::from([(Vec::from(b"Contents"), contents)]));
         let mut ids = ContentStreamIdAllocator::new();
         let resolver = MapResolver {
             objects: BTreeMap::from([

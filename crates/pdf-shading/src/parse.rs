@@ -26,7 +26,7 @@ pub fn shading_from_dictionary(
 ) -> Result<Shading, PdfShadingError> {
     let dictionary = object.try_dictionary(objects)?;
     let shading_type = dictionary
-        .required_number::<i32>("ShadingType", objects)?
+        .required_number::<i32>(b"ShadingType", objects)?
         .try_into()?;
 
     match shading_type {
@@ -48,7 +48,7 @@ pub(crate) fn parse_functions(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<Vec<Function>, PdfShadingError> {
-    let function = objects.resolve_object(dictionary.get_or_err("Function")?)?;
+    let function = objects.resolve_object(dictionary.get_or_err(b"Function")?)?;
 
     match function {
         ObjectVariant::Array(functions) => functions
@@ -65,10 +65,10 @@ fn parse_function_based(
     objects: &dyn ObjectResolver,
 ) -> Result<Shading, PdfShadingError> {
     let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
-    let background = dictionary.optional_vec_of::<f32>("Background", objects)?;
+    let background = dictionary.optional_vec_of::<f32>(b"Background", objects)?;
     let bbox = dictionary.optional_bbox(objects)?;
-    let domain = dictionary.optional_vec_of::<f32>("Domain", objects)?;
-    let anti_alias = dictionary.optional_boolean("AntiAlias", objects)?;
+    let domain = dictionary.optional_vec_of::<f32>(b"Domain", objects)?;
+    let anti_alias = dictionary.optional_boolean(b"AntiAlias", objects)?;
     let functions = parse_functions(dictionary, objects)?;
 
     Ok(Shading::FunctionBased {
@@ -86,9 +86,9 @@ fn parse_axial(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<Shading, PdfShadingError> {
-    let coords = dictionary.required_array_of::<f32, 4>("Coords", objects)?;
+    let coords = dictionary.required_array_of::<f32, 4>(b"Coords", objects)?;
     let color_space = required_color_space(dictionary, objects)?;
-    let function = Function::parse(dictionary.get_or_err("Function")?, objects)?;
+    let function = Function::parse(dictionary.get_or_err(b"Function")?, objects)?;
     let color_stops = ColorStops::from_function(&function, &color_space)?;
 
     Ok(Shading::Axial {
@@ -103,10 +103,10 @@ fn parse_radial(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<Shading, PdfShadingError> {
-    let coords = dictionary.required_array_of::<f32, 6>("Coords", objects)?;
+    let coords = dictionary.required_array_of::<f32, 6>(b"Coords", objects)?;
     let color_space = required_color_space(dictionary, objects)?;
     let bbox = dictionary.optional_bbox(objects)?;
-    let function = Function::parse(dictionary.get_or_err("Function")?, objects)?;
+    let function = Function::parse(dictionary.get_or_err(b"Function")?, objects)?;
     let color_stops = ColorStops::from_function(&function, &color_space)?;
 
     Ok(Shading::Radial {

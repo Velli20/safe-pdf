@@ -57,7 +57,7 @@ mod tests {
 
         let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
         assert_eq!(
-            trailer.dictionary.get("Root").unwrap(),
+            trailer.dictionary.get(b"Root").unwrap(),
             &ObjectVariant::Reference(1)
         );
     }
@@ -69,7 +69,7 @@ mod tests {
 
         let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
         assert_eq!(
-            trailer.dictionary.get("Size").unwrap(),
+            trailer.dictionary.get(b"Size").unwrap(),
             &ObjectVariant::Integer(22)
         );
         assert_eq!(trailer.offset, 187);
@@ -82,7 +82,7 @@ mod tests {
 
         let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
         assert_eq!(
-            trailer.dictionary.get("Root").unwrap(),
+            trailer.dictionary.get(b"Root").unwrap(),
             &ObjectVariant::Reference(1)
         );
         assert_eq!(trailer.offset, 187);
@@ -95,7 +95,7 @@ mod tests {
 
         let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
         assert_eq!(
-            trailer.dictionary.get("Root").unwrap(),
+            trailer.dictionary.get(b"Root").unwrap(),
             &ObjectVariant::Reference(1)
         );
         assert_eq!(trailer.offset, 0);
@@ -141,7 +141,7 @@ mod tests {
             table
                 .trailer
                 .dictionary
-                .get("Prev")
+                .get(b"Prev")
                 .unwrap()
                 .try_number::<usize>(&PassthroughResolver)
                 .unwrap(),

@@ -5,15 +5,15 @@ pub enum BorderEffectStyle {
     /// A cloudy border effect.
     Cloudy,
     /// A vendor or future border effect.
-    Unknown(String),
+    Unknown(Vec<u8>),
 }
 
-impl From<&str> for BorderEffectStyle {
-    fn from(value: &str) -> Self {
+impl From<&[u8]> for BorderEffectStyle {
+    fn from(value: &[u8]) -> Self {
         match value {
-            "S" => Self::None,
-            "C" => Self::Cloudy,
-            other => Self::Unknown(other.to_owned()),
+            b"S" => Self::None,
+            b"C" => Self::Cloudy,
+            other => Self::Unknown(Vec::from(other)),
         }
     }
 }

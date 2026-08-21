@@ -69,15 +69,15 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
     /// Form XObjects are self-contained content streams that can include
     /// their own resources. They are rendered by recursively processing
     /// the form's content stream with the form's transformation matrix.
-    fn invoke_xobject(&mut self, xobject_name: &str) -> Result<(), Self::ErrorType> {
+    fn invoke_xobject(&mut self, xobject_name: &[u8]) -> Result<(), Self::ErrorType> {
         let resources = self
             .current_state()?
             .resources
             .ok_or(PdfCanvasError::PageResourcesMissing)?;
 
-        let xobj = resources
-            .xobject(xobject_name)
-            .ok_or_else(|| PdfCanvasError::XObjectNotFound(xobject_name.to_string()))?;
+        let xobj = resources.xobject(xobject_name).ok_or_else(|| {
+            PdfCanvasError::XObjectNotFound(String::from_utf8_lossy(xobject_name).into_owned())
+        })?;
 
         match xobj {
             Resource::Image(image) => self.render_image_xobject(image)?,
@@ -89,7 +89,11 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
                 form.resources.as_deref(),
                 None,
             )?,
-            _ => return Err(PdfCanvasError::XObjectNotFound(xobject_name.to_string())),
+            _ => {
+                return Err(PdfCanvasError::XObjectNotFound(
+                    String::from_utf8_lossy(xobject_name).into_owned(),
+                ));
+            }
         }
 
         Ok(())

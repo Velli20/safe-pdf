@@ -17,10 +17,10 @@ impl CaretAnnotation {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
-        let difference_rect = dictionary.optional_array_of::<f32, 4>("RD", objects)?;
+        let difference_rect = dictionary.optional_array_of::<f32, 4>(b"RD", objects)?;
         let style = dictionary
-            .get("Sy")
-            .map(|value| value.try_str(objects).map(CaretSymbolStyle::from))
+            .get(b"Sy")
+            .map(|value| value.try_name(objects).map(CaretSymbolStyle::from))
             .transpose()?;
 
         Ok(Self {

@@ -34,7 +34,7 @@ pub struct FileSpecificationDictionary {
 impl FileSpecification {
     pub(crate) fn from_dictionary(
         dictionary: &Dictionary,
-        key: &'static str,
+        key: &'static [u8],
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, AnnotationError> {
         dictionary
@@ -51,13 +51,13 @@ impl FileSpecification {
             return Ok(Self::Path(value.try_bytes(objects)?.to_vec()));
         };
 
-        let file_system = dictionary.optional_bytes_vec("FS", objects)?;
-        let file_name = dictionary.optional_bytes_vec("F", objects)?;
-        let unicode_file_name = dictionary.optional_bytes_vec("UF", objects)?;
-        let mac_file_name = dictionary.optional_bytes_vec("Mac", objects)?;
-        let dos_file_name = dictionary.optional_bytes_vec("DOS", objects)?;
-        let unix_file_name = dictionary.optional_bytes_vec("Unix", objects)?;
-        let volatile = dictionary.optional_boolean("V", objects)?;
+        let file_system = dictionary.optional_name(b"FS", objects)?.map(Vec::from);
+        let file_name = dictionary.optional_bytes_vec(b"F", objects)?;
+        let unicode_file_name = dictionary.optional_bytes_vec(b"UF", objects)?;
+        let mac_file_name = dictionary.optional_bytes_vec(b"Mac", objects)?;
+        let dos_file_name = dictionary.optional_bytes_vec(b"DOS", objects)?;
+        let unix_file_name = dictionary.optional_bytes_vec(b"Unix", objects)?;
+        let volatile = dictionary.optional_boolean(b"V", objects)?;
 
         Ok(Self::Dictionary(FileSpecificationDictionary {
             file_system,

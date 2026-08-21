@@ -23,7 +23,7 @@ pub struct Type3Font {
     /// The bounding box of the font.
     pub bounds: Rect,
     /// A procedure defining any special actions to be taken before a character from this font is rendered.
-    pub char_procs: HashMap<String, ContentStream>,
+    pub char_procs: HashMap<Vec<u8>, ContentStream>,
     /// The font's encoding, specifying the mapping from character codes to glyph names.
     pub encoding: Option<Encoding>,
     /// Parsed ToUnicode CMap for char-code → Unicode mapping.
@@ -36,11 +36,11 @@ impl Type3Font {
         objects: &dyn ObjectResolver,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Self, FontError> {
-        let [a, b, c, d, e, f] = dictionary.required_array_of::<f32, 6>("FontMatrix", objects)?;
+        let [a, b, c, d, e, f] = dictionary.required_array_of::<f32, 6>(b"FontMatrix", objects)?;
         let font_matrix = Transform::from_row(a, b, c, d, e, f);
 
         let [left, top, right, bottom] =
-            dictionary.required_array_of::<f32, 4>("FontBBox", objects)?;
+            dictionary.required_array_of::<f32, 4>(b"FontBBox", objects)?;
         let bounds = Rect {
             left,
             top,
@@ -50,7 +50,7 @@ impl Type3Font {
 
         let encoding = Encoding::from_dictionary(dictionary, objects)?;
 
-        let char_proc_dictionary = dictionary.required_dictionary("CharProcs", objects)?;
+        let char_proc_dictionary = dictionary.required_dictionary(b"CharProcs", objects)?;
 
         let mut char_procs = HashMap::new();
         for (name, value) in char_proc_dictionary.dictionary.iter() {

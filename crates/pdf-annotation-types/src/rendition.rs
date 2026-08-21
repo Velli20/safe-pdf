@@ -14,7 +14,7 @@ impl Rendition {
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, AnnotationError> {
         dictionary
-            .get("R")
+            .get(b"R")
             .map(|value| {
                 Ok(Self {
                     dictionary: value.try_dictionary(objects)?.clone(),

@@ -143,18 +143,18 @@ impl PdfOperator for SetLeading {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetFont {
     /// The name of the font resource.
-    name: String,
+    name: Vec<u8>,
     /// The font size.
     size: f32,
 }
 
 impl SetFont {
-    pub fn new(name: String, size: f32) -> Self {
+    pub fn new(name: Vec<u8>, size: f32) -> Self {
         Self { name, size }
     }
 
     /// Returns the font resource name.
-    pub fn name(&self) -> &str {
+    pub fn name(&self) -> &[u8] {
         &self.name
     }
 
@@ -170,7 +170,7 @@ impl PdfOperator for SetFont {
     const OPERAND_COUNT: Option<usize> = Some(2);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let name = operands.get_str()?;
+        let name = operands.get_name_bytes()?;
         let size = operands
             .take_next()?
             .try_number::<f32>(&PassthroughResolver)?;

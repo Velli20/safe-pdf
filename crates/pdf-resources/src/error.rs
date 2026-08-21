@@ -53,8 +53,11 @@ pub enum PdfPagesError {
     Decode(#[from] DecodeError),
     #[error("{0}")]
     Shading(#[from] PdfShadingError),
-    #[error("invalid annotation entry '/{entry}': {reason}")]
-    InvalidAnnotationEntry { entry: &'static str, reason: String },
-    #[error("missing required annotation entry '/{entry}'")]
-    MissingAnnotationEntry { entry: &'static str },
+    #[error("invalid annotation entry '/{entry:?}': {reason}")]
+    InvalidAnnotationEntry {
+        entry: &'static [u8],
+        reason: String,
+    },
+    #[error("missing required annotation entry '/{entry:?}'")]
+    MissingAnnotationEntry { entry: &'static [u8] },
 }

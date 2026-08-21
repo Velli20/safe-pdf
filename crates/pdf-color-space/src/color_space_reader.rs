@@ -19,7 +19,7 @@ use crate::{color_space::ColorSpace, error::ColorSpaceError};
 const MAX_COLOR_SPACE_DEPTH: usize = 8;
 
 impl ColorSpace {
-    const KEY: &'static str = "ColorSpace";
+    const KEY: &'static [u8] = b"ColorSpace";
 
     pub fn from_dictionary(
         dictionary: &Dictionary,
@@ -65,7 +65,7 @@ pub(crate) fn parse_color_space_object(
         ObjectVariant::Array(arr) => {
             parse_color_space_array(objects, arr.as_slice(), depth.saturating_add(1))
         }
-        other => ColorSpace::try_from(other.try_str(objects)?),
+        other => ColorSpace::try_from(other.try_name(objects)?),
     }
 }
 
@@ -78,7 +78,7 @@ fn parse_color_space_array(
     depth: usize,
 ) -> Result<ColorSpace, ColorSpaceError> {
     if let [single] = arr {
-        return ColorSpace::try_from(single.try_str(objects)?);
+        return ColorSpace::try_from(single.try_name(objects)?);
     }
 
     // Get the color space type (first element)
@@ -88,15 +88,15 @@ fn parse_color_space_array(
             description: "empty color space array".into(),
         })?;
 
-    match cs_type.try_str(objects)? {
-        "Indexed" => parse_indexed_color_space(objects, arr, depth),
-        "ICCBased" => parse_icc_based_color_space(objects, arr, depth),
-        "Separation" => parse_separation_color_space(objects, arr, depth),
-        "Lab" => parse_lab_color_space(objects, arr),
-        "CalGray" => parse_cal_gray_color_space(objects, arr),
-        "CalRGB" => parse_cal_rgb_color_space(objects, arr),
-        "DeviceN" => parse_device_n_color_space(objects, arr, depth),
-        "Pattern" => {
+    match cs_type.try_name(objects)? {
+        b"Indexed" => parse_indexed_color_space(objects, arr, depth),
+        b"ICCBased" => parse_icc_based_color_space(objects, arr, depth),
+        b"Separation" => parse_separation_color_space(objects, arr, depth),
+        b"Lab" => parse_lab_color_space(objects, arr),
+        b"CalGray" => parse_cal_gray_color_space(objects, arr),
+        b"CalRGB" => parse_cal_rgb_color_space(objects, arr),
+        b"DeviceN" => parse_device_n_color_space(objects, arr, depth),
+        b"Pattern" => {
             // Optional second element is the underlying color space used with
             // uncolored tiling patterns.
             let underlying = arr
@@ -107,7 +107,8 @@ fn parse_color_space_array(
         }
         unknown => Err(ColorSpaceError::InvalidColorSpace {
             description: format!(
-                "unsupported color space type: /{unknown} (array with {} elements)",
+                "unsupported color space type: /{} (array with {} elements)",
+                String::from_utf8_lossy(unknown),
                 arr.len()
             ),
         }),

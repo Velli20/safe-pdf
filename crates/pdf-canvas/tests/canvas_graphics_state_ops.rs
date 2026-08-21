@@ -33,7 +33,7 @@ fn render(
 fn graphics_state_resource(params: Vec<ExternalGraphicsStateKey>) -> Resources {
     Resources {
         ext_g_states: HashMap::from([(
-            "GS0".to_string(),
+            b"GS0".to_vec(),
             Resource::ExternalGraphicsState(Rc::new(ExternalGraphicsState { params })),
         )]),
         ..Default::default()

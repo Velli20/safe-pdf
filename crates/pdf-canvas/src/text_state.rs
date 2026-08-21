@@ -72,7 +72,7 @@ impl TextState<'_> {
     /// (ISO/IEC 14496-22 §4.3, `head` table).
     pub(crate) const MAX_UNITS_PER_EM: u16 = 16384;
 
-    pub(crate) fn glyph_name(&self, char_code: u16) -> Option<&str> {
+    pub(crate) fn glyph_name(&self, char_code: u16) -> Option<&[u8]> {
         if let Some(font) = self.font {
             font.glyph_name(char_code)
         } else {

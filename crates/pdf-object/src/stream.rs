@@ -93,12 +93,22 @@ mod tests {
 
     use super::StreamObject;
     use crate::dictionary::Dictionary;
+    use crate::object_variant::ObjectVariant;
 
     #[test]
     fn constructors_record_filter_state() {
-        let decoded = StreamObject::new(1, 0, Box::new(Dictionary::new(BTreeMap::new())), vec![1]);
-        let encoded =
-            StreamObject::new_encoded(2, 0, Box::new(Dictionary::new(BTreeMap::new())), vec![2]);
+        let decoded = StreamObject::new(
+            1,
+            0,
+            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+            vec![1],
+        );
+        let encoded = StreamObject::new_encoded(
+            2,
+            0,
+            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+            vec![2],
+        );
 
         assert!(decoded.filters_applied());
         assert!(!encoded.filters_applied());
@@ -106,8 +116,12 @@ mod tests {
 
     #[test]
     fn setting_filtered_data_updates_bytes_and_state() {
-        let mut stream =
-            StreamObject::new_encoded(1, 0, Box::new(Dictionary::new(BTreeMap::new())), vec![1]);
+        let mut stream = StreamObject::new_encoded(
+            1,
+            0,
+            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+            vec![1],
+        );
 
         stream.set_filtered_data(vec![2, 3]);
 

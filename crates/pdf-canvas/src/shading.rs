@@ -5,11 +5,13 @@ use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::Pd
 
 impl<B: CanvasBackend> ShadingOps for PdfCanvas<'_, B> {
     type ErrorType = PdfCanvasError;
-    fn paint_shading(&mut self, shading_name: &str) -> Result<(), Self::ErrorType> {
+    fn paint_shading(&mut self, shading_name: &[u8]) -> Result<(), Self::ErrorType> {
         let state = self.current_state()?;
 
         let Some(shading) = state.resources.and_then(|r| r.shading(shading_name)) else {
-            return Err(PdfCanvasError::PatternNotFound(shading_name.to_string()));
+            return Err(PdfCanvasError::PatternNotFound(
+                String::from_utf8_lossy(shading_name).into_owned(),
+            ));
         };
 
         // Paints the area of the current clipping path with the shading pattern named

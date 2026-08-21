@@ -272,7 +272,12 @@ mod tests {
     fn inserting_unfiltered_stream_preserves_the_byte_allocation() {
         let data = vec![1, 2, 3, 4];
         let original = data.as_ptr();
-        let stream = StreamObject::new(1, 0, Box::new(Dictionary::new(BTreeMap::new())), data);
+        let stream = StreamObject::new(
+            1,
+            0,
+            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+            data,
+        );
         let mut collection = ObjectCollection::default();
 
         collection
@@ -329,10 +334,10 @@ mod tests {
         let compressed = encoder.finish().expect("zlib finish failed");
 
         let mut decode_parms = BTreeMap::new();
-        decode_parms.insert("Predictor".to_string(), ObjectVariant::Integer(12));
-        decode_parms.insert("Columns".to_string(), ObjectVariant::Integer(5));
-        decode_parms.insert("Colors".to_string(), ObjectVariant::Integer(1));
-        decode_parms.insert("BitsPerComponent".to_string(), ObjectVariant::Integer(8));
+        decode_parms.insert(Vec::from(b"Predictor"), ObjectVariant::Integer(12));
+        decode_parms.insert(Vec::from(b"Columns"), ObjectVariant::Integer(5));
+        decode_parms.insert(Vec::from(b"Colors"), ObjectVariant::Integer(1));
+        decode_parms.insert(Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8));
 
         let decode_parms_object = ObjectVariant::IndirectObject(Box::new(IndirectObject::new(
             2,
@@ -349,12 +354,12 @@ mod tests {
 
         let mut stream_dict = BTreeMap::new();
         stream_dict.insert(
-            "Filter".to_string(),
+            Vec::from(b"Filter"),
             ObjectVariant::Name(b"FlateDecode".to_vec()),
         );
-        stream_dict.insert("DecodeParms".to_string(), ObjectVariant::Reference(2));
+        stream_dict.insert(Vec::from(b"DecodeParms"), ObjectVariant::Reference(2));
         stream_dict.insert(
-            "Length".to_string(),
+            Vec::from(b"Length"),
             ObjectVariant::Integer(compressed.len() as i64),
         );
 
@@ -380,9 +385,9 @@ mod tests {
         use pdf_object::indirect_object::IndirectObject;
 
         let stream_dictionary = Dictionary::new(BTreeMap::from([
-            ("DecodeParms".to_string(), ObjectVariant::Reference(2)),
+            (Vec::from(b"DecodeParms"), ObjectVariant::Reference(2)),
             (
-                "Filter".to_string(),
+                Vec::from(b"Filter"),
                 ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
             ),
         ]));
@@ -408,7 +413,7 @@ mod tests {
                     2,
                     0,
                     Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
-                        BTreeMap::new(),
+                        BTreeMap::<Vec<u8>, ObjectVariant>::new(),
                     )))),
                 ),
             )))

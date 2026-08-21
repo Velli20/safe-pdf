@@ -67,7 +67,7 @@ impl GlyphWidthsMap {
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, FontError> {
         dictionary
-            .get("W")
+            .get(b"W")
             .map(|value| {
                 let widths = value.try_array(objects)?;
                 Self::from_array(widths, objects).map_err(FontError::from)

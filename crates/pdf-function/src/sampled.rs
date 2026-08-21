@@ -234,13 +234,13 @@ impl FunctionImpl for SampledFunction {
         let dictionary = &stream.dictionary;
 
         // /Domain: Required. Array of 2*m numbers defining input domain.
-        let domain = dictionary.required_vec_of::<f32>("Domain", objects)?;
+        let domain = dictionary.required_vec_of::<f32>(b"Domain", objects)?;
 
         // /Range: Required for sampled functions. Array of 2*n numbers.
-        let range = dictionary.required_vec_of::<f32>("Range", objects)?;
+        let range = dictionary.required_vec_of::<f32>(b"Range", objects)?;
 
         // /Size: Required. Array of m integers specifying samples per input dimension.
-        let size = dictionary.required_vec_of::<usize>("Size", objects)?;
+        let size = dictionary.required_vec_of::<usize>(b"Size", objects)?;
         if size.is_empty() {
             return Err(FunctionReadError::InvalidSizeArray);
         }
@@ -248,14 +248,14 @@ impl FunctionImpl for SampledFunction {
         let output_count = range.len() / 2;
 
         // /BitsPerSample: Required. Must be 1, 2, 4, 8, 12, 16, 24, or 32.
-        let bits_per_sample = dictionary.required_number::<usize>("BitsPerSample", objects)?;
+        let bits_per_sample = dictionary.required_number::<usize>(b"BitsPerSample", objects)?;
         if !matches!(bits_per_sample, 1 | 2 | 4 | 8 | 12 | 16 | 24 | 32) {
             return Err(FunctionReadError::InvalidBitsPerSample);
         }
 
         // /Order: Optional. 1 = linear (default), 3 = cubic spline.
         let order = dictionary
-            .get("Order")
+            .get(b"Order")
             .map(|o| {
                 InterpolationOrder::from_i32(o.try_number::<i32>(objects)?)
                     .ok_or(FunctionReadError::InvalidOrder)
@@ -265,7 +265,7 @@ impl FunctionImpl for SampledFunction {
 
         // /Encode: Optional. Defaults to [0, Size[i]-1] per dimension.
         let encode = dictionary
-            .get("Encode")
+            .get(b"Encode")
             .map(|o| o.try_vec_of::<f32>(objects))
             .transpose()?
             .unwrap_or_else(|| {
@@ -280,7 +280,7 @@ impl FunctionImpl for SampledFunction {
 
         // /Decode: Optional. Defaults to Range values.
         let decode = dictionary
-            .get("Decode")
+            .get(b"Decode")
             .map(|o| o.try_vec_of::<f32>(objects))
             .transpose()?
             .unwrap_or_else(|| range.clone());

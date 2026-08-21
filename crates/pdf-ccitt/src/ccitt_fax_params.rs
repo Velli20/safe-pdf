@@ -60,28 +60,28 @@ impl CCITTFaxParams {
     ) -> Result<Self, ObjectError> {
         let mut p = Self::default();
 
-        if let Some(value) = dict.optional_number::<i32>("K", objects)? {
+        if let Some(value) = dict.optional_number::<i32>(b"K", objects)? {
             p.k = value;
         }
-        if let Some(value) = dict.optional_number::<usize>("Columns", objects)? {
+        if let Some(value) = dict.optional_number::<usize>(b"Columns", objects)? {
             p.columns = value;
         }
-        if let Some(value) = dict.optional_number::<usize>("Rows", objects)? {
+        if let Some(value) = dict.optional_number::<usize>(b"Rows", objects)? {
             p.rows = value;
         }
-        if let Some(obj) = dict.optional_boolean("EndOfLine", objects)? {
+        if let Some(obj) = dict.optional_boolean(b"EndOfLine", objects)? {
             p.end_of_line = obj;
         }
-        if let Some(obj) = dict.optional_boolean("EncodedByteAlign", objects)? {
+        if let Some(obj) = dict.optional_boolean(b"EncodedByteAlign", objects)? {
             p.encoded_byte_align = obj;
         }
-        if let Some(obj) = dict.optional_boolean("EndOfBlock", objects)? {
+        if let Some(obj) = dict.optional_boolean(b"EndOfBlock", objects)? {
             p.end_of_block = obj;
         }
-        if let Some(obj) = dict.optional_boolean("BlackIs1", objects)? {
+        if let Some(obj) = dict.optional_boolean(b"BlackIs1", objects)? {
             p.black_is1 = obj;
         }
-        if let Some(value) = dict.optional_number::<u32>("DamagedRowsBeforeError", objects)? {
+        if let Some(value) = dict.optional_number::<u32>(b"DamagedRowsBeforeError", objects)? {
             p.damaged_rows_before_error = value;
         }
 
@@ -93,12 +93,13 @@ impl CCITTFaxParams {
 mod tests {
     use super::*;
     use pdf_object::object_resolver::PassthroughResolver;
+    use pdf_object::object_variant::ObjectVariant;
     use std::collections::BTreeMap;
 
     #[test]
     fn params_from_empty_dict_uses_defaults() -> Result<(), ObjectError> {
         use std::collections::BTreeMap;
-        let dict = Dictionary::new(BTreeMap::new());
+        let dict = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
         let objects = PassthroughResolver;
         let p = CCITTFaxParams::from_dictionary(&dict, &objects)?;
         assert_eq!(p.k, 0);
@@ -116,23 +117,23 @@ mod tests {
     fn params_from_dict_reads_all_keys() -> Result<(), ObjectError> {
         use pdf_object::object_variant::ObjectVariant;
 
-        let mut dict = Dictionary::new(BTreeMap::new());
+        let mut dict = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
         dict.dictionary
-            .insert("K".to_string(), ObjectVariant::Integer(-1));
+            .insert(b"K".to_vec(), ObjectVariant::Integer(-1));
         dict.dictionary
-            .insert("Columns".to_string(), ObjectVariant::Integer(800));
+            .insert(b"Columns".to_vec(), ObjectVariant::Integer(800));
         dict.dictionary
-            .insert("Rows".to_string(), ObjectVariant::Integer(600));
+            .insert(b"Rows".to_vec(), ObjectVariant::Integer(600));
         dict.dictionary
-            .insert("EndOfLine".to_string(), ObjectVariant::Boolean(true));
+            .insert(b"EndOfLine".to_vec(), ObjectVariant::Boolean(true));
         dict.dictionary
-            .insert("EncodedByteAlign".to_string(), ObjectVariant::Boolean(true));
+            .insert(b"EncodedByteAlign".to_vec(), ObjectVariant::Boolean(true));
         dict.dictionary
-            .insert("EndOfBlock".to_string(), ObjectVariant::Boolean(false));
+            .insert(b"EndOfBlock".to_vec(), ObjectVariant::Boolean(false));
         dict.dictionary
-            .insert("BlackIs1".to_string(), ObjectVariant::Boolean(true));
+            .insert(b"BlackIs1".to_vec(), ObjectVariant::Boolean(true));
         dict.dictionary.insert(
-            "DamagedRowsBeforeError".to_string(),
+            b"DamagedRowsBeforeError".to_vec(),
             ObjectVariant::Integer(2),
         );
 

@@ -24,15 +24,15 @@ impl ScreenAnnotation {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
-        let action = AnnotationAction::from_dictionary(dictionary, "A", objects)?;
+        let action = AnnotationAction::from_dictionary(dictionary, b"A", objects)?;
         let additional_actions = dictionary
-            .get("AA")
+            .get(b"AA")
             .map(|value| helpers::dictionary(value, objects))
             .transpose()?;
         let appearance_characteristics =
             AppearanceCharacteristics::from_dictionary(dictionary, objects)?;
-        let border_style = BorderStyle::from_dictionary(dictionary, "BS", objects)?;
-        let border_effect = BorderEffect::from_dictionary(dictionary, "BE", objects)?;
+        let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
+        let border_effect = BorderEffect::from_dictionary(dictionary, b"BE", objects)?;
 
         Ok(Self {
             action,

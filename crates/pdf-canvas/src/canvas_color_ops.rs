@@ -29,11 +29,11 @@ fn apply_content_stream_color(
 
 impl<B: CanvasBackend> ColorOps for PdfCanvas<'_, B> {
     type ErrorType = PdfCanvasError;
-    fn set_stroking_color_space(&mut self, name: &str) -> Result<(), Self::ErrorType> {
+    fn set_stroking_color_space(&mut self, name: &[u8]) -> Result<(), Self::ErrorType> {
         self.set_color_space(name, true)
     }
 
-    fn set_non_stroking_color_space(&mut self, name: &str) -> Result<(), Self::ErrorType> {
+    fn set_non_stroking_color_space(&mut self, name: &[u8]) -> Result<(), Self::ErrorType> {
         self.set_color_space(name, false)
     }
 
@@ -64,7 +64,7 @@ impl<B: CanvasBackend> ColorOps for PdfCanvas<'_, B> {
     fn set_non_stroking_color_extended(
         &mut self,
         components: &[f32],
-        pattern_name: &str,
+        pattern_name: &[u8],
     ) -> Result<(), Self::ErrorType> {
         if !components.is_empty() {
             let state = self.current_state_mut()?;
@@ -89,7 +89,7 @@ impl<B: CanvasBackend> ColorOps for PdfCanvas<'_, B> {
     fn set_stroking_color_extended(
         &mut self,
         components: &[f32],
-        pattern_name: &str,
+        pattern_name: &[u8],
     ) -> Result<(), Self::ErrorType> {
         if !components.is_empty() {
             let state = self.current_state_mut()?;

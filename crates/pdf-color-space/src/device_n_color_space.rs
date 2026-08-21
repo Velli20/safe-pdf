@@ -19,7 +19,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct DeviceNColorSpace {
     /// Ordered list of colorant names (e.g., `["Cyan", "Magenta"]`).
-    pub names: Vec<String>,
+    pub names: Vec<Vec<u8>>,
     /// Fallback color space used when the colorants are not available.
     pub alternate_space: Box<ColorSpace>,
     /// Tint transform function used to map DeviceN components into the alternate space.
@@ -46,7 +46,7 @@ pub(crate) fn parse_device_n_color_space(
     let names = names_obj
         .try_array(objects)?
         .iter()
-        .map(|n| n.try_str(objects).map(|s| s.to_owned()))
+        .map(|name| name.try_name(objects).map(Vec::from))
         .collect::<Result<Vec<_>, _>>()?;
 
     let alternate_space = parse_color_space_object(objects, alt_obj, depth)?;
@@ -119,9 +119,9 @@ mod tests {
 
     fn function_stream(code: &str, output_components: usize) -> ObjectVariant {
         let mut dict = BTreeMap::new();
-        dict.insert("FunctionType".to_string(), ObjectVariant::Integer(4));
+        dict.insert(Vec::from(b"FunctionType"), ObjectVariant::Integer(4));
         dict.insert(
-            "Domain".to_string(),
+            Vec::from(b"Domain"),
             ObjectVariant::Array(vec![
                 ObjectVariant::Real(0.0),
                 ObjectVariant::Real(1.0),
@@ -132,7 +132,7 @@ mod tests {
             ]),
         );
         dict.insert(
-            "Range".to_string(),
+            Vec::from(b"Range"),
             ObjectVariant::Array(
                 (0..output_components)
                     .flat_map(|_| [ObjectVariant::Real(0.0), ObjectVariant::Real(1.0)])
@@ -164,7 +164,7 @@ mod tests {
 
         assert_eq!(
             device_n.names,
-            vec!["Cyan".to_string(), "Magenta".to_string()]
+            vec![Vec::from(b"Cyan"), Vec::from(b"Magenta")]
         );
         assert!(matches!(*device_n.alternate_space, ColorSpace::DeviceRGB));
         assert!(matches!(
@@ -175,7 +175,10 @@ mod tests {
 
     #[test]
     fn parses_five_element_device_n_array_with_attributes() {
-        let attrs = ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::new())));
+        let attrs = ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::<
+            Vec<u8>,
+            ObjectVariant,
+        >::new())));
         let arr = device_n_array(vec![
             ObjectVariant::Array(vec![name("Spot")]),
             name("DeviceCMYK"),
@@ -189,7 +192,7 @@ mod tests {
             panic!("expected DeviceN color space");
         };
 
-        assert_eq!(device_n.names, vec!["Spot".to_string()]);
+        assert_eq!(device_n.names, vec![Vec::from(b"Spot")]);
         assert!(matches!(*device_n.alternate_space, ColorSpace::DeviceCMYK));
     }
 

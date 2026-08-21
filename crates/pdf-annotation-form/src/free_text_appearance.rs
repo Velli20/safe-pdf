@@ -179,7 +179,7 @@ mod tests {
         assert!(
             form.resources
                 .as_ref()
-                .is_some_and(|resources| resources.fonts.contains_key("Helv"))
+                .is_some_and(|resources| resources.fonts.contains_key(b"Helv".as_slice()))
         );
     }
 
@@ -206,7 +206,7 @@ mod tests {
         form.content_stream.operators = vec![
             PdfOperatorVariant::SetRGBFill(SetRGBFill::new(0.2, 0.4, 0.6)),
             PdfOperatorVariant::BeginText(BeginText),
-            PdfOperatorVariant::SetFont(SetFont::new("Helv".to_owned(), 18.0)),
+            PdfOperatorVariant::SetFont(SetFont::new(b"Helv".to_vec(), 18.0)),
             PdfOperatorVariant::SetLeading(SetLeading::new(24.0)),
             PdfOperatorVariant::EndText(EndText),
         ];
@@ -214,7 +214,7 @@ mod tests {
         let style = FreeTextAppearance::derive_style(&annotation);
 
         assert_eq!(style.text_color, Color::from_rgb(0.2, 0.4, 0.6));
-        assert_eq!(style.font.resource_name, "Helv");
+        assert_eq!(style.font.resource_name, b"Helv");
         assert_eq!(style.font_size, 18.0);
         assert_eq!(style.line_height, 24.0);
     }
@@ -242,7 +242,7 @@ mod tests {
         form.content_stream.operators = vec![
             PdfOperatorVariant::SetRGBFill(SetRGBFill::new(f32::NAN, 0.0, 0.0)),
             PdfOperatorVariant::BeginText(BeginText),
-            PdfOperatorVariant::SetFont(SetFont::new("Missing".to_owned(), -1.0)),
+            PdfOperatorVariant::SetFont(SetFont::new(b"Missing".to_vec(), -1.0)),
             PdfOperatorVariant::SetLeading(SetLeading::new(f32::INFINITY)),
             PdfOperatorVariant::EndText(EndText),
         ];

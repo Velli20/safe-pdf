@@ -8,9 +8,9 @@ use crate::{WritingMode, cmap_support::Type0CodeMap, error::CMapError};
 #[derive(Debug, Clone, Copy)]
 pub struct GeneratedCMap {
     /// CMap resource name.
-    pub name: &'static str,
+    pub name: &'static [u8],
     /// Optional base CMap name used through `usecmap`.
-    pub use_cmap: Option<&'static str>,
+    pub use_cmap: Option<&'static [u8]>,
     /// `0` for horizontal writing mode, `1` for vertical writing mode.
     pub writing_mode: u8,
     /// Valid input byte ranges.
@@ -60,7 +60,7 @@ pub struct PredefinedCMap {
 
 impl PredefinedCMap {
     /// Resolve a predefined CMap by name.
-    pub fn from_name(name: &str) -> Result<Option<Self>, CMapError> {
+    pub fn from_name(name: &[u8]) -> Result<Option<Self>, CMapError> {
         let Some(root) = find_cmap(name) else {
             return Ok(None);
         };
@@ -73,12 +73,12 @@ impl PredefinedCMap {
         while let Some(use_cmap) = current.use_cmap {
             if !seen.insert(use_cmap) {
                 return Err(CMapError::InvalidType0EncodingCMap(format!(
-                    "recursive UseCMap reference for {use_cmap}"
+                    "recursive UseCMap reference for {use_cmap:?}"
                 )));
             }
             let Some(next) = find_cmap(use_cmap) else {
                 return Err(CMapError::InvalidType0EncodingCMap(format!(
-                    "missing UseCMap dependency {use_cmap}"
+                    "missing UseCMap dependency {use_cmap:?}"
                 )));
             };
             maps.push(next);
@@ -155,7 +155,7 @@ impl Type0CodeMap for PredefinedCMap {
 }
 
 /// Find a generated CMap by resource name.
-fn find_cmap(name: &str) -> Option<&'static GeneratedCMap> {
+fn find_cmap(name: &[u8]) -> Option<&'static GeneratedCMap> {
     generated::CMAPS
         .binary_search_by(|cmap| cmap.name.cmp(name))
         .ok()
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn japan1_cid_to_unicode_includes_half_width_ascii_and_space_variants() {
-        let map = PredefinedCMap::from_name("UniJIS-UCS2-HW-H")
+        let map = PredefinedCMap::from_name(b"UniJIS-UCS2-HW-H")
             .unwrap()
             .unwrap()
             .cid_to_unicode_map();

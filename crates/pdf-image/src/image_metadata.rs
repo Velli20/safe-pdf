@@ -49,7 +49,7 @@ impl ImageMetadata {
         }
 
         let image_mask = dictionary
-            .optional_boolean("ImageMask", objects)?
+            .optional_boolean(b"ImageMask", objects)?
             .unwrap_or(false);
         let filters = Filters::from_dictionary(dictionary, objects)?;
         let bits_per_component =
@@ -83,7 +83,7 @@ fn read_bits_per_component(
     image_mask: bool,
     filters: Option<&Filters>,
 ) -> Result<usize, PdfImageError> {
-    const BITS_PER_COMPONENT_KEY: &str = "BitsPerComponent";
+    const BITS_PER_COMPONENT_KEY: &[u8] = b"BitsPerComponent";
 
     // Image masks and JPX images may omit BitsPerComponent, with different
     // defaults. Every other image must provide the value explicitly.
@@ -164,9 +164,9 @@ mod tests {
     #[test]
     fn image_mask_defaults_bits_per_component_to_one() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("ImageMask".to_string(), ObjectVariant::Boolean(true)),
-            ("Width".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"ImageMask"), ObjectVariant::Boolean(true)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
         let metadata = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
@@ -181,10 +181,10 @@ mod tests {
     #[test]
     fn image_mask_rejects_non_one_bit_components() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("ImageMask".to_string(), ObjectVariant::Boolean(true)),
-            ("Width".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"ImageMask"), ObjectVariant::Boolean(true)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
         let error = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
@@ -202,12 +202,12 @@ mod tests {
     fn image_mask_stores_filter_chain() {
         let dictionary = Dictionary::new(BTreeMap::from([
             (
-                "Filter".to_string(),
+                Vec::from(b"Filter"),
                 ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("ImageMask".to_string(), ObjectVariant::Boolean(true)),
-            ("Width".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"ImageMask"), ObjectVariant::Boolean(true)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
         let metadata = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
@@ -263,11 +263,11 @@ mod tests {
     fn jpx_images_default_bits_per_component_to_eight() {
         let dictionary = Dictionary::new(BTreeMap::from([
             (
-                "Filter".to_string(),
+                Vec::from(b"Filter"),
                 ObjectVariant::Name(b"JPXDecode".to_vec()),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
         let metadata = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
@@ -284,7 +284,7 @@ mod tests {
     fn stores_ordered_filter_chain() {
         let mut dictionary = direct_dictionary(1, 1, 8);
         dictionary.dictionary.insert(
-            "Filter".to_string(),
+            b"Filter".to_vec(),
             ObjectVariant::Array(vec![
                 ObjectVariant::Name(b"ASCII85Decode".to_vec()),
                 ObjectVariant::Name(b"DCTDecode".to_vec()),
@@ -306,8 +306,8 @@ mod tests {
     #[test]
     fn non_jpx_images_require_bits_per_component() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
         let error = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
@@ -323,26 +323,26 @@ mod tests {
     fn direct_dictionary(width: i64, height: i64, bits_per_component: i64) -> Dictionary {
         Dictionary::new(BTreeMap::from([
             (
-                "BitsPerComponent".to_string(),
+                Vec::from(b"BitsPerComponent"),
                 ObjectVariant::Integer(bits_per_component),
             ),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Name(b"DeviceGray".to_vec()),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(height)),
-            ("Width".to_string(), ObjectVariant::Integer(width)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(height)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(width)),
         ]))
     }
 
     fn indexed_dictionary(bits_per_component: i64) -> Dictionary {
         Dictionary::new(BTreeMap::from([
             (
-                "BitsPerComponent".to_string(),
+                Vec::from(b"BitsPerComponent"),
                 ObjectVariant::Integer(bits_per_component),
             ),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Array(vec![
                     ObjectVariant::Name(b"Indexed".to_vec()),
                     ObjectVariant::Name(b"DeviceRGB".to_vec()),
@@ -350,8 +350,8 @@ mod tests {
                     ObjectVariant::HexString(vec![0, 0, 0, 255, 255, 255]),
                 ]),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]))
     }
 }

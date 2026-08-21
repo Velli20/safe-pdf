@@ -117,7 +117,7 @@ mod tests {
     fn read_xobject_normalizes_inverted_bbox() {
         let dictionary = Dictionary::new(BTreeMap::from([
             (
-                "BBox".to_string(),
+                Vec::from(b"BBox"),
                 ObjectVariant::Array(vec![
                     ObjectVariant::Real(265.077),
                     ObjectVariant::Real(71.8304),
@@ -125,7 +125,7 @@ mod tests {
                     ObjectVariant::Real(43.3206),
                 ]),
             ),
-            ("Subtype".to_string(), ObjectVariant::Name(b"Form".to_vec())),
+            (Vec::from(b"Subtype"), ObjectVariant::Name(b"Form".to_vec())),
         ]));
         let stream = StreamObject::new(7, 0, Box::new(dictionary.clone()), Vec::new());
         let mut cache = DefaultResourceCache::default();
@@ -152,7 +152,7 @@ mod tests {
     fn empty_from_dictionary_creates_empty_content_stream() {
         let dictionary = Dictionary::new(BTreeMap::from([
             (
-                "BBox".to_string(),
+                Vec::from(b"BBox"),
                 ObjectVariant::Array(vec![
                     ObjectVariant::Real(0.0),
                     ObjectVariant::Real(0.0),
@@ -160,9 +160,9 @@ mod tests {
                     ObjectVariant::Real(10.0),
                 ]),
             ),
-            ("Subtype".to_string(), ObjectVariant::Name(b"Form".to_vec())),
+            (Vec::from(b"Subtype"), ObjectVariant::Name(b"Form".to_vec())),
             (
-                "Matrix".to_string(),
+                Vec::from(b"Matrix"),
                 ObjectVariant::Array(vec![
                     ObjectVariant::Real(2.0),
                     ObjectVariant::Real(0.0),

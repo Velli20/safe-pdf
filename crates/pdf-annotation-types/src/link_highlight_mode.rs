@@ -11,18 +11,18 @@ pub enum LinkHighlightMode {
     /// Use the display rectangle.
     Toggle,
     /// A vendor or future mode.
-    Unknown(String),
+    Unknown(Vec<u8>),
 }
 
-impl From<&str> for LinkHighlightMode {
-    fn from(value: &str) -> Self {
+impl From<&[u8]> for LinkHighlightMode {
+    fn from(value: &[u8]) -> Self {
         match value {
-            "I" => Self::Invert,
-            "O" => Self::Outline,
-            "P" => Self::Push,
-            "N" => Self::None,
-            "T" => Self::Toggle,
-            other => Self::Unknown(other.to_owned()),
+            b"I" => Self::Invert,
+            b"O" => Self::Outline,
+            b"P" => Self::Push,
+            b"N" => Self::None,
+            b"T" => Self::Toggle,
+            other => Self::Unknown(Vec::from(other)),
         }
     }
 }

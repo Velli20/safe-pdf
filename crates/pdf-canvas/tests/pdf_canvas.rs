@@ -34,7 +34,7 @@ fn render(
 fn form_resource(name: &str, stream: ContentStream) -> Resources {
     Resources {
         xobjects: HashMap::from([(
-            name.to_string(),
+            name.as_bytes().to_vec(),
             Resource::from(FormXObject {
                 bbox: Rect {
                     left: 0.0,
@@ -53,34 +53,34 @@ fn form_resource(name: &str, stream: ContentStream) -> Resources {
 
 fn image_dictionary() -> Dictionary {
     Dictionary::new(std::collections::BTreeMap::from([
-        ("BitsPerComponent".to_string(), ObjectVariant::Integer(1)),
+        (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(1)),
         (
-            "ColorSpace".to_string(),
+            Vec::from(b"ColorSpace"),
             ObjectVariant::Name(b"DeviceGray".to_vec()),
         ),
         (
-            "Decode".to_string(),
+            Vec::from(b"Decode"),
             ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(0)]),
         ),
-        ("Height".to_string(), ObjectVariant::Integer(1)),
-        ("Width".to_string(), ObjectVariant::Integer(4)),
+        (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+        (Vec::from(b"Width"), ObjectVariant::Integer(4)),
     ]))
 }
 
 fn inline_image() -> InlineImage {
     InlineImage::new(
         Dictionary::new(std::collections::BTreeMap::from([
-            ("BPC".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"BPC"), ObjectVariant::Integer(1)),
             (
-                "CS".to_string(),
+                Vec::from(b"CS"),
                 ObjectVariant::Name(b"DeviceGray".to_vec()),
             ),
             (
-                "D".to_string(),
+                Vec::from(b"D"),
                 ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(0)]),
             ),
-            ("H".to_string(), ObjectVariant::Integer(1)),
-            ("W".to_string(), ObjectVariant::Integer(4)),
+            (Vec::from(b"H"), ObjectVariant::Integer(1)),
+            (Vec::from(b"W"), ObjectVariant::Integer(4)),
         ])),
         vec![0b1010_0000],
         &PassthroughResolver,
@@ -147,7 +147,7 @@ fn still_renders_nested_streams_with_distinct_ids() {
 fn unavailable_image_xobject_is_a_no_op() {
     let stream = content_stream(1, b"/Im Do");
     let resources = Resources {
-        xobjects: HashMap::from([("Im".to_string(), Resource::UnavailableImage)]),
+        xobjects: HashMap::from([(b"Im".to_vec(), Resource::UnavailableImage)]),
         ..Default::default()
     };
     let mut recording = RecordingCanvas::new(100.0, 100.0);
@@ -175,8 +175,8 @@ fn inline_image_render_path_matches_image_xobject_path() {
         ])],
     }));
     let resources = Resources {
-        ext_g_states: HashMap::from([("GS".to_string(), graphics_state)]),
-        xobjects: HashMap::from([("Im".to_string(), Resource::from(image))]),
+        ext_g_states: HashMap::from([(b"GS".to_vec(), graphics_state)]),
+        xobjects: HashMap::from([(b"Im".to_vec(), Resource::from(image))]),
         ..Default::default()
     };
 

@@ -45,7 +45,7 @@ impl<'a, 'b, B: CanvasBackend> TrueTypeFontRenderer<'a, 'b, B> {
         &self,
         font: Option<&Font>,
         code: u16,
-        glyph_name: Option<&str>,
+        glyph_name: Option<&[u8]>,
     ) -> GlyphId {
         let glyph_id = resolve_simple_font_gid(
             font,
@@ -168,7 +168,7 @@ mod tests {
     fn resolve_simple_gid_for_test(
         font: Option<&Font>,
         code: u16,
-        glyph_name: Option<&str>,
+        glyph_name: Option<&[u8]>,
         is_symbolic: bool,
     ) -> GlyphId {
         let fallback_bytes = Standard14Font::Helvetica.fallback_font_bytes();
@@ -238,7 +238,7 @@ mod tests {
             flags: FontFlags::SYMBOLIC,
         });
 
-        let gid = resolve_simple_gid_for_test(Some(&font), 0x01, Some(".notdef"), true);
+        let gid = resolve_simple_gid_for_test(Some(&font), 0x01, Some(b".notdef"), true);
 
         assert_eq!(gid, GlyphId::NOTDEF);
     }

@@ -21,11 +21,11 @@ impl CidFontSubType {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, FontError> {
-        match dictionary.required_str("Subtype", objects)? {
-            "CIDFontType0" => Ok(Self::Type0),
-            "CIDFontType2" => Ok(Self::Type2),
+        match dictionary.required_name(b"Subtype", objects)? {
+            b"CIDFontType0" => Ok(Self::Type0),
+            b"CIDFontType2" => Ok(Self::Type2),
             other => Err(FontError::UnsupportedCidFontSubtype {
-                subtype: other.to_string(),
+                subtype: String::from_utf8_lossy(other).into_owned(),
             }),
         }
     }

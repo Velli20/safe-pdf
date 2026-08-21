@@ -1,7 +1,5 @@
 //! Unit tests for mesh bit-width parsing and validation.
 
-use std::collections::BTreeMap;
-
 use pdf_object::{
     dictionary::Dictionary, error::ObjectError, object_resolver::PassthroughResolver,
     object_variant::ObjectVariant,
@@ -12,17 +10,11 @@ use crate::{error::PdfShadingError, mesh_decoder::MeshDecoderError};
 use super::MeshBitWidths;
 
 fn mesh_widths_dictionary(coordinate: i64, component: i64, flag: i64) -> Dictionary {
-    Dictionary::new(BTreeMap::from([
-        (
-            "BitsPerCoordinate".to_string(),
-            ObjectVariant::Integer(coordinate),
-        ),
-        (
-            "BitsPerComponent".to_string(),
-            ObjectVariant::Integer(component),
-        ),
-        ("BitsPerFlag".to_string(), ObjectVariant::Integer(flag)),
-    ]))
+    Dictionary::from_entries([
+        (b"BitsPerCoordinate", ObjectVariant::Integer(coordinate)),
+        (b"BitsPerComponent", ObjectVariant::Integer(component)),
+        (b"BitsPerFlag", ObjectVariant::Integer(flag)),
+    ])
 }
 
 #[test]
@@ -62,7 +54,7 @@ fn validates_pdf_mesh_bit_widths() {
 #[test]
 fn mesh_bit_widths_require_all_dictionary_entries() {
     let mut dictionary = mesh_widths_dictionary(8, 8, 2);
-    dictionary.take("BitsPerFlag");
+    dictionary.take(b"BitsPerFlag");
 
     assert!(matches!(
         MeshBitWidths::from_dictionary(&dictionary, &PassthroughResolver),
