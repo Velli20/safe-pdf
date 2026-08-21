@@ -1,5 +1,6 @@
 use num_traits::FromPrimitive;
 use pdf_graphics::{LineCap, LineJoin, transform::Transform};
+use pdf_object::object_resolver::PassthroughResolver;
 
 use crate::{
     error::PdfOperatorError,
@@ -28,7 +29,9 @@ impl PdfOperator for SetLineWidth {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let width = operands.get_f32()?;
+        let width = operands
+            .take_next()?
+            .try_number::<f32>(&PassthroughResolver)?;
         Ok(PdfOperatorVariant::SetLineWidth(Self::new(width)))
     }
 
@@ -125,7 +128,9 @@ impl PdfOperator for SetMiterLimit {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let limit = operands.get_f32()?;
+        let limit = operands
+            .take_next()?
+            .try_number::<f32>(&PassthroughResolver)?;
         Ok(PdfOperatorVariant::SetMiterLimit(Self::new(limit)))
     }
 
@@ -156,7 +161,9 @@ impl PdfOperator for SetDashPattern {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let array = operands.get_f32_array()?;
-        let phase = operands.get_f32()?;
+        let phase = operands
+            .take_next()?
+            .try_number::<f32>(&PassthroughResolver)?;
         Ok(PdfOperatorVariant::SetDashPattern(Self::new(array, phase)))
     }
 
@@ -185,7 +192,9 @@ impl PdfOperator for SetFlatnessTolerance {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let tolerance = operands.get_f32()?;
+        let tolerance = operands
+            .take_next()?
+            .try_number::<f32>(&PassthroughResolver)?;
         Ok(PdfOperatorVariant::SetFlatnessTolerance(Self::new(
             tolerance,
         )))
@@ -285,12 +294,7 @@ impl PdfOperator for ConcatMatrix {
     const OPERAND_COUNT: Option<usize> = Some(6);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let a = operands.get_f32()?;
-        let b = operands.get_f32()?;
-        let c = operands.get_f32()?;
-        let d = operands.get_f32()?;
-        let e = operands.get_f32()?;
-        let f = operands.get_f32()?;
+        let [a, b, c, d, e, f] = operands.try_array_of::<f32, 6>()?;
         Ok(PdfOperatorVariant::ConcatMatrix(Self::new([
             a, b, c, d, e, f,
         ])))

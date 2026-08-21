@@ -28,8 +28,7 @@ impl PdfOperator for MoveTo {
     const OPERAND_COUNT: Option<usize> = Some(2);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let x = operands.get_f32()?;
-        let y = operands.get_f32()?;
+        let [x, y] = operands.try_array_of::<f32, 2>()?;
         Ok(PdfOperatorVariant::MoveTo(Self::new(x, y)))
     }
 
@@ -60,8 +59,7 @@ impl PdfOperator for LineTo {
     const OPERAND_COUNT: Option<usize> = Some(2);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let x = operands.get_f32()?;
-        let y = operands.get_f32()?;
+        let [x, y] = operands.try_array_of::<f32, 2>()?;
         Ok(PdfOperatorVariant::LineTo(Self::new(x, y)))
     }
 
@@ -108,12 +106,7 @@ impl PdfOperator for CurveTo {
     const OPERAND_COUNT: Option<usize> = Some(6);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let x1 = operands.get_f32()?;
-        let y1 = operands.get_f32()?;
-        let x2 = operands.get_f32()?;
-        let y2 = operands.get_f32()?;
-        let x3 = operands.get_f32()?;
-        let y3 = operands.get_f32()?;
+        let [x1, y1, x2, y2, x3, y3] = operands.try_array_of::<f32, 6>()?;
         Ok(PdfOperatorVariant::CurveTo(Self::new(
             x1, y1, x2, y2, x3, y3,
         )))
@@ -152,10 +145,7 @@ impl PdfOperator for CurveToV {
     const OPERAND_COUNT: Option<usize> = Some(4);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let x2 = operands.get_f32()?;
-        let y2 = operands.get_f32()?;
-        let x3 = operands.get_f32()?;
-        let y3 = operands.get_f32()?;
+        let [x2, y2, x3, y3] = operands.try_array_of::<f32, 4>()?;
         Ok(PdfOperatorVariant::CurveToV(Self::new(x2, y2, x3, y3)))
     }
 
@@ -191,10 +181,7 @@ impl PdfOperator for CurveToY {
     const OPERAND_COUNT: Option<usize> = Some(4);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let x1 = operands.get_f32()?;
-        let y1 = operands.get_f32()?;
-        let x3 = operands.get_f32()?;
-        let y3 = operands.get_f32()?;
+        let [x1, y1, x3, y3] = operands.try_array_of::<f32, 4>()?;
         Ok(PdfOperatorVariant::CurveToY(Self::new(x1, y1, x3, y3)))
     }
 
@@ -254,10 +241,7 @@ impl PdfOperator for Rectangle {
     const OPERAND_COUNT: Option<usize> = Some(4);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let x = operands.get_f32()?;
-        let y = operands.get_f32()?;
-        let width = operands.get_f32()?;
-        let height = operands.get_f32()?;
+        let [x, y, width, height] = operands.try_array_of::<f32, 4>()?;
         Ok(PdfOperatorVariant::Rectangle(Self::new(
             x, y, width, height,
         )))

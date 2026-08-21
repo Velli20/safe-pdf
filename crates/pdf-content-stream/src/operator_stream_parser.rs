@@ -1,5 +1,4 @@
 use pdf_object::object_resolver::PassthroughResolver;
-use pdf_object::object_variant::ObjectVariant;
 use pdf_parser::error::ParserError;
 use pdf_parser::parser::PdfParser;
 use pdf_tokenizer::error::TokenizerError;
@@ -15,7 +14,7 @@ use pdf_content_stream_operators::{
 /// same operand buffer across operator boundaries.
 pub(super) struct OperatorStreamParser<'a, 'out> {
     parser: PdfParser<'a>,
-    operands: Vec<ObjectVariant>,
+    operands: Operands,
     out: &'out mut Vec<PdfOperatorVariant>,
 }
 
@@ -27,7 +26,7 @@ impl<'a, 'out> OperatorStreamParser<'a, 'out> {
     pub(super) fn new(input: &'a [u8], out: &'out mut Vec<PdfOperatorVariant>) -> Self {
         Self {
             parser: PdfParser::from(input),
-            operands: Vec::with_capacity(6),
+            operands: Operands::with_capacity(6),
             out,
         }
     }
@@ -47,7 +46,7 @@ impl<'a, 'out> OperatorStreamParser<'a, 'out> {
         let result = if next_item_is_operator(next_byte) {
             self.parse_operator_from_stream().map(|()| true)
         } else {
-            self.parse_operand_or_stop()
+            self.parse_operand_or_stop(next_byte)
         };
 
         match result {
@@ -74,15 +73,19 @@ impl<'a, 'out> OperatorStreamParser<'a, 'out> {
     }
 
     /// Parses one operand object and appends it to the reusable operand buffer.
-    fn parse_operand(&mut self) -> Result<(), PdfOperatorError> {
-        let value = self.parser.parse_object(&PassthroughResolver)?;
+    fn parse_operand(&mut self, first_byte: u8) -> Result<(), PdfOperatorError> {
+        let value = if matches!(first_byte, b'+' | b'-' | b'.' | b'0'..=b'9') {
+            self.parser.parse_number()?
+        } else {
+            self.parser.parse_object(&PassthroughResolver)?
+        };
         self.operands.push(value);
         Ok(())
     }
 
     /// Parses one operand object or stops cleanly when the stream ends mid-object.
-    fn parse_operand_or_stop(&mut self) -> Result<bool, PdfOperatorError> {
-        match self.parse_operand() {
+    fn parse_operand_or_stop(&mut self, first_byte: u8) -> Result<bool, PdfOperatorError> {
+        match self.parse_operand(first_byte) {
             Ok(()) => Ok(true),
             Err(error) if is_truncated_operand_error(&error) => {
                 self.operands.clear();
@@ -104,10 +107,14 @@ impl<'a, 'out> OperatorStreamParser<'a, 'out> {
             return Ok(());
         };
 
-        let parsed = if let Some(operator) = (descriptor.parse_hook)(&mut self.parser)? {
-            Some(operator)
+        let parsed = if let Some(parse_hook) = descriptor.parse_hook {
+            if let Some(operator) = parse_hook(&mut self.parser)? {
+                Some(operator)
+            } else {
+                parse_operator(&descriptor, &mut self.operands)?
+            }
         } else {
-            parse_operator(descriptor, &mut self.operands)?
+            parse_operator(&descriptor, &mut self.operands)?
         };
 
         self.push_if_parsed(parsed);
@@ -118,9 +125,7 @@ impl<'a, 'out> OperatorStreamParser<'a, 'out> {
     /// Reads a single operator token and normalizes low-level tokenization
     /// failures into content-stream operator errors.
     fn read_operator_name(&mut self) -> Result<&[u8], PdfOperatorError> {
-        self.parser
-            .read_operator_name()
-            .map_err(map_operator_name_error)
+        Ok(self.parser.read_operator_name()?)
     }
 
     /// Appends a parsed operator when dispatch produced one.
@@ -144,17 +149,6 @@ impl<'a, 'out> OperatorStreamParser<'a, 'out> {
 /// numeric operand.
 fn next_item_is_operator(byte: u8) -> bool {
     PdfParser::is_pdf_regular_character(byte) && !matches!(byte, b'+' | b'-' | b'.' | b'0'..=b'9')
-}
-
-/// Converts operator-token parser failures into content-stream operator errors.
-fn map_operator_name_error(error: ParserError) -> PdfOperatorError {
-    match error {
-        ParserError::UnexpectedEndOfFile => {
-            PdfOperatorError::UnknownOperator("(end of input)".to_string())
-        }
-        ParserError::InvalidToken(c) => PdfOperatorError::UnknownOperator(format!("{c:?}")),
-        other => PdfOperatorError::ParserError(other),
-    }
 }
 
 /// Returns whether an operand parse error means the content stream ended
@@ -186,11 +180,11 @@ fn is_truncated_operand_error(error: &PdfOperatorError) -> bool {
 /// Parses a single operator with its operands.
 ///
 /// Looks up the operator descriptor by name and validates the operand count
-/// before parsing. Takes `operands` by `&mut` so its heap allocation can be
-/// reclaimed and reused for the next operator.
+/// before parsing. The operand buffer retains its allocation for the next
+/// operator, including when parsing fails.
 fn parse_operator(
     descriptor: &OpDescriptor,
-    operands: &mut Vec<ObjectVariant>,
+    operands: &mut Operands,
 ) -> Result<Option<PdfOperatorVariant>, PdfOperatorError> {
     if let Some(required_count) = descriptor.operand_count
         && operands.len() != required_count
@@ -198,9 +192,7 @@ fn parse_operator(
         return Ok(None);
     }
 
-    let mut ops = Operands(std::mem::take(operands));
-    let operator = (descriptor.parser)(&mut ops)?;
-    *operands = ops.0;
+    let operator = (descriptor.parser)(operands)?;
     Ok(Some(operator))
 }
 
@@ -210,6 +202,7 @@ mod tests {
     use pdf_content_stream_operators::{
         graphics_state_operators::RestoreGraphicsState, variants::PdfOperatorVariant,
     };
+    use pdf_object::object_variant::ObjectVariant;
 
     use super::*;
 
@@ -228,23 +221,6 @@ mod tests {
                 "byte {byte:?} should be an operator"
             );
         }
-    }
-
-    #[test]
-    fn operator_name_eof_maps_to_unknown_operator() {
-        let error = map_operator_name_error(ParserError::UnexpectedEndOfFile);
-
-        assert_eq!(
-            error,
-            PdfOperatorError::UnknownOperator("(end of input)".to_string())
-        );
-    }
-
-    #[test]
-    fn operator_name_invalid_token_maps_to_unknown_operator() {
-        let error = map_operator_name_error(ParserError::InvalidToken('/'));
-
-        assert_eq!(error, PdfOperatorError::UnknownOperator("'/'".to_string()));
     }
 
     #[test]
@@ -270,10 +246,11 @@ mod tests {
     #[test]
     fn parse_operator_reuses_operand_buffer_after_success() {
         let descriptor = get_operation_descriptor(b"m").expect("operator descriptor should exist");
-        let mut operands = vec![ObjectVariant::Integer(10), ObjectVariant::Integer(20)];
+        let mut operands =
+            Operands::from(vec![ObjectVariant::Integer(10), ObjectVariant::Integer(20)]);
         let original_capacity = operands.capacity();
 
-        let operator = parse_operator(descriptor, &mut operands).expect("operator should parse");
+        let operator = parse_operator(&descriptor, &mut operands).expect("operator should parse");
 
         assert!(matches!(operator, Some(PdfOperatorVariant::MoveTo(_))));
         assert!(operands.is_empty());
@@ -283,25 +260,19 @@ mod tests {
     #[test]
     fn parse_operator_skips_malformed_fixed_arity_operator_without_consuming_buffer() {
         let descriptor = get_operation_descriptor(b"m").expect("operator descriptor should exist");
-        let mut operands = vec![
+        let mut operands = Operands::from(vec![
             ObjectVariant::Integer(1),
             ObjectVariant::Integer(2),
             ObjectVariant::Integer(3),
-        ];
+        ]);
         let original_capacity = operands.capacity();
 
-        let operator = parse_operator(descriptor, &mut operands)
+        let operator = parse_operator(&descriptor, &mut operands)
             .expect("malformed operator should be skipped");
 
         assert!(operator.is_none());
-        assert_eq!(
-            operands,
-            vec![
-                ObjectVariant::Integer(1),
-                ObjectVariant::Integer(2),
-                ObjectVariant::Integer(3),
-            ]
-        );
+        assert_eq!(operands.len(), 3);
+        assert_eq!(operands.peek_next(), Some(&ObjectVariant::Integer(1)));
         assert_eq!(operands.capacity(), original_capacity);
     }
 
@@ -431,9 +402,48 @@ mod tests {
     }
 
     #[test]
+    fn numeric_operands_recover_from_top_level_reference_syntax() {
+        let mut out = Vec::new();
+        let mut parser = OperatorStreamParser::new(b"1 0 R q", &mut out);
+
+        while parser
+            .parse_next_item()
+            .expect("invalid top-level reference should be skipped")
+        {}
+
+        assert_eq!(parser.out.len(), 1);
+        assert!(matches!(
+            parser.out.first(),
+            Some(PdfOperatorVariant::SaveGraphicsState(_))
+        ));
+    }
+
+    #[test]
+    fn generic_operands_keep_nested_indirect_references() {
+        let mut out = Vec::new();
+        let mut parser = OperatorStreamParser::new(b"/Tag << /Ref 5 0 R >> BDC EMC", &mut out);
+
+        while parser
+            .parse_next_item()
+            .expect("nested reference should parse in a dictionary")
+        {}
+
+        assert_eq!(parser.out.len(), 2);
+        assert!(matches!(
+            parser.out.first(),
+            Some(PdfOperatorVariant::BeginMarkedContentWithProps(_))
+        ));
+        assert!(matches!(
+            parser.out.get(1),
+            Some(PdfOperatorVariant::EndMarkedContent(_))
+        ));
+    }
+
+    #[test]
     fn parse_next_item_recovers_from_invalid_operator_operand_value() {
         let mut out = Vec::new();
         let mut parser = OperatorStreamParser::new(b"9 J q", &mut out);
+        let original_capacity = parser.operands.capacity();
 
         while parser
             .parse_next_item()
@@ -441,6 +451,7 @@ mod tests {
         {}
 
         assert!(parser.operands.is_empty());
+        assert_eq!(parser.operands.capacity(), original_capacity);
         assert_eq!(parser.out.len(), 1);
         assert!(matches!(
             parser.out.first(),

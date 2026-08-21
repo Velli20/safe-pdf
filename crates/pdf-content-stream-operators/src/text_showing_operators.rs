@@ -31,7 +31,7 @@ impl PdfOperator for ShowText {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let text = operands.get_bytes()?;
-        Ok(PdfOperatorVariant::ShowText(Self::new(text.to_vec())))
+        Ok(PdfOperatorVariant::ShowText(Self::new(text)))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
@@ -59,9 +59,7 @@ impl PdfOperator for MoveNextLineShowText {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let text = operands.get_bytes()?;
-        Ok(PdfOperatorVariant::MoveNextLineShowText(Self::new(
-            text.to_vec(),
-        )))
+        Ok(PdfOperatorVariant::MoveNextLineShowText(Self::new(text)))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
@@ -97,14 +95,13 @@ impl PdfOperator for SetSpacingMoveShowText {
     const OPERAND_COUNT: Option<usize> = Some(3);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let word_spacing = operands.get_f32()?;
-        let char_spacing = operands.get_f32()?;
+        let [word_spacing, char_spacing] = operands.try_array_of::<f32, 2>()?;
         let text = operands.get_bytes()?;
 
         Ok(PdfOperatorVariant::SetSpacingMoveShowText(Self::new(
             word_spacing,
             char_spacing,
-            text.to_vec(),
+            text,
         )))
     }
 
@@ -161,5 +158,46 @@ impl PdfOperator for ShowTextArray {
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
         backend.show_text_with_glyph_positioning(&self.elements)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn show_text_moves_the_operand_byte_allocation() {
+        let text = b"text without a copy".to_vec();
+        let original_pointer = text.as_ptr();
+        let mut operands = Operands::from(vec![ObjectVariant::LiteralString(text)]);
+
+        let operator = ShowText::read(&mut operands).expect("text should parse");
+        let PdfOperatorVariant::ShowText(operator) = operator else {
+            panic!("expected ShowText variant");
+        };
+
+        assert_eq!(operator.text, b"text without a copy");
+        assert_eq!(operator.text.as_ptr(), original_pointer);
+    }
+
+    #[test]
+    fn spacing_move_show_text_groups_numeric_prefix_before_text() {
+        let mut operands = Operands::from(vec![
+            ObjectVariant::Real(1.5),
+            ObjectVariant::Integer(2),
+            ObjectVariant::LiteralString(b"text".to_vec()),
+        ]);
+
+        let operator = SetSpacingMoveShowText::read(&mut operands)
+            .expect("mixed operands should parse successfully");
+        let PdfOperatorVariant::SetSpacingMoveShowText(operator) = operator else {
+            panic!("expected SetSpacingMoveShowText variant");
+        };
+
+        assert_eq!(operator.word_spacing, 1.5);
+        assert_eq!(operator.char_spacing, 2.0);
+        assert_eq!(operator.text, b"text");
+        assert!(operands.is_empty());
     }
 }

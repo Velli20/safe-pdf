@@ -5,6 +5,7 @@ use crate::{
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
+use pdf_object::object_resolver::PassthroughResolver;
 
 /// Sets the fill color to a grayscale value.
 /// The gray level applies to subsequent fill operations.
@@ -31,7 +32,9 @@ impl PdfOperator for SetGrayFill {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let gray = operands.get_f32()?;
+        let gray = operands
+            .take_next()?
+            .try_number::<f32>(&PassthroughResolver)?;
         Ok(PdfOperatorVariant::SetGrayFill(Self::new(gray)))
     }
 
@@ -60,7 +63,9 @@ impl PdfOperator for SetGrayStroke {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let gray = operands.get_f32()?;
+        let gray = operands
+            .take_next()?
+            .try_number::<f32>(&PassthroughResolver)?;
         Ok(PdfOperatorVariant::SetGrayStroke(Self::new(gray)))
     }
 
@@ -98,9 +103,7 @@ impl PdfOperator for SetRGBFill {
     const OPERAND_COUNT: Option<usize> = Some(3);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let r = operands.get_f32()?;
-        let g = operands.get_f32()?;
-        let b = operands.get_f32()?;
+        let [r, g, b] = operands.try_array_of::<f32, 3>()?;
         Ok(PdfOperatorVariant::SetRGBFill(Self::new(r, g, b)))
     }
 
@@ -133,9 +136,7 @@ impl PdfOperator for SetRGBStroke {
     const OPERAND_COUNT: Option<usize> = Some(3);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let r = operands.get_f32()?;
-        let g = operands.get_f32()?;
-        let b = operands.get_f32()?;
+        let [r, g, b] = operands.try_array_of::<f32, 3>()?;
         Ok(PdfOperatorVariant::SetRGBStroke(Self::new(r, g, b)))
     }
 
@@ -175,10 +176,7 @@ impl PdfOperator for SetCMYKFill {
     const OPERAND_COUNT: Option<usize> = Some(4);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let c = operands.get_f32()?;
-        let m = operands.get_f32()?;
-        let y = operands.get_f32()?;
-        let k = operands.get_f32()?;
+        let [c, m, y, k] = operands.try_array_of::<f32, 4>()?;
         Ok(PdfOperatorVariant::SetCMYKFill(Self::new(c, m, y, k)))
     }
 
@@ -213,10 +211,7 @@ impl PdfOperator for SetCMYKStroke {
     const OPERAND_COUNT: Option<usize> = Some(4);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let c = operands.get_f32()?;
-        let m = operands.get_f32()?;
-        let y = operands.get_f32()?;
-        let k = operands.get_f32()?;
+        let [c, m, y, k] = operands.try_array_of::<f32, 4>()?;
         Ok(PdfOperatorVariant::SetCMYKStroke(Self::new(c, m, y, k)))
     }
 
@@ -310,7 +305,9 @@ impl PdfOperator for SetStrokingColor {
             if value.is_name() {
                 break;
             }
-            let v = operands.get_f32()?;
+            let v = operands
+                .take_next()?
+                .try_number::<f32>(&PassthroughResolver)?;
             values.push(v);
         }
 
@@ -368,7 +365,9 @@ impl PdfOperator for SetNonStrokingColor {
             if value.is_name() {
                 break;
             }
-            let v = operands.get_f32()?;
+            let v = operands
+                .take_next()?
+                .try_number::<f32>(&PassthroughResolver)?;
             values.push(v);
         }
 
@@ -416,7 +415,11 @@ impl PdfOperator for SetNonStrokingColorSc {
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let mut values = vec![];
         while operands.peek_next().is_some() {
-            values.push(operands.get_f32()?);
+            values.push(
+                operands
+                    .take_next()?
+                    .try_number::<f32>(&PassthroughResolver)?,
+            );
         }
 
         if values.is_empty() {
@@ -452,7 +455,11 @@ impl PdfOperator for SetStrokingColorSc {
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let mut values = vec![];
         while operands.peek_next().is_some() {
-            values.push(operands.get_f32()?);
+            values.push(
+                operands
+                    .take_next()?
+                    .try_number::<f32>(&PassthroughResolver)?,
+            );
         }
 
         if values.is_empty() {
