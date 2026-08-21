@@ -60,14 +60,19 @@ impl OffsetRepairPolicy {
 }
 
 /// Coordinates locating, parsing, repairing, and validating xref sections.
-struct XrefBuilder<'parser, 'input> {
-    parser: &'parser mut PdfParser<'input>,
+struct XrefBuilder<'input> {
+    parser: PdfParser<'input>,
 }
 
-impl<'parser, 'input> XrefBuilder<'parser, 'input> {
-    /// Creates a builder around the parser that owns the input cursor.
-    fn new(parser: &'parser mut PdfParser<'input>) -> Self {
+impl<'input> XrefBuilder<'input> {
+    /// Creates a builder around an independent parser cursor.
+    fn new(parser: PdfParser<'input>) -> Self {
         Self { parser }
+    }
+
+    /// Creates an independent builder positioned at an absolute byte offset.
+    fn at_offset(&self, offset: usize) -> Result<Self, ParserError> {
+        Ok(Self::new(self.parser.at_offset(offset)?))
     }
 
     /// Tries all discovered `startxref` offsets until one yields a valid table.
@@ -102,7 +107,7 @@ impl<'parser, 'input> XrefBuilder<'parser, 'input> {
         let mut offsets = Vec::with_capacity(positions.len());
         for position in positions.into_iter().rev() {
             // Work from the most recent marker backward so newer revisions win.
-            let offset = self.at_position(position, |builder| {
+            let offset = self.at_offset(position).and_then(|mut builder| {
                 builder.parser.read_keyword(STARTXREF_KEYWORD)?;
                 builder.parser.read_number::<usize>(true)
             });
@@ -202,17 +207,22 @@ impl<'parser, 'input> XrefBuilder<'parser, 'input> {
 
     /// Parses a cross-reference section at the exact byte offset.
     fn parse_section_at(&mut self, offset: usize) -> Result<ParsedXrefSection, ParserError> {
-        let object = self.parser.parse_object_at(offset, &PassthroughResolver)?;
+        let mut parser = self
+            .parser
+            .at_offset(offset)
+            .map_err(|_| ParserError::InvalidXrefAtOffset { offset })?;
+        let object = match parser.parse_indirect_object_id() {
+            Some(identifier) => {
+                parser.parse_indirect_object_value(identifier, &PassthroughResolver)?
+            }
+            None => parser.parse_object(&PassthroughResolver)?,
+        };
 
         match object {
             ObjectVariant::CrossReferenceTable(table) => Ok(ParsedXrefSection {
                 kind: XrefSectionKind::Traditional,
                 table,
             }),
-            ObjectVariant::IndirectObject(indirect) => match indirect.object {
-                Some(ObjectVariant::Stream(stream)) => self.parse_stream_section(stream),
-                _ => Err(ParserError::InvalidXrefAtOffset { offset }),
-            },
             ObjectVariant::Stream(stream) => self.parse_stream_section(stream),
             _ => Err(ParserError::InvalidXrefAtOffset { offset }),
         }
@@ -235,11 +245,12 @@ impl<'parser, 'input> XrefBuilder<'parser, 'input> {
             return self.parse_malformed_rows_at(recovered_offset);
         }
 
-        self.at_position(offset, |builder| {
-            builder.parser.skip_whitespace_and_comments();
-            builder.skip_optional_xref_keyword();
-            builder.parse_malformed_rows()
-        })
+        let mut builder = self
+            .at_offset(offset)
+            .map_err(|_| ParserError::InvalidXrefAtOffset { offset })?;
+        builder.parser.skip_whitespace_and_comments();
+        builder.skip_optional_xref_keyword();
+        builder.parse_malformed_rows()
     }
 
     /// Consumes an `xref` keyword when malformed row recovery starts at it.
@@ -396,7 +407,7 @@ impl<'parser, 'input> XrefBuilder<'parser, 'input> {
         let mut best_candidate = None;
         for candidate in candidates {
             // Re-parse each candidate and prefer the one with the strongest trailer.
-            let result = self.at_position(candidate, |builder| {
+            let result = self.at_offset(candidate).and_then(|mut builder| {
                 builder.parser.skip_whitespace_and_comments();
                 builder.parse_malformed_rows()
             });
@@ -446,17 +457,17 @@ impl<'parser, 'input> XrefBuilder<'parser, 'input> {
 
     /// Checks whether a byte offset looks like the start of a malformed entry.
     fn looks_like_malformed_entry(&mut self, offset: usize) -> bool {
-        self.at_position(offset, |builder| {
-            builder.parser.skip_whitespace();
-            builder.parser.parse_cross_reference_entry().is_ok()
-                && builder
-                    .parser
-                    .tokenizer
-                    .data()
-                    .first()
-                    .copied()
-                    .is_some_and(PdfParser::is_pdf_whitespace)
-        })
+        let Ok(mut builder) = self.at_offset(offset) else {
+            return false;
+        };
+        builder.parser.skip_whitespace();
+        builder.parser.parse_cross_reference_entry().is_ok()
+            && builder
+                .parser
+                .remaining_input()
+                .first()
+                .copied()
+                .is_some_and(PdfParser::is_pdf_whitespace)
     }
 
     /// Repairs all normal xref offsets according to the parsed section kind.
@@ -613,23 +624,13 @@ impl<'parser, 'input> XrefBuilder<'parser, 'input> {
             offset: self.parser.tokenizer.position,
         }
     }
-
-    /// Temporarily moves the cursor to a position, then restores it afterward.
-    fn at_position<T>(&mut self, position: usize, operation: impl FnOnce(&mut Self) -> T) -> T {
-        let mark = self.parser.tokenizer.position;
-        self.parser.tokenizer.position = position;
-        let result = operation(self);
-        self.parser.tokenizer.position = mark;
-        result
-    }
 }
 
 impl PdfParser<'_> {
     /// Locates a cross-reference section via `startxref` markers, then follows
     /// the `/Prev` chain to produce a fully-merged [`CrossReferenceTable`].
-    pub fn build_xref_table(&mut self) -> Result<CrossReferenceTable, ParserError> {
-        // Keep the parser-facing API small; the builder owns the actual workflow.
-        XrefBuilder::new(self).build()
+    pub fn build_xref_table(&self) -> Result<CrossReferenceTable, ParserError> {
+        XrefBuilder::new(self.at_offset(0)?).build()
     }
 }
 
@@ -647,14 +648,15 @@ mod tests {
     /// Verifies malformed entry probing rolls the cursor back on failure.
     #[test]
     fn malformed_entry_probe_restores_position_after_failure() {
-        let mut parser = PdfParser::from(b"not-an-xref entry".as_slice());
-        parser.tokenizer.position = 3;
-        let mut builder = XrefBuilder::new(&mut parser);
+        let parser = PdfParser::from(b"not-an-xref entry".as_slice())
+            .at_offset(3)
+            .unwrap();
+        let mut builder = XrefBuilder::new(parser);
 
         let result = builder.try_parse_malformed_entry();
 
         assert!(result.is_err());
-        assert_eq!(builder.parser.tokenizer.position, 3);
+        assert_eq!(builder.parser.position(), 3);
     }
 
     /// Verifies malformed entry probing accepts a valid xref row.
@@ -662,14 +664,14 @@ mod tests {
     fn malformed_entry_probe_parses_valid_entry() {
         let mut data = format_xref_entry(12, 34, 'n');
         data.extend_from_slice(b"trailer");
-        let mut parser = PdfParser::from(data.as_slice());
-        let mut builder = XrefBuilder::new(&mut parser);
+        let parser = PdfParser::from(data.as_slice());
+        let mut builder = XrefBuilder::new(parser);
 
         let entry = builder.try_parse_malformed_entry().unwrap();
 
         assert_eq!(entry, CrossReferenceEntryType::new_normal(12, 34));
         assert!(matches!(
-            builder.parser.tokenizer.data().first().copied(),
+            builder.parser.remaining_input().first().copied(),
             Some(b' ') | Some(b'\n')
         ));
     }
@@ -678,30 +680,29 @@ mod tests {
     #[test]
     fn malformed_entry_detection_requires_terminator() {
         let data = format_xref_entry(12, 34, 'n');
-        let mut parser = PdfParser::from(data.as_slice());
-        let mut builder = XrefBuilder::new(&mut parser);
+        let parser = PdfParser::from(data.as_slice());
+        let mut builder = XrefBuilder::new(parser);
 
         assert!(builder.looks_like_malformed_entry(0));
 
         let truncated = b"0000000012 00034 n".to_vec();
-        let mut parser = PdfParser::from(truncated.as_slice());
-        let mut builder = XrefBuilder::new(&mut parser);
+        let parser = PdfParser::from(truncated.as_slice());
+        let mut builder = XrefBuilder::new(parser);
 
         assert!(!builder.looks_like_malformed_entry(0));
-        assert_eq!(builder.parser.tokenizer.position, 0);
+        assert_eq!(builder.parser.position(), 0);
     }
 
     /// Verifies scanning for `startxref` preserves the parser's cursor.
     #[test]
     fn startxref_scan_restores_parser_position() {
         let data = b"startxref\n12\n";
-        let mut parser = PdfParser::from(data.as_slice());
-        parser.tokenizer.position = 4;
-        let mut builder = XrefBuilder::new(&mut parser);
+        let parser = PdfParser::from(data.as_slice()).at_offset(4).unwrap();
+        let mut builder = XrefBuilder::new(parser);
 
         let offsets = builder.startxref_offsets().unwrap();
 
         assert_eq!(offsets, vec![12]);
-        assert_eq!(builder.parser.tokenizer.position, 4);
+        assert_eq!(builder.parser.position(), 4);
     }
 }

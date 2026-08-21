@@ -131,7 +131,7 @@ fn resolve_image_soft_mask(
 mod tests {
     use pdf_content_stream::ContentStreamIdAllocator;
     use pdf_object::{
-        dictionary::Dictionary, error::ObjectError, indirect_object::IndirectObject,
+        dictionary::Dictionary, error::ObjectError, object_id::PdfObjectId,
         object_resolver::ObjectResolver, object_variant::ObjectVariant, stream::StreamObject,
     };
     use pdf_object_collection::object_collection::ObjectCollection;
@@ -143,6 +143,13 @@ mod tests {
     };
 
     use super::read_xobject;
+
+    fn object_id(number: usize) -> PdfObjectId {
+        PdfObjectId {
+            number,
+            generation: 0,
+        }
+    }
 
     struct MapResolver {
         objects: BTreeMap<usize, ObjectVariant>,
@@ -345,18 +352,16 @@ mod tests {
         let mut objects = ObjectCollection::default();
 
         objects
-            .insert(ObjectVariant::Stream(stream))
+            .insert(object_id(1), ObjectVariant::Stream(stream))
             .expect("unresolved filter parameters should preserve the image stream");
         objects
-            .insert(ObjectVariant::IndirectObject(Box::new(
-                IndirectObject::new(
-                    2,
-                    0,
-                    Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
-                        BTreeMap::<Vec<u8>, ObjectVariant>::new(),
-                    )))),
-                ),
-            )))
+            .insert(
+                object_id(2),
+                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::<
+                    Vec<u8>,
+                    ObjectVariant,
+                >::new()))),
+            )
             .expect("decode parameters should be inserted");
 
         let content = objects.get(1).expect("image stream should be retained");

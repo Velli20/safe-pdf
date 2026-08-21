@@ -1,6 +1,6 @@
 use pdf_object::{
-    indirect_object::IndirectObject, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant, stream::StreamObject,
+    object_id::PdfObjectId, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    stream::StreamObject,
 };
 use pdf_tokenizer::PdfToken;
 
@@ -17,33 +17,11 @@ fn starts_with_boundary_keyword(input: &[u8], keyword: &[u8]) -> bool {
         }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct IndirectObjectHeader {
-    object_number: usize,
-    generation_number: usize,
-}
-
-/// The two valid continuations after an object and generation number pair.
-///
-/// PDF syntax uses the same numeric prefix for indirect object declarations and
-/// indirect references. Keeping the alternatives explicit prevents callers from
-/// treating a reference as an object declaration.
-enum IndirectObjectSyntax {
-    Object(IndirectObjectHeader),
-    Reference { object_number: usize },
-}
-
 impl PdfParser<'_> {
     /// Parses an indirect object declaration at `offset` without changing this parser's cursor.
-    pub(crate) fn parse_indirect_object_header_at(
-        &self,
-        offset: usize,
-    ) -> Option<IndirectObjectHeader> {
-        self.tokenizer.input.get(offset..)?;
-
-        let mut probe = PdfParser::from(self.tokenizer.input);
-        probe.tokenizer.position = offset;
-        probe.parse_indirect_object_header()
+    pub(crate) fn parse_indirect_object_id_at(&self, offset: usize) -> Option<PdfObjectId> {
+        let mut probe = self.at_offset(offset).ok()?;
+        probe.parse_indirect_object_id()
     }
 
     /// Returns whether an indirect object declaration with the requested identifier starts at `offset`.
@@ -53,16 +31,15 @@ impl PdfParser<'_> {
         object_number: usize,
         generation_number: usize,
     ) -> bool {
-        self.parse_indirect_object_header_at(offset)
-            .is_some_and(|header| {
-                header.object_number == object_number
-                    && header.generation_number == generation_number
+        self.parse_indirect_object_id_at(offset)
+            .is_some_and(|identifier| {
+                identifier.number == object_number && identifier.generation == generation_number
             })
     }
 
     /// Returns whether an indirect object declaration, but not a reference, starts at `offset`.
     pub(crate) fn looks_like_indirect_object_header_at(&self, offset: usize) -> bool {
-        self.parse_indirect_object_header_at(offset).is_some()
+        self.parse_indirect_object_id_at(offset).is_some()
     }
 
     /// Returns whether the current input can terminate an object with an omitted `endobj`.
@@ -104,43 +81,72 @@ impl PdfParser<'_> {
         is_reference
     }
 
-    /// Parses the shared numeric prefix of an indirect object declaration or reference.
-    ///
-    /// On failure, the cursor is restored to its initial position so the general object parser
-    /// can interpret the same bytes as a number.
-    fn parse_indirect_object_syntax(&mut self) -> Option<IndirectObjectSyntax> {
+    /// Parses a number, recognizing an indirect reference when present.
+    pub(crate) fn parse_number_or_reference(&mut self) -> Result<ObjectVariant, ParserError> {
         let mark = self.tokenizer.position;
-        let syntax = (|| {
+        let reference = (|| {
             let object_number = self.read_number(true).ok()?;
-            let generation_number = self.read_number(true).ok()?;
-
-            if self.consume_reference_marker() {
-                return Some(IndirectObjectSyntax::Reference { object_number });
-            }
-
-            self.read_keyword(OBJ_KEYWORD).ok()?;
-            Some(IndirectObjectSyntax::Object(IndirectObjectHeader {
-                object_number,
-                generation_number,
-            }))
+            let _generation_number = self.read_number::<usize>(true).ok()?;
+            self.consume_reference_marker().then_some(object_number)
         })();
 
-        if syntax.is_none() {
+        if let Some(object_number) = reference {
+            return Ok(ObjectVariant::Reference(object_number));
+        }
+
+        self.tokenizer.position = mark;
+        self.parse_number()
+    }
+
+    /// Parses an indirect object identifier and consumes its declaration header.
+    ///
+    /// The cursor is restored when the input is not an indirect object declaration.
+    /// The object value and terminator are left for the caller.
+    pub fn parse_indirect_object_id(&mut self) -> Option<PdfObjectId> {
+        let mark = self.tokenizer.position;
+        let identifier = (|| {
+            let number = self.read_number(true).ok()?;
+            let generation = self.read_number(true).ok()?;
+            self.read_keyword(OBJ_KEYWORD).ok()?;
+            Some(PdfObjectId { number, generation })
+        })();
+
+        if identifier.is_none() {
             self.tokenizer.position = mark;
         }
 
-        syntax
+        identifier
     }
 
-    /// Parses an indirect object declaration, restoring the cursor when the input is a reference.
-    pub(crate) fn parse_indirect_object_header(&mut self) -> Option<IndirectObjectHeader> {
-        let mark = self.tokenizer.position;
-        let IndirectObjectSyntax::Object(header) = self.parse_indirect_object_syntax()? else {
-            self.tokenizer.position = mark;
-            return None;
-        };
+    /// Parses the value and terminator following an indirect object identifier.
+    ///
+    /// The identifier must have already been consumed with
+    /// [`Self::parse_indirect_object_id`]. Stream dictionaries are combined with
+    /// their encoded bytes and the identifier without wrapping the result.
+    pub fn parse_indirect_object_value(
+        &mut self,
+        identifier: PdfObjectId,
+        objects: &dyn ObjectResolver,
+    ) -> Result<ObjectVariant, ParserError> {
+        let object = self.parse_object(objects)?;
+        self.skip_whitespace_and_comments();
 
-        Some(header)
+        if self.is_at_stream_start() {
+            let ObjectVariant::Dictionary(dictionary) = object else {
+                return Err(ParserError::StreamObjectWithoutDictionary);
+            };
+            let data = self.parse_stream(&dictionary, objects)?;
+            self.consume_required_endobj()?;
+            return Ok(ObjectVariant::Stream(StreamObject::new_encoded(
+                identifier.number,
+                identifier.generation,
+                dictionary,
+                data,
+            )));
+        }
+
+        self.consume_endobj_or_implicit_boundary()?;
+        Ok(object)
     }
 
     /// Requires `endobj`, unless the current input is a safe malformed-file recovery boundary.
@@ -158,55 +164,15 @@ impl PdfParser<'_> {
         self.read_keyword(ENDOBJ_KEYWORD)
     }
 
-    /// Parses the value and terminator for an indirect object declaration.
-    fn parse_indirect_object_body(
-        &mut self,
-        header: IndirectObjectHeader,
-        objects: &dyn ObjectResolver,
-    ) -> Result<ObjectVariant, ParserError> {
-        let object = self.parse_object(objects)?;
+    /// Consumes the required `endobj` keyword without malformed-file recovery.
+    fn consume_required_endobj(&mut self) -> Result<(), ParserError> {
         self.skip_whitespace_and_comments();
-
-        if matches!(self.tokenizer.peek(), Some(PdfToken::Alphabetic(b's'))) {
-            let ObjectVariant::Dictionary(dictionary) = object else {
-                return Err(ParserError::StreamObjectWithoutDictionary);
-            };
-            let stream = self.parse_stream(&dictionary, objects)?;
-
-            self.skip_whitespace_and_comments();
-            self.read_keyword(ENDOBJ_KEYWORD)?;
-
-            return Ok(ObjectVariant::Stream(StreamObject::new_encoded(
-                header.object_number,
-                header.generation_number,
-                dictionary,
-                stream,
-            )));
-        }
-
-        self.consume_endobj_or_implicit_boundary()?;
-        Ok(ObjectVariant::IndirectObject(Box::new(
-            IndirectObject::new(header.object_number, header.generation_number, Some(object)),
-        )))
+        self.read_keyword(ENDOBJ_KEYWORD)
     }
 
-    /// Parses an indirect object or an object reference from the current position in the input stream.
-    pub fn parse_indirect_object(
-        &mut self,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Option<ObjectVariant>, ParserError> {
-        let Some(syntax) = self.parse_indirect_object_syntax() else {
-            return Ok(None);
-        };
-
-        match syntax {
-            IndirectObjectSyntax::Object(header) => {
-                self.parse_indirect_object_body(header, objects).map(Some)
-            }
-            IndirectObjectSyntax::Reference { object_number } => {
-                Ok(Some(ObjectVariant::Reference(object_number)))
-            }
-        }
+    /// Returns whether the current position begins a stream suffix.
+    fn is_at_stream_start(&mut self) -> bool {
+        matches!(self.tokenizer.peek(), Some(PdfToken::Alphabetic(b's')))
     }
 }
 
@@ -217,29 +183,59 @@ mod tests {
 
     use super::*;
 
+    fn parse_staged_indirect_object(
+        parser: &mut PdfParser<'_>,
+    ) -> Result<Option<(PdfObjectId, ObjectVariant)>, ParserError> {
+        let Some(identifier) = parser.parse_indirect_object_id() else {
+            return Ok(None);
+        };
+        let object = parser.parse_indirect_object_value(identifier, &PassthroughResolver)?;
+        Ok(Some((identifier, object)))
+    }
+
     #[test]
     fn test_indirect_object_valid() {
         let input = b"0 1 obj\n(HELLO)\nendobj\n";
         let mut parser = PdfParser::from(input.as_slice());
-        if let Some(ObjectVariant::IndirectObject(indirect_object)) =
-            parser.parse_indirect_object(&PassthroughResolver).unwrap()
-        {
-            let IndirectObject {
-                object_number,
-                generation_number,
-                object,
-                ..
-            } = indirect_object.as_ref();
-
-            assert_eq!(*object_number, 0);
-            assert_eq!(*generation_number, 1);
-            assert_eq!(
-                *object,
-                Some(ObjectVariant::LiteralString(b"HELLO".to_vec()))
-            );
+        if let Some((identifier, object)) = parse_staged_indirect_object(&mut parser).unwrap() {
+            assert_eq!(identifier.number, 0);
+            assert_eq!(identifier.generation, 1);
+            assert_eq!(object, ObjectVariant::LiteralString(b"HELLO".to_vec()));
         } else {
-            panic!("Expected IndirectObject variant");
+            panic!("Expected indirect object declaration");
         }
+    }
+
+    #[test]
+    fn test_indirect_object_id_leaves_value_for_direct_parser() {
+        let mut parser = PdfParser::from(b"12 3 obj\n42\nendobj".as_slice());
+
+        let identifier = parser
+            .parse_indirect_object_id()
+            .expect("indirect object header should parse");
+
+        assert_eq!(
+            identifier,
+            PdfObjectId {
+                number: 12,
+                generation: 3,
+            }
+        );
+        assert_eq!(
+            parser.parse_object(&PassthroughResolver).unwrap(),
+            ObjectVariant::Integer(42)
+        );
+    }
+
+    #[test]
+    fn test_direct_parser_only_consumes_number_from_indirect_object_declaration() {
+        let mut parser = PdfParser::from(b"12 3 obj\n42\nendobj".as_slice());
+
+        assert_eq!(
+            parser.parse_object(&PassthroughResolver).unwrap(),
+            ObjectVariant::Integer(12)
+        );
+        assert_eq!(parser.tokenizer.data(), b"3 obj\n42\nendobj");
     }
 
     #[test]
@@ -247,9 +243,11 @@ mod tests {
         let input = b"1 0 obj\n<< /Length 5 >>\nstream\nHello\nendstream\n%  %\nendobj\n";
         let mut parser = PdfParser::from(input.as_slice());
 
-        if let Some(ObjectVariant::Stream(stream)) =
-            parser.parse_indirect_object(&PassthroughResolver).unwrap()
+        if let Some((identifier, ObjectVariant::Stream(stream))) =
+            parse_staged_indirect_object(&mut parser).unwrap()
         {
+            assert_eq!(identifier.number, 1);
+            assert_eq!(identifier.generation, 0);
             assert_eq!(stream.object_number, 1);
             assert_eq!(stream.generation_number, 0);
             assert_eq!(stream.raw_data(), b"Hello");
@@ -264,21 +262,12 @@ mod tests {
         let input = b"1501 0 obj\n61\n% comment\nendobj\n";
         let mut parser = PdfParser::from(input.as_slice());
 
-        if let Some(ObjectVariant::IndirectObject(indirect_object)) =
-            parser.parse_indirect_object(&PassthroughResolver).unwrap()
-        {
-            let IndirectObject {
-                object_number,
-                generation_number,
-                object,
-                ..
-            } = indirect_object.as_ref();
-
-            assert_eq!(*object_number, 1501);
-            assert_eq!(*generation_number, 0);
-            assert_eq!(*object, Some(ObjectVariant::Integer(61)));
+        if let Some((identifier, object)) = parse_staged_indirect_object(&mut parser).unwrap() {
+            assert_eq!(identifier.number, 1501);
+            assert_eq!(identifier.generation, 0);
+            assert_eq!(object, ObjectVariant::Integer(61));
         } else {
-            panic!("Expected IndirectObject variant");
+            panic!("Expected indirect object declaration");
         }
     }
 
@@ -287,16 +276,14 @@ mod tests {
         let input = b"1 0 obj\n<< /Type /Catalog >>\n2 0 obj\n<< /Type /Pages >>\nendobj\n";
         let mut parser = PdfParser::from(input.as_slice());
 
-        if let Some(ObjectVariant::IndirectObject(indirect_object)) =
-            parser.parse_indirect_object(&PassthroughResolver).unwrap()
-        {
-            assert_eq!(indirect_object.object_number, 1);
+        if let Some((identifier, _)) = parse_staged_indirect_object(&mut parser).unwrap() {
+            assert_eq!(identifier.number, 1);
             assert_eq!(
                 parser.tokenizer.data(),
                 b"2 0 obj\n<< /Type /Pages >>\nendobj\n"
             );
         } else {
-            panic!("Expected IndirectObject variant");
+            panic!("Expected indirect object declaration");
         }
     }
 
@@ -315,7 +302,7 @@ mod tests {
     fn test_reference_header_parse_restores_cursor() {
         let mut parser = PdfParser::from(b"1 0 R".as_slice());
 
-        assert!(parser.parse_indirect_object_header().is_none());
+        assert!(parser.parse_indirect_object_id().is_none());
         assert_eq!(parser.tokenizer.position, 0);
     }
 
@@ -324,14 +311,10 @@ mod tests {
         let input = b"1 0 obj\n";
         let parser = PdfParser::from(input.as_slice());
 
+        assert!(parser.parse_indirect_object_id_at(input.len()).is_none());
         assert!(
             parser
-                .parse_indirect_object_header_at(input.len())
-                .is_none()
-        );
-        assert!(
-            parser
-                .parse_indirect_object_header_at(input.len().saturating_add(1))
+                .parse_indirect_object_id_at(input.len().saturating_add(1))
                 .is_none()
         );
     }
@@ -346,12 +329,7 @@ mod tests {
         ] {
             let mut parser = PdfParser::from(input);
 
-            assert!(
-                parser
-                    .parse_indirect_object(&PassthroughResolver)
-                    .unwrap()
-                    .is_none()
-            );
+            assert!(parser.parse_indirect_object_id().is_none());
             assert_eq!(parser.tokenizer.position, 0);
         }
     }
@@ -361,6 +339,6 @@ mod tests {
         let input = b"1 0 obj\nnull\nxrefextra";
         let mut parser = PdfParser::from(input.as_slice());
 
-        assert!(parser.parse_indirect_object(&PassthroughResolver).is_err());
+        assert!(parse_staged_indirect_object(&mut parser).is_err());
     }
 }

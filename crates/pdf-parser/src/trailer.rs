@@ -132,7 +132,7 @@ mod tests {
         data.extend_from_slice(format!("{}\r\n", xref2_offset).as_bytes());
         data.extend_from_slice(b"%%EOF");
 
-        let mut parser = PdfParser::from(data.as_slice());
+        let parser = PdfParser::from(data.as_slice());
         let table = parser.build_xref_table().unwrap();
 
         let entry = table.entries.get(&1).unwrap();

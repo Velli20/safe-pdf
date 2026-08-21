@@ -58,17 +58,17 @@ impl<'a> CMapParser<'a> {
     ) -> Result<Option<CMapToken>, CMapError> {
         self.skip_cmap_whitespace_and_comments();
 
-        let Some(byte) = self.parser.tokenizer.peek_byte() else {
+        let Some(byte) = self.parser.peek_byte() else {
             return Ok(None);
         };
 
         let token = match byte {
             b'[' => {
-                let _ = self.parser.tokenizer.read();
+                let _ = self.parser.read_byte();
                 CMapToken::LeftSquareBracket
             }
             b']' => {
-                let _ = self.parser.tokenizer.read();
+                let _ = self.parser.read_byte();
                 CMapToken::RightSquareBracket
             }
             b'(' => CMapToken::LiteralString(
@@ -90,15 +90,15 @@ impl<'a> CMapParser<'a> {
     }
 
     fn parse_name_token(&mut self) -> Result<CMapToken, CMapError> {
-        let _ = self.parser.tokenizer.read();
+        let _ = self.parser.read_byte();
         self.parser.skip_whitespace();
         Ok(CMapToken::Name(self.parser.read_operator_name()?.to_vec()))
     }
 
     fn parse_left_angle_token(&mut self) -> Result<CMapToken, CMapError> {
-        if matches!(self.parser.tokenizer.data().get(1).copied(), Some(b'<')) {
-            let _ = self.parser.tokenizer.read();
-            let _ = self.parser.tokenizer.read();
+        if matches!(self.parser.remaining_input().get(1).copied(), Some(b'<')) {
+            let _ = self.parser.read_byte();
+            let _ = self.parser.read_byte();
             Ok(CMapToken::DoubleLeftAngleBracket)
         } else {
             Ok(CMapToken::HexString(self.parser.parse_hex_string()?))
@@ -106,9 +106,9 @@ impl<'a> CMapParser<'a> {
     }
 
     fn parse_right_angle_token(&mut self, byte: u8) -> Result<CMapToken, CMapError> {
-        if matches!(self.parser.tokenizer.data().get(1).copied(), Some(b'>')) {
-            let _ = self.parser.tokenizer.read();
-            let _ = self.parser.tokenizer.read();
+        if matches!(self.parser.remaining_input().get(1).copied(), Some(b'>')) {
+            let _ = self.parser.read_byte();
+            let _ = self.parser.read_byte();
             Ok(CMapToken::DoubleRightAngleBracket)
         } else {
             Err(self.unexpected_token(byte).into())
@@ -154,7 +154,7 @@ impl<'a> CMapParser<'a> {
     fn unexpected_token(&self, byte: u8) -> ParserError {
         ParserError::UnexpectedTokenAt {
             token: String::from_utf8_lossy(&[byte]).into_owned(),
-            position: self.parser.tokenizer.position,
+            position: self.parser.position(),
         }
     }
 

@@ -10,7 +10,6 @@ use std::collections::BTreeMap;
 
 use pdf_object::{
     cross_reference_table::CrossReferenceEntryType, object_resolver::PassthroughResolver,
-    object_variant::ObjectVariant,
 };
 use pdf_parser::parser::PdfParser;
 
@@ -25,24 +24,17 @@ fn assert_indirect_object_at_offset(
     object_number: usize,
     generation_number: usize,
 ) {
-    let mut parser = PdfParser::from(input);
-    parser.tokenizer.position = offset;
+    let parser = PdfParser::from(input);
+    let mut parser = parser
+        .at_offset(offset)
+        .expect("expected recovered offset to be in bounds");
 
     let parsed = parser
-        .parse_indirect_object(&PassthroughResolver)
-        .expect("expected to parse indirect object at recovered offset");
+        .parse_indirect_object_id()
+        .expect("expected to parse indirect object identifier at recovered offset");
 
-    match parsed {
-        Some(ObjectVariant::IndirectObject(indirect_object)) => {
-            assert_eq!(indirect_object.object_number, object_number);
-            assert_eq!(indirect_object.generation_number, generation_number);
-        }
-        Some(ObjectVariant::Stream(stream)) => {
-            assert_eq!(stream.object_number, object_number);
-            assert_eq!(stream.generation_number, generation_number);
-        }
-        other => panic!("expected indirect object or stream at offset, got {other:?}"),
-    }
+    assert_eq!(parsed.number, object_number);
+    assert_eq!(parsed.generation, generation_number);
 }
 
 fn build_issue139_like_pdf() -> (Vec<u8>, BTreeMap<usize, usize>) {
@@ -416,7 +408,7 @@ fn build_xref_table_simple() {
     data.extend_from_slice(b"trailer\n<< /Size 2 /Root 1 0 R >>\n");
     data.extend_from_slice(format!("startxref\n{xref_offset}\n%%EOF").as_bytes());
 
-    let mut parser = PdfParser::from(data.as_slice());
+    let parser = PdfParser::from(data.as_slice());
     let table = parser.build_xref_table().unwrap();
 
     assert_eq!(table.entries.len(), 2);
@@ -469,7 +461,7 @@ fn build_xref_table_falls_back_from_invalid_newer_xref() {
     );
     data.extend_from_slice(format!("startxref\n{xref2_offset}\n%%EOF").as_bytes());
 
-    let mut parser = PdfParser::from(data.as_slice());
+    let parser = PdfParser::from(data.as_slice());
     let table = parser.build_xref_table().unwrap();
 
     assert_eq!(
@@ -518,7 +510,7 @@ fn build_xref_table_repairs_valid_section_with_shifted_entry_offsets() {
     data.extend_from_slice(b"trailer\n<</Root 1 0 R/Size 6>>\n");
     data.extend_from_slice(format!("startxref\n{xref_offset}\n%%EOF").as_bytes());
 
-    let mut parser = PdfParser::from(data.as_slice());
+    let parser = PdfParser::from(data.as_slice());
     let table = parser.build_xref_table().unwrap();
 
     assert_eq!(
@@ -560,7 +552,7 @@ fn build_xref_table_recovers_missing_xref_keyword_with_subsection_header() {
     data.extend_from_slice(b"trailer\n<< /Size 4 /Root 1 0 R >>\n");
     data.extend_from_slice(format!("startxref\n{xref_offset}\n%%EOF").as_bytes());
 
-    let mut parser = PdfParser::from(data.as_slice());
+    let parser = PdfParser::from(data.as_slice());
     let table = parser.build_xref_table().unwrap();
 
     assert_eq!(
@@ -612,7 +604,7 @@ fn build_xref_table_recovers_stripped_header_offsets() {
         format!("startxref\n{}\n%%EOF", xref_offset + STRIPPED_HEADER_DELTA).as_bytes(),
     );
 
-    let mut parser = PdfParser::from(data.as_slice());
+    let parser = PdfParser::from(data.as_slice());
     let table = parser.build_xref_table().unwrap();
 
     assert_eq!(
@@ -660,7 +652,7 @@ fn build_xref_table_recovers_startxref_inside_endstream() {
     data.extend_from_slice(b"trailer\n<< /Size 4 /Root 1 0 R >>\n");
     data.extend_from_slice(format!("startxref\n{bad_startxref_offset}\n%%EOF").as_bytes());
 
-    let mut parser = PdfParser::from(data.as_slice());
+    let parser = PdfParser::from(data.as_slice());
     let table = parser.build_xref_table().unwrap();
 
     assert_eq!(
@@ -725,7 +717,7 @@ fn build_xref_table_recovers_nearby_xref_without_line_boundary() {
     data.extend_from_slice(b"trailer\n<< /Size 6 /Root 2 0 R /Info 1 0 R >>\n");
     data.extend_from_slice(format!("startxref\n{bad_startxref_offset}\n%%EOF").as_bytes());
 
-    let mut parser = PdfParser::from(data.as_slice());
+    let parser = PdfParser::from(data.as_slice());
     let table = parser.build_xref_table().unwrap();
 
     assert_eq!(
@@ -768,7 +760,7 @@ fn build_xref_table_recovers_nearby_xref_without_line_boundary() {
 #[test]
 fn build_xref_table_repairs_issue139_offsets() {
     let (data, expected_offsets) = build_issue139_like_pdf();
-    let mut parser = PdfParser::from(data.as_slice());
+    let parser = PdfParser::from(data.as_slice());
     let table = parser.build_xref_table().unwrap();
 
     for object_number in 1..=6 {
@@ -814,7 +806,7 @@ fn build_xref_table_repair_ignores_numeric_array_entries() {
     data.extend_from_slice(b"trailer\n<< /Size 3 /Root 1 0 R >>\n");
     data.extend_from_slice(format!("startxref\n{xref_offset}\n%%EOF").as_bytes());
 
-    let mut parser = PdfParser::from(data.as_slice());
+    let parser = PdfParser::from(data.as_slice());
     let table = parser.build_xref_table().unwrap();
 
     assert_eq!(
@@ -829,7 +821,7 @@ fn build_xref_table_repair_ignores_numeric_array_entries() {
 #[test]
 fn build_xref_table_recovers_distant_shifted_xref_offsets() {
     let (data, expected_offsets) = build_far_shifted_xref_pdf(500, 105_359);
-    let mut parser = PdfParser::from(data.as_slice());
+    let parser = PdfParser::from(data.as_slice());
     let table = parser.build_xref_table().unwrap();
 
     assert!(table.entries.get(&0).expect("obj 0 should exist").is_free());
@@ -851,7 +843,7 @@ fn build_xref_table_recovers_distant_shifted_xref_offsets() {
 #[test]
 fn build_xref_table_merges_hybrid_xref_stream_entries() {
     let data = build_hybrid_xref_pdf();
-    let mut parser = PdfParser::from(data.as_slice());
+    let parser = PdfParser::from(data.as_slice());
     let table = parser.build_xref_table().unwrap();
 
     let pages_entry = table.entries.get(&2).expect("obj 2 should exist");
@@ -882,7 +874,7 @@ fn build_xref_table_merges_hybrid_xref_stream_entries() {
 #[test]
 fn build_xref_table_drops_invalid_normal_entry_from_xref_stream() {
     let data = build_malformed_xref_stream_pdf();
-    let mut parser = PdfParser::from(data.as_slice());
+    let parser = PdfParser::from(data.as_slice());
     let table = parser.build_xref_table().unwrap();
 
     assert_eq!(
@@ -954,7 +946,7 @@ fn build_xref_table_recovers_missing_xref_command() {
         format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF").as_bytes(),
     );
 
-    let mut parser = PdfParser::from(data.as_slice());
+    let parser = PdfParser::from(data.as_slice());
     let table = parser.build_xref_table().unwrap();
 
     assert!(table.entries.get(&0).expect("obj 0 should exist").is_free());
@@ -1013,7 +1005,7 @@ fn build_xref_table_recovers_xref_keyword_with_flat_entries() {
         format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF").as_bytes(),
     );
 
-    let mut parser = PdfParser::from(data.as_slice());
+    let parser = PdfParser::from(data.as_slice());
     let table = parser.build_xref_table().unwrap();
 
     assert_eq!(
@@ -1028,7 +1020,7 @@ fn build_xref_table_recovers_xref_keyword_with_flat_entries() {
 #[test]
 fn build_xref_table_normalizes_malformed_incremental_subsection_numbering() {
     let (data, expected_offsets) = build_malformed_incremental_xref_subsection_pdf();
-    let mut parser = PdfParser::from(data.as_slice());
+    let parser = PdfParser::from(data.as_slice());
     let table = parser.build_xref_table().unwrap();
 
     for (object_number, expected_offset) in expected_offsets {

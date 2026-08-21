@@ -42,7 +42,7 @@ impl<'a, 'out> OperatorStreamParser<'a, 'out> {
             return Ok(false);
         };
 
-        let start_position = self.parser.tokenizer.position;
+        let start_position = self.parser.position();
         let result = if next_item_is_operator(next_byte) {
             self.parse_operator_from_stream().map(|()| true)
         } else {
@@ -69,7 +69,7 @@ impl<'a, 'out> OperatorStreamParser<'a, 'out> {
 
     /// Returns the next raw byte without advancing the parser.
     fn peek_next_byte(&self) -> Option<u8> {
-        self.parser.tokenizer.peek_byte()
+        self.parser.peek_byte()
     }
 
     /// Parses one operand object and appends it to the reusable operand buffer.
@@ -139,8 +139,8 @@ impl<'a, 'out> OperatorStreamParser<'a, 'out> {
     fn recover_after_malformed_item(&mut self, start_position: usize) {
         self.operands.clear();
 
-        if self.parser.tokenizer.position <= start_position {
-            let _ = self.parser.tokenizer.read_exactly(1);
+        if self.parser.position() <= start_position {
+            let _ = self.parser.read_byte();
         }
     }
 }
