@@ -32,8 +32,7 @@ impl PdfOperator for MoveTextPosition {
     const OPERAND_COUNT: Option<usize> = Some(2);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let tx = operands.get_f32()?;
-        let ty = operands.get_f32()?;
+        let [tx, ty] = operands.try_array_of::<f32, 2>()?;
         Ok(PdfOperatorVariant::MoveTextPosition(Self::new(tx, ty)))
     }
 
@@ -65,8 +64,7 @@ impl PdfOperator for MoveTextPositionAndSetLeading {
     const OPERAND_COUNT: Option<usize> = Some(2);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let tx = operands.get_f32()?;
-        let ty = operands.get_f32()?;
+        let [tx, ty] = operands.try_array_of::<f32, 2>()?;
         Ok(PdfOperatorVariant::MoveTextPositionAndSetLeading(
             Self::new(tx, ty),
         ))
@@ -105,12 +103,7 @@ impl PdfOperator for SetTextMatrix {
     const OPERAND_COUNT: Option<usize> = Some(6);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let a = operands.get_f32()?;
-        let b = operands.get_f32()?;
-        let c = operands.get_f32()?;
-        let d = operands.get_f32()?;
-        let e = operands.get_f32()?;
-        let f = operands.get_f32()?;
+        let [a, b, c, d, e, f] = operands.try_array_of::<f32, 6>()?;
         Ok(PdfOperatorVariant::SetTextMatrix(Self::new([
             a, b, c, d, e, f,
         ])))

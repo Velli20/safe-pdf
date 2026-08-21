@@ -28,12 +28,7 @@ impl PdfOperator for SetCharWidthAndBoundingBox {
     const OPERAND_COUNT: Option<usize> = Some(6);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let wx = operands.get_f32()?;
-        let wy = operands.get_f32()?;
-        let llx = operands.get_f32()?;
-        let lly = operands.get_f32()?;
-        let urx = operands.get_f32()?;
-        let ury = operands.get_f32()?;
+        let [wx, wy, llx, lly, urx, ury] = operands.try_array_of::<f32, 6>()?;
 
         Ok(PdfOperatorVariant::SetCharWidthAndBoundingBox(Self {
             wx,
@@ -64,8 +59,7 @@ impl PdfOperator for SetCharWidth {
     const OPERAND_COUNT: Option<usize> = Some(2);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let wx = operands.get_f32()?;
-        let wy = operands.get_f32()?;
+        let [wx, wy] = operands.try_array_of::<f32, 2>()?;
 
         Ok(PdfOperatorVariant::SetCharWidth(Self { wx, wy }))
     }

@@ -7,6 +7,7 @@ use crate::{
 };
 use num_traits::FromPrimitive;
 use pdf_graphics::TextRenderingMode;
+use pdf_object::object_resolver::PassthroughResolver;
 
 /// Sets the character spacing, `Tc`, which is a number expressed in unscaled text space units.
 #[derive(Debug, Clone, PartialEq)]
@@ -27,7 +28,9 @@ impl PdfOperator for SetCharacterSpacing {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let spacing = operands.get_f32()?;
+        let spacing = operands
+            .take_next()?
+            .try_number::<f32>(&PassthroughResolver)?;
         Ok(PdfOperatorVariant::SetCharacterSpacing(Self::new(spacing)))
     }
 
@@ -56,7 +59,9 @@ impl PdfOperator for SetWordSpacing {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let spacing = operands.get_f32()?;
+        let spacing = operands
+            .take_next()?
+            .try_number::<f32>(&PassthroughResolver)?;
         Ok(PdfOperatorVariant::SetWordSpacing(Self::new(spacing)))
     }
 
@@ -85,7 +90,9 @@ impl PdfOperator for SetHorizontalScaling {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let scale = operands.get_f32()?;
+        let scale = operands
+            .take_next()?
+            .try_number::<f32>(&PassthroughResolver)?;
         Ok(PdfOperatorVariant::SetHorizontalScaling(Self::new(scale)))
     }
 
@@ -120,7 +127,9 @@ impl PdfOperator for SetLeading {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let leading = operands.get_f32()?;
+        let leading = operands
+            .take_next()?
+            .try_number::<f32>(&PassthroughResolver)?;
         Ok(PdfOperatorVariant::SetLeading(Self::new(leading)))
     }
 
@@ -162,7 +171,9 @@ impl PdfOperator for SetFont {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let name = operands.get_str()?;
-        let size = operands.get_f32()?;
+        let size = operands
+            .take_next()?
+            .try_number::<f32>(&PassthroughResolver)?;
         Ok(PdfOperatorVariant::SetFont(Self::new(name, size)))
     }
 
@@ -226,7 +237,9 @@ impl PdfOperator for SetTextRise {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let rise = operands.get_f32()?;
+        let rise = operands
+            .take_next()?
+            .try_number::<f32>(&PassthroughResolver)?;
         Ok(PdfOperatorVariant::SetTextRise(Self::new(rise)))
     }
 

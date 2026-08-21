@@ -16,3 +16,10 @@ pdf-graphics = { path = "../pdf-graphics" }
 pdf-content-stream-operators = { path = "../pdf-content-stream-operators" }
 thiserror = "2.0.12"
 num-traits = "0.2.19"
+
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "operator_parsing"
+harness = false
