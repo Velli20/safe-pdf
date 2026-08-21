@@ -35,15 +35,15 @@ impl SoftMask {
         cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Option<Self>, PdfPagesError> {
-        let mask_type = MaskMode::from(dictionary.required_str("S", objects)?);
+        let mask_type = MaskMode::from(dictionary.required_bytes(b"S", objects)?);
 
-        let content = dictionary.get_or_err("G")?;
+        let content = dictionary.get_or_err(b"G")?;
         let stream = content.try_stream(objects)?;
-        let subtype = stream.dictionary.required_str("Subtype", objects)?;
-        if subtype != "Form" {
+        let subtype = stream.dictionary.required_bytes(b"Subtype", objects)?;
+        if subtype != b"Form" {
             return Err(PdfPagesError::InvalidExtGStateEntryValue {
                 entry: "SMask".to_string(),
-                reason: format!("group XObject must have /Subtype /Form, found /{subtype}"),
+                reason: format!("group XObject must have /Subtype /Form, found /{subtype:?}"),
             });
         }
 
@@ -92,7 +92,7 @@ mod tests {
     fn soft_mask_dictionary(stream_object_number: usize, subtype: &str) -> Dictionary {
         let form_dictionary = Dictionary::new(BTreeMap::from([
             (
-                "BBox".to_string(),
+                Vec::from(b"BBox"),
                 ObjectVariant::Array(vec![
                     ObjectVariant::Integer(0),
                     ObjectVariant::Integer(0),
@@ -101,7 +101,7 @@ mod tests {
                 ]),
             ),
             (
-                "Subtype".to_string(),
+                Vec::from(b"Subtype"),
                 ObjectVariant::Name(subtype.as_bytes().to_vec()),
             ),
         ]));
@@ -113,8 +113,8 @@ mod tests {
         );
 
         Dictionary::new(BTreeMap::from([
-            ("G".to_string(), ObjectVariant::Stream(stream)),
-            ("S".to_string(), ObjectVariant::Name(b"Alpha".to_vec())),
+            (Vec::from(b"G"), ObjectVariant::Stream(stream)),
+            (Vec::from(b"S"), ObjectVariant::Name(b"Alpha".to_vec())),
         ]))
     }
 

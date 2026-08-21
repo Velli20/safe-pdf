@@ -59,7 +59,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
         Ok(())
     }
 
-    fn set_rendering_intent(&mut self, _intent: &str) -> Result<(), Self::ErrorType> {
+    fn set_rendering_intent(&mut self, _intent: &[u8]) -> Result<(), Self::ErrorType> {
         Ok(())
     }
 
@@ -67,7 +67,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
         Ok(())
     }
 
-    fn set_graphics_state_from_dict(&mut self, dict_name: &str) -> Result<(), Self::ErrorType> {
+    fn set_graphics_state_from_dict(&mut self, dict_name: &[u8]) -> Result<(), Self::ErrorType> {
         let resources = self
             .current_state()?
             .resources

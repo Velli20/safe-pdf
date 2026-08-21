@@ -31,7 +31,7 @@ impl Default for FreeTextStyle {
         Self {
             font: FreeTextFont {
                 standard14: Standard14Font::Helvetica,
-                resource_name: "Helv".to_owned(),
+                resource_name: Vec::from(b"Helv"),
                 encoding: FontEncoding::WinAnsi,
             },
             font_size: 12.0,
@@ -57,7 +57,7 @@ pub struct FreeTextFont {
     /// Standard 14 font used by the appearance.
     pub standard14: Standard14Font,
     /// Name used by `/DA` and the appearance resources.
-    pub resource_name: String,
+    pub resource_name: Vec<u8>,
     /// Encoding used by text-showing operators.
     pub encoding: FontEncoding,
 }

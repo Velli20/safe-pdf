@@ -13,7 +13,7 @@ pub(crate) fn dictionary(
 }
 
 pub(crate) fn point_list(
-    key: &'static str,
+    key: &'static [u8],
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
 ) -> Result<PdfPath, AnnotationError> {

@@ -15,7 +15,7 @@ impl StampAnnotation {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
-        let name = dictionary.optional_bytes_vec("Name", objects)?;
+        let name = dictionary.optional_bytes(b"Name", objects)?.map(Vec::from);
         Ok(Self { name })
     }
 }

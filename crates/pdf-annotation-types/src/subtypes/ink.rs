@@ -18,9 +18,9 @@ impl InkAnnotation {
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
         let ink_list = InkList::from_dictionary(dictionary, objects)?
-            .ok_or(AnnotationError::MissingEntry { entry: "InkList" })?;
-        let border_style = BorderStyle::from_dictionary(dictionary, "BS", objects)?;
-        let interior_color = AnnotationColor::from_dictionary(dictionary, "IC", objects)?;
+            .ok_or(AnnotationError::MissingEntry { entry: b"InkList" })?;
+        let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
+        let interior_color = AnnotationColor::from_dictionary(dictionary, b"IC", objects)?;
 
         Ok(Self {
             ink_list,

@@ -146,14 +146,14 @@ impl PdfParser<'_> {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Option<usize> {
-        if dictionary.get("F").is_some() || dictionary.get("Filter").is_some() {
+        if dictionary.get(b"F").is_some() || dictionary.get(b"Filter").is_some() {
             return None;
         }
 
-        let width = Self::try_inline_image_number(dictionary, "W", "Width", objects)?;
-        let height = Self::try_inline_image_number(dictionary, "H", "Height", objects)?;
+        let width = Self::try_inline_image_number(dictionary, b"W", b"Width", objects)?;
+        let height = Self::try_inline_image_number(dictionary, b"H", b"Height", objects)?;
         let bits_per_component =
-            Self::try_inline_image_number(dictionary, "BPC", "BitsPerComponent", objects)?;
+            Self::try_inline_image_number(dictionary, b"BPC", b"BitsPerComponent", objects)?;
         let samples_per_pixel = Self::try_inline_image_samples_per_pixel(dictionary, objects)?;
 
         let bits_per_row = width
@@ -165,8 +165,8 @@ impl PdfParser<'_> {
 
     fn try_inline_image_number(
         dictionary: &Dictionary,
-        short_key: &str,
-        long_key: &str,
+        short_key: &[u8],
+        long_key: &[u8],
         objects: &dyn ObjectResolver,
     ) -> Option<usize> {
         dictionary
@@ -180,8 +180,8 @@ impl PdfParser<'_> {
         objects: &dyn ObjectResolver,
     ) -> Option<usize> {
         let image_mask = dictionary
-            .get("IM")
-            .or_else(|| dictionary.get("ImageMask"))
+            .get(b"IM")
+            .or_else(|| dictionary.get(b"ImageMask"))
             .and_then(|value| value.try_boolean(objects).ok())
             .unwrap_or(false);
         if image_mask {
@@ -189,14 +189,14 @@ impl PdfParser<'_> {
         }
 
         let color_space = dictionary
-            .get("CS")
-            .or_else(|| dictionary.get("ColorSpace"))?;
+            .get(b"CS")
+            .or_else(|| dictionary.get(b"ColorSpace"))?;
 
-        match color_space.try_str(objects).ok()? {
-            "G" | "DeviceGray" => Some(1),
-            "RGB" | "DeviceRGB" => Some(3),
-            "CMYK" | "DeviceCMYK" => Some(4),
-            "I" | "Indexed" => Some(1),
+        match color_space.try_bytes(objects).ok()? {
+            b"G" | b"DeviceGray" => Some(1),
+            b"RGB" | b"DeviceRGB" => Some(3),
+            b"CMYK" | b"DeviceCMYK" => Some(4),
+            b"I" | b"Indexed" => Some(1),
             _ => None,
         }
     }

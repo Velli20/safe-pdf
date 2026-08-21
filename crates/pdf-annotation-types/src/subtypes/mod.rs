@@ -56,21 +56,21 @@ pub(crate) fn line_endings(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<Option<[LineEndingStyle; 2]>, AnnotationError> {
-    let Some(value) = dictionary.get("LE") else {
+    let Some(value) = dictionary.get(b"LE") else {
         return Ok(None);
     };
 
     let endings = value.try_array(objects)?;
     if endings.len() != 2 {
         return Err(AnnotationError::InvalidEntry {
-            entry: "LE",
+            entry: b"LE",
             reason: format!("expected 2 line ending names, found {}", endings.len()),
         });
     }
 
     let mut parsed = [LineEndingStyle::None, LineEndingStyle::None];
     for (slot, item) in parsed.iter_mut().zip(endings.iter()) {
-        *slot = LineEndingStyle::from(item.try_str(objects)?);
+        *slot = LineEndingStyle::from(item.try_bytes(objects)?);
     }
 
     Ok(Some(parsed))
@@ -81,6 +81,6 @@ pub(crate) fn required_quad_points(
     objects: &dyn ObjectResolver,
 ) -> Result<QuadPoints, AnnotationError> {
     QuadPoints::from_dictionary(dictionary, objects)?.ok_or(AnnotationError::MissingEntry {
-        entry: "QuadPoints",
+        entry: b"QuadPoints",
     })
 }

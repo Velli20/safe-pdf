@@ -17,7 +17,7 @@ fn stream_object(object_number: usize, data: &[u8]) -> StreamObject {
     StreamObject::new(
         object_number,
         0,
-        Box::new(Dictionary::new(BTreeMap::new())),
+        Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
         data.to_vec(),
     )
 }
@@ -126,6 +126,25 @@ fn content_stream_new_handles_bare_sign_text_array_adjustment() {
 }
 
 #[test]
+fn content_stream_preserves_non_utf8_font_name() {
+    let mut ids = ContentStreamIdAllocator::new();
+    let parsed = ContentStream::new(
+        &ObjectVariant::Stream(stream_object(1, b"/#FF 12 Tf")),
+        &PassthroughResolver,
+        &mut ids,
+    )
+    .expect("non-UTF-8 resource names should parse");
+
+    assert_eq!(
+        recorded_operations(&parsed.operators),
+        vec![RecordedOperation::SetFontAndSize {
+            font_name: vec![0xFF],
+            size: 12.0,
+        }]
+    );
+}
+
+#[test]
 fn parsed_inline_image_can_be_dispatched() {
     let mut ids = ContentStreamIdAllocator::new();
     let parsed = ContentStream::new(
@@ -170,7 +189,7 @@ fn content_stream_new_skips_unknown_operator_and_recovers() {
 
 #[test]
 fn from_dictionary_preserves_allocator_for_missing_contents() {
-    let page = Dictionary::new(BTreeMap::new());
+    let page = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
     let mut ids = ContentStreamIdAllocator::new();
 
     let contents = ContentStream::from_dictionary(&page, &PassthroughResolver, &mut ids)
@@ -186,7 +205,7 @@ fn from_dictionary_parses_stream_arrays_and_allocates_monotonically() {
         ObjectVariant::Reference(1),
         ObjectVariant::Reference(2),
     ]);
-    let page = Dictionary::new(BTreeMap::from([("Contents".to_string(), contents)]));
+    let page = Dictionary::new(BTreeMap::from([(Vec::from(b"Contents"), contents)]));
     let mut ids = ContentStreamIdAllocator::new();
     let resolver = MapResolver {
         objects: BTreeMap::from([

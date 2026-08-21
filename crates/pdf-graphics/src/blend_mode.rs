@@ -20,29 +20,29 @@ pub enum BlendMode {
     Color,
     Luminosity,
     DestinationIn,
-    Unknown(String),
+    Unknown(Vec<u8>),
 }
 
-impl From<&str> for BlendMode {
-    fn from(value: &str) -> Self {
+impl From<&[u8]> for BlendMode {
+    fn from(value: &[u8]) -> Self {
         match value {
-            "Normal" => Self::Normal,
-            "Multiply" => Self::Multiply,
-            "Screen" => Self::Screen,
-            "Overlay" => Self::Overlay,
-            "Darken" => Self::Darken,
-            "Lighten" => Self::Lighten,
-            "ColorDodge" => Self::ColorDodge,
-            "ColorBurn" => Self::ColorBurn,
-            "HardLight" => Self::HardLight,
-            "SoftLight" => Self::SoftLight,
-            "Difference" => Self::Difference,
-            "Exclusion" => Self::Exclusion,
-            "Hue" => Self::Hue,
-            "Saturation" => Self::Saturation,
-            "Color" => Self::Color,
-            "Luminosity" => Self::Luminosity,
-            other => Self::Unknown(other.to_owned()),
+            b"Normal" => Self::Normal,
+            b"Multiply" => Self::Multiply,
+            b"Screen" => Self::Screen,
+            b"Overlay" => Self::Overlay,
+            b"Darken" => Self::Darken,
+            b"Lighten" => Self::Lighten,
+            b"ColorDodge" => Self::ColorDodge,
+            b"ColorBurn" => Self::ColorBurn,
+            b"HardLight" => Self::HardLight,
+            b"SoftLight" => Self::SoftLight,
+            b"Difference" => Self::Difference,
+            b"Exclusion" => Self::Exclusion,
+            b"Hue" => Self::Hue,
+            b"Saturation" => Self::Saturation,
+            b"Color" => Self::Color,
+            b"Luminosity" => Self::Luminosity,
+            other => Self::Unknown(Vec::from(other)),
         }
     }
 }
@@ -54,8 +54,8 @@ mod tests {
     #[test]
     fn preserves_unknown_blend_mode() {
         assert_eq!(
-            BlendMode::from("VendorBlend"),
-            BlendMode::Unknown("VendorBlend".to_owned())
+            BlendMode::from(b"VendorBlend".as_slice()),
+            BlendMode::Unknown(Vec::from(b"VendorBlend"))
         );
     }
 }

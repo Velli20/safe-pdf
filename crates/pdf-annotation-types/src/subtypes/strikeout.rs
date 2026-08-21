@@ -20,8 +20,8 @@ impl StrikeOutAnnotation {
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
         let quad_points = super::required_quad_points(dictionary, objects)?;
-        let color = AnnotationColor::from_dictionary(dictionary, "C", objects)?;
-        let constant_opacity = dictionary.optional_number::<f32>("CA", objects)?;
+        let color = AnnotationColor::from_dictionary(dictionary, b"C", objects)?;
+        let constant_opacity = dictionary.optional_number::<f32>(b"CA", objects)?;
 
         Ok(Self {
             quad_points,

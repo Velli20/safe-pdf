@@ -152,7 +152,7 @@ mod tests {
             name("CalRGB"),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
                 (
-                    "WhitePoint".to_string(),
+                    Vec::from(b"WhitePoint"),
                     ObjectVariant::Array(vec![
                         ObjectVariant::Real(0.9505),
                         ObjectVariant::Real(1.0),
@@ -160,7 +160,7 @@ mod tests {
                     ]),
                 ),
                 (
-                    "Matrix".to_string(),
+                    Vec::from(b"Matrix"),
                     ObjectVariant::Array(vec![
                         ObjectVariant::Real(0.9505),
                         ObjectVariant::Real(1.0),
@@ -182,9 +182,9 @@ mod tests {
             1,
             0,
             Box::new(Dictionary::new(BTreeMap::from([
-                ("FunctionType".to_string(), ObjectVariant::Integer(4)),
+                (Vec::from(b"FunctionType"), ObjectVariant::Integer(4)),
                 (
-                    "Domain".to_string(),
+                    Vec::from(b"Domain"),
                     ObjectVariant::Array(
                         (0..4)
                             .flat_map(|_| [ObjectVariant::Integer(0), ObjectVariant::Integer(1)])
@@ -192,7 +192,7 @@ mod tests {
                     ),
                 ),
                 (
-                    "Range".to_string(),
+                    Vec::from(b"Range"),
                     ObjectVariant::Array(
                         (0..3)
                             .flat_map(|_| [ObjectVariant::Integer(0), ObjectVariant::Integer(1)])
@@ -237,17 +237,17 @@ mod tests {
     #[test]
     fn decode_normalized_1bpc_gray_inverts_samples() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(1)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Name(b"DeviceGray".to_vec()),
             ),
             (
-                "Decode".to_string(),
+                Vec::from(b"Decode"),
                 ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(0)]),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(4)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(4)),
         ]));
 
         let image = decode_normalized_image(
@@ -265,17 +265,17 @@ mod tests {
     #[test]
     fn decode_normalized_8bpc_gray_remaps_samples() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Name(b"DeviceGray".to_vec()),
             ),
             (
-                "Decode".to_string(),
+                Vec::from(b"Decode"),
                 ObjectVariant::Array(vec![ObjectVariant::Integer(0), ObjectVariant::Real(0.5)]),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(2)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
 
         let image = decode_normalized_image(
@@ -293,9 +293,9 @@ mod tests {
     #[test]
     fn decode_normalized_indexed_image_applies_decode_before_lookup() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(1)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Array(vec![
                     ObjectVariant::Name(b"Indexed".to_vec()),
                     ObjectVariant::Name(b"DeviceRGB".to_vec()),
@@ -304,11 +304,11 @@ mod tests {
                 ]),
             ),
             (
-                "Decode".to_string(),
+                Vec::from(b"Decode"),
                 ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(0)]),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(2)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
 
         let image = decode_normalized_image(
@@ -326,9 +326,9 @@ mod tests {
     #[test]
     fn indexed_device_n_palette_is_converted_through_cal_rgb() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Array(vec![
                     name("Indexed"),
                     fixture_device_n(),
@@ -336,8 +336,8 @@ mod tests {
                     ObjectVariant::HexString(vec![0, 255, 255, 255]),
                 ]),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
         let image =
@@ -351,10 +351,10 @@ mod tests {
     #[test]
     fn direct_four_component_device_n_is_not_interpreted_as_cmyk() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
-            ("ColorSpace".to_string(), fixture_device_n()),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
+            (Vec::from(b"ColorSpace"), fixture_device_n()),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
         let image = decode_normalized_image(
@@ -371,9 +371,9 @@ mod tests {
     #[test]
     fn indexed_device_cmyk_keeps_device_fast_path() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Array(vec![
                     name("Indexed"),
                     name("DeviceCMYK"),
@@ -381,8 +381,8 @@ mod tests {
                     ObjectVariant::HexString(vec![0, 0, 0, 0]),
                 ]),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
         let image =
@@ -398,16 +398,16 @@ mod tests {
             2,
             0,
             Box::new(Dictionary::new(BTreeMap::from([
-                ("FunctionType".to_string(), ObjectVariant::Integer(4)),
+                (Vec::from(b"FunctionType"), ObjectVariant::Integer(4)),
                 (
-                    "Domain".to_string(),
+                    Vec::from(b"Domain"),
                     ObjectVariant::Array(vec![
                         ObjectVariant::Integer(0),
                         ObjectVariant::Integer(1),
                     ]),
                 ),
                 (
-                    "Range".to_string(),
+                    Vec::from(b"Range"),
                     ObjectVariant::Array(
                         (0..3)
                             .flat_map(|_| [ObjectVariant::Integer(0), ObjectVariant::Integer(1)])
@@ -418,9 +418,9 @@ mod tests {
             b"pop 1 1 1".to_vec(),
         );
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Array(vec![
                     name("Separation"),
                     name("None"),
@@ -428,8 +428,8 @@ mod tests {
                     ObjectVariant::Stream(tint_function),
                 ]),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
         let soft_mask = Image {
             data: Arc::new(vec![128]),
@@ -452,17 +452,17 @@ mod tests {
     #[test]
     fn decode_normalized_image_rejects_invalid_decode_length() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Name(b"DeviceGray".to_vec()),
             ),
             (
-                "Decode".to_string(),
+                Vec::from(b"Decode"),
                 ObjectVariant::Array(vec![ObjectVariant::Integer(0)]),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
         let err =
@@ -481,13 +481,13 @@ mod tests {
     #[test]
     fn decode_normalized_image_without_decode_preserves_samples() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Name(b"DeviceGray".to_vec()),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(2)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
 
         let samples = Arc::new(vec![12, 34]);
@@ -507,13 +507,13 @@ mod tests {
     #[test]
     fn decode_normalized_image_trims_trailing_samples() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Name(b"DeviceGray".to_vec()),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(2)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
         let samples = Arc::new(vec![12, 34, 56]);
 
@@ -532,9 +532,9 @@ mod tests {
     #[test]
     fn decode_normalized_image_mask_defaults_bits_per_component_to_one() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("ImageMask".to_string(), ObjectVariant::Boolean(true)),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(4)),
+            (Vec::from(b"ImageMask"), ObjectVariant::Boolean(true)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(4)),
         ]));
 
         let image = decode_normalized_image(
@@ -553,11 +553,11 @@ mod tests {
     fn decode_normalized_jpx_image_without_bits_per_component_infers_rgb_samples() {
         let dictionary = Dictionary::new(BTreeMap::from([
             (
-                "Filter".to_string(),
+                Vec::from(b"Filter"),
                 ObjectVariant::Name(b"JPXDecode".to_vec()),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(2)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
 
         let image = decode_normalized_image(
@@ -576,11 +576,11 @@ mod tests {
     fn decode_normalized_non_mask_image_still_requires_bits_per_component() {
         let dictionary = Dictionary::new(BTreeMap::from([
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Name(b"DeviceGray".to_vec()),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
         let err =
@@ -596,17 +596,17 @@ mod tests {
     #[test]
     fn decode_normalized_dct_cmyk_accepts_preconverted_rgb_samples() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Name(b"DeviceCMYK".to_vec()),
             ),
             (
-                "Filter".to_string(),
+                Vec::from(b"Filter"),
                 ObjectVariant::Name(b"DCTDecode".to_vec()),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(2)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
 
         let image = decode_normalized_image(
@@ -624,13 +624,13 @@ mod tests {
     #[test]
     fn decode_normalized_non_dct_cmyk_still_rejects_rgb_sized_samples() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Name(b"DeviceCMYK".to_vec()),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(2)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
 
         let err = decode_normalized_image(
@@ -653,17 +653,17 @@ mod tests {
     #[test]
     fn decode_normalized_dct_single_pixel_expands_to_declared_size() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Name(b"DeviceRGB".to_vec()),
             ),
             (
-                "Filter".to_string(),
+                Vec::from(b"Filter"),
                 ObjectVariant::Name(b"DCTDecode".to_vec()),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(2)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
 
         let image = decode_normalized_image(
@@ -684,13 +684,13 @@ mod tests {
     #[test]
     fn decode_normalized_image_applies_resolved_soft_mask() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Name(b"DeviceGray".to_vec()),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(2)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
         let soft_mask = Image {
             width: 2,
@@ -718,17 +718,17 @@ mod tests {
     fn decode_inline_image_applies_filter_chain_before_samples() {
         let image = InlineImage::new(
             Dictionary::new(BTreeMap::from([
-                ("BPC".to_string(), ObjectVariant::Integer(8)),
+                (Vec::from(b"BPC"), ObjectVariant::Integer(8)),
                 (
-                    "CS".to_string(),
+                    Vec::from(b"CS"),
                     ObjectVariant::Name(b"DeviceGray".to_vec()),
                 ),
                 (
-                    "F".to_string(),
+                    Vec::from(b"F"),
                     ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
                 ),
-                ("H".to_string(), ObjectVariant::Integer(1)),
-                ("W".to_string(), ObjectVariant::Integer(1)),
+                (Vec::from(b"H"), ObjectVariant::Integer(1)),
+                (Vec::from(b"W"), ObjectVariant::Integer(1)),
             ])),
             b"2A>".to_vec(),
             &PassthroughResolver,
@@ -745,10 +745,10 @@ mod tests {
     fn decode_inline_image_accepts_abbreviated_gray_color_space() {
         let image = InlineImage::new(
             Dictionary::new(BTreeMap::from([
-                ("BPC".to_string(), ObjectVariant::Integer(1)),
-                ("CS".to_string(), ObjectVariant::Name(b"G".to_vec())),
-                ("H".to_string(), ObjectVariant::Integer(1)),
-                ("W".to_string(), ObjectVariant::Integer(4)),
+                (Vec::from(b"BPC"), ObjectVariant::Integer(1)),
+                (Vec::from(b"CS"), ObjectVariant::Name(b"G".to_vec())),
+                (Vec::from(b"H"), ObjectVariant::Integer(1)),
+                (Vec::from(b"W"), ObjectVariant::Integer(4)),
             ])),
             vec![0b1010_0000],
             &PassthroughResolver,
@@ -766,10 +766,10 @@ mod tests {
     fn decode_inline_image_preserves_unfiltered_shared_samples() {
         let image = InlineImage::new(
             Dictionary::new(BTreeMap::from([
-                ("BPC".to_string(), ObjectVariant::Integer(8)),
-                ("CS".to_string(), ObjectVariant::Name(b"G".to_vec())),
-                ("H".to_string(), ObjectVariant::Integer(1)),
-                ("W".to_string(), ObjectVariant::Integer(2)),
+                (Vec::from(b"BPC"), ObjectVariant::Integer(8)),
+                (Vec::from(b"CS"), ObjectVariant::Name(b"G".to_vec())),
+                (Vec::from(b"H"), ObjectVariant::Integer(1)),
+                (Vec::from(b"W"), ObjectVariant::Integer(2)),
             ])),
             vec![12, 34],
             &PassthroughResolver,
@@ -788,9 +788,9 @@ mod tests {
     fn decode_inline_image_accepts_abbreviated_indexed_color_space() {
         let image = InlineImage::new(
             Dictionary::new(BTreeMap::from([
-                ("BPC".to_string(), ObjectVariant::Integer(1)),
+                (Vec::from(b"BPC"), ObjectVariant::Integer(1)),
                 (
-                    "CS".to_string(),
+                    Vec::from(b"CS"),
                     ObjectVariant::Array(vec![
                         ObjectVariant::Name(b"I".to_vec()),
                         ObjectVariant::Name(b"RGB".to_vec()),
@@ -798,8 +798,8 @@ mod tests {
                         ObjectVariant::HexString(vec![10, 11, 12, 20, 21, 22]),
                     ]),
                 ),
-                ("H".to_string(), ObjectVariant::Integer(1)),
-                ("W".to_string(), ObjectVariant::Integer(4)),
+                (Vec::from(b"H"), ObjectVariant::Integer(1)),
+                (Vec::from(b"W"), ObjectVariant::Integer(4)),
             ])),
             vec![0b1010_0000],
             &PassthroughResolver,
@@ -821,13 +821,13 @@ mod tests {
     #[test]
     fn decode_normalized_1bpc_image_expands_samples() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(1)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Name(b"DeviceGray".to_vec()),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(8)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(8)),
         ]));
 
         let image = decode_normalized_image(
@@ -928,11 +928,11 @@ mod tests {
     fn indexed_dictionary(bits_per_component: i64) -> Dictionary {
         Dictionary::new(BTreeMap::from([
             (
-                "BitsPerComponent".to_string(),
+                Vec::from(b"BitsPerComponent"),
                 ObjectVariant::Integer(bits_per_component),
             ),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Array(vec![
                     ObjectVariant::Name(b"Indexed".to_vec()),
                     ObjectVariant::Name(b"DeviceRGB".to_vec()),
@@ -940,24 +940,24 @@ mod tests {
                     ObjectVariant::HexString(vec![10, 11, 12, 20, 21, 22, 30, 31, 32, 40, 41, 42]),
                 ]),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(4)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(4)),
         ]))
     }
 
     fn filtered_gray_dictionary() -> Dictionary {
         Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Name(b"DeviceGray".to_vec()),
             ),
             (
-                "Filter".to_string(),
+                Vec::from(b"Filter"),
                 ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]))
     }
 }

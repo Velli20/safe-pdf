@@ -309,7 +309,7 @@ pub trait GraphicsStateOps {
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn set_rendering_intent(&mut self, intent: &str) -> Result<(), Self::ErrorType>;
+    fn set_rendering_intent(&mut self, intent: &[u8]) -> Result<(), Self::ErrorType>;
 
     /// Sets the flatness tolerance, controlling the accuracy of curve rendering.
     ///
@@ -332,7 +332,7 @@ pub trait GraphicsStateOps {
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn set_graphics_state_from_dict(&mut self, dict_name: &str) -> Result<(), Self::ErrorType>;
+    fn set_graphics_state_from_dict(&mut self, dict_name: &[u8]) -> Result<(), Self::ErrorType>;
 }
 
 /// Defines methods to handle PDF Color operators.
@@ -348,7 +348,7 @@ pub trait ColorOps {
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn set_stroking_color_space(&mut self, name: &str) -> Result<(), Self::ErrorType>;
+    fn set_stroking_color_space(&mut self, name: &[u8]) -> Result<(), Self::ErrorType>;
 
     /// Sets the color space for subsequent non-stroking (fill) operations.
     ///
@@ -359,7 +359,7 @@ pub trait ColorOps {
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn set_non_stroking_color_space(&mut self, name: &str) -> Result<(), Self::ErrorType>;
+    fn set_non_stroking_color_space(&mut self, name: &[u8]) -> Result<(), Self::ErrorType>;
 
     /// Sets the color for subsequent stroking operations, using the current stroking color space.
     /// The number of components depends on the active color space.
@@ -387,7 +387,7 @@ pub trait ColorOps {
     fn set_stroking_color_extended(
         &mut self,
         components: &[f32],
-        pattern_name: &str,
+        pattern_name: &[u8],
     ) -> Result<(), Self::ErrorType>;
 
     /// Sets the color for subsequent non-stroking (fill) operations, using the current non-stroking color space.
@@ -416,7 +416,7 @@ pub trait ColorOps {
     fn set_non_stroking_color_extended(
         &mut self,
         components: &[f32],
-        pattern_name: &str,
+        pattern_name: &[u8],
     ) -> Result<(), Self::ErrorType>;
 
     /// Sets the stroking color to a grayscale value.
@@ -585,7 +585,7 @@ pub trait TextStateOps {
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn set_font_and_size(&mut self, font_name: &str, size: f32) -> Result<(), Self::ErrorType>;
+    fn set_font_and_size(&mut self, font_name: &[u8], size: f32) -> Result<(), Self::ErrorType>;
 
     /// Sets the text rendering mode (e.g., fill, stroke, clip).
     ///
@@ -734,7 +734,7 @@ pub trait XObjectOps {
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn invoke_xobject(&mut self, xobject_name: &str) -> Result<(), Self::ErrorType>;
+    fn invoke_xobject(&mut self, xobject_name: &[u8]) -> Result<(), Self::ErrorType>;
 
     /// Paints an inline image.
     fn paint_inline_image(&mut self, image: &pdf_image::InlineImage)
@@ -754,7 +754,7 @@ pub trait ShadingOps {
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn paint_shading(&mut self, shading_name: &str) -> Result<(), Self::ErrorType>;
+    fn paint_shading(&mut self, shading_name: &[u8]) -> Result<(), Self::ErrorType>;
 }
 
 /// Defines methods to handle PDF Marked Content operators.
@@ -770,7 +770,7 @@ pub trait MarkedContentOps {
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn mark_point(&mut self, tag: &str) -> Result<(), Self::ErrorType>;
+    fn mark_point(&mut self, tag: &[u8]) -> Result<(), Self::ErrorType>;
 
     /// Defines a marked-content point, associating it with a tag and a property list.
     ///
@@ -784,8 +784,8 @@ pub trait MarkedContentOps {
     /// A `Result` indicating success or an `ErrorType` on failure.
     fn mark_point_with_properties(
         &mut self,
-        tag: &str,
-        properties_name_or_dict: &str,
+        tag: &[u8],
+        properties_name_or_dict: &[u8],
     ) -> Result<(), Self::ErrorType>;
 
     /// Begins a marked-content sequence with a tag.
@@ -797,7 +797,7 @@ pub trait MarkedContentOps {
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn begin_marked_content(&mut self, tag: &str) -> Result<(), Self::ErrorType>;
+    fn begin_marked_content(&mut self, tag: &[u8]) -> Result<(), Self::ErrorType>;
 
     /// Begins a marked-content sequence with a tag and associated properties.
     ///
@@ -808,7 +808,7 @@ pub trait MarkedContentOps {
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn begin_marked_content_with_properties(&mut self, tag: &str) -> Result<(), Self::ErrorType>;
+    fn begin_marked_content_with_properties(&mut self, tag: &[u8]) -> Result<(), Self::ErrorType>;
 
     /// Ends a marked-content sequence.
     ///

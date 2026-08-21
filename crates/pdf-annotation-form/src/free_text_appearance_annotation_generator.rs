@@ -87,14 +87,21 @@ impl FreeTextAnnotationGenerator {
 
     /// Serializes the portable font and text color into the `/DA` program.
     fn default_appearance(style: &FreeTextStyle) -> Vec<u8> {
-        format!(
-            "/{} {} Tf {} {} {} rg",
-            style.font.resource_name,
-            style.font_size,
-            style.text_color.r,
-            style.text_color.g,
-            style.text_color.b
-        )
-        .into_bytes()
+        let suffix = format!(
+            " {} Tf {} {} {} rg",
+            style.font_size, style.text_color.r, style.text_color.g, style.text_color.b
+        );
+        let mut appearance = Vec::with_capacity(
+            style
+                .font
+                .resource_name
+                .len()
+                .saturating_add(suffix.len())
+                .saturating_add(1),
+        );
+        appearance.push(b'/');
+        appearance.extend_from_slice(&style.font.resource_name);
+        appearance.extend_from_slice(suffix.as_bytes());
+        appearance
     }
 }

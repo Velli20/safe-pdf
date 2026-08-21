@@ -14,7 +14,7 @@ impl InkList {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, AnnotationError> {
-        let Some(value) = dictionary.get("InkList") else {
+        let Some(value) = dictionary.get(b"InkList") else {
             return Ok(None);
         };
 
@@ -22,7 +22,7 @@ impl InkList {
         let mut parsed = Vec::with_capacity(strokes.len());
 
         for stroke in strokes {
-            parsed.push(helpers::point_list("InkList", stroke, objects)?);
+            parsed.push(helpers::point_list(b"InkList", stroke, objects)?);
         }
 
         Ok(Some(Self { strokes: parsed }))

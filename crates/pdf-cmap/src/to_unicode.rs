@@ -24,7 +24,7 @@ impl ToUnicodeCMap {
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, CMapError> {
         dictionary
-            .get("ToUnicode")
+            .get(b"ToUnicode")
             .and_then(|value| value.try_stream(objects).ok())
             .map(|stream| Self::try_from(stream.raw_data()))
             .transpose()

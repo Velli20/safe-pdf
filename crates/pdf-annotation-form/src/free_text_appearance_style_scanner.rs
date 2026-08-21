@@ -111,7 +111,7 @@ impl<'a> FreeTextAppearanceStyleScanner<'a> {
         let standard14 = font_resource.0.as_standard14()?;
         Some(FreeTextFont {
             standard14,
-            resource_name: set_font.name().to_owned(),
+            resource_name: Vec::from(set_font.name()),
             encoding: FontEncoding::WinAnsi,
         })
     }

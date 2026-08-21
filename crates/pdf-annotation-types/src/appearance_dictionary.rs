@@ -21,7 +21,7 @@ pub enum AppearanceField {
     /// A single appearance stream.
     Stream(Box<FormXObject>),
     /// Appearance streams keyed by `/AS` appearance state name.
-    Subdictionary(BTreeMap<String, FormXObject>),
+    Subdictionary(BTreeMap<Vec<u8>, FormXObject>),
 }
 
 /// An appearance dictionary.
@@ -42,22 +42,22 @@ impl AppearanceDictionary {
         cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Option<Self>, AnnotationError> {
-        let Some(value) = dictionary.get("AP") else {
+        let Some(value) = dictionary.get(b"AP") else {
             return Ok(None);
         };
 
         let dictionary = value.try_dictionary(objects)?;
         let normal = dictionary
-            .get("N")
-            .map(|value| appearance_field("N", value, objects, cache, cycle_tracker, id_allocator))
+            .get(b"N")
+            .map(|value| appearance_field(b"N", value, objects, cache, cycle_tracker, id_allocator))
             .transpose()?;
         let rollover = dictionary
-            .get("R")
-            .map(|value| appearance_field("R", value, objects, cache, cycle_tracker, id_allocator))
+            .get(b"R")
+            .map(|value| appearance_field(b"R", value, objects, cache, cycle_tracker, id_allocator))
             .transpose()?;
         let down = dictionary
-            .get("D")
-            .map(|value| appearance_field("D", value, objects, cache, cycle_tracker, id_allocator))
+            .get(b"D")
+            .map(|value| appearance_field(b"D", value, objects, cache, cycle_tracker, id_allocator))
             .transpose()?;
 
         Ok(Some(Self {
@@ -72,7 +72,7 @@ impl AppearanceField {
     /// Resolves the appearance stream for an annotation `/AS` state.
     pub fn appearance_field_for_state<'a>(
         &'a self,
-        appearance_state: &Option<String>,
+        appearance_state: &Option<Vec<u8>>,
     ) -> Option<&'a FormXObject> {
         match self {
             Self::Stream(form) => Some(form),
@@ -90,7 +90,7 @@ impl AppearanceField {
     pub fn selected_appearance<'a>(
         requested: Option<&'a Self>,
         fallback: Option<&'a Self>,
-        appearance_state: &Option<String>,
+        appearance_state: &Option<Vec<u8>>,
     ) -> Option<&'a FormXObject> {
         requested
             .and_then(|field| field.appearance_field_for_state(appearance_state))
@@ -101,7 +101,7 @@ impl AppearanceField {
 }
 
 fn appearance_field(
-    entry: &'static str,
+    entry: &'static [u8],
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
     cache: &mut dyn ResourceCache,
@@ -121,7 +121,7 @@ fn appearance_field(
                     return Err(AnnotationError::InvalidEntry {
                         entry,
                         reason: format!(
-                            "expected appearance stream in subdictionary entry '/{name}'"
+                            "expected appearance stream in subdictionary entry /{name:?}"
                         ),
                     });
                 };

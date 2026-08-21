@@ -33,24 +33,24 @@ fn array(values: Vec<ObjectVariant>) -> ObjectVariant {
 
 fn type2_function(c0: Vec<ObjectVariant>, c1: Vec<ObjectVariant>) -> ObjectVariant {
     ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
-        ("FunctionType".to_string(), integer(2)),
-        ("Domain".to_string(), array(vec![real(0.0), real(1.0)])),
-        ("C0".to_string(), array(c0)),
-        ("C1".to_string(), array(c1)),
-        ("N".to_string(), real(1.0)),
+        (Vec::from(b"FunctionType"), integer(2)),
+        (Vec::from(b"Domain"), array(vec![real(0.0), real(1.0)])),
+        (Vec::from(b"C0"), array(c0)),
+        (Vec::from(b"C1"), array(c1)),
+        (Vec::from(b"N"), real(1.0)),
     ]))))
 }
 
 fn inline_axial_shading() -> ObjectVariant {
     ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
-        ("ShadingType".to_string(), integer(2)),
-        ("ColorSpace".to_string(), name("DeviceRGB")),
+        (Vec::from(b"ShadingType"), integer(2)),
+        (Vec::from(b"ColorSpace"), name("DeviceRGB")),
         (
-            "Coords".to_string(),
+            Vec::from(b"Coords"),
             array(vec![real(0.0), real(0.0), real(1.0), real(1.0)]),
         ),
         (
-            "Function".to_string(),
+            Vec::from(b"Function"),
             type2_function(
                 vec![real(0.0), real(0.0), real(0.0)],
                 vec![real(1.0), real(1.0), real(1.0)],
@@ -61,9 +61,9 @@ fn inline_axial_shading() -> ObjectVariant {
 
 fn form_xobject_stream(object_number: usize, data: &[u8]) -> ObjectVariant {
     let dictionary = Dictionary::new(BTreeMap::from([
-        ("Subtype".to_string(), ObjectVariant::Name(b"Form".to_vec())),
+        (Vec::from(b"Subtype"), ObjectVariant::Name(b"Form".to_vec())),
         (
-            "BBox".to_string(),
+            Vec::from(b"BBox"),
             ObjectVariant::Array(vec![integer(0), integer(0), integer(10), integer(10)]),
         ),
     ]));
@@ -79,13 +79,13 @@ fn form_xobject_stream(object_number: usize, data: &[u8]) -> ObjectVariant {
 fn xobject_resources(entries: Vec<(&str, ObjectVariant)>) -> Dictionary {
     let xobjects = entries
         .into_iter()
-        .map(|(name, value)| (name.to_string(), value))
+        .map(|(name, value)| (Vec::from(name.as_bytes()), value))
         .collect::<BTreeMap<_, _>>();
 
     Dictionary::new(BTreeMap::from([(
-        "Resources".to_string(),
+        Vec::from(b"Resources"),
         ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-            "XObject".to_string(),
+            Vec::from(b"XObject"),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(xobjects))),
         )])))),
     )]))
@@ -94,13 +94,13 @@ fn xobject_resources(entries: Vec<(&str, ObjectVariant)>) -> Dictionary {
 fn page_resources(entries: Vec<(&str, ObjectVariant)>) -> Dictionary {
     let shading_entries = entries
         .into_iter()
-        .map(|(name, value)| (name.to_string(), value))
+        .map(|(name, value)| (Vec::from(name.as_bytes()), value))
         .collect::<BTreeMap<_, _>>();
 
     Dictionary::new(BTreeMap::from([(
-        "Resources".to_string(),
+        Vec::from(b"Resources"),
         ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-            "Shading".to_string(),
+            Vec::from(b"Shading"),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(shading_entries))),
         )])))),
     )]))
@@ -110,22 +110,22 @@ fn type3_char_proc(data: &[u8]) -> ObjectVariant {
     ObjectVariant::Stream(StreamObject::new(
         0,
         0,
-        Box::new(Dictionary::new(BTreeMap::new())),
+        Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
         data.to_vec(),
     ))
 }
 
 fn self_referential_type3_font(object_number: usize) -> Dictionary {
     Dictionary::new(BTreeMap::from([
-        ("Type".to_string(), name("Font")),
-        ("Subtype".to_string(), name("Type3")),
-        ("Name".to_string(), name("Self")),
+        (Vec::from(b"Type"), name("Font")),
+        (Vec::from(b"Subtype"), name("Type3")),
+        (Vec::from(b"Name"), name("Self")),
         (
-            "FontBBox".to_string(),
+            Vec::from(b"FontBBox"),
             ObjectVariant::Array(vec![integer(0), integer(0), integer(1000), integer(1000)]),
         ),
         (
-            "FontMatrix".to_string(),
+            Vec::from(b"FontMatrix"),
             ObjectVariant::Array(vec![
                 real(0.001),
                 real(0.0),
@@ -136,18 +136,18 @@ fn self_referential_type3_font(object_number: usize) -> Dictionary {
             ]),
         ),
         (
-            "CharProcs".to_string(),
+            Vec::from(b"CharProcs"),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-                "A".to_string(),
+                Vec::from(b"A"),
                 type3_char_proc(b"0 0 d0"),
             )])))),
         ),
         (
-            "Resources".to_string(),
+            Vec::from(b"Resources"),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-                "Font".to_string(),
+                Vec::from(b"Font"),
                 ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-                    "Self".to_string(),
+                    Vec::from(b"Self"),
                     ObjectVariant::Reference(object_number),
                 )])))),
             )])))),
@@ -160,21 +160,21 @@ fn self_referential_tiling_pattern(object_number: usize) -> ObjectVariant {
         object_number,
         0,
         Box::new(Dictionary::new(BTreeMap::from([
-            ("PatternType".to_string(), integer(1)),
-            ("PaintType".to_string(), integer(1)),
-            ("TilingType".to_string(), integer(1)),
+            (Vec::from(b"PatternType"), integer(1)),
+            (Vec::from(b"PaintType"), integer(1)),
+            (Vec::from(b"TilingType"), integer(1)),
             (
-                "BBox".to_string(),
+                Vec::from(b"BBox"),
                 ObjectVariant::Array(vec![integer(0), integer(0), integer(10), integer(10)]),
             ),
-            ("XStep".to_string(), real(10.0)),
-            ("YStep".to_string(), real(10.0)),
+            (Vec::from(b"XStep"), real(10.0)),
+            (Vec::from(b"YStep"), real(10.0)),
             (
-                "Resources".to_string(),
+                Vec::from(b"Resources"),
                 ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-                    "Pattern".to_string(),
+                    Vec::from(b"Pattern"),
                     ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-                        "Self".to_string(),
+                        Vec::from(b"Self"),
                         ObjectVariant::Reference(object_number),
                     )])))),
                 )])))),
@@ -262,26 +262,26 @@ fn cached_form_xobjects_keep_their_generated_ids() {
 #[test]
 fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
     let page_dict = Dictionary::new(BTreeMap::from([(
-        "Resources".to_string(),
+        Vec::from(b"Resources"),
         ObjectVariant::Reference(100),
     )]));
 
     let resources_dict = Dictionary::new(BTreeMap::from([(
-        "XObject".to_string(),
+        Vec::from(b"XObject"),
         ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-            "Meta6".to_string(),
+            Vec::from(b"Meta6"),
             ObjectVariant::Reference(101),
         )])))),
     )]));
 
     let form_dict = Dictionary::new(BTreeMap::from([
-        ("Subtype".to_string(), ObjectVariant::Name(b"Form".to_vec())),
+        (Vec::from(b"Subtype"), ObjectVariant::Name(b"Form".to_vec())),
         (
-            "BBox".to_string(),
+            Vec::from(b"BBox"),
             ObjectVariant::Array(vec![integer(10), integer(20), integer(30), integer(40)]),
         ),
         (
-            "Matrix".to_string(),
+            Vec::from(b"Matrix"),
             ObjectVariant::Array(vec![
                 real(2.0),
                 real(0.0),
@@ -369,23 +369,23 @@ fn inline_shading_resource_without_object_number_parses() {
 
 #[test]
 fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
-    let xobject_entries = BTreeMap::from([("Self".to_string(), ObjectVariant::Reference(11))]);
+    let xobject_entries = BTreeMap::from([(Vec::from(b"Self"), ObjectVariant::Reference(11))]);
     let resource_dict = Dictionary::new(BTreeMap::from([(
-        "XObject".to_string(),
+        Vec::from(b"XObject"),
         ObjectVariant::Dictionary(Box::new(Dictionary::new(xobject_entries))),
     )]));
 
     let form_dict = Dictionary::new(BTreeMap::from([
-        ("Subtype".to_string(), ObjectVariant::Name(b"Form".to_vec())),
+        (Vec::from(b"Subtype"), ObjectVariant::Name(b"Form".to_vec())),
         (
-            "BBox".to_string(),
+            Vec::from(b"BBox"),
             ObjectVariant::Array(vec![integer(0), integer(0), integer(10), integer(10)]),
         ),
-        ("Resources".to_string(), ObjectVariant::Reference(10)),
+        (Vec::from(b"Resources"), ObjectVariant::Reference(10)),
     ]));
 
     let page_dict = Dictionary::new(BTreeMap::from([(
-        "Resources".to_string(),
+        Vec::from(b"Resources"),
         ObjectVariant::Reference(10),
     )]));
 
@@ -470,11 +470,11 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
 #[test]
 fn self_referential_font_resources_resolve_lazily() {
     let page_dict = Dictionary::new(BTreeMap::from([(
-        "Resources".to_string(),
+        Vec::from(b"Resources"),
         ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-            "Font".to_string(),
+            Vec::from(b"Font"),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-                "Self".to_string(),
+                Vec::from(b"Self"),
                 ObjectVariant::Reference(21),
             )])))),
         )])))),
@@ -534,17 +534,17 @@ fn self_referential_font_resources_resolve_lazily() {
 fn fallback_fonts_do_not_read_nested_type3_resources() {
     let malformed_type3 = ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
         (
-            "Subtype".to_string(),
+            Vec::from(b"Subtype"),
             ObjectVariant::Name(b"Type3".to_vec()),
         ),
-        ("Resources".to_string(), ObjectVariant::Integer(1)),
+        (Vec::from(b"Resources"), ObjectVariant::Integer(1)),
     ]))));
     let page_dict = Dictionary::new(BTreeMap::from([(
-        "Resources".to_string(),
+        Vec::from(b"Resources"),
         ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-            "Font".to_string(),
+            Vec::from(b"Font"),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-                "F1".to_string(),
+                Vec::from(b"F1"),
                 malformed_type3,
             )])))),
         )])))),
@@ -571,11 +571,11 @@ fn fallback_fonts_do_not_read_nested_type3_resources() {
 #[test]
 fn self_referential_pattern_resources_resolve_lazily() {
     let page_dict = Dictionary::new(BTreeMap::from([(
-        "Resources".to_string(),
+        Vec::from(b"Resources"),
         ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-            "Pattern".to_string(),
+            Vec::from(b"Pattern"),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-                "Self".to_string(),
+                Vec::from(b"Self"),
                 ObjectVariant::Reference(31),
             )])))),
         )])))),

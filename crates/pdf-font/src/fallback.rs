@@ -40,7 +40,7 @@ fn fallback_metadata_dictionary<'a>(
     objects: &'a dyn ObjectResolver,
 ) -> &'a Dictionary {
     dictionary
-        .get("DescendantFonts")
+        .get(b"DescendantFonts")
         .and_then(|value| value.try_array(objects).ok())
         .and_then(|descendants| descendants.first())
         .and_then(|descendant| descendant.try_dictionary(objects).ok())
@@ -77,29 +77,29 @@ mod tests {
     #[test]
     fn fallback_discards_pdf_font_metadata() {
         let descriptor = Dictionary::new(BTreeMap::from([(
-            "Flags".to_string(),
+            Vec::from(b"Flags"),
             ObjectVariant::Integer(i64::from(FontFlags::SYMBOLIC.bits())),
         )]));
         let dictionary = Dictionary::new(BTreeMap::from([
             (
-                "BaseFont".to_string(),
+                Vec::from(b"BaseFont"),
                 ObjectVariant::Name(b"Helvetica-Bold".to_vec()),
             ),
             (
-                "FontDescriptor".to_string(),
+                Vec::from(b"FontDescriptor"),
                 ObjectVariant::Dictionary(Box::new(descriptor)),
             ),
-            ("FirstChar".to_string(), ObjectVariant::Integer(65)),
-            ("LastChar".to_string(), ObjectVariant::Integer(65)),
+            (Vec::from(b"FirstChar"), ObjectVariant::Integer(65)),
+            (Vec::from(b"LastChar"), ObjectVariant::Integer(65)),
             (
-                "Widths".to_string(),
+                Vec::from(b"Widths"),
                 ObjectVariant::Array(vec![ObjectVariant::Integer(625)]),
             ),
             (
-                "Encoding".to_string(),
+                Vec::from(b"Encoding"),
                 ObjectVariant::Name(b"WinAnsiEncoding".to_vec()),
             ),
-            ("ToUnicode".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"ToUnicode"), ObjectVariant::Integer(1)),
         ]));
 
         let font = fallback_true_type_from_dictionary(&dictionary, &PassthroughResolver);
@@ -114,8 +114,8 @@ mod tests {
     #[test]
     fn fallback_tolerates_malformed_selection_metadata() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("FontDescriptor".to_string(), ObjectVariant::Integer(1)),
-            ("CIDSystemInfo".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"FontDescriptor"), ObjectVariant::Integer(1)),
+            (Vec::from(b"CIDSystemInfo"), ObjectVariant::Integer(1)),
         ]));
 
         let font = fallback_true_type_from_dictionary(&dictionary, &PassthroughResolver);
@@ -132,14 +132,14 @@ mod tests {
     #[test]
     fn fallback_uses_cjk_program_from_type0_descendant() {
         let descendant = Dictionary::new(BTreeMap::from([(
-            "CIDSystemInfo".to_string(),
+            Vec::from(b"CIDSystemInfo"),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-                "Ordering".to_string(),
+                Vec::from(b"Ordering"),
                 ObjectVariant::LiteralString(b"Japan1".to_vec()),
             )])))),
         )]));
         let dictionary = Dictionary::new(BTreeMap::from([(
-            "DescendantFonts".to_string(),
+            Vec::from(b"DescendantFonts"),
             ObjectVariant::Array(vec![ObjectVariant::Dictionary(Box::new(descendant))]),
         )]));
 

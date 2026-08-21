@@ -30,15 +30,15 @@ impl LineAnnotation {
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
         let line = dictionary
-            .get_or_err("L")?
+            .get_or_err(b"L")?
             .try_array_of::<f32, 4>(objects)?;
         let line_endings = super::line_endings(dictionary, objects)?;
-        let border_style = BorderStyle::from_dictionary(dictionary, "BS", objects)?;
-        let interior_color = AnnotationColor::from_dictionary(dictionary, "IC", objects)?;
-        let leader_line_length = dictionary.optional_number::<f32>("LL", objects)?;
-        let leader_line_extension = dictionary.optional_number::<f32>("LLE", objects)?;
-        let caption = dictionary.optional_boolean("Cap", objects)?;
-        let intent = dictionary.optional_bytes_vec("IT", objects)?;
+        let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
+        let interior_color = AnnotationColor::from_dictionary(dictionary, b"IC", objects)?;
+        let leader_line_length = dictionary.optional_number::<f32>(b"LL", objects)?;
+        let leader_line_extension = dictionary.optional_number::<f32>(b"LLE", objects)?;
+        let caption = dictionary.optional_boolean(b"Cap", objects)?;
+        let intent = dictionary.optional_bytes(b"IT", objects)?.map(Vec::from);
 
         Ok(Self {
             line,

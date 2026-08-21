@@ -163,7 +163,7 @@ fn free_text(
     let AnnotationKind::FreeText(free_text) = &annotation.kind else {
         return Err(FreeTextEditError::WrongSubtype {
             id: id.get(),
-            subtype: annotation.subtype.clone(),
+            subtype: String::from_utf8_lossy(&annotation.subtype).into_owned(),
         });
     };
     Ok(free_text)
@@ -217,7 +217,7 @@ mod tests {
         FreeTextStyle {
             font: FreeTextFont {
                 standard14: Standard14Font::CourierBold,
-                resource_name: "Body".to_owned(),
+                resource_name: Vec::from(b"Body"),
                 encoding: FontEncoding::WinAnsi,
             },
             font_size: 18.0,

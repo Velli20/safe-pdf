@@ -113,7 +113,9 @@ impl DocumentDecryptor {
         password: &[u8],
     ) -> Result<Self, DecryptionError> {
         if let EncryptionFilter::Other(filter) = &encrypt.filter {
-            return Err(DecryptionError::UnsupportedSecurityHandler(filter.clone()));
+            return Err(DecryptionError::UnsupportedSecurityHandler(
+                String::from_utf8_lossy(filter).into_owned(),
+            ));
         }
         if encrypt.version == EncryptionVersion::V5 {
             return Self::new_v5(encrypt, password);
@@ -434,7 +436,7 @@ impl DocumentDecryptor {
             .dictionary
             .into_iter()
             .map(|(key, value)| {
-                if is_signature && key == "Contents" {
+                if is_signature && key == b"Contents" {
                     Ok((key, value))
                 } else {
                     self.decrypt_object_value(value, object_number, generation_number)
@@ -466,7 +468,8 @@ impl DocumentDecryptor {
 
 /// Returns whether a dictionary represents a signature whose `/Contents` is not encrypted.
 fn is_signature_dictionary(dictionary: &Dictionary) -> bool {
-    ["Type", "FT"].into_iter().any(|key| {
+    const SIGNATURE_KEYS: [&[u8]; 2] = [b"Type", b"FT"];
+    SIGNATURE_KEYS.into_iter().any(|key| {
         matches!(
             dictionary.get(key),
             Some(ObjectVariant::Name(value)) if value.as_slice() == b"Sig"
@@ -476,7 +479,7 @@ fn is_signature_dictionary(dictionary: &Dictionary) -> bool {
 
 /// Returns whether PDF encryption rules exempt this stream from decryption.
 fn should_skip_stream_decryption(dictionary: &Dictionary, encrypt_metadata: bool) -> bool {
-    match dictionary.get("Type") {
+    match dictionary.get(b"Type") {
         Some(ObjectVariant::Name(name)) if name.as_slice() == b"XRef" => true,
         Some(ObjectVariant::Name(name)) if name.as_slice() == b"Metadata" => !encrypt_metadata,
         _ => false,
@@ -1106,7 +1109,7 @@ mod tests {
     fn make_stream(type_name: Option<&[u8]>, data: Vec<u8>) -> StreamObject {
         let mut entries = BTreeMap::new();
         if let Some(type_name) = type_name {
-            entries.insert("Type".to_string(), ObjectVariant::Name(type_name.to_vec()));
+            entries.insert(Vec::from(b"Type"), ObjectVariant::Name(type_name.to_vec()));
         }
 
         StreamObject::new(7, 0, Box::new(Dictionary::new(entries)), data)
@@ -1345,7 +1348,7 @@ mod tests {
             Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
                 BTreeMap::from([
                     (
-                        "Contents".to_owned(),
+                        Vec::from(b"Contents"),
                         ObjectVariant::LiteralString(encrypt_for_object(
                             &decryptor,
                             object_number,
@@ -1354,7 +1357,7 @@ mod tests {
                         )),
                     ),
                     (
-                        "RC".to_owned(),
+                        Vec::from(b"RC"),
                         ObjectVariant::Array(vec![ObjectVariant::HexString(encrypt_for_object(
                             &decryptor,
                             object_number,
@@ -1363,10 +1366,10 @@ mod tests {
                         ))]),
                     ),
                     (
-                        "Subtype".to_owned(),
+                        Vec::from(b"Subtype"),
                         ObjectVariant::Name(b"FreeText".to_vec()),
                     ),
-                    ("Parent".to_owned(), ObjectVariant::Reference(4)),
+                    (Vec::from(b"Parent"), ObjectVariant::Reference(4)),
                 ]),
             )))),
         )));
@@ -1381,20 +1384,23 @@ mod tests {
             panic!("indirect object should contain a dictionary");
         };
         assert_eq!(
-            dictionary.get("Contents"),
+            dictionary.get(b"Contents"),
             Some(&ObjectVariant::LiteralString(contents.to_vec()))
         );
         assert_eq!(
-            dictionary.get("RC"),
+            dictionary.get(b"RC"),
             Some(&ObjectVariant::Array(vec![ObjectVariant::HexString(
                 rich_contents.to_vec()
             )]))
         );
         assert_eq!(
-            dictionary.get("Subtype"),
+            dictionary.get(b"Subtype"),
             Some(&ObjectVariant::Name(b"FreeText".to_vec()))
         );
-        assert_eq!(dictionary.get("Parent"), Some(&ObjectVariant::Reference(4)));
+        assert_eq!(
+            dictionary.get(b"Parent"),
+            Some(&ObjectVariant::Reference(4))
+        );
     }
 
     #[test]
@@ -1407,7 +1413,7 @@ mod tests {
             object_number,
             generation_number,
             Box::new(Dictionary::new(BTreeMap::from([(
-                "Label".to_owned(),
+                Vec::from(b"Label"),
                 ObjectVariant::LiteralString(encrypt_for_object(
                     &decryptor,
                     object_number,
@@ -1426,7 +1432,7 @@ mod tests {
         };
         assert_eq!(stream.raw_data(), contents);
         assert_eq!(
-            stream.dictionary.get("Label"),
+            stream.dictionary.get(b"Label"),
             Some(&ObjectVariant::LiteralString(
                 b"annotation appearance".to_vec()
             ))
@@ -1441,9 +1447,9 @@ mod tests {
             0,
             Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
                 BTreeMap::from([
-                    ("Type".to_owned(), ObjectVariant::Name(b"Sig".to_vec())),
+                    (Vec::from(b"Type"), ObjectVariant::Name(b"Sig".to_vec())),
                     (
-                        "Contents".to_owned(),
+                        Vec::from(b"Contents"),
                         ObjectVariant::HexString(vec![0, 0, 0, 0]),
                     ),
                 ]),
@@ -1460,7 +1466,7 @@ mod tests {
             panic!("indirect object should contain a dictionary");
         };
         assert_eq!(
-            dictionary.get("Contents"),
+            dictionary.get(b"Contents"),
             Some(&ObjectVariant::HexString(vec![0, 0, 0, 0]))
         );
     }

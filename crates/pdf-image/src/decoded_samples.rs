@@ -384,13 +384,13 @@ mod tests {
     #[test]
     fn decode_direct_preserves_shared_identity_samples() {
         let dictionary = Dictionary::new(BTreeMap::from([
-            ("BitsPerComponent".to_string(), ObjectVariant::Integer(8)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
-                "ColorSpace".to_string(),
+                Vec::from(b"ColorSpace"),
                 ObjectVariant::Name(b"DeviceGray".to_vec()),
             ),
-            ("Height".to_string(), ObjectVariant::Integer(1)),
-            ("Width".to_string(), ObjectVariant::Integer(2)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
+            (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
         let metadata = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
             .expect("direct image metadata should be valid");

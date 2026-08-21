@@ -21,7 +21,7 @@ impl DecodeMap {
         objects: &dyn ObjectResolver,
         component_count: usize,
     ) -> Result<Option<Self>, DecodeError> {
-        let Some(value) = dictionary.get("Decode") else {
+        let Some(value) = dictionary.get(b"Decode") else {
             return Ok(None);
         };
         let ranges = Self::parse_object(value, objects, component_count)?;
@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn decode_map_is_absent_without_decode_entry() {
-        let dictionary = Dictionary::new(BTreeMap::new());
+        let dictionary = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
         let map = DecodeMap::from_dictionary(&dictionary, &PassthroughResolver, 2).unwrap();
 
         assert!(map.is_none());
@@ -111,10 +111,10 @@ mod tests {
     #[test]
     fn decode_map_rejects_invalid_length() {
         let err = DecodeMap::from_dictionary(
-            &Dictionary::new(BTreeMap::from([(
-                "Decode".to_string(),
+            &Dictionary::from_entries([(
+                b"Decode",
                 ObjectVariant::Array(vec![ObjectVariant::Integer(0)]),
-            )])),
+            )]),
             &PassthroughResolver,
             1,
         )
@@ -132,13 +132,13 @@ mod tests {
     #[test]
     fn decode_map_rejects_non_finite_values() {
         let err = DecodeMap::from_dictionary(
-            &Dictionary::new(BTreeMap::from([(
-                "Decode".to_string(),
+            &Dictionary::from_entries([(
+                b"Decode",
                 ObjectVariant::Array(vec![
                     ObjectVariant::Real(f64::NAN),
                     ObjectVariant::Integer(1),
                 ]),
-            )])),
+            )]),
             &PassthroughResolver,
             1,
         )
@@ -149,15 +149,15 @@ mod tests {
 
     #[test]
     fn decode_map_cycles_ranges_per_component() {
-        let dictionary = Dictionary::new(BTreeMap::from([(
-            "Decode".to_string(),
+        let dictionary = Dictionary::from_entries([(
+            b"Decode",
             ObjectVariant::Array(vec![
                 ObjectVariant::Integer(0),
                 ObjectVariant::Real(0.5),
                 ObjectVariant::Integer(1),
                 ObjectVariant::Integer(0),
             ]),
-        )]));
+        )]);
         let map = DecodeMap::from_dictionary(&dictionary, &PassthroughResolver, 2)
             .unwrap()
             .expect("explicit /Decode should create a map");

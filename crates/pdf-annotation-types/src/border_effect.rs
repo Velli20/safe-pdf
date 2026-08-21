@@ -15,7 +15,7 @@ pub struct BorderEffect {
 impl BorderEffect {
     pub(crate) fn from_dictionary(
         dictionary: &Dictionary,
-        key: &'static str,
+        key: &'static [u8],
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, AnnotationError> {
         let Some(value) = dictionary.get(key) else {
@@ -24,10 +24,10 @@ impl BorderEffect {
 
         let dictionary = value.try_dictionary(objects)?;
         let style = dictionary
-            .get("S")
-            .map(|value| value.try_str(objects).map(BorderEffectStyle::from))
+            .get(b"S")
+            .map(|value| value.try_bytes(objects).map(BorderEffectStyle::from))
             .transpose()?;
-        let intensity = dictionary.optional_number::<f32>("I", objects)?;
+        let intensity = dictionary.optional_number::<f32>(b"I", objects)?;
 
         Ok(Some(Self { style, intensity }))
     }

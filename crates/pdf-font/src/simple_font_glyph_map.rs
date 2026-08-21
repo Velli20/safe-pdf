@@ -9,7 +9,7 @@ use crate::error::FontError;
 pub struct SimpleFontGlyphWidthsMap;
 
 impl SimpleFontGlyphWidthsMap {
-    const KEY: &'static str = "Widths";
+    const KEY: &'static [u8] = b"Widths";
 
     /// Reads the `/Widths` array from a simple-font dictionary, mapping each
     /// character code in `FirstChar..=LastChar` to its glyph width.
@@ -28,8 +28,8 @@ impl SimpleFontGlyphWidthsMap {
             return Ok(None);
         };
 
-        let first_char = dictionary.required_number::<u16>("FirstChar", objects)?;
-        let last_char = dictionary.required_number::<u16>("LastChar", objects)?;
+        let first_char = dictionary.required_number::<u16>(b"FirstChar", objects)?;
+        let last_char = dictionary.required_number::<u16>(b"LastChar", objects)?;
 
         // Validate: FirstChar must not exceed LastChar.
         if first_char > last_char {
@@ -66,11 +66,9 @@ mod tests {
     use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
     use std::collections::BTreeMap;
 
-    fn make_dict(entries: Vec<(&str, ObjectVariant)>) -> Dictionary {
-        let map: BTreeMap<String, ObjectVariant> = entries
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v))
-            .collect();
+    fn make_dict(entries: Vec<(&[u8], ObjectVariant)>) -> Dictionary {
+        let map: BTreeMap<Vec<u8>, ObjectVariant> =
+            entries.into_iter().map(|(k, v)| (k.to_vec(), v)).collect();
         Dictionary::new(map)
     }
 
@@ -89,9 +87,9 @@ mod tests {
     #[test]
     fn normal_widths_mapping() {
         let dict = make_dict(vec![
-            ("FirstChar", int(32)),
-            ("LastChar", int(34)),
-            ("Widths", arr(vec![real(250.0), real(300.0), real(400.0)])),
+            (b"FirstChar", int(32)),
+            (b"LastChar", int(34)),
+            (b"Widths", arr(vec![real(250.0), real(300.0), real(400.0)])),
         ]);
         let result = SimpleFontGlyphWidthsMap::from_dictionary(&dict, &PassthroughResolver)
             .unwrap()
@@ -104,7 +102,7 @@ mod tests {
 
     #[test]
     fn missing_widths_returns_none() {
-        let dict = make_dict(vec![("FirstChar", int(0)), ("LastChar", int(0))]);
+        let dict = make_dict(vec![(b"FirstChar", int(0)), (b"LastChar", int(0))]);
         let result =
             SimpleFontGlyphWidthsMap::from_dictionary(&dict, &PassthroughResolver).unwrap();
         assert!(result.is_none());
@@ -122,9 +120,9 @@ mod tests {
     #[test]
     fn first_char_greater_than_last_char_returns_empty() {
         let dict = make_dict(vec![
-            ("FirstChar", int(100)),
-            ("LastChar", int(50)),
-            ("Widths", arr(vec![real(500.0)])),
+            (b"FirstChar", int(100)),
+            (b"LastChar", int(50)),
+            (b"Widths", arr(vec![real(500.0)])),
         ]);
         let result =
             SimpleFontGlyphWidthsMap::from_dictionary(&dict, &PassthroughResolver).unwrap();
@@ -135,10 +133,10 @@ mod tests {
     fn oversized_array_is_truncated() {
         // LastChar - FirstChar + 1 = 2, but array has 5 entries.
         let dict = make_dict(vec![
-            ("FirstChar", int(10)),
-            ("LastChar", int(11)),
+            (b"FirstChar", int(10)),
+            (b"LastChar", int(11)),
             (
-                "Widths",
+                b"Widths",
                 arr(vec![
                     real(100.0),
                     real(200.0),
@@ -161,9 +159,9 @@ mod tests {
     fn undersized_array_maps_available_entries() {
         // LastChar - FirstChar + 1 = 3, but array only has 1 entry.
         let dict = make_dict(vec![
-            ("FirstChar", int(65)),
-            ("LastChar", int(67)),
-            ("Widths", arr(vec![real(600.0)])),
+            (b"FirstChar", int(65)),
+            (b"LastChar", int(67)),
+            (b"Widths", arr(vec![real(600.0)])),
         ]);
         let result = SimpleFontGlyphWidthsMap::from_dictionary(&dict, &PassthroughResolver)
             .unwrap()
@@ -175,9 +173,9 @@ mod tests {
     #[test]
     fn single_char_range() {
         let dict = make_dict(vec![
-            ("FirstChar", int(0)),
-            ("LastChar", int(0)),
-            ("Widths", arr(vec![real(1000.0)])),
+            (b"FirstChar", int(0)),
+            (b"LastChar", int(0)),
+            (b"Widths", arr(vec![real(1000.0)])),
         ]);
         let result = SimpleFontGlyphWidthsMap::from_dictionary(&dict, &PassthroughResolver)
             .unwrap()

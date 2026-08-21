@@ -20,11 +20,11 @@ impl SoundAnnotation {
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
         let sound = dictionary
-            .get("Sound")
+            .get(b"Sound")
             .map(|value| helpers::dictionary(value, objects))
             .transpose()?;
-        let rate = dictionary.optional_number::<f32>("R", objects)?;
-        let channels = dictionary.optional_number::<i32>("C", objects)?;
+        let rate = dictionary.optional_number::<f32>(b"R", objects)?;
+        let channels = dictionary.optional_number::<i32>(b"C", objects)?;
 
         Ok(Self {
             sound,

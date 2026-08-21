@@ -13,14 +13,14 @@ impl QuadPoints {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, AnnotationError> {
-        let Some(value) = dictionary.get("QuadPoints") else {
+        let Some(value) = dictionary.get(b"QuadPoints") else {
             return Ok(None);
         };
 
         let values = value.try_vec_of::<f32>(objects)?;
         if values.len() % 8 != 0 {
             return Err(AnnotationError::InvalidEntry {
-                entry: "QuadPoints",
+                entry: b"QuadPoints",
                 reason: format!("expected a multiple of 8 numbers, found {}", values.len()),
             });
         }
@@ -30,7 +30,7 @@ impl QuadPoints {
             let quad: [f32; 8] = chunk
                 .try_into()
                 .map_err(|_| AnnotationError::InvalidEntry {
-                    entry: "QuadPoints",
+                    entry: b"QuadPoints",
                     reason: "failed to convert quad points".to_owned(),
                 })?;
             quads.push(quad);

@@ -81,33 +81,33 @@ pub enum RecordedOperation {
         dash_phase: f32,
     },
     SetRenderingIntent {
-        intent: String,
+        intent: Vec<u8>,
     },
     SetFlatnessTolerance {
         tolerance: f32,
     },
     SetGraphicsStateFromDict {
-        dict_name: String,
+        dict_name: Vec<u8>,
     },
     SetStrokingColorSpace {
-        name: String,
+        name: Vec<u8>,
     },
     SetNonStrokingColorSpace {
-        name: String,
+        name: Vec<u8>,
     },
     SetStrokingColor {
         components: Vec<f32>,
     },
     SetStrokingColorExtended {
         components: Vec<f32>,
-        pattern_name: String,
+        pattern_name: Vec<u8>,
     },
     SetNonStrokingColor {
         components: Vec<f32>,
     },
     SetNonStrokingColorExtended {
         components: Vec<f32>,
-        pattern_name: String,
+        pattern_name: Vec<u8>,
     },
     SetStrokingGray {
         gray: f32,
@@ -152,7 +152,7 @@ pub enum RecordedOperation {
         leading: f32,
     },
     SetFontAndSize {
-        font_name: String,
+        font_name: Vec<u8>,
         size: f32,
     },
     SetTextRenderingMode {
@@ -188,26 +188,26 @@ pub enum RecordedOperation {
         text: Vec<u8>,
     },
     InvokeXObject {
-        xobject_name: String,
+        xobject_name: Vec<u8>,
     },
     PaintInlineImage {
         data: Arc<Vec<u8>>,
     },
     PaintShading {
-        shading_name: String,
+        shading_name: Vec<u8>,
     },
     MarkPoint {
-        tag: String,
+        tag: Vec<u8>,
     },
     MarkPointWithProperties {
-        tag: String,
-        properties_name_or_dict: String,
+        tag: Vec<u8>,
+        properties_name_or_dict: Vec<u8>,
     },
     BeginMarkedContent {
-        tag: String,
+        tag: Vec<u8>,
     },
     BeginMarkedContentWithProperties {
-        tag: String,
+        tag: Vec<u8>,
     },
     EndMarkedContent,
 }
@@ -416,9 +416,9 @@ impl GraphicsStateOps for RecordingBackend {
         Ok(())
     }
 
-    fn set_rendering_intent(&mut self, intent: &str) -> Result<(), Self::ErrorType> {
+    fn set_rendering_intent(&mut self, intent: &[u8]) -> Result<(), Self::ErrorType> {
         self.operations.push(RecordedOperation::SetRenderingIntent {
-            intent: intent.to_string(),
+            intent: intent.to_vec(),
         });
         Ok(())
     }
@@ -429,10 +429,10 @@ impl GraphicsStateOps for RecordingBackend {
         Ok(())
     }
 
-    fn set_graphics_state_from_dict(&mut self, dict_name: &str) -> Result<(), Self::ErrorType> {
+    fn set_graphics_state_from_dict(&mut self, dict_name: &[u8]) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::SetGraphicsStateFromDict {
-                dict_name: dict_name.to_string(),
+                dict_name: dict_name.to_vec(),
             });
         Ok(())
     }
@@ -440,18 +440,18 @@ impl GraphicsStateOps for RecordingBackend {
 
 impl ColorOps for RecordingBackend {
     type ErrorType = PdfRecordingCanvasError;
-    fn set_stroking_color_space(&mut self, name: &str) -> Result<(), Self::ErrorType> {
+    fn set_stroking_color_space(&mut self, name: &[u8]) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::SetStrokingColorSpace {
-                name: name.to_string(),
+                name: name.to_vec(),
             });
         Ok(())
     }
 
-    fn set_non_stroking_color_space(&mut self, name: &str) -> Result<(), Self::ErrorType> {
+    fn set_non_stroking_color_space(&mut self, name: &[u8]) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::SetNonStrokingColorSpace {
-                name: name.to_string(),
+                name: name.to_vec(),
             });
         Ok(())
     }
@@ -466,12 +466,12 @@ impl ColorOps for RecordingBackend {
     fn set_stroking_color_extended(
         &mut self,
         components: &[f32],
-        pattern_name: &str,
+        pattern_name: &[u8],
     ) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::SetStrokingColorExtended {
                 components: components.to_vec(),
-                pattern_name: pattern_name.to_string(),
+                pattern_name: pattern_name.to_vec(),
             });
         Ok(())
     }
@@ -487,12 +487,12 @@ impl ColorOps for RecordingBackend {
     fn set_non_stroking_color_extended(
         &mut self,
         components: &[f32],
-        pattern_name: &str,
+        pattern_name: &[u8],
     ) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::SetNonStrokingColorExtended {
                 components: components.to_vec(),
-                pattern_name: pattern_name.to_string(),
+                pattern_name: pattern_name.to_vec(),
             });
         Ok(())
     }
@@ -579,9 +579,9 @@ impl TextStateOps for RecordingBackend {
         Ok(())
     }
 
-    fn set_font_and_size(&mut self, font_name: &str, size: f32) -> Result<(), Self::ErrorType> {
+    fn set_font_and_size(&mut self, font_name: &[u8], size: f32) -> Result<(), Self::ErrorType> {
         self.operations.push(RecordedOperation::SetFontAndSize {
-            font_name: font_name.to_string(),
+            font_name: font_name.to_vec(),
             size,
         });
         Ok(())
@@ -678,9 +678,9 @@ impl TextShowingOps for RecordingBackend {
 
 impl XObjectOps for RecordingBackend {
     type ErrorType = PdfRecordingCanvasError;
-    fn invoke_xobject(&mut self, xobject_name: &str) -> Result<(), Self::ErrorType> {
+    fn invoke_xobject(&mut self, xobject_name: &[u8]) -> Result<(), Self::ErrorType> {
         self.operations.push(RecordedOperation::InvokeXObject {
-            xobject_name: xobject_name.to_string(),
+            xobject_name: xobject_name.to_vec(),
         });
         Ok(())
     }
@@ -695,9 +695,9 @@ impl XObjectOps for RecordingBackend {
 
 impl ShadingOps for RecordingBackend {
     type ErrorType = PdfRecordingCanvasError;
-    fn paint_shading(&mut self, shading_name: &str) -> Result<(), Self::ErrorType> {
+    fn paint_shading(&mut self, shading_name: &[u8]) -> Result<(), Self::ErrorType> {
         self.operations.push(RecordedOperation::PaintShading {
-            shading_name: shading_name.to_string(),
+            shading_name: shading_name.to_vec(),
         });
         Ok(())
     }
@@ -705,38 +705,34 @@ impl ShadingOps for RecordingBackend {
 
 impl MarkedContentOps for RecordingBackend {
     type ErrorType = PdfRecordingCanvasError;
-    fn mark_point(&mut self, tag: &str) -> Result<(), Self::ErrorType> {
-        self.operations.push(RecordedOperation::MarkPoint {
-            tag: tag.to_string(),
-        });
+    fn mark_point(&mut self, tag: &[u8]) -> Result<(), Self::ErrorType> {
+        self.operations
+            .push(RecordedOperation::MarkPoint { tag: tag.to_vec() });
         Ok(())
     }
 
     fn mark_point_with_properties(
         &mut self,
-        tag: &str,
-        properties_name_or_dict: &str,
+        tag: &[u8],
+        properties_name_or_dict: &[u8],
     ) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::MarkPointWithProperties {
-                tag: tag.to_string(),
-                properties_name_or_dict: properties_name_or_dict.to_string(),
+                tag: tag.to_vec(),
+                properties_name_or_dict: properties_name_or_dict.to_vec(),
             });
         Ok(())
     }
 
-    fn begin_marked_content(&mut self, tag: &str) -> Result<(), Self::ErrorType> {
-        self.operations.push(RecordedOperation::BeginMarkedContent {
-            tag: tag.to_string(),
-        });
-        Ok(())
-    }
-
-    fn begin_marked_content_with_properties(&mut self, tag: &str) -> Result<(), Self::ErrorType> {
+    fn begin_marked_content(&mut self, tag: &[u8]) -> Result<(), Self::ErrorType> {
         self.operations
-            .push(RecordedOperation::BeginMarkedContentWithProperties {
-                tag: tag.to_string(),
-            });
+            .push(RecordedOperation::BeginMarkedContent { tag: tag.to_vec() });
+        Ok(())
+    }
+
+    fn begin_marked_content_with_properties(&mut self, tag: &[u8]) -> Result<(), Self::ErrorType> {
+        self.operations
+            .push(RecordedOperation::BeginMarkedContentWithProperties { tag: tag.to_vec() });
         Ok(())
     }
 

@@ -58,12 +58,12 @@ fn resources_dictionary(entries: &[(&str, &str)]) -> Dictionary {
     let color_spaces = Dictionary::new(BTreeMap::from(
         entries
             .iter()
-            .map(|(name, value)| ((*name).to_owned(), color_space(value)))
+            .map(|(name, value)| (Vec::from(name.as_bytes()), color_space(value)))
             .collect::<BTreeMap<_, _>>(),
     ));
 
     Dictionary::new(BTreeMap::from([(
-        "ColorSpace".to_owned(),
+        Vec::from(b"ColorSpace"),
         ObjectVariant::Dictionary(Box::new(color_spaces)),
     )]))
 }
@@ -74,22 +74,22 @@ fn page_dictionary(
     resources: Option<Dictionary>,
     media_box: Option<[i64; 4]>,
 ) -> Dictionary {
-    let mut entries = BTreeMap::from([("Type".to_owned(), name("Page"))]);
+    let mut entries = BTreeMap::from([(Vec::from(b"Type"), name("Page"))]);
 
     if let Some(parent) = parent {
-        entries.insert("Parent".to_owned(), ObjectVariant::Reference(parent));
+        entries.insert(Vec::from(b"Parent"), ObjectVariant::Reference(parent));
     }
 
     if let Some(resources) = resources {
         entries.insert(
-            "Resources".to_owned(),
+            Vec::from(b"Resources"),
             ObjectVariant::Dictionary(Box::new(resources)),
         );
     }
 
     if let Some([left, bottom, right, top]) = media_box {
         entries.insert(
-            "MediaBox".to_owned(),
+            Vec::from(b"MediaBox"),
             ObjectVariant::Array(vec![
                 integer(left),
                 integer(bottom),
@@ -110,24 +110,24 @@ fn pages_dictionary(
     resources: Option<Dictionary>,
     media_box: Option<[i64; 4]>,
 ) -> Dictionary {
-    let mut entries = BTreeMap::from([("Type".to_owned(), name("Pages"))]);
+    let mut entries = BTreeMap::from([(Vec::from(b"Type"), name("Pages"))]);
 
     entries.insert(
-        "Kids".to_owned(),
+        Vec::from(b"Kids"),
         ObjectVariant::Array(kids.iter().copied().map(ObjectVariant::Reference).collect()),
     );
-    entries.insert("Count".to_owned(), integer(kids.len() as i64));
+    entries.insert(Vec::from(b"Count"), integer(kids.len() as i64));
 
     if let Some(resources) = resources {
         entries.insert(
-            "Resources".to_owned(),
+            Vec::from(b"Resources"),
             ObjectVariant::Dictionary(Box::new(resources)),
         );
     }
 
     if let Some([left, bottom, right, top]) = media_box {
         entries.insert(
-            "MediaBox".to_owned(),
+            Vec::from(b"MediaBox"),
             ObjectVariant::Array(vec![
                 integer(left),
                 integer(bottom),

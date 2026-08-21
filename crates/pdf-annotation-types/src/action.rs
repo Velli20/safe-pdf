@@ -98,99 +98,99 @@ pub enum AnnotationAction {
     /// A vendor or future action type.
     Unknown {
         /// The action subtype name.
-        action_type: String,
+        action_type: Vec<u8>,
     },
 }
 
 impl AnnotationAction {
     pub(crate) fn from_dictionary(
         dictionary: &Dictionary,
-        key: &'static str,
+        key: &'static [u8],
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, AnnotationError> {
         let Some(action_dictionary) = dictionary.optional_dictionary(key, objects)? else {
             return Ok(None);
         };
 
-        let action = match action_dictionary.required_str("S", objects)? {
-            "GoTo" => Self::GoTo {
+        let action = match action_dictionary.required_bytes(b"S", objects)? {
+            b"GoTo" => Self::GoTo {
                 destination: AnnotationDestination::from_object(
-                    action_dictionary.get_or_err("D")?,
-                    "D",
+                    action_dictionary.get_or_err(b"D")?,
+                    b"D",
                     objects,
                 )?,
             },
-            "GoToR" => Self::GoToRemote {
+            b"GoToR" => Self::GoToRemote {
                 file_specification: FileSpecification::from_object(
-                    action_dictionary.get_or_err("F")?,
+                    action_dictionary.get_or_err(b"F")?,
                     objects,
                 )?,
                 destination: action_dictionary
-                    .get("D")
-                    .map(|value| AnnotationDestination::from_object(value, "D", objects))
+                    .get(b"D")
+                    .map(|value| AnnotationDestination::from_object(value, b"D", objects))
                     .transpose()?,
-                new_window: action_dictionary.optional_boolean("NewWindow", objects)?,
+                new_window: action_dictionary.optional_boolean(b"NewWindow", objects)?,
             },
-            "URI" => Self::Uri {
-                uri: action_dictionary.required_bytes_vec("URI", objects)?,
-                is_map: action_dictionary.optional_boolean("IsMap", objects)?,
+            b"URI" => Self::Uri {
+                uri: action_dictionary.required_bytes_vec(b"URI", objects)?,
+                is_map: action_dictionary.optional_boolean(b"IsMap", objects)?,
             },
-            "Launch" => Self::Launch {
+            b"Launch" => Self::Launch {
                 file_specification: FileSpecification::from_dictionary(
                     action_dictionary,
-                    "F",
+                    b"F",
                     objects,
                 )?,
                 windows: action_dictionary
-                    .get("Win")
+                    .get(b"Win")
                     .map(|value| helpers::dictionary(value, objects))
                     .transpose()?,
             },
-            "Named" => Self::Named {
-                name: action_dictionary.required_bytes_vec("N", objects)?,
+            b"Named" => Self::Named {
+                name: Vec::from(action_dictionary.required_bytes(b"N", objects)?),
             },
-            "SubmitForm" => Self::SubmitForm {
+            b"SubmitForm" => Self::SubmitForm {
                 file_specification: FileSpecification::from_dictionary(
                     action_dictionary,
-                    "F",
+                    b"F",
                     objects,
                 )?,
-                fields: name_list(action_dictionary, "Fields", objects)?,
-                flags: action_dictionary.optional_number::<i32>("Flags", objects)?,
+                fields: name_list(action_dictionary, b"Fields", objects)?,
+                flags: action_dictionary.optional_number::<i32>(b"Flags", objects)?,
             },
-            "ResetForm" => Self::ResetForm {
-                fields: name_list(action_dictionary, "Fields", objects)?,
-                flags: action_dictionary.optional_number::<i32>("Flags", objects)?,
+            b"ResetForm" => Self::ResetForm {
+                fields: name_list(action_dictionary, b"Fields", objects)?,
+                flags: action_dictionary.optional_number::<i32>(b"Flags", objects)?,
             },
-            "ImportData" => Self::ImportData {
+            b"ImportData" => Self::ImportData {
                 file_specification: FileSpecification::from_object(
-                    action_dictionary.get_or_err("F")?,
+                    action_dictionary.get_or_err(b"F")?,
                     objects,
                 )?,
             },
-            "JavaScript" => Self::JavaScript {
-                script: javascript_bytes(action_dictionary.get_or_err("JS")?, objects)?,
+            b"JavaScript" => Self::JavaScript {
+                script: javascript_bytes(action_dictionary.get_or_err(b"JS")?, objects)?,
             },
-            "SetOCGState" => Self::SetOCGState {
-                state: name_list(action_dictionary, "State", objects)?.unwrap_or_default(),
-                preserve_rb: action_dictionary.optional_boolean("PreserveRB", objects)?,
+            b"SetOCGState" => Self::SetOCGState {
+                state: name_list(action_dictionary, b"State", objects)?.unwrap_or_default(),
+                preserve_rb: action_dictionary.optional_boolean(b"PreserveRB", objects)?,
             },
-            "Rendition" => Self::Rendition {
-                operation: action_dictionary.optional_number::<i32>("OP", objects)?,
+            b"Rendition" => Self::Rendition {
+                operation: action_dictionary.optional_number::<i32>(b"OP", objects)?,
                 rendition: Rendition::from_dictionary(action_dictionary, objects)?,
             },
-            "Trans" => Self::Trans {
+            b"Trans" => Self::Trans {
                 transition: action_dictionary
-                    .get("Trans")
+                    .get(b"Trans")
                     .map(|value| helpers::dictionary(value, objects))
                     .transpose()?,
-                duration: action_dictionary.optional_number::<f32>("D", objects)?,
+                duration: action_dictionary.optional_number::<f32>(b"D", objects)?,
             },
-            "GoTo3DView" => Self::GoTo3DView {
-                view: three_d_view(action_dictionary, "TA", objects)?,
+            b"GoTo3DView" => Self::GoTo3DView {
+                view: three_d_view(action_dictionary, b"TA", objects)?,
             },
             other => Self::Unknown {
-                action_type: other.to_owned(),
+                action_type: Vec::from(other),
             },
         };
 
@@ -219,7 +219,7 @@ fn javascript_bytes(
 
 pub(crate) fn name_list(
     dictionary: &Dictionary,
-    key: &'static str,
+    key: &'static [u8],
     objects: &dyn ObjectResolver,
 ) -> Result<Option<Vec<Vec<u8>>>, AnnotationError> {
     let Some(value) = dictionary.get(key) else {
@@ -237,7 +237,7 @@ pub(crate) fn name_list(
 
 pub(crate) fn three_d_view(
     dictionary: &Dictionary,
-    key: &'static str,
+    key: &'static [u8],
     objects: &dyn ObjectResolver,
 ) -> Result<Option<ThreeDView>, AnnotationError> {
     dictionary
@@ -281,10 +281,10 @@ mod tests {
 
     fn action_dictionary(js: ObjectVariant) -> Dictionary {
         Dictionary::new(BTreeMap::from([(
-            "A".to_owned(),
+            Vec::from(b"A"),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
-                ("S".to_owned(), ObjectVariant::Name(b"JavaScript".to_vec())),
-                ("JS".to_owned(), js),
+                (Vec::from(b"S"), ObjectVariant::Name(b"JavaScript".to_vec())),
+                (Vec::from(b"JS"), js),
             ])))),
         )]))
     }
@@ -293,7 +293,7 @@ mod tests {
         ObjectVariant::Stream(StreamObject::new(
             7,
             0,
-            Box::new(Dictionary::new(BTreeMap::new())),
+            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
             data.to_vec(),
         ))
     }
@@ -302,8 +302,8 @@ mod tests {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<AnnotationAction, AnnotationError> {
-        AnnotationAction::from_dictionary(dictionary, "A", objects)?
-            .ok_or(AnnotationError::MissingEntry { entry: "A" })
+        AnnotationAction::from_dictionary(dictionary, b"A", objects)?
+            .ok_or(AnnotationError::MissingEntry { entry: b"A" })
     }
 
     #[test]

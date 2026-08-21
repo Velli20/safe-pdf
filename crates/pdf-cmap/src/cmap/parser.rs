@@ -309,7 +309,7 @@ mod tests {
 
         let error = parser.next_token().unwrap_err();
 
-        assert_eq!(error, CMapError::UnknownCMapKeyword("bogus".to_string()));
+        assert_eq!(error, CMapError::UnknownCMapKeyword("bogus".to_owned()));
     }
 
     #[test]

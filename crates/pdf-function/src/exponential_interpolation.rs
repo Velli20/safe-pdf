@@ -88,16 +88,16 @@ impl FunctionImpl for ExponentialFunction {
         objects: &dyn ObjectResolver,
     ) -> Result<Function, FunctionReadError> {
         let dictionary = object.try_dictionary(objects)?;
-        let domain = dictionary.required_array_of::<f32, 2>("Domain", objects)?;
+        let domain = dictionary.required_array_of::<f32, 2>(b"Domain", objects)?;
 
         // /C0: Output values at domain[0]. Defaults to [0.0].
         let c0 = dictionary
-            .optional_vec_of::<f32>("C0", objects)?
+            .optional_vec_of::<f32>(b"C0", objects)?
             .unwrap_or_else(|| vec![0.0]);
 
         // /C1: Output values at domain[1]. Defaults to [1.0].
         let c1 = dictionary
-            .optional_vec_of::<f32>("C1", objects)?
+            .optional_vec_of::<f32>(b"C1", objects)?
             .unwrap_or_else(|| vec![1.0]);
 
         // Validate C0/C1 length match at parse time.
@@ -106,10 +106,10 @@ impl FunctionImpl for ExponentialFunction {
         }
 
         // /N: Interpolation exponent (required).
-        let exponent = dictionary.required_number::<f32>("N", objects)?;
+        let exponent = dictionary.required_number::<f32>(b"N", objects)?;
 
         // /Range: Optional. Output range for clamping (ISO 32000 §7.10.3).
-        let range = dictionary.optional_vec_of::<f32>("Range", objects)?;
+        let range = dictionary.optional_vec_of::<f32>(b"Range", objects)?;
 
         Ok(Function::Exponential(ExponentialFunction {
             c0,

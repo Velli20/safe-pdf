@@ -28,11 +28,11 @@ fn number_array(values: &[f32]) -> ObjectVariant {
 
 fn type_2_rgb_function() -> ObjectVariant {
     ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
-        ("FunctionType".to_string(), integer(2)),
-        ("Domain".to_string(), number_array(&[0.0, 1.0])),
-        ("C0".to_string(), number_array(&[1.0, 0.0, 0.0])),
-        ("C1".to_string(), number_array(&[0.0, 0.0, 1.0])),
-        ("N".to_string(), ObjectVariant::Real(1.0)),
+        (Vec::from(b"FunctionType"), integer(2)),
+        (Vec::from(b"Domain"), number_array(&[0.0, 1.0])),
+        (Vec::from(b"C0"), number_array(&[1.0, 0.0, 0.0])),
+        (Vec::from(b"C1"), number_array(&[0.0, 0.0, 1.0])),
+        (Vec::from(b"N"), ObjectVariant::Real(1.0)),
     ]))))
 }
 
@@ -48,7 +48,7 @@ fn free_form_stream(
     }
     let mut entries = mesh_entries(4, 4, 4, bits_per_flag, decode);
     if let Some(function) = function {
-        entries.insert("Function".to_string(), function);
+        entries.insert(Vec::from(b"Function"), function);
     }
 
     shading_stream(entries, data)
@@ -64,7 +64,7 @@ fn patch_stream(
     let [coordinate, component, flag] = widths;
     let mut entries = mesh_entries(shading_type, coordinate, component, flag, decode);
     if let Some(function) = function {
-        entries.insert("Function".to_string(), function);
+        entries.insert(Vec::from(b"Function"), function);
     }
     shading_stream(entries, data)
 }
@@ -75,24 +75,24 @@ fn mesh_entries(
     bits_per_component: i64,
     bits_per_flag: i64,
     decode: Vec<f32>,
-) -> BTreeMap<String, ObjectVariant> {
+) -> BTreeMap<Vec<u8>, ObjectVariant> {
     BTreeMap::from([
-        ("ShadingType".to_string(), integer(shading_type)),
+        (Vec::from(b"ShadingType"), integer(shading_type)),
         (
-            "ColorSpace".to_string(),
+            Vec::from(b"ColorSpace"),
             ObjectVariant::Name(b"DeviceRGB".to_vec()),
         ),
         (
-            "BitsPerCoordinate".to_string(),
+            Vec::from(b"BitsPerCoordinate"),
             integer(bits_per_coordinate),
         ),
-        ("BitsPerComponent".to_string(), integer(bits_per_component)),
-        ("BitsPerFlag".to_string(), integer(bits_per_flag)),
-        ("Decode".to_string(), number_array(&decode)),
+        (Vec::from(b"BitsPerComponent"), integer(bits_per_component)),
+        (Vec::from(b"BitsPerFlag"), integer(bits_per_flag)),
+        (Vec::from(b"Decode"), number_array(&decode)),
     ])
 }
 
-fn shading_stream(entries: BTreeMap<String, ObjectVariant>, data: Vec<u8>) -> ObjectVariant {
+fn shading_stream(entries: BTreeMap<Vec<u8>, ObjectVariant>, data: Vec<u8>) -> ObjectVariant {
     ObjectVariant::Stream(StreamObject::new(
         1,
         0,

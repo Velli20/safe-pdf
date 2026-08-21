@@ -432,7 +432,7 @@ fn build_xref_table_simple() {
     let size: i64 = table
         .trailer
         .dictionary
-        .get("Size")
+        .get(b"Size")
         .expect("Size expected")
         .try_number(&PassthroughResolver)
         .unwrap();

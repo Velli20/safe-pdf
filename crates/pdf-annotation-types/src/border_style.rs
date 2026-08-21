@@ -17,7 +17,7 @@ pub struct BorderStyle {
 impl BorderStyle {
     pub(crate) fn from_dictionary(
         dictionary: &Dictionary,
-        key: &'static str,
+        key: &'static [u8],
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, AnnotationError> {
         let Some(value) = dictionary.get(key) else {
@@ -25,12 +25,12 @@ impl BorderStyle {
         };
 
         let dictionary = value.try_dictionary(objects)?;
-        let width = dictionary.optional_number::<f32>("W", objects)?;
+        let width = dictionary.optional_number::<f32>(b"W", objects)?;
         let style = dictionary
-            .get("S")
-            .map(|value| value.try_str(objects).map(BorderStyleName::from))
+            .get(b"S")
+            .map(|value| value.try_bytes(objects).map(BorderStyleName::from))
             .transpose()?;
-        let dash_pattern = dictionary.optional_vec_of::<f32>("D", objects)?;
+        let dash_pattern = dictionary.optional_vec_of::<f32>(b"D", objects)?;
 
         Ok(Some(Self {
             width,

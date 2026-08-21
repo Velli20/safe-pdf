@@ -24,13 +24,13 @@ impl WritingMode {
 #[error("CMap name does not identify a writing mode")]
 pub struct WritingModeNameError;
 
-impl TryFrom<&str> for WritingMode {
+impl TryFrom<&[u8]> for WritingMode {
     type Error = WritingModeNameError;
 
-    fn try_from(name: &str) -> Result<Self, Self::Error> {
+    fn try_from(name: &[u8]) -> Result<Self, Self::Error> {
         match name {
-            "Identity-H" => Ok(Self::Horizontal),
-            "Identity-V" => Ok(Self::Vertical),
+            b"Identity-H" => Ok(Self::Horizontal),
+            b"Identity-V" => Ok(Self::Vertical),
             _ => Err(WritingModeNameError),
         }
     }

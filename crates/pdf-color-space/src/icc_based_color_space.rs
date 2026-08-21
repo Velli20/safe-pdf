@@ -44,7 +44,7 @@ pub(crate) fn parse_icc_based_color_space(
     };
 
     let stream = icc_stream.try_stream(objects)?;
-    let num_components = stream.dictionary.required_number::<usize>("N", objects)?;
+    let num_components = stream.dictionary.required_number::<usize>(b"N", objects)?;
 
     // N shall be 1, 3, or 4.
     if !matches!(num_components, 1 | 3 | 4) {
@@ -55,7 +55,7 @@ pub(crate) fn parse_icc_based_color_space(
 
     let alternate_space = stream
         .dictionary
-        .get("Alternate")
+        .get(b"Alternate")
         .map(|alt| parse_color_space_object(objects, alt, depth))
         .transpose()?
         .map(Box::new);
@@ -93,7 +93,7 @@ impl ICCBasedColorSpace {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::sync::Arc;
 
     use pdf_graphics::color::Color;
     use pdf_object::{
@@ -116,10 +116,10 @@ mod tests {
         let stream = StreamObject::new(
             1,
             0,
-            Box::new(Dictionary::new(BTreeMap::from([(
-                "N".to_string(),
+            Box::new(Dictionary::from_entries([(
+                b"N",
                 ObjectVariant::Integer(3),
-            )]))),
+            )])),
             vec![1, 2, 3, 4],
         );
         let stream_data = stream.shared_data();

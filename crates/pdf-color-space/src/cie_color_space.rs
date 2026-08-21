@@ -19,9 +19,9 @@ impl CieColorSpaceParams {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, ObjectError> {
-        let white_point = dictionary.required_array_of::<f32, 3>("WhitePoint", objects)?;
+        let white_point = dictionary.required_array_of::<f32, 3>(b"WhitePoint", objects)?;
         let black_point = dictionary
-            .optional_array_of::<f32, 3>("BlackPoint", objects)?
+            .optional_array_of::<f32, 3>(b"BlackPoint", objects)?
             .unwrap_or_default();
 
         Ok(Self {
@@ -33,8 +33,6 @@ impl CieColorSpaceParams {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use pdf_object::{
         dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     };
@@ -47,10 +45,10 @@ mod tests {
 
     #[test]
     fn parses_white_and_black_points() {
-        let dictionary = Dictionary::new(BTreeMap::from([
-            ("BlackPoint".to_owned(), array(&[0.1, 0.2, 0.3])),
-            ("WhitePoint".to_owned(), array(&[0.9, 1.0, 0.8])),
-        ]));
+        let dictionary = Dictionary::from_entries([
+            (b"BlackPoint", array(&[0.1, 0.2, 0.3])),
+            (b"WhitePoint", array(&[0.9, 1.0, 0.8])),
+        ]);
 
         let params =
             CieColorSpaceParams::from_dictionary(&dictionary, &PassthroughResolver).unwrap();
@@ -66,10 +64,7 @@ mod tests {
 
     #[test]
     fn defaults_missing_black_point_to_zero() {
-        let dictionary = Dictionary::new(BTreeMap::from([(
-            "WhitePoint".to_owned(),
-            array(&[0.9, 1.0, 0.8]),
-        )]));
+        let dictionary = Dictionary::from_entries([(b"WhitePoint", array(&[0.9, 1.0, 0.8]))]);
 
         let params =
             CieColorSpaceParams::from_dictionary(&dictionary, &PassthroughResolver).unwrap();

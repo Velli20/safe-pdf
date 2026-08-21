@@ -16,7 +16,7 @@ use pdf_resources::{
 pub struct PdfPages;
 
 impl PdfPages {
-    pub const KEY: &'static str = "Pages";
+    pub const KEY: &'static [u8] = b"Pages";
 }
 
 impl ReadFromDictionary for PdfPages {
@@ -33,7 +33,7 @@ impl ReadFromDictionary for PdfPages {
         // The `/Kids` array is a required entry in a Pages dictionary. It contains
         // indirect references to child objects, which can be either other Pages nodes
         // or leaf Page nodes.
-        let kids_array = dictionary.required_array("Kids", objects)?;
+        let kids_array = dictionary.required_array(b"Kids", objects)?;
 
         // This vector will store the flattened list of all leaf `PdfPage` objects
         // found by traversing the page tree.
@@ -50,7 +50,7 @@ impl ReadFromDictionary for PdfPages {
             let dictionary = value.try_dictionary(objects)?;
 
             // Determine the type of the child object by reading its `/Type` entry.
-            match dictionary.required_str("Type", objects)? {
+            match dictionary.required_bytes(b"Type", objects)? {
                 PdfPage::KEY => {
                     // If the child is a leaf node (`/Type /Page`), parse it as a `PdfPage`.
                     let page = PdfPage::from_dictionary(
@@ -76,7 +76,7 @@ impl ReadFromDictionary for PdfPages {
                 obj_type => {
                     // If the child has an unexpected type, return an error.
                     return Err(PdfPagesError::InvalidKidsEntryType {
-                        found_type: obj_type.to_string(),
+                        found_type: String::from_utf8_lossy(obj_type).into_owned(),
                     });
                 }
             }
@@ -145,7 +145,7 @@ mod tests {
     fn resources_with_color_space(name: &str) -> Resources {
         let mut res = Resources::default();
         res.color_spaces.insert(
-            name.to_owned(),
+            name.as_bytes().to_vec(),
             Resource::ColorSpace(Rc::new(ColorSpace::DeviceGray)),
         );
         res
@@ -172,7 +172,7 @@ mod tests {
         assert!(Rc::ptr_eq(inherited, &parent));
 
         assert!(
-            inherited.color_spaces.contains_key("CS1"),
+            inherited.color_spaces.contains_key(b"CS1".as_slice()),
             "inherited resources should contain the parent color space"
         );
     }
@@ -185,11 +185,11 @@ mod tests {
         // Child already defines "CS1" (DeviceRGB) and also has "CS2".
         let mut child_res = Resources::default();
         child_res.color_spaces.insert(
-            "CS1".to_owned(),
+            b"CS1".to_vec(),
             Resource::ColorSpace(Rc::new(ColorSpace::DeviceRGB)),
         );
         child_res.color_spaces.insert(
-            "CS2".to_owned(),
+            b"CS2".to_vec(),
             Resource::ColorSpace(Rc::new(ColorSpace::DeviceGray)),
         );
 
@@ -213,7 +213,7 @@ mod tests {
         // "CS1" must remain the child's version (DeviceRGB), not replaced by the parent's (DeviceGray).
         assert!(
             matches!(
-                result.color_spaces.get("CS1"),
+                result.color_spaces.get(b"CS1".as_slice()),
                 Some(Resource::ColorSpace(cs)) if matches!(cs.as_ref(), ColorSpace::DeviceRGB)
             ),
             "child CS1 should not be overwritten by the parent"
@@ -221,7 +221,7 @@ mod tests {
 
         // "CS2" stays.
         assert!(
-            result.color_spaces.contains_key("CS2"),
+            result.color_spaces.contains_key(b"CS2".as_slice()),
             "child CS2 should still be present"
         );
     }
@@ -231,7 +231,7 @@ mod tests {
         // Parent defines two color spaces: "CS1" and "CS2".
         let mut parent = resources_with_color_space("CS1");
         parent.color_spaces.insert(
-            "CS2".to_owned(),
+            b"CS2".to_vec(),
             Resource::ColorSpace(Rc::new(ColorSpace::DeviceRGB)),
         );
         let parent = Rc::new(parent);
@@ -239,7 +239,7 @@ mod tests {
         // Child only defines "CS1" (DeviceRGB); it is missing "CS2".
         let mut child_res = Resources::default();
         child_res.color_spaces.insert(
-            "CS1".to_owned(),
+            b"CS1".to_vec(),
             Resource::ColorSpace(Rc::new(ColorSpace::DeviceRGB)),
         );
 
@@ -258,7 +258,7 @@ mod tests {
         // "CS1" remains the child's version (DeviceRGB).
         assert!(
             matches!(
-                result.color_spaces.get("CS1"),
+                result.color_spaces.get(b"CS1".as_slice()),
                 Some(Resource::ColorSpace(cs)) if matches!(cs.as_ref(), ColorSpace::DeviceRGB)
             ),
             "child CS1 should not be overwritten by the parent"
@@ -266,7 +266,7 @@ mod tests {
 
         // "CS2" is inherited from the parent because the child didn't define it.
         assert!(
-            result.color_spaces.contains_key("CS2"),
+            result.color_spaces.contains_key(b"CS2".as_slice()),
             "parent CS2 should have been inherited into the child"
         );
     }

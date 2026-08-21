@@ -21,10 +21,10 @@ impl CircleAnnotation {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
-        let border_style = BorderStyle::from_dictionary(dictionary, "BS", objects)?;
-        let interior_color = AnnotationColor::from_dictionary(dictionary, "IC", objects)?;
-        let border_effect = BorderEffect::from_dictionary(dictionary, "BE", objects)?;
-        let difference_rect = dictionary.optional_array_of::<f32, 4>("RD", objects)?;
+        let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
+        let interior_color = AnnotationColor::from_dictionary(dictionary, b"IC", objects)?;
+        let border_effect = BorderEffect::from_dictionary(dictionary, b"BE", objects)?;
+        let difference_rect = dictionary.optional_array_of::<f32, 4>(b"RD", objects)?;
 
         Ok(Self {
             border_style,

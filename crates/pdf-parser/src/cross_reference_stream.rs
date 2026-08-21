@@ -25,7 +25,7 @@ pub fn parse_xref_stream(
     let dict = stream.dictionary.as_ref();
 
     validate_stream_type(stream, objects)?;
-    let size = dict.required_number::<usize>("Size", objects)?;
+    let size = dict.required_number::<usize>(b"Size", objects)?;
     let layout = XrefStreamLayout::from_dictionary(stream, objects)?;
 
     if layout.entry_width == 0 {
@@ -63,16 +63,16 @@ fn validate_stream_type(
     stream: &StreamObject,
     objects: &dyn ObjectResolver,
 ) -> Result<(), ParserError> {
-    let Some(type_name) = stream.dictionary.optional_str("Type", objects)? else {
+    let Some(type_name) = stream.dictionary.optional_bytes(b"Type", objects)? else {
         return Ok(());
     };
 
-    if type_name == "XRef" {
+    if type_name == b"XRef" {
         Ok(())
     } else {
         Err(ParserError::InvalidKeyword(
-            "XRef".to_string(),
-            type_name.to_owned(),
+            "XRef".to_owned(),
+            String::from_utf8_lossy(type_name).into_owned(),
         ))
     }
 }
@@ -94,7 +94,7 @@ impl XrefStreamLayout {
     ) -> Result<Self, ParserError> {
         let [type_width, second_field_width, third_field_width] = stream
             .dictionary
-            .required_array_of::<usize, 3>("W", objects)?;
+            .required_array_of::<usize, 3>(b"W", objects)?;
 
         Ok(Self {
             type_width,
@@ -120,7 +120,7 @@ fn parse_subsections(
     objects: &dyn ObjectResolver,
     size: usize,
 ) -> Result<Vec<XrefSubsection>, ParserError> {
-    let index_values = stream.dictionary.get("Index").map_or_else(
+    let index_values = stream.dictionary.get(b"Index").map_or_else(
         || Ok(vec![0, size]),
         |index_value| index_value.try_vec_of::<usize>(objects),
     )?;
@@ -230,10 +230,10 @@ mod tests {
         raw_data: Vec<u8>,
     ) -> StreamObject {
         let mut dict_map = BTreeMap::new();
-        dict_map.insert("Type".to_string(), ObjectVariant::Name(b"XRef".to_vec()));
-        dict_map.insert("Size".to_string(), ObjectVariant::Integer(size as i64));
+        dict_map.insert(Vec::from(b"Type"), ObjectVariant::Name(b"XRef".to_vec()));
+        dict_map.insert(Vec::from(b"Size"), ObjectVariant::Integer(size as i64));
         dict_map.insert(
-            "W".to_string(),
+            Vec::from(b"W"),
             ObjectVariant::Array(
                 w.iter()
                     .map(|&v| ObjectVariant::Integer(v as i64))
@@ -242,7 +242,7 @@ mod tests {
         );
         if let Some(idx) = index {
             dict_map.insert(
-                "Index".to_string(),
+                Vec::from(b"Index"),
                 ObjectVariant::Array(
                     idx.iter()
                         .map(|&v| ObjectVariant::Integer(v as i64))
@@ -251,7 +251,7 @@ mod tests {
             );
         }
         dict_map.insert(
-            "Length".to_string(),
+            Vec::from(b"Length"),
             ObjectVariant::Integer(raw_data.len() as i64),
         );
 
@@ -387,10 +387,10 @@ mod tests {
         let compressed = encoder.finish().unwrap();
 
         let mut dict_map = BTreeMap::new();
-        dict_map.insert("Type".to_string(), ObjectVariant::Name(b"XRef".to_vec()));
-        dict_map.insert("Size".to_string(), ObjectVariant::Integer(size as i64));
+        dict_map.insert(Vec::from(b"Type"), ObjectVariant::Name(b"XRef".to_vec()));
+        dict_map.insert(Vec::from(b"Size"), ObjectVariant::Integer(size as i64));
         dict_map.insert(
-            "W".to_string(),
+            Vec::from(b"W"),
             ObjectVariant::Array(
                 w.iter()
                     .map(|&v| ObjectVariant::Integer(v as i64))
@@ -399,7 +399,7 @@ mod tests {
         );
         if let Some(idx) = index {
             dict_map.insert(
-                "Index".to_string(),
+                Vec::from(b"Index"),
                 ObjectVariant::Array(
                     idx.iter()
                         .map(|&v| ObjectVariant::Integer(v as i64))
@@ -408,25 +408,25 @@ mod tests {
             );
         }
         dict_map.insert(
-            "Filter".to_string(),
+            Vec::from(b"Filter"),
             ObjectVariant::Name(b"FlateDecode".to_vec()),
         );
         dict_map.insert(
-            "DecodeParms".to_string(),
+            Vec::from(b"DecodeParms"),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(
                 vec![
                     (
-                        "Columns".to_string(),
+                        Vec::from(b"Columns"),
                         ObjectVariant::Integer(columns as i64),
                     ),
-                    ("Predictor".to_string(), ObjectVariant::Integer(12)),
+                    (Vec::from(b"Predictor"), ObjectVariant::Integer(12)),
                 ]
                 .into_iter()
                 .collect(),
             ))),
         );
         dict_map.insert(
-            "Length".to_string(),
+            Vec::from(b"Length"),
             ObjectVariant::Integer(compressed.len() as i64),
         );
 

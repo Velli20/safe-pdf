@@ -13,7 +13,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub struct SeparationColorSpace {
     /// The name of the colorant (e.g., `/All`, `/None`, or a custom name).
-    pub name: String,
+    pub name: Vec<u8>,
     /// The alternate color space to use if the separation is not supported.
     pub alternate_space: Box<ColorSpace>,
     /// The tint transform function (transforms tint 0.0-1.0 to alternate space).
@@ -34,7 +34,7 @@ pub(crate) fn parse_separation_color_space(
         });
     };
 
-    let name = name.try_str(objects)?.to_owned();
+    let name = Vec::from(name.try_bytes(objects)?);
     let alternate_space = parse_color_space_object(objects, alternate_space, depth)?;
     let tint_transform = Function::parse(objects.resolve_object(tint_transform)?, objects)?;
 
@@ -49,7 +49,7 @@ impl SeparationColorSpace {
     pub fn apply(&self, components: &[f32]) -> Result<Color, ColorSpaceError> {
         // If the name is "None", it represents the absence of all colorants.
         // Produce fully transparent output regardless of tint value.
-        if self.name == "None" {
+        if self.name == b"None" {
             return Ok(Color::from_rgba(0.0, 0.0, 0.0, 0.0));
         }
 

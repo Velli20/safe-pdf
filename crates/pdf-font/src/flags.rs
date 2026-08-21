@@ -32,12 +32,12 @@ impl FontFlags {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, FontError> {
-        let Some(descriptor) = dictionary.optional_dictionary("FontDescriptor", objects)? else {
+        let Some(descriptor) = dictionary.optional_dictionary(b"FontDescriptor", objects)? else {
             return Ok(Self::empty());
         };
 
         Ok(descriptor
-            .get("Flags")
+            .get(b"Flags")
             .and_then(|value| value.try_number::<u32>(objects).ok())
             .map(Self::from_bits_truncate)
             .unwrap_or_default())

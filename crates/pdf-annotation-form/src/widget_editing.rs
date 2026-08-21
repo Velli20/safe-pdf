@@ -61,8 +61,8 @@ struct WidgetLocation {
 
 struct ButtonMember {
     location: WidgetLocation,
-    on_state: Option<String>,
-    active_state: Option<String>,
+    on_state: Option<Vec<u8>>,
+    active_state: Option<Vec<u8>>,
 }
 
 /// Edits widget annotations across a materialized PDF document.
@@ -301,7 +301,7 @@ impl<'a> WidgetEditor<'a> {
                 widget.is_radio_button(),
                 widget.is_radios_in_unison(),
                 on_state,
-                widget.active_button_state(annotation).map(str::to_owned),
+                widget.active_button_state(annotation).map(Vec::from),
             )
         };
 
@@ -312,7 +312,7 @@ impl<'a> WidgetEditor<'a> {
 
         let selected_state = target_on_state.as_deref();
         let group_value = if selected {
-            selected_state.map(str::to_owned)
+            selected_state.map(Vec::from)
         } else if is_radio_button {
             members.iter().find_map(|member| {
                 let affected = member.location == target
@@ -489,7 +489,7 @@ fn choice_value(values: &[Vec<u8>], multi_select: bool) -> Option<WidgetFieldVal
 
 fn button_member(location: WidgetLocation, annotation: &Annotation) -> ButtonMember {
     let active_state = match &annotation.kind {
-        AnnotationKind::Widget(widget) => widget.active_button_state(annotation).map(str::to_owned),
+        AnnotationKind::Widget(widget) => widget.active_button_state(annotation).map(Vec::from),
         _ => None,
     };
     ButtonMember {
@@ -506,7 +506,7 @@ fn ensure_listbox(
     let AnnotationKind::Widget(widget) = &annotation.kind else {
         return Err(WidgetEditError::WrongSubtype {
             id: id.get(),
-            subtype: annotation.subtype.clone(),
+            subtype: String::from_utf8_lossy(&annotation.subtype).into_owned(),
         });
     };
     widget
@@ -522,7 +522,7 @@ fn ensure_button(
     let AnnotationKind::Widget(widget) = &annotation.kind else {
         return Err(WidgetEditError::WrongSubtype {
             id: id.get(),
-            subtype: annotation.subtype.clone(),
+            subtype: String::from_utf8_lossy(&annotation.subtype).into_owned(),
         });
     };
     widget

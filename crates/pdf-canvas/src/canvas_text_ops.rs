@@ -108,7 +108,7 @@ impl<B: CanvasBackend> TextStateOps for PdfCanvas<'_, B> {
         Ok(())
     }
 
-    fn set_font_and_size(&mut self, font_name: &str, size: f32) -> Result<(), Self::ErrorType> {
+    fn set_font_and_size(&mut self, font_name: &[u8], size: f32) -> Result<(), Self::ErrorType> {
         let state = self.current_state_mut()?;
         state.text_state.font_size = size;
 
@@ -120,7 +120,9 @@ impl<B: CanvasBackend> TextStateOps for PdfCanvas<'_, B> {
             return Ok(());
         }
 
-        Err(PdfCanvasError::FontNotFound(font_name.to_string()))
+        Err(PdfCanvasError::FontNotFound(
+            String::from_utf8_lossy(font_name).into_owned(),
+        ))
     }
 
     fn set_text_rendering_mode(&mut self, mode: TextRenderingMode) -> Result<(), Self::ErrorType> {

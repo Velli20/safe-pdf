@@ -41,7 +41,7 @@ pub(crate) fn parse_lab_color_space(
         black_point,
     } = CieColorSpaceParams::from_dictionary(dict, objects)?;
     let range = dict
-        .optional_array_of::<f32, 4>("Range", objects)?
+        .optional_array_of::<f32, 4>(b"Range", objects)?
         .unwrap_or([-100.0, 100.0, -100.0, 100.0]);
     Ok(ColorSpace::Lab(LabColorSpace {
         white_point,

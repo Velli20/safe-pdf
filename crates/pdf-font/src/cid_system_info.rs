@@ -36,12 +36,12 @@ impl CidOrdering {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, FontError> {
-        let Some(cid_system_info) = dictionary.optional_dictionary("CIDSystemInfo", objects)?
+        let Some(cid_system_info) = dictionary.optional_dictionary(b"CIDSystemInfo", objects)?
         else {
             return Ok(None);
         };
 
-        let Some(ordering) = cid_system_info.optional_str("Ordering", objects)? else {
+        let Some(ordering) = cid_system_info.optional_bytes(b"Ordering", objects)? else {
             return Ok(None);
         };
 
@@ -50,22 +50,22 @@ impl CidOrdering {
 
     /// Build a best-effort CID to Unicode map for this ordering.
     pub(crate) fn cid_to_unicode_map(self) -> Result<Option<HashMap<u16, char>>, CMapError> {
-        let unicode_cmap_name = match self {
-            Self::Japan1 => "UniJIS-UCS2-HW-H",
-            Self::GB1 => "UniGB-UCS2-H",
-            Self::CNS1 => "UniCNS-UCS2-H",
-            Self::Korea1 => "UniKS-UCS2-H",
+        let unicode_cmap_name: &[u8] = match self {
+            Self::Japan1 => b"UniJIS-UCS2-HW-H",
+            Self::GB1 => b"UniGB-UCS2-H",
+            Self::CNS1 => b"UniCNS-UCS2-H",
+            Self::Korea1 => b"UniKS-UCS2-H",
         };
 
         Ok(PredefinedCMap::from_name(unicode_cmap_name)?.map(|cmap| cmap.cid_to_unicode_map()))
     }
 
-    fn from_name(name: &str) -> Option<Self> {
+    fn from_name(name: &[u8]) -> Option<Self> {
         match name {
-            "Japan1" => Some(Self::Japan1),
-            "GB1" => Some(Self::GB1),
-            "CNS1" => Some(Self::CNS1),
-            "Korea1" => Some(Self::Korea1),
+            b"Japan1" => Some(Self::Japan1),
+            b"GB1" => Some(Self::GB1),
+            b"CNS1" => Some(Self::CNS1),
+            b"Korea1" => Some(Self::Korea1),
             _ => None,
         }
     }

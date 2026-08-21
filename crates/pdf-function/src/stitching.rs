@@ -110,20 +110,20 @@ impl FunctionImpl for StitchingFunction {
     ) -> Result<Function, FunctionReadError> {
         let dictionary = object.try_dictionary(objects)?;
 
-        let domain = dictionary.required_array_of::<f32, 2>("Domain", objects)?;
+        let domain = dictionary.required_array_of::<f32, 2>(b"Domain", objects)?;
 
         // Parse /Functions array (sub-functions to stitch together)
-        let functions_arr = dictionary.required_array("Functions", objects)?;
+        let functions_arr = dictionary.required_array(b"Functions", objects)?;
         let functions = functions_arr
             .iter()
             .map(|obj| Function::parse(obj, objects))
             .collect::<Result<Vec<_>, _>>()?;
 
         // Parse /Bounds array (boundaries between sub-functions)
-        let bounds = dictionary.required_vec_of::<f32>("Bounds", objects)?;
+        let bounds = dictionary.required_vec_of::<f32>(b"Bounds", objects)?;
 
         // Parse /Encode array (input mapping for each sub-function)
-        let encode = dictionary.required_vec_of::<f32>("Encode", objects)?;
+        let encode = dictionary.required_vec_of::<f32>(b"Encode", objects)?;
 
         // Validate structural relationships
         let expected_bounds = functions

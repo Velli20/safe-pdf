@@ -677,7 +677,7 @@ mod tests {
     #[test]
     fn unknown_blend_mode_uses_normal_compositing() {
         assert_eq!(
-            to_skia_blend_mode(BlendMode::Unknown("VendorBlend".to_owned())),
+            to_skia_blend_mode(BlendMode::Unknown(Vec::from(b"VendorBlend"))),
             skia_safe::BlendMode::SrcOver
         );
     }

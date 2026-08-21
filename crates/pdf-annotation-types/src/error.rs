@@ -14,11 +14,14 @@ pub enum AnnotationError {
     #[error("{0}")]
     Resources(#[from] PdfPagesError),
     /// An annotation entry is present but has the wrong type or value shape.
-    #[error("invalid annotation entry '/{entry}': {reason}")]
-    InvalidEntry { entry: &'static str, reason: String },
+    #[error("invalid annotation entry '/{entry:?}': {reason}")]
+    InvalidEntry {
+        entry: &'static [u8],
+        reason: String,
+    },
     /// A required annotation entry is missing.
-    #[error("missing required annotation entry '/{entry}'")]
-    MissingEntry { entry: &'static str },
+    #[error("missing required annotation entry '/{entry:?}'")]
+    MissingEntry { entry: &'static [u8] },
 }
 
 /// Errors returned while resolving a button widget's active appearance state.

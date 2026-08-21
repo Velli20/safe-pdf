@@ -87,15 +87,15 @@ impl Type1Font {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<(FontData, Type1FontProgramFormat), FontError> {
-        let descriptor = dictionary.required_dictionary("FontDescriptor", objects)?;
+        let descriptor = dictionary.required_dictionary(b"FontDescriptor", objects)?;
 
         // Path 1: FontFile3 stream with subtype-driven handling.
-        if let Some(font_file3) = descriptor.get("FontFile3") {
+        if let Some(font_file3) = descriptor.get(b"FontFile3") {
             let stream = font_file3.try_stream(objects)?;
-            let subtype = stream.dictionary.optional_str("Subtype", objects)?;
+            let subtype = stream.dictionary.optional_bytes(b"Subtype", objects)?;
 
             return match subtype {
-                Some("Type1C") | Some("CIDFontType0C") => {
+                Some(b"Type1C") | Some(b"CIDFontType0C") => {
                     let cff_data = stream.raw_data();
                     if cff_data.is_empty() {
                         return Err(FontError::MissingFontFile);
@@ -103,12 +103,12 @@ impl Type1Font {
                     build_cff_font(cff_data)
                         .map(|font| (font.into(), Type1FontProgramFormat::OpenTypeCff))
                 }
-                Some("OpenType") => Ok((
+                Some(b"OpenType") => Ok((
                     FontData::shared(stream.shared_data()),
                     Type1FontProgramFormat::OpenTypeCff,
                 )),
                 Some(other) => Err(FontError::UnsupportedFontSubtype {
-                    subtype: other.to_string(),
+                    subtype: String::from_utf8_lossy(other).into_owned(),
                 }),
                 None => Err(FontError::UnsupportedFontSubtype {
                     subtype: "FontFile3".to_string(),
@@ -117,7 +117,7 @@ impl Type1Font {
         }
 
         // Path 2: classic Type 1 in FontFile.
-        if let Some(font_file) = descriptor.get("FontFile") {
+        if let Some(font_file) = descriptor.get(b"FontFile") {
             let stream = font_file.try_stream(objects)?;
             let normalized =
                 normalize_classic_type1_bytes(descriptor, stream.shared_data(), objects)?;
@@ -152,9 +152,9 @@ fn classic_type1_length(
     data_len: usize,
     objects: &dyn ObjectResolver,
 ) -> Result<Option<usize>, FontError> {
-    let length1 = descriptor.optional_number::<usize>("Length1", objects)?;
-    let length2 = descriptor.optional_number::<usize>("Length2", objects)?;
-    let length3 = descriptor.optional_number::<usize>("Length3", objects)?;
+    let length1 = descriptor.optional_number::<usize>(b"Length1", objects)?;
+    let length2 = descriptor.optional_number::<usize>(b"Length2", objects)?;
+    let length3 = descriptor.optional_number::<usize>(b"Length3", objects)?;
 
     let Some(total_length) = length1
         .zip(length2)
@@ -194,7 +194,7 @@ mod tests {
         let mut file3_stream_dict = BTreeMap::new();
         if let Some(subtype) = subtype {
             file3_stream_dict.insert(
-                "Subtype".to_string(),
+                Vec::from(b"Subtype"),
                 ObjectVariant::Name(subtype.as_bytes().to_vec()),
             );
         }
@@ -203,13 +203,13 @@ mod tests {
 
         let mut descriptor_dict = BTreeMap::new();
         descriptor_dict.insert(
-            "FontFile3".to_string(),
+            Vec::from(b"FontFile3"),
             ObjectVariant::Stream(font_file3_stream),
         );
 
         let mut font_dict = BTreeMap::new();
         font_dict.insert(
-            "FontDescriptor".to_string(),
+            Vec::from(b"FontDescriptor"),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(descriptor_dict))),
         );
         Dictionary::new(font_dict)
@@ -222,31 +222,31 @@ mod tests {
         let mut descriptor_dict = BTreeMap::new();
         if let Some((length1, length2, length3)) = lengths {
             descriptor_dict.insert(
-                "Length1".to_string(),
+                Vec::from(b"Length1"),
                 ObjectVariant::Integer(length1 as i64),
             );
             descriptor_dict.insert(
-                "Length2".to_string(),
+                Vec::from(b"Length2"),
                 ObjectVariant::Integer(length2 as i64),
             );
             descriptor_dict.insert(
-                "Length3".to_string(),
+                Vec::from(b"Length3"),
                 ObjectVariant::Integer(length3 as i64),
             );
         }
         descriptor_dict.insert(
-            "FontFile".to_string(),
+            Vec::from(b"FontFile"),
             ObjectVariant::Stream(StreamObject::new(
                 11,
                 0,
-                Box::new(Dictionary::new(BTreeMap::new())),
+                Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
                 bytes,
             )),
         );
 
         let mut font_dict = BTreeMap::new();
         font_dict.insert(
-            "FontDescriptor".to_string(),
+            Vec::from(b"FontDescriptor"),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(descriptor_dict))),
         );
         Dictionary::new(font_dict)
@@ -339,12 +339,10 @@ currentfile eexec
     #[test]
     fn empty_type1c_uses_standard14_fallback() {
         let mut dict = make_font_dict_with_font_file3(Some("Type1C"), Vec::new());
+        dict.dictionary
+            .insert(b"Subtype".to_vec(), ObjectVariant::Name(b"Type1".to_vec()));
         dict.dictionary.insert(
-            "Subtype".to_string(),
-            ObjectVariant::Name(b"Type1".to_vec()),
-        );
-        dict.dictionary.insert(
-            "BaseFont".to_string(),
+            b"BaseFont".to_vec(),
             ObjectVariant::Name(b"Helvetica".to_vec()),
         );
         let mut id_allocator = ContentStreamIdAllocator::new();
@@ -362,9 +360,9 @@ currentfile eexec
         let opentype_bytes = vec![0, 1, 2, 3, 4, 5];
         let dict = make_font_dict_with_font_file3(Some("OpenType"), opentype_bytes.clone());
         let stream_bytes = dict
-            .required_dictionary("FontDescriptor", &PassthroughResolver)
+            .required_dictionary(b"FontDescriptor", &PassthroughResolver)
             .unwrap()
-            .required_stream("FontFile3", &PassthroughResolver)
+            .required_stream(b"FontFile3", &PassthroughResolver)
             .unwrap()
             .raw_data()
             .as_ptr();
@@ -384,7 +382,7 @@ currentfile eexec
         assert_eq!(
             err,
             FontError::UnsupportedFontSubtype {
-                subtype: "Type42".to_string()
+                subtype: "Type42".to_owned()
             }
         );
     }
@@ -397,7 +395,7 @@ currentfile eexec
         assert_eq!(
             err,
             FontError::UnsupportedFontSubtype {
-                subtype: "FontFile3".to_string()
+                subtype: "FontFile3".to_owned()
             }
         );
     }
@@ -407,9 +405,9 @@ currentfile eexec
         let (bytes, lengths) = minimal_pfa_font();
         let dict = make_font_dict_with_font_file(bytes.clone(), Some(lengths));
         let stream_bytes = dict
-            .required_dictionary("FontDescriptor", &PassthroughResolver)
+            .required_dictionary(b"FontDescriptor", &PassthroughResolver)
             .unwrap()
-            .required_stream("FontFile", &PassthroughResolver)
+            .required_stream(b"FontFile", &PassthroughResolver)
             .unwrap()
             .raw_data()
             .as_ptr();
@@ -425,9 +423,9 @@ currentfile eexec
         let bytes = minimal_pfb_font();
         let dict = make_font_dict_with_font_file(bytes.clone(), None);
         let stream_bytes = dict
-            .required_dictionary("FontDescriptor", &PassthroughResolver)
+            .required_dictionary(b"FontDescriptor", &PassthroughResolver)
             .unwrap()
-            .required_stream("FontFile", &PassthroughResolver)
+            .required_stream(b"FontFile", &PassthroughResolver)
             .unwrap()
             .raw_data()
             .as_ptr();
@@ -444,9 +442,9 @@ currentfile eexec
         bytes.extend_from_slice(b"trailing junk");
         let dict = make_font_dict_with_font_file(bytes, Some(lengths));
         let stream_bytes = dict
-            .required_dictionary("FontDescriptor", &PassthroughResolver)
+            .required_dictionary(b"FontDescriptor", &PassthroughResolver)
             .unwrap()
-            .required_stream("FontFile", &PassthroughResolver)
+            .required_stream(b"FontFile", &PassthroughResolver)
             .unwrap()
             .raw_data()
             .as_ptr();
@@ -466,7 +464,7 @@ currentfile eexec
         assert_eq!(
             err,
             FontError::UnsupportedFontSubtype {
-                subtype: "FontFile".to_string()
+                subtype: "FontFile".to_owned()
             }
         );
     }

@@ -11,18 +11,18 @@ pub enum BorderStyleName {
     /// Underline border.
     Underline,
     /// A vendor or future border style.
-    Unknown(String),
+    Unknown(Vec<u8>),
 }
 
-impl From<&str> for BorderStyleName {
-    fn from(value: &str) -> Self {
+impl From<&[u8]> for BorderStyleName {
+    fn from(value: &[u8]) -> Self {
         match value {
-            "S" => Self::Solid,
-            "D" => Self::Dashed,
-            "B" => Self::Beveled,
-            "I" => Self::Inset,
-            "U" => Self::Underline,
-            other => Self::Unknown(other.to_owned()),
+            b"S" => Self::Solid,
+            b"D" => Self::Dashed,
+            b"B" => Self::Beveled,
+            b"I" => Self::Inset,
+            b"U" => Self::Underline,
+            other => Self::Unknown(Vec::from(other)),
         }
     }
 }

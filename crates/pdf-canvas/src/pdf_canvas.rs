@@ -567,13 +567,15 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// # Errors
     ///
     /// Returns an error if the pattern is not found in the resources.
-    pub(crate) fn set_fill_pattern(&mut self, pattern_name: &str) -> Result<(), PdfCanvasError> {
+    pub(crate) fn set_fill_pattern(&mut self, pattern_name: &[u8]) -> Result<(), PdfCanvasError> {
         let Some(pattern) = self
             .current_state()?
             .resources
             .and_then(|r| r.pattern(pattern_name))
         else {
-            return Err(PdfCanvasError::PatternNotFound(pattern_name.to_string()));
+            return Err(PdfCanvasError::PatternNotFound(
+                String::from_utf8_lossy(pattern_name).into_owned(),
+            ));
         };
         self.current_state_mut()?.fill_pattern = Some(pattern);
         Ok(())
@@ -588,13 +590,15 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// # Errors
     ///
     /// Returns an error if the pattern is not found in the resources.
-    pub(crate) fn set_stroke_pattern(&mut self, pattern_name: &str) -> Result<(), PdfCanvasError> {
+    pub(crate) fn set_stroke_pattern(&mut self, pattern_name: &[u8]) -> Result<(), PdfCanvasError> {
         let Some(pattern) = self
             .current_state()?
             .resources
             .and_then(|r| r.pattern(pattern_name))
         else {
-            return Err(PdfCanvasError::PatternNotFound(pattern_name.to_string()));
+            return Err(PdfCanvasError::PatternNotFound(
+                String::from_utf8_lossy(pattern_name).into_owned(),
+            ));
         };
         self.current_state_mut()?.stroke_pattern = Some(pattern);
         Ok(())
@@ -700,7 +704,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// - `is_stroking`: If `true`, sets the stroking color space; otherwise, sets the filling color space.
     pub(crate) fn set_color_space(
         &mut self,
-        name: &str,
+        name: &[u8],
         is_stroking: bool,
     ) -> Result<(), PdfCanvasError> {
         let state = self.current_state_mut()?;
@@ -713,17 +717,20 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         // The names /DeviceGray, /DeviceRGB, /DeviceCMYK, and /Pattern are reserved
         // keywords that always identify their corresponding colour spaces directly.
         // Per PDF spec §8.6.8 each also sets the current colour to its initial value.
-        if matches!(name, "DeviceGray" | "DeviceRGB" | "DeviceCMYK" | "Pattern") {
+        if matches!(
+            name,
+            b"DeviceGray" | b"DeviceRGB" | b"DeviceCMYK" | b"Pattern"
+        ) {
             let (cs, initial_color) = match name {
-                "DeviceGray" => (
+                b"DeviceGray" => (
                     &CanvasState::DEVICE_GRAY_COLOR_SPACE,
                     Some(Color::from_gray(0.0)),
                 ),
-                "DeviceRGB" => (
+                b"DeviceRGB" => (
                     &CanvasState::DEVICE_RGB_COLOR_SPACE,
                     Some(Color::from_rgb(0.0, 0.0, 0.0)),
                 ),
-                "DeviceCMYK" => (
+                b"DeviceCMYK" => (
                     &CanvasState::DEVICE_CMYK_COLOR_SPACE,
                     Some(Color::from_cmyk(0.0, 0.0, 0.0, 1.0)),
                 ),
@@ -745,7 +752,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         }
 
         let Some(cs) = state.resources.and_then(|res| res.color_space(name)) else {
-            return Err(PdfCanvasError::ColorSpaceNotFound(name.to_string()));
+            return Err(PdfCanvasError::ColorSpaceNotFound(
+                String::from_utf8_lossy(name).into_owned(),
+            ));
         };
 
         if is_stroking {

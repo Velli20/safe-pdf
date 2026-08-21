@@ -121,9 +121,11 @@ impl FunctionImpl for PostScriptCalculatorFunction {
         let stream = object.try_stream(objects)?;
         let domain = stream
             .dictionary
-            .required_vec_of::<f32>("Domain", objects)?;
+            .required_vec_of::<f32>(b"Domain", objects)?;
 
-        let range = stream.dictionary.required_vec_of::<f32>("Range", objects)?;
+        let range = stream
+            .dictionary
+            .required_vec_of::<f32>(b"Range", objects)?;
 
         // Parse PostScript code: add spaces around braces for tokenization
         let code_str = String::from_utf8_lossy(stream.raw_data());

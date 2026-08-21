@@ -40,10 +40,10 @@ pub(crate) fn read_object_stream(
     let dict = stream.dictionary.as_ref();
 
     // /N: number of objects in this stream (required)
-    let n = dict.required_number::<usize>("N", objects)?;
+    let n = dict.required_number::<usize>(b"N", objects)?;
 
     // /First: byte offset of the first object data within the decoded stream (required)
-    let first = dict.required_number::<usize>("First", objects)?;
+    let first = dict.required_number::<usize>(b"First", objects)?;
 
     // Decode stream data (applies filters)
     let data = stream.raw_data();

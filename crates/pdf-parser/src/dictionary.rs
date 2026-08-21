@@ -9,8 +9,8 @@ use crate::{error::ParserError, parser::PdfParser};
 
 enum DictionaryEntryState {
     ExpectKeyOrTerminator,
-    ExpectValue { key: String },
-    ContinueNameValue { key: String, value: Vec<u8> },
+    ExpectValue { key: Vec<u8> },
+    ContinueNameValue { key: Vec<u8>, value: Vec<u8> },
 }
 
 impl PdfParser<'_> {
@@ -81,7 +81,7 @@ impl PdfParser<'_> {
                 None => return Err(ParserError::UnexpectedEndOfFile),
             }
 
-            let key = String::from_utf8_lossy(&self.parse_name()?).into_owned();
+            let key = self.parse_name()?;
             self.skip_whitespace_and_comments();
             let object = self.parse_inline_image_dictionary_value(objects)?;
             dictionary.insert(key, object);
@@ -106,7 +106,7 @@ impl PdfParser<'_> {
     fn next_dictionary_state(
         &mut self,
         objects: &dyn ObjectResolver,
-        dictionary: &mut BTreeMap<String, ObjectVariant>,
+        dictionary: &mut BTreeMap<Vec<u8>, ObjectVariant>,
         state: DictionaryEntryState,
     ) -> Result<DictionaryEntryState, ParserError> {
         match state {
@@ -122,8 +122,7 @@ impl PdfParser<'_> {
 
     /// Reads the next dictionary key and transitions to value parsing.
     fn parse_dictionary_key_state(&mut self) -> Result<DictionaryEntryState, ParserError> {
-        // Dictionary keys are always ASCII per spec; convert at boundary.
-        let key = String::from_utf8_lossy(&self.parse_name()?).into_owned();
+        let key = self.parse_name()?;
         Ok(DictionaryEntryState::ExpectValue { key })
     }
 
@@ -134,8 +133,8 @@ impl PdfParser<'_> {
     fn parse_dictionary_value_state(
         &mut self,
         objects: &dyn ObjectResolver,
-        dictionary: &mut BTreeMap<String, ObjectVariant>,
-        key: String,
+        dictionary: &mut BTreeMap<Vec<u8>, ObjectVariant>,
+        key: Vec<u8>,
     ) -> Result<DictionaryEntryState, ParserError> {
         match self.tokenizer.peek() {
             Some(PdfToken::Solidus) => {
@@ -153,8 +152,8 @@ impl PdfParser<'_> {
     /// Extends a spaced name value until it reaches a real delimiter or key boundary.
     fn continue_dictionary_name_value(
         &mut self,
-        dictionary: &mut BTreeMap<String, ObjectVariant>,
-        key: String,
+        dictionary: &mut BTreeMap<Vec<u8>, ObjectVariant>,
+        key: Vec<u8>,
         mut value: Vec<u8>,
     ) -> Result<DictionaryEntryState, ParserError> {
         if self.is_at_dictionary_end() || matches!(self.tokenizer.peek(), Some(PdfToken::Solidus)) {
@@ -231,10 +230,10 @@ mod tests {
         let result = parser.parse_dictionary(&PassthroughResolver).unwrap();
 
         assert_eq!(
-            result.get("AnyName"),
+            result.get(b"AnyName"),
             Some(&ObjectVariant::Name(b"A B".to_vec()))
         );
-        assert_eq!(result.get("Next"), Some(&ObjectVariant::Integer(1)));
+        assert_eq!(result.get(b"Next"), Some(&ObjectVariant::Integer(1)));
     }
 
     #[test]
@@ -243,10 +242,10 @@ mod tests {
         let result = parser.parse_dictionary(&PassthroughResolver).unwrap();
 
         assert_eq!(
-            result.get("AnyName"),
+            result.get(b"AnyName"),
             Some(&ObjectVariant::Name(b"A B C".to_vec()))
         );
-        assert_eq!(result.get("Next"), Some(&ObjectVariant::Integer(1)));
+        assert_eq!(result.get(b"Next"), Some(&ObjectVariant::Integer(1)));
     }
 
     #[test]
@@ -255,13 +254,23 @@ mod tests {
         let result = parser.parse_dictionary(&PassthroughResolver).unwrap();
 
         assert_eq!(
-            result.get("Name"),
+            result.get(b"Name"),
             Some(&ObjectVariant::Name(b"Value".to_vec()))
         );
         assert_eq!(
-            result.get("Next"),
+            result.get(b"Next"),
             Some(&ObjectVariant::Name(b"Other".to_vec()))
         );
+    }
+
+    #[test]
+    fn dictionary_preserves_non_utf8_name_keys_and_values() {
+        let mut parser = PdfParser::from(b"<< /#FF /#FE >>".as_slice());
+        let result = parser
+            .parse_dictionary(&PassthroughResolver)
+            .expect("arbitrary Name bytes should parse");
+
+        assert_eq!(result.get(&[0xFF]), Some(&ObjectVariant::Name(vec![0xFE])));
     }
 
     #[test]
@@ -323,7 +332,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            result.get("CS"),
+            result.get(b"CS"),
             Some(&ObjectVariant::Name(b"DeviceGray".to_vec()))
         );
         assert!(parser.tokenizer.data().starts_with(b"ID \x00\x01"));

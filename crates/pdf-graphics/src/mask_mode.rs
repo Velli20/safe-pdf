@@ -6,15 +6,15 @@ pub enum MaskMode {
     /// The soft mask is applied to the luminosity channel.
     Luminosity,
     /// An unrecognized soft mask mode.
-    Unknown(String),
+    Unknown(Vec<u8>),
 }
 
-impl From<&str> for MaskMode {
-    fn from(value: &str) -> Self {
+impl From<&[u8]> for MaskMode {
+    fn from(value: &[u8]) -> Self {
         match value {
-            "Alpha" => Self::Alpha,
-            "Luminosity" => Self::Luminosity,
-            other => Self::Unknown(other.to_owned()),
+            b"Alpha" => Self::Alpha,
+            b"Luminosity" => Self::Luminosity,
+            other => Self::Unknown(Vec::from(other)),
         }
     }
 }

@@ -25,11 +25,11 @@ impl PolyLineAnnotation {
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
         let vertices =
-            helpers::point_list("Vertices", dictionary.get_or_err("Vertices")?, objects)?;
+            helpers::point_list(b"Vertices", dictionary.get_or_err(b"Vertices")?, objects)?;
         let line_endings = super::line_endings(dictionary, objects)?;
-        let interior_color = AnnotationColor::from_dictionary(dictionary, "IC", objects)?;
-        let border_style = BorderStyle::from_dictionary(dictionary, "BS", objects)?;
-        let intent = dictionary.optional_bytes_vec("IT", objects)?;
+        let interior_color = AnnotationColor::from_dictionary(dictionary, b"IC", objects)?;
+        let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
+        let intent = dictionary.optional_bytes(b"IT", objects)?.map(Vec::from);
 
         Ok(Self {
             vertices,

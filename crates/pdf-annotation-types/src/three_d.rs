@@ -30,7 +30,7 @@ impl ThreeDAnnotation {
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, AnnotationError> {
         let default_view = dictionary
-            .get("3DV")
+            .get(b"3DV")
             .map(|value| {
                 Ok::<ThreeDView, AnnotationError>(ThreeDView {
                     dictionary: value.try_dictionary(objects)?.clone(),
@@ -38,7 +38,7 @@ impl ThreeDAnnotation {
             })
             .transpose()?;
         let activation = dictionary
-            .get("3DA")
+            .get(b"3DA")
             .map(|value| {
                 Ok::<MovieActivation, AnnotationError>(MovieActivation {
                     dictionary: value.try_dictionary(objects)?.clone(),

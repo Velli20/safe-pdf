@@ -5,15 +5,15 @@ pub enum CaretSymbolStyle {
     /// No marker.
     None,
     /// A vendor or future caret symbol style.
-    Unknown(String),
+    Unknown(Vec<u8>),
 }
 
-impl From<&str> for CaretSymbolStyle {
-    fn from(value: &str) -> Self {
+impl From<&[u8]> for CaretSymbolStyle {
+    fn from(value: &[u8]) -> Self {
         match value {
-            "P" => Self::P,
-            "None" => Self::None,
-            other => Self::Unknown(other.to_owned()),
+            b"P" => Self::P,
+            b"None" => Self::None,
+            other => Self::Unknown(Vec::from(other)),
         }
     }
 }

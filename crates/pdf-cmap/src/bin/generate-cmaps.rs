@@ -425,12 +425,12 @@ fn render_generated_cmaps(cmaps: &[ParsedCMap]) -> Result<String> {
         let use_cmap = cmap
             .use_cmap
             .as_ref()
-            .map(|name| format!("Some({name:?})"))
+            .map(|name| format!("Some(b{name:?})"))
             .unwrap_or_else(|| "None".to_string());
         push_line(
             &mut out,
             &format!(
-                "    GeneratedCMap {{ name: {:?}, use_cmap: {}, writing_mode: {}, code_space_ranges: &{}_CODESPACES, cid_ranges: &{}_RANGES, cid_chars: &{}_CHARS }},",
+                "    GeneratedCMap {{ name: b{:?}, use_cmap: {}, writing_mode: {}, code_space_ranges: &{}_CODESPACES, cid_ranges: &{}_RANGES, cid_chars: &{}_CHARS }},",
                 cmap.name, use_cmap, cmap.writing_mode, ident, ident, ident
             ),
         );

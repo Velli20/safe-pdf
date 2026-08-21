@@ -11,13 +11,13 @@ use crate::{
     annotation_id::AnnotationId,
 };
 
-const OFF_STATE: &str = "Off";
+const OFF_STATE: &[u8] = b"Off";
 
 /// A typed page annotation.
 pub struct Annotation {
     id: AnnotationId,
     /// The annotation subtype name.
-    pub subtype: String,
+    pub subtype: Vec<u8>,
     /// The optional annotation rectangle from `/Rect`.
     pub rect: Option<Rect>,
     /// The optional annotation contents.
@@ -29,7 +29,7 @@ pub struct Annotation {
     /// The optional appearance dictionary from `/AP`.
     pub appearance: Option<AppearanceDictionary>,
     /// The optional appearance state from `/AS`.
-    pub appearance_state: Option<String>,
+    pub appearance_state: Option<Vec<u8>>,
     /// The optional border array from `/Border`.
     pub border: Option<AnnotationBorder>,
     /// The optional annotation color from `/C`.
@@ -53,7 +53,7 @@ impl Annotation {
     /// A valid current `/AS` state is preferred. Otherwise, this selects the
     /// first non-`/Off` key from the normal appearance subdictionary. Returns
     /// [`ButtonStateError::MissingOnState`] when no such state is available.
-    pub fn button_on_state(&self) -> Result<String, ButtonStateError> {
+    pub fn button_on_state(&self) -> Result<Vec<u8>, ButtonStateError> {
         let Some(appearance) = self.appearance.as_ref() else {
             return Err(ButtonStateError::MissingOnState { id: self.id });
         };
@@ -72,7 +72,7 @@ impl Annotation {
 
         states
             .keys()
-            .find(|state| state.as_str() != OFF_STATE)
+            .find(|state| state.as_slice() != OFF_STATE)
             .cloned()
             .ok_or(ButtonStateError::MissingOnState { id: self.id })
     }
@@ -80,21 +80,19 @@ impl Annotation {
     /// Applies a button appearance state to this annotation's `/AS` entry.
     ///
     /// `None` represents the PDF button off state and is stored as `/Off`.
-    pub fn set_button_appearance_state(&mut self, state: Option<&str>) {
-        self.appearance_state = Some(state.unwrap_or(OFF_STATE).to_owned());
+    pub fn set_button_appearance_state(&mut self, state: Option<&[u8]>) {
+        self.appearance_state = Some(state.unwrap_or(OFF_STATE).to_vec());
     }
 
     /// Synchronizes this widget annotation's `/V` field with a button state.
     ///
     /// `None` represents the PDF button off state and is stored as `/Off`.
     /// This method leaves non-widget annotations unchanged.
-    pub fn set_button_value(&mut self, state: Option<&str>) {
+    pub fn set_button_value(&mut self, state: Option<&[u8]>) {
         let AnnotationKind::Widget(widget) = &mut self.kind else {
             return;
         };
-        widget.value = Some(WidgetFieldValue::Bytes(
-            state.unwrap_or(OFF_STATE).as_bytes().to_vec(),
-        ));
+        widget.value = Some(WidgetFieldValue::Bytes(state.unwrap_or(OFF_STATE).to_vec()));
     }
 
     /// Assigns an identifier when attaching an annotation to a page.
@@ -115,7 +113,7 @@ impl Annotation {
     ) -> Self {
         Self {
             id: AnnotationId::from_page_value(0),
-            subtype: "FreeText".to_owned(),
+            subtype: b"FreeText".to_vec(),
             rect: Some(rect),
             contents: Some(contents),
             name: None,
@@ -138,7 +136,7 @@ impl Annotation {
         cycle_tracker: &mut ReadCycleTracker,
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Option<Vec<Self>>, AnnotationError> {
-        let Some(annots) = dictionary.get("Annots") else {
+        let Some(annots) = dictionary.get(b"Annots") else {
             return Ok(None);
         };
 
@@ -151,7 +149,7 @@ impl Annotation {
             };
             // A broken annotation can still be useful to preserve the rest of the page,
             // but without `/Subtype` we cannot dispatch it to a concrete parser.
-            if dictionary.get("Subtype").is_none() {
+            if dictionary.get(b"Subtype").is_none() {
                 continue;
             }
             let mut annotation =
@@ -174,13 +172,13 @@ impl Annotation {
         // Some PDFs omit `/Type` on annotation dictionaries even though the
         // entry is nominally expected to be `/Annot`, so only validate it when
         // the key is actually present.
-        if let Some(annotation_type) = dictionary.optional_str("Type", objects)? {
+        if let Some(annotation_type) = dictionary.optional_bytes(b"Type", objects)? {
             match annotation_type {
-                "Annot" => {}
+                b"Annot" => {}
                 other => {
                     return Err(AnnotationError::InvalidEntry {
-                        entry: "Type",
-                        reason: format!("expected /Annot, found /{other}"),
+                        entry: b"Type",
+                        reason: format!("expected /Annot, found /{other:?}"),
                     });
                 }
             }
@@ -188,10 +186,13 @@ impl Annotation {
 
         // `/Subtype` identifies the concrete annotation kind and is required
         // for dispatching to the subtype-specific parser.
-        let subtype = dictionary.required_str("Subtype", objects)?.to_owned();
+        let subtype = dictionary
+            .get_or_err(b"Subtype")?
+            .try_bytes(objects)?
+            .to_vec();
 
         let rect = dictionary
-            .get("Rect")
+            .get(b"Rect")
             .map(|value| {
                 value.try_array_of::<f32, 4>(objects).map(|arr| {
                     let [left, bottom, right, top] = arr;
@@ -207,13 +208,14 @@ impl Annotation {
 
         let kind = AnnotationKind::from_dictionary(&subtype, dictionary, objects)?;
 
-        let contents = dictionary.optional_bytes_vec("Contents", objects)?;
-        let name = dictionary.optional_bytes_vec("NM", objects)?;
-        let flags = dictionary.optional_number::<i32>("F", objects)?;
+        let contents = dictionary.optional_bytes_vec(b"Contents", objects)?;
+        let name = dictionary.optional_bytes_vec(b"NM", objects)?;
+        let flags = dictionary.optional_number::<i32>(b"F", objects)?;
         let appearance_state = dictionary
-            .optional_str("AS", objects)?
-            .map(|s| s.to_owned());
-        let struct_parent = dictionary.optional_number::<usize>("StructParent", objects)?;
+            .get(b"AS")
+            .map(|value| value.try_bytes(objects).map(Vec::from))
+            .transpose()?;
+        let struct_parent = dictionary.optional_number::<usize>(b"StructParent", objects)?;
 
         let appearance = AppearanceDictionary::from_dictionary(
             dictionary,
@@ -224,7 +226,7 @@ impl Annotation {
         )?;
         let optional_content = OptionalContent::from_dictionary(dictionary, objects)?;
         let border = AnnotationBorder::from_dictionary(dictionary, objects)?;
-        let color = AnnotationColor::from_dictionary(dictionary, "C", objects)?;
+        let color = AnnotationColor::from_dictionary(dictionary, b"C", objects)?;
 
         Ok(Self {
             id: AnnotationId::from_page_value(0),
@@ -301,16 +303,19 @@ mod tests {
 
     fn annotation_dictionary(entries: Vec<(&str, ObjectVariant)>) -> Dictionary {
         let mut values = BTreeMap::new();
-        values.insert("Subtype".to_owned(), ObjectVariant::Name(b"Popup".to_vec()));
+        values.insert(
+            Vec::from(b"Subtype"),
+            ObjectVariant::Name(b"Popup".to_vec()),
+        );
         for (key, value) in entries {
-            values.insert(key.to_owned(), value);
+            values.insert(Vec::from(key.as_bytes()), value);
         }
         Dictionary::new(values)
     }
 
     fn appearance_stream(object_number: usize) -> ObjectVariant {
         let dictionary = Dictionary::new(BTreeMap::from([(
-            "BBox".to_owned(),
+            Vec::from(b"BBox"),
             ObjectVariant::Array(vec![
                 ObjectVariant::Integer(0),
                 ObjectVariant::Integer(0),
@@ -332,14 +337,14 @@ mod tests {
             .enumerate()
             .map(|(index, state)| {
                 (
-                    (*state).to_owned(),
+                    Vec::from(state.as_bytes()),
                     appearance_stream(index.saturating_add(1)),
                 )
             })
             .collect();
         let normal = ObjectVariant::Dictionary(Box::new(Dictionary::new(states)));
         let appearance = ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-            "N".to_owned(),
+            Vec::from(b"N"),
             normal,
         )]))));
 
@@ -358,7 +363,7 @@ mod tests {
         parse_annotation(Dictionary::new(
             entries
                 .into_iter()
-                .map(|(key, value)| (key.to_owned(), value))
+                .map(|(key, value)| (Vec::from(key.as_bytes()), value))
                 .collect(),
         ))
         .expect("button annotation should parse")
@@ -380,20 +385,23 @@ mod tests {
 
         let annotation = parse_annotation(dictionary).expect("annotation should parse");
 
-        assert_eq!(annotation.subtype, "Popup");
+        assert_eq!(annotation.subtype, b"Popup".to_vec());
     }
 
     #[test]
     fn valid_type_is_still_accepted() {
         let mut values = BTreeMap::new();
-        values.insert("Type".to_owned(), ObjectVariant::Name(b"Annot".to_vec()));
-        values.insert("Subtype".to_owned(), ObjectVariant::Name(b"Popup".to_vec()));
-        values.insert("Parent".to_owned(), ObjectVariant::Reference(3));
+        values.insert(Vec::from(b"Type"), ObjectVariant::Name(b"Annot".to_vec()));
+        values.insert(
+            Vec::from(b"Subtype"),
+            ObjectVariant::Name(b"Popup".to_vec()),
+        );
+        values.insert(Vec::from(b"Parent"), ObjectVariant::Reference(3));
 
         let annotation =
             parse_annotation(Dictionary::new(values)).expect("annotation should parse");
 
-        assert_eq!(annotation.subtype, "Popup");
+        assert_eq!(annotation.subtype, b"Popup".to_vec());
     }
 
     #[test]
@@ -409,14 +417,14 @@ mod tests {
     fn button_on_state_prefers_the_current_valid_appearance_state() {
         let annotation = button_annotation(Some("B"), &["Off", "A", "B"]);
 
-        assert_eq!(annotation.button_on_state(), Ok("B".to_owned()));
+        assert_eq!(annotation.button_on_state(), Ok(b"B".to_vec()));
     }
 
     #[test]
     fn button_on_state_falls_back_to_the_first_non_off_state() {
         let annotation = button_annotation(Some("Missing"), &["Off", "B", "A"]);
 
-        assert_eq!(annotation.button_on_state(), Ok("A".to_owned()));
+        assert_eq!(annotation.button_on_state(), Ok(b"A".to_vec()));
     }
 
     #[test]
@@ -435,24 +443,30 @@ mod tests {
     fn button_appearance_and_field_values_are_updated_independently() {
         let mut annotation = button_annotation(None, &[]);
 
-        annotation.set_button_appearance_state(Some("Yes"));
-        annotation.set_button_value(Some("Yes"));
-        assert_eq!(annotation.appearance_state.as_deref(), Some("Yes"));
+        annotation.set_button_appearance_state(Some(b"Yes"));
+        annotation.set_button_value(Some(b"Yes"));
+        assert_eq!(
+            annotation.appearance_state.as_deref(),
+            Some(b"Yes".as_slice())
+        );
         assert_eq!(widget_value(&annotation), Some(b"Yes".as_slice()));
 
         annotation.set_button_appearance_state(None);
         annotation.set_button_value(None);
         assert_eq!(annotation.appearance_state.as_deref(), Some(OFF_STATE));
-        assert_eq!(widget_value(&annotation), Some(OFF_STATE.as_bytes()));
+        assert_eq!(widget_value(&annotation), Some(OFF_STATE));
     }
 
     #[test]
     fn malformed_present_rect_remains_an_error() {
         let mut values = BTreeMap::new();
-        values.insert("Type".to_owned(), ObjectVariant::Name(b"Annot".to_vec()));
-        values.insert("Subtype".to_owned(), ObjectVariant::Name(b"Popup".to_vec()));
+        values.insert(Vec::from(b"Type"), ObjectVariant::Name(b"Annot".to_vec()));
         values.insert(
-            "Rect".to_owned(),
+            Vec::from(b"Subtype"),
+            ObjectVariant::Name(b"Popup".to_vec()),
+        );
+        values.insert(
+            Vec::from(b"Rect"),
             ObjectVariant::Array(vec![
                 ObjectVariant::Integer(0),
                 ObjectVariant::Integer(0),
@@ -471,8 +485,11 @@ mod tests {
     #[test]
     fn invalid_present_type_remains_an_error() {
         let mut values = BTreeMap::new();
-        values.insert("Type".to_owned(), ObjectVariant::Name(b"Page".to_vec()));
-        values.insert("Subtype".to_owned(), ObjectVariant::Name(b"Popup".to_vec()));
+        values.insert(Vec::from(b"Type"), ObjectVariant::Name(b"Page".to_vec()));
+        values.insert(
+            Vec::from(b"Subtype"),
+            ObjectVariant::Name(b"Popup".to_vec()),
+        );
 
         let error = match parse_annotation(Dictionary::new(values)) {
             Ok(_) => panic!("invalid annotation type should fail"),
@@ -481,7 +498,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            AnnotationError::InvalidEntry { entry: "Type", .. }
+            AnnotationError::InvalidEntry { entry: b"Type", .. }
         ));
     }
 
@@ -491,7 +508,7 @@ mod tests {
         objects.insert(
             4,
             ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-                "Type".to_owned(),
+                Vec::from(b"Type"),
                 ObjectVariant::Name(b"Annot".to_vec()),
             )])))),
         );
@@ -499,14 +516,17 @@ mod tests {
         objects.insert(
             5,
             ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
-                ("Type".to_owned(), ObjectVariant::Name(b"Annot".to_vec())),
-                ("Subtype".to_owned(), ObjectVariant::Name(b"Popup".to_vec())),
+                (Vec::from(b"Type"), ObjectVariant::Name(b"Annot".to_vec())),
+                (
+                    Vec::from(b"Subtype"),
+                    ObjectVariant::Name(b"Popup".to_vec()),
+                ),
             ])))),
         );
 
         let mut page_values = BTreeMap::new();
         page_values.insert(
-            "Annots".to_owned(),
+            Vec::from(b"Annots"),
             ObjectVariant::Array(vec![
                 ObjectVariant::Reference(4),
                 ObjectVariant::Reference(5),
@@ -530,7 +550,7 @@ mod tests {
         let annotations = annotations.expect("annotations should be present");
         // The broken object is skipped, but the valid annotation remains available.
         assert_eq!(annotations.len(), 1);
-        assert_eq!(annotations[0].subtype, "Popup");
+        assert_eq!(annotations[0].subtype, b"Popup".to_vec());
         assert_eq!(annotations[0].id().get(), 0);
     }
 }

@@ -17,11 +17,11 @@ use crate::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct InvokeXObject {
     /// The name of the XObject resource to invoke, as defined in the resource dictionary.
-    name: String,
+    name: Vec<u8>,
 }
 
 impl InvokeXObject {
-    pub fn new(name: String) -> Self {
+    pub fn new(name: Vec<u8>) -> Self {
         Self { name }
     }
 }
@@ -32,7 +32,7 @@ impl PdfOperator for InvokeXObject {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let name = operands.get_str()?;
+        let name = operands.get_name_bytes()?;
         Ok(PdfOperatorVariant::InvokeXObject(Self::new(name)))
     }
 
@@ -80,10 +80,10 @@ mod tests {
     fn inline_image_call_dispatches_to_backend_hook() {
         let image = InlineImage::new(
             Dictionary::new(BTreeMap::from([
-                ("BPC".to_string(), ObjectVariant::Integer(8)),
-                ("CS".to_string(), ObjectVariant::Name(b"G".to_vec())),
-                ("H".to_string(), ObjectVariant::Integer(1)),
-                ("W".to_string(), ObjectVariant::Integer(2)),
+                (Vec::from(b"BPC"), ObjectVariant::Integer(8)),
+                (Vec::from(b"CS"), ObjectVariant::Name(b"G".to_vec())),
+                (Vec::from(b"H"), ObjectVariant::Integer(1)),
+                (Vec::from(b"W"), ObjectVariant::Integer(2)),
             ])),
             vec![0x01, 0x02],
             &PassthroughResolver,

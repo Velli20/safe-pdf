@@ -346,7 +346,10 @@ fn checkbox_editor_uses_nonstandard_on_state() {
 
     let page = document.pages.first().expect("page should exist");
     let annotation = page.annotation(id).expect("annotation");
-    assert_eq!(annotation.appearance_state.as_deref(), Some("1"));
+    assert_eq!(
+        annotation.appearance_state.as_deref(),
+        Some(b"1".as_slice())
+    );
     assert_eq!(widget_value(annotation), Some(b"1".as_slice()));
 }
 
@@ -385,8 +388,8 @@ fn radio_editor_selects_one_in_inherited_field_group() {
     let page = document.pages.first().expect("page should exist");
     let first = page.annotation(first_id).expect("first radio");
     let second = page.annotation(second_id).expect("second radio");
-    assert_eq!(first.appearance_state.as_deref(), Some("Off"));
-    assert_eq!(second.appearance_state.as_deref(), Some("B"));
+    assert_eq!(first.appearance_state.as_deref(), Some(b"Off".as_slice()));
+    assert_eq!(second.appearance_state.as_deref(), Some(b"B".as_slice()));
     assert_eq!(widget_value(first), Some(b"B".as_slice()));
     assert_eq!(widget_value(second), Some(b"B".as_slice()));
     let AnnotationKind::Widget(first_widget) = &first.kind else {
@@ -428,7 +431,10 @@ fn checkbox_editor_synchronizes_field_widgets_across_pages() {
 
     for page in &document.pages {
         let annotation = &page.annotations.as_ref().unwrap()[0];
-        assert_eq!(annotation.appearance_state.as_deref(), Some("Yes"));
+        assert_eq!(
+            annotation.appearance_state.as_deref(),
+            Some(b"Yes".as_slice())
+        );
         assert_eq!(widget_value(annotation), Some(b"Yes".as_slice()));
     }
 }
@@ -467,8 +473,8 @@ fn radio_editor_synchronizes_field_value_across_pages() {
 
     let first = &document.pages[0].annotations.as_ref().unwrap()[0];
     let second = &document.pages[1].annotations.as_ref().unwrap()[0];
-    assert_eq!(first.appearance_state.as_deref(), Some("Off"));
-    assert_eq!(second.appearance_state.as_deref(), Some("B"));
+    assert_eq!(first.appearance_state.as_deref(), Some(b"Off".as_slice()));
+    assert_eq!(second.appearance_state.as_deref(), Some(b"B".as_slice()));
     assert_eq!(widget_value(first), Some(b"B".as_slice()));
     assert_eq!(widget_value(second), Some(b"B".as_slice()));
 }
@@ -500,9 +506,18 @@ fn radios_in_unison_select_matching_on_states() {
         .expect("radio should select");
 
     let annotations = document.pages[0].annotations.as_ref().unwrap();
-    assert_eq!(annotations[0].appearance_state.as_deref(), Some("A"));
-    assert_eq!(annotations[1].appearance_state.as_deref(), Some("A"));
-    assert_eq!(annotations[2].appearance_state.as_deref(), Some("Off"));
+    assert_eq!(
+        annotations[0].appearance_state.as_deref(),
+        Some(b"A".as_slice())
+    );
+    assert_eq!(
+        annotations[1].appearance_state.as_deref(),
+        Some(b"A".as_slice())
+    );
+    assert_eq!(
+        annotations[2].appearance_state.as_deref(),
+        Some(b"Off".as_slice())
+    );
     assert!(
         annotations
             .iter()
@@ -517,7 +532,7 @@ fn radios_in_unison_select_matching_on_states() {
     assert!(
         annotations
             .iter()
-            .all(|annotation| annotation.appearance_state.as_deref() == Some("Off"))
+            .all(|annotation| annotation.appearance_state.as_deref() == Some(b"Off".as_slice()))
     );
     assert!(
         annotations
@@ -551,8 +566,14 @@ fn radios_without_unison_keep_duplicate_on_states_exclusive() {
         .expect("radio should select");
 
     let annotations = document.pages[0].annotations.as_ref().unwrap();
-    assert_eq!(annotations[0].appearance_state.as_deref(), Some("Off"));
-    assert_eq!(annotations[1].appearance_state.as_deref(), Some("A"));
+    assert_eq!(
+        annotations[0].appearance_state.as_deref(),
+        Some(b"Off".as_slice())
+    );
+    assert_eq!(
+        annotations[1].appearance_state.as_deref(),
+        Some(b"A".as_slice())
+    );
 }
 
 #[test]
@@ -581,7 +602,7 @@ fn radio_activation_honors_no_toggle_to_off() {
         document.pages[0].annotations.as_ref().unwrap()[0]
             .appearance_state
             .as_deref(),
-        Some("A")
+        Some(b"A".as_slice())
     );
 }
 
@@ -608,7 +629,10 @@ fn radio_activation_can_toggle_selected_button_off() {
 
     assert!(activation.state_changed);
     let annotation = &document.pages[0].annotations.as_ref().unwrap()[0];
-    assert_eq!(annotation.appearance_state.as_deref(), Some("Off"));
+    assert_eq!(
+        annotation.appearance_state.as_deref(),
+        Some(b"Off".as_slice())
+    );
     assert_eq!(widget_value(annotation), Some(b"Off".as_slice()));
 }
 
@@ -637,7 +661,7 @@ fn read_only_button_activation_does_not_change_state() {
         document.pages[0].annotations.as_ref().unwrap()[0]
             .appearance_state
             .as_deref(),
-        Some("Off")
+        Some(b"Off".as_slice())
     );
 
     WidgetEditor::new(&mut document)
@@ -647,7 +671,7 @@ fn read_only_button_activation_does_not_change_state() {
         document.pages[0].annotations.as_ref().unwrap()[0]
             .appearance_state
             .as_deref(),
-        Some("Yes")
+        Some(b"Yes".as_slice())
     );
 }
 
@@ -683,7 +707,7 @@ fn annotation_controller_activates_widgets_through_the_document() {
         document.pages[0].annotations.as_ref().unwrap()[0]
             .appearance_state
             .as_deref(),
-        Some("Yes")
+        Some(b"Yes".as_slice())
     );
 }
 

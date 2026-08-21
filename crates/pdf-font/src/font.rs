@@ -28,7 +28,7 @@ pub enum Font {
 }
 
 impl Font {
-    pub const KEY: &'static str = "Font";
+    pub const KEY: &'static [u8] = b"Font";
 
     /// Parse a font dictionary, replacing any unreadable font with a bundled
     /// whole-font TrueType fallback.
@@ -49,23 +49,23 @@ impl Font {
         id_allocator: &mut ContentStreamIdAllocator,
     ) -> Result<Font, FontError> {
         // Determine the font subtype from the dictionary.
-        let subtype = dictionary.required_str("Subtype", objects)?;
+        let subtype = dictionary.required_bytes(b"Subtype", objects)?;
         match subtype {
-            "Type0" => {
+            b"Type0" => {
                 let type0_font = Type0Font::from_dictionary(dictionary, objects)?;
                 Ok(Font::Type0(type0_font))
             }
-            "Type1" => Type1Font::from_dictionary(dictionary, objects).map(Font::Type1),
-            "Type3" => {
+            b"Type1" => Type1Font::from_dictionary(dictionary, objects).map(Font::Type1),
+            b"Type3" => {
                 let type3_font = Type3Font::from_dictionary(dictionary, objects, id_allocator)?;
                 Ok(Font::Type3(type3_font))
             }
-            "TrueType" => {
+            b"TrueType" => {
                 let tt_font = TrueTypeFont::from_dictionary(dictionary, objects)?;
                 Ok(Font::TrueType(tt_font))
             }
             other => Err(FontError::UnsupportedFontSubtype {
-                subtype: other.to_string(),
+                subtype: String::from_utf8_lossy(other).into_owned(),
             }),
         }
     }
@@ -151,7 +151,7 @@ impl Font {
         Some(f32::from(advance) / f32::from(units_per_em) * 1000.0)
     }
 
-    pub fn glyph_name(&self, char_code: u16) -> Option<&str> {
+    pub fn glyph_name(&self, char_code: u16) -> Option<&[u8]> {
         let index = usize::from(char_code);
         match self {
             Font::Type1(font) => font.encoding.names.get(index).map(Cow::as_ref),
@@ -243,12 +243,12 @@ mod tests {
     fn test_truetype_encoding_fallback() {
         // Build a TrueType font with a minimal encoding that maps char code 65
         // to the glyph name "A".  The AGL single-char rule maps "A" → U+0041.
-        let names: Vec<Cow<'static, str>> = (0..256)
+        let names: Vec<Cow<'static, [u8]>> = (0..256)
             .map(|index| {
                 if index == 65 {
-                    Cow::Borrowed("A")
+                    Cow::Borrowed(b"A".as_slice())
                 } else {
-                    Cow::Borrowed(".notdef")
+                    Cow::Borrowed(b".notdef".as_slice())
                 }
             })
             .collect();

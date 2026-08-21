@@ -14,7 +14,7 @@ impl OptionalContent {
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Self>, AnnotationError> {
         dictionary
-            .get("OC")
+            .get(b"OC")
             .map(|value| {
                 Ok(Self {
                     dictionary: value.try_dictionary(objects)?.clone(),

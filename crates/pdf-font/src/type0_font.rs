@@ -165,7 +165,7 @@ impl<'a> Type0DescendantFont<'a> {
     ) -> Result<Self, FontError> {
         let dictionary = descendant_font_dictionary(dictionary, objects)?;
         let default_width = dictionary
-            .optional_number::<f32>("DW", objects)?
+            .optional_number::<f32>(b"DW", objects)?
             .unwrap_or(Type0Font::DEFAULT_WIDTH);
         Ok(Self {
             dictionary,
@@ -197,7 +197,7 @@ fn descendant_font_dictionary<'a>(
     dictionary: &'a Dictionary,
     objects: &'a dyn ObjectResolver,
 ) -> Result<&'a Dictionary, FontError> {
-    let descendant_fonts = dictionary.required_array("DescendantFonts", objects)?;
+    let descendant_fonts = dictionary.required_array(b"DescendantFonts", objects)?;
     if descendant_fonts.len() != 1 {
         return Err(FontError::InvalidDescendantFonts(
             "Expected exactly one descendant font",
@@ -396,7 +396,7 @@ mod tests {
     fn type0_font_accepts_stream_encoding_and_preserves_tounicode() {
         let encoding_stream = make_stream_object(
             1,
-            Dictionary::new(BTreeMap::new()),
+            Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
             br#"
             begincmap
             /WMode 0 def
@@ -412,7 +412,7 @@ mod tests {
         );
         let to_unicode_stream = make_stream_object(
             2,
-            Dictionary::new(BTreeMap::new()),
+            Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
             br#"
             beginbfchar
             <0041> <0042>
@@ -423,7 +423,7 @@ mod tests {
 
         let mut file3_dict = BTreeMap::new();
         file3_dict.insert(
-            "Subtype".to_string(),
+            Vec::from(b"Subtype"),
             ObjectVariant::Name(b"OpenType".to_vec()),
         );
         let font_file3_stream =
@@ -432,21 +432,21 @@ mod tests {
         let font_file3 = ObjectVariant::Stream(font_file3_stream);
 
         let mut descriptor_dict = BTreeMap::new();
-        descriptor_dict.insert("FontFile3".to_string(), font_file3);
+        descriptor_dict.insert(Vec::from(b"FontFile3"), font_file3);
 
         let mut descendant_dict = BTreeMap::new();
         descendant_dict.insert(
-            "Subtype".to_string(),
+            Vec::from(b"Subtype"),
             ObjectVariant::Name(b"CIDFontType0".to_vec()),
         );
         descendant_dict.insert(
-            "FontDescriptor".to_string(),
+            Vec::from(b"FontDescriptor"),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(descriptor_dict))),
         );
         descendant_dict.insert(
-            "CIDSystemInfo".to_string(),
+            Vec::from(b"CIDSystemInfo"),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-                "Ordering".to_string(),
+                Vec::from(b"Ordering"),
                 ObjectVariant::LiteralString(b"Japan1".to_vec()),
             )])))),
         );
@@ -457,13 +457,13 @@ mod tests {
 
         let mut font_dict = BTreeMap::new();
         font_dict.insert(
-            "Subtype".to_string(),
+            Vec::from(b"Subtype"),
             ObjectVariant::Name(b"Type0".to_vec()),
         );
-        font_dict.insert("Encoding".to_string(), encoding_stream);
-        font_dict.insert("ToUnicode".to_string(), to_unicode_stream);
+        font_dict.insert(Vec::from(b"Encoding"), encoding_stream);
+        font_dict.insert(Vec::from(b"ToUnicode"), to_unicode_stream);
         font_dict.insert(
-            "DescendantFonts".to_string(),
+            Vec::from(b"DescendantFonts"),
             ObjectVariant::Array(descendant_fonts),
         );
 
@@ -487,7 +487,7 @@ mod tests {
     fn type0_font_accepts_bfchar_encoding_streams() {
         let encoding_stream = make_stream_object(
             1,
-            Dictionary::new(BTreeMap::new()),
+            Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
             br#"
             begincmap
             /WMode 0 def
@@ -505,22 +505,22 @@ mod tests {
 
         let mut descriptor_dict = BTreeMap::new();
         descriptor_dict.insert(
-            "FontFile2".to_string(),
+            Vec::from(b"FontFile2"),
             ObjectVariant::Stream(StreamObject::new(
                 3,
                 0,
-                Box::new(Dictionary::new(BTreeMap::new())),
+                Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
                 vec![0, 1, 0, 0],
             )),
         );
 
         let mut descendant_dict = BTreeMap::new();
         descendant_dict.insert(
-            "Subtype".to_string(),
+            Vec::from(b"Subtype"),
             ObjectVariant::Name(b"CIDFontType2".to_vec()),
         );
         descendant_dict.insert(
-            "FontDescriptor".to_string(),
+            Vec::from(b"FontDescriptor"),
             ObjectVariant::Dictionary(Box::new(Dictionary::new(descriptor_dict))),
         );
 
@@ -530,12 +530,12 @@ mod tests {
 
         let mut font_dict = BTreeMap::new();
         font_dict.insert(
-            "Subtype".to_string(),
+            Vec::from(b"Subtype"),
             ObjectVariant::Name(b"Type0".to_vec()),
         );
-        font_dict.insert("Encoding".to_string(), encoding_stream);
+        font_dict.insert(Vec::from(b"Encoding"), encoding_stream);
         font_dict.insert(
-            "DescendantFonts".to_string(),
+            Vec::from(b"DescendantFonts"),
             ObjectVariant::Array(descendant_fonts),
         );
 
@@ -571,22 +571,25 @@ mod tests {
     fn cid_font_type0_fallback_ignores_malformed_cid_system_info() {
         let descendant = Dictionary::new(BTreeMap::from([
             (
-                "Subtype".to_string(),
+                Vec::from(b"Subtype"),
                 ObjectVariant::Name(b"CIDFontType0".to_vec()),
             ),
             (
-                "FontDescriptor".to_string(),
-                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::new()))),
+                Vec::from(b"FontDescriptor"),
+                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::<
+                    Vec<u8>,
+                    ObjectVariant,
+                >::new()))),
             ),
-            ("CIDSystemInfo".to_string(), ObjectVariant::Integer(1)),
+            (Vec::from(b"CIDSystemInfo"), ObjectVariant::Integer(1)),
         ]));
         let dictionary = Dictionary::new(BTreeMap::from([
             (
-                "Subtype".to_string(),
+                Vec::from(b"Subtype"),
                 ObjectVariant::Name(b"Type0".to_vec()),
             ),
             (
-                "DescendantFonts".to_string(),
+                Vec::from(b"DescendantFonts"),
                 ObjectVariant::Array(vec![ObjectVariant::Dictionary(Box::new(descendant))]),
             ),
         ]));
@@ -605,7 +608,7 @@ mod tests {
 
     #[test]
     fn cid_font_type0_fallback_ignores_unknown_cid_ordering() {
-        let descendant = missing_descendant_with_ordering("CIDFontType0", "Unknown");
+        let descendant = missing_descendant_with_ordering(b"CIDFontType0", b"Unknown");
         let dictionary = type0_dictionary(descendant);
 
         let font = Type0Font::from_dictionary(&dictionary, &PassthroughResolver).unwrap();
@@ -622,7 +625,7 @@ mod tests {
 
     #[test]
     fn cid_font_type2_missing_font_file_preserves_composite_font_semantics() {
-        let descendant = missing_cjk_descendant("CIDFontType2");
+        let descendant = missing_cjk_descendant(b"CIDFontType2");
         let dictionary = type0_dictionary(descendant);
 
         let font = Type0Font::from_dictionary(&dictionary, &PassthroughResolver).unwrap();
@@ -683,10 +686,10 @@ mod tests {
     }
 
     fn issue_13343_font() -> Type0Font {
-        let mut descendant = missing_cjk_descendant("CIDFontType0");
-        descendant.insert("DW".to_string(), ObjectVariant::Integer(1180));
+        let mut descendant = missing_cjk_descendant(b"CIDFontType0");
+        descendant.insert(Vec::from(b"DW"), ObjectVariant::Integer(1180));
         descendant.insert(
-            "W".to_string(),
+            Vec::from(b"W"),
             ObjectVariant::Array(vec![
                 ObjectVariant::Integer(231),
                 ObjectVariant::Integer(389),
@@ -708,56 +711,56 @@ mod tests {
         font
     }
 
-    fn missing_cjk_descendant(subtype: &str) -> BTreeMap<String, ObjectVariant> {
-        missing_descendant_with_ordering(subtype, "Japan1")
+    fn missing_cjk_descendant(subtype: &[u8]) -> BTreeMap<Vec<u8>, ObjectVariant> {
+        missing_descendant_with_ordering(subtype, b"Japan1")
     }
 
     fn missing_descendant_with_ordering(
-        subtype: &str,
-        ordering: &str,
-    ) -> BTreeMap<String, ObjectVariant> {
+        subtype: &[u8],
+        ordering: &[u8],
+    ) -> BTreeMap<Vec<u8>, ObjectVariant> {
         BTreeMap::from([
             (
-                "Subtype".to_string(),
-                ObjectVariant::Name(subtype.as_bytes().to_vec()),
+                Vec::from(b"Subtype"),
+                ObjectVariant::Name(Vec::from(subtype)),
             ),
             (
-                "BaseFont".to_string(),
+                Vec::from(b"BaseFont"),
                 ObjectVariant::Name(b"Ryumin-Light".to_vec()),
             ),
             (
-                "FontDescriptor".to_string(),
+                Vec::from(b"FontDescriptor"),
                 ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-                    "Flags".to_string(),
+                    Vec::from(b"Flags"),
                     ObjectVariant::Integer(6),
                 )])))),
             ),
             (
-                "CIDSystemInfo".to_string(),
+                Vec::from(b"CIDSystemInfo"),
                 ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-                    "Ordering".to_string(),
-                    ObjectVariant::LiteralString(ordering.as_bytes().to_vec()),
+                    Vec::from(b"Ordering"),
+                    ObjectVariant::LiteralString(Vec::from(ordering)),
                 )])))),
             ),
         ])
     }
 
-    fn type0_dictionary(descendant: BTreeMap<String, ObjectVariant>) -> Dictionary {
+    fn type0_dictionary(descendant: BTreeMap<Vec<u8>, ObjectVariant>) -> Dictionary {
         Dictionary::new(BTreeMap::from([
             (
-                "Subtype".to_string(),
+                Vec::from(b"Subtype"),
                 ObjectVariant::Name(b"Type0".to_vec()),
             ),
             (
-                "BaseFont".to_string(),
+                Vec::from(b"BaseFont"),
                 ObjectVariant::Name(b"Ryumin-Light-90ms-RKSJ-H".to_vec()),
             ),
             (
-                "Encoding".to_string(),
+                Vec::from(b"Encoding"),
                 ObjectVariant::Name(b"90ms-RKSJ-H".to_vec()),
             ),
             (
-                "DescendantFonts".to_string(),
+                Vec::from(b"DescendantFonts"),
                 ObjectVariant::Array(vec![ObjectVariant::Dictionary(Box::new(Dictionary::new(
                     descendant,
                 )))]),

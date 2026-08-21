@@ -18,10 +18,10 @@ impl MovieAnnotation {
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
         let movie = dictionary
-            .get("Movie")
+            .get(b"Movie")
             .map(|value| helpers::dictionary(value, objects))
             .transpose()?;
-        let title = dictionary.optional_bytes_vec("T", objects)?;
+        let title = dictionary.optional_bytes_vec(b"T", objects)?;
 
         Ok(Self { movie, title })
     }

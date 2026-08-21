@@ -76,9 +76,9 @@ impl FreeFormMeshConfig {
     ) -> Result<Self, PdfShadingError> {
         let color_space = required_color_space(dictionary, objects)?;
         let widths = MeshBitWidths::from_dictionary(dictionary, objects)?;
-        let decode = dictionary.required_vec_of::<f32>("Decode", objects)?;
+        let decode = dictionary.required_vec_of::<f32>(b"Decode", objects)?;
         let bbox = dictionary.optional_bbox(objects)?;
-        let anti_alias = dictionary.optional_boolean("AntiAlias", objects)?;
+        let anti_alias = dictionary.optional_boolean(b"AntiAlias", objects)?;
         let functions = optional_functions(dictionary, objects)?;
 
         Ok(Self {
@@ -197,7 +197,7 @@ fn optional_functions(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<Vec<Function>, PdfShadingError> {
-    if dictionary.get("Function").is_some() {
+    if dictionary.get(b"Function").is_some() {
         parse_functions(dictionary, objects)
     } else {
         Ok(Vec::new())

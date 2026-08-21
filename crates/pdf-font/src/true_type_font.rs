@@ -139,10 +139,10 @@ impl TrueTypeFont {
         let flags = FontFlags::from_dictionary(dictionary, objects)?;
 
         let descriptor = dictionary
-            .optional_dictionary("FontDescriptor", objects)?
+            .optional_dictionary(b"FontDescriptor", objects)?
             .ok_or(FontError::MissingFontFile)?;
         let stream = descriptor
-            .optional_stream("FontFile2", objects)?
+            .optional_stream(b"FontFile2", objects)?
             .ok_or(FontError::MissingFontFile)?;
 
         Ok(TrueTypeFontProgram {
@@ -167,16 +167,16 @@ mod tests {
         let stream = StreamObject::new(
             1,
             0,
-            Box::new(Dictionary::new(BTreeMap::new())),
+            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
             vec![1, 2, 3, 4],
         );
         let stream_bytes = stream.raw_data().as_ptr();
         let descriptor = Dictionary::new(BTreeMap::from([(
-            "FontFile2".to_string(),
+            b"FontFile2".to_vec(),
             ObjectVariant::Stream(stream),
         )]));
         let dictionary = Dictionary::new(BTreeMap::from([(
-            "FontDescriptor".to_string(),
+            b"FontDescriptor".to_vec(),
             ObjectVariant::Dictionary(Box::new(descriptor)),
         )]));
 
@@ -219,7 +219,7 @@ mod tests {
                 .as_ref()
                 .and_then(|encoding| encoding.names.get(65))
                 .map(Cow::as_ref),
-            Some("A"),
+            Some(b"A".as_slice()),
         );
     }
 
@@ -242,7 +242,7 @@ mod tests {
                 .as_ref()
                 .and_then(|value| value.names.get(82))
                 .map(Cow::as_ref),
-            Some("R"),
+            Some(b"R".as_slice()),
         );
     }
 }

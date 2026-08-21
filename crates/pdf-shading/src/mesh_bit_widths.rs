@@ -43,9 +43,9 @@ impl MeshBitWidths {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, PdfShadingError> {
-        let coordinate = dictionary.required_number::<usize>("BitsPerCoordinate", objects)?;
-        let component = dictionary.required_number::<usize>("BitsPerComponent", objects)?;
-        let flag = dictionary.required_number::<usize>("BitsPerFlag", objects)?;
+        let coordinate = dictionary.required_number::<usize>(b"BitsPerCoordinate", objects)?;
+        let component = dictionary.required_number::<usize>(b"BitsPerComponent", objects)?;
+        let flag = dictionary.required_number::<usize>(b"BitsPerFlag", objects)?;
 
         validate_allowed_width(
             coordinate,

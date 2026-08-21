@@ -31,7 +31,7 @@ impl PdfParser<'_> {
         self.read_keyword(STREAM_START)?;
 
         let stream_data_start = self.tokenizer.position;
-        let length = dictionary.optional_number::<usize>("Length", objects)?;
+        let length = dictionary.optional_number::<usize>(b"Length", objects)?;
 
         match length {
             Some(length) => self.parse_stream_with_length(stream_data_start, length),
@@ -234,7 +234,7 @@ mod tests {
     #[test]
     fn test_parse_stream_missing_stream_keyword() {
         let dictionary = Dictionary::new(
-            vec![("Length".to_string(), ObjectVariant::Integer(11))]
+            vec![(Vec::from(b"Length"), ObjectVariant::Integer(11))]
                 .into_iter()
                 .collect(),
         );
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn test_parse_stream_missing_endstream_keyword() {
         let dictionary = Dictionary::new(
-            vec![("Length".to_string(), ObjectVariant::Integer(11))]
+            vec![(Vec::from(b"Length"), ObjectVariant::Integer(11))]
                 .into_iter()
                 .collect(),
         );
@@ -263,7 +263,7 @@ mod tests {
 
     #[test]
     fn test_parse_stream_missing_length_entry() {
-        let dictionary = Dictionary::new(BTreeMap::new());
+        let dictionary = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
 
         let input = b"stream\nHello World\nendstream";
         let mut parser = PdfParser::from(input.as_slice());
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn test_parse_stream_missing_length_entry_without_endstream_errors() {
-        let dictionary = Dictionary::new(BTreeMap::new());
+        let dictionary = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
 
         let input = b"stream\nHello World\nendstrm";
         let mut parser = PdfParser::from(input.as_slice());
@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn test_parse_stream_recovers_incorrect_length_too_short() {
         let dictionary = Dictionary::new(
-            vec![("Length".to_string(), ObjectVariant::Integer(5))] // Incorrect length
+            vec![(Vec::from(b"Length"), ObjectVariant::Integer(5))] // Incorrect length
                 .into_iter()
                 .collect(),
         );
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn test_parse_stream_recovers_incorrect_length_too_long() {
         let dictionary = Dictionary::new(
-            vec![("Length".to_string(), ObjectVariant::Integer(53))]
+            vec![(Vec::from(b"Length"), ObjectVariant::Integer(53))]
                 .into_iter()
                 .collect(),
         );

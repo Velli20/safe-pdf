@@ -44,7 +44,7 @@ fn cff_gid(
     cid_charset: Option<&CffCharset<'_>>,
     is_cid: bool,
     char_code: u16,
-    glyph_name: Option<&str>,
+    glyph_name: Option<&[u8]>,
 ) -> Result<GlyphId, PdfCanvasError> {
     if is_cid {
         return Ok(cid_charset
@@ -57,7 +57,7 @@ fn cff_gid(
         .map_err(|_| PdfCanvasError::InvalidType1CffTable)?
         .charset(0)
         .map_err(|_| PdfCanvasError::InvalidType1CffCharset)?;
-    let glyph_name = glyph_name.unwrap_or(".notdef").as_bytes();
+    let glyph_name = glyph_name.unwrap_or(b".notdef");
 
     Ok(charset
         .and_then(|charset| {
@@ -75,15 +75,15 @@ fn classic_gid(
     font: &ClassicType1Font,
     is_cid: bool,
     char_code: u16,
-    glyph_name: Option<&str>,
+    glyph_name: Option<&[u8]>,
 ) -> GlyphId {
     if is_cid {
         return GlyphId::new(u32::from(char_code));
     }
 
-    let glyph_name = glyph_name.unwrap_or(".notdef");
+    let glyph_name = glyph_name.unwrap_or(b".notdef");
     font.glyph_names()
-        .find_map(|(gid, name)| (name == glyph_name).then_some(gid))
+        .find_map(|(gid, name)| (name.as_bytes() == glyph_name).then_some(gid))
         .unwrap_or(GlyphId::NOTDEF)
 }
 
