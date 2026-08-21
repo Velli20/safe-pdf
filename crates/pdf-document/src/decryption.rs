@@ -40,7 +40,7 @@ use crate::encryption::{
     CryptFilterMethod, EncryptDictionary, EncryptionFilter, EncryptionVersion,
 };
 use pdf_object::{
-    dictionary::Dictionary, indirect_object::IndirectObject, object_variant::ObjectVariant,
+    dictionary::Dictionary, object_id::PdfObjectId, object_variant::ObjectVariant,
     stream::StreamObject,
 };
 
@@ -371,24 +371,16 @@ impl DocumentDecryptor {
     /// number and generation of the indirect object that contains them.
     pub(crate) fn decrypt_object(
         &self,
+        identifier: PdfObjectId,
         object: ObjectVariant,
     ) -> Result<ObjectVariant, DecryptionError> {
         match object {
-            ObjectVariant::IndirectObject(indirect) => {
-                let object_number = indirect.object_number;
-                let generation_number = indirect.generation_number;
-                let object = indirect
-                    .object
-                    .map(|object| {
-                        self.decrypt_object_value(object, object_number, generation_number)
-                    })
-                    .transpose()?;
-                Ok(ObjectVariant::IndirectObject(Box::new(
-                    IndirectObject::new(object_number, generation_number, object),
-                )))
+            ObjectVariant::Stream(mut stream) => {
+                stream.object_number = identifier.number;
+                stream.generation_number = identifier.generation;
+                self.decrypt_stream_value(stream)
             }
-            ObjectVariant::Stream(stream) => self.decrypt_stream_value(stream),
-            other => Ok(other),
+            other => self.decrypt_object_value(other, identifier.number, identifier.generation),
         }
     }
 
@@ -417,9 +409,6 @@ impl DocumentDecryptor {
                 self.decrypt_dictionary(*dictionary, object_number, generation_number)?,
             ))),
             ObjectVariant::Stream(stream) => self.decrypt_stream_value(stream),
-            ObjectVariant::IndirectObject(indirect) => {
-                self.decrypt_object(ObjectVariant::IndirectObject(indirect))
-            }
             other => Ok(other),
         }
     }
@@ -1342,46 +1331,41 @@ mod tests {
         let generation_number = 0;
         let contents = b"H\xF6ll\xF6";
         let rich_contents = b"<p>H\xF6ll\xF6</p>";
-        let object = ObjectVariant::IndirectObject(Box::new(IndirectObject::new(
-            object_number,
-            generation_number,
-            Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
-                BTreeMap::from([
-                    (
-                        Vec::from(b"Contents"),
-                        ObjectVariant::LiteralString(encrypt_for_object(
-                            &decryptor,
-                            object_number,
-                            generation_number,
-                            contents,
-                        )),
-                    ),
-                    (
-                        Vec::from(b"RC"),
-                        ObjectVariant::Array(vec![ObjectVariant::HexString(encrypt_for_object(
-                            &decryptor,
-                            object_number,
-                            generation_number,
-                            rich_contents,
-                        ))]),
-                    ),
-                    (
-                        Vec::from(b"Subtype"),
-                        ObjectVariant::Name(b"FreeText".to_vec()),
-                    ),
-                    (Vec::from(b"Parent"), ObjectVariant::Reference(4)),
-                ]),
-            )))),
-        )));
-
-        let decrypted = decryptor.decrypt_object(object).expect("object decrypts");
-        let ObjectVariant::IndirectObject(indirect) = decrypted else {
-            panic!("decrypted object should remain indirect");
+        let identifier = PdfObjectId {
+            number: object_number,
+            generation: generation_number,
         };
-        assert_eq!(indirect.object_number, object_number);
-        assert_eq!(indirect.generation_number, generation_number);
-        let Some(ObjectVariant::Dictionary(dictionary)) = indirect.object else {
-            panic!("indirect object should contain a dictionary");
+        let object = ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
+            (
+                Vec::from(b"Contents"),
+                ObjectVariant::LiteralString(encrypt_for_object(
+                    &decryptor,
+                    object_number,
+                    generation_number,
+                    contents,
+                )),
+            ),
+            (
+                Vec::from(b"RC"),
+                ObjectVariant::Array(vec![ObjectVariant::HexString(encrypt_for_object(
+                    &decryptor,
+                    object_number,
+                    generation_number,
+                    rich_contents,
+                ))]),
+            ),
+            (
+                Vec::from(b"Subtype"),
+                ObjectVariant::Name(b"FreeText".to_vec()),
+            ),
+            (Vec::from(b"Parent"), ObjectVariant::Reference(4)),
+        ]))));
+
+        let decrypted = decryptor
+            .decrypt_object(identifier, object)
+            .expect("object decrypts");
+        let ObjectVariant::Dictionary(dictionary) = decrypted else {
+            panic!("decrypted object should remain a dictionary");
         };
         assert_eq!(
             dictionary.get(b"Contents"),
@@ -1410,8 +1394,8 @@ mod tests {
         let generation_number = 0;
         let contents = b"appearance";
         let stream = StreamObject::new(
-            object_number,
-            generation_number,
+            99,
+            1,
             Box::new(Dictionary::new(BTreeMap::from([(
                 Vec::from(b"Label"),
                 ObjectVariant::LiteralString(encrypt_for_object(
@@ -1425,11 +1409,19 @@ mod tests {
         );
 
         let decrypted = decryptor
-            .decrypt_object(ObjectVariant::Stream(stream))
+            .decrypt_object(
+                PdfObjectId {
+                    number: object_number,
+                    generation: generation_number,
+                },
+                ObjectVariant::Stream(stream),
+            )
             .expect("stream decrypts");
         let ObjectVariant::Stream(stream) = decrypted else {
             panic!("decrypted object should remain a stream");
         };
+        assert_eq!(stream.object_number, object_number);
+        assert_eq!(stream.generation_number, generation_number);
         assert_eq!(stream.raw_data(), contents);
         assert_eq!(
             stream.dictionary.get(b"Label"),
@@ -1442,28 +1434,23 @@ mod tests {
     #[test]
     fn decrypt_object_preserves_unencrypted_signature_contents() {
         let decryptor = make_decryptor(true);
-        let object = ObjectVariant::IndirectObject(Box::new(IndirectObject::new(
-            9,
-            0,
-            Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
-                BTreeMap::from([
-                    (Vec::from(b"Type"), ObjectVariant::Name(b"Sig".to_vec())),
-                    (
-                        Vec::from(b"Contents"),
-                        ObjectVariant::HexString(vec![0, 0, 0, 0]),
-                    ),
-                ]),
-            )))),
-        )));
+        let identifier = PdfObjectId {
+            number: 9,
+            generation: 0,
+        };
+        let object = ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
+            (Vec::from(b"Type"), ObjectVariant::Name(b"Sig".to_vec())),
+            (
+                Vec::from(b"Contents"),
+                ObjectVariant::HexString(vec![0, 0, 0, 0]),
+            ),
+        ]))));
 
         let decrypted = decryptor
-            .decrypt_object(object)
+            .decrypt_object(identifier, object)
             .expect("signature decrypts");
-        let ObjectVariant::IndirectObject(indirect) = decrypted else {
-            panic!("decrypted object should remain indirect");
-        };
-        let Some(ObjectVariant::Dictionary(dictionary)) = indirect.object else {
-            panic!("indirect object should contain a dictionary");
+        let ObjectVariant::Dictionary(dictionary) = decrypted else {
+            panic!("decrypted object should remain a dictionary");
         };
         assert_eq!(
             dictionary.get(b"Contents"),

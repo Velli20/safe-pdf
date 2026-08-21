@@ -7,12 +7,11 @@ use pdf_tokenizer::{PdfToken, Tokenizer};
 /// Parses PDF objects from a borrowed byte slice.
 pub struct PdfParser<'a> {
     /// The underlying tokenizer that drives byte-level reading.
-    pub tokenizer: Tokenizer<'a>,
+    pub(crate) tokenizer: Tokenizer<'a>,
     /// Tracks the current recursive nesting depth while parsing.
     ///
     /// The parser increments this on entry to each object and decrements on exit.
-    /// Callers should not mutate this field; it is public for testing purposes only.
-    pub current_nesting_depth: usize,
+    current_nesting_depth: usize,
 }
 
 impl<'a> From<&'a [u8]> for PdfParser<'a> {
@@ -27,6 +26,43 @@ impl<'a> From<&'a [u8]> for PdfParser<'a> {
 impl<'a> PdfParser<'a> {
     /// Maximum nesting depth for PDF objects.
     const MAX_NESTING_DEPTH: usize = 32;
+
+    /// Creates an independent parser positioned at an absolute byte offset.
+    ///
+    /// The returned parser borrows the same input, starts with a fresh nesting
+    /// depth, and does not share cursor state with this parser.
+    pub fn at_offset(&self, offset: usize) -> Result<Self, ParserError> {
+        if offset > self.tokenizer.input.len() {
+            return Err(ParserError::InvalidOffset {
+                offset,
+                input_length: self.tokenizer.input.len(),
+            });
+        }
+
+        let mut parser = Self::from(self.tokenizer.input);
+        parser.tokenizer.position = offset;
+        Ok(parser)
+    }
+
+    /// Returns the current absolute byte offset.
+    pub const fn position(&self) -> usize {
+        self.tokenizer.position
+    }
+
+    /// Returns the unconsumed input beginning at the current cursor.
+    pub fn remaining_input(&self) -> &[u8] {
+        self.tokenizer.data()
+    }
+
+    /// Returns the next raw byte without consuming it.
+    pub fn peek_byte(&self) -> Option<u8> {
+        self.tokenizer.peek_byte()
+    }
+
+    /// Consumes and returns the next raw byte.
+    pub fn read_byte(&mut self) -> Option<u8> {
+        self.tokenizer.next_byte()
+    }
 
     /// Returns whether `c` is a PDF whitespace character (NUL, HT, LF, FF, CR, or SP).
     pub const fn is_pdf_whitespace(c: u8) -> bool {
@@ -156,23 +192,6 @@ impl<'a> PdfParser<'a> {
         self.read_regular_character_token()
     }
 
-    /// Parses a PDF object at a specific byte offset in the input stream.
-    ///
-    /// Temporarily seeks to `position`, parses the object, then restores the original position.
-    /// Useful for random access parsing when following cross-reference table entries.
-    pub fn parse_object_at(
-        &mut self,
-        position: usize,
-        objects: &dyn ObjectResolver,
-    ) -> Result<ObjectVariant, ParserError> {
-        let mark = self.tokenizer.position;
-        self.tokenizer.position = position;
-        let result = self.parse_object(objects);
-        self.tokenizer.position = mark;
-
-        result
-    }
-
     /// Reads a sequence of ASCII digits and parses them into type `T`.
     ///
     /// Best-effort parsing intentionally stops at the first non-digit byte instead of enforcing a
@@ -299,19 +318,7 @@ impl<'a> PdfParser<'a> {
             }
             PdfToken::LeftAngleBracket => ObjectVariant::HexString(self.parse_hex_string()?),
             PdfToken::Solidus => ObjectVariant::Name(self.parse_name()?),
-            PdfToken::Number(_) => {
-                // Numbers are ambiguous: could be an indirect object,
-                // an indirect reference, or a plain number.
-                let mark = self.tokenizer.position;
-
-                // Try parsing as an indirect object first.
-                if let Some(o) = self.parse_indirect_object(objects)? {
-                    return Ok(o);
-                }
-                // If that fails, reset and try parsing as a number.
-                self.tokenizer.position = mark;
-                self.parse_number()?
-            }
+            PdfToken::Number(_) => self.parse_number_or_reference()?,
             PdfToken::Minus => self.parse_number()?,
             PdfToken::Plus => self.parse_number()?,
             PdfToken::Period => self.parse_number()?,
@@ -353,6 +360,39 @@ mod tests {
     use pdf_object::object_resolver::PassthroughResolver;
 
     use super::*;
+
+    #[test]
+    fn at_offset_creates_an_independent_parser() {
+        let parser = PdfParser::from(b"0 1".as_slice());
+        let mut fork = parser.at_offset(2).unwrap();
+
+        assert_eq!(fork.parse_number().unwrap(), ObjectVariant::Integer(1));
+        assert_eq!(parser.position(), 0);
+        assert_eq!(fork.position(), 3);
+    }
+
+    #[test]
+    fn at_offset_accepts_end_of_input() {
+        let input = b"data";
+        let parser = PdfParser::from(input.as_slice());
+        let fork = parser.at_offset(input.len()).unwrap();
+
+        assert_eq!(fork.position(), input.len());
+        assert_eq!(fork.peek_byte(), None);
+    }
+
+    #[test]
+    fn at_offset_rejects_positions_beyond_input() {
+        let parser = PdfParser::from(b"data".as_slice());
+
+        assert_eq!(
+            parser.at_offset(5).err().unwrap(),
+            ParserError::InvalidOffset {
+                offset: 5,
+                input_length: 4,
+            }
+        );
+    }
 
     #[test]
     fn test_unexpected_token() {
@@ -417,8 +457,11 @@ mod tests {
         for input in cases {
             let mut parser = PdfParser::from(input);
             let operator = parser.read_operator_name().unwrap();
+            let expected = input
+                .get(..input.len().saturating_sub(1))
+                .expect("operator test input should contain trailing whitespace");
 
-            assert_eq!(operator, &input[..input.len().saturating_sub(1)]);
+            assert_eq!(operator, expected);
             assert_eq!(parser.tokenizer.data(), b" ");
         }
     }

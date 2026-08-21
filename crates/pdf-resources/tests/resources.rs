@@ -4,7 +4,7 @@ use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_font::font::Font;
 use pdf_graphics::transform::Transform;
 use pdf_object::{
-    dictionary::Dictionary, indirect_object::IndirectObject, object_resolver::PassthroughResolver,
+    dictionary::Dictionary, object_id::PdfObjectId, object_resolver::PassthroughResolver,
     object_variant::ObjectVariant, stream::StreamObject,
 };
 use pdf_object_collection::object_collection::ObjectCollection;
@@ -14,6 +14,13 @@ use pdf_resources::{
     resource_cache::DefaultResourceCache, resources::Resources,
 };
 use pdf_shading::model::Shading;
+
+fn object_id(number: usize) -> PdfObjectId {
+    PdfObjectId {
+        number,
+        generation: 0,
+    }
+}
 
 fn integer(value: i64) -> ObjectVariant {
     ObjectVariant::Integer(value)
@@ -295,18 +302,16 @@ fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
 
     let mut objects = ObjectCollection::default();
     objects
-        .insert(ObjectVariant::IndirectObject(Box::new(
-            IndirectObject::new(
-                100,
-                0,
-                Some(ObjectVariant::Dictionary(Box::new(resources_dict))),
-            ),
-        )))
+        .insert(
+            object_id(100),
+            ObjectVariant::Dictionary(Box::new(resources_dict)),
+        )
         .expect("resources dictionary should insert");
     objects
-        .insert(ObjectVariant::IndirectObject(Box::new(
-            IndirectObject::new(101, 0, Some(ObjectVariant::Dictionary(Box::new(form_dict)))),
-        )))
+        .insert(
+            object_id(101),
+            ObjectVariant::Dictionary(Box::new(form_dict)),
+        )
         .expect("dictionary-only form should insert");
 
     let mut cache = DefaultResourceCache::default();
@@ -391,21 +396,16 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
 
     let mut objects = ObjectCollection::default();
     objects
-        .insert(ObjectVariant::IndirectObject(Box::new(
-            IndirectObject::new(
-                10,
-                0,
-                Some(ObjectVariant::Dictionary(Box::new(resource_dict))),
-            ),
-        )))
+        .insert(
+            object_id(10),
+            ObjectVariant::Dictionary(Box::new(resource_dict)),
+        )
         .expect("resource dictionary should insert");
     objects
-        .insert(ObjectVariant::Stream(StreamObject::new(
-            11,
-            0,
-            Box::new(form_dict),
-            b"q".to_vec(),
-        )))
+        .insert(
+            object_id(11),
+            ObjectVariant::Stream(StreamObject::new(11, 0, Box::new(form_dict), b"q".to_vec())),
+        )
         .expect("form xobject should insert");
 
     let mut cache = DefaultResourceCache::default();
@@ -482,15 +482,10 @@ fn self_referential_font_resources_resolve_lazily() {
 
     let mut objects = ObjectCollection::default();
     objects
-        .insert(ObjectVariant::IndirectObject(Box::new(
-            IndirectObject::new(
-                21,
-                0,
-                Some(ObjectVariant::Dictionary(Box::new(
-                    self_referential_type3_font(21),
-                ))),
-            ),
-        )))
+        .insert(
+            object_id(21),
+            ObjectVariant::Dictionary(Box::new(self_referential_type3_font(21))),
+        )
         .expect("font should insert");
 
     let mut cache = DefaultResourceCache::default();
@@ -583,7 +578,7 @@ fn self_referential_pattern_resources_resolve_lazily() {
 
     let mut objects = ObjectCollection::default();
     objects
-        .insert(self_referential_tiling_pattern(31))
+        .insert(object_id(31), self_referential_tiling_pattern(31))
         .expect("pattern should insert");
 
     let mut cache = DefaultResourceCache::default();

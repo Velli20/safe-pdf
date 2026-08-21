@@ -1,6 +1,5 @@
-use pdf_object::indirect_object::IndirectObject;
 use pdf_object::object_resolver::ObjectResolver;
-use pdf_object::{error::ObjectError, object_variant::ObjectVariant};
+use pdf_object::{error::ObjectError, object_id::PdfObjectId, object_variant::ObjectVariant};
 use std::collections::{HashMap, HashSet};
 
 #[cfg(feature = "json")]
@@ -49,61 +48,42 @@ impl ObjectCollection {
 
     /// Inserts a PDF object into the collection.
     ///
-    /// This method handles different object variants and stores them using their
-    /// appropriate keys:
-    /// - `IndirectObject`: Stored by its `object_number`, with the inner object extracted.
-    /// - `Stream`: Stored by its `object_number`.
-    /// - `Reference`: Stored by the referenced object number.
-    /// - Other variants are ignored and not stored.
+    /// The explicit identifier is authoritative. It is copied into dictionaries
+    /// and streams whose runtime behavior needs the containing object number.
     ///
     /// # Parameters
     ///
-    /// - `obj`: The [`ObjectVariant`] to insert into the collection.
+    /// - `identifier`: The identifier parsed from the indirect object header.
+    /// - `obj`: The direct [`ObjectVariant`] value to store.
     ///
     /// # Returns
     ///
     /// An error if a duplicate key is detected otherwise `Ok(())`.
-    pub fn insert(&mut self, obj: ObjectVariant) -> Result<(), ObjectError> {
-        match obj {
-            ObjectVariant::IndirectObject(indirect) => {
-                let IndirectObject {
-                    object_number,
-                    object,
-                    ..
-                } = *indirect;
-                let Some(mut object) = object else {
-                    return Ok(());
-                };
-
-                if let ObjectVariant::Dictionary(ref mut d) = object {
-                    d.object_number = Some(object_number);
-                }
-                if self.map.insert(object_number, object).is_some() {
-                    return Err(ObjectError::DuplicateKeyInObjectCollection(object_number));
-                }
+    pub fn insert(
+        &mut self,
+        identifier: PdfObjectId,
+        mut obj: ObjectVariant,
+    ) -> Result<(), ObjectError> {
+        match &mut obj {
+            ObjectVariant::Dictionary(dictionary) => {
+                dictionary.object_number = Some(identifier.number);
             }
-            ObjectVariant::Stream(mut stream) => {
+            ObjectVariant::Stream(stream) => {
+                stream.object_number = identifier.number;
+                stream.generation_number = identifier.generation;
                 if !stream.filters_applied()
-                    && let Ok(data) = pdf_filter::filter::decode_with_resolver(&stream, self)
+                    && let Ok(data) = pdf_filter::filter::decode_with_resolver(stream, self)
                 {
                     stream.set_filtered_data(data);
                 }
-
-                let object_number = stream.object_number;
-                if self
-                    .map
-                    .insert(object_number, ObjectVariant::Stream(stream))
-                    .is_some()
-                {
-                    return Err(ObjectError::DuplicateKeyInObjectCollection(object_number));
-                }
-            }
-            ObjectVariant::Reference(ref reference) => {
-                if self.map.insert(*reference, obj.clone()).is_some() {
-                    return Err(ObjectError::DuplicateKeyInObjectCollection(*reference));
-                }
             }
             _ => {}
+        }
+
+        if self.map.insert(identifier.number, obj).is_some() {
+            return Err(ObjectError::DuplicateKeyInObjectCollection(
+                identifier.number,
+            ));
         }
         Ok(())
     }
@@ -223,14 +203,6 @@ impl ObjectCollection {
                 })
             }
             ObjectVariant::EndOfFile => json!({ "type": "EndOfFile" }),
-            ObjectVariant::IndirectObject(indirect) => {
-                json!({
-                    "type": "IndirectObject",
-                    "object_number": indirect.object_number,
-                    "generation_number": indirect.generation_number,
-                    "object": indirect.object.as_ref().map(Self::object_variant_to_json)
-                })
-            }
             ObjectVariant::Reference(obj_num) => {
                 json!({ "type": "Reference", "object_number": obj_num })
             }
@@ -276,15 +248,21 @@ mod tests {
         let data = vec![1, 2, 3, 4];
         let original = data.as_ptr();
         let stream = StreamObject::new(
-            1,
-            0,
+            99,
+            4,
             Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
             data,
         );
         let mut collection = ObjectCollection::default();
 
         collection
-            .insert(ObjectVariant::Stream(stream))
+            .insert(
+                PdfObjectId {
+                    number: 1,
+                    generation: 0,
+                },
+                ObjectVariant::Stream(stream),
+            )
             .expect("stream insert failed");
 
         let stored = collection
@@ -295,6 +273,34 @@ mod tests {
             })
             .expect("inserted stream should be present");
         assert_eq!(stored.raw_data().as_ptr(), original);
+        assert_eq!(stored.object_number, 1);
+        assert_eq!(stored.generation_number, 0);
+    }
+
+    #[test]
+    fn insertion_records_the_explicit_id_on_dictionaries() {
+        let mut collection = ObjectCollection::default();
+        collection
+            .insert(
+                PdfObjectId {
+                    number: 7,
+                    generation: 2,
+                },
+                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::<
+                    Vec<u8>,
+                    ObjectVariant,
+                >::new()))),
+            )
+            .expect("dictionary insert failed");
+
+        let stored = collection
+            .get(7)
+            .and_then(|object| match object {
+                ObjectVariant::Dictionary(dictionary) => Some(dictionary),
+                _ => None,
+            })
+            .expect("inserted dictionary should be present");
+        assert_eq!(stored.object_number, Some(7));
     }
 
     #[test]
@@ -325,7 +331,6 @@ mod tests {
 
     #[test]
     fn insert_decodes_stream_with_indirect_decode_parms() {
-        use pdf_object::indirect_object::IndirectObject;
         use std::io::Write;
 
         let mut encoded_row = Vec::from([2u8]);
@@ -342,17 +347,18 @@ mod tests {
         decode_parms.insert(Vec::from(b"Colors"), ObjectVariant::Integer(1));
         decode_parms.insert(Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8));
 
-        let decode_parms_object = ObjectVariant::IndirectObject(Box::new(IndirectObject::new(
-            2,
-            0,
-            Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
-                decode_parms,
-            )))),
-        )));
+        let decode_parms_object =
+            ObjectVariant::Dictionary(Box::new(Dictionary::new(decode_parms)));
 
         let mut collection = ObjectCollection::default();
         collection
-            .insert(decode_parms_object)
+            .insert(
+                PdfObjectId {
+                    number: 2,
+                    generation: 0,
+                },
+                decode_parms_object,
+            )
             .expect("decode parms insert failed");
 
         let mut stream_dict = BTreeMap::new();
@@ -373,7 +379,15 @@ mod tests {
             compressed,
         ));
 
-        collection.insert(stream).expect("stream insert failed");
+        collection
+            .insert(
+                PdfObjectId {
+                    number: 1,
+                    generation: 0,
+                },
+                stream,
+            )
+            .expect("stream insert failed");
 
         let decoded = collection.get(1).and_then(|obj| match obj {
             ObjectVariant::Stream(stream) => Some((stream.raw_data(), stream.filters_applied())),
@@ -385,8 +399,6 @@ mod tests {
 
     #[test]
     fn insert_preserves_encoded_state_when_filter_dependencies_are_unresolved() {
-        use pdf_object::indirect_object::IndirectObject;
-
         let stream_dictionary = Dictionary::new(BTreeMap::from([
             (Vec::from(b"DecodeParms"), ObjectVariant::Reference(2)),
             (
@@ -398,7 +410,13 @@ mod tests {
         let mut collection = ObjectCollection::default();
 
         collection
-            .insert(ObjectVariant::Stream(stream))
+            .insert(
+                PdfObjectId {
+                    number: 1,
+                    generation: 0,
+                },
+                ObjectVariant::Stream(stream),
+            )
             .expect("encoded stream insertion should be recoverable");
         let stored = collection
             .get(1)
@@ -411,15 +429,16 @@ mod tests {
         assert_eq!(stored.raw_data(), b"2A>");
 
         collection
-            .insert(ObjectVariant::IndirectObject(Box::new(
-                IndirectObject::new(
-                    2,
-                    0,
-                    Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
-                        BTreeMap::<Vec<u8>, ObjectVariant>::new(),
-                    )))),
-                ),
-            )))
+            .insert(
+                PdfObjectId {
+                    number: 2,
+                    generation: 0,
+                },
+                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::<
+                    Vec<u8>,
+                    ObjectVariant,
+                >::new()))),
+            )
             .expect("decode parameters should be inserted");
 
         let stored = collection

@@ -767,20 +767,13 @@ mod tests {
     #[test]
     fn test_decode_parms_array_accepts_indirect_dictionary_object() {
         use flate2::{Compression, write::ZlibEncoder};
-        use pdf_object::indirect_object::IndirectObject;
         use std::io::Write;
 
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(b"hello").expect("zlib write failed");
         let compressed = encoder.finish().expect("zlib finish failed");
 
-        let decode_parms = ObjectVariant::IndirectObject(Box::new(IndirectObject::new(
-            2,
-            0,
-            Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
-                BTreeMap::<Vec<u8>, ObjectVariant>::new(),
-            )))),
-        )));
+        let decode_parms = ObjectVariant::Reference(2);
         let dictionary = Dictionary::new(BTreeMap::from([
             (
                 Vec::from(b"Filter"),
@@ -792,9 +785,17 @@ mod tests {
             ),
         ]));
 
-        let decoded =
-            decode_data_with_resolver(&dictionary, Arc::new(compressed), &PassthroughResolver)
-                .expect("decode failed");
+        let resolver = TestResolver {
+            objects: BTreeMap::from([(
+                2,
+                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::<
+                    Vec<u8>,
+                    ObjectVariant,
+                >::new()))),
+            )]),
+        };
+        let decoded = decode_data_with_resolver(&dictionary, Arc::new(compressed), &resolver)
+            .expect("decode failed");
 
         assert_eq!(decoded.as_ref(), b"hello");
     }

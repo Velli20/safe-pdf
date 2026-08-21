@@ -18,12 +18,9 @@ use crate::diagnostic::{PdfReadDiagnostic, PdfReadDiagnosticKind};
 use crate::error::PdfReaderError;
 use crate::object_stream::read_object_stream;
 use crate::reader::{EncryptionContext, object_id};
-use pdf_object::{
-    cross_reference_table::CrossReferenceEntryType, error::ObjectError,
-    object_variant::ObjectVariant,
-};
+use pdf_object::{cross_reference_table::CrossReferenceEntryType, error::ObjectError};
 use pdf_object_collection::object_collection::ObjectCollection;
-use pdf_parser::parser::PdfParser;
+use pdf_parser::{error::ParserError, parser::PdfParser};
 
 /// Maps an index within one object stream to the xref object numbers using that index.
 ///
@@ -249,7 +246,7 @@ impl ObjectLoadQueue {
 /// of parsing code.
 pub(super) struct ObjectLoader<'input, 'loader> {
     /// Random-access parser over the source PDF bytes.
-    parser: &'loader mut PdfParser<'input>,
+    parser: &'loader PdfParser<'input>,
     /// Optional document decryptor and encryption-dictionary exclusion.
     encryption: EncryptionContext,
     /// Objects available for resolving references during subsequent parses.
@@ -264,7 +261,7 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
     /// Creates an object loader for one parsed cross-reference table.
     pub(super) fn new(
         entries: &BTreeMap<usize, CrossReferenceEntryType>,
-        parser: &'loader mut PdfParser<'input>,
+        parser: &'loader PdfParser<'input>,
         encryption: EncryptionContext,
         diagnostics: &'loader mut Vec<PdfReadDiagnostic>,
     ) -> Self {
@@ -360,19 +357,21 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
     /// that parsing was intentionally skipped after a recoverable decryption
     /// failure or that the parsed value did not insert an addressable object.
     fn load_object(&mut self, byte_offset: usize) -> Result<Option<usize>, PdfReaderError> {
-        let object = self
+        let mut parser = self
             .parser
-            .parse_object_at(byte_offset, &self.objects)
+            .at_offset(byte_offset)
             .map_err(PdfReaderError::ParserError)?;
-        if matches!(object, ObjectVariant::Reference(_)) {
-            return Err(PdfReaderError::UnexpectedReference {
-                offset: byte_offset,
-            });
-        }
+        let identifier = parser.parse_indirect_object_id().ok_or(
+            ParserError::ExpectedIndirectObjectDeclaration {
+                position: byte_offset,
+            },
+        )?;
+        let object = parser
+            .parse_indirect_object_value(identifier, &self.objects)
+            .map_err(PdfReaderError::ParserError)?;
 
-        let identifier = object.identifier();
-        let object = match self.encryption.decryptor_for(identifier) {
-            Some(decryptor) => match decryptor.decrypt_object(object) {
+        let object = match self.encryption.decryptor_for(Some(identifier)) {
+            Some(decryptor) => match decryptor.decrypt_object(identifier, object) {
                 Ok(object) => object,
                 Err(error) => {
                     self.diagnostics.push(PdfReadDiagnostic::new(
@@ -387,12 +386,14 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
             None => object,
         };
         self.objects
-            .insert(object)
+            .insert(identifier, object)
             .map_err(PdfReaderError::ObjectError)?;
 
-        Ok(identifier
-            .map(|identifier| identifier.number)
-            .filter(|&object_number| self.objects.get(object_number).is_some()))
+        Ok(self
+            .objects
+            .get(identifier.number)
+            .is_some()
+            .then_some(identifier.number))
     }
 
     /// Parses one available object stream and inserts all xref-requested members.

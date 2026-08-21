@@ -3,8 +3,6 @@ use num_traits::FromPrimitive;
 use crate::cross_reference_table::CrossReferenceTable;
 use crate::dictionary::Dictionary;
 use crate::error::ObjectError;
-use crate::indirect_object::IndirectObject;
-use crate::object_id::PdfObjectId;
 use crate::object_resolver::ObjectResolver;
 use crate::stream::StreamObject;
 use crate::trailer::Trailer;
@@ -39,8 +37,6 @@ pub enum ObjectVariant {
     CrossReferenceTable(CrossReferenceTable),
     /// End-of-file marker.
     EndOfFile,
-    /// An indirect object with its object number and generation.
-    IndirectObject(Box<IndirectObject>),
     /// An indirect reference pointing to an object number.
     Reference(usize),
     /// A stream object, which may have associated dictionary and data.
@@ -51,7 +47,7 @@ impl ObjectVariant {
     /// Resolves an `ObjectVariant` into a `Dictionary`.
     ///
     /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
-    /// into a direct, stream, or indirect object's dictionary.
+    /// into a direct or stream object's dictionary.
     ///
     /// # Parameters
     ///
@@ -74,10 +70,6 @@ impl ObjectVariant {
         match object {
             ObjectVariant::Dictionary(dict) => Ok(dict.as_ref()),
             ObjectVariant::Stream(stream) => Ok(stream.dictionary.as_ref()),
-            ObjectVariant::IndirectObject(indirect) => match indirect.object.as_ref() {
-                Some(ObjectVariant::Dictionary(dict)) => Ok(dict.as_ref()),
-                _ => Err(ObjectError::TypeMismatch("Dictionary", object.name())),
-            },
             _ => Err(ObjectError::TypeMismatch("Dictionary", object.name())),
         }
     }
@@ -361,7 +353,6 @@ impl ObjectVariant {
     /// Returns the variant name as a static string, useful in error messages.
     pub const fn name(&self) -> &'static str {
         match self {
-            ObjectVariant::IndirectObject(_) => "IndirectObject",
             ObjectVariant::Dictionary(_) => "Dictionary",
             ObjectVariant::Array(_) => "Array",
             ObjectVariant::LiteralString(_) => "LiteralString",
@@ -376,21 +367,6 @@ impl ObjectVariant {
             ObjectVariant::CrossReferenceTable(_) => "CrossReferenceTable",
             ObjectVariant::EndOfFile => "EndOfFile",
             ObjectVariant::Reference(_) => "Reference",
-        }
-    }
-
-    /// Extracts a named object identifier when an object carries one.
-    pub fn identifier(&self) -> Option<PdfObjectId> {
-        match self {
-            ObjectVariant::IndirectObject(indirect) => Some(PdfObjectId {
-                number: indirect.object_number,
-                generation: indirect.generation_number,
-            }),
-            ObjectVariant::Stream(stream) => Some(PdfObjectId {
-                number: stream.object_number,
-                generation: stream.generation_number,
-            }),
-            _ => None,
         }
     }
 }
@@ -413,39 +389,6 @@ mod tests {
                 ObjectVariant::Reference(_) => Ok(&self.object),
                 _ => Ok(object),
             }
-        }
-    }
-
-    #[test]
-    fn try_dictionary_returns_dictionary_from_indirect_object() {
-        let object = ObjectVariant::IndirectObject(Box::new(IndirectObject::new(
-            1,
-            0,
-            Some(ObjectVariant::Dictionary(Box::new(Dictionary::new(
-                std::collections::BTreeMap::<Vec<u8>, ObjectVariant>::new(),
-            )))),
-        )));
-
-        let dictionary = object
-            .try_dictionary(&PassthroughResolver)
-            .expect("indirect dictionary object should decode as a dictionary");
-
-        assert!(dictionary.dictionary.is_empty());
-    }
-
-    #[test]
-    fn try_dictionary_rejects_indirect_object_without_dictionary() {
-        for inner_object in [None, Some(ObjectVariant::Integer(7))] {
-            let object =
-                ObjectVariant::IndirectObject(Box::new(IndirectObject::new(1, 0, inner_object)));
-            let err = object
-                .try_dictionary(&PassthroughResolver)
-                .expect_err("indirect object without a dictionary should fail");
-
-            assert_eq!(
-                err,
-                ObjectError::TypeMismatch("Dictionary", "IndirectObject")
-            );
         }
     }
 

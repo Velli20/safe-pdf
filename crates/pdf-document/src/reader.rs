@@ -19,7 +19,7 @@ use pdf_object::{
     object_variant::ObjectVariant,
     trailer::Trailer,
 };
-use pdf_parser::parser::PdfParser;
+use pdf_parser::{error::ParserError, parser::PdfParser};
 use pdf_resources::object_reader::{ReadCycleTracker, ReadFromDictionary};
 use pdf_resources::resource_cache::DefaultResourceCache;
 
@@ -47,12 +47,12 @@ impl PdfReader {
         let encryption = EncryptionContext::from_trailer(
             &mut trailer,
             &entries,
-            &mut parser,
+            &parser,
             password.unwrap_or(EMPTY_PASSWORD),
             &mut diagnostics,
         )?;
         let mut objects =
-            ObjectLoader::new(&entries, &mut parser, encryption, &mut diagnostics).load()?;
+            ObjectLoader::new(&entries, &parser, encryption, &mut diagnostics).load()?;
         let document = PdfDocument {
             pages: extract_page_tree(&trailer, &mut objects)?,
         };
@@ -95,7 +95,7 @@ impl EncryptionContext {
     fn from_trailer(
         trailer: &mut Trailer,
         entries: &BTreeMap<usize, CrossReferenceEntryType>,
-        parser: &mut PdfParser,
+        parser: &PdfParser,
         password: &[u8],
         diagnostics: &mut Vec<PdfReadDiagnostic>,
     ) -> Result<Self, PdfReaderError> {
@@ -172,7 +172,7 @@ fn extract_page_tree(
 fn load_encrypt_dictionary(
     encrypt_reference: ObjectVariant,
     entries: &BTreeMap<usize, CrossReferenceEntryType>,
-    parser: &mut PdfParser,
+    parser: &PdfParser,
 ) -> Result<EncryptDictionary, PdfReaderError> {
     let object = match encrypt_reference {
         ObjectVariant::Reference(object_number) => {
@@ -188,7 +188,15 @@ fn load_encrypt_dictionary(
                     .ok_or(ObjectError::FailedResolveObjectReference {
                         obj_num: object_number,
                     })?;
-            parser.parse_object_at(byte_offset, &PassthroughResolver)?
+            let mut object_parser = parser
+                .at_offset(byte_offset)
+                .map_err(PdfReaderError::ParserError)?;
+            let identifier = object_parser.parse_indirect_object_id().ok_or(
+                ParserError::ExpectedIndirectObjectDeclaration {
+                    position: byte_offset,
+                },
+            )?;
+            object_parser.parse_indirect_object_value(identifier, &PassthroughResolver)?
         }
         object => object,
     };

@@ -16,6 +16,8 @@ pub enum ParserError {
     InvalidNumber(String),
     #[error("Unexpected end of file")]
     UnexpectedEndOfFile,
+    #[error("Byte offset {offset} exceeds input length {input_length}")]
+    InvalidOffset { offset: usize, input_length: usize },
     #[error("Tokenizer error: {0}")]
     TokenizerError(#[from] TokenizerError),
     #[error("Cross-reference table error: {0}")]
@@ -50,6 +52,8 @@ pub enum ParserError {
     UnexpectedTokenAt { token: String, position: usize },
     #[error("Nesting depth exceeded")]
     NestingDepthExceeded,
+    #[error("Expected an indirect object declaration at position {position}")]
+    ExpectedIndirectObjectDeclaration { position: usize },
     #[error("Object error: {0}")]
     ObjectError(#[from] ObjectError),
     #[error("Stream object found without a preceding dictionary")]
