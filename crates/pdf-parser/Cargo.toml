@@ -15,4 +15,9 @@ pdf-filter = { path = "../pdf-filter" }
 thiserror = "2.0.12"
 
 [dev-dependencies]
+criterion = "0.8"
 flate2 = "1.1.1"
+
+[[bench]]
+name = "number_parsing"
+harness = false

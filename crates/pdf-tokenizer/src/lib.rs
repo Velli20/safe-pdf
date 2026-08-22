@@ -195,14 +195,15 @@ impl<'a> Tokenizer<'a> {
         F: Fn(u8) -> bool,
     {
         let start = self.position;
-        while let Some(&b) = self.input.get(self.position) {
-            if condition(b) {
-                let _ = self.advance(1);
-            } else {
-                break;
-            }
-        }
-        let slice = self.input.get(start..self.position);
+        let remaining = self.input.get(start..).unwrap_or(&[]);
+        let length = remaining
+            .iter()
+            .copied()
+            .position(|byte| !condition(byte))
+            .unwrap_or(remaining.len());
+        let end = start.saturating_add(length);
+        let slice = self.input.get(start..end);
+        self.position = end;
 
         slice.unwrap_or(&[])
     }
@@ -221,5 +222,29 @@ mod tests {
         assert_eq!(tokenizer.read(), Some(PdfToken::Number(2)));
         assert_eq!(tokenizer.read(), Some(PdfToken::Number(3)));
         assert_eq!(tokenizer.read(), None);
+    }
+
+    #[test]
+    fn read_while_returns_matching_prefix_and_stops_at_first_mismatch() {
+        let mut tokenizer = Tokenizer::new(b"123abc");
+
+        assert_eq!(
+            tokenizer.read_while_u8(|byte| byte.is_ascii_digit()),
+            b"123"
+        );
+        assert_eq!(tokenizer.position, 3);
+        assert_eq!(tokenizer.data(), b"abc");
+    }
+
+    #[test]
+    fn read_while_consumes_the_entire_remaining_input() {
+        let mut tokenizer = Tokenizer::new(b"123");
+
+        assert_eq!(
+            tokenizer.read_while_u8(|byte| byte.is_ascii_digit()),
+            b"123"
+        );
+        assert_eq!(tokenizer.position, 3);
+        assert!(tokenizer.data().is_empty());
     }
 }

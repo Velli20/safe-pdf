@@ -2350,6 +2350,7 @@ dependencies = [
 name = "pdf-parser"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "flate2",
  "pdf-filter",
  "pdf-image",
