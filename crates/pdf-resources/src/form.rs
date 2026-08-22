@@ -127,7 +127,7 @@ mod tests {
             ),
             (Vec::from(b"Subtype"), ObjectVariant::Name(b"Form".to_vec())),
         ]));
-        let stream = StreamObject::new(7, 0, Box::new(dictionary.clone()), Vec::new());
+        let stream = StreamObject::new(7, 0, dictionary.clone(), Vec::new());
         let mut cache = DefaultResourceCache::default();
         let mut cycle_tracker = ReadCycleTracker::default();
         let mut id_allocator = ContentStreamIdAllocator::new();

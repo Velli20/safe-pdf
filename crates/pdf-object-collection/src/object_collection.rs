@@ -151,7 +151,7 @@ impl ObjectCollection {
     #[cfg(feature = "json")]
     fn object_variant_to_json(obj: &ObjectVariant) -> JsonValue {
         match obj {
-            ObjectVariant::Dictionary(dict) => Self::dictionary_to_json(dict.as_ref()),
+            ObjectVariant::Dictionary(dict) => Self::dictionary_to_json(dict),
             ObjectVariant::Array(arr) => {
                 JsonValue::Array(arr.iter().map(Self::object_variant_to_json).collect())
             }
@@ -211,7 +211,7 @@ impl ObjectCollection {
                     "type": "Stream",
                     "object_number": stream.object_number,
                     "generation_number": stream.generation_number,
-                    "dictionary": Self::dictionary_to_json(stream.dictionary.as_ref()),
+                    "dictionary": Self::dictionary_to_json(&stream.dictionary),
                     "data_length": stream.raw_data().len()
                 })
             }
@@ -250,7 +250,7 @@ mod tests {
         let stream = StreamObject::new(
             99,
             4,
-            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+            Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
             data,
         );
         let mut collection = ObjectCollection::default();
@@ -286,10 +286,9 @@ mod tests {
                     number: 7,
                     generation: 2,
                 },
-                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::<
-                    Vec<u8>,
-                    ObjectVariant,
-                >::new()))),
+                ObjectVariant::Dictionary(Dictionary::new(
+                    BTreeMap::<Vec<u8>, ObjectVariant>::new(),
+                )),
             )
             .expect("dictionary insert failed");
 
@@ -347,8 +346,7 @@ mod tests {
         decode_parms.insert(Vec::from(b"Colors"), ObjectVariant::Integer(1));
         decode_parms.insert(Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8));
 
-        let decode_parms_object =
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(decode_parms)));
+        let decode_parms_object = ObjectVariant::Dictionary(Dictionary::new(decode_parms));
 
         let mut collection = ObjectCollection::default();
         collection
@@ -375,7 +373,7 @@ mod tests {
         let stream = ObjectVariant::Stream(StreamObject::new_encoded(
             1,
             0,
-            Box::new(Dictionary::new(stream_dict)),
+            Dictionary::new(stream_dict),
             compressed,
         ));
 
@@ -406,7 +404,7 @@ mod tests {
                 ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
             ),
         ]));
-        let stream = StreamObject::new_encoded(1, 0, Box::new(stream_dictionary), b"2A>".to_vec());
+        let stream = StreamObject::new_encoded(1, 0, stream_dictionary, b"2A>".to_vec());
         let mut collection = ObjectCollection::default();
 
         collection
@@ -434,10 +432,9 @@ mod tests {
                     number: 2,
                     generation: 0,
                 },
-                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::<
-                    Vec<u8>,
-                    ObjectVariant,
-                >::new()))),
+                ObjectVariant::Dictionary(Dictionary::new(
+                    BTreeMap::<Vec<u8>, ObjectVariant>::new(),
+                )),
             )
             .expect("decode parameters should be inserted");
 

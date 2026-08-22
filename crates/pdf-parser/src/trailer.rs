@@ -39,7 +39,7 @@ impl PdfParser<'_> {
             0
         };
 
-        Ok(Trailer::new(dictionary, offset))
+        Ok(Trailer::new(Box::new(dictionary), offset))
     }
 }
 

@@ -168,10 +168,10 @@ pub fn content_stream(object_number: usize, data: &[u8]) -> ContentStream {
     let stream = StreamObject::new(
         object_number,
         0,
-        Box::new(Dictionary::new(std::collections::BTreeMap::<
+        Dictionary::new(std::collections::BTreeMap::<
             Vec<u8>,
             pdf_object::object_variant::ObjectVariant,
-        >::new())),
+        >::new()),
         data.to_vec(),
     );
     let mut ids = ContentStreamIdAllocator::new();

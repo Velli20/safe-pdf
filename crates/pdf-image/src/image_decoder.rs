@@ -150,7 +150,7 @@ mod tests {
     fn fixture_cal_rgb() -> ObjectVariant {
         ObjectVariant::Array(vec![
             name("CalRGB"),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
+            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
                 (
                     Vec::from(b"WhitePoint"),
                     ObjectVariant::Array(vec![
@@ -173,7 +173,7 @@ mod tests {
                         ObjectVariant::Integer(0),
                     ]),
                 ),
-            ])))),
+            ]))),
         ])
     }
 
@@ -181,7 +181,7 @@ mod tests {
         let function = StreamObject::new(
             1,
             0,
-            Box::new(Dictionary::new(BTreeMap::from([
+            Dictionary::new(BTreeMap::from([
                 (Vec::from(b"FunctionType"), ObjectVariant::Integer(4)),
                 (
                     Vec::from(b"Domain"),
@@ -199,7 +199,7 @@ mod tests {
                             .collect(),
                     ),
                 ),
-            ]))),
+            ])),
             b"4 3 roll pop".to_vec(),
         );
 
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn read_xobject_uses_predecoded_filtered_stream_data() {
         let dictionary = filtered_gray_dictionary();
-        let stream = StreamObject::new(1, 0, Box::new(dictionary.clone()), vec![0x2A]);
+        let stream = StreamObject::new(1, 0, dictionary.clone(), vec![0x2A]);
 
         let image = read_xobject(&dictionary, &stream, &PassthroughResolver, None)
             .expect("predecoded image data should not be filtered again");
@@ -226,7 +226,7 @@ mod tests {
     #[test]
     fn read_xobject_decodes_encoded_stream_data() {
         let dictionary = filtered_gray_dictionary();
-        let stream = StreamObject::new_encoded(1, 0, Box::new(dictionary.clone()), b"2A>".to_vec());
+        let stream = StreamObject::new_encoded(1, 0, dictionary.clone(), b"2A>".to_vec());
 
         let image = read_xobject(&dictionary, &stream, &PassthroughResolver, None)
             .expect("encoded image data should have its filter applied");
@@ -397,7 +397,7 @@ mod tests {
         let tint_function = StreamObject::new(
             2,
             0,
-            Box::new(Dictionary::new(BTreeMap::from([
+            Dictionary::new(BTreeMap::from([
                 (Vec::from(b"FunctionType"), ObjectVariant::Integer(4)),
                 (
                     Vec::from(b"Domain"),
@@ -414,7 +414,7 @@ mod tests {
                             .collect(),
                     ),
                 ),
-            ]))),
+            ])),
             b"pop 1 1 1".to_vec(),
         );
         let dictionary = Dictionary::new(BTreeMap::from([

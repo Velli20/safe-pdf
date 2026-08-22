@@ -27,13 +27,13 @@ fn number_array(values: &[f32]) -> ObjectVariant {
 }
 
 fn type_2_rgb_function() -> ObjectVariant {
-    ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
+    ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
         (Vec::from(b"FunctionType"), integer(2)),
         (Vec::from(b"Domain"), number_array(&[0.0, 1.0])),
         (Vec::from(b"C0"), number_array(&[1.0, 0.0, 0.0])),
         (Vec::from(b"C1"), number_array(&[0.0, 0.0, 1.0])),
         (Vec::from(b"N"), ObjectVariant::Real(1.0)),
-    ]))))
+    ])))
 }
 
 fn free_form_stream(
@@ -93,12 +93,7 @@ fn mesh_entries(
 }
 
 fn shading_stream(entries: BTreeMap<Vec<u8>, ObjectVariant>, data: Vec<u8>) -> ObjectVariant {
-    ObjectVariant::Stream(StreamObject::new(
-        1,
-        0,
-        Box::new(Dictionary::new(entries)),
-        data,
-    ))
+    ObjectVariant::Stream(StreamObject::new(1, 0, Dictionary::new(entries), data))
 }
 
 fn push_field(bits: &mut Vec<bool>, value: u32, width: usize) {

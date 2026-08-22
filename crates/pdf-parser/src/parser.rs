@@ -314,7 +314,7 @@ impl<'a> PdfParser<'a> {
                 }
             }
             PdfToken::DoubleLeftAngleBracket => {
-                ObjectVariant::Dictionary(Box::new(self.parse_dictionary(objects)?))
+                ObjectVariant::Dictionary(self.parse_dictionary(objects)?)
             }
             PdfToken::LeftAngleBracket => ObjectVariant::HexString(self.parse_hex_string()?),
             PdfToken::Solidus => ObjectVariant::Name(self.parse_name()?),

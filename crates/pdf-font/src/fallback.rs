@@ -87,7 +87,7 @@ mod tests {
             ),
             (
                 Vec::from(b"FontDescriptor"),
-                ObjectVariant::Dictionary(Box::new(descriptor)),
+                ObjectVariant::Dictionary(descriptor),
             ),
             (Vec::from(b"FirstChar"), ObjectVariant::Integer(65)),
             (Vec::from(b"LastChar"), ObjectVariant::Integer(65)),
@@ -133,14 +133,14 @@ mod tests {
     fn fallback_uses_cjk_program_from_type0_descendant() {
         let descendant = Dictionary::new(BTreeMap::from([(
             Vec::from(b"CIDSystemInfo"),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                 Vec::from(b"Ordering"),
                 ObjectVariant::LiteralString(b"Japan1".to_vec()),
-            )])))),
+            )]))),
         )]));
         let dictionary = Dictionary::new(BTreeMap::from([(
             Vec::from(b"DescendantFonts"),
-            ObjectVariant::Array(vec![ObjectVariant::Dictionary(Box::new(descendant))]),
+            ObjectVariant::Array(vec![ObjectVariant::Dictionary(descendant)]),
         )]));
 
         let fallback = fallback_true_type_from_dictionary(&dictionary, &PassthroughResolver);

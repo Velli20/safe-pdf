@@ -37,13 +37,13 @@ pub(crate) fn read_object_stream(
     stream: &StreamObject,
     objects: &dyn ObjectResolver,
 ) -> Result<Vec<CompressedObject>, PdfReaderError> {
-    let dict = stream.dictionary.as_ref();
-
     // /N: number of objects in this stream (required)
-    let n = dict.required_number::<usize>(b"N", objects)?;
+    let n = stream.dictionary.required_number::<usize>(b"N", objects)?;
 
     // /First: byte offset of the first object data within the decoded stream (required)
-    let first = dict.required_number::<usize>(b"First", objects)?;
+    let first = stream
+        .dictionary
+        .required_number::<usize>(b"First", objects)?;
 
     // Decode stream data (applies filters)
     let data = stream.raw_data();

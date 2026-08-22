@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn self_referential_soft_mask_is_treated_as_absent() {
-        let stream = StreamObject::new(7, 0, Box::new(image_dictionary(7)), vec![0xAA]);
+        let stream = StreamObject::new(7, 0, image_dictionary(7), vec![0xAA]);
         let resolver = MapResolver {
             objects: BTreeMap::from([(7, ObjectVariant::Stream(stream.clone()))]),
         };
@@ -223,7 +223,7 @@ mod tests {
         let image_stream = StreamObject::new(
             1,
             0,
-            Box::new(Dictionary::new(BTreeMap::from([
+            Dictionary::new(BTreeMap::from([
                 (
                     Vec::from(b"Subtype"),
                     ObjectVariant::Name(b"Image".to_vec()),
@@ -236,13 +236,13 @@ mod tests {
                     ObjectVariant::Name(b"DeviceGray".to_vec()),
                 ),
                 (Vec::from(b"SMask"), ObjectVariant::Reference(2)),
-            ]))),
+            ])),
             vec![0x20, 0xC0],
         );
         let mask_stream = StreamObject::new(
             2,
             0,
-            Box::new(Dictionary::new(BTreeMap::from([
+            Dictionary::new(BTreeMap::from([
                 (
                     Vec::from(b"Subtype"),
                     ObjectVariant::Name(b"Image".to_vec()),
@@ -254,7 +254,7 @@ mod tests {
                     Vec::from(b"ColorSpace"),
                     ObjectVariant::Name(b"DeviceGray".to_vec()),
                 ),
-            ]))),
+            ])),
             vec![0x10, 0xE0],
         );
         let resolver = MapResolver {
@@ -294,14 +294,14 @@ mod tests {
 
     #[test]
     fn soft_mask_xobject_error_is_propagated() {
-        let image_stream = StreamObject::new(1, 0, Box::new(image_dictionary(2)), vec![0xAA]);
+        let image_stream = StreamObject::new(1, 0, image_dictionary(2), vec![0xAA]);
         let mask_stream = StreamObject::new(
             2,
             0,
-            Box::new(Dictionary::new(BTreeMap::from([(
+            Dictionary::new(BTreeMap::from([(
                 Vec::from(b"Subtype"),
                 ObjectVariant::Name(b"Unsupported".to_vec()),
-            )]))),
+            )])),
             vec![],
         );
         let resolver = MapResolver {
@@ -348,7 +348,7 @@ mod tests {
             ),
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
-        let stream = StreamObject::new_encoded(1, 0, Box::new(dictionary), b"2A>".to_vec());
+        let stream = StreamObject::new_encoded(1, 0, dictionary, b"2A>".to_vec());
         let mut objects = ObjectCollection::default();
 
         objects
@@ -357,10 +357,9 @@ mod tests {
         objects
             .insert(
                 object_id(2),
-                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::<
-                    Vec<u8>,
-                    ObjectVariant,
-                >::new()))),
+                ObjectVariant::Dictionary(Dictionary::new(
+                    BTreeMap::<Vec<u8>, ObjectVariant>::new(),
+                )),
             )
             .expect("decode parameters should be inserted");
 
@@ -396,7 +395,7 @@ mod tests {
         let stream = StreamObject::new(
             9,
             0,
-            Box::new(Dictionary::new(BTreeMap::from([
+            Dictionary::new(BTreeMap::from([
                 (
                     Vec::from(b"Subtype"),
                     ObjectVariant::Name(b"Image".to_vec()),
@@ -407,7 +406,7 @@ mod tests {
                     Vec::from(b"ColorSpace"),
                     ObjectVariant::Name(b"DeviceGray".to_vec()),
                 ),
-            ]))),
+            ])),
             vec![0],
         );
         let resolver = MapResolver {

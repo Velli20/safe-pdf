@@ -405,9 +405,9 @@ impl DocumentDecryptor {
                 .map(|value| self.decrypt_object_value(value, object_number, generation_number))
                 .collect::<Result<Vec<_>, _>>()
                 .map(ObjectVariant::Array),
-            ObjectVariant::Dictionary(dictionary) => Ok(ObjectVariant::Dictionary(Box::new(
-                self.decrypt_dictionary(*dictionary, object_number, generation_number)?,
-            ))),
+            ObjectVariant::Dictionary(dictionary) => Ok(ObjectVariant::Dictionary(
+                self.decrypt_dictionary(dictionary, object_number, generation_number)?,
+            )),
             ObjectVariant::Stream(stream) => self.decrypt_stream_value(stream),
             other => Ok(other),
         }
@@ -445,11 +445,11 @@ impl DocumentDecryptor {
         let generation_number = stream.generation_number;
         let stream = self.decrypt_stream_object(stream)?;
         let dictionary =
-            self.decrypt_dictionary(*stream.dictionary, object_number, generation_number)?;
+            self.decrypt_dictionary(stream.dictionary, object_number, generation_number)?;
         Ok(ObjectVariant::Stream(StreamObject::new_encoded(
             object_number,
             generation_number,
-            Box::new(dictionary),
+            dictionary,
             stream.data,
         )))
     }
@@ -1101,7 +1101,7 @@ mod tests {
             entries.insert(Vec::from(b"Type"), ObjectVariant::Name(type_name.to_vec()));
         }
 
-        StreamObject::new(7, 0, Box::new(Dictionary::new(entries)), data)
+        StreamObject::new(7, 0, Dictionary::new(entries), data)
     }
 
     fn encrypt_for_object(
@@ -1335,7 +1335,7 @@ mod tests {
             number: object_number,
             generation: generation_number,
         };
-        let object = ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
+        let object = ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
             (
                 Vec::from(b"Contents"),
                 ObjectVariant::LiteralString(encrypt_for_object(
@@ -1359,7 +1359,7 @@ mod tests {
                 ObjectVariant::Name(b"FreeText".to_vec()),
             ),
             (Vec::from(b"Parent"), ObjectVariant::Reference(4)),
-        ]))));
+        ])));
 
         let decrypted = decryptor
             .decrypt_object(identifier, object)
@@ -1396,7 +1396,7 @@ mod tests {
         let stream = StreamObject::new(
             99,
             1,
-            Box::new(Dictionary::new(BTreeMap::from([(
+            Dictionary::new(BTreeMap::from([(
                 Vec::from(b"Label"),
                 ObjectVariant::LiteralString(encrypt_for_object(
                     &decryptor,
@@ -1404,7 +1404,7 @@ mod tests {
                     generation_number,
                     b"annotation appearance",
                 )),
-            )]))),
+            )])),
             encrypt_for_object(&decryptor, object_number, generation_number, contents),
         );
 
@@ -1438,13 +1438,13 @@ mod tests {
             number: 9,
             generation: 0,
         };
-        let object = ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
+        let object = ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
             (Vec::from(b"Type"), ObjectVariant::Name(b"Sig".to_vec())),
             (
                 Vec::from(b"Contents"),
                 ObjectVariant::HexString(vec![0, 0, 0, 0]),
             ),
-        ]))));
+        ])));
 
         let decrypted = decryptor
             .decrypt_object(identifier, object)

@@ -837,6 +837,8 @@ dependencies = [
  "pdf-resources",
  "pdf-tokenizer",
  "raw-window-handle",
+ "serde",
+ "serde_json",
  "skia-safe",
  "thiserror 2.0.12",
  "wgpu",

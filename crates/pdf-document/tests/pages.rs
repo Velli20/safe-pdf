@@ -64,7 +64,7 @@ fn resources_dictionary(entries: &[(&str, &str)]) -> Dictionary {
 
     Dictionary::new(BTreeMap::from([(
         Vec::from(b"ColorSpace"),
-        ObjectVariant::Dictionary(Box::new(color_spaces)),
+        ObjectVariant::Dictionary(color_spaces),
     )]))
 }
 
@@ -83,7 +83,7 @@ fn page_dictionary(
     if let Some(resources) = resources {
         entries.insert(
             Vec::from(b"Resources"),
-            ObjectVariant::Dictionary(Box::new(resources)),
+            ObjectVariant::Dictionary(resources),
         );
     }
 
@@ -121,7 +121,7 @@ fn pages_dictionary(
     if let Some(resources) = resources {
         entries.insert(
             Vec::from(b"Resources"),
-            ObjectVariant::Dictionary(Box::new(resources)),
+            ObjectVariant::Dictionary(resources),
         );
     }
 
@@ -157,10 +157,7 @@ fn inherited_resources_and_media_box_apply_to_leaf_pages() {
     let page = page_dictionary(page_number, Some(root_number), None, None);
 
     let resolver = MapResolver {
-        objects: BTreeMap::from([(
-            page_number,
-            ObjectVariant::Dictionary(Box::new(page.clone())),
-        )]),
+        objects: BTreeMap::from([(page_number, ObjectVariant::Dictionary(page.clone()))]),
     };
 
     let mut cache = DefaultResourceCache::default();
@@ -220,10 +217,7 @@ fn child_resources_keep_their_own_entries_while_inheriting_missing_ones() {
     );
 
     let resolver = MapResolver {
-        objects: BTreeMap::from([(
-            page_number,
-            ObjectVariant::Dictionary(Box::new(page.clone())),
-        )]),
+        objects: BTreeMap::from([(page_number, ObjectVariant::Dictionary(page.clone()))]),
     };
 
     let mut cache = DefaultResourceCache::default();

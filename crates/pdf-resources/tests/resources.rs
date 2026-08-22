@@ -39,17 +39,17 @@ fn array(values: Vec<ObjectVariant>) -> ObjectVariant {
 }
 
 fn type2_function(c0: Vec<ObjectVariant>, c1: Vec<ObjectVariant>) -> ObjectVariant {
-    ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
+    ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
         (Vec::from(b"FunctionType"), integer(2)),
         (Vec::from(b"Domain"), array(vec![real(0.0), real(1.0)])),
         (Vec::from(b"C0"), array(c0)),
         (Vec::from(b"C1"), array(c1)),
         (Vec::from(b"N"), real(1.0)),
-    ]))))
+    ])))
 }
 
 fn inline_axial_shading() -> ObjectVariant {
-    ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
+    ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
         (Vec::from(b"ShadingType"), integer(2)),
         (Vec::from(b"ColorSpace"), name("DeviceRGB")),
         (
@@ -63,7 +63,7 @@ fn inline_axial_shading() -> ObjectVariant {
                 vec![real(1.0), real(1.0), real(1.0)],
             ),
         ),
-    ]))))
+    ])))
 }
 
 fn form_xobject_stream(object_number: usize, data: &[u8]) -> ObjectVariant {
@@ -78,7 +78,7 @@ fn form_xobject_stream(object_number: usize, data: &[u8]) -> ObjectVariant {
     ObjectVariant::Stream(StreamObject::new(
         object_number,
         0,
-        Box::new(dictionary),
+        dictionary,
         data.to_vec(),
     ))
 }
@@ -91,10 +91,10 @@ fn xobject_resources(entries: Vec<(&str, ObjectVariant)>) -> Dictionary {
 
     Dictionary::new(BTreeMap::from([(
         Vec::from(b"Resources"),
-        ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+        ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
             Vec::from(b"XObject"),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(xobjects))),
-        )])))),
+            ObjectVariant::Dictionary(Dictionary::new(xobjects)),
+        )]))),
     )]))
 }
 
@@ -106,10 +106,10 @@ fn page_resources(entries: Vec<(&str, ObjectVariant)>) -> Dictionary {
 
     Dictionary::new(BTreeMap::from([(
         Vec::from(b"Resources"),
-        ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+        ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
             Vec::from(b"Shading"),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(shading_entries))),
-        )])))),
+            ObjectVariant::Dictionary(Dictionary::new(shading_entries)),
+        )]))),
     )]))
 }
 
@@ -117,7 +117,7 @@ fn type3_char_proc(data: &[u8]) -> ObjectVariant {
     ObjectVariant::Stream(StreamObject::new(
         0,
         0,
-        Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+        Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
         data.to_vec(),
     ))
 }
@@ -144,20 +144,20 @@ fn self_referential_type3_font(object_number: usize) -> Dictionary {
         ),
         (
             Vec::from(b"CharProcs"),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                 Vec::from(b"A"),
                 type3_char_proc(b"0 0 d0"),
-            )])))),
+            )]))),
         ),
         (
             Vec::from(b"Resources"),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                 Vec::from(b"Font"),
-                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                     Vec::from(b"Self"),
                     ObjectVariant::Reference(object_number),
-                )])))),
-            )])))),
+                )]))),
+            )]))),
         ),
     ]))
 }
@@ -166,7 +166,7 @@ fn self_referential_tiling_pattern(object_number: usize) -> ObjectVariant {
     ObjectVariant::Stream(StreamObject::new(
         object_number,
         0,
-        Box::new(Dictionary::new(BTreeMap::from([
+        Dictionary::new(BTreeMap::from([
             (Vec::from(b"PatternType"), integer(1)),
             (Vec::from(b"PaintType"), integer(1)),
             (Vec::from(b"TilingType"), integer(1)),
@@ -178,15 +178,15 @@ fn self_referential_tiling_pattern(object_number: usize) -> ObjectVariant {
             (Vec::from(b"YStep"), real(10.0)),
             (
                 Vec::from(b"Resources"),
-                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                     Vec::from(b"Pattern"),
-                    ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                    ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                         Vec::from(b"Self"),
                         ObjectVariant::Reference(object_number),
-                    )])))),
-                )])))),
+                    )]))),
+                )]))),
             ),
-        ]))),
+        ])),
         b"q".to_vec(),
     ))
 }
@@ -275,10 +275,10 @@ fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
 
     let resources_dict = Dictionary::new(BTreeMap::from([(
         Vec::from(b"XObject"),
-        ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+        ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
             Vec::from(b"Meta6"),
             ObjectVariant::Reference(101),
-        )])))),
+        )]))),
     )]));
 
     let form_dict = Dictionary::new(BTreeMap::from([
@@ -302,16 +302,10 @@ fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
 
     let mut objects = ObjectCollection::default();
     objects
-        .insert(
-            object_id(100),
-            ObjectVariant::Dictionary(Box::new(resources_dict)),
-        )
+        .insert(object_id(100), ObjectVariant::Dictionary(resources_dict))
         .expect("resources dictionary should insert");
     objects
-        .insert(
-            object_id(101),
-            ObjectVariant::Dictionary(Box::new(form_dict)),
-        )
+        .insert(object_id(101), ObjectVariant::Dictionary(form_dict))
         .expect("dictionary-only form should insert");
 
     let mut cache = DefaultResourceCache::default();
@@ -377,7 +371,7 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
     let xobject_entries = BTreeMap::from([(Vec::from(b"Self"), ObjectVariant::Reference(11))]);
     let resource_dict = Dictionary::new(BTreeMap::from([(
         Vec::from(b"XObject"),
-        ObjectVariant::Dictionary(Box::new(Dictionary::new(xobject_entries))),
+        ObjectVariant::Dictionary(Dictionary::new(xobject_entries)),
     )]));
 
     let form_dict = Dictionary::new(BTreeMap::from([
@@ -396,15 +390,12 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
 
     let mut objects = ObjectCollection::default();
     objects
-        .insert(
-            object_id(10),
-            ObjectVariant::Dictionary(Box::new(resource_dict)),
-        )
+        .insert(object_id(10), ObjectVariant::Dictionary(resource_dict))
         .expect("resource dictionary should insert");
     objects
         .insert(
             object_id(11),
-            ObjectVariant::Stream(StreamObject::new(11, 0, Box::new(form_dict), b"q".to_vec())),
+            ObjectVariant::Stream(StreamObject::new(11, 0, form_dict, b"q".to_vec())),
         )
         .expect("form xobject should insert");
 
@@ -471,20 +462,20 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
 fn self_referential_font_resources_resolve_lazily() {
     let page_dict = Dictionary::new(BTreeMap::from([(
         Vec::from(b"Resources"),
-        ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+        ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
             Vec::from(b"Font"),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                 Vec::from(b"Self"),
                 ObjectVariant::Reference(21),
-            )])))),
-        )])))),
+            )]))),
+        )]))),
     )]));
 
     let mut objects = ObjectCollection::default();
     objects
         .insert(
             object_id(21),
-            ObjectVariant::Dictionary(Box::new(self_referential_type3_font(21))),
+            ObjectVariant::Dictionary(self_referential_type3_font(21)),
         )
         .expect("font should insert");
 
@@ -527,22 +518,22 @@ fn self_referential_font_resources_resolve_lazily() {
 
 #[test]
 fn fallback_fonts_do_not_read_nested_type3_resources() {
-    let malformed_type3 = ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
+    let malformed_type3 = ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
         (
             Vec::from(b"Subtype"),
             ObjectVariant::Name(b"Type3".to_vec()),
         ),
         (Vec::from(b"Resources"), ObjectVariant::Integer(1)),
-    ]))));
+    ])));
     let page_dict = Dictionary::new(BTreeMap::from([(
         Vec::from(b"Resources"),
-        ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+        ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
             Vec::from(b"Font"),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                 Vec::from(b"F1"),
                 malformed_type3,
-            )])))),
-        )])))),
+            )]))),
+        )]))),
     )]));
     let mut cache = DefaultResourceCache::default();
     let mut cycle_tracker = ReadCycleTracker::default();
@@ -567,13 +558,13 @@ fn fallback_fonts_do_not_read_nested_type3_resources() {
 fn self_referential_pattern_resources_resolve_lazily() {
     let page_dict = Dictionary::new(BTreeMap::from([(
         Vec::from(b"Resources"),
-        ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+        ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
             Vec::from(b"Pattern"),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                 Vec::from(b"Self"),
                 ObjectVariant::Reference(31),
-            )])))),
-        )])))),
+            )]))),
+        )]))),
     )]));
 
     let mut objects = ObjectCollection::default();

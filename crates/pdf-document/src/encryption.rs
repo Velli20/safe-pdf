@@ -358,8 +358,7 @@ mod tests {
             ("CFM", ObjectVariant::Name(b"AESV3".to_vec())),
             ("Length", ObjectVariant::Integer(32)),
         ]);
-        let crypt_filters =
-            make_dictionary(vec![("StdCF", ObjectVariant::Dictionary(Box::new(std_cf)))]);
+        let crypt_filters = make_dictionary(vec![("StdCF", ObjectVariant::Dictionary(std_cf))]);
         let dict = make_dictionary(vec![
             ("Filter", ObjectVariant::Name(b"Standard".to_vec())),
             ("V", ObjectVariant::Integer(5)),
@@ -370,7 +369,7 @@ mod tests {
             ("UE", ObjectVariant::HexString(vec![0u8; 32])),
             ("Perms", ObjectVariant::HexString(vec![0u8; 16])),
             ("P", ObjectVariant::Integer(-4)),
-            ("CF", ObjectVariant::Dictionary(Box::new(crypt_filters))),
+            ("CF", ObjectVariant::Dictionary(crypt_filters)),
             ("StmF", ObjectVariant::Name(b"StdCF".to_vec())),
             ("StrF", ObjectVariant::Name(b"Identity".to_vec())),
         ]);

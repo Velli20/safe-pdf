@@ -384,12 +384,7 @@ mod tests {
         dictionary: Dictionary,
         data: Vec<u8>,
     ) -> ObjectVariant {
-        ObjectVariant::Stream(StreamObject::new(
-            object_number,
-            0,
-            Box::new(dictionary),
-            data,
-        ))
+        ObjectVariant::Stream(StreamObject::new(object_number, 0, dictionary, data))
     }
 
     #[test]
@@ -426,8 +421,7 @@ mod tests {
             Vec::from(b"Subtype"),
             ObjectVariant::Name(b"OpenType".to_vec()),
         );
-        let font_file3_stream =
-            StreamObject::new(3, 0, Box::new(Dictionary::new(file3_dict)), vec![0, 1, 2]);
+        let font_file3_stream = StreamObject::new(3, 0, Dictionary::new(file3_dict), vec![0, 1, 2]);
         let font_file3_bytes = font_file3_stream.raw_data().as_ptr();
         let font_file3 = ObjectVariant::Stream(font_file3_stream);
 
@@ -441,19 +435,17 @@ mod tests {
         );
         descendant_dict.insert(
             Vec::from(b"FontDescriptor"),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(descriptor_dict))),
+            ObjectVariant::Dictionary(Dictionary::new(descriptor_dict)),
         );
         descendant_dict.insert(
             Vec::from(b"CIDSystemInfo"),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                 Vec::from(b"Ordering"),
                 ObjectVariant::LiteralString(b"Japan1".to_vec()),
-            )])))),
+            )]))),
         );
 
-        let descendant_fonts = vec![ObjectVariant::Dictionary(Box::new(Dictionary::new(
-            descendant_dict,
-        )))];
+        let descendant_fonts = vec![ObjectVariant::Dictionary(Dictionary::new(descendant_dict))];
 
         let mut font_dict = BTreeMap::new();
         font_dict.insert(
@@ -509,7 +501,7 @@ mod tests {
             ObjectVariant::Stream(StreamObject::new(
                 3,
                 0,
-                Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+                Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
                 vec![0, 1, 0, 0],
             )),
         );
@@ -521,12 +513,10 @@ mod tests {
         );
         descendant_dict.insert(
             Vec::from(b"FontDescriptor"),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(descriptor_dict))),
+            ObjectVariant::Dictionary(Dictionary::new(descriptor_dict)),
         );
 
-        let descendant_fonts = vec![ObjectVariant::Dictionary(Box::new(Dictionary::new(
-            descendant_dict,
-        )))];
+        let descendant_fonts = vec![ObjectVariant::Dictionary(Dictionary::new(descendant_dict))];
 
         let mut font_dict = BTreeMap::new();
         font_dict.insert(
@@ -576,10 +566,9 @@ mod tests {
             ),
             (
                 Vec::from(b"FontDescriptor"),
-                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::<
-                    Vec<u8>,
-                    ObjectVariant,
-                >::new()))),
+                ObjectVariant::Dictionary(Dictionary::new(
+                    BTreeMap::<Vec<u8>, ObjectVariant>::new(),
+                )),
             ),
             (Vec::from(b"CIDSystemInfo"), ObjectVariant::Integer(1)),
         ]));
@@ -590,7 +579,7 @@ mod tests {
             ),
             (
                 Vec::from(b"DescendantFonts"),
-                ObjectVariant::Array(vec![ObjectVariant::Dictionary(Box::new(descendant))]),
+                ObjectVariant::Array(vec![ObjectVariant::Dictionary(descendant)]),
             ),
         ]));
 
@@ -730,17 +719,17 @@ mod tests {
             ),
             (
                 Vec::from(b"FontDescriptor"),
-                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                     Vec::from(b"Flags"),
                     ObjectVariant::Integer(6),
-                )])))),
+                )]))),
             ),
             (
                 Vec::from(b"CIDSystemInfo"),
-                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+                ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                     Vec::from(b"Ordering"),
                     ObjectVariant::LiteralString(Vec::from(ordering)),
-                )])))),
+                )]))),
             ),
         ])
     }
@@ -761,9 +750,7 @@ mod tests {
             ),
             (
                 Vec::from(b"DescendantFonts"),
-                ObjectVariant::Array(vec![ObjectVariant::Dictionary(Box::new(Dictionary::new(
-                    descendant,
-                )))]),
+                ObjectVariant::Array(vec![ObjectVariant::Dictionary(Dictionary::new(descendant))]),
             ),
         ]))
     }

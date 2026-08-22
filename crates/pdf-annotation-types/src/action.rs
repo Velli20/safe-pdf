@@ -282,10 +282,10 @@ mod tests {
     fn action_dictionary(js: ObjectVariant) -> Dictionary {
         Dictionary::new(BTreeMap::from([(
             Vec::from(b"A"),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
+            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
                 (Vec::from(b"S"), ObjectVariant::Name(b"JavaScript".to_vec())),
                 (Vec::from(b"JS"), js),
-            ])))),
+            ]))),
         )]))
     }
 
@@ -293,7 +293,7 @@ mod tests {
         ObjectVariant::Stream(StreamObject::new(
             7,
             0,
-            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+            Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
             data.to_vec(),
         ))
     }

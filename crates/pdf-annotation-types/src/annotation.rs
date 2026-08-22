@@ -323,12 +323,7 @@ mod tests {
                 ObjectVariant::Integer(1),
             ]),
         )]));
-        ObjectVariant::Stream(StreamObject::new(
-            object_number,
-            0,
-            Box::new(dictionary),
-            Vec::new(),
-        ))
+        ObjectVariant::Stream(StreamObject::new(object_number, 0, dictionary, Vec::new()))
     }
 
     fn button_annotation(appearance_state: Option<&str>, states: &[&str]) -> Annotation {
@@ -342,11 +337,9 @@ mod tests {
                 )
             })
             .collect();
-        let normal = ObjectVariant::Dictionary(Box::new(Dictionary::new(states)));
-        let appearance = ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
-            Vec::from(b"N"),
-            normal,
-        )]))));
+        let normal = ObjectVariant::Dictionary(Dictionary::new(states));
+        let appearance =
+            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(Vec::from(b"N"), normal)])));
 
         let mut entries = vec![
             ("Subtype", ObjectVariant::Name(b"Widget".to_vec())),
@@ -507,21 +500,21 @@ mod tests {
         let mut objects = BTreeMap::new();
         objects.insert(
             4,
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([(
+            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                 Vec::from(b"Type"),
                 ObjectVariant::Name(b"Annot".to_vec()),
-            )])))),
+            )]))),
         );
 
         objects.insert(
             5,
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::from([
+            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
                 (Vec::from(b"Type"), ObjectVariant::Name(b"Annot".to_vec())),
                 (
                     Vec::from(b"Subtype"),
                     ObjectVariant::Name(b"Popup".to_vec()),
                 ),
-            ])))),
+            ]))),
         );
 
         let mut page_values = BTreeMap::new();

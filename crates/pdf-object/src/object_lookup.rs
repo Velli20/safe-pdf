@@ -1027,14 +1027,14 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::from([
             (
                 b"Dictionary".to_vec(),
-                ObjectVariant::Dictionary(Box::new(nested.clone())),
+                ObjectVariant::Dictionary(nested.clone()),
             ),
             (
                 b"Stream".to_vec(),
                 ObjectVariant::Stream(StreamObject::new(
                     7,
                     0,
-                    Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+                    Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
                     Vec::new(),
                 )),
             ),
@@ -1129,7 +1129,7 @@ mod tests {
     fn slice_lookup_methods_convert_common_types() {
         let nested = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
         let values = [
-            ObjectVariant::Dictionary(Box::new(nested.clone())),
+            ObjectVariant::Dictionary(nested.clone()),
             ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(2)]),
             ObjectVariant::LiteralString(b"text".to_vec()),
             ObjectVariant::Boolean(false),

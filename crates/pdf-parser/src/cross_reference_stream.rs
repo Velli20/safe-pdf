@@ -19,24 +19,24 @@ use crate::error::ParserError;
 /// The stream data is decoded (filters such as FlateDecode and predictors
 /// are applied) before reading the binary xref entries.
 pub fn parse_xref_stream(
-    stream: &StreamObject,
+    stream: StreamObject,
     objects: &dyn ObjectResolver,
 ) -> Result<CrossReferenceTable, ParserError> {
-    let dict = stream.dictionary.as_ref();
-
-    validate_stream_type(stream, objects)?;
-    let size = dict.required_number::<usize>(b"Size", objects)?;
-    let layout = XrefStreamLayout::from_dictionary(stream, objects)?;
+    validate_stream_type(&stream, objects)?;
+    let layout = XrefStreamLayout::from_dictionary(&stream, objects)?;
+    let size = stream
+        .dictionary
+        .required_number::<usize>(b"Size", objects)?;
 
     if layout.entry_width == 0 {
         return Ok(CrossReferenceTable::new(
             BTreeMap::new(),
-            Trailer::new(stream.dictionary.clone(), 0),
+            Trailer::new(Box::new(stream.dictionary), 0),
         ));
     }
 
-    let subsections = parse_subsections(stream, objects, size)?;
-    let data = pdf_filter::filter::decode_with_resolver(stream, objects)?;
+    let subsections = parse_subsections(&stream, objects, size)?;
+    let data = pdf_filter::filter::decode_with_resolver(&stream, objects)?;
     let mut entries = BTreeMap::new();
 
     let mut decoder = XrefStreamEntryDecoder::new(&data, layout);
@@ -45,7 +45,7 @@ pub fn parse_xref_stream(
             let Some(entry) = decoder.next_entry() else {
                 return Ok(CrossReferenceTable::new(
                     entries,
-                    Trailer::new(stream.dictionary.clone(), 0),
+                    Trailer::new(Box::new(stream.dictionary), 0),
                 ));
             };
 
@@ -54,7 +54,7 @@ pub fn parse_xref_stream(
         }
     }
 
-    let trailer = Trailer::new(stream.dictionary.clone(), 0);
+    let trailer = Trailer::new(Box::new(stream.dictionary), 0);
     Ok(CrossReferenceTable::new(entries, trailer))
 }
 
@@ -255,7 +255,7 @@ mod tests {
             ObjectVariant::Integer(raw_data.len() as i64),
         );
 
-        StreamObject::new(0, 0, Box::new(Dictionary::new(dict_map)), raw_data)
+        StreamObject::new(0, 0, Dictionary::new(dict_map), raw_data)
     }
 
     #[test]
@@ -272,7 +272,7 @@ mod tests {
         data.extend_from_slice(&[1, 2, 0, 0]);
 
         let stream = build_xref_stream([1, 2, 1], None, 4, data);
-        let table = parse_xref_stream(&stream, &PassthroughResolver).unwrap();
+        let table = parse_xref_stream(stream, &PassthroughResolver).unwrap();
 
         assert_eq!(table.entries.len(), 4);
 
@@ -307,7 +307,7 @@ mod tests {
         data.extend_from_slice(&[0, 200]);
 
         let stream = build_xref_stream([0, 2, 0], None, 2, data);
-        let table = parse_xref_stream(&stream, &PassthroughResolver).unwrap();
+        let table = parse_xref_stream(stream, &PassthroughResolver).unwrap();
 
         assert_eq!(table.entries.len(), 2);
         assert_eq!(table.entries[&0].byte_offset(), Some(100));
@@ -323,7 +323,7 @@ mod tests {
         data.extend_from_slice(&[1, 100, 0]);
 
         let stream = build_xref_stream([1, 1, 1], Some(vec![5, 2, 10, 1]), 11, data);
-        let table = parse_xref_stream(&stream, &PassthroughResolver).unwrap();
+        let table = parse_xref_stream(stream, &PassthroughResolver).unwrap();
 
         assert_eq!(table.entries.len(), 3);
         assert_eq!(table.entries[&5].byte_offset(), Some(50));
@@ -337,7 +337,7 @@ mod tests {
     fn test_parse_xref_stream_keeps_complete_entries_from_truncated_data() {
         let stream = build_xref_stream([1, 1, 1], None, 2, vec![1, 42, 0, 1, 84]);
 
-        let table = parse_xref_stream(&stream, &PassthroughResolver).unwrap();
+        let table = parse_xref_stream(stream, &PassthroughResolver).unwrap();
 
         assert_eq!(table.entries.len(), 1);
         assert_eq!(table.entries[&0].byte_offset(), Some(42));
@@ -347,7 +347,7 @@ mod tests {
     fn test_parse_xref_stream_maps_unknown_entry_types_to_free_entries() {
         let stream = build_xref_stream([1, 1, 1], None, 1, vec![9, 42, 7]);
 
-        let table = parse_xref_stream(&stream, &PassthroughResolver).unwrap();
+        let table = parse_xref_stream(stream, &PassthroughResolver).unwrap();
 
         assert_eq!(table.entries[&0], CrossReferenceEntryType::new_free(0, 0));
     }
@@ -413,7 +413,7 @@ mod tests {
         );
         dict_map.insert(
             Vec::from(b"DecodeParms"),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(
+            ObjectVariant::Dictionary(Dictionary::new(
                 vec![
                     (
                         Vec::from(b"Columns"),
@@ -423,14 +423,14 @@ mod tests {
                 ]
                 .into_iter()
                 .collect(),
-            ))),
+            )),
         );
         dict_map.insert(
             Vec::from(b"Length"),
             ObjectVariant::Integer(compressed.len() as i64),
         );
 
-        StreamObject::new(0, 0, Box::new(Dictionary::new(dict_map)), compressed)
+        StreamObject::new(0, 0, Dictionary::new(dict_map), compressed)
     }
 
     #[test]
@@ -454,7 +454,7 @@ mod tests {
             raw_entries,
             5, // columns = w1+w2+w3
         );
-        let table = parse_xref_stream(&stream, &PassthroughResolver).unwrap();
+        let table = parse_xref_stream(stream, &PassthroughResolver).unwrap();
 
         assert_eq!(table.entries.len(), 4);
 

@@ -105,12 +105,7 @@ mod tests {
                 ObjectVariant::Name(subtype.as_bytes().to_vec()),
             ),
         ]));
-        let stream = StreamObject::new(
-            stream_object_number,
-            0,
-            Box::new(form_dictionary),
-            Vec::new(),
-        );
+        let stream = StreamObject::new(stream_object_number, 0, form_dictionary, Vec::new());
 
         Dictionary::new(BTreeMap::from([
             (Vec::from(b"G"), ObjectVariant::Stream(stream)),

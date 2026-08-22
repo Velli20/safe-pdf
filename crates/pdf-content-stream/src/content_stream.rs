@@ -157,7 +157,7 @@ mod tests {
         StreamObject::new(
             object_number,
             0,
-            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+            Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
             data.to_vec(),
         )
     }

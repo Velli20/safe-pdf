@@ -14,7 +14,7 @@ use crate::trailer::Trailer;
 #[derive(Debug, PartialEq, Clone)]
 pub enum ObjectVariant {
     /// A PDF dictionary object.
-    Dictionary(Box<Dictionary>),
+    Dictionary(Dictionary),
     /// A PDF array of objects.
     Array(Vec<ObjectVariant>),
     /// A literal string (enclosed in parentheses in PDF syntax), stored as raw bytes.
@@ -68,8 +68,8 @@ impl ObjectVariant {
         };
 
         match object {
-            ObjectVariant::Dictionary(dict) => Ok(dict.as_ref()),
-            ObjectVariant::Stream(stream) => Ok(stream.dictionary.as_ref()),
+            ObjectVariant::Dictionary(dict) => Ok(dict),
+            ObjectVariant::Stream(stream) => Ok(&stream.dictionary),
             _ => Err(ObjectError::TypeMismatch("Dictionary", object.name())),
         }
     }
@@ -441,9 +441,9 @@ mod tests {
             .expect_err("null object should not decode as a stream");
         assert_eq!(null_err, ObjectError::TypeMismatch("Stream", "Null"));
 
-        let dict_object = ObjectVariant::Dictionary(Box::new(crate::dictionary::Dictionary::new(
+        let dict_object = ObjectVariant::Dictionary(crate::dictionary::Dictionary::new(
             std::collections::BTreeMap::<Vec<u8>, ObjectVariant>::new(),
-        )));
+        ));
         let dict_err = dict_object
             .try_stream(&PassthroughResolver)
             .expect_err("dictionary object should not decode as a stream");
@@ -456,9 +456,9 @@ mod tests {
             (ObjectVariant::Integer(7), "Integer"),
             (ObjectVariant::Array(Vec::new()), "Array"),
             (
-                ObjectVariant::Dictionary(Box::new(crate::dictionary::Dictionary::new(
+                ObjectVariant::Dictionary(crate::dictionary::Dictionary::new(
                     std::collections::BTreeMap::<Vec<u8>, ObjectVariant>::new(),
-                ))),
+                )),
                 "Dictionary",
             ),
             (ObjectVariant::Boolean(true), "Boolean"),

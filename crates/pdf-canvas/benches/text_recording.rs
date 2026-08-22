@@ -60,7 +60,7 @@ fn content_stream(text: &[u8]) -> ContentStream {
     let mut data = b"BT /F1 10 Tf (".to_vec();
     data.extend_from_slice(text);
     data.extend_from_slice(b") Tj ET");
-    let stream = StreamObject::new(1, 0, Box::new(Dictionary::new(Default::default())), data);
+    let stream = StreamObject::new(1, 0, Dictionary::new(Default::default()), data);
     ContentStream::new(
         &ObjectVariant::Stream(stream),
         &PassthroughResolver,

@@ -198,8 +198,7 @@ mod tests {
                 ObjectVariant::Name(subtype.as_bytes().to_vec()),
             );
         }
-        let font_file3_stream =
-            StreamObject::new(10, 0, Box::new(Dictionary::new(file3_stream_dict)), bytes);
+        let font_file3_stream = StreamObject::new(10, 0, Dictionary::new(file3_stream_dict), bytes);
 
         let mut descriptor_dict = BTreeMap::new();
         descriptor_dict.insert(
@@ -210,7 +209,7 @@ mod tests {
         let mut font_dict = BTreeMap::new();
         font_dict.insert(
             Vec::from(b"FontDescriptor"),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(descriptor_dict))),
+            ObjectVariant::Dictionary(Dictionary::new(descriptor_dict)),
         );
         Dictionary::new(font_dict)
     }
@@ -239,7 +238,7 @@ mod tests {
             ObjectVariant::Stream(StreamObject::new(
                 11,
                 0,
-                Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+                Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
                 bytes,
             )),
         );
@@ -247,7 +246,7 @@ mod tests {
         let mut font_dict = BTreeMap::new();
         font_dict.insert(
             Vec::from(b"FontDescriptor"),
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(descriptor_dict))),
+            ObjectVariant::Dictionary(Dictionary::new(descriptor_dict)),
         );
         Dictionary::new(font_dict)
     }
