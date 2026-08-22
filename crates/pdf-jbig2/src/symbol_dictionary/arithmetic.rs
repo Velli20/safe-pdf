@@ -86,12 +86,9 @@ fn decode_arithmetic_symbol_width_run(
         .ok_or(Jbig2Error::InvalidState(SYMBOL_DICTIONARY_AT_DATA))?;
     let mut width = 0i32;
 
-    loop {
-        let Some(delta_width) =
-            decoder.decode_integer(JBig2ArithIntegerContext::SymbolWidthDelta)?
-        else {
-            break;
-        };
+    while let Some(delta_width) =
+        decoder.decode_integer(JBig2ArithIntegerContext::SymbolWidthDelta)?
+    {
         width = width
             .checked_add(delta_width)
             .ok_or(Jbig2Error::Overflow(INTEGER_CONVERSION_OVERFLOW))?;

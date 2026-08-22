@@ -46,7 +46,7 @@ pub(crate) fn parse_patch_mesh(
 ) -> Result<Shading, PdfShadingError> {
     let kind = PatchKind::from_shading_type(shading_type)?;
     let stream = object.try_stream(objects)?;
-    let config = PatchMeshConfig::parse(stream.dictionary.as_ref(), objects)?;
+    let config = PatchMeshConfig::parse(&stream.dictionary, objects)?;
     let patches = PatchMeshParser::new(stream.raw_data(), &config, kind)?.parse()?;
 
     Ok(config.into_shading(shading_type, patches))

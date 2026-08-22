@@ -116,10 +116,7 @@ mod tests {
         let stream = StreamObject::new(
             1,
             0,
-            Box::new(Dictionary::from_entries([(
-                b"N",
-                ObjectVariant::Integer(3),
-            )])),
+            Dictionary::from_entries([(b"N", ObjectVariant::Integer(3))]),
             vec![1, 2, 3, 4],
         );
         let stream_data = stream.shared_data();

@@ -20,7 +20,7 @@ fn repeated_stream(fragment: &[u8]) -> ObjectVariant {
     ObjectVariant::Stream(StreamObject::new(
         1,
         0,
-        Box::new(Dictionary::new(Default::default())),
+        Dictionary::new(Default::default()),
         data,
     ))
 }

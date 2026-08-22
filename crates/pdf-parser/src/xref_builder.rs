@@ -232,7 +232,7 @@ impl<'input> XrefBuilder<'input> {
     fn parse_stream_section(&self, stream: StreamObject) -> Result<ParsedXrefSection, ParserError> {
         Ok(ParsedXrefSection {
             kind: XrefSectionKind::Stream,
-            table: crate::cross_reference_stream::parse_xref_stream(&stream, &PassthroughResolver)?,
+            table: crate::cross_reference_stream::parse_xref_stream(stream, &PassthroughResolver)?,
         })
     }
 

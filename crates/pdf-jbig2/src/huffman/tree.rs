@@ -6,17 +6,12 @@ use pdf_utils::BitReader;
 /// ITU-T T.88 / ISO/IEC 14492 Annex B decodes Huffman prefixes bit by bit;
 /// this enum records whether a bit path is still empty, continues to another
 /// internal node, or resolves to a range-table symbol.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 enum Link {
+    #[default]
     Empty,
     Node(usize),
     Leaf(usize),
-}
-
-impl Default for Link {
-    fn default() -> Self {
-        Self::Empty
-    }
 }
 
 /// A node in the binary prefix-code decode tree.

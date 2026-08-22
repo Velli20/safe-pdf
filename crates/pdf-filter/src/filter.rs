@@ -321,7 +321,7 @@ pub fn decode_data_with_resolver(
     for (index, filter) in filters.into_iter().enumerate() {
         let param_dict = match decode_parms {
             None => None,
-            Some(ObjectVariant::Dictionary(dictionary)) => Some(dictionary.as_ref()),
+            Some(ObjectVariant::Dictionary(dictionary)) => Some(dictionary),
             Some(ObjectVariant::Array(array)) => {
                 array.as_slice().optional_dictionary(index, objects)?
             }
@@ -547,7 +547,7 @@ mod tests {
         let stream = StreamObject::new(
             1,
             0,
-            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+            Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
             b"shared stream data".to_vec(),
         );
 
@@ -566,7 +566,7 @@ mod tests {
             ObjectVariant::Name(b"JBIG2Decode".to_vec()),
         );
 
-        let stream = StreamObject::new(1, 0, Box::new(Dictionary::new(dict)), Vec::new());
+        let stream = StreamObject::new(1, 0, Dictionary::new(dict), Vec::new());
         let err = decode(&stream).expect_err("expected decode failure");
         assert!(matches!(err, FilterError::Decompression(_)));
     }
@@ -606,8 +606,7 @@ mod tests {
             Vec::from(b"Filter"),
             ObjectVariant::Name(b"JBIG2Decode".to_vec()),
         );
-        let globals_stream =
-            StreamObject::new(3, 0, Box::new(Dictionary::new(globals_dict)), Vec::new());
+        let globals_stream = StreamObject::new(3, 0, Dictionary::new(globals_dict), Vec::new());
 
         let mut decode_parms = BTreeMap::new();
         decode_parms.insert(Vec::from(b"JBIG2Globals"), ObjectVariant::Reference(3));
@@ -621,13 +620,10 @@ mod tests {
         dict.insert(Vec::from(b"Height"), ObjectVariant::Integer(1));
         dict.insert(Vec::from(b"DecodeParms"), ObjectVariant::Reference(2));
 
-        let stream = StreamObject::new(1, 0, Box::new(Dictionary::new(dict)), Vec::new());
+        let stream = StreamObject::new(1, 0, Dictionary::new(dict), Vec::new());
 
         let mut objects = BTreeMap::new();
-        objects.insert(
-            2,
-            ObjectVariant::Dictionary(Box::new(Dictionary::new(decode_parms))),
-        );
+        objects.insert(2, ObjectVariant::Dictionary(Dictionary::new(decode_parms)));
         objects.insert(3, ObjectVariant::Stream(globals_stream));
 
         let resolver = TrackingResolver {
@@ -650,7 +646,7 @@ mod tests {
         dict.insert(Vec::from(b"Width"), ObjectVariant::Integer(8));
         dict.insert(Vec::from(b"Height"), ObjectVariant::Integer(1));
 
-        let stream = StreamObject::new(1, 0, Box::new(Dictionary::new(dict)), vec![0x00]);
+        let stream = StreamObject::new(1, 0, Dictionary::new(dict), vec![0x00]);
 
         let err = decode(&stream).expect_err("expected decode failure");
         assert!(matches!(err, FilterError::Decompression(_)));
@@ -667,7 +663,7 @@ mod tests {
         let stream = StreamObject::new(
             1,
             0,
-            Box::new(Dictionary::new(dict)),
+            Dictionary::new(dict),
             b"48 65 6c 6c 6f>ignored".to_vec(),
         );
 
@@ -711,7 +707,7 @@ mod tests {
             ObjectVariant::Integer(compressed.len() as i64),
         );
 
-        let stream = StreamObject::new(1, 0, Box::new(Dictionary::new(dict)), compressed);
+        let stream = StreamObject::new(1, 0, Dictionary::new(dict), compressed);
 
         let mut objects = BTreeMap::new();
         objects.insert(
@@ -788,10 +784,9 @@ mod tests {
         let resolver = TestResolver {
             objects: BTreeMap::from([(
                 2,
-                ObjectVariant::Dictionary(Box::new(Dictionary::new(BTreeMap::<
-                    Vec<u8>,
-                    ObjectVariant,
-                >::new()))),
+                ObjectVariant::Dictionary(Dictionary::new(
+                    BTreeMap::<Vec<u8>, ObjectVariant>::new(),
+                )),
             )]),
         };
         let decoded = decode_data_with_resolver(&dictionary, Arc::new(compressed), &resolver)
@@ -811,7 +806,7 @@ mod tests {
         let stream = StreamObject::new(
             1,
             0,
-            Box::new(Dictionary::new(dict)),
+            Dictionary::new(dict),
             vec![2, b'A', b'B', b'C', 255, b'!', 128],
         );
 
@@ -824,7 +819,7 @@ mod tests {
         let mut dict = BTreeMap::new();
         dict.insert(Vec::from(b"Filter"), ObjectVariant::Name(b"RL".to_vec()));
 
-        let stream = StreamObject::new(1, 0, Box::new(Dictionary::new(dict)), vec![0, b'X', 128]);
+        let stream = StreamObject::new(1, 0, Dictionary::new(dict), vec![0, b'X', 128]);
 
         let decoded = decode(&stream).expect("decode failed");
         assert_eq!(decoded.as_ref(), b"X");

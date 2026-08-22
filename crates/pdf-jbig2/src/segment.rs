@@ -89,19 +89,14 @@ impl SegmentType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub(crate) enum JBig2SegmentResult {
+    #[default]
     None,
     HuffmanTable(CustomHuffmanDecoder),
     Image(JBig2Image),
     PatternDictionary(PatternDictionary),
     SymbolDictionary(SymbolDictionary),
-}
-
-impl Default for JBig2SegmentResult {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

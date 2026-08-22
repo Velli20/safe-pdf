@@ -47,7 +47,7 @@ pub(crate) fn parse_free_form_triangle_mesh(
     objects: &dyn ObjectResolver,
 ) -> Result<Shading, PdfShadingError> {
     let stream = object.try_stream(objects)?;
-    let config = FreeFormMeshConfig::parse(stream.dictionary.as_ref(), objects)?;
+    let config = FreeFormMeshConfig::parse(&stream.dictionary, objects)?;
     let triangles = FreeFormMeshParser::new(stream.raw_data(), &config)?.parse()?;
 
     Ok(Shading::FreeFormTriangleMesh {

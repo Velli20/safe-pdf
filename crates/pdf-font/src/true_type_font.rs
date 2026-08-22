@@ -167,7 +167,7 @@ mod tests {
         let stream = StreamObject::new(
             1,
             0,
-            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+            Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
             vec![1, 2, 3, 4],
         );
         let stream_bytes = stream.raw_data().as_ptr();
@@ -177,7 +177,7 @@ mod tests {
         )]));
         let dictionary = Dictionary::new(BTreeMap::from([(
             b"FontDescriptor".to_vec(),
-            ObjectVariant::Dictionary(Box::new(descriptor)),
+            ObjectVariant::Dictionary(descriptor),
         )]));
 
         let font = TrueTypeFont::from_dictionary(&dictionary, &PassthroughResolver)

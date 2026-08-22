@@ -15,7 +15,7 @@ pub struct StreamObject {
     /// The generation number, used for PDF incremental updates.
     pub generation_number: usize,
     /// The dictionary associated with this stream.
-    pub dictionary: Box<Dictionary>,
+    pub dictionary: Dictionary,
     /// Shared byte data of the stream.
     ///
     /// The bytes may still be encoded when the stream was created directly
@@ -32,7 +32,7 @@ impl StreamObject {
     pub fn new(
         object_number: usize,
         generation_number: usize,
-        dictionary: Box<Dictionary>,
+        dictionary: Dictionary,
         data: impl Into<Arc<Vec<u8>>>,
     ) -> Self {
         StreamObject {
@@ -48,7 +48,7 @@ impl StreamObject {
     pub fn new_encoded(
         object_number: usize,
         generation_number: usize,
-        dictionary: Box<Dictionary>,
+        dictionary: Dictionary,
         data: impl Into<Arc<Vec<u8>>>,
     ) -> Self {
         StreamObject {
@@ -100,13 +100,13 @@ mod tests {
         let decoded = StreamObject::new(
             1,
             0,
-            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+            Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
             vec![1],
         );
         let encoded = StreamObject::new_encoded(
             2,
             0,
-            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+            Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
             vec![2],
         );
 
@@ -119,7 +119,7 @@ mod tests {
         let mut stream = StreamObject::new_encoded(
             1,
             0,
-            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+            Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
             vec![1],
         );
 

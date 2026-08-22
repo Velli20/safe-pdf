@@ -167,7 +167,7 @@ mod tests {
         let stream = StreamObject::new(
             1,
             0,
-            Box::new(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new())),
+            Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
             vec![1, 2, 3, 4],
         );
         let stream_data = stream.shared_data();

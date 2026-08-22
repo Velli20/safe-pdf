@@ -412,11 +412,11 @@ fn widget_field_value(
         | ObjectVariant::LiteralString(bytes)
         | ObjectVariant::Name(bytes) => Ok(WidgetFieldValue::Bytes(bytes.clone())),
         ObjectVariant::Dictionary(dictionary) => {
-            Ok(WidgetFieldValue::Dictionary(dictionary.as_ref().clone()))
+            Ok(WidgetFieldValue::Dictionary(dictionary.clone()))
         }
-        ObjectVariant::Stream(stream) => Ok(WidgetFieldValue::Dictionary(
-            stream.dictionary.as_ref().clone(),
-        )),
+        ObjectVariant::Stream(stream) => {
+            Ok(WidgetFieldValue::Dictionary(stream.dictionary.clone()))
+        }
         ObjectVariant::Array(values) => values
             .iter()
             .map(|value| widget_field_value(entry, value, objects))
