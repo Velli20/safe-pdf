@@ -1,22 +1,6 @@
 use pdf_object::object_variant::ObjectVariant;
-use pdf_tokenizer::PdfToken;
-use thiserror::Error;
 
 use crate::{error::ParserError, parser::PdfParser};
-
-#[derive(Debug, PartialEq, Error)]
-pub enum NumberError {
-    #[error("Failed to parse fractional part of number: {err}")]
-    FractionalPartError { err: String },
-    #[error("Failed to parse '{number_str}' as a real number: {source}")]
-    RealNumberParseError {
-        number_str: String,
-        #[source]
-        source: std::num::ParseFloatError,
-    },
-    #[error("Numeric value overflow")]
-    NumericValueOverflow,
-}
 
 impl PdfParser<'_> {
     /// Parses a PDF numeric object (integer or real) from the current position in the input stream.
@@ -26,107 +10,109 @@ impl PdfParser<'_> {
     /// A `Number` object containing the parsed integer (`i64`) or real (`f64`) value,
     /// or a `ParserError` on failure.
     pub fn parse_number(&mut self) -> Result<ObjectVariant, ParserError> {
-        let mut has_minus = false;
-        let mut saw_sign = false;
+        // Keep the starting offset so the complete numeric lexeme can be borrowed after
+        // scanning. Nothing is copied while identifying the token.
+        let start = self.tokenizer.position;
 
-        // 1. Check for optional sign.
-        if let Some(PdfToken::Plus) = self.tokenizer.peek() {
-            self.tokenizer.read();
-            saw_sign = true;
-        } else if let Some(PdfToken::Minus) = self.tokenizer.peek() {
-            self.tokenizer.read();
-            has_minus = true;
-            saw_sign = true;
-        }
-
-        // 2. Parse leading digits (integral part). Track whether input started with '.'
-        //    so we can distinguish ".5" (no leading digits, integer_part is a sentinel 0)
-        //    from "0.5" (leading zero, integer_part is a parsed 0). The two cases have
-        //    different validity rules: bare "." is invalid but "0." is valid.
-        let started_with_period = matches!(self.tokenizer.peek(), Some(PdfToken::Period));
-        let integer_part: i64 = if started_with_period {
-            0
+        // A PDF number may begin with exactly one optional sign. Consume it separately
+        // from the digit runs so a second sign remains visible and causes parsing to fail.
+        let has_sign = if matches!(self.tokenizer.peek_byte(), Some(b'+' | b'-')) {
+            let _ = self.tokenizer.next_byte();
+            true
         } else {
-            match self.read_number::<i64>(false) {
-                Ok(value) => value,
-                Err(error @ ParserError::UnexpectedTokenAt { .. }) if saw_sign => {
-                    if matches!(
-                        self.tokenizer.peek(),
-                        Some(PdfToken::Plus | PdfToken::Minus)
-                    ) {
-                        return Err(error);
-                    }
-                    0
-                }
-                Err(error) => return Err(error),
-            }
+            false
         };
 
-        // 3. Check for decimal point.
-        if let Some(PdfToken::Period) = self.tokenizer.peek() {
-            self.tokenizer.read();
+        // Scan the integral digits. `read_while_u8` stops at the first non-digit, which
+        // preserves best-effort parsing of malformed glued tokens such as `61endobj`:
+        // only `61` belongs to the number and `endobj` remains for the next parser step.
+        let mut has_digits = !self
+            .tokenizer
+            .read_while_u8(|byte| byte.is_ascii_digit())
+            .is_empty();
 
-            // 4. Parse fractional digits. Preserve them as raw bytes to avoid a
-            //    lossy-conversion → format! → re-parse round-trip.
-            let fraction_bytes = self.tokenizer.read_while_u8(|b| b.is_ascii_digit());
-
-            // fraction_bytes contains only ASCII digits (guaranteed by the predicate above),
-            // so from_utf8 is always successful here.
-            let fraction_str = std::str::from_utf8(fraction_bytes).map_err(|_| {
-                NumberError::FractionalPartError {
-                    err: "digit sequence contains non-UTF8 bytes".to_string(),
-                }
-            })?;
-
-            // "." and "-." are invalid; "0." and "0.0" are valid real numbers.
-            if started_with_period && fraction_str.is_empty() {
-                return Err(NumberError::FractionalPartError {
-                    err: "Invalid real number: missing digits after decimal point.".to_string(),
-                }
-                .into());
-            }
-
-            // 5. Compute the real value directly without building a formatted string.
-            //    Parse fractional digits as their integer value (e.g. "456" → 456.0),
-            //    then scale by 10^-len to get the fractional contribution.
-            let frac_value: f64 = if fraction_str.is_empty() {
-                0.0
-            } else {
-                let exp = i32::try_from(fraction_str.len())
-                    .map_err(|_| NumberError::NumericValueOverflow)?;
-                let frac_digits = fraction_str.parse::<f64>().map_err(|source| {
-                    NumberError::RealNumberParseError {
-                        number_str: fraction_str.to_string(),
-                        source,
-                    }
-                })?;
-                frac_digits / 10_f64.powi(exp)
-            };
-
-            // i64 → f64 is a well-defined lossy cast; no From impl exists in std for this pair.
-            #[allow(clippy::as_conversions)]
-            let value = integer_part as f64 + frac_value;
-            let number = if has_minus { -value } else { value };
-
-            self.skip_whitespace();
-            Ok(ObjectVariant::Real(number))
+        // PDF real numbers contain one decimal point and permit digits on only one side
+        // (`.5` and `42.` are both valid). Consume at most one point, then scan the
+        // fractional digits. Recording `is_real` also selects the target Rust type below.
+        let is_real = if matches!(self.tokenizer.peek_byte(), Some(b'.')) {
+            let _ = self.tokenizer.next_byte();
+            has_digits |= !self
+                .tokenizer
+                .read_while_u8(|byte| byte.is_ascii_digit())
+                .is_empty();
+            true
         } else {
-            // 6. No decimal point: return as integer.
-            self.skip_whitespace();
-            let integer = if has_minus {
-                integer_part
-                    .checked_neg()
-                    .ok_or(NumberError::NumericValueOverflow)?
-            } else {
-                integer_part
-            };
-            Ok(ObjectVariant::Integer(integer))
+            false
+        };
+
+        // Some malformed PDFs use a standalone `+` or `-` as a zero-valued text-array
+        // adjustment. Retain that recovery only when another, non-sign object follows.
+        // A sign at EOF remains truncated input, while a second sign is left to fail as
+        // an invalid numeric lexeme instead of being silently accepted as zero.
+        if !has_digits && !is_real && has_sign {
+            match self.tokenizer.peek_byte() {
+                Some(b'+' | b'-') => {}
+                Some(_) => {
+                    self.skip_whitespace();
+                    return Ok(ObjectVariant::Integer(0));
+                }
+                None => return Err(ParserError::UnexpectedEndOfFile),
+            }
         }
+
+        // The tokenizer cursor now marks the exclusive end of the lexeme:
+        // `[optional sign][integral digits][optional point][fractional digits]`.
+        // Borrow that exact range from the original input so successful parsing does not
+        // allocate. `get` keeps this safe even if an externally modified tokenizer cursor
+        // violates its normal bounds invariant.
+        let number_bytes = self
+            .tokenizer
+            .input
+            .get(start..self.tokenizer.position)
+            .unwrap_or(&[]);
+
+        // An empty range means the caller invoked number parsing at a byte that cannot
+        // begin a number. Report the byte without consuming it so higher-level recovery
+        // can decide how to proceed.
+        if number_bytes.is_empty() {
+            return match self.tokenizer.peek_byte() {
+                Some(byte) => Err(ParserError::UnexpectedTokenAt {
+                    token: String::from_utf8_lossy(&[byte]).into_owned(),
+                    position: self.tokenizer.position,
+                }),
+                None => Err(ParserError::UnexpectedEndOfFile),
+            };
+        }
+
+        // Every consumed byte is ASCII by construction, so `from_utf8_lossy` returns a
+        // borrowed string for valid parser state. It also gives the error path a safe,
+        // printable owned representation without unsafe UTF-8 assumptions.
+        let number_str = String::from_utf8_lossy(number_bytes);
+
+        // Parse the entire lexeme with the standard library. This handles the sign and
+        // overflow checks for integers and provides correctly rounded decimal-to-f64
+        // conversion for reals. Both conversion failures use one public numeric error.
+        let number = if is_real {
+            number_str
+                .parse::<f64>()
+                .map(ObjectVariant::Real)
+                .map_err(|_| ParserError::InvalidNumber(number_str.into_owned()))?
+        } else {
+            number_str
+                .parse::<i64>()
+                .map(ObjectVariant::Integer)
+                .map_err(|_| ParserError::InvalidNumber(number_str.into_owned()))?
+        };
+
+        // A parsed PDF object consumes trailing PDF whitespace, matching the other
+        // primitive parsers while leaving the next non-whitespace token untouched.
+        self.skip_whitespace();
+        Ok(number)
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -215,5 +201,71 @@ mod tests {
 
         assert_eq!(result, ObjectVariant::Integer(61));
         assert_eq!(parser.tokenizer.data(), b"endobj");
+    }
+
+    #[test]
+    fn test_parse_number_integer_boundaries_and_overflow_positions() {
+        for (input, expected) in [
+            (b"9223372036854775807".as_slice(), i64::MAX),
+            (b"-9223372036854775807".as_slice(), -i64::MAX),
+            (b"-9223372036854775808".as_slice(), i64::MIN),
+        ] {
+            let mut parser = PdfParser::from(input);
+
+            assert_eq!(
+                parser.parse_number().unwrap(),
+                ObjectVariant::Integer(expected)
+            );
+            assert_eq!(parser.position(), input.len());
+        }
+
+        for input in [
+            b"9223372036854775808".as_slice(),
+            b"-9223372036854775809".as_slice(),
+        ] {
+            let mut parser = PdfParser::from(input);
+
+            assert_eq!(
+                parser.parse_number().unwrap_err(),
+                ParserError::InvalidNumber(String::from_utf8_lossy(input).into_owned())
+            );
+            assert_eq!(parser.position(), input.len());
+        }
+    }
+
+    #[test]
+    fn test_parse_number_uses_standard_real_bit_patterns() {
+        let expected = "12.12345678901234567890".parse::<f64>().unwrap();
+        let mut parser = PdfParser::from(b"12.12345678901234567890".as_slice());
+
+        let ObjectVariant::Real(actual) = parser.parse_number().unwrap() else {
+            panic!("expected a real number");
+        };
+
+        assert_eq!(actual.to_bits(), expected.to_bits());
+
+        let mut negative_zero_parser = PdfParser::from(b"-0.".as_slice());
+        let ObjectVariant::Real(negative_zero) = negative_zero_parser.parse_number().unwrap()
+        else {
+            panic!("expected a real number");
+        };
+        assert_eq!(negative_zero.to_bits(), (-0.0_f64).to_bits());
+    }
+
+    #[test]
+    fn test_parse_number_reports_invalid_lexeme_and_preserves_cursor_positions() {
+        let mut invalid = PdfParser::from(b"--42".as_slice());
+        assert_eq!(
+            invalid.parse_number().unwrap_err(),
+            ParserError::InvalidNumber("-".to_owned())
+        );
+        assert_eq!(invalid.position(), 1);
+
+        let mut whitespace = PdfParser::from(b"1\0\t\n\x0c\r 2".as_slice());
+        assert_eq!(
+            whitespace.parse_number().unwrap(),
+            ObjectVariant::Integer(1)
+        );
+        assert_eq!(whitespace.remaining_input(), b"2");
     }
 }

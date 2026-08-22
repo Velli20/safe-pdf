@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::{
     cross_reference_table::CrossReferenceTableError, header::HeaderError,
-    literal_string::LiteralStringObjectError, name::NameObjectError, number::NumberError,
+    literal_string::LiteralStringObjectError, name::NameObjectError,
 };
 
 #[derive(Error, Debug, PartialEq)]
@@ -24,8 +24,6 @@ pub enum ParserError {
     CrossReferenceTableError(#[from] CrossReferenceTableError),
     #[error("Invalid non-hex decimal character in the input: '{0}'")]
     NotHexDecimal(char),
-    #[error("Number error: {0}")]
-    NumberError(#[from] NumberError),
     #[error("Name object error: {0}")]
     NameObjectError(#[from] NameObjectError),
     #[error("Literal string object error: {0}")]
