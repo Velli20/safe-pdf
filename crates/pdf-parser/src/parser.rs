@@ -87,6 +87,19 @@ impl<'a> PdfParser<'a> {
         !Self::is_pdf_delimiter(c)
     }
 
+    /// Returns whether an absolute input position can begin a PDF token.
+    ///
+    /// The beginning of the file is always a token boundary. Every later position is
+    /// a boundary only when the preceding byte is PDF whitespace or a delimiter.
+    /// Callers must separately verify that a token actually begins at `position`.
+    pub(crate) fn is_token_start_at(&self, position: usize) -> bool {
+        position == 0
+            || position
+                .checked_sub(1)
+                .and_then(|index| self.tokenizer.input.get(index))
+                .is_some_and(|byte| Self::is_pdf_delimiter(*byte))
+    }
+
     /// Consumes exactly one end-of-line marker from the input stream if one is present.
     ///
     /// Valid EOL sequences are `\r\n` (CRLF), `\r` (CR), or `\n` (LF), consumed in that
@@ -122,7 +135,7 @@ impl<'a> PdfParser<'a> {
 
     /// Returns `true` if the current position is at a `%%EOF` marker.
     ///
-    /// Uses [`read_keyword`] for the `EOF` check (including the trailing
+    /// Uses [`Self::read_keyword`] for the `EOF` check (including the trailing
     /// delimiter requirement) and always restores the original position.
     fn is_at_eof_marker(&mut self) -> bool {
         let mark = self.tokenizer.position;
@@ -392,6 +405,18 @@ mod tests {
                 input_length: 4,
             }
         );
+    }
+
+    #[test]
+    fn token_start_requires_input_start_or_a_preceding_delimiter() {
+        let parser = PdfParser::from(b"ab cd/ef".as_slice());
+
+        assert!(parser.is_token_start_at(0));
+        assert!(!parser.is_token_start_at(1));
+        assert!(parser.is_token_start_at(3));
+        assert!(parser.is_token_start_at(6));
+        assert!(!parser.is_token_start_at(8));
+        assert!(!parser.is_token_start_at(9));
     }
 
     #[test]

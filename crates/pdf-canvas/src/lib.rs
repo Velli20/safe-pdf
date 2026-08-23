@@ -11,6 +11,7 @@ mod canvas_marked_content_ops;
 mod canvas_path_ops;
 mod canvas_state;
 mod canvas_text_ops;
+mod content_stream_render_state;
 pub mod error;
 mod font_renderer_support;
 mod pdf_path_pen;

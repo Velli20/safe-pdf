@@ -11,7 +11,21 @@ use pdf_object::{
 };
 use std::rc::Rc;
 
-/// Reads a stream-backed XObject with cycle protection.
+/// Reads a stream-backed XObject while guarding against recursive references.
+///
+/// The stream's object number is registered with `cycle_tracker` for the duration
+/// of parsing. If the same object is already being read, this returns `Ok(None)`
+/// so callers can omit that recursive edge. Otherwise, it dispatches to
+/// [`read_xobject_inner`] and returns the parsed resource in `Some`.
+///
+/// The cycle-tracker entry is removed before returning, including when parsing
+/// fails.
+///
+/// # Errors
+///
+/// Returns [`PdfPagesError`] when the XObject subtype is missing or unsupported,
+/// referenced data cannot be resolved, image decoding fails, or a Form XObject's
+/// content or resources cannot be parsed.
 pub(crate) fn read_xobject(
     content: &ObjectVariant,
     dictionary: &Dictionary,
@@ -38,7 +52,19 @@ pub(crate) fn read_xobject(
     result.map(Some)
 }
 
-fn read_xobject_inner(
+/// Parses a stream-backed XObject without registering it in the cycle tracker.
+///
+/// Callers must provide cycle protection or publish a lazy cache placeholder
+/// before invoking this function. Image XObjects are decoded with their optional
+/// soft mask; images with unusable dimensions become [`Resource::UnavailableImage`].
+/// Form XObjects are materialized with their content stream and nested resources.
+///
+/// # Errors
+///
+/// Returns [`PdfPagesError`] when the `/Subtype` entry is missing or unsupported,
+/// object references cannot be resolved, image data cannot be decoded, or Form
+/// content and resources cannot be parsed.
+pub(crate) fn read_xobject_inner(
     content: &ObjectVariant,
     dictionary: &Dictionary,
     stream_data: &StreamObject,

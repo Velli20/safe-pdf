@@ -23,7 +23,7 @@ use crate::{
     resource::Resource,
     resource_cache::{ResourceCache, read_resource_lazy},
     resources_reference::ResourcesReference,
-    xobject::read_xobject,
+    xobject::read_xobject_inner,
 };
 use pdf_color_space::color_space::ColorSpace;
 
@@ -181,25 +181,17 @@ fn read_xobject_resource(
 
     match resolved {
         ObjectVariant::Stream(stream) => {
-            if let Some(cached) = cache.get(&stream.object_number) {
-                return Ok(Some(cached.clone()));
-            }
-
-            let resource = match read_xobject(
-                value,
-                &stream.dictionary,
-                stream,
-                objects,
-                cache,
-                cycle_tracker,
-                id_allocator,
-            ) {
-                Ok(Some(resource)) => resource,
-                Ok(None) => return Ok(None),
-                Err(err) => return Err(err),
-            };
-
-            cache.insert(stream.object_number, resource.clone());
+            let resource = read_resource_lazy(cache, Some(stream.object_number), |cache| {
+                read_xobject_inner(
+                    value,
+                    &stream.dictionary,
+                    stream,
+                    objects,
+                    cache,
+                    cycle_tracker,
+                    id_allocator,
+                )
+            })?;
             Ok(Some(resource))
         }
         ObjectVariant::Dictionary(dictionary) => {
@@ -210,42 +202,16 @@ fn read_xobject_resource(
                 });
             }
 
-            let object_number = dictionary.object_number;
-            if let Some(object_number) = object_number
-                && let Some(cached) = cache.get(&object_number)
-            {
-                return Ok(Some(cached.clone()));
-            }
-
-            let form = if let Some(object_number) = object_number {
-                if !cycle_tracker.begin_read(object_number) {
-                    return Ok(None);
-                }
-
+            let resource = read_resource_lazy(cache, dictionary.object_number, |cache| {
                 let form = crate::form::FormXObject::empty_from_dictionary(
                     dictionary,
                     objects,
                     cache,
                     cycle_tracker,
                     id_allocator,
-                );
-                cycle_tracker.end_read(object_number);
-                form?
-            } else {
-                crate::form::FormXObject::empty_from_dictionary(
-                    dictionary,
-                    objects,
-                    cache,
-                    cycle_tracker,
-                    id_allocator,
-                )?
-            };
-
-            let resource = Resource::from(form);
-
-            if let Some(object_number) = object_number {
-                cache.insert(object_number, resource.clone());
-            }
+                )?;
+                Ok::<Resource, PdfPagesError>(Resource::from(form))
+            })?;
 
             Ok(Some(resource))
         }

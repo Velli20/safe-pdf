@@ -109,7 +109,7 @@ fn draw_path_forwards_dash_pattern_to_backend() {
 }
 
 #[test]
-fn skips_recursive_render_when_content_stream_id_is_already_active() {
+fn renders_recursive_stream_until_the_depth_limit() {
     let root = content_stream(1, b"/Self Do");
     let resources = form_resource(
         "Self",
@@ -120,13 +120,34 @@ fn skips_recursive_render_when_content_stream_id_is_already_active() {
     );
     let mut recording = RecordingCanvas::new(100.0, 100.0);
 
-    render(&mut recording, &root, Some(&resources)).expect("recursive render should be skipped");
     render(&mut recording, &root, Some(&resources))
-        .expect("stream ID should be released after rendering");
+        .expect("recursive render should stop at the depth limit");
+    render(&mut recording, &root, Some(&resources))
+        .expect("stream depth and active IDs should be released after rendering");
 
     let observer = replay(&recording);
-    assert_eq!(observer.save_count, 2);
-    assert_eq!(observer.restore_count, 2);
+    assert_eq!(observer.save_count, 80);
+    assert_eq!(observer.restore_count, 80);
+}
+
+#[test]
+fn bounds_branching_recursive_streams_by_invocation_budget() {
+    let root = content_stream(2, b"/Self Do /Self Do");
+    let resources = form_resource(
+        "Self",
+        ContentStream {
+            operators: root.operators.clone(),
+            id: root.id,
+        },
+    );
+    let mut recording = RecordingCanvas::new(100.0, 100.0);
+
+    render(&mut recording, &root, Some(&resources))
+        .expect("branching recursion should stop at the invocation budget");
+
+    let observer = replay(&recording);
+    assert_eq!(observer.save_count, 4097);
+    assert_eq!(observer.restore_count, 4097);
 }
 
 #[test]
@@ -141,6 +162,38 @@ fn still_renders_nested_streams_with_distinct_ids() {
     let observer = replay(&recording);
     assert_eq!(observer.save_count, 3);
     assert_eq!(observer.restore_count, 3);
+}
+
+#[test]
+fn releases_render_state_after_an_operator_error() {
+    let failing = content_stream(7, b"/Missing Do");
+    let recursive = content_stream(7, b"/Self Do");
+    let resources = form_resource(
+        "Self",
+        ContentStream {
+            operators: recursive.operators.clone(),
+            id: recursive.id,
+        },
+    );
+    let mut recording = RecordingCanvas::new(100.0, 100.0);
+    let page = PdfPage::default();
+    let mut canvas =
+        PdfCanvas::new(&mut recording, &page, None).expect("canvas should be constructed");
+
+    let result = canvas.render_content_stream(&failing, None, None, None, None);
+    assert!(matches!(
+        result,
+        Err(pdf_canvas::error::PdfCanvasError::PageResourcesMissing)
+    ));
+
+    canvas
+        .render_content_stream(&recursive, None, None, Some(&resources), None)
+        .expect("rendering should use the full depth budget after an error");
+    drop(canvas);
+
+    let observer = replay(&recording);
+    assert_eq!(observer.save_count, 41);
+    assert_eq!(observer.restore_count, 41);
 }
 
 #[test]

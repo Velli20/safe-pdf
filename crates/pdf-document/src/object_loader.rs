@@ -367,7 +367,7 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
             },
         )?;
         let object = parser
-            .parse_indirect_object_value(identifier, &self.objects)
+            .parse_indirect_object_value_recovering_streams(identifier, &self.objects)
             .map_err(PdfReaderError::ParserError)?;
 
         let object = match self.encryption.decryptor_for(Some(identifier)) {

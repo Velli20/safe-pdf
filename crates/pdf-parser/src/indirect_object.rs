@@ -9,6 +9,12 @@ use crate::{error::ParserError, parser::PdfParser};
 const OBJ_KEYWORD: &[u8] = b"obj";
 const ENDOBJ_KEYWORD: &[u8] = b"endobj";
 
+#[derive(Clone, Copy)]
+enum StreamParseMode {
+    Strict,
+    Recover,
+}
+
 fn starts_with_boundary_keyword(input: &[u8], keyword: &[u8]) -> bool {
     input.starts_with(keyword)
         && match input.get(keyword.len()).copied() {
@@ -128,6 +134,28 @@ impl PdfParser<'_> {
         identifier: PdfObjectId,
         objects: &dyn ObjectResolver,
     ) -> Result<ObjectVariant, ParserError> {
+        self.parse_indirect_object_value_with_mode(identifier, objects, StreamParseMode::Strict)
+    }
+
+    /// Parses a document object with validated stream-boundary recovery.
+    ///
+    /// Stream dictionaries use their declared `/Length` when that boundary is
+    /// structurally valid. A malformed or missing length falls back to a bounded
+    /// `endstream` search without reparsing the object.
+    pub fn parse_indirect_object_value_recovering_streams(
+        &mut self,
+        identifier: PdfObjectId,
+        objects: &dyn ObjectResolver,
+    ) -> Result<ObjectVariant, ParserError> {
+        self.parse_indirect_object_value_with_mode(identifier, objects, StreamParseMode::Recover)
+    }
+
+    fn parse_indirect_object_value_with_mode(
+        &mut self,
+        identifier: PdfObjectId,
+        objects: &dyn ObjectResolver,
+        stream_mode: StreamParseMode,
+    ) -> Result<ObjectVariant, ParserError> {
         let object = self.parse_object(objects)?;
         self.skip_whitespace_and_comments();
 
@@ -135,7 +163,10 @@ impl PdfParser<'_> {
             let ObjectVariant::Dictionary(dictionary) = object else {
                 return Err(ParserError::StreamObjectWithoutDictionary);
             };
-            let data = self.parse_stream(&dictionary, objects)?;
+            let data = match stream_mode {
+                StreamParseMode::Strict => self.parse_stream(&dictionary, objects)?,
+                StreamParseMode::Recover => self.parse_stream_recovering(&dictionary, objects)?,
+            };
             self.consume_required_endobj()?;
             return Ok(ObjectVariant::Stream(StreamObject::new_encoded(
                 identifier.number,
@@ -150,7 +181,7 @@ impl PdfParser<'_> {
     }
 
     /// Requires `endobj`, unless the current input is a safe malformed-file recovery boundary.
-    fn consume_endobj_or_implicit_boundary(&mut self) -> Result<(), ParserError> {
+    pub(crate) fn consume_endobj_or_implicit_boundary(&mut self) -> Result<(), ParserError> {
         let mark = self.tokenizer.position;
         if self.read_keyword(ENDOBJ_KEYWORD).is_ok() {
             return Ok(());
@@ -165,7 +196,7 @@ impl PdfParser<'_> {
     }
 
     /// Consumes the required `endobj` keyword without malformed-file recovery.
-    fn consume_required_endobj(&mut self) -> Result<(), ParserError> {
+    pub(crate) fn consume_required_endobj(&mut self) -> Result<(), ParserError> {
         self.skip_whitespace_and_comments();
         self.read_keyword(ENDOBJ_KEYWORD)
     }
@@ -255,6 +286,48 @@ mod tests {
         } else {
             panic!("Expected Stream variant");
         }
+    }
+
+    #[test]
+    fn test_stream_indirect_object_requires_endobj() {
+        let input = b"1 0 obj\n<< /Length 5 >>\nstream\nHello\nendstream\n";
+        let mut parser = PdfParser::from(input.as_slice());
+
+        let result = parse_staged_indirect_object(&mut parser);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn recovering_stream_parser_repairs_zero_length_payload() {
+        let input = b"1 0 obj\n<< /Length 0 /Filter [/ASCIIHexDecode /FlateDecode] >>\nstream\n789C730A51700D010003DD0150>\nendstream\nendobj";
+        let mut parser = PdfParser::from(input.as_slice());
+        let identifier = parser
+            .parse_indirect_object_id()
+            .expect("indirect object header should parse");
+
+        let object = parser
+            .parse_indirect_object_value_recovering_streams(identifier, &PassthroughResolver)
+            .expect("the structurally delimited stream should recover");
+        let ObjectVariant::Stream(stream) = object else {
+            panic!("expected recovered stream");
+        };
+
+        assert_eq!(stream.raw_data(), b"789C730A51700D010003DD0150>");
+    }
+
+    #[test]
+    fn recovering_stream_parser_requires_endobj_after_candidate() {
+        let input = b"1 0 obj\n<< /Length 0 >>\nstream\npayload\nendstream\nnot-endobj";
+        let mut parser = PdfParser::from(input.as_slice());
+        let identifier = parser
+            .parse_indirect_object_id()
+            .expect("indirect object header should parse");
+
+        let result =
+            parser.parse_indirect_object_value_recovering_streams(identifier, &PassthroughResolver);
+
+        assert!(result.is_err());
     }
 
     #[test]

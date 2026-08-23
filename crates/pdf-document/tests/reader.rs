@@ -585,6 +585,41 @@ fn build_malformed_incremental_xref_subsection_pdf() -> Vec<u8> {
     data
 }
 
+fn build_xref_backed_zero_length_filtered_stream_pdf() -> Vec<u8> {
+    let mut data = Vec::new();
+    data.extend_from_slice(b"%PDF-1.7\n");
+
+    let obj1_offset = data.len();
+    data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+    let obj2_offset = data.len();
+    data.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+
+    let obj3_offset = data.len();
+    data.extend_from_slice(
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >>\nendobj\n",
+    );
+
+    let obj4_offset = data.len();
+    data.extend_from_slice(
+        b"4 0 obj\n<< /Filter [/ASCIIHexDecode /FlateDecode] /Length 0 >>\nstream\n",
+    );
+    data.extend_from_slice(b"789C730A51700D010003DD0150>");
+    data.extend_from_slice(b"\nendstream\nendobj\n");
+
+    let xref_offset = data.len();
+    data.extend_from_slice(b"xref\n0 5\n");
+    data.extend_from_slice(format_xref_entry(0, 65_535, false).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj1_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj2_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj3_offset, 0, true).as_bytes());
+    data.extend_from_slice(format_xref_entry(obj4_offset, 0, true).as_bytes());
+    data.extend_from_slice(b"trailer\n<< /Size 5 /Root 1 0 R >>\n");
+    data.extend_from_slice(format!("startxref\n{xref_offset}\n%%EOF").as_bytes());
+
+    data
+}
+
 #[test]
 fn test_encrypted_document_detection() {
     let mut data = Vec::new();
@@ -843,6 +878,86 @@ fn test_missing_xref_command_pdf_loads_normally() {
     let doc = result.unwrap();
     assert_eq!(doc.page_count(), 1);
     assert!(doc.get_page(0).is_some());
+}
+
+#[test]
+fn test_missing_startxref_value_with_leading_junk_loads_normally() {
+    let mut data = b"Some junk before the header\n\n".to_vec();
+    let header_offset = data.len();
+    data.extend_from_slice(b"%PDF-1.1\n");
+
+    let obj1_offset = data.len();
+    data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+
+    let obj2_offset = data.len();
+    data.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+
+    let obj3_offset = data.len();
+    data.extend_from_slice(
+        b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>\nendobj\n",
+    );
+
+    data.extend_from_slice(b"xref\n0 4\n");
+    data.extend_from_slice(format_xref_entry(0, 65535, false).as_bytes());
+    data.extend_from_slice(
+        format_xref_entry(obj1_offset.saturating_sub(header_offset), 0, true).as_bytes(),
+    );
+    data.extend_from_slice(
+        format_xref_entry(obj2_offset.saturating_sub(header_offset), 0, true).as_bytes(),
+    );
+    data.extend_from_slice(
+        format_xref_entry(obj3_offset.saturating_sub(header_offset), 0, true).as_bytes(),
+    );
+    data.extend_from_slice(b"trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n");
+
+    let reader = PdfReader;
+    let document = reader
+        .read_from_bytes(&data, None)
+        .expect("a missing startxref value should trigger linear recovery");
+
+    assert_eq!(document.page_count(), 1);
+    assert!(document.get_page(0).is_some());
+}
+
+#[test]
+fn test_issue6069_recovers_content_stream_with_incorrect_length() {
+    let data = b"Some junk before the header\n\n%PDF-1.1\n\
+1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\n\
+2 0 obj\n<</Type/Pages/Count 1/Kids[3 0 R]/MediaBox [0 0 400 50]>>\nendobj\n\
+3 0 obj\n<</Type/Page/Parent 2 0 R/Resources<</Font<</F1<</Type/Font/Subtype/Type1/BaseFont/Arial>>>>>>/Contents 4 0 R>>\nendobj\n\
+4 0 obj\n<</Length 43>>\nstream\n\
+BT/F1 14 Tf 20 20 Td(Missing value for startxref and junk before magic header) Tj ET\n\
+endstream\nendobj\n\
+xref\n0000000000 65535 f \n0000000008 00000 n \n0000000054 00000 n \n0000000128 00000 n \n0000000254 00000 n \n\
+trailer\n<</Root 1 0 R/Size 5>>\nstartxref\n";
+
+    let report = PdfReader
+        .read_with_report(data, None)
+        .expect("issue6069 should load through xref reconstruction");
+    let page = report
+        .document()
+        .get_page(0)
+        .expect("issue6069 should contain one page");
+    let contents = page
+        .contents
+        .as_ref()
+        .expect("the recovered page content stream should remain available");
+
+    assert_eq!(contents.operators.len(), 5);
+}
+
+#[test]
+fn test_xref_backed_zero_length_filtered_stream_recovers() {
+    let data = build_xref_backed_zero_length_filtered_stream_pdf();
+    let document = PdfReader
+        .read_from_bytes(&data, None)
+        .expect("xref-backed stream with a malformed zero length should recover");
+    let contents = document
+        .get_page(0)
+        .and_then(|page| page.contents.as_ref())
+        .expect("the recovered and decoded content stream should remain available");
+
+    assert_eq!(contents.operators.len(), 2);
 }
 
 #[test]

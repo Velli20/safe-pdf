@@ -1,9 +1,9 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::{
     canvas_backend::{CanvasBackend, Shader},
     canvas_state::CanvasState,
+    content_stream_render_state::ContentStreamRenderState,
     error::PdfCanvasError,
     pdf_path_pen::PdfPathPen,
     recording_canvas::RecordingCanvas,
@@ -41,8 +41,8 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     pub(crate) page: &'a PdfPage,
     /// The stack of graphics states, supporting save/restore semantics.
     pub(crate) canvas_stack: Vec<CanvasState<'a>>,
-    /// Content-stream IDs currently being rendered on this canvas stack.
-    pub(crate) active_content_stream_ids: HashSet<usize>,
+    /// State used to bound nested and recursive content-stream rendering.
+    content_stream_render_state: ContentStreamRenderState,
     /// Optional owned buffer for extracted text glyph positions.
     pub(crate) text_glyphs: Option<Vec<TextGlyph>>,
 }
@@ -116,7 +116,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             mask: None,
             page,
             canvas_stack,
-            active_content_stream_ids: HashSet::new(),
+            content_stream_render_state: ContentStreamRenderState::default(),
             text_glyphs: None,
         })
     }
@@ -228,7 +228,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             mask: None,
             page: self.page,
             canvas_stack,
-            active_content_stream_ids: self.active_content_stream_ids.clone(),
+            content_stream_render_state: self.content_stream_render_state.clone(),
             text_glyphs: None,
         };
 
@@ -623,49 +623,72 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         mat: Option<Transform>,
         bbox: Option<&Rect>,
         resources: Option<&'a Resources>,
+        filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
+    ) -> Result<(), PdfCanvasError> {
+        let Some(invocation) = self.content_stream_render_state.enter(content_stream.id) else {
+            // Reaching either safety limit is treated as a successful no-op so
+            // malformed recursive content cannot abort the rest of the page.
+            return Ok(());
+        };
+
+        let result =
+            self.render_admitted_content_stream(content_stream, mat, bbox, resources, filter);
+
+        // Release admission state even when setup or an operator returned an
+        // error, allowing later streams to render normally on this canvas.
+        self.content_stream_render_state.exit(invocation);
+
+        result
+    }
+
+    /// Renders an admitted content stream and balances graphics state on failure.
+    fn render_admitted_content_stream(
+        &mut self,
+        content_stream: &ContentStream,
+        mat: Option<Transform>,
+        bbox: Option<&Rect>,
+        resources: Option<&'a Resources>,
         mut filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
     ) -> Result<(), PdfCanvasError> {
-        if !self.active_content_stream_ids.insert(content_stream.id) {
-            return Ok(());
-        }
-
         self.save()?;
 
-        if let Some(mat) = mat {
-            // Concatenate the provided `XObject` matrix with the current CTM.
-            // PDF spec: invoking a form XObject with its /Matrix entry performs a
-            // concatenation like the 'cm' operator does. The operation is:
-            //   CTM' = CTM * FormMatrix
-            self.current_state_mut()?.transform.post_concat(&mat);
-        }
-
-        if let Some(bbox) = bbox {
-            // Set up a clipping path based on the bounding box.
-            let mut clip_path = PdfPath::default();
-            clip_path.move_to(bbox.left, bbox.top);
-            clip_path.line_to(bbox.right, bbox.top);
-            clip_path.line_to(bbox.right, bbox.bottom);
-            clip_path.line_to(bbox.left, bbox.bottom);
-            clip_path.close();
-
-            self.set_clip_path(clip_path, PathFillType::EvenOdd)?;
-        }
-
-        if let Some(resources) = resources {
-            self.current_state_mut()?.resources = Some(resources);
-        }
-
-        for op in &content_stream.operators {
-            if filter.as_mut().is_some_and(|filter| filter(op)) {
-                continue;
+        let result = (|| {
+            if let Some(mat) = mat {
+                // Concatenate the provided `XObject` matrix with the current CTM.
+                // PDF spec: invoking a form XObject with its /Matrix entry performs a
+                // concatenation like the 'cm' operator does. The operation is:
+                //   CTM' = CTM * FormMatrix
+                self.current_state_mut()?.transform.post_concat(&mat);
             }
-            op.call(self)?;
-        }
+
+            if let Some(bbox) = bbox {
+                // Set up a clipping path based on the bounding box.
+                let mut clip_path = PdfPath::default();
+                clip_path.move_to(bbox.left, bbox.top);
+                clip_path.line_to(bbox.right, bbox.top);
+                clip_path.line_to(bbox.right, bbox.bottom);
+                clip_path.line_to(bbox.left, bbox.bottom);
+                clip_path.close();
+
+                self.set_clip_path(clip_path, PathFillType::EvenOdd)?;
+            }
+
+            if let Some(resources) = resources {
+                self.current_state_mut()?.resources = Some(resources);
+            }
+
+            for op in &content_stream.operators {
+                if filter.as_mut().is_some_and(|filter| filter(op)) {
+                    continue;
+                }
+                op.call(self)?;
+            }
+
+            Ok(())
+        })();
 
         self.restore();
-
-        let _ = self.active_content_stream_ids.remove(&content_stream.id);
-        Ok(())
+        result
     }
 
     /// Saves the entire current graphics state onto a stack.

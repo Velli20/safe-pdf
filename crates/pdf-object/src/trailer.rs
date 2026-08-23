@@ -11,12 +11,13 @@ pub struct Trailer {
     pub dictionary: Box<Dictionary>,
     /// The byte offset from the beginning of the file to the start of
     /// the cross-reference table (`xref` section), used for locating
-    /// objects within the PDF.
-    pub offset: usize,
+    /// objects within the PDF. This is `None` when the trailer has no usable
+    /// `startxref` value.
+    pub offset: Option<usize>,
 }
 
 impl Trailer {
-    pub fn new(dictionary: Box<Dictionary>, offset: usize) -> Self {
+    pub fn new(dictionary: Box<Dictionary>, offset: Option<usize>) -> Self {
         Trailer { dictionary, offset }
     }
 }
