@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use pdf_object::{
     cross_reference_table::CrossReferenceEntryType, object_resolver::PassthroughResolver,
 };
-use pdf_parser::parser::PdfParser;
+use pdf_parser::{error::ParserError, parser::PdfParser};
 
 fn format_xref_entry(offset: usize, generation: u16, used: bool) -> String {
     let kind = if used { 'n' } else { 'f' };
@@ -429,6 +429,82 @@ fn build_xref_table_simple() {
         .try_number(&PassthroughResolver)
         .unwrap();
     assert_eq!(size, 2);
+}
+
+#[test]
+fn build_xref_table_reconstructs_missing_xref_and_skips_stream_payload() {
+    let mut data = Vec::new();
+    data.extend_from_slice(b"%PDF-1.7\n");
+
+    let obj1_offset = data.len();
+    data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog >>\nendobj\n");
+
+    let fake_pdf_syntax = b"99 0 obj\n<< /Fake true >>\nendobj\ntrailer\n<< /Root 99 0 R >>";
+    let obj2_offset = data.len();
+    data.extend_from_slice(
+        format!(
+            "2 0 obj\n<< /Length {} >>\nstream\n",
+            fake_pdf_syntax.len().saturating_add(1)
+        )
+        .as_bytes(),
+    );
+    data.extend_from_slice(fake_pdf_syntax);
+    data.extend_from_slice(b"\nendstream\nendobj\n");
+    data.extend_from_slice(b"trailer\n<< /Size 3 /Root 1 0 R >>\n%%EOF\n");
+
+    let table = PdfParser::from(data.as_slice()).build_xref_table().unwrap();
+
+    assert_eq!(table.entries.len(), 2);
+    assert_eq!(
+        table
+            .entries
+            .get(&1)
+            .and_then(CrossReferenceEntryType::byte_offset),
+        Some(obj1_offset)
+    );
+    assert_eq!(
+        table
+            .entries
+            .get(&2)
+            .and_then(CrossReferenceEntryType::byte_offset),
+        Some(obj2_offset)
+    );
+    assert!(!table.entries.contains_key(&99));
+    assert_eq!(
+        table.trailer.dictionary.get(b"Root"),
+        Some(&pdf_object::object_variant::ObjectVariant::Reference(1))
+    );
+}
+
+#[test]
+fn build_xref_table_reconstruction_prefers_latest_object_declaration() {
+    let mut data = Vec::new();
+    data.extend_from_slice(b"%PDF-1.7\n");
+    data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Version /Old >>\nendobj\n");
+
+    let latest_offset = data.len();
+    data.extend_from_slice(b"1 2 obj\n<< /Type /Catalog /Version /New >>\nendobj\n");
+    data.extend_from_slice(b"trailer\n<< /Size 2 /Root 1 0 R >>\n%%EOF\n");
+
+    let table = PdfParser::from(data.as_slice()).build_xref_table().unwrap();
+    let entry = table.entries.get(&1).expect("object 1 should be rebuilt");
+
+    assert_eq!(entry.byte_offset(), Some(latest_offset));
+    assert_eq!(
+        entry,
+        &CrossReferenceEntryType::new_normal(latest_offset, 2)
+    );
+}
+
+#[test]
+fn build_xref_table_without_xref_still_requires_a_rooted_trailer() {
+    let data = b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n";
+
+    let error = PdfParser::from(data.as_slice())
+        .build_xref_table()
+        .expect_err("a trailer-free file should not be reconstructed");
+
+    assert!(matches!(error, ParserError::MissingStartXref));
 }
 
 #[test]

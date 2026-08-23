@@ -83,6 +83,38 @@ fn form_xobject_stream(object_number: usize, data: &[u8]) -> ObjectVariant {
     ))
 }
 
+fn recursive_form_xobject_stream(
+    object_number: usize,
+    nested_name: &str,
+    nested_object_number: usize,
+    data: &[u8],
+) -> ObjectVariant {
+    let dictionary = Dictionary::new(BTreeMap::from([
+        (Vec::from(b"Subtype"), ObjectVariant::Name(b"Form".to_vec())),
+        (
+            Vec::from(b"BBox"),
+            ObjectVariant::Array(vec![integer(0), integer(0), integer(10), integer(10)]),
+        ),
+        (
+            Vec::from(b"Resources"),
+            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+                Vec::from(b"XObject"),
+                ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+                    Vec::from(nested_name.as_bytes()),
+                    ObjectVariant::Reference(nested_object_number),
+                )]))),
+            )]))),
+        ),
+    ]));
+
+    ObjectVariant::Stream(StreamObject::new(
+        object_number,
+        0,
+        dictionary,
+        data.to_vec(),
+    ))
+}
+
 fn xobject_resources(entries: Vec<(&str, ObjectVariant)>) -> Dictionary {
     let xobjects = entries
         .into_iter()
@@ -456,6 +488,71 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
         nested_form.content_stream.id, form.content_stream.id,
         "recursive /Resources lookups should resolve to the cached form xobject"
     );
+}
+
+#[test]
+fn mutually_recursive_form_xobjects_resolve_lazily() {
+    let page_dict = Dictionary::new(BTreeMap::from([(
+        Vec::from(b"Resources"),
+        ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+            Vec::from(b"XObject"),
+            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
+                Vec::from(b"First"),
+                ObjectVariant::Reference(6),
+            )]))),
+        )]))),
+    )]));
+
+    let mut objects = ObjectCollection::default();
+    objects
+        .insert(
+            object_id(6),
+            recursive_form_xobject_stream(6, "Next", 8, b"/Next Do"),
+        )
+        .expect("first form should insert");
+    objects
+        .insert(
+            object_id(8),
+            recursive_form_xobject_stream(8, "Back", 6, b"/Back Do"),
+        )
+        .expect("second form should insert");
+
+    let mut cache = DefaultResourceCache::default();
+    let mut cycle_tracker = ReadCycleTracker::default();
+    let mut ids = ContentStreamIdAllocator::new();
+    let resources = Resources::read(
+        &page_dict,
+        &objects,
+        &mut cache,
+        &mut cycle_tracker,
+        &mut ids,
+    )
+    .expect("mutually recursive forms should parse")
+    .expect("page resources should exist");
+
+    let first = resources.xobject("First");
+    assert!(matches!(first, Some(Resource::Form(_))));
+    let Some(Resource::Form(first)) = first else {
+        return;
+    };
+    let second = first
+        .resources
+        .as_ref()
+        .and_then(|nested| nested.xobject("Next"));
+    assert!(matches!(second, Some(Resource::Form(_))));
+    let Some(Resource::Form(second)) = second else {
+        return;
+    };
+    let back_to_first = second
+        .resources
+        .as_ref()
+        .and_then(|nested| nested.xobject("Back"));
+    assert!(matches!(back_to_first, Some(Resource::Form(_))));
+    let Some(Resource::Form(back_to_first)) = back_to_first else {
+        return;
+    };
+
+    assert_eq!(back_to_first.content_stream.id, first.content_stream.id);
 }
 
 #[test]

@@ -31,7 +31,7 @@ pub fn parse_xref_stream(
     if layout.entry_width == 0 {
         return Ok(CrossReferenceTable::new(
             BTreeMap::new(),
-            Trailer::new(Box::new(stream.dictionary), 0),
+            Trailer::new(Box::new(stream.dictionary), None),
         ));
     }
 
@@ -45,7 +45,7 @@ pub fn parse_xref_stream(
             let Some(entry) = decoder.next_entry() else {
                 return Ok(CrossReferenceTable::new(
                     entries,
-                    Trailer::new(Box::new(stream.dictionary), 0),
+                    Trailer::new(Box::new(stream.dictionary), None),
                 ));
             };
 
@@ -54,7 +54,7 @@ pub fn parse_xref_stream(
         }
     }
 
-    let trailer = Trailer::new(Box::new(stream.dictionary), 0);
+    let trailer = Trailer::new(Box::new(stream.dictionary), None);
     Ok(CrossReferenceTable::new(entries, trailer))
 }
 

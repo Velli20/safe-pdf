@@ -232,3 +232,118 @@ pub fn render_page_cached<B: CanvasBackend>(
 
     Ok(())
 }
+
+#[cfg(test)]
+#[allow(clippy::arithmetic_side_effects, clippy::expect_used)]
+mod tests {
+    use pdf_document::reader::PdfReader;
+
+    use super::PdfRenderer;
+
+    fn append_stream_object(data: &mut Vec<u8>, number: usize, dictionary: &str, content: &[u8]) {
+        data.extend_from_slice(
+            format!(
+                "{number} 0 obj\n<< {dictionary} /Length {} >>\nstream\n",
+                content.len().saturating_add(1)
+            )
+            .as_bytes(),
+        );
+        data.extend_from_slice(content);
+        data.extend_from_slice(b"\nendstream\nendobj\n");
+    }
+
+    fn xref_less_recursive_form_pdf() -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"%PDF-1.4\n");
+        data.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+        data.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+        data.extend_from_slice(
+            b"3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 500 300] \
+              /Contents 4 0 R /Resources << /XObject << /X1 6 0 R >> >> >>\nendobj\n",
+        );
+        append_stream_object(&mut data, 4, "", b"1 0 0 1 25 25 cm /X1 Do");
+        append_stream_object(
+            &mut data,
+            6,
+            "/Subtype /Form /BBox [0 0 1000 1000] \
+             /Resources << /Font << /F1 7 0 R >> /XObject << /X0 8 0 R >> >>",
+            b"BT /F1 24 Tf (Hello world) Tj ET 0.5 0 0 0.5 25 25 cm /X0 Do",
+        );
+        data.extend_from_slice(
+            b"7 0 obj\n<< /Type /Font /Subtype /Type1 /Name /F1 \
+              /BaseFont /Helvetica /Encoding /MacRomanEncoding >>\nendobj\n",
+        );
+        append_stream_object(
+            &mut data,
+            8,
+            "/Subtype /Form /BBox [0 0 1000 1000] \
+             /Resources << /Font << /F1 7 0 R >> /XObject << /X1 6 0 R >> >>",
+            b"BT /F1 24 Tf (Hello world) Tj ET 0.5 0 0 0.5 25 25 cm /X1 Do",
+        );
+        data.extend_from_slice(b"trailer\n<< /Size 9 /Root 1 0 R >>\n%%EOF\n");
+        data
+    }
+
+    fn text_after_stream_length_recovery_pdf() -> &'static [u8] {
+        b"\n\n%PDF-1.1\n\
+1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\n\
+2 0 obj\n<</Type/Pages/Count 1/Kids[3 0 R]/MediaBox [0 0 400 50]>>\nendobj\n\
+3 0 obj\n<</Type/Page/Parent 2 0 R/Resources<</Font<</F1<</Type/Font/Subtype/Type1/BaseFont/Arial>>>>>>/Contents 4 0 R>>\nendobj\n\
+4 0 obj\n<</Length 43>>\nstream\n\
+BT/F1 14 Tf 20 20 Td(TEST) Tj ET\n\
+endstream\nendobj\n\
+xref\n0000000000 65535 f \n0000000008 00000 n \n0000000054 00000 n \n0000000128 00000 n \n0000000254 00000 n \n\
+trailer\n<</Root 1 0 R/Size 5>>\nstartxref\n"
+    }
+
+    #[test]
+    fn renders_text_after_stream_length_recovery() {
+        let document = PdfReader
+            .read_from_bytes(text_after_stream_length_recovery_pdf(), None)
+            .expect("PDF should load through xref reconstruction");
+
+        let recorded = PdfRenderer::new(document)
+            .render_page_to_recording(0, 400.0, 50.0)
+            .expect("PDF should render its recovered content stream");
+
+        assert_eq!(recorded.text_layout().glyphs().len(), 4);
+    }
+
+    #[test]
+    fn renders_xref_less_pdf_with_mutually_recursive_forms() {
+        let data = xref_less_recursive_form_pdf();
+        let document = PdfReader
+            .read_from_bytes(&data, None)
+            .expect("xref reconstruction should load the PDF");
+        assert_eq!(document.page_count(), 1);
+
+        let recorded = PdfRenderer::new(document)
+            .render_page_to_recording(0, 500.0, 300.0)
+            .expect("recursive form rendering should stop at the depth limit");
+        let glyphs = recorded.text_layout().glyphs();
+
+        assert!(glyphs.len() >= 11 * 3);
+        assert_eq!(glyphs.len() % 11, 0);
+        let first_width = glyphs
+            .first()
+            .expect("first repeated glyph should exist")
+            .bounds
+            .width()
+            .abs();
+        let second_width = glyphs
+            .get(11)
+            .expect("second repeated glyph should exist")
+            .bounds
+            .width()
+            .abs();
+        let third_width = glyphs
+            .get(22)
+            .expect("third repeated glyph should exist")
+            .bounds
+            .width()
+            .abs();
+
+        assert!((second_width / first_width - 0.5).abs() < 0.01);
+        assert!((third_width / second_width - 0.5).abs() < 0.01);
+    }
+}

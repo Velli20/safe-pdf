@@ -29,14 +29,15 @@ impl PdfParser<'_> {
         self.skip_whitespace_and_comments();
 
         // A trailer located via /Prev may be followed by later body content or another xref
-        // section rather than an immediate startxref footer. When startxref is present,
-        // preserve its offset; otherwise, use 0 because callers only need the dictionary.
+        // section rather than an immediate startxref footer. Preserve a usable startxref
+        // offset when present, but retain the trailer dictionary when its footer is absent
+        // or malformed so callers can recover the cross-reference data independently.
         let mark = self.tokenizer.position;
         let offset = if self.read_keyword(START_XREF_KEYWORD).is_ok() {
-            self.read_number::<usize>(true)?
+            self.read_number::<usize>(true).ok()
         } else {
             self.tokenizer.position = mark;
-            0
+            None
         };
 
         Ok(Trailer::new(Box::new(dictionary), offset))
@@ -72,7 +73,7 @@ mod tests {
             trailer.dictionary.get(b"Size").unwrap(),
             &ObjectVariant::Integer(22)
         );
-        assert_eq!(trailer.offset, 187);
+        assert_eq!(trailer.offset, Some(187));
     }
 
     #[test]
@@ -85,7 +86,7 @@ mod tests {
             trailer.dictionary.get(b"Root").unwrap(),
             &ObjectVariant::Reference(1)
         );
-        assert_eq!(trailer.offset, 187);
+        assert_eq!(trailer.offset, Some(187));
     }
 
     #[test]
@@ -98,7 +99,38 @@ mod tests {
             trailer.dictionary.get(b"Root").unwrap(),
             &ObjectVariant::Reference(1)
         );
-        assert_eq!(trailer.offset, 0);
+        assert_eq!(trailer.offset, None);
+    }
+
+    #[test]
+    fn test_parse_trailer_returns_none_for_invalid_startxref_values() {
+        let inputs = [
+            b"trailer\n<< /Size 22 /Root 1 0 R >>\nstartxref\n".as_slice(),
+            b"trailer\n<< /Size 22 /Root 1 0 R >>\nstartxref\ninvalid".as_slice(),
+            b"trailer\n<< /Size 22 /Root 1 0 R >>\nstartxref\n999999999999999999999999999999999999999999999999"
+                .as_slice(),
+        ];
+
+        for input in inputs {
+            let mut parser = PdfParser::from(input);
+            let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
+
+            assert_eq!(trailer.offset, None);
+            assert_eq!(
+                trailer.dictionary.get(b"Root"),
+                Some(&ObjectVariant::Reference(1))
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_trailer_preserves_zero_startxref_value() {
+        let input = b"trailer\n<< /Size 1 /Root 1 0 R >>\nstartxref\n0\n%%EOF";
+        let mut parser = PdfParser::from(input.as_slice());
+
+        let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
+
+        assert_eq!(trailer.offset, Some(0));
     }
 
     #[test]
