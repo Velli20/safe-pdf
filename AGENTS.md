@@ -51,6 +51,7 @@ Supporting crates:
 
 ## Code Style
 
+- Do not create subdirectories beneath any `src/` directory; keep Rust modules in flat sibling `.rs` files
 - Idiomatic Rust: iterators, ownership, lifetimes over cloning
 - Small, composable functions over monolithic ones
 - Do not add trivial helper functions whose only purpose is to construct and return a single error variant; inline the error construction at the call site

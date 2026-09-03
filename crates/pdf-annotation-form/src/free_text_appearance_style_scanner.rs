@@ -3,7 +3,7 @@
 use pdf_content_stream_operators::{
     color_operators::SetRGBFill, text_state_operators::SetFont, variants::PdfOperatorVariant,
 };
-use pdf_font::encoding::FontEncoding;
+use pdf_font::BaseEncoding;
 use pdf_graphics::color::Color;
 use pdf_resources::form::FormXObject;
 
@@ -112,7 +112,7 @@ impl<'a> FreeTextAppearanceStyleScanner<'a> {
         Some(FreeTextFont {
             standard14,
             resource_name: Vec::from(set_font.name()),
-            encoding: FontEncoding::WinAnsi,
+            encoding: BaseEncoding::WinAnsi,
         })
     }
 

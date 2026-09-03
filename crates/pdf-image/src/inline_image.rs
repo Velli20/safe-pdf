@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
+use bytes::Bytes;
 use pdf_filter::filter::decode_data_with_resolver;
 use pdf_object::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
@@ -12,14 +12,14 @@ use crate::{error::PdfImageError, image_metadata::ImageMetadata};
 #[derive(Debug)]
 pub struct InlineImage {
     metadata: ImageMetadata,
-    data: Arc<Vec<u8>>,
+    data: Bytes,
 }
 
 impl InlineImage {
     /// Creates an inline image from its parsed dictionary and encoded payload bytes.
     pub fn new(
         dictionary: Dictionary,
-        data: impl Into<Arc<Vec<u8>>>,
+        data: impl Into<Bytes>,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, PdfImageError> {
         let dictionary = normalize_inline_image_dictionary(&dictionary);
@@ -30,8 +30,8 @@ impl InlineImage {
     }
 
     /// Returns shared ownership of the filter-decoded inline-image samples.
-    pub fn shared_data(&self) -> Arc<Vec<u8>> {
-        Arc::clone(&self.data)
+    pub fn shared_data(&self) -> Bytes {
+        self.data.clone()
     }
 
     pub(crate) fn metadata(&self) -> &ImageMetadata {
@@ -98,8 +98,9 @@ fn normalize_inline_image_value(key: &[u8], value: &ObjectVariant) -> ObjectVari
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::collections::BTreeMap;
 
+    use bytes::Bytes;
     use pdf_object::{
         dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     };
@@ -195,11 +196,11 @@ mod tests {
 
     #[test]
     fn inline_image_shares_unfiltered_samples() {
-        let data = Arc::new(vec![1, 2]);
-        let image = InlineImage::new(gray_dictionary(), Arc::clone(&data), &PassthroughResolver)
+        let data = Bytes::from_static(&[1, 2]);
+        let image = InlineImage::new(gray_dictionary(), data.clone(), &PassthroughResolver)
             .expect("unfiltered image should be constructed");
 
-        assert!(Arc::ptr_eq(&image.shared_data(), &data));
+        assert_eq!(image.shared_data().as_ptr(), data.as_ptr());
     }
 
     #[test]

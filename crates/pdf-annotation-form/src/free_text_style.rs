@@ -1,5 +1,5 @@
 use pdf_annotation_types::FreeTextAlignment;
-use pdf_font::{encoding::FontEncoding, standard14::Standard14Font};
+use pdf_font::{BaseEncoding, standard14::Standard14Font};
 use pdf_graphics::{color::Color, rect::Rect};
 
 /// Complete layout and appearance settings for generated free text.
@@ -32,7 +32,7 @@ impl Default for FreeTextStyle {
             font: FreeTextFont {
                 standard14: Standard14Font::Helvetica,
                 resource_name: Vec::from(b"Helv"),
-                encoding: FontEncoding::WinAnsi,
+                encoding: BaseEncoding::WinAnsi,
             },
             font_size: 12.0,
             line_height: 14.4,
@@ -59,7 +59,7 @@ pub struct FreeTextFont {
     /// Name used by `/DA` and the appearance resources.
     pub resource_name: Vec<u8>,
     /// Encoding used by text-showing operators.
-    pub encoding: FontEncoding,
+    pub encoding: BaseEncoding,
 }
 
 /// Border styling for generated free text.

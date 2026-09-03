@@ -8,6 +8,7 @@ autotests = false
 workspace = true
 
 [dependencies]
+bytes = "1.10.1"
 num-traits = "0.2.19"
 pdf-color-space = { path = "../pdf-color-space" }
 pdf-decode = { path = "../pdf-decode" }

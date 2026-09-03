@@ -1,32 +1,21 @@
 use crate::canvas_backend::CanvasBackend;
 use crate::error::PdfCanvasError;
 use crate::pdf_canvas::PdfCanvas;
-use crate::text_renderer::TextRenderer;
-use crate::truetype_font_renderer::TrueTypeFontRenderer;
-use crate::type1_font_renderer::Type1FontRenderer;
-use crate::type3_font_renderer::Type3FontRenderer;
-use num_traits::FromPrimitive;
-use pdf_content_stream_operators::TextElement;
 use pdf_content_stream_operators::pdf_operator_backend::{
     TextObjectOps, TextPositioningOps, TextShowingOps, TextStateOps,
 };
-use pdf_font::flags::FontFlags;
-use pdf_font::font::Font;
-use pdf_font::type0_font::Type0FontProgramFormat;
-use pdf_font::type1_font::Type1FontProgramFormat;
-use pdf_graphics::TextRenderingMode;
+use pdf_content_stream_operators::variants::PdfOperatorVariant;
+use pdf_graphics::pdf_path::PdfPath;
 use pdf_graphics::transform::Transform;
+use pdf_graphics::{PaintMode, PathFillType, TextRenderingMode};
+use pdf_text_engine::text::{PdfTextItem, PdfTextRun};
 
 impl<B: CanvasBackend> TextPositioningOps for PdfCanvas<'_, B> {
     type ErrorType = PdfCanvasError;
     fn move_text_position(&mut self, tx: f32, ty: f32) -> Result<(), Self::ErrorType> {
-        let mat = Transform::from_translate(tx, ty);
-        let state = self.current_state_mut()?;
-        // PDF 1.7 (Tj and text positioning): Td updates Tlm = Tlm * T(tx, ty), then Tm = Tlm.
-        // Use post-multiplication to move in text space coordinates.
-        state.text_state.line_matrix.post_concat(&mat);
-        let lm = state.text_state.line_matrix;
-        state.text_state.matrix = lm;
+        self.current_state_mut()?
+            .text_state
+            .move_line_position(tx, ty);
         Ok(())
     }
 
@@ -42,22 +31,15 @@ impl<B: CanvasBackend> TextPositioningOps for PdfCanvas<'_, B> {
     }
 
     fn set_text_matrix(&mut self, transform: &Transform) -> Result<(), Self::ErrorType> {
-        let state = self.current_state_mut()?;
-        // Tm operator sets both Tm and Tlm to the same matrix.
-        state.text_state.line_matrix = *transform;
-        state.text_state.matrix = *transform;
+        self.current_state_mut()?
+            .text_state
+            .set_matrices(*transform);
         Ok(())
     }
 
     fn move_to_start_of_next_line(&mut self) -> Result<(), Self::ErrorType> {
         // T*: Move to start of next line using current leading: Tlm = Tlm * T(0, -Tl); Tm = Tlm.
-        let leading = self.current_state()?.text_state.leading;
-        let state = self.current_state_mut()?;
-
-        let mat = Transform::from_translate(0.0, -leading);
-        state.text_state.line_matrix.post_concat(&mat);
-        let lm = state.text_state.line_matrix;
-        state.text_state.matrix = lm;
+        self.current_state_mut()?.text_state.move_to_next_line();
         Ok(())
     }
 }
@@ -88,17 +70,17 @@ impl<B: CanvasBackend> TextObjectOps for PdfCanvas<'_, B> {
 impl<B: CanvasBackend> TextStateOps for PdfCanvas<'_, B> {
     type ErrorType = PdfCanvasError;
     fn set_character_spacing(&mut self, spacing: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.text_state.character_spacing = spacing;
+        self.current_state_mut()?.text_state.style.character_spacing = spacing;
         Ok(())
     }
 
     fn set_word_spacing(&mut self, spacing: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.text_state.word_spacing = spacing;
+        self.current_state_mut()?.text_state.style.word_spacing = spacing;
         Ok(())
     }
 
     fn set_horizontal_text_scaling(&mut self, scale_percent: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.text_state.horizontal_scaling = scale_percent / 100.0;
+        self.current_state_mut()?.text_state.style.horizontal_scale = scale_percent / 100.0;
         Ok(())
     }
 
@@ -109,124 +91,50 @@ impl<B: CanvasBackend> TextStateOps for PdfCanvas<'_, B> {
     }
 
     fn set_font_and_size(&mut self, font_name: &[u8], size: f32) -> Result<(), Self::ErrorType> {
-        let state = self.current_state_mut()?;
-        state.text_state.font_size = size;
-
-        if let Some(resources) = state.resources
-            && let Some((font, nested_resources)) = resources.font(font_name)
-        {
-            state.text_state.font = Some(font);
-            state.text_state.resources = nested_resources;
-            return Ok(());
-        }
-
-        Err(PdfCanvasError::FontNotFound(
-            String::from_utf8_lossy(font_name).into_owned(),
-        ))
+        let (font, nested_resources) = self
+            .current_state()?
+            .resources
+            .and_then(|resources| resources.font(font_name))
+            .ok_or_else(|| {
+                PdfCanvasError::FontNotFound(String::from_utf8_lossy(font_name).into_owned())
+            })?;
+        let handle = self.load_pdf_font(font)?;
+        let text_state = &mut self.current_state_mut()?.text_state;
+        text_state.font = Some(handle);
+        text_state.font_spec = Some(font);
+        text_state.resources = nested_resources;
+        text_state.style.font_size = size;
+        Ok(())
     }
 
     fn set_text_rendering_mode(&mut self, mode: TextRenderingMode) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.rendering_mode = mode;
+        self.current_state_mut()?.paint.rendering_mode = mode;
         Ok(())
     }
 
     fn set_text_rise(&mut self, rise: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.text_state.rise = rise;
+        self.current_state_mut()?.text_state.style.rise = rise;
         Ok(())
     }
-}
-
-/// Create an iterator over single-byte character codes as `u16`.
-fn to_char_iter(text: &[u8]) -> impl Iterator<Item = u16> + '_ {
-    text.iter().copied().map(|b| u16::from_u8(b).unwrap_or(0))
 }
 
 impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
     type ErrorType = PdfCanvasError;
-    fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
-        let current_font = self
-            .current_state()?
-            .text_state
-            .font
-            .ok_or(PdfCanvasError::CurrentFontRequired)?;
-
-        match current_font {
-            Font::Type3(type3_font) => {
-                let iter = to_char_iter(text);
-                let mut renderer = Type3FontRenderer::new(self, type3_font)?;
-                renderer.render_text(iter)
-            }
-            Font::Type1(type1_font) => {
-                let program = type1_font.font_file.as_ref();
-                let iter = to_char_iter(text);
-
-                let mut renderer =
-                    Type1FontRenderer::new(self, program, type1_font.program_format, false)?;
-                renderer.render_text(iter)
-            }
-            Font::TrueType(font) => {
-                let iter = to_char_iter(text);
-                let is_symbolic = font.flags.contains(FontFlags::SYMBOLIC);
-                let mut renderer =
-                    TrueTypeFontRenderer::new(self, &font.font_file, false, is_symbolic, false)?;
-                renderer.render_text(iter)
-            }
-            Font::Type0(font) => {
-                let decoded_cids = font.decode_bytes_to_cids(text);
-                let iter = decoded_cids.into_iter();
-
-                match font.program_format {
-                    Type0FontProgramFormat::OpenTypeCff => {
-                        let program = font.font_file.as_ref();
-                        let program_format = font
-                            .type1_program_format
-                            .unwrap_or(Type1FontProgramFormat::OpenTypeCff);
-                        let mut renderer =
-                            Type1FontRenderer::new(self, program, program_format, true)?;
-                        renderer.render_text(iter)
-                    }
-                    Type0FontProgramFormat::TrueType { cid_to_unicode } => {
-                        // CID TrueType fonts use glyph IDs directly; symbolic flag is irrelevant.
-                        let mut renderer = TrueTypeFontRenderer::new(
-                            self,
-                            &font.font_file,
-                            true,
-                            false,
-                            cid_to_unicode,
-                        )?;
-                        renderer.render_text(iter)
-                    }
-                }
-            }
-        }
+    fn show_text(&mut self, text: &PdfTextItem) -> Result<(), Self::ErrorType> {
+        self.render_text_items(std::slice::from_ref(text))
     }
 
     fn show_text_with_glyph_positioning(
         &mut self,
-        elements: &[pdf_content_stream_operators::TextElement],
+        elements: &[PdfTextItem],
     ) -> Result<(), Self::ErrorType> {
-        for element in elements {
-            match element {
-                TextElement::Text { value } => {
-                    self.show_text(value)?;
-                }
-                TextElement::Adjustment { amount } => {
-                    // TJ adjustment: Tm = Tm * T( -amount/1000 * Tfs * Th, 0 )
-                    let amount = (*amount) / 1000.0;
-                    let state = self.current_state_mut()?;
-                    let tx =
-                        -amount * state.text_state.font_size * state.text_state.horizontal_scaling;
-                    state.text_state.matrix.post_translate(tx, 0.0);
-                }
-                TextElement::HexString { value } => {
-                    self.show_text(value)?;
-                }
-            }
-        }
-        Ok(())
+        self.render_text_items(elements)
     }
 
-    fn move_to_next_line_and_show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
+    fn move_to_next_line_and_show_text(
+        &mut self,
+        text: &PdfTextItem,
+    ) -> Result<(), Self::ErrorType> {
         self.move_to_start_of_next_line()?;
         self.show_text(text)
     }
@@ -235,10 +143,200 @@ impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
         &mut self,
         word_spacing: f32,
         char_spacing: f32,
-        text: &[u8],
+        text: &PdfTextItem,
     ) -> Result<(), Self::ErrorType> {
         self.set_word_spacing(word_spacing)?;
         self.set_character_spacing(char_spacing)?;
         self.move_to_next_line_and_show_text(text)
+    }
+}
+
+impl<B: CanvasBackend> PdfCanvas<'_, B> {
+    /// Paints or accumulates one scalable glyph outline.
+    ///
+    /// `outline` is expressed in font design coordinates. `transform` maps those coordinates into
+    /// the backend's device space. The backend must apply the fill, stroke, visibility, and
+    /// clipping behavior selected by [`CanvasPaint::rendering_mode`]. For a clip-capable mode,
+    /// the transformed outline is accumulated for the next [`Self::commit_text_clip`] call rather
+    /// than immediately changing the active clip.
+    ///
+    /// # Errors
+    ///
+    /// Returns the backend error when transforming, painting, or accumulating the outline fails.
+    fn paint_outline(
+        &mut self,
+        path: &std::sync::Arc<PdfPath>,
+        transform: &Transform,
+    ) -> Result<(), PdfCanvasError> {
+        match self.current_state()?.paint.rendering_mode {
+            TextRenderingMode::Fill => {
+                self.draw_transformed_path(path, transform, PaintMode::Fill, PathFillType::Winding)
+            }
+            TextRenderingMode::Stroke => self.draw_transformed_path(
+                path,
+                transform,
+                PaintMode::Stroke,
+                PathFillType::Winding,
+            ),
+            TextRenderingMode::FillAndStroke => self.draw_transformed_path(
+                path,
+                transform,
+                PaintMode::FillAndStroke,
+                PathFillType::Winding,
+            ),
+            TextRenderingMode::Invisible => Ok(()),
+            TextRenderingMode::FillAndClip => {
+                self.draw_transformed_path(
+                    path,
+                    transform,
+                    PaintMode::Fill,
+                    PathFillType::Winding,
+                )?;
+                self.add_transformed_text_clip(path, transform)
+            }
+            TextRenderingMode::StrokeAndClip => {
+                self.draw_transformed_path(
+                    path,
+                    transform,
+                    PaintMode::Stroke,
+                    PathFillType::Winding,
+                )?;
+                self.add_transformed_text_clip(path, transform)
+            }
+            TextRenderingMode::FillStrokeAndClip => {
+                self.draw_transformed_path(
+                    path,
+                    transform,
+                    PaintMode::FillAndStroke,
+                    PathFillType::Winding,
+                )?;
+                self.add_transformed_text_clip(path, transform)
+            }
+            TextRenderingMode::Clip => self.add_transformed_text_clip(path, transform),
+        }
+    }
+
+    fn add_transformed_text_clip(
+        &mut self,
+        path: &std::sync::Arc<PdfPath>,
+        transform: &Transform,
+    ) -> Result<(), PdfCanvasError> {
+        let mut transformed = path.as_ref().clone();
+        transformed.transform(transform);
+        self.add_to_text_clip(&transformed)
+    }
+
+    /// Executes one opaque PDF Type 3 character procedure.
+    ///
+    /// `glyph` is resolved by the PDF integration layer to the original character content stream
+    /// and its nested resources. The backend must execute that content under `transform` and honor
+    /// the requested visibility and clipping mode. Any temporary clip produced by the procedure
+    /// remains pending until [`Self::commit_text_clip`].
+    ///
+    /// This method is the dependency boundary that prevents the text engine from depending on PDF
+    /// content-stream parsing or a concrete canvas implementation.
+    ///
+    /// # Errors
+    ///
+    /// Returns the backend error when the handle cannot be resolved or the Type 3 content stream
+    /// cannot be rendered or accumulated.
+    fn paint_type3(
+        &mut self,
+        glyph: pdf_font::GlyphId,
+        transform: &Transform,
+    ) -> Result<(), PdfCanvasError> {
+        let state = self.current_state()?;
+        let font = state
+            .text_state
+            .font_spec
+            .ok_or(PdfCanvasError::CurrentFontRequired)?;
+        let resources = state.text_state.resources;
+
+        // Skipping a missing Type 3 procedure is a no-op.
+        let Some(procedure) = font.type3_procedure(glyph) else {
+            return Ok(());
+        };
+
+        let mut filter = |operator: &PdfOperatorVariant| {
+            matches!(
+                operator,
+                PdfOperatorVariant::SetCharWidth(_)
+                    | PdfOperatorVariant::SetCharWidthAndBoundingBox(_)
+            )
+        };
+
+        // The text engine supplies a complete glyph-to-device transform. A
+        // Type 3 procedure is executed through the regular content-stream
+        // machinery, which normally post-concatenates its matrix onto the
+        // current CTM. Temporarily use identity as that base so the page CTM
+        // already present in `transform` is not applied a second time.
+        self.save()?;
+        let state = self.current_state_mut()?;
+        state.transform = Transform::identity();
+        let result = self.render_content_stream(
+            procedure,
+            Some(*transform),
+            None,
+            resources,
+            Some(&mut filter),
+        );
+        self.restore();
+        result
+    }
+
+    fn render_text_items(&mut self, items: &[PdfTextItem]) -> Result<(), PdfCanvasError> {
+        let state = self.current_state()?;
+        let font = state
+            .text_state
+            .font
+            .as_ref()
+            .ok_or(PdfCanvasError::CurrentFontRequired)?
+            .clone();
+
+        let style = state.text_state.style.clone();
+        let rendering_mode = state.paint.rendering_mode;
+        let mut base_transform = state.text_state.matrix;
+        base_transform.concat(&state.transform);
+        let font_system = std::sync::Arc::clone(&self.font_system);
+        let type3 = font.spec().is_type3();
+        let advance = font_system.visit_pdf(
+            &PdfTextRun {
+                font: &font,
+                items,
+                style,
+            },
+            |face, glyph| {
+                let mut glyph_transform = glyph.local_transform;
+                glyph_transform.concat(&base_transform);
+                if rendering_mode != TextRenderingMode::Invisible {
+                    if type3 {
+                        self.paint_type3(glyph.glyph_id, &glyph_transform)?;
+                    } else {
+                        let pixels_per_em = glyph
+                            .local_transform
+                            .sx
+                            .abs()
+                            .max(glyph.local_transform.sy.abs());
+                        let outline =
+                            self.glyph_outline(face.as_ref(), glyph.glyph_id, pixels_per_em)?;
+                        self.paint_outline(&outline, &glyph_transform)?;
+                    }
+                }
+                if let Some(recorded) = &mut self.text_glyphs {
+                    let bounds = base_transform.map_rect(&glyph.bounds).normalized();
+                    if bounds.is_valid() {
+                        recorded.push(crate::text::TextGlyph {
+                            unicode: glyph.unicode,
+                            bounds,
+                        });
+                    }
+                }
+                Ok::<(), PdfCanvasError>(())
+            },
+        )?;
+        self.current_state_mut()?
+            .text_state
+            .advance(advance.x, advance.y);
+        Ok(())
     }
 }

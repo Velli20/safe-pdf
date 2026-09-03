@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use bytes::Bytes;
 
 use crate::dictionary::Dictionary;
 
@@ -20,8 +20,8 @@ pub struct StreamObject {
     ///
     /// The bytes may still be encoded when the stream was created directly
     /// from PDF input and filter decoding has not yet succeeded. Cloning the
-    /// [`Arc`] shares the allocation rather than copying the bytes.
-    pub data: Arc<Vec<u8>>,
+    /// [`Bytes`] shares the allocation rather than copying the bytes.
+    pub data: Bytes,
     /// Indicates whether the stream's declared filter chain has been applied to
     /// the current bytes.
     filters_applied: bool,
@@ -33,7 +33,7 @@ impl StreamObject {
         object_number: usize,
         generation_number: usize,
         dictionary: Dictionary,
-        data: impl Into<Arc<Vec<u8>>>,
+        data: impl Into<Bytes>,
     ) -> Self {
         StreamObject {
             object_number,
@@ -49,7 +49,7 @@ impl StreamObject {
         object_number: usize,
         generation_number: usize,
         dictionary: Dictionary,
-        data: impl Into<Arc<Vec<u8>>>,
+        data: impl Into<Bytes>,
     ) -> Self {
         StreamObject {
             object_number,
@@ -66,7 +66,7 @@ impl StreamObject {
     }
 
     /// Replaces the stream bytes with the result of applying its filter chain.
-    pub fn set_filtered_data(&mut self, data: impl Into<Arc<Vec<u8>>>) {
+    pub fn set_filtered_data(&mut self, data: impl Into<Bytes>) {
         self.data = data.into();
         self.filters_applied = true;
     }
@@ -76,14 +76,14 @@ impl StreamObject {
     /// Use [`Self::filters_applied`] when the distinction between encoded and
     /// decoded bytes matters to the caller.
     pub fn raw_data(&self) -> &[u8] {
-        self.data.as_slice()
+        self.data.as_ref()
     }
 
     /// Returns shared ownership of the current stream bytes.
     ///
-    /// Cloning the returned [`Arc`] does not copy the underlying byte buffer.
-    pub fn shared_data(&self) -> Arc<Vec<u8>> {
-        Arc::clone(&self.data)
+    /// Cloning the returned [`Bytes`] does not copy the underlying byte buffer.
+    pub fn shared_data(&self) -> Bytes {
+        self.data.clone()
     }
 }
 

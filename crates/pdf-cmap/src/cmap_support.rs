@@ -14,7 +14,7 @@ pub(crate) fn bytes_to_u32(bytes: &[u8]) -> u32 {
     })
 }
 
-/// Decode text by matching the longest valid character code at each position.
+/// Decode the first source code by matching the longest valid character code.
 ///
 /// # Parameters
 ///
@@ -27,47 +27,30 @@ pub(crate) fn bytes_to_u32(bytes: &[u8]) -> u32 {
 ///
 /// # Returns
 ///
-/// A vector of decoded CIDs. Unknown or unmapped bytes are replaced with `0`
-/// and decoding advances by one byte.
-pub(crate) fn decode_with_code_space<HasCodeSpace, MapCode>(
+/// The packed source code, consumed byte length, and mapped CID. Unknown or unmapped input returns
+/// the first byte with CID 0 so a streaming caller can advance safely. Empty input returns `None`.
+pub(crate) fn decode_next_with_code_space<HasCodeSpace, MapCode>(
     text: &[u8],
     allowed_code_lengths: &[usize],
     mut has_code_space: HasCodeSpace,
     mut map_code: MapCode,
-) -> Vec<u16>
+) -> Option<(u32, usize, u16)>
 where
     HasCodeSpace: FnMut(u32, usize) -> bool,
     MapCode: FnMut(u32) -> Option<u16>,
 {
-    let mut decoded = Vec::new();
-    let mut position = 0usize;
+    let first = text.first().copied()?;
+    for len in allowed_code_lengths.iter().rev() {
+        let Some(bytes) = text.get(..*len) else {
+            continue;
+        };
 
-    while position < text.len() {
-        let mut matched = None;
-
-        for len in allowed_code_lengths.iter().rev() {
-            let end = position.saturating_add(*len);
-            let Some(bytes) = text.get(position..end) else {
-                continue;
-            };
-
-            let code = bytes_to_u32(bytes);
-            if has_code_space(code, *len) {
-                matched = Some((*len, map_code(code).unwrap_or(0)));
-                break;
-            }
-        }
-
-        if let Some((len, cid)) = matched {
-            decoded.push(cid);
-            position = position.saturating_add(len);
-        } else {
-            decoded.push(0);
-            position = position.saturating_add(1);
+        let code = bytes_to_u32(bytes);
+        if has_code_space(code, *len) {
+            return Some((code, *len, map_code(code).unwrap_or(0)));
         }
     }
-
-    decoded
+    Some((u32::from(first), 1, 0))
 }
 
 /// Shared lookup contract for Type0 encoding CMaps.
@@ -81,7 +64,7 @@ pub(crate) trait Type0CodeMap {
     /// # Returns
     ///
     /// All accepted source-code byte lengths, sorted in ascending order.
-    fn allowed_code_lengths(&self) -> Vec<usize>;
+    fn allowed_code_lengths(&self) -> &[usize];
 
     /// Return whether a packed source code is valid for a byte length.
     ///
@@ -110,7 +93,7 @@ pub(crate) trait Type0CodeMap {
     /// exists.
     fn map_code_to_cid(&self, code: u32) -> Option<u16>;
 
-    /// Decode raw text bytes into CIDs using this CMap.
+    /// Decode the first source code using this CMap.
     ///
     /// # Parameters
     ///
@@ -119,13 +102,13 @@ pub(crate) trait Type0CodeMap {
     ///
     /// # Returns
     ///
-    /// The decoded CIDs produced by matching the longest valid source-code
-    /// length at each position.
-    fn decode_text(&self, text: &[u8]) -> Vec<u16> {
-        let lengths = self.allowed_code_lengths();
-        decode_with_code_space(
+    /// The source code, consumed length, and CID selected by the longest valid code-space match.
+    /// Non-empty input always consumes at least one byte, including malformed or unmapped input, so
+    /// repeated calls cannot stall a streaming decoder.
+    fn decode_next(&self, text: &[u8]) -> Option<(u32, usize, u16)> {
+        decode_next_with_code_space(
             text,
-            &lengths,
+            self.allowed_code_lengths(),
             |code, len| self.has_code_space(code, len),
             |code| self.map_code_to_cid(code),
         )

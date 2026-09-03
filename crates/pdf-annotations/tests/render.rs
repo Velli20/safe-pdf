@@ -15,6 +15,7 @@ use pdf_graphics::{
     BlendMode, Image, MaskMode, PathFillType, color::Color, pdf_path::PathVerb, pdf_path::PdfPath,
     rect::Rect, transform::Transform,
 };
+use pdf_text_engine::bundled_font_system;
 
 #[derive(Default)]
 struct CountingCanvas {
@@ -114,7 +115,8 @@ where
         .expect("PDF should parse");
     let page = document.pages.first().expect("page should exist");
     let mut backend = CountingCanvas::default();
-    let canvas = PdfCanvas::new(&mut backend, page, None).expect("canvas should build");
+    let canvas = PdfCanvas::new(&mut backend, page, None, bundled_font_system())
+        .expect("canvas should build");
     let mut renderer = AnnotationRenderer::new(canvas);
     if let Some(annotations) = &page.annotations {
         renderer

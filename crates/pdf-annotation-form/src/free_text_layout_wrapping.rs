@@ -2,7 +2,7 @@
 
 use std::ops::RangeInclusive;
 
-use pdf_font::font::Font;
+use pdf_font::PdfFontSpec;
 
 /// An encoded visual line and the source cursor positions represented by it.
 pub(crate) struct WrappedLine {
@@ -40,7 +40,7 @@ impl WrappedLine {
 /// Wraps encoded text using font-derived visual widths.
 pub(super) struct TextWrapper<'a> {
     /// The font used to measure candidate lines.
-    font: &'a Font,
+    font: &'a PdfFontSpec,
     /// The font size used for measurement.
     font_size: f32,
     /// The maximum permitted line width.
@@ -49,7 +49,7 @@ pub(super) struct TextWrapper<'a> {
 
 impl<'a> TextWrapper<'a> {
     /// Creates a text wrapper with fixed measurement parameters.
-    pub(super) fn new(font: &'a Font, font_size: f32, maximum_width: f32) -> Self {
+    pub(super) fn new(font: &'a PdfFontSpec, font_size: f32, maximum_width: f32) -> Self {
         Self {
             font,
             font_size,
@@ -98,7 +98,8 @@ impl<'a> TextWrapper<'a> {
 
     /// Reports whether encoded bytes fit within the configured width.
     fn fits(&self, bytes: &[u8]) -> bool {
-        self.font.encoded_text_width(bytes, self.font_size) <= self.maximum_width
+        pdf_text_engine::measure_encoded_text_width(self.font, bytes, self.font_size)
+            <= self.maximum_width
     }
 }
 
@@ -322,15 +323,13 @@ impl LineBuilder {
 
 #[cfg(test)]
 mod tests {
-    use pdf_font::{standard14::Standard14Font, true_type_font::TrueTypeFont};
+    use pdf_font::standard14::Standard14Font;
 
     use super::*;
 
     #[test]
     fn wrapping_normalizes_ascii_whitespace_and_tracks_source_cursors() {
-        let font = Font::TrueType(TrueTypeFont::synthetic_standard14_font(
-            Standard14Font::Courier,
-        ));
+        let font = PdfFontSpec::from(Standard14Font::Courier);
         let lines =
             TextWrapper::new(&font, 12.0, f32::INFINITY).wrap(b" first\t\tsecond  \n\nthird");
         let line_bytes: Vec<&[u8]> = lines.iter().map(WrappedLine::bytes).collect();
@@ -352,10 +351,8 @@ mod tests {
 
     #[test]
     fn wrapping_fills_lines_before_splitting_oversized_words() {
-        let font = Font::TrueType(TrueTypeFont::synthetic_standard14_font(
-            Standard14Font::Courier,
-        ));
-        let four_glyphs = font.encoded_text_width(b"aaaa", 12.0);
+        let font = PdfFontSpec::from(Standard14Font::Courier);
+        let four_glyphs = pdf_text_engine::measure_encoded_text_width(&font, b"aaaa", 12.0);
         let lines = TextWrapper::new(&font, 12.0, four_glyphs).wrap(b"  aa b cccccc");
         let line_bytes: Vec<&[u8]> = lines.iter().map(WrappedLine::bytes).collect();
 

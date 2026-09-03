@@ -84,7 +84,7 @@ impl PageTextLayout {
             {
                 result.push('\n');
             }
-            result.extend(glyph.unicode.iter());
+            result.extend(glyph.unicode.as_slice());
             previous = Some(glyph);
         }
 
@@ -153,15 +153,13 @@ fn is_new_line(previous: &TextGlyph, current: &TextGlyph) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pdf_font::char_vec::CharVec;
+    use std::sync::Arc;
+
+    use pdf_cmap::UnicodeSequence;
 
     fn glyph(text: &str, left: f32, top: f32, right: f32, bottom: f32) -> TextGlyph {
-        let mut unicode = CharVec::new();
-        for character in text.chars() {
-            unicode.push(character);
-        }
         TextGlyph {
-            unicode,
+            unicode: UnicodeSequence::from_shared(Arc::from(text.chars().collect::<Vec<_>>())),
             bounds: Rect {
                 left,
                 top,

@@ -1,6 +1,6 @@
 //! Validation and normalization of free-text layout input.
 
-use pdf_font::{font::Font, true_type_font::TrueTypeFont};
+use pdf_font::PdfFontSpec;
 use pdf_graphics::{color::Color, rect::Rect};
 
 use crate::{FreeText, FreeTextEditError, FreeTextOverflow, FreeTextStyle};
@@ -14,7 +14,7 @@ pub(super) struct ValidatedFreeText<'a> {
     /// The source text encoded for the selected PDF font.
     encoded_text: Vec<u8>,
     /// The font used for text measurement and rendering.
-    font: Font,
+    font: PdfFontSpec,
     /// The maximum width allowed for a wrapped line.
     maximum_line_width: f32,
     /// The number of characters in the source text.
@@ -29,9 +29,7 @@ impl<'a> TryFrom<&'a FreeText> for ValidatedFreeText<'a> {
         StyleValidator::new(&free_text.style).validate()?;
         let rectangle = ValidatedRectangle::try_from(free_text.rect)?;
         let encoded_text = free_text.style.font.encoding.encode(&free_text.text)?;
-        let font = Font::TrueType(TrueTypeFont::synthetic_standard14_font(
-            free_text.style.font.standard14,
-        ));
+        let font = PdfFontSpec::from(free_text.style.font.standard14);
         let maximum_line_width = match free_text.style.overflow {
             FreeTextOverflow::ExpandRight => f32::INFINITY,
             FreeTextOverflow::ExpandHeight | FreeTextOverflow::Reject => {
@@ -62,7 +60,7 @@ impl<'a> ValidatedFreeText<'a> {
     }
 
     /// Returns the font used to measure the encoded text.
-    pub(super) fn font(&self) -> &Font {
+    pub(super) fn font(&self) -> &PdfFontSpec {
         &self.font
     }
 
@@ -82,7 +80,7 @@ impl<'a> ValidatedFreeText<'a> {
     }
 
     /// Consumes the validated input and returns its measurement font.
-    pub(super) fn into_font(self) -> Font {
+    pub(super) fn into_font(self) -> PdfFontSpec {
         self.font
     }
 }

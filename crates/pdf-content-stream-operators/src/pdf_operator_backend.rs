@@ -5,7 +5,7 @@
 
 use pdf_graphics::{LineCap, LineJoin, TextRenderingMode, transform::Transform};
 
-use crate::TextElement;
+use crate::PdfTextItem;
 
 /// Defines methods for handling PDF path construction operators.
 ///
@@ -670,37 +670,40 @@ pub trait TextShowingOps {
     ///
     /// # Parameters
     ///
-    /// - `text`: A byte slice representing the text string, typically encoded according to the current font.
+    /// - `text`: The text item to show, typically encoded according to the current font.
     ///
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType>;
+    fn show_text(&mut self, text: &PdfTextItem) -> Result<(), Self::ErrorType>;
 
     /// Shows text, allowing individual adjustments to glyph positions.
     ///
     /// # Parameters
     ///
-    /// - `elements`: A slice of `TextElement`s, which can be strings or numeric adjustments.
+    /// - `elements`: A slice of `PdfTextItem`s, which can be strings or numeric adjustments.
     ///
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
     fn show_text_with_glyph_positioning(
         &mut self,
-        elements: &[TextElement],
+        elements: &[PdfTextItem],
     ) -> Result<(), Self::ErrorType>;
 
     /// Moves to the next line and shows a text string.
     ///
     /// # Parameters
     ///
-    /// - `text`: A byte slice representing the text string.
+    /// - `text`: The text item to show.
     ///
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn move_to_next_line_and_show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType>;
+    fn move_to_next_line_and_show_text(
+        &mut self,
+        text: &PdfTextItem,
+    ) -> Result<(), Self::ErrorType>;
 
     /// Sets word and character spacing, moves to the next line, and shows a text string.
     ///
@@ -708,7 +711,7 @@ pub trait TextShowingOps {
     ///
     /// - `word_spacing`: The word spacing to set.
     /// - `char_spacing`: The character spacing to set.
-    /// - `text`: A byte slice representing the text string.
+    /// - `text`: The text item to show.
     ///
     /// # Returns
     ///
@@ -717,7 +720,7 @@ pub trait TextShowingOps {
         &mut self,
         word_spacing: f32,
         char_spacing: f32,
-        text: &[u8],
+        text: &PdfTextItem,
     ) -> Result<(), Self::ErrorType>;
 }
 

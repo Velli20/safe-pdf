@@ -1,5 +1,4 @@
-use std::sync::Arc;
-
+use bytes::Bytes;
 use pdf_filter::filter::decode_with_resolver;
 use pdf_graphics::Image;
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, stream::StreamObject};
@@ -40,7 +39,7 @@ pub fn decode_inline_image(
 /// `Height`, `BitsPerComponent`, and `ColorSpace`.
 pub fn decode_normalized_image(
     dictionary: &Dictionary,
-    raw_data: Arc<Vec<u8>>,
+    raw_data: Bytes,
     objects: &dyn ObjectResolver,
     soft_mask: Option<&Image>,
 ) -> Result<Image, PdfImageError> {
@@ -49,7 +48,7 @@ pub fn decode_normalized_image(
 }
 
 fn decode_normalized_image_with_metadata(
-    raw_data: Arc<Vec<u8>>,
+    raw_data: Bytes,
     soft_mask: Option<&Image>,
     metadata: &ImageMetadata,
 ) -> Result<Image, PdfImageError> {
@@ -77,12 +76,7 @@ fn decode_normalized_image_with_metadata(
 }
 
 /// Builds a render image from color-space-converted RGBA and combines its alpha with `/SMask`.
-fn image_from_rgba(
-    data: Arc<Vec<u8>>,
-    width: usize,
-    height: usize,
-    soft_mask: Option<&Image>,
-) -> Image {
+fn image_from_rgba(data: Bytes, width: usize, height: usize, soft_mask: Option<&Image>) -> Image {
     let byte_len = width
         .saturating_mul(height)
         .saturating_mul(4)
@@ -106,7 +100,7 @@ fn image_from_rgba(
         }
     }
     Image {
-        data: Arc::new(rgba),
+        data: rgba.into(),
         width,
         height,
         pixel_format: pdf_graphics::PixelFormat::RGBA8888,
@@ -131,8 +125,9 @@ fn soft_mask_alphas(mask: &Image) -> Box<dyn Iterator<Item = u8> + '_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use std::{collections::BTreeMap, sync::Arc};
+    use std::collections::BTreeMap;
 
+    use bytes::Bytes;
     use pdf_object::{
         dictionary::Dictionary, error::ObjectError, object_resolver::PassthroughResolver,
         object_variant::ObjectVariant, stream::StreamObject,
@@ -219,7 +214,7 @@ mod tests {
         let image = read_xobject(&dictionary, &stream, &PassthroughResolver, None)
             .expect("predecoded image data should not be filtered again");
 
-        assert!(Arc::ptr_eq(&image.data, &stream.data));
+        assert_eq!(image.data.as_ptr(), stream.data.as_ptr());
         assert_eq!(image.data.as_ref(), &[0x2A]);
     }
 
@@ -252,7 +247,7 @@ mod tests {
 
         let image = decode_normalized_image(
             &dictionary,
-            Arc::new(vec![0b1010_0000]),
+            vec![0b1010_0000].into(),
             &PassthroughResolver,
             None,
         )
@@ -278,13 +273,9 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
 
-        let image = decode_normalized_image(
-            &dictionary,
-            Arc::new(vec![0, 255]),
-            &PassthroughResolver,
-            None,
-        )
-        .expect("8-bpc decoded grayscale image should decode");
+        let image =
+            decode_normalized_image(&dictionary, vec![0, 255].into(), &PassthroughResolver, None)
+                .expect("8-bpc decoded grayscale image should decode");
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
         assert_eq!(image.data.as_ref(), &[0x00, 0x80]);
@@ -313,7 +304,7 @@ mod tests {
 
         let image = decode_normalized_image(
             &dictionary,
-            Arc::new(vec![0b1000_0000]),
+            vec![0b1000_0000].into(),
             &PassthroughResolver,
             None,
         )
@@ -341,7 +332,7 @@ mod tests {
         ]));
 
         let image =
-            decode_normalized_image(&dictionary, Arc::new(vec![0]), &PassthroughResolver, None)
+            decode_normalized_image(&dictionary, vec![0].into(), &PassthroughResolver, None)
                 .expect("Indexed DeviceN image should convert through its alternate space");
 
         assert_eq!(image.pixel_format, PixelFormat::RGBA8888);
@@ -359,7 +350,7 @@ mod tests {
 
         let image = decode_normalized_image(
             &dictionary,
-            Arc::new(vec![0, 255, 255, 255]),
+            vec![0, 255, 255, 255].into(),
             &PassthroughResolver,
             None,
         )
@@ -386,7 +377,7 @@ mod tests {
         ]));
 
         let image =
-            decode_normalized_image(&dictionary, Arc::new(vec![0]), &PassthroughResolver, None)
+            decode_normalized_image(&dictionary, vec![0].into(), &PassthroughResolver, None)
                 .expect("Indexed DeviceCMYK image should retain its existing conversion");
 
         assert_eq!(image.data.as_ref(), &[255, 255, 255, 255]);
@@ -432,7 +423,7 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
         let soft_mask = Image {
-            data: Arc::new(vec![128]),
+            data: vec![128].into(),
             width: 1,
             height: 1,
             pixel_format: PixelFormat::Gray8,
@@ -440,7 +431,7 @@ mod tests {
 
         let image = decode_normalized_image(
             &dictionary,
-            Arc::new(vec![255]),
+            vec![255].into(),
             &PassthroughResolver,
             Some(&soft_mask),
         )
@@ -465,9 +456,8 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
-        let err =
-            decode_normalized_image(&dictionary, Arc::new(vec![0]), &PassthroughResolver, None)
-                .expect_err("invalid /Decode length should fail");
+        let err = decode_normalized_image(&dictionary, vec![0].into(), &PassthroughResolver, None)
+            .expect_err("invalid /Decode length should fail");
 
         assert!(matches!(
             err,
@@ -490,16 +480,12 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
 
-        let samples = Arc::new(vec![12, 34]);
-        let image = decode_normalized_image(
-            &dictionary,
-            Arc::clone(&samples),
-            &PassthroughResolver,
-            None,
-        )
-        .expect("grayscale image without /Decode should decode");
+        let samples = Bytes::from_static(&[12, 34]);
+        let image =
+            decode_normalized_image(&dictionary, samples.clone(), &PassthroughResolver, None)
+                .expect("grayscale image without /Decode should decode");
 
-        assert!(Arc::ptr_eq(&image.data, &samples));
+        assert_eq!(image.data.as_ptr(), samples.as_ptr());
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
         assert_eq!(image.data.as_ref(), &[12, 34]);
     }
@@ -515,17 +501,13 @@ mod tests {
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
-        let samples = Arc::new(vec![12, 34, 56]);
+        let samples = Bytes::from_static(&[12, 34, 56]);
 
-        let image = decode_normalized_image(
-            &dictionary,
-            Arc::clone(&samples),
-            &PassthroughResolver,
-            None,
-        )
-        .expect("trailing samples should be ignored");
+        let image =
+            decode_normalized_image(&dictionary, samples.clone(), &PassthroughResolver, None)
+                .expect("trailing samples should be ignored");
 
-        assert!(!Arc::ptr_eq(&image.data, &samples));
+        assert_eq!(image.data.as_ptr(), samples.as_ptr());
         assert_eq!(image.data.as_ref(), &[12, 34]);
     }
 
@@ -539,7 +521,7 @@ mod tests {
 
         let image = decode_normalized_image(
             &dictionary,
-            Arc::new(vec![0b1010_0000]),
+            vec![0b1010_0000].into(),
             &PassthroughResolver,
             None,
         )
@@ -562,7 +544,7 @@ mod tests {
 
         let image = decode_normalized_image(
             &dictionary,
-            Arc::new(vec![1, 2, 3, 4, 5, 6]),
+            vec![1, 2, 3, 4, 5, 6].into(),
             &PassthroughResolver,
             None,
         )
@@ -583,9 +565,8 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
-        let err =
-            decode_normalized_image(&dictionary, Arc::new(vec![0]), &PassthroughResolver, None)
-                .expect_err("non-mask images should still require BitsPerComponent");
+        let err = decode_normalized_image(&dictionary, vec![0].into(), &PassthroughResolver, None)
+            .expect_err("non-mask images should still require BitsPerComponent");
 
         assert!(matches!(
             err,
@@ -611,7 +592,7 @@ mod tests {
 
         let image = decode_normalized_image(
             &dictionary,
-            Arc::new(vec![10, 20, 30, 40, 50, 60]),
+            vec![10, 20, 30, 40, 50, 60].into(),
             &PassthroughResolver,
             None,
         )
@@ -635,7 +616,7 @@ mod tests {
 
         let err = decode_normalized_image(
             &dictionary,
-            Arc::new(vec![10, 20, 30, 40, 50, 60]),
+            vec![10, 20, 30, 40, 50, 60].into(),
             &PassthroughResolver,
             None,
         )
@@ -668,7 +649,7 @@ mod tests {
 
         let image = decode_normalized_image(
             &dictionary,
-            Arc::new(vec![0xAA, 0x10, 0x20]),
+            vec![0xAA, 0x10, 0x20].into(),
             &PassthroughResolver,
             None,
         )
@@ -701,7 +682,7 @@ mod tests {
 
         let image = decode_normalized_image(
             &dictionary,
-            Arc::new(vec![0x20, 0xC0]),
+            vec![0x20, 0xC0].into(),
             &PassthroughResolver,
             Some(&soft_mask),
         )
@@ -780,7 +761,7 @@ mod tests {
         let decoded =
             decode_inline_image(&image, None).expect("unfiltered inline image should decode");
 
-        assert!(Arc::ptr_eq(&decoded.data, &samples));
+        assert_eq!(decoded.data.as_ptr(), samples.as_ptr());
         assert_eq!(decoded.data.as_ref(), &[12, 34]);
     }
 
@@ -832,7 +813,7 @@ mod tests {
 
         let image = decode_normalized_image(
             &dictionary,
-            Arc::new(vec![0b1011_0010]),
+            vec![0b1011_0010].into(),
             &PassthroughResolver,
             None,
         )
@@ -850,7 +831,7 @@ mod tests {
         let dictionary = indexed_dictionary(1);
         let image = decode_normalized_image(
             &dictionary,
-            Arc::new(vec![0b1010_0000]),
+            vec![0b1010_0000].into(),
             &PassthroughResolver,
             None,
         )
@@ -868,13 +849,9 @@ mod tests {
     #[test]
     fn decode_normalized_indexed_image_2bpc_expands_samples() {
         let dictionary = indexed_dictionary(2);
-        let image = decode_normalized_image(
-            &dictionary,
-            Arc::new(vec![0x1B]),
-            &PassthroughResolver,
-            None,
-        )
-        .expect("2-bpc indexed image should decode");
+        let image =
+            decode_normalized_image(&dictionary, vec![0x1B].into(), &PassthroughResolver, None)
+                .expect("2-bpc indexed image should decode");
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
         assert_eq!(
@@ -890,7 +867,7 @@ mod tests {
         let dictionary = indexed_dictionary(4);
         let image = decode_normalized_image(
             &dictionary,
-            Arc::new(vec![0x01, 0x23]),
+            vec![0x01, 0x23].into(),
             &PassthroughResolver,
             None,
         )
@@ -910,7 +887,7 @@ mod tests {
         let dictionary = indexed_dictionary(8);
         let image = decode_normalized_image(
             &dictionary,
-            Arc::new(vec![0, 1, 2, 3]),
+            vec![0, 1, 2, 3].into(),
             &PassthroughResolver,
             None,
         )

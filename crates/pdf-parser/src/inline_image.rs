@@ -270,7 +270,7 @@ mod tests {
 
         let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
 
-        assert_eq!(image.shared_data().as_slice(), b"abcEIxdef\n");
+        assert_eq!(image.shared_data().as_ref(), b"abcEIxdef\n");
         assert_eq!(parser.tokenizer.data(), b" Q");
     }
 
@@ -283,11 +283,11 @@ mod tests {
         let mut parser = PdfParser::from(input.as_slice());
         let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
 
-        assert_eq!(image.shared_data().as_slice().len(), 34);
+        assert_eq!(image.shared_data().len(), 34);
         assert!(
             image
                 .shared_data()
-                .as_slice()
+                .as_ref()
                 .iter()
                 .all(|byte| *byte == 0xFF)
         );
@@ -301,7 +301,7 @@ mod tests {
 
         let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
 
-        assert_eq!(image.shared_data().as_slice(), b"abc EIxyzj");
+        assert_eq!(image.shared_data().as_ref(), b"abc EIxyzj");
         assert_eq!(parser.tokenizer.data(), b" Q");
     }
 
@@ -311,7 +311,7 @@ mod tests {
 
         let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
 
-        assert_eq!(image.shared_data().as_slice(), b"\x00\n");
+        assert_eq!(image.shared_data().as_ref(), b"\x00\n");
         assert_eq!(parser.tokenizer.data(), b" Q");
     }
 
@@ -324,7 +324,7 @@ mod tests {
         let mut parser = PdfParser::from(input.as_slice());
         let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
 
-        assert_eq!(image.shared_data().as_slice(), &[0xFF, 0x80, b'\n']);
+        assert_eq!(image.shared_data().as_ref(), &[0xFF, 0x80, b'\n']);
         assert_eq!(parser.tokenizer.data(), b" Q");
     }
 
@@ -353,7 +353,7 @@ mod tests {
 
         let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
 
-        assert_eq!(image.shared_data().as_slice(), b"x\n");
+        assert_eq!(image.shared_data().as_ref(), b"x\n");
         assert_eq!(parser.tokenizer.data(), b"");
     }
 

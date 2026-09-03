@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use bytes::Bytes;
 use pdf_graphics::{color::Color, rect::Rect, transform::Transform};
 
 use crate::{
@@ -57,7 +58,7 @@ pub enum ShadingPaint {
     /// A rasterized mesh shading paint.
     RasterImage {
         /// Shared RGBA8 image data for the rasterized shading.
-        pixels: Arc<Vec<u8>>,
+        pixels: Bytes,
         /// Raster width in pixels.
         width: usize,
         /// Raster height in pixels.
@@ -125,7 +126,7 @@ pub fn build_shading_paint(
             let raster = rasterize_mesh_triangles(triangles, bounds, &mesh_transform);
 
             Ok(ShadingPaint::RasterImage {
-                pixels: Arc::new(raster.pixels),
+                pixels: raster.pixels.into(),
                 width: raster.width,
                 height: raster.height,
                 dest_rect: raster.bounds,
@@ -161,7 +162,7 @@ pub fn build_shading_paint(
             );
 
             Ok(ShadingPaint::RasterImage {
-                pixels: Arc::new(raster.pixels),
+                pixels: raster.pixels.into(),
                 width: raster.width,
                 height: raster.height,
                 dest_rect: raster.bounds,
@@ -186,7 +187,7 @@ fn has_paintable_bounds(bounds: &Rect) -> bool {
 
 fn transparent_raster_paint() -> ShadingPaint {
     ShadingPaint::RasterImage {
-        pixels: Arc::new(vec![0_u8, 0, 0, 0]),
+        pixels: Bytes::from_static(&[0_u8, 0, 0, 0]),
         width: 1,
         height: 1,
         dest_rect: Rect {

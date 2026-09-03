@@ -13,18 +13,12 @@ mod canvas_state;
 mod canvas_text_ops;
 mod content_stream_render_state;
 pub mod error;
-mod font_renderer_support;
-mod pdf_path_pen;
 
 pub mod pdf_canvas;
 pub mod recording_canvas;
 mod shading;
 pub mod stroke_style;
 pub mod text;
-mod text_renderer;
 mod text_state;
-mod truetype_font_renderer;
-pub mod type1_font_renderer;
-mod type3_font_renderer;
 
 impl<B: CanvasBackend> PdfOperatorBackend for PdfCanvas<'_, B> {}

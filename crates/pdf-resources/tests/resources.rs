@@ -1,7 +1,6 @@
 use std::{collections::BTreeMap, rc::Rc};
 
 use pdf_content_stream::ContentStreamIdAllocator;
-use pdf_font::font::Font;
 use pdf_graphics::transform::Transform;
 use pdf_object::{
     dictionary::Dictionary, object_id::PdfObjectId, object_resolver::PassthroughResolver,
@@ -592,7 +591,7 @@ fn self_referential_font_resources_resolve_lazily() {
 
     let (font, nested_resources) = resources.font("Self").expect("font should resolve");
     assert!(
-        matches!(font, Font::Type3(_)),
+        font.is_type3(),
         "expected the self-referential font to stay usable"
     );
 
@@ -602,7 +601,7 @@ fn self_referential_font_resources_resolve_lazily() {
         .expect("lazy nested font lookup should resolve");
 
     assert!(
-        matches!(nested_font, Font::Type3(_)),
+        nested_font.is_type3(),
         "expected the nested self-reference to resolve to the same font type"
     );
 
@@ -647,7 +646,7 @@ fn fallback_fonts_do_not_read_nested_type3_resources() {
     .expect("page resources should exist");
     let (font, nested_resources) = resources.font("F1").expect("font should resolve");
 
-    assert!(matches!(font, Font::TrueType(_)));
+    assert!(font.as_standard14().is_some());
     assert!(nested_resources.is_none());
 }
 

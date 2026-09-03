@@ -1,12 +1,19 @@
+//! Adapter from `skrifa` outline commands to PDF path geometry.
+
 use pdf_graphics::pdf_path::PdfPath;
 use skrifa::outline::OutlinePen;
 
-/// An implementation of `skrifa::outline::OutlinePen` that converts glyph outlines
-/// into a `PdfPath`.
+/// Collects `skrifa` outline commands in a [`PdfPath`].
 #[derive(Default)]
 pub(crate) struct PdfPathPen {
-    /// The `PdfPath` being constructed from the glyph outline commands.
-    pub path: PdfPath,
+    path: PdfPath,
+}
+
+impl PdfPathPen {
+    /// Consumes the pen and returns the collected path.
+    pub(crate) fn into_path(self) -> PdfPath {
+        self.path
+    }
 }
 
 impl OutlinePen for PdfPathPen {

@@ -1,7 +1,7 @@
 //! Rectangle growth, alignment, and caret geometry for wrapped text.
 
 use pdf_annotation_types::FreeTextAlignment;
-use pdf_font::font::Font;
+use pdf_font::PdfFontSpec;
 use pdf_graphics::rect::Rect;
 
 use crate::{
@@ -15,7 +15,7 @@ pub(super) struct LayoutGeometry<'a> {
     /// The validated layout style.
     style: &'a FreeTextStyle,
     /// The font used for line measurement.
-    font: &'a Font,
+    font: &'a PdfFontSpec,
     /// The wrapped lines in visual order.
     lines: &'a [WrappedLine],
 }
@@ -25,7 +25,7 @@ impl<'a> LayoutGeometry<'a> {
     pub(super) fn new(
         rect: Rect,
         style: &'a FreeTextStyle,
-        font: &'a Font,
+        font: &'a PdfFontSpec,
         lines: &'a [WrappedLine],
     ) -> Self {
         Self {
@@ -77,8 +77,7 @@ impl<'a> LayoutGeometry<'a> {
 
     /// Measures one wrapped line at the configured font size.
     pub(super) fn line_width(&self, line: &WrappedLine) -> f32 {
-        self.font
-            .encoded_text_width(line.bytes(), self.style.font_size)
+        pdf_text_engine::measure_encoded_text_width(self.font, line.bytes(), self.style.font_size)
     }
 
     /// Returns the horizontal text origin for a measured line.
@@ -178,7 +177,11 @@ impl<'a> LayoutGeometry<'a> {
 
         CaretMetrics {
             line_width: self.line_width(line),
-            prefix_width: self.font.encoded_text_width(prefix, self.style.font_size),
+            prefix_width: pdf_text_engine::measure_encoded_text_width(
+                self.font,
+                prefix,
+                self.style.font_size,
+            ),
         }
     }
 

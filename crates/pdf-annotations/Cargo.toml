@@ -14,3 +14,5 @@ thiserror = "2.0.12"
 
 [dev-dependencies]
 pdf-document = { path = "../pdf-document" }
+pdf-font = { path = "../pdf-font" }
+pdf-text-engine = { path = "../pdf-text-engine" }

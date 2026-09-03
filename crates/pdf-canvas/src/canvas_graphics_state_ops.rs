@@ -31,22 +31,22 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
     }
 
     fn set_line_width(&mut self, width: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.line_width = width;
+        self.current_state_mut()?.paint.line_width = width;
         Ok(())
     }
 
     fn set_line_cap(&mut self, cap_style: LineCap) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.line_cap = cap_style;
+        self.current_state_mut()?.paint.line_cap = cap_style;
         Ok(())
     }
 
     fn set_line_join(&mut self, line_join: LineJoin) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.line_join = line_join;
+        self.current_state_mut()?.paint.line_join = line_join;
         Ok(())
     }
 
     fn set_miter_limit(&mut self, miter_limit: f32) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.miter_limit = miter_limit;
+        self.current_state_mut()?.paint.miter_limit = miter_limit;
         Ok(())
     }
 
@@ -55,7 +55,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
         dash_array: &[f32],
         dash_phase: f32,
     ) -> Result<(), Self::ErrorType> {
-        self.current_state_mut()?.dash_pattern = DashPattern::new(dash_array, dash_phase)?;
+        self.current_state_mut()?.paint.dash_pattern = DashPattern::new(dash_array, dash_phase)?;
         Ok(())
     }
 
@@ -81,19 +81,19 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
         for state in &states.params {
             match state {
                 ExternalGraphicsStateKey::LineWidth(width) => {
-                    self.current_state_mut()?.line_width = *width
+                    self.current_state_mut()?.paint.line_width = *width
                 }
                 ExternalGraphicsStateKey::LineCap(cap) => {
-                    self.current_state_mut()?.line_cap = *cap;
+                    self.current_state_mut()?.paint.line_cap = *cap;
                 }
                 ExternalGraphicsStateKey::LineJoin(join) => {
-                    self.current_state_mut()?.line_join = *join;
+                    self.current_state_mut()?.paint.line_join = *join;
                 }
                 ExternalGraphicsStateKey::MiterLimit(miter) => {
-                    self.current_state_mut()?.miter_limit = *miter;
+                    self.current_state_mut()?.paint.miter_limit = *miter;
                 }
                 ExternalGraphicsStateKey::DashPattern(dash_pattern) => {
-                    self.current_state_mut()?.dash_pattern = Some(dash_pattern.clone());
+                    self.current_state_mut()?.paint.dash_pattern = Some(dash_pattern.clone());
                 }
                 ExternalGraphicsStateKey::RenderingIntent(_) => {
                     return Err(PdfCanvasError::UnsupportedFeature(
@@ -105,7 +105,9 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                 ExternalGraphicsStateKey::OverprintMode(_) => {}
                 ExternalGraphicsStateKey::Font(font, font_size) => {
                     if let Resource::Font { font, resources } = font {
-                        self.current_state_mut()?.text_state.font = Some(font);
+                        let handle = self.load_pdf_font(font.as_ref())?;
+                        self.current_state_mut()?.text_state.font = Some(handle);
+                        self.current_state_mut()?.text_state.font_spec = Some(font);
                         if let Some(resources) = resources {
                             self.current_state_mut()?.text_state.resources = Some(resources);
                         }
@@ -115,7 +117,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                         ));
                     }
 
-                    self.current_state_mut()?.text_state.font_size = *font_size;
+                    self.current_state_mut()?.text_state.style.font_size = *font_size;
                 }
                 ExternalGraphicsStateKey::BlendMode(modes) => {
                     // Store the blend mode(s) in the current graphics state.
@@ -127,7 +129,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                         ));
                     }
                     if let Some(mode) = modes.first() {
-                        self.current_state_mut()?.blend_mode = Some(mode.clone());
+                        self.current_state_mut()?.paint.blend_mode = Some(mode.clone());
                     }
                 }
                 ExternalGraphicsStateKey::SoftMask(smask) => {
@@ -176,10 +178,10 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                     }
                 }
                 ExternalGraphicsStateKey::StrokingAlpha(alpha) => {
-                    self.current_state_mut()?.stroke_color.a = *alpha
+                    self.current_state_mut()?.paint.stroke_color.a = *alpha
                 }
                 ExternalGraphicsStateKey::NonStrokingAlpha(alpha) => {
-                    self.current_state_mut()?.fill_color.a = *alpha
+                    self.current_state_mut()?.paint.fill_color.a = *alpha
                 }
                 ExternalGraphicsStateKey::StrokeAdjustment(_) => {}
                 ExternalGraphicsStateKey::AppleAntiAliasing(_) => {}

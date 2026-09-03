@@ -1,5 +1,4 @@
-use std::sync::Arc;
-
+use bytes::Bytes;
 use pdf_graphics::LineCap;
 use pdf_graphics::LineJoin;
 use pdf_graphics::TextRenderingMode;
@@ -7,7 +6,7 @@ use pdf_graphics::transform::Transform;
 use pdf_image::InlineImage;
 use thiserror::Error;
 
-use crate::TextElement;
+use crate::PdfTextItem;
 use crate::pdf_operator_backend::*;
 
 /// Represents a recorded operation with its parameters.
@@ -174,24 +173,24 @@ pub enum RecordedOperation {
     },
     MoveToStartOfNextLine,
     ShowText {
-        text: Vec<u8>,
+        text: PdfTextItem,
     },
     ShowTextWithGlyphPositioning {
-        elements: Vec<TextElement>,
+        elements: Vec<PdfTextItem>,
     },
     MoveToNextLineAndShowText {
-        text: Vec<u8>,
+        text: PdfTextItem,
     },
     SetSpacingAndShowText {
         word_spacing: f32,
         char_spacing: f32,
-        text: Vec<u8>,
+        text: PdfTextItem,
     },
     InvokeXObject {
         xobject_name: Vec<u8>,
     },
     PaintInlineImage {
-        data: Arc<Vec<u8>>,
+        data: Bytes,
     },
     PaintShading {
         shading_name: Vec<u8>,
@@ -634,16 +633,15 @@ impl TextPositioningOps for RecordingBackend {
 
 impl TextShowingOps for RecordingBackend {
     type ErrorType = PdfRecordingCanvasError;
-    fn show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
-        self.operations.push(RecordedOperation::ShowText {
-            text: text.to_vec(),
-        });
+    fn show_text(&mut self, text: &PdfTextItem) -> Result<(), Self::ErrorType> {
+        self.operations
+            .push(RecordedOperation::ShowText { text: text.clone() });
         Ok(())
     }
 
     fn show_text_with_glyph_positioning(
         &mut self,
-        elements: &[TextElement],
+        elements: &[PdfTextItem],
     ) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::ShowTextWithGlyphPositioning {
@@ -652,11 +650,12 @@ impl TextShowingOps for RecordingBackend {
         Ok(())
     }
 
-    fn move_to_next_line_and_show_text(&mut self, text: &[u8]) -> Result<(), Self::ErrorType> {
+    fn move_to_next_line_and_show_text(
+        &mut self,
+        text: &PdfTextItem,
+    ) -> Result<(), Self::ErrorType> {
         self.operations
-            .push(RecordedOperation::MoveToNextLineAndShowText {
-                text: text.to_vec(),
-            });
+            .push(RecordedOperation::MoveToNextLineAndShowText { text: text.clone() });
         Ok(())
     }
 
@@ -664,13 +663,13 @@ impl TextShowingOps for RecordingBackend {
         &mut self,
         word_spacing: f32,
         char_spacing: f32,
-        text: &[u8],
+        text: &PdfTextItem,
     ) -> Result<(), Self::ErrorType> {
         self.operations
             .push(RecordedOperation::SetSpacingAndShowText {
                 word_spacing,
                 char_spacing,
-                text: text.to_vec(),
+                text: text.clone(),
             });
         Ok(())
     }

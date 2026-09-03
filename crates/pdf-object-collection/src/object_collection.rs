@@ -447,7 +447,7 @@ mod tests {
             .expect("stream should remain in the collection");
         let decoded = pdf_filter::filter::decode_with_resolver(stored, &collection)
             .expect("filter retry should succeed after dependency insertion");
-        assert_eq!(decoded.as_slice(), &[0x2A]);
+        assert_eq!(decoded.as_ref(), &[0x2A]);
     }
 
     #[test]

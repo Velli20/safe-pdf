@@ -324,7 +324,7 @@ mod tests {
                 Some(PdfOperatorVariant::InlineImage(image)),
                 PdfOperatorVariant::InlineImage(cloned_image),
             ) => {
-                assert_eq!(image.shared_data().as_slice(), b"x\n");
+                assert_eq!(image.shared_data().as_ref(), b"x\n");
                 assert!(std::rc::Rc::ptr_eq(image, cloned_image));
             }
             other => panic!("expected inline image, got {other:?}"),

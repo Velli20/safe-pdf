@@ -28,6 +28,23 @@ enum RecordingCommand {
         shader: Option<Shader>,
         blend_mode: Option<BlendMode>,
     },
+    FillTransformedPath {
+        path: Arc<PdfPath>,
+        transform: Transform,
+        fill_type: PathFillType,
+        color: Color,
+        shader: Option<Shader>,
+        blend_mode: Option<BlendMode>,
+    },
+    StrokeTransformedPath {
+        path: Arc<PdfPath>,
+        transform: Transform,
+        color: Color,
+        line_width: f32,
+        stroke_style: StrokeStyle,
+        shader: Option<Shader>,
+        blend_mode: Option<BlendMode>,
+    },
     SetClipRegion {
         path: PdfPath,
         mode: PathFillType,
@@ -129,6 +146,38 @@ impl RecordingCanvas {
                         blend_mode.clone(),
                     )?;
                 }
+                FillTransformedPath {
+                    path,
+                    transform,
+                    fill_type,
+                    color,
+                    shader,
+                    blend_mode,
+                } => backend.fill_transformed_path(
+                    path,
+                    transform,
+                    *fill_type,
+                    *color,
+                    shader,
+                    blend_mode.clone(),
+                )?,
+                StrokeTransformedPath {
+                    path,
+                    transform,
+                    color,
+                    line_width,
+                    stroke_style,
+                    shader,
+                    blend_mode,
+                } => backend.stroke_transformed_path(
+                    path,
+                    transform,
+                    *color,
+                    *line_width,
+                    stroke_style,
+                    shader,
+                    blend_mode.clone(),
+                )?,
                 SetClipRegion { path, mode } => backend.set_clip_region(path, *mode)?,
                 Save => backend.save()?,
                 Restore => backend.restore()?,
@@ -208,6 +257,48 @@ impl CanvasBackend for RecordingCanvas {
     ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::StrokePath {
             path: path.clone(),
+            color,
+            line_width,
+            stroke_style: stroke_style.clone(),
+            shader: shader.clone(),
+            blend_mode,
+        });
+        Ok(())
+    }
+
+    fn fill_transformed_path(
+        &mut self,
+        path: &Arc<PdfPath>,
+        transform: &Transform,
+        fill_type: PathFillType,
+        color: Color,
+        shader: &Option<Shader>,
+        blend_mode: Option<BlendMode>,
+    ) -> Result<(), PdfCanvasError> {
+        self.commands.push(RecordingCommand::FillTransformedPath {
+            path: Arc::clone(path),
+            transform: *transform,
+            fill_type,
+            color,
+            shader: shader.clone(),
+            blend_mode,
+        });
+        Ok(())
+    }
+
+    fn stroke_transformed_path(
+        &mut self,
+        path: &Arc<PdfPath>,
+        transform: &Transform,
+        color: Color,
+        line_width: f32,
+        stroke_style: &StrokeStyle,
+        shader: &Option<Shader>,
+        blend_mode: Option<BlendMode>,
+    ) -> Result<(), PdfCanvasError> {
+        self.commands.push(RecordingCommand::StrokeTransformedPath {
+            path: Arc::clone(path),
+            transform: *transform,
             color,
             line_width,
             stroke_style: stroke_style.clone(),
@@ -317,9 +408,9 @@ mod tests {
 
     #[test]
     fn recorded_image_shares_pixel_data() {
-        let data = Arc::new(vec![1, 2, 3, 4]);
+        let data = bytes::Bytes::from_static(&[1, 2, 3, 4]);
         let image = BackendImage {
-            data: Arc::clone(&data),
+            data: data.clone(),
             width: 1,
             height: 1,
             pixel_format: PixelFormat::RGBA8888,
@@ -334,7 +425,7 @@ mod tests {
             matches!(
                 command,
                 RecordingCommand::DrawImage { image, .. }
-                    if Arc::ptr_eq(&image.data, &data)
+                    if image.data.as_ptr() == data.as_ptr()
             )
         }));
     }
@@ -386,5 +477,31 @@ mod tests {
                 )
             }));
         }
+    }
+
+    #[test]
+    fn transformed_path_recording_shares_source_geometry() {
+        let mut source = PdfPath::default();
+        source.move_to(1.0, 2.0);
+        source.line_to(3.0, 4.0);
+        let source = Arc::new(source);
+        let mut canvas = RecordingCanvas::new(10.0, 10.0);
+
+        canvas
+            .fill_transformed_path(
+                &source,
+                &Transform::from_translate(5.0, 6.0),
+                PathFillType::Winding,
+                Color::from_rgb(0.0, 0.0, 0.0),
+                &None,
+                None,
+            )
+            .expect("transformed path should be recorded");
+
+        assert!(matches!(
+            canvas.commands.first(),
+            Some(RecordingCommand::FillTransformedPath { path, .. })
+                if Arc::ptr_eq(path, &source)
+        ));
     }
 }

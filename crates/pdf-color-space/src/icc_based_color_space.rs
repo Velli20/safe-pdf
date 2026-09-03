@@ -1,5 +1,4 @@
-use std::sync::Arc;
-
+use bytes::Bytes;
 use pdf_graphics::color::Color;
 use pdf_object::{
     object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
@@ -24,7 +23,7 @@ pub struct ICCBasedColorSpace {
     ///
     /// ICC colour management is not yet implemented. The alternate space (or a
     /// device-equivalent) is used for rendering until ICC support is added.
-    pub profile_data: Arc<Vec<u8>>,
+    pub profile_data: Bytes,
 }
 
 /// Parses an ICCBased color space: `[/ICCBased stream]`
@@ -93,8 +92,7 @@ impl ICCBasedColorSpace {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
+    use bytes::Bytes;
     use pdf_graphics::color::Color;
     use pdf_object::{
         dictionary::Dictionary, object_resolver::PassthroughResolver,
@@ -107,7 +105,7 @@ mod tests {
         ICCBasedColorSpace {
             num_components,
             alternate_space: None,
-            profile_data: Arc::new(Vec::new()),
+            profile_data: Bytes::new(),
         }
     }
 
@@ -131,7 +129,7 @@ mod tests {
             panic!("expected ICCBased color space");
         };
 
-        assert!(Arc::ptr_eq(&icc_based.profile_data, &stream_data));
+        assert_eq!(icc_based.profile_data.as_ptr(), stream_data.as_ptr());
     }
 
     #[test]

@@ -1,34 +1,31 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
     canvas_backend::{CanvasBackend, Shader},
     canvas_state::CanvasState,
     content_stream_render_state::ContentStreamRenderState,
     error::PdfCanvasError,
-    pdf_path_pen::PdfPathPen,
     recording_canvas::RecordingCanvas,
     stroke_style::StrokeStyle,
-    text::{TextGlyph, TextGlyphStart, glyph_bounds, glyph_unicode},
+    text::TextGlyph,
     text_state::TextState,
 };
 use pdf_content_stream::ContentStream;
 use pdf_content_stream_operators::pdf_operator_backend::PathConstructionOps;
 use pdf_content_stream_operators::variants::PdfOperatorVariant;
 use pdf_document::page::PdfPage;
+use pdf_font::pdf_font_handle::PdfFontHandle;
+use pdf_font::{FontError, FontFaceId, GlyphGeometry, GlyphId, PdfFontSpec};
 use pdf_graphics::{
-    BlendMode, MaskMode, PaintMode, PathFillType, TextRenderingMode, color::Color,
-    pdf_path::PathVerb, pdf_path::PdfPath, rect::Rect, transform::Transform,
+    BlendMode, MaskMode, PaintMode, PathFillType, color::Color, pdf_path::PathVerb,
+    pdf_path::PdfPath, rect::Rect, transform::Transform,
 };
 use pdf_resources::{
     pattern::{PaintType, Pattern},
     resources::Resources,
 };
 use pdf_shading::{model::Shading, paint::build_shading_paint};
-use skrifa::{
-    OutlineGlyph,
-    outline::DrawSettings,
-    prelude::{LocationRef, Size},
-};
+use pdf_text_engine::FontSystem;
 
 pub struct PdfCanvas<'a, B: CanvasBackend> {
     /// The current path being constructed or drawn, if any.
@@ -39,6 +36,12 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     pub(crate) mask: Option<(Arc<RecordingCanvas>, MaskMode, Transform)>,
     /// The PDF page associated with this canvas.
     pub(crate) page: &'a PdfPage,
+    /// Shared text engine used to load and lay out font resources.
+    pub(crate) font_system: Arc<FontSystem>,
+    /// Loaded font handles keyed by the stable address of a page resource specification.
+    font_cache: HashMap<*const PdfFontSpec, PdfFontHandle>,
+    /// Scalable outlines reused by repeated glyphs during this page render.
+    glyph_cache: HashMap<(FontFaceId, GlyphId, u32), Arc<PdfPath>>,
     /// The stack of graphics states, supporting save/restore semantics.
     pub(crate) canvas_stack: Vec<CanvasState<'a>>,
     /// State used to bound nested and recursive content-stream rendering.
@@ -63,6 +66,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         backend: &'a mut B,
         page: &'a PdfPage,
         bb: Option<&Rect>,
+        font_system: Arc<FontSystem>,
     ) -> Result<Self, PdfCanvasError> {
         let media_box = &page.media_box;
 
@@ -115,6 +119,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             canvas: backend,
             mask: None,
             page,
+            font_system,
+            font_cache: HashMap::new(),
+            glyph_cache: HashMap::new(),
             canvas_stack,
             content_stream_render_state: ContentStreamRenderState::default(),
             text_glyphs: None,
@@ -227,6 +234,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             canvas: recording_canvas,
             mask: None,
             page: self.page,
+            font_system: Arc::clone(&self.font_system),
+            font_cache: HashMap::new(),
+            glyph_cache: HashMap::new(),
             canvas_stack,
             content_stream_render_state: self.content_stream_render_state.clone(),
             text_glyphs: None,
@@ -245,6 +255,44 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         self.canvas_stack
             .last()
             .ok_or(PdfCanvasError::EmptyGraphicsStateStack)
+    }
+
+    /// Loads a PDF font once for each resource specification used by this canvas.
+    pub(crate) fn load_pdf_font(
+        &mut self,
+        spec: &PdfFontSpec,
+    ) -> Result<PdfFontHandle, PdfCanvasError> {
+        let key = std::ptr::from_ref(spec);
+        if let Some(handle) = self.font_cache.get(&key) {
+            return Ok(handle.clone());
+        }
+        let handle = self.font_system.load_pdf_font(spec.clone())?;
+        self.font_cache.insert(key, handle.clone());
+        Ok(handle)
+    }
+
+    /// Returns a page-scoped cached scalable outline.
+    pub(crate) fn glyph_outline(
+        &mut self,
+        face: &dyn pdf_font::FontFace,
+        glyph: GlyphId,
+        pixels_per_em: f32,
+    ) -> Result<Arc<PdfPath>, PdfCanvasError> {
+        let key = (face.id(), glyph, pixels_per_em.to_bits());
+        if let Some(outline) = self.glyph_cache.get(&key) {
+            return Ok(Arc::clone(outline));
+        }
+        let geometry = match face.glyph_geometry(glyph, pixels_per_em) {
+            Ok(geometry) => geometry,
+            Err(FontError::InvalidProgram { .. }) => None,
+            Err(error) => return Err(error.into()),
+        };
+        let Some(GlyphGeometry::Outline(outline)) = geometry else {
+            return Ok(Arc::new(PdfPath::default()));
+        };
+        let outline = Arc::new(outline);
+        self.glyph_cache.insert(key, Arc::clone(&outline));
+        Ok(outline)
     }
 
     /// Returns a mutable reference to the current graphics state on the stack.
@@ -398,16 +446,15 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         mode: PaintMode,
         fill_type: PathFillType,
     ) -> Result<(), PdfCanvasError> {
-        let state = self.current_state()?;
-
-        let fill_color = state.fill_color;
-        let stroke_color = state.stroke_color;
-        let blend_mode = state.blend_mode.clone();
-        let line_width = state.line_width * state.transform.sx;
+        let paint = &self.current_state()?.paint;
+        let fill_color = paint.fill_color;
+        let stroke_color = paint.stroke_color;
+        let blend_mode = paint.blend_mode.clone();
+        let line_width = paint.line_width * self.current_state()?.transform.sx;
         let stroke_style = StrokeStyle {
-            dash_pattern: state.dash_pattern.clone(),
+            dash_pattern: paint.dash_pattern.clone(),
         }
-        .scaled(state.transform.sx);
+        .scaled(self.current_state()?.transform.sx);
 
         match mode {
             PaintMode::Fill => {
@@ -451,6 +498,67 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         }
     }
 
+    /// Draws shared geometry using a per-instance transform.
+    pub(crate) fn draw_transformed_path(
+        &mut self,
+        path: &Arc<PdfPath>,
+        transform: &Transform,
+        mode: PaintMode,
+        fill_type: PathFillType,
+    ) -> Result<(), PdfCanvasError> {
+        let paint = &self.current_state()?.paint;
+        let fill_color = paint.fill_color;
+        let stroke_color = paint.stroke_color;
+        let blend_mode = paint.blend_mode.clone();
+        let line_width = paint.line_width * self.current_state()?.transform.sx;
+        let stroke_style = StrokeStyle {
+            dash_pattern: paint.dash_pattern.clone(),
+        }
+        .scaled(self.current_state()?.transform.sx);
+
+        match mode {
+            PaintMode::Fill => {
+                let shader = self.compute_shader(false)?;
+                self.canvas.fill_transformed_path(
+                    path, transform, fill_type, fill_color, &shader, blend_mode,
+                )
+            }
+            PaintMode::Stroke => {
+                let shader = self.compute_shader(true)?;
+                self.canvas.stroke_transformed_path(
+                    path,
+                    transform,
+                    stroke_color,
+                    line_width,
+                    &stroke_style,
+                    &shader,
+                    blend_mode,
+                )
+            }
+            PaintMode::FillAndStroke => {
+                let fill_shader = self.compute_shader(false)?;
+                self.canvas.fill_transformed_path(
+                    path,
+                    transform,
+                    fill_type,
+                    fill_color,
+                    &fill_shader,
+                    blend_mode.clone(),
+                )?;
+                let stroke_shader = self.compute_shader(true)?;
+                self.canvas.stroke_transformed_path(
+                    path,
+                    transform,
+                    stroke_color,
+                    line_width,
+                    &stroke_style,
+                    &stroke_shader,
+                    blend_mode,
+                )
+            }
+        }
+    }
+
     /// Replays a path into the current graphics path.
     ///
     /// This is used by callers that need to materialize a [`PdfPath`] through the
@@ -483,7 +591,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     ///
     /// This updates only the fill alpha component in the current graphics state.
     pub fn set_non_stroking_alpha(&mut self, alpha: f32) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.fill_color.a = alpha;
+        self.current_state_mut()?.paint.fill_color.a = alpha;
         Ok(())
     }
 
@@ -491,13 +599,13 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     ///
     /// This updates only the stroke alpha component in the current graphics state.
     pub fn set_stroking_alpha(&mut self, alpha: f32) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.stroke_color.a = alpha;
+        self.current_state_mut()?.paint.stroke_color.a = alpha;
         Ok(())
     }
 
     /// Sets the blend mode for subsequent paint operations.
     pub fn set_blend_mode(&mut self, blend_mode: Option<BlendMode>) -> Result<(), PdfCanvasError> {
-        self.current_state_mut()?.blend_mode = blend_mode;
+        self.current_state_mut()?.paint.blend_mode = blend_mode;
         Ok(())
     }
 
@@ -763,12 +871,12 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             if is_stroking {
                 state.stroke_color_space = Some(cs);
                 if let Some(color) = initial_color {
-                    state.stroke_color = color;
+                    state.paint.stroke_color = color;
                 }
             } else {
                 state.fill_color_space = Some(cs);
                 if let Some(color) = initial_color {
-                    state.fill_color = color;
+                    state.paint.fill_color = color;
                 }
             }
             return Ok(());
@@ -787,99 +895,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         }
         Ok(())
     }
-
-    /// Draws a font outline glyph onto the canvas using the current text rendering mode.
-    ///
-    /// # Parameters
-    ///
-    /// - `outline_glyph`: The outline representation of the glyph to render.
-    /// - `transform`: The transformation matrix to apply to the glyph path
-    ///   (maps glyph space to device space).
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` if the glyph is rendered successfully, or an error if drawing fails.
-    pub(crate) fn draw_outline_glyph(
-        &mut self,
-        outline_glyph: &OutlineGlyph<'_>,
-        transform: &Transform,
-    ) -> Result<(), PdfCanvasError> {
-        let mut pen = PdfPathPen::default();
-        let settings = DrawSettings::from((Size::unscaled(), LocationRef::default()));
-        if outline_glyph.draw(settings, &mut pen).is_err() {
-            // Missing or malformed glyphs are not treated as errors: skip drawing this glyph.
-            return Ok(());
-        }
-
-        pen.path.transform(transform);
-        self.draw_glyph_path(&pen.path)
-    }
-
-    pub(crate) fn draw_glyph_path(&mut self, path: &PdfPath) -> Result<(), PdfCanvasError> {
-        let rendering_mode = self.current_state()?.rendering_mode;
-        if rendering_mode == TextRenderingMode::Invisible {
-            return Ok(());
-        }
-
-        match rendering_mode {
-            TextRenderingMode::Fill => self.draw_path(path, PaintMode::Fill, PathFillType::Winding),
-            TextRenderingMode::Stroke => {
-                self.draw_path(path, PaintMode::Stroke, PathFillType::Winding)
-            }
-            TextRenderingMode::FillAndStroke => {
-                self.draw_path(path, PaintMode::FillAndStroke, PathFillType::Winding)
-            }
-            TextRenderingMode::Invisible => Ok(()),
-            TextRenderingMode::FillClip => {
-                self.draw_path(path, PaintMode::Fill, PathFillType::Winding)?;
-                self.add_to_text_clip(path)
-            }
-            TextRenderingMode::StrokeClip => {
-                self.draw_path(path, PaintMode::Stroke, PathFillType::Winding)?;
-                self.add_to_text_clip(path)
-            }
-            TextRenderingMode::FillStrokeClip => {
-                self.draw_path(path, PaintMode::FillAndStroke, PathFillType::Winding)?;
-                self.add_to_text_clip(path)
-            }
-            TextRenderingMode::Clip => self.add_to_text_clip(path),
-        }
-    }
-
-    pub(crate) fn text_glyph_start(&self) -> Result<Option<TextGlyphStart<'a>>, PdfCanvasError> {
-        if self.text_glyphs.is_none() {
-            return Ok(None);
-        }
-        let state = self.current_state()?;
-        let mut transform = state.text_state.matrix;
-        transform.concat(&state.transform);
-        Ok(Some(TextGlyphStart {
-            transform,
-            font_size: state.text_state.font_size,
-            font: state.text_state.font,
-        }))
-    }
-
-    pub(crate) fn record_text_glyph(
-        &mut self,
-        char_code: u16,
-        start: Option<TextGlyphStart<'a>>,
-    ) -> Result<(), PdfCanvasError> {
-        let Some(start) = start else {
-            return Ok(());
-        };
-        let state = self.current_state()?;
-        let mut after = state.text_state.matrix;
-        after.concat(&state.transform);
-        let bounds = glyph_bounds(&start.transform, start.font_size, &after);
-        if bounds.is_valid() {
-            let unicode = glyph_unicode(start.font, char_code);
-            if let Some(glyphs) = &mut self.text_glyphs {
-                glyphs.push(TextGlyph { unicode, bounds });
-            }
-        }
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -887,6 +902,7 @@ mod tests {
     use pdf_content_stream_operators::pdf_operator_backend::GraphicsStateOps;
     use pdf_document::page::PdfPage;
     use pdf_graphics::rect::Rect;
+    use pdf_text_engine::bundled_font_system;
 
     use super::PdfCanvas;
     use crate::recording_canvas::RecordingCanvas;
@@ -905,7 +921,8 @@ mod tests {
     fn set_dash_pattern_updates_current_state() {
         let page = page();
         let mut backend = RecordingCanvas::new(100.0, 100.0);
-        let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None, bundled_font_system())
+            .expect("canvas should build");
 
         canvas
             .set_dash_pattern(&[4.0, 2.0], 1.0)
@@ -914,6 +931,7 @@ mod tests {
         let dash_pattern = canvas
             .current_state()
             .expect("state should exist")
+            .paint
             .dash_pattern
             .as_ref()
             .expect("dash pattern should be stored");
@@ -925,7 +943,8 @@ mod tests {
     fn empty_dash_pattern_clears_current_state() {
         let page = page();
         let mut backend = RecordingCanvas::new(100.0, 100.0);
-        let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None, bundled_font_system())
+            .expect("canvas should build");
 
         canvas
             .set_dash_pattern(&[4.0, 2.0], 1.0)
@@ -938,6 +957,7 @@ mod tests {
             canvas
                 .current_state()
                 .expect("state should exist")
+                .paint
                 .dash_pattern
                 .is_none()
         );
@@ -947,7 +967,8 @@ mod tests {
     fn invalid_dash_pattern_does_not_mutate_current_state() {
         let page = page();
         let mut backend = RecordingCanvas::new(100.0, 100.0);
-        let mut canvas = PdfCanvas::new(&mut backend, &page, None).expect("canvas should build");
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None, bundled_font_system())
+            .expect("canvas should build");
 
         canvas
             .set_dash_pattern(&[4.0, 2.0], 1.0)
@@ -958,6 +979,7 @@ mod tests {
         let dash_pattern = canvas
             .current_state()
             .expect("state should exist")
+            .paint
             .dash_pattern
             .as_ref()
             .expect("previous dash pattern should remain");

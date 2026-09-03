@@ -3,7 +3,7 @@ use crate::{
     resources::Resources,
 };
 use pdf_color_space::color_space::ColorSpace;
-use pdf_font::font::Font;
+use pdf_font::PdfFontSpec;
 use pdf_graphics::Image;
 use pdf_shading::model::Shading;
 use std::{cell::OnceCell, rc::Rc};
@@ -40,7 +40,7 @@ impl ResourceReference {
 pub enum Resource {
     /// A font resource used for text rendering.
     Font {
-        font: Rc<Font>,
+        font: Rc<PdfFontSpec>,
         /// Optional nested resources for this font, such as ExtGState or XObjects used in Type 3 fonts.
         resources: Option<Rc<Resources>>,
     },
@@ -86,7 +86,7 @@ impl Resource {
     }
 
     /// Returns this resource as a font and any resources nested beneath it.
-    pub fn as_font(&self) -> Option<(&Font, Option<&Resources>)> {
+    pub fn as_font(&self) -> Option<(&PdfFontSpec, Option<&Resources>)> {
         let Self::Font { font, resources } = self.resolved()? else {
             return None;
         };

@@ -72,6 +72,52 @@ pub trait CanvasBackend {
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError>;
 
+    /// Fills a shared path after applying `transform` to its geometry.
+    ///
+    /// Backends that can retain shared geometry or apply native transforms should override this
+    /// method. The default implementation preserves compatibility by materializing a transformed
+    /// device-space path and forwarding to [`Self::fill_path`].
+    fn fill_transformed_path(
+        &mut self,
+        path: &Arc<PdfPath>,
+        transform: &Transform,
+        fill_type: PathFillType,
+        color: Color,
+        shader: &Option<Shader>,
+        blend_mode: Option<BlendMode>,
+    ) -> Result<(), PdfCanvasError> {
+        let mut transformed = path.as_ref().clone();
+        transformed.transform(transform);
+        self.fill_path(&transformed, fill_type, color, shader, blend_mode)
+    }
+
+    /// Strokes a shared path after applying `transform` to its geometry.
+    ///
+    /// The default implementation materializes a transformed device-space path and forwards to
+    /// [`Self::stroke_path`].
+    #[allow(clippy::too_many_arguments)]
+    fn stroke_transformed_path(
+        &mut self,
+        path: &Arc<PdfPath>,
+        transform: &Transform,
+        color: Color,
+        line_width: f32,
+        stroke_style: &StrokeStyle,
+        shader: &Option<Shader>,
+        blend_mode: Option<BlendMode>,
+    ) -> Result<(), PdfCanvasError> {
+        let mut transformed = path.as_ref().clone();
+        transformed.transform(transform);
+        self.stroke_path(
+            &transformed,
+            color,
+            line_width,
+            stroke_style,
+            shader,
+            blend_mode,
+        )
+    }
+
     /// Sets the clipping region by intersecting the current clip path with the given path.
     ///
     /// All subsequent drawing operations will be constrained to this new region.

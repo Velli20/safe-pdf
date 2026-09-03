@@ -1,150 +1,66 @@
+//! Runtime whole-font substitution and missing-glyph fallback contracts.
+
 use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
-use crate::{
-    cid_system_info::CidOrdering, flags::FontFlags, standard14::Standard14Font,
-    true_type_font::TrueTypeFont,
-};
+use crate::error::FontError;
+use crate::font::{FontFaceId, FontMetadata, FontSource};
+use crate::pdf_font_spec::PdfFontSpec;
 
-const NOTO_SANS_CJK_JP_REGULAR: &[u8] = include_bytes!("../assets/NotoSansCJKjp-Regular.otf");
+/// Request for a complete substitute before PDF text decoding begins.
+pub struct WholeFontFallbackRequest<'a> {
+    /// Normalized PDF resource whose primary program is unusable.
+    pub pdf_font: &'a PdfFontSpec,
+    /// Metadata used for family and style matching.
+    pub requested: &'a FontMetadata,
+    /// Faces already attempted during this resolution operation.
+    pub excluded_faces: &'a [FontFaceId],
+}
 
-/// Build a synthetic TrueType font from fallback font data.
-///
-/// # Paramaters
-///
-/// - `dictionary`: The PDF font dictionary used to select a bundled font program.
-/// - `objects`: The resolver used to dereference indirect PDF objects.
-///
-/// # Returns
-///
-/// A [`TrueTypeFont`] backed only by bundled fallback font data. PDF widths,
-/// encoding, ToUnicode data, and descriptor flags are intentionally discarded.
-pub(crate) fn fallback_true_type_from_dictionary(
+/// Request for candidate faces covering one missing Unicode scalar.
+pub struct GlyphFallbackRequest<'a> {
+    /// Missing Unicode scalar.
+    pub character: char,
+    /// Metadata of the primary or requested face.
+    pub requested: &'a FontMetadata,
+    /// Source PDF font when fallback occurs in a PDF run.
+    pub pdf_font: Option<&'a PdfFontSpec>,
+    /// Faces already attempted for this glyph.
+    pub excluded_faces: &'a [FontFaceId],
+}
+
+/// Ordered source proposed by a fallback provider.
+#[derive(Debug, Clone)]
+pub struct FallbackCandidate {
+    /// Font program source to attempt.
+    pub source: FontSource,
+    /// Matching metadata used by fallback selection and diagnostics.
+    pub metadata: FontMetadata,
+}
+
+/// Application-supplied policy for runtime font substitution.
+pub trait FallbackProvider: Send + Sync {
+    /// Returns ordered candidates that can replace an unusable primary font.
+    fn whole_font_candidates(
+        &self,
+        request: &WholeFontFallbackRequest<'_>,
+    ) -> Result<Vec<FallbackCandidate>, FontError>;
+
+    /// Returns ordered candidates expected to cover one missing scalar.
+    fn glyph_candidates(
+        &self,
+        request: &GlyphFallbackRequest<'_>,
+    ) -> Result<Vec<FallbackCandidate>, FontError>;
+}
+
+pub(crate) fn fallback_standard14_font(
     dictionary: &Dictionary,
+    descriptor: Option<&Dictionary>,
     objects: &dyn ObjectResolver,
-) -> TrueTypeFont {
-    let metadata = fallback_metadata_dictionary(dictionary, objects);
-    let flags = FontFlags::from_dictionary(metadata, objects).unwrap_or_default();
-    let standard14 = Standard14Font::from_dictionary(metadata, objects, flags);
-    let font_file = if is_cjk_cid_font(metadata, objects) {
-        NOTO_SANS_CJK_JP_REGULAR
-    } else {
-        standard14.fallback_font_bytes()
-    };
-
-    TrueTypeFont::from_bytes(font_file, Some(standard14))
-}
-
-/// Select metadata from a Type0 descendant when one is readable.
-fn fallback_metadata_dictionary<'a>(
-    dictionary: &'a Dictionary,
-    objects: &'a dyn ObjectResolver,
-) -> &'a Dictionary {
-    dictionary
-        .get(b"DescendantFonts")
-        .and_then(|value| value.try_array(objects).ok())
-        .and_then(|descendants| descendants.first())
-        .and_then(|descendant| descendant.try_dictionary(objects).ok())
-        .unwrap_or(dictionary)
-}
-
-/// Detect whether a CID font dictionary uses a known CJK CID ordering.
-///
-/// # Paramaters
-///
-/// - `dictionary`: The PDF font dictionary that may contain `/CIDSystemInfo`.
-/// - `objects`: The resolver used to dereference indirect PDF objects.
-///
-/// # Returns
-///
-/// `true` when the dictionary declares a supported CJK CID ordering; otherwise
-/// `false`.
-fn is_cjk_cid_font(dictionary: &Dictionary, objects: &dyn ObjectResolver) -> bool {
-    CidOrdering::from_dictionary(dictionary, objects)
-        .ok()
-        .flatten()
-        .is_some()
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use std::collections::BTreeMap;
-
-    use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
-
-    use super::*;
-
-    #[test]
-    fn fallback_discards_pdf_font_metadata() {
-        let descriptor = Dictionary::new(BTreeMap::from([(
-            Vec::from(b"Flags"),
-            ObjectVariant::Integer(i64::from(FontFlags::SYMBOLIC.bits())),
-        )]));
-        let dictionary = Dictionary::new(BTreeMap::from([
-            (
-                Vec::from(b"BaseFont"),
-                ObjectVariant::Name(b"Helvetica-Bold".to_vec()),
-            ),
-            (
-                Vec::from(b"FontDescriptor"),
-                ObjectVariant::Dictionary(descriptor),
-            ),
-            (Vec::from(b"FirstChar"), ObjectVariant::Integer(65)),
-            (Vec::from(b"LastChar"), ObjectVariant::Integer(65)),
-            (
-                Vec::from(b"Widths"),
-                ObjectVariant::Array(vec![ObjectVariant::Integer(625)]),
-            ),
-            (
-                Vec::from(b"Encoding"),
-                ObjectVariant::Name(b"WinAnsiEncoding".to_vec()),
-            ),
-            (Vec::from(b"ToUnicode"), ObjectVariant::Integer(1)),
-        ]));
-
-        let font = fallback_true_type_from_dictionary(&dictionary, &PassthroughResolver);
-
-        assert_eq!(font.standard14, Some(Standard14Font::HelveticaBold));
-        assert!(font.flags.is_empty());
-        assert!(font.widths.is_none());
-        assert!(font.encoding.is_none());
-        assert!(font.to_unicode.is_none());
-    }
-
-    #[test]
-    fn fallback_tolerates_malformed_selection_metadata() {
-        let dictionary = Dictionary::new(BTreeMap::from([
-            (Vec::from(b"FontDescriptor"), ObjectVariant::Integer(1)),
-            (Vec::from(b"CIDSystemInfo"), ObjectVariant::Integer(1)),
-        ]));
-
-        let font = fallback_true_type_from_dictionary(&dictionary, &PassthroughResolver);
-
-        assert!(font.widths.is_none());
-        assert!(font.to_unicode.is_none());
-        assert_eq!(font.standard14, Some(Standard14Font::Helvetica));
-        assert_eq!(
-            font.font_file.as_ref(),
-            Standard14Font::Helvetica.fallback_font_bytes()
-        );
-    }
-
-    #[test]
-    fn fallback_uses_cjk_program_from_type0_descendant() {
-        let descendant = Dictionary::new(BTreeMap::from([(
-            Vec::from(b"CIDSystemInfo"),
-            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
-                Vec::from(b"Ordering"),
-                ObjectVariant::LiteralString(b"Japan1".to_vec()),
-            )]))),
-        )]));
-        let dictionary = Dictionary::new(BTreeMap::from([(
-            Vec::from(b"DescendantFonts"),
-            ObjectVariant::Array(vec![ObjectVariant::Dictionary(descendant)]),
-        )]));
-
-        let fallback = fallback_true_type_from_dictionary(&dictionary, &PassthroughResolver);
-
-        assert_eq!(fallback.font_file.as_ref(), NOTO_SANS_CJK_JP_REGULAR);
-    }
+) -> crate::standard14::Standard14Font {
+    let flags = descriptor
+        .and_then(|value| value.get(b"Flags"))
+        .and_then(|value| value.try_number::<u32>(objects).ok())
+        .map(crate::flags::FontFlags::from_bits_truncate)
+        .unwrap_or_default();
+    crate::standard14::from_dictionary(dictionary, objects, flags)
 }

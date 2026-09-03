@@ -1,60 +1,19 @@
 #![allow(clippy::arithmetic_side_effects, clippy::expect_used)]
 
-use std::{collections::HashMap, hint::black_box, rc::Rc};
+use std::{collections::HashMap, hint::black_box, rc::Rc, sync::Arc};
 
+use bytes::Bytes;
 use criterion::{Criterion, criterion_group, criterion_main};
 use pdf_canvas::{pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas};
 use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_document::page::PdfPage;
-use pdf_font::{
-    encoding::Encoding,
-    font::Font,
-    type1_font::{Type1Font, Type1FontProgramFormat},
-};
+use pdf_font::{FontProgramFormat, FontSource, PdfFontSpec};
 use pdf_object::{
     dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     stream::StreamObject,
 };
 use pdf_resources::{resource::Resource, resources::Resources};
-
-const EEXEC_SEED: u16 = 55665;
-
-fn encrypt(bytes: &[u8]) -> Vec<u8> {
-    let mut state = EEXEC_SEED;
-    bytes
-        .iter()
-        .map(|plain| {
-            let cipher = *plain ^ u8::try_from(state >> 8).expect("shifted seed should fit");
-            state = u16::try_from(
-                (u32::from(cipher) + u32::from(state))
-                    .wrapping_mul(52845)
-                    .wrapping_add(22719)
-                    & 0xffff,
-            )
-            .expect("masked state should fit");
-            cipher
-        })
-        .collect()
-}
-
-fn font_bytes() -> Vec<u8> {
-    let mut bytes = br#"%!FontType1-1.0: Bench 1.0
-10 dict begin
-/FontName /Bench def
-/FontType 1 def
-/FontMatrix [0.001 0 0 0.001 0 0] readonly def
-/FontBBox [0 0 0 0] readonly def
-/Encoding StandardEncoding def
-currentdict end
-currentfile eexec
-"#
-    .to_vec();
-    let mut private = vec![0, 0, 0, 0];
-    private.extend_from_slice(b"/Private 1 dict dup begin\n/lenIV -1 def\n/CharStrings 1 dict dup begin\n/.notdef 1 RD \x0E ND\nend\nend\nmark currentfile closefile\n");
-    bytes.extend(encrypt(&private));
-    bytes.extend_from_slice(b"0000000000000000000000000000000000000000\ncleartomark\n");
-    bytes
-}
+use pdf_text_engine::bundled_font_system;
 
 fn content_stream(text: &[u8]) -> ContentStream {
     let mut data = b"BT /F1 10 Tf (".to_vec();
@@ -70,13 +29,21 @@ fn content_stream(text: &[u8]) -> ContentStream {
 }
 
 fn benchmark(c: &mut Criterion) {
-    let font = Font::Type1(Type1Font {
-        font_file: font_bytes().into(),
-        program_format: Type1FontProgramFormat::ClassicType1,
-        widths: Some(HashMap::from([(65, 500.0)])),
-        encoding: Encoding::default(),
-        to_unicode: None,
+    let font = PdfFontSpec::from(pdf_font::Standard14Font::Helvetica);
+    let PdfFontSpec::Type1(simple) = font else {
+        unreachable!("Helvetica should create a simple Type 1 specification");
+    };
+    let font = PdfFontSpec::TrueType(pdf_font::SimpleFontSpec {
+        program: Some(FontSource::Memory {
+            data: Bytes::from_static(pdf_font::standard14::fallback_font_bytes(
+                pdf_font::Standard14Font::Helvetica,
+            )),
+            format: FontProgramFormat::TrueType,
+            face_index: 0,
+        }),
+        ..simple
     });
+    let font_system = bundled_font_system();
     let resources = Resources {
         fonts: HashMap::from([(
             b"F1".to_vec(),
@@ -87,32 +54,45 @@ fn benchmark(c: &mut Criterion) {
         )]),
         ..Default::default()
     };
-    let text = vec![b'A'; 1_024];
-    let stream = content_stream(&text);
     let page = PdfPage::default();
+    let repeated = vec![b'A'; 1_024];
+    let mixed = (0..1_024)
+        .map(|index| b'A' + u8::try_from(index % 26).expect("alphabet index should fit"))
+        .collect::<Vec<_>>();
 
-    c.bench_function("text/render_1024_glyphs", |bencher| {
-        bencher.iter(|| {
-            let mut recording = RecordingCanvas::new(1000.0, 1000.0);
-            let mut canvas =
-                PdfCanvas::new(&mut recording, &page, None).expect("canvas should initialize");
-            canvas
-                .render_content_stream(&stream, None, None, Some(&resources), None)
-                .expect("text should render");
-        });
-    });
-    c.bench_function("text/render_and_record_1024_glyphs", |bencher| {
-        bencher.iter(|| {
-            let mut recording = RecordingCanvas::new(1000.0, 1000.0);
-            let mut canvas = PdfCanvas::new(&mut recording, &page, None)
-                .expect("canvas should initialize")
-                .with_text_recording();
-            canvas
-                .render_content_stream(&stream, None, None, Some(&resources), None)
-                .expect("text should render");
-            black_box(canvas.take_text_glyphs());
-        });
-    });
+    for (workload, text) in [("repeated", repeated), ("mixed", mixed)] {
+        let stream = content_stream(&text);
+        c.bench_function(
+            &format!("text/render_{workload}_1024_real_glyphs"),
+            |bencher| {
+                bencher.iter(|| {
+                    let mut recording = RecordingCanvas::new(1000.0, 1000.0);
+                    let mut canvas =
+                        PdfCanvas::new(&mut recording, &page, None, Arc::clone(&font_system))
+                            .expect("canvas should initialize");
+                    canvas
+                        .render_content_stream(&stream, None, None, Some(&resources), None)
+                        .expect("text should render");
+                });
+            },
+        );
+        c.bench_function(
+            &format!("text/render_and_record_{workload}_1024_real_glyphs"),
+            |bencher| {
+                bencher.iter(|| {
+                    let mut recording = RecordingCanvas::new(1000.0, 1000.0);
+                    let mut canvas =
+                        PdfCanvas::new(&mut recording, &page, None, Arc::clone(&font_system))
+                            .expect("canvas should initialize")
+                            .with_text_recording();
+                    canvas
+                        .render_content_stream(&stream, None, None, Some(&resources), None)
+                        .expect("text should render");
+                    black_box(canvas.take_text_glyphs());
+                });
+            },
+        );
+    }
 }
 
 criterion_group!(benches, benchmark);

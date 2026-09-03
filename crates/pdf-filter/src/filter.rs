@@ -1,5 +1,6 @@
 use std::fmt;
-use std::sync::Arc;
+
+use bytes::Bytes;
 
 use crate::{error::FilterError, predictor::PredictorParams};
 
@@ -303,9 +304,9 @@ impl Filter {
 /// Returns [`FilterError`] if any filter in the chain fails or is unsupported.
 pub fn decode_data_with_resolver(
     dictionary: &Dictionary,
-    stream_data: Arc<Vec<u8>>,
+    stream_data: Bytes,
     objects: &dyn ObjectResolver,
-) -> Result<Arc<Vec<u8>>, FilterError> {
+) -> Result<Bytes, FilterError> {
     let mut data = stream_data;
     let filters = Filters::from_dictionary(dictionary, objects)?;
 
@@ -337,7 +338,7 @@ pub fn decode_data_with_resolver(
 
         match filter {
             Filter::FlateDecode => {
-                let decoded = Filter::decode_flate(data.as_slice())?;
+                let decoded = Filter::decode_flate(data.as_ref())?;
                 let predictor = match param_dict {
                     Some(dictionary) => PredictorParams::from_dictionary(dictionary, objects)?,
                     None => PredictorParams::default(),
@@ -347,7 +348,7 @@ pub fn decode_data_with_resolver(
                 } else {
                     crate::predictor::apply_predictor(&decoded, &predictor)?
                 };
-                data = Arc::new(decoded);
+                data = decoded.into();
             }
             Filter::LZWDecode => {
                 let (early_change, predictor) = match param_dict {
@@ -360,33 +361,33 @@ pub fn decode_data_with_resolver(
                     ),
                     None => (true, PredictorParams::default()),
                 };
-                let decoded = crate::lzw::decode(data.as_slice(), early_change)?;
+                let decoded = crate::lzw::decode(data.as_ref(), early_change)?;
                 let decoded = if predictor.is_none() {
                     decoded
                 } else {
                     crate::predictor::apply_predictor(&decoded, &predictor)?
                 };
-                data = Arc::new(decoded);
+                data = decoded.into();
             }
             Filter::JPXDecode => {
-                let decoded = Filter::decode_jpeg2000(data.as_slice())?;
-                data = Arc::new(decoded);
+                let decoded = Filter::decode_jpeg2000(data.as_ref())?;
+                data = decoded.into();
             }
             Filter::DCTDecode => {
-                let decoded = Filter::decode_jpeg_baseline(data.as_slice())?;
-                data = Arc::new(decoded);
+                let decoded = Filter::decode_jpeg_baseline(data.as_ref())?;
+                data = decoded.into();
             }
             Filter::ASCII85Decode => {
-                let decoded = crate::ascii85::decode_ascii85(data.as_slice())?;
-                data = Arc::new(decoded);
+                let decoded = crate::ascii85::decode_ascii85(data.as_ref())?;
+                data = decoded.into();
             }
             Filter::ASCIIHexDecode => {
-                let decoded = crate::asciihex::decode_ascii_hex(data.as_slice())?;
-                data = Arc::new(decoded);
+                let decoded = crate::asciihex::decode_ascii_hex(data.as_ref())?;
+                data = decoded.into();
             }
             Filter::RunLengthDecode => {
-                let decoded = crate::runlength::decode_run_length(data.as_slice())?;
-                data = Arc::new(decoded);
+                let decoded = crate::runlength::decode_run_length(data.as_ref())?;
+                data = decoded.into();
             }
             Filter::JBIG2Decode => {
                 let (width, height) = resolve_jbig2_dimensions(dictionary, objects)?;
@@ -394,17 +395,16 @@ pub fn decode_data_with_resolver(
                     Some(dictionary) => resolve_jbig2_globals(dictionary, objects)?,
                     None => None,
                 };
-                let decoded =
-                    pdf_jbig2::decode(data.as_slice(), width, height, globals.as_deref())?;
-                data = Arc::new(decoded);
+                let decoded = pdf_jbig2::decode(data.as_ref(), width, height, globals.as_deref())?;
+                data = decoded.into();
             }
             Filter::CCITTFaxDecode => {
                 let ccitt_params = match param_dict {
                     Some(dictionary) => CCITTFaxParams::from_dictionary(dictionary, objects)?,
                     None => CCITTFaxParams::default(),
                 };
-                let decoded = pdf_ccitt::decode(data.as_slice(), &ccitt_params)?;
-                data = Arc::new(decoded);
+                let decoded = pdf_ccitt::decode(data.as_ref(), &ccitt_params)?;
+                data = decoded.into();
             }
             Filter::Unsupported(name) => {
                 return Err(FilterError::UnsupportedFilter(
@@ -427,7 +427,7 @@ pub fn decode_data_with_resolver(
 pub fn decode_with_resolver(
     stream: &StreamObject,
     objects: &dyn ObjectResolver,
-) -> Result<Arc<Vec<u8>>, FilterError> {
+) -> Result<Bytes, FilterError> {
     decode_data_with_resolver(&stream.dictionary, stream.shared_data(), objects)
 }
 
@@ -435,7 +435,7 @@ pub fn decode_with_resolver(
 ///
 /// This convenience wrapper uses a passthrough resolver, so it only supports
 /// direct `/Filter` and `/DecodeParms` values.
-pub fn decode(stream: &StreamObject) -> Result<Arc<Vec<u8>>, FilterError> {
+pub fn decode(stream: &StreamObject) -> Result<Bytes, FilterError> {
     let objects = PassthroughResolver;
     decode_with_resolver(stream, &objects)
 }
@@ -515,14 +515,13 @@ mod tests {
     #[test]
     fn decode_data_without_filters_preserves_shared_data() {
         let dictionary = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
-        let data = Arc::new(b"stream data".to_vec());
+        let data = Bytes::from_static(b"stream data");
 
-        let decoded =
-            decode_data_with_resolver(&dictionary, Arc::clone(&data), &PassthroughResolver)
-                .expect("unfiltered data should decode");
+        let decoded = decode_data_with_resolver(&dictionary, data.clone(), &PassthroughResolver)
+            .expect("unfiltered data should decode");
 
-        assert!(Arc::ptr_eq(&decoded, &data));
-        assert_eq!(decoded.as_slice(), b"stream data");
+        assert_eq!(decoded.as_ptr(), data.as_ptr());
+        assert_eq!(decoded.as_ref(), b"stream data");
     }
 
     #[test]
@@ -532,14 +531,13 @@ mod tests {
             ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
         )]));
 
-        let encoded = Arc::new(b"48 65 6c 6c 6f>".to_vec());
-        let decoded =
-            decode_data_with_resolver(&dictionary, Arc::clone(&encoded), &PassthroughResolver)
-                .expect("filtered data should decode");
+        let encoded = Bytes::from_static(b"48 65 6c 6c 6f>");
+        let decoded = decode_data_with_resolver(&dictionary, encoded.clone(), &PassthroughResolver)
+            .expect("filtered data should decode");
 
-        assert_eq!(Arc::strong_count(&decoded), 1);
-        assert!(!Arc::ptr_eq(&decoded, &encoded));
-        assert_eq!(decoded.as_slice(), b"Hello");
+        assert!(decoded.is_unique());
+        assert_ne!(decoded.as_ptr(), encoded.as_ptr());
+        assert_eq!(decoded.as_ref(), b"Hello");
     }
 
     #[test]
@@ -554,8 +552,8 @@ mod tests {
         let decoded = decode_with_resolver(&stream, &PassthroughResolver)
             .expect("unfiltered data should decode");
 
-        assert!(Arc::ptr_eq(&decoded, &stream.data));
-        assert_eq!(decoded.as_slice(), b"shared stream data");
+        assert_eq!(decoded.as_ptr(), stream.data.as_ptr());
+        assert_eq!(decoded.as_ref(), b"shared stream data");
     }
 
     #[test]
@@ -752,7 +750,7 @@ mod tests {
 
         let decoded = decode_data_with_resolver(
             &dictionary,
-            Arc::new(encoded.into_bytes()),
+            encoded.into_bytes().into(),
             &PassthroughResolver,
         )
         .expect("decode failed");
@@ -789,7 +787,7 @@ mod tests {
                 )),
             )]),
         };
-        let decoded = decode_data_with_resolver(&dictionary, Arc::new(compressed), &resolver)
+        let decoded = decode_data_with_resolver(&dictionary, compressed.into(), &resolver)
             .expect("decode failed");
 
         assert_eq!(decoded.as_ref(), b"hello");

@@ -1,7 +1,8 @@
 #![allow(clippy::arithmetic_side_effects)]
 
-use std::{hint::black_box, sync::Arc};
+use std::hint::black_box;
 
+use bytes::Bytes;
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use pdf_graphics::{Image, PixelFormat};
 
@@ -11,12 +12,12 @@ const NUM_PIXELS: usize = WIDTH * HEIGHT;
 const NUM_PIXELS_U64: u64 = 262_144;
 
 fn benchmark_image_conversion(criterion: &mut Criterion) {
-    let gray = Arc::new(vec![0x80; NUM_PIXELS]);
-    let rgb = Arc::new([0x20, 0x80, 0xE0].repeat(NUM_PIXELS));
-    let cmyk = Arc::new([0x10, 0x40, 0x80, 0x20].repeat(NUM_PIXELS));
-    let two_components = Arc::new([0x40, 0xC0].repeat(NUM_PIXELS));
+    let gray = Bytes::from(vec![0x80; NUM_PIXELS]);
+    let rgb = Bytes::from([0x20, 0x80, 0xE0].repeat(NUM_PIXELS));
+    let cmyk = Bytes::from([0x10, 0x40, 0x80, 0x20].repeat(NUM_PIXELS));
+    let two_components = Bytes::from([0x40, 0xC0].repeat(NUM_PIXELS));
     let soft_mask = Image {
-        data: Arc::new(vec![0xA0; NUM_PIXELS]),
+        data: Bytes::from(vec![0xA0; NUM_PIXELS]),
         width: WIDTH,
         height: HEIGHT,
         pixel_format: PixelFormat::Gray8,
@@ -28,7 +29,7 @@ fn benchmark_image_conversion(criterion: &mut Criterion) {
     group.bench_function("gray_with_soft_mask", |bencher| {
         bencher.iter(|| {
             black_box(Image::from_decoded_samples(
-                Arc::clone(&gray),
+                gray.clone(),
                 WIDTH,
                 HEIGHT,
                 1,
@@ -39,7 +40,7 @@ fn benchmark_image_conversion(criterion: &mut Criterion) {
     group.bench_function("rgb", |bencher| {
         bencher.iter(|| {
             black_box(Image::from_decoded_samples(
-                Arc::clone(&rgb),
+                rgb.clone(),
                 WIDTH,
                 HEIGHT,
                 3,
@@ -50,7 +51,7 @@ fn benchmark_image_conversion(criterion: &mut Criterion) {
     group.bench_function("cmyk", |bencher| {
         bencher.iter(|| {
             black_box(Image::from_decoded_samples(
-                Arc::clone(&cmyk),
+                cmyk.clone(),
                 WIDTH,
                 HEIGHT,
                 4,
@@ -61,7 +62,7 @@ fn benchmark_image_conversion(criterion: &mut Criterion) {
     group.bench_function("two_component_fallback", |bencher| {
         bencher.iter(|| {
             black_box(Image::from_decoded_samples(
-                Arc::clone(&two_components),
+                two_components.clone(),
                 WIDTH,
                 HEIGHT,
                 2,

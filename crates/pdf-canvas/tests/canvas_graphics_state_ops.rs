@@ -16,6 +16,7 @@ use pdf_resources::{
     resources::Resources,
     soft_mask::SoftMask,
 };
+use pdf_text_engine::bundled_font_system;
 
 fn render(
     stream: &ContentStream,
@@ -24,7 +25,7 @@ fn render(
     let page = PdfPage::default();
     let mut recording = RecordingCanvas::new(100.0, 100.0);
     {
-        let mut canvas = PdfCanvas::new(&mut recording, &page, None)?;
+        let mut canvas = PdfCanvas::new(&mut recording, &page, None, bundled_font_system())?;
         canvas.render_content_stream(stream, None, None, Some(resources), None)?;
     }
     Ok(recording)

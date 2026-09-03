@@ -22,8 +22,8 @@ impl<B: CanvasBackend> ShadingOps for PdfCanvas<'_, B> {
             PdfPath::from(&Rect::new(self.canvas.width(), self.canvas.height()))
         };
 
-        let fill_color = state.fill_color;
-        let blend_mode = state.blend_mode.clone();
+        let fill_color = state.paint.fill_color;
+        let blend_mode = state.paint.blend_mode.clone();
         let mat = state.transform;
         let shader = Some(self.build_shading_shader(shading, &Some(mat))?);
 

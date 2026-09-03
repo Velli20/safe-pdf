@@ -13,14 +13,12 @@ pub enum PdfCanvasError {
     CurrentFontRequired,
     #[error("Page resources are missing")]
     PageResourcesMissing,
-    #[error("Invalid font data: unrecognized Type 1 font data")]
-    UnrecognizedType1Font,
-    #[error("Invalid font data: failed to read the CFF table from the Type 1 font")]
-    InvalidType1CffTable,
-    #[error("Invalid font data: failed to read the Type 1 font CFF charset")]
-    InvalidType1CffCharset,
     #[error("Invalid font data: {0}")]
     InvalidFont(String),
+    #[error(transparent)]
+    Font(#[from] pdf_font::FontError),
+    #[error(transparent)]
+    Text(#[from] pdf_text_engine::TextError),
     #[error("Font resource '{0}' was not found")]
     FontNotFound(String),
     #[error("Color space resource '{0}' was not found")]
@@ -29,8 +27,6 @@ pub enum PdfCanvasError {
     PatternNotFound(String),
     #[error("Graphics state stack is empty while accessing the current state")]
     EmptyGraphicsStateStack,
-    #[error("Failed to parse TrueType font data: {0}")]
-    TrueTypeFontParse(String),
     #[error("External object (XObject) '{0}' was not found in page resources")]
     XObjectNotFound(String),
     #[error("Invalid image data: {0}")]

@@ -1,6 +1,7 @@
 pub mod bezier;
 pub mod blend_mode;
 mod bounds_accumulator;
+pub mod canvas_paint;
 pub mod color;
 pub mod dash_pattern;
 mod image;
@@ -12,6 +13,7 @@ pub mod transform;
 
 pub use blend_mode::BlendMode;
 pub use bounds_accumulator::BoundsAccumulator;
+pub use canvas_paint::CanvasPaint;
 pub use dash_pattern::DashPattern;
 pub use image::Image;
 pub use mask_mode::MaskMode;
@@ -61,16 +63,25 @@ pub enum PathFillType {
     EvenOdd,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, FromPrimitive)]
+// PDF-compatible mode used to paint and optionally clip glyph geometry.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, FromPrimitive)]
 pub enum TextRenderingMode {
+    /// Fill glyph interiors.
     #[default]
     Fill,
+    /// Stroke glyph outlines.
     Stroke,
+    /// Fill and stroke glyph outlines.
     FillAndStroke,
+    /// Advance text without painting it.
     Invisible,
-    FillClip,
-    StrokeClip,
-    FillStrokeClip,
+    /// Fill glyphs and add their outlines to the text clip.
+    FillAndClip,
+    /// Stroke glyphs and add their outlines to the text clip.
+    StrokeAndClip,
+    /// Fill, stroke, and add glyph outlines to the text clip.
+    FillStrokeAndClip,
+    /// Add glyph outlines to the text clip without painting them.
     Clip,
 }
 
