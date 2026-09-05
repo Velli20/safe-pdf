@@ -1,6 +1,6 @@
 //! Validated text wrapping and geometry for editable free-text annotations.
 
-use pdf_font::font::Font;
+use pdf_font::PdfFontSpec;
 use pdf_graphics::rect::Rect;
 
 use crate::{
@@ -19,7 +19,7 @@ pub(crate) struct FreeTextLayout<'a> {
     /// The validated appearance style.
     style: &'a FreeTextStyle,
     /// The font used to measure and render encoded text.
-    font: Font,
+    font: PdfFontSpec,
     /// The encoded lines produced by the wrapping policy.
     lines: Vec<WrappedLine>,
     /// The number of character cursor positions in the source text.
@@ -66,7 +66,7 @@ impl<'a> FreeTextLayout<'a> {
     }
 
     /// Consumes the layout and returns its rendering font.
-    pub(crate) fn into_font(self) -> Font {
+    pub(crate) fn into_font(self) -> PdfFontSpec {
         self.font
     }
 

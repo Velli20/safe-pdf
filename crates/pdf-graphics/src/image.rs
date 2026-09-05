@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use bytes::Bytes;
 
 use crate::PixelFormat;
 
@@ -6,7 +6,7 @@ use crate::PixelFormat;
 #[derive(Debug, Clone)]
 pub struct Image {
     /// Shared pixel data.
-    pub data: Arc<Vec<u8>>,
+    pub data: Bytes,
     /// The width of the image in pixels.
     pub width: usize,
     /// The height of the image in pixels.
@@ -21,7 +21,7 @@ impl Image {
     /// Single-component images without a soft mask retain their grayscale
     /// buffer. All other images are converted to RGBA pixels.
     pub fn from_decoded_samples(
-        data: Arc<Vec<u8>>,
+        data: Bytes,
         width: usize,
         height: usize,
         num_color_components: usize,
@@ -38,7 +38,7 @@ impl Image {
         }
 
         Self {
-            data: Arc::new(Self::to_rgba(
+            data: Bytes::from(Self::to_rgba(
                 data.as_ref(),
                 width,
                 height,
@@ -201,36 +201,35 @@ impl Image {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use std::sync::Arc;
-
     use super::Image;
     use crate::PixelFormat;
+    use bytes::Bytes;
 
     #[test]
     fn clone_shares_pixel_data() {
-        let data = Arc::new(vec![1, 2, 3, 4]);
+        let data = Bytes::from_static(&[1, 2, 3, 4]);
         let image = Image {
-            data: Arc::clone(&data),
+            data: data.clone(),
             width: 1,
             height: 1,
             pixel_format: PixelFormat::RGBA8888,
         };
 
-        assert!(Arc::ptr_eq(&image.clone().data, &data));
+        assert_eq!(image.clone().data.as_ptr(), data.as_ptr());
     }
 
     #[test]
     fn grayscale_without_soft_mask_reuses_samples() {
-        let data = Arc::new(vec![12, 34]);
-        let image = Image::from_decoded_samples(Arc::clone(&data), 2, 1, 1, None);
+        let data = Bytes::from_static(&[12, 34]);
+        let image = Image::from_decoded_samples(data.clone(), 2, 1, 1, None);
 
-        assert!(Arc::ptr_eq(&image.data, &data));
+        assert_eq!(image.data.as_ptr(), data.as_ptr());
         assert_eq!(image.pixel_format, PixelFormat::Gray8);
     }
 
     #[test]
     fn rgb_samples_are_expanded_to_rgba() {
-        let image = Image::from_decoded_samples(Arc::new(vec![10, 20, 30]), 1, 1, 3, None);
+        let image = Image::from_decoded_samples(vec![10, 20, 30].into(), 1, 1, 3, None);
 
         assert_eq!(image.pixel_format, PixelFormat::RGBA8888);
         assert_eq!(image.data.as_ref(), &[10, 20, 30, 255]);
@@ -238,14 +237,14 @@ mod tests {
 
     #[test]
     fn cmyk_samples_are_converted_to_rgba() {
-        let image = Image::from_decoded_samples(Arc::new(vec![0, 0, 0, 0]), 1, 1, 4, None);
+        let image = Image::from_decoded_samples(vec![0, 0, 0, 0].into(), 1, 1, 4, None);
 
         assert_eq!(image.data.as_ref(), &[255, 255, 255, 255]);
     }
 
     #[test]
     fn uncommon_component_counts_use_available_color_channels() {
-        let image = Image::from_decoded_samples(Arc::new(vec![10, 20]), 1, 1, 2, None);
+        let image = Image::from_decoded_samples(vec![10, 20].into(), 1, 1, 2, None);
 
         assert_eq!(image.data.as_ref(), &[10, 20, 0, 255]);
     }
@@ -253,13 +252,12 @@ mod tests {
     #[test]
     fn soft_mask_supplies_alpha_samples() {
         let soft_mask = Image {
-            data: Arc::new(vec![0x10, 0xE0]),
+            data: vec![0x10, 0xE0].into(),
             width: 2,
             height: 1,
             pixel_format: PixelFormat::Gray8,
         };
-        let image =
-            Image::from_decoded_samples(Arc::new(vec![0x20, 0xC0]), 2, 1, 1, Some(&soft_mask));
+        let image = Image::from_decoded_samples(vec![0x20, 0xC0].into(), 2, 1, 1, Some(&soft_mask));
 
         assert_eq!(
             image.data.as_ref(),
@@ -270,13 +268,12 @@ mod tests {
     #[test]
     fn short_soft_mask_defaults_remaining_pixels_to_opaque() {
         let soft_mask = Image {
-            data: Arc::new(vec![0x10]),
+            data: vec![0x10].into(),
             width: 1,
             height: 1,
             pixel_format: PixelFormat::Gray8,
         };
-        let image =
-            Image::from_decoded_samples(Arc::new(vec![0x20, 0xC0]), 2, 1, 1, Some(&soft_mask));
+        let image = Image::from_decoded_samples(vec![0x20, 0xC0].into(), 2, 1, 1, Some(&soft_mask));
 
         assert_eq!(
             image.data.as_ref(),
@@ -286,7 +283,7 @@ mod tests {
 
     #[test]
     fn zero_components_produce_an_empty_rgba_image() {
-        let image = Image::from_decoded_samples(Arc::new(vec![10, 20]), 1, 1, 0, None);
+        let image = Image::from_decoded_samples(vec![10, 20].into(), 1, 1, 0, None);
 
         assert_eq!(image.pixel_format, PixelFormat::RGBA8888);
         assert!(image.data.is_empty());
@@ -294,15 +291,14 @@ mod tests {
 
     #[test]
     fn incomplete_trailing_components_are_ignored() {
-        let image = Image::from_decoded_samples(Arc::new(vec![10, 20, 30, 40, 50]), 2, 1, 3, None);
+        let image = Image::from_decoded_samples(vec![10, 20, 30, 40, 50].into(), 2, 1, 3, None);
 
         assert_eq!(image.data.as_ref(), &[10, 20, 30, 255]);
     }
 
     #[test]
     fn conversion_stops_at_the_declared_pixel_count() {
-        let image =
-            Image::from_decoded_samples(Arc::new(vec![10, 20, 30, 40, 50, 60]), 1, 1, 3, None);
+        let image = Image::from_decoded_samples(vec![10, 20, 30, 40, 50, 60].into(), 1, 1, 3, None);
 
         assert_eq!(image.data.as_ref(), &[10, 20, 30, 255]);
     }

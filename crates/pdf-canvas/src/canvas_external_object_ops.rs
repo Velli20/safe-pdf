@@ -123,7 +123,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         let transform = generate_image_orientation_matrix(transform);
         let dest_rect = Self::compute_destination_rect(&transform, rotation_degrees);
 
-        let blend_mode = self.current_state()?.blend_mode.clone();
+        let blend_mode = self.current_state()?.paint.blend_mode.clone();
         if inline_image {
             self.canvas
                 .draw_inline_image(image, blend_mode, dest_rect, Some(rotation_degrees))

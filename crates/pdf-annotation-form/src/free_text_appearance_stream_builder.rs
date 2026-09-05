@@ -5,6 +5,7 @@ use std::rc::Rc;
 use pdf_annotation_types::{AppearanceDictionary, AppearanceField};
 use pdf_content_stream::ContentStream;
 use pdf_content_stream_operators::{
+    PdfTextItem,
     color_operators::{SetRGBFill, SetRGBStroke},
     graphics_state_operators::{RestoreGraphicsState, SaveGraphicsState, SetLineWidth},
     path_operators::Rectangle,
@@ -107,7 +108,9 @@ impl<'a> FreeTextAppearanceStreamBuilder<'a> {
                     self.layout.line_x(self.bounds.width(), line_width),
                     baseline,
                 ])),
-                PdfOperatorVariant::ShowText(ShowText::new(line.bytes().to_owned())),
+                PdfOperatorVariant::ShowText(ShowText::new(PdfTextItem::Text(
+                    line.bytes().to_owned(),
+                ))),
             ]);
             baseline -= self.style.line_height;
         }

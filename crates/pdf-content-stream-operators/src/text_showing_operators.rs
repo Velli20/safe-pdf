@@ -1,4 +1,4 @@
-use crate::TextElement;
+use crate::PdfTextItem;
 use crate::operands::Operands;
 use crate::operator_trait::PdfOperator;
 use crate::{
@@ -13,13 +13,13 @@ use pdf_object::{
 /// Shows a text string.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShowText {
-    /// An array of bytes of the text string to be shown. The string is typically encoded
-    /// according to the font's encoding.
-    text: Vec<u8>,
+    /// The text item to be shown. Its bytes are typically encoded according to the font's
+    /// encoding.
+    text: PdfTextItem,
 }
 
 impl ShowText {
-    pub fn new(text: Vec<u8>) -> Self {
+    pub fn new(text: PdfTextItem) -> Self {
         Self { text }
     }
 }
@@ -31,7 +31,9 @@ impl PdfOperator for ShowText {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let text = operands.get_string_bytes()?;
-        Ok(PdfOperatorVariant::ShowText(Self::new(text)))
+        Ok(PdfOperatorVariant::ShowText(Self::new(PdfTextItem::Text(
+            text,
+        ))))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
@@ -43,11 +45,11 @@ impl PdfOperator for ShowText {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MoveNextLineShowText {
     /// The text string to be shown.
-    text: Vec<u8>,
+    text: PdfTextItem,
 }
 
 impl MoveNextLineShowText {
-    pub fn new(text: Vec<u8>) -> Self {
+    pub fn new(text: PdfTextItem) -> Self {
         Self { text }
     }
 }
@@ -59,7 +61,9 @@ impl PdfOperator for MoveNextLineShowText {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let text = operands.get_string_bytes()?;
-        Ok(PdfOperatorVariant::MoveNextLineShowText(Self::new(text)))
+        Ok(PdfOperatorVariant::MoveNextLineShowText(Self::new(
+            PdfTextItem::Text(text),
+        )))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
@@ -76,11 +80,11 @@ pub struct SetSpacingMoveShowText {
     /// The new character spacing to set before showing the text.
     char_spacing: f32,
     /// The text string to be shown.
-    text: Vec<u8>,
+    text: PdfTextItem,
 }
 
 impl SetSpacingMoveShowText {
-    pub fn new(word_spacing: f32, char_spacing: f32, text: Vec<u8>) -> Self {
+    pub fn new(word_spacing: f32, char_spacing: f32, text: PdfTextItem) -> Self {
         Self {
             word_spacing,
             char_spacing,
@@ -101,7 +105,7 @@ impl PdfOperator for SetSpacingMoveShowText {
         Ok(PdfOperatorVariant::SetSpacingMoveShowText(Self::new(
             word_spacing,
             char_spacing,
-            text,
+            PdfTextItem::Text(text),
         )))
     }
 
@@ -115,13 +119,13 @@ impl PdfOperator for SetSpacingMoveShowText {
 /// displacement (depending on the writing mode) to apply before showing the next string or glyph.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShowTextArray {
-    /// A vector of `TextElement`s, where each element is either a string to show
+    /// A vector of `PdfTextItem`s, where each item is either a string to show
     /// or a numeric adjustment for positioning.
-    elements: Vec<TextElement>,
+    elements: Vec<PdfTextItem>,
 }
 
 impl ShowTextArray {
-    pub fn new(elements: Vec<TextElement>) -> Self {
+    pub fn new(elements: Vec<PdfTextItem>) -> Self {
         Self { elements }
     }
 }
@@ -141,14 +145,14 @@ impl PdfOperator for ShowTextArray {
         for value in values {
             match value {
                 ObjectVariant::HexString(value) => {
-                    elements.push(TextElement::HexString { value });
+                    elements.push(PdfTextItem::Text(value));
                 }
                 ObjectVariant::LiteralString(value) => {
-                    elements.push(TextElement::Text { value });
+                    elements.push(PdfTextItem::Text(value));
                 }
                 other => {
                     let amount = other.try_number::<f32>(&PassthroughResolver)?;
-                    elements.push(TextElement::Adjustment { amount });
+                    elements.push(PdfTextItem::Adjustment(amount));
                 }
             }
         }
@@ -177,8 +181,11 @@ mod tests {
             panic!("expected ShowText variant");
         };
 
-        assert_eq!(operator.text, b"text without a copy");
-        assert_eq!(operator.text.as_ptr(), original_pointer);
+        let PdfTextItem::Text(text) = operator.text else {
+            panic!("expected text item");
+        };
+        assert_eq!(text, b"text without a copy");
+        assert_eq!(text.as_ptr(), original_pointer);
     }
 
     #[test]
@@ -197,7 +204,7 @@ mod tests {
 
         assert_eq!(operator.word_spacing, 1.5);
         assert_eq!(operator.char_spacing, 2.0);
-        assert_eq!(operator.text, b"text");
+        assert_eq!(operator.text, PdfTextItem::Text(b"text".to_vec()));
         assert!(operands.is_empty());
     }
 }

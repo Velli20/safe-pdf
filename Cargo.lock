@@ -2083,6 +2083,7 @@ dependencies = [
  "pdf-font",
  "pdf-graphics",
  "pdf-resources",
+ "pdf-text-engine",
  "thiserror 2.0.12",
 ]
 
@@ -2106,7 +2107,9 @@ dependencies = [
  "pdf-annotation-types",
  "pdf-canvas",
  "pdf-document",
+ "pdf-font",
  "pdf-graphics",
+ "pdf-text-engine",
  "thiserror 2.0.12",
 ]
 
@@ -2114,8 +2117,9 @@ dependencies = [
 name = "pdf-canvas"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "criterion",
- "num-traits",
+ "pdf-cmap",
  "pdf-color-space",
  "pdf-content-stream",
  "pdf-content-stream-operators",
@@ -2126,8 +2130,7 @@ dependencies = [
  "pdf-object",
  "pdf-resources",
  "pdf-shading",
- "read-fonts 0.39.2",
- "skrifa",
+ "pdf-text-engine",
  "thiserror 2.0.12",
 ]
 
@@ -2155,6 +2158,7 @@ dependencies = [
 name = "pdf-color-space"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "pdf-function",
  "pdf-graphics",
  "pdf-object",
@@ -2180,6 +2184,7 @@ dependencies = [
 name = "pdf-content-stream-operators"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "num-traits",
  "pdf-graphics",
  "pdf-image",
@@ -2225,6 +2230,7 @@ name = "pdf-filter"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.9.1",
+ "bytes",
  "flate2",
  "image",
  "jpeg2k",
@@ -2241,8 +2247,7 @@ name = "pdf-font"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.9.1",
- "num-derive",
- "num-traits",
+ "bytes",
  "pdf-cmap",
  "pdf-content-stream",
  "pdf-content-stream-operators",
@@ -2250,6 +2255,7 @@ dependencies = [
  "pdf-object",
  "pdf-parser",
  "read-fonts 0.39.2",
+ "self_cell",
  "skrifa",
  "thiserror 2.0.12",
  "write-fonts",
@@ -2271,6 +2277,7 @@ dependencies = [
 name = "pdf-graphics"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "criterion",
  "num-derive",
  "num-traits",
@@ -2305,6 +2312,7 @@ dependencies = [
 name = "pdf-image"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "num-traits",
  "pdf-color-space",
  "pdf-decode",
@@ -2330,6 +2338,7 @@ dependencies = [
 name = "pdf-object"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "num-traits",
  "pdf-graphics",
  "thiserror 2.0.12",
@@ -2375,10 +2384,12 @@ version = "0.1.0"
 dependencies = [
  "pdf-annotations",
  "pdf-canvas",
+ "pdf-cmap",
  "pdf-content-stream",
  "pdf-document",
  "pdf-font",
  "pdf-graphics",
+ "pdf-text-engine",
  "thiserror 2.0.12",
 ]
 
@@ -2406,6 +2417,7 @@ dependencies = [
 name = "pdf-shading"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "num-traits",
  "pdf-color-space",
  "pdf-decode",
@@ -2413,6 +2425,18 @@ dependencies = [
  "pdf-graphics",
  "pdf-object",
  "pdf-utils",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "pdf-text-engine"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "pdf-cmap",
+ "pdf-content-stream-operators",
+ "pdf-font",
+ "pdf-graphics",
  "thiserror 2.0.12",
 ]
 
@@ -2833,6 +2857,12 @@ dependencies = [
  "smithay-client-toolkit",
  "tiny-skia",
 ]
+
+[[package]]
+name = "self_cell"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ab42ca02749e120097e328d91d415325bdf43b1c72c4c8badf37375fe40a813"
 
 [[package]]
 name = "serde"

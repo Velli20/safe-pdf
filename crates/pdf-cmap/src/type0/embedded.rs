@@ -1,45 +1,63 @@
 use std::collections::HashMap;
 
+use crate::WritingMode;
+
 use crate::{
-    WritingMode, cmap::token::CMapToken, cmap_support::Type0CodeMap, error::CMapError,
+    cmap::token::CMapToken, cmap_support::Type0CodeMap, error::CMapError,
     type0::parser::EmbeddedCMapBuilder,
 };
 
 /// Parsed data for an embedded Type0 encoding CMap stream.
 #[derive(Debug, Clone)]
 pub struct EmbeddedCMap {
+    /// Inclusive source-code ranges accepted by the CMap.
     pub(super) code_space_ranges: Vec<CodeSpaceRange>,
+    /// Sorted, deduplicated source-code widths cached by the parser.
     pub(super) allowed_code_lengths: Vec<usize>,
+    /// Explicit source-code-to-CID entries.
     pub(super) cid_chars: HashMap<u32, u16>,
+    /// Sequential source-code-to-CID ranges.
     pub(super) cid_ranges: Vec<CidRange>,
+    /// Direction declared by `/WMode`.
     pub(super) writing_mode: WritingMode,
 }
 
+/// One inclusive code-space interval for a fixed source width.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct CodeSpaceRange {
+    /// Packed big-endian lower bound.
     pub(super) start: u32,
+    /// Packed big-endian upper bound.
     pub(super) end: u32,
+    /// Source width in bytes.
     pub(super) len: usize,
 }
 
+/// One inclusive source range mapped to sequential CIDs.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct CidRange {
+    /// Packed big-endian lower source bound.
     pub(super) start: u32,
+    /// Packed big-endian upper source bound.
     pub(super) end: u32,
+    /// CID corresponding to `start`.
     pub(super) cid_start: u16,
 }
 
 impl EmbeddedCMap {
+    /// Returns the writing direction parsed from `/WMode`.
     pub(crate) fn writing_mode(&self) -> WritingMode {
         self.writing_mode
     }
 }
 
 impl Type0CodeMap for EmbeddedCMap {
-    fn allowed_code_lengths(&self) -> Vec<usize> {
-        self.allowed_code_lengths.clone()
+    /// Borrows the cached source widths without allocating per decoded code.
+    fn allowed_code_lengths(&self) -> &[usize] {
+        &self.allowed_code_lengths
     }
 
+    /// Tests the packed code against ranges of the same byte width.
     fn has_code_space(&self, code: u32, len: usize) -> bool {
         self.code_space_ranges
             .iter()
@@ -90,7 +108,7 @@ impl TryFrom<&[u8]> for EmbeddedCMap {
                 }
                 CMapToken::Name(name) if name.as_slice() == b"WMode" => {
                     let mode = state.parser.expect_integer_token("invalid /WMode value")?;
-                    state.writing_mode = WritingMode::from_integer(mode);
+                    state.writing_mode = WritingMode::from(mode);
                 }
                 _ => {}
             }

@@ -1,0 +1,17 @@
+[package]
+name = "pdf-text-engine"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+pdf-cmap = { path = "../pdf-cmap" }
+pdf-font = { path = "../pdf-font" }
+pdf-content-stream-operators = { path = "../pdf-content-stream-operators" }
+pdf-graphics = { path = "../pdf-graphics" }
+thiserror = "2.0.12"
+
+[dev-dependencies]
+bytes = "1.10.1"

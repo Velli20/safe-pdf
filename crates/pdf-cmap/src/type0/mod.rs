@@ -6,12 +6,12 @@ use pdf_object::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
     text_encoding::BigEndianU16Units,
 };
-
 mod embedded;
 mod parser;
 
 use crate::{
-    WritingMode, cmap_support::Type0CodeMap, error::CMapError, predefined::PredefinedCMap,
+    Cid, CidMapping, PdfCMap, PdfCode, WritingMode, cmap_support::Type0CodeMap, error::CMapError,
+    predefined::PredefinedCMap,
 };
 
 pub use embedded::EmbeddedCMap;
@@ -84,22 +84,68 @@ impl Type0EncodingCMap {
         units
     }
 
-    /// Decode raw text bytes into CIDs using this CMap.
+    /// Decodes all raw text bytes into CIDs using this CMap.
+    ///
+    /// This allocating convenience method is intended for callers that need the complete CID list.
+    /// The text engine instead calls [`PdfCMap::decode_next`] and consumes mappings one at a time.
+    /// Unknown codes and an incomplete final identity code become CID 0 (`.notdef`) while still
+    /// consuming input, guaranteeing forward progress on malformed text.
     pub fn decode(&self, text: &[u8]) -> Vec<u16> {
-        match self {
-            Self::Identity { .. } => Self::decode_identity(text),
-            Self::Predefined(cmap) => cmap.decode_text(text),
-            Self::Embedded(cmap) => cmap.decode_text(text),
+        let mut remaining = text;
+        let mut decoded = Vec::new();
+        while let Some(mapping) = self.decode_mapping(remaining) {
+            decoded.push(u16::try_from(mapping.cid.0).unwrap_or_default());
+            let Some(next) = remaining.get(usize::from(mapping.source.byte_len())..) else {
+                break;
+            };
+            remaining = next;
         }
+        decoded
     }
 
     /// Return whether this CMap is one of the predefined identity mappings.
     pub fn is_identity(&self) -> bool {
         matches!(self, Self::Identity { .. })
     }
+}
 
-    /// Return the writing mode declared by this CMap.
-    pub fn writing_mode(&self) -> WritingMode {
+impl Type0EncodingCMap {
+    /// Decodes one source code without allocating an intermediate collection.
+    ///
+    /// The returned mapping preserves both the packed source code and its byte length for
+    /// `/ToUnicode` lookup and exact stream advancement. Identity CMaps consume two-byte codes when
+    /// possible; an unmatched trailing byte is consumed as a one-byte `.notdef` mapping. Embedded
+    /// and predefined maps apply their longest valid code-space match.
+    fn decode_mapping(&self, bytes: &[u8]) -> Option<CidMapping> {
+        let (code, byte_len, cid) = match self {
+            Self::Identity { .. } => {
+                let first = bytes.first().copied()?;
+                if let Some([first, second]) = bytes.get(..2) {
+                    let cid = u16::from_be_bytes([*first, *second]);
+                    (u32::from(cid), 2, cid)
+                } else {
+                    (u32::from(first), 1, 0)
+                }
+            }
+            Self::Predefined(cmap) => cmap.decode_next(bytes)?,
+            Self::Embedded(cmap) => cmap.decode_next(bytes)?,
+        };
+        let byte_len = u8::try_from(byte_len).ok()?;
+        Some(CidMapping {
+            source: PdfCode::new(code, byte_len).ok()?,
+            cid: Cid(u32::from(cid)),
+        })
+    }
+}
+
+impl PdfCMap for Type0EncodingCMap {
+    /// Streams the first mapping in `bytes` using the CMap's malformed-input recovery policy.
+    fn decode_next(&self, bytes: &[u8]) -> Result<Option<CidMapping>, CMapError> {
+        Ok(self.decode_mapping(bytes))
+    }
+
+    /// Returns the writing mode declared by the identity, predefined, or embedded CMap.
+    fn writing_mode(&self) -> WritingMode {
         match self {
             Self::Identity { writing_mode } => *writing_mode,
             Self::Predefined(cmap) => cmap.writing_mode(),

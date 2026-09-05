@@ -1,7 +1,8 @@
 use std::collections::{BTreeSet, HashMap};
 
+use crate::WritingMode;
+
 use crate::{
-    WritingMode,
     cmap::{parser::CMapParser, token::CMapToken},
     error::CMapError,
 };

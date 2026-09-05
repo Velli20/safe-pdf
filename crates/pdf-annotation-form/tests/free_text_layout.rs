@@ -9,7 +9,8 @@ use pdf_annotation_form::{
     FreeText, FreeTextEditError, FreeTextEditor, FreeTextOverflow, FreeTextStyle,
 };
 use pdf_document::page::PdfPage;
-use pdf_font::{font::Font, standard14::Standard14Font, true_type_font::TrueTypeFont};
+use pdf_font::PdfFontSpec;
+use pdf_font::standard14::Standard14Font;
 use pdf_graphics::rect::Rect;
 
 fn created_rect(free_text: FreeText) -> Rect {
@@ -54,9 +55,7 @@ fn explicit_newlines_preserve_empty_lines() {
 
 #[test]
 fn caret_follows_whitespace_wrap_boundaries_and_empty_lines() {
-    let font = Font::TrueType(TrueTypeFont::synthetic_standard14_font(
-        Standard14Font::Courier,
-    ));
+    let font = PdfFontSpec::from(Standard14Font::Courier);
     let mut style = FreeTextStyle::default();
     style.font.standard14 = Standard14Font::Courier;
     style.font_size = 12.0;
@@ -69,7 +68,10 @@ fn caret_follows_whitespace_wrap_boundaries_and_empty_lines() {
     };
     style.overflow = FreeTextOverflow::ExpandHeight;
     let free_text = FreeText {
-        rect: Rect::new(font.encoded_text_width(b"aaaa", style.font_size), 20.0),
+        rect: Rect::new(
+            pdf_text_engine::measure_encoded_text_width(&font, b"aaaa", style.font_size),
+            20.0,
+        ),
         text: "  aa b cccccc\n".to_owned(),
         style,
     };

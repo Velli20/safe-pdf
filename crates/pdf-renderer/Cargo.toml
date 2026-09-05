@@ -9,7 +9,9 @@ pdf-content-stream = { path = "../pdf-content-stream" }
 pdf-document = { path = "../pdf-document" }
 pdf-canvas = { path = "../pdf-canvas" }
 pdf-graphics = { path = "../pdf-graphics" }
+pdf-font = { path = "../pdf-font" }
+pdf-text-engine = { path = "../pdf-text-engine" }
+pdf-cmap = { path = "../pdf-cmap" }
 thiserror = "2.0.12"
 
 [dev-dependencies]
-pdf-font = { path = "../pdf-font" }

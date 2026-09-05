@@ -1,340 +1,237 @@
-use std::borrow::Cow;
+//! Font program, face, registry, and glyph geometry abstractions.
 
-use pdf_cmap::ToUnicodeCMap;
-use pdf_content_stream::ContentStreamIdAllocator;
-use pdf_object::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-};
-use read_fonts::TableProvider;
-use skrifa::{FontRef, MetadataProvider};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use crate::{
-    char_vec::CharVec, error::FontError, fallback::fallback_true_type_from_dictionary,
-    glyph_name_to_unicode::glyph_name_to_unicode, standard14::Standard14Font,
-    true_type_font::TrueTypeFont, type0_font::Type0Font, type1_font::Type1Font,
-    type3_font::Type3Font,
-};
+use bytes::Bytes;
+use pdf_graphics::pdf_path::PdfPath;
 
-/// Represents a font object in a PDF document.
-pub enum Font {
-    /// A CIDFont used as a descendant font in a Type0 font.
-    Type0(Type0Font),
-    /// A classic PostScript font.
-    Type1(Type1Font),
-    /// A type 3 font with glyphs defined by PDF content streams.
-    Type3(Type3Font),
-    /// A TrueType font.
-    TrueType(TrueTypeFont),
+use crate::error::FontError;
+pub use crate::font_registry::FontRegistry;
+
+/// Stable identity assigned to one loaded font face.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct FontFaceId(pub u64);
+
+/// Font-specific identifier for one glyph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct GlyphId(pub u32);
+
+/// Opaque key understood by an application-provided external font source.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExternalFontKey(pub Arc<str>);
+
+/// Supported physical font program representations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FontProgramFormat {
+    /// A classic PostScript Type 1 program.
+    Type1,
+    /// A name-keyed Compact Font Format program, including PDF `/Type1C` data.
+    Cff,
+    /// A CID-keyed Compact Font Format program, including PDF `/CIDFontType0C` data.
+    CidCff,
+    /// A standalone TrueType program.
+    TrueType,
+    /// An OpenType container with TrueType outlines.
+    OpenTypeTrueType,
+    /// An OpenType container with CFF or CFF2 outlines.
+    OpenTypeCff,
+    /// A PDF Type 3 program whose glyphs are content streams rather than font bytes.
+    Type3,
 }
 
-impl Font {
-    pub const KEY: &'static [u8] = b"Font";
-
-    /// Parse a font dictionary, replacing any unreadable font with a bundled
-    /// whole-font TrueType fallback.
-    pub fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Font {
-        match Self::try_from_dictionary(dictionary, objects, id_allocator) {
-            Ok(font) => font,
-            Err(_) => Font::TrueType(fallback_true_type_from_dictionary(dictionary, objects)),
-        }
-    }
-
-    fn try_from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Font, FontError> {
-        // Determine the font subtype from the dictionary.
-        let subtype = dictionary.required_bytes(b"Subtype", objects)?;
-        match subtype {
-            b"Type0" => {
-                let type0_font = Type0Font::from_dictionary(dictionary, objects)?;
-                Ok(Font::Type0(type0_font))
-            }
-            b"Type1" => Type1Font::from_dictionary(dictionary, objects).map(Font::Type1),
-            b"Type3" => {
-                let type3_font = Type3Font::from_dictionary(dictionary, objects, id_allocator)?;
-                Ok(Font::Type3(type3_font))
-            }
-            b"TrueType" => {
-                let tt_font = TrueTypeFont::from_dictionary(dictionary, objects)?;
-                Ok(Font::TrueType(tt_font))
-            }
-            other => Err(FontError::UnsupportedFontSubtype {
-                subtype: String::from_utf8_lossy(other).into_owned(),
-            }),
-        }
-    }
+/// Origin and storage for a font program requested by the loader.
+#[derive(Debug, Clone)]
+pub enum FontSource {
+    /// Font bytes embedded in a PDF or supplied directly by the application.
+    Memory {
+        /// Shared immutable program bytes.
+        data: Bytes,
+        /// Declared or detected program format.
+        format: FontProgramFormat,
+        /// Zero-based face index for collection containers.
+        face_index: u32,
+    },
+    /// A font that must be obtained from an application-owned database.
+    External {
+        /// Provider-specific lookup key.
+        key: ExternalFontKey,
+        /// Expected program format when it is known.
+        format_hint: Option<FontProgramFormat>,
+        /// Zero-based face index for collection containers.
+        face_index: u32,
+    },
+    /// A PDF Type 3 face represented by normalized glyph procedure handles.
+    Type3 {
+        /// Procedure handles indexed by glyph name.
+        glyphs: Arc<BTreeMap<GlyphName, GlyphId>>,
+    },
 }
 
-impl Font {
-    /// Returns the Standard 14 identity when this font is backed by the
-    /// synthetic Standard 14 fallback path.
-    pub fn as_standard14(&self) -> Option<Standard14Font> {
-        match self {
-            Font::TrueType(font) => font.standard14,
-            _ => None,
-        }
-    }
-
-    /// Returns a glyph width in PDF glyph-space units (1/1000 em) for simple
-    /// and CID fonts when available.
+impl From<&FontSource> for Option<FontProgramFormat> {
+    /// Extracts an explicitly declared format from a font source.
     ///
-    /// For Type0 fonts, this returns the font's default width when explicit
-    /// width data is missing.
-    pub fn glyph_width(&self, char_code: u16) -> Option<f32> {
-        match self {
-            Font::Type0(font) => {
-                if let Some(w) = &font.widths {
-                    return w.get_width(char_code).or(Some(font.default_width));
-                }
-                Some(font.default_width)
-            }
-            Font::TrueType(font) => font
-                .widths
-                .as_ref()
-                .and_then(|w| w.get(&char_code).copied()),
-            Font::Type1(font) => font
-                .widths
-                .as_ref()
-                .and_then(|w| w.get(&char_code).copied()),
-            _ => None,
+    /// External sources may intentionally omit a format hint, in which case
+    /// the caller must supply the format it is attempting to load. Keeping
+    /// that fallback choice in the driver preserves useful diagnostics for
+    /// each driver's source-specific error path.
+    fn from(source: &FontSource) -> Self {
+        match source {
+            FontSource::Memory { format, .. }
+            | FontSource::External {
+                format_hint: Some(format),
+                ..
+            } => Some(*format),
+            FontSource::External {
+                format_hint: None, ..
+            } => None,
+            FontSource::Type3 { .. } => Some(FontProgramFormat::Type3),
         }
-    }
-
-    /// Measures encoded text in user-space units for a given font size.
-    ///
-    /// Widths come from the parsed PDF font width data when available. Missing
-    /// simple-font widths fall back to 500 glyph-space units, matching a stable
-    /// half-em approximation for layout decisions.
-    pub fn encoded_text_width(&self, text: &[u8], font_size: f32) -> f32 {
-        const DEFAULT_SIMPLE_WIDTH: f32 = 500.0;
-        const GLYPH_SPACE_UNITS: f32 = 1000.0;
-
-        let glyph_width_sum = match self {
-            Font::Type0(font) => font
-                .decode_bytes_to_cids(text)
-                .into_iter()
-                .map(|cid| self.glyph_width(cid).unwrap_or(DEFAULT_SIMPLE_WIDTH))
-                .sum::<f32>(),
-            _ => text
-                .iter()
-                .copied()
-                .map(u16::from)
-                .map(|code| {
-                    self.glyph_width(code)
-                        .or_else(|| self.open_type_glyph_width(code))
-                        .unwrap_or(DEFAULT_SIMPLE_WIDTH)
-                })
-                .sum::<f32>(),
-        };
-
-        glyph_width_sum / GLYPH_SPACE_UNITS * font_size
-    }
-
-    fn open_type_glyph_width(&self, char_code: u16) -> Option<f32> {
-        let Font::TrueType(font) = self else {
-            return None;
-        };
-        let font_ref = FontRef::new(font.font_file.as_ref()).ok()?;
-        let unicode = self.char_to_unicode(char_code)?;
-        let glyph_id = font_ref.charmap().map(unicode)?;
-        let advance = font_ref.hmtx().ok()?.advance(glyph_id)?;
-        let units_per_em = font_ref.head().ok()?.units_per_em();
-        if units_per_em == 0 {
-            return None;
-        }
-        Some(f32::from(advance) / f32::from(units_per_em) * 1000.0)
-    }
-
-    pub fn glyph_name(&self, char_code: u16) -> Option<&[u8]> {
-        let index = usize::from(char_code);
-        match self {
-            Font::Type1(font) => font.encoding.names.get(index).map(Cow::as_ref),
-            Font::Type3(font) => font
-                .encoding
-                .as_ref()
-                .and_then(|enc| enc.names.get(index).map(Cow::as_ref)),
-            Font::TrueType(font) => font
-                .encoding
-                .as_ref()
-                .and_then(|enc| enc.names.get(index).map(Cow::as_ref)),
-            _ => None,
-        }
-    }
-
-    /// Map a PDF character code to all of its Unicode scalar values.
-    ///
-    /// Resolution order:
-    /// 1. ToUnicode CMap — returns the full slice (handles ligatures such as "fi"
-    ///    mapped to `['f','i']`).
-    /// 2. Glyph name → Adobe Glyph List (Type1 / Type3 / TrueType with encodings).
-    /// 3. Bundled fallback font cmap.
-    /// 4. Type0/CID reverse-cmap fallback (Identity-H/V fonts without ToUnicode).
-    ///
-    /// Returns an empty [`CharVec`] when no mapping is found.
-    pub fn chars_to_unicode(&self, char_code: u16) -> CharVec {
-        // Priority 1: ToUnicode CMap
-        let to_unicode: Option<&ToUnicodeCMap> = match self {
-            Font::Type0(f) => f.to_unicode.as_ref(),
-            Font::Type1(f) => f.to_unicode.as_ref(),
-            Font::TrueType(f) => f.to_unicode.as_ref(),
-            Font::Type3(f) => f.to_unicode.as_ref(),
-        };
-        if let Some(chars) = to_unicode.and_then(|m| m.map_char_code(char_code))
-            && !chars.is_empty()
-        {
-            return CharVec::from_slice(chars);
-        }
-
-        // Priority 2: glyph name → AGL
-        if let Some(name) = self.glyph_name(char_code)
-            && let Some(c) = glyph_name_to_unicode(name)
-        {
-            return CharVec::from(c);
-        }
-
-        // Priority 3: bundled fallback font cmap.
-        if let Font::TrueType(font) = self
-            && font.standard14.is_some()
-            && let Some(c) = char::from_u32(u32::from(char_code))
-            && FontRef::new(font.font_file.as_ref())
-                .ok()
-                .and_then(|font_ref| font_ref.charmap().map(c))
-                .is_some()
-        {
-            return CharVec::from(c);
-        }
-
-        // Priority 4: Type0 reverse-cmap (Identity-H/V without ToUnicode)
-        if let Font::Type0(f) = self
-            && let Some(map) = &f.glyph_to_unicode
-            && let Some(&c) = map.get(&char_code)
-        {
-            return CharVec::from(c);
-        }
-
-        CharVec::new()
-    }
-
-    /// Map a PDF character code to its first Unicode scalar value.
-    ///
-    /// For ligatures that map to multiple code points, only the first is returned.
-    /// Prefer [`chars_to_unicode`](Self::chars_to_unicode) when full coverage is needed.
-    pub fn char_to_unicode(&self, char_code: u16) -> Option<char> {
-        self.chars_to_unicode(char_code).into_iter().next().copied()
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::borrow::Cow;
+/// Slant requested from or reported by a font face.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub enum FontSlant {
+    /// Upright roman glyphs.
+    #[default]
+    Normal,
+    /// Designed italic glyphs.
+    Italic,
+    /// Mechanically or descriptively oblique glyphs.
+    Oblique {
+        /// Slant angle in degrees when known.
+        angle: Option<f32>,
+    },
+}
 
-    use pdf_cmap::Type0EncodingCMap;
+/// Width class requested from or reported by a font face.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum FontStretch {
+    /// A face narrower than the normal width class.
+    Condensed,
+    /// The normal width class.
+    #[default]
+    Normal,
+    /// A face wider than the normal width class.
+    Expanded,
+}
 
-    use super::*;
-    use crate::{encoding::Encoding, flags::FontFlags, true_type_font::TrueTypeFont};
+/// CSS-compatible numeric font weight in the inclusive conceptual range 1–1000.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FontWeight(pub u16);
 
-    #[test]
-    fn test_truetype_encoding_fallback() {
-        // Build a TrueType font with a minimal encoding that maps char code 65
-        // to the glyph name "A".  The AGL single-char rule maps "A" → U+0041.
-        let names: Vec<Cow<'static, [u8]>> = (0..256)
-            .map(|index| {
-                if index == 65 {
-                    Cow::Borrowed(b"A".as_slice())
-                } else {
-                    Cow::Borrowed(b".notdef".as_slice())
-                }
-            })
-            .collect();
-        let enc = Encoding { names };
-        let font = Font::TrueType(TrueTypeFont {
-            font_file: Vec::new().into(),
-            widths: None,
-            encoding: Some(enc),
-            to_unicode: None,
-            standard14: None,
-            flags: FontFlags::empty(),
-        });
-        assert_eq!(font.char_to_unicode(65), Some('A'));
-        assert_eq!(&*font.chars_to_unicode(65), ['A'].as_slice());
+impl Default for FontWeight {
+    fn default() -> Self {
+        Self(400)
     }
+}
 
-    #[test]
-    fn test_ligature_chars_to_unicode() {
-        // ToUnicode CMap maps char 1 → fi (U+FB01) + fl (U+FB02) as a ligature pair.
-        let cmap_data = b"beginbfchar\n<01> <FB01FB02>\nendbfchar\n";
-        let cmap = ToUnicodeCMap::try_from(cmap_data.as_slice()).unwrap();
-        let font = Font::TrueType(TrueTypeFont {
-            font_file: Vec::new().into(),
-            widths: None,
-            encoding: None,
-            to_unicode: Some(cmap),
-            standard14: None,
-            flags: FontFlags::empty(),
-        });
-        assert_eq!(
-            &*font.chars_to_unicode(1),
-            ['\u{FB01}', '\u{FB02}'].as_slice()
-        );
-        // char_to_unicode returns only the first character
-        assert_eq!(font.char_to_unicode(1), Some('\u{FB01}'));
-    }
+/// Human-readable and stylistic information associated with a loaded face.
+#[derive(Debug, Clone, Default)]
+pub struct FontMetadata {
+    /// PostScript name when one is available.
+    pub postscript_name: Option<Arc<str>>,
+    /// Typographic family name when one is available.
+    pub family: Option<Arc<str>>,
+    /// Typographic subfamily name when one is available.
+    pub subfamily: Option<Arc<str>>,
+    /// Numeric weight used during fallback matching.
+    pub weight: FontWeight,
+    /// Width class used during fallback matching.
+    pub stretch: FontStretch,
+    /// Slant used during fallback matching.
+    pub slant: FontSlant,
+    /// Whether the face is treated as symbolic rather than Unicode-oriented.
+    pub symbolic: bool,
+}
 
-    #[test]
-    fn test_cmap_parsers_share_comment_whitespace_and_hex_rules() {
-        let type0_data = br#"
-        begincmap
-        /WMode 0 def
-        1 begincodespacerange
-        <01> % comment between tokens
-        <F>
-        endcodespacerange
-        1 begincidchar
-        <01> 9
-        endcidchar
-        endcmap
-        "#;
-        let type0 = Type0EncodingCMap::from_bytes(type0_data).unwrap();
-        assert_eq!(type0.decode(&[0x01, 0xF0]), vec![9, 0]);
+/// A normalized glyph name without a leading PDF slash.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct GlyphName(pub Arc<[u8]>);
 
-        let to_unicode_data = br#"
-        beginbfchar
-        <01> % comment between tokens
-        <041>
-        endbfchar
-        "#;
-        let cmap = ToUnicodeCMap::try_from(to_unicode_data.as_slice()).unwrap();
-        assert_eq!(cmap.map_char_code(0x01), Some(['\u{0410}'].as_slice()));
-    }
+/// Global metrics expressed in font design units.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FontMetrics {
+    /// Number of design units per em square.
+    pub units_per_em: u16,
+    /// Typographic ascender.
+    pub ascender: f32,
+    /// Typographic descender.
+    pub descender: f32,
+}
 
-    #[test]
-    fn test_type0_glyph_to_unicode_fallback() {
-        use std::collections::HashMap;
+/// Fallback ascender measured as a fraction of one em above the baseline.
+///
+/// This is the conventional 80/20 division of an em-square line box: 80% is
+/// reserved above the baseline and 20% below it. It is not a metric prescribed
+/// by the PDF or OpenType specifications and is used only when a font provides
+/// neither usable line metrics nor usable global bounds.
+pub const FALLBACK_ASCENDER_EM_RATIO: f32 = 0.8;
 
-        use crate::type0_font::{CidFontSubType, Type0Font, Type0FontProgramFormat};
+/// Fallback descender measured as a fraction of one em below the baseline.
+///
+/// Together with [`FALLBACK_ASCENDER_EM_RATIO`], this produces a one-em-high
+/// selection cell using the conventional 80/20 baseline split. The value is
+/// negative because font descenders are expressed below the baseline.
+pub const FALLBACK_DESCENDER_EM_RATIO: f32 = -0.2;
 
-        let mut glyph_map: HashMap<u16, char> = HashMap::new();
-        glyph_map.insert(65u16, 'A');
-        let font = Font::Type0(Type0Font {
-            subtype: CidFontSubType::Type2,
-            program_format: Type0FontProgramFormat::TrueType {
-                cid_to_unicode: false,
-            },
-            font_file: Vec::new().into(),
-            type1_program_format: None,
-            widths: None,
-            encoding: None,
-            default_width: 1000.0,
-            to_unicode: None,
-            glyph_to_unicode: Some(glyph_map),
-        });
-        assert_eq!(&*font.chars_to_unicode(65), ['A'].as_slice());
-        assert_eq!(font.char_to_unicode(65), Some('A'));
-    }
+/// Renderable geometry supplied by a loaded font face.
+#[derive(Clone)]
+pub enum GlyphGeometry {
+    /// A scalable vector outline in font design units.
+    Outline(PdfPath),
+    /// A PDF Type 3 character procedure delegated to the integration backend.
+    Type3(GlyphId),
+}
+
+/// Parameters passed to a format driver while loading a font face.
+#[derive(Debug, Clone)]
+pub struct FontLoadRequest {
+    /// Program source to load.
+    pub source: FontSource,
+    /// Metadata inferred from the enclosing PDF or application request.
+    pub metadata_hint: FontMetadata,
+    /// Registry-allocated identity for the face being loaded.
+    pub face_id: FontFaceId,
+}
+
+/// A parsed, immutable font face usable by PDF layout and rendering workers.
+pub trait FontFace: Send + Sync {
+    /// Returns the stable identity assigned to this face.
+    fn id(&self) -> FontFaceId;
+
+    /// Returns descriptive and matching metadata.
+    fn metadata(&self) -> &FontMetadata;
+
+    /// Returns global design-space metrics when the font provides them.
+    fn metrics(&self) -> Option<FontMetrics>;
+
+    /// Resolves a Unicode scalar to a glyph identifier when the face covers it.
+    fn glyph_for_char(&self, character: char) -> Option<GlyphId>;
+
+    /// Resolves a PostScript glyph name when supported by the face.
+    fn glyph_for_name(&self, name: &GlyphName) -> Option<GlyphId>;
+
+    /// Returns the glyph's horizontal advance in font design units when available.
+    ///
+    /// PDF layout uses this only when an unrelated fallback face supplies the glyph. Native PDF
+    /// faces continue to use widths from the PDF font dictionary.
+    fn horizontal_advance(&self, glyph: GlyphId) -> Result<Option<f32>, FontError>;
+
+    /// Returns renderable geometry for one glyph at the requested pixel size.
+    fn glyph_geometry(
+        &self,
+        glyph: GlyphId,
+        pixels_per_em: f32,
+    ) -> Result<Option<GlyphGeometry>, FontError>;
+}
+
+/// Format-specific loader that turns font sources into immutable faces.
+pub trait FontDriver: Send + Sync {
+    /// Reports whether this driver accepts the supplied program format.
+    fn supports(&self, format: FontProgramFormat) -> bool;
+
+    /// Loads one face from a normalized request.
+    fn load(&self, request: &FontLoadRequest) -> Result<Arc<dyn FontFace>, FontError>;
 }

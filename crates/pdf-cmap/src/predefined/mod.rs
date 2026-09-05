@@ -2,7 +2,9 @@ mod generated;
 
 use std::collections::{BTreeSet, HashMap};
 
-use crate::{WritingMode, cmap_support::Type0CodeMap, error::CMapError};
+use crate::WritingMode;
+
+use crate::{cmap_support::Type0CodeMap, error::CMapError};
 
 /// Generated predefined CMap metadata.
 #[derive(Debug, Clone, Copy)]
@@ -55,11 +57,20 @@ pub struct GeneratedCidChar {
 /// A resolved predefined CMap and its `UseCMap` fallback chain.
 #[derive(Debug, Clone)]
 pub struct PredefinedCMap {
+    /// Root map followed by its `UseCMap` fallbacks in lookup order.
     maps: Vec<&'static GeneratedCMap>,
+    /// Sorted, deduplicated code lengths cached once when the chain is resolved.
+    ///
+    /// Keeping this slice avoids rebuilding and allocating a set for every streamed character.
+    code_lengths: Vec<usize>,
 }
 
 impl PredefinedCMap {
-    /// Resolve a predefined CMap by name.
+    /// Resolves a predefined CMap by name and precomputes its decoding shape.
+    ///
+    /// `UseCMap` dependencies are retained in lookup order and cycles or missing generated
+    /// dependencies are rejected. Accepted code lengths are merged once across the complete chain
+    /// for allocation-free streaming decode calls.
     pub fn from_name(name: &[u8]) -> Result<Option<Self>, CMapError> {
         let Some(root) = find_cmap(name) else {
             return Ok(None);
@@ -85,7 +96,17 @@ impl PredefinedCMap {
             current = next;
         }
 
-        Ok(Some(Self { maps }))
+        let mut lengths = BTreeSet::new();
+        for map in &maps {
+            for range in map.code_space_ranges {
+                lengths.insert(usize::from(range.len));
+            }
+        }
+
+        Ok(Some(Self {
+            maps,
+            code_lengths: lengths.into_iter().collect(),
+        }))
     }
 
     /// Return the writing mode declared by the root CMap.
@@ -121,14 +142,8 @@ impl PredefinedCMap {
 
 impl Type0CodeMap for PredefinedCMap {
     /// Return all code lengths accepted by this CMap chain.
-    fn allowed_code_lengths(&self) -> Vec<usize> {
-        let mut lengths = BTreeSet::new();
-        for map in &self.maps {
-            for range in map.code_space_ranges {
-                lengths.insert(usize::from(range.len));
-            }
-        }
-        lengths.into_iter().collect()
+    fn allowed_code_lengths(&self) -> &[usize] {
+        &self.code_lengths
     }
 
     /// Return whether a packed code is valid for a byte length in this CMap chain.

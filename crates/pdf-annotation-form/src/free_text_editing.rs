@@ -206,7 +206,7 @@ fn apply_generated_fields(existing: &mut Annotation, generated: Annotation) {
 
 #[cfg(test)]
 mod tests {
-    use pdf_font::{encoding::FontEncoding, standard14::Standard14Font};
+    use pdf_font::{BaseEncoding, standard14::Standard14Font};
     use pdf_graphics::color::Color;
 
     use crate::{FreeTextFont, FreeTextOverflow};
@@ -218,7 +218,7 @@ mod tests {
             font: FreeTextFont {
                 standard14: Standard14Font::CourierBold,
                 resource_name: Vec::from(b"Body"),
-                encoding: FontEncoding::WinAnsi,
+                encoding: BaseEncoding::WinAnsi,
             },
             font_size: 18.0,
             line_height: 21.6,

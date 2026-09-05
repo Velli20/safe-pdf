@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
 use pdf_content_stream_operators::{
-    TextElement,
+    PdfTextItem,
     graphics_state_operators::SaveGraphicsState,
     recording_pdf_operator_backend::{RecordedOperation, RecordingBackend},
     text_showing_operators::ShowTextArray,
@@ -100,27 +100,27 @@ fn content_stream_new_handles_bare_sign_text_array_adjustment() {
         Some(PdfOperatorVariant::ShowTextArray(op))
             if op
                 == &ShowTextArray::new(vec![
-                    TextElement::Text { value: b"e".to_vec() },
-                    TextElement::Adjustment { amount: -4.0 },
-                    TextElement::Text { value: b"x".to_vec() },
-                    TextElement::Adjustment { amount: 12.0 },
-                    TextElement::Text { value: b"t".to_vec() },
-                    TextElement::Adjustment { amount: -3.0 },
-                    TextElement::Text { value: b"e".to_vec() },
-                    TextElement::Adjustment { amount: -4.0 },
-                    TextElement::Text { value: b"n".to_vec() },
-                    TextElement::Adjustment { amount: -4.0 },
-                    TextElement::Text { value: b"s".to_vec() },
-                    TextElement::Adjustment { amount: 3.0 },
-                    TextElement::Text { value: b"i".to_vec() },
-                    TextElement::Adjustment { amount: 3.0 },
-                    TextElement::Text { value: b"v".to_vec() },
-                    TextElement::Adjustment { amount: 0.0 },
-                    TextElement::Text { value: b"e".to_vec() },
-                    TextElement::Adjustment { amount: -4.0 },
-                    TextElement::Text { value: b"l".to_vec() },
-                    TextElement::Adjustment { amount: 3.0 },
-                    TextElement::Text { value: b"y".to_vec() },
+                    PdfTextItem::Text(b"e".to_vec()),
+                    PdfTextItem::Adjustment(-4.0),
+                    PdfTextItem::Text(b"x".to_vec()),
+                    PdfTextItem::Adjustment(12.0),
+                    PdfTextItem::Text(b"t".to_vec()),
+                    PdfTextItem::Adjustment(-3.0),
+                    PdfTextItem::Text(b"e".to_vec()),
+                    PdfTextItem::Adjustment(-4.0),
+                    PdfTextItem::Text(b"n".to_vec()),
+                    PdfTextItem::Adjustment(-4.0),
+                    PdfTextItem::Text(b"s".to_vec()),
+                    PdfTextItem::Adjustment(3.0),
+                    PdfTextItem::Text(b"i".to_vec()),
+                    PdfTextItem::Adjustment(3.0),
+                    PdfTextItem::Text(b"v".to_vec()),
+                    PdfTextItem::Adjustment(0.0),
+                    PdfTextItem::Text(b"e".to_vec()),
+                    PdfTextItem::Adjustment(-4.0),
+                    PdfTextItem::Text(b"l".to_vec()),
+                    PdfTextItem::Adjustment(3.0),
+                    PdfTextItem::Text(b"y".to_vec()),
                 ])
     ));
 }

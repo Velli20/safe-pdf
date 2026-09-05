@@ -318,7 +318,7 @@ fn to_skia_shader(shader: &Shader) -> Result<skia_safe::Shader, PdfCanvasError> 
             transform,
         }) => {
             let image = to_skia_image(&Image {
-                data: Arc::clone(pixels),
+                data: pixels.clone(),
                 width: *width,
                 height: *height,
                 pixel_format: PixelFormat::RGBA8888,
@@ -427,6 +427,54 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
             paint.set_shader(shader);
         }
 
+        self.surface.canvas().draw_path(&sk_path, &paint);
+        Ok(())
+    }
+
+    fn fill_transformed_path(
+        &mut self,
+        path: &Arc<PdfPath>,
+        transform: &Transform,
+        fill_type: PathFillType,
+        color: Color,
+        shader: &Option<Shader>,
+        blend_mode: Option<BlendMode>,
+    ) -> Result<(), PdfCanvasError> {
+        let mut sk_path = to_skia_path(path).make_transform(&to_skia_matrix(transform));
+        sk_path.set_fill_type(to_skia_fill_type(fill_type));
+        let mut paint = make_paint(color, skia_safe::paint::Style::Fill, None, blend_mode);
+        if let Some(shader_spec) = shader {
+            paint.set_shader(to_skia_shader(shader_spec)?);
+        }
+        self.surface.canvas().draw_path(&sk_path, &paint);
+        Ok(())
+    }
+
+    fn stroke_transformed_path(
+        &mut self,
+        path: &Arc<PdfPath>,
+        transform: &Transform,
+        color: Color,
+        line_width: f32,
+        stroke_style: &StrokeStyle,
+        shader: &Option<Shader>,
+        blend_mode: Option<BlendMode>,
+    ) -> Result<(), PdfCanvasError> {
+        let sk_path = to_skia_path(path).make_transform(&to_skia_matrix(transform));
+        let mut paint = make_paint(
+            color,
+            skia_safe::paint::Style::Stroke,
+            Some(line_width),
+            blend_mode,
+        );
+        if let Some(dash_pattern) = &stroke_style.dash_pattern {
+            let effect = skia_safe::PathEffect::dash(&dash_pattern.intervals, dash_pattern.phase)
+                .ok_or(SkiaCanvasBackendError::DashPathEffectCreationFailed)?;
+            paint.set_path_effect(effect);
+        }
+        if let Some(shader_spec) = shader {
+            paint.set_shader(to_skia_shader(shader_spec)?);
+        }
         self.surface.canvas().draw_path(&sk_path, &paint);
         Ok(())
     }

@@ -129,5 +129,5 @@ fn fully_degenerate_free_form_mesh_builds_transparent_paint() {
 
     assert_eq!(width, 1);
     assert_eq!(height, 1);
-    assert_eq!(pixels.as_slice(), [0, 0, 0, 0]);
+    assert_eq!(pixels.as_ref(), [0, 0, 0, 0]);
 }

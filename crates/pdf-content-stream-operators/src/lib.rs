@@ -23,10 +23,11 @@ pub mod xobject_and_image_operators;
 
 extern crate alloc;
 
-// TextElement enum for ShowTextArray operator
+/// One operand from a PDF `Tj` or `TJ` text-showing operation.
 #[derive(Debug, Clone, PartialEq)]
-pub enum TextElement {
-    HexString { value: Vec<u8> },
-    Text { value: Vec<u8> },
-    Adjustment { amount: f32 },
+pub enum PdfTextItem {
+    /// Encoded PDF string bytes.
+    Text(Vec<u8>),
+    /// Numeric text-position adjustment in thousandths of a text-space unit.
+    Adjustment(f32),
 }

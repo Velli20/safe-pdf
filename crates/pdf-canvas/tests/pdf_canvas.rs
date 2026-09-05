@@ -2,7 +2,7 @@
 
 mod common;
 
-use std::{collections::HashMap, rc::Rc, sync::Arc};
+use std::{collections::HashMap, rc::Rc};
 
 use common::{content_stream, replay};
 use pdf_canvas::{pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas};
@@ -20,6 +20,7 @@ use pdf_resources::{
     resource::Resource,
     resources::Resources,
 };
+use pdf_text_engine::bundled_font_system;
 
 fn render(
     recording: &mut RecordingCanvas,
@@ -27,7 +28,7 @@ fn render(
     resources: Option<&Resources>,
 ) -> Result<(), pdf_canvas::error::PdfCanvasError> {
     let page = PdfPage::default();
-    let mut canvas = PdfCanvas::new(recording, &page, None)?;
+    let mut canvas = PdfCanvas::new(recording, &page, None, bundled_font_system())?;
     canvas.render_content_stream(stream, None, None, resources, None)
 }
 
@@ -177,8 +178,8 @@ fn releases_render_state_after_an_operator_error() {
     );
     let mut recording = RecordingCanvas::new(100.0, 100.0);
     let page = PdfPage::default();
-    let mut canvas =
-        PdfCanvas::new(&mut recording, &page, None).expect("canvas should be constructed");
+    let mut canvas = PdfCanvas::new(&mut recording, &page, None, bundled_font_system())
+        .expect("canvas should be constructed");
 
     let result = canvas.render_content_stream(&failing, None, None, None, None);
     assert!(matches!(
@@ -217,7 +218,7 @@ fn unavailable_image_xobject_is_a_no_op() {
 fn inline_image_render_path_matches_image_xobject_path() {
     let image = pdf_image::decode_normalized_image(
         &image_dictionary(),
-        Arc::new(vec![0b1010_0000]),
+        vec![0b1010_0000].into(),
         &pdf_object::object_resolver::PassthroughResolver,
         None,
     )

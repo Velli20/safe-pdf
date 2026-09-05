@@ -1,22 +1,15 @@
+//! Writing mode for PDF text rendering.
+
 use thiserror::Error;
 
-/// Writing mode declared by a Type0 encoding CMap.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Direction in which glyph advances are applied by the PDF font.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum WritingMode {
-    /// Horizontal writing mode (`/WMode 0`).
+    /// Glyphs advance along the text-space x axis.
+    #[default]
     Horizontal,
-    /// Vertical writing mode (`/WMode 1`).
+    /// Glyphs advance along the text-space y axis using vertical origins.
     Vertical,
-}
-
-impl WritingMode {
-    pub(crate) fn from_integer(value: i64) -> Self {
-        if value == 1 {
-            Self::Vertical
-        } else {
-            Self::Horizontal
-        }
-    }
 }
 
 /// Error returned when a CMap name does not identify a writing mode.
@@ -32,6 +25,16 @@ impl TryFrom<&[u8]> for WritingMode {
             b"Identity-H" => Ok(Self::Horizontal),
             b"Identity-V" => Ok(Self::Vertical),
             _ => Err(WritingModeNameError),
+        }
+    }
+}
+
+impl From<i64> for WritingMode {
+    fn from(value: i64) -> Self {
+        if value == 1 {
+            Self::Vertical
+        } else {
+            Self::Horizontal
         }
     }
 }

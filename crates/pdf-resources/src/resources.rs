@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use pdf_content_stream::ContentStreamIdAllocator;
-use pdf_font::font::Font;
+use pdf_font::PdfFontSpec;
+use pdf_font::from_dictionary;
 use pdf_object::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
     object_variant::ObjectVariant,
@@ -67,8 +68,8 @@ pub(crate) fn read_font_resource(
 ) -> Result<Resource, PdfPagesError> {
     // Font construction is best-effort and infallible. Only successfully
     // parsed Type3 fonts consume nested resources; whole-font fallbacks do not.
-    let font = Font::from_dictionary(dictionary, objects, id_allocator);
-    let resources = if matches!(&font, Font::Type3(_)) {
+    let font = from_dictionary(dictionary, objects, id_allocator);
+    let resources = if font.is_type3() {
         Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?
     } else {
         None
@@ -88,7 +89,7 @@ fn read_fonts(
     cycle_tracker: &mut ReadCycleTracker,
     id_allocator: &mut ContentStreamIdAllocator,
 ) -> Result<HashMap<Vec<u8>, Resource>, PdfPagesError> {
-    let Some(font_dict) = resources.optional_dictionary(Font::KEY, objects)? else {
+    let Some(font_dict) = resources.optional_dictionary(b"Font", objects)? else {
         return Ok(HashMap::new());
     };
 
@@ -337,7 +338,7 @@ impl Resources {
     ///
     /// An `Option` containing a reference to the [`Font`] if found, or `None`
     /// if not present or not a font.
-    pub fn font<N: AsRef<[u8]>>(&self, name: N) -> Option<(&Font, Option<&Resources>)> {
+    pub fn font<N: AsRef<[u8]>>(&self, name: N) -> Option<(&PdfFontSpec, Option<&Resources>)> {
         self.resolved()?.fonts.get(name.as_ref())?.as_font()
     }
 

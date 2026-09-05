@@ -4,70 +4,7 @@ use pdf_object::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
-use crate::error::FontError;
-
-/// Represents the base encoding of a font.
-#[derive(Default, PartialEq, Clone, Debug)]
-pub enum FontEncoding {
-    #[default]
-    None,
-    /// Standard encoding.
-    Standard,
-    /// Standard Mac Roman encoding.
-    MacRoman,
-    /// Mac Expert encoding.
-    MacExpert,
-    /// Windows ANSI encoding.
-    WinAnsi,
-    /// Unknown encoding.
-    Unknown(Vec<u8>),
-}
-
-impl From<&[u8]> for FontEncoding {
-    fn from(name: &[u8]) -> Self {
-        match name {
-            b"MacRomanEncoding" => Self::MacRoman,
-            b"MacExpertEncoding" => Self::MacExpert,
-            b"StandardEncoding" => Self::Standard,
-            b"WinAnsiEncoding" => Self::WinAnsi,
-            _ => Self::Unknown(Vec::from(name)),
-        }
-    }
-}
-
-impl FontEncoding {
-    /// Encodes UTF-8 text using the font encoding.
-    pub fn encode(&self, text: &str) -> Result<Vec<u8>, FontError> {
-        text.chars()
-            .map(|character| self.encode_char(character))
-            .collect()
-    }
-
-    /// Encodes a single Unicode scalar value using the font encoding.
-    pub fn encode_char(&self, character: char) -> Result<u8, FontError> {
-        match self {
-            Self::WinAnsi => encode_win_ansi_char(character),
-            _ => Err(FontError::UnsupportedTextEncoding(self.clone())),
-        }
-    }
-
-    /// Decodes bytes using the font encoding.
-    pub fn decode(&self, bytes: &[u8]) -> Result<String, FontError> {
-        bytes
-            .iter()
-            .copied()
-            .map(|byte| self.decode_byte(byte))
-            .collect()
-    }
-
-    /// Decodes a single encoded byte using the font encoding.
-    pub fn decode_byte(&self, byte: u8) -> Result<char, FontError> {
-        match self {
-            Self::WinAnsi => decode_win_ansi_byte(byte),
-            _ => Err(FontError::UnsupportedTextEncoding(self.clone())),
-        }
-    }
-}
+use crate::{base_encoding::BaseEncoding, error::FontError};
 
 #[derive(Debug)]
 pub struct Encoding {
@@ -89,18 +26,18 @@ impl Encoding {
         }
     }
 
-    pub(crate) fn from_base_encoding(encoding: FontEncoding) -> Result<Self, FontError> {
+    pub(crate) fn from_base_encoding(encoding: BaseEncoding) -> Result<Self, FontError> {
         let names = match encoding {
-            FontEncoding::Standard => names_from_base(&STANDARD_NAMES),
-            FontEncoding::WinAnsi => names_from_base(&WIN_ANSI_NAMES),
-            FontEncoding::MacRoman => names_from_base(&MAC_ROMAN_NAMES),
-            FontEncoding::MacExpert => names_from_base(&MAC_EXPERT_NAMES),
-            FontEncoding::Unknown(name) => {
+            BaseEncoding::Standard => names_from_base(&STANDARD_NAMES),
+            BaseEncoding::WinAnsi => names_from_base(&WIN_ANSI_NAMES),
+            BaseEncoding::MacRoman => names_from_base(&MAC_ROMAN_NAMES),
+            BaseEncoding::MacExpert => names_from_base(&MAC_EXPERT_NAMES),
+            BaseEncoding::Unknown(name) => {
                 return Err(FontError::UnsupportedBaseEncoding(
                     String::from_utf8_lossy(&name).into_owned(),
                 ));
             }
-            FontEncoding::None => Vec::new(),
+            BaseEncoding::BuiltIn => Vec::new(),
         };
         Ok(Self { names })
     }
@@ -142,7 +79,7 @@ impl Encoding {
                 ObjectVariant::Dictionary(encoding_dictionary) => {
                     Self::from_encoding_dictionary(encoding_dictionary, objects)
                 }
-                other => Self::from_base_encoding(FontEncoding::from(other.try_bytes(objects)?)),
+                other => Self::from_base_encoding(BaseEncoding::from(other.try_bytes(objects)?)),
             })
             .transpose()
     }
@@ -153,7 +90,7 @@ impl Encoding {
     ) -> Result<Self, FontError> {
         let mut encoding = match dictionary.get(b"BaseEncoding") {
             Some(base) => {
-                let base_encoding = FontEncoding::from(base.try_bytes(objects)?);
+                let base_encoding = BaseEncoding::from(base.try_bytes(objects)?);
                 Encoding::from_base_encoding(base_encoding)?
             }
             None => Self::default(),
@@ -171,7 +108,7 @@ fn names_from_base(base: &[&'static [u8]]) -> Vec<Cow<'static, [u8]>> {
     base.iter().map(|&nm| Cow::Borrowed(nm)).collect()
 }
 
-fn encode_win_ansi_char(character: char) -> Result<u8, FontError> {
+pub(crate) fn encode_win_ansi_char(character: char) -> Result<u8, FontError> {
     let code = u32::from(character);
     if code <= 0x7f || (0xa0..=0xff).contains(&code) {
         return u8::try_from(code)
@@ -211,7 +148,7 @@ fn encode_win_ansi_char(character: char) -> Result<u8, FontError> {
     Ok(byte)
 }
 
-fn decode_win_ansi_byte(byte: u8) -> Result<char, FontError> {
+pub(crate) fn decode_win_ansi_byte(byte: u8) -> Result<char, FontError> {
     let character = match byte {
         0x80 => '\u{20ac}',
         0x82 => '\u{201a}',
@@ -1286,29 +1223,30 @@ const MAC_EXPERT_NAMES: [&[u8]; 256] = [
 
 #[cfg(test)]
 mod tests {
-    use super::{FontEncoding, FontError};
+    use super::FontError;
+    use crate::BaseEncoding;
 
     #[test]
     fn win_ansi_round_trips_supported_text() {
         let text = "Euro \u{20ac}, caf\u{e9}, \u{201c}quoted\u{201d}";
-        let encoded = FontEncoding::WinAnsi.encode(text).expect("encode");
+        let encoded = BaseEncoding::WinAnsi.encode(text).expect("encode");
         assert_eq!(
-            FontEncoding::WinAnsi.decode(&encoded).expect("decode"),
+            BaseEncoding::WinAnsi.decode(&encoded).expect("decode"),
             text
         );
     }
 
     #[test]
     fn win_ansi_encodes_special_characters() {
-        assert_eq!(FontEncoding::WinAnsi.encode_char('\u{20ac}'), Ok(0x80));
-        assert_eq!(FontEncoding::WinAnsi.encode_char('\u{201c}'), Ok(0x93));
-        assert_eq!(FontEncoding::WinAnsi.encode_char('\u{201d}'), Ok(0x94));
+        assert_eq!(BaseEncoding::WinAnsi.encode_char('\u{20ac}'), Ok(0x80));
+        assert_eq!(BaseEncoding::WinAnsi.encode_char('\u{201c}'), Ok(0x93));
+        assert_eq!(BaseEncoding::WinAnsi.encode_char('\u{201d}'), Ok(0x94));
     }
 
     #[test]
     fn win_ansi_rejects_unrepresentable_characters() {
         assert_eq!(
-            FontEncoding::WinAnsi.encode_char('\u{1f642}'),
+            BaseEncoding::WinAnsi.encode_char('\u{1f642}'),
             Err(FontError::UnsupportedWinAnsiCharacter {
                 character: '\u{1f642}'
             })
@@ -1318,11 +1256,11 @@ mod tests {
     #[test]
     fn win_ansi_rejects_undefined_bytes() {
         assert_eq!(
-            FontEncoding::WinAnsi.decode_byte(0x81),
+            BaseEncoding::WinAnsi.decode_byte(0x81),
             Err(FontError::InvalidWinAnsiByte { byte: 0x81 })
         );
         assert_eq!(
-            FontEncoding::WinAnsi.decode_byte(0x9d),
+            BaseEncoding::WinAnsi.decode_byte(0x9d),
             Err(FontError::InvalidWinAnsiByte { byte: 0x9d })
         );
     }
@@ -1330,12 +1268,12 @@ mod tests {
     #[test]
     fn non_win_ansi_variants_are_rejected() {
         assert_eq!(
-            FontEncoding::Standard.encode("test"),
-            Err(FontError::UnsupportedTextEncoding(FontEncoding::Standard))
+            BaseEncoding::Standard.encode("test"),
+            Err(FontError::UnsupportedTextEncoding(BaseEncoding::Standard))
         );
         assert_eq!(
-            FontEncoding::None.decode(b"test"),
-            Err(FontError::UnsupportedTextEncoding(FontEncoding::None))
+            BaseEncoding::BuiltIn.decode(b"test"),
+            Err(FontError::UnsupportedTextEncoding(BaseEncoding::BuiltIn))
         );
     }
 }

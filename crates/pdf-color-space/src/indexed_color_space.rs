@@ -1,5 +1,4 @@
-use std::sync::Arc;
-
+use bytes::Bytes;
 use pdf_graphics::color::Color;
 use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
@@ -18,7 +17,7 @@ pub struct IndexedColorSpace {
     /// Maximum valid index value (0 to 255). The palette contains `hival + 1` entries.
     pub hival: u8,
     /// Raw lookup table bytes. Each entry contains `base.num_color_components()` bytes.
-    pub lookup: Arc<Vec<u8>>,
+    pub lookup: Bytes,
 }
 
 /// Parses an Indexed color space: `[/Indexed base hival lookup]`
@@ -55,9 +54,9 @@ pub(crate) fn parse_indexed_color_space(
 fn extract_lookup_table(
     objects: &dyn ObjectResolver,
     lookup: &ObjectVariant,
-) -> Result<Arc<Vec<u8>>, ColorSpaceError> {
+) -> Result<Bytes, ColorSpaceError> {
     if let Ok(data) = lookup.try_bytes(objects) {
-        return Ok(Arc::new(data.to_vec()));
+        return Ok(Bytes::copy_from_slice(data));
     }
     Ok(lookup.try_stream(objects)?.shared_data())
 }
@@ -176,7 +175,7 @@ mod tests {
         let extracted = extract_lookup_table(&PassthroughResolver, &lookup)
             .expect("stream lookup table should parse");
 
-        assert!(Arc::ptr_eq(&extracted, &stream_data));
+        assert_eq!(extracted.as_ptr(), stream_data.as_ptr());
     }
 
     #[test]
@@ -192,7 +191,7 @@ mod tests {
             let extracted = extract_lookup_table(&PassthroughResolver, &lookup)
                 .expect("string lookup table should parse");
 
-            assert_eq!(extracted.as_slice(), expected.as_slice());
+            assert_eq!(extracted.as_ref(), expected.as_slice());
         }
     }
 
@@ -200,10 +199,11 @@ mod tests {
         IndexedColorSpace {
             base: Box::new(ColorSpace::DeviceRGB),
             hival: 7,
-            lookup: Arc::new(vec![
+            lookup: vec![
                 0, 128, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 255, 255, 255, 0, 255, 255, 255, 0,
                 243, 128, 255,
-            ]),
+            ]
+            .into(),
         }
     }
 
