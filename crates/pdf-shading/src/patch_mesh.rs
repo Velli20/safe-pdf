@@ -4,7 +4,7 @@
 //! packed-stream decoding, and patch reconstruction live in dedicated sibling
 //! modules so each stage can be understood independently.
 
-use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object_reader::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 use thiserror::Error;
 
 use crate::{

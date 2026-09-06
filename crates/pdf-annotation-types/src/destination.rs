@@ -1,5 +1,5 @@
-use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_lookup::ObjectLookupExt,
+use pdf_object_reader::{
+    dictionary::Dictionary, object_error::ObjectError, object_lookup::ObjectLookupExt,
     object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
@@ -18,7 +18,7 @@ pub enum DestinationTarget {
     /// A destination page dictionary.
     Dictionary(Dictionary),
     /// A destination page reference.
-    Reference(usize),
+    Reference(pdf_object_reader::object_id::ObjectId),
 }
 
 /// An explicit destination array.

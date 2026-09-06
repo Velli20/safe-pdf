@@ -1,6 +1,6 @@
 //! Emits the normal appearance stream for generated free-text annotations.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use pdf_annotation_types::{AppearanceDictionary, AppearanceField};
 use pdf_content_stream::ContentStream;
@@ -154,14 +154,15 @@ impl<'a> FreeTextAppearanceStreamBuilder<'a> {
         resources.fonts.insert(
             style.font.resource_name.clone(),
             Resource::Font {
-                font: Rc::new(layout.into_font()),
+                font: Arc::new(layout.into_font()),
                 resources: None,
-            },
+            }
+            .into(),
         );
         let form = FormXObject {
             bbox: Rect::new(bounds.width(), bounds.height()),
             matrix: None,
-            resources: Some(Rc::new(resources)),
+            resources: Some(resources.into()),
             content_stream: ContentStream { operators, id: 0 },
         };
         AppearanceDictionary {

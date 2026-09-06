@@ -1,99 +1,54 @@
-use std::rc::Rc;
-
-use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
-use pdf_graphics::rect::Rect;
-use pdf_graphics::transform::Transform;
-use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+use crate::resources::Resources;
+use pdf_content_stream::ContentStream;
+use pdf_graphics::{rect::Rect, transform::Transform};
+use pdf_object_reader::{
+    FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult,
+    object_variant::ObjectVariant,
 };
 
-use crate::error::PdfPagesError;
-use crate::object_reader::ReadCycleTracker;
-use crate::resource_cache::ResourceCache;
-use crate::resources::Resources;
-
-/// Represents a PDF Form XObject.
+/// A parsed Form XObject, including deferred resource graph edges.
 pub struct FormXObject {
-    /// The bounding box of the form.
+    /// Normalized form bounds.
     pub bbox: Rect,
-    /// Optional transformation matrix.
+    /// Optional form transformation.
     pub matrix: Option<Transform>,
-    /// Resources used by the form.
-    pub resources: Option<Rc<Resources>>,
-    /// The content stream that defines the graphics of the pattern cell.
+    /// Resources needed to paint the form.
+    pub resources: Option<ObjectHandle<Resources>>,
+    /// Parsed form operators.
     pub content_stream: ContentStream,
 }
 
-impl FormXObject {
-    /// Builds a form XObject from parsed dictionary fields and a prepared content stream.
-    ///
-    /// This helper centralizes the shared `/BBox`, `/Matrix`, and `/Resources`
-    /// parsing used by both stream-backed forms and dictionary-only fallback forms.
-    fn from_dictionary_parts(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        cycle_tracker: &mut ReadCycleTracker,
-        id_allocator: &mut ContentStreamIdAllocator,
-        content_stream: ContentStream,
-    ) -> Result<Self, PdfPagesError> {
-        // Retrieve the `/BBox` entry.
-        let bbox = dictionary.required_bbox(objects)?.normalized();
-
-        // Retrieve the `/Matrix` entry if present.
-        let matrix = dictionary.optional_matrix(objects)?;
-
-        // Parse the `/Resources` entry if present, mapping any errors.
-        let resources = Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?;
-
-        Ok(FormXObject {
+impl FromPdfObject for FormXObject {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object().object().clone();
+        // Both stream-backed and dictionary-only forms expose the same metadata.
+        let mut context = context.dictionary()?;
+        let content_stream = match object.value() {
+            // Dictionary-only forms still receive an ID, but have no drawing operators.
+            ObjectVariant::Dictionary(_) => ContentStream {
+                operators: Vec::new(),
+                id: context.content_stream_ids().next_id()?,
+            },
+            _ => context.read::<ContentStream>(object.value())?,
+        };
+        let bbox = context
+            .dictionary()
+            .required_bbox(context.source())?
+            .normalized();
+        let matrix = context.dictionary().optional_matrix(context.source())?;
+        // Retain deferred handles so recursive resource graphs can finish decoding.
+        let resources = context
+            .dictionary()
+            .get(b"Resources")
+            .cloned()
+            .map(|value| context.read_shared(&value))
+            .transpose()?;
+        Ok(Self {
             bbox,
             matrix,
             resources,
             content_stream,
         })
-    }
-
-    /// Parses a Form XObject from its dictionary and stream data.
-    pub fn read_xobject(
-        content: &ObjectVariant,
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        cycle_tracker: &mut ReadCycleTracker,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Self, PdfPagesError> {
-        let content_stream = ContentStream::new(content, objects, id_allocator)?;
-        Self::from_dictionary_parts(
-            dictionary,
-            objects,
-            cache,
-            cycle_tracker,
-            id_allocator,
-            content_stream,
-        )
-    }
-
-    /// Parses a dictionary-only Form XObject and treats it as an empty form.
-    pub fn empty_from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        cycle_tracker: &mut ReadCycleTracker,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Self, PdfPagesError> {
-        let content_stream = ContentStream {
-            operators: Vec::new(),
-            id: id_allocator.next_id()?,
-        };
-        Self::from_dictionary_parts(
-            dictionary,
-            objects,
-            cache,
-            cycle_tracker,
-            id_allocator,
-            content_stream,
-        )
     }
 }
 
@@ -102,14 +57,11 @@ impl FormXObject {
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_content_stream::ContentStreamIdAllocator;
     use pdf_graphics::transform::Transform;
-    use pdf_object::{
+    use pdf_object_reader::{
         dictionary::Dictionary, object_resolver::PassthroughResolver,
         object_variant::ObjectVariant, stream::StreamObject,
     };
-
-    use crate::{object_reader::ReadCycleTracker, resource_cache::DefaultResourceCache};
 
     use super::FormXObject;
 
@@ -128,19 +80,12 @@ mod tests {
             (Vec::from(b"Subtype"), ObjectVariant::Name(b"Form".to_vec())),
         ]));
         let stream = StreamObject::new(7, 0, dictionary.clone(), Vec::new());
-        let mut cache = DefaultResourceCache::default();
-        let mut cycle_tracker = ReadCycleTracker::default();
-        let mut id_allocator = ContentStreamIdAllocator::new();
 
-        let form = FormXObject::read_xobject(
-            &ObjectVariant::Stream(stream),
-            &dictionary,
-            &PassthroughResolver,
-            &mut cache,
-            &mut cycle_tracker,
-            &mut id_allocator,
-        )
-        .expect("form xobject should parse");
+        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+
+        let form = reader
+            .read::<FormXObject>(&ObjectVariant::Stream(stream))
+            .expect("form xobject should parse");
 
         assert_eq!(form.bbox.left, 265.077);
         assert_eq!(form.bbox.top, 43.3206);
@@ -173,18 +118,16 @@ mod tests {
                 ]),
             ),
         ]));
-        let mut cache = DefaultResourceCache::default();
-        let mut cycle_tracker = ReadCycleTracker::default();
-        let mut id_allocator = ContentStreamIdAllocator::new();
 
-        let form = FormXObject::empty_from_dictionary(
-            &dictionary,
-            &PassthroughResolver,
-            &mut cache,
-            &mut cycle_tracker,
-            &mut id_allocator,
-        )
-        .expect("dictionary-only form should parse");
+        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+
+        let form = reader
+            .read::<FormXObject>(
+                &pdf_object_reader::object_variant::ObjectVariant::Dictionary(
+                    (&dictionary).clone(),
+                ),
+            )
+            .expect("dictionary-only form should parse");
 
         assert_eq!(form.bbox.left, 0.0);
         assert_eq!(form.bbox.top, 0.0);

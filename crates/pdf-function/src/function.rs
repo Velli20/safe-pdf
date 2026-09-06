@@ -6,7 +6,7 @@
 //! - Type 3: Stitching functions (combining multiple functions)
 //! - Type 4: PostScript Calculator functions
 
-use pdf_object::{
+use pdf_object_reader::{
     object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 

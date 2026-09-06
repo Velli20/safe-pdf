@@ -1,12 +1,10 @@
+//! PDF object variants and checked accessors.
+
+use crate::{
+    cross_reference_table::CrossReferenceTable, dictionary::Dictionary, object_error::ObjectError,
+    object_id::ObjectId, object_resolver::ObjectResolver, stream::StreamObject, trailer::Trailer,
+};
 use num_traits::FromPrimitive;
-
-use crate::cross_reference_table::CrossReferenceTable;
-use crate::dictionary::Dictionary;
-use crate::error::ObjectError;
-use crate::object_resolver::ObjectResolver;
-use crate::stream::StreamObject;
-use crate::trailer::Trailer;
-
 /// Represents any PDF object as described in the PDF specification.
 ///
 /// This enum is the central value type used across the crate to model
@@ -38,7 +36,7 @@ pub enum ObjectVariant {
     /// End-of-file marker.
     EndOfFile,
     /// An indirect reference pointing to an object number.
-    Reference(usize),
+    Reference(ObjectId),
     /// A stream object, which may have associated dictionary and data.
     Stream(StreamObject),
 }
@@ -336,7 +334,7 @@ impl ObjectVariant {
     /// Returns the object number if this is a `Reference`.
     pub fn try_object_number(&self) -> Result<usize, ObjectError> {
         match self {
-            ObjectVariant::Reference(value) => Ok(*value),
+            ObjectVariant::Reference(value) => Ok(value.number),
             ObjectVariant::Dictionary(value) => {
                 value.object_number.ok_or(ObjectError::ObjectMissingNumber {
                     found_type: "Dictionary",
@@ -410,7 +408,7 @@ mod tests {
 
     #[test]
     fn try_bytes_accepts_resolved_byte_backed_object() {
-        let reference = ObjectVariant::Reference(1);
+        let reference = ObjectVariant::Reference(crate::object_id::ObjectId::new(1, 0));
         let resolver = FixedResolver {
             object: ObjectVariant::Name(vec![0xFF]),
         };

@@ -9,18 +9,23 @@ pub mod font_registry;
 pub mod glyph_name_to_unicode;
 pub mod glyph_widths_map;
 pub mod pdf;
+mod pdf_font_descriptor;
 pub mod pdf_font_handle;
+mod pdf_font_metrics;
 mod pdf_font_parser;
+mod pdf_font_program;
 pub mod pdf_font_spec;
 mod pdf_path_pen;
 mod query_cache;
-pub mod simple_font_glyph_map;
+pub mod simple_font_spec;
 pub mod standard14;
 pub mod text_string;
 pub mod true_type;
 pub mod type0;
+pub mod type0_font_spec;
 pub mod type1;
 pub mod type3;
+pub mod type3_font_spec;
 
 pub use base_encoding::BaseEncoding;
 pub use error::FontError;
@@ -37,7 +42,6 @@ pub use pdf::{
     PdfFontDescriptor, PdfGlyphMetric, PdfMetrics, SimpleEncoding, SimpleFontSpec, ToUnicodeMap,
     Type0FontSpec, Type3FontSpec,
 };
-pub use pdf_font_parser::from_dictionary;
 pub use pdf_font_spec::BundledFallbackProvider;
 pub use pdf_font_spec::PdfFontSpec;
 pub use standard14::Standard14Font;

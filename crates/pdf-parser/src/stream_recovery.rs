@@ -22,7 +22,7 @@
 //! remains available for structural objects such as cross-reference streams, while
 //! ordinary document objects use this validated recovery path.
 
-use pdf_object::{
+use pdf_object_reader::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
     object_variant::ObjectVariant,
 };

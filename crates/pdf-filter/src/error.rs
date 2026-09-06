@@ -54,13 +54,13 @@ impl From<pdf_utils::BitReaderError> for FilterError {
     }
 }
 
-impl From<pdf_object::error::ObjectError> for FilterError {
-    fn from(err: pdf_object::error::ObjectError) -> Self {
+impl From<pdf_object_reader::object_error::ObjectError> for FilterError {
+    fn from(err: pdf_object_reader::object_error::ObjectError) -> Self {
         Self::Object(err.to_string())
     }
 }
 
-impl From<FilterError> for pdf_object::error::ObjectError {
+impl From<FilterError> for pdf_object_reader::object_error::ObjectError {
     fn from(err: FilterError) -> Self {
         match err {
             FilterError::Decompression(msg) => Self::DecompressionError(msg),

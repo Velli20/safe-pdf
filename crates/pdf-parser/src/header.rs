@@ -1,4 +1,4 @@
-use pdf_object::version::Version;
+use pdf_object_reader::version::Version;
 use pdf_tokenizer::PdfToken;
 use thiserror::Error;
 

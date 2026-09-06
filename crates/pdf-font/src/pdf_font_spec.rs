@@ -1,5 +1,8 @@
 //! Complete normalized PDF font resource specifications.
 
+use pdf_object_reader::{
+    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
+};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -34,6 +37,37 @@ pub enum PdfFontSpec {
     TrueType(SimpleFontSpec),
     /// A Type 3 font whose glyphs are PDF content streams.
     Type3(Type3FontSpec),
+}
+
+impl FromPdfObject for PdfFontSpec {
+    /// Reads a font resource, substituting a Standard 14 font on parsing failure.
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        // Keep recovery at the resource boundary; strict conversion reports the cause.
+        Ok(Self::try_from(&mut context).unwrap_or_else(|_| {
+            Self::from(crate::fallback::fallback_standard14_font(&mut context))
+        }))
+    }
+}
+
+impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for PdfFontSpec {
+    type Error = ObjectReadError;
+
+    /// Parses a font dictionary without applying whole-font substitution.
+    fn try_from(context: &mut DictionaryContext<'_, A>) -> ReadResult<Self> {
+        let subtype: Arc<[u8]> = context.required(b"Subtype")?;
+        match subtype.as_ref() {
+            b"Type0" => Type0FontSpec::try_from(context).map(Self::Type0),
+            b"Type1" => SimpleFontSpec::try_from(context).map(Self::Type1),
+            b"MMType1" => SimpleFontSpec::try_from(context).map(Self::MultipleMasterType1),
+            b"TrueType" => SimpleFontSpec::try_from(context).map(Self::TrueType),
+            b"Type3" => Type3FontSpec::try_from(context).map(Self::Type3),
+            other => Err(FontError::UnsupportedFontSubtype {
+                subtype: String::from_utf8_lossy(other).into_owned(),
+            }
+            .into()),
+        }
+    }
 }
 
 impl From<Standard14Font> for PdfFontSpec {

@@ -3,7 +3,7 @@ use pdf_decode::DecodeError;
 use pdf_function::{
     error::FunctionReadError, function_interpolation_error::FunctionInterpolationError,
 };
-use pdf_object::error::ObjectError;
+use pdf_object_reader::object_error::ObjectError;
 use thiserror::Error;
 
 pub use crate::{
@@ -35,4 +35,13 @@ pub enum PdfShadingError {
     PatchMesh(#[from] PatchMeshError),
     #[error("unsupported shading feature: {0}")]
     UnsupportedFeature(String),
+}
+
+impl From<PdfShadingError> for pdf_object_reader::ObjectReadError {
+    fn from(source: PdfShadingError) -> Self {
+        Self::Decode {
+            target: "PDF shading",
+            source: Box::new(source),
+        }
+    }
 }

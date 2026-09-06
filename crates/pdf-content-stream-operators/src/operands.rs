@@ -1,7 +1,7 @@
 use crate::error::PdfOperatorError;
 use num_traits::FromPrimitive;
-use pdf_object::{
-    error::ObjectError, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+use pdf_object_reader::{
+    object_error::ObjectError, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
 };
 
 /// Reusable storage for the operands belonging to one PDF operator.

@@ -1,4 +1,4 @@
-use pdf_object::text_encoding::BigEndianU16Units;
+use pdf_object_reader::text_encoding::BigEndianU16Units;
 use thiserror::Error;
 
 const UTF16_BIG_ENDIAN_BOM: &[u8] = &[0xFE, 0xFF];

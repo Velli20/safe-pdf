@@ -1,4 +1,4 @@
-use pdf_object::error::ObjectError;
+use pdf_object_reader::object_error::ObjectError;
 use pdf_resources::error::PdfPagesError;
 use thiserror::Error;
 
@@ -33,4 +33,13 @@ pub enum ButtonStateError {
         /// Stable, page-scoped identifier of the annotation whose state could not be resolved.
         id: AnnotationId,
     },
+}
+
+impl From<AnnotationError> for pdf_object_reader::ObjectReadError {
+    fn from(source: AnnotationError) -> Self {
+        Self::Decode {
+            target: "PDF annotation",
+            source: Box::new(source),
+        }
+    }
 }

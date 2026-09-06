@@ -14,7 +14,7 @@ pdf-color-space = { path = "../pdf-color-space" }
 pdf-decode = { path = "../pdf-decode" }
 pdf-function = { path = "../pdf-function" }
 pdf-graphics = { path = "../pdf-graphics" }
-pdf-object = { path = "../pdf-object" }
+pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-utils = { path = "../pdf-utils" }
 thiserror = "2.0.12"
 

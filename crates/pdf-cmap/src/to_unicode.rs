@@ -6,7 +6,10 @@
 use std::collections::HashMap;
 
 use crate::{UnicodeSequence, cmap::parser::CMapParser, error::CMapError};
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object_reader::{
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, dictionary::Dictionary,
+    object_resolver::ObjectResolver,
+};
 
 /// A named identity `/ToUnicode` map covering the Unicode basic multilingual plane.
 ///
@@ -40,7 +43,7 @@ pub struct ToUnicodeCMap(HashMap<u16, UnicodeSequence>);
 impl ToUnicodeCMap {
     /// Parse the optional `/ToUnicode` CMap from a font dictionary.
     ///
-    /// # Paramaters
+    /// # Parameters
     ///
     /// - `dictionary`: The PDF font dictionary that may contain `/ToUnicode`.
     /// - `objects`: The resolver used to dereference indirect PDF objects.
@@ -87,6 +90,14 @@ impl crate::ToUnicodeMap for ToUnicodeCMap {
         u16::try_from(code.value())
             .ok()
             .and_then(|value| self.map_char_code(value).cloned())
+    }
+}
+
+impl FromPdfObject for ToUnicodeCMap {
+    /// Parses a stream within the caller's traversal; named identity maps are handled separately.
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let context = context.stream()?;
+        Ok(Self::try_from(context.stream().raw_data())?)
     }
 }
 

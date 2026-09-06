@@ -1,7 +1,7 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use pdf_image::InlineImage;
-use pdf_object::object_resolver::PassthroughResolver;
+use pdf_object_reader::object_resolver::PassthroughResolver;
 use pdf_parser::parser::PdfParser;
 
 use crate::{
@@ -54,7 +54,7 @@ impl PdfOperator for InlineImage {
         parser: &mut PdfParser<'a>,
     ) -> Result<Option<PdfOperatorVariant>, PdfOperatorError> {
         let image = parser.parse_inline_image(&PassthroughResolver)?;
-        Ok(Some(PdfOperatorVariant::InlineImage(Rc::new(image))))
+        Ok(Some(PdfOperatorVariant::InlineImage(Arc::new(image))))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
@@ -67,7 +67,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use pdf_image::InlineImage;
-    use pdf_object::{
+    use pdf_object_reader::{
         dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     };
 

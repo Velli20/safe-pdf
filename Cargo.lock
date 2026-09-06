@@ -831,14 +831,12 @@ dependencies = [
  "pdf-graphics",
  "pdf-graphics-femtovg",
  "pdf-graphics-skia",
- "pdf-object",
+ "pdf-object-reader",
  "pdf-parser",
  "pdf-renderer",
  "pdf-resources",
  "pdf-tokenizer",
  "raw-window-handle",
- "serde",
- "serde_json",
  "skia-safe",
  "thiserror 2.0.12",
  "wgpu",
@@ -2095,7 +2093,7 @@ dependencies = [
  "num-traits",
  "pdf-content-stream",
  "pdf-graphics",
- "pdf-object",
+ "pdf-object-reader",
  "pdf-resources",
  "thiserror 2.0.12",
 ]
@@ -2127,7 +2125,7 @@ dependencies = [
  "pdf-font",
  "pdf-graphics",
  "pdf-image",
- "pdf-object",
+ "pdf-object-reader",
  "pdf-resources",
  "pdf-shading",
  "pdf-text-engine",
@@ -2138,7 +2136,7 @@ dependencies = [
 name = "pdf-ccitt"
 version = "0.1.0"
 dependencies = [
- "pdf-object",
+ "pdf-object-reader",
  "pdf-utils",
  "thiserror 2.0.12",
 ]
@@ -2149,7 +2147,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "pdf-object",
+ "pdf-object-reader",
  "pdf-parser",
  "thiserror 2.0.12",
 ]
@@ -2161,7 +2159,7 @@ dependencies = [
  "bytes",
  "pdf-function",
  "pdf-graphics",
- "pdf-object",
+ "pdf-object-reader",
  "thiserror 2.0.12",
 ]
 
@@ -2174,7 +2172,7 @@ dependencies = [
  "pdf-content-stream-operators",
  "pdf-graphics",
  "pdf-image",
- "pdf-object",
+ "pdf-object-reader",
  "pdf-parser",
  "pdf-tokenizer",
  "thiserror 2.0.12",
@@ -2188,7 +2186,7 @@ dependencies = [
  "num-traits",
  "pdf-graphics",
  "pdf-image",
- "pdf-object",
+ "pdf-object-reader",
  "pdf-parser",
  "pdf-tokenizer",
  "thiserror 2.0.12",
@@ -2199,7 +2197,7 @@ name = "pdf-decode"
 version = "0.1.0"
 dependencies = [
  "num-traits",
- "pdf-object",
+ "pdf-object-reader",
  "pdf-utils",
  "thiserror 2.0.12",
 ]
@@ -2215,8 +2213,8 @@ dependencies = [
  "pdf-color-space",
  "pdf-content-stream",
  "pdf-graphics",
- "pdf-object",
  "pdf-object-collection",
+ "pdf-object-reader",
  "pdf-parser",
  "pdf-resources",
  "rc4",
@@ -2237,7 +2235,7 @@ dependencies = [
  "num-traits",
  "pdf-ccitt",
  "pdf-jbig2",
- "pdf-object",
+ "pdf-object-reader",
  "pdf-utils",
  "thiserror 2.0.12",
 ]
@@ -2252,7 +2250,7 @@ dependencies = [
  "pdf-content-stream",
  "pdf-content-stream-operators",
  "pdf-graphics",
- "pdf-object",
+ "pdf-object-reader",
  "pdf-parser",
  "read-fonts 0.39.2",
  "self_cell",
@@ -2268,7 +2266,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "pdf-decode",
- "pdf-object",
+ "pdf-object-reader",
  "pdf-postscript",
  "thiserror 2.0.12",
 ]
@@ -2318,7 +2316,7 @@ dependencies = [
  "pdf-decode",
  "pdf-filter",
  "pdf-graphics",
- "pdf-object",
+ "pdf-object-reader",
  "thiserror 2.0.12",
 ]
 
@@ -2335,25 +2333,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "pdf-object"
-version = "0.1.0"
-dependencies = [
- "bytes",
- "num-traits",
- "pdf-graphics",
- "thiserror 2.0.12",
-]
-
-[[package]]
 name = "pdf-object-collection"
 version = "0.1.0"
 dependencies = [
  "flate2",
  "num-traits",
  "pdf-filter",
- "pdf-object",
+ "pdf-object-reader",
  "serde",
  "serde_json",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "pdf-object-reader"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "num-traits",
+ "pdf-graphics",
  "thiserror 2.0.12",
 ]
 
@@ -2365,7 +2363,7 @@ dependencies = [
  "flate2",
  "pdf-filter",
  "pdf-image",
- "pdf-object",
+ "pdf-object-reader",
  "pdf-tokenizer",
  "thiserror 2.0.12",
 ]
@@ -2407,8 +2405,8 @@ dependencies = [
  "pdf-function",
  "pdf-graphics",
  "pdf-image",
- "pdf-object",
  "pdf-object-collection",
+ "pdf-object-reader",
  "pdf-shading",
  "thiserror 2.0.12",
 ]
@@ -2423,7 +2421,7 @@ dependencies = [
  "pdf-decode",
  "pdf-function",
  "pdf-graphics",
- "pdf-object",
+ "pdf-object-reader",
  "pdf-utils",
  "thiserror 2.0.12",
 ]

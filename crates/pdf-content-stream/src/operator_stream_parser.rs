@@ -1,4 +1,4 @@
-use pdf_object::object_resolver::PassthroughResolver;
+use pdf_object_reader::object_resolver::PassthroughResolver;
 use pdf_parser::error::ParserError;
 use pdf_parser::parser::PdfParser;
 use pdf_tokenizer::error::TokenizerError;
@@ -202,7 +202,7 @@ mod tests {
     use pdf_content_stream_operators::{
         graphics_state_operators::RestoreGraphicsState, variants::PdfOperatorVariant,
     };
-    use pdf_object::object_variant::ObjectVariant;
+    use pdf_object_reader::object_variant::ObjectVariant;
 
     use super::*;
 
@@ -325,7 +325,7 @@ mod tests {
                 PdfOperatorVariant::InlineImage(cloned_image),
             ) => {
                 assert_eq!(image.shared_data().as_ref(), b"x\n");
-                assert!(std::rc::Rc::ptr_eq(image, cloned_image));
+                assert!(std::sync::Arc::ptr_eq(image, cloned_image));
             }
             other => panic!("expected inline image, got {other:?}"),
         }

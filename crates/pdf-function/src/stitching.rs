@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 
-use pdf_object::{
+use pdf_object_reader::{
     object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 

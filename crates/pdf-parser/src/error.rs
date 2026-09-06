@@ -1,5 +1,5 @@
 use pdf_filter::error::FilterError;
-use pdf_object::error::ObjectError;
+use pdf_object_reader::object_error::ObjectError;
 use pdf_tokenizer::error::TokenizerError;
 use thiserror::Error;
 

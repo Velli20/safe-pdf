@@ -1,4 +1,4 @@
-use pdf_object::error::ObjectError;
+use pdf_object_reader::object_error::ObjectError;
 use pdf_parser::error::ParserError;
 use pdf_tokenizer::error::TokenizerError;
 use thiserror::Error;
@@ -44,4 +44,19 @@ pub enum PdfOperatorError {
     EmptyTextOperand,
     #[error("Object error while reading a content stream: {0}")]
     Object(#[from] ObjectError),
+}
+
+impl From<pdf_object_reader::ContentStreamIdExhausted> for PdfOperatorError {
+    fn from(_: pdf_object_reader::ContentStreamIdExhausted) -> Self {
+        Self::ContentStreamIdExhausted
+    }
+}
+
+impl From<PdfOperatorError> for pdf_object_reader::ObjectReadError {
+    fn from(source: PdfOperatorError) -> Self {
+        Self::Decode {
+            target: "PDF content stream",
+            source: Box::new(source),
+        }
+    }
 }

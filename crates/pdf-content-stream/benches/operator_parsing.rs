@@ -3,8 +3,8 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
-use pdf_object::{
+use pdf_content_stream::ContentStream;
+use pdf_object_reader::{
     dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     stream::StreamObject,
 };
@@ -44,10 +44,10 @@ fn benchmark_stream(
 
     group.bench_function("materialize", |bencher| {
         bencher.iter(|| {
-            let mut allocator = ContentStreamIdAllocator::new();
-            let parsed =
-                ContentStream::new(black_box(&stream), &PassthroughResolver, &mut allocator)
-                    .expect("benchmark content stream should parse");
+            let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+            let parsed = reader
+                .read::<ContentStream>(black_box(&stream))
+                .expect("benchmark content stream should parse");
             assert_eq!(parsed.operators.len(), expected_operators);
             black_box(parsed);
         });

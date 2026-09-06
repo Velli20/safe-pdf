@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use crate::error::ParserError;
-use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object_reader::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 use pdf_tokenizer::{PdfToken, Tokenizer};
 
 /// Parses PDF objects from a borrowed byte slice.
@@ -370,7 +370,7 @@ impl<'a> PdfParser<'a> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use pdf_object::object_resolver::PassthroughResolver;
+    use pdf_object_reader::object_resolver::PassthroughResolver;
 
     use super::*;
 

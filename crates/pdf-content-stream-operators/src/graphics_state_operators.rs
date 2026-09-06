@@ -1,6 +1,6 @@
 use num_traits::FromPrimitive;
 use pdf_graphics::{LineCap, LineJoin, transform::Transform};
-use pdf_object::object_resolver::PassthroughResolver;
+use pdf_object_reader::object_resolver::PassthroughResolver;
 
 use crate::{
     error::PdfOperatorError,

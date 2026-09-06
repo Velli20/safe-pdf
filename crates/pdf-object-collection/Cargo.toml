@@ -12,7 +12,7 @@ default = []
 json = ["serde", "serde_json"]
 
 [dependencies]
-pdf-object = { path = "../pdf-object" }
+pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-filter = { path = "../pdf-filter" }
 num-traits = "0.2.19"
 thiserror = "2.0.12"

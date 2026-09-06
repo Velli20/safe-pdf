@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use pdf_image::InlineImage;
 
@@ -79,7 +79,7 @@ pub enum PdfOperatorVariant {
     SetTextRise(SetTextRise),
     InvokeXObject(InvokeXObject),
     BeginCompatibility(BeginCompatibility),
-    InlineImage(Rc<InlineImage>),
+    InlineImage(Arc<InlineImage>),
     EndCompatibility(EndCompatibility),
     PaintShading(PaintShading),
     SetCharWidthAndBoundingBox(SetCharWidthAndBoundingBox),

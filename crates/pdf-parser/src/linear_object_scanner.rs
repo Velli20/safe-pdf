@@ -22,9 +22,9 @@
 
 use std::collections::BTreeMap;
 
-use pdf_object::{
+use pdf_object_reader::{
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
-    object_id::PdfObjectId,
+    object_id::ObjectId,
     object_resolver::PassthroughResolver,
     object_variant::ObjectVariant,
     trailer::Trailer,
@@ -194,10 +194,7 @@ impl<'input> LinearObjectScanner<'input> {
     ///
     /// Returns an error for an invalid indirect-object header, malformed value, stream
     /// without a dictionary, unrecoverable stream boundary, or invalid terminator.
-    fn scan_indirect_object(
-        &self,
-        probe: &mut PdfParser<'input>,
-    ) -> Result<PdfObjectId, ParserError> {
+    fn scan_indirect_object(&self, probe: &mut PdfParser<'input>) -> Result<ObjectId, ParserError> {
         let object_start = probe.position();
         let identifier = probe.parse_indirect_object_id().ok_or(
             ParserError::ExpectedIndirectObjectDeclaration {
@@ -252,7 +249,7 @@ impl<'input> LinearObjectScanner<'input> {
 fn root_is_indexed(objects: &BTreeMap<usize, CrossReferenceEntryType>, trailer: &Trailer) -> bool {
     matches!(
         trailer.dictionary.get(b"Root"),
-        Some(ObjectVariant::Reference(object_number)) if objects.contains_key(object_number)
+        Some(ObjectVariant::Reference(object_number)) if objects.contains_key(&object_number.number)
     )
 }
 

@@ -1,4 +1,7 @@
-use crate::{error::ObjectError, object_variant::ObjectVariant};
+use crate::{
+    object_error::ObjectError, object_id::ObjectId, object_variant::ObjectVariant,
+    pdf_object::PdfObject,
+};
 
 pub trait ObjectResolver {
     /// Resolves an object reference to its underlying object.
@@ -45,3 +48,19 @@ impl ObjectResolver for PassthroughResolver {
 /// Deprecated alias for [`PassthroughResolver`]. Use `PassthroughResolver` instead.
 #[deprecated(note = "Use PassthroughResolver instead")]
 pub type UnimplementedResolver = PassthroughResolver;
+
+impl crate::ObjectSource for PassthroughResolver {
+    type Error = ObjectError;
+    fn read_object(&self, _id: ObjectId) -> Result<Option<PdfObject>, Self::Error> {
+        Ok(None)
+    }
+}
+
+impl<S: ObjectResolver + ?Sized> ObjectResolver for &S {
+    fn resolve_object<'a>(
+        &'a self,
+        object: &'a ObjectVariant,
+    ) -> Result<&'a ObjectVariant, ObjectError> {
+        (**self).resolve_object(object)
+    }
+}

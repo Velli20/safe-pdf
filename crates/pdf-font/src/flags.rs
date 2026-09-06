@@ -1,9 +1,5 @@
 use bitflags::bitflags;
-use pdf_object::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-};
-
-use crate::error::FontError;
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 bitflags! {
     /// Font descriptor flags as defined in ISO 32000-1, Table 123.
@@ -26,20 +22,9 @@ bitflags! {
     }
 }
 
-impl FontFlags {
-    /// Read font descriptor flags from a font dictionary.
-    pub(crate) fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Self, FontError> {
-        let Some(descriptor) = dictionary.optional_dictionary(b"FontDescriptor", objects)? else {
-            return Ok(Self::empty());
-        };
-
-        Ok(descriptor
-            .get(b"Flags")
-            .and_then(|value| value.try_number::<u32>(objects).ok())
-            .map(Self::from_bits_truncate)
-            .unwrap_or_default())
+impl FromPdfObject for FontFlags {
+    /// Reads a descriptor's flag number while ignoring reserved bits.
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        Ok(Self::from_bits_truncate(u32::from_pdf_object(context)?))
     }
 }

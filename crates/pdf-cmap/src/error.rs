@@ -6,7 +6,7 @@ pub enum CMapError {
     #[error("Invalid PDF character code: {0}")]
     InvalidPdfCode(&'static str),
     #[error("Object error while reading a CMap: {0}")]
-    ObjectError(#[from] pdf_object::error::ObjectError),
+    ObjectError(#[from] pdf_object_reader::object_error::ObjectError),
     #[error("Unsupported Type0 /Encoding CMap '{0}'")]
     UnsupportedType0EncodingCMap(String),
     #[error("Invalid Type0 /Encoding CMap: {0}")]
@@ -21,4 +21,13 @@ pub enum CMapError {
     UnknownCMapKeyword(String),
     #[error("{0}")]
     ParserError(#[from] pdf_parser::error::ParserError),
+}
+
+impl From<CMapError> for pdf_object_reader::ObjectReadError {
+    fn from(source: CMapError) -> Self {
+        Self::Decode {
+            target: "PDF CMap",
+            source: Box::new(source),
+        }
+    }
 }

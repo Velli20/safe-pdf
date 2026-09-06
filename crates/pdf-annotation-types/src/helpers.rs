@@ -1,5 +1,5 @@
 use pdf_graphics::pdf_path::PdfPath;
-use pdf_object::{
+use pdf_object_reader::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 

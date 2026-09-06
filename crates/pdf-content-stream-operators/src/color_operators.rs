@@ -5,7 +5,7 @@ use crate::{
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
-use pdf_object::object_resolver::PassthroughResolver;
+use pdf_object_reader::object_resolver::PassthroughResolver;
 
 /// Sets the fill color to a grayscale value.
 /// The gray level applies to subsequent fill operations.

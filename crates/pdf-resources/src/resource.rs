@@ -5,34 +5,9 @@ use crate::{
 use pdf_color_space::color_space::ColorSpace;
 use pdf_font::PdfFontSpec;
 use pdf_graphics::Image;
+use pdf_object_reader::ObjectHandle;
 use pdf_shading::model::Shading;
-use std::{cell::OnceCell, rc::Rc};
-
-/// Lazily-resolved handle to a resource that is still being constructed.
-///
-/// The resource cache inserts this handle before recursive parsing begins so
-/// child lookups can preserve the entry instead of dropping it when they
-/// encounter a cycle back to the same PDF object.
-#[derive(Clone)]
-pub struct ResourceReference {
-    resource: Rc<OnceCell<Resource>>,
-}
-
-impl ResourceReference {
-    pub(crate) fn new(_object_number: usize) -> Self {
-        Self {
-            resource: Rc::new(OnceCell::new()),
-        }
-    }
-
-    pub(crate) fn resolve(&self, resource: Resource) {
-        let _ = self.resource.set(resource);
-    }
-
-    pub(crate) fn resolved(&self) -> Option<&Resource> {
-        self.resource.get()
-    }
-}
+use std::sync::Arc;
 
 /// Represents a PDF resource used on a page, such as fonts,
 /// graphics states, XObjects, patterns, or shadings.
@@ -40,96 +15,75 @@ impl ResourceReference {
 pub enum Resource {
     /// A font resource used for text rendering.
     Font {
-        font: Rc<PdfFontSpec>,
+        font: Arc<PdfFontSpec>,
         /// Optional nested resources for this font, such as ExtGState or XObjects used in Type 3 fonts.
-        resources: Option<Rc<Resources>>,
+        resources: Option<ObjectHandle<Resources>>,
     },
     /// An external graphics state resource.
-    ExternalGraphicsState(Rc<ExternalGraphicsState>),
+    ExternalGraphicsState(ObjectHandle<ExternalGraphicsState>),
     /// An image XObject resource.
-    Image(Rc<Image>),
+    Image(Arc<Image>),
     /// An image XObject whose dimensions are malformed and cannot be rendered.
     UnavailableImage,
     /// A form XObject resource.
-    Form(Rc<FormXObject>),
+    Form(ObjectHandle<FormXObject>),
     /// A pattern resource, used for tiling or shading fills.
-    Pattern(Rc<Pattern>),
+    Pattern(ObjectHandle<Pattern>),
     /// A shading resource, used for gradient fills and complex color transitions.
-    Shading(Rc<Shading>),
+    Shading(Arc<Shading>),
     /// A color space resource, used for defining color models.
-    ColorSpace(Rc<ColorSpace>),
-    /// A placeholder for a resource that is still being lazily resolved.
-    CyclicReference(ResourceReference),
+    ColorSpace(Arc<ColorSpace>),
 }
 
 impl Resource {
-    /// Creates a placeholder/reference pair for a resource object.
-    ///
-    /// The placeholder is inserted into the resource cache before parsing the
-    /// final resource so recursive lookups can keep the entry alive until the
-    /// returned [`ResourceReference`] is resolved.
-    pub(crate) fn cyclic_reference(object_number: usize) -> (Self, ResourceReference) {
-        let reference = ResourceReference::new(object_number);
-        (Self::CyclicReference(reference.clone()), reference)
-    }
-
-    /// Returns the fully resolved resource behind `self`.
-    ///
-    /// When `self` is the lazy placeholder produced by
-    /// [`Self::cyclic_reference`], this follows its [`ResourceReference`] and
-    /// yields the published resource once parsing has completed.
-    pub(crate) fn resolved(&self) -> Option<&Self> {
-        match self {
-            Self::CyclicReference(reference) => reference.resolved()?.resolved(),
-            _ => Some(self),
-        }
-    }
-
     /// Returns this resource as a font and any resources nested beneath it.
-    pub fn as_font(&self) -> Option<(&PdfFontSpec, Option<&Resources>)> {
-        let Self::Font { font, resources } = self.resolved()? else {
+    pub fn as_font(&self) -> Option<(Arc<PdfFontSpec>, Option<Arc<Resources>>)> {
+        let Self::Font { font, resources } = self else {
             return None;
         };
-        Some((font, resources.as_deref()))
+        Some((
+            Arc::clone(font),
+            resources.as_ref().map(ObjectHandle::get).transpose().ok()?,
+        ))
     }
 
-    pub(crate) fn as_external_graphics_state(&self) -> Option<&ExternalGraphicsState> {
-        let Self::ExternalGraphicsState(state) = self.resolved()? else {
+    pub(crate) fn as_external_graphics_state(&self) -> Option<Arc<ExternalGraphicsState>> {
+        let Self::ExternalGraphicsState(state) = self else {
             return None;
         };
-        Some(state)
+        state.get().ok()
     }
 
-    pub(crate) fn as_pattern(&self) -> Option<&Pattern> {
-        let Self::Pattern(pattern) = self.resolved()? else {
+    pub(crate) fn as_pattern(&self) -> Option<Arc<Pattern>> {
+        let Self::Pattern(pattern) = self else {
             return None;
         };
-        Some(pattern)
+        pattern.get().ok()
     }
 
-    pub(crate) fn as_shading(&self) -> Option<&Shading> {
-        let Self::Shading(shading) = self.resolved()? else {
+    pub(crate) fn as_shading(&self) -> Option<Arc<Shading>> {
+        let Self::Shading(shading) = self else {
             return None;
         };
-        Some(shading)
+        Some(Arc::clone(shading))
     }
 
-    pub(crate) fn as_color_space(&self) -> Option<&ColorSpace> {
-        let Self::ColorSpace(color_space) = self.resolved()? else {
+    pub(crate) fn as_color_space(&self) -> Option<Arc<ColorSpace>> {
+        let Self::ColorSpace(color_space) = self else {
             return None;
         };
-        Some(color_space)
+        Some(Arc::clone(color_space))
     }
 }
 
 impl From<Image> for Resource {
     fn from(image: Image) -> Self {
-        Self::Image(Rc::new(image))
+        Self::Image(Arc::new(image))
     }
 }
 
 impl From<FormXObject> for Resource {
     fn from(form: FormXObject) -> Self {
-        Self::Form(Rc::new(form))
+        Self::Form(ObjectHandle::from(form))
     }
 }

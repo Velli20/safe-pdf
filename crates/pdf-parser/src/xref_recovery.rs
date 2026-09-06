@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use pdf_object::{
+use pdf_object_reader::{
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
     object_resolver::PassthroughResolver,
     object_variant::ObjectVariant,
@@ -283,7 +283,7 @@ impl<'input> XrefRecovery<'input> {
             let has_valid_root = matches!(
                 section.table.trailer.dictionary.get(b"Root"),
                 Some(ObjectVariant::Reference(object_number))
-                    if section.table.entries.contains_key(object_number)
+                    if section.table.entries.contains_key(&object_number.number)
             );
 
             match best_candidate {
@@ -487,7 +487,7 @@ impl<'input> XrefRecovery<'input> {
 
 #[cfg(test)]
 mod tests {
-    use pdf_object::cross_reference_table::CrossReferenceEntryType;
+    use pdf_object_reader::cross_reference_table::CrossReferenceEntryType;
 
     use super::*;
 

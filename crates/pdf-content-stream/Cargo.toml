@@ -10,7 +10,7 @@ workspace = true
 [dependencies]
 pdf-parser = { path = "../pdf-parser" }
 pdf-tokenizer = { path = "../pdf-tokenizer" }
-pdf-object = { path = "../pdf-object" }
+pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-image = { path = "../pdf-image" }
 pdf-graphics = { path = "../pdf-graphics" }
 pdf-content-stream-operators = { path = "../pdf-content-stream-operators" }

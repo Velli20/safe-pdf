@@ -9,7 +9,7 @@ workspace = true
 
 [dependencies]
 pdf-decode = { path = "../pdf-decode" }
-pdf-object = { path = "../pdf-object" }
+pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-postscript = { path = "../pdf-postscript" }
 thiserror = "2.0.12"
 num-traits = "0.2.19"

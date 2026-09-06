@@ -16,7 +16,7 @@ pdf-image = { path = "../pdf-image" }
 pdf-text-engine = { path = "../pdf-text-engine" }
 pdf-font = { path = "../pdf-font" }
 pdf-cmap = { path = "../pdf-cmap" }
-pdf-object = { path = "../pdf-object" }
+pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-graphics = { path = "../pdf-graphics" }
 pdf-shading = { path = "../pdf-shading" }
 pdf-color-space = { path = "../pdf-color-space" }

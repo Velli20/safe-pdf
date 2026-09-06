@@ -1,5 +1,7 @@
-use pdf_object::object_resolver::ObjectResolver;
-use pdf_object::{error::ObjectError, object_id::PdfObjectId, object_variant::ObjectVariant};
+use pdf_object_reader::object_resolver::ObjectResolver;
+use pdf_object_reader::{
+    object_error::ObjectError, object_id::ObjectId, object_variant::ObjectVariant,
+};
 use std::collections::{HashMap, HashSet};
 
 #[cfg(feature = "json")]
@@ -8,6 +10,8 @@ use serde_json::{Value as JsonValue, json};
 #[derive(Default)]
 pub struct ObjectCollection {
     pub map: HashMap<usize, ObjectVariant>,
+    /// Generations belonging to the loaded snapshot's active objects.
+    pub generations: HashMap<usize, usize>,
 }
 
 impl ObjectResolver for ObjectCollection {
@@ -23,12 +27,23 @@ impl ObjectResolver for ObjectCollection {
                 ObjectVariant::Reference(object_number) => {
                     if !in_progress.insert(*object_number) {
                         return Err(ObjectError::CyclicDependency {
-                            obj_num: *object_number,
+                            obj_num: object_number.number,
                         });
                     }
-                    current_obj = self.map.get(object_number).ok_or(
+                    if self
+                        .generations
+                        .get(&object_number.number)
+                        .copied()
+                        .unwrap_or(0)
+                        != object_number.generation
+                    {
+                        return Err(ObjectError::FailedResolveObjectReference {
+                            obj_num: object_number.number,
+                        });
+                    }
+                    current_obj = self.map.get(&object_number.number).ok_or(
                         ObjectError::FailedResolveObjectReference {
-                            obj_num: *object_number,
+                            obj_num: object_number.number,
                         },
                     )?;
                 }
@@ -43,6 +58,7 @@ impl ObjectCollection {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             map: HashMap::with_capacity(capacity),
+            generations: HashMap::with_capacity(capacity),
         }
     }
 
@@ -61,7 +77,7 @@ impl ObjectCollection {
     /// An error if a duplicate key is detected otherwise `Ok(())`.
     pub fn insert(
         &mut self,
-        identifier: PdfObjectId,
+        identifier: ObjectId,
         mut obj: ObjectVariant,
     ) -> Result<(), ObjectError> {
         match &mut obj {
@@ -80,6 +96,8 @@ impl ObjectCollection {
             _ => {}
         }
 
+        self.generations
+            .insert(identifier.number, identifier.generation);
         if self.map.insert(identifier.number, obj).is_some() {
             return Err(ObjectError::DuplicateKeyInObjectCollection(
                 identifier.number,
@@ -96,6 +114,7 @@ impl ObjectCollection {
     /// were already registered in pass 1 (e.g., via an object stream entry in the
     /// xref table). The object-stream version is authoritative for these objects.
     pub fn insert_compressed(&mut self, obj_num: usize, obj: ObjectVariant) {
+        self.generations.insert(obj_num, 0);
         self.map.insert(obj_num, obj);
     }
 
@@ -204,7 +223,7 @@ impl ObjectCollection {
             }
             ObjectVariant::EndOfFile => json!({ "type": "EndOfFile" }),
             ObjectVariant::Reference(obj_num) => {
-                json!({ "type": "Reference", "object_number": obj_num })
+                json!({ "type": "Reference", "object_number": obj_num.number, "generation": obj_num.generation })
             }
             ObjectVariant::Stream(stream) => {
                 json!({
@@ -220,7 +239,7 @@ impl ObjectCollection {
 
     /// Converts a `Dictionary` to a `serde_json::Value`.
     #[cfg(feature = "json")]
-    fn dictionary_to_json(dict: &pdf_object::dictionary::Dictionary) -> JsonValue {
+    fn dictionary_to_json(dict: &pdf_object_reader::dictionary::Dictionary) -> JsonValue {
         let mut map = serde_json::Map::new();
         for (key, value) in &dict.dictionary {
             map.insert(
@@ -239,7 +258,7 @@ impl ObjectCollection {
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_object::{dictionary::Dictionary, stream::StreamObject};
+    use pdf_object_reader::{dictionary::Dictionary, stream::StreamObject};
 
     use super::*;
 
@@ -257,7 +276,7 @@ mod tests {
 
         collection
             .insert(
-                PdfObjectId {
+                ObjectId {
                     number: 1,
                     generation: 0,
                 },
@@ -282,7 +301,7 @@ mod tests {
         let mut collection = ObjectCollection::default();
         collection
             .insert(
-                PdfObjectId {
+                ObjectId {
                     number: 7,
                     generation: 2,
                 },
@@ -305,10 +324,15 @@ mod tests {
     #[test]
     fn resolve_object_reports_direct_self_reference_cycle() {
         let mut collection = ObjectCollection::default();
-        collection.map.insert(1, ObjectVariant::Reference(1));
+        collection.map.insert(
+            1,
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0)),
+        );
 
         let err = collection
-            .resolve_object(&ObjectVariant::Reference(1))
+            .resolve_object(&ObjectVariant::Reference(
+                pdf_object_reader::object_id::ObjectId::new(1, 0),
+            ))
             .expect_err("self-referential object should report a cycle");
 
         assert_eq!(err, ObjectError::CyclicDependency { obj_num: 1 });
@@ -317,12 +341,23 @@ mod tests {
     #[test]
     fn resolve_object_reports_indirect_reference_cycle() {
         let mut collection = ObjectCollection::default();
-        collection.map.insert(1, ObjectVariant::Reference(2));
-        collection.map.insert(2, ObjectVariant::Reference(3));
-        collection.map.insert(3, ObjectVariant::Reference(1));
+        collection.map.insert(
+            1,
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(2, 0)),
+        );
+        collection.map.insert(
+            2,
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(3, 0)),
+        );
+        collection.map.insert(
+            3,
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0)),
+        );
 
         let err = collection
-            .resolve_object(&ObjectVariant::Reference(1))
+            .resolve_object(&ObjectVariant::Reference(
+                pdf_object_reader::object_id::ObjectId::new(1, 0),
+            ))
             .expect_err("mutually recursive references should report a cycle");
 
         assert_eq!(err, ObjectError::CyclicDependency { obj_num: 1 });
@@ -351,7 +386,7 @@ mod tests {
         let mut collection = ObjectCollection::default();
         collection
             .insert(
-                PdfObjectId {
+                ObjectId {
                     number: 2,
                     generation: 0,
                 },
@@ -364,7 +399,10 @@ mod tests {
             Vec::from(b"Filter"),
             ObjectVariant::Name(b"FlateDecode".to_vec()),
         );
-        stream_dict.insert(Vec::from(b"DecodeParms"), ObjectVariant::Reference(2));
+        stream_dict.insert(
+            Vec::from(b"DecodeParms"),
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(2, 0)),
+        );
         stream_dict.insert(
             Vec::from(b"Length"),
             ObjectVariant::Integer(compressed.len() as i64),
@@ -379,7 +417,7 @@ mod tests {
 
         collection
             .insert(
-                PdfObjectId {
+                ObjectId {
                     number: 1,
                     generation: 0,
                 },
@@ -398,7 +436,10 @@ mod tests {
     #[test]
     fn insert_preserves_encoded_state_when_filter_dependencies_are_unresolved() {
         let stream_dictionary = Dictionary::new(BTreeMap::from([
-            (Vec::from(b"DecodeParms"), ObjectVariant::Reference(2)),
+            (
+                Vec::from(b"DecodeParms"),
+                ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(2, 0)),
+            ),
             (
                 Vec::from(b"Filter"),
                 ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
@@ -409,7 +450,7 @@ mod tests {
 
         collection
             .insert(
-                PdfObjectId {
+                ObjectId {
                     number: 1,
                     generation: 0,
                 },
@@ -428,7 +469,7 @@ mod tests {
 
         collection
             .insert(
-                PdfObjectId {
+                ObjectId {
                     number: 2,
                     generation: 0,
                 },
@@ -456,5 +497,22 @@ mod tests {
 
         assert!(collection.map.capacity() >= 12);
         assert!(collection.map.is_empty());
+    }
+}
+
+impl pdf_object_reader::ObjectSource for ObjectCollection {
+    type Error = ObjectError;
+    fn read_object(
+        &self,
+        id: pdf_object_reader::object_id::ObjectId,
+    ) -> Result<Option<pdf_object_reader::pdf_object::PdfObject>, Self::Error> {
+        if self.generations.get(&id.number()).copied().unwrap_or(0) != id.generation() {
+            return Ok(None);
+        }
+        Ok(self
+            .map
+            .get(&id.number())
+            .cloned()
+            .map(pdf_object_reader::pdf_object::PdfObject::new))
     }
 }

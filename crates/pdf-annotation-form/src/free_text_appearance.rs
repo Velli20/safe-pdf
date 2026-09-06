@@ -176,11 +176,11 @@ mod tests {
             Some(PdfOperatorVariant::RestoreGraphicsState(_))
         ));
         assert!(operators.next().is_none());
-        assert!(
-            form.resources
-                .as_ref()
-                .is_some_and(|resources| resources.fonts.contains_key(b"Helv".as_slice()))
-        );
+        assert!(form.resources.as_ref().is_some_and(|resources| {
+            resources
+                .get()
+                .is_ok_and(|resources| resources.fonts.contains_key(b"Helv".as_slice()))
+        }));
     }
 
     #[test]

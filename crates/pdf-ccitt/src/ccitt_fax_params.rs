@@ -1,5 +1,5 @@
-use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_lookup::ObjectLookupExt,
+use pdf_object_reader::{
+    dictionary::Dictionary, object_error::ObjectError, object_lookup::ObjectLookupExt,
     object_resolver::ObjectResolver,
 };
 
@@ -92,8 +92,8 @@ impl CCITTFaxParams {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pdf_object::object_resolver::PassthroughResolver;
-    use pdf_object::object_variant::ObjectVariant;
+    use pdf_object_reader::object_resolver::PassthroughResolver;
+    use pdf_object_reader::object_variant::ObjectVariant;
     use std::collections::BTreeMap;
 
     #[test]
@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn params_from_dict_reads_all_keys() -> Result<(), ObjectError> {
-        use pdf_object::object_variant::ObjectVariant;
+        use pdf_object_reader::object_variant::ObjectVariant;
 
         let mut dict = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
         dict.dictionary

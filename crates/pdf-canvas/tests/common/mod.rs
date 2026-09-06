@@ -8,12 +8,12 @@ use pdf_canvas::{
     recording_canvas::RecordingCanvas,
     stroke_style::StrokeStyle,
 };
-use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
+use pdf_content_stream::ContentStream;
 use pdf_graphics::{
     BlendMode, Image, MaskMode, PathFillType, PixelFormat, color::Color, pdf_path::PdfPath,
     rect::Rect, transform::Transform,
 };
-use pdf_object::{
+use pdf_object_reader::{
     dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     stream::StreamObject,
 };
@@ -170,17 +170,14 @@ pub fn content_stream(object_number: usize, data: &[u8]) -> ContentStream {
         0,
         Dictionary::new(std::collections::BTreeMap::<
             Vec<u8>,
-            pdf_object::object_variant::ObjectVariant,
+            pdf_object_reader::object_variant::ObjectVariant,
         >::new()),
         data.to_vec(),
     );
-    let mut ids = ContentStreamIdAllocator::new();
-    let mut content_stream = ContentStream::new(
-        &ObjectVariant::Stream(stream),
-        &PassthroughResolver,
-        &mut ids,
-    )
-    .expect("content stream should parse");
+    let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+    let mut content_stream = reader
+        .read::<ContentStream>(&ObjectVariant::Stream(stream))
+        .expect("content stream should parse");
     content_stream.id = object_number;
     content_stream
 }

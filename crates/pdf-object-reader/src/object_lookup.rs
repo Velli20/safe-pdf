@@ -1,7 +1,7 @@
 use num_traits::FromPrimitive;
 
 use crate::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
+    dictionary::Dictionary, object_error::ObjectError, object_resolver::ObjectResolver,
     object_variant::ObjectVariant, stream::StreamObject,
 };
 
@@ -945,7 +945,10 @@ mod tests {
 
     #[test]
     fn slice_optional_number_returns_none_for_missing_or_null() {
-        let values = [ObjectVariant::Null, ObjectVariant::Reference(1)];
+        let values = [
+            ObjectVariant::Null,
+            ObjectVariant::Reference(crate::object_id::ObjectId::new(1, 0)),
+        ];
 
         let missing = values
             .optional_number::<u16>(2, &PassthroughResolver)
@@ -1048,7 +1051,10 @@ mod tests {
                 ObjectVariant::LiteralString(b"abc".to_vec()),
             ),
             (b"Boolean".to_vec(), ObjectVariant::Boolean(true)),
-            (b"Reference".to_vec(), ObjectVariant::Reference(9)),
+            (
+                b"Reference".to_vec(),
+                ObjectVariant::Reference(crate::object_id::ObjectId::new(9, 0)),
+            ),
         ]));
 
         let stream = dictionary
@@ -1133,7 +1139,7 @@ mod tests {
             ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(2)]),
             ObjectVariant::LiteralString(b"text".to_vec()),
             ObjectVariant::Boolean(false),
-            ObjectVariant::Reference(3),
+            ObjectVariant::Reference(crate::object_id::ObjectId::new(3, 0)),
         ];
 
         assert_eq!(
@@ -1170,7 +1176,9 @@ mod tests {
 
     #[test]
     fn optional_dictionary_returns_none_for_resolved_null() {
-        let values = [ObjectVariant::Reference(1)];
+        let values = [ObjectVariant::Reference(crate::object_id::ObjectId::new(
+            1, 0,
+        ))];
 
         let value = values
             .optional_dictionary(0, &NullResolver)

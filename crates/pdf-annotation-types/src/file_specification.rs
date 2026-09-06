@@ -1,4 +1,4 @@
-use pdf_object::{
+use pdf_object_reader::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
     object_variant::ObjectVariant,
 };

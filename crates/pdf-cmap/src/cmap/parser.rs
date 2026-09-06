@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use pdf_object::object_variant::ObjectVariant;
+use pdf_object_reader::object_variant::ObjectVariant;
 use pdf_parser::{error::ParserError, parser::PdfParser};
 
 use crate::{cmap::token::CMapToken, error::CMapError};

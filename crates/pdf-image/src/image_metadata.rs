@@ -2,7 +2,7 @@ use pdf_color_space::color_space::ColorSpace;
 use pdf_decode::DecodeMap;
 use pdf_filter::filter::Filters;
 use pdf_graphics::rect::Rect;
-use pdf_object::{
+use pdf_object_reader::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
 };
 
@@ -137,8 +137,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use pdf_filter::filter::{Filter, Filters};
-    use pdf_object::{
-        dictionary::Dictionary, error::ObjectError, object_resolver::PassthroughResolver,
+    use pdf_object_reader::{
+        dictionary::Dictionary, object_error::ObjectError, object_resolver::PassthroughResolver,
         object_variant::ObjectVariant,
     };
 

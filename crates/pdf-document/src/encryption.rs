@@ -10,7 +10,7 @@
 //! - The encryption dictionary contains parameters needed to decrypt the document.
 //! - Before reading other objects, the encryption dictionary must be resolved first.
 
-use pdf_object::{
+use pdf_object_reader::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
 };
 
@@ -268,7 +268,7 @@ fn parse_v5_crypt_filter(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pdf_object::{
+    use pdf_object_reader::{
         dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     };
     use std::collections::BTreeMap;

@@ -1,4 +1,4 @@
-use pdf_object::object_variant::ObjectVariant;
+use pdf_object_reader::object_variant::ObjectVariant;
 
 use crate::{error::ParserError, parser::PdfParser};
 

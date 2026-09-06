@@ -1,5 +1,5 @@
-use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_lookup::ObjectLookupExt,
+use pdf_object_reader::{
+    dictionary::Dictionary, object_error::ObjectError, object_lookup::ObjectLookupExt,
     object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
@@ -254,7 +254,7 @@ pub(crate) fn three_d_view(
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_object::{object_resolver::PassthroughResolver, stream::StreamObject};
+    use pdf_object_reader::{object_resolver::PassthroughResolver, stream::StreamObject};
 
     use super::*;
 
@@ -271,11 +271,11 @@ mod tests {
                 return Ok(obj);
             };
 
-            self.objects
-                .get(object_number)
-                .ok_or(ObjectError::FailedResolveObjectReference {
-                    obj_num: *object_number,
-                })
+            self.objects.get(&object_number.number).ok_or(
+                ObjectError::FailedResolveObjectReference {
+                    obj_num: object_number.number,
+                },
+            )
         }
     }
 
@@ -338,7 +338,9 @@ mod tests {
 
     #[test]
     fn javascript_action_accepts_referenced_stream_script() {
-        let dictionary = action_dictionary(ObjectVariant::Reference(7));
+        let dictionary = action_dictionary(ObjectVariant::Reference(
+            pdf_object_reader::object_id::ObjectId::new(7, 0),
+        ));
         let objects = TestResolver {
             objects: BTreeMap::from([(7, stream_object(b"var hidden = true;"))]),
         };

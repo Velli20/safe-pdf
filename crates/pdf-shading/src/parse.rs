@@ -6,9 +6,9 @@
 
 use pdf_color_space::color_space::ColorSpace;
 use pdf_function::function::{Function, FunctionImpl};
-use pdf_object::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+use pdf_object_reader::{
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, dictionary::Dictionary,
+    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
 use crate::{
@@ -19,27 +19,28 @@ use crate::{
     patch_mesh::parse_patch_mesh,
 };
 
-/// Parses a PDF shading object from a dictionary or stream object.
-pub fn shading_from_dictionary(
-    object: &ObjectVariant,
-    objects: &dyn ObjectResolver,
-) -> Result<Shading, PdfShadingError> {
-    let dictionary = object.try_dictionary(objects)?;
-    let shading_type = dictionary
-        .required_number::<i32>(b"ShadingType", objects)?
-        .try_into()?;
+impl FromPdfObject for Shading {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object().value();
+        let objects = context.source();
+        let dictionary = object.try_dictionary(objects)?;
+        let shading_type = dictionary
+            .required_number::<i32>(b"ShadingType", objects)?
+            .try_into()?;
 
-    match shading_type {
-        ShadingType::FunctionBased => parse_function_based(dictionary, objects),
-        ShadingType::Axial => parse_axial(dictionary, objects),
-        ShadingType::Radial => parse_radial(dictionary, objects),
-        ShadingType::FreeFormTriangleMesh => parse_free_form_triangle_mesh(object, objects),
-        ShadingType::CoonsPatchMesh | ShadingType::TensorProductPatchMesh => {
-            parse_patch_mesh(object, objects, shading_type)
+        match shading_type {
+            ShadingType::FunctionBased => parse_function_based(dictionary, objects),
+            ShadingType::Axial => parse_axial(dictionary, objects),
+            ShadingType::Radial => parse_radial(dictionary, objects),
+            ShadingType::FreeFormTriangleMesh => parse_free_form_triangle_mesh(object, objects),
+            ShadingType::CoonsPatchMesh | ShadingType::TensorProductPatchMesh => {
+                parse_patch_mesh(object, objects, shading_type)
+            }
+            unsupported => Ok(Shading::Unsupported {
+                name: unsupported.to_string(),
+            }),
         }
-        unsupported => Ok(Shading::Unsupported {
-            name: unsupported.to_string(),
-        }),
+        .map_err(pdf_object_reader::ObjectReadError::from)
     }
 }
 

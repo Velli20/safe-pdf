@@ -1,73 +1,38 @@
-//! External graphics-state soft mask parsing.
-
-use std::rc::Rc;
-
-use pdf_content_stream::ContentStreamIdAllocator;
+//! External graphics-state soft mask decoding.
+use crate::{error::PdfPagesError, form::FormXObject};
 use pdf_graphics::MaskMode;
-use pdf_object::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-};
+use pdf_object_reader::object_lookup::ObjectLookupExt;
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult};
 
-use crate::{
-    error::PdfPagesError, form::FormXObject, object_reader::ReadCycleTracker, resource::Resource,
-    resource_cache::ResourceCache, xobject::read_xobject,
-};
-
-/// Soft mask extracted from an ExtGState `SMask` entry.
+/// A soft mask and its transparency group.
 pub struct SoftMask {
-    /// How the mask is derived from the transparency group output: from color
-    /// luminance (`Luminosity`) or from alpha/shape (`Alpha`).
+    /// Whether the group's alpha or luminosity supplies the mask.
     pub mask_type: MaskMode,
-    /// The transparency group XObject (`G`) whose rendered result provides the
-    /// input used to compute the soft mask.
-    pub shape: Rc<FormXObject>,
+    /// The transparency group. Recursive groups remain deferred until painting.
+    pub shape: ObjectHandle<FormXObject>,
 }
-
-impl SoftMask {
-    /// Parses a soft mask dictionary.
-    ///
-    /// Returns `None` when the mask's transparency group is skipped because it
-    /// would introduce a cycle in the XObject graph.
-    pub fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        cycle_tracker: &mut ReadCycleTracker,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Option<Self>, PdfPagesError> {
-        let mask_type = MaskMode::from(dictionary.required_bytes(b"S", objects)?);
-
-        let content = dictionary.get_or_err(b"G")?;
-        let stream = content.try_stream(objects)?;
-        let subtype = stream.dictionary.required_bytes(b"Subtype", objects)?;
+impl FromPdfObject for SoftMask {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        let mask_type = MaskMode::from(
+            context
+                .dictionary()
+                .required_bytes(b"S", context.source())?,
+        );
+        let group = context.dictionary().get_or_err(b"G")?;
+        let stream = group.try_stream(context.source())?;
+        let subtype = stream
+            .dictionary
+            .required_bytes(b"Subtype", context.source())?;
         if subtype != b"Form" {
             return Err(PdfPagesError::InvalidExtGStateEntryValue {
                 entry: "SMask".to_string(),
                 reason: format!("group XObject must have /Subtype /Form, found /{subtype:?}"),
-            });
+            }
+            .into());
         }
-
-        let Some(shape) = read_xobject(
-            content,
-            &stream.dictionary,
-            stream,
-            objects,
-            cache,
-            cycle_tracker,
-            id_allocator,
-        )?
-        else {
-            return Ok(None);
-        };
-
-        let Resource::Form(shape) = shape else {
-            return Err(PdfPagesError::InvalidExtGStateEntryValue {
-                entry: "SMask".to_string(),
-                reason: "group XObject did not produce a Form resource".to_string(),
-            });
-        };
-
-        Ok(Some(Self { mask_type, shape }))
+        let shape = context.required_shared(b"G")?;
+        Ok(Self { mask_type, shape })
     }
 }
 
@@ -76,16 +41,13 @@ impl SoftMask {
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_content_stream::ContentStreamIdAllocator;
     use pdf_graphics::MaskMode;
-    use pdf_object::{
+    use pdf_object_reader::{
         dictionary::Dictionary, object_resolver::PassthroughResolver,
         object_variant::ObjectVariant, stream::StreamObject,
     };
 
-    use crate::{
-        error::PdfPagesError, object_reader::ReadCycleTracker, resource_cache::DefaultResourceCache,
-    };
+    use crate::error::PdfPagesError;
 
     use super::SoftMask;
 
@@ -116,57 +78,79 @@ mod tests {
     #[test]
     fn parses_soft_mask_dictionary() {
         let dictionary = soft_mask_dictionary(7, "Form");
-        let mut cache = DefaultResourceCache::default();
-        let mut cycle_tracker = ReadCycleTracker::default();
-        let mut id_allocator = ContentStreamIdAllocator::new();
 
-        let soft_mask = SoftMask::from_dictionary(
-            &dictionary,
-            &PassthroughResolver,
-            &mut cache,
-            &mut cycle_tracker,
-            &mut id_allocator,
-        )
-        .expect("soft mask should parse")
-        .expect("soft mask should be present");
+        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+
+        let soft_mask = reader
+            .read::<Option<SoftMask>>(
+                &pdf_object_reader::object_variant::ObjectVariant::Dictionary(
+                    (&dictionary).clone(),
+                ),
+            )
+            .expect("soft mask should parse")
+            .expect("soft mask should be present");
 
         assert_eq!(soft_mask.mask_type, MaskMode::Alpha);
-        assert_eq!(soft_mask.shape.content_stream.id, 0);
+        assert_eq!(
+            soft_mask
+                .shape
+                .get()
+                .expect("published shape")
+                .content_stream
+                .id,
+            0
+        );
     }
 
     #[test]
-    fn cycle_suppressed_shape_returns_none() {
-        let dictionary = soft_mask_dictionary(7, "Form");
-        let mut cache = DefaultResourceCache::default();
-        let mut cycle_tracker = ReadCycleTracker::default();
-        let mut id_allocator = ContentStreamIdAllocator::new();
-        assert!(cycle_tracker.begin_read(7));
-
-        let soft_mask = SoftMask::from_dictionary(
-            &dictionary,
-            &PassthroughResolver,
-            &mut cache,
-            &mut cycle_tracker,
-            &mut id_allocator,
-        )
-        .expect("cycle-suppressed soft mask should not fail");
-
-        assert!(soft_mask.is_none());
+    fn recursive_soft_mask_retains_a_shared_shape() {
+        use pdf_object_collection::object_collection::ObjectCollection;
+        use pdf_object_reader::{ObjectReader, object_id::ObjectId};
+        let mut dictionary = soft_mask_dictionary(7, "Form");
+        let Some(ObjectVariant::Stream(mut stream)) = dictionary.take(b"G") else {
+            panic!("group stream");
+        };
+        stream.dictionary.dictionary.insert(
+            b"Resources".to_vec(),
+            ObjectVariant::Dictionary(Dictionary::from_entries([(
+                b"ExtGState".as_slice(),
+                ObjectVariant::Dictionary(Dictionary::from_entries([(
+                    b"GS".as_slice(),
+                    ObjectVariant::Dictionary(Dictionary::from_entries([(
+                        b"SMask".as_slice(),
+                        ObjectVariant::Reference(ObjectId::new(8, 0)),
+                    )])),
+                )])),
+            )])),
+        );
+        dictionary
+            .dictionary
+            .insert(b"G".to_vec(), ObjectVariant::Reference(ObjectId::new(7, 0)));
+        let mut objects = ObjectCollection::default();
+        objects
+            .insert(ObjectId::new(7, 0), ObjectVariant::Stream(stream))
+            .expect("group");
+        objects
+            .insert(ObjectId::new(8, 0), ObjectVariant::Dictionary(dictionary))
+            .expect("mask");
+        let reader = ObjectReader::new(objects);
+        let mask = reader
+            .read_shared_indirect::<SoftMask>(ObjectId::new(8, 0))
+            .expect("recursive mask")
+            .get()
+            .expect("published mask");
+        assert_eq!(mask.shape.object_id(), Some(ObjectId::new(7, 0)));
+        assert!(mask.shape.get().is_ok());
     }
 
     #[test]
     fn non_form_shape_is_rejected() {
         let dictionary = soft_mask_dictionary(7, "Image");
-        let mut cache = DefaultResourceCache::default();
-        let mut cycle_tracker = ReadCycleTracker::default();
-        let mut id_allocator = ContentStreamIdAllocator::new();
 
-        let error = match SoftMask::from_dictionary(
-            &dictionary,
-            &PassthroughResolver,
-            &mut cache,
-            &mut cycle_tracker,
-            &mut id_allocator,
+        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+
+        let error = match reader.read::<Option<SoftMask>>(
+            &pdf_object_reader::object_variant::ObjectVariant::Dictionary((&dictionary).clone()),
         ) {
             Err(error) => error,
             Ok(_) => panic!("an image cannot be used as an ExtGState soft-mask group"),
@@ -174,7 +158,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            PdfPagesError::InvalidExtGStateEntryValue { entry, .. } if entry == "SMask"
+            pdf_object_reader::ObjectReadError::Decode { source, .. } if matches!(source.downcast_ref::<PdfPagesError>(), Some(PdfPagesError::InvalidExtGStateEntryValue { entry, .. }) if entry == "SMask")
         ));
     }
 }

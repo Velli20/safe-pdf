@@ -1,5 +1,5 @@
 use pdf_image::InlineImage;
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object_reader::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 use crate::{error::ParserError, parser::PdfParser};
 
@@ -238,7 +238,7 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use pdf_object::object_resolver::PassthroughResolver;
+    use pdf_object_reader::object_resolver::PassthroughResolver;
 
     use super::*;
 

@@ -8,7 +8,11 @@ impl<B: CanvasBackend> ShadingOps for PdfCanvas<'_, B> {
     fn paint_shading(&mut self, shading_name: &[u8]) -> Result<(), Self::ErrorType> {
         let state = self.current_state()?;
 
-        let Some(shading) = state.resources.and_then(|r| r.shading(shading_name)) else {
+        let Some(shading) = state
+            .resources
+            .as_ref()
+            .and_then(|r| r.shading(shading_name))
+        else {
             return Err(PdfCanvasError::PatternNotFound(
                 String::from_utf8_lossy(shading_name).into_owned(),
             ));
@@ -25,7 +29,7 @@ impl<B: CanvasBackend> ShadingOps for PdfCanvas<'_, B> {
         let fill_color = state.paint.fill_color;
         let blend_mode = state.paint.blend_mode.clone();
         let mat = state.transform;
-        let shader = Some(self.build_shading_shader(shading, &Some(mat))?);
+        let shader = Some(self.build_shading_shader(&shading, &Some(mat))?);
 
         self.save()?;
         self.canvas.fill_path(

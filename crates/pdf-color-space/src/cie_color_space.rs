@@ -1,5 +1,5 @@
-use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_lookup::ObjectLookupExt,
+use pdf_object_reader::{
+    dictionary::Dictionary, object_error::ObjectError, object_lookup::ObjectLookupExt,
     object_resolver::ObjectResolver,
 };
 
@@ -33,7 +33,7 @@ impl CieColorSpaceParams {
 
 #[cfg(test)]
 mod tests {
-    use pdf_object::{
+    use pdf_object_reader::{
         dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     };
 

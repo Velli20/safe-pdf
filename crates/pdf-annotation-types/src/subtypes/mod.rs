@@ -48,7 +48,7 @@ pub use self::underline::UnderlineAnnotation;
 pub use self::watermark::WatermarkAnnotation;
 pub use self::widget::{WidgetAnnotation, WidgetChoiceOption, WidgetFieldFlags, WidgetFieldValue};
 
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object_reader::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 use crate::{AnnotationError, LineEndingStyle, QuadPoints};
 

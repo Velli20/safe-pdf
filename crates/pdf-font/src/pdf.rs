@@ -1,16 +1,17 @@
 //! Normalized PDF font resources, encodings, CMaps, and metrics.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use pdf_cmap::PdfCMap;
-use pdf_content_stream::ContentStream;
-use pdf_graphics::{rect::Rect, transform::Transform};
+use pdf_graphics::rect::Rect;
 
 use crate::base_encoding::BaseEncoding;
-use crate::font::{FontMetadata, FontSource, GlyphId, GlyphName};
+use crate::font::{FontMetadata, GlyphName};
 pub use crate::pdf_font_spec::PdfFontSpec;
+pub use crate::simple_font_spec::SimpleFontSpec;
 pub use crate::standard14::Standard14Font;
+pub use crate::type0_font_spec::{CidFontKind, CidFontSpec, Type0FontSpec};
+pub use crate::type3_font_spec::Type3FontSpec;
 pub use pdf_cmap::{PdfCode, ToUnicodeMap};
 
 /// Number of PDF glyph-space units in one text-space em.
@@ -43,6 +44,9 @@ pub struct PdfGlyphMetric {
 }
 
 /// Sparse PDF metrics table with a required default.
+///
+/// Typed object decoding accepts a complete simple, Type 3, or descendant CID
+/// font dictionary. Its subtype selects the width table and default-width rule.
 #[derive(Debug, Clone)]
 pub struct PdfMetrics {
     /// Metric used when no explicit entry exists.
@@ -66,34 +70,6 @@ pub struct PdfFontDescriptor {
     pub stem_v: Option<f32>,
 }
 
-/// Data shared by Type 1, Multiple Master Type 1, and TrueType simple fonts.
-#[derive(Clone)]
-pub struct SimpleFontSpec {
-    /// PDF base font name without a leading slash.
-    pub base_font: Arc<[u8]>,
-    /// Parsed descriptor information.
-    pub descriptor: PdfFontDescriptor,
-    /// Embedded, external, or Standard 14 program source when available.
-    pub program: Option<FontSource>,
-    /// Standard 14 identity when this resource denotes one of the built-in fonts.
-    pub standard14: Option<Standard14Font>,
-    /// One-byte character encoding.
-    pub encoding: SimpleEncoding,
-    /// Explicit PDF width data.
-    pub metrics: PdfMetrics,
-    /// Optional source-code-to-Unicode map.
-    pub to_unicode: Option<Arc<dyn ToUnicodeMap>>,
-}
-
-/// Descendant subtype used by a Type 0 composite font.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CidFontKind {
-    /// CIDFontType0, normally backed by CID-keyed CFF outlines.
-    Type0,
-    /// CIDFontType2, backed by TrueType outlines.
-    Type2,
-}
-
 /// Registry and ordering information from a CID font dictionary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CidSystemInfo {
@@ -103,59 +79,4 @@ pub struct CidSystemInfo {
     pub ordering: Arc<[u8]>,
     /// Supplement number.
     pub supplement: u32,
-}
-
-/// Normalized descendant font used by a Type 0 composite font.
-#[derive(Clone)]
-pub struct CidFontSpec {
-    /// Descendant subtype.
-    pub kind: CidFontKind,
-    /// Parsed descriptor information.
-    pub descriptor: PdfFontDescriptor,
-    /// Embedded or externally supplied descendant program.
-    pub program: Option<FontSource>,
-    /// CID collection identity.
-    pub system_info: CidSystemInfo,
-    /// Horizontal and vertical CID metrics.
-    pub metrics: PdfMetrics,
-    /// Optional CID-to-glyph identifier mapping for CIDFontType2.
-    pub cid_to_gid: Option<Arc<[u16]>>,
-    /// Best-effort CID-to-Unicode mapping for collection-backed font substitution.
-    pub cid_to_unicode: Option<Arc<HashMap<u16, char>>>,
-}
-
-/// Normalized Type 0 composite font.
-#[derive(Clone)]
-pub struct Type0FontSpec {
-    /// PDF base font name without a leading slash.
-    pub base_font: Arc<[u8]>,
-    /// Source-code-to-CID encoding CMap.
-    pub encoding: Arc<dyn PdfCMap>,
-    /// The single descendant CID font.
-    pub descendant: CidFontSpec,
-    /// Optional source-code-to-Unicode map.
-    pub to_unicode: Option<Arc<dyn ToUnicodeMap>>,
-}
-
-/// Normalized Type 3 font whose glyph programs remain owned by the PDF layer.
-#[derive(Clone)]
-pub struct Type3FontSpec {
-    /// PDF base font name without a leading slash.
-    pub base_font: Arc<[u8]>,
-    /// Font matching metadata inferred from the PDF resource.
-    pub metadata: FontMetadata,
-    /// Matrix mapping Type 3 glyph space to text space.
-    pub font_matrix: Transform,
-    /// Declared Type 3 font bounds.
-    pub bounds: Rect,
-    /// One-byte character encoding.
-    pub encoding: SimpleEncoding,
-    /// PDF width data.
-    pub metrics: PdfMetrics,
-    /// Opaque character procedure handles indexed by glyph name.
-    pub char_procedures: Arc<BTreeMap<GlyphName, GlyphId>>,
-    /// Parsed PDF content streams indexed by their opaque glyph handles.
-    pub type3_procedures: Arc<HashMap<GlyphId, ContentStream>>,
-    /// Optional source-code-to-Unicode map.
-    pub to_unicode: Option<Arc<dyn ToUnicodeMap>>,
 }

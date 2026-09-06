@@ -2,7 +2,7 @@
 
 mod common;
 
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, sync::Arc};
 
 use common::{content_stream, replay};
 use pdf_canvas::{pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas};
@@ -11,7 +11,7 @@ use pdf_content_stream_operators::variants::PdfOperatorVariant;
 use pdf_document::page::PdfPage;
 use pdf_graphics::{BlendMode, PixelFormat, rect::Rect};
 use pdf_image::InlineImage;
-use pdf_object::{
+use pdf_object_reader::{
     dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
 };
 use pdf_resources::{
@@ -25,7 +25,7 @@ use pdf_text_engine::bundled_font_system;
 fn render(
     recording: &mut RecordingCanvas,
     stream: &ContentStream,
-    resources: Option<&Resources>,
+    resources: Option<Arc<Resources>>,
 ) -> Result<(), pdf_canvas::error::PdfCanvasError> {
     let page = PdfPage::default();
     let mut canvas = PdfCanvas::new(recording, &page, None, bundled_font_system())?;
@@ -112,18 +112,18 @@ fn draw_path_forwards_dash_pattern_to_backend() {
 #[test]
 fn renders_recursive_stream_until_the_depth_limit() {
     let root = content_stream(1, b"/Self Do");
-    let resources = form_resource(
+    let resources = Arc::new(form_resource(
         "Self",
         ContentStream {
             operators: root.operators.clone(),
             id: root.id,
         },
-    );
+    ));
     let mut recording = RecordingCanvas::new(100.0, 100.0);
 
-    render(&mut recording, &root, Some(&resources))
+    render(&mut recording, &root, Some(Arc::clone(&resources)))
         .expect("recursive render should stop at the depth limit");
-    render(&mut recording, &root, Some(&resources))
+    render(&mut recording, &root, Some(Arc::clone(&resources)))
         .expect("stream depth and active IDs should be released after rendering");
 
     let observer = replay(&recording);
@@ -134,16 +134,16 @@ fn renders_recursive_stream_until_the_depth_limit() {
 #[test]
 fn bounds_branching_recursive_streams_by_invocation_budget() {
     let root = content_stream(2, b"/Self Do /Self Do");
-    let resources = form_resource(
+    let resources = Arc::new(form_resource(
         "Self",
         ContentStream {
             operators: root.operators.clone(),
             id: root.id,
         },
-    );
+    ));
     let mut recording = RecordingCanvas::new(100.0, 100.0);
 
-    render(&mut recording, &root, Some(&resources))
+    render(&mut recording, &root, Some(Arc::clone(&resources)))
         .expect("branching recursion should stop at the invocation budget");
 
     let observer = replay(&recording);
@@ -155,10 +155,11 @@ fn bounds_branching_recursive_streams_by_invocation_budget() {
 fn still_renders_nested_streams_with_distinct_ids() {
     let root = content_stream(1, b"/Child Do");
     let child = content_stream(2, b"q Q");
-    let resources = form_resource("Child", child);
+    let resources = Arc::new(form_resource("Child", child));
     let mut recording = RecordingCanvas::new(100.0, 100.0);
 
-    render(&mut recording, &root, Some(&resources)).expect("distinct nested stream should render");
+    render(&mut recording, &root, Some(Arc::clone(&resources)))
+        .expect("distinct nested stream should render");
 
     let observer = replay(&recording);
     assert_eq!(observer.save_count, 3);
@@ -169,13 +170,13 @@ fn still_renders_nested_streams_with_distinct_ids() {
 fn releases_render_state_after_an_operator_error() {
     let failing = content_stream(7, b"/Missing Do");
     let recursive = content_stream(7, b"/Self Do");
-    let resources = form_resource(
+    let resources = Arc::new(form_resource(
         "Self",
         ContentStream {
             operators: recursive.operators.clone(),
             id: recursive.id,
         },
-    );
+    ));
     let mut recording = RecordingCanvas::new(100.0, 100.0);
     let page = PdfPage::default();
     let mut canvas = PdfCanvas::new(&mut recording, &page, None, bundled_font_system())
@@ -188,7 +189,7 @@ fn releases_render_state_after_an_operator_error() {
     ));
 
     canvas
-        .render_content_stream(&recursive, None, None, Some(&resources), None)
+        .render_content_stream(&recursive, None, None, Some(Arc::clone(&resources)), None)
         .expect("rendering should use the full depth budget after an error");
     drop(canvas);
 
@@ -200,13 +201,13 @@ fn releases_render_state_after_an_operator_error() {
 #[test]
 fn unavailable_image_xobject_is_a_no_op() {
     let stream = content_stream(1, b"/Im Do");
-    let resources = Resources {
+    let resources = Arc::new(Resources {
         xobjects: HashMap::from([(b"Im".to_vec(), Resource::UnavailableImage)]),
         ..Default::default()
-    };
+    });
     let mut recording = RecordingCanvas::new(100.0, 100.0);
 
-    render(&mut recording, &stream, Some(&resources))
+    render(&mut recording, &stream, Some(Arc::clone(&resources)))
         .expect("an unavailable image should not abort page rendering");
 
     let observer = replay(&recording);
@@ -219,34 +220,44 @@ fn inline_image_render_path_matches_image_xobject_path() {
     let image = pdf_image::decode_normalized_image(
         &image_dictionary(),
         vec![0b1010_0000].into(),
-        &pdf_object::object_resolver::PassthroughResolver,
+        &pdf_object_reader::object_resolver::PassthroughResolver,
         None,
     )
     .expect("image XObject should decode");
-    let graphics_state = Resource::ExternalGraphicsState(Rc::new(ExternalGraphicsState {
-        params: vec![ExternalGraphicsStateKey::BlendMode(vec![
-            BlendMode::Multiply,
-        ])],
-    }));
-    let resources = Resources {
+    let graphics_state = Resource::ExternalGraphicsState(pdf_object_reader::ObjectHandle::from(
+        ExternalGraphicsState {
+            params: vec![ExternalGraphicsStateKey::BlendMode(vec![
+                BlendMode::Multiply,
+            ])],
+        },
+    ));
+    let resources = Arc::new(Resources {
         ext_g_states: HashMap::from([(b"GS".to_vec(), graphics_state)]),
         xobjects: HashMap::from([(b"Im".to_vec(), Resource::from(image))]),
         ..Default::default()
-    };
+    });
 
     let xobject_stream = content_stream(1, b"/GS gs 2 0 0 3 10 20 cm /Im Do");
     let mut inline_stream = content_stream(2, b"/GS gs 2 0 0 3 10 20 cm");
     inline_stream
         .operators
-        .push(PdfOperatorVariant::InlineImage(Rc::new(inline_image())));
+        .push(PdfOperatorVariant::InlineImage(Arc::new(inline_image())));
 
     let mut xobject_recording = RecordingCanvas::new(100.0, 100.0);
-    render(&mut xobject_recording, &xobject_stream, Some(&resources))
-        .expect("image XObject should render");
+    render(
+        &mut xobject_recording,
+        &xobject_stream,
+        Some(Arc::clone(&resources)),
+    )
+    .expect("image XObject should render");
 
     let mut inline_recording = RecordingCanvas::new(100.0, 100.0);
-    render(&mut inline_recording, &inline_stream, Some(&resources))
-        .expect("inline image should render");
+    render(
+        &mut inline_recording,
+        &inline_stream,
+        Some(Arc::clone(&resources)),
+    )
+    .expect("inline image should render");
 
     let xobject_observer = replay(&xobject_recording);
     let inline_observer = replay(&inline_recording);
