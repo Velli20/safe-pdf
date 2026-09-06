@@ -1,5 +1,5 @@
-use pdf_object::{
-    object_id::PdfObjectId, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+use pdf_object_reader::{
+    object_id::ObjectId, object_resolver::ObjectResolver, object_variant::ObjectVariant,
     stream::StreamObject,
 };
 use pdf_tokenizer::PdfToken;
@@ -25,7 +25,7 @@ fn starts_with_boundary_keyword(input: &[u8], keyword: &[u8]) -> bool {
 
 impl PdfParser<'_> {
     /// Parses an indirect object declaration at `offset` without changing this parser's cursor.
-    pub(crate) fn parse_indirect_object_id_at(&self, offset: usize) -> Option<PdfObjectId> {
+    pub(crate) fn parse_indirect_object_id_at(&self, offset: usize) -> Option<ObjectId> {
         let mut probe = self.at_offset(offset).ok()?;
         probe.parse_indirect_object_id()
     }
@@ -92,8 +92,9 @@ impl PdfParser<'_> {
         let mark = self.tokenizer.position;
         let reference = (|| {
             let object_number = self.read_number(true).ok()?;
-            let _generation_number = self.read_number::<usize>(true).ok()?;
-            self.consume_reference_marker().then_some(object_number)
+            let generation_number = self.read_number::<usize>(true).ok()?;
+            self.consume_reference_marker()
+                .then_some(ObjectId::new(object_number, generation_number))
         })();
 
         if let Some(object_number) = reference {
@@ -108,13 +109,13 @@ impl PdfParser<'_> {
     ///
     /// The cursor is restored when the input is not an indirect object declaration.
     /// The object value and terminator are left for the caller.
-    pub fn parse_indirect_object_id(&mut self) -> Option<PdfObjectId> {
+    pub fn parse_indirect_object_id(&mut self) -> Option<ObjectId> {
         let mark = self.tokenizer.position;
         let identifier = (|| {
             let number = self.read_number(true).ok()?;
             let generation = self.read_number(true).ok()?;
             self.read_keyword(OBJ_KEYWORD).ok()?;
-            Some(PdfObjectId { number, generation })
+            Some(ObjectId { number, generation })
         })();
 
         if identifier.is_none() {
@@ -131,7 +132,7 @@ impl PdfParser<'_> {
     /// their encoded bytes and the identifier without wrapping the result.
     pub fn parse_indirect_object_value(
         &mut self,
-        identifier: PdfObjectId,
+        identifier: ObjectId,
         objects: &dyn ObjectResolver,
     ) -> Result<ObjectVariant, ParserError> {
         self.parse_indirect_object_value_with_mode(identifier, objects, StreamParseMode::Strict)
@@ -144,7 +145,7 @@ impl PdfParser<'_> {
     /// `endstream` search without reparsing the object.
     pub fn parse_indirect_object_value_recovering_streams(
         &mut self,
-        identifier: PdfObjectId,
+        identifier: ObjectId,
         objects: &dyn ObjectResolver,
     ) -> Result<ObjectVariant, ParserError> {
         self.parse_indirect_object_value_with_mode(identifier, objects, StreamParseMode::Recover)
@@ -152,7 +153,7 @@ impl PdfParser<'_> {
 
     fn parse_indirect_object_value_with_mode(
         &mut self,
-        identifier: PdfObjectId,
+        identifier: ObjectId,
         objects: &dyn ObjectResolver,
         stream_mode: StreamParseMode,
     ) -> Result<ObjectVariant, ParserError> {
@@ -210,13 +211,13 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
+    use pdf_object_reader::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
 
     use super::*;
 
     fn parse_staged_indirect_object(
         parser: &mut PdfParser<'_>,
-    ) -> Result<Option<(PdfObjectId, ObjectVariant)>, ParserError> {
+    ) -> Result<Option<(ObjectId, ObjectVariant)>, ParserError> {
         let Some(identifier) = parser.parse_indirect_object_id() else {
             return Ok(None);
         };
@@ -247,7 +248,7 @@ mod tests {
 
         assert_eq!(
             identifier,
-            PdfObjectId {
+            ObjectId {
                 number: 12,
                 generation: 3,
             }

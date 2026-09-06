@@ -1,7 +1,7 @@
 //! Unit tests for mesh bit-width parsing and validation.
 
-use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::PassthroughResolver,
+use pdf_object_reader::{
+    dictionary::Dictionary, object_error::ObjectError, object_resolver::PassthroughResolver,
     object_variant::ObjectVariant,
 };
 

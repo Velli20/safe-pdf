@@ -1,5 +1,5 @@
 use crate::{error::ParserError, parser::PdfParser};
-use pdf_object::{
+use pdf_object_reader::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
 };
 
@@ -39,7 +39,7 @@ impl PdfParser<'_> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
+    use pdf_object_reader::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
 
     use super::*;
 

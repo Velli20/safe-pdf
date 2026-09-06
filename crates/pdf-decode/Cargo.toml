@@ -8,6 +8,6 @@ workspace = true
 
 [dependencies]
 num-traits = "0.2.19"
-pdf-object = { path = "../pdf-object" }
+pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-utils = { path = "../pdf-utils" }
 thiserror = "2.0.12"

@@ -106,8 +106,8 @@ impl<'a> FreeTextAppearanceStyleScanner<'a> {
 
     /// Resolves a font operator through the form resources as a Standard 14 font.
     fn standard14_font(&self, set_font: &SetFont) -> Option<FreeTextFont> {
-        let resources = self.form.resources.as_ref()?;
-        let font_resource = resources.fonts.get(set_font.name())?.as_font()?;
+        let resources = self.form.resources.as_ref()?.get().ok()?;
+        let font_resource = resources.font(set_font.name())?;
         let standard14 = font_resource.0.as_standard14()?;
         Some(FreeTextFont {
             standard14,

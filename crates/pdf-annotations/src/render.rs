@@ -162,7 +162,12 @@ impl<'a, B: CanvasBackend> AnnotationRenderer<'a, B> {
             &appearance.content_stream,
             Some(placement),
             Some(&appearance_bbox),
-            appearance.resources.as_deref(),
+            appearance
+                .resources
+                .as_ref()
+                .map(|resources| resources.get())
+                .transpose()
+                .map_err(PdfCanvasError::from)?,
             None,
         )?;
 

@@ -365,7 +365,7 @@ impl DecodedSamples {
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_object::{
+    use pdf_object_reader::{
         dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     };
 

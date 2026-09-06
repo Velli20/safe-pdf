@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-use pdf_object::error::ObjectError;
+use pdf_object_reader::object_error::ObjectError;
 
 /// Errors returned by the PDF decode helpers in this crate.
 #[derive(Debug, Error)]

@@ -3,20 +3,21 @@ use pdf_font::pdf_font_handle::PdfFontHandle;
 use pdf_graphics::transform::Transform;
 use pdf_resources::resources::Resources;
 use pdf_text_engine::text_style::TextStyle;
+use std::sync::Arc;
 
 /// PDF text state retained by the canvas around engine layout calls.
 #[derive(Clone)]
-pub(crate) struct TextState<'a> {
+pub(crate) struct TextState {
     pub(crate) matrix: Transform,
     pub(crate) line_matrix: Transform,
     pub(crate) style: TextStyle,
     pub(crate) leading: f32,
     pub(crate) font: Option<PdfFontHandle>,
-    pub(crate) font_spec: Option<&'a PdfFontSpec>,
-    pub(crate) resources: Option<&'a Resources>,
+    pub(crate) font_spec: Option<Arc<PdfFontSpec>>,
+    pub(crate) resources: Option<Arc<Resources>>,
 }
 
-impl Default for TextState<'_> {
+impl Default for TextState {
     fn default() -> Self {
         Self {
             matrix: Transform::identity(),
@@ -30,7 +31,7 @@ impl Default for TextState<'_> {
     }
 }
 
-impl TextState<'_> {
+impl TextState {
     pub(crate) fn move_line_position(&mut self, tx: f32, ty: f32) {
         self.line_matrix
             .post_concat(&Transform::from_translate(tx, ty));

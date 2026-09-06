@@ -9,19 +9,28 @@
 use std::collections::BTreeMap;
 
 use pdf_color_space::color_space::ColorSpace;
-use pdf_content_stream::ContentStreamIdAllocator;
-use pdf_document::pages::PdfPages;
-use pdf_object::{
-    dictionary::Dictionary, error::ObjectError, object_resolver::ObjectResolver,
+use pdf_document::document::PdfDocument;
+use pdf_object_reader::{
+    dictionary::Dictionary, object_error::ObjectError, object_resolver::ObjectResolver,
     object_variant::ObjectVariant,
-};
-use pdf_resources::{
-    object_reader::{ReadCycleTracker, ReadFromDictionary},
-    resource_cache::DefaultResourceCache,
 };
 
 struct MapResolver {
     objects: BTreeMap<usize, ObjectVariant>,
+}
+
+impl pdf_object_reader::ObjectSource for MapResolver {
+    type Error = ObjectError;
+    fn read_object(
+        &self,
+        id: pdf_object_reader::object_id::ObjectId,
+    ) -> Result<Option<pdf_object_reader::pdf_object::PdfObject>, Self::Error> {
+        Ok(self
+            .objects
+            .get(&id.number())
+            .cloned()
+            .map(pdf_object_reader::pdf_object::PdfObject::new))
+    }
 }
 
 impl ObjectResolver for MapResolver {
@@ -30,13 +39,12 @@ impl ObjectResolver for MapResolver {
         obj: &'a ObjectVariant,
     ) -> Result<&'a ObjectVariant, ObjectError> {
         match obj {
-            ObjectVariant::Reference(object_number) => {
-                self.objects
-                    .get(object_number)
-                    .ok_or(ObjectError::FailedResolveObjectReference {
-                        obj_num: *object_number,
-                    })
-            }
+            ObjectVariant::Reference(object_number) => self
+                .objects
+                .get(&object_number.number)
+                .ok_or(ObjectError::FailedResolveObjectReference {
+                    obj_num: object_number.number,
+                }),
             _ => Ok(obj),
         }
     }
@@ -77,7 +85,10 @@ fn page_dictionary(
     let mut entries = BTreeMap::from([(Vec::from(b"Type"), name("Page"))]);
 
     if let Some(parent) = parent {
-        entries.insert(Vec::from(b"Parent"), ObjectVariant::Reference(parent));
+        entries.insert(
+            Vec::from(b"Parent"),
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(parent, 0)),
+        );
     }
 
     if let Some(resources) = resources {
@@ -114,7 +125,14 @@ fn pages_dictionary(
 
     entries.insert(
         Vec::from(b"Kids"),
-        ObjectVariant::Array(kids.iter().copied().map(ObjectVariant::Reference).collect()),
+        ObjectVariant::Array(
+            kids.iter()
+                .copied()
+                .map(|number| {
+                    ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(number, 0))
+                })
+                .collect(),
+        ),
     );
     entries.insert(Vec::from(b"Count"), integer(kids.len() as i64));
 
@@ -160,19 +178,14 @@ fn inherited_resources_and_media_box_apply_to_leaf_pages() {
         objects: BTreeMap::from([(page_number, ObjectVariant::Dictionary(page.clone()))]),
     };
 
-    let mut cache = DefaultResourceCache::default();
-    let mut cycle_tracker = ReadCycleTracker::default();
-    let mut id_allocator = ContentStreamIdAllocator::new();
+    let reader = pdf_object_reader::ObjectReader::new(&resolver);
 
-    let pages = PdfPages::from_dictionary(
-        &root_pages,
-        &resolver,
-        &mut cache,
-        &mut cycle_tracker,
-        &mut id_allocator,
-    )
-    .expect("page tree should parse")
-    .expect("root pages node should produce pages");
+    let pages = reader
+        .read::<PdfDocument>(
+            &pdf_object_reader::object_variant::ObjectVariant::Dictionary((&root_pages).clone()),
+        )
+        .map(|document| document.pages)
+        .expect("page tree should parse");
 
     assert_eq!(pages.len(), 1);
 
@@ -182,7 +195,7 @@ fn inherited_resources_and_media_box_apply_to_leaf_pages() {
         .as_ref()
         .expect("page should inherit resources");
     assert!(matches!(
-        resources.color_space("CS1"),
+        resources.color_space("CS1").as_deref(),
         Some(ColorSpace::DeviceGray)
     ));
 
@@ -220,29 +233,24 @@ fn child_resources_keep_their_own_entries_while_inheriting_missing_ones() {
         objects: BTreeMap::from([(page_number, ObjectVariant::Dictionary(page.clone()))]),
     };
 
-    let mut cache = DefaultResourceCache::default();
-    let mut cycle_tracker = ReadCycleTracker::default();
-    let mut id_allocator = ContentStreamIdAllocator::new();
+    let reader = pdf_object_reader::ObjectReader::new(&resolver);
 
-    let pages = PdfPages::from_dictionary(
-        &root_pages,
-        &resolver,
-        &mut cache,
-        &mut cycle_tracker,
-        &mut id_allocator,
-    )
-    .expect("page tree should parse")
-    .expect("root pages node should produce pages");
+    let pages = reader
+        .read::<PdfDocument>(
+            &pdf_object_reader::object_variant::ObjectVariant::Dictionary((&root_pages).clone()),
+        )
+        .map(|document| document.pages)
+        .expect("page tree should parse");
 
     let page = pages.first().expect("page should exist");
     let resources = page.resources.as_ref().expect("page should have resources");
 
     assert!(matches!(
-        resources.color_space("CS1"),
+        resources.color_space("CS1").as_deref(),
         Some(ColorSpace::DeviceRGB)
     ));
     assert!(matches!(
-        resources.color_space("CS2"),
+        resources.color_space("CS2").as_deref(),
         Some(ColorSpace::DeviceRGB)
     ));
 

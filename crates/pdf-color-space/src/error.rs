@@ -4,7 +4,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum ColorSpaceError {
     #[error("Failed to resolve PDF object: {0}")]
-    ObjectError(#[from] pdf_object::error::ObjectError),
+    ObjectError(#[from] pdf_object_reader::object_error::ObjectError),
     #[error("Invalid or unsupported ColorSpace: {description}")]
     InvalidColorSpace { description: String },
     #[error("Function parsing error: {0}")]
@@ -15,4 +15,13 @@ pub enum ColorSpaceError {
     InsufficientComponents(usize, usize),
     #[error("Unsupported color space: {0}")]
     Unsupported(String),
+}
+
+impl From<ColorSpaceError> for pdf_object_reader::ObjectReadError {
+    fn from(source: ColorSpaceError) -> Self {
+        Self::Decode {
+            target: "PDF color space",
+            source: Box::new(source),
+        }
+    }
 }

@@ -1,5 +1,5 @@
 use num_traits::ToPrimitive;
-use pdf_object::{
+use pdf_object_reader::{
     object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 use pdf_postscript::{operator::Operator, value::Value};

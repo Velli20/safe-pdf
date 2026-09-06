@@ -9,7 +9,7 @@ workspace = true
 
 [dependencies]
 pdf-tokenizer = { path = "../pdf-tokenizer" }
-pdf-object = { path = "../pdf-object" }
+pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-image = { path = "../pdf-image" }
 pdf-filter = { path = "../pdf-filter" }
 thiserror = "2.0.12"

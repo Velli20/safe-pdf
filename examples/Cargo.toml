@@ -7,7 +7,7 @@ license = "MIT"
 
 [dependencies]
 pdf-document         = { path = "../crates/pdf-document" }
-pdf-object           = { path = "../crates/pdf-object" }
+pdf-object-reader = { path = "../crates/pdf-object-reader" }
 pdf-resources        = { path = "../crates/pdf-resources" }
 pdf-content-stream = { path = "../crates/pdf-content-stream" }
 pdf-parser           = { path = "../crates/pdf-parser" }

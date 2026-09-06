@@ -20,7 +20,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use pdf_object::{
+use pdf_object_reader::{
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
     object_resolver::PassthroughResolver,
     object_variant::ObjectVariant,

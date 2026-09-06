@@ -1,14 +1,14 @@
 #![allow(clippy::arithmetic_side_effects, clippy::expect_used)]
 
-use std::{collections::HashMap, hint::black_box, rc::Rc, sync::Arc};
+use std::{collections::HashMap, hint::black_box, sync::Arc};
 
 use bytes::Bytes;
 use criterion::{Criterion, criterion_group, criterion_main};
 use pdf_canvas::{pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas};
-use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
+use pdf_content_stream::ContentStream;
 use pdf_document::page::PdfPage;
 use pdf_font::{FontProgramFormat, FontSource, PdfFontSpec};
-use pdf_object::{
+use pdf_object_reader::{
     dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     stream::StreamObject,
 };
@@ -20,12 +20,9 @@ fn content_stream(text: &[u8]) -> ContentStream {
     data.extend_from_slice(text);
     data.extend_from_slice(b") Tj ET");
     let stream = StreamObject::new(1, 0, Dictionary::new(Default::default()), data);
-    ContentStream::new(
-        &ObjectVariant::Stream(stream),
-        &PassthroughResolver,
-        &mut ContentStreamIdAllocator::new(),
-    )
-    .expect("benchmark stream should parse")
+    pdf_object_reader::ObjectReader::new(&PassthroughResolver)
+        .read::<ContentStream>(&ObjectVariant::Stream(stream))
+        .expect("benchmark stream should parse")
 }
 
 fn benchmark(c: &mut Criterion) {
@@ -44,16 +41,17 @@ fn benchmark(c: &mut Criterion) {
         ..simple
     });
     let font_system = bundled_font_system();
-    let resources = Resources {
+    let resources = Arc::new(Resources {
         fonts: HashMap::from([(
             b"F1".to_vec(),
             Resource::Font {
-                font: Rc::new(font),
+                font: Arc::new(font),
                 resources: None,
-            },
+            }
+            .into(),
         )]),
         ..Default::default()
-    };
+    });
     let page = PdfPage::default();
     let repeated = vec![b'A'; 1_024];
     let mixed = (0..1_024)
@@ -71,7 +69,13 @@ fn benchmark(c: &mut Criterion) {
                         PdfCanvas::new(&mut recording, &page, None, Arc::clone(&font_system))
                             .expect("canvas should initialize");
                     canvas
-                        .render_content_stream(&stream, None, None, Some(&resources), None)
+                        .render_content_stream(
+                            &stream,
+                            None,
+                            None,
+                            Some(Arc::clone(&resources)),
+                            None,
+                        )
                         .expect("text should render");
                 });
             },
@@ -86,7 +90,13 @@ fn benchmark(c: &mut Criterion) {
                             .expect("canvas should initialize")
                             .with_text_recording();
                     canvas
-                        .render_content_stream(&stream, None, None, Some(&resources), None)
+                        .render_content_stream(
+                            &stream,
+                            None,
+                            None,
+                            Some(Arc::clone(&resources)),
+                            None,
+                        )
                         .expect("text should render");
                     black_box(canvas.take_text_glyphs());
                 });

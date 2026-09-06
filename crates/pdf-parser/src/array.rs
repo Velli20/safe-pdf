@@ -1,4 +1,4 @@
-use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object_reader::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 use pdf_tokenizer::PdfToken;
 
 use crate::{error::ParserError, parser::PdfParser};
@@ -38,7 +38,7 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use pdf_object::object_resolver::PassthroughResolver;
+    use pdf_object_reader::object_resolver::PassthroughResolver;
 
     use super::*;
 

@@ -1,18 +1,12 @@
-use std::rc::Rc;
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult};
 
-use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
+use pdf_content_stream::ContentStream;
 use pdf_graphics::{rect::Rect, transform::Transform};
-use pdf_object::{
-    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-};
+use pdf_object_reader::object_lookup::ObjectLookupExt;
 use pdf_shading::model::Shading;
 
 use crate::{
-    error::PdfPagesError,
-    external_graphics_state::ExternalGraphicsState,
-    object_reader::{ReadCycleTracker, ReadFromDictionary},
-    resource_cache::ResourceCache,
-    resources::Resources,
+    error::PdfPagesError, external_graphics_state::ExternalGraphicsState, resources::Resources,
 };
 
 /// PaintType for tiling patterns.
@@ -104,7 +98,7 @@ pub enum Pattern {
         /// An optional transformation matrix to be applied to the pattern.
         matrix: Option<Transform>,
         /// A dictionary of resources required by the pattern's content stream.
-        resources: Rc<Resources>,
+        resources: ObjectHandle<Resources>,
         /// The content stream that defines the graphics of the pattern cell.
         content_stream: ContentStream,
     },
@@ -119,30 +113,24 @@ pub enum Pattern {
     },
 }
 
-impl Pattern {
-    /// Reads and constructs a `Pattern` from a PDF object.
-    ///
-    /// This function parses a PDF pattern object, which can be either a tiling pattern or a shading pattern,
-    /// from the provided `object` using the given `objects` resolver and `cache` for resource management.
-    /// It extracts all required fields and sub-objects, handling both pattern types as defined by the PDF specification.
-    ///
-    /// # Parameters
-    ///
-    /// - `object`: The PDF object variant representing the pattern to parse.
-    /// - `objects`: The object resolver used to resolve indirect references within the PDF.
-    /// - `cache`: A mutable reference to the resource cache for resolving and storing resources.
-    ///
-    /// # Returns
-    ///
-    /// Returns a `Result` containing the constructed `Pattern` on success, or a `PdfPagesError` if parsing fails.
-    pub(crate) fn read(
-        object: &ObjectVariant,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        cycle_tracker: &mut ReadCycleTracker,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Pattern, PdfPagesError> {
-        let dictionary = object.try_dictionary(objects)?;
+impl FromPdfObject for Pattern {
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let raw = context.object().object().clone();
+        let object = raw.value();
+        let objects = context.source();
+        let dictionary = match object {
+            pdf_object_reader::object_variant::ObjectVariant::Dictionary(dictionary) => dictionary,
+            pdf_object_reader::object_variant::ObjectVariant::Stream(stream) => &stream.dictionary,
+            other => {
+                return Err(pdf_object_reader::object_error::ObjectError::TypeMismatch(
+                    "Dictionary or Stream",
+                    other.name(),
+                )
+                .into());
+            }
+        };
 
         let pattern_type = dictionary.required_number::<i32>(b"PatternType", objects)?;
 
@@ -169,12 +157,12 @@ impl Pattern {
                 // Read the `/YStep` entry.
                 let y_step = dictionary.required_number::<f32>(b"YStep", objects)?;
 
-                // Read the `/Resources` entry. Needed by the pattern's content stream.
-                let parsed_resources =
-                    Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?;
-                let resources = parsed_resources.unwrap_or_else(|| Rc::new(Resources::default()));
-
-                let content_stream = ContentStream::new(object, objects, id_allocator)?;
+                let content_stream = context.read::<ContentStream>(object)?;
+                let resources = dictionary
+                    .get(b"Resources")
+                    .map(|value| context.read_shared(value))
+                    .transpose()?
+                    .unwrap_or_else(|| ObjectHandle::from(Resources::default()));
 
                 Ok(Pattern::Tiling {
                     paint_type,
@@ -190,23 +178,12 @@ impl Pattern {
             PatternType::Shading => {
                 let shading_object = dictionary.get_or_err(b"Shading")?;
                 // Read the shading object that defines the gradient fill.
-                let shading = Shading::from_dictionary(shading_object, objects)?;
+                let shading = context.read::<Shading>(shading_object)?;
 
-                // Read an external graphics state dictionary to apply when painting the pattern.
-                let ext_g_state = match dictionary
+                let ext_g_state = dictionary
                     .get(b"ExtGState")
-                    .map(|obj| obj.try_dictionary(objects))
-                    .transpose()?
-                {
-                    Some(ext) => ExternalGraphicsState::from_dictionary(
-                        ext,
-                        objects,
-                        cache,
-                        cycle_tracker,
-                        id_allocator,
-                    )?,
-                    None => None,
-                };
+                    .map(|value| context.read(value))
+                    .transpose()?;
 
                 Ok(Pattern::Shading {
                     shading,

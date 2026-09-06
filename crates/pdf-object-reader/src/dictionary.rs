@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use pdf_graphics::{rect::Rect, transform::Transform};
 
 use crate::{
-    error::ObjectError, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    object_error::ObjectError, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
     object_variant::ObjectVariant,
 };
 

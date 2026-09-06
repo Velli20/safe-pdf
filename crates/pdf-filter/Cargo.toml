@@ -13,7 +13,7 @@ jpeg2k = "0.10.1"
 image = { version = "0.25.9", default-features = false, features = ["jpeg"] }
 pdf-ccitt = { path = "../pdf-ccitt" }
 pdf-jbig2 = { path = "../pdf-jbig2" }
-pdf-object = { path = "../pdf-object" }
+pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-utils = { path = "../pdf-utils" }
 
 [lints]

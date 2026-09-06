@@ -1,6 +1,6 @@
 use crate::{error::ParserError, parser::PdfParser};
-use pdf_object::{
-    error::ObjectError, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+use pdf_object_reader::{
+    object_error::ObjectError, object_resolver::ObjectResolver, object_variant::ObjectVariant,
     trailer::Trailer,
 };
 
@@ -47,7 +47,7 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
+    use pdf_object_reader::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
 
     use super::*;
 
@@ -59,7 +59,7 @@ mod tests {
         let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
         assert_eq!(
             trailer.dictionary.get(b"Root").unwrap(),
-            &ObjectVariant::Reference(1)
+            &ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0))
         );
     }
 
@@ -84,7 +84,7 @@ mod tests {
         let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
         assert_eq!(
             trailer.dictionary.get(b"Root").unwrap(),
-            &ObjectVariant::Reference(1)
+            &ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0))
         );
         assert_eq!(trailer.offset, Some(187));
     }
@@ -97,7 +97,7 @@ mod tests {
         let trailer = parser.parse_trailer(&PassthroughResolver).unwrap();
         assert_eq!(
             trailer.dictionary.get(b"Root").unwrap(),
-            &ObjectVariant::Reference(1)
+            &ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0))
         );
         assert_eq!(trailer.offset, None);
     }
@@ -118,7 +118,9 @@ mod tests {
             assert_eq!(trailer.offset, None);
             assert_eq!(
                 trailer.dictionary.get(b"Root"),
-                Some(&ObjectVariant::Reference(1))
+                Some(&ObjectVariant::Reference(
+                    pdf_object_reader::object_id::ObjectId::new(1, 0)
+                ))
             );
         }
     }

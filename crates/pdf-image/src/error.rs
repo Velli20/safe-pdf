@@ -7,7 +7,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum PdfImageError {
     #[error("{0}")]
-    Object(#[from] pdf_object::error::ObjectError),
+    Object(#[from] pdf_object_reader::object_error::ObjectError),
     #[error("{0}")]
     ColorSpace(#[from] ColorSpaceError),
     #[error("{0}")]

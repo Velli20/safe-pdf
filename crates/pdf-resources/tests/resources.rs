@@ -1,21 +1,17 @@
-use std::{collections::BTreeMap, rc::Rc};
+use std::{collections::BTreeMap, sync::Arc};
 
-use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_graphics::transform::Transform;
-use pdf_object::{
-    dictionary::Dictionary, object_id::PdfObjectId, object_resolver::PassthroughResolver,
+use pdf_object_collection::object_collection::ObjectCollection;
+use pdf_object_reader::{
+    dictionary::Dictionary, object_id::ObjectId, object_resolver::PassthroughResolver,
     object_variant::ObjectVariant, stream::StreamObject,
 };
-use pdf_object_collection::object_collection::ObjectCollection;
 
-use pdf_resources::{
-    object_reader::ReadCycleTracker, pattern::Pattern, resource::Resource,
-    resource_cache::DefaultResourceCache, resources::Resources,
-};
+use pdf_resources::{pattern::Pattern, resource::Resource, resources::Resources};
 use pdf_shading::model::Shading;
 
-fn object_id(number: usize) -> PdfObjectId {
-    PdfObjectId {
+fn object_id(number: usize) -> ObjectId {
+    ObjectId {
         number,
         generation: 0,
     }
@@ -100,7 +96,10 @@ fn recursive_form_xobject_stream(
                 Vec::from(b"XObject"),
                 ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                     Vec::from(nested_name.as_bytes()),
-                    ObjectVariant::Reference(nested_object_number),
+                    ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(
+                        nested_object_number,
+                        0,
+                    )),
                 )]))),
             )]))),
         ),
@@ -186,7 +185,10 @@ fn self_referential_type3_font(object_number: usize) -> Dictionary {
                 Vec::from(b"Font"),
                 ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                     Vec::from(b"Self"),
-                    ObjectVariant::Reference(object_number),
+                    ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(
+                        object_number,
+                        0,
+                    )),
                 )]))),
             )]))),
         ),
@@ -213,7 +215,10 @@ fn self_referential_tiling_pattern(object_number: usize) -> ObjectVariant {
                     Vec::from(b"Pattern"),
                     ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                         Vec::from(b"Self"),
-                        ObjectVariant::Reference(object_number),
+                        ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(
+                            object_number,
+                            0,
+                        )),
                     )]))),
                 )]))),
             ),
@@ -224,34 +229,35 @@ fn self_referential_tiling_pattern(object_number: usize) -> ObjectVariant {
 
 fn form_content_stream_id(xobject: &Resource) -> Option<usize> {
     match xobject {
-        Resource::Form(form) => Some(form.content_stream.id),
+        Resource::Form(form) => Some(form.get().ok()?.content_stream.id),
         _ => None,
     }
 }
 
 #[test]
 fn cached_form_xobjects_keep_their_generated_ids() {
-    let shared = form_xobject_stream(11, b"q");
-    let distinct = form_xobject_stream(12, b"Q");
+    let mut objects = ObjectCollection::default();
+    for (number, data) in [
+        (11, b"q".as_slice()),
+        (12, b"Q".as_slice()),
+        (13, b"q Q".as_slice()),
+    ] {
+        objects
+            .insert(object_id(number), form_xobject_stream(number, data))
+            .expect("form should insert");
+    }
     let resources = xobject_resources(vec![
-        ("SharedA", shared.clone()),
-        ("SharedB", shared),
-        ("Distinct", distinct),
+        ("SharedA", ObjectVariant::Reference(object_id(11))),
+        ("SharedB", ObjectVariant::Reference(object_id(11))),
+        ("Distinct", ObjectVariant::Reference(object_id(12))),
     ]);
 
-    let mut cache = DefaultResourceCache::default();
-    let mut cycle_tracker = ReadCycleTracker::default();
-    let mut ids = ContentStreamIdAllocator::new();
+    let reader = pdf_object_reader::ObjectReader::new(&objects);
 
-    let parsed = Resources::read(
-        &resources,
-        &PassthroughResolver,
-        &mut cache,
-        &mut cycle_tracker,
-        &mut ids,
-    )
-    .expect("xobjects should parse")
-    .expect("resources should exist");
+    let parsed = reader
+        .read_shared::<Resources>((&resources).get(b"Resources").expect("resource entry"))
+        .and_then(|handle| handle.get())
+        .expect("xobjects should parse");
 
     let shared_a = form_content_stream_id(parsed.xobject("SharedA").expect("SharedA should exist"))
         .expect("SharedA should be a form XObject");
@@ -264,15 +270,10 @@ fn cached_form_xobjects_keep_their_generated_ids() {
     assert_eq!(shared_b, shared_a);
     assert_ne!(distinct_id, shared_a);
 
-    let parsed_again = Resources::read(
-        &resources,
-        &PassthroughResolver,
-        &mut cache,
-        &mut cycle_tracker,
-        &mut ids,
-    )
-    .expect("cached xobjects should parse")
-    .expect("resources should exist");
+    let parsed_again = reader
+        .read_shared::<Resources>((&resources).get(b"Resources").expect("resource entry"))
+        .and_then(|handle| handle.get())
+        .expect("cached xobjects should parse");
     let shared_again = form_content_stream_id(
         parsed_again
             .xobject("SharedA")
@@ -281,16 +282,16 @@ fn cached_form_xobjects_keep_their_generated_ids() {
     .expect("SharedA should be a form XObject");
     assert_eq!(shared_again, shared_a);
 
-    let later_resources = xobject_resources(vec![("Later", form_xobject_stream(13, b"q Q"))]);
-    let later = Resources::read(
-        &later_resources,
-        &PassthroughResolver,
-        &mut cache,
-        &mut cycle_tracker,
-        &mut ids,
-    )
-    .expect("later xobject should parse")
-    .expect("resources should exist");
+    let later_resources =
+        xobject_resources(vec![("Later", ObjectVariant::Reference(object_id(13)))]);
+    let later = reader
+        .read_shared::<Resources>(
+            (&later_resources)
+                .get(b"Resources")
+                .expect("resource entry"),
+        )
+        .and_then(|handle| handle.get())
+        .expect("later xobject should parse");
     let later_id = form_content_stream_id(later.xobject("Later").expect("Later should exist"))
         .expect("Later should be a form XObject");
 
@@ -298,17 +299,78 @@ fn cached_form_xobjects_keep_their_generated_ids() {
 }
 
 #[test]
+fn form_resources_accept_an_indirect_stream_dictionary() {
+    let nested_resources = ObjectVariant::Stream(StreamObject::new(
+        15,
+        0,
+        Dictionary::new(BTreeMap::from([
+            (Vec::from(b"Subtype"), name("Form")),
+            (
+                Vec::from(b"BBox"),
+                array(vec![integer(0), integer(0), integer(10), integer(10)]),
+            ),
+        ])),
+        Vec::new(),
+    ));
+    let form = ObjectVariant::Stream(StreamObject::new(
+        14,
+        0,
+        Dictionary::new(BTreeMap::from([
+            (Vec::from(b"Subtype"), name("Form")),
+            (
+                Vec::from(b"BBox"),
+                array(vec![integer(0), integer(0), integer(10), integer(10)]),
+            ),
+            (
+                Vec::from(b"Resources"),
+                ObjectVariant::Reference(object_id(15)),
+            ),
+        ])),
+        Vec::new(),
+    ));
+    let page = xobject_resources(vec![("Form", ObjectVariant::Reference(object_id(14)))]);
+
+    let mut objects = ObjectCollection::default();
+    objects
+        .insert(object_id(14), form)
+        .expect("form should insert");
+    objects
+        .insert(object_id(15), nested_resources)
+        .expect("stream-backed resources should insert");
+
+    let reader = pdf_object_reader::ObjectReader::new(&objects);
+    let resources = reader
+        .read_shared::<Resources>(page.get(b"Resources").expect("resource entry"))
+        .and_then(|handle| handle.get())
+        .expect("page resources should parse");
+    assert!(matches!(resources.xobject("Form"), Some(Resource::Form(_))));
+    let Some(Resource::Form(form)) = resources.xobject("Form") else {
+        return;
+    };
+    let form = form.get().expect("form should be published");
+    let nested_resources = form
+        .resources
+        .as_ref()
+        .expect("form should retain its resources")
+        .get()
+        .expect("stream-backed resources should be published");
+
+    assert!(nested_resources.fonts.is_empty());
+    assert!(nested_resources.xobjects.is_empty());
+}
+
+#[test]
 fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
     let page_dict = Dictionary::new(BTreeMap::from([(
         Vec::from(b"Resources"),
-        ObjectVariant::Reference(100),
+        ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(100, 0)),
     )]));
 
     let resources_dict = Dictionary::new(BTreeMap::from([(
         Vec::from(b"XObject"),
         ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
             Vec::from(b"Meta6"),
-            ObjectVariant::Reference(101),
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(101, 0)),
         )]))),
     )]));
 
@@ -339,19 +401,12 @@ fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
         .insert(object_id(101), ObjectVariant::Dictionary(form_dict))
         .expect("dictionary-only form should insert");
 
-    let mut cache = DefaultResourceCache::default();
-    let mut cycle_tracker = ReadCycleTracker::default();
-    let mut ids = ContentStreamIdAllocator::new();
+    let reader = pdf_object_reader::ObjectReader::new(&objects);
 
-    let resources = Resources::read(
-        &page_dict,
-        &objects,
-        &mut cache,
-        &mut cycle_tracker,
-        &mut ids,
-    )
-    .expect("resources should parse")
-    .expect("page resources should exist");
+    let resources = reader
+        .read_shared::<Resources>((&page_dict).get(b"Resources").expect("resource entry"))
+        .and_then(|handle| handle.get())
+        .expect("resources should parse");
 
     let xobject = resources.xobject("Meta6");
     assert!(
@@ -361,6 +416,7 @@ fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
     let Some(Resource::Form(form)) = xobject else {
         return;
     };
+    let form = form.get().expect("published form");
 
     assert_eq!(form.bbox.left, 10.0);
     assert_eq!(form.bbox.top, 20.0);
@@ -377,29 +433,29 @@ fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
 #[test]
 fn inline_shading_resource_without_object_number_parses() {
     let page_dict = page_resources(vec![("Inline", inline_axial_shading())]);
-    let mut cache = DefaultResourceCache::default();
-    let mut cycle_tracker = ReadCycleTracker::default();
-    let mut ids = ContentStreamIdAllocator::new();
 
-    let resources = Resources::read(
-        &page_dict,
-        &PassthroughResolver,
-        &mut cache,
-        &mut cycle_tracker,
-        &mut ids,
-    )
-    .expect("inline shading resources should parse")
-    .expect("page resources should exist");
+    let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+
+    let resources = reader
+        .read_shared::<Resources>((&page_dict).get(b"Resources").expect("resource entry"))
+        .and_then(|handle| handle.get())
+        .expect("inline shading resources should parse");
 
     assert!(
-        matches!(resources.shading("Inline"), Some(Shading::Axial { .. })),
+        matches!(
+            resources.shading("Inline").as_deref(),
+            Some(Shading::Axial { .. })
+        ),
         "expected the inline shading dictionary to parse as an axial shading"
     );
 }
 
 #[test]
 fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
-    let xobject_entries = BTreeMap::from([(Vec::from(b"Self"), ObjectVariant::Reference(11))]);
+    let xobject_entries = BTreeMap::from([(
+        Vec::from(b"Self"),
+        ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(11, 0)),
+    )]);
     let resource_dict = Dictionary::new(BTreeMap::from([(
         Vec::from(b"XObject"),
         ObjectVariant::Dictionary(Dictionary::new(xobject_entries)),
@@ -411,12 +467,15 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
             Vec::from(b"BBox"),
             ObjectVariant::Array(vec![integer(0), integer(0), integer(10), integer(10)]),
         ),
-        (Vec::from(b"Resources"), ObjectVariant::Reference(10)),
+        (
+            Vec::from(b"Resources"),
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(10, 0)),
+        ),
     ]));
 
     let page_dict = Dictionary::new(BTreeMap::from([(
         Vec::from(b"Resources"),
-        ObjectVariant::Reference(10),
+        ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(10, 0)),
     )]));
 
     let mut objects = ObjectCollection::default();
@@ -430,30 +489,18 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
         )
         .expect("form xobject should insert");
 
-    let mut cache = DefaultResourceCache::default();
-    let mut cycle_tracker = ReadCycleTracker::default();
-    let mut ids = ContentStreamIdAllocator::new();
+    let reader = pdf_object_reader::ObjectReader::new(&objects);
 
-    let resources = Resources::read(
-        &page_dict,
-        &objects,
-        &mut cache,
-        &mut cycle_tracker,
-        &mut ids,
-    )
-    .expect("cyclic resources should parse")
-    .expect("page resources should exist");
+    let resources = reader
+        .read_shared::<Resources>((&page_dict).get(b"Resources").expect("resource entry"))
+        .and_then(|handle| handle.get())
+        .expect("cyclic resources should parse");
 
-    let cached_resources = Resources::read(
-        &page_dict,
-        &objects,
-        &mut cache,
-        &mut cycle_tracker,
-        &mut ids,
-    )
-    .expect("cached resources should parse")
-    .expect("cached page resources should exist");
-    assert!(Rc::ptr_eq(&resources, &cached_resources));
+    let cached_resources = reader
+        .read_shared::<Resources>((&page_dict).get(b"Resources").expect("resource entry"))
+        .and_then(|handle| handle.get())
+        .expect("cached resources should parse");
+    assert!(Arc::ptr_eq(&resources, &cached_resources));
 
     let form = resources.xobject("Self");
     assert!(
@@ -463,11 +510,14 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
     let Some(Resource::Form(form)) = form else {
         return;
     };
+    let form = form.get().expect("published form");
 
     let nested_resources = form
         .resources
         .as_ref()
-        .expect("recursive /Resources reference should stay available");
+        .expect("recursive /Resources reference should stay available")
+        .get()
+        .expect("published resources");
     let nested_form = nested_resources
         .xobject("Self")
         .expect("recursive lookup should resolve the same form");
@@ -478,6 +528,7 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
     let Resource::Form(nested_form) = nested_form else {
         return;
     };
+    let nested_form = nested_form.get().expect("published form");
 
     assert!(
         nested_form.resources.is_some(),
@@ -497,7 +548,7 @@ fn mutually_recursive_form_xobjects_resolve_lazily() {
             Vec::from(b"XObject"),
             ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                 Vec::from(b"First"),
-                ObjectVariant::Reference(6),
+                ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(6, 0)),
             )]))),
         )]))),
     )]));
@@ -516,40 +567,36 @@ fn mutually_recursive_form_xobjects_resolve_lazily() {
         )
         .expect("second form should insert");
 
-    let mut cache = DefaultResourceCache::default();
-    let mut cycle_tracker = ReadCycleTracker::default();
-    let mut ids = ContentStreamIdAllocator::new();
-    let resources = Resources::read(
-        &page_dict,
-        &objects,
-        &mut cache,
-        &mut cycle_tracker,
-        &mut ids,
-    )
-    .expect("mutually recursive forms should parse")
-    .expect("page resources should exist");
+    let reader = pdf_object_reader::ObjectReader::new(&objects);
+    let resources = reader
+        .read_shared::<Resources>((&page_dict).get(b"Resources").expect("resource entry"))
+        .and_then(|handle| handle.get())
+        .expect("mutually recursive forms should parse");
 
     let first = resources.xobject("First");
     assert!(matches!(first, Some(Resource::Form(_))));
     let Some(Resource::Form(first)) = first else {
         return;
     };
+    let first = first.get().expect("published form");
     let second = first
         .resources
         .as_ref()
-        .and_then(|nested| nested.xobject("Next"));
+        .and_then(|nested| nested.get().ok()?.xobject("Next").cloned());
     assert!(matches!(second, Some(Resource::Form(_))));
     let Some(Resource::Form(second)) = second else {
         return;
     };
+    let second = second.get().expect("published form");
     let back_to_first = second
         .resources
         .as_ref()
-        .and_then(|nested| nested.xobject("Back"));
+        .and_then(|nested| nested.get().ok()?.xobject("Back").cloned());
     assert!(matches!(back_to_first, Some(Resource::Form(_))));
     let Some(Resource::Form(back_to_first)) = back_to_first else {
         return;
     };
+    let back_to_first = back_to_first.get().expect("published form");
 
     assert_eq!(back_to_first.content_stream.id, first.content_stream.id);
 }
@@ -562,7 +609,7 @@ fn self_referential_font_resources_resolve_lazily() {
             Vec::from(b"Font"),
             ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                 Vec::from(b"Self"),
-                ObjectVariant::Reference(21),
+                ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(21, 0)),
             )]))),
         )]))),
     )]));
@@ -575,19 +622,12 @@ fn self_referential_font_resources_resolve_lazily() {
         )
         .expect("font should insert");
 
-    let mut cache = DefaultResourceCache::default();
-    let mut cycle_tracker = ReadCycleTracker::default();
-    let mut ids = ContentStreamIdAllocator::new();
+    let reader = pdf_object_reader::ObjectReader::new(&objects);
 
-    let resources = Resources::read(
-        &page_dict,
-        &objects,
-        &mut cache,
-        &mut cycle_tracker,
-        &mut ids,
-    )
-    .expect("resources should parse")
-    .expect("page resources should exist");
+    let resources = reader
+        .read_shared::<Resources>((&page_dict).get(b"Resources").expect("resource entry"))
+        .and_then(|handle| handle.get())
+        .expect("resources should parse");
 
     let (font, nested_resources) = resources.font("Self").expect("font should resolve");
     assert!(
@@ -607,7 +647,7 @@ fn self_referential_font_resources_resolve_lazily() {
 
     let nested_again = nested_again.expect("recursive nested resources should stay accessible");
     assert!(
-        std::ptr::eq(nested_resources, nested_again),
+        Arc::ptr_eq(&nested_resources, &nested_again),
         "lazy font resolution should preserve the recursive resource graph"
     );
 }
@@ -631,19 +671,13 @@ fn fallback_fonts_do_not_read_nested_type3_resources() {
             )]))),
         )]))),
     )]));
-    let mut cache = DefaultResourceCache::default();
-    let mut cycle_tracker = ReadCycleTracker::default();
-    let mut ids = ContentStreamIdAllocator::new();
 
-    let resources = Resources::read(
-        &page_dict,
-        &PassthroughResolver,
-        &mut cache,
-        &mut cycle_tracker,
-        &mut ids,
-    )
-    .expect("fallback font resources should parse")
-    .expect("page resources should exist");
+    let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+
+    let resources = reader
+        .read_shared::<Resources>((&page_dict).get(b"Resources").expect("resource entry"))
+        .and_then(|handle| handle.get())
+        .expect("fallback font resources should parse");
     let (font, nested_resources) = resources.font("F1").expect("font should resolve");
 
     assert!(font.as_standard14().is_some());
@@ -658,7 +692,7 @@ fn self_referential_pattern_resources_resolve_lazily() {
             Vec::from(b"Pattern"),
             ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                 Vec::from(b"Self"),
-                ObjectVariant::Reference(31),
+                ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(31, 0)),
             )]))),
         )]))),
     )]));
@@ -668,44 +702,39 @@ fn self_referential_pattern_resources_resolve_lazily() {
         .insert(object_id(31), self_referential_tiling_pattern(31))
         .expect("pattern should insert");
 
-    let mut cache = DefaultResourceCache::default();
-    let mut cycle_tracker = ReadCycleTracker::default();
-    let mut ids = ContentStreamIdAllocator::new();
+    let reader = pdf_object_reader::ObjectReader::new(&objects);
 
-    let resources = Resources::read(
-        &page_dict,
-        &objects,
-        &mut cache,
-        &mut cycle_tracker,
-        &mut ids,
-    )
-    .expect("resources should parse")
-    .expect("page resources should exist");
+    let resources = reader
+        .read_shared::<Resources>((&page_dict).get(b"Resources").expect("resource entry"))
+        .and_then(|handle| handle.get())
+        .expect("resources should parse");
 
     let pattern = resources.pattern("Self").expect("pattern should resolve");
     assert!(
-        matches!(pattern, Pattern::Tiling { .. }),
+        matches!(pattern.as_ref(), Pattern::Tiling { .. }),
         "expected the self-referential pattern to stay usable"
     );
 
     let Pattern::Tiling {
         resources: nested_resources,
         ..
-    } = pattern
+    } = pattern.as_ref()
     else {
         return;
     };
 
     let nested_pattern = nested_resources
+        .get()
+        .expect("published pattern resources")
         .pattern("Self")
         .expect("lazy nested pattern lookup should resolve");
 
     assert!(
-        matches!(nested_pattern, Pattern::Tiling { .. }),
+        matches!(nested_pattern.as_ref(), Pattern::Tiling { .. }),
         "expected the nested self-reference to resolve to the same pattern type"
     );
     assert!(
-        std::ptr::eq(pattern, nested_pattern),
+        Arc::ptr_eq(&pattern, &nested_pattern),
         "lazy pattern resolution should preserve the recursive resource graph"
     );
 }

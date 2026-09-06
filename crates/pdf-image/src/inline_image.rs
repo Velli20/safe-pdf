@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use bytes::Bytes;
 use pdf_filter::filter::decode_data_with_resolver;
-use pdf_object::{
+use pdf_object_reader::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
@@ -101,7 +101,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use bytes::Bytes;
-    use pdf_object::{
+    use pdf_object_reader::{
         dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     };
 
@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn normalize_inline_image_dictionary_expands_abbreviations() {
-        let dictionary = pdf_object::dictionary::Dictionary::new(BTreeMap::from([
+        let dictionary = pdf_object_reader::dictionary::Dictionary::new(BTreeMap::from([
             (Vec::from(b"BPC"), ObjectVariant::Integer(8)),
             (Vec::from(b"CS"), ObjectVariant::Name(b"RGB".to_vec())),
             (Vec::from(b"D"), ObjectVariant::Null),
@@ -155,7 +155,7 @@ mod tests {
         ];
 
         for (abbreviated, canonical) in cases {
-            let dictionary = pdf_object::dictionary::Dictionary::new(BTreeMap::from([(
+            let dictionary = pdf_object_reader::dictionary::Dictionary::new(BTreeMap::from([(
                 Vec::from(b"CS"),
                 ObjectVariant::Name(abbreviated.as_bytes().to_vec()),
             )]));
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn normalize_inline_image_dictionary_expands_indexed_color_space_arrays() {
-        let dictionary = pdf_object::dictionary::Dictionary::new(BTreeMap::from([(
+        let dictionary = pdf_object_reader::dictionary::Dictionary::new(BTreeMap::from([(
             Vec::from(b"CS"),
             ObjectVariant::Array(vec![
                 ObjectVariant::Name(b"I".to_vec()),

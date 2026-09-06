@@ -7,7 +7,7 @@
 )]
 
 use pdf_document::{diagnostic::PdfReadDiagnosticKind, error::PdfReaderError, reader::PdfReader};
-use pdf_object::error::ObjectError;
+use pdf_object_reader::object_error::ObjectError;
 
 fn format_xref_entry(offset: usize, generation: u16, used: bool) -> String {
     let kind = if used { 'n' } else { 'f' };

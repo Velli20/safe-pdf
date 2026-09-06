@@ -1,331 +1,121 @@
-//! PDF Resources dictionary parsing and management.
-//!
-//! This module handles the `/Resources` dictionary found in PDF pages and other
-//! content streams, providing access to fonts, graphics states, XObjects, patterns,
-//! and shadings.
-
-use std::collections::HashMap;
-use std::rc::Rc;
-
-use pdf_content_stream::ContentStreamIdAllocator;
-use pdf_font::PdfFontSpec;
-use pdf_font::from_dictionary;
-use pdf_object::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
-};
-use pdf_shading::model::Shading;
-
+//! Resource namespaces and typed decoding.
 use crate::{
-    error::PdfPagesError,
-    external_graphics_state::ExternalGraphicsState,
-    object_reader::{ReadCycleTracker, ReadFromDictionary},
-    pattern::Pattern,
-    resource::Resource,
-    resource_cache::{ResourceCache, read_resource_lazy},
-    resources_reference::ResourcesReference,
-    xobject::read_xobject_inner,
+    error::PdfPagesError, external_graphics_state::ExternalGraphicsState, form::FormXObject,
+    pattern::Pattern, resource::Resource,
 };
 use pdf_color_space::color_space::ColorSpace;
+use pdf_font::PdfFontSpec;
+use pdf_object_reader::object_lookup::ObjectLookupExt;
+use pdf_object_reader::{
+    Dictionary, DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle,
+    ReadResult, object_variant::ObjectVariant,
+};
+use pdf_shading::model::Shading;
+use std::{collections::HashMap, sync::Arc};
 
-/// Contains all resources referenced by a PDF content stream, organized per PDF sub-dictionary.
-///
-/// Each field corresponds to a named sub-dictionary in the PDF `/Resources` dictionary
-/// (PDF spec §7.8.3). Keeping them separate ensures that resource names are scoped per
-/// category: a font named `"F1"` and an XObject named `"F1"` are independent entries and
-/// will never collide during page-tree resource inheritance (PDF spec §7.7.4).
+/// Named resource categories. Child entries override only the same category.
 ///
 /// ```compile_fail
 /// use pdf_resources::resources::Resources;
-///
 /// fn requires_clone<T: Clone>() {}
 /// requires_clone::<Resources>();
 /// ```
 #[derive(Default)]
 pub struct Resources {
-    /// Resources from the `/Font` sub-dictionary.
-    pub fonts: HashMap<Vec<u8>, Resource>,
-    /// Resources from the `/ExtGState` sub-dictionary.
+    /// The /Font resource namespace.
+    pub fonts: HashMap<Vec<u8>, ObjectHandle<Resource>>,
+    /// The /ExtGState resource namespace.
     pub ext_g_states: HashMap<Vec<u8>, Resource>,
-    /// Resources from the `/Pattern` sub-dictionary.
+    /// The /Pattern resource namespace.
     pub patterns: HashMap<Vec<u8>, Resource>,
-    /// Resources from the `/XObject` sub-dictionary.
+    /// The /XObject resource namespace.
     pub xobjects: HashMap<Vec<u8>, Resource>,
-    /// Resources from the `/Shading` sub-dictionary.
+    /// The /Shading resource namespace.
     pub shadings: HashMap<Vec<u8>, Resource>,
-    /// Resources from the `/ColorSpace` sub-dictionary.
+    /// The /ColorSpace resource namespace.
     pub color_spaces: HashMap<Vec<u8>, Resource>,
-    #[doc(hidden)]
-    pub lazy_reference: Option<ResourcesReference>,
 }
 
-pub(crate) fn read_font_resource(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-    cache: &mut dyn ResourceCache,
-    cycle_tracker: &mut ReadCycleTracker,
-    id_allocator: &mut ContentStreamIdAllocator,
-) -> Result<Resource, PdfPagesError> {
-    // Font construction is best-effort and infallible. Only successfully
-    // parsed Type3 fonts consume nested resources; whole-font fallbacks do not.
-    let font = from_dictionary(dictionary, objects, id_allocator);
-    let resources = if font.is_type3() {
-        Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?
-    } else {
-        None
-    };
-
-    Ok(Resource::Font {
-        font: Rc::new(font),
-        resources,
-    })
-}
-
-/// Parses all font resources from the `/Font` sub-dictionary.
-fn read_fonts(
-    resources: &Dictionary,
-    objects: &dyn ObjectResolver,
-    cache: &mut dyn ResourceCache,
-    cycle_tracker: &mut ReadCycleTracker,
-    id_allocator: &mut ContentStreamIdAllocator,
-) -> Result<HashMap<Vec<u8>, Resource>, PdfPagesError> {
-    let Some(font_dict) = resources.optional_dictionary(b"Font", objects)? else {
-        return Ok(HashMap::new());
-    };
-
-    let mut result = HashMap::new();
-    for (name, value) in &font_dict.dictionary {
-        let dict = value.try_dictionary(objects)?;
-        let resource = read_resource_lazy(cache, dict.object_number, |cache| {
-            read_font_resource(dict, objects, cache, cycle_tracker, id_allocator)
-        })?;
-        result.insert(name.clone(), resource);
-    }
-    Ok(result)
-}
-
-/// Parses all external graphics state resources from the `/ExtGState` sub-dictionary.
-fn read_external_graphics_states(
-    resources: &Dictionary,
-    objects: &dyn ObjectResolver,
-    cache: &mut dyn ResourceCache,
-    cycle_tracker: &mut ReadCycleTracker,
-    id_allocator: &mut ContentStreamIdAllocator,
-) -> Result<HashMap<Vec<u8>, Resource>, PdfPagesError> {
-    let Some(ext_gstate_dict) = resources.optional_dictionary(b"ExtGState", objects)? else {
-        return Ok(HashMap::new());
-    };
-
-    let mut result = HashMap::new();
-    for (name, value) in &ext_gstate_dict.dictionary {
-        let dict = value.try_dictionary(objects)?;
-        if let Some(num) = &dict.object_number
-            && let Some(cached) = cache.get(num)
-        {
-            result.insert(name.clone(), cached.clone());
-            continue;
+impl FromPdfObject for Resources {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        if matches!(context.object().value(), ObjectVariant::Stream(_)) {
+            let mut stream = context.stream()?;
+            Self::decode_dictionary(stream.dictionary())
+        } else {
+            Self::decode_dictionary(context.dictionary()?)
         }
-
-        let resource = match ExternalGraphicsState::from_dictionary(
-            dict,
-            objects,
-            cache,
-            cycle_tracker,
-            id_allocator,
-        ) {
-            Ok(Some(ext_g_state)) => Resource::ExternalGraphicsState(Rc::new(ext_g_state)),
-            Ok(None) => continue,
-            Err(err) => return Err(err),
-        };
-
-        if let Some(num) = dict.object_number {
-            cache.insert(num, resource.clone());
-        }
-        result.insert(name.clone(), resource);
     }
-    Ok(result)
-}
-
-/// Parses all pattern resources from the `/Pattern` sub-dictionary.
-fn read_patterns(
-    resources: &Dictionary,
-    objects: &dyn ObjectResolver,
-    cache: &mut dyn ResourceCache,
-    cycle_tracker: &mut ReadCycleTracker,
-    id_allocator: &mut ContentStreamIdAllocator,
-) -> Result<HashMap<Vec<u8>, Resource>, PdfPagesError> {
-    let Some(pattern_dict) = resources.optional_dictionary(b"Pattern", objects)? else {
-        return Ok(HashMap::new());
-    };
-
-    let mut result = HashMap::new();
-    for (name, value) in &pattern_dict.dictionary {
-        let object_number = value.try_object_number()?;
-        let resource = read_resource_lazy(cache, Some(object_number), |cache| {
-            let pattern = Pattern::read(value, objects, cache, cycle_tracker, id_allocator)?;
-            Ok::<Resource, PdfPagesError>(Resource::Pattern(Rc::new(pattern)))
-        })?;
-        result.insert(name.clone(), resource);
-    }
-    Ok(result)
-}
-
-/// Parses all XObject resources from the `/XObject` sub-dictionary.
-fn read_xobject_resource(
-    value: &ObjectVariant,
-    objects: &dyn ObjectResolver,
-    cache: &mut dyn ResourceCache,
-    cycle_tracker: &mut ReadCycleTracker,
-    id_allocator: &mut ContentStreamIdAllocator,
-) -> Result<Option<Resource>, PdfPagesError> {
-    let resolved = objects.resolve_object(value)?;
-
-    match resolved {
-        ObjectVariant::Stream(stream) => {
-            let resource = read_resource_lazy(cache, Some(stream.object_number), |cache| {
-                read_xobject_inner(
-                    value,
-                    &stream.dictionary,
-                    stream,
-                    objects,
-                    cache,
-                    cycle_tracker,
-                    id_allocator,
-                )
-            })?;
-            Ok(Some(resource))
-        }
-        ObjectVariant::Dictionary(dictionary) => {
-            let subtype = dictionary.required_bytes(b"Subtype", objects)?;
-            if subtype != b"Form" {
-                return Err(crate::error::PdfPagesError::UnsupportedXObjectSubtype {
-                    subtype: String::from_utf8_lossy(subtype).into_owned(),
-                });
-            }
-
-            let resource = read_resource_lazy(cache, dictionary.object_number, |cache| {
-                let form = crate::form::FormXObject::empty_from_dictionary(
-                    dictionary,
-                    objects,
-                    cache,
-                    cycle_tracker,
-                    id_allocator,
-                )?;
-                Ok::<Resource, PdfPagesError>(Resource::from(form))
-            })?;
-
-            Ok(Some(resource))
-        }
-        _ => Err(pdf_object::error::ObjectError::TypeMismatch(
-            "Stream or Form Dictionary",
-            resolved.name(),
-        )
-        .into()),
-    }
-}
-
-/// Parses all XObject resources from the `/XObject` sub-dictionary.
-///
-/// Stream-backed XObjects are parsed through the normal XObject reader. If a
-/// resource resolves to a dictionary with `/Subtype /Form`, it is recovered as
-/// an empty Form XObject so the resource remains paintable even without stream
-/// bytes. Any other non-stream entry is rejected with a typed error.
-fn read_xobjects(
-    resources: &Dictionary,
-    objects: &dyn ObjectResolver,
-    cache: &mut dyn ResourceCache,
-    cycle_tracker: &mut ReadCycleTracker,
-    id_allocator: &mut ContentStreamIdAllocator,
-) -> Result<HashMap<Vec<u8>, Resource>, PdfPagesError> {
-    let Some(xobject_dict) = resources.optional_dictionary(b"XObject", objects)? else {
-        return Ok(HashMap::new());
-    };
-
-    let mut result = HashMap::new();
-    for (name, value) in &xobject_dict.dictionary {
-        let Some(resource) =
-            read_xobject_resource(value, objects, cache, cycle_tracker, id_allocator)?
-        else {
-            continue;
-        };
-        result.insert(name.clone(), resource);
-    }
-    Ok(result)
-}
-
-/// Parses all shading resources from the `/Shading` sub-dictionary.
-fn read_shadings(
-    resources: &Dictionary,
-    objects: &dyn ObjectResolver,
-    cache: &mut dyn ResourceCache,
-) -> Result<HashMap<Vec<u8>, Resource>, PdfPagesError> {
-    let Some(shading_dict) = resources.optional_dictionary(b"Shading", objects)? else {
-        return Ok(HashMap::new());
-    };
-
-    let mut result = HashMap::new();
-    for (name, value) in &shading_dict.dictionary {
-        let dict = value.try_dictionary(objects)?;
-        let resource = read_resource_lazy(cache, dict.object_number, |_| {
-            Ok::<Resource, PdfPagesError>(Resource::Shading(Rc::new(Shading::from_dictionary(
-                value, objects,
-            )?)))
-        })?;
-        result.insert(name.clone(), resource);
-    }
-    Ok(result)
-}
-
-/// Parses all color space resources from the `/ColorSpace` sub-dictionary.
-fn read_color_spaces(
-    resources: &Dictionary,
-    objects: &dyn ObjectResolver,
-    cache: &mut dyn ResourceCache,
-) -> Result<HashMap<Vec<u8>, Resource>, PdfPagesError> {
-    let Some(color_space_dict) = resources.optional_dictionary(b"ColorSpace", objects)? else {
-        return Ok(HashMap::new());
-    };
-
-    let mut result = HashMap::new();
-    for (name, value) in &color_space_dict.dictionary {
-        let object_number = value.try_object_number().ok();
-        let resource = read_resource_lazy(cache, object_number, |_| {
-            let color_space = ColorSpace::from_object(value, objects)?;
-            Ok::<Resource, PdfPagesError>(Resource::ColorSpace(Rc::new(color_space)))
-        })?;
-        result.insert(name.clone(), resource);
-    }
-    Ok(result)
 }
 
 impl Resources {
-    /// Creates a placeholder/reference pair for a `/Resources` dictionary.
-    ///
-    /// The placeholder is inserted into the cache before recursive parsing
-    /// continues, allowing later lookups of the same object number to keep the
-    /// entry alive until the final dictionary can be published through the
-    /// returned [`ResourcesReference`].
-    pub(crate) fn cyclic_reference(object_number: usize) -> (Self, ResourcesReference) {
-        let reference = ResourcesReference::new(object_number);
-        (
-            Self {
-                lazy_reference: Some(reference.clone()),
-                ..Self::default()
-            },
-            reference,
-        )
-    }
-
-    /// Returns the fully resolved `/Resources` dictionary behind `self`.
-    ///
-    /// If `self` is still the lazy placeholder produced by
-    /// [`Self::cyclic_reference`], this follows its [`ResourcesReference`] and
-    /// returns the final dictionary only after it has been published.
-    fn resolved(&self) -> Option<&Self> {
-        match &self.lazy_reference {
-            Some(reference) => reference.resolved()?.resolved(),
-            None => Some(self),
+    fn decode_dictionary<A>(mut context: DictionaryContext<'_, A>) -> ReadResult<Self>
+    where
+        A: ObjectAccess + ?Sized,
+    {
+        let mut resources = Self::default();
+        if let Some(dictionary) = context.optional::<Dictionary>(b"Font")? {
+            for (name, value) in &dictionary.dictionary {
+                resources
+                    .fonts
+                    .insert(name.clone(), context.read_shared::<Resource>(value)?);
+            }
         }
+        if let Some(dictionary) = context.optional::<Dictionary>(b"ExtGState")? {
+            for (name, value) in &dictionary.dictionary {
+                resources.ext_g_states.insert(
+                    name.clone(),
+                    Resource::ExternalGraphicsState(context.read_shared(value)?),
+                );
+            }
+        }
+        if let Some(dictionary) = context.optional::<Dictionary>(b"Pattern")? {
+            for (name, value) in &dictionary.dictionary {
+                resources
+                    .patterns
+                    .insert(name.clone(), Resource::Pattern(context.read_shared(value)?));
+            }
+        }
+        if let Some(dictionary) = context.optional::<Dictionary>(b"XObject")? {
+            for (name, value) in &dictionary.dictionary {
+                let resolved = context.resolve(value)?;
+                let dictionary = resolved.value().try_dictionary(context.source())?;
+                let resource =
+                    if dictionary.required_bytes(b"Subtype", context.source())? == b"Form" {
+                        Resource::Form(context.read_shared::<FormXObject>(value)?)
+                    } else {
+                        let subtype = dictionary.required_bytes(b"Subtype", context.source())?;
+                        if subtype != b"Image" {
+                            return Err(PdfPagesError::UnsupportedXObjectSubtype {
+                                subtype: String::from_utf8_lossy(subtype).into_owned(),
+                            }
+                            .into());
+                        }
+                        context
+                            .read_shared::<Resource>(value)?
+                            .get()?
+                            .as_ref()
+                            .clone()
+                    };
+                resources.xobjects.insert(name.clone(), resource);
+            }
+        }
+        if let Some(dictionary) = context.optional::<Dictionary>(b"Shading")? {
+            for (name, value) in &dictionary.dictionary {
+                let shading = context.read_shared::<Shading>(value)?.get()?;
+                resources
+                    .shadings
+                    .insert(name.clone(), Resource::Shading(shading));
+            }
+        }
+        if let Some(dictionary) = context.optional::<Dictionary>(b"ColorSpace")? {
+            for (name, value) in &dictionary.dictionary {
+                let color_space = context.read_shared::<ColorSpace>(value)?.get()?;
+                resources
+                    .color_spaces
+                    .insert(name.clone(), Resource::ColorSpace(color_space));
+            }
+        }
+        Ok(resources)
     }
 
     /// Returns a reference to a font resource by name, if it exists.
@@ -338,8 +128,11 @@ impl Resources {
     ///
     /// An `Option` containing a reference to the [`Font`] if found, or `None`
     /// if not present or not a font.
-    pub fn font<N: AsRef<[u8]>>(&self, name: N) -> Option<(&PdfFontSpec, Option<&Resources>)> {
-        self.resolved()?.fonts.get(name.as_ref())?.as_font()
+    pub fn font<N: AsRef<[u8]>>(
+        &self,
+        name: N,
+    ) -> Option<(Arc<PdfFontSpec>, Option<Arc<Resources>>)> {
+        self.fonts.get(name.as_ref())?.get().ok()?.as_font()
     }
 
     /// Returns a reference to an external graphics state resource by name, if it exists.
@@ -355,9 +148,8 @@ impl Resources {
     pub fn external_graphics_state<N: AsRef<[u8]>>(
         &self,
         name: N,
-    ) -> Option<&ExternalGraphicsState> {
-        self.resolved()?
-            .ext_g_states
+    ) -> Option<Arc<ExternalGraphicsState>> {
+        self.ext_g_states
             .get(name.as_ref())?
             .as_external_graphics_state()
     }
@@ -373,7 +165,7 @@ impl Resources {
     /// An `Option` containing the resolved [`Resource::Image`],
     /// [`Resource::UnavailableImage`], or [`Resource::Form`] entry if found.
     pub fn xobject<N: AsRef<[u8]>>(&self, name: N) -> Option<&Resource> {
-        self.resolved()?.xobjects.get(name.as_ref())?.resolved()
+        self.xobjects.get(name.as_ref())
     }
 
     /// Returns a reference to a pattern resource by name, if it exists.
@@ -386,8 +178,8 @@ impl Resources {
     ///
     /// An `Option` containing a reference to the [`Pattern`] if found, or `None`
     /// if not present or not a pattern.
-    pub fn pattern<N: AsRef<[u8]>>(&self, name: N) -> Option<&Pattern> {
-        self.resolved()?.patterns.get(name.as_ref())?.as_pattern()
+    pub fn pattern<N: AsRef<[u8]>>(&self, name: N) -> Option<Arc<Pattern>> {
+        self.patterns.get(name.as_ref())?.as_pattern()
     }
 
     /// Returns a reference to a shading resource by name, if it exists.
@@ -400,8 +192,8 @@ impl Resources {
     ///
     /// An `Option` containing a reference to the [`Shading`] if found, or `None`
     /// if not present or not a shading.
-    pub fn shading<N: AsRef<[u8]>>(&self, name: N) -> Option<&Shading> {
-        self.resolved()?.shadings.get(name.as_ref())?.as_shading()
+    pub fn shading<N: AsRef<[u8]>>(&self, name: N) -> Option<Arc<Shading>> {
+        self.shadings.get(name.as_ref())?.as_shading()
     }
 
     /// Returns a reference to a color space resource by name, if it exists.
@@ -414,65 +206,8 @@ impl Resources {
     ///
     /// An `Option` containing a reference to the [`ColorSpace`] if found, or `None`
     /// if not present or not a color space.
-    pub fn color_space<N: AsRef<[u8]>>(&self, name: N) -> Option<&ColorSpace> {
-        self.resolved()?
-            .color_spaces
-            .get(name.as_ref())?
-            .as_color_space()
-    }
-
-    /// Reads the `/Resources` dictionary.
-    ///
-    /// This function extracts all resource types (fonts, external graphics states, patterns,
-    /// XObjects, shadings, and color spaces) referenced in the provided `dictionary`.
-    ///
-    /// # Parameters
-    ///
-    /// - `dictionary`: The PDF dictionary potentially containing a `/Resources` entry.
-    /// - `objects`: An object resolver for resolving indirect PDF object references.
-    /// - `cache`: A mutable resource cache for storing and retrieving parsed resources.
-    /// - `id_allocator`: Shared allocator for generated `ContentStream` IDs.
-    ///
-    /// # Returns
-    ///
-    /// Returns a shared [`Resources`] value when resources are found, `None` if no
-    /// `/Resources` entry exists, or an error if parsing fails for any resource type.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`PdfPagesError`] if any resource fails to parse or resolve.
-    pub fn read(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        cycle_tracker: &mut ReadCycleTracker,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Option<Rc<Self>>, PdfPagesError> {
-        const KEY: &[u8] = b"Resources";
-
-        let Some(resources_entry) = dictionary.get(KEY) else {
-            return Ok(None);
-        };
-
-        let resources = resources_entry.try_dictionary(objects)?;
-        read_resource_lazy(cache, resources.object_number, |cache| {
-            Ok(Self {
-                fonts: read_fonts(resources, objects, cache, cycle_tracker, id_allocator)?,
-                ext_g_states: read_external_graphics_states(
-                    resources,
-                    objects,
-                    cache,
-                    cycle_tracker,
-                    id_allocator,
-                )?,
-                patterns: read_patterns(resources, objects, cache, cycle_tracker, id_allocator)?,
-                xobjects: read_xobjects(resources, objects, cache, cycle_tracker, id_allocator)?,
-                shadings: read_shadings(resources, objects, cache)?,
-                color_spaces: read_color_spaces(resources, objects, cache)?,
-                lazy_reference: None,
-            })
-        })
-        .map(Some)
+    pub fn color_space<N: AsRef<[u8]>>(&self, name: N) -> Option<Arc<ColorSpace>> {
+        self.color_spaces.get(name.as_ref())?.as_color_space()
     }
 
     /// Returns a resource dictionary containing `self` and inherited parent entries.
@@ -484,8 +219,7 @@ impl Resources {
     /// parent entry of a different category with the same name (e.g. an XObject
     /// named `"F1"`).
     pub fn merged_with_parent(&self, parent: &Self) -> Option<Self> {
-        let parent = parent.resolved()?;
-        let child = self.resolved()?;
+        let child = self;
 
         Some(Self {
             fonts: Self::merged_category(&child.fonts, &parent.fonts),
@@ -494,15 +228,14 @@ impl Resources {
             xobjects: Self::merged_category(&child.xobjects, &parent.xobjects),
             shadings: Self::merged_category(&child.shadings, &parent.shadings),
             color_spaces: Self::merged_category(&child.color_spaces, &parent.color_spaces),
-            lazy_reference: None,
         })
     }
 
     /// Returns one merged resource category with child entries taking precedence.
-    fn merged_category(
-        child: &HashMap<Vec<u8>, Resource>,
-        parent: &HashMap<Vec<u8>, Resource>,
-    ) -> HashMap<Vec<u8>, Resource> {
+    fn merged_category<T: Clone>(
+        child: &HashMap<Vec<u8>, T>,
+        parent: &HashMap<Vec<u8>, T>,
+    ) -> HashMap<Vec<u8>, T> {
         let mut merged = HashMap::with_capacity(child.len().saturating_add(parent.len()));
         merged.extend(
             child

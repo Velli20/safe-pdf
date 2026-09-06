@@ -1,7 +1,9 @@
 use bytes::Bytes;
 use pdf_filter::filter::decode_with_resolver;
 use pdf_graphics::Image;
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver, stream::StreamObject};
+use pdf_object_reader::{
+    dictionary::Dictionary, object_resolver::ObjectResolver, stream::StreamObject,
+};
 
 use crate::InlineImage;
 use crate::decoded_samples::DecodedSamples;
@@ -128,8 +130,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use bytes::Bytes;
-    use pdf_object::{
-        dictionary::Dictionary, error::ObjectError, object_resolver::PassthroughResolver,
+    use pdf_object_reader::{
+        dictionary::Dictionary, object_error::ObjectError, object_resolver::PassthroughResolver,
         object_variant::ObjectVariant, stream::StreamObject,
     };
 

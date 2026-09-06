@@ -2,7 +2,7 @@
 
 mod common;
 
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, sync::Arc};
 
 use common::{content_stream, replay};
 use pdf_canvas::{error::PdfCanvasError, pdf_canvas::PdfCanvas, recording_canvas::RecordingCanvas};
@@ -20,13 +20,13 @@ use pdf_text_engine::bundled_font_system;
 
 fn render(
     stream: &ContentStream,
-    resources: &Resources,
+    resources: &Arc<Resources>,
 ) -> Result<RecordingCanvas, PdfCanvasError> {
     let page = PdfPage::default();
     let mut recording = RecordingCanvas::new(100.0, 100.0);
     {
         let mut canvas = PdfCanvas::new(&mut recording, &page, None, bundled_font_system())?;
-        canvas.render_content_stream(stream, None, None, Some(resources), None)?;
+        canvas.render_content_stream(stream, None, None, Some(Arc::clone(resources)), None)?;
     }
     Ok(recording)
 }
@@ -35,7 +35,9 @@ fn graphics_state_resource(params: Vec<ExternalGraphicsStateKey>) -> Resources {
     Resources {
         ext_g_states: HashMap::from([(
             b"GS0".to_vec(),
-            Resource::ExternalGraphicsState(Rc::new(ExternalGraphicsState { params })),
+            Resource::ExternalGraphicsState(pdf_object_reader::ObjectHandle::from(
+                ExternalGraphicsState { params },
+            )),
         )]),
         ..Default::default()
     }
@@ -43,7 +45,7 @@ fn graphics_state_resource(params: Vec<ExternalGraphicsStateKey>) -> Resources {
 
 #[test]
 fn unmatched_restore_graphics_state_is_ignored() {
-    let resources = Resources::default();
+    let resources = Arc::new(Resources::default());
     let stream = content_stream(1, b"Q q Q Q");
 
     let recording = render(&stream, &resources).expect("unmatched restores should be ignored");
@@ -55,11 +57,13 @@ fn unmatched_restore_graphics_state_is_ignored() {
 
 #[test]
 fn external_graphics_state_dash_pattern_is_used_for_strokes() {
-    let resources = graphics_state_resource(vec![ExternalGraphicsStateKey::DashPattern(
-        DashPattern::new(&[3.0, 1.0], 2.0)
-            .expect("dash pattern should be valid")
-            .expect("dash pattern should be present"),
-    )]);
+    let resources = Arc::new(graphics_state_resource(vec![
+        ExternalGraphicsStateKey::DashPattern(
+            DashPattern::new(&[3.0, 1.0], 2.0)
+                .expect("dash pattern should be valid")
+                .expect("dash pattern should be present"),
+        ),
+    ]));
     let stream = content_stream(1, b"/GS0 gs 0 0 m 10 0 l S");
 
     let recording = render(&stream, &resources).expect("content stream should render");
@@ -92,12 +96,12 @@ fn soft_mask_form_with_zero_area_bbox_is_ignored() {
             id: 2,
         },
     };
-    let resources = graphics_state_resource(vec![ExternalGraphicsStateKey::SoftMask(Some(
-        Box::new(SoftMask {
+    let resources = Arc::new(graphics_state_resource(vec![
+        ExternalGraphicsStateKey::SoftMask(Some(pdf_object_reader::ObjectHandle::from(SoftMask {
             mask_type: MaskMode::Alpha,
-            shape: Rc::new(form),
-        }),
-    ))]);
+            shape: form.into(),
+        }))),
+    ]));
     let stream = content_stream(1, b"/GS0 gs");
 
     let recording = render(&stream, &resources).expect("zero-area soft mask should be ignored");

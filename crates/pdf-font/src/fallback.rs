@@ -1,6 +1,6 @@
 //! Runtime whole-font substitution and missing-glyph fallback contracts.
 
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object_reader::{DictionaryContext, ObjectAccess};
 
 use crate::error::FontError;
 use crate::font::{FontFaceId, FontMetadata, FontSource};
@@ -52,15 +52,9 @@ pub trait FallbackProvider: Send + Sync {
     ) -> Result<Vec<FallbackCandidate>, FontError>;
 }
 
+/// Selects the historical whole-font fallback from BaseFont, without descriptor flags.
 pub(crate) fn fallback_standard14_font(
-    dictionary: &Dictionary,
-    descriptor: Option<&Dictionary>,
-    objects: &dyn ObjectResolver,
+    context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
 ) -> crate::standard14::Standard14Font {
-    let flags = descriptor
-        .and_then(|value| value.get(b"Flags"))
-        .and_then(|value| value.try_number::<u32>(objects).ok())
-        .map(crate::flags::FontFlags::from_bits_truncate)
-        .unwrap_or_default();
-    crate::standard14::from_dictionary(dictionary, objects, flags)
+    crate::standard14::from_context(context, crate::flags::FontFlags::empty())
 }

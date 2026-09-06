@@ -94,11 +94,12 @@ impl<B: CanvasBackend> TextStateOps for PdfCanvas<'_, B> {
         let (font, nested_resources) = self
             .current_state()?
             .resources
+            .as_ref()
             .and_then(|resources| resources.font(font_name))
             .ok_or_else(|| {
                 PdfCanvasError::FontNotFound(String::from_utf8_lossy(font_name).into_owned())
             })?;
-        let handle = self.load_pdf_font(font)?;
+        let handle = self.load_pdf_font(&font)?;
         let text_state = &mut self.current_state_mut()?.text_state;
         text_state.font = Some(handle);
         text_state.font_spec = Some(font);
@@ -249,8 +250,9 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         let font = state
             .text_state
             .font_spec
+            .clone()
             .ok_or(PdfCanvasError::CurrentFontRequired)?;
-        let resources = state.text_state.resources;
+        let resources = state.text_state.resources.clone();
 
         // Skipping a missing Type 3 procedure is a no-op.
         let Some(procedure) = font.type3_procedure(glyph) else {

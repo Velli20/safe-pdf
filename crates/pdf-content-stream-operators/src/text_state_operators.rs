@@ -7,7 +7,7 @@ use crate::{
 };
 use num_traits::FromPrimitive;
 use pdf_graphics::TextRenderingMode;
-use pdf_object::object_resolver::PassthroughResolver;
+use pdf_object_reader::object_resolver::PassthroughResolver;
 
 /// Sets the character spacing, `Tc`, which is a number expressed in unscaled text space units.
 #[derive(Debug, Clone, PartialEq)]

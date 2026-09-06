@@ -8,7 +8,7 @@ workspace = true
 
 [dependencies]
 pdf-parser = { path = "../pdf-parser" }
-pdf-object = { path = "../pdf-object" }
+pdf-object-reader = { path = "../pdf-object-reader" }
 thiserror = "2.0.12"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }

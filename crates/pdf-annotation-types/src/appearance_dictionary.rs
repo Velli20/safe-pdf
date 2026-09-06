@@ -1,12 +1,9 @@
 use std::collections::BTreeMap;
 
-use pdf_content_stream::ContentStreamIdAllocator;
-use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+use pdf_object_reader::{
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
 };
-use pdf_resources::{
-    form::FormXObject, object_reader::ReadCycleTracker, resource_cache::ResourceCache,
-};
+use pdf_resources::form::FormXObject;
 
 use crate::AnnotationError;
 
@@ -34,37 +31,50 @@ pub struct AppearanceDictionary {
     pub down: Option<AppearanceField>,
 }
 
-impl AppearanceDictionary {
-    pub(crate) fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        cycle_tracker: &mut ReadCycleTracker,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Option<Self>, AnnotationError> {
-        let Some(value) = dictionary.get(b"AP") else {
-            return Ok(None);
-        };
+impl FromPdfObject for AppearanceDictionary {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        Ok(Self {
+            normal: context.optional(b"N")?,
+            rollover: context.optional(b"R")?,
+            down: context.optional(b"D")?,
+        })
+    }
+}
 
-        let dictionary = value.try_dictionary(objects)?;
-        let normal = dictionary
-            .get(b"N")
-            .map(|value| appearance_field(b"N", value, objects, cache, cycle_tracker, id_allocator))
-            .transpose()?;
-        let rollover = dictionary
-            .get(b"R")
-            .map(|value| appearance_field(b"R", value, objects, cache, cycle_tracker, id_allocator))
-            .transpose()?;
-        let down = dictionary
-            .get(b"D")
-            .map(|value| appearance_field(b"D", value, objects, cache, cycle_tracker, id_allocator))
-            .transpose()?;
-
-        Ok(Some(Self {
-            normal,
-            rollover,
-            down,
-        }))
+impl FromPdfObject for AppearanceField {
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let raw = context.object().object().clone();
+        match raw.value() {
+            ObjectVariant::Stream(_) => Ok(Self::Stream(Box::new(context.read(raw.value())?))),
+            ObjectVariant::Dictionary(dictionary) => {
+                let mut appearances = BTreeMap::new();
+                for (name, value) in &dictionary.dictionary {
+                    let resolved: pdf_object_reader::pdf_object::PdfObject = context.read(value)?;
+                    if !matches!(resolved.value(), ObjectVariant::Stream(_)) {
+                        return Err(AnnotationError::InvalidEntry {
+                            entry: b"AP",
+                            reason: format!(
+                                "expected appearance stream in subdictionary entry /{name:?}"
+                            ),
+                        }
+                        .into());
+                    }
+                    appearances.insert(name.clone(), context.read(value)?);
+                }
+                Ok(Self::Subdictionary(appearances))
+            }
+            other => Err(AnnotationError::InvalidEntry {
+                entry: b"AP",
+                reason: format!(
+                    "expected appearance stream or subdictionary, found {}",
+                    other.name()
+                ),
+            }
+            .into()),
+        }
     }
 }
 
@@ -98,63 +108,4 @@ impl AppearanceField {
                 fallback.and_then(|field| field.appearance_field_for_state(appearance_state))
             })
     }
-}
-
-fn appearance_field(
-    entry: &'static [u8],
-    value: &ObjectVariant,
-    objects: &dyn ObjectResolver,
-    cache: &mut dyn ResourceCache,
-    cycle_tracker: &mut ReadCycleTracker,
-    id_allocator: &mut ContentStreamIdAllocator,
-) -> Result<AppearanceField, AnnotationError> {
-    match objects.resolve_object(value)? {
-        ObjectVariant::Stream(stream) => {
-            let appearance =
-                appearance_stream(value, stream, objects, cache, cycle_tracker, id_allocator)?;
-            Ok(AppearanceField::Stream(Box::new(appearance)))
-        }
-        ObjectVariant::Dictionary(dictionary) => {
-            let mut appearances = BTreeMap::new();
-            for (name, value) in &dictionary.dictionary {
-                let ObjectVariant::Stream(stream) = objects.resolve_object(value)? else {
-                    return Err(AnnotationError::InvalidEntry {
-                        entry,
-                        reason: format!(
-                            "expected appearance stream in subdictionary entry /{name:?}"
-                        ),
-                    });
-                };
-                let appearance =
-                    appearance_stream(value, stream, objects, cache, cycle_tracker, id_allocator)?;
-                appearances.insert(name.clone(), appearance);
-            }
-            Ok(AppearanceField::Subdictionary(appearances))
-        }
-        other => Err(AnnotationError::InvalidEntry {
-            entry,
-            reason: format!(
-                "expected appearance stream or subdictionary, found {}",
-                other.name()
-            ),
-        }),
-    }
-}
-
-fn appearance_stream(
-    value: &ObjectVariant,
-    stream: &pdf_object::stream::StreamObject,
-    objects: &dyn ObjectResolver,
-    cache: &mut dyn ResourceCache,
-    cycle_tracker: &mut ReadCycleTracker,
-    id_allocator: &mut ContentStreamIdAllocator,
-) -> Result<FormXObject, AnnotationError> {
-    Ok(FormXObject::read_xobject(
-        value,
-        &stream.dictionary,
-        objects,
-        cache,
-        cycle_tracker,
-        id_allocator,
-    )?)
 }

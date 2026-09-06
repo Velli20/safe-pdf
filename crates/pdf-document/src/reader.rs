@@ -7,21 +7,19 @@ use crate::encryption::EncryptDictionary;
 use crate::error::PdfReaderError;
 use crate::object_loader::ObjectLoader;
 use crate::page::PdfPage;
-use crate::pages::PdfPages;
 use crate::report::PdfReadReport;
-use pdf_content_stream::ContentStreamIdAllocator;
-use pdf_object::object_id::PdfObjectId;
-use pdf_object::object_lookup::ObjectLookupExt;
-use pdf_object::object_resolver::{ObjectResolver, PassthroughResolver};
-use pdf_object::{
+use pdf_object_reader::ObjectReader;
+use pdf_object_reader::object_id::ObjectId;
+use pdf_object_reader::object_lookup::ObjectLookupExt;
+use pdf_object_reader::object_resolver::PassthroughResolver;
+use pdf_object_reader::{
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
-    error::ObjectError,
+    object_error::ObjectError,
     object_variant::ObjectVariant,
     trailer::Trailer,
 };
 use pdf_parser::{error::ParserError, parser::PdfParser};
-use pdf_resources::object_reader::{ReadCycleTracker, ReadFromDictionary};
-use pdf_resources::resource_cache::DefaultResourceCache;
+use std::sync::Arc;
 
 const EMPTY_PASSWORD: &[u8] = b"";
 
@@ -51,10 +49,9 @@ impl PdfReader {
             password.unwrap_or(EMPTY_PASSWORD),
             &mut diagnostics,
         )?;
-        let mut objects =
-            ObjectLoader::new(&entries, &parser, encryption, &mut diagnostics).load()?;
+        let objects = ObjectLoader::new(&entries, &parser, encryption, &mut diagnostics).load()?;
         let document = PdfDocument {
-            pages: extract_page_tree(&trailer, &mut objects)?,
+            pages: extract_page_tree(&trailer, objects)?,
         };
 
         Ok(PdfReadReport::new(document, diagnostics))
@@ -132,7 +129,7 @@ impl EncryptionContext {
     }
 
     /// Returns the decryptor unless the object is the encryption dictionary itself.
-    pub(crate) fn decryptor_for(&self, object: Option<PdfObjectId>) -> Option<&DocumentDecryptor> {
+    pub(crate) fn decryptor_for(&self, object: Option<ObjectId>) -> Option<&DocumentDecryptor> {
         let object_number = object.map(|identifier| identifier.number);
         (object_number != self.dictionary_object_number)
             .then_some(self.decryptor.as_ref())
@@ -141,8 +138,8 @@ impl EncryptionContext {
 }
 
 /// Creates an identifier for an object whose generation is not available in xref context.
-pub(crate) fn object_id(number: usize) -> PdfObjectId {
-    PdfObjectId {
+pub(crate) fn object_id(number: usize) -> ObjectId {
+    ObjectId {
         number,
         generation: 0,
     }
@@ -151,21 +148,16 @@ pub(crate) fn object_id(number: usize) -> PdfObjectId {
 /// Resolves the page tree rooted at the trailer catalog.
 fn extract_page_tree(
     trailer: &Trailer,
-    objects: &mut dyn ObjectResolver,
+    objects: pdf_object_collection::object_collection::ObjectCollection,
 ) -> Result<Vec<PdfPage>, PdfReaderError> {
-    let catalog = trailer.dictionary.required_dictionary(b"Root", objects)?;
-    let pages = catalog.required_dictionary(b"Pages", objects)?;
-    let mut cache = DefaultResourceCache::default();
-    let mut cycle_tracker = ReadCycleTracker::default();
-    let mut content_stream_ids = ContentStreamIdAllocator::new();
-    Ok(PdfPages::from_dictionary(
-        pages,
-        objects,
-        &mut cache,
-        &mut cycle_tracker,
-        &mut content_stream_ids,
-    )?
-    .unwrap_or_default())
+    let catalog = trailer.dictionary.required_dictionary(b"Root", &objects)?;
+    let pages = catalog.get_or_err(b"Pages")?.clone();
+    let reader = Arc::new(ObjectReader::new(objects));
+    let mut pages = reader.read::<PdfDocument>(&pages)?.pages;
+    for page in &mut pages {
+        page.read_state = Some(Arc::clone(&reader));
+    }
+    Ok(pages)
 }
 
 /// Resolves and parses the trailer's encryption dictionary without decrypting it.
@@ -175,7 +167,8 @@ fn load_encrypt_dictionary(
     parser: &PdfParser,
 ) -> Result<EncryptDictionary, PdfReaderError> {
     let object = match encrypt_reference {
-        ObjectVariant::Reference(object_number) => {
+        ObjectVariant::Reference(object_id) => {
+            let object_number = object_id.number;
             let entry =
                 entries
                     .get(&object_number)

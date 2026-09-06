@@ -1,4 +1,4 @@
-use pdf_object::error::ObjectError;
+use pdf_object_reader::object_error::ObjectError;
 use pdf_parser::{error::ParserError, header::HeaderError};
 use pdf_resources::error::PdfPagesError;
 use thiserror::Error;
@@ -8,6 +8,9 @@ use crate::decryption::DecryptionError;
 /// Errors that can occur while reading a PDF document.
 #[derive(Debug, Error)]
 pub enum PdfReaderError {
+    /// A failure while decoding the document's typed object graph.
+    #[error(transparent)]
+    ObjectRead(#[from] pdf_object_reader::ObjectReadError),
     #[error("missing trailer")]
     MissingTrailer,
     #[error("unexpected reference object at offset {offset}")]

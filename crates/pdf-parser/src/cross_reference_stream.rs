@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use pdf_object::{
+use pdf_object_reader::{
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
     object_lookup::ObjectLookupExt,
     object_resolver::ObjectResolver,
@@ -214,7 +214,7 @@ fn read_field(bytes: &[u8]) -> usize {
     clippy::arithmetic_side_effects
 )]
 mod tests {
-    use pdf_object::{
+    use pdf_object_reader::{
         cross_reference_table::CrossReferenceEntryType, dictionary::Dictionary,
         object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     };

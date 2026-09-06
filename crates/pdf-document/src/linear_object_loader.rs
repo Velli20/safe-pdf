@@ -2,8 +2,8 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use pdf_object::{
-    error::ObjectError, object_id::PdfObjectId, object_resolver::ObjectResolver,
+use pdf_object_reader::{
+    object_error::ObjectError, object_id::ObjectId, object_resolver::ObjectResolver,
     object_variant::ObjectVariant, trailer::Trailer,
 };
 use pdf_object_collection::object_collection::ObjectCollection;
@@ -18,7 +18,7 @@ use crate::{
 
 /// A parsed top-level object and its physical position in the source PDF.
 struct LinearObjectRecord {
-    identifier: PdfObjectId,
+    identifier: ObjectId,
     value: ObjectVariant,
     byte_offset: usize,
 }
@@ -57,15 +57,15 @@ impl ObjectResolver for ParsedLinearObjects {
             };
             if !in_progress.insert(*object_number) {
                 return Err(ObjectError::CyclicDependency {
-                    obj_num: *object_number,
+                    obj_num: object_number.number,
                 });
             }
             current = self
                 .records
-                .get(object_number)
+                .get(&object_number.number)
                 .map(|record| &record.value)
                 .ok_or(ObjectError::FailedResolveObjectReference {
-                    obj_num: *object_number,
+                    obj_num: object_number.number,
                 })?;
         }
     }
@@ -246,7 +246,7 @@ impl<'input, 'loader> LinearObjectLoader<'input, 'loader> {
 
             for (source_offset, object_number) in pending {
                 let result = objects
-                    .get(object_number)
+                    .get(&object_number.number)
                     .ok_or(ObjectError::FailedResolveObjectReference {
                         obj_num: object_number,
                     })?
@@ -421,7 +421,7 @@ mod tests {
 
         assert_eq!(
             loaded.trailer.dictionary.get(b"Root"),
-            Some(&ObjectVariant::Reference(2))
+            Some(&ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(2, 0)))
         );
         assert!(loaded.objects.get(1).is_some());
         assert!(loaded.objects.get(2).is_some());

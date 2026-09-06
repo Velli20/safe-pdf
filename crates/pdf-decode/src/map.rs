@@ -1,6 +1,6 @@
 //! PDF `/Decode` map parsing and application helpers.
 
-use pdf_object::{
+use pdf_object_reader::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
@@ -94,7 +94,7 @@ impl DecodeMap {
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_object::{
+    use pdf_object_reader::{
         dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     };
 

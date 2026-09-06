@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use pdf_object::{
+use pdf_object_reader::{
     cross_reference_table::CrossReferenceEntryType, object_resolver::PassthroughResolver,
 };
 use pdf_parser::{error::ParserError, parser::PdfParser};
@@ -472,7 +472,11 @@ fn build_xref_table_reconstructs_missing_xref_and_skips_stream_payload() {
     assert!(!table.entries.contains_key(&99));
     assert_eq!(
         table.trailer.dictionary.get(b"Root"),
-        Some(&pdf_object::object_variant::ObjectVariant::Reference(1))
+        Some(
+            &pdf_object_reader::object_variant::ObjectVariant::Reference(
+                pdf_object_reader::object_id::ObjectId::new(1, 0)
+            )
+        )
     );
 }
 

@@ -1,17 +1,10 @@
-use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+use pdf_object_reader::{
+    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
 };
+use pdf_object_reader::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
-use crate::{
-    error::PdfPagesError,
-    object_reader::{ReadCycleTracker, ReadFromDictionary},
-    resource::Resource,
-    resource_cache::{ResourceCache, read_resource_lazy},
-    resources::read_font_resource,
-    soft_mask::SoftMask,
-};
+use crate::{error::PdfPagesError, resource::Resource, soft_mask::SoftMask};
 use num_traits::FromPrimitive;
-use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_graphics::{BlendMode, DashPattern, LineCap, LineJoin};
 
 /// Represents a key-value pair from a PDF External Graphics State dictionary (`ExtGState`).
@@ -47,12 +40,12 @@ pub enum ExternalGraphicsStateKey {
     OverprintMode(i32),
     /// Font (`Font`). An array containing a font dictionary or stream and a font size.
     /// Represented here as the object number of the font resource and the font size.
-    Font(Resource, f32),
+    Font(pdf_object_reader::ObjectHandle<Resource>, f32),
     /// Blend mode (`BM`). A name or array of names specifying the blend mode to be used
     /// when compositing objects.
     BlendMode(Vec<BlendMode>),
     /// Soft mask (`SMask`). A dictionary specifying the soft mask to be used, or the name `None`.
-    SoftMask(Option<Box<SoftMask>>),
+    SoftMask(Option<pdf_object_reader::ObjectHandle<SoftMask>>),
     /// Stroking alpha constant (`CA`). A number in the range 0.0 to 1.0 specifying the constant
     /// opacity value to be used for stroking operations.
     StrokingAlpha(f32),
@@ -84,38 +77,20 @@ pub struct ExternalGraphicsState {
     pub params: Vec<ExternalGraphicsStateKey>,
 }
 
-impl ReadFromDictionary for ExternalGraphicsState {
-    type Output = Self;
-
-    fn read_dictionary_inner(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        cycle_tracker: &mut ReadCycleTracker,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Self, PdfPagesError> {
-        let mut params: Vec<ExternalGraphicsStateKey> = Vec::new();
-
+impl FromPdfObject for ExternalGraphicsState {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        let dictionary = context.dictionary().clone();
+        let mut params = Vec::new();
         for (name, value) in &dictionary.dictionary {
             if name == b"Type" {
-                // The "Type" entry is optional and, if present, must be "ExtGState".
-                // We can safely ignore it during parsing.
                 continue;
             }
-            // Resolve reference (if any).
-            let resolved = match value {
-                ObjectVariant::Reference(_) => objects.resolve_object(value)?,
-                _ => value,
-            };
-
-            if let Some(param) =
-                parse_entry(name, resolved, objects, cache, cycle_tracker, id_allocator)?
-            {
+            if let Some(param) = parse_entry(name, value, &mut context)? {
                 params.push(param);
             }
         }
-
-        Ok(ExternalGraphicsState { params })
+        Ok(Self { params })
     }
 }
 
@@ -163,30 +138,22 @@ fn parse_dash_pattern(
     Ok(Some(ExternalGraphicsStateKey::DashPattern(dash_pattern)))
 }
 
-fn parse_font(
+fn parse_font<A: ObjectAccess + ?Sized>(
     key_name: &[u8],
     value: &ObjectVariant,
-    objects: &dyn ObjectResolver,
-    cache: &mut dyn ResourceCache,
-    cycle_tracker: &mut ReadCycleTracker,
-    id_allocator: &mut ContentStreamIdAllocator,
+    context: &mut DictionaryContext<'_, A>,
 ) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
-    let arr = value.try_array(objects)?;
-    let [font_ref, font_size] = arr else {
+    let arr = value.try_array(context.source())?.to_vec();
+    let [font_ref, font_size] = arr.as_slice() else {
         return Err(invalid_ext_gstate_entry_structure(
             key_name,
             "an array with exactly 2 elements",
             format!("an array with {} elements", arr.len()),
         ));
     };
-    let font_size = font_size.try_number::<f32>(objects)?;
-
-    let dict = font_ref.try_dictionary(objects)?;
-    let resource = read_resource_lazy(cache, dict.object_number, |cache| {
-        read_font_resource(dict, objects, cache, cycle_tracker, id_allocator)
-    })?;
-
-    Ok(ExternalGraphicsStateKey::Font(resource, font_size))
+    let font_size = font_size.try_number::<f32>(context.source())?;
+    let font = context.read_shared::<Resource>(font_ref)?;
+    Ok(ExternalGraphicsStateKey::Font(font, font_size))
 }
 
 fn parse_blend_mode(
@@ -211,14 +178,15 @@ fn parse_blend_mode(
 ///
 /// Returns `Ok(None)` for unrecognized keys, which are silently ignored
 /// per the PDF specification.
-fn parse_entry(
+fn parse_entry<A: ObjectAccess + ?Sized>(
     name: &[u8],
     value: &ObjectVariant,
-    objects: &dyn ObjectResolver,
-    cache: &mut dyn ResourceCache,
-    cycle_tracker: &mut ReadCycleTracker,
-    id_allocator: &mut ContentStreamIdAllocator,
+    context: &mut DictionaryContext<'_, A>,
 ) -> Result<Option<ExternalGraphicsStateKey>, PdfPagesError> {
+    let raw_value = value;
+    let resolved = context.resolve(value)?;
+    let value = resolved.value();
+    let objects = context.source();
     let parsed = match name {
         b"TR" => ExternalGraphicsStateKey::TransferFunction,
         b"TR2" => ExternalGraphicsStateKey::TransferFunctionNew,
@@ -253,18 +221,11 @@ fn parse_entry(
         b"OP" => ExternalGraphicsStateKey::OverprintStroke(value.try_boolean(objects)?),
         b"op" => ExternalGraphicsStateKey::OverprintFill(value.try_boolean(objects)?),
         b"OPM" => ExternalGraphicsStateKey::OverprintMode(value.try_number::<i32>(objects)?),
-        b"Font" => parse_font(name, value, objects, cache, cycle_tracker, id_allocator)?,
+        b"Font" => parse_font(name, value, context)?,
         b"BM" => parse_blend_mode(value, objects)?,
         b"SMask" => {
             let soft_mask = match value {
-                ObjectVariant::Dictionary(dictionary) => SoftMask::from_dictionary(
-                    dictionary,
-                    objects,
-                    cache,
-                    cycle_tracker,
-                    id_allocator,
-                )?
-                .map(Box::new),
+                ObjectVariant::Dictionary(_) => Some(context.read_shared::<SoftMask>(raw_value)?),
                 other => match other.try_bytes(objects)? {
                     b"None" => None,
                     _ => {
@@ -293,15 +254,11 @@ fn parse_entry(
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_content_stream::ContentStreamIdAllocator;
-    use pdf_object::{
+    use pdf_object_reader::{
         dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     };
 
-    use crate::object_reader::ReadFromDictionary;
-    use crate::{
-        error::PdfPagesError, object_reader::ReadCycleTracker, resource_cache::DefaultResourceCache,
-    };
+    use crate::error::PdfPagesError;
 
     use super::{ExternalGraphicsState, ExternalGraphicsStateKey};
 
@@ -317,17 +274,11 @@ mod tests {
 
     fn parse_ext_gstate(
         dictionary: &Dictionary,
-    ) -> Result<Option<ExternalGraphicsState>, PdfPagesError> {
-        let mut cache = DefaultResourceCache::default();
-        let mut cycle_tracker = ReadCycleTracker::default();
-        let mut id_allocator = ContentStreamIdAllocator::new();
+    ) -> pdf_object_reader::ReadResult<Option<ExternalGraphicsState>> {
+        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
 
-        ExternalGraphicsState::from_dictionary(
-            dictionary,
-            &PassthroughResolver,
-            &mut cache,
-            &mut cycle_tracker,
-            &mut id_allocator,
+        reader.read::<Option<ExternalGraphicsState>>(
+            &pdf_object_reader::object_variant::ObjectVariant::Dictionary((dictionary).clone()),
         )
     }
 
@@ -337,19 +288,17 @@ mod tests {
             vec![ObjectVariant::Real(3.0), ObjectVariant::Real(1.0)],
             2.0,
         );
-        let mut cache = DefaultResourceCache::default();
-        let mut cycle_tracker = ReadCycleTracker::default();
-        let mut id_allocator = ContentStreamIdAllocator::new();
 
-        let ext_gstate = ExternalGraphicsState::from_dictionary(
-            &dictionary,
-            &PassthroughResolver,
-            &mut cache,
-            &mut cycle_tracker,
-            &mut id_allocator,
-        )
-        .expect("extgstate should parse")
-        .expect("extgstate should be present");
+        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+
+        let ext_gstate = reader
+            .read::<Option<ExternalGraphicsState>>(
+                &pdf_object_reader::object_variant::ObjectVariant::Dictionary(
+                    (&dictionary).clone(),
+                ),
+            )
+            .expect("extgstate should parse")
+            .expect("extgstate should be present");
 
         assert_eq!(ext_gstate.params.len(), 1);
         match &ext_gstate.params[0] {
@@ -367,16 +316,11 @@ mod tests {
             vec![ObjectVariant::Real(0.0), ObjectVariant::Real(0.0)],
             0.0,
         );
-        let mut cache = DefaultResourceCache::default();
-        let mut cycle_tracker = ReadCycleTracker::default();
-        let mut id_allocator = ContentStreamIdAllocator::new();
 
-        let error = match ExternalGraphicsState::from_dictionary(
-            &dictionary,
-            &PassthroughResolver,
-            &mut cache,
-            &mut cycle_tracker,
-            &mut id_allocator,
+        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+
+        let error = match reader.read::<Option<ExternalGraphicsState>>(
+            &pdf_object_reader::object_variant::ObjectVariant::Dictionary((&dictionary).clone()),
         ) {
             Err(error) => error,
             Ok(_) => panic!("invalid dash pattern should fail"),
@@ -384,26 +328,24 @@ mod tests {
 
         assert!(matches!(
             error,
-            PdfPagesError::InvalidExtGStateEntryValue { entry, .. } if entry == "D"
+            pdf_object_reader::ObjectReadError::Decode { source, .. } if matches!(source.downcast_ref::<PdfPagesError>(), Some(PdfPagesError::InvalidExtGStateEntryValue { entry, .. }) if entry == "D")
         ));
     }
 
     #[test]
     fn empty_dash_array_is_ignored() {
         let dictionary = dash_dict(Vec::new(), 0.0);
-        let mut cache = DefaultResourceCache::default();
-        let mut cycle_tracker = ReadCycleTracker::default();
-        let mut id_allocator = ContentStreamIdAllocator::new();
 
-        let ext_gstate = ExternalGraphicsState::from_dictionary(
-            &dictionary,
-            &PassthroughResolver,
-            &mut cache,
-            &mut cycle_tracker,
-            &mut id_allocator,
-        )
-        .expect("extgstate should parse")
-        .expect("extgstate should be present");
+        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+
+        let ext_gstate = reader
+            .read::<Option<ExternalGraphicsState>>(
+                &pdf_object_reader::object_variant::ObjectVariant::Dictionary(
+                    (&dictionary).clone(),
+                ),
+            )
+            .expect("extgstate should parse")
+            .expect("extgstate should be present");
 
         assert!(ext_gstate.params.is_empty());
     }
@@ -439,7 +381,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            PdfPagesError::InvalidExtGStateEntryValue { entry, .. } if entry == "SMask"
+            pdf_object_reader::ObjectReadError::Decode { source, .. } if matches!(source.downcast_ref::<PdfPagesError>(), Some(PdfPagesError::InvalidExtGStateEntryValue { entry, .. }) if entry == "SMask")
         ));
     }
 }

@@ -5,7 +5,7 @@ use bytes::Bytes;
 use crate::{error::FilterError, predictor::PredictorParams};
 
 use pdf_ccitt::CCITTFaxParams;
-use pdf_object::{
+use pdf_object_reader::{
     dictionary::Dictionary,
     object_lookup::ObjectLookupExt,
     object_resolver::{ObjectResolver, PassthroughResolver},
@@ -328,7 +328,7 @@ pub fn decode_data_with_resolver(
             }
             Some(other) => {
                 return Err(FilterError::from(
-                    pdf_object::error::ObjectError::TypeMismatch(
+                    pdf_object_reader::object_error::ObjectError::TypeMismatch(
                         "Dictionary or Array",
                         other.name(),
                     ),
@@ -475,7 +475,7 @@ fn resolve_jbig2_globals(
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_object::{
+    use pdf_object_reader::{
         dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
         stream::StreamObject,
     };
@@ -582,15 +582,16 @@ mod tests {
             fn resolve_object<'a>(
                 &'a self,
                 obj: &'a ObjectVariant,
-            ) -> Result<&'a ObjectVariant, pdf_object::error::ObjectError> {
+            ) -> Result<&'a ObjectVariant, pdf_object_reader::object_error::ObjectError>
+            {
                 match obj {
                     ObjectVariant::Reference(object_number) => {
-                        if *object_number == 3 {
+                        if object_number.number == 3 {
                             self.resolved_globals.set(true);
                         }
-                        self.objects.get(object_number).ok_or(
-                            pdf_object::error::ObjectError::FailedResolveObjectReference {
-                                obj_num: *object_number,
+                        self.objects.get(&object_number.number).ok_or(
+                            pdf_object_reader::object_error::ObjectError::FailedResolveObjectReference {
+                                obj_num: object_number.number,
                             },
                         )
                     }
@@ -607,7 +608,10 @@ mod tests {
         let globals_stream = StreamObject::new(3, 0, Dictionary::new(globals_dict), Vec::new());
 
         let mut decode_parms = BTreeMap::new();
-        decode_parms.insert(Vec::from(b"JBIG2Globals"), ObjectVariant::Reference(3));
+        decode_parms.insert(
+            Vec::from(b"JBIG2Globals"),
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(3, 0)),
+        );
 
         let mut dict = BTreeMap::new();
         dict.insert(
@@ -616,7 +620,10 @@ mod tests {
         );
         dict.insert(Vec::from(b"Width"), ObjectVariant::Integer(8));
         dict.insert(Vec::from(b"Height"), ObjectVariant::Integer(1));
-        dict.insert(Vec::from(b"DecodeParms"), ObjectVariant::Reference(2));
+        dict.insert(
+            Vec::from(b"DecodeParms"),
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(2, 0)),
+        );
 
         let stream = StreamObject::new(1, 0, Dictionary::new(dict), Vec::new());
 
@@ -677,11 +684,14 @@ mod tests {
         fn resolve_object<'a>(
             &'a self,
             obj: &'a ObjectVariant,
-        ) -> Result<&'a ObjectVariant, pdf_object::error::ObjectError> {
+        ) -> Result<&'a ObjectVariant, pdf_object_reader::object_error::ObjectError> {
             match obj {
-                ObjectVariant::Reference(object_number) => self.objects.get(object_number).ok_or(
-                    pdf_object::error::ObjectError::FailedResolveObjectReference {
-                        obj_num: *object_number,
+                ObjectVariant::Reference(object_number) => self
+                    .objects
+                    .get(&object_number.number)
+                    .ok_or(
+                    pdf_object_reader::object_error::ObjectError::FailedResolveObjectReference {
+                        obj_num: object_number.number,
                     },
                 ),
                 other => Ok(other),
@@ -699,7 +709,10 @@ mod tests {
         let compressed = encoder.finish().expect("zlib finish failed");
 
         let mut dict = BTreeMap::new();
-        dict.insert(Vec::from(b"Filter"), ObjectVariant::Reference(3));
+        dict.insert(
+            Vec::from(b"Filter"),
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(3, 0)),
+        );
         dict.insert(
             Vec::from(b"Length"),
             ObjectVariant::Integer(compressed.len() as i64),
@@ -767,7 +780,8 @@ mod tests {
         encoder.write_all(b"hello").expect("zlib write failed");
         let compressed = encoder.finish().expect("zlib finish failed");
 
-        let decode_parms = ObjectVariant::Reference(2);
+        let decode_parms =
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(2, 0));
         let dictionary = Dictionary::new(BTreeMap::from([
             (
                 Vec::from(b"Filter"),

@@ -4,7 +4,7 @@
 //! reading a PDF, together with the contextual information attached to each
 //! diagnostic.
 
-use pdf_object::object_id::PdfObjectId;
+use pdf_object_reader::object_id::ObjectId;
 
 /// Categorizes a recoverable PDF read problem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,7 +27,7 @@ pub struct PdfReadDiagnostic {
     /// The byte offset associated with the problem, when available.
     pub byte_offset: Option<usize>,
     /// The indirect object associated with the problem, when available.
-    pub object: Option<PdfObjectId>,
+    pub object: Option<ObjectId>,
     /// A human-readable rendering of the underlying error.
     pub message: String,
 }
@@ -37,7 +37,7 @@ impl PdfReadDiagnostic {
     pub(crate) fn new(
         kind: PdfReadDiagnosticKind,
         byte_offset: Option<usize>,
-        object: Option<PdfObjectId>,
+        object: Option<ObjectId>,
         error: impl std::fmt::Display,
     ) -> Self {
         Self {

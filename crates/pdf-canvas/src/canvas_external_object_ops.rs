@@ -73,6 +73,7 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
         let resources = self
             .current_state()?
             .resources
+            .clone()
             .ok_or(PdfCanvasError::PageResourcesMissing)?;
 
         let xobj = resources.xobject(xobject_name).ok_or_else(|| {
@@ -82,13 +83,19 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
         match xobj {
             Resource::Image(image) => self.render_image_xobject(image)?,
             Resource::UnavailableImage => {}
-            Resource::Form(form) => self.render_content_stream(
-                &form.content_stream,
-                form.matrix,
-                Some(&form.bbox),
-                form.resources.as_deref(),
-                None,
-            )?,
+            Resource::Form(form) => {
+                let form = form.get()?;
+                self.render_content_stream(
+                    &form.content_stream,
+                    form.matrix,
+                    Some(&form.bbox),
+                    form.resources
+                        .as_ref()
+                        .map(|resources| resources.get())
+                        .transpose()?,
+                    None,
+                )?;
+            }
             _ => {
                 return Err(PdfCanvasError::XObjectNotFound(
                     String::from_utf8_lossy(xobject_name).into_owned(),

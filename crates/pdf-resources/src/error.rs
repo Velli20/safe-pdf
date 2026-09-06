@@ -13,10 +13,13 @@ use thiserror::Error;
 /// Errors that can occur during parsing of a PDF Pages object.
 #[derive(Error, Debug)]
 pub enum PdfPagesError {
+    /// Failure in a nested typed object read.
+    #[error(transparent)]
+    ObjectRead(#[from] pdf_object_reader::ObjectReadError),
     #[error("invalid /Kids entry type: expected /Page or /Pages, found '{found_type}'")]
     InvalidKidsEntryType { found_type: String },
     #[error("{0}")]
-    Object(#[from] pdf_object::error::ObjectError),
+    Object(#[from] pdf_object_reader::object_error::ObjectError),
     #[error("failed to parse content stream: {0}")]
     ContentStream(#[from] PdfOperatorError),
     #[error("{0}")]
@@ -60,4 +63,16 @@ pub enum PdfPagesError {
     },
     #[error("missing required annotation entry '/{entry:?}'")]
     MissingAnnotationEntry { entry: &'static [u8] },
+}
+
+impl From<PdfPagesError> for pdf_object_reader::ObjectReadError {
+    fn from(source: PdfPagesError) -> Self {
+        match source {
+            PdfPagesError::ObjectRead(error) => error,
+            source => Self::Decode {
+                target: "PDF resource",
+                source: Box::new(source),
+            },
+        }
+    }
 }

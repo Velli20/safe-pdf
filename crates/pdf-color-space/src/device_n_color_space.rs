@@ -3,7 +3,7 @@ use pdf_function::{
     function_interpolation_error::FunctionInterpolationError,
 };
 use pdf_graphics::color::Color;
-use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object_reader::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
 use crate::{
     color_space::ColorSpace, color_space_reader::parse_color_space_object, error::ColorSpaceError,
@@ -101,7 +101,7 @@ mod tests {
     use pdf_function::{
         function::Function, function_interpolation_error::FunctionInterpolationError,
     };
-    use pdf_object::{
+    use pdf_object_reader::{
         dictionary::Dictionary, object_resolver::PassthroughResolver,
         object_variant::ObjectVariant, stream::StreamObject,
     };

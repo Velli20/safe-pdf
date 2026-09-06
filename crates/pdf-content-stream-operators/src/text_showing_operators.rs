@@ -6,8 +6,8 @@ use crate::{
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
-use pdf_object::{
-    error::ObjectError, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+use pdf_object_reader::{
+    object_error::ObjectError, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
 };
 
 /// Shows a text string.

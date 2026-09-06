@@ -2,7 +2,6 @@
 
 use pdf_color_space::color_space::ColorSpace;
 use pdf_graphics::{color::Color, point::Point, rect::Rect};
-use pdf_object::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
 use crate::{color_stops::ColorStops, error::PdfShadingError};
 
@@ -185,13 +184,5 @@ impl Shading {
             | Self::PatchMesh { bbox, .. } => bbox.as_ref(),
             Self::Axial { .. } | Self::Unsupported { .. } => None,
         }
-    }
-
-    /// Parses a shading object from a PDF shading dictionary or stream.
-    pub fn from_dictionary(
-        object: &ObjectVariant,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Self, PdfShadingError> {
-        crate::parse::shading_from_dictionary(object, objects)
     }
 }

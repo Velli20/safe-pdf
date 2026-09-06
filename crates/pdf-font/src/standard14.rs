@@ -1,7 +1,6 @@
 //! Standard 14 PDF font identities.
 
 use crate::flags::FontFlags;
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 /// Standard 14 identity used when a PDF omits an embedded program.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -87,14 +86,19 @@ pub fn fallback_font_bytes(font: Standard14Font) -> &'static [u8] {
     }
 }
 
-pub(crate) fn from_dictionary(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
+/// Selects a Standard 14 identity from a best-effort BaseFont hint and fallback flags.
+pub(crate) fn from_context(
+    context: &mut pdf_object_reader::DictionaryContext<
+        '_,
+        impl pdf_object_reader::ObjectAccess + ?Sized,
+    >,
     flags: FontFlags,
 ) -> Standard14Font {
-    dictionary
-        .get(b"BaseFont")
-        .and_then(|value| value.try_bytes(objects).ok())
+    context
+        .optional::<std::sync::Arc<[u8]>>(b"BaseFont")
+        .ok()
+        .flatten()
+        .as_deref()
         .and_then(from_base_font_name)
         .unwrap_or_else(|| from_flags(flags))
 }

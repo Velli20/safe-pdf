@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use pdf_object::{
+use pdf_object_reader::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 use pdf_tokenizer::PdfToken;
@@ -191,7 +191,7 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use pdf_object::object_resolver::PassthroughResolver;
+    use pdf_object_reader::object_resolver::PassthroughResolver;
 
     use super::*;
 

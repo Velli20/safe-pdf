@@ -1,13 +1,11 @@
-use std::rc::Rc;
+use pdf_object_collection::object_collection::ObjectCollection;
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult};
+use std::sync::Arc;
 
-use pdf_annotation_types::{Annotation, AnnotationError, annotation_id::AnnotationId};
-use pdf_content_stream::{ContentStream, ContentStreamIdAllocator};
+use pdf_annotation_types::{Annotation, annotation_id::AnnotationId};
+use pdf_content_stream::ContentStream;
 use pdf_graphics::rect::Rect;
-use pdf_object::{dictionary::Dictionary, object_resolver::ObjectResolver};
-use pdf_resources::{
-    error::PdfPagesError, object_reader::ReadCycleTracker, resource_cache::ResourceCache,
-    resources::Resources,
-};
+use pdf_resources::resources::Resources;
 
 /// Represents a single page in a PDF document.
 ///
@@ -24,44 +22,17 @@ pub struct PdfPage {
     /// `/MediaBox` attribute which defines the page boundaries.
     pub media_box: Option<Rect>,
     /// `/Resources` attribute which defines the resources used by the page.
-    pub resources: Option<Rc<Resources>>,
+    pub resources: Option<Arc<Resources>>,
     /// Next page-scoped annotation identifier.
     #[doc(hidden)]
     pub annotation_id_high_watermark: usize,
+    /// Retains the source and typed resources when a page is detached from its document.
+    #[doc(hidden)]
+    pub read_state: Option<Arc<ObjectReader<ObjectCollection>>>,
 }
 
 impl PdfPage {
     pub const KEY: &'static [u8] = b"Page";
-
-    pub fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        cycle_tracker: &mut ReadCycleTracker,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Self, PdfPagesError> {
-        let contents = ContentStream::from_dictionary(dictionary, objects, id_allocator)?;
-        let media_box = dictionary.optional_media_box(objects)?;
-        let resources = Resources::read(dictionary, objects, cache, cycle_tracker, id_allocator)?;
-
-        let annotations = Annotation::from_page_dictionary(
-            dictionary,
-            objects,
-            cache,
-            cycle_tracker,
-            id_allocator,
-        )
-        .map_err(annotation_error_into_pages_error)?;
-        let annotation_id_high_watermark = annotations.as_ref().map_or(0, Vec::len);
-
-        Ok(Self {
-            contents,
-            annotations,
-            media_box,
-            resources,
-            annotation_id_high_watermark,
-        })
-    }
 
     /// Returns an annotation by its stable page-scoped identifier.
     pub fn annotation(&self, id: AnnotationId) -> Option<&Annotation> {
@@ -113,13 +84,25 @@ impl PdfPage {
     }
 }
 
-fn annotation_error_into_pages_error(error: AnnotationError) -> PdfPagesError {
-    match error {
-        AnnotationError::Object(error) => error.into(),
-        AnnotationError::Resources(error) => error,
-        AnnotationError::InvalidEntry { entry, reason } => {
-            PdfPagesError::InvalidAnnotationEntry { entry, reason }
-        }
-        AnnotationError::MissingEntry { entry } => PdfPagesError::MissingAnnotationEntry { entry },
+impl FromPdfObject for PdfPage {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        let dictionary = context.dictionary().clone();
+        let contents = context.optional::<ContentStream>(b"Contents")?;
+        let media_box = dictionary.optional_media_box(context.source())?;
+        let resources = context
+            .optional_shared::<Resources>(b"Resources")?
+            .map(|handle| handle.get())
+            .transpose()?;
+        let annotations = Annotation::from_page_dictionary(&mut context)?;
+        let annotation_id_high_watermark = annotations.as_ref().map_or(0, Vec::len);
+        Ok(Self {
+            contents,
+            media_box,
+            resources,
+            annotations,
+            annotation_id_high_watermark,
+            read_state: None,
+        })
     }
 }

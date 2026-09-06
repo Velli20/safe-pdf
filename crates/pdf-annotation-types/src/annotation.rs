@@ -1,9 +1,6 @@
-use pdf_content_stream::ContentStreamIdAllocator;
 use pdf_graphics::rect::Rect;
-use pdf_object::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-};
-use pdf_resources::{object_reader::ReadCycleTracker, resource_cache::ResourceCache};
+use pdf_object_reader::object_lookup::ObjectLookupExt;
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 use crate::{
     AnnotationBorder, AnnotationColor, AnnotationError, AnnotationKind, AppearanceDictionary,
@@ -43,6 +40,29 @@ pub struct Annotation {
 }
 
 impl Annotation {
+    /// Reads page annotations while preserving page-local identifier assignment.
+    pub fn from_page_dictionary<A: ObjectAccess + ?Sized>(
+        context: &mut pdf_object_reader::DictionaryContext<'_, A>,
+    ) -> ReadResult<Option<Vec<Self>>> {
+        let Some(annots) = context.optional::<pdf_object_reader::pdf_array::PdfArray>(b"Annots")?
+        else {
+            return Ok(None);
+        };
+        let mut annotations = Vec::with_capacity(annots.len());
+        for value in annots.iter() {
+            let Ok(dictionary) = value.try_dictionary(context.source()) else {
+                continue;
+            };
+            if dictionary.get(b"Subtype").is_none() {
+                continue;
+            }
+            let mut annotation: Self = context.read(value)?;
+            annotation.id = AnnotationId::from_page_value(annotations.len());
+            annotations.push(annotation);
+        }
+        Ok(Some(annotations))
+    }
+
     /// Returns this annotation's stable, page-scoped runtime identifier.
     pub const fn id(&self) -> AnnotationId {
         self.id
@@ -127,48 +147,14 @@ impl Annotation {
             kind: AnnotationKind::FreeText(free_text),
         }
     }
+}
 
-    /// Reads all page annotations from the optional `/Annots` array.
-    pub fn from_page_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        cycle_tracker: &mut ReadCycleTracker,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Option<Vec<Self>>, AnnotationError> {
-        let Some(annots) = dictionary.get(b"Annots") else {
-            return Ok(None);
-        };
-
-        let annots = annots.try_array(objects)?;
-        let mut annotations = Vec::with_capacity(annots.len());
-
-        for annot in annots {
-            let Ok(dictionary) = annot.try_dictionary(objects) else {
-                continue;
-            };
-            // A broken annotation can still be useful to preserve the rest of the page,
-            // but without `/Subtype` we cannot dispatch it to a concrete parser.
-            if dictionary.get(b"Subtype").is_none() {
-                continue;
-            }
-            let mut annotation =
-                Self::from_dictionary(dictionary, objects, cache, cycle_tracker, id_allocator)?;
-            annotation.id = AnnotationId::from_page_value(annotations.len());
-            annotations.push(annotation);
-        }
-
-        Ok(Some(annotations))
-    }
-
-    /// Parses a single resolved annotation dictionary.
-    pub fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        cache: &mut dyn ResourceCache,
-        cycle_tracker: &mut ReadCycleTracker,
-        id_allocator: &mut ContentStreamIdAllocator,
-    ) -> Result<Self, AnnotationError> {
+impl FromPdfObject for Annotation {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        let raw = context.dictionary().clone();
+        let dictionary = &raw;
+        let objects = context.source();
         // Some PDFs omit `/Type` on annotation dictionaries even though the
         // entry is nominally expected to be `/Annot`, so only validate it when
         // the key is actually present.
@@ -179,7 +165,8 @@ impl Annotation {
                     return Err(AnnotationError::InvalidEntry {
                         entry: b"Type",
                         reason: format!("expected /Annot, found /{other:?}"),
-                    });
+                    }
+                    .into());
                 }
             }
         }
@@ -217,16 +204,11 @@ impl Annotation {
             .transpose()?;
         let struct_parent = dictionary.optional_number::<usize>(b"StructParent", objects)?;
 
-        let appearance = AppearanceDictionary::from_dictionary(
-            dictionary,
-            objects,
-            cache,
-            cycle_tracker,
-            id_allocator,
-        )?;
         let optional_content = OptionalContent::from_dictionary(dictionary, objects)?;
         let border = AnnotationBorder::from_dictionary(dictionary, objects)?;
         let color = AnnotationColor::from_dictionary(dictionary, b"C", objects)?;
+
+        let appearance = context.optional(b"AP")?;
 
         Ok(Self {
             id: AnnotationId::from_page_value(0),
@@ -248,21 +230,34 @@ impl Annotation {
 
 #[cfg(test)]
 mod tests {
+    use pdf_object_reader::Dictionary;
     use std::collections::BTreeMap;
 
-    use pdf_content_stream::ContentStreamIdAllocator;
-    use pdf_object::{
-        error::ObjectError,
+    use pdf_object_reader::{
+        object_error::ObjectError,
         object_resolver::{ObjectResolver, PassthroughResolver},
         object_variant::ObjectVariant,
         stream::StreamObject,
     };
-    use pdf_resources::{object_reader::ReadCycleTracker, resource_cache::DefaultResourceCache};
 
     use super::*;
 
     struct TestResolver {
         objects: BTreeMap<usize, ObjectVariant>,
+    }
+
+    impl pdf_object_reader::ObjectSource for TestResolver {
+        type Error = ObjectError;
+        fn read_object(
+            &self,
+            id: pdf_object_reader::object_id::ObjectId,
+        ) -> Result<Option<pdf_object_reader::pdf_object::PdfObject>, Self::Error> {
+            Ok(self
+                .objects
+                .get(&id.number())
+                .cloned()
+                .map(pdf_object_reader::pdf_object::PdfObject::new))
+        }
     }
 
     impl ObjectResolver for TestResolver {
@@ -275,9 +270,9 @@ mod tests {
             // Follow reference chains the same way the real reader does so the
             // page-level annotation test exercises indirect annotation objects.
             while let ObjectVariant::Reference(object_number) = current {
-                current = self.objects.get(object_number).ok_or(
+                current = self.objects.get(&object_number.number).ok_or(
                     ObjectError::FailedResolveObjectReference {
-                        obj_num: *object_number,
+                        obj_num: object_number.number,
                     },
                 )?;
             }
@@ -286,18 +281,13 @@ mod tests {
         }
     }
 
-    fn parse_annotation(dictionary: Dictionary) -> Result<Annotation, AnnotationError> {
+    fn parse_annotation(dictionary: Dictionary) -> pdf_object_reader::ReadResult<Annotation> {
         let objects = PassthroughResolver;
-        let mut cache = DefaultResourceCache::default();
-        let mut cycle_tracker = ReadCycleTracker::default();
-        let mut id_allocator = ContentStreamIdAllocator::new();
 
-        Annotation::from_dictionary(
-            &dictionary,
-            &objects,
-            &mut cache,
-            &mut cycle_tracker,
-            &mut id_allocator,
+        let reader = pdf_object_reader::ObjectReader::new(&objects);
+
+        reader.read::<Annotation>(
+            &pdf_object_reader::object_variant::ObjectVariant::Dictionary((&dictionary).clone()),
         )
     }
 
@@ -374,7 +364,10 @@ mod tests {
 
     #[test]
     fn missing_type_is_preserved_as_none() {
-        let dictionary = annotation_dictionary(vec![("Parent", ObjectVariant::Reference(3))]);
+        let dictionary = annotation_dictionary(vec![(
+            "Parent",
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(3, 0)),
+        )]);
 
         let annotation = parse_annotation(dictionary).expect("annotation should parse");
 
@@ -389,7 +382,10 @@ mod tests {
             Vec::from(b"Subtype"),
             ObjectVariant::Name(b"Popup".to_vec()),
         );
-        values.insert(Vec::from(b"Parent"), ObjectVariant::Reference(3));
+        values.insert(
+            Vec::from(b"Parent"),
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(3, 0)),
+        );
 
         let annotation =
             parse_annotation(Dictionary::new(values)).expect("annotation should parse");
@@ -399,7 +395,10 @@ mod tests {
 
     #[test]
     fn missing_rect_is_preserved_as_none() {
-        let dictionary = annotation_dictionary(vec![("Parent", ObjectVariant::Reference(3))]);
+        let dictionary = annotation_dictionary(vec![(
+            "Parent",
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(3, 0)),
+        )]);
 
         let annotation = parse_annotation(dictionary).expect("annotation should parse");
 
@@ -472,7 +471,9 @@ mod tests {
             Err(error) => error,
         };
 
-        assert!(matches!(error, AnnotationError::Object(_)));
+        assert!(
+            matches!(error, pdf_object_reader::ObjectReadError::Decode { source, .. } if source.downcast_ref::<ObjectError>().is_some())
+        );
     }
 
     #[test]
@@ -491,7 +492,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            AnnotationError::InvalidEntry { entry: b"Type", .. }
+            pdf_object_reader::ObjectReadError::Decode { source, .. } if matches!(source.downcast_ref::<AnnotationError>(), Some(AnnotationError::InvalidEntry { entry: b"Type", .. }))
         ));
     }
 
@@ -521,22 +522,29 @@ mod tests {
         page_values.insert(
             Vec::from(b"Annots"),
             ObjectVariant::Array(vec![
-                ObjectVariant::Reference(4),
-                ObjectVariant::Reference(5),
+                ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(4, 0)),
+                ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(5, 0)),
             ]),
         );
 
         let resolver = TestResolver { objects };
-        let mut cache = DefaultResourceCache::default();
-        let mut cycle_tracker = ReadCycleTracker::default();
-        let mut id_allocator = ContentStreamIdAllocator::new();
+
+        let reader = pdf_object_reader::ObjectReader::new(&resolver);
 
         let annotations = Annotation::from_page_dictionary(
-            &Dictionary::new(page_values),
-            &resolver,
-            &mut cache,
-            &mut cycle_tracker,
-            &mut id_allocator,
+            &mut pdf_object_reader::ObjectContext::new(
+                pdf_object_reader::resolved_object::ResolvedObject::try_from(
+                    pdf_object_reader::pdf_object::PdfObject::new(
+                        pdf_object_reader::object_variant::ObjectVariant::Dictionary(
+                            (&Dictionary::new(page_values)).clone(),
+                        ),
+                    ),
+                )
+                .expect("direct page"),
+                &mut reader.session(),
+            )
+            .dictionary()
+            .expect("page dictionary"),
         )
         .expect("page annotations should parse");
 

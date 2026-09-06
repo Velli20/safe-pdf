@@ -18,8 +18,10 @@ use crate::diagnostic::{PdfReadDiagnostic, PdfReadDiagnosticKind};
 use crate::error::PdfReaderError;
 use crate::object_stream::read_object_stream;
 use crate::reader::{EncryptionContext, object_id};
-use pdf_object::{cross_reference_table::CrossReferenceEntryType, error::ObjectError};
 use pdf_object_collection::object_collection::ObjectCollection;
+use pdf_object_reader::{
+    cross_reference_table::CrossReferenceEntryType, object_error::ObjectError,
+};
 use pdf_parser::{error::ParserError, parser::PdfParser};
 
 /// Maps an index within one object stream to the xref object numbers using that index.

@@ -1,5 +1,5 @@
 use pdf_decode::DecodeError;
-use pdf_object::error::ObjectError;
+use pdf_object_reader::object_error::ObjectError;
 use pdf_postscript::calculator::CalcError;
 use thiserror::Error;
 

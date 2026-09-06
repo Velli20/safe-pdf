@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use bitflags::bitflags;
-use pdf_object::{
+use pdf_object_reader::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
     object_variant::ObjectVariant,
 };
@@ -102,7 +102,7 @@ impl WidgetAnnotation {
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
         let field_id = match dictionary.get(b"Parent") {
-            Some(ObjectVariant::Reference(parent_id)) => Some(*parent_id),
+            Some(ObjectVariant::Reference(parent_id)) => Some(parent_id.number),
             _ => None,
         };
         let mut field_type = None;

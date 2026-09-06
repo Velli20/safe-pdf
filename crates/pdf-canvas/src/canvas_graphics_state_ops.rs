@@ -71,6 +71,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
         let resources = self
             .current_state()?
             .resources
+            .clone()
             .ok_or(PdfCanvasError::PageResourcesMissing)?;
 
         let Some(states) = resources.external_graphics_state(dict_name) else {
@@ -104,12 +105,13 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                 ExternalGraphicsStateKey::OverprintFill(_) => {}
                 ExternalGraphicsStateKey::OverprintMode(_) => {}
                 ExternalGraphicsStateKey::Font(font, font_size) => {
-                    if let Resource::Font { font, resources } = font {
+                    let resource = font.get()?;
+                    if let Resource::Font { font, resources } = resource.as_ref() {
                         let handle = self.load_pdf_font(font.as_ref())?;
                         self.current_state_mut()?.text_state.font = Some(handle);
-                        self.current_state_mut()?.text_state.font_spec = Some(font);
+                        self.current_state_mut()?.text_state.font_spec = Some(Arc::clone(font));
                         if let Some(resources) = resources {
-                            self.current_state_mut()?.text_state.resources = Some(resources);
+                            self.current_state_mut()?.text_state.resources = Some(resources.get()?);
                         }
                     } else {
                         return Err(PdfCanvasError::UnsupportedFeature(
@@ -135,11 +137,12 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                 ExternalGraphicsStateKey::SoftMask(smask) => {
                     // Handle the `/SMask` entry from an `ExtGState` dictionary.
                     if let Some(smask) = smask.as_ref() {
+                        let smask = smask.get()?;
                         if matches!(&smask.mask_type, MaskMode::Unknown(_)) {
                             continue;
                         }
 
-                        let form = &smask.shape;
+                        let form = smask.shape.get()?;
                         // The soft mask is defined by a Form XObject.
                         // We need to render this form's content into a separate mask surface.
                         if !Self::can_record_offscreen_bbox(&form.bbox) {
@@ -156,7 +159,10 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                             &form.content_stream,
                             form.matrix,
                             &form.bbox,
-                            form.resources.as_deref(),
+                            form.resources
+                                .as_ref()
+                                .map(|resources| resources.get())
+                                .transpose()?,
                             None,
                         )?;
 

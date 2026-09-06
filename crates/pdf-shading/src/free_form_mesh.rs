@@ -3,7 +3,7 @@
 use pdf_color_space::color_space::ColorSpace;
 use pdf_function::function::Function;
 use pdf_graphics::rect::Rect;
-use pdf_object::{
+use pdf_object_reader::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
     object_variant::ObjectVariant,
 };

@@ -6,6 +6,5 @@ pub mod error;
 pub mod object_loader;
 pub mod object_stream;
 pub mod page;
-pub mod pages;
 pub mod reader;
 pub mod report;

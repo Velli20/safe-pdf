@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use pdf_object::{
+use pdf_object_reader::{
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceStatus, CrossReferenceTable},
     object_resolver::ObjectResolver,
 };
@@ -143,7 +143,7 @@ fn is_malformed_leading_free_object_zero(entry: &CrossReferenceEntryType) -> boo
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
-    use pdf_object::object_resolver::PassthroughResolver;
+    use pdf_object_reader::object_resolver::PassthroughResolver;
 
     use super::*;
 

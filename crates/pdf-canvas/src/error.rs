@@ -5,6 +5,9 @@ use thiserror::Error;
 /// Defines errors that can occur during PDF canvas operations.
 #[derive(Debug, Error)]
 pub enum PdfCanvasError {
+    /// A deferred resource could not be accessed.
+    #[error(transparent)]
+    ObjectRead(#[from] pdf_object_reader::ObjectReadError),
     #[error("The current operation requires an active path, but no path has been started")]
     PathRequired,
     #[error("The current operation requires a current point, but no current point is set")]

@@ -43,7 +43,7 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     /// Scalable outlines reused by repeated glyphs during this page render.
     glyph_cache: HashMap<(FontFaceId, GlyphId, u32), Arc<PdfPath>>,
     /// The stack of graphics states, supporting save/restore semantics.
-    pub(crate) canvas_stack: Vec<CanvasState<'a>>,
+    pub(crate) canvas_stack: Vec<CanvasState>,
     /// State used to bound nested and recursive content-stream rendering.
     content_stream_render_state: ContentStreamRenderState,
     /// Optional owned buffer for extracted text glyph positions.
@@ -206,7 +206,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         content_stream: &ContentStream,
         mat: Option<Transform>,
         bbox: &Rect,
-        resources: Option<&'a Resources>,
+        resources: Option<Arc<Resources>>,
         filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
     ) -> Result<(), PdfCanvasError> {
         // Calculate scale factors.
@@ -251,7 +251,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// # Errors
     ///
     /// Returns an error if the graphics state stack is empty.
-    pub(crate) fn current_state(&self) -> Result<&CanvasState<'a>, PdfCanvasError> {
+    pub(crate) fn current_state(&self) -> Result<&CanvasState, PdfCanvasError> {
         self.canvas_stack
             .last()
             .ok_or(PdfCanvasError::EmptyGraphicsStateStack)
@@ -300,7 +300,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// # Errors
     ///
     /// Returns an error if the graphics state stack is empty.
-    pub(crate) fn current_state_mut(&mut self) -> Result<&mut CanvasState<'a>, PdfCanvasError> {
+    pub(crate) fn current_state_mut(&mut self) -> Result<&mut CanvasState, PdfCanvasError> {
         self.canvas_stack
             .last_mut()
             .ok_or(PdfCanvasError::EmptyGraphicsStateStack)
@@ -332,18 +332,18 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     ///
     /// An optional `Shader` or an error if pattern rendering fails.
     fn compute_shader(&mut self, for_stroke: bool) -> Result<Option<Shader>, PdfCanvasError> {
-        let state: &CanvasState<'_> = self.current_state()?;
+        let state: &CanvasState = self.current_state()?;
         let pattern = if for_stroke {
-            &state.stroke_pattern
+            state.stroke_pattern.clone()
         } else {
-            &state.fill_pattern
+            state.fill_pattern.clone()
         };
 
         let Some(pattern) = pattern else {
             return Ok(None);
         };
 
-        match pattern {
+        match pattern.as_ref() {
             Pattern::Shading {
                 shading, matrix, ..
             } => {
@@ -414,7 +414,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     content_stream,
                     None,
                     &bbox,
-                    Some(resources.as_ref()),
+                    Some(resources.get()?),
                     filter,
                 )?;
 
@@ -679,6 +679,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         let Some(pattern) = self
             .current_state()?
             .resources
+            .as_ref()
             .and_then(|r| r.pattern(pattern_name))
         else {
             return Err(PdfCanvasError::PatternNotFound(
@@ -702,6 +703,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         let Some(pattern) = self
             .current_state()?
             .resources
+            .as_ref()
             .and_then(|r| r.pattern(pattern_name))
         else {
             return Err(PdfCanvasError::PatternNotFound(
@@ -730,7 +732,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         content_stream: &ContentStream,
         mat: Option<Transform>,
         bbox: Option<&Rect>,
-        resources: Option<&'a Resources>,
+        resources: Option<Arc<Resources>>,
         filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
     ) -> Result<(), PdfCanvasError> {
         let Some(invocation) = self.content_stream_render_state.enter(content_stream.id) else {
@@ -755,7 +757,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         content_stream: &ContentStream,
         mat: Option<Transform>,
         bbox: Option<&Rect>,
-        resources: Option<&'a Resources>,
+        resources: Option<Arc<Resources>>,
         mut filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
     ) -> Result<(), PdfCanvasError> {
         self.save()?;
@@ -854,27 +856,27 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         ) {
             let (cs, initial_color) = match name {
                 b"DeviceGray" => (
-                    &CanvasState::DEVICE_GRAY_COLOR_SPACE,
+                    Arc::new(CanvasState::DEVICE_GRAY_COLOR_SPACE),
                     Some(Color::from_gray(0.0)),
                 ),
                 b"DeviceRGB" => (
-                    &CanvasState::DEVICE_RGB_COLOR_SPACE,
+                    Arc::new(CanvasState::DEVICE_RGB_COLOR_SPACE),
                     Some(Color::from_rgb(0.0, 0.0, 0.0)),
                 ),
                 b"DeviceCMYK" => (
-                    &CanvasState::DEVICE_CMYK_COLOR_SPACE,
+                    Arc::new(CanvasState::DEVICE_CMYK_COLOR_SPACE),
                     Some(Color::from_cmyk(0.0, 0.0, 0.0, 1.0)),
                 ),
                 // Pattern: no initial colour is defined by the spec.
-                _ => (&CanvasState::PATTERN_COLOR_SPACE, None),
+                _ => (Arc::new(CanvasState::PATTERN_COLOR_SPACE), None),
             };
             if is_stroking {
-                state.stroke_color_space = Some(cs);
+                state.stroke_color_space = Some(Arc::clone(&cs));
                 if let Some(color) = initial_color {
                     state.paint.stroke_color = color;
                 }
             } else {
-                state.fill_color_space = Some(cs);
+                state.fill_color_space = Some(Arc::clone(&cs));
                 if let Some(color) = initial_color {
                     state.paint.fill_color = color;
                 }
@@ -882,16 +884,20 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             return Ok(());
         }
 
-        let Some(cs) = state.resources.and_then(|res| res.color_space(name)) else {
+        let Some(cs) = state
+            .resources
+            .as_ref()
+            .and_then(|res| res.color_space(name))
+        else {
             return Err(PdfCanvasError::ColorSpaceNotFound(
                 String::from_utf8_lossy(name).into_owned(),
             ));
         };
 
         if is_stroking {
-            state.stroke_color_space = Some(cs);
+            state.stroke_color_space = Some(Arc::clone(&cs));
         } else {
-            state.fill_color_space = Some(cs);
+            state.fill_color_space = Some(Arc::clone(&cs));
         }
         Ok(())
     }
@@ -914,6 +920,7 @@ mod tests {
             media_box: None,
             resources: None,
             annotation_id_high_watermark: 0,
+            read_state: None,
         }
     }
 

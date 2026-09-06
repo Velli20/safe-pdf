@@ -2,8 +2,9 @@
 
 use std::convert::TryFrom;
 
-use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+use pdf_object_reader::{
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, dictionary::Dictionary,
+    object_resolver::ObjectResolver, object_variant::ObjectVariant,
     text_encoding::BigEndianU16Units,
 };
 mod embedded;
@@ -150,6 +151,22 @@ impl PdfCMap for Type0EncodingCMap {
             Self::Identity { writing_mode } => *writing_mode,
             Self::Predefined(cmap) => cmap.writing_mode(),
             Self::Embedded(cmap) => cmap.writing_mode(),
+        }
+    }
+}
+
+impl FromPdfObject for Type0EncodingCMap {
+    /// Decodes an embedded stream or predefined name using the active object traversal.
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match context.object().value() {
+            ObjectVariant::Stream(_) => {
+                let context = context.stream()?;
+                Ok(Self::from_bytes(context.stream().raw_data())?)
+            }
+            _ => {
+                let name = std::sync::Arc::<[u8]>::from_pdf_object(context)?;
+                Ok(Self::from_name(&name)?)
+            }
         }
     }
 }

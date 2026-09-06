@@ -1,4 +1,4 @@
-use pdf_object::text_encoding::BigEndianU16Units;
+use pdf_object_reader::text_encoding::BigEndianU16Units;
 
 use crate::cmap_support::bytes_to_u32;
 

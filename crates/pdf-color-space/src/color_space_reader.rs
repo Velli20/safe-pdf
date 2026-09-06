@@ -1,5 +1,6 @@
-use pdf_object::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+use pdf_object_reader::{
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, dictionary::Dictionary,
+    object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
 use crate::{
@@ -31,16 +32,11 @@ impl ColorSpace {
 
         parse_color_space_object(objects, color_space_obj, 0).map(Some)
     }
+}
 
-    /// Parses a color space directly from an [`ObjectVariant`].
-    ///
-    /// Accepts names, arrays, and indirect references — all valid forms of a
-    /// color space definition as they appear in a resource dictionary value.
-    pub fn from_object(
-        obj: &ObjectVariant,
-        objects: &dyn ObjectResolver,
-    ) -> Result<ColorSpace, ColorSpaceError> {
-        parse_color_space_object(objects, obj, 0)
+impl FromPdfObject for ColorSpace {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        parse_color_space_object(context.source(), context.object().value(), 0).map_err(Into::into)
     }
 }
 
@@ -117,7 +113,7 @@ fn parse_color_space_array(
 
 #[cfg(test)]
 mod tests {
-    use pdf_object::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
+    use pdf_object_reader::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
 
     use crate::{color_space::ColorSpace, error::ColorSpaceError};
 
@@ -143,7 +139,9 @@ mod tests {
         ];
 
         for (object, expected) in cases {
-            let parsed = ColorSpace::from_object(&object, &PassthroughResolver).unwrap();
+            let parsed = pdf_object_reader::ObjectReader::new(&PassthroughResolver)
+                .read::<ColorSpace>(&object)
+                .unwrap();
 
             match (parsed, expected) {
                 (ColorSpace::DeviceGray, ColorSpace::DeviceGray)
@@ -158,39 +156,37 @@ mod tests {
 
     #[test]
     fn parses_single_name_pattern_array() {
-        let parsed = ColorSpace::from_object(
-            &ObjectVariant::Array(vec![name("Pattern")]),
-            &PassthroughResolver,
-        )
-        .unwrap();
+        let parsed = pdf_object_reader::ObjectReader::new(&PassthroughResolver)
+            .read::<ColorSpace>(&ObjectVariant::Array(vec![name("Pattern")]))
+            .unwrap();
 
         assert!(matches!(parsed, ColorSpace::Pattern(None)));
     }
 
     #[test]
     fn rejects_empty_color_space_array() {
-        let error =
-            ColorSpace::from_object(&ObjectVariant::Array(Vec::new()), &PassthroughResolver)
-                .unwrap_err();
+        let error = pdf_object_reader::ObjectReader::new(&PassthroughResolver)
+            .read::<ColorSpace>(&ObjectVariant::Array(Vec::new()))
+            .unwrap_err();
 
         assert!(matches!(
             error,
-            ColorSpaceError::InvalidColorSpace { description } if description == "empty color space array"
+            pdf_object_reader::ObjectReadError::Decode { source, .. } if matches!(source.downcast_ref::<ColorSpaceError>(), Some(ColorSpaceError::InvalidColorSpace { description }) if description == "empty color space array")
         ));
     }
 
     #[test]
     fn rejects_unsupported_multi_element_color_space_array() {
-        let error = ColorSpace::from_object(
-            &ObjectVariant::Array(vec![name("DeviceGray"), ObjectVariant::Integer(1)]),
-            &PassthroughResolver,
-        )
-        .unwrap_err();
+        let error = pdf_object_reader::ObjectReader::new(&PassthroughResolver)
+            .read::<ColorSpace>(&ObjectVariant::Array(vec![
+                name("DeviceGray"),
+                ObjectVariant::Integer(1),
+            ]))
+            .unwrap_err();
 
         assert!(matches!(
             error,
-            ColorSpaceError::InvalidColorSpace { description }
-                if description == "unsupported color space type: /DeviceGray (array with 2 elements)"
+            pdf_object_reader::ObjectReadError::Decode { source, .. } if matches!(source.downcast_ref::<ColorSpaceError>(), Some(ColorSpaceError::InvalidColorSpace { description }) if description == "unsupported color space type: /DeviceGray (array with 2 elements)")
         ));
     }
 }

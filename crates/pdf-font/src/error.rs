@@ -1,6 +1,6 @@
 use pdf_cmap::error::CMapError;
 use pdf_content_stream_operators::error::PdfOperatorError;
-use pdf_object::error::ObjectError;
+use pdf_object_reader::object_error::ObjectError;
 use thiserror::Error;
 
 use crate::base_encoding::BaseEncoding;
@@ -55,4 +55,13 @@ pub enum FontError {
     InvalidWinAnsiByte { byte: u8 },
     #[error("{0}")]
     CMapError(#[from] CMapError),
+}
+
+impl From<FontError> for pdf_object_reader::ObjectReadError {
+    fn from(source: FontError) -> Self {
+        Self::Decode {
+            target: "PDF font",
+            source: Box::new(source),
+        }
+    }
 }

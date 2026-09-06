@@ -119,7 +119,7 @@ impl PdfRenderer {
                     cs,
                     None,
                     None,
-                    page.resources.as_deref(),
+                    page.resources.clone(),
                     None,
                 )?;
             }
@@ -145,7 +145,7 @@ impl PdfRenderer {
                 cs,
                 None,
                 None,
-                page.resources.as_deref(),
+                page.resources.clone(),
                 None,
             )?;
         }
@@ -177,7 +177,7 @@ impl PdfRenderer {
                     cs,
                     None,
                     None,
-                    page.resources.as_deref(),
+                    page.resources.clone(),
                     None,
                 )?;
             }
