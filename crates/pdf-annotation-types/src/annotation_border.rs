@@ -26,7 +26,7 @@ impl AnnotationBorder {
             return Ok(None);
         };
 
-        let [horizontal_radius, vertical_radius, width, rest @ ..] = value else {
+        let [horizontal_radius, vertical_radius, width, rest @ ..] = value.as_slice() else {
             return Err(AnnotationError::InvalidEntry {
                 entry: b"Border",
                 reason: "expected an array with at least 3 numbers".to_owned(),

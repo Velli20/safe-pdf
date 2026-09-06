@@ -174,11 +174,15 @@ impl ObjectCollection {
             ObjectVariant::Array(arr) => {
                 JsonValue::Array(arr.iter().map(Self::object_variant_to_json).collect())
             }
-            ObjectVariant::LiteralString(s) => {
-                json!({ "type": "LiteralString", "value": String::from_utf8_lossy(s).as_ref() })
+            ObjectVariant::String(s)
+                if s.kind() == pdf_object_reader::string_kind::StringKind::Literal =>
+            {
+                json!({ "type": "LiteralString", "value": String::from_utf8_lossy(s.as_bytes()).as_ref() })
             }
-            ObjectVariant::Name(name) => {
-                json!({ "type": "Name", "value": String::from_utf8_lossy(name).as_ref() })
+            ObjectVariant::String(name)
+                if name.kind() == pdf_object_reader::string_kind::StringKind::Name =>
+            {
+                json!({ "type": "Name", "value": String::from_utf8_lossy(name.as_bytes()).as_ref() })
             }
             ObjectVariant::Integer(i) => JsonValue::Number((*i).into()),
             ObjectVariant::Real(r) => serde_json::Number::from_f64(*r)
@@ -186,10 +190,10 @@ impl ObjectCollection {
                 .unwrap_or(JsonValue::Null),
             ObjectVariant::Boolean(b) => JsonValue::Bool(*b),
             ObjectVariant::Null => JsonValue::Null,
-            ObjectVariant::HexString(bytes) => {
+            ObjectVariant::String(bytes) => {
                 // Encode hex string as base64 for JSON compatibility
                 use std::fmt::Write;
-                let hex: String = bytes.iter().fold(String::new(), |mut acc, b| {
+                let hex: String = bytes.as_bytes().iter().fold(String::new(), |mut acc, b| {
                     let _ = write!(acc, "{b:02x}");
                     acc
                 });
@@ -397,7 +401,10 @@ mod tests {
         let mut stream_dict = BTreeMap::new();
         stream_dict.insert(
             Vec::from(b"Filter"),
-            ObjectVariant::Name(b"FlateDecode".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"FlateDecode".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         );
         stream_dict.insert(
             Vec::from(b"DecodeParms"),
@@ -442,7 +449,10 @@ mod tests {
             ),
             (
                 Vec::from(b"Filter"),
-                ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"ASCIIHexDecode".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
         ]));
         let stream = StreamObject::new_encoded(1, 0, stream_dictionary, b"2A>".to_vec());

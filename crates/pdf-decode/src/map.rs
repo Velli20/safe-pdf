@@ -113,7 +113,7 @@ mod tests {
         let err = DecodeMap::from_dictionary(
             &Dictionary::from_entries([(
                 b"Decode",
-                ObjectVariant::Array(vec![ObjectVariant::Integer(0)]),
+                ObjectVariant::Array(vec![ObjectVariant::Integer(0.into())].into()),
             )]),
             &PassthroughResolver,
             1,
@@ -134,10 +134,13 @@ mod tests {
         let err = DecodeMap::from_dictionary(
             &Dictionary::from_entries([(
                 b"Decode",
-                ObjectVariant::Array(vec![
-                    ObjectVariant::Real(f64::NAN),
-                    ObjectVariant::Integer(1),
-                ]),
+                ObjectVariant::Array(
+                    vec![
+                        ObjectVariant::Real(f64::NAN.into()),
+                        ObjectVariant::Integer(1),
+                    ]
+                    .into(),
+                ),
             )]),
             &PassthroughResolver,
             1,
@@ -151,12 +154,15 @@ mod tests {
     fn decode_map_cycles_ranges_per_component() {
         let dictionary = Dictionary::from_entries([(
             b"Decode",
-            ObjectVariant::Array(vec![
-                ObjectVariant::Integer(0),
-                ObjectVariant::Real(0.5),
-                ObjectVariant::Integer(1),
-                ObjectVariant::Integer(0),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    ObjectVariant::Integer(0.into()),
+                    ObjectVariant::Real(0.5),
+                    ObjectVariant::Integer(1),
+                    ObjectVariant::Integer(0),
+                ]
+                .into(),
+            ),
         )]);
         let map = DecodeMap::from_dictionary(&dictionary, &PassthroughResolver, 2)
             .unwrap()

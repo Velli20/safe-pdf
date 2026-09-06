@@ -528,7 +528,10 @@ mod tests {
     fn decode_data_with_filter_returns_shared_decoded_data() {
         let dictionary = Dictionary::new(BTreeMap::from([(
             Vec::from(b"Filter"),
-            ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"ASCIIHexDecode".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         )]));
 
         let encoded = Bytes::from_static(b"48 65 6c 6c 6f>");
@@ -561,7 +564,10 @@ mod tests {
         let mut dict = BTreeMap::new();
         dict.insert(
             Vec::from(b"Filter"),
-            ObjectVariant::Name(b"JBIG2Decode".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"JBIG2Decode".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         );
 
         let stream = StreamObject::new(1, 0, Dictionary::new(dict), Vec::new());
@@ -603,7 +609,10 @@ mod tests {
         let mut globals_dict = BTreeMap::new();
         globals_dict.insert(
             Vec::from(b"Filter"),
-            ObjectVariant::Name(b"JBIG2Decode".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"JBIG2Decode".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         );
         let globals_stream = StreamObject::new(3, 0, Dictionary::new(globals_dict), Vec::new());
 
@@ -616,7 +625,10 @@ mod tests {
         let mut dict = BTreeMap::new();
         dict.insert(
             Vec::from(b"Filter"),
-            ObjectVariant::Name(b"JBIG2Decode".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"JBIG2Decode".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         );
         dict.insert(Vec::from(b"Width"), ObjectVariant::Integer(8));
         dict.insert(Vec::from(b"Height"), ObjectVariant::Integer(1));
@@ -646,7 +658,10 @@ mod tests {
         let mut dict = BTreeMap::new();
         dict.insert(
             Vec::from(b"Filter"),
-            ObjectVariant::Name(b"JBIG2Decode".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"JBIG2Decode".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         );
         dict.insert(Vec::from(b"Width"), ObjectVariant::Integer(8));
         dict.insert(Vec::from(b"Height"), ObjectVariant::Integer(1));
@@ -662,7 +677,10 @@ mod tests {
         let mut dict = BTreeMap::new();
         dict.insert(
             Vec::from(b"Filter"),
-            ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"ASCIIHexDecode".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         );
 
         let stream = StreamObject::new(
@@ -723,7 +741,13 @@ mod tests {
         let mut objects = BTreeMap::new();
         objects.insert(
             3,
-            ObjectVariant::Array(vec![ObjectVariant::Name(b"FlateDecode".to_vec())]),
+            ObjectVariant::Array(
+                vec![pdf_object_reader::pdf_string::PdfString::from(
+                    b"FlateDecode".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                )]
+                .into(),
+            ),
         );
         let resolver = TestResolver { objects };
 
@@ -750,14 +774,23 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::from([
             (
                 Vec::from(b"Filter"),
-                ObjectVariant::Array(vec![
-                    ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
-                    ObjectVariant::Name(b"FlateDecode".to_vec()),
-                ]),
+                ObjectVariant::Array(
+                    vec![
+                        pdf_object_reader::pdf_string::PdfString::from(
+                            b"ASCIIHexDecode".to_vec(),
+                            pdf_object_reader::string_kind::StringKind::Name,
+                        ),
+                        pdf_object_reader::pdf_string::PdfString::from(
+                            b"FlateDecode".to_vec(),
+                            pdf_object_reader::string_kind::StringKind::Name,
+                        ),
+                    ]
+                    .into(),
+                ),
             ),
             (
                 Vec::from(b"DecodeParms"),
-                ObjectVariant::Array(vec![ObjectVariant::Null]),
+                ObjectVariant::Array(vec![ObjectVariant::Null].into()),
             ),
         ]));
 
@@ -785,11 +818,14 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::from([
             (
                 Vec::from(b"Filter"),
-                ObjectVariant::Name(b"FlateDecode".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"FlateDecode".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (
                 Vec::from(b"DecodeParms"),
-                ObjectVariant::Array(vec![decode_parms]),
+                ObjectVariant::Array(vec![decode_parms].into()),
             ),
         ]));
 
@@ -812,7 +848,10 @@ mod tests {
         let mut dict = BTreeMap::new();
         dict.insert(
             Vec::from(b"Filter"),
-            ObjectVariant::Name(b"RunLengthDecode".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"RunLengthDecode".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         );
 
         let stream = StreamObject::new(
@@ -829,7 +868,13 @@ mod tests {
     #[test]
     fn test_decode_rl_alias_stream() {
         let mut dict = BTreeMap::new();
-        dict.insert(Vec::from(b"Filter"), ObjectVariant::Name(b"RL".to_vec()));
+        dict.insert(
+            Vec::from(b"Filter"),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"RL".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
+        );
 
         let stream = StreamObject::new(1, 0, Dictionary::new(dict), vec![0, b'X', 128]);
 

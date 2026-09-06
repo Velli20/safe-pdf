@@ -33,6 +33,7 @@ mod tests {
         variants::PdfOperatorVariant,
     };
     use pdf_graphics::{color::Color, rect::Rect};
+    use std::sync::Arc;
 
     use super::*;
     use crate::FreeTextBorder;
@@ -206,7 +207,7 @@ mod tests {
         form.content_stream.operators = vec![
             PdfOperatorVariant::SetRGBFill(SetRGBFill::new(0.2, 0.4, 0.6)),
             PdfOperatorVariant::BeginText(BeginText),
-            PdfOperatorVariant::SetFont(SetFont::new(b"Helv".to_vec(), 18.0)),
+            PdfOperatorVariant::SetFont(SetFont::new(Arc::from(b"Helv".to_vec()), 18.0)),
             PdfOperatorVariant::SetLeading(SetLeading::new(24.0)),
             PdfOperatorVariant::EndText(EndText),
         ];
@@ -242,7 +243,7 @@ mod tests {
         form.content_stream.operators = vec![
             PdfOperatorVariant::SetRGBFill(SetRGBFill::new(f32::NAN, 0.0, 0.0)),
             PdfOperatorVariant::BeginText(BeginText),
-            PdfOperatorVariant::SetFont(SetFont::new(b"Missing".to_vec(), -1.0)),
+            PdfOperatorVariant::SetFont(SetFont::new(Arc::from(b"Missing".to_vec()), -1.0)),
             PdfOperatorVariant::SetLeading(SetLeading::new(f32::INFINITY)),
             PdfOperatorVariant::EndText(EndText),
         ];

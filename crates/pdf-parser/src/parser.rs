@@ -1,7 +1,10 @@
 use std::str::FromStr;
 
 use crate::error::ParserError;
-use pdf_object_reader::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object_reader::{
+    object_resolver::ObjectResolver, object_variant::ObjectVariant, pdf_string::PdfString,
+    string_kind::StringKind,
+};
 use pdf_tokenizer::{PdfToken, Tokenizer};
 
 /// Parses PDF objects from a borrowed byte slice.
@@ -329,14 +332,18 @@ impl<'a> PdfParser<'a> {
             PdfToken::DoubleLeftAngleBracket => {
                 ObjectVariant::Dictionary(self.parse_dictionary(objects)?)
             }
-            PdfToken::LeftAngleBracket => ObjectVariant::HexString(self.parse_hex_string()?),
-            PdfToken::Solidus => ObjectVariant::Name(self.parse_name()?),
+            PdfToken::LeftAngleBracket => {
+                PdfString::from(self.parse_hex_string()?, StringKind::Hexadecimal)
+            }
+            PdfToken::Solidus => PdfString::from(self.parse_name()?, StringKind::Name),
             PdfToken::Number(_) => self.parse_number_or_reference()?,
             PdfToken::Minus => self.parse_number()?,
             PdfToken::Plus => self.parse_number()?,
             PdfToken::Period => self.parse_number()?,
             PdfToken::LeftSquareBracket => ObjectVariant::Array(self.parse_array(objects)?),
-            PdfToken::LeftParenthesis => ObjectVariant::LiteralString(self.parse_literal_string()?),
+            PdfToken::LeftParenthesis => {
+                PdfString::from(self.parse_literal_string()?, StringKind::Literal)
+            }
             token => {
                 return Err(ParserError::UnexpectedTokenAt {
                     token: format!("{token:?}"),

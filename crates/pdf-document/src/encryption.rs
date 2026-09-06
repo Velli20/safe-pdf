@@ -322,11 +322,29 @@ mod tests {
     #[test]
     fn test_parse_full_encrypt_dictionary() {
         let dict = make_dictionary(vec![
-            ("Filter", ObjectVariant::Name(b"Standard".to_vec())),
+            (
+                "Filter",
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"Standard".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
             ("V", ObjectVariant::Integer(4)),
             ("R", ObjectVariant::Integer(4)),
-            ("O", ObjectVariant::HexString(vec![0u8; 32])),
-            ("U", ObjectVariant::HexString(vec![0u8; 32])),
+            (
+                "O",
+                pdf_object_reader::pdf_string::PdfString::from(
+                    vec![0u8; 32],
+                    pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                ),
+            ),
+            (
+                "U",
+                pdf_object_reader::pdf_string::PdfString::from(
+                    vec![0u8; 32],
+                    pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                ),
+            ),
             ("P", ObjectVariant::Integer(-1)),
             ("Length", ObjectVariant::Integer(128)),
             ("EncryptMetadata", ObjectVariant::Boolean(false)),
@@ -355,23 +373,77 @@ mod tests {
     #[test]
     fn test_parse_v5_aes_256_crypt_filters() {
         let std_cf = make_dictionary(vec![
-            ("CFM", ObjectVariant::Name(b"AESV3".to_vec())),
+            (
+                "CFM",
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"AESV3".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
             ("Length", ObjectVariant::Integer(32)),
         ]);
         let crypt_filters = make_dictionary(vec![("StdCF", ObjectVariant::Dictionary(std_cf))]);
         let dict = make_dictionary(vec![
-            ("Filter", ObjectVariant::Name(b"Standard".to_vec())),
+            (
+                "Filter",
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"Standard".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
             ("V", ObjectVariant::Integer(5)),
             ("R", ObjectVariant::Integer(6)),
-            ("O", ObjectVariant::HexString(vec![0u8; 48])),
-            ("U", ObjectVariant::HexString(vec![0u8; 48])),
-            ("OE", ObjectVariant::HexString(vec![0u8; 32])),
-            ("UE", ObjectVariant::HexString(vec![0u8; 32])),
-            ("Perms", ObjectVariant::HexString(vec![0u8; 16])),
+            (
+                "O",
+                pdf_object_reader::pdf_string::PdfString::from(
+                    vec![0u8; 48],
+                    pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                ),
+            ),
+            (
+                "U",
+                pdf_object_reader::pdf_string::PdfString::from(
+                    vec![0u8; 48],
+                    pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                ),
+            ),
+            (
+                "OE",
+                pdf_object_reader::pdf_string::PdfString::from(
+                    vec![0u8; 32],
+                    pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                ),
+            ),
+            (
+                "UE",
+                pdf_object_reader::pdf_string::PdfString::from(
+                    vec![0u8; 32],
+                    pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                ),
+            ),
+            (
+                "Perms",
+                pdf_object_reader::pdf_string::PdfString::from(
+                    vec![0u8; 16],
+                    pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                ),
+            ),
             ("P", ObjectVariant::Integer(-4)),
             ("CF", ObjectVariant::Dictionary(crypt_filters)),
-            ("StmF", ObjectVariant::Name(b"StdCF".to_vec())),
-            ("StrF", ObjectVariant::Name(b"Identity".to_vec())),
+            (
+                "StmF",
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"StdCF".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
+            (
+                "StrF",
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"Identity".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
         ]);
 
         let encrypt = EncryptDictionary::from_dictionary(&dict, &PassthroughResolver).unwrap();

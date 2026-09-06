@@ -181,8 +181,14 @@ mod tests {
     #[test]
     fn string_lookups_preserve_their_bytes() {
         for lookup in [
-            ObjectVariant::LiteralString(vec![1, 2, 3]),
-            ObjectVariant::HexString(vec![4, 5, 6]),
+            pdf_object_reader::pdf_string::PdfString::from(
+                vec![1, 2, 3],
+                pdf_object_reader::string_kind::StringKind::Literal,
+            ),
+            pdf_object_reader::pdf_string::PdfString::from(
+                vec![4, 5, 6],
+                pdf_object_reader::string_kind::StringKind::Hexadecimal,
+            ),
         ] {
             let expected = lookup
                 .try_bytes(&PassthroughResolver)

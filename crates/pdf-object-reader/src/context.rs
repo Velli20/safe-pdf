@@ -65,7 +65,7 @@ impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
     pub fn array(self) -> ReadResult<ArrayContext<'read, A>> {
         match self.object.value() {
             ObjectVariant::Array(value) => Ok(ArrayContext {
-                array: PdfArray::new(value.clone()),
+                array: value.clone(),
                 access: self.access,
             }),
             _ => Err(ObjectReadError::TypeMismatch {

@@ -80,7 +80,10 @@ fn mesh_entries(
         (Vec::from(b"ShadingType"), integer(shading_type)),
         (
             Vec::from(b"ColorSpace"),
-            ObjectVariant::Name(b"DeviceRGB".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"DeviceRGB".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         ),
         (
             Vec::from(b"BitsPerCoordinate"),

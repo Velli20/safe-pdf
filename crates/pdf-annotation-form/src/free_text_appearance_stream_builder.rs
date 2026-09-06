@@ -108,9 +108,9 @@ impl<'a> FreeTextAppearanceStreamBuilder<'a> {
                     self.layout.line_x(self.bounds.width(), line_width),
                     baseline,
                 ])),
-                PdfOperatorVariant::ShowText(ShowText::new(PdfTextItem::Text(
-                    line.bytes().to_owned(),
-                ))),
+                PdfOperatorVariant::ShowText(ShowText::new(PdfTextItem::Text(Arc::from(
+                    line.bytes(),
+                )))),
             ]);
             baseline -= self.style.line_height;
         }
@@ -123,7 +123,7 @@ impl<'a> FreeTextAppearanceStreamBuilder<'a> {
             Self::fill_color(self.style.text_color),
             PdfOperatorVariant::BeginText(BeginText),
             PdfOperatorVariant::SetFont(SetFont::new(
-                self.style.font.resource_name.clone(),
+                Arc::from(self.style.font.resource_name.clone()),
                 self.style.font_size,
             )),
         ]);

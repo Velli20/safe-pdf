@@ -17,11 +17,11 @@ use crate::{
 #[derive(Debug, Clone, PartialEq)]
 pub struct InvokeXObject {
     /// The name of the XObject resource to invoke, as defined in the resource dictionary.
-    name: Vec<u8>,
+    name: Arc<[u8]>,
 }
 
 impl InvokeXObject {
-    pub fn new(name: Vec<u8>) -> Self {
+    pub fn new(name: Arc<[u8]>) -> Self {
         Self { name }
     }
 }
@@ -32,7 +32,7 @@ impl PdfOperator for InvokeXObject {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let name = operands.get_name_bytes()?;
+        let name = operands.get_string_bytes()?;
         Ok(PdfOperatorVariant::InvokeXObject(Self::new(name)))
     }
 
@@ -81,7 +81,13 @@ mod tests {
         let image = InlineImage::new(
             Dictionary::new(BTreeMap::from([
                 (Vec::from(b"BPC"), ObjectVariant::Integer(8)),
-                (Vec::from(b"CS"), ObjectVariant::Name(b"G".to_vec())),
+                (
+                    Vec::from(b"CS"),
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        b"G",
+                        pdf_object_reader::string_kind::StringKind::Name,
+                    ),
+                ),
                 (Vec::from(b"H"), ObjectVariant::Integer(1)),
                 (Vec::from(b"W"), ObjectVariant::Integer(2)),
             ])),
