@@ -57,11 +57,16 @@ fn image_dictionary() -> Dictionary {
         (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(1)),
         (
             Vec::from(b"ColorSpace"),
-            ObjectVariant::Name(b"DeviceGray".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"DeviceGray".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         ),
         (
             Vec::from(b"Decode"),
-            ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(0)]),
+            ObjectVariant::Array(
+                vec![ObjectVariant::Integer(1.into()), ObjectVariant::Integer(0)].into(),
+            ),
         ),
         (Vec::from(b"Height"), ObjectVariant::Integer(1)),
         (Vec::from(b"Width"), ObjectVariant::Integer(4)),
@@ -74,11 +79,16 @@ fn inline_image() -> InlineImage {
             (Vec::from(b"BPC"), ObjectVariant::Integer(1)),
             (
                 Vec::from(b"CS"),
-                ObjectVariant::Name(b"DeviceGray".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DeviceGray".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (
                 Vec::from(b"D"),
-                ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(0)]),
+                ObjectVariant::Array(
+                    vec![ObjectVariant::Integer(1.into()), ObjectVariant::Integer(0)].into(),
+                ),
             ),
             (Vec::from(b"H"), ObjectVariant::Integer(1)),
             (Vec::from(b"W"), ObjectVariant::Integer(4)),

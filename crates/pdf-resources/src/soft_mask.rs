@@ -55,23 +55,35 @@ mod tests {
         let form_dictionary = Dictionary::new(BTreeMap::from([
             (
                 Vec::from(b"BBox"),
-                ObjectVariant::Array(vec![
-                    ObjectVariant::Integer(0),
-                    ObjectVariant::Integer(0),
-                    ObjectVariant::Integer(10),
-                    ObjectVariant::Integer(10),
-                ]),
+                ObjectVariant::Array(
+                    vec![
+                        ObjectVariant::Integer(0.into()),
+                        ObjectVariant::Integer(0),
+                        ObjectVariant::Integer(10),
+                        ObjectVariant::Integer(10),
+                    ]
+                    .into(),
+                ),
             ),
             (
                 Vec::from(b"Subtype"),
-                ObjectVariant::Name(subtype.as_bytes().to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    subtype.as_bytes().to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
         ]));
         let stream = StreamObject::new(stream_object_number, 0, form_dictionary, Vec::new());
 
         Dictionary::new(BTreeMap::from([
             (Vec::from(b"G"), ObjectVariant::Stream(stream)),
-            (Vec::from(b"S"), ObjectVariant::Name(b"Alpha".to_vec())),
+            (
+                Vec::from(b"S"),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"Alpha".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
         ]))
     }
 

@@ -237,7 +237,13 @@ mod tests {
 
     #[test]
     fn try_get_as_propagates_conversion_error() {
-        let dictionary = dictionary_with(b"Count", ObjectVariant::Name(b"Count".to_vec()));
+        let dictionary = dictionary_with(
+            b"Count",
+            crate::pdf_string::PdfString::from(
+                b"Count".to_vec(),
+                crate::string_kind::StringKind::Name,
+            ),
+        );
 
         let error = dictionary
             .try_get_as::<ParsedInteger>(b"Count")
@@ -250,12 +256,15 @@ mod tests {
     fn optional_bbox_parses_rectangle() {
         let dictionary = dictionary_with(
             b"BBox",
-            ObjectVariant::Array(vec![
-                ObjectVariant::Integer(1),
-                ObjectVariant::Real(2.5),
-                ObjectVariant::Integer(3),
-                ObjectVariant::Real(4.5),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    ObjectVariant::Integer(1.into()),
+                    ObjectVariant::Real(2.5),
+                    ObjectVariant::Integer(3),
+                    ObjectVariant::Real(4.5),
+                ]
+                .into(),
+            ),
         );
 
         let bbox = dictionary
@@ -295,12 +304,15 @@ mod tests {
     fn required_bbox_parses_rectangle() {
         let dictionary = dictionary_with(
             b"BBox",
-            ObjectVariant::Array(vec![
-                ObjectVariant::Integer(1),
-                ObjectVariant::Integer(2),
-                ObjectVariant::Integer(3),
-                ObjectVariant::Integer(4),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    ObjectVariant::Integer(1.into()),
+                    ObjectVariant::Integer(2),
+                    ObjectVariant::Integer(3),
+                    ObjectVariant::Integer(4),
+                ]
+                .into(),
+            ),
         );
 
         let bbox = dictionary
@@ -322,11 +334,14 @@ mod tests {
     fn required_bbox_propagates_invalid_array_length() {
         let dictionary = dictionary_with(
             b"BBox",
-            ObjectVariant::Array(vec![
-                ObjectVariant::Integer(1),
-                ObjectVariant::Integer(2),
-                ObjectVariant::Integer(3),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    ObjectVariant::Integer(1.into()),
+                    ObjectVariant::Integer(2),
+                    ObjectVariant::Integer(3),
+                ]
+                .into(),
+            ),
         );
 
         let error = dictionary
@@ -431,12 +446,15 @@ mod tests {
     fn optional_media_box_parses_rectangle() {
         let dictionary = dictionary_with(
             b"MediaBox",
-            ObjectVariant::Array(vec![
-                ObjectVariant::Integer(10),
-                ObjectVariant::Integer(20),
-                ObjectVariant::Integer(210),
-                ObjectVariant::Integer(320),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    ObjectVariant::Integer(10.into()),
+                    ObjectVariant::Integer(20),
+                    ObjectVariant::Integer(210),
+                    ObjectVariant::Integer(320),
+                ]
+                .into(),
+            ),
         );
 
         let media_box = dictionary
@@ -476,11 +494,14 @@ mod tests {
     fn optional_media_box_propagates_invalid_array_length() {
         let dictionary = dictionary_with(
             b"MediaBox",
-            ObjectVariant::Array(vec![
-                ObjectVariant::Integer(10),
-                ObjectVariant::Integer(20),
-                ObjectVariant::Integer(210),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    ObjectVariant::Integer(10.into()),
+                    ObjectVariant::Integer(20),
+                    ObjectVariant::Integer(210),
+                ]
+                .into(),
+            ),
         );
 
         let error = dictionary
@@ -500,14 +521,17 @@ mod tests {
     fn optional_matrix_parses_transform() {
         let dictionary = dictionary_with(
             b"Matrix",
-            ObjectVariant::Array(vec![
-                ObjectVariant::Real(1.0),
-                ObjectVariant::Real(2.0),
-                ObjectVariant::Real(3.0),
-                ObjectVariant::Real(4.0),
-                ObjectVariant::Real(5.0),
-                ObjectVariant::Real(6.0),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    ObjectVariant::Real(1.0.into()),
+                    ObjectVariant::Real(2.0),
+                    ObjectVariant::Real(3.0),
+                    ObjectVariant::Real(4.0),
+                    ObjectVariant::Real(5.0),
+                    ObjectVariant::Real(6.0),
+                ]
+                .into(),
+            ),
         );
 
         let matrix = dictionary
@@ -542,14 +566,17 @@ mod tests {
     fn required_matrix_parses_transform() {
         let dictionary = dictionary_with(
             b"Matrix",
-            ObjectVariant::Array(vec![
-                ObjectVariant::Integer(1),
-                ObjectVariant::Integer(2),
-                ObjectVariant::Integer(3),
-                ObjectVariant::Integer(4),
-                ObjectVariant::Integer(5),
-                ObjectVariant::Integer(6),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    ObjectVariant::Integer(1.into()),
+                    ObjectVariant::Integer(2),
+                    ObjectVariant::Integer(3),
+                    ObjectVariant::Integer(4),
+                    ObjectVariant::Integer(5),
+                    ObjectVariant::Integer(6),
+                ]
+                .into(),
+            ),
         );
 
         let matrix = dictionary
@@ -563,13 +590,16 @@ mod tests {
     fn required_matrix_propagates_invalid_array_length() {
         let dictionary = dictionary_with(
             b"Matrix",
-            ObjectVariant::Array(vec![
-                ObjectVariant::Integer(1),
-                ObjectVariant::Integer(2),
-                ObjectVariant::Integer(3),
-                ObjectVariant::Integer(4),
-                ObjectVariant::Integer(5),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    ObjectVariant::Integer(1.into()),
+                    ObjectVariant::Integer(2),
+                    ObjectVariant::Integer(3),
+                    ObjectVariant::Integer(4),
+                    ObjectVariant::Integer(5),
+                ]
+                .into(),
+            ),
         );
 
         let error = dictionary

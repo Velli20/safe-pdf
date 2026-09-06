@@ -408,9 +408,7 @@ fn widget_field_value(
 ) -> Result<WidgetFieldValue, AnnotationError> {
     let value = objects.resolve_object(value)?;
     match value {
-        ObjectVariant::HexString(bytes)
-        | ObjectVariant::LiteralString(bytes)
-        | ObjectVariant::Name(bytes) => Ok(WidgetFieldValue::Bytes(bytes.clone())),
+        ObjectVariant::String(bytes) => Ok(WidgetFieldValue::Bytes(bytes.as_bytes().to_vec())),
         ObjectVariant::Dictionary(dictionary) => {
             Ok(WidgetFieldValue::Dictionary(dictionary.clone()))
         }

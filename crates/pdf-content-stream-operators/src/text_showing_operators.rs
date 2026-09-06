@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::PdfTextItem;
 use crate::operands::Operands;
 use crate::operator_trait::PdfOperator;
@@ -142,13 +144,10 @@ impl PdfOperator for ShowTextArray {
         };
 
         let mut elements = Vec::with_capacity(values.len());
-        for value in values {
+        for value in values.iter() {
             match value {
-                ObjectVariant::HexString(value) => {
-                    elements.push(PdfTextItem::Text(value));
-                }
-                ObjectVariant::LiteralString(value) => {
-                    elements.push(PdfTextItem::Text(value));
+                ObjectVariant::String(value) => {
+                    elements.push(PdfTextItem::Text(Arc::clone(&value.bytes)));
                 }
                 other => {
                     let amount = other.try_number::<f32>(&PassthroughResolver)?;
@@ -172,9 +171,16 @@ mod tests {
 
     #[test]
     fn show_text_moves_the_operand_byte_allocation() {
-        let text = b"text without a copy".to_vec();
+        let text: Arc<[u8]> = Arc::from(b"text without a copy".to_vec());
+
         let original_pointer = text.as_ptr();
-        let mut operands = Operands::from(vec![ObjectVariant::LiteralString(text)]);
+
+        let mut operands = Operands::from(vec![ObjectVariant::String(
+            pdf_object_reader::pdf_string::PdfString {
+                bytes: text,
+                kind: pdf_object_reader::string_kind::StringKind::Literal,
+            },
+        )]);
 
         let operator = ShowText::read(&mut operands).expect("text should parse");
         let PdfOperatorVariant::ShowText(operator) = operator else {
@@ -184,7 +190,7 @@ mod tests {
         let PdfTextItem::Text(text) = operator.text else {
             panic!("expected text item");
         };
-        assert_eq!(text, b"text without a copy");
+        assert_eq!(&*text, b"text without a copy");
         assert_eq!(text.as_ptr(), original_pointer);
     }
 
@@ -193,7 +199,10 @@ mod tests {
         let mut operands = Operands::from(vec![
             ObjectVariant::Real(1.5),
             ObjectVariant::Integer(2),
-            ObjectVariant::LiteralString(b"text".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"text",
+                pdf_object_reader::string_kind::StringKind::Literal,
+            ),
         ]);
 
         let operator = SetSpacingMoveShowText::read(&mut operands)
@@ -204,7 +213,10 @@ mod tests {
 
         assert_eq!(operator.word_spacing, 1.5);
         assert_eq!(operator.char_spacing, 2.0);
-        assert_eq!(operator.text, PdfTextItem::Text(b"text".to_vec()));
+        assert_eq!(
+            operator.text,
+            PdfTextItem::Text(std::sync::Arc::from(&b"text"[..]))
+        );
         assert!(operands.is_empty());
     }
 }

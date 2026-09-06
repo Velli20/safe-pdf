@@ -1,5 +1,6 @@
 use num_traits::FromPrimitive;
 
+use crate::pdf_array::PdfArray;
 use crate::{
     dictionary::Dictionary, object_error::ObjectError, object_resolver::ObjectResolver,
     object_variant::ObjectVariant, stream::StreamObject,
@@ -126,7 +127,7 @@ pub trait ObjectLookupExt<K> {
         &'a self,
         key: K,
         objects: &'a dyn ObjectResolver,
-    ) -> Result<Option<&'a [ObjectVariant]>, ObjectError>;
+    ) -> Result<Option<&'a PdfArray>, ObjectError>;
 
     /// Returns a required array value from this container.
     ///
@@ -148,7 +149,7 @@ pub trait ObjectLookupExt<K> {
         &'a self,
         key: K,
         objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a [ObjectVariant], ObjectError>;
+    ) -> Result<&'a PdfArray, ObjectError>;
 
     /// Returns an optional byte-backed value from this container.
     ///
@@ -525,7 +526,7 @@ impl ObjectLookupExt<usize> for [ObjectVariant] {
         &'a self,
         index: usize,
         objects: &'a dyn ObjectResolver,
-    ) -> Result<Option<&'a [ObjectVariant]>, ObjectError> {
+    ) -> Result<Option<&'a PdfArray>, ObjectError> {
         optional_resolved_value(self.get(index), objects)?
             .map(|value| value.try_array(objects))
             .transpose()
@@ -535,7 +536,7 @@ impl ObjectLookupExt<usize> for [ObjectVariant] {
         &'a self,
         index: usize,
         objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a [ObjectVariant], ObjectError> {
+    ) -> Result<&'a PdfArray, ObjectError> {
         required_slice_value(self, index)?.try_array(objects)
     }
 
@@ -717,7 +718,7 @@ impl ObjectLookupExt<&[u8]> for Dictionary {
         &'a self,
         key: &[u8],
         objects: &'a dyn ObjectResolver,
-    ) -> Result<Option<&'a [ObjectVariant]>, ObjectError> {
+    ) -> Result<Option<&'a PdfArray>, ObjectError> {
         optional_resolved_value(self.get(key), objects)?
             .map(|value| value.try_array(objects))
             .transpose()
@@ -727,7 +728,7 @@ impl ObjectLookupExt<&[u8]> for Dictionary {
         &'a self,
         key: &[u8],
         objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a [ObjectVariant], ObjectError> {
+    ) -> Result<&'a PdfArray, ObjectError> {
         self.get_or_err(key)?.try_array(objects)
     }
 
@@ -1043,12 +1044,23 @@ mod tests {
             ),
             (
                 b"Array".to_vec(),
-                ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(2)]),
+                ObjectVariant::Array(
+                    vec![ObjectVariant::Integer(1.into()), ObjectVariant::Integer(2)].into(),
+                ),
             ),
-            (b"String".to_vec(), ObjectVariant::Name(b"Name".to_vec())),
+            (
+                b"String".to_vec(),
+                crate::pdf_string::PdfString::from(
+                    b"Name".to_vec(),
+                    crate::string_kind::StringKind::Name,
+                ),
+            ),
             (
                 b"Bytes".to_vec(),
-                ObjectVariant::LiteralString(b"abc".to_vec()),
+                crate::pdf_string::PdfString::from(
+                    b"abc".to_vec(),
+                    crate::string_kind::StringKind::Literal,
+                ),
             ),
             (b"Boolean".to_vec(), ObjectVariant::Boolean(true)),
             (
@@ -1110,11 +1122,14 @@ mod tests {
     fn dictionary_lookup_methods_convert_numeric_arrays() {
         let dictionary = Dictionary::new(BTreeMap::from([(
             b"Numbers".to_vec(),
-            ObjectVariant::Array(vec![
-                ObjectVariant::Integer(1),
-                ObjectVariant::Integer(2),
-                ObjectVariant::Integer(3),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    ObjectVariant::Integer(1.into()),
+                    ObjectVariant::Integer(2),
+                    ObjectVariant::Integer(3),
+                ]
+                .into(),
+            ),
         )]));
 
         assert_eq!(
@@ -1136,8 +1151,13 @@ mod tests {
         let nested = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
         let values = [
             ObjectVariant::Dictionary(nested.clone()),
-            ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(2)]),
-            ObjectVariant::LiteralString(b"text".to_vec()),
+            ObjectVariant::Array(
+                vec![ObjectVariant::Integer(1.into()), ObjectVariant::Integer(2)].into(),
+            ),
+            crate::pdf_string::PdfString::from(
+                b"text".to_vec(),
+                crate::string_kind::StringKind::Literal,
+            ),
             ObjectVariant::Boolean(false),
             ObjectVariant::Reference(crate::object_id::ObjectId::new(3, 0)),
         ];
@@ -1201,12 +1221,27 @@ mod tests {
     #[test]
     fn byte_lookups_accept_names_and_strings() {
         let dictionary = Dictionary::from_entries([
-            (b"Name".as_slice(), ObjectVariant::Name(vec![0xFF])),
+            (
+                b"Name".as_slice(),
+                crate::pdf_string::PdfString::from(
+                    vec![0xFF],
+                    crate::string_kind::StringKind::Name,
+                ),
+            ),
             (
                 b"Literal".as_slice(),
-                ObjectVariant::LiteralString(vec![0xFE]),
+                crate::pdf_string::PdfString::from(
+                    vec![0xFE],
+                    crate::string_kind::StringKind::Literal,
+                ),
             ),
-            (b"Hex".as_slice(), ObjectVariant::HexString(vec![0xFD])),
+            (
+                b"Hex".as_slice(),
+                crate::pdf_string::PdfString::from(
+                    vec![0xFD],
+                    crate::string_kind::StringKind::Hexadecimal,
+                ),
+            ),
             (b"Null".as_slice(), ObjectVariant::Null),
         ]);
 

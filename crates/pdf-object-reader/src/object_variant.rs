@@ -1,5 +1,8 @@
 //! PDF object variants and checked accessors.
 
+use crate::pdf_array::PdfArray;
+use crate::pdf_string::PdfString;
+use crate::string_kind::StringKind;
 use crate::{
     cross_reference_table::CrossReferenceTable, dictionary::Dictionary, object_error::ObjectError,
     object_id::ObjectId, object_resolver::ObjectResolver, stream::StreamObject, trailer::Trailer,
@@ -14,11 +17,10 @@ pub enum ObjectVariant {
     /// A PDF dictionary object.
     Dictionary(Dictionary),
     /// A PDF array of objects.
-    Array(Vec<ObjectVariant>),
+    Array(PdfArray),
     /// A literal string (enclosed in parentheses in PDF syntax), stored as raw bytes.
-    LiteralString(Vec<u8>),
+    String(PdfString),
     /// A name object (prefixed with a slash in PDF syntax), stored as raw bytes.
-    Name(Vec<u8>),
     /// An integer number.
     Integer(i64),
     /// A real (floating point) number.
@@ -28,7 +30,6 @@ pub enum ObjectVariant {
     /// The null object.
     Null,
     /// A hexadecimal string represented as raw bytes.
-    HexString(Vec<u8>),
     /// The trailer dictionary object.
     Trailer(Trailer),
     /// The cross-reference table object.
@@ -117,7 +118,7 @@ impl ObjectVariant {
     pub fn try_array<'a>(
         &'a self,
         objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a [ObjectVariant], ObjectError> {
+    ) -> Result<&'a PdfArray, ObjectError> {
         let object = if let ObjectVariant::Reference(_) = self {
             objects.resolve_object(self)?
         } else {
@@ -125,18 +126,18 @@ impl ObjectVariant {
         };
 
         match object {
-            ObjectVariant::Array(arr) => Ok(arr.as_slice()),
+            ObjectVariant::Array(arr) => Ok(arr),
             _ => Err(ObjectError::TypeMismatch("Array", object.name())),
         }
     }
 
     /// Creates an owned PDF Name from borrowed bytes.
     ///
-    /// Parsed names should be moved directly into [`ObjectVariant::Name`].
+    /// Parsed names should be moved directly into [`ObjectVariant::String`].
     /// This constructor is intended for hand-built objects whose source is a
     /// borrowed byte literal or slice.
     pub fn name_from_bytes(name: &[u8]) -> Self {
-        Self::Name(Vec::from(name))
+        PdfString::from(name, StringKind::Name)
     }
 
     /// Resolves an `ObjectVariant` into a `Vec<T>` of numeric values.
@@ -208,7 +209,7 @@ impl ObjectVariant {
 
     /// Returns `true` if this value is a Name object.
     pub fn is_name(&self) -> bool {
-        matches!(self, ObjectVariant::Name(_))
+        matches!(self, ObjectVariant::String(value) if value.kind() == StringKind::Name)
     }
 
     /// Returns `true` if this value is an `Array`.
@@ -290,9 +291,7 @@ impl ObjectVariant {
         };
 
         match object {
-            ObjectVariant::HexString(bytes)
-            | ObjectVariant::LiteralString(bytes)
-            | ObjectVariant::Name(bytes) => Ok(bytes),
+            ObjectVariant::String(value) => Ok(value.as_bytes()),
             _ => Err(ObjectError::TypeMismatch("Bytes", object.name())),
         }
     }
@@ -349,18 +348,22 @@ impl ObjectVariant {
     }
 
     /// Returns the variant name as a static string, useful in error messages.
-    pub const fn name(&self) -> &'static str {
+    pub fn name(&self) -> &'static str {
         match self {
             ObjectVariant::Dictionary(_) => "Dictionary",
             ObjectVariant::Array(_) => "Array",
-            ObjectVariant::LiteralString(_) => "LiteralString",
-            ObjectVariant::Name(_) => "Name",
+            ObjectVariant::String(value) => {
+                if value.kind() == StringKind::Name {
+                    "Name"
+                } else {
+                    "String"
+                }
+            }
             ObjectVariant::Integer(_) => "Integer",
             ObjectVariant::Real(_) => "Real",
             ObjectVariant::Boolean(_) => "Boolean",
             ObjectVariant::Null => "Null",
             ObjectVariant::Stream(_) => "Stream",
-            ObjectVariant::HexString(_) => "HexString",
             ObjectVariant::Trailer(_) => "Trailer",
             ObjectVariant::CrossReferenceTable(_) => "CrossReferenceTable",
             ObjectVariant::EndOfFile => "EndOfFile",
@@ -393,9 +396,27 @@ mod tests {
     #[test]
     fn try_bytes_accepts_names_and_strings() {
         for (object, expected) in [
-            (ObjectVariant::Name(vec![0xFF]), vec![0xFF]),
-            (ObjectVariant::LiteralString(vec![0xFE]), vec![0xFE]),
-            (ObjectVariant::HexString(vec![0xFD]), vec![0xFD]),
+            (
+                crate::pdf_string::PdfString::from(
+                    vec![0xFF],
+                    crate::string_kind::StringKind::Name,
+                ),
+                vec![0xFF],
+            ),
+            (
+                crate::pdf_string::PdfString::from(
+                    vec![0xFE],
+                    crate::string_kind::StringKind::Literal,
+                ),
+                vec![0xFE],
+            ),
+            (
+                crate::pdf_string::PdfString::from(
+                    vec![0xFD],
+                    crate::string_kind::StringKind::Hexadecimal,
+                ),
+                vec![0xFD],
+            ),
         ] {
             assert_eq!(
                 object
@@ -410,7 +431,10 @@ mod tests {
     fn try_bytes_accepts_resolved_byte_backed_object() {
         let reference = ObjectVariant::Reference(crate::object_id::ObjectId::new(1, 0));
         let resolver = FixedResolver {
-            object: ObjectVariant::Name(vec![0xFF]),
+            object: crate::pdf_string::PdfString::from(
+                vec![0xFF],
+                crate::string_kind::StringKind::Name,
+            ),
         };
 
         assert_eq!(
@@ -423,12 +447,12 @@ mod tests {
 
     #[test]
     fn try_number_returns_type_mismatch_for_non_number() {
-        let object = ObjectVariant::Array(vec![]);
+        let object = ObjectVariant::Array(vec![].into());
         let err = object
             .try_number::<u16>(&PassthroughResolver)
             .expect_err("non-number object should not decode as number");
 
-        assert_eq!(err, ObjectError::TypeMismatch("Number", "Array"));
+        assert_eq!(err, ObjectError::TypeMismatch("Number", "Array".into()));
     }
 
     #[test]
@@ -452,7 +476,10 @@ mod tests {
     fn try_bytes_returns_type_mismatch_for_non_bytes() {
         for (object, name) in [
             (ObjectVariant::Integer(7), "Integer"),
-            (ObjectVariant::Array(Vec::new()), "Array"),
+            (
+                ObjectVariant::Array(crate::pdf_array::PdfArray::new(Vec::new())),
+                "Array",
+            ),
             (
                 ObjectVariant::Dictionary(crate::dictionary::Dictionary::new(
                     std::collections::BTreeMap::<Vec<u8>, ObjectVariant>::new(),

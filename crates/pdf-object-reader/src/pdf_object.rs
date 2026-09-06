@@ -30,8 +30,12 @@ impl PdfObject {
             ObjectVariant::Boolean(_) => ObjectKind::Boolean,
             ObjectVariant::Integer(_) => ObjectKind::Integer,
             ObjectVariant::Real(_) => ObjectKind::Real,
-            ObjectVariant::LiteralString(_) | ObjectVariant::HexString(_) => ObjectKind::String,
-            ObjectVariant::Name(_) => ObjectKind::Name,
+            ObjectVariant::String(value)
+                if value.kind() == crate::string_kind::StringKind::Name =>
+            {
+                ObjectKind::Name
+            }
+            ObjectVariant::String(_) => ObjectKind::String,
             ObjectVariant::Array(_) => ObjectKind::Array,
             ObjectVariant::Dictionary(_) => ObjectKind::Dictionary,
             ObjectVariant::Stream(_) => ObjectKind::Stream,

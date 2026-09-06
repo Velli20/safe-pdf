@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use num_traits::FromPrimitive;
 use pdf_graphics::{LineCap, LineJoin, transform::Transform};
 use pdf_object_reader::object_resolver::PassthroughResolver;
@@ -211,11 +213,11 @@ impl PdfOperator for SetFlatnessTolerance {
 /// /AbsoluteColorimetric, /RelativeColorimetric, /Saturation, /Perceptual.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetRenderingIntent {
-    intent: Vec<u8>,
+    intent: Arc<[u8]>,
 }
 
 impl SetRenderingIntent {
-    pub fn new(intent: Vec<u8>) -> Self {
+    pub fn new(intent: Arc<[u8]>) -> Self {
         Self { intent }
     }
 }
@@ -226,7 +228,7 @@ impl PdfOperator for SetRenderingIntent {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let intent = operands.get_name_bytes()?;
+        let intent = operands.get_string_bytes()?;
         Ok(PdfOperatorVariant::SetRenderingIntent(Self::new(intent)))
     }
 
@@ -310,11 +312,11 @@ impl PdfOperator for ConcatMatrix {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetGraphicsStateFromDict {
     /// The name of the graphics state parameter dictionary.
-    dict_name: Vec<u8>,
+    dict_name: Arc<[u8]>,
 }
 
 impl SetGraphicsStateFromDict {
-    pub fn new(dict_name: Vec<u8>) -> Self {
+    pub fn new(dict_name: Arc<[u8]>) -> Self {
         Self { dict_name }
     }
 }
@@ -325,7 +327,7 @@ impl PdfOperator for SetGraphicsStateFromDict {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let dict_name = operands.get_name_bytes()?;
+        let dict_name = operands.get_string_bytes()?;
         Ok(PdfOperatorVariant::SetGraphicsStateFromDict(Self::new(
             dict_name,
         )))

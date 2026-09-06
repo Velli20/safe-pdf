@@ -209,9 +209,7 @@ fn javascript_bytes(
     };
 
     match object {
-        ObjectVariant::HexString(bytes)
-        | ObjectVariant::Name(bytes)
-        | ObjectVariant::LiteralString(bytes) => Ok(bytes.clone()),
+        ObjectVariant::String(value) => Ok(value.as_bytes().to_vec()),
         ObjectVariant::Stream(stream) => Ok(stream.raw_data().to_vec()),
         _ => Err(ObjectError::TypeMismatch("Bytes", object.name()).into()),
     }
@@ -283,7 +281,13 @@ mod tests {
         Dictionary::new(BTreeMap::from([(
             Vec::from(b"A"),
             ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
-                (Vec::from(b"S"), ObjectVariant::Name(b"JavaScript".to_vec())),
+                (
+                    Vec::from(b"S"),
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        b"JavaScript".to_vec(),
+                        pdf_object_reader::string_kind::StringKind::Name,
+                    ),
+                ),
                 (Vec::from(b"JS"), js),
             ]))),
         )]))
@@ -308,7 +312,10 @@ mod tests {
 
     #[test]
     fn javascript_action_accepts_inline_string_script() {
-        let dictionary = action_dictionary(ObjectVariant::LiteralString(b"app.alert(1);".to_vec()));
+        let dictionary = action_dictionary(pdf_object_reader::pdf_string::PdfString::from(
+            b"app.alert(1);".to_vec(),
+            pdf_object_reader::string_kind::StringKind::Literal,
+        ));
 
         let action = parse_action(&dictionary, &PassthroughResolver)
             .expect("JavaScript action should parse");

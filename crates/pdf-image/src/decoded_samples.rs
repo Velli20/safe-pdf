@@ -385,7 +385,10 @@ mod tests {
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Name(b"DeviceGray".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DeviceGray".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),

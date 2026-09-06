@@ -118,7 +118,13 @@ mod tests {
         let map: BTreeMap<Vec<u8>, ObjectVariant> = entries
             .into_iter()
             .map(|(k, v)| (k.to_vec(), v))
-            .chain([(b"Subtype".to_vec(), ObjectVariant::Name(b"Type1".to_vec()))])
+            .chain([(
+                b"Subtype".to_vec(),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"Type1".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            )])
             .collect();
         Dictionary::new(map)
     }
@@ -132,7 +138,7 @@ mod tests {
     }
 
     fn arr(items: Vec<ObjectVariant>) -> ObjectVariant {
-        ObjectVariant::Array(items)
+        ObjectVariant::Array(items.into())
     }
 
     #[test]

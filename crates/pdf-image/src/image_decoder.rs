@@ -141,37 +141,49 @@ mod tests {
     use crate::error::PdfImageError;
 
     fn name(value: &str) -> ObjectVariant {
-        ObjectVariant::Name(value.as_bytes().to_vec())
+        pdf_object_reader::pdf_string::PdfString::from(
+            value.as_bytes().to_vec(),
+            pdf_object_reader::string_kind::StringKind::Name,
+        )
     }
 
     fn fixture_cal_rgb() -> ObjectVariant {
-        ObjectVariant::Array(vec![
-            name("CalRGB"),
-            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
-                (
-                    Vec::from(b"WhitePoint"),
-                    ObjectVariant::Array(vec![
-                        ObjectVariant::Real(0.9505),
-                        ObjectVariant::Real(1.0),
-                        ObjectVariant::Real(1.089),
-                    ]),
-                ),
-                (
-                    Vec::from(b"Matrix"),
-                    ObjectVariant::Array(vec![
-                        ObjectVariant::Real(0.9505),
-                        ObjectVariant::Real(1.0),
-                        ObjectVariant::Real(1.089),
-                        ObjectVariant::Integer(0),
-                        ObjectVariant::Integer(0),
-                        ObjectVariant::Integer(0),
-                        ObjectVariant::Integer(0),
-                        ObjectVariant::Integer(0),
-                        ObjectVariant::Integer(0),
-                    ]),
-                ),
-            ]))),
-        ])
+        ObjectVariant::Array(
+            vec![
+                name("CalRGB".into()),
+                ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
+                    (
+                        Vec::from(b"WhitePoint"),
+                        ObjectVariant::Array(
+                            vec![
+                                ObjectVariant::Real(0.9505.into()),
+                                ObjectVariant::Real(1.0),
+                                ObjectVariant::Real(1.089),
+                            ]
+                            .into(),
+                        ),
+                    ),
+                    (
+                        Vec::from(b"Matrix"),
+                        ObjectVariant::Array(
+                            vec![
+                                ObjectVariant::Real(0.9505.into()),
+                                ObjectVariant::Real(1.0),
+                                ObjectVariant::Real(1.089),
+                                ObjectVariant::Integer(0),
+                                ObjectVariant::Integer(0),
+                                ObjectVariant::Integer(0),
+                                ObjectVariant::Integer(0),
+                                ObjectVariant::Integer(0),
+                                ObjectVariant::Integer(0),
+                            ]
+                            .into(),
+                        ),
+                    ),
+                ]))),
+            ]
+            .into(),
+        )
     }
 
     fn fixture_device_n() -> ObjectVariant {
@@ -200,12 +212,17 @@ mod tests {
             b"4 3 roll pop".to_vec(),
         );
 
-        ObjectVariant::Array(vec![
-            name("DeviceN"),
-            ObjectVariant::Array(vec![name("IBM"), name("None"), name("None"), name("None")]),
-            fixture_cal_rgb(),
-            ObjectVariant::Stream(function),
-        ])
+        ObjectVariant::Array(
+            vec![
+                name("DeviceN".into()),
+                ObjectVariant::Array(
+                    vec![name("IBM".into()), name("None"), name("None"), name("None")].into(),
+                ),
+                fixture_cal_rgb(),
+                ObjectVariant::Stream(function),
+            ]
+            .into(),
+        )
     }
 
     #[test]
@@ -237,11 +254,16 @@ mod tests {
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(1)),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Name(b"DeviceGray".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DeviceGray".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (
                 Vec::from(b"Decode"),
-                ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(0)]),
+                ObjectVariant::Array(
+                    vec![ObjectVariant::Integer(1.into()), ObjectVariant::Integer(0)].into(),
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(4)),
@@ -265,11 +287,16 @@ mod tests {
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Name(b"DeviceGray".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DeviceGray".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (
                 Vec::from(b"Decode"),
-                ObjectVariant::Array(vec![ObjectVariant::Integer(0), ObjectVariant::Real(0.5)]),
+                ObjectVariant::Array(
+                    vec![ObjectVariant::Integer(0.into()), ObjectVariant::Real(0.5)].into(),
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),
@@ -289,16 +316,30 @@ mod tests {
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(1)),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Array(vec![
-                    ObjectVariant::Name(b"Indexed".to_vec()),
-                    ObjectVariant::Name(b"DeviceRGB".to_vec()),
-                    ObjectVariant::Integer(1),
-                    ObjectVariant::HexString(vec![10, 11, 12, 20, 21, 22]),
-                ]),
+                ObjectVariant::Array(
+                    vec![
+                        pdf_object_reader::pdf_string::PdfString::from(
+                            b"Indexed".to_vec(),
+                            pdf_object_reader::string_kind::StringKind::Name,
+                        ),
+                        pdf_object_reader::pdf_string::PdfString::from(
+                            b"DeviceRGB".to_vec(),
+                            pdf_object_reader::string_kind::StringKind::Name,
+                        ),
+                        ObjectVariant::Integer(1),
+                        pdf_object_reader::pdf_string::PdfString::from(
+                            vec![10, 11, 12, 20, 21, 22],
+                            pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                        ),
+                    ]
+                    .into(),
+                ),
             ),
             (
                 Vec::from(b"Decode"),
-                ObjectVariant::Array(vec![ObjectVariant::Integer(1), ObjectVariant::Integer(0)]),
+                ObjectVariant::Array(
+                    vec![ObjectVariant::Integer(1.into()), ObjectVariant::Integer(0)].into(),
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),
@@ -322,12 +363,18 @@ mod tests {
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Array(vec![
-                    name("Indexed"),
-                    fixture_device_n(),
-                    ObjectVariant::Integer(0),
-                    ObjectVariant::HexString(vec![0, 255, 255, 255]),
-                ]),
+                ObjectVariant::Array(
+                    vec![
+                        name("Indexed".into()),
+                        fixture_device_n(),
+                        ObjectVariant::Integer(0),
+                        pdf_object_reader::pdf_string::PdfString::from(
+                            vec![0, 255, 255, 255],
+                            pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                        ),
+                    ]
+                    .into(),
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
@@ -367,12 +414,18 @@ mod tests {
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Array(vec![
-                    name("Indexed"),
-                    name("DeviceCMYK"),
-                    ObjectVariant::Integer(0),
-                    ObjectVariant::HexString(vec![0, 0, 0, 0]),
-                ]),
+                ObjectVariant::Array(
+                    vec![
+                        name("Indexed".into()),
+                        name("DeviceCMYK"),
+                        ObjectVariant::Integer(0),
+                        pdf_object_reader::pdf_string::PdfString::from(
+                            vec![0, 0, 0, 0],
+                            pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                        ),
+                    ]
+                    .into(),
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
@@ -394,10 +447,9 @@ mod tests {
                 (Vec::from(b"FunctionType"), ObjectVariant::Integer(4)),
                 (
                     Vec::from(b"Domain"),
-                    ObjectVariant::Array(vec![
-                        ObjectVariant::Integer(0),
-                        ObjectVariant::Integer(1),
-                    ]),
+                    ObjectVariant::Array(
+                        vec![ObjectVariant::Integer(0.into()), ObjectVariant::Integer(1)].into(),
+                    ),
                 ),
                 (
                     Vec::from(b"Range"),
@@ -414,12 +466,15 @@ mod tests {
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Array(vec![
-                    name("Separation"),
-                    name("None"),
-                    name("DeviceRGB"),
-                    ObjectVariant::Stream(tint_function),
-                ]),
+                ObjectVariant::Array(
+                    vec![
+                        name("Separation".into()),
+                        name("None"),
+                        name("DeviceRGB"),
+                        ObjectVariant::Stream(tint_function),
+                    ]
+                    .into(),
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
@@ -448,11 +503,14 @@ mod tests {
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Name(b"DeviceGray".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DeviceGray".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (
                 Vec::from(b"Decode"),
-                ObjectVariant::Array(vec![ObjectVariant::Integer(0)]),
+                ObjectVariant::Array(vec![ObjectVariant::Integer(0.into())].into()),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
@@ -476,7 +534,10 @@ mod tests {
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Name(b"DeviceGray".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DeviceGray".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),
@@ -498,7 +559,10 @@ mod tests {
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Name(b"DeviceGray".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DeviceGray".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),
@@ -538,7 +602,10 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::from([
             (
                 Vec::from(b"Filter"),
-                ObjectVariant::Name(b"JPXDecode".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"JPXDecode".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),
@@ -561,7 +628,10 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::from([
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Name(b"DeviceGray".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DeviceGray".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
@@ -582,11 +652,17 @@ mod tests {
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Name(b"DeviceCMYK".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DeviceCMYK".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (
                 Vec::from(b"Filter"),
-                ObjectVariant::Name(b"DCTDecode".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DCTDecode".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),
@@ -610,7 +686,10 @@ mod tests {
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Name(b"DeviceCMYK".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DeviceCMYK".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),
@@ -639,11 +718,17 @@ mod tests {
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Name(b"DeviceRGB".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DeviceRGB".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (
                 Vec::from(b"Filter"),
-                ObjectVariant::Name(b"DCTDecode".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DCTDecode".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),
@@ -670,7 +755,10 @@ mod tests {
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Name(b"DeviceGray".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DeviceGray".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),
@@ -704,11 +792,17 @@ mod tests {
                 (Vec::from(b"BPC"), ObjectVariant::Integer(8)),
                 (
                     Vec::from(b"CS"),
-                    ObjectVariant::Name(b"DeviceGray".to_vec()),
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        b"DeviceGray".to_vec(),
+                        pdf_object_reader::string_kind::StringKind::Name,
+                    ),
                 ),
                 (
                     Vec::from(b"F"),
-                    ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        b"ASCIIHexDecode".to_vec(),
+                        pdf_object_reader::string_kind::StringKind::Name,
+                    ),
                 ),
                 (Vec::from(b"H"), ObjectVariant::Integer(1)),
                 (Vec::from(b"W"), ObjectVariant::Integer(1)),
@@ -729,7 +823,13 @@ mod tests {
         let image = InlineImage::new(
             Dictionary::new(BTreeMap::from([
                 (Vec::from(b"BPC"), ObjectVariant::Integer(1)),
-                (Vec::from(b"CS"), ObjectVariant::Name(b"G".to_vec())),
+                (
+                    Vec::from(b"CS"),
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        b"G".to_vec(),
+                        pdf_object_reader::string_kind::StringKind::Name,
+                    ),
+                ),
                 (Vec::from(b"H"), ObjectVariant::Integer(1)),
                 (Vec::from(b"W"), ObjectVariant::Integer(4)),
             ])),
@@ -750,7 +850,13 @@ mod tests {
         let image = InlineImage::new(
             Dictionary::new(BTreeMap::from([
                 (Vec::from(b"BPC"), ObjectVariant::Integer(8)),
-                (Vec::from(b"CS"), ObjectVariant::Name(b"G".to_vec())),
+                (
+                    Vec::from(b"CS"),
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        b"G".to_vec(),
+                        pdf_object_reader::string_kind::StringKind::Name,
+                    ),
+                ),
                 (Vec::from(b"H"), ObjectVariant::Integer(1)),
                 (Vec::from(b"W"), ObjectVariant::Integer(2)),
             ])),
@@ -774,12 +880,24 @@ mod tests {
                 (Vec::from(b"BPC"), ObjectVariant::Integer(1)),
                 (
                     Vec::from(b"CS"),
-                    ObjectVariant::Array(vec![
-                        ObjectVariant::Name(b"I".to_vec()),
-                        ObjectVariant::Name(b"RGB".to_vec()),
-                        ObjectVariant::Integer(1),
-                        ObjectVariant::HexString(vec![10, 11, 12, 20, 21, 22]),
-                    ]),
+                    ObjectVariant::Array(
+                        vec![
+                            pdf_object_reader::pdf_string::PdfString::from(
+                                b"I".to_vec(),
+                                pdf_object_reader::string_kind::StringKind::Name,
+                            ),
+                            pdf_object_reader::pdf_string::PdfString::from(
+                                b"RGB".to_vec(),
+                                pdf_object_reader::string_kind::StringKind::Name,
+                            ),
+                            ObjectVariant::Integer(1),
+                            pdf_object_reader::pdf_string::PdfString::from(
+                                vec![10, 11, 12, 20, 21, 22],
+                                pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                            ),
+                        ]
+                        .into(),
+                    ),
                 ),
                 (Vec::from(b"H"), ObjectVariant::Integer(1)),
                 (Vec::from(b"W"), ObjectVariant::Integer(4)),
@@ -807,7 +925,10 @@ mod tests {
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(1)),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Name(b"DeviceGray".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DeviceGray".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(8)),
@@ -912,12 +1033,24 @@ mod tests {
             ),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Array(vec![
-                    ObjectVariant::Name(b"Indexed".to_vec()),
-                    ObjectVariant::Name(b"DeviceRGB".to_vec()),
-                    ObjectVariant::Integer(3),
-                    ObjectVariant::HexString(vec![10, 11, 12, 20, 21, 22, 30, 31, 32, 40, 41, 42]),
-                ]),
+                ObjectVariant::Array(
+                    vec![
+                        pdf_object_reader::pdf_string::PdfString::from(
+                            b"Indexed".to_vec(),
+                            pdf_object_reader::string_kind::StringKind::Name,
+                        ),
+                        pdf_object_reader::pdf_string::PdfString::from(
+                            b"DeviceRGB".to_vec(),
+                            pdf_object_reader::string_kind::StringKind::Name,
+                        ),
+                        ObjectVariant::Integer(3),
+                        pdf_object_reader::pdf_string::PdfString::from(
+                            vec![10, 11, 12, 20, 21, 22, 30, 31, 32, 40, 41, 42],
+                            pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                        ),
+                    ]
+                    .into(),
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(4)),
@@ -929,11 +1062,17 @@ mod tests {
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Name(b"DeviceGray".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DeviceGray".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (
                 Vec::from(b"Filter"),
-                ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"ASCIIHexDecode".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),

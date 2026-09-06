@@ -106,10 +106,8 @@ impl AnnotationDestination {
         objects: &dyn ObjectResolver,
     ) -> Result<Self, AnnotationError> {
         Ok(match value {
-            ObjectVariant::LiteralString(bytes)
-            | ObjectVariant::HexString(bytes)
-            | ObjectVariant::Name(bytes) => Self::Named {
-                name: bytes.clone(),
+            ObjectVariant::String(value) => Self::Named {
+                name: value.as_bytes().to_vec(),
             },
             ObjectVariant::Reference(_)
             | ObjectVariant::Dictionary(_)

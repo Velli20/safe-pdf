@@ -203,7 +203,10 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::from([
             (
                 Vec::from(b"Filter"),
-                ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"ASCIIHexDecode".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"ImageMask"), ObjectVariant::Boolean(true)),
@@ -264,7 +267,10 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::from([
             (
                 Vec::from(b"Filter"),
-                ObjectVariant::Name(b"JPXDecode".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"JPXDecode".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
@@ -285,10 +291,19 @@ mod tests {
         let mut dictionary = direct_dictionary(1, 1, 8);
         dictionary.dictionary.insert(
             b"Filter".to_vec(),
-            ObjectVariant::Array(vec![
-                ObjectVariant::Name(b"ASCII85Decode".to_vec()),
-                ObjectVariant::Name(b"DCTDecode".to_vec()),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        b"ASCII85Decode".to_vec(),
+                        pdf_object_reader::string_kind::StringKind::Name,
+                    ),
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        b"DCTDecode".to_vec(),
+                        pdf_object_reader::string_kind::StringKind::Name,
+                    ),
+                ]
+                .into(),
+            ),
         );
 
         let metadata = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
@@ -328,7 +343,10 @@ mod tests {
             ),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Name(b"DeviceGray".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DeviceGray".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(height)),
             (Vec::from(b"Width"), ObjectVariant::Integer(width)),
@@ -343,12 +361,24 @@ mod tests {
             ),
             (
                 Vec::from(b"ColorSpace"),
-                ObjectVariant::Array(vec![
-                    ObjectVariant::Name(b"Indexed".to_vec()),
-                    ObjectVariant::Name(b"DeviceRGB".to_vec()),
-                    ObjectVariant::Integer(1),
-                    ObjectVariant::HexString(vec![0, 0, 0, 255, 255, 255]),
-                ]),
+                ObjectVariant::Array(
+                    vec![
+                        pdf_object_reader::pdf_string::PdfString::from(
+                            b"Indexed".to_vec(),
+                            pdf_object_reader::string_kind::StringKind::Name,
+                        ),
+                        pdf_object_reader::pdf_string::PdfString::from(
+                            b"DeviceRGB".to_vec(),
+                            pdf_object_reader::string_kind::StringKind::Name,
+                        ),
+                        ObjectVariant::Integer(1),
+                        pdf_object_reader::pdf_string::PdfString::from(
+                            vec![0, 0, 0, 255, 255, 255],
+                            pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                        ),
+                    ]
+                    .into(),
+                ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),

@@ -295,7 +295,10 @@ mod tests {
         let mut values = BTreeMap::new();
         values.insert(
             Vec::from(b"Subtype"),
-            ObjectVariant::Name(b"Popup".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"Popup".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         );
         for (key, value) in entries {
             values.insert(Vec::from(key.as_bytes()), value);
@@ -306,12 +309,15 @@ mod tests {
     fn appearance_stream(object_number: usize) -> ObjectVariant {
         let dictionary = Dictionary::new(BTreeMap::from([(
             Vec::from(b"BBox"),
-            ObjectVariant::Array(vec![
-                ObjectVariant::Integer(0),
-                ObjectVariant::Integer(0),
-                ObjectVariant::Integer(1),
-                ObjectVariant::Integer(1),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    ObjectVariant::Integer(0.into()),
+                    ObjectVariant::Integer(0),
+                    ObjectVariant::Integer(1),
+                    ObjectVariant::Integer(1),
+                ]
+                .into(),
+            ),
         )]));
         ObjectVariant::Stream(StreamObject::new(object_number, 0, dictionary, Vec::new()))
     }
@@ -332,14 +338,29 @@ mod tests {
             ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(Vec::from(b"N"), normal)])));
 
         let mut entries = vec![
-            ("Subtype", ObjectVariant::Name(b"Widget".to_vec())),
-            ("FT", ObjectVariant::Name(b"Btn".to_vec())),
+            (
+                "Subtype",
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"Widget".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
+            (
+                "FT",
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"Btn".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
             ("AP", appearance),
         ];
         if let Some(appearance_state) = appearance_state {
             entries.push((
                 "AS",
-                ObjectVariant::Name(appearance_state.as_bytes().to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    appearance_state.as_bytes().to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ));
         }
 
@@ -377,10 +398,19 @@ mod tests {
     #[test]
     fn valid_type_is_still_accepted() {
         let mut values = BTreeMap::new();
-        values.insert(Vec::from(b"Type"), ObjectVariant::Name(b"Annot".to_vec()));
+        values.insert(
+            Vec::from(b"Type"),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"Annot".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
+        );
         values.insert(
             Vec::from(b"Subtype"),
-            ObjectVariant::Name(b"Popup".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"Popup".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         );
         values.insert(
             Vec::from(b"Parent"),
@@ -452,18 +482,30 @@ mod tests {
     #[test]
     fn malformed_present_rect_remains_an_error() {
         let mut values = BTreeMap::new();
-        values.insert(Vec::from(b"Type"), ObjectVariant::Name(b"Annot".to_vec()));
+        values.insert(
+            Vec::from(b"Type"),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"Annot".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
+        );
         values.insert(
             Vec::from(b"Subtype"),
-            ObjectVariant::Name(b"Popup".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"Popup".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         );
         values.insert(
             Vec::from(b"Rect"),
-            ObjectVariant::Array(vec![
-                ObjectVariant::Integer(0),
-                ObjectVariant::Integer(0),
-                ObjectVariant::Integer(10),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    ObjectVariant::Integer(0.into()),
+                    ObjectVariant::Integer(0),
+                    ObjectVariant::Integer(10),
+                ]
+                .into(),
+            ),
         );
 
         let error = match parse_annotation(Dictionary::new(values)) {
@@ -479,10 +521,19 @@ mod tests {
     #[test]
     fn invalid_present_type_remains_an_error() {
         let mut values = BTreeMap::new();
-        values.insert(Vec::from(b"Type"), ObjectVariant::Name(b"Page".to_vec()));
+        values.insert(
+            Vec::from(b"Type"),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"Page".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
+        );
         values.insert(
             Vec::from(b"Subtype"),
-            ObjectVariant::Name(b"Popup".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"Popup".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         );
 
         let error = match parse_annotation(Dictionary::new(values)) {
@@ -503,17 +554,29 @@ mod tests {
             4,
             ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([(
                 Vec::from(b"Type"),
-                ObjectVariant::Name(b"Annot".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"Annot".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             )]))),
         );
 
         objects.insert(
             5,
             ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
-                (Vec::from(b"Type"), ObjectVariant::Name(b"Annot".to_vec())),
+                (
+                    Vec::from(b"Type"),
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        b"Annot".to_vec(),
+                        pdf_object_reader::string_kind::StringKind::Name,
+                    ),
+                ),
                 (
                     Vec::from(b"Subtype"),
-                    ObjectVariant::Name(b"Popup".to_vec()),
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        b"Popup".to_vec(),
+                        pdf_object_reader::string_kind::StringKind::Name,
+                    ),
                 ),
             ]))),
         );
@@ -521,10 +584,15 @@ mod tests {
         let mut page_values = BTreeMap::new();
         page_values.insert(
             Vec::from(b"Annots"),
-            ObjectVariant::Array(vec![
-                ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(4, 0)),
-                ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(5, 0)),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    ObjectVariant::Reference(
+                        pdf_object_reader::object_id::ObjectId::new(4, 0).into(),
+                    ),
+                    ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(5, 0)),
+                ]
+                .into(),
+            ),
         );
 
         let resolver = TestResolver { objects };
