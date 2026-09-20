@@ -38,10 +38,11 @@ PDF bytes
 - `pdf-content-stream`: content stream parsing and operator stream handling.
 - `pdf-content-stream-operators`: trait-based operator categories used to dispatch path, text, color, graphics-state, clipping, shading, image, and marked-content operations.
 - `pdf-canvas`: stateful PDF drawing engine that interprets page content against a generic backend.
-- `pdf-renderer`: page rendering orchestration, plus recording-canvas based page caching and replay.
+- `pdf-renderer`: page rendering orchestration and recording-canvas based page caching and replay.
 
 ### Supporting crates
 
+- `pdf-annotation-core`: decodes page annotations from PDF dictionaries, owns semantic annotation editing and sidecar persistence, and provides the backend-neutral annotation layer (source import, per-viewport entries, edit dispatch) that every host presents. See the [annotation architecture guide](crates/pdf-annotation-core/MIGRATION.md) for module ownership and editing constraints.
 - `pdf-filter`: PDF stream filters such as ASCII85, ASCIIHex, LZW, predictors, and CCITT Fax support.
 - `pdf-decode`: sample decoding helpers and indexed/ranged decode utilities.
 - `pdf-image`: image XObject and inline-image handling.
@@ -98,7 +99,6 @@ The `examples` workspace member contains the currently supported demos.
 - `cargo run --example femtovg --features femtovg`
   Runs the FemtoVG prototype renderer.
 - `cargo xtask emscripten --features skia-wasm`
-  Builds the web target and copies artifacts into `examples/web/dist/`.
 - `cargo xtask emscripten --features skia-wasm --serve --port 8080`
   Builds and serves the web example locally.
 

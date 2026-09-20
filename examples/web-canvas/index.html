@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Safe-PDF · Canvas 2D</title>
+    <link rel="stylesheet" href="./pkg/annotation_layer.css">
+    <style>
+      :root {
+        font: 15px system-ui, sans-serif;
+        color: #17232a;
+        background: #e8edef;
+      }
+
+      body { margin: 0; }
+
+      .toolbar {
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 18px;
+        padding: 14px 24px;
+        background: #fff;
+        border-bottom: 1px solid #c7d0d6;
+      }
+
+      h1 { margin: 0; font-size: 18px; }
+      button, select, input { font: inherit; }
+      label { display: flex; align-items: center; gap: 6px; }
+      input[type="file"] { max-width: 100%; min-width: 0; }
+
+      button {
+        padding: 6px 12px;
+        border: 1px solid #b8c6ce;
+        border-radius: 5px;
+        background: #f8fafb;
+        cursor: pointer;
+      }
+
+      button:disabled { cursor: default; opacity: 0.6; }
+      :focus-visible { outline: 2px solid #167baf; outline-offset: 2px; }
+      #status { color: #52636d; font-size: 13px; }
+      #error { margin: 12px 24px; color: #a31515; white-space: pre-wrap; }
+      #error:empty { display: none; }
+
+      #pages {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 24px;
+        padding: 28px;
+        overflow-x: auto;
+      }
+
+      .page {
+        position: relative;
+        flex: none;
+        align-self: safe center;
+        background: #fff;
+        box-shadow: 0 2px 10px #17232a30;
+        touch-action: none;
+        user-select: none;
+      }
+
+      .layer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        transform-origin: 0 0;
+      }
+
+      .content { z-index: 0; }
+      .annotations { z-index: 1; pointer-events: none; }
+      .selection { z-index: 2; pointer-events: none; }
+
+      .highlight {
+        position: absolute;
+        background: #378deb55;
+        pointer-events: none;
+      }
+
+      @media (max-width: 600px) {
+        .toolbar { gap: 12px; padding: 12px; }
+        #pages { padding: 16px; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="toolbar">
+      <h1>Safe-PDF</h1>
+      <label for="file">Open PDF
+        <input id="file" type="file" accept="application/pdf,.pdf" disabled>
+      </label>
+      <label for="zoom">Zoom
+        <select id="zoom" disabled>
+          <option value="0.5">50%</option>
+          <option value="1" selected>100%</option>
+          <option value="1.5">150%</option>
+          <option value="2">200%</option>
+        </select>
+      </label>
+      <button id="rotate" type="button" aria-label="Rotate clockwise 90 degrees" disabled>Rotate</button>
+      <button id="copy" type="button" disabled>Copy selection</button>
+      <span id="status" role="status">Loading…</span>
+    </header>
+    <div id="error" role="alert"></div>
+    <noscript>This PDF viewer requires JavaScript.</noscript>
+    <main id="pages" aria-label="PDF pages"></main>
+    <script type="module" src="host.js"></script>
+  </body>
+</html>

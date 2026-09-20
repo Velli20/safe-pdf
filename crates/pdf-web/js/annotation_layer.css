@@ -1,0 +1,18 @@
+.native-annotations { position: absolute; inset: 0; pointer-events: none; }
+.native-annotation { position: absolute; left: 0; top: 0; transform-origin: 0 0; box-sizing: border-box; pointer-events: auto; }
+.native-control { display: block; width: 100%; height: 100%; margin: 0; box-sizing: border-box; padding: 0; overflow: hidden; white-space: pre-wrap; }
+.native-control:is(input,textarea,select), .native-free-text-editor { user-select: text; touch-action: auto; }
+.native-control:is(input,textarea,select,button) { background: white; border: 1px solid #777; border-radius: 0; }
+.native-control:is(input[type=radio],input[type=checkbox]) { appearance: auto; }
+.native-control.native-link { background: transparent; cursor: pointer; }
+.native-control.native-link:hover { background: #167baf18; }
+.native-control svg { display: block; overflow: visible; }
+.native-annotation[data-kind=highlight] svg { mix-blend-mode: multiply; }
+.native-annotation:is([data-kind=highlight],[data-kind=underline],[data-kind=squiggly],[data-kind=strike_out]) { pointer-events: none; }
+.native-popup { position: absolute; top: 100%; left: 0; min-width: 180px; min-height: 48px; padding: 8px; white-space: pre-wrap; background: #fff8ce !important; color: #222 !important; border: 1px solid #b29b45; box-sizing: border-box; user-select: text; pointer-events: auto; }
+.native-annotation[data-kind=popup] .native-popup { top: 0; width: 100%; height: 100%; }
+.native-stamp { border: 2px solid currentColor; font-weight: bold; text-transform: uppercase; display: flex; align-items: center; justify-content: center; }
+.native-unsupported { border: 1px dashed #777; background: #f1f1f1 !important; font-size: 10px; }
+.native-free-text-editor { position: absolute; inset: 0; width: 100%; height: 100%; box-sizing: border-box; resize: none; font: inherit; color: inherit; text-align: inherit; z-index: 1; }
+.native-annotation:focus-visible, .native-control:focus-visible { outline: 2px solid #167baf; outline-offset: 2px; }
+.native-control[aria-invalid=true], .native-free-text-editor[aria-invalid=true] { outline: 2px solid #a31515; }

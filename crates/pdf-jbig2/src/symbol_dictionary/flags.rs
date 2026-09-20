@@ -61,7 +61,7 @@ impl SymbolDictionaryFlagBits {
 
     /// Extract a two-bit selector field defined by section 7.4.2.1.1.
     fn two_bit_selector(self, mask: Self, shift: u16) -> u8 {
-        u8::try_from((self.bits() & mask.bits()) >> shift).map_or(0, |value| value)
+        u8::try_from((self.bits() & mask.bits()) >> shift).unwrap_or(0)
     }
 }
 

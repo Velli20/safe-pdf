@@ -277,17 +277,16 @@ impl DecodedSamples {
         let denominator = f32::from(sample_max.max(1));
         match color_space {
             ColorSpace::Lab(lab) => samples
-                .chunks_exact(3)
-                .flat_map(|pixel| {
-                    let [l, a, b] = pixel else {
-                        return [0.0; 3];
-                    };
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .flat_map(|&[l, a, b]| {
                     let [amin, amax, bmin, bmax] = lab.range;
                     let normalized = |sample| f32::from(sample) / denominator;
                     [
-                        normalized(*l) * 100.0,
-                        amin + normalized(*a) * (amax - amin),
-                        bmin + normalized(*b) * (bmax - bmin),
+                        normalized(l) * 100.0,
+                        amin + normalized(a) * (amax - amin),
+                        bmin + normalized(b) * (bmax - bmin),
                     ]
                 })
                 .collect(),

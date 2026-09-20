@@ -1,18 +1,16 @@
+//! Rendering behavior and fixtures for mod.
 #![allow(clippy::arithmetic_side_effects, clippy::expect_used)]
 
-use std::sync::Arc;
-
+use pdf_canvas::CanvasPath;
 use pdf_canvas::{
     canvas_backend::{CanvasBackend, Shader},
     error::PdfCanvasError,
+    mask_layer::MaskLayer,
     recording_canvas::RecordingCanvas,
     stroke_style::StrokeStyle,
 };
 use pdf_content_stream::ContentStream;
-use pdf_graphics::{
-    BlendMode, Image, MaskMode, PathFillType, PixelFormat, color::Color, pdf_path::PdfPath,
-    rect::Rect, transform::Transform,
-};
+use pdf_graphics::{BlendMode, Image, PathFillType, PixelFormat, color::Color, rect::Rect};
 use pdf_object_reader::{
     dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     stream::StreamObject,
@@ -41,6 +39,7 @@ pub struct ObservingCanvas {
 }
 
 impl ObservingCanvas {
+    /// Copies image metadata and pixels for later assertions about drawing calls.
     fn observed_image(
         image: &Image,
         blend_mode: Option<BlendMode>,
@@ -60,57 +59,65 @@ impl ObservingCanvas {
 }
 
 impl CanvasBackend for ObservingCanvas {
+    /// Fills the supplied device-space path using the requested paint and fill rule.
     fn fill_path(
         &mut self,
-        _path: &PdfPath,
+        _path: &CanvasPath<'_>,
         _fill_type: PathFillType,
         color: Color,
-        _shader: &Option<Shader>,
+        _shader: Option<&Shader>,
         _blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
         self.fill_colors.push(color);
         Ok(())
     }
 
+    /// Strokes device-space geometry using the supplied width and stroke style.
     fn stroke_path(
         &mut self,
-        _path: &PdfPath,
+        _path: &CanvasPath<'_>,
         _color: Color,
         _line_width: f32,
         stroke_style: &StrokeStyle,
-        _shader: &Option<Shader>,
+        _shader: Option<&Shader>,
         _blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
         self.stroke_styles.push(stroke_style.clone());
         Ok(())
     }
 
+    /// Intersects subsequent painting with the supplied device-space clipping path.
     fn set_clip_region(
         &mut self,
-        _path: &PdfPath,
+        _path: &CanvasPath<'_>,
         _mode: PathFillType,
     ) -> Result<(), PdfCanvasError> {
         Ok(())
     }
 
+    /// Returns the logical canvas width used by PDF painting.
     fn width(&self) -> f32 {
         100.0
     }
 
+    /// Returns the logical canvas height used by PDF painting.
     fn height(&self) -> f32 {
         100.0
     }
 
+    /// Saves the current clipping and drawing state for a matching restore.
     fn save(&mut self) -> Result<(), PdfCanvasError> {
         self.save_count += 1;
         Ok(())
     }
 
+    /// Restores the most recently saved drawing state.
     fn restore(&mut self) -> Result<(), PdfCanvasError> {
         self.restore_count += 1;
         Ok(())
     }
 
+    /// Draws decoded image pixels into the supplied destination rectangle.
     fn draw_image_rect(
         &mut self,
         image: &Image,
@@ -127,6 +134,7 @@ impl CanvasBackend for ObservingCanvas {
         Ok(())
     }
 
+    /// Draws an inline image using the same placement contract as image objects.
     fn draw_inline_image(
         &mut self,
         image: &Image,
@@ -143,27 +151,18 @@ impl CanvasBackend for ObservingCanvas {
         Ok(())
     }
 
-    fn begin_mask_layer(
-        &mut self,
-        _mask: &Arc<RecordingCanvas>,
-        _transform: &Transform,
-        _mask_mode: MaskMode,
-    ) -> Result<(), PdfCanvasError> {
+    /// Observes one scoped mask and forwards its painting callback.
+    fn with_mask_layer<F>(&mut self, _mask: &MaskLayer, paint: F) -> Result<(), PdfCanvasError>
+    where
+        F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>,
+    {
         self.begin_mask_count += 1;
-        Ok(())
-    }
-
-    fn end_mask_layer(
-        &mut self,
-        _mask: &Arc<RecordingCanvas>,
-        _transform: &Transform,
-        _mask_mode: MaskMode,
-    ) -> Result<(), PdfCanvasError> {
-        Ok(())
+        paint(self)
     }
 }
 
 #[allow(dead_code)]
+/// Builds a parsed content-stream fixture from operator bytes.
 pub fn content_stream(object_number: usize, data: &[u8]) -> ContentStream {
     let stream = StreamObject::new(
         object_number,
@@ -182,6 +181,7 @@ pub fn content_stream(object_number: usize, data: &[u8]) -> ContentStream {
     content_stream
 }
 
+/// Replays a recording into an observer for assertions on drawing behavior.
 pub fn replay(recording: &RecordingCanvas) -> ObservingCanvas {
     let mut observer = ObservingCanvas::default();
     recording

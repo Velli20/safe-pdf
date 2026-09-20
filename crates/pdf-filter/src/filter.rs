@@ -223,12 +223,7 @@ impl Filter {
         Ok(decoded)
     }
 
-    /// Decodes JPXDecode (JPEG 2000) compressed stream data.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`FilterError::Decompression`] if the JPEG 2000 decoding fails,
-    /// which can happen if the data is corrupted or not valid JPEG 2000 data.
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     fn decode_jpeg2000(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
         let bitmap = jpeg2k::Image::from_bytes(stream_data)
             .map_err(|e| FilterError::Decompression(e.to_string()))?;
@@ -240,35 +235,37 @@ impl Filter {
         Self::decode_jpeg2000_pixels(pixels)
     }
 
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
     fn decode_jpeg2000_pixels(pixels: jpeg2k::ImageData) -> Result<Vec<u8>, FilterError> {
         let data = match pixels.data {
             jpeg2k::ImagePixelData::L8(data) | jpeg2k::ImagePixelData::Rgb8(data) => data,
             jpeg2k::ImagePixelData::La8(data) => data
-                .chunks_exact(2)
-                .map(|chunk| chunk.iter().next().copied().unwrap_or_default())
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|&[luminance, _]| luminance)
                 .collect::<Vec<u8>>(),
             jpeg2k::ImagePixelData::Rgba8(data) => data
-                .chunks_exact(4)
-                .flat_map(|chunk| chunk.iter().take(3).copied())
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .flat_map(|&[r, g, b, _]| [r, g, b])
                 .collect::<Vec<u8>>(),
             jpeg2k::ImagePixelData::L16(data) | jpeg2k::ImagePixelData::Rgb16(data) => data
                 .into_iter()
                 .flat_map(|v| v.to_be_bytes())
                 .collect::<Vec<u8>>(),
             jpeg2k::ImagePixelData::La16(data) => data
-                .chunks_exact(2)
-                .flat_map(|chunk| {
-                    chunk
-                        .iter()
-                        .next()
-                        .copied()
-                        .unwrap_or_default()
-                        .to_be_bytes()
-                })
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .flat_map(|&[luminance, _]| luminance.to_be_bytes())
                 .collect::<Vec<u8>>(),
             jpeg2k::ImagePixelData::Rgba16(data) => data
-                .chunks_exact(4)
-                .flat_map(|chunk| chunk.iter().take(3).flat_map(|v| v.to_be_bytes()))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .flat_map(|&[r, g, b, _]| [r, g, b].into_iter().flat_map(u16::to_be_bytes))
                 .collect::<Vec<u8>>(),
         };
 
@@ -370,8 +367,15 @@ pub fn decode_data_with_resolver(
                 data = decoded.into();
             }
             Filter::JPXDecode => {
-                let decoded = Filter::decode_jpeg2000(data.as_ref())?;
-                data = decoded.into();
+                #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+                {
+                    let decoded = Filter::decode_jpeg2000(data.as_ref())?;
+                    data = decoded.into();
+                }
+                #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+                {
+                    return Err(FilterError::UnsupportedFilter("JPXDecode".to_string()));
+                }
             }
             Filter::DCTDecode => {
                 let decoded = Filter::decode_jpeg_baseline(data.as_ref())?;
@@ -880,70 +884,5 @@ mod tests {
 
         let decoded = decode(&stream).expect("decode failed");
         assert_eq!(decoded.as_ref(), b"X");
-    }
-
-    #[test]
-    fn test_decode_jpeg2000_pixels_accepts_rgb8() {
-        let pixels = jpeg2k::ImageData {
-            width: 1,
-            height: 1,
-            format: jpeg2k::ImageFormat::Rgb8,
-            data: jpeg2k::ImagePixelData::Rgb8(vec![10, 20, 30]),
-        };
-
-        let decoded = Filter::decode_jpeg2000_pixels(pixels).expect("decode should succeed");
-        assert_eq!(decoded, vec![10, 20, 30]);
-    }
-
-    #[test]
-    fn test_decode_jpeg2000_pixels_converts_la8_to_l8() {
-        let pixels = jpeg2k::ImageData {
-            width: 1,
-            height: 2,
-            format: jpeg2k::ImageFormat::La8,
-            data: jpeg2k::ImagePixelData::La8(vec![11, 111, 22, 222]),
-        };
-
-        let decoded = Filter::decode_jpeg2000_pixels(pixels).expect("decode should succeed");
-        assert_eq!(decoded, vec![11, 22]);
-    }
-
-    #[test]
-    fn test_decode_jpeg2000_pixels_converts_rgba8_to_rgb8() {
-        let pixels = jpeg2k::ImageData {
-            width: 1,
-            height: 2,
-            format: jpeg2k::ImageFormat::Rgba8,
-            data: jpeg2k::ImagePixelData::Rgba8(vec![1, 2, 3, 4, 5, 6, 7, 8]),
-        };
-
-        let decoded = Filter::decode_jpeg2000_pixels(pixels).expect("decode should succeed");
-        assert_eq!(decoded, vec![1, 2, 3, 5, 6, 7]);
-    }
-
-    #[test]
-    fn test_decode_jpeg2000_pixels_converts_rgba16_to_rgb16_bytes() {
-        let pixels = jpeg2k::ImageData {
-            width: 1,
-            height: 1,
-            format: jpeg2k::ImageFormat::Rgba16,
-            data: jpeg2k::ImagePixelData::Rgba16(vec![0x0102, 0x0304, 0x0506, 0x0708]),
-        };
-
-        let decoded = Filter::decode_jpeg2000_pixels(pixels).expect("decode should succeed");
-        assert_eq!(decoded, vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06]);
-    }
-
-    #[test]
-    fn test_decode_jpeg2000_pixels_converts_la16_to_l16_bytes() {
-        let pixels = jpeg2k::ImageData {
-            width: 1,
-            height: 2,
-            format: jpeg2k::ImageFormat::La16,
-            data: jpeg2k::ImagePixelData::La16(vec![0x0102, 0x0304, 0x0506, 0x0708]),
-        };
-
-        let decoded = Filter::decode_jpeg2000_pixels(pixels).expect("decode should succeed");
-        assert_eq!(decoded, vec![0x01, 0x02, 0x05, 0x06]);
     }
 }

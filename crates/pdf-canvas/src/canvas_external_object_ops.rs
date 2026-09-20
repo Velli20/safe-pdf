@@ -106,6 +106,7 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
         Ok(())
     }
 
+    /// Decodes inline image samples before applying the current painting state.
     fn paint_inline_image(&mut self, image: &InlineImage) -> Result<(), Self::ErrorType> {
         let decoded = decode_inline_image(image, None)
             .map_err(|e| PdfCanvasError::InvalidImageData(e.to_string()))?;
@@ -120,6 +121,7 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         self.render_decoded_image(image, false)
     }
 
+    /// Computes image placement before entering the backend-only mask callback.
     fn render_decoded_image(
         &mut self,
         image: &Image,
@@ -131,13 +133,13 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         let dest_rect = Self::compute_destination_rect(&transform, rotation_degrees);
 
         let blend_mode = self.current_state()?.paint.blend_mode.clone();
-        if inline_image {
-            self.canvas
-                .draw_inline_image(image, blend_mode, dest_rect, Some(rotation_degrees))
-        } else {
-            self.canvas
-                .draw_image_rect(image, blend_mode, dest_rect, Some(rotation_degrees))
-        }
+        self.with_soft_mask(|backend| {
+            if inline_image {
+                backend.draw_inline_image(image, blend_mode, dest_rect, Some(rotation_degrees))
+            } else {
+                backend.draw_image_rect(image, blend_mode, dest_rect, Some(rotation_degrees))
+            }
+        })
     }
 
     /// Computes the destination rectangle for image rendering.

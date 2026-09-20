@@ -1,8 +1,11 @@
 //! External graphics-state soft mask decoding.
 use crate::{error::PdfPagesError, form::FormXObject};
+use num_traits::ToPrimitive;
+use pdf_function::function::{Function, FunctionImpl};
 use pdf_graphics::MaskMode;
 use pdf_object_reader::object_lookup::ObjectLookupExt;
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult};
+use std::sync::Arc;
 
 /// A soft mask and its transparency group.
 pub struct SoftMask {
@@ -10,6 +13,8 @@ pub struct SoftMask {
     pub mask_type: MaskMode,
     /// The transparency group. Recursive groups remain deferred until painting.
     pub shape: ObjectHandle<FormXObject>,
+    /// Optional `/TR` mapping, sampled for the renderer's 8-bit mask coverage.
+    pub transfer: Option<Arc<[u8; 256]>>,
 }
 impl FromPdfObject for SoftMask {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
@@ -32,7 +37,53 @@ impl FromPdfObject for SoftMask {
             .into());
         }
         let shape = context.required_shared(b"G")?;
-        Ok(Self { mask_type, shape })
+        let transfer = match context.dictionary().get(b"TR") {
+            None => None,
+            Some(value)
+                if value
+                    .try_bytes(context.source())
+                    .is_ok_and(|name| name == b"Identity") =>
+            {
+                None
+            }
+            Some(value) => {
+                let function =
+                    Function::parse(value, context.source()).map_err(PdfPagesError::from)?;
+                let mut table = [0; 256];
+                for (input, output) in (0_u8..=255).zip(&mut table) {
+                    let values = function
+                        .apply(&[f32::from(input) / 255.0])
+                        .map_err(PdfPagesError::from)?;
+                    let [value] = values.as_slice() else {
+                        return Err(PdfPagesError::InvalidExtGStateEntryValue {
+                            entry: "SMask.TR".into(),
+                            reason: "expected one output".into(),
+                        }
+                        .into());
+                    };
+                    if !value.is_finite() {
+                        return Err(PdfPagesError::InvalidExtGStateEntryValue {
+                            entry: "SMask.TR".into(),
+                            reason: "nonfinite output".into(),
+                        }
+                        .into());
+                    }
+                    *output = (value.clamp(0.0, 1.0) * 255.0)
+                        .round()
+                        .to_u8()
+                        .ok_or_else(|| PdfPagesError::InvalidExtGStateEntryValue {
+                            entry: "SMask.TR".into(),
+                            reason: "invalid output".into(),
+                        })?;
+                }
+                Some(Arc::new(table))
+            }
+        };
+        Ok(Self {
+            mask_type,
+            shape,
+            transfer,
+        })
     }
 }
 
@@ -85,6 +136,55 @@ mod tests {
                 ),
             ),
         ]))
+    }
+
+    #[test]
+    fn parses_inverting_mask_transfer_function() {
+        let mut dictionary = soft_mask_dictionary(7, "Form");
+        let function = StreamObject::new(
+            8,
+            0,
+            Dictionary::from_entries([
+                (b"FunctionType".as_slice(), ObjectVariant::Integer(4)),
+                (
+                    b"Domain".as_slice(),
+                    ObjectVariant::Array(
+                        vec![ObjectVariant::Integer(0), ObjectVariant::Integer(1)].into(),
+                    ),
+                ),
+                (
+                    b"Range".as_slice(),
+                    ObjectVariant::Array(
+                        vec![ObjectVariant::Integer(0), ObjectVariant::Integer(1)].into(),
+                    ),
+                ),
+            ]),
+            b"{1 exch sub}".to_vec(),
+        );
+        dictionary
+            .dictionary
+            .insert(b"TR".to_vec(), ObjectVariant::Stream(function));
+        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let mask = reader
+            .read::<SoftMask>(&ObjectVariant::Dictionary(dictionary))
+            .unwrap();
+        let table = mask.transfer.unwrap();
+        for (input, output) in (0_u8..=255).zip(table.iter()) {
+            assert_eq!(*output, 255 - input);
+        }
+    }
+
+    #[test]
+    fn identity_mask_transfer_needs_no_table() {
+        let mut dictionary = soft_mask_dictionary(7, "Form");
+        dictionary
+            .dictionary
+            .insert(b"TR".to_vec(), ObjectVariant::name_from_bytes(b"Identity"));
+        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let mask = reader
+            .read::<SoftMask>(&ObjectVariant::Dictionary(dictionary))
+            .unwrap();
+        assert!(mask.transfer.is_none());
     }
 
     #[test]

@@ -9,7 +9,6 @@ bytes = "1.10.1"
 num-traits = "0.2.19"
 thiserror = "2.0.12"
 flate2 = "1.1.1"
-jpeg2k = "0.10.1"
 image = { version = "0.25.9", default-features = false, features = ["jpeg"] }
 pdf-ccitt = { path = "../pdf-ccitt" }
 pdf-jbig2 = { path = "../pdf-jbig2" }
@@ -18,3 +17,6 @@ pdf-utils = { path = "../pdf-utils" }
 
 [lints]
 workspace = true
+
+[target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
+jpeg2k = "0.10.1"

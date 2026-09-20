@@ -133,14 +133,10 @@ fn parse_subsections(
     }
 
     Ok(index_values
-        .chunks_exact(2)
-        .filter_map(|pair| match pair {
-            [start, count] => Some(XrefSubsection {
-                start: *start,
-                count: *count,
-            }),
-            _ => None,
-        })
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&[start, count]| XrefSubsection { start, count })
         .collect())
 }
 

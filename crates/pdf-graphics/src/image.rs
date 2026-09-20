@@ -3,7 +3,7 @@ use bytes::Bytes;
 use crate::PixelFormat;
 
 /// Represents render-ready raster image pixels.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Image {
     /// Shared pixel data.
     pub data: Bytes,
@@ -16,6 +16,28 @@ pub struct Image {
 }
 
 impl Image {
+    /// Returns the packed RGBA8 byte count for this image's dimensions.
+    ///
+    /// Returns `None` for empty dimensions or if the byte count overflows `usize`.
+    pub fn rgba_byte_size(&self) -> Option<usize> {
+        if self.width == 0 || self.height == 0 {
+            return None;
+        }
+        self.width.checked_mul(self.height)?.checked_mul(4)
+    }
+
+    /// Returns the image dimensions.
+    ///
+    /// The method converts the declared width and height into the `u32`
+    /// coordinate range expected by browser canvas APIs. It is a portable
+    /// capability on the image model; callers still perform buffer and storage
+    /// validation separately where that crate-specific context is needed.
+    pub fn dimensions(&self) -> Option<[u32; 2]> {
+        let width = u32::try_from(self.width).ok()?;
+        let height = u32::try_from(self.height).ok()?;
+        Some([width, height])
+    }
+
     /// Creates a render-ready image from decoded component samples.
     ///
     /// Single-component images without a soft mask retain their grayscale
@@ -110,11 +132,13 @@ impl Image {
         let available_pixels = image_data
             .len()
             .checked_div(num_color_components)
-            .map_or(0, std::convert::identity);
+            .unwrap_or(0);
         let num_pixels = declared_pixels.min(available_pixels);
         let mut out = vec![0; num_pixels.saturating_mul(4)];
         let mut pixels = out
-            .chunks_exact_mut(4)
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
             .zip(image_data.chunks_exact(num_color_components));
 
         if let Some(mask) = soft_mask {
@@ -182,7 +206,7 @@ impl Image {
         let key = 255u16.saturating_sub(u16::from(key));
         let channel = component.saturating_mul(key) / 255;
 
-        u8::try_from(channel).map_or(u8::MAX, std::convert::identity)
+        u8::try_from(channel).unwrap_or(u8::MAX)
     }
 
     /// Appends a best-effort RGBA pixel for unsupported component counts.

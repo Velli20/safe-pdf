@@ -822,8 +822,6 @@ dependencies = [
  "gl",
  "glutin",
  "glutin-winit",
- "pdf-annotation-form",
- "pdf-annotations",
  "pdf-canvas",
  "pdf-content-stream",
  "pdf-document",
@@ -837,6 +835,7 @@ dependencies = [
  "pdf-resources",
  "pdf-tokenizer",
  "raw-window-handle",
+ "serde_json",
  "skia-safe",
  "thiserror 2.0.12",
  "wgpu",
@@ -1544,6 +1543,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "minicov"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3aa3aa12b448ac225b3102217d1ac5cc717908f02722926524b0599c933c7a0"
+dependencies = [
+ "cc",
+ "walkdir",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2070,45 +2079,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
-name = "pdf-annotation-form"
-version = "0.1.0"
-dependencies = [
- "pdf-annotation-types",
- "pdf-canvas",
- "pdf-content-stream",
- "pdf-content-stream-operators",
- "pdf-document",
- "pdf-font",
- "pdf-graphics",
- "pdf-resources",
- "pdf-text-engine",
- "thiserror 2.0.12",
-]
-
-[[package]]
-name = "pdf-annotation-types"
+name = "pdf-annotation-core"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.9.1",
  "num-traits",
- "pdf-content-stream",
  "pdf-graphics",
  "pdf-object-reader",
- "pdf-resources",
+ "serde",
+ "serde_json",
  "thiserror 2.0.12",
-]
-
-[[package]]
-name = "pdf-annotations"
-version = "0.1.0"
-dependencies = [
- "pdf-annotation-types",
- "pdf-canvas",
- "pdf-document",
- "pdf-font",
- "pdf-graphics",
- "pdf-text-engine",
- "thiserror 2.0.12",
+ "ts-rs",
 ]
 
 [[package]]
@@ -2117,6 +2098,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "criterion",
+ "num-traits",
  "pdf-cmap",
  "pdf-color-space",
  "pdf-content-stream",
@@ -2209,7 +2191,7 @@ dependencies = [
  "aes",
  "cbc",
  "md-5",
- "pdf-annotation-types",
+ "pdf-annotation-core",
  "pdf-color-space",
  "pdf-content-stream",
  "pdf-graphics",
@@ -2218,6 +2200,7 @@ dependencies = [
  "pdf-parser",
  "pdf-resources",
  "rc4",
+ "serde",
  "sha2",
  "stringprep",
  "thiserror 2.0.12",
@@ -2279,7 +2262,9 @@ dependencies = [
  "criterion",
  "num-derive",
  "num-traits",
+ "serde",
  "thiserror 2.0.12",
+ "ts-rs",
 ]
 
 [[package]]
@@ -2298,12 +2283,31 @@ dependencies = [
 name = "pdf-graphics-skia"
 version = "0.1.0"
 dependencies = [
+ "num-traits",
  "pdf-canvas",
  "pdf-document",
  "pdf-graphics",
+ "pdf-image",
  "pdf-shading",
+ "pdf-text-engine",
  "skia-safe",
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "pdf-graphics-web"
+version = "0.1.0"
+dependencies = [
+ "js-sys",
+ "num-traits",
+ "pdf-canvas",
+ "pdf-graphics",
+ "pdf-image",
+ "pdf-shading",
+ "thiserror 2.0.12",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
+ "web-sys",
 ]
 
 [[package]]
@@ -2352,6 +2356,7 @@ dependencies = [
  "bytes",
  "num-traits",
  "pdf-graphics",
+ "serde",
  "thiserror 2.0.12",
 ]
 
@@ -2380,7 +2385,6 @@ dependencies = [
 name = "pdf-renderer"
 version = "0.1.0"
 dependencies = [
- "pdf-annotations",
  "pdf-canvas",
  "pdf-cmap",
  "pdf-content-stream",
@@ -2450,6 +2454,28 @@ name = "pdf-utils"
 version = "0.1.0"
 dependencies = [
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "pdf-web"
+version = "0.1.0"
+dependencies = [
+ "num-traits",
+ "pdf-annotation-core",
+ "pdf-canvas",
+ "pdf-document",
+ "pdf-font",
+ "pdf-graphics",
+ "pdf-graphics-web",
+ "pdf-renderer",
+ "pdf-text-engine",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12",
+ "ts-rs",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
+ "web-sys",
 ]
 
 [[package]]
@@ -3305,6 +3331,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e672c95779cf947c5311f83787af4fa8fffd12fb27e4993211a84bdfd9610f9c"
 
 [[package]]
+name = "ts-rs"
+version = "12.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "756050066659291d47a554a9f558125db17428b073c5ffce1daf5dcb0f7231d8"
+dependencies = [
+ "thiserror 2.0.12",
+ "ts-rs-macros",
+]
+
+[[package]]
+name = "ts-rs-macros"
+version = "12.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38d90eea51bc7988ef9e674bf80a85ba6804739e535e9cab48e4bb34a8b652aa"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+ "termcolor",
+]
+
+[[package]]
 name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3485,6 +3533,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasm-bindgen-test"
+version = "0.3.50"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66c8d5e33ca3b6d9fa3b4676d774c5778031d27a578c2b007f905acf816152c3"
+dependencies = [
+ "js-sys",
+ "minicov",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-bindgen-test-macro",
+]
+
+[[package]]
+name = "wasm-bindgen-test-macro"
+version = "0.3.50"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "17d5042cc5fa009658f9a7333ef24291b1291a25b6382dd68862a7f3b969f69b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "wayland-backend"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3591,6 +3663,26 @@ dependencies = [
  "log",
  "once_cell",
  "pkg-config",
+]
+
+[[package]]
+name = "web-canvas-example"
+version = "0.1.0"
+dependencies = [
+ "num-traits",
+ "pdf-annotation-core",
+ "pdf-canvas",
+ "pdf-document",
+ "pdf-font",
+ "pdf-graphics",
+ "pdf-graphics-web",
+ "pdf-renderer",
+ "pdf-shading",
+ "pdf-text-engine",
+ "pdf-web",
+ "serde_json",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -4269,6 +4361,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "pdf-annotation-core",
+ "pdf-web",
+ "ts-rs",
 ]
 
 [[package]]

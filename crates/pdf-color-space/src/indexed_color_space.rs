@@ -55,10 +55,12 @@ fn extract_lookup_table(
     objects: &dyn ObjectResolver,
     lookup: &ObjectVariant,
 ) -> Result<Bytes, ColorSpaceError> {
-    if let Ok(data) = lookup.try_bytes(objects) {
-        return Ok(Bytes::copy_from_slice(data));
+    // Streams must be matched first: `try_bytes` also accepts streams but
+    // exposes their raw (possibly still encoded) bytes.
+    if let Ok(stream) = lookup.try_stream(objects) {
+        return Ok(stream.shared_data());
     }
-    Ok(lookup.try_stream(objects)?.shared_data())
+    Ok(Bytes::copy_from_slice(lookup.try_bytes(objects)?))
 }
 
 /// Converts a raw palette entry (byte slice) to a [`Color`] using the given base color space.

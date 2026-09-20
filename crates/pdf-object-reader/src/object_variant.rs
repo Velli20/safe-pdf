@@ -292,6 +292,7 @@ impl ObjectVariant {
 
         match object {
             ObjectVariant::String(value) => Ok(value.as_bytes()),
+            ObjectVariant::Stream(stream) => Ok(stream.raw_data()),
             _ => Err(ObjectError::TypeMismatch("Bytes", object.name())),
         }
     }

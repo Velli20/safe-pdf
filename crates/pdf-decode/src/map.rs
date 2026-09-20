@@ -45,13 +45,7 @@ impl DecodeMap {
         }
 
         let mut ranges = Vec::with_capacity(component_count);
-        for pair in values.chunks_exact(2) {
-            let [min, max] = pair else {
-                return Err(DecodeError::InvalidDecodeLength {
-                    expected_values,
-                    actual_values: values.len(),
-                });
-            };
+        for [min, max] in values.as_chunks::<2>().0 {
             ranges.push(DecodeRange::new(
                 min.try_number::<f32>(objects)?,
                 max.try_number::<f32>(objects)?,

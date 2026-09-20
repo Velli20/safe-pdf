@@ -1,0 +1,22 @@
+[package]
+name = "pdf-graphics-web"
+version = "0.1.0"
+edition = "2024"
+description = "Canvas 2D drawing and bounded browser rendering resources"
+
+[lints]
+workspace = true
+
+[dependencies]
+pdf-canvas = { path = "../pdf-canvas" }
+pdf-graphics = { path = "../pdf-graphics" }
+pdf-image = { path = "../pdf-image" }
+pdf-shading = { path = "../pdf-shading" }
+thiserror = "2.0.12"
+num-traits = "0.2"
+js-sys = "=0.3.77"
+wasm-bindgen = "=0.2.100"
+web-sys = { version = "=0.3.77", features = ["Window", "Document", "Element", "HtmlCanvasElement", "CanvasRenderingContext2d", "Path2d", "CanvasGradient", "CanvasPattern", "ImageData", "CanvasWindingRule", "SvgMatrix", "SvgsvgElement"] }
+
+[dev-dependencies]
+wasm-bindgen-test = "=0.3.50"

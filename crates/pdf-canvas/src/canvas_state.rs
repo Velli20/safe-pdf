@@ -1,9 +1,10 @@
+//! PDF graphics-state values retained across saved states.
 use pdf_color_space::color_space::ColorSpace;
 use pdf_graphics::{CanvasPaint, pdf_path::PdfPath, transform::Transform};
 use pdf_resources::{pattern::Pattern, resources::Resources};
 use std::sync::Arc;
 
-use crate::text_state::TextState;
+use crate::{mask_layer::MaskLayer, text_state::TextState};
 
 /// Represents the complete graphics state for a PDF canvas, including
 /// transformation, color, stroke, text, and pattern information.
@@ -11,6 +12,10 @@ use crate::text_state::TextState;
 pub(crate) struct CanvasState {
     /// The current transformation matrix, mapping user space to device space.
     pub transform: Transform,
+    /// Default user-space mapping of the current content stream, before its `cm` operators.
+    pub pattern_parent_transform: Transform,
+    /// Selected soft mask and the device transform captured when it was selected.
+    pub soft_mask: Option<MaskLayer>,
     /// Paint properties used for paths and text glyphs.
     pub paint: CanvasPaint,
     /// The current text state, encapsulating font, size, and text matrix.
@@ -48,9 +53,12 @@ impl CanvasState {
 }
 
 impl Default for CanvasState {
+    /// Creates the initial state with the documented rendering defaults.
     fn default() -> Self {
         Self {
             transform: Transform::identity(),
+            pattern_parent_transform: Transform::identity(),
+            soft_mask: None,
             paint: CanvasPaint::default(),
             text_state: TextState::default(),
             clip_path: None,

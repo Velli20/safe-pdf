@@ -14,8 +14,26 @@ cargo fmt                                   # Format code
 cargo build --example skia --features skia  # Build Skia example
 cargo run --example skia --features skia -- examples/assets/webgl.pdf  # Run viewer
 cargo xtask emscripten --features skia-wasm # Build WASM target
+cargo xtask web-canvas --profile debug      # Fast build for the Canvas 2D web example
+cargo xtask web-canvas --profile debug --serve --port 8080 # Build and serve at http://127.0.0.1:8080
 cargo fuzz run parse_object                 # Fuzz the parser
 ```
+
+## Web Canvas Development
+
+`pdf-graphics-web` runs through the `web-canvas-example` WASM application in
+`examples/web-canvas`; it is not a native executable. The fast development loop is:
+
+```sh
+cargo xtask web-canvas --profile debug
+cargo xtask web-canvas --profile debug --serve --port 8080
+```
+
+The build compiles for `wasm32-unknown-unknown`, writes browser bindings to
+`examples/web-canvas/pkg/`, and copies the overlay fixture to
+`examples/web-canvas/sample.pdf`. The server serves that directory at
+`http://127.0.0.1:8080`; rerun the command after Rust changes to rebuild. It requires
+the `wasm-bindgen-cli` version pinned by the workspace (`wasm-bindgen --version`).
 
 ## Workspace Lint Rules (Critical)
 
@@ -65,4 +83,4 @@ Supporting crates:
 CI runs on push/PR to main (`.github/workflows/ci.yml`):
 1. `cargo check` + `cargo test` + `cargo clippy` + `cargo fmt --check`
 2. Minimal feature build (no optional features)
-3. WASM/Emscripten build
+3. Web Canvas (wasm-bindgen) build of `examples/web-canvas`, deployed to GitHub Pages on push to `main`

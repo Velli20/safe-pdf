@@ -3,11 +3,15 @@ name = "pdf-object-reader"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+serde = ["dep:serde"]
+
 [lints]
 workspace = true
 
 [dependencies]
 thiserror = "2.0.12"
+serde = { version = "1", features = ["derive"], optional = true }
 
 bytes = "1.10.1"
 num-traits = "0.2.19"

@@ -1,0 +1,31 @@
+[package]
+name = "pdf-web"
+version = "0.1.0"
+edition = "2024"
+description = "Browser PDF page orchestration, overlays, and interaction adapters"
+
+[lints]
+workspace = true
+
+[features]
+typescript = ["dep:ts-rs", "pdf-annotation-core/typescript"]
+
+[dependencies]
+ts-rs = { version = "12", optional = true }
+pdf-annotation-core = { path = "../pdf-annotation-core" }
+pdf-font = { path = "../pdf-font" }
+pdf-canvas = { path = "../pdf-canvas" }
+pdf-graphics = { path = "../pdf-graphics" }
+pdf-graphics-web = { path = "../pdf-graphics-web" }
+pdf-document = { path = "../pdf-document", features = ["serde"] }
+pdf-renderer = { path = "../pdf-renderer" }
+pdf-text-engine = { path = "../pdf-text-engine" }
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2.0.12"
+num-traits = "0.2"
+wasm-bindgen = "=0.2.100"
+
+[dev-dependencies]
+wasm-bindgen-test = "=0.3.50"
+web-sys = { version = "=0.3.77", features = ["Window", "Document", "Element", "HtmlCanvasElement"] }

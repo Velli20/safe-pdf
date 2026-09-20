@@ -1,3 +1,4 @@
+use crate::CanvasPath;
 use crate::canvas_backend::CanvasBackend;
 use crate::error::PdfCanvasError;
 use crate::pdf_canvas::PdfCanvas;
@@ -59,8 +60,10 @@ impl<B: CanvasBackend> TextObjectOps for PdfCanvas<'_, B> {
         // Apply any glyph outlines accumulated for clip-mode text rendering (modes 4–7).
         // Per ISO 32000 §9.3.6, the clip path is set at the end of the text object.
         if let Some(clip_path) = self.current_state_mut()?.pending_text_clip.take() {
-            self.canvas
-                .set_clip_region(&clip_path, pdf_graphics::PathFillType::Winding)?;
+            self.canvas.set_clip_region(
+                &CanvasPath::device(&clip_path),
+                pdf_graphics::PathFillType::Winding,
+            )?;
             self.current_state_mut()?.clip_path = Some(clip_path);
         }
         Ok(())
@@ -169,62 +172,36 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         path: &std::sync::Arc<PdfPath>,
         transform: &Transform,
     ) -> Result<(), PdfCanvasError> {
-        match self.current_state()?.paint.rendering_mode {
+        let mode = self.current_state()?.paint.rendering_mode;
+        if matches!(mode, TextRenderingMode::Invisible) {
+            return Ok(());
+        }
+        let path = CanvasPath::shared(std::sync::Arc::clone(path), *transform)?;
+        match mode {
             TextRenderingMode::Fill => {
-                self.draw_transformed_path(path, transform, PaintMode::Fill, PathFillType::Winding)
+                self.draw_path(&path, PaintMode::Fill, PathFillType::Winding)
             }
-            TextRenderingMode::Stroke => self.draw_transformed_path(
-                path,
-                transform,
-                PaintMode::Stroke,
-                PathFillType::Winding,
-            ),
-            TextRenderingMode::FillAndStroke => self.draw_transformed_path(
-                path,
-                transform,
-                PaintMode::FillAndStroke,
-                PathFillType::Winding,
-            ),
+            TextRenderingMode::Stroke => {
+                self.draw_path(&path, PaintMode::Stroke, PathFillType::Winding)
+            }
+            TextRenderingMode::FillAndStroke => {
+                self.draw_path(&path, PaintMode::FillAndStroke, PathFillType::Winding)
+            }
             TextRenderingMode::Invisible => Ok(()),
             TextRenderingMode::FillAndClip => {
-                self.draw_transformed_path(
-                    path,
-                    transform,
-                    PaintMode::Fill,
-                    PathFillType::Winding,
-                )?;
-                self.add_transformed_text_clip(path, transform)
+                self.draw_path(&path, PaintMode::Fill, PathFillType::Winding)?;
+                self.add_to_text_clip(&path.to_pdf_path()?)
             }
             TextRenderingMode::StrokeAndClip => {
-                self.draw_transformed_path(
-                    path,
-                    transform,
-                    PaintMode::Stroke,
-                    PathFillType::Winding,
-                )?;
-                self.add_transformed_text_clip(path, transform)
+                self.draw_path(&path, PaintMode::Stroke, PathFillType::Winding)?;
+                self.add_to_text_clip(&path.to_pdf_path()?)
             }
             TextRenderingMode::FillStrokeAndClip => {
-                self.draw_transformed_path(
-                    path,
-                    transform,
-                    PaintMode::FillAndStroke,
-                    PathFillType::Winding,
-                )?;
-                self.add_transformed_text_clip(path, transform)
+                self.draw_path(&path, PaintMode::FillAndStroke, PathFillType::Winding)?;
+                self.add_to_text_clip(&path.to_pdf_path()?)
             }
-            TextRenderingMode::Clip => self.add_transformed_text_clip(path, transform),
+            TextRenderingMode::Clip => self.add_to_text_clip(&path.to_pdf_path()?),
         }
-    }
-
-    fn add_transformed_text_clip(
-        &mut self,
-        path: &std::sync::Arc<PdfPath>,
-        transform: &Transform,
-    ) -> Result<(), PdfCanvasError> {
-        let mut transformed = path.as_ref().clone();
-        transformed.transform(transform);
-        self.add_to_text_clip(&transformed)
     }
 
     /// Executes one opaque PDF Type 3 character procedure.
@@ -282,8 +259,8 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             resources,
             Some(&mut filter),
         );
-        self.restore();
-        result
+        let restore_result = self.restore();
+        result.and(restore_result)
     }
 
     fn render_text_items(&mut self, items: &[PdfTextItem]) -> Result<(), PdfCanvasError> {

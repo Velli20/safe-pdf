@@ -2,6 +2,12 @@ use crate::{point::Point, transform::Transform};
 
 /// An axis-aligned rectangle whose edge coordinate type defaults to `f32`.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "typescript",
+    ts(export_to = "annotation_contract.ts", concrete(T = f64))
+)]
 pub struct Rect<T = f32> {
     /// The left edge of the rectangle.
     pub left: T,
@@ -68,9 +74,108 @@ impl Rect<f32> {
             && point.y <= rect.bottom
     }
 
+    /// Returns whether a point lies inside or on this rectangle's boundary.
+    pub fn contains_point(&self, x: f32, y: f32) -> bool {
+        let rect = self.normalized();
+        x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+    }
+
+    /// Returns the Euclidean distance from a point to this rectangle.
+    pub fn distance(&self, p: Point) -> f32 {
+        (self.left - p.x)
+            .max(0.0)
+            .max(p.x - self.right)
+            .hypot((self.top - p.y).max(0.0).max(p.y - self.bottom))
+    }
+
     /// Returns the scale transform produced by dividing this rectangle's size by another.
     pub fn scale(&self, other: &Self) -> Transform {
         Transform::from_scale(self.width() / other.width(), self.height() / other.height())
+    }
+}
+
+impl Rect<f64> {
+    /// Orders edges so `left` and `top` are the minimum x and y coordinates.
+    pub fn normalized(&self) -> Self {
+        Self {
+            left: self.left.min(self.right),
+            top: self.top.min(self.bottom),
+            right: self.left.max(self.right),
+            bottom: self.top.max(self.bottom),
+        }
+    }
+
+    /// Returns the horizontal extent.
+    pub fn width(&self) -> f64 {
+        self.right - self.left
+    }
+
+    /// Returns the vertical extent toward increasing y.
+    pub fn height(&self) -> f64 {
+        self.bottom - self.top
+    }
+
+    /// Smallest rectangle containing both, assuming both are normalized.
+    pub fn union(&self, other: &Self) -> Self {
+        Self {
+            left: self.left.min(other.left),
+            top: self.top.min(other.top),
+            right: self.right.max(other.right),
+            bottom: self.bottom.max(other.bottom),
+        }
+    }
+
+    /// Moves all edges by the given displacement without normalizing or validating.
+    pub fn translate(&mut self, dx: f64, dy: f64) {
+        self.left += dx;
+        self.right += dx;
+        self.top += dy;
+        self.bottom += dy;
+    }
+
+    /// Returns whether this rectangle has finite edges and finite, positive dimensions.
+    pub fn is_valid(&self) -> bool {
+        [
+            self.left,
+            self.top,
+            self.right,
+            self.bottom,
+            self.width(),
+            self.height(),
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+            && self.width() > 0.0
+            && self.height() > 0.0
+    }
+
+    /// Clamps a displacement so this normalized rectangle stays inside `page` on each axis.
+    /// Oversized rectangles are frozen on that axis; the other axis can still move.
+    ///
+    /// Returns `None` when either rectangle or the displacement is invalid, or when the
+    /// displacement limits overflow.
+    pub fn clamp_translation(&self, delta: Point<f64>, page: &Self) -> Option<Point<f64>> {
+        if !self.is_valid() || !page.is_valid() || !delta.is_finite() {
+            return None;
+        }
+        let clamp = |start: f64, end: f64, page_start: f64, page_end: f64, delta: f64| {
+            if end - start > page_end - page_start {
+                return Some(0.0);
+            }
+            let min = page_start - start;
+            let max = page_end - end;
+            if !min.is_finite() || !max.is_finite() || min > max {
+                return None;
+            }
+            Some(delta.clamp(min, max))
+        };
+        let result = Point {
+            x: clamp(self.left, self.right, page.left, page.right, delta.x)?,
+            y: clamp(self.top, self.bottom, page.top, page.bottom, delta.y)?,
+        };
+        let mut moved = *self;
+        moved.translate(result.x, result.y);
+        moved.is_valid().then_some(result)
     }
 }
 
@@ -119,8 +224,22 @@ mod tests {
     use super::Rect;
 
     #[test]
-    fn normalized_orders_inverted_edges() {
+    fn contains_point_checks_axis_aligned_coordinates() {
         let rect = Rect {
+            left: 0.0,
+            top: 0.0,
+            right: 10.0,
+            bottom: 10.0,
+        };
+
+        assert!(rect.contains_point(5.0, 5.0));
+        assert!(rect.contains_point(0.0, 0.0));
+        assert!(!rect.contains_point(11.0, 5.0));
+    }
+
+    #[test]
+    fn normalized_orders_inverted_edges() {
+        let rect: Rect = Rect {
             left: 10.0,
             top: 20.0,
             right: -5.0,
@@ -168,6 +287,13 @@ mod tests {
         assert!(rect.contains(Point::new(10.0, 20.0)));
         assert!(!rect.contains(Point::new(-1.0, 10.0)));
         assert!(!rect.contains(Point::new(5.0, 21.0)));
+    }
+
+    #[test]
+    fn distance_computes_distance_from_point_to_rectangle() {
+        let rect = Rect::new(10.0, 10.0);
+        assert_eq!(rect.distance(Point::new(0.0, 0.0)), 0.0);
+        assert_eq!(rect.distance(Point::new(20.0, 20.0)), 14.1421356);
     }
 
     #[test]

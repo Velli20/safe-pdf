@@ -1,3 +1,4 @@
+//! PDF graphics-state selection and save/restore operators.
 use std::sync::Arc;
 
 use pdf_content_stream_operators::pdf_operator_backend::GraphicsStateOps;
@@ -11,15 +12,17 @@ use crate::{
 
 impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
     type ErrorType = PdfCanvasError;
+    /// Saves PDF graphics state together with the corresponding backend state.
     fn save_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
         self.save()
     }
 
+    /// Restores PDF graphics state and its corresponding backend save.
     fn restore_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
-        self.restore();
-        Ok(())
+        self.restore()
     }
 
+    /// Concatenates the supplied matrix with the current PDF transformation.
     fn concat_matrix(&mut self, transform: &Transform) -> Result<(), Self::ErrorType> {
         // PDF 'cm' operator: update the current transformation matrix (CTM) by
         // concatenating the provided matrix [a b c d e f] onto the current CTM.
@@ -30,26 +33,31 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
         Ok(())
     }
 
+    /// Updates the width used for subsequent path strokes.
     fn set_line_width(&mut self, width: f32) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.paint.line_width = width;
         Ok(())
     }
 
+    /// Updates the end-cap style used for subsequent path strokes.
     fn set_line_cap(&mut self, cap_style: LineCap) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.paint.line_cap = cap_style;
         Ok(())
     }
 
+    /// Updates the corner-join style used for subsequent path strokes.
     fn set_line_join(&mut self, line_join: LineJoin) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.paint.line_join = line_join;
         Ok(())
     }
 
+    /// Updates the maximum miter length relative to stroke width.
     fn set_miter_limit(&mut self, miter_limit: f32) -> Result<(), Self::ErrorType> {
         self.current_state_mut()?.paint.miter_limit = miter_limit;
         Ok(())
     }
 
+    /// Validates and stores dash intervals and their starting phase.
     fn set_dash_pattern(
         &mut self,
         dash_array: &[f32],
@@ -59,14 +67,17 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
         Ok(())
     }
 
+    /// Handles the rendering-intent operator; color conversion currently uses its default intent.
     fn set_rendering_intent(&mut self, _intent: &[u8]) -> Result<(), Self::ErrorType> {
         Ok(())
     }
 
+    /// Handles the flatness operator; path approximation remains backend-controlled.
     fn set_flatness_tolerance(&mut self, _tolerance: f32) -> Result<(), Self::ErrorType> {
         Ok(())
     }
 
+    /// Applies extended graphics-state entries, preparing soft-mask recordings when selected.
     fn set_graphics_state_from_dict(&mut self, dict_name: &[u8]) -> Result<(), Self::ErrorType> {
         let resources = self
             .current_state()?
@@ -168,19 +179,15 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
 
                         let transform = self.current_state()?.transform;
 
-                        let arc = Arc::new(recording_canvas);
-
-                        // Enable the mask on the main canvas. Subsequent drawing operations
-                        // will be modulated by this mask.
-                        self.canvas
-                            .begin_mask_layer(&arc, &transform, smask.mask_type.clone())?;
-
-                        // Store the mask in the current canvas state to be used until it's finished.
-                        self.mask = Some((Arc::clone(&arc), smask.mask_type.clone(), transform));
-                    } else if let Some((mask, mask_type, transform)) = self.mask.take() {
-                        // This branch handles the case where `/SMask` is set to `/None` in the `ExtGState`,
-                        // which signals the end of the current soft mask application.
-                        self.canvas.end_mask_layer(&mask, &transform, mask_type)?;
+                        self.current_state_mut()?.soft_mask =
+                            Some(crate::mask_layer::MaskLayer::new(
+                                Arc::new(recording_canvas),
+                                transform,
+                                smask.mask_type.clone(),
+                                smask.transfer.clone(),
+                            )?);
+                    } else {
+                        self.current_state_mut()?.soft_mask = None;
                     }
                 }
                 ExternalGraphicsStateKey::StrokingAlpha(alpha) => {

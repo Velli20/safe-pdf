@@ -94,11 +94,14 @@ fn image_from_rgba(data: Bytes, width: usize, height: usize, soft_mask: Option<&
 
     let mut rgba = data.get(..byte_len).map_or_else(Vec::new, <[u8]>::to_vec);
     if let Some(mask) = soft_mask {
-        for (pixel, mask_alpha) in rgba.chunks_exact_mut(4).zip(soft_mask_alphas(mask)) {
-            if let [_, _, _, alpha] = pixel {
-                let combined = u16::from(*alpha).saturating_mul(u16::from(mask_alpha)) / 255;
-                *alpha = u8::try_from(combined).unwrap_or(u8::MAX);
-            }
+        for ([_, _, _, alpha], mask_alpha) in rgba
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(soft_mask_alphas(mask))
+        {
+            let combined = u16::from(*alpha).saturating_mul(u16::from(mask_alpha)) / 255;
+            *alpha = u8::try_from(combined).unwrap_or(u8::MAX);
         }
     }
     Image {
@@ -109,19 +112,18 @@ fn image_from_rgba(data: Bytes, width: usize, height: usize, soft_mask: Option<&
     }
 }
 
-fn soft_mask_alphas(mask: &Image) -> Box<dyn Iterator<Item = u8> + '_> {
-    match mask.pixel_format {
-        pdf_graphics::PixelFormat::Gray8 => Box::new(mask.data.iter().copied()),
-        pdf_graphics::PixelFormat::RGBA8888 => {
-            Box::new(mask.data.chunks_exact(4).filter_map(|pixel| match pixel {
-                [gray, _, _, alpha] => {
-                    let combined = u16::from(*gray).saturating_mul(u16::from(*alpha)) / 255;
-                    Some(u8::try_from(combined).unwrap_or(u8::MAX))
-                }
-                _ => None,
-            }))
-        }
-    }
+/// Samples soft-mask coverage without requiring a complete declared image buffer.
+///
+/// Gray8 supplies coverage directly; RGBA combines the red channel with alpha.
+/// Incomplete RGBA pixels are ignored. The caller zips these values with output
+/// pixels, leaving destination alpha unchanged when the mask ends early.
+fn soft_mask_alphas(mask: &Image) -> impl Iterator<Item = u8> + '_ {
+    crate::raster::rgba_pixels(mask).map(|[gray, _, _, alpha]| {
+        // Expanded Gray8 has alpha 255, so this preserves its original sample.
+        // RGBA masks retain integer truncation rather than luminosity weighting.
+        let combined = u16::from(gray).saturating_mul(u16::from(alpha)) / 255;
+        u8::try_from(combined).unwrap_or(u8::MAX)
+    })
 }
 
 #[cfg(test)]

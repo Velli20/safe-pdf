@@ -8,7 +8,10 @@ mod image;
 pub mod mask_mode;
 pub mod pdf_path;
 pub mod point;
+pub mod polyline;
+pub mod quad;
 pub mod rect;
+pub mod size;
 pub mod transform;
 
 pub use blend_mode::BlendMode;
@@ -18,6 +21,7 @@ pub use dash_pattern::DashPattern;
 pub use image::Image;
 pub use mask_mode::MaskMode;
 use num_derive::FromPrimitive;
+pub use size::Size;
 
 /// Specifies the shape to be used at the end of open subpaths when they are stroked.
 #[derive(Debug, Clone, Copy, PartialEq, FromPrimitive)]

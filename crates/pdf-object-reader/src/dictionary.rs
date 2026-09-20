@@ -50,6 +50,23 @@ impl Dictionary {
         self.dictionary.get(key)
     }
 
+    /// Iterates the entries in key order, yielding each PDF Name key as a byte slice.
+    pub fn iter(&self) -> impl Iterator<Item = (&[u8], &ObjectVariant)> {
+        self.dictionary
+            .iter()
+            .map(|(key, value)| (key.as_slice(), value))
+    }
+
+    /// Returns the number of entries.
+    pub fn len(&self) -> usize {
+        self.dictionary.len()
+    }
+
+    /// Returns `true` when the dictionary has no entries.
+    pub fn is_empty(&self) -> bool {
+        self.dictionary.is_empty()
+    }
+
     /// Converts the value associated with the given key when it is present.
     ///
     /// # Parameters

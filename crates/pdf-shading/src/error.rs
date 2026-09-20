@@ -45,3 +45,14 @@ impl From<PdfShadingError> for pdf_object_reader::ObjectReadError {
         }
     }
 }
+
+/// Failures while sampling a shading paint into pixels.
+#[derive(Debug, Error)]
+pub enum ShadingRasterError {
+    /// Geometry, gradient stops, dimensions, or raster data are invalid.
+    #[error("invalid shading raster input: {0}")]
+    InvalidInput(&'static str),
+    /// The requested buffer size overflows or its allocation fails.
+    #[error("shading raster allocation limit exceeded")]
+    ResourceLimit,
+}

@@ -14,18 +14,11 @@ impl From<&[u8]> for BigEndianU16Units {
     /// so callers can apply the malformed-input policy required by their PDF
     /// context.
     fn from(bytes: &[u8]) -> Self {
-        let mut units = Vec::with_capacity(bytes.len() / 2);
-        let mut chunks = bytes.chunks_exact(2);
-
-        for pair in &mut chunks {
-            if let [high, low] = pair {
-                units.push(u16::from_be_bytes([*high, *low]));
-            }
-        }
+        let (pairs, remainder) = bytes.as_chunks::<2>();
 
         Self {
-            units,
-            trailing_byte: chunks.remainder().first().copied(),
+            units: pairs.iter().map(|&pair| u16::from_be_bytes(pair)).collect(),
+            trailing_byte: remainder.first().copied(),
         }
     }
 }

@@ -1,4 +1,3 @@
-use pdf_annotations::{AnnotationRenderError, AnnotationRenderer};
 use pdf_canvas::{
     canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
     recording_canvas::RecordingCanvas,
@@ -8,17 +7,37 @@ use pdf_text_engine::FontSystem;
 use std::sync::Arc;
 use thiserror::Error;
 
+mod document_text_selection;
 pub mod page_cache;
 pub mod text_selection;
 
 pub use page_cache::PageRecordingCache;
-pub use text_selection::{PageTextLayout, TextGlyph};
+pub use text_selection::{
+    DocumentTextSelection, PageTextLayout, SelectionBatch, SelectionPoint, SelectionSpan,
+    TextGlyph, TextHit, TextSelection, TextSelectionError, TextSelectionResult,
+};
+
+/// Renders page content and captures text using a shared viewport, excluding annotations.
+/// Backend lifecycle and any separate annotation pass remain the caller's responsibility.
+pub fn render_page_content_with_text_layout<B: CanvasBackend>(
+    backend: &mut B,
+    page: &pdf_document::page::PdfPage,
+    viewport: &pdf_canvas::PageViewport,
+    fonts: Arc<FontSystem>,
+) -> Result<PageTextLayout, PdfCanvasError> {
+    let mut canvas =
+        PdfCanvas::new_with_viewport(backend, page, viewport, fonts)?.with_text_recording();
+    if let Some(content) = &page.contents {
+        canvas.render_content_stream(content, None, None, page.resources.clone(), None)?;
+    }
+    Ok(PageTextLayout::new(canvas.take_text_glyphs()))
+}
 
 /// A page's drawing commands and selectable text captured in one render pass.
 #[derive(Clone)]
 pub struct RecordedPage {
     recording: RecordingCanvas,
-    text_layout: PageTextLayout,
+    text_layout: Arc<PageTextLayout>,
 }
 
 impl RecordedPage {
@@ -32,13 +51,18 @@ impl RecordedPage {
         &self.text_layout
     }
 
+    /// Shares the text layout with a selection controller without copying glyphs.
+    pub fn text_layout_arc(&self) -> Arc<PageTextLayout> {
+        Arc::clone(&self.text_layout)
+    }
+
     /// Replays this page onto a concrete backend.
     pub fn replay<B: CanvasBackend>(&self, backend: &mut B) -> Result<(), PdfCanvasError> {
         self.recording.replay(backend)
     }
 
     /// Consumes this page and returns its drawing commands and text layout.
-    pub fn into_parts(self) -> (RecordingCanvas, PageTextLayout) {
+    pub fn into_parts(self) -> (RecordingCanvas, Arc<PageTextLayout>) {
         (self.recording, self.text_layout)
     }
 }
@@ -50,8 +74,6 @@ pub enum PdfRendererError {
     PageNotFound(usize),
     #[error("PDF canvas error: {0}")]
     PdfCanvasError(#[from] pdf_canvas::error::PdfCanvasError),
-    #[error("Annotation render error: {0}")]
-    AnnotationRenderError(#[from] AnnotationRenderError),
 }
 
 /// Renders pages of a [`PdfDocument`] onto a user supplied [`CanvasBackend`].
@@ -95,7 +117,7 @@ impl PdfRenderer {
         self.document
     }
 
-    /// Renders a page onto the canvas backend.
+    /// Renders page content only; native annotations are presented separately.
     ///
     /// # Parameters
     ///
@@ -112,19 +134,10 @@ impl PdfRenderer {
     ) -> Result<(), PdfRendererError> {
         let page = self.page(page_index)?;
         {
-            let canvas = PdfCanvas::new(canvas_backend, page, None, Arc::clone(&self.font_system))?;
-            let mut annotation_renderer = AnnotationRenderer::new(canvas);
+            let mut canvas =
+                PdfCanvas::new(canvas_backend, page, None, Arc::clone(&self.font_system))?;
             if let Some(cs) = &page.contents {
-                annotation_renderer.canvas_mut().render_content_stream(
-                    cs,
-                    None,
-                    None,
-                    page.resources.clone(),
-                    None,
-                )?;
-            }
-            if let Some(annotations) = &page.annotations {
-                annotation_renderer.render_all(annotations)?;
+                canvas.render_content_stream(cs, None, None, page.resources.clone(), None)?;
             }
         }
         Ok(())
@@ -137,26 +150,16 @@ impl PdfRenderer {
         page_index: usize,
     ) -> Result<PageTextLayout, PdfRendererError> {
         let page = self.page(page_index)?;
-        let canvas = PdfCanvas::new(canvas_backend, page, None, Arc::clone(&self.font_system))?
+        let mut canvas = PdfCanvas::new(canvas_backend, page, None, Arc::clone(&self.font_system))?
             .with_text_recording();
-        let mut annotation_renderer = AnnotationRenderer::new(canvas);
         if let Some(cs) = &page.contents {
-            annotation_renderer.canvas_mut().render_content_stream(
-                cs,
-                None,
-                None,
-                page.resources.clone(),
-                None,
-            )?;
+            canvas.render_content_stream(cs, None, None, page.resources.clone(), None)?;
         }
-        let glyphs = annotation_renderer.canvas_mut().take_text_glyphs();
-        if let Some(annotations) = &page.annotations {
-            annotation_renderer.render_all(annotations)?;
-        }
+        let glyphs = canvas.take_text_glyphs();
         Ok(PageTextLayout::new(glyphs))
     }
 
-    /// Renders a PDF page into combined drawing and text recordings for caching.
+    /// Records page content and text for caching, excluding native annotations.
     ///
     /// Drawing commands and glyph bounds use the requested device dimensions;
     /// replay the result only onto a backend with the same dimensions.
@@ -169,27 +172,17 @@ impl PdfRenderer {
         let page = self.page(page_index)?;
         let mut recording = RecordingCanvas::new(width, height);
         let glyphs = {
-            let canvas = PdfCanvas::new(&mut recording, page, None, Arc::clone(&self.font_system))?
-                .with_text_recording();
-            let mut annotation_renderer = AnnotationRenderer::new(canvas);
+            let mut canvas =
+                PdfCanvas::new(&mut recording, page, None, Arc::clone(&self.font_system))?
+                    .with_text_recording();
             if let Some(cs) = &page.contents {
-                annotation_renderer.canvas_mut().render_content_stream(
-                    cs,
-                    None,
-                    None,
-                    page.resources.clone(),
-                    None,
-                )?;
+                canvas.render_content_stream(cs, None, None, page.resources.clone(), None)?;
             }
-            let glyphs = annotation_renderer.canvas_mut().take_text_glyphs();
-            if let Some(annotations) = &page.annotations {
-                annotation_renderer.render_all(annotations)?;
-            }
-            glyphs
+            canvas.take_text_glyphs()
         };
         Ok(RecordedPage {
             recording,
-            text_layout: PageTextLayout::new(glyphs),
+            text_layout: Arc::new(PageTextLayout::new(glyphs)),
         })
     }
 

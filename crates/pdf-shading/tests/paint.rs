@@ -34,30 +34,25 @@ fn builds_transformed_free_form_triangle_raster_paint() {
     let paint = build_shading_paint(&shading, Some(Transform::from_translate(2.0, 3.0)))
         .expect("free-form triangle mesh should build raster paint");
     assert!(matches!(paint, ShadingPaint::RasterImage { .. }));
-    let ShadingPaint::RasterImage {
-        pixels,
-        width,
-        height,
-        dest_rect,
-        transform,
-    } = paint
-    else {
+    let ShadingPaint::RasterImage { image, transform } = paint else {
         return;
     };
 
-    assert_eq!(width, 4);
-    assert_eq!(height, 4);
-    assert_eq!(dest_rect.left, 2.0);
-    assert_eq!(dest_rect.top, 3.0);
-    assert_eq!(dest_rect.right, 6.0);
-    assert_eq!(dest_rect.bottom, 7.0);
-    assert_eq!(transform, None);
+    assert_eq!(image.width, 4);
+    assert_eq!(image.height, 4);
+    assert_eq!(transform, Transform::from_translate(2.0, 3.0));
     assert!(
-        pixels
+        image
+            .data
             .chunks_exact(4)
             .any(|pixel| pixel.get(3) == Some(&u8::MAX))
     );
-    assert!(pixels.chunks_exact(4).any(|pixel| pixel == [0, 0, 0, 0]));
+    assert!(
+        image
+            .data
+            .chunks_exact(4)
+            .any(|pixel| pixel == [0, 0, 0, 0])
+    );
 }
 
 #[test]
@@ -91,14 +86,13 @@ fn free_form_triangle_mesh_falls_back_from_empty_bbox_to_geometry() {
 
     let paint =
         build_shading_paint(&shading, None).expect("triangle geometry should provide bounds");
-    let ShadingPaint::RasterImage { dest_rect, .. } = paint else {
+    let ShadingPaint::RasterImage { image, transform } = paint else {
         return;
     };
 
-    assert_eq!(dest_rect.left, 10.0);
-    assert_eq!(dest_rect.top, 20.0);
-    assert_eq!(dest_rect.right, 30.0);
-    assert_eq!(dest_rect.bottom, 40.0);
+    assert_eq!(image.width, 20);
+    assert_eq!(image.height, 20);
+    assert_eq!(transform, Transform::from_translate(10.0, 20.0));
 }
 
 #[test]
@@ -117,17 +111,51 @@ fn fully_degenerate_free_form_mesh_builds_transparent_paint() {
     };
 
     let paint = build_shading_paint(&shading, None).expect("degenerate mesh should be a no-op");
-    let ShadingPaint::RasterImage {
-        pixels,
-        width,
-        height,
-        ..
+    let ShadingPaint::RasterImage { image, .. } = paint else {
+        return;
+    };
+
+    assert_eq!(image.width, 1);
+    assert_eq!(image.height, 1);
+    assert_eq!(image.data.as_ref(), [0, 0, 0, 0]);
+}
+
+#[test]
+fn gradient_preparation_normalizes_colors_and_transform() {
+    let paint = ShadingPaint::linear_gradient(
+        [0.0, 0.0, 10.0, 0.0],
+        None,
+        [0.0, 1.0].into(),
+        [
+            Color::from_rgba(-1.0, 0.5, 2.0, 1.5),
+            Color::from_rgb(0.0, 0.0, 0.0),
+        ]
+        .into(),
+    )
+    .expect("gradient should be prepared");
+
+    let ShadingPaint::LinearGradient {
+        colors, transform, ..
     } = paint
     else {
         return;
     };
+    assert_eq!(transform, Transform::identity());
+    assert_eq!(colors.first(), Some(&Color::from_rgba(0.0, 0.5, 1.0, 1.0)));
+}
 
-    assert_eq!(width, 1);
-    assert_eq!(height, 1);
-    assert_eq!(pixels.as_ref(), [0, 0, 0, 0]);
+#[test]
+fn gradient_preparation_rejects_singular_transform() {
+    let result = ShadingPaint::linear_gradient(
+        [0.0, 0.0, 10.0, 0.0],
+        Some(Transform::from_scale(0.0, 1.0)),
+        [0.0, 1.0].into(),
+        [
+            Color::from_rgb(0.0, 0.0, 0.0),
+            Color::from_rgb(1.0, 1.0, 1.0),
+        ]
+        .into(),
+    );
+
+    assert!(result.is_err());
 }

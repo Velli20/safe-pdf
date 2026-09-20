@@ -1,5 +1,16 @@
 use crate::rect::Rect;
 
+/// Failure while validating or inverting an affine transform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum TransformError {
+    /// An input or computed inverse has a nonfinite component.
+    #[error("nonfinite transform")]
+    NonFinite,
+    /// The determinant is zero or cannot be represented as a finite value.
+    #[error("singular transform")]
+    Singular,
+}
+
 /// An affine transformation matrix.
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Transform {
@@ -25,6 +36,53 @@ impl Default for Transform {
 }
 
 impl Transform {
+    /// Maps a point, rejecting nonfinite input or output coordinates.
+    pub fn try_map_point(
+        &self,
+        point: crate::point::Point,
+    ) -> Result<crate::point::Point, TransformError> {
+        self.validate()?;
+        if !point.x.is_finite() || !point.y.is_finite() {
+            return Err(TransformError::NonFinite);
+        }
+        let (x, y) = self.transform_point(point.x, point.y);
+        if !x.is_finite() || !y.is_finite() {
+            return Err(TransformError::NonFinite);
+        }
+        Ok(crate::point::Point::new(x, y))
+    }
+
+    /// Checks that every affine component is finite.
+    pub fn validate(&self) -> Result<(), TransformError> {
+        if [self.sx, self.ky, self.kx, self.sy, self.tx, self.ty]
+            .iter()
+            .all(|value| value.is_finite())
+        {
+            Ok(())
+        } else {
+            Err(TransformError::NonFinite)
+        }
+    }
+
+    /// Inverts a finite, nonsingular transform, rejecting nonfinite output.
+    pub fn try_inverse(&self) -> Result<Self, TransformError> {
+        self.validate()?;
+        let determinant = self.sx * self.sy - self.kx * self.ky;
+        if !determinant.is_finite() || determinant == 0.0 {
+            return Err(TransformError::Singular);
+        }
+        let inverse = Self::from_row(
+            self.sy / determinant,
+            -self.ky / determinant,
+            -self.kx / determinant,
+            self.sx / determinant,
+            (self.kx * self.ty - self.sy * self.tx) / determinant,
+            (self.ky * self.tx - self.sx * self.ty) / determinant,
+        );
+        inverse.validate()?;
+        Ok(inverse)
+    }
+
     /// Creates an identity transform.
     pub fn identity() -> Self {
         Transform::default()
@@ -40,6 +98,11 @@ impl Transform {
             tx,
             ty,
         }
+    }
+
+    /// The components in [`Self::from_row`] order: `[sx, ky, kx, sy, tx, ty]`.
+    pub const fn to_row(&self) -> [f32; 6] {
+        [self.sx, self.ky, self.kx, self.sy, self.tx, self.ty]
     }
 
     pub fn from_translate(tx: f32, ty: f32) -> Self {
@@ -162,8 +225,7 @@ impl Transform {
     /// If the current transform is `M_self` and the `other` transform is `M_other`,
     /// this operation updates `M_self` to `M_other * M_self`.
     ///
-    /// This means that the transformation represented by `M_other` is applied,
-    /// and then the original transformation `M_self` is applied to that result.
+    /// This applies `M_self` to a point first, then applies `M_other`.
     /// When transforming a point `P`, the new transformation acts as `(M_other * M_self) * P`.
     ///
     /// # Arguments
@@ -212,7 +274,7 @@ impl Transform {
 
     /// Post-multiplies this transform by another `Transform` (self = self * other).
     ///
-    /// This applies the existing transformation first, then the `other` transformation.
+    /// This applies `other` to a point first, then the existing transformation.
     /// Useful when updating a current transform by appending an operation in the
     /// coordinate space of the current transform (e.g., PDF text matrix updates).
     pub fn post_concat(&mut self, other: &Transform) -> &mut Self {
@@ -252,6 +314,15 @@ impl Transform {
         self
     }
 
+    /// Returns `self * other` without mutating either input.
+    ///
+    /// This applies `other` to a point first, followed by `self`.
+    #[must_use]
+    pub fn post_concatenated(mut self, other: &Self) -> Self {
+        self.post_concat(other);
+        self
+    }
+
     /// Post-multiplies this transform by a translation (self = self * T(tx, ty)).
     ///
     /// Unlike `translate`, which pre-multiplies, this applies the translation in the
@@ -274,7 +345,7 @@ impl Transform {
     /// [ sinθ   cosθ  0 ]
     /// [  0      0    1 ]
     ///
-    /// This applies the existing transformation first, then the rotation in the
+    /// This applies the rotation to a point first, then the existing transformation in the
     /// local space of the current transform. The translation (tx, ty) remains unchanged.
     ///
     /// Updates are:
@@ -347,6 +418,18 @@ impl Transform {
             right: max_x,
             bottom: max_y,
         }
+    }
+
+    /// Returns the lengths of the transformed unit axes: how many output units one
+    /// input unit spans along x and along y, including any rotation or shear.
+    pub fn axis_scales(&self) -> [f32; 2] {
+        [self.sx.hypot(self.ky), self.kx.hypot(self.sy)]
+    }
+
+    /// Returns the larger of the two axis scales.
+    pub fn max_scale(&self) -> f32 {
+        let [x, y] = self.axis_scales();
+        x.max(y)
     }
 
     /// Returns the rotation angle (in degrees, counter-clockwise) encoded by the
