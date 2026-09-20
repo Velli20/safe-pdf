@@ -1,4 +1,20 @@
-use crate::{rect::Rect, transform::Transform};
+use crate::{
+    BoundsAccumulator,
+    point::Point,
+    rect::Rect,
+    transform::{Transform, TransformError},
+};
+
+/// Failure extracting the vertices of one straight-segment subpath.
+#[derive(Debug, thiserror::Error)]
+pub enum PolylineError {
+    /// Curves or multiple subpaths cannot be represented by one polyline.
+    #[error("path is not a single polyline")]
+    NotPolyline,
+    /// Mapping a vertex produced invalid coordinates.
+    #[error(transparent)]
+    Transform(#[from] crate::transform::TransformError),
+}
 
 /// Represents a single operation in a graphics path.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -49,6 +65,70 @@ pub struct PdfPath {
 }
 
 impl PdfPath {
+    /// Returns conservative transformed bounds of all endpoints and control points.
+    ///
+    /// Coordinates are mapped before accumulation, without allocating. Bézier bounds
+    /// include control points rather than curve extrema. Moves count as points; closing
+    /// verbs add none. Empty geometry returns `None`, while degenerate bounds are kept.
+    /// Nonfinite transforms, input coordinates, or mapping overflow return an error.
+    pub fn bounds(&self, transform: &Transform) -> Result<Option<Rect>, TransformError> {
+        transform.validate()?;
+        let mut bounds = BoundsAccumulator::new();
+        let mut include = |x, y| -> Result<(), TransformError> {
+            bounds.include(transform.try_map_point(Point::new(x, y))?);
+            Ok(())
+        };
+        for verb in &self.verbs {
+            match *verb {
+                PathVerb::MoveTo { x, y } | PathVerb::LineTo { x, y } => include(x, y)?,
+                PathVerb::QuadTo { x1, y1, x2, y2 } => {
+                    include(x1, y1)?;
+                    include(x2, y2)?;
+                }
+                PathVerb::CubicTo {
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    x3,
+                    y3,
+                } => {
+                    include(x1, y1)?;
+                    include(x2, y2)?;
+                    include(x3, y3)?;
+                }
+                PathVerb::Close => {}
+            }
+        }
+        Ok(bounds.finish())
+    }
+
+    /// Returns one polyline's vertices in the coordinate space of `transform`.
+    /// Curves and additional subpaths return `NotPolyline`; no curve is flattened.
+    /// A closing verb appends the first vertex, preserving the closing segment.
+    pub fn try_polyline_points(
+        &self,
+        transform: &Transform,
+    ) -> Result<Vec<crate::point::Point>, PolylineError> {
+        let mut points = Vec::with_capacity(self.verbs.len());
+        for verb in &self.verbs {
+            match *verb {
+                PathVerb::MoveTo { x, y } if points.is_empty() => {
+                    points.push(transform.try_map_point(crate::point::Point::new(x, y))?)
+                }
+                PathVerb::LineTo { x, y } if !points.is_empty() => {
+                    points.push(transform.try_map_point(crate::point::Point::new(x, y))?)
+                }
+                PathVerb::Close => {
+                    let first = points.first().copied().ok_or(PolylineError::NotPolyline)?;
+                    points.push(first);
+                }
+                _ => return Err(PolylineError::NotPolyline),
+            }
+        }
+        Ok(points)
+    }
+
     pub fn from(rect: &Rect) -> Self {
         let mut path = PdfPath::default();
         path.move_to(rect.left, rect.top);
@@ -237,6 +317,137 @@ impl PdfPath {
 mod tests {
     use super::{PathVerb, PdfPath};
     use crate::rect::Rect;
+    use crate::transform::{Transform, TransformError};
+
+    #[test]
+    fn bounds_handle_empty_moves_closure_and_multiple_subpaths() {
+        let mut path = PdfPath::default();
+        assert_eq!(path.bounds(&Transform::identity()).unwrap(), None);
+        path.close();
+        assert_eq!(path.bounds(&Transform::identity()).unwrap(), None);
+        path.move_to(-3.0, 4.0);
+        assert_eq!(
+            path.bounds(&Transform::identity()).unwrap(),
+            Some(Rect {
+                left: -3.0,
+                top: 4.0,
+                right: -3.0,
+                bottom: 4.0,
+            })
+        );
+        path.line_to(5.0, 4.0);
+        path.close();
+        path.move_to(1.0, -2.0);
+        assert_eq!(
+            path.bounds(&Transform::identity()).unwrap(),
+            Some(Rect {
+                left: -3.0,
+                top: -2.0,
+                right: 5.0,
+                bottom: 4.0,
+            })
+        );
+    }
+
+    #[test]
+    fn bounds_include_quadratic_and_cubic_control_points() {
+        let mut path = PdfPath::default();
+        path.move_to(0.0, 0.0);
+        path.quad_to(-10.0, 20.0, 2.0, 3.0);
+        assert_eq!(
+            path.bounds(&Transform::identity()).unwrap(),
+            Some(Rect {
+                left: -10.0,
+                top: 0.0,
+                right: 2.0,
+                bottom: 20.0,
+            })
+        );
+        path.curve_to(-30.0, -40.0, 50.0, 60.0, 4.0, 5.0);
+        assert_eq!(
+            path.bounds(&Transform::identity()).unwrap(),
+            Some(Rect {
+                left: -30.0,
+                top: -40.0,
+                right: 50.0,
+                bottom: 60.0,
+            })
+        );
+    }
+
+    #[test]
+    fn bounds_transform_rectangles_and_preserve_degenerate_results() {
+        let path = PdfPath::from(&Rect::new(2.0, 4.0));
+        let rotation = Transform::from_row(0.0, 1.0, -1.0, 0.0, 10.0, 20.0);
+        assert_eq!(
+            path.bounds(&rotation).unwrap(),
+            Some(Rect {
+                left: 6.0,
+                top: 20.0,
+                right: 10.0,
+                bottom: 22.0,
+            })
+        );
+        assert_eq!(
+            path.bounds(&Transform::from_scale(0.0, 0.0)).unwrap(),
+            Some(Rect::new(0.0, 0.0))
+        );
+        let mut diagonal = PdfPath::default();
+        diagonal.move_to(0.0, 2.0);
+        diagonal.line_to(2.0, 0.0);
+        let shear = Transform::from_row(1.0, 0.0, 1.0, 1.0, 0.0, 0.0);
+        assert_eq!(
+            diagonal.bounds(&shear).unwrap(),
+            Some(Rect {
+                left: 2.0,
+                top: 0.0,
+                right: 2.0,
+                bottom: 2.0,
+            })
+        );
+    }
+
+    #[test]
+    fn bounds_reject_nonfinite_coordinates_in_every_verb() {
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            for verb in [
+                PathVerb::MoveTo { x: invalid, y: 0.0 },
+                PathVerb::LineTo { x: 0.0, y: invalid },
+                PathVerb::QuadTo {
+                    x1: invalid,
+                    y1: 0.0,
+                    x2: 1.0,
+                    y2: 1.0,
+                },
+                PathVerb::CubicTo {
+                    x1: 0.0,
+                    y1: 0.0,
+                    x2: 1.0,
+                    y2: invalid,
+                    x3: 2.0,
+                    y3: 2.0,
+                },
+            ] {
+                let mut path = PdfPath::default();
+                path.move_to(0.0, 0.0);
+                path.verbs.push(verb);
+                assert_eq!(
+                    path.bounds(&Transform::identity()),
+                    Err(TransformError::NonFinite)
+                );
+            }
+            assert_eq!(
+                PdfPath::default().bounds(&Transform::from_scale(invalid, 1.0)),
+                Err(TransformError::NonFinite)
+            );
+        }
+        let mut path = PdfPath::default();
+        path.move_to(f32::MAX, 0.0);
+        assert_eq!(
+            path.bounds(&Transform::from_scale(2.0, 1.0)),
+            Err(TransformError::NonFinite)
+        );
+    }
 
     fn assert_approx_eq(actual: f32, expected: f32) {
         let delta = (actual - expected).abs();

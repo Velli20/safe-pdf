@@ -118,22 +118,25 @@ mod tests {
     use crate::{color_space::ColorSpace, error::ColorSpaceError};
 
     fn name(value: &str) -> ObjectVariant {
-        ObjectVariant::Name(value.as_bytes().to_vec())
+        pdf_object_reader::pdf_string::PdfString::from(
+            value.as_bytes().to_vec(),
+            pdf_object_reader::string_kind::StringKind::Name,
+        )
     }
 
     #[test]
     fn parses_single_name_device_color_space_arrays() {
         let cases = [
             (
-                ObjectVariant::Array(vec![name("DeviceGray")]),
+                ObjectVariant::Array(vec![name("DeviceGray".into())].into()),
                 ColorSpace::DeviceGray,
             ),
             (
-                ObjectVariant::Array(vec![name("DeviceRGB")]),
+                ObjectVariant::Array(vec![name("DeviceRGB".into())].into()),
                 ColorSpace::DeviceRGB,
             ),
             (
-                ObjectVariant::Array(vec![name("DeviceCMYK")]),
+                ObjectVariant::Array(vec![name("DeviceCMYK".into())].into()),
                 ColorSpace::DeviceCMYK,
             ),
         ];
@@ -157,7 +160,7 @@ mod tests {
     #[test]
     fn parses_single_name_pattern_array() {
         let parsed = pdf_object_reader::ObjectReader::new(&PassthroughResolver)
-            .read::<ColorSpace>(&ObjectVariant::Array(vec![name("Pattern")]))
+            .read::<ColorSpace>(&ObjectVariant::Array(vec![name("Pattern".into())].into()))
             .unwrap();
 
         assert!(matches!(parsed, ColorSpace::Pattern(None)));
@@ -166,7 +169,9 @@ mod tests {
     #[test]
     fn rejects_empty_color_space_array() {
         let error = pdf_object_reader::ObjectReader::new(&PassthroughResolver)
-            .read::<ColorSpace>(&ObjectVariant::Array(Vec::new()))
+            .read::<ColorSpace>(&ObjectVariant::Array(
+                pdf_object_reader::pdf_array::PdfArray::new(Vec::new()),
+            ))
             .unwrap_err();
 
         assert!(matches!(
@@ -178,10 +183,9 @@ mod tests {
     #[test]
     fn rejects_unsupported_multi_element_color_space_array() {
         let error = pdf_object_reader::ObjectReader::new(&PassthroughResolver)
-            .read::<ColorSpace>(&ObjectVariant::Array(vec![
-                name("DeviceGray"),
-                ObjectVariant::Integer(1),
-            ]))
+            .read::<ColorSpace>(&ObjectVariant::Array(
+                vec![name("DeviceGray".into()), ObjectVariant::Integer(1)].into(),
+            ))
             .unwrap_err();
 
         assert!(matches!(

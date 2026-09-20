@@ -4,7 +4,8 @@
  * Low-level PDF rendering engine backed by the Safe-PDF WASM module.
  *
  * Provides a clean, DOM-minimal API for loading and rendering PDF pages
- * using WebGL and Skia (compiled to WebAssembly via Emscripten).
+ * using WebGL and Skia (compiled to WebAssembly via Emscripten), plus the
+ * document-wide text selection owned by the Rust side.
  *
  * @example
  * ```js
@@ -14,10 +15,8 @@
  * await renderer.init('./dist/emscripten.js');
  *
  * const { pageCount } = renderer.loadPdf(pdfArrayBuffer);
- * console.log(`Loaded ${pageCount} pages`);
- *
- * const dataUrl = renderer.renderPage(0, 800, 600);
- * document.querySelector('img').src = dataUrl;
+ * renderer.renderPageToCanvas(0, 800, 600);
+ * context.drawImage(renderer.canvas, 0, 0);
  *
  * renderer.freePdf();
  * renderer.destroy();
@@ -41,29 +40,24 @@ const DEFAULT_GL_ATTRIBUTES = {
   renderViaOffscreenBackBuffer: false,
 };
 
-const ANNOTATION_RESULT_CONSUMED = 1;
-const ANNOTATION_RESULT_REDRAW = 2;
-const ANNOTATION_RESULT_EDITING = 4;
+const utf8 = new TextDecoder('utf-8');
 
-const ANNOTATION_EDIT_COMMANDS = Object.freeze({
-  insert: 0,
-  newline: 1,
-  'move-left': 2,
-  'move-right': 3,
-  'move-to-start': 4,
-  'move-to-end': 5,
-  'delete-backward': 6,
-  'delete-forward': 7,
-  commit: 8,
-  cancel: 9,
-});
+/**
+ * @typedef {object} SelectionBatch
+ * @property {number}   page               Zero-based page index.
+ * @property {number}   layout_revision    Revision of the retained text layout.
+ * @property {number}   selection_revision Selection revision this batch reflects.
+ * @property {number[]} device_size        `[width, height]` the layout was recorded at.
+ * @property {number[]} keys               Stable highlight identities, one per rectangle.
+ * @property {number[]} bounds             Packed `[left, top, right, bottom]` in layout device space.
+ */
 
 /**
  * Low-level PDF rendering engine.
  *
  * Manages a hidden `<canvas>` element, a WebGL context, and the Safe-PDF
- * WASM module. Renders individual PDF pages and returns image data that
- * callers can display however they like.
+ * WASM module. Renders individual PDF pages into that canvas and exposes
+ * the Rust-owned text selection.
  */
 export class SafePdfRenderer {
   /** @type {HTMLCanvasElement} */
@@ -75,23 +69,7 @@ export class SafePdfRenderer {
   /** @type {number|null} Emscripten GL context handle. */
   #glHandle = null;
 
-  // ---- Extra WASM function bindings ----
-  #sk_get_page_width = null;
-  #sk_get_page_height = null;
-  #sk_clear_text_layout_cache = null;
-  #sk_get_text_glyph_count = null;
-  #sk_hit_test_text = null;
-  #sk_build_text_selection_rects = null;
-  #sk_get_text_selection_rects_ptr = null;
-  #sk_build_selected_text = null;
-  #sk_get_selected_text_ptr = null;
-  #sk_annotation_pointer_pressed = null;
-  #sk_annotation_pointer_moved = null;
-  #sk_annotation_pointer_released = null;
-  #sk_annotation_is_editing = null;
-  #sk_annotation_edit = null;
-
-  /** @type {object|null} Reference to the Emscripten `Module` object. */
+  /** @type {object|null} The instantiated Emscripten module. */
   #wasmModule = null;
 
   /** @type {boolean} */
@@ -99,9 +77,6 @@ export class SafePdfRenderer {
 
   /** @type {number|null} Pointer to PDF data in WASM linear memory. */
   #pdfDataPtr = null;
-
-  /** @type {number} Length of PDF data in bytes. */
-  #pdfDataLength = 0;
 
   /** @type {number} Number of pages in the loaded PDF. */
   #pageCount = 0;
@@ -111,12 +86,18 @@ export class SafePdfRenderer {
   #sk_get_page_count = null;
   #sk_render_page = null;
   #sk_free_pdf = null;
-  #sk_is_page_cached = null;
   #sk_get_cache_count = null;
   #sk_clear_cache = null;
   #sk_reset_gpu = null;
   #sk_get_prefetch_count = null;
   #sk_get_prefetch_page = null;
+  #sk_get_page_width = null;
+  #sk_get_page_height = null;
+  #sk_get_scratch_ptr = null;
+  #sk_hit_test_text = null;
+  #sk_select = null;
+  #sk_build_selection_updates = null;
+  #sk_build_selected_text = null;
 
   /**
    * Create a new SafePdfRenderer.
@@ -148,9 +129,9 @@ export class SafePdfRenderer {
   // ==================================================================
 
   /**
-   * Initialise the WASM module and create the WebGL context.
+   * Instantiate the WASM module and create the WebGL context.
    *
-   * @param {string} wasmUrl  URL to the Emscripten-generated JS glue file
+   * @param {string} wasmUrl  URL to the Emscripten-generated ES module
    *   (e.g. `'./dist/emscripten.js'`).
    * @returns {Promise<void>}  Resolves when the renderer is ready.
    * @throws {Error} If the WebGL context cannot be created or the WASM
@@ -161,8 +142,12 @@ export class SafePdfRenderer {
       throw new Error('SafePdfRenderer is already initialized');
     }
 
-    await this.#loadWasmModule(wasmUrl);
+    // Resolve like a script tag would: relative to the document, not this module.
+    const moduleUrl = new URL(wasmUrl, document.baseURI).href;
+    const { default: createModule } = await import(moduleUrl);
+    this.#wasmModule = await createModule({ canvas: this.#canvas, noInitialRun: true });
     this.#bindWasmFunctions();
+    this.#initWebGL();
     this.#initialized = true;
   }
 
@@ -195,16 +180,14 @@ export class SafePdfRenderer {
     this.#assertReady();
     this.freePdf();
 
-    const uint8Array = new Uint8Array(arrayBuffer);
-    this.#pdfDataLength = uint8Array.length;
-    this.#pdfDataPtr = this.#wasmModule._malloc(this.#pdfDataLength);
-    this.#wasmModule.HEAPU8.set(uint8Array, this.#pdfDataPtr);
+    const bytes = new Uint8Array(arrayBuffer);
+    this.#pdfDataPtr = this.#wasmModule._malloc(bytes.length);
+    this.#wasmModule.HEAPU8.set(bytes, this.#pdfDataPtr);
 
-    const result = this.#sk_load_pdf(this.#pdfDataPtr, this.#pdfDataLength);
+    const result = this.#sk_load_pdf(this.#pdfDataPtr, bytes.length);
     if (result < 0) {
       this.#wasmModule._free(this.#pdfDataPtr);
       this.#pdfDataPtr = null;
-      this.#pdfDataLength = 0;
       throw new Error(`Failed to parse PDF (error code: ${result})`);
     }
 
@@ -221,25 +204,8 @@ export class SafePdfRenderer {
   }
 
   /**
-   * Render a single page to the internal canvas and return its contents as
-   * a JPEG data-URL string.
-   *
-   * @param {number} pageIndex  Zero-based page index.
-   * @param {number} width      Target width in device pixels.
-   * @param {number} height     Target height in device pixels.
-   * @returns {string}          JPEG data-URL of the rendered page.
-   * @throws {RangeError} If `pageIndex` is out of bounds.
-   * @throws {Error}      If the WASM render call fails.
-   */
-  renderPage(pageIndex, width, height) {
-    this.#renderInternal(pageIndex, width, height);
-    return this.#canvas.toDataURL('image/jpeg', 0.92);
-  }
-
-  /**
-   * Render a single page to the internal canvas without encoding it to a
-   * data-URL.  Callers can then read the canvas pixels directly, e.g. via
-   * `drawImage(renderer.canvas, 0, 0)`, avoiding a costly encode/decode cycle.
+   * Render a single page to the internal canvas. Callers read the canvas
+   * pixels directly, e.g. via `drawImage(renderer.canvas, 0, 0)`.
    *
    * @param {number} pageIndex  Zero-based page index.
    * @param {number} width      Target width in device pixels.
@@ -248,15 +214,35 @@ export class SafePdfRenderer {
    * @throws {Error}      If the WASM render call fails.
    */
   renderPageToCanvas(pageIndex, width, height) {
-    this.#renderInternal(pageIndex, width, height);
+    this.#assertPage(pageIndex);
+
+    // Resize the canvas (and reinitialise WebGL) when the target size changes.
+    if (this.#canvas.width !== width || this.#canvas.height !== height) {
+      // Drop the Skia DirectContext BEFORE the GL context is invalidated by
+      // the canvas resize.  Skia caches GPU resources (textures, programs,
+      // buffers) that become stale when the WebGL context is reset.
+      this.#sk_reset_gpu();
+
+      this.#canvas.width = width;
+      this.#canvas.height = height;
+      this.#initWebGL();
+    }
+
+    this.#wasmModule.GL.makeContextCurrent(this.#glHandle);
+
+    const result = this.#sk_render_page(width, height, pageIndex);
+    if (result !== 0) {
+      throw new Error(`Render failed for page ${pageIndex} (code ${result})`);
+    }
   }
 
   /**
-   * Return the dimensions of a PDF page in PDF points.
+   * Return the displayed dimensions of a PDF page in PDF points, honoring
+   * the CropBox and `/Rotate` exactly as rendering does.
    *
    * @param {number} pageIndex  Zero-based page index.
    * @returns {{ width: number, height: number } | null}
-   *   Page dimensions, or `null` if the page has no media box or the index
+   *   Page dimensions, or `null` if the page has no page box or the index
    *   is out of range.
    */
   getPageDimensions(pageIndex) {
@@ -268,21 +254,8 @@ export class SafePdfRenderer {
   }
 
   /**
-   * Check whether a page is present in the WASM-level render cache.
-   *
-   * @param {number} pageIndex  Zero-based page index.
-   * @returns {boolean}
-   */
-  isPageCached(pageIndex) {
-    this.#assertReady();
-    return this.#sk_is_page_cached(pageIndex) === 1;
-  }
-
-  /**
    * Return the number of pages currently in the WASM-level render cache.
-   *
-   * This is a single WASM call (O(1)), much cheaper than iterating over
-   * all pages with {@link isPageCached}.
+   * This is a single O(1) WASM call.
    *
    * @returns {number}
    */
@@ -291,223 +264,81 @@ export class SafePdfRenderer {
     return this.#sk_get_cache_count();
   }
 
-  /**
-   * Clear the WASM-level render cache for all pages.
-   */
+  /** Clear the WASM-level render cache for all pages. */
   clearCache() {
     this.#assertReady();
     this.#sk_clear_cache();
   }
 
   /**
-   * Clear cached text layouts used for selection and copy.
-   */
-  clearTextLayoutCache() {
-    this.#assertReady();
-    this.#sk_clear_text_layout_cache();
-  }
-
-  /**
-   * Return the number of selectable glyph spans on a rendered page.
+   * Hit-test a point on a page displayed at `width`×`height` device pixels.
    *
    * @param {number} pageIndex
    * @param {number} width
    * @param {number} height
-   * @returns {number}
-   */
-  getTextGlyphCount(pageIndex, width, height) {
-    this.#assertReady();
-    this.#assertPdfLoaded();
-    this.#assertPageIndex(pageIndex);
-    return this.#sk_get_text_glyph_count(
-      pageIndex,
-      Math.round(width),
-      Math.round(height)
-    );
-  }
-
-  /**
-   * Hit-test a rendered page point against selectable text.
-   *
-   * @param {number} pageIndex
-   * @param {number} width
-   * @param {number} height
-   * @param {number} x
-   * @param {number} y
-   * @returns {number|null} Glyph index, or `null` when no text is available.
+   * @param {number} x  Page-local x in device pixels.
+   * @param {number} y  Page-local y in device pixels.
+   * @returns {number[]|null} `[page, layoutRevision, glyphIndex]`, or `null`
+   *   when no text is near the point.
    */
   hitTestText(pageIndex, width, height, x, y) {
-    this.#assertReady();
-    this.#assertPdfLoaded();
-    this.#assertPageIndex(pageIndex);
-
-    const hit = this.#sk_hit_test_text(
-      pageIndex,
-      Math.round(width),
-      Math.round(height),
-      x,
-      y
-    );
-    return hit === 0xFFFFFFFF ? null : hit;
+    this.#assertPage(pageIndex);
+    const length = this.#sk_hit_test_text(pageIndex, Math.round(width), Math.round(height), x, y);
+    return length ? JSON.parse(this.#readScratch(length)) : null;
   }
 
   /**
-   * Return selection highlight rectangles for one rendered page.
+   * Set the selection from two hit-test triples, or clear it with an empty array.
    *
-   * @param {number} pageIndex
-   * @param {number} width
-   * @param {number} height
-   * @param {number} startIndex Inclusive glyph index.
-   * @param {number} endIndex Inclusive glyph index.
-   * @returns {Array<{left: number, top: number, right: number, bottom: number}>}
+   * @param {number[]} endpoints  `[]` or `[...anchor, ...focus]`.
+   * @returns {number} The new selection revision.
    */
-  getTextSelectionRects(pageIndex, width, height, startIndex, endIndex) {
+  select(endpoints) {
     this.#assertReady();
     this.#assertPdfLoaded();
-    this.#assertPageIndex(pageIndex);
-
-    const count = this.#sk_build_text_selection_rects(
-      pageIndex,
-      Math.round(width),
-      Math.round(height),
-      startIndex,
-      endIndex
-    );
-    if (count === 0) return [];
-
-    const ptr = this.#sk_get_text_selection_rects_ptr();
-    const values = this.#wasmModule.HEAPF32.subarray(ptr / 4, ptr / 4 + count * 4);
-    const rects = [];
-    for (let i = 0; i < values.length; i += 4) {
-      rects.push({
-        left: values[i],
-        top: values[i + 1],
-        right: values[i + 2],
-        bottom: values[i + 3],
-      });
+    const bytes = endpoints.length * 4;
+    const ptr = bytes ? this.#wasmModule._malloc(bytes) : 0;
+    try {
+      if (bytes) this.#wasmModule.HEAPU32.set(endpoints, ptr / 4);
+      const revision = this.#sk_select(ptr, endpoints.length);
+      if (revision < 0) throw new Error('Invalid selection endpoints');
+      return revision;
+    } finally {
+      if (ptr) this.#wasmModule._free(ptr);
     }
-    return rects;
   }
 
   /**
-   * Return selected text for one rendered page.
+   * Return highlight batches for the visible pages whose selection changed.
    *
-   * @param {number} pageIndex
-   * @param {number} width
-   * @param {number} height
-   * @param {number} startIndex Inclusive glyph index.
-   * @param {number} endIndex Inclusive glyph index.
+   * @param {number[]} visible  Visible page indices.
+   * @param {number} [since]    Only pages changed after this selection revision;
+   *   omit for a full snapshot.
+   * @returns {SelectionBatch[]}
+   */
+  selectionUpdates(visible, since) {
+    this.#assertReady();
+    this.#assertPdfLoaded();
+    const bytes = visible.length * 4;
+    const ptr = bytes ? this.#wasmModule._malloc(bytes) : 0;
+    try {
+      if (bytes) this.#wasmModule.HEAPU32.set(visible, ptr / 4);
+      // The revision parameter is a 64-bit integer on the C ABI.
+      const length = this.#sk_build_selection_updates(ptr, visible.length, BigInt(since ?? -1));
+      return length ? JSON.parse(this.#readScratch(length)) : [];
+    } finally {
+      if (ptr) this.#wasmModule._free(ptr);
+    }
+  }
+
+  /**
+   * Return the selected text, or an empty string.
    * @returns {string}
    */
-  getSelectedText(pageIndex, width, height, startIndex, endIndex) {
+  selectedText() {
     this.#assertReady();
-    this.#assertPdfLoaded();
-    this.#assertPageIndex(pageIndex);
-
-    const length = this.#sk_build_selected_text(
-      pageIndex,
-      Math.round(width),
-      Math.round(height),
-      startIndex,
-      endIndex
-    );
-    if (length === 0) return '';
-
-    const ptr = this.#sk_get_selected_text_ptr();
-    const bytes = this.#wasmModule.HEAPU8.slice(ptr, ptr + length);
-    return new TextDecoder('utf-8').decode(bytes);
-  }
-
-  /**
-   * Send a primary-pointer press to annotation interaction.
-   *
-   * @returns {{consumed: boolean, redraw: boolean, editing: boolean}}
-   */
-  annotationPointerDown(pageIndex, width, height, x, y) {
-    this.#assertAnnotationPointerInput(pageIndex, width, height, x, y);
-    const result = this.#sk_annotation_pointer_pressed(
-      pageIndex,
-      Math.round(width),
-      Math.round(height),
-      x,
-      y
-    );
-    return this.#decodeAnnotationResult(result, 'pointer press');
-  }
-
-  /**
-   * Send primary-pointer movement to annotation interaction.
-   *
-   * @returns {{consumed: boolean, redraw: boolean, editing: boolean}}
-   */
-  annotationPointerMove(pageIndex, width, height, x, y) {
-    this.#assertAnnotationPointerInput(pageIndex, width, height, x, y);
-    const result = this.#sk_annotation_pointer_moved(
-      pageIndex,
-      Math.round(width),
-      Math.round(height),
-      x,
-      y
-    );
-    return this.#decodeAnnotationResult(result, 'pointer movement');
-  }
-
-  /**
-   * End the active primary-pointer annotation gesture.
-   *
-   * @returns {{consumed: boolean, redraw: boolean, editing: boolean}}
-   */
-  annotationPointerUp() {
-    this.#assertReady();
-    this.#assertPdfLoaded();
-    const result = this.#sk_annotation_pointer_released();
-    return this.#decodeAnnotationResult(result, 'pointer release');
-  }
-
-  /** Whether a free-text annotation edit session is active. */
-  isAnnotationEditing() {
-    this.#assertReady();
-    this.#assertPdfLoaded();
-    return this.#sk_annotation_is_editing() === 1;
-  }
-
-  /**
-   * Apply a semantic command to the active free-text annotation editor.
-   *
-   * @param {number} pageIndex
-   * @param {'insert'|'newline'|'move-left'|'move-right'|'move-to-start'|
-   *   'move-to-end'|'delete-backward'|'delete-forward'|'commit'|'cancel'} command
-   * @param {string} [text=''] Text used by the `insert` command.
-   * @returns {{consumed: boolean, redraw: boolean, editing: boolean}}
-   */
-  handleAnnotationEditCommand(pageIndex, command, text = '') {
-    this.#assertReady();
-    this.#assertPdfLoaded();
-    this.#assertPageIndex(pageIndex);
-
-    if (!Object.hasOwn(ANNOTATION_EDIT_COMMANDS, command)) {
-      throw new TypeError(`Unknown annotation edit command: ${command}`);
-    }
-    if (command === 'insert' && typeof text !== 'string') {
-      throw new TypeError('Annotation insert text must be a string');
-    }
-
-    const bytes = command === 'insert' ? new TextEncoder().encode(text) : null;
-    const ptr = bytes?.length ? this.#wasmModule._malloc(bytes.length) : 0;
-    try {
-      if (bytes?.length) {
-        this.#wasmModule.HEAPU8.set(bytes, ptr);
-      }
-      const result = this.#sk_annotation_edit(
-        pageIndex,
-        ANNOTATION_EDIT_COMMANDS[command],
-        ptr,
-        bytes?.length ?? 0
-      );
-      return this.#decodeAnnotationResult(result, `edit command '${command}'`);
-    } finally {
-      if (ptr !== 0) this.#wasmModule._free(ptr);
-    }
+    if (this.#pdfDataPtr === null) return '';
+    return this.#readScratch(this.#sk_build_selected_text());
   }
 
   /**
@@ -542,7 +373,6 @@ export class SafePdfRenderer {
       this.#sk_free_pdf();
       this.#wasmModule._free(this.#pdfDataPtr);
       this.#pdfDataPtr = null;
-      this.#pdfDataLength = 0;
       this.#pageCount = 0;
     }
   }
@@ -553,17 +383,7 @@ export class SafePdfRenderer {
    */
   destroy() {
     this.freePdf();
-
-    // Release the Emscripten GL context to avoid leaking entries in the
-    // GL context registry and keeping GPU resources alive after teardown.
-    if (
-      this.#glHandle !== null &&
-      typeof GL !== 'undefined' &&
-      GL.deleteContext
-    ) {
-      GL.deleteContext(this.#glHandle);
-      this.#glHandle = null;
-    }
+    this.#deleteGLContext();
 
     if (this.#ownsCanvas && this.#canvas?.parentNode) {
       this.#canvas.parentNode.removeChild(this.#canvas);
@@ -589,7 +409,9 @@ export class SafePdfRenderer {
     }
   }
 
-  #assertPageIndex(pageIndex) {
+  #assertPage(pageIndex) {
+    this.#assertReady();
+    this.#assertPdfLoaded();
     if (pageIndex < 0 || pageIndex >= this.#pageCount) {
       throw new RangeError(
         `Page index ${pageIndex} out of range [0, ${this.#pageCount - 1}]`
@@ -597,106 +419,24 @@ export class SafePdfRenderer {
     }
   }
 
-  #assertAnnotationPointerInput(pageIndex, width, height, x, y) {
-    this.#assertReady();
-    this.#assertPdfLoaded();
-    this.#assertPageIndex(pageIndex);
-    if (
-      !Number.isFinite(width) ||
-      !Number.isFinite(height) ||
-      width <= 0 ||
-      height <= 0 ||
-      !Number.isFinite(x) ||
-      !Number.isFinite(y)
-    ) {
-      throw new RangeError('Annotation pointer coordinates and dimensions must be finite');
-    }
+  /** Decode the WASM-side result buffer produced by the last `sk_build_*` call. */
+  #readScratch(length) {
+    if (!length) return '';
+    const ptr = this.#sk_get_scratch_ptr();
+    return utf8.decode(this.#wasmModule.HEAPU8.subarray(ptr, ptr + length));
   }
 
-  #decodeAnnotationResult(result, action) {
-    if (result < 0) {
-      throw new Error(`Annotation ${action} failed (code ${result})`);
-    }
-    return {
-      consumed: (result & ANNOTATION_RESULT_CONSUMED) !== 0,
-      redraw: (result & ANNOTATION_RESULT_REDRAW) !== 0,
-      editing: (result & ANNOTATION_RESULT_EDITING) !== 0,
-    };
-  }
-
-  /**
-   * Dynamically load the Emscripten-generated JS file and wait for the
-   * WASM module to finish initialising.
-   */
-  #loadWasmModule(wasmUrl) {
-    return new Promise((resolve, reject) => {
-      /* eslint-disable no-undef */
-      window.Module = {
-        noInitialRun: true,
-        canvas: this.#canvas,
-        onRuntimeInitialized: () => {
-          this.#wasmModule = window.Module;
-          this.#initWebGL();
-          resolve();
-        },
-      };
-      /* eslint-enable no-undef */
-
-      const script = document.createElement('script');
-      script.src = wasmUrl;
-      script.onerror = () =>
-        reject(new Error(`Failed to load WASM module from: ${wasmUrl}`));
-      document.head.appendChild(script);
-    });
-  }
-
-  /**
-   * Core render path shared by {@link renderPage} and {@link renderPageToCanvas}.
-   * Resizes the canvas if needed, reinitialises WebGL, and invokes the WASM
-   * render call.  Does NOT encode the result.
-   *
-   * @param {number} pageIndex
-   * @param {number} width
-   * @param {number} height
-   */
-  #renderInternal(pageIndex, width, height) {
-    this.#assertReady();
-    this.#assertPdfLoaded();
-
-    this.#assertPageIndex(pageIndex);
-
-    // Resize the canvas (and reinitialise WebGL) when the target size changes.
-    if (this.#canvas.width !== width || this.#canvas.height !== height) {
-      // Drop the Skia DirectContext BEFORE the GL context is invalidated by
-      // the canvas resize.  Skia caches GPU resources (textures, programs,
-      // buffers) that become stale when the WebGL context is reset.
-      this.#sk_reset_gpu();
-
-      this.#canvas.width = width;
-      this.#canvas.height = height;
-      this.#initWebGL();
-    }
-
-    this.#makeGLCurrent();
-
-    const result = this.#sk_render_page(width, height, pageIndex);
-    if (result !== 0) {
-      throw new Error(`Render failed for page ${pageIndex} (code ${result})`);
+  /** Release the Emscripten GL handle so the context registry does not leak. */
+  #deleteGLContext() {
+    if (this.#glHandle !== null && this.#wasmModule) {
+      this.#wasmModule.GL.deleteContext(this.#glHandle);
+      this.#glHandle = null;
     }
   }
 
   /** Create (or recreate) the WebGL context on the internal canvas. */
   #initWebGL() {
-    // Clean up the previous Emscripten GL handle so we don't leak entries
-    // in the GL context registry.
-    if (
-      this.#glHandle !== null &&
-      typeof GL !== 'undefined' &&
-      GL.deleteContext
-    ) {
-      GL.deleteContext(this.#glHandle);
-      this.#glHandle = null;
-    }
+    this.#deleteGLContext();
 
     const gl =
       this.#canvas.getContext('webgl2', DEFAULT_GL_ATTRIBUTES) ||
@@ -706,45 +446,29 @@ export class SafePdfRenderer {
       throw new Error('Unable to create WebGL context');
     }
 
-    if (typeof GL !== 'undefined' && GL.registerContext && GL.makeContextCurrent) {
-      this.#glHandle = GL.registerContext(gl, DEFAULT_GL_ATTRIBUTES);
-      GL.makeContextCurrent(this.#glHandle);
-    }
-  }
-
-  /** Ensure the Emscripten GL context is current. */
-  #makeGLCurrent() {
-    if (this.#glHandle !== null && typeof GL !== 'undefined') {
-      GL.makeContextCurrent(this.#glHandle);
-    }
+    const GL = this.#wasmModule.GL;
+    this.#glHandle = GL.registerContext(gl, DEFAULT_GL_ATTRIBUTES);
+    GL.makeContextCurrent(this.#glHandle);
   }
 
   /** Bind cwrap'd WASM exports to private fields. */
   #bindWasmFunctions() {
     const M = this.#wasmModule;
-    this.#sk_load_pdf        = M.cwrap('sk_load_pdf',        'number', ['number', 'number']);
-    this.#sk_get_page_count  = M.cwrap('sk_get_page_count',  'number', []);
-    this.#sk_render_page     = M.cwrap('sk_render_page',     'number', ['number', 'number', 'number']);
-    this.#sk_free_pdf        = M.cwrap('sk_free_pdf',        null,     []);
-    this.#sk_is_page_cached  = M.cwrap('sk_is_page_cached',  'number', ['number']);
+    this.#sk_load_pdf = M.cwrap('sk_load_pdf', 'number', ['number', 'number']);
+    this.#sk_get_page_count = M.cwrap('sk_get_page_count', 'number', []);
+    this.#sk_render_page = M.cwrap('sk_render_page', 'number', ['number', 'number', 'number']);
+    this.#sk_free_pdf = M.cwrap('sk_free_pdf', null, []);
     this.#sk_get_cache_count = M.cwrap('sk_get_cache_count', 'number', []);
-    this.#sk_clear_cache     = M.cwrap('sk_clear_cache',     null,     []);
-    this.#sk_reset_gpu       = M.cwrap('sk_reset_gpu',       null,     []);
+    this.#sk_clear_cache = M.cwrap('sk_clear_cache', null, []);
+    this.#sk_reset_gpu = M.cwrap('sk_reset_gpu', null, []);
     this.#sk_get_prefetch_count = M.cwrap('sk_get_prefetch_count', 'number', ['number']);
-    this.#sk_get_prefetch_page  = M.cwrap('sk_get_prefetch_page',  'number', ['number', 'number']);
-    this.#sk_get_page_width     = M.cwrap('sk_get_page_width',     'number', ['number']);
-    this.#sk_get_page_height    = M.cwrap('sk_get_page_height',    'number', ['number']);
-    this.#sk_clear_text_layout_cache = M.cwrap('sk_clear_text_layout_cache', null, []);
-    this.#sk_get_text_glyph_count = M.cwrap('sk_get_text_glyph_count', 'number', ['number', 'number', 'number']);
+    this.#sk_get_prefetch_page = M.cwrap('sk_get_prefetch_page', 'number', ['number', 'number']);
+    this.#sk_get_page_width = M.cwrap('sk_get_page_width', 'number', ['number']);
+    this.#sk_get_page_height = M.cwrap('sk_get_page_height', 'number', ['number']);
+    this.#sk_get_scratch_ptr = M.cwrap('sk_get_scratch_ptr', 'number', []);
     this.#sk_hit_test_text = M.cwrap('sk_hit_test_text', 'number', ['number', 'number', 'number', 'number', 'number']);
-    this.#sk_build_text_selection_rects = M.cwrap('sk_build_text_selection_rects', 'number', ['number', 'number', 'number', 'number', 'number']);
-    this.#sk_get_text_selection_rects_ptr = M.cwrap('sk_get_text_selection_rects_ptr', 'number', []);
-    this.#sk_build_selected_text = M.cwrap('sk_build_selected_text', 'number', ['number', 'number', 'number', 'number', 'number']);
-    this.#sk_get_selected_text_ptr = M.cwrap('sk_get_selected_text_ptr', 'number', []);
-    this.#sk_annotation_pointer_pressed = M.cwrap('sk_annotation_pointer_pressed', 'number', ['number', 'number', 'number', 'number', 'number']);
-    this.#sk_annotation_pointer_moved = M.cwrap('sk_annotation_pointer_moved', 'number', ['number', 'number', 'number', 'number', 'number']);
-    this.#sk_annotation_pointer_released = M.cwrap('sk_annotation_pointer_released', 'number', []);
-    this.#sk_annotation_is_editing = M.cwrap('sk_annotation_is_editing', 'number', []);
-    this.#sk_annotation_edit = M.cwrap('sk_annotation_edit', 'number', ['number', 'number', 'number', 'number']);
+    this.#sk_select = M.cwrap('sk_select', 'number', ['number', 'number']);
+    this.#sk_build_selection_updates = M.cwrap('sk_build_selection_updates', 'number', ['number', 'number', 'number']);
+    this.#sk_build_selected_text = M.cwrap('sk_build_selected_text', 'number', []);
   }
 }

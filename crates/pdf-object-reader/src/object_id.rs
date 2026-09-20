@@ -2,6 +2,7 @@
 
 /// Identifies one indirect object in a PDF file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ObjectId {
     /// The indirect object number.
     pub number: usize,

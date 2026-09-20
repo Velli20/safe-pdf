@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::error::PdfOperatorError;
 use num_traits::FromPrimitive;
 use pdf_object_reader::{
@@ -97,24 +99,12 @@ impl Operands {
     }
 
     /// Reads the next PDF string operand as owned bytes.
-    pub fn get_string_bytes(&mut self) -> Result<Vec<u8>, PdfOperatorError> {
+    pub fn get_string_bytes(&mut self) -> Result<Arc<[u8]>, PdfOperatorError> {
         let object = self.take_next()?;
         match object {
-            ObjectVariant::HexString(value) | ObjectVariant::LiteralString(value) => Ok(value),
+            ObjectVariant::String(value) => Ok(Arc::clone(&value.bytes)),
             other => Err(PdfOperatorError::OperandTypeMismatch {
                 expected: "a PDF string operand (HexString or LiteralString)",
-                found: other.name(),
-            }),
-        }
-    }
-
-    /// Reads the next PDF Name operand as owned bytes.
-    pub fn get_name_bytes(&mut self) -> Result<Vec<u8>, PdfOperatorError> {
-        let object = self.take_next()?;
-        match object {
-            ObjectVariant::Name(value) => Ok(value),
-            other => Err(PdfOperatorError::OperandTypeMismatch {
-                expected: "a Name operand",
                 found: other.name(),
             }),
         }
@@ -186,7 +176,10 @@ mod tests {
     fn grouped_conversion_consumes_through_the_invalid_operand() {
         let mut operands = Operands::from(vec![
             ObjectVariant::Integer(1),
-            ObjectVariant::LiteralString(b"not a number".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"not a number",
+                pdf_object_reader::string_kind::StringKind::Literal,
+            ),
             ObjectVariant::Integer(3),
         ]);
 
@@ -211,17 +204,5 @@ mod tests {
             })
         ));
         assert_eq!(operands.len(), 1);
-    }
-
-    #[test]
-    fn name_operand_preserves_non_utf8_bytes() {
-        let mut operands = Operands::from(vec![ObjectVariant::Name(vec![0xFF])]);
-
-        assert_eq!(
-            operands
-                .get_name_bytes()
-                .expect("PDF Names may contain arbitrary bytes"),
-            [0xFF]
-        );
     }
 }

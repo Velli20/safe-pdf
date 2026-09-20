@@ -26,11 +26,14 @@ fn real(value: f64) -> ObjectVariant {
 }
 
 fn name(value: &str) -> ObjectVariant {
-    ObjectVariant::Name(value.as_bytes().to_vec())
+    pdf_object_reader::pdf_string::PdfString::from(
+        value.as_bytes().to_vec(),
+        pdf_object_reader::string_kind::StringKind::Name,
+    )
 }
 
 fn array(values: Vec<ObjectVariant>) -> ObjectVariant {
-    ObjectVariant::Array(values)
+    ObjectVariant::Array(values.into())
 }
 
 fn type2_function(c0: Vec<ObjectVariant>, c1: Vec<ObjectVariant>) -> ObjectVariant {
@@ -63,10 +66,18 @@ fn inline_axial_shading() -> ObjectVariant {
 
 fn form_xobject_stream(object_number: usize, data: &[u8]) -> ObjectVariant {
     let dictionary = Dictionary::new(BTreeMap::from([
-        (Vec::from(b"Subtype"), ObjectVariant::Name(b"Form".to_vec())),
+        (
+            Vec::from(b"Subtype"),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"Form".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
+        ),
         (
             Vec::from(b"BBox"),
-            ObjectVariant::Array(vec![integer(0), integer(0), integer(10), integer(10)]),
+            ObjectVariant::Array(
+                vec![integer(0.into()), integer(0), integer(10), integer(10)].into(),
+            ),
         ),
     ]));
 
@@ -85,10 +96,18 @@ fn recursive_form_xobject_stream(
     data: &[u8],
 ) -> ObjectVariant {
     let dictionary = Dictionary::new(BTreeMap::from([
-        (Vec::from(b"Subtype"), ObjectVariant::Name(b"Form".to_vec())),
+        (
+            Vec::from(b"Subtype"),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"Form".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
+        ),
         (
             Vec::from(b"BBox"),
-            ObjectVariant::Array(vec![integer(0), integer(0), integer(10), integer(10)]),
+            ObjectVariant::Array(
+                vec![integer(0.into()), integer(0), integer(10), integer(10)].into(),
+            ),
         ),
         (
             Vec::from(b"Resources"),
@@ -159,18 +178,23 @@ fn self_referential_type3_font(object_number: usize) -> Dictionary {
         (Vec::from(b"Name"), name("Self")),
         (
             Vec::from(b"FontBBox"),
-            ObjectVariant::Array(vec![integer(0), integer(0), integer(1000), integer(1000)]),
+            ObjectVariant::Array(
+                vec![integer(0.into()), integer(0), integer(1000), integer(1000)].into(),
+            ),
         ),
         (
             Vec::from(b"FontMatrix"),
-            ObjectVariant::Array(vec![
-                real(0.001),
-                real(0.0),
-                real(0.0),
-                real(0.001),
-                real(0.0),
-                real(0.0),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    real(0.001.into()),
+                    real(0.0),
+                    real(0.0),
+                    real(0.001),
+                    real(0.0),
+                    real(0.0),
+                ]
+                .into(),
+            ),
         ),
         (
             Vec::from(b"CharProcs"),
@@ -205,7 +229,9 @@ fn self_referential_tiling_pattern(object_number: usize) -> ObjectVariant {
             (Vec::from(b"TilingType"), integer(1)),
             (
                 Vec::from(b"BBox"),
-                ObjectVariant::Array(vec![integer(0), integer(0), integer(10), integer(10)]),
+                ObjectVariant::Array(
+                    vec![integer(0.into()), integer(0), integer(10), integer(10)].into(),
+                ),
             ),
             (Vec::from(b"XStep"), real(10.0)),
             (Vec::from(b"YStep"), real(10.0)),
@@ -375,21 +401,32 @@ fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
     )]));
 
     let form_dict = Dictionary::new(BTreeMap::from([
-        (Vec::from(b"Subtype"), ObjectVariant::Name(b"Form".to_vec())),
+        (
+            Vec::from(b"Subtype"),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"Form".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
+        ),
         (
             Vec::from(b"BBox"),
-            ObjectVariant::Array(vec![integer(10), integer(20), integer(30), integer(40)]),
+            ObjectVariant::Array(
+                vec![integer(10.into()), integer(20), integer(30), integer(40)].into(),
+            ),
         ),
         (
             Vec::from(b"Matrix"),
-            ObjectVariant::Array(vec![
-                real(2.0),
-                real(0.0),
-                real(0.0),
-                real(3.0),
-                real(4.0),
-                real(5.0),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    real(2.0.into()),
+                    real(0.0),
+                    real(0.0),
+                    real(3.0),
+                    real(4.0),
+                    real(5.0),
+                ]
+                .into(),
+            ),
         ),
     ]));
 
@@ -462,10 +499,18 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
     )]));
 
     let form_dict = Dictionary::new(BTreeMap::from([
-        (Vec::from(b"Subtype"), ObjectVariant::Name(b"Form".to_vec())),
+        (
+            Vec::from(b"Subtype"),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"Form".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
+        ),
         (
             Vec::from(b"BBox"),
-            ObjectVariant::Array(vec![integer(0), integer(0), integer(10), integer(10)]),
+            ObjectVariant::Array(
+                vec![integer(0.into()), integer(0), integer(10), integer(10)].into(),
+            ),
         ),
         (
             Vec::from(b"Resources"),
@@ -657,7 +702,10 @@ fn fallback_fonts_do_not_read_nested_type3_resources() {
     let malformed_type3 = ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
         (
             Vec::from(b"Subtype"),
-            ObjectVariant::Name(b"Type3".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"Type3".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         ),
         (Vec::from(b"Resources"), ObjectVariant::Integer(1)),
     ])));

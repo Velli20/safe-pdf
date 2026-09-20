@@ -193,6 +193,9 @@ impl AppRenderer for Renderer2 {
 }
 
 fn main() {
+    eprintln!(
+        "PDF annotations are unsupported in the FemtoVG viewer; use web-canvas for annotation presentation and interaction."
+    );
     const INPUT: &[u8] = include_bytes!("assets/dd5cf1a7d6d190f94a28201777f11bf4.pdf");
     let document = PdfReader::default().read_from_bytes(INPUT, None).unwrap();
 

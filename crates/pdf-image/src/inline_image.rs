@@ -79,13 +79,17 @@ fn normalize_inline_image_value(key: &[u8], value: &ObjectVariant) -> ObjectVari
     }
 
     match value {
-        ObjectVariant::Name(name) => match name.as_slice() {
-            b"G" => ObjectVariant::name_from_bytes(b"DeviceGray"),
-            b"RGB" => ObjectVariant::name_from_bytes(b"DeviceRGB"),
-            b"CMYK" => ObjectVariant::name_from_bytes(b"DeviceCMYK"),
-            b"I" => ObjectVariant::name_from_bytes(b"Indexed"),
-            _ => value.clone(),
-        },
+        ObjectVariant::String(name)
+            if name.kind() == pdf_object_reader::string_kind::StringKind::Name =>
+        {
+            match name.as_bytes() {
+                b"G" => ObjectVariant::name_from_bytes(b"DeviceGray"),
+                b"RGB" => ObjectVariant::name_from_bytes(b"DeviceRGB"),
+                b"CMYK" => ObjectVariant::name_from_bytes(b"DeviceCMYK"),
+                b"I" => ObjectVariant::name_from_bytes(b"Indexed"),
+                _ => value.clone(),
+            }
+        }
         ObjectVariant::Array(values) => ObjectVariant::Array(
             values
                 .iter()
@@ -111,10 +115,22 @@ mod tests {
     fn normalize_inline_image_dictionary_expands_abbreviations() {
         let dictionary = pdf_object_reader::dictionary::Dictionary::new(BTreeMap::from([
             (Vec::from(b"BPC"), ObjectVariant::Integer(8)),
-            (Vec::from(b"CS"), ObjectVariant::Name(b"RGB".to_vec())),
+            (
+                Vec::from(b"CS"),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"RGB".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
             (Vec::from(b"D"), ObjectVariant::Null),
             (Vec::from(b"DP"), ObjectVariant::Boolean(true)),
-            (Vec::from(b"F"), ObjectVariant::Name(b"DCTDecode".to_vec())),
+            (
+                Vec::from(b"F"),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DCTDecode".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
             (Vec::from(b"H"), ObjectVariant::Integer(2)),
             (Vec::from(b"I"), ObjectVariant::Boolean(false)),
             (Vec::from(b"IM"), ObjectVariant::Boolean(true)),
@@ -129,13 +145,19 @@ mod tests {
                 (b"BitsPerComponent".to_vec(), ObjectVariant::Integer(8)),
                 (
                     b"ColorSpace".to_vec(),
-                    ObjectVariant::Name(b"DeviceRGB".to_vec())
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        b"DeviceRGB".to_vec(),
+                        pdf_object_reader::string_kind::StringKind::Name
+                    )
                 ),
                 (b"Decode".to_vec(), ObjectVariant::Null),
                 (b"DecodeParms".to_vec(), ObjectVariant::Boolean(true)),
                 (
                     b"Filter".to_vec(),
-                    ObjectVariant::Name(b"DCTDecode".to_vec())
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        b"DCTDecode".to_vec(),
+                        pdf_object_reader::string_kind::StringKind::Name
+                    )
                 ),
                 (b"Height".to_vec(), ObjectVariant::Integer(2)),
                 (b"ImageMask".to_vec(), ObjectVariant::Boolean(true)),
@@ -157,14 +179,20 @@ mod tests {
         for (abbreviated, canonical) in cases {
             let dictionary = pdf_object_reader::dictionary::Dictionary::new(BTreeMap::from([(
                 Vec::from(b"CS"),
-                ObjectVariant::Name(abbreviated.as_bytes().to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    abbreviated.as_bytes().to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             )]));
 
             let normalized = normalize_inline_image_dictionary(&dictionary);
 
             assert_eq!(
                 normalized.dictionary.get(b"ColorSpace".as_slice()),
-                Some(&ObjectVariant::Name(canonical.as_bytes().to_vec()))
+                Some(&pdf_object_reader::pdf_string::PdfString::from(
+                    canonical.as_bytes().to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name
+                ))
             );
         }
     }
@@ -173,24 +201,48 @@ mod tests {
     fn normalize_inline_image_dictionary_expands_indexed_color_space_arrays() {
         let dictionary = pdf_object_reader::dictionary::Dictionary::new(BTreeMap::from([(
             Vec::from(b"CS"),
-            ObjectVariant::Array(vec![
-                ObjectVariant::Name(b"I".to_vec()),
-                ObjectVariant::Name(b"RGB".to_vec()),
-                ObjectVariant::Integer(1),
-                ObjectVariant::HexString(vec![10, 11, 12, 20, 21, 22]),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        b"I".to_vec(),
+                        pdf_object_reader::string_kind::StringKind::Name,
+                    ),
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        b"RGB".to_vec(),
+                        pdf_object_reader::string_kind::StringKind::Name,
+                    ),
+                    ObjectVariant::Integer(1),
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        vec![10, 11, 12, 20, 21, 22],
+                        pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                    ),
+                ]
+                .into(),
+            ),
         )]));
 
         let normalized = normalize_inline_image_dictionary(&dictionary);
 
         assert_eq!(
             normalized.dictionary.get(b"ColorSpace".as_slice()),
-            Some(&ObjectVariant::Array(vec![
-                ObjectVariant::Name(b"Indexed".to_vec()),
-                ObjectVariant::Name(b"DeviceRGB".to_vec()),
-                ObjectVariant::Integer(1),
-                ObjectVariant::HexString(vec![10, 11, 12, 20, 21, 22]),
-            ]))
+            Some(&ObjectVariant::Array(
+                vec![
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        b"Indexed".to_vec(),
+                        pdf_object_reader::string_kind::StringKind::Name.into()
+                    ),
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        b"DeviceRGB".to_vec(),
+                        pdf_object_reader::string_kind::StringKind::Name
+                    ),
+                    ObjectVariant::Integer(1),
+                    pdf_object_reader::pdf_string::PdfString::from(
+                        vec![10, 11, 12, 20, 21, 22],
+                        pdf_object_reader::string_kind::StringKind::Hexadecimal
+                    ),
+                ]
+                .into()
+            ))
         );
     }
 
@@ -208,7 +260,10 @@ mod tests {
         let mut dictionary = gray_dictionary();
         dictionary.dictionary.insert(
             b"F".to_vec(),
-            ObjectVariant::Name(b"ASCIIHexDecode".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"ASCIIHexDecode".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         );
 
         let image = InlineImage::new(dictionary, b"2A>".to_vec(), &PassthroughResolver)
@@ -232,7 +287,13 @@ mod tests {
     fn gray_dictionary() -> Dictionary {
         Dictionary::new(BTreeMap::from([
             (Vec::from(b"BPC"), ObjectVariant::Integer(8)),
-            (Vec::from(b"CS"), ObjectVariant::Name(b"G".to_vec())),
+            (
+                Vec::from(b"CS"),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"G".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
             (Vec::from(b"H"), ObjectVariant::Integer(1)),
             (Vec::from(b"W"), ObjectVariant::Integer(2)),
         ]))

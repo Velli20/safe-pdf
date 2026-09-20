@@ -1,6 +1,8 @@
+//! PDF operator interpretation and painting orchestration.
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
+    CanvasPath,
     canvas_backend::{CanvasBackend, Shader},
     canvas_state::CanvasState,
     content_stream_render_state::ContentStreamRenderState,
@@ -9,16 +11,16 @@ use crate::{
     stroke_style::StrokeStyle,
     text::TextGlyph,
     text_state::TextState,
+    tiling_shader::TilingShader,
 };
 use pdf_content_stream::ContentStream;
-use pdf_content_stream_operators::pdf_operator_backend::PathConstructionOps;
 use pdf_content_stream_operators::variants::PdfOperatorVariant;
 use pdf_document::page::PdfPage;
 use pdf_font::pdf_font_handle::PdfFontHandle;
 use pdf_font::{FontError, FontFaceId, GlyphGeometry, GlyphId, PdfFontSpec};
 use pdf_graphics::{
-    BlendMode, MaskMode, PaintMode, PathFillType, color::Color, pdf_path::PathVerb,
-    pdf_path::PdfPath, rect::Rect, transform::Transform,
+    BlendMode, PaintMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
+    transform::Transform,
 };
 use pdf_resources::{
     pattern::{PaintType, Pattern},
@@ -27,13 +29,12 @@ use pdf_resources::{
 use pdf_shading::{model::Shading, paint::build_shading_paint};
 use pdf_text_engine::FontSystem;
 
+/// Interprets PDF operators and prepares device-space painting for a borrowed backend.
 pub struct PdfCanvas<'a, B: CanvasBackend> {
     /// The current path being constructed or drawn, if any.
     pub(crate) current_path: Option<PdfPath>,
     /// The drawing backend implementing `CanvasBackend` for rendering operations.
     pub(crate) canvas: &'a mut B,
-    /// An optional mask surface for advanced compositing or clipping.
-    pub(crate) mask: Option<(Arc<RecordingCanvas>, MaskMode, Transform)>,
     /// The PDF page associated with this canvas.
     pub(crate) page: &'a PdfPage,
     /// Shared text engine used to load and lay out font resources.
@@ -68,48 +69,27 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         bb: Option<&Rect>,
         font_system: Arc<FontSystem>,
     ) -> Result<Self, PdfCanvasError> {
-        let media_box = &page.media_box;
+        let viewport =
+            crate::PageViewport::from_page(page, bb, [backend.width(), backend.height()])?;
+        Self::new_with_viewport(backend, page, &viewport, font_system)
+    }
 
-        let (pdf_media_width, pdf_media_height) = if let Some(bb) = bb {
-            (bb.width(), bb.height())
-        } else if let Some(mb) = media_box.as_ref() {
-            (mb.width(), mb.height())
-        } else {
-            (0.0, 0.0)
-        };
-
-        let backend_canvas_width = backend.width();
-        let backend_canvas_height = backend.height();
-
-        // Calculate scale factors.
-        let scale_x = if pdf_media_width != 0.0 {
-            backend_canvas_width / pdf_media_width
-        } else {
-            1.0
-        };
-
-        let scale_y = if pdf_media_height != 0.0 {
-            backend_canvas_height / pdf_media_height
-        } else {
-            1.0
-        };
-
-        // Directly construct the userspace transformation matrix.
-        // This matrix performs the following operations on PDF coordinates (px, py):
-        // 1. Scales them: (px * scale_x, py * scale_y)
-        // 2. Flips the Y-axis and translates it: Y_canvas = backend_canvas_height - (py * scale_y)
-        // Resulting canvas coordinates: (px * scale_x, backend_canvas_height - py * scale_y)
-        let transform = Transform::from_row(
-            scale_x,               // sx: Scale X
-            0.0,                   // ky: Skew Y (none)
-            0.0,                   // kx: Skew X (none)
-            -scale_y,              // sy: Scale Y and reflect (Y points down)
-            0.0,                   // tx: Translate X (none)
-            backend_canvas_height, // ty: Translate Y to move origin to top-left after reflection
-        );
+    /// Creates a canvas using the page mapping shared with layout and annotations.
+    /// Returns an error if the backend has different logical device dimensions.
+    pub fn new_with_viewport(
+        backend: &'a mut B,
+        page: &'a PdfPage,
+        viewport: &crate::PageViewport,
+        font_system: Arc<FontSystem>,
+    ) -> Result<Self, PdfCanvasError> {
+        if viewport.device_size() != [backend.width(), backend.height()] {
+            return Err(crate::ViewportError::DeviceSizeMismatch.into());
+        }
+        let transform = *viewport.page_to_device();
 
         let canvas_stack = vec![CanvasState {
             transform,
+            pattern_parent_transform: transform,
             text_state: TextState::default(),
             ..Default::default()
         }];
@@ -117,7 +97,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         Ok(Self {
             current_path: None,
             canvas: backend,
-            mask: None,
             page,
             font_system,
             font_cache: HashMap::new(),
@@ -225,6 +204,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
         let canvas_stack = vec![CanvasState {
             transform,
+            pattern_parent_transform: transform,
             text_state: TextState::default(),
             ..Default::default()
         }];
@@ -232,7 +212,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         let mut other = PdfCanvas::<RecordingCanvas> {
             current_path: None,
             canvas: recording_canvas,
-            mask: None,
             page: self.page,
             font_system: Arc::clone(&self.font_system),
             font_cache: HashMap::new(),
@@ -379,10 +358,13 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     return Ok(None);
                 }
 
-                // The tiling pattern's `/Matrix` maps pattern space -> user space.
-                // We pass it through unchanged and let the backend concatenate it with
-                // the current CTM when sampling the pattern.
-                let transform = *matrix;
+                // Patterns are anchored to their parent stream's default user space,
+                // independently of later `cm` operators. Paths already use logical
+                // device coordinates, so prepare the shader in the same coordinates.
+                let transform = self.current_state()?.pattern_parent_transform;
+                let transform = matrix
+                    .as_ref()
+                    .map_or(transform, |matrix| transform.post_concatenated(matrix));
 
                 // Uncolored patterns use the current color from the graphics state,
                 // so we filter out color-setting operators from the content stream.
@@ -418,12 +400,12 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     filter,
                 )?;
 
-                let shader = Shader::TilingPatternImage {
-                    image: Arc::new(recording_canvas),
-                    transform,
-                    x_step: *x_step,
-                    y_step: *y_step,
-                };
+                let shader = Shader::TilingPatternImage(TilingShader::new(
+                    Arc::new(recording_canvas),
+                    Some(transform),
+                    bbox,
+                    [*x_step, *y_step],
+                )?);
                 Ok(Some(shader))
             }
         }
@@ -442,149 +424,54 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// Returns an error if the paint mode is not implemented or if pattern computation fails.
     pub(crate) fn draw_path(
         &mut self,
-        path: &PdfPath,
+        path: &CanvasPath<'_>,
         mode: PaintMode,
         fill_type: PathFillType,
     ) -> Result<(), PdfCanvasError> {
-        let paint = &self.current_state()?.paint;
-        let fill_color = paint.fill_color;
-        let stroke_color = paint.stroke_color;
-        let blend_mode = paint.blend_mode.clone();
-        let line_width = paint.line_width * self.current_state()?.transform.sx;
-        let stroke_style = StrokeStyle {
-            dash_pattern: paint.dash_pattern.clone(),
-        }
-        .scaled(self.current_state()?.transform.sx);
-
-        match mode {
-            PaintMode::Fill => {
-                let shader = self.compute_shader(false)?;
-                self.canvas
-                    .fill_path(path, fill_type, fill_color, &shader, blend_mode)
+        let fill = if matches!(mode, PaintMode::Fill | PaintMode::FillAndStroke) {
+            let paint = &self.current_state()?.paint;
+            Some((
+                paint.fill_color,
+                paint.blend_mode.clone(),
+                self.compute_shader(false)?,
+            ))
+        } else {
+            None
+        };
+        let stroke = if matches!(mode, PaintMode::Stroke | PaintMode::FillAndStroke) {
+            let state = self.current_state()?;
+            Some((
+                state.paint.stroke_color,
+                state.paint.blend_mode.clone(),
+                state.paint.line_width * state.transform.sx,
+                StrokeStyle::from_paint(&state.paint, state.transform.sx)?,
+                self.compute_shader(true)?,
+            ))
+        } else {
+            None
+        };
+        self.with_soft_mask(|backend| {
+            if let Some((color, blend, shader)) = fill {
+                backend.fill_path(path, fill_type, color, shader.as_ref(), blend)?;
             }
-            PaintMode::Stroke => {
-                let shader = self.compute_shader(true)?;
-                self.canvas.stroke_path(
-                    path,
-                    stroke_color,
-                    line_width,
-                    &stroke_style,
-                    &shader,
-                    blend_mode,
-                )
+            if let Some((color, blend, width, style, shader)) = stroke {
+                backend.stroke_path(path, color, width, &style, shader.as_ref(), blend)?;
             }
-            PaintMode::FillAndStroke => {
-                // First fill the path using the current fill settings
-                let fill_shader = self.compute_shader(false)?;
-                self.canvas.fill_path(
-                    path,
-                    fill_type,
-                    fill_color,
-                    &fill_shader,
-                    blend_mode.clone(),
-                )?;
-
-                // Then stroke the path using the current stroke settings
-                let stroke_shader = self.compute_shader(true)?;
-                self.canvas.stroke_path(
-                    path,
-                    stroke_color,
-                    line_width,
-                    &stroke_style,
-                    &stroke_shader,
-                    blend_mode,
-                )
-            }
-        }
+            Ok(())
+        })
     }
 
-    /// Draws shared geometry using a per-instance transform.
-    pub(crate) fn draw_transformed_path(
-        &mut self,
-        path: &Arc<PdfPath>,
-        transform: &Transform,
-        mode: PaintMode,
-        fill_type: PathFillType,
-    ) -> Result<(), PdfCanvasError> {
-        let paint = &self.current_state()?.paint;
-        let fill_color = paint.fill_color;
-        let stroke_color = paint.stroke_color;
-        let blend_mode = paint.blend_mode.clone();
-        let line_width = paint.line_width * self.current_state()?.transform.sx;
-        let stroke_style = StrokeStyle {
-            dash_pattern: paint.dash_pattern.clone(),
-        }
-        .scaled(self.current_state()?.transform.sx);
-
-        match mode {
-            PaintMode::Fill => {
-                let shader = self.compute_shader(false)?;
-                self.canvas.fill_transformed_path(
-                    path, transform, fill_type, fill_color, &shader, blend_mode,
-                )
-            }
-            PaintMode::Stroke => {
-                let shader = self.compute_shader(true)?;
-                self.canvas.stroke_transformed_path(
-                    path,
-                    transform,
-                    stroke_color,
-                    line_width,
-                    &stroke_style,
-                    &shader,
-                    blend_mode,
-                )
-            }
-            PaintMode::FillAndStroke => {
-                let fill_shader = self.compute_shader(false)?;
-                self.canvas.fill_transformed_path(
-                    path,
-                    transform,
-                    fill_type,
-                    fill_color,
-                    &fill_shader,
-                    blend_mode.clone(),
-                )?;
-                let stroke_shader = self.compute_shader(true)?;
-                self.canvas.stroke_transformed_path(
-                    path,
-                    transform,
-                    stroke_color,
-                    line_width,
-                    &stroke_style,
-                    &stroke_shader,
-                    blend_mode,
-                )
-            }
-        }
-    }
-
-    /// Replays a path into the current graphics path.
+    /// Borrows the backend for one painting operation with the currently selected mask.
     ///
-    /// This is used by callers that need to materialize a [`PdfPath`] through the
-    /// canvas path-construction API before painting it.
-    pub fn replay_path(&mut self, path: &PdfPath) -> Result<(), PdfCanvasError> {
-        for verb in &path.verbs {
-            match *verb {
-                PathVerb::MoveTo { x, y } => self.move_to(x, y)?,
-                PathVerb::LineTo { x, y } => self.line_to(x, y)?,
-                PathVerb::CubicTo {
-                    x1,
-                    y1,
-                    x2,
-                    y2,
-                    x3,
-                    y3,
-                } => self.curve_to(x1, y1, x2, y2, x3, y3)?,
-                PathVerb::QuadTo { .. } => {
-                    return Err(PdfCanvasError::UnsupportedFeature(
-                        "quadratic annotation paths".to_owned(),
-                    ));
-                }
-                PathVerb::Close => self.close_path()?,
-            }
-        }
-        Ok(())
+    /// Callers prepare PDF state before this boundary so the callback needs only the backend.
+    pub(crate) fn with_soft_mask(
+        &mut self,
+        paint: impl FnOnce(&mut B) -> Result<(), PdfCanvasError>,
+    ) -> Result<(), PdfCanvasError> {
+        let Some(mask) = self.current_state()?.soft_mask.clone() else {
+            return paint(self.canvas);
+        };
+        self.canvas.with_mask_layer(&mask, paint)
     }
 
     /// Sets the alpha value for subsequent non-stroking paint operations.
@@ -624,10 +511,10 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         mode: PaintMode,
         fill_type: PathFillType,
     ) -> Result<(), PdfCanvasError> {
-        let Some(mut path) = self.current_path.take() else {
+        let Some(path) = self.current_path.take() else {
             return Ok(());
         };
-        path.transform(&self.current_state()?.transform);
+        let path = CanvasPath::transformed(&path, self.current_state()?.transform)?;
         self.draw_path(&path, mode, fill_type)
     }
 
@@ -643,12 +530,14 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// Returns an error if the graphics state is invalid.
     pub(crate) fn set_clip_path(
         &mut self,
-        mut path: PdfPath,
+        path: PdfPath,
         mode: PathFillType,
     ) -> Result<(), PdfCanvasError> {
-        path.transform(&self.current_state()?.transform);
+        let path =
+            CanvasPath::transformed(&path, self.current_state()?.transform)?.to_pdf_path()?;
 
-        self.canvas.set_clip_region(&path, mode)?;
+        self.canvas
+            .set_clip_region(&CanvasPath::device(&path), mode)?;
         self.current_state_mut()?.clip_path = Some(path);
         Ok(())
     }
@@ -771,16 +660,12 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 self.current_state_mut()?.transform.post_concat(&mat);
             }
 
+            let state = self.current_state_mut()?;
+            state.pattern_parent_transform = state.transform;
+
             if let Some(bbox) = bbox {
                 // Set up a clipping path based on the bounding box.
-                let mut clip_path = PdfPath::default();
-                clip_path.move_to(bbox.left, bbox.top);
-                clip_path.line_to(bbox.right, bbox.top);
-                clip_path.line_to(bbox.right, bbox.bottom);
-                clip_path.line_to(bbox.left, bbox.bottom);
-                clip_path.close();
-
-                self.set_clip_path(clip_path, PathFillType::EvenOdd)?;
+                self.set_clip_path(PdfPath::from(bbox), PathFillType::EvenOdd)?;
             }
 
             if let Some(resources) = resources {
@@ -797,8 +682,8 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             Ok(())
         })();
 
-        self.restore();
-        result
+        let restore_result = self.restore();
+        result.and(restore_result)
     }
 
     /// Saves the entire current graphics state onto a stack.
@@ -807,26 +692,27 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// A corresponding call to `restore` is required to pop the state from the stack.
     pub(crate) fn save(&mut self) -> Result<(), PdfCanvasError> {
         let state = self.current_state()?.clone();
+        self.canvas.save()?;
         self.canvas_stack.push(state);
-        self.canvas.save()
+        Ok(())
     }
 
     /// Restores the most recently saved graphics state from the stack.
     ///
     /// If the restored state included a clipping path, the clipping path is reset on the backend.
-    pub(crate) fn restore(&mut self) {
+    pub(crate) fn restore(&mut self) -> Result<(), PdfCanvasError> {
         // Do not allow popping the initial/base graphics state. There is no
         // corresponding backend `save()` for it, so ignore unmatched restore
         // operations to keep the canvas stack and backend stack in sync.
         if self.canvas_stack.len() <= 1 {
-            return;
+            return Ok(());
         }
 
         // At this point there is at least one saved state beyond the base,
         // so popping is safe and has a matching backend `save()`.
-        let _ = self.canvas_stack.pop();
-
-        let _ = self.canvas.restore();
+        self.canvas.restore()?;
+        self.canvas_stack.pop();
+        Ok(())
     }
 
     /// Sets the current color space for stroking or filling operations.
@@ -913,18 +799,22 @@ mod tests {
     use super::PdfCanvas;
     use crate::recording_canvas::RecordingCanvas;
 
+    /// Creates a minimal page fixture for graphics-state tests.
     fn page() -> PdfPage {
         PdfPage {
             contents: None,
             annotations: None,
             media_box: None,
+            crop_box: None,
             resources: None,
+            rotation: None,
             annotation_id_high_watermark: 0,
             read_state: None,
         }
     }
 
     #[test]
+    /// Verifies that set dash pattern updates current state.
     fn set_dash_pattern_updates_current_state() {
         let page = page();
         let mut backend = RecordingCanvas::new(100.0, 100.0);
@@ -947,6 +837,7 @@ mod tests {
     }
 
     #[test]
+    /// Verifies that empty dash pattern clears current state.
     fn empty_dash_pattern_clears_current_state() {
         let page = page();
         let mut backend = RecordingCanvas::new(100.0, 100.0);
@@ -971,6 +862,7 @@ mod tests {
     }
 
     #[test]
+    /// Verifies that invalid dash pattern does not mutate current state.
     fn invalid_dash_pattern_does_not_mutate_current_state() {
         let page = page();
         let mut backend = RecordingCanvas::new(100.0, 100.0);
@@ -995,6 +887,7 @@ mod tests {
     }
 
     #[test]
+    /// Verifies that rejects absurd offscreen recording bbox.
     fn rejects_absurd_offscreen_recording_bbox() {
         assert!(!PdfCanvas::<RecordingCanvas>::can_record_offscreen_bbox(
             &Rect {

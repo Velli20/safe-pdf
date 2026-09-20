@@ -22,12 +22,13 @@ pub mod type3_font_operators;
 pub mod xobject_and_image_operators;
 
 extern crate alloc;
+use std::sync::Arc;
 
 /// One operand from a PDF `Tj` or `TJ` text-showing operation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PdfTextItem {
     /// Encoded PDF string bytes.
-    Text(Vec<u8>),
+    Text(Arc<[u8]>),
     /// Numeric text-position adjustment in thousandths of a text-space unit.
     Adjustment(f32),
 }

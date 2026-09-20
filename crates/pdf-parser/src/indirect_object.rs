@@ -232,7 +232,13 @@ mod tests {
         if let Some((identifier, object)) = parse_staged_indirect_object(&mut parser).unwrap() {
             assert_eq!(identifier.number, 0);
             assert_eq!(identifier.generation, 1);
-            assert_eq!(object, ObjectVariant::LiteralString(b"HELLO".to_vec()));
+            assert_eq!(
+                object,
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"HELLO".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Literal
+                )
+            );
         } else {
             panic!("Expected indirect object declaration");
         }

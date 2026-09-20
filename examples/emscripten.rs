@@ -1,33 +1,17 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use gl_rs as gl;
-use pdf_annotation_form::{
-    AnnotationController, AnnotationEditCommand, AnnotationInteractionResult,
-    AnnotationPointerMove, AnnotationPointerPress, AnnotationViewport,
-};
+use pdf_canvas::PageViewport;
 use pdf_document::reader::PdfReader;
 use pdf_graphics::point::Point;
 use pdf_graphics_skia::gpu_state::SkiaGpuState;
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
-use pdf_renderer::{PageRecordingCache, PageTextLayout, PdfRenderer, render_page_cached};
-use std::{cell::RefCell, time::Instant};
-
-const INTERACTION_CONSUMED: i32 = 1;
-const INTERACTION_REDRAW: i32 = 2;
-const INTERACTION_EDITING: i32 = 4;
-const INTERACTION_ERROR: i32 = -1;
-const INTERACTION_INVALID_INPUT: i32 = -2;
-
-const EDIT_INSERT: i32 = 0;
-const EDIT_NEWLINE: i32 = 1;
-const EDIT_MOVE_LEFT: i32 = 2;
-const EDIT_MOVE_RIGHT: i32 = 3;
-const EDIT_MOVE_TO_START: i32 = 4;
-const EDIT_MOVE_TO_END: i32 = 5;
-const EDIT_DELETE_BACKWARD: i32 = 6;
-const EDIT_DELETE_FORWARD: i32 = 7;
-const EDIT_COMMIT: i32 = 8;
-const EDIT_CANCEL: i32 = 9;
+use pdf_renderer::{
+    DocumentTextSelection, PageRecordingCache, PdfRenderer, RecordedPage, SelectionPoint,
+    SelectionSpan,
+};
+use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 
 // Thread-local storage for the currently loaded PDF renderer.
 // Using RefCell for interior mutability since WASM is single-threaded.
@@ -37,77 +21,33 @@ thread_local! {
     /// Page recording cache for efficient re-rendering.
     /// Caches up to 5 dimension-specific pages with drawing commands and text layout.
     static PAGE_CACHE: RefCell<PageRecordingCache> = RefCell::new(PageRecordingCache::new(5));
-    static TEXT_SELECTION_RECTS: RefCell<Vec<f32>> = const { RefCell::new(Vec::new()) };
-    static SELECTED_TEXT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
-    static ANNOTATION_CONTROLLER: RefCell<AnnotationController> =
-        RefCell::new(AnnotationController::default());
-    static ANNOTATION_PAGE_INDEX: RefCell<Option<usize>> = const { RefCell::new(None) };
+    /// Document-wide selection over the layouts captured while recording pages.
+    static TEXT_SELECTION: RefCell<Option<DocumentTextSelection>> = const { RefCell::new(None) };
+    /// Monotonic revision handed to each installed layout.
+    static LAYOUT_REVISION: Cell<u32> = const { Cell::new(0) };
+    /// Device size of each page's retained selection layout; later renders at other
+    /// sizes keep the first layout so selections survive zoom changes.
+    static LAYOUT_SIZES: RefCell<BTreeMap<usize, [f32; 2]>> = const { RefCell::new(BTreeMap::new()) };
+    /// Output buffer for JSON and UTF-8 results read by JavaScript via `sk_get_scratch_ptr`.
+    static SCRATCH: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
-fn clear_text_selection_state() {
-    TEXT_SELECTION_RECTS.with(|rects| {
-        rects.borrow_mut().clear();
-    });
-    SELECTED_TEXT.with(|text| {
-        text.borrow_mut().clear();
-    });
+/// Stores `bytes` for JavaScript and returns their length.
+fn publish(bytes: Vec<u8>) -> usize {
+    SCRATCH.with(|scratch| {
+        let mut scratch = scratch.borrow_mut();
+        *scratch = bytes;
+        scratch.len()
+    })
 }
 
-fn clear_annotation_interaction_state() {
-    ANNOTATION_CONTROLLER.with(|controller| {
-        *controller.borrow_mut() = AnnotationController::default();
-    });
-    ANNOTATION_PAGE_INDEX.with(|page_index| {
-        *page_index.borrow_mut() = None;
-    });
-}
-
-fn encode_interaction_result(result: AnnotationInteractionResult) -> i32 {
-    let editing = ANNOTATION_CONTROLLER.with(|controller| controller.borrow().is_editing());
-    let mut encoded = 0;
-    if result.consumed {
-        encoded |= INTERACTION_CONSUMED;
-    }
-    if result.redraw {
-        encoded |= INTERACTION_REDRAW;
-    }
-    if editing {
-        encoded |= INTERACTION_EDITING;
-    }
-    encoded
-}
-
-fn combine_interaction_results(
-    first: AnnotationInteractionResult,
-    second: AnnotationInteractionResult,
-) -> AnnotationInteractionResult {
-    AnnotationInteractionResult {
-        consumed: first.consumed || second.consumed,
-        redraw: first.redraw || second.redraw,
-    }
-}
-
-fn annotation_edit_command<'a>(code: i32, text: &'a str) -> Option<AnnotationEditCommand<'a>> {
-    match code {
-        EDIT_INSERT => Some(AnnotationEditCommand::Insert { text }),
-        EDIT_NEWLINE => Some(AnnotationEditCommand::Newline),
-        EDIT_MOVE_LEFT => Some(AnnotationEditCommand::MoveLeft),
-        EDIT_MOVE_RIGHT => Some(AnnotationEditCommand::MoveRight),
-        EDIT_MOVE_TO_START => Some(AnnotationEditCommand::MoveToStart),
-        EDIT_MOVE_TO_END => Some(AnnotationEditCommand::MoveToEnd),
-        EDIT_DELETE_BACKWARD => Some(AnnotationEditCommand::DeleteBackward),
-        EDIT_DELETE_FORWARD => Some(AnnotationEditCommand::DeleteForward),
-        EDIT_COMMIT => Some(AnnotationEditCommand::Commit),
-        EDIT_CANCEL => Some(AnnotationEditCommand::Cancel),
-        _ => None,
-    }
-}
-
-fn with_text_layout<R>(
+/// Records `page_index` at the requested size on a cache miss, sharing its text
+/// layout with the selection controller, then runs `f` on the recording.
+fn with_recorded_page<R>(
     page_index: usize,
     width: i32,
     height: i32,
-    f: impl FnOnce(&PageTextLayout) -> R,
+    f: impl FnOnce(&RecordedPage) -> R,
 ) -> Option<R> {
     if width <= 0 || height <= 0 {
         return None;
@@ -128,17 +68,41 @@ fn with_text_layout<R>(
                 let recorded = match renderer.render_page_to_recording(page_index, width, height) {
                     Ok(recorded) => recorded,
                     Err(e) => {
-                        eprintln!("Text layout error: {e:?}");
+                        eprintln!("Page recording error: {e:?}");
                         return None;
                     }
                 };
+                install_layout(page_index, [width, height], &recorded);
                 cache.insert(page_index, recorded);
             }
-            cache
-                .get(page_index, width, height)
-                .map(|recorded| f(recorded.text_layout()))
+            cache.get(page_index, width, height).map(f)
         })
     })
+}
+
+/// Shares the first recorded layout of a page with the selection controller.
+fn install_layout(page_index: usize, size: [f32; 2], recorded: &RecordedPage) {
+    let Ok(page) = u32::try_from(page_index) else {
+        return;
+    };
+    if LAYOUT_SIZES.with(|sizes| sizes.borrow().contains_key(&page_index)) {
+        return;
+    }
+    let revision = LAYOUT_REVISION.with(|r| {
+        let next = r.get().saturating_add(1);
+        r.set(next);
+        next
+    });
+    TEXT_SELECTION.with(|selection| {
+        if let Some(selection) = selection.borrow_mut().as_mut() {
+            match selection.install_layout(page, revision, size, recorded.text_layout_arc()) {
+                Ok(()) => {
+                    LAYOUT_SIZES.with(|sizes| sizes.borrow_mut().insert(page_index, size));
+                }
+                Err(e) => eprintln!("Text layout install error: {e:?}"),
+            }
+        }
+    });
 }
 
 #[macro_export]
@@ -190,8 +154,19 @@ pub unsafe extern "C" fn sk_load_pdf(data_ptr: *const u8, data_len: usize) -> i3
             PAGE_CACHE.with(|cache| {
                 cache.borrow_mut().clear();
             });
-            clear_text_selection_state();
-            clear_annotation_interaction_state();
+            let pages = (0..document.page_count())
+                .filter_map(|page| u32::try_from(page).ok())
+                .collect::<Vec<_>>();
+            let selection = match DocumentTextSelection::new(&pages) {
+                Ok(selection) => selection,
+                Err(e) => {
+                    eprintln!("Failed to create text selection: {e:?}");
+                    return -1;
+                }
+            };
+            TEXT_SELECTION.with(|current| *current.borrow_mut() = Some(selection));
+            LAYOUT_SIZES.with(|sizes| sizes.borrow_mut().clear());
+            LAYOUT_REVISION.with(|revision| revision.set(0));
             CURRENT_RENDERER.with(|renderer| {
                 *renderer.borrow_mut() = Some(PdfRenderer::new(document));
             });
@@ -280,42 +255,21 @@ pub extern "C" fn sk_render_page(width: i32, height: i32, page_index: usize) -> 
                 height: height as f32,
             };
 
-            // Use cached rendering for better performance
-            let result = PAGE_CACHE.with(|cache| {
-                let mut cache = cache.borrow_mut();
-                match render_page_cached(renderer, page_index, &mut cache, &mut skia_backend) {
+            // Replay the recorded page so text layouts are captured once per size.
+            drop(renderer_ref);
+            let result = with_recorded_page(page_index, width, height, |recorded| {
+                match recorded.replay(&mut skia_backend) {
                     Ok(()) => 0,
                     Err(e) => {
                         eprintln!("Render error: {e:?}");
                         -3
                     }
                 }
-            });
+            })
+            .unwrap_or(-3);
 
             if result != 0 {
                 return result;
-            }
-
-            let Some(page) = renderer.document().get_page(page_index) else {
-                return -1;
-            };
-            let Some(viewport) = AnnotationViewport::from_page(page, width as f32, height as f32)
-            else {
-                return -3;
-            };
-            let active_page = ANNOTATION_PAGE_INDEX.with(|active_page| *active_page.borrow());
-            let overlay_result = if active_page == Some(page_index) {
-                ANNOTATION_CONTROLLER.with(|controller| {
-                    controller
-                        .borrow()
-                        .draw_overlay(&mut skia_backend, page, viewport)
-                })
-            } else {
-                AnnotationController::default().draw_overlay(&mut skia_backend, page, viewport)
-            };
-            if let Err(error) = overlay_result {
-                eprintln!("Annotation overlay error: {error:?}");
-                return -3;
             }
 
             // Flush and submit to ensure GPU commands are executed
@@ -332,8 +286,9 @@ pub extern "C" fn sk_free_pdf() {
     PAGE_CACHE.with(|cache| {
         cache.borrow_mut().clear();
     });
-    clear_text_selection_state();
-    clear_annotation_interaction_state();
+    TEXT_SELECTION.with(|selection| *selection.borrow_mut() = None);
+    LAYOUT_SIZES.with(|sizes| sizes.borrow_mut().clear());
+    SCRATCH.with(|scratch| scratch.borrow_mut().clear());
     CURRENT_RENDERER.with(|renderer| {
         *renderer.borrow_mut() = None;
     });
@@ -439,211 +394,18 @@ pub extern "C" fn sk_clear_cache() {
     });
 }
 
-/// Clears cached text layouts and temporary selection buffers.
-#[unsafe(export_name = "sk_clear_text_layout_cache")]
-pub extern "C" fn sk_clear_text_layout_cache() {
-    PAGE_CACHE.with(|cache| cache.borrow_mut().clear());
-    clear_text_selection_state();
+/// Returns a pointer to the last JSON or UTF-8 result; read the length the producing call returned.
+#[unsafe(export_name = "sk_get_scratch_ptr")]
+pub extern "C" fn sk_get_scratch_ptr() -> *const u8 {
+    SCRATCH.with(|scratch| scratch.borrow().as_ptr())
 }
 
-/// Handles a primary annotation pointer press in device coordinates.
-#[unsafe(export_name = "sk_annotation_pointer_pressed")]
-pub extern "C" fn sk_annotation_pointer_pressed(
-    page_index: usize,
-    width: i32,
-    height: i32,
-    x: f32,
-    y: f32,
-) -> i32 {
-    if width <= 0 || height <= 0 || !x.is_finite() || !y.is_finite() {
-        return INTERACTION_INVALID_INPUT;
-    }
-
-    let previous_page = ANNOTATION_PAGE_INDEX.with(|active_page| *active_page.borrow());
-    let page_change = if previous_page.is_some() && previous_page != Some(page_index) {
-        ANNOTATION_CONTROLLER.with(|controller| controller.borrow_mut().page_changed())
-    } else {
-        AnnotationInteractionResult::IGNORED
-    };
-
-    let interaction = CURRENT_RENDERER.with(|renderer| {
-        let mut renderer = renderer.borrow_mut();
-        let renderer = renderer.as_mut()?;
-        let viewport = renderer
-            .document()
-            .get_page(page_index)
-            .and_then(|page| AnnotationViewport::from_page(page, width as f32, height as f32))?;
-        Some(ANNOTATION_CONTROLLER.with(|controller| {
-            controller.borrow_mut().pointer_pressed(
-                renderer.document_mut(),
-                AnnotationPointerPress {
-                    page_index,
-                    viewport,
-                    position: Point::new(x, y),
-                    timestamp: Instant::now(),
-                },
-            )
-        }))
-    });
-    let Some(interaction) = interaction else {
-        return INTERACTION_INVALID_INPUT;
-    };
-    let outcome = match interaction {
-        Ok(outcome) => combine_interaction_results(page_change, outcome),
-        Err(error) => {
-            eprintln!("Annotation pointer press error: {error:?}");
-            return INTERACTION_ERROR;
-        }
-    };
-
-    let selected =
-        ANNOTATION_CONTROLLER.with(|controller| controller.borrow().selected().is_some());
-    ANNOTATION_PAGE_INDEX.with(|active_page| {
-        *active_page.borrow_mut() = selected.then_some(page_index);
-    });
-    if outcome.redraw {
-        PAGE_CACHE.with(|cache| cache.borrow_mut().clear());
-    }
-    encode_interaction_result(outcome)
-}
-
-/// Handles primary annotation pointer movement in device coordinates.
-#[unsafe(export_name = "sk_annotation_pointer_moved")]
-pub extern "C" fn sk_annotation_pointer_moved(
-    page_index: usize,
-    width: i32,
-    height: i32,
-    x: f32,
-    y: f32,
-) -> i32 {
-    if width <= 0 || height <= 0 || !x.is_finite() || !y.is_finite() {
-        return INTERACTION_INVALID_INPUT;
-    }
-
-    let interaction = CURRENT_RENDERER.with(|renderer| {
-        let mut renderer = renderer.borrow_mut();
-        let renderer = renderer.as_mut()?;
-        let viewport = renderer
-            .document()
-            .get_page(page_index)
-            .and_then(|page| AnnotationViewport::from_page(page, width as f32, height as f32))?;
-        Some(ANNOTATION_CONTROLLER.with(|controller| {
-            controller.borrow_mut().pointer_moved(
-                renderer.document_mut(),
-                AnnotationPointerMove {
-                    page_index,
-                    viewport,
-                    position: Point::new(x, y),
-                },
-            )
-        }))
-    });
-    let Some(interaction) = interaction else {
-        return INTERACTION_INVALID_INPUT;
-    };
-    let outcome = match interaction {
-        Ok(outcome) => outcome,
-        Err(error) => {
-            eprintln!("Annotation pointer move error: {error:?}");
-            return INTERACTION_ERROR;
-        }
-    };
-    if outcome.redraw {
-        PAGE_CACHE.with(|cache| {
-            cache.borrow_mut().remove(page_index);
-        });
-    }
-    encode_interaction_result(outcome)
-}
-
-/// Ends the current primary annotation pointer gesture.
-#[unsafe(export_name = "sk_annotation_pointer_released")]
-pub extern "C" fn sk_annotation_pointer_released() -> i32 {
-    let outcome =
-        ANNOTATION_CONTROLLER.with(|controller| controller.borrow_mut().pointer_released());
-    encode_interaction_result(outcome)
-}
-
-/// Returns whether free-text annotation editing is active.
-#[unsafe(export_name = "sk_annotation_is_editing")]
-pub extern "C" fn sk_annotation_is_editing() -> i32 {
-    ANNOTATION_CONTROLLER.with(|controller| i32::from(controller.borrow().is_editing()))
-}
-
-/// Applies a semantic editing command to the active free-text annotation.
+/// Hit-tests a point on a page displayed at `width`×`height` device pixels.
 ///
-/// # Safety
-///
-/// For insert commands, `text_ptr` must address `text_len` readable UTF-8 bytes
-/// for the duration of this call. Other command types ignore the text buffer.
-#[unsafe(export_name = "sk_annotation_edit")]
-pub unsafe extern "C" fn sk_annotation_edit(
-    page_index: usize,
-    command: i32,
-    text_ptr: *const u8,
-    text_len: usize,
-) -> i32 {
-    let active_page = ANNOTATION_PAGE_INDEX.with(|active_page| *active_page.borrow());
-    if active_page != Some(page_index) {
-        return INTERACTION_INVALID_INPUT;
-    }
-
-    let text = if command == EDIT_INSERT {
-        if text_ptr.is_null() && text_len != 0 {
-            return INTERACTION_INVALID_INPUT;
-        }
-        let bytes = if text_len == 0 {
-            &[]
-        } else {
-            // SAFETY: The caller guarantees the pointer is readable for
-            // `text_len` bytes, and the slice is used only during this call.
-            unsafe { std::slice::from_raw_parts(text_ptr, text_len) }
-        };
-        let Ok(text) = std::str::from_utf8(bytes) else {
-            return INTERACTION_INVALID_INPUT;
-        };
-        text
-    } else {
-        ""
-    };
-    let Some(command) = annotation_edit_command(command, text) else {
-        return INTERACTION_INVALID_INPUT;
-    };
-
-    let interaction = CURRENT_RENDERER.with(|renderer| {
-        let mut renderer = renderer.borrow_mut();
-        let renderer = renderer.as_mut()?;
-        let page = renderer.document_mut().pages.get_mut(page_index)?;
-        Some(
-            ANNOTATION_CONTROLLER
-                .with(|controller| controller.borrow_mut().handle_edit_command(page, command)),
-        )
-    });
-    let Some(interaction) = interaction else {
-        return INTERACTION_INVALID_INPUT;
-    };
-    let outcome = match interaction {
-        Ok(outcome) => outcome,
-        Err(error) => {
-            eprintln!("Annotation edit error: {error:?}");
-            return INTERACTION_ERROR;
-        }
-    };
-    if outcome.redraw {
-        PAGE_CACHE.with(|cache| {
-            cache.borrow_mut().remove(page_index);
-        });
-    }
-    encode_interaction_result(outcome)
-}
-
-/// Returns the number of selectable glyph spans on a rendered page.
-#[unsafe(export_name = "sk_get_text_glyph_count")]
-pub extern "C" fn sk_get_text_glyph_count(page_index: usize, width: i32, height: i32) -> usize {
-    with_text_layout(page_index, width, height, |layout| layout.glyphs().len()).unwrap_or(0)
-}
-
-/// Returns the glyph index nearest to a device-space point, or `usize::MAX`.
+/// The page is recorded at that size when it has no retained layout yet; otherwise
+/// the point is scaled into the retained layout's device space. On a hit, publishes
+/// `[page, layout_revision, glyph_index]` as JSON and returns its byte length;
+/// returns `0` when no glyph is near the point.
 #[unsafe(export_name = "sk_hit_test_text")]
 pub extern "C" fn sk_hit_test_text(
     page_index: usize,
@@ -652,116 +414,172 @@ pub extern "C" fn sk_hit_test_text(
     x: f32,
     y: f32,
 ) -> usize {
-    with_text_layout(page_index, width, height, |layout| {
-        layout
-            .hit_test(x, y)
-            .map(|hit| hit.index())
-            .unwrap_or(usize::MAX)
-    })
-    .unwrap_or(usize::MAX)
+    if width <= 0 || height <= 0 {
+        return 0;
+    }
+    let layout_size =
+        |sizes: &RefCell<BTreeMap<usize, [f32; 2]>>| sizes.borrow().get(&page_index).copied();
+    let size = match LAYOUT_SIZES.with(layout_size) {
+        Some(size) => size,
+        None => {
+            if with_recorded_page(page_index, width, height, |_| ()).is_none() {
+                return 0;
+            }
+            match LAYOUT_SIZES.with(layout_size) {
+                Some(size) => size,
+                None => return 0,
+            }
+        }
+    };
+    let Ok(page) = u32::try_from(page_index) else {
+        return 0;
+    };
+    let point = Point::new(x * size[0] / width as f32, y * size[1] / height as f32);
+    let hit = TEXT_SELECTION.with(|selection| {
+        selection
+            .borrow()
+            .as_ref()
+            .and_then(|selection| selection.hit_test(page, point).ok().flatten())
+    });
+    match hit {
+        Some(hit) => publish(
+            serde_json::json!([hit.page, hit.layout_revision, hit.glyph_index])
+                .to_string()
+                .into_bytes(),
+        ),
+        None => 0,
+    }
 }
 
-/// Builds selection rectangles for an inclusive glyph-index range.
+/// Sets the selection from two `[page, layout_revision, glyph_index]` triples, or clears
+/// it when `len` is `0`. Returns the new selection revision, or `-1` on invalid input.
 ///
-/// Returns the number of rectangles. Call [`sk_get_text_selection_rects_ptr`]
-/// and read `count * 4` f32 values in left/top/right/bottom order.
-#[unsafe(export_name = "sk_build_text_selection_rects")]
-pub extern "C" fn sk_build_text_selection_rects(
-    page_index: usize,
-    width: i32,
-    height: i32,
-    start_index: usize,
-    end_index: usize,
+/// # Safety
+///
+/// `endpoints` must point to `len` readable `u32` values that outlive this call.
+#[unsafe(export_name = "sk_select")]
+pub unsafe extern "C" fn sk_select(endpoints: *const u32, len: usize) -> i32 {
+    let values: &[u32] = if len == 0 || endpoints.is_null() {
+        &[]
+    } else {
+        // SAFETY: The caller guarantees `endpoints` references `len` initialized values.
+        unsafe { std::slice::from_raw_parts(endpoints, len) }
+    };
+    let point = |page: u32, layout_revision: u32, index: u32| SelectionPoint {
+        page,
+        layout_revision,
+        glyph_index: index as usize,
+    };
+    let span = match *values {
+        [] => None,
+        [a, ar, ai, b, br, bi] => Some(SelectionSpan {
+            anchor: point(a, ar, ai),
+            focus: point(b, br, bi),
+        }),
+        _ => return -1,
+    };
+    TEXT_SELECTION.with(|selection| {
+        selection
+            .borrow_mut()
+            .as_mut()
+            .and_then(|selection| selection.select(span).ok())
+            .and_then(|revision| i32::try_from(revision).ok())
+            .unwrap_or(-1)
+    })
+}
+
+/// Publishes highlight batches for the `len` visible pages at `visible` as JSON:
+/// `[{page, layout_revision, selection_revision, device_size, keys, bounds}]`, where
+/// `bounds` is packed `[left, top, right, bottom]` in the retained layout's device
+/// space. A negative `since` requests every visible page; otherwise only pages changed
+/// after that selection revision. Returns the JSON byte length, or `0` on failure.
+///
+/// # Safety
+///
+/// `visible` must point to `len` readable `u32` values that outlive this call.
+#[unsafe(export_name = "sk_build_selection_updates")]
+pub unsafe extern "C" fn sk_build_selection_updates(
+    visible: *const u32,
+    len: usize,
+    since: i64,
 ) -> usize {
-    let rect_values = with_text_layout(page_index, width, height, |layout| {
-        let Some(selection) = layout.selection_from_indices(start_index, end_index) else {
-            return Vec::new();
-        };
-
-        layout
-            .selection_rects(selection)
-            .into_iter()
-            .flat_map(|rect| [rect.left, rect.top, rect.right, rect.bottom])
-            .collect::<Vec<f32>>()
-    })
-    .unwrap_or_default();
-
-    TEXT_SELECTION_RECTS.with(|rects| {
-        let mut rects = rects.borrow_mut();
-        *rects = rect_values;
-        rects.len() / 4
-    })
+    let pages: &[u32] = if len == 0 || visible.is_null() {
+        &[]
+    } else {
+        // SAFETY: The caller guarantees `visible` references `len` initialized values.
+        unsafe { std::slice::from_raw_parts(visible, len) }
+    };
+    let since = u32::try_from(since).ok();
+    let batches = TEXT_SELECTION.with(|selection| {
+        selection
+            .borrow()
+            .as_ref()
+            .and_then(|selection| selection.updates(pages, since).ok())
+    });
+    let Some(batches) = batches else {
+        return 0;
+    };
+    let json = batches
+        .iter()
+        .map(|batch| {
+            serde_json::json!({
+                "page": batch.page(),
+                "layout_revision": batch.layout_revision(),
+                "selection_revision": batch.selection_revision(),
+                "device_size": batch.device_size(),
+                "keys": batch.keys(),
+                "bounds": batch
+                    .bounds()
+                    .iter()
+                    .flat_map(|r| [r.left, r.top, r.right, r.bottom])
+                    .collect::<Vec<f32>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+    publish(serde_json::Value::Array(json).to_string().into_bytes())
 }
 
-/// Returns a pointer to the last built text-selection rectangle buffer.
-#[unsafe(export_name = "sk_get_text_selection_rects_ptr")]
-pub extern "C" fn sk_get_text_selection_rects_ptr() -> *const f32 {
-    TEXT_SELECTION_RECTS.with(|rects| rects.borrow().as_ptr())
-}
-
-/// Builds selected UTF-8 text for an inclusive glyph-index range.
-///
-/// Returns the byte length. Call [`sk_get_selected_text_ptr`] and read that
-/// many bytes from WASM memory.
+/// Publishes the selected text as UTF-8 and returns its byte length.
 #[unsafe(export_name = "sk_build_selected_text")]
-pub extern "C" fn sk_build_selected_text(
-    page_index: usize,
-    width: i32,
-    height: i32,
-    start_index: usize,
-    end_index: usize,
-) -> usize {
-    let text = with_text_layout(page_index, width, height, |layout| {
-        let Some(selection) = layout.selection_from_indices(start_index, end_index) else {
-            return String::new();
-        };
-        layout.selected_text(selection)
-    })
-    .unwrap_or_default();
+pub extern "C" fn sk_build_selected_text() -> usize {
+    let text = TEXT_SELECTION.with(|selection| {
+        selection
+            .borrow()
+            .as_ref()
+            .and_then(|selection| selection.selected_text().ok())
+            .unwrap_or_default()
+    });
+    publish(text.into_bytes())
+}
 
-    SELECTED_TEXT.with(|selected| {
-        let mut selected = selected.borrow_mut();
-        *selected = text.into_bytes();
-        selected.len()
+/// Returns the displayed page size in PDF points, or `[0, 0]` when unavailable.
+fn page_size(page_index: usize) -> [f32; 2] {
+    CURRENT_RENDERER.with(|renderer| {
+        renderer
+            .borrow()
+            .as_ref()
+            .and_then(|renderer| renderer.document().get_page(page_index))
+            .and_then(|page| PageViewport::page_size(page).ok())
+            .unwrap_or([0.0, 0.0])
     })
 }
 
-/// Returns a pointer to the last built selected-text UTF-8 buffer.
-#[unsafe(export_name = "sk_get_selected_text_ptr")]
-pub extern "C" fn sk_get_selected_text_ptr() -> *const u8 {
-    SELECTED_TEXT.with(|selected| selected.borrow().as_ptr())
-}
-
-/// Returns the width of the given page in PDF points.
+/// Returns the displayed width of the given page in PDF points, honoring the
+/// CropBox and `/Rotate` exactly as rendering does.
 ///
-/// Returns `0.0` if the page index is out of range or the page has no media box.
+/// Returns `0.0` if the page index is out of range or the page has no page box.
 #[unsafe(export_name = "sk_get_page_width")]
 pub extern "C" fn sk_get_page_width(page_index: usize) -> f32 {
-    CURRENT_RENDERER.with(|renderer| {
-        renderer
-            .borrow()
-            .as_ref()
-            .and_then(|renderer| renderer.document().get_page(page_index))
-            .and_then(|p| p.media_box.as_ref())
-            .map(|mb| mb.width())
-            .unwrap_or(0.0)
-    })
+    page_size(page_index)[0]
 }
 
-/// Returns the height of the given page in PDF points.
+/// Returns the displayed height of the given page in PDF points, honoring the
+/// CropBox and `/Rotate` exactly as rendering does.
 ///
-/// Returns `0.0` if the page index is out of range or the page has no media box.
+/// Returns `0.0` if the page index is out of range or the page has no page box.
 #[unsafe(export_name = "sk_get_page_height")]
 pub extern "C" fn sk_get_page_height(page_index: usize) -> f32 {
-    CURRENT_RENDERER.with(|renderer| {
-        renderer
-            .borrow()
-            .as_ref()
-            .and_then(|renderer| renderer.document().get_page(page_index))
-            .and_then(|p| p.media_box.as_ref())
-            .map(|mb| mb.height())
-            .unwrap_or(0.0)
-    })
+    page_size(page_index)[1]
 }
 
 fn main() {}

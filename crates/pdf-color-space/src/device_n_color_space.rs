@@ -108,7 +108,10 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn name(value: &str) -> ObjectVariant {
-        ObjectVariant::Name(value.as_bytes().to_vec())
+        pdf_object_reader::pdf_string::PdfString::from(
+            value.as_bytes().to_vec(),
+            pdf_object_reader::string_kind::StringKind::Name,
+        )
     }
 
     fn device_n_array(mut entries: Vec<ObjectVariant>) -> Vec<ObjectVariant> {
@@ -122,14 +125,17 @@ mod tests {
         dict.insert(Vec::from(b"FunctionType"), ObjectVariant::Integer(4));
         dict.insert(
             Vec::from(b"Domain"),
-            ObjectVariant::Array(vec![
-                ObjectVariant::Real(0.0),
-                ObjectVariant::Real(1.0),
-                ObjectVariant::Real(0.0),
-                ObjectVariant::Real(1.0),
-                ObjectVariant::Real(0.0),
-                ObjectVariant::Real(1.0),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    ObjectVariant::Real(0.0.into()),
+                    ObjectVariant::Real(1.0),
+                    ObjectVariant::Real(0.0),
+                    ObjectVariant::Real(1.0),
+                    ObjectVariant::Real(0.0),
+                    ObjectVariant::Real(1.0),
+                ]
+                .into(),
+            ),
         );
         dict.insert(
             Vec::from(b"Range"),
@@ -151,7 +157,7 @@ mod tests {
     #[test]
     fn parses_four_element_device_n_array() {
         let arr = device_n_array(vec![
-            ObjectVariant::Array(vec![name("Cyan"), name("Magenta")]),
+            ObjectVariant::Array(vec![name("Cyan".into()), name("Magenta")].into()),
             name("DeviceRGB"),
             function_stream("pop pop 0.1 0.2 0.3", 3),
         ]);
@@ -178,7 +184,7 @@ mod tests {
         let attrs =
             ObjectVariant::Dictionary(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()));
         let arr = device_n_array(vec![
-            ObjectVariant::Array(vec![name("Spot")]),
+            ObjectVariant::Array(vec![name("Spot".into())].into()),
             name("DeviceCMYK"),
             function_stream("pop 0.2 0.4 0.6 0.8", 4),
             attrs,
@@ -197,7 +203,7 @@ mod tests {
     #[test]
     fn applies_device_n_through_tint_transform_and_alternate_space() {
         let arr = device_n_array(vec![
-            ObjectVariant::Array(vec![name("Cyan"), name("Magenta"), name("Yellow")]),
+            ObjectVariant::Array(vec![name("Cyan".into()), name("Magenta"), name("Yellow")].into()),
             name("DeviceRGB"),
             function_stream("pop pop pop 0.25 0.5 0.75", 3),
         ]);
@@ -218,7 +224,7 @@ mod tests {
     #[test]
     fn rejects_device_n_tint_transform_output_arity_mismatch() {
         let arr = device_n_array(vec![
-            ObjectVariant::Array(vec![name("Cyan"), name("Magenta"), name("Yellow")]),
+            ObjectVariant::Array(vec![name("Cyan".into()), name("Magenta"), name("Yellow")].into()),
             name("DeviceRGB"),
             function_stream("pop pop 0.25 0.5", 2),
         ]);
@@ -243,7 +249,7 @@ mod tests {
     #[test]
     fn rejects_device_n_with_too_few_input_components() {
         let arr = device_n_array(vec![
-            ObjectVariant::Array(vec![name("Cyan"), name("Magenta")]),
+            ObjectVariant::Array(vec![name("Cyan".into()), name("Magenta")].into()),
             name("DeviceRGB"),
             function_stream("pop pop 0.1 0.2 0.3", 3),
         ]);
@@ -262,7 +268,7 @@ mod tests {
     fn rejects_three_element_device_n_array() {
         let arr = vec![
             name("DeviceN"),
-            ObjectVariant::Array(vec![name("Cyan")]),
+            ObjectVariant::Array(vec![name("Cyan".into())].into()),
             name("DeviceRGB"),
         ];
 

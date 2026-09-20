@@ -13,6 +13,9 @@ pub enum DashPatternError {
 
 /// Dash pattern used for stroking paths.
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct DashPattern {
     /// Alternating dash and gap lengths.
     pub intervals: Vec<f32>,
@@ -56,15 +59,17 @@ impl DashPattern {
     }
 
     /// Returns a pattern scaled into the same coordinate space as the stroked path.
-    pub fn scaled(&self, scale: f32) -> Self {
-        Self {
-            intervals: self
-                .intervals
-                .iter()
-                .map(|interval| interval * scale)
-                .collect(),
-            phase: self.phase * scale,
-        }
+    ///
+    /// The scaled pattern is validated like a freshly parsed one, so an overflowing,
+    /// zero, or negative scale is rejected instead of producing unusable intervals.
+    pub fn scaled(&self, scale: f32) -> Result<Self, DashPatternError> {
+        let intervals: Vec<f32> = self
+            .intervals
+            .iter()
+            .map(|interval| interval * scale)
+            .collect();
+        let phase = self.phase * scale;
+        Ok(Self::new(&intervals, phase)?.unwrap_or(Self { intervals, phase }))
     }
 }
 
@@ -128,7 +133,9 @@ mod tests {
             .expect("dash pattern should be valid")
             .expect("dash pattern should be present");
 
-        let scaled = pattern.scaled(2.0);
+        let scaled = pattern
+            .scaled(2.0)
+            .expect("scaled dash pattern should be valid");
 
         assert_eq!(scaled.intervals, vec![6.0, 2.0, 4.0, 6.0, 2.0, 4.0]);
         assert_eq!(scaled.phase, 3.0);

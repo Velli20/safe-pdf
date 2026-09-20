@@ -5,12 +5,10 @@ use crate::error::{ObjectReadError, ReadResult};
 use crate::object_kind::ObjectKind;
 use crate::object_variant::ObjectVariant;
 use crate::pdf_array::PdfArray;
-use crate::pdf_name::PdfName;
 use crate::pdf_object::PdfObject;
 use crate::pdf_string::PdfString;
 use crate::reader::ObjectAccess;
 use crate::resolved_object::ResolvedObject;
-use crate::string_kind::StringKind;
 use crate::{dictionary::Dictionary, stream::StreamObject};
 
 /// Decodes a resolved PDF value using one object-bound context.
@@ -139,23 +137,10 @@ impl<T: FromPdfObject> FromPdfObject for Vec<T> {
     }
 }
 
-impl FromPdfObject for PdfName {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().value() {
-            ObjectVariant::Name(value) => Ok(PdfName::from_bytes(value)),
-            _ => Err(ObjectReadError::TypeMismatch {
-                expected: ObjectKind::Name,
-                actual: context.object().kind(),
-            }),
-        }
-    }
-}
-
 impl FromPdfObject for PdfString {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         match context.object().value() {
-            ObjectVariant::LiteralString(value) => Ok(PdfString::new(value, StringKind::Literal)),
-            ObjectVariant::HexString(value) => Ok(PdfString::new(value, StringKind::Hexadecimal)),
+            ObjectVariant::String(value) => Ok(value.clone()),
             _ => Err(ObjectReadError::TypeMismatch {
                 expected: ObjectKind::String,
                 actual: context.object().kind(),
@@ -167,7 +152,7 @@ impl FromPdfObject for PdfString {
 impl FromPdfObject for PdfArray {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         match context.object().value() {
-            ObjectVariant::Array(value) => Ok(PdfArray::new(value.clone())),
+            ObjectVariant::Array(value) => Ok(value.clone()),
             _ => Err(ObjectReadError::TypeMismatch {
                 expected: ObjectKind::Array,
                 actual: context.object().kind(),

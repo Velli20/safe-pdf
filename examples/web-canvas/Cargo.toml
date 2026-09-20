@@ -1,0 +1,28 @@
+[package]
+name = "web-canvas-example"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "renderer.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pdf-web = { path = "../../crates/pdf-web" }
+pdf-graphics-web = { path = "../../crates/pdf-graphics-web" }
+pdf-document = { path = "../../crates/pdf-document" }
+pdf-graphics = { path = "../../crates/pdf-graphics" }
+pdf-renderer = { path = "../../crates/pdf-renderer" }
+pdf-canvas = { path = "../../crates/pdf-canvas" }
+pdf-shading = { path = "../../crates/pdf-shading" }
+pdf-text-engine = { path = "../../crates/pdf-text-engine" }
+pdf-font = { path = "../../crates/pdf-font" }
+pdf-annotation-core = { path = "../../crates/pdf-annotation-core" }
+serde_json = "1"
+wasm-bindgen = "=0.2.100"
+web-sys = { version = "=0.3.77", features = ["HtmlCanvasElement"] }
+num-traits = "0.2"

@@ -3,6 +3,7 @@
 mod common;
 
 use common::replay;
+use pdf_canvas::CanvasPath;
 use pdf_canvas::{
     canvas_backend::CanvasBackend, recording_canvas::RecordingCanvas, stroke_style::StrokeStyle,
 };
@@ -19,15 +20,18 @@ fn replay_preserves_stroke_style() {
             intervals: vec![4.0, 2.0],
             phase: 1.0,
         }),
+        line_cap: pdf_graphics::LineCap::Round,
+        line_join: pdf_graphics::LineJoin::Bevel,
+        miter_limit: 8.0,
     };
 
     recording
         .stroke_path(
-            &path,
+            &CanvasPath::device(&path),
             Color::from_rgb(0.0, 0.0, 0.0),
             1.0,
             &stroke_style,
-            &None,
+            None,
             None,
         )
         .expect("stroke should record");

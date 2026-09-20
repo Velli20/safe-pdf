@@ -1,5 +1,11 @@
-use pdf_graphics::rect::Rect;
+//! Page text hit testing, selection geometry, and Unicode copying.
 
+use pdf_graphics::{point::Point, rect::Rect};
+
+pub use crate::document_text_selection::{
+    DocumentTextSelection, SelectionBatch, SelectionPoint, SelectionSpan, TextSelectionError,
+    TextSelectionResult,
+};
 pub use pdf_canvas::text::TextGlyph;
 
 /// Ordered text layout for one rendered page size.
@@ -35,7 +41,10 @@ impl PageTextLayout {
     /// Finds the nearest glyph hit for a device-space point.
     pub fn hit_test(&self, x: f32, y: f32) -> Option<TextHit> {
         let direct = self.glyphs.iter().enumerate().find_map(|(index, glyph)| {
-            contains_point(&glyph.bounds, x, y).then_some(TextHit { index })
+            glyph
+                .bounds
+                .contains_point(x, y)
+                .then_some(TextHit { index })
         });
         if direct.is_some() {
             return direct;
@@ -45,7 +54,7 @@ impl PageTextLayout {
             .iter()
             .enumerate()
             .filter_map(|(index, glyph)| {
-                let distance = distance_to_rect(&glyph.bounds, x, y);
+                let distance = glyph.bounds.normalized().distance(Point::new(x, y));
                 distance.is_finite().then_some((index, distance))
             })
             .min_by(|a, b| a.1.total_cmp(&b.1))
@@ -67,8 +76,8 @@ impl PageTextLayout {
 
     /// Returns highlight rectangles for a selection.
     pub fn selection_rects(&self, selection: TextSelection) -> Vec<Rect> {
-        self.selected_glyphs(selection)
-            .filter_map(|glyph| glyph.bounds.is_valid().then_some(glyph.bounds))
+        self.selection_bounds(selection)
+            .map(|(_, bounds)| bounds)
             .collect()
     }
 
@@ -77,7 +86,7 @@ impl PageTextLayout {
         let mut result = String::new();
         let mut previous: Option<&TextGlyph> = None;
 
-        for glyph in self.selected_glyphs(selection) {
+        for (_, glyph) in self.selected_glyphs(selection) {
             if let Some(prev) = previous
                 && is_new_line(prev, glyph)
                 && !result.ends_with('\n')
@@ -91,7 +100,20 @@ impl PageTextLayout {
         result
     }
 
-    fn selected_glyphs(&self, selection: TextSelection) -> impl Iterator<Item = &TextGlyph> {
+    /// Iterates valid highlight bounds with their original glyph indices.
+    pub(super) fn selection_bounds(
+        &self,
+        selection: TextSelection,
+    ) -> impl Iterator<Item = (usize, Rect)> {
+        self.selected_glyphs(selection)
+            .filter_map(|(index, glyph)| glyph.bounds.is_valid().then_some((index, glyph.bounds)))
+    }
+
+    /// Iterates the clamped inclusive selection, preserving original glyph indices.
+    fn selected_glyphs(
+        &self,
+        selection: TextSelection,
+    ) -> impl Iterator<Item = (usize, &TextGlyph)> {
         let start = selection.start.min(self.glyphs.len());
         let end_exclusive = selection
             .end
@@ -100,6 +122,7 @@ impl PageTextLayout {
             .unwrap_or(self.glyphs.len());
         self.glyphs
             .iter()
+            .enumerate()
             .skip(start)
             .take(end_exclusive.saturating_sub(start))
     }
@@ -119,30 +142,7 @@ impl TextSelection {
     }
 }
 
-fn contains_point(rect: &Rect, x: f32, y: f32) -> bool {
-    let rect = rect.normalized();
-    x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
-}
-
-fn distance_to_rect(rect: &Rect, x: f32, y: f32) -> f32 {
-    let rect = rect.normalized();
-    let dx = if x < rect.left {
-        rect.left - x
-    } else if x > rect.right {
-        x - rect.right
-    } else {
-        0.0
-    };
-    let dy = if y < rect.top {
-        rect.top - y
-    } else if y > rect.bottom {
-        y - rect.bottom
-    } else {
-        0.0
-    };
-    dx.hypot(dy)
-}
-
+/// Detects a line break from the vertical gap relative to the glyph heights.
 fn is_new_line(previous: &TextGlyph, current: &TextGlyph) -> bool {
     let previous_height = previous.bounds.height().abs().max(1.0);
     let current_height = current.bounds.height().abs().max(1.0);
@@ -151,12 +151,14 @@ fn is_new_line(previous: &TextGlyph, current: &TextGlyph) -> bool {
 }
 
 #[cfg(test)]
+/// Tests page hit testing, range normalization, and Unicode copying.
 mod tests {
     use super::*;
     use std::sync::Arc;
 
     use pdf_cmap::UnicodeSequence;
 
+    /// Creates a glyph with the supplied Unicode text and bounds.
     fn glyph(text: &str, left: f32, top: f32, right: f32, bottom: f32) -> TextGlyph {
         TextGlyph {
             unicode: UnicodeSequence::from_shared(Arc::from(text.chars().collect::<Vec<_>>())),
@@ -170,6 +172,7 @@ mod tests {
     }
 
     #[test]
+    /// Checks that a containing glyph takes precedence over nearby glyphs.
     fn hit_test_returns_containing_glyph() {
         let layout = PageTextLayout::new(vec![
             glyph("a", 0.0, 0.0, 10.0, 10.0),
@@ -180,6 +183,7 @@ mod tests {
     }
 
     #[test]
+    /// Checks that a reverse drag produces an ordered inclusive selection.
     fn selection_between_normalizes_reverse_drag() {
         let layout = PageTextLayout::new(vec![
             glyph("a", 0.0, 0.0, 10.0, 10.0),
@@ -195,6 +199,7 @@ mod tests {
     }
 
     #[test]
+    /// Checks that oversized indices are clamped to the layout.
     fn selection_from_indices_clamps_to_layout() {
         let layout = PageTextLayout::new(vec![
             glyph("a", 0.0, 0.0, 10.0, 10.0),
@@ -209,6 +214,7 @@ mod tests {
     }
 
     #[test]
+    /// Checks that an empty layout has no selectable range.
     fn selection_from_indices_returns_none_for_empty_layout() {
         let layout = PageTextLayout::new(Vec::new());
 
@@ -216,6 +222,7 @@ mod tests {
     }
 
     #[test]
+    /// Checks that copying across a vertical gap inserts a newline.
     fn selected_text_inserts_newline_between_lines() {
         let layout = PageTextLayout::new(vec![
             glyph("a", 0.0, 0.0, 10.0, 10.0),
@@ -229,6 +236,7 @@ mod tests {
     }
 
     #[test]
+    /// Checks that copying retains every Unicode scalar in a glyph.
     fn selected_text_preserves_multi_scalar_glyphs() {
         let layout = PageTextLayout::new(vec![glyph("fi", 0.0, 0.0, 10.0, 10.0)]);
         let selection = layout

@@ -51,7 +51,10 @@ impl ObjectResolver for MapResolver {
 }
 
 fn name(value: &str) -> ObjectVariant {
-    ObjectVariant::Name(value.as_bytes().to_vec())
+    pdf_object_reader::pdf_string::PdfString::from(
+        value.as_bytes().to_vec(),
+        pdf_object_reader::string_kind::StringKind::Name,
+    )
 }
 
 fn integer(value: i64) -> ObjectVariant {
@@ -59,7 +62,7 @@ fn integer(value: i64) -> ObjectVariant {
 }
 
 fn color_space(value: &str) -> ObjectVariant {
-    ObjectVariant::Array(vec![name(value)])
+    ObjectVariant::Array(vec![name(value.into())].into())
 }
 
 fn resources_dictionary(entries: &[(&str, &str)]) -> Dictionary {
@@ -101,12 +104,15 @@ fn page_dictionary(
     if let Some([left, bottom, right, top]) = media_box {
         entries.insert(
             Vec::from(b"MediaBox"),
-            ObjectVariant::Array(vec![
-                integer(left),
-                integer(bottom),
-                integer(right),
-                integer(top),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    integer(left.into()),
+                    integer(bottom),
+                    integer(right),
+                    integer(top),
+                ]
+                .into(),
+            ),
         );
     }
 
@@ -146,12 +152,15 @@ fn pages_dictionary(
     if let Some([left, bottom, right, top]) = media_box {
         entries.insert(
             Vec::from(b"MediaBox"),
-            ObjectVariant::Array(vec![
-                integer(left),
-                integer(bottom),
-                integer(right),
-                integer(top),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    integer(left.into()),
+                    integer(bottom),
+                    integer(right),
+                    integer(top),
+                ]
+                .into(),
+            ),
         );
     }
 

@@ -158,7 +158,10 @@ mod tests {
     fn descriptor_with_cff(subtype: &[u8], data: &'static [u8]) -> Dictionary {
         let stream_dictionary = Dictionary::from_entries([(
             b"Subtype".as_slice(),
-            ObjectVariant::Name(subtype.to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                subtype.to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         )]);
         let stream = StreamObject::new(1, 0, stream_dictionary, data);
         Dictionary::from_entries([(b"FontFile3".as_slice(), ObjectVariant::Stream(stream))])

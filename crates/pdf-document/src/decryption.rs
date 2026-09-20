@@ -392,18 +392,18 @@ impl DocumentDecryptor {
         generation_number: usize,
     ) -> Result<ObjectVariant, DecryptionError> {
         match object {
-            ObjectVariant::LiteralString(bytes) => Ok(ObjectVariant::LiteralString(
-                self.decrypt_string(object_number, generation_number, &bytes)?,
-            )),
-            ObjectVariant::HexString(bytes) => Ok(ObjectVariant::HexString(self.decrypt_string(
-                object_number,
-                generation_number,
-                &bytes,
-            )?)),
+            ObjectVariant::String(value)
+                if value.kind() != pdf_object_reader::string_kind::StringKind::Name =>
+            {
+                Ok(pdf_object_reader::pdf_string::PdfString::from(
+                    self.decrypt_string(object_number, generation_number, value.as_bytes())?,
+                    value.kind(),
+                ))
+            }
             ObjectVariant::Array(values) => values
                 .into_iter()
                 .map(|value| self.decrypt_object_value(value, object_number, generation_number))
-                .collect::<Result<Vec<_>, _>>()
+                .collect::<Result<pdf_object_reader::pdf_array::PdfArray, _>>()
                 .map(ObjectVariant::Array),
             ObjectVariant::Dictionary(dictionary) => Ok(ObjectVariant::Dictionary(
                 self.decrypt_dictionary(dictionary, object_number, generation_number)?,
@@ -461,7 +461,7 @@ fn is_signature_dictionary(dictionary: &Dictionary) -> bool {
     SIGNATURE_KEYS.into_iter().any(|key| {
         matches!(
             dictionary.get(key),
-            Some(ObjectVariant::Name(value)) if value.as_slice() == b"Sig"
+            Some(ObjectVariant::String(value)) if value.as_bytes() == b"Sig"
         )
     })
 }
@@ -469,8 +469,8 @@ fn is_signature_dictionary(dictionary: &Dictionary) -> bool {
 /// Returns whether PDF encryption rules exempt this stream from decryption.
 fn should_skip_stream_decryption(dictionary: &Dictionary, encrypt_metadata: bool) -> bool {
     match dictionary.get(b"Type") {
-        Some(ObjectVariant::Name(name)) if name.as_slice() == b"XRef" => true,
-        Some(ObjectVariant::Name(name)) if name.as_slice() == b"Metadata" => !encrypt_metadata,
+        Some(ObjectVariant::String(name)) if name.as_bytes() == b"XRef" => true,
+        Some(ObjectVariant::String(name)) if name.as_bytes() == b"Metadata" => !encrypt_metadata,
         _ => false,
     }
 }
@@ -1098,7 +1098,13 @@ mod tests {
     fn make_stream(type_name: Option<&[u8]>, data: Vec<u8>) -> StreamObject {
         let mut entries = BTreeMap::new();
         if let Some(type_name) = type_name {
-            entries.insert(Vec::from(b"Type"), ObjectVariant::Name(type_name.to_vec()));
+            entries.insert(
+                Vec::from(b"Type"),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    type_name.to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            );
         }
 
         StreamObject::new(7, 0, Dictionary::new(entries), data)
@@ -1338,25 +1344,32 @@ mod tests {
         let object = ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
             (
                 Vec::from(b"Contents"),
-                ObjectVariant::LiteralString(encrypt_for_object(
-                    &decryptor,
-                    object_number,
-                    generation_number,
-                    contents,
-                )),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    encrypt_for_object(&decryptor, object_number, generation_number, contents),
+                    pdf_object_reader::string_kind::StringKind::Literal,
+                ),
             ),
             (
                 Vec::from(b"RC"),
-                ObjectVariant::Array(vec![ObjectVariant::HexString(encrypt_for_object(
-                    &decryptor,
-                    object_number,
-                    generation_number,
-                    rich_contents,
-                ))]),
+                ObjectVariant::Array(
+                    vec![pdf_object_reader::pdf_string::PdfString::from(
+                        encrypt_for_object(
+                            &decryptor,
+                            object_number,
+                            generation_number,
+                            rich_contents,
+                        ),
+                        pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                    )]
+                    .into(),
+                ),
             ),
             (
                 Vec::from(b"Subtype"),
-                ObjectVariant::Name(b"FreeText".to_vec()),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"FreeText".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
             ),
             (
                 Vec::from(b"Parent"),
@@ -1372,17 +1385,27 @@ mod tests {
         };
         assert_eq!(
             dictionary.get(b"Contents"),
-            Some(&ObjectVariant::LiteralString(contents.to_vec()))
+            Some(&pdf_object_reader::pdf_string::PdfString::from(
+                contents.to_vec(),
+                pdf_object_reader::string_kind::StringKind::Literal
+            ))
         );
         assert_eq!(
             dictionary.get(b"RC"),
-            Some(&ObjectVariant::Array(vec![ObjectVariant::HexString(
-                rich_contents.to_vec()
-            )]))
+            Some(&ObjectVariant::Array(
+                vec![pdf_object_reader::pdf_string::PdfString::from(
+                    rich_contents.to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Hexadecimal.into()
+                )]
+                .into()
+            ))
         );
         assert_eq!(
             dictionary.get(b"Subtype"),
-            Some(&ObjectVariant::Name(b"FreeText".to_vec()))
+            Some(&pdf_object_reader::pdf_string::PdfString::from(
+                b"FreeText".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name
+            ))
         );
         assert_eq!(
             dictionary.get(b"Parent"),
@@ -1403,12 +1426,15 @@ mod tests {
             1,
             Dictionary::new(BTreeMap::from([(
                 Vec::from(b"Label"),
-                ObjectVariant::LiteralString(encrypt_for_object(
-                    &decryptor,
-                    object_number,
-                    generation_number,
-                    b"annotation appearance",
-                )),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    encrypt_for_object(
+                        &decryptor,
+                        object_number,
+                        generation_number,
+                        b"annotation appearance",
+                    ),
+                    pdf_object_reader::string_kind::StringKind::Literal,
+                ),
             )])),
             encrypt_for_object(&decryptor, object_number, generation_number, contents),
         );
@@ -1430,8 +1456,9 @@ mod tests {
         assert_eq!(stream.raw_data(), contents);
         assert_eq!(
             stream.dictionary.get(b"Label"),
-            Some(&ObjectVariant::LiteralString(
-                b"annotation appearance".to_vec()
+            Some(&pdf_object_reader::pdf_string::PdfString::from(
+                b"annotation appearance".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Literal
             ))
         );
     }
@@ -1444,10 +1471,19 @@ mod tests {
             generation: 0,
         };
         let object = ObjectVariant::Dictionary(Dictionary::new(BTreeMap::from([
-            (Vec::from(b"Type"), ObjectVariant::Name(b"Sig".to_vec())),
+            (
+                Vec::from(b"Type"),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"Sig".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
             (
                 Vec::from(b"Contents"),
-                ObjectVariant::HexString(vec![0, 0, 0, 0]),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    vec![0, 0, 0, 0],
+                    pdf_object_reader::string_kind::StringKind::Hexadecimal,
+                ),
             ),
         ])));
 
@@ -1459,7 +1495,10 @@ mod tests {
         };
         assert_eq!(
             dictionary.get(b"Contents"),
-            Some(&ObjectVariant::HexString(vec![0, 0, 0, 0]))
+            Some(&pdf_object_reader::pdf_string::PdfString::from(
+                vec![0, 0, 0, 0],
+                pdf_object_reader::string_kind::StringKind::Hexadecimal
+            ))
         );
     }
 }

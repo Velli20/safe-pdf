@@ -70,14 +70,23 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::from([
             (
                 Vec::from(b"BBox"),
-                ObjectVariant::Array(vec![
-                    ObjectVariant::Real(265.077),
-                    ObjectVariant::Real(71.8304),
-                    ObjectVariant::Real(301.321),
-                    ObjectVariant::Real(43.3206),
-                ]),
+                ObjectVariant::Array(
+                    vec![
+                        ObjectVariant::Real(265.077.into()),
+                        ObjectVariant::Real(71.8304),
+                        ObjectVariant::Real(301.321),
+                        ObjectVariant::Real(43.3206),
+                    ]
+                    .into(),
+                ),
             ),
-            (Vec::from(b"Subtype"), ObjectVariant::Name(b"Form".to_vec())),
+            (
+                Vec::from(b"Subtype"),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"Form".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
         ]));
         let stream = StreamObject::new(7, 0, dictionary.clone(), Vec::new());
 
@@ -98,24 +107,36 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::from([
             (
                 Vec::from(b"BBox"),
-                ObjectVariant::Array(vec![
-                    ObjectVariant::Real(0.0),
-                    ObjectVariant::Real(0.0),
-                    ObjectVariant::Real(10.0),
-                    ObjectVariant::Real(10.0),
-                ]),
+                ObjectVariant::Array(
+                    vec![
+                        ObjectVariant::Real(0.0.into()),
+                        ObjectVariant::Real(0.0),
+                        ObjectVariant::Real(10.0),
+                        ObjectVariant::Real(10.0),
+                    ]
+                    .into(),
+                ),
             ),
-            (Vec::from(b"Subtype"), ObjectVariant::Name(b"Form".to_vec())),
+            (
+                Vec::from(b"Subtype"),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"Form".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
             (
                 Vec::from(b"Matrix"),
-                ObjectVariant::Array(vec![
-                    ObjectVariant::Real(2.0),
-                    ObjectVariant::Real(0.0),
-                    ObjectVariant::Real(0.0),
-                    ObjectVariant::Real(3.0),
-                    ObjectVariant::Real(4.0),
-                    ObjectVariant::Real(5.0),
-                ]),
+                ObjectVariant::Array(
+                    vec![
+                        ObjectVariant::Real(2.0.into()),
+                        ObjectVariant::Real(0.0),
+                        ObjectVariant::Real(0.0),
+                        ObjectVariant::Real(3.0),
+                        ObjectVariant::Real(4.0),
+                        ObjectVariant::Real(5.0),
+                    ]
+                    .into(),
+                ),
             ),
         ]));
 

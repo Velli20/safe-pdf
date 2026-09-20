@@ -63,7 +63,10 @@ mod tests {
     fn named_identity_to_unicode_map_is_supported() {
         let dictionary = Dictionary::from_entries([(
             b"ToUnicode".as_slice(),
-            ObjectVariant::Name(b"Identity-H".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"Identity-H".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         )]);
         let map = ObjectReader::new(PassthroughResolver)
             .read::<UnicodeFixture>(&ObjectVariant::Dictionary(dictionary))
@@ -79,7 +82,10 @@ mod tests {
     fn unsupported_named_to_unicode_map_is_ignored() {
         let dictionary = Dictionary::from_entries([(
             b"ToUnicode".as_slice(),
-            ObjectVariant::Name(b"Unsupported-H".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"Unsupported-H".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         )]);
 
         assert!(

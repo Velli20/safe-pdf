@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use pdf_object_reader::{
     dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    pdf_string::PdfString, string_kind::StringKind,
 };
 use pdf_tokenizer::PdfToken;
 
@@ -97,7 +98,7 @@ impl PdfParser<'_> {
         objects: &dyn ObjectResolver,
     ) -> Result<ObjectVariant, ParserError> {
         match self.tokenizer.peek() {
-            Some(PdfToken::Solidus) => Ok(ObjectVariant::Name(self.parse_name()?)),
+            Some(PdfToken::Solidus) => Ok(PdfString::from(self.parse_name()?, StringKind::Name)),
             _ => self.parse_object(objects),
         }
     }
@@ -157,7 +158,7 @@ impl PdfParser<'_> {
         mut value: Vec<u8>,
     ) -> Result<DictionaryEntryState, ParserError> {
         if self.is_at_dictionary_end() || matches!(self.tokenizer.peek(), Some(PdfToken::Solidus)) {
-            dictionary.insert(key, ObjectVariant::Name(value));
+            dictionary.insert(key, PdfString::from(value, StringKind::Name));
             return Ok(DictionaryEntryState::ExpectKeyOrTerminator);
         }
 
@@ -166,7 +167,7 @@ impl PdfParser<'_> {
         };
 
         if !Self::is_pdf_regular_character(byte) {
-            dictionary.insert(key, ObjectVariant::Name(value));
+            dictionary.insert(key, PdfString::from(value, StringKind::Name));
             return Ok(DictionaryEntryState::ExpectKeyOrTerminator);
         }
 
@@ -231,7 +232,10 @@ mod tests {
 
         assert_eq!(
             result.get(b"AnyName"),
-            Some(&ObjectVariant::Name(b"A B".to_vec()))
+            Some(&pdf_object_reader::pdf_string::PdfString::from(
+                b"A B".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name
+            ))
         );
         assert_eq!(result.get(b"Next"), Some(&ObjectVariant::Integer(1)));
     }
@@ -243,7 +247,10 @@ mod tests {
 
         assert_eq!(
             result.get(b"AnyName"),
-            Some(&ObjectVariant::Name(b"A B C".to_vec()))
+            Some(&pdf_object_reader::pdf_string::PdfString::from(
+                b"A B C".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name
+            ))
         );
         assert_eq!(result.get(b"Next"), Some(&ObjectVariant::Integer(1)));
     }
@@ -255,11 +262,17 @@ mod tests {
 
         assert_eq!(
             result.get(b"Name"),
-            Some(&ObjectVariant::Name(b"Value".to_vec()))
+            Some(&pdf_object_reader::pdf_string::PdfString::from(
+                b"Value".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name
+            ))
         );
         assert_eq!(
             result.get(b"Next"),
-            Some(&ObjectVariant::Name(b"Other".to_vec()))
+            Some(&pdf_object_reader::pdf_string::PdfString::from(
+                b"Other".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name
+            ))
         );
     }
 
@@ -270,7 +283,13 @@ mod tests {
             .parse_dictionary(&PassthroughResolver)
             .expect("arbitrary Name bytes should parse");
 
-        assert_eq!(result.get(&[0xFF]), Some(&ObjectVariant::Name(vec![0xFE])));
+        assert_eq!(
+            result.get(&[0xFF]),
+            Some(&pdf_object_reader::pdf_string::PdfString::from(
+                vec![0xFE],
+                pdf_object_reader::string_kind::StringKind::Name
+            ))
+        );
     }
 
     #[test]
@@ -333,7 +352,10 @@ mod tests {
 
         assert_eq!(
             result.get(b"CS"),
-            Some(&ObjectVariant::Name(b"DeviceGray".to_vec()))
+            Some(&pdf_object_reader::pdf_string::PdfString::from(
+                b"DeviceGray".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name
+            ))
         );
         assert!(parser.tokenizer.data().starts_with(b"ID \x00\x01"));
     }

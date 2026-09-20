@@ -99,6 +99,7 @@ fn soft_mask_form_with_zero_area_bbox_is_ignored() {
     let resources = Arc::new(graphics_state_resource(vec![
         ExternalGraphicsStateKey::SoftMask(Some(pdf_object_reader::ObjectHandle::from(SoftMask {
             mask_type: MaskMode::Alpha,
+            transfer: None,
             shape: form.into(),
         }))),
     ]));

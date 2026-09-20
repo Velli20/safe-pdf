@@ -2,6 +2,9 @@ use num_traits::ToPrimitive;
 
 /// Unpremultiplied color with RGBA channel
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct Color {
     pub r: f32,
     pub g: f32,

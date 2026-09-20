@@ -67,6 +67,7 @@ mod tests {
     #[test]
     fn finish_returns_none_when_empty() {
         assert_eq!(BoundsAccumulator::new().finish(), None);
+        assert_eq!(BoundsAccumulator::default().finish(), None);
     }
 
     #[test]

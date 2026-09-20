@@ -13,3 +13,4 @@ mod patch_mesh;
 mod patch_mesh_config;
 mod patch_mesh_kind;
 mod patch_mesh_parser;
+pub mod pixel_processor;

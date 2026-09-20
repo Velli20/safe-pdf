@@ -3,6 +3,8 @@
 /// Records the source syntax used for a PDF string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StringKind {
+    /// A PDF name object.
+    Name,
     /// A string originally written between parentheses.
     Literal,
     /// A string originally written using hexadecimal notation.

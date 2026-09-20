@@ -145,6 +145,8 @@ mod content_stream_id_allocator;
 pub mod context;
 /// The one-context client decoding trait and built-in conversions.
 pub mod decode;
+/// Recoverable read problems with their PDF location context.
+pub mod diagnostic;
 /// Structured acquisition, traversal, decoding, and handle errors.
 pub mod error;
 /// Typed deferred handles for reader-owned resource graphs.
@@ -191,10 +193,14 @@ pub mod object_error;
 pub mod object_lookup;
 /// PDF object resolver model and parsing operations.
 pub mod object_resolver;
+/// Iteration over `/Parent` dictionary chains.
+pub mod parent_chain;
 /// PDF stream model and parsing operations.
 pub mod stream;
 /// PDF text encoding model and parsing operations.
 pub mod text_encoding;
+/// PDF text string decoding into Unicode.
+pub mod text_string;
 /// PDF trailer model and parsing operations.
 pub mod trailer;
 /// PDF version model and parsing operations.

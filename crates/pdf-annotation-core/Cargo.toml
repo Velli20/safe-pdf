@@ -1,0 +1,20 @@
+[package]
+name = "pdf-annotation-core"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[features]
+typescript = ["dep:ts-rs", "pdf-graphics/typescript"]
+
+[dependencies]
+bitflags = "2.9.1"
+num-traits = "0.2.19"
+ts-rs = { version = "12", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2.0.12"
+pdf-graphics = { path = "../pdf-graphics", features = ["serde"] }
+pdf-object-reader = { path = "../pdf-object-reader" }

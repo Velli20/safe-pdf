@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "examples", "xtask"]
+members = ["crates/*", "examples", "examples/web-canvas", "xtask"]
 default-members = ["crates/*", "examples"]
 
 [workspace.lints.clippy]

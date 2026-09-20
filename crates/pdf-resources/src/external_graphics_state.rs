@@ -118,7 +118,7 @@ fn parse_dash_pattern(
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
 ) -> Result<Option<ExternalGraphicsStateKey>, PdfPagesError> {
-    let arr = value.try_array(objects)?;
+    let arr = value.try_array(objects)?.as_slice();
     let [dash_array, dash_phase] = arr else {
         return Err(invalid_ext_gstate_entry_structure(
             key_name,
@@ -265,10 +265,13 @@ mod tests {
     fn dash_dict(dash_array: Vec<ObjectVariant>, dash_phase: f32) -> Dictionary {
         Dictionary::new(BTreeMap::from([(
             Vec::from(b"D"),
-            ObjectVariant::Array(vec![
-                ObjectVariant::Array(dash_array),
-                ObjectVariant::Real(f64::from(dash_phase)),
-            ]),
+            ObjectVariant::Array(
+                vec![
+                    ObjectVariant::Array(dash_array.into()),
+                    ObjectVariant::Real(f64::from(dash_phase)),
+                ]
+                .into(),
+            ),
         )]))
     }
 
@@ -354,7 +357,10 @@ mod tests {
     fn soft_mask_none_is_preserved() {
         let dictionary = Dictionary::new(BTreeMap::from([(
             Vec::from(b"SMask"),
-            ObjectVariant::Name(b"None".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"None".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         )]));
 
         let ext_gstate = parse_ext_gstate(&dictionary)
@@ -371,7 +377,10 @@ mod tests {
     fn invalid_soft_mask_name_is_rejected() {
         let dictionary = Dictionary::new(BTreeMap::from([(
             Vec::from(b"SMask"),
-            ObjectVariant::Name(b"Invalid".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"Invalid".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         )]));
 
         let error = match parse_ext_gstate(&dictionary) {

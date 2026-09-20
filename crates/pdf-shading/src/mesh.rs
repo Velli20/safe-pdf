@@ -128,7 +128,7 @@ pub fn evaluate_tensor_patch_vertex(
     let mut x = 0.0;
     let mut y = 0.0;
 
-    for (row, v_weight) in control_points.chunks_exact(4).zip(v_basis) {
+    for (row, v_weight) in control_points.as_chunks::<4>().0.iter().zip(v_basis) {
         for (&point, u_weight) in row.iter().zip(u_basis) {
             let weight = u_weight * v_weight;
             x += point.x * weight;

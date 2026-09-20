@@ -150,7 +150,7 @@ mod tests {
     fn recorded(width: f32, height: f32) -> RecordedPage {
         RecordedPage {
             recording: RecordingCanvas::new(width, height),
-            text_layout: PageTextLayout::default(),
+            text_layout: std::sync::Arc::new(PageTextLayout::default()),
         }
     }
 

@@ -78,3 +78,14 @@ impl From<DecodeError> for PdfImageError {
         }
     }
 }
+
+/// Failures while validating or processing render-ready image pixels.
+#[derive(Debug, Error)]
+pub enum ImageRasterError {
+    /// Dimensions, packed pixel data, or computed alpha are invalid.
+    #[error("invalid image raster input: {0}")]
+    InvalidInput(&'static str),
+    /// The requested buffer size overflows or its allocation fails.
+    #[error("image raster allocation limit exceeded")]
+    ResourceLimit,
+}

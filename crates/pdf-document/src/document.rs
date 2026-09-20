@@ -23,6 +23,13 @@ impl FromPdfObject for PdfDocument {
         let mut context = context.dictionary()?;
         let kids = context.required::<pdf_object_reader::pdf_array::PdfArray>(b"Kids")?;
         let media_box = context.dictionary().optional_media_box(context.source())?;
+        let crop_box = context
+            .dictionary()
+            .optional_array_of::<f32, 4>(b"CropBox", context.source())?
+            .map(Rect::from);
+        let rotation = context
+            .dictionary()
+            .optional_number::<i32>(b"Rotate", context.source())?;
         let resources = context
             .optional_shared::<Resources>(b"Resources")?
             .map(|handle| handle.get())
@@ -51,6 +58,14 @@ impl FromPdfObject for PdfDocument {
         }
         if let Some(media_box) = media_box {
             Self::apply_media_box_inheritance(&mut pages, &media_box);
+        }
+        for page in &mut pages {
+            if page.crop_box.is_none() {
+                page.crop_box = crop_box;
+            }
+            if page.rotation.is_none() {
+                page.rotation = rotation;
+            }
         }
         Ok(Self { pages })
     }
@@ -120,6 +135,8 @@ mod tests {
             contents: None,
             annotations: None,
             media_box: None,
+            crop_box: None,
+            rotation: None,
             annotation_id_high_watermark: 0,
             read_state: None,
         };
@@ -160,6 +177,8 @@ mod tests {
             contents: None,
             annotations: None,
             media_box: None,
+            crop_box: None,
+            rotation: None,
             annotation_id_high_watermark: 0,
             read_state: None,
         };
@@ -210,6 +229,8 @@ mod tests {
             contents: None,
             annotations: None,
             media_box: None,
+            crop_box: None,
+            rotation: None,
             annotation_id_high_watermark: 0,
             read_state: None,
         };
@@ -248,6 +269,8 @@ mod tests {
             contents: None,
             annotations: None,
             media_box: None,
+            crop_box: None,
+            rotation: None,
             annotation_id_high_watermark: 0,
             read_state: None,
         };
@@ -282,6 +305,8 @@ mod tests {
             contents: None,
             annotations: None,
             media_box: Some(child_mb),
+            crop_box: None,
+            rotation: None,
             annotation_id_high_watermark: 0,
             read_state: None,
         };

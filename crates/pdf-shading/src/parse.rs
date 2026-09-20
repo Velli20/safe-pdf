@@ -88,9 +88,12 @@ fn parse_axial(
     objects: &dyn ObjectResolver,
 ) -> Result<Shading, PdfShadingError> {
     let coords = dictionary.required_array_of::<f32, 4>(b"Coords", objects)?;
+    let domain = dictionary
+        .optional_array_of::<f32, 2>(b"Domain", objects)?
+        .unwrap_or(crate::color_stops::DEFAULT_DOMAIN);
     let color_space = required_color_space(dictionary, objects)?;
     let function = Function::parse(dictionary.get_or_err(b"Function")?, objects)?;
-    let color_stops = ColorStops::from_function(&function, &color_space)?;
+    let color_stops = ColorStops::from_function_domain(&function, &color_space, domain)?;
 
     Ok(Shading::Axial {
         color_space,
@@ -105,10 +108,13 @@ fn parse_radial(
     objects: &dyn ObjectResolver,
 ) -> Result<Shading, PdfShadingError> {
     let coords = dictionary.required_array_of::<f32, 6>(b"Coords", objects)?;
+    let domain = dictionary
+        .optional_array_of::<f32, 2>(b"Domain", objects)?
+        .unwrap_or(crate::color_stops::DEFAULT_DOMAIN);
     let color_space = required_color_space(dictionary, objects)?;
     let bbox = dictionary.optional_bbox(objects)?;
     let function = Function::parse(dictionary.get_or_err(b"Function")?, objects)?;
-    let color_stops = ColorStops::from_function(&function, &color_space)?;
+    let color_stops = ColorStops::from_function_domain(&function, &color_space, domain)?;
 
     Ok(Shading::Radial {
         color_space,

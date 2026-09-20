@@ -5,8 +5,8 @@
  * {@link SafePdfRenderer}.
  *
  * Provides continuous-scroll page viewing, zoom controls, keyboard
- * navigation, and intelligent page prefetching — all encapsulated in a
- * single class that can be dropped into any web page.
+ * navigation, Rust-owned text selection, and page prefetching — all
+ * encapsulated in a single class that can be dropped into any web page.
  *
  * The viewer creates its own DOM inside a provided container element and
  * emits events so that consuming applications can build custom chrome
@@ -49,23 +49,14 @@ const DEFAULT_PAGE_HEIGHT = 792;
 /** Gap between pages in the scroll view (px). */
 const PAGE_GAP = 20;
 
-/**
- * Padding around the scroll content (px). Must match the `padding` value in
- * `.spdf-scroll-content` CSS so that scroll-position calculations are correct.
- */
-const SCROLL_PADDING = 20;
-
-/** Number of extra pages to render above/below the viewport. */
-const RENDER_BUFFER = 1;
+/** Margin around the viewport within which pages are rendered ahead of time. */
+const RENDER_MARGIN = '100%';
 
 /** Idle-callback timeout for prefetch work (ms). */
 const PREFETCH_TIMEOUT = 1000;
 
 /** Minimum remaining idle time to start rendering a prefetch page (ms). */
 const PREFETCH_MIN_IDLE = 10;
-
-/** Scroll debounce delay (ms). */
-const SCROLL_DEBOUNCE = 100;
 
 /**
  * Polyfill for `requestIdleCallback` (Safari, older browsers).
@@ -99,6 +90,7 @@ const VIEWER_CSS = /* css */ `
 }
 .spdf-page-wrapper {
   position: relative;
+  flex: none;
   background: #fff;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   display: flex;
@@ -133,9 +125,10 @@ const VIEWER_CSS = /* css */ `
 }
 .spdf-selection-layer {
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
   pointer-events: none;
-  overflow: hidden;
   z-index: 2;
 }
 .spdf-selection-rect {
@@ -190,9 +183,7 @@ function injectCSS() {
 
 /**
  * @typedef {object} SafePdfViewerOptions
- * @property {string}  wasmUrl             URL to the Emscripten JS glue file.
- * @property {number}  [pageWidth=612]     Default page width in PDF points.
- * @property {number}  [pageHeight=792]    Default page height in PDF points.
+ * @property {string}  wasmUrl             URL to the Emscripten ES module.
  * @property {number}  [initialZoom=1]     Initial zoom level (1 = 100%).
  * @property {string}  [emptyMessage]      Message shown when no PDF is loaded.
  * @property {boolean} [keyboardNav=true]  Enable built-in keyboard navigation.
@@ -233,14 +224,14 @@ export class SafePdfViewer extends EventTarget {
    */
   #pageSizes = [];
 
-  /**
-   * Precomputed scroll-top position (px) for the top edge of each page.
-   * @type {number[]}
-   */
-  #pageScrollOffsets = [];
+  /** @type {Set<number>} Pages intersecting the viewport plus the render margin. */
+  #visiblePages = new Set();
 
-  /** @type {Set<string>} Cache keys (`${pageIndex}-${zoom}`) of already-rendered pages. */
-  #imageCache = new Set();
+  /** @type {IntersectionObserver|null} */
+  #observer = null;
+
+  /** @type {number|null} Pending animation frame for rendering visible pages. */
+  #renderFrame = null;
 
   // ---- Prefetch ----
   /** @type {number[]} */
@@ -248,18 +239,16 @@ export class SafePdfViewer extends EventTarget {
   #isPrefetching = false;
 
   // ---- Text selection ----
-  #selectionAnchor = null;
-  #selectionFocus = null;
-  #isSelecting = false;
-  #selectedText = '';
-
-  // ---- Annotation interaction ----
-  #annotationPointerActive = false;
-  #annotationPointerId = null;
-  #annotationPageIndex = null;
-
-  // ---- Scroll ----
-  #scrollTimeout = null;
+  /** @type {{ anchor: number[], pointerId: number } | null} */
+  #selectionDrag = null;
+  /** @type {number|undefined} Last selection revision applied to the DOM. */
+  #selectionRevision = undefined;
+  /** @type {boolean} Whether the next selection update must refresh every visible page. */
+  #fullSelection = true;
+  /** @type {number|null} Pending animation frame for selection highlights. */
+  #selectionFrame = null;
+  /** @type {Map<number, Map<number, HTMLElement>>} Highlight nodes by page and key. */
+  #highlights = new Map();
 
   // ---- DOM refs ----
   /** @type {HTMLElement} */
@@ -301,7 +290,7 @@ export class SafePdfViewer extends EventTarget {
     this.#renderer = new SafePdfRenderer();
 
     // Bind event handlers so they can be removed later.
-    this.#boundHandleScroll = this.#handleScroll.bind(this);
+    this.#boundHandleScroll = this.#scheduleRender.bind(this);
     this.#boundHandleKeydown = this.#handleKeydown.bind(this);
     this.#boundHandleResize = this.#handleResize.bind(this);
     this.#boundHandlePointerDown = this.#handlePointerDown.bind(this);
@@ -351,16 +340,7 @@ export class SafePdfViewer extends EventTarget {
 
     try {
       const buffer = await file.arrayBuffer();
-      const result = this.#loadBuffer(buffer);
-
-      this.dispatchEvent(
-        new CustomEvent('load', {
-          detail: { pageCount: result.pageCount, fileName: file.name },
-        })
-      );
-
-      this.#afterLoad();
-      return result;
+      return this.#load(buffer, file.name);
     } catch (err) {
       this.#emitError('Failed to load PDF file', err);
       this.#showLoading(false);
@@ -379,16 +359,7 @@ export class SafePdfViewer extends EventTarget {
     this.#showLoading(true);
 
     try {
-      const result = this.#loadBuffer(buffer);
-
-      this.dispatchEvent(
-        new CustomEvent('load', {
-          detail: { pageCount: result.pageCount, fileName },
-        })
-      );
-
-      this.#afterLoad();
-      return result;
+      return this.#load(buffer, fileName);
     } catch (err) {
       this.#emitError('Failed to load PDF buffer', err);
       this.#showLoading(false);
@@ -397,17 +368,15 @@ export class SafePdfViewer extends EventTarget {
   }
 
   /**
-   * Scroll to and highlight a specific page.
+   * Scroll to a specific page.
    *
    * @param {number} pageIndex  Zero-based page index.
    */
   goToPage(pageIndex) {
-    if (pageIndex < 0 || pageIndex >= this.#pageCount) return;
+    const wrapper = this.#wrapper(pageIndex);
+    if (!wrapper) return;
 
-    this.#scrollContainer.scrollTo({
-      top: this.#pageScrollOffsets[pageIndex],
-      behavior: 'smooth',
-    });
+    wrapper.scrollIntoView({ block: 'start', behavior: 'smooth' });
     this.#setCurrentPage(pageIndex);
   }
 
@@ -424,13 +393,14 @@ export class SafePdfViewer extends EventTarget {
   /**
    * Set the zoom level.
    *
+   * Page wrappers are resized in place, so scroll position and the text
+   * selection survive; visible pages re-render at the new size.
+   *
    * @param {number|'fit-width'|'fit-page'} value
    *   A numeric scale factor (e.g. `1.5` for 150%), or one of the special
    *   strings `'fit-width'` / `'fit-page'`.
    */
   setZoom(value) {
-    this.#endAnnotationPointerGesture();
-
     // Use the first page as the reference for fit calculations; fall back to
     // defaults when no PDF is loaded yet.
     const refW = this.#pageSizes[0]?.width ?? DEFAULT_PAGE_WIDTH;
@@ -450,25 +420,10 @@ export class SafePdfViewer extends EventTarget {
       this.#zoom = Number(value) || 1;
     }
 
-    // Flush caches.
-    this.#imageCache.clear();
     this.#renderer.clearCache();
-    this.#renderer.clearTextLayoutCache();
-    this.#clearSelection();
-
-    const savedPage = this.#currentPage;
-
-    this.#buildPageLayout();
-
-    // Wait for the browser to finish laying out the rebuilt page wrappers
-    // before scrolling and rendering.  Two rAF calls guarantee a full
-    // layout pass has occurred — more reliable than an arbitrary setTimeout.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        this.goToPage(savedPage);
-        this.#renderVisiblePages();
-      });
-    });
+    for (let i = 0; i < this.#pageCount; i++) this.#layoutWrapper(i);
+    this.#scheduleRender();
+    this.#scheduleSelection(true);
 
     this.dispatchEvent(
       new CustomEvent('zoomchange', {
@@ -517,29 +472,15 @@ export class SafePdfViewer extends EventTarget {
    * @returns {string}
    */
   getSelectedText() {
-    if (this.#selectedText) return this.#selectedText;
-
-    const ranges = this.#selectedPageRanges();
-    if (ranges.length === 0) return '';
-
-    const parts = [];
-    for (const range of ranges) {
-      const { width, height } = this.#scaledPageSizeForPage(range.pageIndex);
-      const text = this.#renderer.getSelectedText(
-        range.pageIndex,
-        width,
-        height,
-        range.startIndex,
-        range.endIndex
-      );
-      if (text) parts.push(text);
-    }
-    return parts.join('\n');
+    if (!this.#renderer.isReady || this.#pageCount === 0) return '';
+    return this.#renderer.selectedText();
   }
 
   /** Clear the current text selection. */
   clearSelection() {
-    this.#clearSelection();
+    this.#selectionDrag = null;
+    if (this.#renderer.isReady && this.#pageCount > 0) this.#renderer.select([]);
+    this.#scheduleSelection(true);
   }
 
   /**
@@ -555,11 +496,9 @@ export class SafePdfViewer extends EventTarget {
    */
   destroy() {
     this.#detachEventListeners();
-    this.#endAnnotationPointerGesture();
-    this.#clearSelection();
+    this.#resetDocumentState();
     this.#renderer.destroy();
     this.#container.innerHTML = '';
-    this.#imageCache.clear();
   }
 
   // ==================================================================
@@ -597,18 +536,14 @@ export class SafePdfViewer extends EventTarget {
     this.#container.appendChild(this.#scrollContainer);
   }
 
-  /** Build (or rebuild) the page placeholder grid for the current zoom. */
+  /** Build the page placeholders and start observing their visibility. */
   #buildPageLayout() {
     this.#scrollContent.innerHTML = '';
 
     for (let i = 0; i < this.#pageCount; i++) {
-      const { width, height } = this.#scaledPageSizeForPage(i);
-
       const wrapper = document.createElement('div');
       wrapper.className = 'spdf-page-wrapper';
-      wrapper.style.width = `${width}px`;
-      wrapper.style.height = `${height}px`;
-      wrapper.dataset.pageIndex = i;
+      wrapper.dataset.pageIndex = String(i);
 
       const placeholder = document.createElement('div');
       placeholder.className = 'spdf-page-placeholder';
@@ -625,9 +560,25 @@ export class SafePdfViewer extends EventTarget {
       wrapper.appendChild(label);
 
       this.#scrollContent.appendChild(wrapper);
+      this.#layoutWrapper(i);
+      this.#observer.observe(wrapper);
     }
+  }
 
-    this.#computePageScrollOffsets();
+  /** Size a page wrapper for the current zoom and mark its pixels stale. */
+  #layoutWrapper(pageIndex) {
+    const wrapper = this.#wrapper(pageIndex);
+    if (!wrapper) return;
+    const { width, height } = this.#scaledPageSizeForPage(pageIndex);
+    wrapper.style.width = `${width}px`;
+    wrapper.style.height = `${height}px`;
+    this.#scaleSelectionLayer(pageIndex);
+  }
+
+  /** @returns {HTMLElement|undefined} */
+  #wrapper(pageIndex) {
+    const wrapper = this.#scrollContent.children[pageIndex];
+    return wrapper?.classList.contains('spdf-page-wrapper') ? wrapper : undefined;
   }
 
   // ==================================================================
@@ -635,6 +586,19 @@ export class SafePdfViewer extends EventTarget {
   // ==================================================================
 
   #attachEventListeners() {
+    this.#observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const index = Number(entry.target.dataset.pageIndex);
+          if (entry.isIntersecting) this.#visiblePages.add(index);
+          else this.#visiblePages.delete(index);
+        }
+        this.#scheduleRender();
+        this.#scheduleSelection(true);
+      },
+      { root: this.#scrollContainer, rootMargin: RENDER_MARGIN }
+    );
+
     this.#scrollContainer.addEventListener(
       'scroll',
       this.#boundHandleScroll,
@@ -647,19 +611,16 @@ export class SafePdfViewer extends EventTarget {
       'pointerdown',
       this.#boundHandlePointerDown
     );
-    this.#scrollContainer.addEventListener(
-      'pointermove',
-      this.#boundHandlePointerMove
-    );
-    this.#scrollContainer.addEventListener('pointerup', this.#boundHandlePointerUp);
-    this.#scrollContainer.addEventListener(
-      'pointercancel',
-      this.#boundHandlePointerUp
-    );
+    window.addEventListener('pointermove', this.#boundHandlePointerMove);
+    window.addEventListener('pointerup', this.#boundHandlePointerUp);
+    window.addEventListener('pointercancel', this.#boundHandlePointerUp);
+    window.addEventListener('blur', this.#boundHandlePointerUp);
     document.addEventListener('copy', this.#boundHandleCopy, true);
   }
 
   #detachEventListeners() {
+    this.#observer?.disconnect();
+    this.#observer = null;
     this.#scrollContainer?.removeEventListener('scroll', this.#boundHandleScroll);
     document.removeEventListener('keydown', this.#boundHandleKeydown, true);
     window.removeEventListener('resize', this.#boundHandleResize);
@@ -667,18 +628,10 @@ export class SafePdfViewer extends EventTarget {
       'pointerdown',
       this.#boundHandlePointerDown
     );
-    this.#scrollContainer?.removeEventListener(
-      'pointermove',
-      this.#boundHandlePointerMove
-    );
-    this.#scrollContainer?.removeEventListener(
-      'pointerup',
-      this.#boundHandlePointerUp
-    );
-    this.#scrollContainer?.removeEventListener(
-      'pointercancel',
-      this.#boundHandlePointerUp
-    );
+    window.removeEventListener('pointermove', this.#boundHandlePointerMove);
+    window.removeEventListener('pointerup', this.#boundHandlePointerUp);
+    window.removeEventListener('pointercancel', this.#boundHandlePointerUp);
+    window.removeEventListener('blur', this.#boundHandlePointerUp);
     document.removeEventListener('copy', this.#boundHandleCopy, true);
   }
 
@@ -686,21 +639,14 @@ export class SafePdfViewer extends EventTarget {
   // Loading helpers
   // ==================================================================
 
-  /**
-   * Common path for loading a PDF buffer into the renderer and updating
-   * internal state.
-   */
-  #loadBuffer(buffer) {
-    this.#endAnnotationPointerGesture();
-    this.#imageCache.clear();
-    this.#annotationPointerActive = false;
-    this.#annotationPageIndex = null;
-    this.#clearSelection();
+  /** Load a PDF buffer into the renderer, rebuild the layout, and emit `load`. */
+  #load(buffer, fileName) {
+    this.#resetDocumentState();
     const { pageCount } = this.#renderer.loadPdf(buffer);
     this.#pageCount = pageCount;
     this.#currentPage = 0;
 
-    // Query each page's true dimensions from the WASM/PDF layer.
+    // Query each page's displayed dimensions from the WASM/PDF layer.
     this.#pageSizes = [];
     for (let i = 0; i < pageCount; i++) {
       const dims = this.#renderer.getPageDimensions(i);
@@ -709,24 +655,30 @@ export class SafePdfViewer extends EventTarget {
       );
     }
 
+    this.dispatchEvent(
+      new CustomEvent('load', { detail: { pageCount, fileName } })
+    );
+
+    this.#buildPageLayout();
+    this.#showLoading(false);
     return { pageCount };
   }
 
-  /** Runs after a successful load: builds layout, renders first pages. */
-  #afterLoad() {
-    this.#buildPageLayout();
-
-    // Use a double rAF to ensure the browser has completed layout of the
-    // newly inserted page wrappers before we try to read scroll geometry.
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        try {
-          this.#renderVisiblePages();
-        } finally {
-          this.#showLoading(false);
-        }
-      });
-    });
+  /** Forget per-document DOM and selection state before a load or teardown. */
+  #resetDocumentState() {
+    this.#observer?.disconnect();
+    this.#visiblePages.clear();
+    this.#highlights.clear();
+    this.#selectionDrag = null;
+    this.#selectionRevision = undefined;
+    this.#fullSelection = true;
+    this.#prefetchQueue = [];
+    if (this.#renderFrame !== null) cancelAnimationFrame(this.#renderFrame);
+    if (this.#selectionFrame !== null) cancelAnimationFrame(this.#selectionFrame);
+    this.#renderFrame = null;
+    this.#selectionFrame = null;
+    this.#pageCount = 0;
+    this.#pageSizes = [];
   }
 
   // ==================================================================
@@ -735,7 +687,6 @@ export class SafePdfViewer extends EventTarget {
 
   /**
    * Calculate the pixel size of a specific page at the current zoom.
-   * Uses the page's true PDF dimensions if available, falling back to defaults.
    *
    * @param {number} pageIndex
    * @returns {{ width: number, height: number }}
@@ -751,43 +702,24 @@ export class SafePdfViewer extends EventTarget {
   }
 
   /**
-   * Precompute the scroll-top position of the top edge of every page and
-   * store the results in {@link #pageScrollOffsets}.  Must be called after
-   * the page layout is (re)built or after the zoom changes.
-   */
-  #computePageScrollOffsets() {
-    this.#pageScrollOffsets = [];
-    let top = SCROLL_PADDING;
-    for (let i = 0; i < this.#pageCount; i++) {
-      this.#pageScrollOffsets.push(top);
-      const { height } = this.#scaledPageSizeForPage(i);
-      top += height + PAGE_GAP;
-    }
-  }
-
-  /**
-   * Render a page into the corresponding page wrapper using `drawImage`,
-   * bypassing the expensive encode→data-URL→decode cycle.
-   * Results are cached by page index + zoom level so each page is only
-   * rendered once per zoom.
+   * Render a page into its wrapper's display canvas via `drawImage`, unless
+   * the canvas already shows this page at the current zoom.
    *
    * @param {number} pageIndex
    */
   #renderAndDisplay(pageIndex) {
-    const key = `${pageIndex}-${this.#zoom.toFixed(4)}`;
-    if (this.#imageCache.has(key)) return;
+    const wrapper = this.#wrapper(pageIndex);
+    if (!wrapper) return;
+
+    const zoomKey = this.#zoom.toFixed(4);
+    if (wrapper.dataset.zoom === zoomKey) return;
 
     const { width, height } = this.#scaledPageSizeForPage(pageIndex);
     this.#renderer.renderPageToCanvas(pageIndex, width, height);
 
-    const wrapper = this.#scrollContent.children[pageIndex];
-    if (!wrapper) return;
-
     let displayCanvas = wrapper.querySelector('.spdf-page-canvas');
     if (!displayCanvas) {
-      const placeholder = wrapper.querySelector('.spdf-page-placeholder');
-      if (placeholder) placeholder.remove();
-
+      wrapper.querySelector('.spdf-page-placeholder')?.remove();
       displayCanvas = document.createElement('canvas');
       displayCanvas.className = 'spdf-page-canvas spdf-page-img';
       wrapper.insertBefore(displayCanvas, wrapper.firstChild);
@@ -796,100 +728,23 @@ export class SafePdfViewer extends EventTarget {
     displayCanvas.width = width;
     displayCanvas.height = height;
     displayCanvas.getContext('2d').drawImage(this.#renderer.canvas, 0, 0);
-
-    this.#imageCache.add(key);
+    wrapper.dataset.zoom = zoomKey;
   }
 
-  #invalidatePageImage(pageIndex) {
-    const prefix = `${pageIndex}-`;
-    for (const key of this.#imageCache) {
-      if (key.startsWith(prefix)) this.#imageCache.delete(key);
-    }
-  }
-
-  #refreshAfterAnnotationInteraction(outcome, pageIndex, invalidateAll) {
-    if (!outcome.redraw) return;
-
-    if (invalidateAll) {
-      this.#imageCache.clear();
+  /** Coalesce scroll and visibility changes into one render per frame. */
+  #scheduleRender() {
+    if (this.#renderFrame !== null || this.#pageCount === 0) return;
+    this.#renderFrame = requestAnimationFrame(() => {
+      this.#renderFrame = null;
       this.#renderVisiblePages();
-      return;
-    }
-
-    this.#invalidatePageImage(pageIndex);
-    try {
-      this.#renderAndDisplay(pageIndex);
-    } catch (err) {
-      this.#emitError('Failed to redraw annotation interaction', err);
-    }
+    });
   }
 
-  // ==================================================================
-  // Visible-Page Detection
-  // ==================================================================
-
-  /** Return the range of pages that are currently in (or near) the viewport. */
-  #visiblePageRange() {
-    const scrollTop = this.#scrollContainer.scrollTop;
-    const viewportH = this.#scrollContainer.clientHeight;
-    const viewBottom = scrollTop + viewportH;
-
-    // Linear scan: find the first and last pages whose bounding boxes
-    // overlap the viewport.  Works correctly for mixed page heights.
-    let first = 0;
-    let last = this.#pageCount - 1;
-    let foundFirst = false;
-
-    for (let i = 0; i < this.#pageCount; i++) {
-      const pageTop = this.#pageScrollOffsets[i];
-      const { height } = this.#scaledPageSizeForPage(i);
-      const pageBottom = pageTop + height;
-
-      if (pageBottom > scrollTop && pageTop < viewBottom) {
-        if (!foundFirst) {
-          first = i;
-          foundFirst = true;
-        }
-        last = i;
-      } else if (foundFirst) {
-        // Pages are ordered, so once we leave the viewport we're done.
-        break;
-      }
-    }
-
-    return {
-      first: Math.max(0, first - RENDER_BUFFER),
-      last: Math.min(this.#pageCount - 1, last + RENDER_BUFFER),
-    };
-  }
-
-  /** Determine which page is "current" based on scroll position. */
-  #pageFromScroll() {
-    const scrollTop = this.#scrollContainer.scrollTop;
-    const viewportH = this.#scrollContainer.clientHeight;
-    const center = scrollTop + viewportH / 2;
-
-    // Binary search for the last page whose top edge is at or above center.
-    let lo = 0;
-    let hi = this.#pageCount - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (this.#pageScrollOffsets[mid] <= center) {
-        lo = mid;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    return lo;
-  }
-
-  /** Render every page that is currently visible (or nearly visible). */
+  /** Render every page intersecting the viewport (plus the render margin). */
   #renderVisiblePages() {
     if (this.#pageCount === 0 || !this.#renderer.isReady) return;
 
-    const { first, last } = this.#visiblePageRange();
-
-    for (let i = first; i <= last; i++) {
+    for (const i of [...this.#visiblePages].sort((a, b) => a - b)) {
       try {
         this.#renderAndDisplay(i);
       } catch (err) {
@@ -898,202 +753,140 @@ export class SafePdfViewer extends EventTarget {
     }
 
     // Sync current-page state.
-    const page = this.#pageFromScroll();
-    if (page !== this.#currentPage) {
+    const page = this.#pageNearestCenter();
+    if (page !== null && page !== this.#currentPage) {
       this.#setCurrentPage(page);
     }
 
     // Kick off background prefetch.
     this.#schedulePrefetch(this.#currentPage);
-    this.#renderSelectionHighlights();
+  }
+
+  /** The visible page whose box is closest to the viewport centre. */
+  #pageNearestCenter() {
+    const viewport = this.#scrollContainer.getBoundingClientRect();
+    const center = viewport.top + viewport.height / 2;
+    let best = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (const index of this.#visiblePages) {
+      const rect = this.#wrapper(index)?.getBoundingClientRect();
+      if (!rect) continue;
+      const distance =
+        center < rect.top ? rect.top - center : center > rect.bottom ? center - rect.bottom : 0;
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = index;
+      }
+    }
+    return best;
   }
 
   // ==================================================================
   // Text Selection
   // ==================================================================
 
-  #clearSelection() {
-    this.#selectionAnchor = null;
-    this.#selectionFocus = null;
-    this.#isSelecting = false;
-    this.#selectedText = '';
-    this.#clearSelectionLayers();
-  }
+  /**
+   * Hit-test the page under a pointer event against the Rust text layout.
+   *
+   * @param {PointerEvent} e
+   * @returns {number[]|null} `[page, layoutRevision, glyphIndex]`
+   */
+  #hitTest(e) {
+    const wrapper = document
+      .elementFromPoint(e.clientX, e.clientY)
+      ?.closest('.spdf-page-wrapper');
+    if (!wrapper || !this.#scrollContent.contains(wrapper)) return null;
 
-  #clearSelectionLayers() {
-    for (const wrapper of this.#scrollContent?.children ?? []) {
-      const layer = wrapper.querySelector?.('.spdf-selection-layer');
-      if (layer) layer.innerHTML = '';
-    }
-  }
-
-  #selectedPageRanges() {
-    if (!this.#selectionAnchor || !this.#selectionFocus) return [];
-
-    const anchorBeforeFocus =
-      this.#compareSelectionPoints(this.#selectionAnchor, this.#selectionFocus) <= 0;
-    const start = anchorBeforeFocus ? this.#selectionAnchor : this.#selectionFocus;
-    const end = anchorBeforeFocus ? this.#selectionFocus : this.#selectionAnchor;
-    const ranges = [];
-
-    for (let pageIndex = start.pageIndex; pageIndex <= end.pageIndex; pageIndex++) {
-      const { width, height } = this.#scaledPageSizeForPage(pageIndex);
-      const glyphCount = this.#renderer.getTextGlyphCount(pageIndex, width, height);
-      if (glyphCount === 0) continue;
-
-      const startIndex = pageIndex === start.pageIndex ? start.glyphIndex : 0;
-      const endIndex =
-        pageIndex === end.pageIndex ? end.glyphIndex : glyphCount - 1;
-      ranges.push({ pageIndex, startIndex, endIndex });
-    }
-
-    return ranges;
-  }
-
-  #renderSelectionHighlights() {
-    this.#clearSelectionLayers();
-
-    for (const range of this.#selectedPageRanges()) {
-      const wrapper = this.#scrollContent.children[range.pageIndex];
-      if (!wrapper) continue;
-
-      const layer = wrapper.querySelector('.spdf-selection-layer');
-      if (!layer) continue;
-
-      const { width, height } = this.#scaledPageSizeForPage(range.pageIndex);
-      const rects = this.#renderer.getTextSelectionRects(
-        range.pageIndex,
-        width,
-        height,
-        range.startIndex,
-        range.endIndex
-      );
-
-      for (const rect of rects) {
-        const left = Math.min(rect.left, rect.right);
-        const top = Math.min(rect.top, rect.bottom);
-        const rectWidth = Math.abs(rect.right - rect.left);
-        const rectHeight = Math.abs(rect.bottom - rect.top);
-        if (rectWidth <= 0 || rectHeight <= 0) continue;
-
-        const el = document.createElement('div');
-        el.className = 'spdf-selection-rect';
-        el.style.left = `${left}px`;
-        el.style.top = `${top}px`;
-        el.style.width = `${rectWidth}px`;
-        el.style.height = `${rectHeight}px`;
-        layer.appendChild(el);
-      }
-    }
-  }
-
-  #refreshSelectedText() {
-    const ranges = this.#selectedPageRanges();
-    if (ranges.length === 0) {
-      this.#selectedText = '';
-      return;
-    }
-
-    const parts = [];
-    for (const range of ranges) {
-      const { width, height } = this.#scaledPageSizeForPage(range.pageIndex);
-      const text = this.#renderer.getSelectedText(
-        range.pageIndex,
-        width,
-        height,
-        range.startIndex,
-        range.endIndex
-      );
-      if (text) parts.push(text);
-    }
-    this.#selectedText = parts.join('\n');
-  }
-
-  #compareSelectionPoints(a, b) {
-    if (a.pageIndex !== b.pageIndex) {
-      return a.pageIndex - b.pageIndex;
-    }
-    return a.glyphIndex - b.glyphIndex;
-  }
-
-  #selectionHitFromEvent(e) {
-    const pagePoint = this.#pagePointFromClientPoint(e.clientX, e.clientY);
-    if (!pagePoint) return null;
-
-    const { width, height } = this.#scaledPageSizeForPage(pagePoint.pageIndex);
-    const glyphIndex = this.#renderer.hitTestText(
-      pagePoint.pageIndex,
+    const pageIndex = Number(wrapper.dataset.pageIndex);
+    const rect = wrapper.getBoundingClientRect();
+    const { width, height } = this.#scaledPageSizeForPage(pageIndex);
+    return this.#renderer.hitTestText(
+      pageIndex,
       width,
       height,
-      pagePoint.x,
-      pagePoint.y
+      e.clientX - rect.left,
+      e.clientY - rect.top
     );
-    if (glyphIndex === null) return null;
-
-    return { pageIndex: pagePoint.pageIndex, glyphIndex };
   }
 
-  #pagePointFromClientPoint(clientX, clientY) {
-    let nearest = null;
-    let nearestDistance = Number.POSITIVE_INFINITY;
-
-    for (const wrapper of this.#scrollContent.children) {
-      if (!wrapper.classList?.contains('spdf-page-wrapper')) continue;
-      const pageIndex = Number(wrapper.dataset.pageIndex);
-      if (!Number.isInteger(pageIndex)) continue;
-
-      const rect = wrapper.getBoundingClientRect();
-      const x = Math.min(Math.max(clientX - rect.left, 0), rect.width);
-      const y = Math.min(Math.max(clientY - rect.top, 0), rect.height);
-
-      if (clientY >= rect.top && clientY <= rect.bottom) {
-        return { pageIndex, x, y };
+  /** Coalesce selection changes into one DOM update per frame. */
+  #scheduleSelection(full = false) {
+    this.#fullSelection ||= full;
+    if (this.#selectionFrame !== null || this.#pageCount === 0) return;
+    this.#selectionFrame = requestAnimationFrame(() => {
+      this.#selectionFrame = null;
+      try {
+        this.#updateSelectionHighlights();
+      } catch (err) {
+        console.error('Failed to update selection', err);
       }
+    });
+  }
 
-      const distance =
-        clientY < rect.top ? rect.top - clientY : clientY - rect.bottom;
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearest = { pageIndex, x, y };
+  /** Apply changed highlight batches, reusing nodes by their stable keys. */
+  #updateSelectionHighlights() {
+    if (!this.#renderer.isReady || this.#pageCount === 0) return;
+    const batches = this.#renderer.selectionUpdates(
+      [...this.#visiblePages],
+      this.#fullSelection ? undefined : this.#selectionRevision
+    );
+
+    for (const batch of batches) {
+      const wrapper = this.#wrapper(batch.page);
+      const layer = wrapper?.querySelector('.spdf-selection-layer');
+      if (!layer) continue;
+
+      // Highlights are in the retained layout's device space; scale the layer
+      // to the displayed page size instead of recomputing every rectangle.
+      layer.dataset.deviceWidth = String(batch.device_size[0]);
+      layer.dataset.deviceHeight = String(batch.device_size[1]);
+      this.#scaleSelectionLayer(batch.page);
+
+      let nodes = this.#highlights.get(batch.page);
+      if (!nodes) {
+        nodes = new Map();
+        this.#highlights.set(batch.page, nodes);
       }
+      const retained = new Set(batch.keys);
+      for (const [key, node] of nodes) {
+        if (!retained.has(key)) {
+          node.remove();
+          nodes.delete(key);
+        }
+      }
+      batch.keys.forEach((key, index) => {
+        let node = nodes.get(key);
+        if (!node) {
+          node = document.createElement('div');
+          node.className = 'spdf-selection-rect';
+          layer.appendChild(node);
+          nodes.set(key, node);
+        }
+        const [left, top, right, bottom] = batch.bounds.slice(index * 4, index * 4 + 4);
+        node.style.left = `${left}px`;
+        node.style.top = `${top}px`;
+        node.style.width = `${right - left}px`;
+        node.style.height = `${bottom - top}px`;
+      });
     }
 
-    return nearest;
+    const latest = batches.at(-1);
+    if (latest) this.#selectionRevision = latest.selection_revision;
+    this.#fullSelection = false;
   }
 
-  #pagePointForPage(pageIndex, clientX, clientY) {
-    const wrapper = this.#scrollContent.children[pageIndex];
-    if (!wrapper?.classList.contains('spdf-page-wrapper')) return null;
-
-    const rect = wrapper.getBoundingClientRect();
-    return {
-      pageIndex,
-      x: clientX - rect.left,
-      y: clientY - rect.top,
-    };
-  }
-
-  #pagePointAtClientPoint(clientX, clientY) {
-    for (const wrapper of this.#scrollContent.children) {
-      if (!wrapper.classList?.contains('spdf-page-wrapper')) continue;
-      const pageIndex = Number(wrapper.dataset.pageIndex);
-      if (!Number.isInteger(pageIndex)) continue;
-
-      const rect = wrapper.getBoundingClientRect();
-      if (
-        clientX >= rect.left &&
-        clientX <= rect.right &&
-        clientY >= rect.top &&
-        clientY <= rect.bottom
-      ) {
-        return {
-          pageIndex,
-          x: clientX - rect.left,
-          y: clientY - rect.top,
-        };
-      }
-    }
-    return null;
+  /** Map a page's selection layer from layout device pixels to the displayed size. */
+  #scaleSelectionLayer(pageIndex) {
+    const layer = this.#wrapper(pageIndex)?.querySelector('.spdf-selection-layer');
+    if (!layer) return;
+    const deviceWidth = Number(layer.dataset.deviceWidth);
+    const deviceHeight = Number(layer.dataset.deviceHeight);
+    if (!deviceWidth || !deviceHeight) return;
+    const { width, height } = this.#scaledPageSizeForPage(pageIndex);
+    layer.style.width = `${deviceWidth}px`;
+    layer.style.height = `${deviceHeight}px`;
+    layer.style.transform = `scale(${width / deviceWidth}, ${height / deviceHeight})`;
   }
 
   // ==================================================================
@@ -1101,11 +894,10 @@ export class SafePdfViewer extends EventTarget {
   // ==================================================================
 
   #schedulePrefetch(currentPage) {
-    const pages = this.#renderer.getPrefetchPages(currentPage);
-    const newQueue = pages.filter((idx) => {
-      const key = `${idx}-${this.#zoom.toFixed(4)}`;
-      return !this.#imageCache.has(key);
-    });
+    const zoomKey = this.#zoom.toFixed(4);
+    const newQueue = this.#renderer
+      .getPrefetchPages(currentPage)
+      .filter((idx) => this.#wrapper(idx)?.dataset.zoom !== zoomKey);
 
     // Always replace the queue so an in-flight idle callback picks up
     // pages relevant to the current scroll position, not a stale one.
@@ -1123,11 +915,6 @@ export class SafePdfViewer extends EventTarget {
   }
 
   #processPrefetchQueue(deadline) {
-    if (this.#prefetchQueue.length === 0) {
-      this.#isPrefetching = false;
-      return;
-    }
-
     while (
       this.#prefetchQueue.length > 0 &&
       deadline.timeRemaining() > PREFETCH_MIN_IDLE
@@ -1155,217 +942,55 @@ export class SafePdfViewer extends EventTarget {
   // ==================================================================
 
   #handlePointerDown(e) {
-    if (
-      this.#pageCount === 0 ||
-      e.button !== 0 ||
-      e.isPrimary === false
-    ) return;
+    if (this.#pageCount === 0 || e.button !== 0 || e.isPrimary === false) return;
 
-    const annotationPoint =
-      this.#pagePointAtClientPoint(e.clientX, e.clientY) ??
-      (this.#annotationPageIndex === null
-        ? null
-        : this.#pagePointForPage(
-            this.#annotationPageIndex,
-            e.clientX,
-            e.clientY
-          ));
-
-    if (annotationPoint) {
-      const { width, height } = this.#scaledPageSizeForPage(
-        annotationPoint.pageIndex
-      );
-      let annotationOutcome;
-      try {
-        annotationOutcome = this.#renderer.annotationPointerDown(
-          annotationPoint.pageIndex,
-          width,
-          height,
-          annotationPoint.x,
-          annotationPoint.y
-        );
-      } catch (err) {
-        this.#emitError('Failed to interact with PDF annotation', err);
-        return;
-      }
-
-      this.#annotationPageIndex = annotationOutcome.consumed
-        ? annotationPoint.pageIndex
-        : null;
-
-      if (annotationOutcome.consumed) {
-        e.preventDefault();
-        this.#scrollContainer.focus({ preventScroll: true });
-        this.#clearSelection();
-        this.#annotationPointerActive = true;
-        this.#annotationPointerId = e.pointerId;
-        this.#scrollContainer.setPointerCapture?.(e.pointerId);
-        this.#refreshAfterAnnotationInteraction(
-          annotationOutcome,
-          annotationPoint.pageIndex,
-          true
-        );
-        return;
-      }
-
-      this.#refreshAfterAnnotationInteraction(
-        annotationOutcome,
-        annotationPoint.pageIndex,
-        true
-      );
-    }
-
-    const hit = this.#selectionHitFromEvent(e);
-    if (!hit) {
-      this.#clearSelection();
+    const anchor = this.#hitTest(e);
+    if (!anchor) {
+      this.clearSelection();
       return;
     }
 
     e.preventDefault();
     this.#scrollContainer.focus({ preventScroll: true });
-    this.#isSelecting = true;
-    this.#selectionAnchor = hit;
-    this.#selectionFocus = hit;
-    this.#scrollContainer.setPointerCapture?.(e.pointerId);
-    this.#refreshSelectedText();
-    this.#renderSelectionHighlights();
+    this.#renderer.select([...anchor, ...anchor]);
+    this.#selectionDrag = { anchor, pointerId: e.pointerId };
+    this.#scheduleSelection();
   }
 
   #handlePointerMove(e) {
-    if (this.#annotationPointerActive && this.#annotationPageIndex !== null) {
-      const pagePoint = this.#pagePointForPage(
-        this.#annotationPageIndex,
-        e.clientX,
-        e.clientY
-      );
-      if (!pagePoint) return;
+    if (this.#selectionDrag?.pointerId !== e.pointerId) return;
 
-      const { width, height } = this.#scaledPageSizeForPage(pagePoint.pageIndex);
-      try {
-        const outcome = this.#renderer.annotationPointerMove(
-          pagePoint.pageIndex,
-          width,
-          height,
-          pagePoint.x,
-          pagePoint.y
-        );
-        e.preventDefault();
-        this.#refreshAfterAnnotationInteraction(
-          outcome,
-          pagePoint.pageIndex,
-          false
-        );
-      } catch (err) {
-        this.#emitError('Failed to drag PDF annotation', err);
-        this.#endAnnotationPointerGesture(e.pointerId);
-      }
-      return;
-    }
-
-    if (!this.#isSelecting) return;
-
-    const hit = this.#selectionHitFromEvent(e);
-    if (!hit) return;
+    const focus = this.#hitTest(e);
+    if (!focus) return;
 
     e.preventDefault();
-    this.#selectionFocus = hit;
-    this.#refreshSelectedText();
-    this.#renderSelectionHighlights();
+    this.#renderer.select([...this.#selectionDrag.anchor, ...focus]);
+    this.#scheduleSelection();
   }
 
   #handlePointerUp(e) {
-    if (this.#annotationPointerActive) {
-      try {
-        this.#renderer.annotationPointerUp();
-      } catch (err) {
-        this.#emitError('Failed to finish PDF annotation interaction', err);
-      } finally {
-        this.#annotationPointerActive = false;
-        if (this.#scrollContainer.hasPointerCapture?.(e.pointerId)) {
-          this.#scrollContainer.releasePointerCapture(e.pointerId);
-        }
-        this.#annotationPointerId = null;
-      }
-      return;
+    if (!(e instanceof PointerEvent) || this.#selectionDrag?.pointerId === e.pointerId) {
+      this.#selectionDrag = null;
     }
-
-    if (!this.#isSelecting) return;
-
-    this.#isSelecting = false;
-    this.#scrollContainer.releasePointerCapture?.(e.pointerId);
   }
 
   #handleCopy(e) {
     if (this.#isEditableEventTarget(e.target)) return;
 
-    const text = this.#selectedText || this.getSelectedText();
-    if (!text) return;
+    const text = this.getSelectedText();
+    if (!text || !e.clipboardData) return;
 
     e.preventDefault();
-    if (e.clipboardData) {
-      e.clipboardData.setData('text/plain', text);
-    } else {
-      this.#writeTextToClipboard(text);
-    }
-  }
-
-  #handleScroll() {
-    if (this.#scrollTimeout) clearTimeout(this.#scrollTimeout);
-
-    // Render immediately for a responsive feel.
-    this.#renderVisiblePages();
-
-    // …and once more after scrolling settles.
-    this.#scrollTimeout = setTimeout(() => {
-      this.#renderVisiblePages();
-    }, SCROLL_DEBOUNCE);
+    e.clipboardData.setData('text/plain', text);
   }
 
   /** @param {KeyboardEvent} e */
   #handleKeydown(e) {
-    if (this.#pageCount === 0) return;
+    if (this.#pageCount === 0 || this.#options.keyboardNav === false) return;
 
     // Guard: e.target can be null or a non-HTMLElement for document-level
     // key events. Also skip text-input elements to avoid hijacking typing.
     if (this.#isEditableEventTarget(e.target)) return;
-
-    if (
-      this.#annotationPageIndex !== null &&
-      this.#renderer.isAnnotationEditing()
-    ) {
-      const edit = this.#annotationEditCommandFromEvent(e);
-      if (edit) {
-        e.preventDefault();
-        try {
-          const outcome = this.#renderer.handleAnnotationEditCommand(
-            this.#annotationPageIndex,
-            edit.command,
-            edit.text
-          );
-          this.#refreshAfterAnnotationInteraction(
-            outcome,
-            this.#annotationPageIndex,
-            false
-          );
-        } catch (err) {
-          this.#emitError('Failed to edit PDF annotation', err);
-        }
-      }
-      return;
-    }
-
-    if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 'c') {
-      const text = this.#selectedText || this.getSelectedText();
-      if (text) {
-        e.preventDefault();
-        this.#writeTextToClipboard(text);
-      }
-      return;
-    }
-
-    if (this.#options.keyboardNav === false) {
-      return;
-    }
 
     switch (e.key) {
       case 'ArrowDown':
@@ -1403,58 +1028,6 @@ export class SafePdfViewer extends EventTarget {
     this.#loadingOverlay?.classList.toggle('spdf-hidden', !show);
   }
 
-  #annotationEditCommandFromEvent(e) {
-    switch (e.key) {
-      case 'Escape':
-        return { command: 'cancel' };
-      case 'Enter':
-        return { command: e.shiftKey ? 'newline' : 'commit' };
-      case 'ArrowLeft':
-        return { command: 'move-left' };
-      case 'ArrowRight':
-        return { command: 'move-right' };
-      case 'Home':
-        return { command: 'move-to-start' };
-      case 'End':
-        return { command: 'move-to-end' };
-      case 'Backspace':
-        return { command: 'delete-backward' };
-      case 'Delete':
-        return { command: 'delete-forward' };
-      default:
-        if (
-          !e.ctrlKey &&
-          !e.metaKey &&
-          !e.isComposing &&
-          [...e.key].length === 1 &&
-          !/\p{Cc}/u.test(e.key)
-        ) {
-          return { command: 'insert', text: e.key };
-        }
-        return null;
-    }
-  }
-
-  #endAnnotationPointerGesture(pointerId) {
-    if (!this.#annotationPointerActive) return;
-    if (this.#renderer.isReady && this.#pageCount > 0) {
-      try {
-        this.#renderer.annotationPointerUp();
-      } catch (err) {
-        this.#emitError('Failed to finish PDF annotation interaction', err);
-      }
-    }
-    this.#annotationPointerActive = false;
-    const capturedPointerId = pointerId ?? this.#annotationPointerId;
-    if (
-      capturedPointerId !== null &&
-      this.#scrollContainer.hasPointerCapture?.(capturedPointerId)
-    ) {
-      this.#scrollContainer.releasePointerCapture(capturedPointerId);
-    }
-    this.#annotationPointerId = null;
-  }
-
   #isEditableEventTarget(target) {
     if (!(target instanceof HTMLElement)) return false;
 
@@ -1467,37 +1040,9 @@ export class SafePdfViewer extends EventTarget {
     );
   }
 
-  #writeTextToClipboard(text) {
-    const copied = this.#copyTextWithTextarea(text);
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).catch(() => {});
-    }
-
-    return copied;
-  }
-
-  #copyTextWithTextarea(text) {
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.setAttribute('readonly', '');
-    textarea.style.position = 'fixed';
-    textarea.style.top = '0';
-    textarea.style.left = '-9999px';
-    textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
-    textarea.select();
-
-    try {
-      return document.execCommand('copy');
-    } catch {
-      return false;
-    } finally {
-      textarea.remove();
-    }
-  }
-
   /** Update current page and dispatch event. */
   #setCurrentPage(index) {
+    if (index < 0 || index >= this.#pageCount) return;
     this.#currentPage = index;
     this.dispatchEvent(
       new CustomEvent('pagechange', {

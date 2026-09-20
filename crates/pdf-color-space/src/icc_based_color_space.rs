@@ -119,7 +119,10 @@ mod tests {
         );
         let stream_data = stream.shared_data();
         let array = [
-            ObjectVariant::Name(b"ICCBased".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"ICCBased".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
             ObjectVariant::Stream(stream),
         ];
 

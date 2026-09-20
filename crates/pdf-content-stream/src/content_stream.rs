@@ -58,6 +58,7 @@ impl ContentStream {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::sync::Arc;
 
     use pdf_content_stream_operators::{
         PdfTextItem,
@@ -185,27 +186,27 @@ mod tests {
             Some(PdfOperatorVariant::ShowTextArray(op))
                 if op
                     == &ShowTextArray::new(vec![
-                        PdfTextItem::Text(b"e".to_vec()),
+                        PdfTextItem::Text(Arc::from(&b"e"[..])),
                         PdfTextItem::Adjustment(-4.0),
-                        PdfTextItem::Text(b"x".to_vec()),
+                        PdfTextItem::Text(Arc::from(&b"x"[..])),
                         PdfTextItem::Adjustment(12.0),
-                        PdfTextItem::Text(b"t".to_vec()),
+                        PdfTextItem::Text(Arc::from(&b"t"[..])),
                         PdfTextItem::Adjustment(-3.0),
-                        PdfTextItem::Text(b"e".to_vec()),
+                        PdfTextItem::Text(Arc::from(&b"e"[..])),
                         PdfTextItem::Adjustment(-4.0),
-                        PdfTextItem::Text(b"n".to_vec()),
+                        PdfTextItem::Text(Arc::from(&b"n"[..])),
                         PdfTextItem::Adjustment(-4.0),
-                        PdfTextItem::Text(b"s".to_vec()),
+                        PdfTextItem::Text(Arc::from(&b"s"[..])),
                         PdfTextItem::Adjustment(3.0),
-                        PdfTextItem::Text(b"i".to_vec()),
+                        PdfTextItem::Text(Arc::from(&b"i"[..])),
                         PdfTextItem::Adjustment(3.0),
-                        PdfTextItem::Text(b"v".to_vec()),
+                        PdfTextItem::Text(Arc::from(&b"v"[..])),
                         PdfTextItem::Adjustment(0.0),
-                        PdfTextItem::Text(b"e".to_vec()),
+                        PdfTextItem::Text(Arc::from(&b"e"[..])),
                         PdfTextItem::Adjustment(-4.0),
-                        PdfTextItem::Text(b"l".to_vec()),
+                        PdfTextItem::Text(Arc::from(&b"l"[..])),
                         PdfTextItem::Adjustment(3.0),
-                        PdfTextItem::Text(b"y".to_vec()),
+                        PdfTextItem::Text(Arc::from(&b"y"[..])),
                     ])
         ));
     }
@@ -259,10 +260,13 @@ mod tests {
 
     #[test]
     fn content_stream_read_parses_array_streams_in_order_without_concatenation() {
-        let contents = ObjectVariant::Array(vec![
-            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0)),
-            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(2, 0)),
-        ]);
+        let contents = ObjectVariant::Array(
+            vec![
+                ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0).into()),
+                ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(2, 0)),
+            ]
+            .into(),
+        );
         let resolver = MapResolver {
             objects: BTreeMap::from([
                 (1, ObjectVariant::Stream(stream_object(1, b"1 2"))),
@@ -284,7 +288,7 @@ mod tests {
 
     #[test]
     fn content_stream_read_rejects_non_stream_array_entries() {
-        let contents = ObjectVariant::Array(vec![ObjectVariant::Null]);
+        let contents = ObjectVariant::Array(vec![ObjectVariant::Null].into());
         let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
 
         let err = reader
@@ -301,7 +305,7 @@ mod tests {
                 expected: pdf_object_reader::object_kind::ObjectKind::Stream,
                 actual: pdf_object_reader::object_kind::ObjectKind::Null,
             })
-        ));
+        .into()));
         assert_eq!(
             reader
                 .content_stream_ids()
@@ -357,10 +361,13 @@ mod tests {
 
     #[test]
     fn optional_contents_parses_stream_arrays_and_allocates_monotonically() {
-        let contents = ObjectVariant::Array(vec![
-            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0)),
-            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(2, 0)),
-        ]);
+        let contents = ObjectVariant::Array(
+            vec![
+                ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0).into()),
+                ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(2, 0)),
+            ]
+            .into(),
+        );
         let page = Dictionary::new(BTreeMap::from([(Vec::from(b"Contents"), contents)]));
         let resolver = MapResolver {
             objects: BTreeMap::from([

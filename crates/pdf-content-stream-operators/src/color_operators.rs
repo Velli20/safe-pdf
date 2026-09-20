@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     error::PdfOperatorError,
     operands::Operands,
@@ -224,11 +226,11 @@ impl PdfOperator for SetCMYKStroke {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetStrokeColorSpace {
     /// The name of the color space.
-    name: Vec<u8>,
+    name: Arc<[u8]>,
 }
 
 impl SetStrokeColorSpace {
-    pub fn new(name: Vec<u8>) -> Self {
+    pub fn new(name: Arc<[u8]>) -> Self {
         Self { name }
     }
 }
@@ -238,7 +240,7 @@ impl PdfOperator for SetStrokeColorSpace {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let name = operands.get_name_bytes()?;
+        let name = operands.get_string_bytes()?;
         Ok(PdfOperatorVariant::SetStrokeColorSpace(Self::new(name)))
     }
 
@@ -251,11 +253,11 @@ impl PdfOperator for SetStrokeColorSpace {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetNonStrokingColorSpace {
     /// The name of the color space.
-    name: Vec<u8>,
+    name: Arc<[u8]>,
 }
 
 impl SetNonStrokingColorSpace {
-    pub fn new(name: Vec<u8>) -> Self {
+    pub fn new(name: Arc<[u8]>) -> Self {
         Self { name }
     }
 }
@@ -265,7 +267,7 @@ impl PdfOperator for SetNonStrokingColorSpace {
     const OPERAND_COUNT: Option<usize> = Some(1);
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let name = operands.get_name_bytes()?;
+        let name = operands.get_string_bytes()?;
         Ok(PdfOperatorVariant::SetNonStrokingColorSpace(Self::new(
             name,
         )))
@@ -283,11 +285,11 @@ pub struct SetStrokingColor {
     /// Color component values.
     components: Vec<f32>,
     /// An optional name of a pattern.
-    pattern: Option<Vec<u8>>,
+    pattern: Option<Arc<[u8]>>,
 }
 
 impl SetStrokingColor {
-    pub fn new(components: Vec<f32>, pattern: Option<Vec<u8>>) -> Self {
+    pub fn new(components: Vec<f32>, pattern: Option<Arc<[u8]>>) -> Self {
         Self {
             components,
             pattern,
@@ -317,7 +319,7 @@ impl PdfOperator for SetStrokingColor {
             .map(|obj| obj.is_name())
             .unwrap_or(false)
         {
-            operands.get_name_bytes().ok()
+            operands.get_string_bytes().ok()
         } else {
             None
         };
@@ -343,11 +345,11 @@ pub struct SetNonStrokingColor {
     /// Color component values.
     components: Vec<f32>,
     /// An optional name of a pattern.
-    pattern: Option<Vec<u8>>,
+    pattern: Option<Arc<[u8]>>,
 }
 
 impl SetNonStrokingColor {
-    pub fn new(components: Vec<f32>, pattern: Option<Vec<u8>>) -> Self {
+    pub fn new(components: Vec<f32>, pattern: Option<Arc<[u8]>>) -> Self {
         Self {
             components,
             pattern,
@@ -377,7 +379,7 @@ impl PdfOperator for SetNonStrokingColor {
             .map(|obj| obj.is_name())
             .unwrap_or(false)
         {
-            operands.get_name_bytes().ok()
+            operands.get_string_bytes().ok()
         } else {
             None
         };

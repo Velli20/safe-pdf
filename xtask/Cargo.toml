@@ -8,3 +8,6 @@ description = "Build automation tasks for safe-pdf"
 [dependencies]
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
+pdf-annotation-core = { path = "../crates/pdf-annotation-core", features = ["typescript"] }
+pdf-web = { path = "../crates/pdf-web", features = ["typescript"] }
+ts-rs = "12"

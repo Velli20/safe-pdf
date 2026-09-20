@@ -1,4 +1,4 @@
-use pdf_object_reader::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object_reader::{object_resolver::ObjectResolver, pdf_array::PdfArray};
 use pdf_tokenizer::PdfToken;
 
 use crate::{error::ParserError, parser::PdfParser};
@@ -11,10 +11,7 @@ impl PdfParser<'_> {
     /// An `Array` object containing the parsed PDF objects as its elements,
     /// or a `ParserError` if the input is malformed (e.g., missing delimiters,
     /// invalid object syntax within the array, or an unexpected token).
-    pub fn parse_array(
-        &mut self,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Vec<ObjectVariant>, ParserError> {
+    pub fn parse_array(&mut self, objects: &dyn ObjectResolver) -> Result<PdfArray, ParserError> {
         self.tokenizer.expect(PdfToken::LeftSquareBracket)?;
         self.skip_whitespace_and_comments();
 
@@ -31,7 +28,7 @@ impl PdfParser<'_> {
 
         self.tokenizer.expect(PdfToken::RightSquareBracket)?;
 
-        Ok(values)
+        Ok(PdfArray::from(values))
     }
 }
 

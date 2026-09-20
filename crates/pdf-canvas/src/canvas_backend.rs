@@ -1,12 +1,11 @@
-use std::sync::Arc;
-
-use pdf_graphics::{
-    BlendMode, Image, MaskMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
-    transform::Transform,
-};
+//! Low-level drawing and lexically scoped masking.
+use pdf_graphics::{BlendMode, Image, PathFillType, color::Color, rect::Rect};
 use pdf_shading::paint::ShadingPaint;
 
-use crate::{error::PdfCanvasError, recording_canvas::RecordingCanvas, stroke_style::StrokeStyle};
+use crate::{
+    CanvasPath, error::PdfCanvasError, mask_layer::MaskLayer, stroke_style::StrokeStyle,
+    tiling_shader::TilingShader,
+};
 
 /// Represents a shader used for advanced fill and stroke operations in PDF rendering.
 #[derive(Clone)]
@@ -16,16 +15,7 @@ pub enum Shader {
     /// Represents a tiling pattern image shader for filling or stroking paths with a repeated image.
     ///
     /// Used to define how an image is tiled across a region, with optional transformation and spacing.
-    TilingPatternImage {
-        /// A recording canvas containing the tiling pattern content.
-        image: Arc<RecordingCanvas>,
-        /// The transformation to apply to the pattern tile.
-        transform: Option<Transform>,
-        /// The horizontal spacing between tiles.
-        x_step: f32,
-        /// The vertical spacing between tiles.
-        y_step: f32,
-    },
+    TilingPatternImage(TilingShader),
 }
 
 /// A low-level drawing backend for rendering PDF graphics.
@@ -38,17 +28,17 @@ pub trait CanvasBackend {
     ///
     /// # Parameters
     ///
-    /// - `path`: The path to fill. The coordinates are in the backend's device space.
+    /// - `path`: The path to fill. Its verbs resolve to logical device coordinates.
     /// - `fill_type`: The rule (winding or even-odd) to determine what is "inside" the path.
     /// - `color`: The color to use for filling the path.
     /// - `shader`: An optional shader to use for filling the path.
     /// - `blend_mode`: An optional blend mode to use when filling the path.
     fn fill_path(
         &mut self,
-        path: &PdfPath,
+        path: &CanvasPath<'_>,
         fill_type: PathFillType,
         color: Color,
-        shader: &Option<Shader>,
+        shader: Option<&Shader>,
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError>;
 
@@ -56,7 +46,7 @@ pub trait CanvasBackend {
     ///
     /// # Parameters
     ///
-    /// - `path`: The path to stroke. The coordinates are in the backend's device space.
+    /// - `path`: The path to stroke. Its verbs resolve to logical device coordinates.
     /// - `color`: The color of the stroke.
     /// - `line_width`: The width of the stroke in device units.
     /// - `stroke_style`: Stroke metadata such as dash pattern.
@@ -64,59 +54,13 @@ pub trait CanvasBackend {
     /// - `blend_mode`: An optional blend mode to use when stroking the path.
     fn stroke_path(
         &mut self,
-        path: &PdfPath,
+        path: &CanvasPath<'_>,
         color: Color,
         line_width: f32,
         stroke_style: &StrokeStyle,
-        shader: &Option<Shader>,
+        shader: Option<&Shader>,
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError>;
-
-    /// Fills a shared path after applying `transform` to its geometry.
-    ///
-    /// Backends that can retain shared geometry or apply native transforms should override this
-    /// method. The default implementation preserves compatibility by materializing a transformed
-    /// device-space path and forwarding to [`Self::fill_path`].
-    fn fill_transformed_path(
-        &mut self,
-        path: &Arc<PdfPath>,
-        transform: &Transform,
-        fill_type: PathFillType,
-        color: Color,
-        shader: &Option<Shader>,
-        blend_mode: Option<BlendMode>,
-    ) -> Result<(), PdfCanvasError> {
-        let mut transformed = path.as_ref().clone();
-        transformed.transform(transform);
-        self.fill_path(&transformed, fill_type, color, shader, blend_mode)
-    }
-
-    /// Strokes a shared path after applying `transform` to its geometry.
-    ///
-    /// The default implementation materializes a transformed device-space path and forwards to
-    /// [`Self::stroke_path`].
-    #[allow(clippy::too_many_arguments)]
-    fn stroke_transformed_path(
-        &mut self,
-        path: &Arc<PdfPath>,
-        transform: &Transform,
-        color: Color,
-        line_width: f32,
-        stroke_style: &StrokeStyle,
-        shader: &Option<Shader>,
-        blend_mode: Option<BlendMode>,
-    ) -> Result<(), PdfCanvasError> {
-        let mut transformed = path.as_ref().clone();
-        transformed.transform(transform);
-        self.stroke_path(
-            &transformed,
-            color,
-            line_width,
-            stroke_style,
-            shader,
-            blend_mode,
-        )
-    }
 
     /// Sets the clipping region by intersecting the current clip path with the given path.
     ///
@@ -126,8 +70,11 @@ pub trait CanvasBackend {
     ///
     /// - `path`: The path to use for clipping.
     /// - `mode`: The fill type to determine the clipping region.
-    fn set_clip_region(&mut self, path: &PdfPath, mode: PathFillType)
-    -> Result<(), PdfCanvasError>;
+    fn set_clip_region(
+        &mut self,
+        path: &CanvasPath<'_>,
+        mode: PathFillType,
+    ) -> Result<(), PdfCanvasError>;
 
     /// Returns the width of the canvas in device units.
     fn width(&self) -> f32;
@@ -170,30 +117,16 @@ pub trait CanvasBackend {
         self.draw_image_rect(image, blend_mode, dest_rect, image_rotation)
     }
 
-    /// Begins drawing into the specified mask layer.
+    /// Paints isolated content and applies the supplied mask only after successful painting.
     ///
-    /// All subsequent drawing operations will affect the mask until `end_mask_layer` is called.
+    /// Preparation failures do not invoke `paint`. Painting failures discard isolated content.
+    /// Native restoration runs explicitly before this method returns; it does not use `Drop`.
+    /// Unknown mask modes invoke `paint` directly without isolation.
     ///
-    /// # Parameters
-    ///
-    /// - `mask`: The mask layer to begin drawing into.
-    fn begin_mask_layer(
-        &mut self,
-        mask: &Arc<RecordingCanvas>,
-        transform: &Transform,
-        mask_mode: MaskMode,
-    ) -> Result<(), PdfCanvasError>;
-
-    /// Ends drawing into the specified mask layer and applies it to the canvas.
-    ///
-    /// # Parameters
-    ///
-    /// - `mask`: The mask layer to end and apply.
-    /// - `transform`: The transformation to apply to the mask when compositing.
-    fn end_mask_layer(
-        &mut self,
-        mask: &Arc<RecordingCanvas>,
-        transform: &Transform,
-        mask_mode: MaskMode,
-    ) -> Result<(), PdfCanvasError>;
+    /// The callback must balance its own saves/restores and must not restore caller-owned state.
+    /// These guarantees apply to returned errors, not unwinding panics.
+    fn with_mask_layer<F>(&mut self, mask: &MaskLayer, paint: F) -> Result<(), PdfCanvasError>
+    where
+        Self: Sized,
+        F: FnOnce(&mut Self) -> Result<(), PdfCanvasError>;
 }

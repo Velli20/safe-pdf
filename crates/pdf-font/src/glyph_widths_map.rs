@@ -369,7 +369,7 @@ mod tests {
     // Keep domain-error assertions while exercising the context reader exclusively.
     fn read_widths(array: &[ObjectVariant]) -> Result<GlyphWidthsMap, GlyphWidthsMapError> {
         pdf_object_reader::ObjectReader::new(PassthroughResolver)
-            .read::<GlyphWidthsMap>(&ObjectVariant::Array(array.to_vec()))
+            .read::<GlyphWidthsMap>(&ObjectVariant::Array(array.to_vec().into()))
             .map_err(|error| {
                 let mut source: &dyn std::error::Error = &error;
                 loop {
@@ -396,7 +396,7 @@ mod tests {
 
     // Build a PDF array for a width-entry fixture.
     fn arr(elements: Vec<ObjectVariant>) -> ObjectVariant {
-        ObjectVariant::Array(elements)
+        ObjectVariant::Array(elements.into())
     }
 
     struct SingleObjectResolver {
@@ -457,7 +457,7 @@ mod tests {
         let resolver = SingleObjectResolver { resolved: widths };
 
         let glyph_widths_map = pdf_object_reader::ObjectReader::new(resolver)
-            .read::<GlyphWidthsMap>(&ObjectVariant::Array(input_array))
+            .read::<GlyphWidthsMap>(&ObjectVariant::Array(input_array.into()))
             .unwrap();
 
         assert_eq!(glyph_widths_map.runs.len(), 1);

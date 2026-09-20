@@ -1,8 +1,9 @@
 use pdf_object_collection::object_collection::ObjectCollection;
+use pdf_object_reader::object_lookup::ObjectLookupExt;
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult};
 use std::sync::Arc;
 
-use pdf_annotation_types::{Annotation, annotation_id::AnnotationId};
+use pdf_annotation_core::SourceAnnotation;
 use pdf_content_stream::ContentStream;
 use pdf_graphics::rect::Rect;
 use pdf_resources::resources::Resources;
@@ -18,9 +19,13 @@ pub struct PdfPage {
     /// an array of streams.
     pub contents: Option<ContentStream>,
     /// The raw annotation dictionaries attached to the page.
-    pub annotations: Option<Vec<Annotation>>,
+    pub annotations: Option<Vec<SourceAnnotation>>,
     /// `/MediaBox` attribute which defines the page boundaries.
     pub media_box: Option<Rect>,
+    /// Inherited visible page bounds.
+    pub crop_box: Option<Rect>,
+    /// Inherited clockwise page rotation in degrees.
+    pub rotation: Option<i32>,
     /// `/Resources` attribute which defines the resources used by the page.
     pub resources: Option<Arc<Resources>>,
     /// Next page-scoped annotation identifier.
@@ -35,35 +40,35 @@ impl PdfPage {
     pub const KEY: &'static [u8] = b"Page";
 
     /// Returns an annotation by its stable page-scoped identifier.
-    pub fn annotation(&self, id: AnnotationId) -> Option<&Annotation> {
+    pub fn annotation(&self, id: u64) -> Option<&SourceAnnotation> {
         self.annotations
             .as_deref()?
             .iter()
-            .find(|annotation| annotation.id() == id)
+            .find(|annotation| annotation.id == id)
     }
 
     /// Returns a mutable annotation by its stable page-scoped identifier.
     #[doc(hidden)]
-    pub fn annotation_mut(&mut self, id: AnnotationId) -> Option<&mut Annotation> {
+    pub fn annotation_mut(&mut self, id: u64) -> Option<&mut SourceAnnotation> {
         self.annotations
             .as_deref_mut()?
             .iter_mut()
-            .find(|annotation| annotation.id() == id)
+            .find(|annotation| annotation.id == id)
     }
 
     /// Reserves a new identifier that will not be reused during this page's lifetime.
     #[doc(hidden)]
-    pub fn reserve_annotation_id(&mut self) -> Option<AnnotationId> {
+    pub fn reserve_annotation_id(&mut self) -> Option<u64> {
         let next = self.annotation_id_high_watermark.checked_add(1)?;
-        let id = AnnotationId::from_page_value(self.annotation_id_high_watermark);
+        let id = u64::try_from(self.annotation_id_high_watermark).ok()?;
         self.annotation_id_high_watermark = next;
         Some(id)
     }
 
     /// Attaches an already materialized annotation to this page.
     #[doc(hidden)]
-    pub fn push_annotation(&mut self, mut annotation: Annotation, id: AnnotationId) {
-        annotation.set_id(id);
+    pub fn push_annotation(&mut self, mut annotation: SourceAnnotation, id: u64) {
+        annotation.id = id;
         self.annotations
             .get_or_insert_with(Vec::new)
             .push(annotation);
@@ -71,11 +76,11 @@ impl PdfPage {
 
     /// Removes an annotation by identifier.
     #[doc(hidden)]
-    pub fn take_annotation(&mut self, id: AnnotationId) -> Option<Annotation> {
+    pub fn take_annotation(&mut self, id: u64) -> Option<SourceAnnotation> {
         let annotations = self.annotations.as_mut()?;
         let index = annotations
             .iter()
-            .position(|annotation| annotation.id() == id)?;
+            .position(|annotation| annotation.id == id)?;
         let annotation = annotations.remove(index);
         if annotations.is_empty() {
             self.annotations = None;
@@ -90,15 +95,23 @@ impl FromPdfObject for PdfPage {
         let dictionary = context.dictionary().clone();
         let contents = context.optional::<ContentStream>(b"Contents")?;
         let media_box = dictionary.optional_media_box(context.source())?;
+        let crop_box = dictionary
+            .optional_array_of::<f32, 4>(b"CropBox", context.source())?
+            .map(Rect::from);
+        let rotation = context
+            .dictionary()
+            .optional_number::<i32>(b"Rotate", context.source())?;
         let resources = context
             .optional_shared::<Resources>(b"Resources")?
             .map(|handle| handle.get())
             .transpose()?;
-        let annotations = Annotation::from_page_dictionary(&mut context)?;
+        let annotations = SourceAnnotation::from_page_dictionary(&mut context)?;
         let annotation_id_high_watermark = annotations.as_ref().map_or(0, Vec::len);
         Ok(Self {
             contents,
             media_box,
+            crop_box,
+            rotation,
             resources,
             annotations,
             annotation_id_high_watermark,

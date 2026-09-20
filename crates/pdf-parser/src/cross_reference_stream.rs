@@ -133,14 +133,10 @@ fn parse_subsections(
     }
 
     Ok(index_values
-        .chunks_exact(2)
-        .filter_map(|pair| match pair {
-            [start, count] => Some(XrefSubsection {
-                start: *start,
-                count: *count,
-            }),
-            _ => None,
-        })
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&[start, count]| XrefSubsection { start, count })
         .collect())
 }
 
@@ -230,7 +226,13 @@ mod tests {
         raw_data: Vec<u8>,
     ) -> StreamObject {
         let mut dict_map = BTreeMap::new();
-        dict_map.insert(Vec::from(b"Type"), ObjectVariant::Name(b"XRef".to_vec()));
+        dict_map.insert(
+            Vec::from(b"Type"),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"XRef".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
+        );
         dict_map.insert(Vec::from(b"Size"), ObjectVariant::Integer(size as i64));
         dict_map.insert(
             Vec::from(b"W"),
@@ -387,7 +389,13 @@ mod tests {
         let compressed = encoder.finish().unwrap();
 
         let mut dict_map = BTreeMap::new();
-        dict_map.insert(Vec::from(b"Type"), ObjectVariant::Name(b"XRef".to_vec()));
+        dict_map.insert(
+            Vec::from(b"Type"),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"XRef".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
+        );
         dict_map.insert(Vec::from(b"Size"), ObjectVariant::Integer(size as i64));
         dict_map.insert(
             Vec::from(b"W"),
@@ -409,7 +417,10 @@ mod tests {
         }
         dict_map.insert(
             Vec::from(b"Filter"),
-            ObjectVariant::Name(b"FlateDecode".to_vec()),
+            pdf_object_reader::pdf_string::PdfString::from(
+                b"FlateDecode".to_vec(),
+                pdf_object_reader::string_kind::StringKind::Name,
+            ),
         );
         dict_map.insert(
             Vec::from(b"DecodeParms"),

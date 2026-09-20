@@ -3,15 +3,19 @@ name = "pdf-document"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+serde = ["dep:serde", "pdf-object-reader/serde"]
+
 [dependencies]
 pdf-content-stream = { path = "../pdf-content-stream" }
-pdf-annotation-types = { path = "../pdf-annotation-types" }
+pdf-annotation-core = { path = "../pdf-annotation-core" }
 pdf-object-collection = { path = "../pdf-object-collection" }
 pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-parser = { path = "../pdf-parser" }
 pdf-resources = { path = "../pdf-resources" }
 pdf-graphics = { path = "../pdf-graphics" }
 thiserror = "2.0.12"
+serde = { version = "1", features = ["derive"], optional = true }
 
 md-5 = "0.10.6"
 sha2 = "0.10.9"
