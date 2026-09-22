@@ -29,6 +29,8 @@ pub mod free_text;
 pub mod kind;
 /// Source snapshots and live annotation capabilities.
 pub mod metadata;
+/// Optional content group state retained from `SetOCGState` actions.
+pub mod ocg_state;
 /// Owned source PDF annotation types, independent of parser resources.
 pub mod pdf_data;
 /// Canonical native PDF annotation record and subtype vocabulary.
