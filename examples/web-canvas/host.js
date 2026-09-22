@@ -204,7 +204,7 @@ class PdfViewer {
       page.nativeLayer = new NativeAnnotationLayer(page.annotations, {
         onCommand: (entry, command, revision, viewportRevision) => this.sendAnnotationEvent(entry, command, revision, viewportRevision),
         toPageDelta: (entry, dx, dy) => Array.from(this.pdf.page_delta(entry.page, dx, dy)),
-        onAction: entry => { this.elements.status.textContent = entry.action ? `Annotation action: ${typeof entry.action === 'string' ? entry.action : Object.keys(entry.action)[0]}` : entry.text || ''; },
+        onAction: entry => this.handleAnnotationAction(entry),
         onError: error => this.showError(error),
       });
     }
@@ -239,6 +239,23 @@ class PdfViewer {
     try { this.refreshAnnotations(receipt.pages); }
     catch (error) { this.showError(`Edit committed; presentation refresh failed: ${error}`); }
     return receipt;
+  }
+
+  // Applies a SetOCGState action to optional content visibility, else reports the
+  // action. Toggling a group only changes presentation, so the pages the receipt
+  // names are re-requested without any revision advancing.
+  handleAnnotationAction(entry) {
+    if (entry.action && typeof entry.action === 'object' && 'SetOCGState' in entry.action) {
+      try {
+        const receipt = JSON.parse(this.pdf.set_optional_content_state(JSON.stringify(entry.action)));
+        this.refreshAnnotations(receipt.pages);
+        this.elements.status.textContent = `Optional content updated (${receipt.pages.length} page(s))`;
+      } catch (error) { this.showError(error); }
+      return;
+    }
+    this.elements.status.textContent = entry.action
+      ? `Annotation action: ${typeof entry.action === 'string' ? entry.action : Object.keys(entry.action)[0]}`
+      : entry.text || '';
   }
 
   refreshAnnotations(changed) {

@@ -31,6 +31,8 @@ pub mod kind;
 pub mod metadata;
 /// Optional content group state retained from `SetOCGState` actions.
 pub mod ocg_state;
+/// Optional content group visibility applied to annotation presentation.
+pub mod optional_content;
 /// Owned source PDF annotation types, independent of parser resources.
 pub mod pdf_data;
 /// Canonical native PDF annotation record and subtype vocabulary.
@@ -48,6 +50,7 @@ mod validation;
 
 mod source_decode;
 mod source_decode_actions;
+mod source_decode_optional_content;
 mod source_decode_subtypes;
 mod source_decode_widget;
 /// Shared fields normalized from the widget records that display them.
@@ -75,7 +78,12 @@ mod widget_control;
 
 pub use entry::{AnnotationEntry, ControlKind, ControlTag, WidgetControl};
 pub use layer_error::{AnnotationLayerError, AnnotationLayerResult};
+pub use optional_content::{
+    AnnotationOptionalContent, OptionalContentProperties, OptionalContentState,
+};
 pub use overlay::{AnnotationOverlay, PreparedAnnotations};
-pub use requests::{AnnotationCommandRequest, AnnotationReceipt, AnnotationTarget};
+pub use requests::{
+    AnnotationCommandRequest, AnnotationReceipt, AnnotationTarget, OptionalContentReceipt,
+};
 pub use session_store::{SessionStorageError, SessionStore};
 pub use shapes::{Shape, ShapePaint};

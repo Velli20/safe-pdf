@@ -39,3 +39,16 @@ pub struct AnnotationReceipt {
     /// Pages whose annotation presentation must be refreshed.
     pub pages: Vec<u32>,
 }
+
+/// Acknowledgement of an applied optional content visibility change.
+///
+/// Carries no revision: optional content visibility is host presentation state,
+/// so applying it never edits an annotation and never advances the document
+/// revision. Only the listed pages need their presentation refreshed.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
+pub struct OptionalContentReceipt {
+    /// Pages whose annotation presentation must be refreshed.
+    pub pages: Vec<u32>,
+}

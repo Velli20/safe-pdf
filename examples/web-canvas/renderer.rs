@@ -1,4 +1,5 @@
 //! A small document owner demonstrating the browser crate's host-facing APIs.
+use pdf_annotation_core::pdf_data::AnnotationAction;
 use pdf_document::{document::PdfDocument, reader::PdfReader};
 use pdf_graphics_web::{WebCanvasBackend, WebCanvasOptions};
 use pdf_renderer::DocumentTextSelection;
@@ -191,6 +192,20 @@ impl WebDocument {
     /// Returns a committed receipt or a JavaScript decoding/validation error.
     pub fn dispatch_command(&mut self, json: &str) -> Result<String, JsValue> {
         self.accept_event(WebAnnotationEvent::new(json)?)
+    }
+
+    /// Applies a `SetOCGState` link action to runtime optional content visibility,
+    /// returning the pages the host must request again as JSON.
+    ///
+    /// `action_json` is the same `action` value the host received on an annotation
+    /// entry, so there is no second request schema to keep in sync.
+    pub fn set_optional_content_state(&mut self, action_json: &str) -> Result<String, JsValue> {
+        let action: AnnotationAction = serde_json::from_str(action_json).map_err(error)?;
+        let receipt = self
+            .overlay
+            .set_optional_content_state(&action)
+            .map_err(error)?;
+        serde_json::to_string(&receipt).map_err(error)
     }
 
     /// Returns import failures without preventing valid annotations from being edited.

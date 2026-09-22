@@ -6,8 +6,8 @@ use crate::document::PdfDocument;
 use crate::encryption::EncryptDictionary;
 use crate::error::PdfReaderError;
 use crate::object_loader::ObjectLoader;
-use crate::page::PdfPage;
 use crate::report::PdfReadReport;
+use pdf_annotation_core::OptionalContentProperties;
 use pdf_object_reader::ObjectReader;
 use pdf_object_reader::object_id::ObjectId;
 use pdf_object_reader::object_lookup::ObjectLookupExt;
@@ -50,9 +50,7 @@ impl PdfReader {
             &mut diagnostics,
         )?;
         let objects = ObjectLoader::new(&entries, &parser, encryption, &mut diagnostics).load()?;
-        let document = PdfDocument {
-            pages: extract_page_tree(&trailer, objects)?,
-        };
+        let document = extract_page_tree(&trailer, objects, &mut diagnostics)?;
 
         Ok(PdfReadReport::new(document, diagnostics))
     }
@@ -145,19 +143,42 @@ pub(crate) fn object_id(number: usize) -> ObjectId {
     }
 }
 
-/// Resolves the page tree rooted at the trailer catalog.
+/// Resolves the page tree rooted at the trailer catalog, along with the catalog's
+/// optional content declaration.
 fn extract_page_tree(
     trailer: &Trailer,
     objects: pdf_object_collection::object_collection::ObjectCollection,
-) -> Result<Vec<PdfPage>, PdfReaderError> {
+    diagnostics: &mut Vec<PdfReadDiagnostic>,
+) -> Result<PdfDocument, PdfReaderError> {
     let catalog = trailer.dictionary.required_dictionary(b"Root", &objects)?;
     let pages = catalog.get_or_err(b"Pages")?.clone();
+    let optional_content = catalog.get(b"OCProperties").cloned();
     let reader = Arc::new(ObjectReader::new(objects));
     let mut pages = reader.read::<PdfDocument>(&pages)?.pages;
     for page in &mut pages {
         page.read_state = Some(Arc::clone(&reader));
     }
-    Ok(pages)
+    // Optional content only governs presentation, so an unreadable declaration is
+    // reported and dropped rather than failing an otherwise usable document.
+    let optional_content = optional_content.and_then(|value| {
+        let object = value.try_object_number().ok().map(object_id);
+        match reader.read::<OptionalContentProperties>(&value) {
+            Ok(properties) => Some(properties),
+            Err(error) => {
+                diagnostics.push(PdfReadDiagnostic::new(
+                    PdfReadDiagnosticKind::ObjectParse,
+                    None,
+                    object,
+                    error,
+                ));
+                None
+            }
+        }
+    });
+    Ok(PdfDocument {
+        pages,
+        optional_content,
+    })
 }
 
 /// Resolves and parses the trailer's encryption dictionary without decrypting it.

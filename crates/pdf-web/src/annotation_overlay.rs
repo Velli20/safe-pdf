@@ -1,7 +1,8 @@
 //! Browser adapter around Core's backend-neutral annotation overlay.
 use crate::{WebViewport, annotation_entry::WebAnnotationEntry, error::WebResult};
 use pdf_annotation_core::{
-    AnnotationCommandRequest, AnnotationOverlay, AnnotationReceipt, PreparedAnnotations,
+    AnnotationCommandRequest, AnnotationOverlay, AnnotationReceipt, OptionalContentReceipt,
+    PreparedAnnotations, pdf_data::AnnotationAction,
 };
 use pdf_document::{diagnostic::PdfReadDiagnostic, document::PdfDocument};
 use pdf_graphics::{rect::Rect, transform::Transform};
@@ -76,7 +77,7 @@ impl WebAnnotationOverlay {
             .iter()
             .map(|page| page.annotations.as_deref().unwrap_or_default());
         Ok(Self {
-            overlay: AnnotationOverlay::new(pages)?,
+            overlay: AnnotationOverlay::new(pages, document.optional_content.as_ref())?,
         })
     }
 
@@ -138,6 +139,17 @@ impl WebAnnotationOverlay {
         Ok(self
             .overlay
             .accept_event(command, viewport.map(WebViewport::revision), page_bounds)?)
+    }
+
+    /// Applies a `SetOCGState` action to runtime optional content visibility.
+    ///
+    /// # Errors
+    /// Returns an error when the action is not a `SetOCGState` action.
+    pub fn set_optional_content_state(
+        &mut self,
+        action: &AnnotationAction,
+    ) -> WebResult<OptionalContentReceipt> {
+        Ok(self.overlay.set_optional_content_state(action)?)
     }
 
     /// Drops only a page's disposable entries; Core values survive eviction.

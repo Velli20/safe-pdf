@@ -1,6 +1,6 @@
 //! Reproducible annotation declarations. Export is explicit, never a generated test.
 use anyhow::{Context, Result, bail};
-use pdf_annotation_core::{AnnotationCommandRequest, AnnotationReceipt};
+use pdf_annotation_core::{AnnotationCommandRequest, AnnotationReceipt, OptionalContentReceipt};
 use pdf_web::WebAnnotationEntry;
 use std::path::Path;
 use ts_rs::TS;
@@ -23,6 +23,7 @@ pub(crate) fn generate(check: bool) -> Result<()> {
     WebAnnotationEntry::export_all(&config)?;
     AnnotationCommandRequest::export_all(&config)?;
     AnnotationReceipt::export_all(&config)?;
+    OptionalContentReceipt::export_all(&config)?;
     // ts-rs emits spaces before newlines; normalize deterministically for review.
     let generated_text = std::fs::read_to_string(&generated)?;
     let contents = (generated_text
