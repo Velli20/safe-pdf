@@ -70,11 +70,12 @@ file_specification: FileSpecification, } } | { "JavaScript": {
  */
 script: Array<number>, } } | { "SetOCGState": {
 /**
- * The OCG state names.
+ * The `/State` operations and their group targets, in source order.
  */
-state: Array<Array<number>>,
+state: Array<OcgStateEntry>,
 /**
- * Whether to preserve the radiobutton state.
+ * Whether to preserve radio-button relationships between groups.
+ * Omission means `true` when the action is executed.
  */
 preserve_rb: boolean | null, } } | { "Rendition": {
 /**
@@ -1006,6 +1007,31 @@ required: boolean,
  * Fixed configuration and initial value to validate at creation.
  */
 content: FieldKind, };
+
+/**
+ * Owned `/State` element of a `SetOCGState` action.
+ *
+ * The `/State` array is a flat sequence in which each operation governs the
+ * group targets that follow it, so elements are retained in their source order.
+ */
+export type OcgStateEntry = "On" | "Off" | "Toggle" | { "Group": OcgTarget };
+
+/**
+ * Owned optional content group target of a `SetOCGState` `/State` element.
+ */
+export type OcgTarget = { "Reference": {
+/**
+ * PDF object number, distinct from Core annotation and field identities.
+ */
+number: string,
+/**
+ * PDF generation number.
+ */
+generation: string, } } | { "Dictionary": {
+/**
+ * The group's `/Name` bytes.
+ */
+name: Array<number>, } };
 
 /**
  * Completed edits; transient dragging and drawing previews remain host-owned.

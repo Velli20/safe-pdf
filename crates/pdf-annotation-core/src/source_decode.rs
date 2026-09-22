@@ -118,6 +118,10 @@ impl SourceAnnotation {
         };
         let mut annotations = Vec::with_capacity(annots.len());
         for value in annots.iter() {
+            if value.is_null(context.source())? {
+                continue;
+            }
+
             let dictionary = value.try_dictionary(context.source())?;
             if dictionary.get(b"Subtype").is_none() {
                 continue;

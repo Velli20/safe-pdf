@@ -1,5 +1,6 @@
 //! Action, destination, and file-specification decoding; nothing is executed.
 use crate::error::SourceDecodeError;
+use crate::ocg_state::{OcgStateEntry, OcgTarget};
 use crate::pdf_data::{
     AnnotationAction, AnnotationDestination, DestinationTarget, ExplicitDestination,
     FileSpecification, FileSpecificationDictionary,
@@ -78,7 +79,7 @@ impl AnnotationAction {
                     .try_bytes_vec(objects)?,
             },
             b"SetOCGState" => Self::SetOCGState {
-                state: name_list(action_dictionary, b"State", objects)?.unwrap_or_default(),
+                state: ocg_state(action_dictionary, objects)?,
                 preserve_rb: action_dictionary.optional_boolean(b"PreserveRB", objects)?,
             },
             b"Rendition" => Self::Rendition {
@@ -242,6 +243,83 @@ impl FileSpecification {
             volatile,
         })))
     }
+}
+
+/// Decodes the `/State` array of a `SetOCGState` action.
+///
+/// Elements alternate between operation names and the group targets they govern,
+/// so the sequence is retained in source order rather than collected as names.
+fn ocg_state(
+    dictionary: &Dictionary,
+    objects: &dyn ObjectResolver,
+) -> DecodeResult<Vec<OcgStateEntry>> {
+    const ENTRY: &[u8] = b"State";
+
+    let Some(value) = dictionary.get(ENTRY) else {
+        return Err(SourceDecodeError::MissingEntry { entry: ENTRY });
+    };
+
+    let items = value.try_array(objects)?;
+    let mut state = Vec::with_capacity(items.len());
+    let mut seen_operation = false;
+    let mut pending_operation = false;
+
+    for item in items {
+        if item.is_name() {
+            if pending_operation {
+                return Err(SourceDecodeError::InvalidEntry {
+                    entry: ENTRY,
+                    reason: "optional content operation has no group target".to_owned(),
+                });
+            }
+            state.push(OcgStateEntry::try_from(item.try_bytes(objects)?)?);
+            seen_operation = true;
+            pending_operation = true;
+            continue;
+        }
+
+        if !seen_operation {
+            return Err(SourceDecodeError::InvalidEntry {
+                entry: ENTRY,
+                reason: "group target precedes any optional content operation".to_owned(),
+            });
+        }
+        state.push(OcgStateEntry::Group(ocg_target(item, objects)?));
+        pending_operation = false;
+    }
+
+    if pending_operation {
+        return Err(SourceDecodeError::InvalidEntry {
+            entry: ENTRY,
+            reason: "optional content operation has no group target".to_owned(),
+        });
+    }
+
+    Ok(state)
+}
+
+/// Decodes one optional content group target, keeping references unresolved.
+fn ocg_target(value: &ObjectVariant, objects: &dyn ObjectResolver) -> DecodeResult<OcgTarget> {
+    if let ObjectVariant::Reference(id) = value {
+        return Ok(OcgTarget::Reference {
+            number: u64::try_from(id.number).map_err(|_| SourceDecodeError::ResourceLimit)?,
+            generation: u64::try_from(id.generation)
+                .map_err(|_| SourceDecodeError::ResourceLimit)?,
+        });
+    }
+
+    let group = value.try_dictionary(objects)?;
+    let group_type = group.required_bytes(b"Type", objects)?;
+    if group_type != b"OCG" {
+        return Err(SourceDecodeError::InvalidEntry {
+            entry: b"State",
+            reason: format!("optional content group has type '{group_type:?}'"),
+        });
+    }
+
+    Ok(OcgTarget::Dictionary {
+        name: group.required_bytes_vec(b"Name", objects)?,
+    })
 }
 
 fn name_list(

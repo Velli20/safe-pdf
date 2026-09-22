@@ -217,6 +217,25 @@ impl ObjectVariant {
         matches!(self, ObjectVariant::Array(_))
     }
 
+    /// Returns `true` if this value, or the object it references, is `Null`.
+    ///
+    /// # Parameters
+    ///
+    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
+    ///
+    /// # Returns
+    ///
+    /// `bool` or `Err` if a reference cannot be resolved.
+    pub fn is_null(&self, objects: &dyn ObjectResolver) -> Result<bool, ObjectError> {
+        let object = if let ObjectVariant::Reference(_) = self {
+            objects.resolve_object(self)?
+        } else {
+            self
+        };
+
+        Ok(matches!(object, ObjectVariant::Null))
+    }
+
     /// Resolves an `ObjectVariant` into a fixed-size array of numeric values.
     ///
     /// This function attempts to convert an array object into a Rust array of type `[T; N]`,

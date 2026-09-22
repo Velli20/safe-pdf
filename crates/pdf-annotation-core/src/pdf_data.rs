@@ -1,6 +1,6 @@
 //! Owned PDF metadata. These values retain source information without resolving resources.
 //! Raw byte fields are never interpreted as UTF-8 merely to serialize them.
-use crate::{metadata::AnnotationFlags, models::Quad};
+use crate::{metadata::AnnotationFlags, models::Quad, ocg_state::OcgStateEntry};
 use pdf_graphics::{DashPattern, color::Color, polyline::Polyline, rect::Rect};
 
 bitflags::bitflags! {
@@ -404,9 +404,10 @@ pub enum AnnotationAction {
     },
     /// A SetOCGState action.
     SetOCGState {
-        /// The OCG state names.
-        state: Vec<Vec<u8>>,
-        /// Whether to preserve the radiobutton state.
+        /// The `/State` operations and their group targets, in source order.
+        state: Vec<OcgStateEntry>,
+        /// Whether to preserve radio-button relationships between groups.
+        /// Omission means `true` when the action is executed.
         preserve_rb: Option<bool>,
     },
     /// A rendition action.
