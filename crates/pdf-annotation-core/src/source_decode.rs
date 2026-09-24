@@ -78,6 +78,8 @@ impl FromPdfObject for SourceAnnotation {
             .map(|value| value.try_bytes(objects).map(Vec::from))
             .transpose()?;
         let struct_parent = dictionary.optional_number::<u64>(b"StructParent", objects)?;
+        let optional_content =
+            crate::source_decode_optional_content::optional_content(dictionary, objects)?;
 
         let border = AnnotationBorder::from_dictionary(dictionary, objects)?;
         let color = color(dictionary, b"C", objects)?;
@@ -103,6 +105,7 @@ impl FromPdfObject for SourceAnnotation {
             border,
             color,
             struct_parent,
+            optional_content,
             kind,
         })
     }

@@ -1,6 +1,9 @@
 //! Owned PDF metadata. These values retain source information without resolving resources.
 //! Raw byte fields are never interpreted as UTF-8 merely to serialize them.
-use crate::{metadata::AnnotationFlags, models::Quad, ocg_state::OcgStateEntry};
+use crate::{
+    metadata::AnnotationFlags, models::Quad, ocg_state::OcgStateEntry,
+    optional_content::AnnotationOptionalContent,
+};
 use pdf_graphics::{DashPattern, color::Color, polyline::Polyline, rect::Rect};
 
 bitflags::bitflags! {
@@ -878,6 +881,11 @@ pub struct SourceAnnotation {
     #[serde(with = "crate::wire::optional")]
     #[cfg_attr(feature = "typescript", ts(type = "string | null"))]
     pub struct_parent: Option<u64>,
+    /// The optional `/OC` optional content membership governing display.
+    /// Defaulted on load so sidecars written before this entry still deserialize.
+    #[serde(default)]
+    #[cfg_attr(feature = "typescript", ts(optional))]
+    pub optional_content: Option<AnnotationOptionalContent>,
     /// The parsed subtype-specific payload.
     pub kind: NativeAnnotation,
 }

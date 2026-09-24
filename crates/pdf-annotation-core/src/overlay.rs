@@ -8,9 +8,13 @@ use crate::{
     kind::AnnotationKind,
     layer_error::{AnnotationLayerError, AnnotationLayerResult},
     models::{Annotation, AnnotationId, Point, Revision},
-    pdf_data::SourceAnnotation,
+    ocg_state::OcgStateEntry,
+    optional_content::{OptionalContentProperties, OptionalContentState},
+    pdf_data::{AnnotationAction, SourceAnnotation},
     projection,
-    requests::{AnnotationCommandRequest, AnnotationReceipt, AnnotationTarget},
+    requests::{
+        AnnotationCommandRequest, AnnotationReceipt, AnnotationTarget, OptionalContentReceipt,
+    },
 };
 use pdf_graphics::{rect::Rect, transform::Transform};
 use pdf_object_reader::diagnostic::PdfReadDiagnostic;
@@ -64,11 +68,17 @@ pub struct AnnotationOverlay {
     modified: BTreeMap<u64, Revision>,
     /// Revision every imported annotation was last changed at.
     imported: Revision,
+    /// Runtime optional content visibility. Disposable presentation state that is
+    /// never persisted and never advances the document revision.
+    optional_content: OptionalContentState,
 }
 
 impl AnnotationOverlay {
     /// Imports one source annotation slice per page once and retains valid
     /// annotations and field groups.
+    ///
+    /// `optional_content` is the document catalog's `/OCProperties`, which seeds
+    /// which groups start visible. A document that declares none hides nothing.
     ///
     /// # Errors
     ///
@@ -76,6 +86,7 @@ impl AnnotationOverlay {
     /// source records are retained as diagnostics without partially importing fields.
     pub fn new<'a>(
         pages: impl IntoIterator<Item = &'a [SourceAnnotation]>,
+        optional_content: Option<&OptionalContentProperties>,
     ) -> AnnotationLayerResult<Self> {
         let document = import::import(pages)?;
         let imported = document.engine.view().data().revision;
@@ -84,6 +95,10 @@ impl AnnotationOverlay {
             pages: BTreeMap::new(),
             modified: BTreeMap::new(),
             imported,
+            optional_content: optional_content.map_or_else(
+                OptionalContentState::default,
+                OptionalContentState::from_properties,
+            ),
         })
     }
 
@@ -168,6 +183,61 @@ impl AnnotationOverlay {
         })
     }
 
+    /// Applies a `SetOCGState` action to runtime optional content visibility and
+    /// drops the prepared presentation of every page it can affect.
+    ///
+    /// Visibility is presentation state: this never mutates an annotation, never
+    /// dirties the sidecar, and never advances the document revision. The returned
+    /// pages are the ones the host must request again.
+    ///
+    /// The action's `/PreserveRB` is accepted and ignored, because `/RBGroups`
+    /// radio relationships are not modelled; a group is turned on without turning
+    /// off the siblings a full reader would.
+    ///
+    /// # Errors
+    /// Rejects an action that is not `SetOCGState`.
+    pub fn set_optional_content_state(
+        &mut self,
+        action: &AnnotationAction,
+    ) -> AnnotationLayerResult<OptionalContentReceipt> {
+        let AnnotationAction::SetOCGState { state, .. } = action else {
+            return Err(AnnotationLayerError::InvalidInput(
+                "optional content action",
+            ));
+        };
+        let pages = self.apply_optional_content(state);
+        for page in &pages {
+            self.pages.remove(page);
+        }
+        Ok(OptionalContentReceipt {
+            pages: pages.into_iter().collect(),
+        })
+    }
+
+    /// Applies `state` and reports the pages holding an annotation that depends on
+    /// a group whose visibility changed. The engine view is released before the
+    /// caller evicts the snapshots those pages own.
+    fn apply_optional_content(&mut self, state: &[OcgStateEntry]) -> BTreeSet<u32> {
+        let changed = self.optional_content.apply(state);
+        if changed.is_empty() {
+            return BTreeSet::new();
+        }
+        self.document
+            .engine
+            .view()
+            .data()
+            .annotations
+            .iter()
+            .filter(|annotation| {
+                annotation
+                    .source()
+                    .and_then(|source| source.optional_content.as_ref())
+                    .is_some_and(|content| content.depends_on(&changed))
+            })
+            .map(|annotation| annotation.page.0)
+            .collect()
+    }
+
     /// Drops only a page's disposable presentation; Core values survive eviction.
     pub fn remove_page(&mut self, page: u32) {
         self.pages.remove(&page);
@@ -243,6 +313,7 @@ impl AnnotationOverlay {
         projection::project(
             annotation,
             view,
+            &self.optional_content,
             self.document.hints.get(&annotation.id.0),
             page_to_device,
             self.modified_revision(annotation.id),

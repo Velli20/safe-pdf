@@ -2,6 +2,7 @@ use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ObjectReadEr
 use std::sync::Arc;
 
 use crate::page::PdfPage;
+use pdf_annotation_core::OptionalContentProperties;
 
 use pdf_graphics::rect::Rect;
 use pdf_object_reader::object_lookup::ObjectLookupExt;
@@ -11,6 +12,9 @@ use pdf_resources::{error::PdfPagesError, resources::Resources};
 pub struct PdfDocument {
     /// The document's pages, in source order.
     pub pages: Vec<PdfPage>,
+    /// The catalog's `/OCProperties`, absent when the document declares no optional
+    /// content or its declaration could not be read.
+    pub optional_content: Option<OptionalContentProperties>,
 }
 
 impl PdfDocument {
@@ -67,7 +71,12 @@ impl FromPdfObject for PdfDocument {
                 page.rotation = rotation;
             }
         }
-        Ok(Self { pages })
+        // This reads the `/Pages` node, not the catalog, so optional content is
+        // attached by the document reader once the catalog is available.
+        Ok(Self {
+            pages,
+            optional_content: None,
+        })
     }
 }
 

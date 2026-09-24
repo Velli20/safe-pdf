@@ -168,6 +168,11 @@ source: SourceAnnotation | null,
 action: AnnotationAction | null, };
 
 /**
+ * Owned `/OC` entry of an annotation: a single group, or a membership dictionary.
+ */
+export type AnnotationOptionalContent = { "Group": OptionalContentGroupId } | { "Membership": OptionalContentMembership };
+
+/**
  * Acknowledgement of a committed in-memory edit, never a storage acknowledgement.
  */
 export type AnnotationReceipt = {
@@ -1132,6 +1137,68 @@ value: ComboValue, };
 export type OptionId = number;
 
 /**
+ * Identity of one optional content group within its source document.
+ *
+ * The indirect object number is the only stable identity a PDF gives an optional
+ * content group, so it is the identity used here. A group reached only as a direct
+ * dictionary has no object number and retains its `/Name` instead, matching what
+ * [`OcgTarget::Dictionary`] preserves.
+ *
+ * The generation number is deliberately **not** part of this identity. A document
+ * produced by incremental update can name the same logical group as `12 0 R` in
+ * `/OCProperties` and `12 1 R` in a `SetOCGState` action; keying on the pair would
+ * silently fail to match those and the action would appear to do nothing. Within one
+ * effective cross-reference table an object number is already unique.
+ */
+export type OptionalContentGroupId = { "Object": {
+/**
+ * PDF object number, distinct from Core annotation and field identities.
+ */
+number: string, } } | { "Name": {
+/**
+ * The group's `/Name` bytes.
+ */
+name: Array<number>, } };
+
+/**
+ * Owned `/OCMD` membership dictionary retained from the source PDF.
+ */
+export type OptionalContentMembership = {
+/**
+ * The `/OCGs` member groups. A single group reference is retained as a
+ * one-element list. Null members are dropped rather than retained.
+ */
+groups: Array<OptionalContentGroupId>,
+/**
+ * The `/P` policy; `AnyOn` when the entry is absent.
+ */
+policy: OptionalContentPolicy,
+/**
+ * Whether a `/VE` visibility expression was present. Expressions are not
+ * evaluated, and content carrying one is treated as visible. Retaining the
+ * flag lets a host report the limitation without decoding the entry again.
+ */
+has_visibility_expression: boolean, };
+
+/**
+ * The `/P` visibility policy of an `/OCMD` membership dictionary.
+ */
+export type OptionalContentPolicy = "AnyOn" | "AllOn" | "AnyOff" | "AllOff";
+
+/**
+ * Acknowledgement of an applied optional content visibility change.
+ *
+ * Carries no revision: optional content visibility is host presentation state,
+ * so applying it never edits an annotation and never advances the document
+ * revision. Only the listed pages need their presentation refreshed.
+ */
+export type OptionalContentReceipt = {
+/**
+ * Pages whose annotation presentation must be refreshed.
+ */
+pages: Array<number>, };
+
+/**
  * Zero-based index into the host document's pages.
  */
 export type PageIndex = number;
@@ -1477,6 +1544,11 @@ color: Color | null,
  * The optional structure parent index from `/StructParent`.
  */
 struct_parent: string | null,
+/**
+ * The optional `/OC` optional content membership governing display.
+ * Defaulted on load so sidecars written before this entry still deserialize.
+ */
+optional_content?: AnnotationOptionalContent,
 /**
  * The parsed subtype-specific payload.
  */
