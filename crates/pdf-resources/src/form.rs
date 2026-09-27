@@ -8,8 +8,9 @@ use pdf_object_reader::{
 
 /// A parsed Form XObject, including deferred resource graph edges.
 pub struct FormXObject {
-    /// Normalized form bounds.
-    pub bbox: Rect,
+    /// Normalized form bounds; absent when the form dictionary omits `/BBox`, in which
+    /// case the form is not clipped.
+    pub bbox: Option<Rect>,
     /// Optional form transformation.
     pub matrix: Option<Transform>,
     /// Resources needed to paint the form.
@@ -33,8 +34,8 @@ impl FromPdfObject for FormXObject {
         };
         let bbox = context
             .dictionary()
-            .required_bbox(context.source())?
-            .normalized();
+            .optional_bbox(context.source())?
+            .map(|bbox| bbox.normalized());
         let matrix = context.dictionary().optional_matrix(context.source())?;
         // Retain deferred handles so recursive resource graphs can finish decoding.
         let resources = context
@@ -96,10 +97,11 @@ mod tests {
             .read::<FormXObject>(&ObjectVariant::Stream(stream))
             .expect("form xobject should parse");
 
-        assert_eq!(form.bbox.left, 265.077);
-        assert_eq!(form.bbox.top, 43.3206);
-        assert_eq!(form.bbox.right, 301.321);
-        assert_eq!(form.bbox.bottom, 71.8304);
+        let bbox = form.bbox.expect("form bbox should be present");
+        assert_eq!(bbox.left, 265.077);
+        assert_eq!(bbox.top, 43.3206);
+        assert_eq!(bbox.right, 301.321);
+        assert_eq!(bbox.bottom, 71.8304);
     }
 
     #[test]
@@ -150,10 +152,11 @@ mod tests {
             )
             .expect("dictionary-only form should parse");
 
-        assert_eq!(form.bbox.left, 0.0);
-        assert_eq!(form.bbox.top, 0.0);
-        assert_eq!(form.bbox.right, 10.0);
-        assert_eq!(form.bbox.bottom, 10.0);
+        let bbox = form.bbox.expect("form bbox should be present");
+        assert_eq!(bbox.left, 0.0);
+        assert_eq!(bbox.top, 0.0);
+        assert_eq!(bbox.right, 10.0);
+        assert_eq!(bbox.bottom, 10.0);
         assert_eq!(
             form.matrix,
             Some(Transform::from_row(2.0, 0.0, 0.0, 3.0, 4.0, 5.0))

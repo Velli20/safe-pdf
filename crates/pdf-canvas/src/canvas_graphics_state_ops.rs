@@ -156,20 +156,24 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                         let form = smask.shape.get()?;
                         // The soft mask is defined by a Form XObject.
                         // We need to render this form's content into a separate mask surface.
-                        if !Self::can_record_offscreen_bbox(&form.bbox) {
+                        // Without bounds there is no offscreen surface to record into.
+                        let Some(bbox) = form.bbox.as_ref() else {
+                            continue;
+                        };
+                        if !Self::can_record_offscreen_bbox(bbox) {
                             continue;
                         }
 
                         // Create a recording canvas to act as the mask layer.
                         let mut recording_canvas =
-                            RecordingCanvas::new(form.bbox.width(), form.bbox.height());
+                            RecordingCanvas::new(bbox.width(), bbox.height());
 
                         // Render the form's content stream into the mask canvas.
                         self.record_content_stream(
                             &mut recording_canvas,
                             &form.content_stream,
                             form.matrix,
-                            &form.bbox,
+                            bbox,
                             form.resources
                                 .as_ref()
                                 .map(|resources| resources.get())

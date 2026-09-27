@@ -37,12 +37,12 @@ fn form_resource(name: &str, stream: ContentStream) -> Resources {
         xobjects: HashMap::from([(
             name.as_bytes().to_vec(),
             Resource::from(FormXObject {
-                bbox: Rect {
+                bbox: Some(Rect {
                     left: 0.0,
                     top: 0.0,
                     right: 10.0,
                     bottom: 10.0,
-                },
+                }),
                 matrix: None,
                 resources: None,
                 content_stream: stream,

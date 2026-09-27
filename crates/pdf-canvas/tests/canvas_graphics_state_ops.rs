@@ -83,12 +83,12 @@ fn external_graphics_state_dash_pattern_is_used_for_strokes() {
 #[test]
 fn soft_mask_form_with_zero_area_bbox_is_ignored() {
     let form = FormXObject {
-        bbox: Rect {
+        bbox: Some(Rect {
             left: 5.0,
             top: 10.0,
             right: 5.0,
             bottom: 20.0,
-        },
+        }),
         matrix: None,
         resources: None,
         content_stream: ContentStream {
