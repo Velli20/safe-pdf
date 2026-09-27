@@ -455,10 +455,11 @@ fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
     };
     let form = form.get().expect("published form");
 
-    assert_eq!(form.bbox.left, 10.0);
-    assert_eq!(form.bbox.top, 20.0);
-    assert_eq!(form.bbox.right, 30.0);
-    assert_eq!(form.bbox.bottom, 40.0);
+    let bbox = form.bbox.expect("form bbox should be present");
+    assert_eq!(bbox.left, 10.0);
+    assert_eq!(bbox.top, 20.0);
+    assert_eq!(bbox.right, 30.0);
+    assert_eq!(bbox.bottom, 40.0);
     assert_eq!(
         form.matrix,
         Some(Transform::from_row(2.0, 0.0, 0.0, 3.0, 4.0, 5.0))

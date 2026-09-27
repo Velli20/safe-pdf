@@ -88,7 +88,7 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
                 self.render_content_stream(
                     &form.content_stream,
                     form.matrix,
-                    Some(&form.bbox),
+                    form.bbox.as_ref(),
                     form.resources
                         .as_ref()
                         .map(|resources| resources.get())
