@@ -77,8 +77,6 @@ const REVISION_3_MIXING_ROUNDS: u8 = 19;
 pub struct DocumentDecryptor {
     /// The file encryption key derived from the password.
     file_key: Vec<u8>,
-    /// The encryption version (determines algorithm).
-    version: EncryptionVersion,
     /// The key length in bytes (used for validation, may be useful for future extensions).
     #[allow(dead_code)]
     key_length_bytes: usize,
@@ -158,7 +156,6 @@ impl DocumentDecryptor {
         )? {
             return Ok(DocumentDecryptor {
                 file_key,
-                version: encrypt.version,
                 key_length_bytes,
                 encrypt_metadata: encrypt.encrypt_metadata,
                 stream_method: encrypt.stream_method,
@@ -189,7 +186,6 @@ impl DocumentDecryptor {
         )? {
             return Ok(DocumentDecryptor {
                 file_key,
-                version: encrypt.version,
                 key_length_bytes,
                 encrypt_metadata: encrypt.encrypt_metadata,
                 stream_method: encrypt.stream_method,
@@ -250,7 +246,6 @@ impl DocumentDecryptor {
 
         Ok(Self {
             file_key,
-            version: encrypt.version,
             key_length_bytes: 32,
             encrypt_metadata: encrypt.encrypt_metadata,
             stream_method: encrypt.stream_method,
@@ -346,12 +341,8 @@ impl DocumentDecryptor {
             CryptFilterMethod::Identity => Ok(encrypted_data.to_vec()),
             CryptFilterMethod::Aes256 => aes_256_cbc_decrypt(&self.file_key, encrypted_data),
             CryptFilterMethod::Rc4 | CryptFilterMethod::Aes128 => {
-                let object_key = compute_object_key(
-                    &self.file_key,
-                    object_number,
-                    generation_number,
-                    self.version,
-                )?;
+                let object_key =
+                    compute_object_key(&self.file_key, object_number, generation_number, method)?;
                 match method {
                     CryptFilterMethod::Rc4 => rc4_crypt(&object_key, encrypted_data),
                     CryptFilterMethod::Aes128 => aes_128_cbc_decrypt(&object_key, encrypted_data),
@@ -831,7 +822,7 @@ fn compute_object_key(
     file_key: &[u8],
     object_number: usize,
     generation_number: usize,
-    version: EncryptionVersion,
+    method: CryptFilterMethod,
 ) -> Result<Vec<u8>, DecryptionError> {
     let mut hasher = Md5::new();
 
@@ -855,7 +846,7 @@ fn compute_object_key(
     hasher.update(generation_number.to_le_bytes());
 
     // For AES, add the "sAlT" marker
-    if matches!(version, EncryptionVersion::V4) {
+    if method == CryptFilterMethod::Aes128 {
         hasher.update(b"sAlT");
     }
 
@@ -1087,7 +1078,6 @@ mod tests {
     fn make_decryptor(encrypt_metadata: bool) -> DocumentDecryptor {
         DocumentDecryptor {
             file_key: vec![0; 16],
-            version: EncryptionVersion::V4,
             key_length_bytes: 16,
             encrypt_metadata,
             stream_method: CryptFilterMethod::Aes128,
@@ -1124,7 +1114,7 @@ mod tests {
             &decryptor.file_key,
             object_number,
             generation_number,
-            decryptor.version,
+            CryptFilterMethod::Aes128,
         )
         .expect("test object key is valid");
         let iv = [0u8; 16];
@@ -1265,7 +1255,7 @@ mod tests {
     #[test]
     fn test_compute_object_key() {
         let file_key = vec![0x01, 0x02, 0x03, 0x04, 0x05];
-        let object_key = compute_object_key(&file_key, 1, 0, EncryptionVersion::V2)
+        let object_key = compute_object_key(&file_key, 1, 0, CryptFilterMethod::Rc4)
             .expect("test object key is valid");
 
         // Object key should be at most 16 bytes
@@ -1277,9 +1267,9 @@ mod tests {
     #[test]
     fn test_compute_object_key_aes() {
         let file_key = vec![0x01; 16];
-        let object_key_rc4 = compute_object_key(&file_key, 1, 0, EncryptionVersion::V2)
+        let object_key_rc4 = compute_object_key(&file_key, 1, 0, CryptFilterMethod::Rc4)
             .expect("test object key is valid");
-        let object_key_aes = compute_object_key(&file_key, 1, 0, EncryptionVersion::V4)
+        let object_key_aes = compute_object_key(&file_key, 1, 0, CryptFilterMethod::Aes128)
             .expect("test object key is valid");
 
         // AES adds "sAlT" to the hash, so keys should differ

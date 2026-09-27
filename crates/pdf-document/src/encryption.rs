@@ -38,6 +38,24 @@ pub(crate) enum CryptFilterMethod {
     Aes256,
 }
 
+impl TryFrom<&[u8]> for CryptFilterMethod {
+    type Error = PdfReaderError;
+
+    /// Maps a crypt filter's `/CFM` name to its decryption method.
+    fn try_from(name: &[u8]) -> Result<Self, Self::Error> {
+        match name {
+            b"None" => Ok(CryptFilterMethod::Identity),
+            b"V2" => Ok(CryptFilterMethod::Rc4),
+            b"AESV2" => Ok(CryptFilterMethod::Aes128),
+            b"AESV3" => Ok(CryptFilterMethod::Aes256),
+            method => Err(PdfReaderError::DecryptionSetup(format!(
+                "unsupported crypt filter method: {}",
+                String::from_utf8_lossy(method)
+            ))),
+        }
+    }
+}
+
 impl From<&[u8]> for EncryptionFilter {
     fn from(name: &[u8]) -> Self {
         match name {
@@ -193,7 +211,10 @@ impl EncryptDictionary {
             EncryptionVersion::V1 | EncryptionVersion::V2 => {
                 (CryptFilterMethod::Rc4, CryptFilterMethod::Rc4)
             }
-            EncryptionVersion::V4 => (CryptFilterMethod::Aes128, CryptFilterMethod::Aes128),
+            EncryptionVersion::V4 => (
+                parse_v4_crypt_filter(dict, b"StmF", objects)?,
+                parse_v4_crypt_filter(dict, b"StrF", objects)?,
+            ),
             EncryptionVersion::V5 => (
                 parse_v5_crypt_filter(dict, b"StmF", objects)?,
                 parse_v5_crypt_filter(dict, b"StrF", objects)?,
@@ -234,6 +255,32 @@ impl EncryptDictionary {
     }
 }
 
+/// Resolves one of the document-default V=4 crypt filters.
+///
+/// A missing `/StmF` or `/StrF` keeps the historical AES-128 default, while a named
+/// filter is resolved through `/CF` so RC4 (`/V2`) documents decrypt correctly.
+fn parse_v4_crypt_filter(
+    dictionary: &Dictionary,
+    entry: &[u8],
+    objects: &dyn ObjectResolver,
+) -> Result<CryptFilterMethod, PdfReaderError> {
+    let Some(filter_name) = dictionary.optional_bytes(entry, objects)? else {
+        return Ok(CryptFilterMethod::Aes128);
+    };
+    if filter_name == b"Identity" {
+        return Ok(CryptFilterMethod::Identity);
+    }
+
+    let crypt_filters = dictionary.required_dictionary(b"CF", objects)?;
+    let crypt_filter = crypt_filters.required_dictionary(filter_name, objects)?;
+    match CryptFilterMethod::try_from(crypt_filter.required_bytes(b"CFM", objects)?)? {
+        CryptFilterMethod::Aes256 => Err(PdfReaderError::DecryptionSetup(
+            "AESV3 crypt filters require V=5 encryption".to_string(),
+        )),
+        method => Ok(method),
+    }
+}
+
 /// Resolves one of the document-default V=5 crypt filters.
 fn parse_v5_crypt_filter(
     dictionary: &Dictionary,
@@ -249,8 +296,8 @@ fn parse_v5_crypt_filter(
 
     let crypt_filters = dictionary.required_dictionary(b"CF", objects)?;
     let crypt_filter = crypt_filters.required_dictionary(filter_name, objects)?;
-    match crypt_filter.required_bytes(b"CFM", objects)? {
-        b"AESV3" => {
+    match CryptFilterMethod::try_from(crypt_filter.required_bytes(b"CFM", objects)?)? {
+        CryptFilterMethod::Aes256 => {
             let key_length = crypt_filter.optional_number::<i32>(b"Length", objects)?;
             if key_length.is_some_and(|length| length != 32) {
                 return Err(PdfReaderError::DecryptionSetup(
