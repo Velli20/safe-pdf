@@ -73,7 +73,24 @@ pub enum PdfRendererError {
     #[error("Page not found: {0}")]
     PageNotFound(usize),
     #[error("PDF canvas error: {0}")]
-    PdfCanvasError(#[from] pdf_canvas::error::PdfCanvasError),
+    PdfCanvasError(#[source] pdf_utils::TracedError<pdf_canvas::error::PdfCanvasError>),
+}
+
+impl From<PdfCanvasError> for PdfRendererError {
+    #[track_caller]
+    fn from(error: PdfCanvasError) -> Self {
+        Self::PdfCanvasError(pdf_utils::TracedError::new(error))
+    }
+}
+
+impl PdfRendererError {
+    /// Returns the backtrace captured when a canvas error entered the renderer.
+    pub fn trace(&self) -> Option<&pdf_utils::ErrorTrace> {
+        match self {
+            Self::PdfCanvasError(error) => Some(error.trace()),
+            Self::PageNotFound(_) => None,
+        }
+    }
 }
 
 /// Renders pages of a [`PdfDocument`] onto a user supplied [`CanvasBackend`].

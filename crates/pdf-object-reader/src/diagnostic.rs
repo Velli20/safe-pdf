@@ -37,10 +37,15 @@ pub struct PdfReadDiagnostic {
     pub object: Option<ObjectId>,
     /// A human-readable rendering of the underlying error.
     pub message: String,
+    /// Stack captured when this recoverable diagnostic was constructed.
+    /// Excluded from serialized document data and diagnostic equality.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub trace: pdf_utils::ErrorTrace,
 }
 
 impl PdfReadDiagnostic {
     /// Creates a diagnostic with the available PDF location context.
+    #[track_caller]
     pub fn new(
         kind: PdfReadDiagnosticKind,
         byte_offset: Option<usize>,
@@ -53,6 +58,7 @@ impl PdfReadDiagnostic {
             byte_offset,
             object,
             message: error.to_string(),
+            trace: pdf_utils::ErrorTrace::capture("recoverable diagnostic construction"),
         }
     }
 
