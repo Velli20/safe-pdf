@@ -16,7 +16,9 @@
 //! accepts only the syntax located at the supplied byte offset and never searches the
 //! surrounding input. The builder delegates to the private `XrefRecovery` type when
 //! exact parsing or offset validation fails, keeping the normal parser reusable by
-//! recovery probes without embedding heuristics in it.
+//! recovery probes without embedding heuristics in it. When no declared marker yields a
+//! table that can reach the document catalog, the builder falls back to that module's
+//! linear object reconstruction.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -85,19 +87,21 @@ impl<'input> XrefBuilder<'input> {
     /// Builds the best complete cross-reference table reachable from the file tail.
     ///
     /// Every syntactically numeric `startxref` value is tried newest first. A candidate
-    /// succeeds only when its revision chain can be merged and the resulting normal
-    /// entries validate against real indirect-object headers. If a newer marker is
-    /// corrupt, an older marker may still recover a usable revision.
+    /// succeeds only when its revision chain can be merged and the resulting table both
+    /// validates against real indirect-object headers and anchors the document catalog.
+    /// If a newer marker is corrupt, an older marker may still recover a usable revision.
     ///
-    /// When no numeric marker exists at all, control passes to linear object
-    /// reconstruction. A file that contains numeric markers but whose candidates all
-    /// fail returns the last candidate error; it is not silently reinterpreted as a
-    /// marker-less document.
+    /// Linear object reconstruction is the last resort. It runs when no numeric marker
+    /// exists at all, and also when every declared marker fails: a file can carry a
+    /// syntactically valid but empty or catalog-less section, which is no more usable than
+    /// a missing one. The specific candidate error is preferred over the reconstruction
+    /// error so a genuinely unrecoverable file still reports why its markers failed.
     ///
     /// # Errors
     ///
     /// Returns the last section, chain, or validation error when all discovered offsets
-    /// fail. Missing-marker reconstruction errors and input offset errors are propagated.
+    /// fail and reconstruction cannot produce a rooted table. Missing-marker
+    /// reconstruction errors and input offset errors are propagated.
     fn build(&mut self) -> Result<CrossReferenceTable, ParserError> {
         let offsets = match self.startxref_offsets() {
             Ok(offsets) => offsets,
@@ -118,7 +122,10 @@ impl<'input> XrefBuilder<'input> {
             }
         }
 
-        Err(last_error.unwrap_or(ParserError::MissingStartXref))
+        match XrefRecovery::new(&self.parser).rebuild_without_xref() {
+            Ok(table) => Ok(table),
+            Err(error) => Err(last_error.unwrap_or(error)),
+        }
     }
 
     /// Discovers syntactically valid numeric `startxref` declarations.
