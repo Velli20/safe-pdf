@@ -1,12 +1,19 @@
 //! Device-independent annotation styling; appearance streams are never executed.
 use crate::error::ValidationError;
-use crate::pdf_data::{NativeAnnotation, SourceAnnotation};
+use crate::fields::TextMode;
+use crate::pdf_data::{NativeAnnotation, SourceAnnotation, WidgetAnnotation};
 use num_traits::ToPrimitive;
-use pdf_graphics::color::Color;
+use pdf_graphics::{color::Color, rect::Rect};
 use serde::{Deserialize, Serialize};
 
 /// Stroke width used when a resolved style has no positive border width.
 const DEFAULT_STROKE_WIDTH: f64 = 1.0;
+
+/// Line height, in ems, an auto-sized single-line widget must fit within its height.
+const AUTO_SIZE_LINE_FACTOR: f64 = 1.35;
+
+/// Estimated average glyph advance, in ems, used to fit a push-button caption's width.
+const AVERAGE_GLYPH_EM: f64 = 0.6;
 
 /// Fill and stroke of one shape.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -216,9 +223,13 @@ pub(crate) fn generic_font_family(name: &[u8]) -> &'static str {
 /// style value intact. Standard 14 aliases resolve to generic families; unknown
 /// resources use sans-serif. This function performs no resource access and does
 /// not panic. It does not validate unrelated preexisting style fields.
-pub fn apply_default_style(bytes: &[u8], style: &mut ResolvedStyle) {
+///
+/// Returns whether the last `Tf` requested automatic sizing with a zero font size;
+/// the caller decides the size because it depends on the annotation's geometry.
+pub fn apply_default_style(bytes: &[u8], style: &mut ResolvedStyle) -> bool {
     let text = String::from_utf8_lossy(bytes);
     let mut operands: Vec<&str> = Vec::new();
+    let mut auto_size = false;
     for token in text.lines().flat_map(|line| {
         line.split('%')
             .next()
@@ -228,10 +239,9 @@ pub fn apply_default_style(bytes: &[u8], style: &mut ResolvedStyle) {
         match token {
             "Tf" => {
                 if let [name, size] = operands.as_slice() {
-                    if let Ok(size) = size.parse::<f64>()
-                        && size.is_finite()
-                        && size > 0.0
-                    {
+                    let size = size.parse::<f64>().ok().filter(|size| size.is_finite());
+                    auto_size = size == Some(0.0);
+                    if let Some(size) = size.filter(|size| *size > 0.0) {
                         style.font_size = size;
                     }
                     style.font_family =
@@ -261,6 +271,41 @@ pub fn apply_default_style(bytes: &[u8], style: &mut ResolvedStyle) {
             }
             _ => operands.clear(),
         }
+    }
+    auto_size
+}
+
+impl WidgetAnnotation {
+    /// Font size for a `/DA` auto size (`0 Tf`) that fits the text inside `rect` less
+    /// `border_width` on each side, or `None` to keep the default size.
+    ///
+    /// Only single-line text, combo boxes, and push buttons are auto-sized; a push
+    /// button's `/MK /CA` caption must also fit the width. Returns `None` when the
+    /// border leaves no room. Does not panic.
+    pub fn auto_font_size(&self, rect: &Rect<f64>, border_width: f64) -> Option<f64> {
+        let single_line = match self.field_type.as_deref() {
+            Some(b"Tx") => self.text_mode() != TextMode::Multiline,
+            Some(b"Ch") => self.is_combo_box(),
+            Some(b"Btn") => self.is_push_button(),
+            _ => false,
+        };
+        if !single_line {
+            return None;
+        }
+        let inset = border_width * 2.0;
+        let mut size = (rect.height() - inset) / AUTO_SIZE_LINE_FACTOR;
+        let caption_chars = self
+            .is_push_button()
+            .then_some(self.appearance_characteristics.as_ref())
+            .flatten()
+            .and_then(|mk| mk.normal_caption.as_deref())
+            .map(|caption| String::from_utf8_lossy(caption).chars().count())
+            .and_then(|count| count.to_f64())
+            .filter(|count| *count > 0.0);
+        if let Some(count) = caption_chars {
+            size = size.min((rect.width() - inset) / (AVERAGE_GLYPH_EM * count));
+        }
+        (size.is_finite() && size > 0.0).then_some(size)
     }
 }
 
@@ -309,8 +354,10 @@ pub fn resolve_source_style(
         style.dash = border.dash_pattern.clone().unwrap_or_default();
     }
     style.background = interior.map(opaque).transpose()?.flatten();
+    let mut widget = None;
     let (appearance, quadding) = match &annotation.kind {
         NativeAnnotation::Widget(v) => {
+            widget = Some(v.as_ref());
             if let Some(mk) = &v.appearance_characteristics {
                 style.background = mk
                     .background_color
@@ -325,10 +372,18 @@ pub fn resolve_source_style(
         NativeAnnotation::FreeText(v) => (v.default_appearance.as_deref(), v.quadding),
         _ => (None, None),
     };
-    if let Some(bytes) = appearance {
-        apply_default_style(bytes, &mut style);
+    let auto_size = appearance.is_some_and(|bytes| apply_default_style(bytes, &mut style));
+    if auto_size
+        && let Some(widget) = widget
+        && let Ok(rect) = annotation.bounds()
+        && let Some(size) = widget.auto_font_size(&rect, style.border_width)
+    {
+        style.font_size = size;
     }
+    // Viewers center push-button captions regardless of `/Q`.
+    let push_button = widget.is_some_and(|w| w.is_button() && w.is_push_button());
     style.alignment = match quadding {
+        _ if push_button => Alignment::Center,
         Some(1) => Alignment::Center,
         Some(2) => Alignment::Right,
         _ => Alignment::Left,

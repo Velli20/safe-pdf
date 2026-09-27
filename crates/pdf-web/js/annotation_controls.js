@@ -146,7 +146,10 @@ export class FormControl extends AnnotationComponent {
       node.checked = p.checked;
       // PDF radios in unison may have several checked members; HTML grouping must not override /AS.
       node.name = `pdf-${this.entry.page}-${this.entry.id}`;
-    } else if (node instanceof HTMLButtonElement) node.textContent = p.caption || p.label || 'Button';
+    } else if (node instanceof HTMLButtonElement) {
+      node.textContent = p.caption || p.label || 'Button';
+      node.title = p.caption || p.label;
+    }
   }
 
   /** @param {import('./annotation_contract').WidgetControl} p */

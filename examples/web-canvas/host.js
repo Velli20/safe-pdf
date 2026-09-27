@@ -50,6 +50,27 @@ function createPage(index) {
   };
 }
 
+/** Decodes PDF text string bytes for display: UTF-16BE with a BOM, else Latin-1. */
+const pdfText = bytes => bytes[0] === 0xfe && bytes[1] === 0xff
+  ? new TextDecoder('utf-16be').decode(new Uint8Array(bytes.slice(2)))
+  : String.fromCharCode(...bytes);
+
+// Describes an annotation action for the status bar without executing it.
+function describeAction(action) {
+  if (typeof action === 'string') return `Annotation action: ${action}`;
+  const remote = action.GoToRemote;
+  if (!remote) return `Annotation action: ${Object.keys(action)[0]}`;
+  const spec = remote.file_specification;
+  const file = spec.Path ?? spec.Dictionary?.unicode_file_name ?? spec.Dictionary?.file_name;
+  let text = `Go to remote file "${file ? pdfText(file) : 'unknown'}"`;
+  const destination = remote.destination;
+  const page = destination?.Explicit && Object.values(destination.Explicit)[0]?.page;
+  if (page?.PageIndex) text += `, page ${Number(page.PageIndex.index) + 1}`;
+  else if (destination?.Named) text += `, destination "${pdfText(destination.Named.name)}"`;
+  if (remote.new_window) text += ' (new window)';
+  return text;
+}
+
 class PdfViewer {
   constructor() {
     this.elements = Object.fromEntries(
@@ -253,9 +274,7 @@ class PdfViewer {
       } catch (error) { this.showError(error); }
       return;
     }
-    this.elements.status.textContent = entry.action
-      ? `Annotation action: ${typeof entry.action === 'string' ? entry.action : Object.keys(entry.action)[0]}`
-      : entry.text || '';
+    this.elements.status.textContent = entry.action ? describeAction(entry.action) : entry.text || '';
   }
 
   refreshAnnotations(changed) {
