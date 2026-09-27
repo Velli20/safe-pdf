@@ -4,6 +4,9 @@
 .native-control:is(input,textarea,select), .native-free-text-editor { user-select: text; touch-action: auto; }
 .native-control:is(input,textarea,select,button) { background: white; border: 1px solid #777; border-radius: 0; }
 .native-control:is(input[type=radio],input[type=checkbox]) { appearance: auto; }
+button.native-control { cursor: pointer; white-space: nowrap; text-align: center; }
+button.native-control:hover:not(:disabled) { filter: brightness(0.94); }
+button.native-control:active:not(:disabled) { filter: brightness(0.67); }
 .native-control.native-link { background: transparent; cursor: pointer; }
 .native-control.native-link:hover { background: #167baf18; }
 .native-control svg { display: block; overflow: visible; }
