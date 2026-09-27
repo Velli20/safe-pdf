@@ -25,7 +25,18 @@ fn starts_with_boundary_keyword(input: &[u8], keyword: &[u8]) -> bool {
 
 impl PdfParser<'_> {
     /// Parses an indirect object declaration at `offset` without changing this parser's cursor.
+    ///
+    /// Offsets inside a number are rejected without reading the digit run, which keeps
+    /// byte-by-byte scans over long digit sequences linear.
     pub(crate) fn parse_indirect_object_id_at(&self, offset: usize) -> Option<ObjectId> {
+        if offset
+            .checked_sub(1)
+            .and_then(|index| self.tokenizer.input.get(index))
+            .is_some_and(u8::is_ascii_digit)
+        {
+            return None;
+        }
+
         let mut probe = self.at_offset(offset).ok()?;
         probe.parse_indirect_object_id()
     }
