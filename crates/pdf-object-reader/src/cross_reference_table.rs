@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::trailer::Trailer;
+use crate::{object_variant::ObjectVariant, trailer::Trailer};
 
 /// Represents a cross-reference table in a PDF file.
 /// The cross-reference table is used to quickly locate objects in the PDF file
@@ -19,6 +19,27 @@ pub struct CrossReferenceTable {
 impl CrossReferenceTable {
     pub fn new(entries: BTreeMap<usize, CrossReferenceEntryType>, trailer: Trailer) -> Self {
         CrossReferenceTable { entries, trailer }
+    }
+
+    /// Returns whether the trailer's `/Root` can be located through these entries.
+    ///
+    /// A table is only usable as a document index if it anchors the catalog, so a
+    /// `/Root` reference is followed into the entries and the located entry must be able
+    /// to name a position. A missing entry, a free entry, or a placeholder row leaves the
+    /// catalog unreachable. A directly stored catalog dictionary needs no entry at all,
+    /// while a trailer without `/Root` can never anchor a document.
+    ///
+    /// Generation numbers are deliberately ignored, consistent with this table's
+    /// object-number keying; matching them is left to object loading.
+    pub fn indexes_catalog(&self) -> bool {
+        match self.trailer.dictionary.get(b"Root") {
+            Some(ObjectVariant::Reference(catalog)) => self
+                .entries
+                .get(&catalog.number)
+                .is_some_and(CrossReferenceEntryType::locates_object),
+            Some(_) => true,
+            None => false,
+        }
     }
 }
 
@@ -88,6 +109,19 @@ impl CrossReferenceEntryType {
     /// Returns true if this is a Compressed entry.
     pub fn is_compressed(&self) -> bool {
         matches!(self, CrossReferenceEntryType::Compressed { .. })
+    }
+
+    /// Returns whether this entry can locate the object it declares.
+    ///
+    /// A free entry names no object. A normal entry with a zero byte offset cannot be a
+    /// real declaration either, because the file header occupies the start of the input;
+    /// such rows appear in malformed tables as unwritten placeholders.
+    pub fn locates_object(&self) -> bool {
+        match self {
+            CrossReferenceEntryType::Normal { byte_offset, .. } => *byte_offset != 0,
+            CrossReferenceEntryType::Compressed { .. } => true,
+            CrossReferenceEntryType::Free { .. } => false,
+        }
     }
 }
 

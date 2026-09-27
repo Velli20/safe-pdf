@@ -134,11 +134,15 @@ impl<'input> LinearObjectScanner<'input> {
         }
 
         let trailer = trailer.ok_or(ParserError::MissingStartXref)?;
-        if objects.is_empty() || !root_is_indexed(&objects, &trailer) {
+        let table = CrossReferenceTable::new(objects, trailer);
+        // Merely finding a `/Root` key is insufficient: arbitrary stream bytes can
+        // resemble a trailer. Requiring its referenced object number to have a complete
+        // scanned declaration gives the reconstructed table a minimally connected root.
+        if table.entries.is_empty() || !table.indexes_catalog() {
             return Err(ParserError::MissingStartXref);
         }
 
-        Ok(CrossReferenceTable::new(objects, trailer))
+        Ok(table)
     }
 
     /// Classifies and completely probes a candidate beginning at `position`.
@@ -237,20 +241,6 @@ impl<'input> LinearObjectScanner<'input> {
         let _ = trailer.dictionary.get(b"Root")?;
         Some((ScanCandidate::Trailer(trailer), probe.position()))
     }
-}
-
-/// Checks that the recovered trailer's catalog reference is present in the new index.
-///
-/// Merely finding a `/Root` key is insufficient: arbitrary stream bytes can resemble a
-/// trailer. Requiring its referenced object number to have a complete scanned
-/// declaration gives the reconstructed table a minimally connected document root.
-/// Generation matching is intentionally left to normal object loading, consistent with
-/// the cross-reference table's object-number keying.
-fn root_is_indexed(objects: &BTreeMap<usize, CrossReferenceEntryType>, trailer: &Trailer) -> bool {
-    matches!(
-        trailer.dictionary.get(b"Root"),
-        Some(ObjectVariant::Reference(object_number)) if objects.contains_key(&object_number.number)
-    )
 }
 
 #[cfg(test)]

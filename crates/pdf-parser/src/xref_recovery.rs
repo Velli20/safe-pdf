@@ -11,7 +11,6 @@ use std::collections::{BTreeMap, HashSet};
 use pdf_object_reader::{
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
     object_resolver::PassthroughResolver,
-    object_variant::ObjectVariant,
 };
 
 use crate::{
@@ -280,11 +279,7 @@ impl<'input> XrefRecovery<'input> {
             if entry_count == 0 {
                 continue;
             }
-            let has_valid_root = matches!(
-                section.table.trailer.dictionary.get(b"Root"),
-                Some(ObjectVariant::Reference(object_number))
-                    if section.table.entries.contains_key(&object_number.number)
-            );
+            let has_valid_root = section.table.indexes_catalog();
 
             match best_candidate {
                 Some((_, best_entry_count, best_has_valid_root))
@@ -449,24 +444,31 @@ impl<'input> XrefRecovery<'input> {
             .matches_indirect_object_header_at(offset, object_number, generation_number)
     }
 
-    /// Rejects any merged normal entry that still disagrees with the source bytes.
+    /// Rejects a merged table that disagrees with the source bytes or cannot be used.
+    ///
+    /// Every normal entry must still name the indirect object it claims. Beyond that, the
+    /// table must reach the document catalog: a syntactically valid section can be empty
+    /// or omit `/Root`'s object entirely, and accepting it would yield an index that
+    /// cannot load a single page. Rejecting it here lets the caller fall back to linear
+    /// object reconstruction instead.
     pub(crate) fn validate(
         &self,
         table: CrossReferenceTable,
         xref_offset: usize,
     ) -> Result<CrossReferenceTable, ParserError> {
-        let is_valid = table.entries.iter().all(|(&object_number, entry)| {
-            let CrossReferenceEntryType::Normal {
-                byte_offset,
-                generation_number,
-            } = entry
-            else {
-                return true;
-            };
+        let is_valid = table.indexes_catalog()
+            && table.entries.iter().all(|(&object_number, entry)| {
+                let CrossReferenceEntryType::Normal {
+                    byte_offset,
+                    generation_number,
+                } = entry
+                else {
+                    return true;
+                };
 
-            *byte_offset == 0
-                || self.is_indirect_object_at(*byte_offset, object_number, *generation_number)
-        });
+                *byte_offset == 0
+                    || self.is_indirect_object_at(*byte_offset, object_number, *generation_number)
+            });
 
         if is_valid {
             Ok(table)
