@@ -6,10 +6,14 @@
 //! heuristics separate prevents tolerant scanning from becoming an implicit part of
 //! the normal parser.
 
-use std::collections::{BTreeMap, HashSet};
+use std::{
+    cell::OnceCell,
+    collections::{BTreeMap, HashMap, HashSet},
+};
 
 use pdf_object_reader::{
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
+    object_id::ObjectId,
     object_resolver::PassthroughResolver,
 };
 
@@ -343,6 +347,8 @@ impl<'input> XrefRecovery<'input> {
     /// Rechecks and repairs every normal object offset against the source bytes.
     fn repair_offsets(&self, table: &mut CrossReferenceTable, policy: OffsetRepairPolicy) {
         let mut invalid_entries = Vec::new();
+        // Built on first use so well-formed tables never pay for a whole-file scan.
+        let latest_offsets = OnceCell::new();
 
         for (&object_number, entry) in &mut table.entries {
             let CrossReferenceEntryType::Normal {
@@ -381,7 +387,13 @@ impl<'input> XrefRecovery<'input> {
                     policy
                         .fall_back_to_latest_match
                         .then(|| {
-                            self.latest_indirect_object_offset(object_number, generation_number)
+                            latest_offsets
+                                .get_or_init(|| self.latest_indirect_object_offsets())
+                                .get(&ObjectId {
+                                    number: object_number,
+                                    generation: generation_number,
+                                })
+                                .copied()
                         })
                         .flatten()
                 });
@@ -422,15 +434,19 @@ impl<'input> XrefRecovery<'input> {
             })
     }
 
-    /// Falls back to the newest matching object declaration in the complete file.
-    fn latest_indirect_object_offset(
-        &self,
-        object_number: usize,
-        generation_number: usize,
-    ) -> Option<usize> {
+    /// Indexes the newest declaration offset of every indirect object header in the file.
+    ///
+    /// Probing every byte once and letting later offsets replace earlier ones finds the
+    /// same match as a reverse search per object, but costs one pass for the whole table
+    /// instead of one pass per unrepairable entry.
+    fn latest_indirect_object_offsets(&self) -> HashMap<ObjectId, usize> {
         (0..self.parser.tokenizer.input.len())
-            .rev()
-            .find(|offset| self.is_indirect_object_at(*offset, object_number, generation_number))
+            .filter_map(|offset| {
+                self.parser
+                    .parse_indirect_object_id_at(offset)
+                    .map(|identifier| (identifier, offset))
+            })
+            .collect()
     }
 
     /// Checks for the requested indirect object declaration at one byte offset.
