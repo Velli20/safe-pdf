@@ -38,7 +38,12 @@ impl AnnotationAction {
                     .get(b"D")
                     .map(|value| AnnotationDestination::from_object(value, b"D", objects))
                     .transpose()?,
-                new_window: action_dictionary.optional_boolean(b"NewWindow", objects)?,
+                // Advisory viewer hint; like PDFium, a malformed value (e.g. the name
+                // `/false`) is treated as absent rather than rejecting the annotation.
+                new_window: action_dictionary
+                    .optional_boolean(b"NewWindow", objects)
+                    .ok()
+                    .flatten(),
             },
             b"URI" => Self::Uri {
                 uri: action_dictionary.required_bytes_vec(b"URI", objects)?,
@@ -200,6 +205,9 @@ fn destination_target(
             number: u64::try_from(id.number).map_err(|_| SourceDecodeError::ResourceLimit)?,
             generation: u64::try_from(id.generation)
                 .map_err(|_| SourceDecodeError::ResourceLimit)?,
+        },
+        ObjectVariant::Integer(index) => DestinationTarget::PageIndex {
+            index: u64::try_from(*index).map_err(|_| SourceDecodeError::ResourceLimit)?,
         },
         _ => {
             value.try_dictionary(objects)?;
