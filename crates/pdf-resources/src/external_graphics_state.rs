@@ -1,7 +1,9 @@
 use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
+    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
 };
-use pdf_object_reader::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object_reader::{
+    object_kind::ObjectKind, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+};
 
 use crate::{error::PdfPagesError, resource::Resource, soft_mask::SoftMask};
 use num_traits::FromPrimitive;
@@ -184,7 +186,14 @@ fn parse_entry<A: ObjectAccess + ?Sized>(
     context: &mut DictionaryContext<'_, A>,
 ) -> Result<Option<ExternalGraphicsStateKey>, PdfPagesError> {
     let raw_value = value;
-    let resolved = context.resolve(value)?;
+    // A null value or a reference to a nonexistent object is equivalent to
+    // an absent entry (ISO 32000 §7.3.7, §7.3.10).
+    let resolved = match context.resolve(value) {
+        Ok(resolved) if resolved.kind() == ObjectKind::Null => return Ok(None),
+        Ok(resolved) => resolved,
+        Err(ObjectReadError::MissingObject { .. }) => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
     let value = resolved.value();
     let objects = context.source();
     let parsed = match name {
