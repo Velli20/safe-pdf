@@ -214,12 +214,14 @@ impl Annotation {
     }
 
     /// Whether live flags and subtype permit legacy-style interactive dragging.
-    /// Core's existing highlight and widget translation capability is preserved.
+    /// Core's existing highlight translation capability is preserved. Form widgets stay
+    /// fixed while filling, as in other viewers; Core can still move them programmatically.
     pub fn can_translate(&self) -> bool {
         self.metadata.can_translate()
             && !matches!(
                 self.content,
                 AnnotationKind::Link(_)
+                    | AnnotationKind::Widget(_)
                     | AnnotationKind::Popup(_)
                     | AnnotationKind::Caret(_)
                     | AnnotationKind::Unknown(_)
