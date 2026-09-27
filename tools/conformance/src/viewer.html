@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conformance Viewer</title>
+<style>
+:root {
+  --bg: #f6f6f4; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --line: #dddcd6;
+  --accent: #2458c6; --bad: #c0362c; --warn: #b7791f; --good: #2f7d4f; --sel: #e8eefb;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #161615; --panel: #1f1f1d; --text: #ecebe6; --muted: #9d9c95; --line: #34332f;
+          --accent: #7aa2f7; --bad: #f07167; --warn: #e9b44c; --good: #6fcf97; --sel: #26324a; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.45 system-ui, sans-serif; }
+header { padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { font-size: 15px; margin: 0 0 4px; }
+header .meta { color: var(--muted); }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+.controls select, .controls input { font: inherit; padding: 4px 6px; background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); border-radius: 4px; max-width: 100%; }
+.controls input[type=search] { min-width: 220px; }
+main { display: grid; grid-template-columns: minmax(320px, 36%) 1fr; height: calc(100vh - 100px); }
+@media (max-width: 800px) { main { grid-template-columns: 1fr; height: auto; } #list { max-height: 45vh; } }
+#list { overflow: auto; border-right: 1px solid var(--line); }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { position: sticky; top: 0; background: var(--panel); cursor: pointer; user-select: none; }
+tr.row { cursor: pointer; }
+tr.row:hover { background: var(--sel); }
+tr.row.selected { background: var(--sel); outline: 1px solid var(--accent); }
+td.id { word-break: break-all; }
+.sig { color: var(--muted); font-size: 12px; word-break: break-word; }
+.status { font-weight: 600; }
+.status.pass { color: var(--good); } .status.mismatch { color: var(--warn); }
+.status.render_error, .status.read_error, .status.crash, .status.timeout { color: var(--bad); }
+.delta.regressed { color: var(--bad); font-weight: 600; } .delta.improved { color: var(--good); }
+#detail { overflow: auto; padding: 12px 16px; }
+#detail h2 { font-size: 14px; margin: 0 0 6px; word-break: break-all; }
+.modes { display: flex; gap: 4px; margin: 8px 0; flex-wrap: wrap; }
+.modes button { font: inherit; padding: 3px 10px; border: 1px solid var(--line); background: var(--panel);
+  color: var(--text); border-radius: 4px; cursor: pointer; }
+.modes button.on { border-color: var(--accent); color: var(--accent); }
+.stage { position: relative; display: inline-block; max-width: 100%; background: #fff; }
+.stage img { display: block; max-width: 100%; height: auto; }
+.stage .over { position: absolute; inset: 0; }
+.pair { display: flex; gap: 8px; flex-wrap: wrap; }
+.pair figure { margin: 0; flex: 1 1 280px; min-width: 0; }
+.pair figcaption { color: var(--muted); font-size: 12px; }
+.pair img { width: 100%; height: auto; background: #fff; }
+input[type=range] { width: 260px; max-width: 100%; }
+.links a { color: var(--accent); margin-right: 12px; }
+code { font-size: 12px; background: var(--bg); padding: 1px 4px; border-radius: 3px; word-break: break-all; }
+.empty { color: var(--muted); padding: 24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Conformance</h1>
+  <div class="meta" id="meta"></div>
+</header>
+<div class="controls">
+  <select id="status"><option value="failing">Failing pages</option><option value="all">All pages</option></select>
+  <select id="delta"><option value="">Any baseline change</option><option value="regressed">Regressed</option>
+    <option value="improved">Improved</option><option value="new">New</option><option value="unchanged">Unchanged</option></select>
+  <select id="signature"><option value="">All signatures</option></select>
+  <input id="search" type="search" placeholder="Filter by case id">
+</div>
+<main>
+  <div id="list"><table><thead><tr>
+    <th data-sort="id">Case / page</th><th data-sort="status">Status</th><th data-sort="mismatch">Mismatch ▾</th>
+  </tr></thead><tbody id="rows"></tbody></table></div>
+  <section id="detail"><div class="empty">Select a row. Keys: j/k move, 1–4 switch view.</div></section>
+</main>
+<script src="index.js"></script>
+<script>
+const data = window.CONFORMANCE;
+const $ = (id) => document.getElementById(id);
+let sortKey = "mismatch", sortDesc = true, selected = 0, mode = "side";
+const rows = [];
+for (const c of data.cases) {
+  if (c.pages.length === 0) rows.push({ c, p: null, status: c.status, mismatch: null, signature: c.signature, delta: c.delta });
+  for (const p of c.pages) rows.push({ c, p, status: p.status, mismatch: p.mismatch, signature: p.signature, delta: p.delta });
+}
+const failing = (s) => !["pass", "no_reference", "unavailable"].includes(s);
+$("title").textContent = `${data.corpus} conformance`;
+$("meta").textContent = `${data.pdfium} · pass ≤ ${(data.tolerance * 100).toFixed(2)}% · ` +
+  Object.entries(data.totals).map(([k, v]) => `${v} ${k}`).join(", ");
+for (const cl of data.clusters) {
+  const o = document.createElement("option");
+  o.value = cl.signature; o.textContent = `${cl.count} · ${cl.signature}`;
+  $("signature").append(o);
+}
+function visible() {
+  const st = $("status").value, dl = $("delta").value, sg = $("signature").value, q = $("search").value.toLowerCase();
+  const list = rows.filter((r) => (st === "all" || failing(r.status)) && (!dl || r.delta === dl) &&
+    (!sg || r.signature === sg) && (!q || r.c.id.toLowerCase().includes(q)));
+  const val = (r) => sortKey === "id" ? r.c.id : sortKey === "status" ? r.status : (r.mismatch ?? -1);
+  list.sort((a, b) => (val(a) < val(b) ? -1 : val(a) > val(b) ? 1 : 0) * (sortDesc ? -1 : 1));
+  return list;
+}
+let current = [];
+function render() {
+  current = visible();
+  selected = Math.min(selected, Math.max(0, current.length - 1));
+  const tbody = $("rows"); tbody.textContent = "";
+  current.forEach((r, i) => {
+    const tr = document.createElement("tr"); tr.className = "row" + (i === selected ? " selected" : "");
+    const id = document.createElement("td"); id.className = "id";
+    id.textContent = r.c.id + (r.p ? ` · p${r.p.page}` : "");
+    if (r.signature && failing(r.status)) { const s = document.createElement("div"); s.className = "sig"; s.textContent = r.signature; id.append(s); }
+    const st = document.createElement("td");
+    st.innerHTML = `<span class="status ${r.status}">${r.status}</span><div class="delta ${r.delta}">${r.delta}</div>`;
+    const mm = document.createElement("td"); mm.textContent = r.mismatch == null ? "" : (r.mismatch * 100).toFixed(2) + "%";
+    tr.append(id, st, mm); tr.onclick = () => { selected = i; render(); };
+    tbody.append(tr);
+  });
+  showDetail(current[selected]);
+  const sel = tbody.querySelector(".selected"); if (sel) sel.scrollIntoView({ block: "nearest" });
+}
+function el(tag, attrs = {}, text) { const e = document.createElement(tag); Object.assign(e, attrs); if (text) e.textContent = text; return e; }
+function showDetail(r) {
+  const d = $("detail"); d.textContent = "";
+  if (!r) { d.append(el("div", { className: "empty" }, "No rows match.")); return; }
+  const base = `cases/${r.c.dir}/`;
+  d.append(el("h2", {}, r.c.id + (r.p ? ` · page ${r.p.page}` : "")));
+  const info = el("div");
+  info.innerHTML = `<span class="status ${r.status}">${r.status}</span> · baseline <span class="delta ${r.delta}">${r.delta}</span>` +
+    (r.mismatch != null ? ` · ${(r.mismatch * 100).toFixed(3)}% mismatched` : "");
+  d.append(info);
+  if (r.signature) { const s = el("div", { className: "sig" }); s.append(el("code", {}, r.signature)); d.append(s); }
+  const links = el("div", { className: "links" });
+  if (r.c.bundle) links.append(el("a", { href: base + "summary.md", target: "_blank" }, "summary.md"), el("a", { href: base + "report.json", target: "_blank" }, "report.json"));
+  const files = r.p ? r.p.files : [];
+  const content = files.find((f) => f.endsWith("-content.txt"));
+  if (content) links.append(el("a", { href: base + content, target: "_blank" }, "content stream"));
+  d.append(links);
+  const rep = el("div"); rep.append("Reproduce: ", el("code", {}, r.p ? r.p.reproduce : r.c.reproduce)); d.append(rep);
+  if (r.c.likely_crates.length) d.append(el("div", { className: "sig" }, "Likely crates: " + r.c.likely_crates.join(", ")));
+  const pick = (suffix) => files.find((f) => f.endsWith(suffix));
+  const ref = pick("-ref.png"), safe = pick("-safe.png"), diff = pick("-diff.png");
+  if (!ref && !safe) { d.append(el("div", { className: "empty" }, r.status === "pass" ? "Passing page: no images are kept." : "No images for this entry.")); return; }
+  const modes = el("div", { className: "modes" });
+  for (const [key, label] of [["side", "1 Side by side"], ["swipe", "2 Swipe"], ["onion", "3 Onion skin"], ["diff", "4 Diff"]]) {
+    const b = el("button", { className: mode === key ? "on" : "" }, label);
+    b.onclick = () => { mode = key; showDetail(r); };
+    modes.append(b);
+  }
+  d.append(modes);
+  if (mode === "side" || !ref || !safe) {
+    const pair = el("div", { className: "pair" });
+    for (const [f, cap] of [[ref, "PDFium"], [safe, "Safe-PDF"], [diff, "Diff"]]) if (f) {
+      const fig = el("figure"); fig.append(el("img", { src: base + f, loading: "lazy" }), el("figcaption", {}, cap)); pair.append(fig);
+    }
+    d.append(pair);
+  } else if (mode === "diff") {
+    const s = el("div", { className: "stage" }); s.append(el("img", { src: base + diff })); d.append(s);
+    d.append(el("div", { className: "sig" }, "red: missing ink · blue: extra ink · magenta: hue · orange: shape · yellow: tolerated · hatched: annotations (not compared)"));
+  } else {
+    const s = el("div", { className: "stage" });
+    const under = el("img", { src: base + ref }), over = el("img", { src: base + safe, className: "over" });
+    s.append(under, over);
+    const slider = el("input", { type: "range", min: 0, max: 100, value: 50 });
+    const apply = () => {
+      if (mode === "swipe") { over.style.opacity = 1; over.style.clipPath = `inset(0 0 0 ${slider.value}%)`; }
+      else { over.style.clipPath = "none"; over.style.opacity = slider.value / 100; }
+    };
+    slider.oninput = apply; apply();
+    d.append(el("div", { className: "sig" }, mode === "swipe" ? "Left: PDFium · right: Safe-PDF" : "Opacity of Safe-PDF over PDFium"), slider, s);
+  }
+  for (const f of files.filter((f) => /-region\d+\.png$/.test(f))) {
+    const fig = el("figure", { className: "pair" }); fig.append(el("img", { src: base + f, loading: "lazy" }));
+    d.append(el("div", { className: "sig" }, f + " (PDFium | Safe-PDF)"), fig);
+  }
+}
+for (const id of ["status", "delta", "signature"]) $(id).onchange = () => { selected = 0; render(); };
+$("search").oninput = () => { selected = 0; render(); };
+document.querySelectorAll("th[data-sort]").forEach((th) => th.onclick = () => {
+  const key = th.dataset.sort; sortDesc = key === sortKey ? !sortDesc : key === "mismatch"; sortKey = key; render();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" && e.target.type !== "range") return;
+  if (e.key === "j") { selected = Math.min(selected + 1, current.length - 1); render(); }
+  else if (e.key === "k") { selected = Math.max(selected - 1, 0); render(); }
+  else if (["1", "2", "3", "4"].includes(e.key)) { mode = ["side", "swipe", "onion", "diff"][Number(e.key) - 1]; showDetail(current[selected]); }
+});
+render();
+</script>
+</body>
+</html>

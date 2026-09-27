@@ -1,0 +1,31 @@
+[package]
+name = "pdf-conformance"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Render PDF test corpora with Safe-PDF and PDFium and report differences"
+
+[lints]
+workspace = true
+
+[dependencies]
+pdf-canvas = { path = "../../crates/pdf-canvas" }
+pdf-document = { path = "../../crates/pdf-document", features = ["error-backtrace"] }
+pdf-graphics = { path = "../../crates/pdf-graphics" }
+pdf-graphics-skia = { path = "../../crates/pdf-graphics-skia" }
+pdf-object-collection = { path = "../../crates/pdf-object-collection" }
+pdf-object-reader = { path = "../../crates/pdf-object-reader" }
+pdf-shading = { path = "../../crates/pdf-shading" }
+pdf-renderer = { path = "../../crates/pdf-renderer", features = ["error-backtrace"] }
+pdf-utils = { path = "../../crates/pdf-utils", features = ["error-backtrace"] }
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+md-5 = "0.10"
+num-traits = "0.2"
+pdfium-render = { version = "0.9.4", default-features = false, features = ["pdfium_7881"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+skia-safe = { version = "0.91.1", default-features = false, features = ["binary-cache"] }
+walkdir = "2"

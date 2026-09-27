@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*", "examples", "examples/web-canvas", "xtask"]
+members = ["crates/*", "examples", "examples/web-canvas", "tools/conformance", "xtask"]
 default-members = ["crates/*", "examples"]
 
 [workspace.lints.clippy]
@@ -23,3 +23,18 @@ indexing_slicing = "deny"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+# Symbolized diagnostic workers, including panic traces.
+[profile.regression]
+inherits = "dev"
+debug = 2
+strip = "none"
+panic = "unwind"
+
+# Optimize third-party code and the harness's own pixel loops, but keep workspace
+# library crates unoptimized so backtraces show every Safe-PDF frame.
+[profile.regression.package."*"]
+opt-level = 3
+
+[profile.regression.package.pdf-conformance]
+opt-level = 3

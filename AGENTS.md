@@ -84,3 +84,8 @@ CI runs on push/PR to main (`.github/workflows/ci.yml`):
 1. `cargo check` + `cargo test` + `cargo clippy` + `cargo fmt --check`
 2. Minimal feature build (no optional features)
 3. Web Canvas (wasm-bindgen) build of `examples/web-canvas`, deployed to GitHub Pages on push to `main`
+
+Conformance (`.github/workflows/conformance.yml`) renders the PDFium and pdf.js corpora against
+PDFium when a pull request is merged to `main`, or on manual dispatch. It files one GitHub issue
+per unreported failure cluster and never fails on regressions. To gate pull requests, uncomment
+its `pull_request` trigger. See `tools/conformance/README.md`.

@@ -362,7 +362,7 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
         let mut parser = self
             .parser
             .at_offset(byte_offset)
-            .map_err(PdfReaderError::ParserError)?;
+            .map_err(PdfReaderError::from)?;
         let identifier = parser.parse_indirect_object_id().ok_or(
             ParserError::ExpectedIndirectObjectDeclaration {
                 position: byte_offset,
@@ -370,7 +370,7 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
         )?;
         let object = parser
             .parse_indirect_object_value_recovering_streams(identifier, &self.objects)
-            .map_err(PdfReaderError::ParserError)?;
+            .map_err(PdfReaderError::from)?;
 
         let object = match self.encryption.decryptor_for(Some(identifier)) {
             Some(decryptor) => match decryptor.decrypt_object(identifier, object) {
@@ -389,7 +389,7 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
         };
         self.objects
             .insert(identifier, object)
-            .map_err(PdfReaderError::ObjectError)?;
+            .map_err(PdfReaderError::from)?;
 
         Ok(self
             .objects

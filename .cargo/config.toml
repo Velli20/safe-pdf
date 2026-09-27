@@ -1,5 +1,6 @@
 [alias]
 xtask = "run --package xtask --"
+conformance = "run --package pdf-conformance --profile regression --"
 
 [profile.release]
 lto = "fat"

@@ -3,7 +3,11 @@ name = "pdf-renderer"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+error-backtrace = ["pdf-utils/error-backtrace"]
+
 [dependencies]
+pdf-utils = { path = "../pdf-utils" }
 pdf-content-stream = { path = "../pdf-content-stream" }
 pdf-document = { path = "../pdf-document" }
 pdf-canvas = { path = "../pdf-canvas" }

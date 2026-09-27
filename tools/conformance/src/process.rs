@@ -1,0 +1,126 @@
+//! Runs workers as isolated child processes with timeouts and full output capture.
+
+use crate::model::ProcessEvidence;
+use anyhow::{Context, Result, anyhow};
+use serde::de::DeserializeOwned;
+use std::{
+    io::Read,
+    process::{Command, Output, Stdio},
+    thread,
+    time::{Duration, Instant},
+};
+
+/// Prefix of the stderr lines workers print when entering a stage.
+pub const STAGE_MARKER: &str = "conformance-stage: ";
+
+/// Keeps the tail of stderr; panics and backtraces end there.
+const STDERR_LIMIT: usize = 64 * 1024;
+
+/// Starts a hidden worker subcommand of this executable with backtraces enabled.
+pub fn worker_command() -> Result<Command> {
+    let mut command = Command::new(std::env::current_exe()?);
+    command
+        .arg("worker")
+        .env("RUST_BACKTRACE", "full")
+        .env("RUST_LIB_BACKTRACE", "1");
+    Ok(command)
+}
+
+/// Runs `command`, parsing its stdout as JSON on success.
+pub fn execute<T: DeserializeOwned>(
+    command: Command,
+    timeout: Duration,
+) -> Result<(Option<T>, ProcessEvidence)> {
+    let start = Instant::now();
+    let (output, timed_out) = timed_output(command, timeout)?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut evidence = ProcessEvidence {
+        exit_status: output.status.to_string(),
+        timed_out,
+        elapsed_ms: start.elapsed().as_millis(),
+        stage: stderr
+            .lines()
+            .rev()
+            .find_map(|line| line.strip_prefix(STAGE_MARKER))
+            .map(str::to_owned),
+        stderr: tail(&stderr, STDERR_LIMIT),
+        stdout: None,
+    };
+    let value = if !timed_out && output.status.success() {
+        match serde_json::from_slice(&output.stdout) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                evidence.stdout = Some(format!(
+                    "invalid worker JSON ({error}): {}",
+                    tail(&String::from_utf8_lossy(&output.stdout), 4096)
+                ));
+                None
+            }
+        }
+    } else {
+        None
+    };
+    Ok((value, evidence))
+}
+
+fn tail(text: &str, limit: usize) -> String {
+    let skip = text.len().saturating_sub(limit);
+    let start = (skip..=text.len())
+        .find(|index| text.is_char_boundary(*index))
+        .unwrap_or(text.len());
+    text.get(start..).unwrap_or_default().to_owned()
+}
+
+fn timed_output(mut command: Command, timeout: Duration) -> Result<(Output, bool)> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("launching {command:?}"))?;
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("stdout was not piped"))?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("stderr was not piped"))?;
+    let stdout_reader = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stdout.read_to_end(&mut bytes)?;
+        Ok::<_, std::io::Error>(bytes)
+    });
+    let stderr_reader = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stderr.read_to_end(&mut bytes)?;
+        Ok::<_, std::io::Error>(bytes)
+    });
+    let start = Instant::now();
+    let mut timed_out = false;
+    loop {
+        if child.try_wait()?.is_some() {
+            break;
+        }
+        if start.elapsed() >= timeout {
+            child.kill()?;
+            timed_out = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    let status = child.wait()?;
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| anyhow!("stdout reader panicked"))??;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| anyhow!("stderr reader panicked"))??;
+    Ok((
+        Output {
+            status,
+            stdout,
+            stderr,
+        },
+        timed_out,
+    ))
+}

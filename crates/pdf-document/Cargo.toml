@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
+error-backtrace = ["pdf-utils/error-backtrace", "pdf-object-reader/error-backtrace"]
 serde = ["dep:serde", "pdf-object-reader/serde"]
 
 [dependencies]
+pdf-utils = { path = "../pdf-utils" }
 pdf-content-stream = { path = "../pdf-content-stream" }
 pdf-annotation-core = { path = "../pdf-annotation-core" }
 pdf-object-collection = { path = "../pdf-object-collection" }

@@ -4,12 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
+error-backtrace = ["pdf-utils/error-backtrace"]
 serde = ["dep:serde"]
 
 [lints]
 workspace = true
 
 [dependencies]
+pdf-utils = { path = "../pdf-utils" }
 thiserror = "2.0.12"
 serde = { version = "1", features = ["derive"], optional = true }
 

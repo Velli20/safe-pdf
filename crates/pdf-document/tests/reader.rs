@@ -653,9 +653,8 @@ fn test_encrypted_document_detection() {
     let result = reader.read_from_bytes(&data, None);
     assert!(matches!(
         result,
-        Err(PdfReaderError::ObjectError(
-            ObjectError::MissingRequiredKey { ref key }
-        )) if key == "ID"
+        Err(PdfReaderError::ObjectError(ref error))
+            if matches!(error.error(), ObjectError::MissingRequiredKey { key } if key == "ID")
     ));
 }
 
