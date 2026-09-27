@@ -138,33 +138,26 @@ fn apply_tiff_predictor(data: &[u8], params: &PredictorParams) -> Result<Vec<u8>
 /// - 2: Up (difference from pixel above)
 /// - 3: Average of left and above
 /// - 4: Paeth predictor
+///
+/// A truncated final row is decoded with the bytes available, matching PDFium,
+/// so short trailing data is not silently dropped.
 fn apply_png_predictor(data: &[u8], params: &PredictorParams) -> Result<Vec<u8>, FilterError> {
     let row_bytes = params.row_bytes();
     // Each PNG-predicted row has a 1-byte filter prefix.
     let stride = row_bytes.saturating_add(1);
-    if stride == 0 {
-        return Ok(Vec::new());
-    }
 
     let bpp = params.bpp().max(1);
-    let num_rows = data.len().checked_div(stride).unwrap_or(0);
-    let mut output = Vec::with_capacity(num_rows.saturating_mul(row_bytes));
+    let mut output = Vec::with_capacity(data.len());
     let mut prev_row: Vec<u8> = vec![0u8; row_bytes];
 
-    let mut offset = 0usize;
-    for _ in 0..num_rows {
-        let Some(&filter_type) = data.get(offset) else {
+    for chunk in data.chunks(stride) {
+        let Some((&filter_type, row_data)) = chunk.split_first() else {
             break;
         };
-        offset = offset.saturating_add(1);
-
-        let row_end = offset.saturating_add(row_bytes);
-        let row_data = data.get(offset..row_end).unwrap_or_default();
 
         let mut current_row = vec![0u8; row_bytes];
 
-        for i in 0..row_bytes {
-            let raw = row_data.get(i).copied().unwrap_or(0);
+        for (i, &raw) in row_data.iter().enumerate() {
             let left = if i >= bpp {
                 current_row.get(i.wrapping_sub(bpp)).copied().unwrap_or(0)
             } else {
@@ -196,9 +189,8 @@ fn apply_png_predictor(data: &[u8], params: &PredictorParams) -> Result<Vec<u8>,
             }
         }
 
-        output.extend_from_slice(&current_row);
+        output.extend_from_slice(current_row.get(..row_data.len()).unwrap_or_default());
         prev_row = current_row;
-        offset = row_end;
     }
 
     Ok(output)
