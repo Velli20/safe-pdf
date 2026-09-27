@@ -476,7 +476,11 @@ number: string,
 /**
  * PDF generation number.
  */
-generation: string, } };
+generation: string, } } | { "PageIndex": {
+/**
+ * Page index within the target document.
+ */
+index: string, } };
 
 /**
  * A committed edit result; failures produce an error instead of an event.

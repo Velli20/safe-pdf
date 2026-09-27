@@ -272,6 +272,13 @@ pub enum DestinationTarget {
         #[cfg_attr(feature = "typescript", ts(type = "string"))]
         generation: u64,
     },
+    /// A zero-based page index, used by remote (`GoToR`) destinations.
+    PageIndex {
+        /// Page index within the target document.
+        #[serde(with = "crate::wire")]
+        #[cfg_attr(feature = "typescript", ts(type = "string"))]
+        index: u64,
+    },
 }
 
 /// Owned ExplicitDestination data retained from the source PDF.
