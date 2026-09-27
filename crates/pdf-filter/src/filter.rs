@@ -298,7 +298,8 @@ impl Filter {
 ///
 /// # Errors
 ///
-/// Returns [`FilterError`] if any filter in the chain fails or is unsupported.
+/// Returns [`FilterError`] if a filter fails or is unsupported, except when an
+/// adjacent duplicate filter fails after its first pass succeeded.
 pub fn decode_data_with_resolver(
     dictionary: &Dictionary,
     stream_data: Bytes,
@@ -333,91 +334,96 @@ pub fn decode_data_with_resolver(
             }
         };
 
-        match filter {
-            Filter::FlateDecode => {
-                let decoded = Filter::decode_flate(data.as_ref())?;
-                let predictor = match param_dict {
-                    Some(dictionary) => PredictorParams::from_dictionary(dictionary, objects)?,
-                    None => PredictorParams::default(),
-                };
-                let decoded = if predictor.is_none() {
-                    decoded
-                } else {
-                    crate::predictor::apply_predictor(&decoded, &predictor)?
-                };
-                data = decoded.into();
-            }
-            Filter::LZWDecode => {
-                let (early_change, predictor) = match param_dict {
-                    Some(dictionary) => (
-                        dictionary
-                            .optional_number(b"EarlyChange", objects)?
-                            .unwrap_or(1)
-                            != 0,
-                        PredictorParams::from_dictionary(dictionary, objects)?,
-                    ),
-                    None => (true, PredictorParams::default()),
-                };
-                let decoded = crate::lzw::decode(data.as_ref(), early_change)?;
-                let decoded = if predictor.is_none() {
-                    decoded
-                } else {
-                    crate::predictor::apply_predictor(&decoded, &predictor)?
-                };
-                data = decoded.into();
-            }
-            Filter::JPXDecode => {
-                #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-                {
-                    let decoded = Filter::decode_jpeg2000(data.as_ref())?;
-                    data = decoded.into();
-                }
-                #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-                {
-                    return Err(FilterError::UnsupportedFilter("JPXDecode".to_string()));
-                }
-            }
-            Filter::DCTDecode => {
-                let decoded = Filter::decode_jpeg_baseline(data.as_ref())?;
-                data = decoded.into();
-            }
-            Filter::ASCII85Decode => {
-                let decoded = crate::ascii85::decode_ascii85(data.as_ref())?;
-                data = decoded.into();
-            }
-            Filter::ASCIIHexDecode => {
-                let decoded = crate::asciihex::decode_ascii_hex(data.as_ref())?;
-                data = decoded.into();
-            }
-            Filter::RunLengthDecode => {
-                let decoded = crate::runlength::decode_run_length(data.as_ref())?;
-                data = decoded.into();
-            }
-            Filter::JBIG2Decode => {
-                let (width, height) = resolve_jbig2_dimensions(dictionary, objects)?;
-                let globals = match param_dict {
-                    Some(dictionary) => resolve_jbig2_globals(dictionary, objects)?,
-                    None => None,
-                };
-                let decoded = pdf_jbig2::decode(data.as_ref(), width, height, globals.as_deref())?;
-                data = decoded.into();
-            }
-            Filter::CCITTFaxDecode => {
-                let ccitt_params = match param_dict {
-                    Some(dictionary) => CCITTFaxParams::from_dictionary(dictionary, objects)?,
-                    None => CCITTFaxParams::default(),
-                };
-                let decoded = pdf_ccitt::decode(data.as_ref(), &ccitt_params)?;
-                data = decoded.into();
-            }
-            Filter::Unsupported(name) => {
-                return Err(FilterError::UnsupportedFilter(
-                    String::from_utf8_lossy(name).into_owned(),
-                ));
-            }
+        match try_decode_data_with_resolver(filter, data.as_ref(), param_dict, dictionary, objects)
+        {
+            Ok(decoded) => data = decoded,
+            // A repeated filter can be spurious when its first pass already
+            // produced the binary data expected by the next filter.
+            Err(_)
+                if index
+                    .checked_sub(1)
+                    .and_then(|previous| filters.filters.get(previous))
+                    == Some(filter) => {}
+            Err(error) => return Err(error),
         }
     }
     Ok(data)
+}
+
+fn try_decode_data_with_resolver(
+    filter: &Filter,
+    data: &[u8],
+    param_dict: Option<&Dictionary>,
+    dictionary: &Dictionary,
+    objects: &dyn ObjectResolver,
+) -> Result<Bytes, FilterError> {
+    let decoded = match filter {
+        Filter::FlateDecode => {
+            let decoded = Filter::decode_flate(data)?;
+            let predictor = match param_dict {
+                Some(dictionary) => PredictorParams::from_dictionary(dictionary, objects)?,
+                None => PredictorParams::default(),
+            };
+            if predictor.is_none() {
+                decoded
+            } else {
+                crate::predictor::apply_predictor(&decoded, &predictor)?
+            }
+        }
+        Filter::LZWDecode => {
+            let (early_change, predictor) = match param_dict {
+                Some(dictionary) => (
+                    dictionary
+                        .optional_number(b"EarlyChange", objects)?
+                        .unwrap_or(1)
+                        != 0,
+                    PredictorParams::from_dictionary(dictionary, objects)?,
+                ),
+                None => (true, PredictorParams::default()),
+            };
+            let decoded = crate::lzw::decode(data, early_change)?;
+            if predictor.is_none() {
+                decoded
+            } else {
+                crate::predictor::apply_predictor(&decoded, &predictor)?
+            }
+        }
+        Filter::JPXDecode => {
+            #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+            {
+                Filter::decode_jpeg2000(data)?
+            }
+            #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+            {
+                return Err(FilterError::UnsupportedFilter("JPXDecode".to_string()));
+            }
+        }
+        Filter::DCTDecode => Filter::decode_jpeg_baseline(data)?,
+        Filter::ASCII85Decode => crate::ascii85::decode_ascii85(data)?,
+        Filter::ASCIIHexDecode => crate::asciihex::decode_ascii_hex(data)?,
+        Filter::RunLengthDecode => crate::runlength::decode_run_length(data)?,
+        Filter::JBIG2Decode => {
+            let (width, height) = resolve_jbig2_dimensions(dictionary, objects)?;
+            let globals = match param_dict {
+                Some(dictionary) => resolve_jbig2_globals(dictionary, objects)?,
+                None => None,
+            };
+            pdf_jbig2::decode(data, width, height, globals.as_deref())?
+        }
+        Filter::CCITTFaxDecode => {
+            let ccitt_params = match param_dict {
+                Some(dictionary) => CCITTFaxParams::from_dictionary(dictionary, objects)?,
+                None => CCITTFaxParams::default(),
+            };
+            pdf_ccitt::decode(data, &ccitt_params)?
+        }
+        Filter::Unsupported(name) => {
+            return Err(FilterError::UnsupportedFilter(
+                String::from_utf8_lossy(name).into_owned(),
+            ));
+        }
+    };
+    Ok(decoded.into())
 }
 
 /// Decodes a [`StreamObject`] by applying its full filter chain.
@@ -427,7 +433,8 @@ pub fn decode_data_with_resolver(
 ///
 /// # Errors
 ///
-/// Returns [`FilterError`] if any filter in the chain fails or is unsupported.
+/// Returns [`FilterError`] if a filter fails or is unsupported, except when an
+/// adjacent duplicate filter fails after its first pass succeeded.
 pub fn decode_with_resolver(
     stream: &StreamObject,
     objects: &dyn ObjectResolver,
