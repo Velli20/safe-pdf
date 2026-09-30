@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::decryption::DocumentDecryptor;
 use crate::diagnostic::{PdfReadDiagnostic, PdfReadDiagnosticKind};
 use crate::document::PdfDocument;
-use crate::encryption::EncryptDictionary;
+use crate::encrypt_objects::EncryptObjectLoader;
 use crate::error::PdfReaderError;
 use crate::object_loader::ObjectLoader;
 use crate::report::PdfReadReport;
@@ -14,11 +14,9 @@ use pdf_object_reader::object_lookup::ObjectLookupExt;
 use pdf_object_reader::object_resolver::PassthroughResolver;
 use pdf_object_reader::{
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
-    object_error::ObjectError,
-    object_variant::ObjectVariant,
     trailer::Trailer,
 };
-use pdf_parser::{error::ParserError, parser::PdfParser};
+use pdf_parser::parser::PdfParser;
 use std::sync::Arc;
 
 const EMPTY_PASSWORD: &[u8] = b"";
@@ -101,22 +99,23 @@ impl EncryptionContext {
             });
         };
         let dictionary_object_number = encrypt_reference.try_object_number().ok();
-        let encryption = match load_encrypt_dictionary(encrypt_reference, entries, parser) {
-            Ok(encryption) => encryption,
-            Err(error) if error.is_recoverable_optional_object_error() => {
-                diagnostics.push(PdfReadDiagnostic::new(
-                    PdfReadDiagnosticKind::MalformedEncryption,
-                    None,
-                    dictionary_object_number.map(object_id),
-                    error,
-                ));
-                return Ok(Self {
-                    decryptor: None,
-                    dictionary_object_number: None,
-                });
-            }
-            Err(error) => return Err(error),
-        };
+        let encryption =
+            match EncryptObjectLoader::new(entries, parser).load_dictionary(encrypt_reference) {
+                Ok(encryption) => encryption,
+                Err(error) if error.is_recoverable_optional_object_error() => {
+                    diagnostics.push(PdfReadDiagnostic::new(
+                        PdfReadDiagnosticKind::MalformedEncryption,
+                        None,
+                        dictionary_object_number.map(object_id),
+                        error,
+                    ));
+                    return Ok(Self {
+                        decryptor: None,
+                        dictionary_object_number: None,
+                    });
+                }
+                Err(error) => return Err(error),
+            };
         let document_id = extract_document_id(trailer)?;
         let decryptor = DocumentDecryptor::new(&encryption, document_id, password)
             .map_err(PdfReaderError::from_decryption_setup)?;
@@ -179,43 +178,6 @@ fn extract_page_tree(
         pages,
         optional_content,
     })
-}
-
-/// Resolves and parses the trailer's encryption dictionary without decrypting it.
-fn load_encrypt_dictionary(
-    encrypt_reference: ObjectVariant,
-    entries: &BTreeMap<usize, CrossReferenceEntryType>,
-    parser: &PdfParser,
-) -> Result<EncryptDictionary, PdfReaderError> {
-    let object = match encrypt_reference {
-        ObjectVariant::Reference(object_id) => {
-            let object_number = object_id.number;
-            let entry =
-                entries
-                    .get(&object_number)
-                    .ok_or(ObjectError::FailedResolveObjectReference {
-                        obj_num: object_number,
-                    })?;
-            let byte_offset =
-                entry
-                    .byte_offset()
-                    .ok_or(ObjectError::FailedResolveObjectReference {
-                        obj_num: object_number,
-                    })?;
-            let mut object_parser = parser
-                .at_offset(byte_offset)
-                .map_err(PdfReaderError::from)?;
-            let identifier = object_parser.parse_indirect_object_id().ok_or(
-                ParserError::ExpectedIndirectObjectDeclaration {
-                    position: byte_offset,
-                },
-            )?;
-            object_parser.parse_indirect_object_value(identifier, &PassthroughResolver)?
-        }
-        object => object,
-    };
-    let dictionary = object.try_dictionary(&PassthroughResolver)?;
-    EncryptDictionary::from_dictionary(dictionary, &PassthroughResolver)
 }
 
 /// Extracts the first trailer document identifier used for encryption key derivation.

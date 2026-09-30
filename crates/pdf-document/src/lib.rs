@@ -1,6 +1,7 @@
 mod decryption;
 pub mod diagnostic;
 pub mod document;
+mod encrypt_objects;
 mod encryption;
 pub mod error;
 pub mod object_loader;
