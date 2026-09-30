@@ -88,4 +88,6 @@ CI runs on push/PR to main (`.github/workflows/ci.yml`):
 Conformance (`.github/workflows/conformance.yml`) renders the PDFium and pdf.js corpora against
 PDFium when a pull request is merged to `main`, or on manual dispatch. It files one GitHub issue
 per unreported failure cluster and never fails on regressions. To gate pull requests, uncomment
-its `pull_request` trigger. See `tools/conformance/README.md`.
+its `pull_request` trigger. Both corpora are compared with PDFium's annotation-free render, and
+runs on `main` publish the viewers to GitHub Pages under `/conformance/`. See
+`tools/conformance/README.md`.

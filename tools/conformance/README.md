@@ -35,7 +35,9 @@ when its revision differs from the pinned one.
 - **Goldens.** The goldens are written by PDFium's `pdfium_test` at 72 dpi. The
   harness prefers the Skia variants, which match Safe-PDF's rasterizer. Goldens
   include annotations and form fields, but Safe-PDF's compared render is page
-  content only, so annotation rectangles are not compared.
+  content only, so annotation rectangles are not compared. CI therefore runs
+  both corpora with `--reference pdfium`, which renders every PDF without
+  annotations or form fields; goldens stay the zero-setup local default.
 - **`setup-pdfium`.** It clones depot_tools from chromium.googlesource.com and
   syncs PDFium from pdfium.googlesource.com, both at pinned revisions. It then
   builds a shared library into `target/conformance/pdfium-build/`. The first run
@@ -68,12 +70,19 @@ recorded with its stage and stderr, and it does not stop the run.
 
 ## CI
 
-`.github/workflows/conformance.yml` runs both corpora on Linux.
+`.github/workflows/conformance.yml` runs both corpora on Linux against the
+PDFium library (`--reference pdfium`), so the pdfium corpus is compared without
+annotations and includes PDFs that have no goldens.
 
 - **Pull request merged to `main`, or a manual run:** it compares against the
   baselines, uploads the `conformance-<corpus>` artifacts (viewer, `TRIAGE.md`,
   bundles) and writes a job summary. It then runs `cargo conformance issues`.
   Regressions show up as a warning and in issues; they never fail the run.
+- **Published viewer:** runs on `main` deploy the viewers to GitHub Pages at
+  <https://velli20.github.io/safe-pdf/conformance/>, next to the web-canvas
+  demo. Pages holds one site, so the `publish` job and `ci.yml`'s `deploy` job
+  each fetch the other half from its newest `pages-conformance` /
+  `pages-web-canvas` artifact (`.github/scripts/assemble-pages.sh`).
 - **Gating pull requests:** uncomment the `pull_request` trigger in the
   workflow. Pull request runs then fail on regressions against the baselines,
   because `FAIL_ON_EVENTS` lists `pull_request`, and they file no issues.
@@ -92,7 +101,7 @@ recorded with its stage and stderr, and it does not stop the run.
     are classified can change keys, and so file new issues.
   - Preview locally with `cargo conformance issues --corpus pdfium --repo
     owner/name --dry-run`. Bodies are written to `target/conformance/<corpus>/issues/`.
-- **PDFium on CI:** the pdf.js leg downloads the pinned prebuilt
+- **PDFium on CI:** both legs download the pinned prebuilt
   `pdfium-linux-x64` from bblanchon/pdfium-binaries (`chromium/7881`, verified
   by SHA-256). Prebuilt binaries are used only in CI; local tooling never
   downloads them.
