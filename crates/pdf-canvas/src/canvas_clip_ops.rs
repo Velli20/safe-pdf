@@ -6,16 +6,12 @@ use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::Pd
 impl<B: CanvasBackend> ClippingPathOps for PdfCanvas<'_, B> {
     type ErrorType = PdfCanvasError;
     fn clip_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
-        let Some(path) = self.current_path.take() else {
-            return Err(PdfCanvasError::PathRequired);
-        };
-        self.set_clip_path(path, PathFillType::Winding)
+        self.pending_clip = Some(PathFillType::Winding);
+        Ok(())
     }
 
     fn clip_path_even_odd(&mut self) -> Result<(), Self::ErrorType> {
-        let Some(path) = self.current_path.take() else {
-            return Err(PdfCanvasError::PathRequired);
-        };
-        self.set_clip_path(path, PathFillType::EvenOdd)
+        self.pending_clip = Some(PathFillType::EvenOdd);
+        Ok(())
     }
 }

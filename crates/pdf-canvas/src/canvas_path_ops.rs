@@ -79,7 +79,7 @@ impl<B: CanvasBackend> PathConstructionOps for PdfCanvas<'_, B> {
 impl<B: CanvasBackend> PathPaintingOps for PdfCanvas<'_, B> {
     type ErrorType = PdfCanvasError;
     fn stroke_path(&mut self) -> Result<(), Self::ErrorType> {
-        self.paint_taken_path(PaintMode::Stroke, PathFillType::default())
+        self.end_path(Some(PaintMode::Stroke), PathFillType::default())
     }
 
     fn close_and_stroke_path(&mut self) -> Result<(), Self::ErrorType> {
@@ -88,19 +88,19 @@ impl<B: CanvasBackend> PathPaintingOps for PdfCanvas<'_, B> {
     }
 
     fn fill_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
-        self.paint_taken_path(PaintMode::Fill, PathFillType::Winding)
+        self.end_path(Some(PaintMode::Fill), PathFillType::Winding)
     }
 
     fn fill_path_even_odd(&mut self) -> Result<(), Self::ErrorType> {
-        self.paint_taken_path(PaintMode::Fill, PathFillType::EvenOdd)
+        self.end_path(Some(PaintMode::Fill), PathFillType::EvenOdd)
     }
 
     fn fill_and_stroke_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
-        self.paint_taken_path(PaintMode::FillAndStroke, PathFillType::Winding)
+        self.end_path(Some(PaintMode::FillAndStroke), PathFillType::Winding)
     }
 
     fn fill_and_stroke_path_even_odd(&mut self) -> Result<(), Self::ErrorType> {
-        self.paint_taken_path(PaintMode::FillAndStroke, PathFillType::EvenOdd)
+        self.end_path(Some(PaintMode::FillAndStroke), PathFillType::EvenOdd)
     }
 
     fn close_fill_and_stroke_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
@@ -114,7 +114,6 @@ impl<B: CanvasBackend> PathPaintingOps for PdfCanvas<'_, B> {
     }
 
     fn end_path_no_op(&mut self) -> Result<(), Self::ErrorType> {
-        self.current_path.take();
-        Ok(())
+        self.end_path(None, PathFillType::default())
     }
 }

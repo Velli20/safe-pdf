@@ -116,6 +116,20 @@ impl RecordingCanvas {
         }
     }
 
+    /// Names the recorded fill, stroke and clip commands in order, for assertions in tests.
+    #[cfg(test)]
+    pub(crate) fn path_command_names(&self) -> Vec<&'static str> {
+        self.commands
+            .iter()
+            .filter_map(|command| match command {
+                RecordingCommand::FillPath { .. } => Some("fill"),
+                RecordingCommand::StrokePath { .. } => Some("stroke"),
+                RecordingCommand::SetClipRegion { .. } => Some("clip"),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Returns the depth of recordings nested beneath this one; zero when flat.
     pub fn nesting(&self) -> usize {
         self.nesting
