@@ -35,9 +35,6 @@ pub enum PdfCanvasError {
     /// A deferred resource could not be accessed.
     #[error(transparent)]
     ObjectRead(#[from] pdf_object_reader::ObjectReadError),
-    #[error("The current operation requires an active path, but no path has been started")]
-    /// The operator needs an active path.
-    PathRequired,
     #[error("The current operation requires a current point, but no current point is set")]
     /// The path operator needs a current point.
     CurrentPointRequired,

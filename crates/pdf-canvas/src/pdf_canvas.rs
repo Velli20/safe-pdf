@@ -33,6 +33,8 @@ use pdf_text_engine::FontSystem;
 pub struct PdfCanvas<'a, B: CanvasBackend> {
     /// The current path being constructed or drawn, if any.
     pub(crate) current_path: Option<PdfPath>,
+    /// Fill rule requested by a `W`/`W*` operator, applied when the next painting operator ends the path.
+    pub(crate) pending_clip: Option<PathFillType>,
     /// The drawing backend implementing `CanvasBackend` for rendering operations.
     pub(crate) canvas: &'a mut B,
     /// The PDF page associated with this canvas.
@@ -96,6 +98,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
         Ok(Self {
             current_path: None,
+            pending_clip: None,
             canvas: backend,
             page,
             font_system,
@@ -211,6 +214,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
         let mut other = PdfCanvas::<RecordingCanvas> {
             current_path: None,
+            pending_clip: None,
             canvas: recording_canvas,
             page: self.page,
             font_system: Arc::clone(&self.font_system),
@@ -496,26 +500,37 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         Ok(())
     }
 
-    /// Paints the current path (if any) using the specified paint mode and fill type, then clears the path.
+    /// Ends the current path, painting it with `mode` when given and then applying any clip
+    /// requested by a preceding `W`/`W*` operator.
+    ///
+    /// Without a current path the operator is ignored and the pending clip is discarded, as
+    /// PDFium and pdf.js do.
     ///
     /// # Parameters
     ///
-    /// - `mode`: The paint mode (fill, stroke, or fill and stroke).
+    /// - `mode`: The paint mode (fill, stroke, or fill and stroke), or `None` for `n`.
     /// - `fill_type`: The fill rule to use.
     ///
     /// # Errors
     ///
-    /// Returns an error if there is no active path or if drawing fails.
-    pub(crate) fn paint_taken_path(
+    /// Returns an error if drawing or clipping fails.
+    pub(crate) fn end_path(
         &mut self,
-        mode: PaintMode,
+        mode: Option<PaintMode>,
         fill_type: PathFillType,
     ) -> Result<(), PdfCanvasError> {
+        let pending_clip = self.pending_clip.take();
         let Some(path) = self.current_path.take() else {
             return Ok(());
         };
-        let path = CanvasPath::transformed(&path, self.current_state()?.transform)?;
-        self.draw_path(&path, mode, fill_type)
+        if let Some(mode) = mode {
+            let device_path = CanvasPath::transformed(&path, self.current_state()?.transform)?;
+            self.draw_path(&device_path, mode, fill_type)?;
+        }
+        match pending_clip {
+            Some(clip_type) => self.set_clip_path(path, clip_type),
+            None => Ok(()),
+        }
     }
 
     /// Sets the clipping path for subsequent drawing operations.
@@ -791,7 +806,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
 #[cfg(test)]
 mod tests {
-    use pdf_content_stream_operators::pdf_operator_backend::GraphicsStateOps;
+    use pdf_content_stream_operators::pdf_operator_backend::{
+        ClippingPathOps, GraphicsStateOps, PathConstructionOps, PathPaintingOps,
+    };
     use pdf_document::page::PdfPage;
     use pdf_graphics::rect::Rect;
     use pdf_text_engine::bundled_font_system;
@@ -897,5 +914,90 @@ mod tests {
                 bottom: 32767.0,
             }
         ));
+    }
+
+    #[test]
+    /// Verifies that clip and paint operators without a current path are ignored.
+    fn clip_and_paint_without_path_are_ignored() {
+        let page = page();
+        let mut backend = RecordingCanvas::new(100.0, 100.0);
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None, bundled_font_system())
+            .expect("canvas should build");
+
+        canvas
+            .clip_path_nonzero_winding()
+            .expect("W without a path should be ignored");
+        canvas
+            .clip_path_even_odd()
+            .expect("W* without a path should be ignored");
+        canvas
+            .fill_path_nonzero_winding()
+            .expect("f without a path should be ignored");
+        canvas
+            .stroke_path()
+            .expect("S without a path should be ignored");
+        canvas
+            .end_path_no_op()
+            .expect("n without a path should be ignored");
+
+        let state = canvas.current_state().expect("state should exist");
+        assert!(state.clip_path.is_none());
+        assert!(canvas.pending_clip.is_none());
+        drop(canvas);
+        assert!(backend.path_command_names().is_empty());
+    }
+
+    #[test]
+    /// Verifies that `W` is applied when the following painting operator ends the path.
+    fn clip_applies_at_end_of_following_path() {
+        let page = page();
+        let mut backend = RecordingCanvas::new(100.0, 100.0);
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None, bundled_font_system())
+            .expect("canvas should build");
+
+        // `W 40 20 m 160 20 l 160 80 l 40 80 l h n` from pdf.js `clippath.pdf`.
+        canvas
+            .clip_path_nonzero_winding()
+            .expect("W should succeed");
+        canvas.move_to(40.0, 20.0).expect("m should succeed");
+        canvas.line_to(160.0, 20.0).expect("l should succeed");
+        canvas.line_to(160.0, 80.0).expect("l should succeed");
+        canvas.line_to(40.0, 80.0).expect("l should succeed");
+        canvas.close_path().expect("h should succeed");
+        canvas.end_path_no_op().expect("n should apply the clip");
+
+        let state = canvas.current_state().expect("state should exist");
+        assert!(state.clip_path.is_some());
+        assert!(canvas.pending_clip.is_none());
+        assert!(canvas.current_path.is_none());
+        drop(canvas);
+        assert_eq!(backend.path_command_names(), ["clip"]);
+    }
+
+    #[test]
+    /// Verifies that `re W f` both fills the path and clips to it.
+    fn clip_before_fill_keeps_path_for_painting() {
+        let page = page();
+        let mut backend = RecordingCanvas::new(100.0, 100.0);
+        let mut canvas = PdfCanvas::new(&mut backend, &page, None, bundled_font_system())
+            .expect("canvas should build");
+
+        canvas
+            .rectangle(10.0, 10.0, 20.0, 20.0)
+            .expect("re should succeed");
+        canvas.clip_path_even_odd().expect("W* should succeed");
+        canvas
+            .fill_path_nonzero_winding()
+            .expect("f should paint and clip");
+
+        assert!(
+            canvas
+                .current_state()
+                .expect("state should exist")
+                .clip_path
+                .is_some()
+        );
+        drop(canvas);
+        assert_eq!(backend.path_command_names(), ["fill", "clip"]);
     }
 }
