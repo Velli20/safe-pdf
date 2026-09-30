@@ -18,7 +18,6 @@ mod issue_state;
 mod issues;
 mod model;
 mod pdfium_build;
-mod pr_report;
 mod process;
 mod reference;
 mod regions;
@@ -117,18 +116,6 @@ enum Command {
         /// Print planned actions and write bodies under target/conformance/issues/.
         #[arg(long)]
         dry_run: bool,
-    },
-    /// Write a pull request report comparing the last runs with open issues and baselines.
-    PrReport {
-        /// Corpora whose last runs are reported; repeat the flag.
-        #[arg(long, value_enum, required = true)]
-        corpus: Vec<CorpusKind>,
-        /// Repository as owner/name.
-        #[arg(long, env = "GITHUB_REPOSITORY")]
-        repo: String,
-        /// Markdown output file.
-        #[arg(long, default_value = "target/conformance/pr-report.md")]
-        out: PathBuf,
     },
     /// Rerun the cases of an issue against the published reference images, fetching only
     /// the PDFs it needs. Needs no PDFium build.
@@ -289,7 +276,6 @@ fn main() -> Result<ExitCode> {
             max_new,
             dry_run,
         })?,
-        Command::PrReport { corpus, repo, out } => pr_report::run(&corpus, &repo, &out)?,
         Command::Repro(args) => {
             repro::run(&args)?;
         }

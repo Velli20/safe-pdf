@@ -89,8 +89,7 @@ CI runs on push/PR to main (`.github/workflows/ci.yml`):
 Conformance (`.github/workflows/conformance.yml`) renders the PDFium and pdf.js corpora against
 PDFium's annotation-free render. On `main` (merged pull requests and manual runs) it keeps one
 GitHub issue per failure cause across both corpora, closes issues whose failure is gone, and
-publishes the viewers to GitHub Pages under `/conformance/`. On pull requests that are ready for
-review it posts a report of what the change fixes and breaks; it never fails a pull request. To
+publishes the viewers to GitHub Pages under `/conformance/`. It does not run on pull requests. To
 fix a conformance issue, follow `.claude/skills/fix-conformance-issue/SKILL.md`
 (`cargo conformance repro <key>`, then `cargo conformance verify <key>`). See
 `tools/conformance/README.md`.

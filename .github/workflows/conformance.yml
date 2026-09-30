@@ -7,18 +7,14 @@ name: Conformance
 # - Push to main (a merged pull request) and manual runs on main: one `issues` job files,
 #   updates and closes GitHub issues for both corpora together, and the viewers are
 #   published to GitHub Pages under /conformance/.
-# - Pull requests that are ready for review: the full corpora run and a `pr-report` job
-#   comments what the change fixes and breaks. Report only; nothing fails the pull request.
 #
-# To gate pull requests on regressions later, add `pull_request` to FAIL_ON_EVENTS.
+# Pull requests do not run it, so they merge without waiting on the corpora. To gate pull
+# requests on regressions later, add a `pull_request` trigger and add it to FAIL_ON_EVENTS.
 # See tools/conformance/README.md.
 
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
-    types: [ opened, synchronize, reopened, ready_for_review ]
   workflow_dispatch:
     inputs:
       accept:
@@ -29,11 +25,10 @@ on:
 permissions:
   contents: read
 
-# Pull requests cancel superseded runs. Issue-filing runs queue behind each other so
-# two runs never file the same cluster twice.
+# Runs queue behind each other so two runs never file the same cluster twice.
 concurrency:
-  group: conformance-${{ github.event_name == 'pull_request' && github.ref || 'issues' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: conformance-issues
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -46,8 +41,6 @@ env:
 jobs:
   conformance:
     name: Conformance (${{ matrix.corpus }})
-    # Draft pull requests are skipped; the run starts when the pull request is ready for review.
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 150
     permissions:
@@ -128,7 +121,7 @@ jobs:
           if [ -f "$triage" ]; then
             {
               sed '/^## Failure clusters/,$d' "$triage"
-              if [ "${{ github.event_name }}" != pull_request ] && [ "${{ github.ref }}" = refs/heads/main ]; then
+              if [ "${{ github.ref }}" = refs/heads/main ]; then
                 owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
                 echo "Viewer (published when the run finishes): https://${owner}.github.io/${{ github.event.repository.name }}/conformance/${{ matrix.corpus }}/"
                 echo
@@ -169,7 +162,7 @@ jobs:
   issues:
     name: File GitHub issues
     needs: conformance
-    if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: always() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -225,73 +218,10 @@ jobs:
           fi
           cargo conformance issues $args --repo "${{ github.repository }}" --max-new 15
 
-  pr-report:
-    name: Pull request report
-    needs: conformance
-    if: always() && github.event_name == 'pull_request' && !github.event.pull_request.draft
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      issues: read
-      pull-requests: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install system dependencies (Skia)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libfontconfig1-dev libfreetype6-dev
-
-      - name: Cache cargo registry + build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/regression
-          key: ${{ runner.os }}-conformance-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-conformance-
-
-      - name: Download reports
-        uses: actions/download-artifact@v4
-        with:
-          pattern: conformance-*
-          path: reports
-
-      - name: Write and post the report
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          args=""
-          for corpus in pdfium pdfjs; do
-            if [ -f "reports/conformance-$corpus/index.json" ]; then
-              mkdir -p target/conformance
-              rm -rf "target/conformance/$corpus"
-              mv "reports/conformance-$corpus" "target/conformance/$corpus"
-              args="$args --corpus $corpus"
-            fi
-          done
-          if [ -z "$args" ]; then
-            echo "::warning ::No reports to compare."
-            exit 0
-          fi
-          cargo conformance pr-report $args --repo "${{ github.repository }}" --out target/conformance/pr-report.md
-          cat target/conformance/pr-report.md >> "$GITHUB_STEP_SUMMARY"
-          # Fork pull requests get a read-only token; the job summary still has the report.
-          gh pr comment "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}" \
-            --body-file target/conformance/pr-report.md --edit-last --create-if-none \
-            || echo "::warning ::Could not comment on the pull request; the report is in the job summary."
-
   publish:
     name: Publish reports to GitHub Pages
     needs: conformance
-    if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: always() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

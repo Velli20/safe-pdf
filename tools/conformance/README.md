@@ -137,12 +137,13 @@ PDFs that have no goldens.
   against its baseline and uploaded as the `conformance-<corpus>` artifact (viewer,
   `TRIAGE.md`, `results.json`, bundles) with a job summary. The `issues` job then reports
   both corpora together with `cargo conformance issues --corpus pdfium --corpus pdfjs`.
-- **Pull requests:** once a pull request is ready for review, both corpora run in full and
-  the `pr-report` job comments what the change fixes (open issues that no longer
-  reproduce), regressions against the baselines, and new failure clusters. It is a report
-  only and never fails the pull request. Draft pull requests are skipped.
-- **Gating later:** add `pull_request` to `FAIL_ON_EVENTS` in the workflow to fail pull
-  requests on regressions against the baselines.
+- **Pull requests:** not run, so they merge without waiting on the corpora. A regression
+  shows up after the merge as a new or reopened issue labelled `regression`. To check a
+  change before merging, run `cargo conformance repro <key>` for the issues it touches, or
+  start the workflow manually on the branch.
+- **Gating later:** add a `pull_request` trigger and add `pull_request` to
+  `FAIL_ON_EVENTS` in the workflow to fail pull requests on regressions against the
+  baselines.
 - **Published viewer:** runs on `main` deploy the viewers to GitHub Pages at
   <https://velli20.github.io/safe-pdf/conformance/>, next to the web-canvas demo. Issues
   link straight into it (`#case=<id>&page=<n>`) and embed its images. Pages holds one site,
