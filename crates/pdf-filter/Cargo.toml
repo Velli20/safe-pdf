@@ -8,12 +8,15 @@ bitflags = "2.9.1"
 bytes = "1.10.1"
 num-traits = "0.2.19"
 thiserror = "2.0.12"
-flate2 = "1.1.1"
+miniz_oxide = "0.8.8"
 image = { version = "0.25.9", default-features = false, features = ["jpeg"] }
 pdf-ccitt = { path = "../pdf-ccitt" }
 pdf-jbig2 = { path = "../pdf-jbig2" }
 pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-utils = { path = "../pdf-utils" }
+
+[dev-dependencies]
+flate2 = "1.1.1"
 
 [lints]
 workspace = true
