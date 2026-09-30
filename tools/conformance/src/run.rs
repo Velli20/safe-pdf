@@ -30,8 +30,8 @@ pub struct RunOptions {
     pub explicit_root: bool,
     /// Substring filter on case ids.
     pub filter: Option<String>,
-    /// Exact case id.
-    pub case: Option<String>,
+    /// Exact case ids; empty selects every case.
+    pub cases: Vec<String>,
     /// Single page to check.
     pub page: Option<usize>,
     /// Parallel workers.
@@ -46,11 +46,20 @@ pub struct RunOptions {
     pub timeout: Duration,
     /// Mismatch fraction treated as a pass.
     pub tolerance: f64,
-    /// PDFium shared library; `None` uses the corpus's golden images.
+    /// PDFium shared library; `None` uses reference images from files.
     pub pdfium: Option<PathBuf>,
+    /// Directory of published reference images, one `<case dir>/pN-ref.png` per page;
+    /// `None` with no PDFium uses the corpus's golden images.
+    pub reference_images: Option<PathBuf>,
 }
 
 impl RunOptions {
+    /// Returns true when the run checks only part of the corpus, so absent failures say
+    /// nothing about whether they were fixed.
+    pub fn filtered(&self) -> bool {
+        self.filter.is_some() || !self.cases.is_empty() || self.page.is_some()
+    }
+
     /// Returns the command that reruns one case, optionally one page.
     pub fn reproduce(&self, case: &str, page: Option<usize>) -> String {
         let mut args = vec![
@@ -88,7 +97,7 @@ pub fn run(options: &RunOptions) -> Result<bool> {
     let cases = corpus::select(
         options.kind.cases(&options.root)?,
         options.filter.as_deref(),
-        options.case.as_deref(),
+        &options.cases,
     )?;
     let out = corpus::output_dir(options.kind);
     fs::create_dir_all(out.join("cases"))?;
@@ -206,7 +215,7 @@ fn run_case(options: &RunOptions, out: &Path, case: &Case) -> Result<CaseResult>
 
     let mut command = process::worker_command()?;
     command.arg("read").arg("--pdf").arg(&case.path);
-    add_reference(&mut command, options);
+    add_reference(&mut command, options, &result.dir);
     if let Some(password) = &case.password {
         command.arg("--password").arg(password);
     }
@@ -230,7 +239,14 @@ fn run_case(options: &RunOptions, out: &Path, case: &Case) -> Result<CaseResult>
     let non_embedded_fonts = !read.inventory.non_embedded_fonts.is_empty();
     result.read = Some(read);
     for page in pages {
-        let mut page = run_page(options, &case_out, case, page, non_embedded_fonts)?;
+        let mut page = run_page(
+            options,
+            &case_out,
+            case,
+            &result.dir,
+            page,
+            non_embedded_fonts,
+        )?;
         if result.status == Status::ReadError && page.status == Status::RenderError {
             page.status = Status::ReadError;
             page.signature.clone_from(&result.signature);
@@ -252,6 +268,14 @@ fn run_case(options: &RunOptions, out: &Path, case: &Case) -> Result<CaseResult>
                     .all(|page| page.status == Status::NoReference) =>
             {
                 (Status::NoReference, None)
+            }
+            Some(_)
+                if result
+                    .pages
+                    .iter()
+                    .any(|page| page.status == Status::FontSubstitution) =>
+            {
+                (Status::FontSubstitution, None)
             }
             _ => (Status::Pass, None),
         };
@@ -286,6 +310,7 @@ fn run_page(
     options: &RunOptions,
     case_out: &Path,
     case: &Case,
+    case_dir: &str,
     page: usize,
     non_embedded_fonts: bool,
 ) -> Result<PageResult> {
@@ -304,7 +329,7 @@ fn run_page(
         .arg(options.tolerance.to_string())
         .arg("--out-dir")
         .arg(case_out);
-    add_reference(&mut command, options);
+    add_reference(&mut command, options, case_dir);
     if let Some(password) = &case.password {
         command.arg("--password").arg(password);
     }
@@ -329,6 +354,7 @@ fn run_page(
     })
 }
 
+/// Returns the page status with its signature.
 fn page_verdict(
     output: &PageOutput,
     tolerance: f64,
@@ -342,6 +368,12 @@ fn page_verdict(
     }
     match &output.metrics {
         None => (Status::NoReference, None),
+        Some(metrics)
+            if metrics.mismatch > tolerance
+                && signature::is_font_substitution(output, non_embedded_fonts) =>
+        {
+            (Status::FontSubstitution, None)
+        }
         Some(metrics) if metrics.mismatch > tolerance => (
             Status::Mismatch,
             Some(signature::mismatch(output, non_embedded_fonts)),
@@ -350,9 +382,14 @@ fn page_verdict(
     }
 }
 
-/// Passes the PDFium library to a worker. A component build keeps its dependent shared
-/// libraries next to `libpdfium`, so that directory joins the dynamic loader path.
-fn add_reference(command: &mut std::process::Command, options: &RunOptions) {
+/// Passes the reference to a worker: published images of the case, or the PDFium library.
+/// A component build keeps its dependent shared libraries next to `libpdfium`, so that
+/// directory joins the dynamic loader path.
+fn add_reference(command: &mut std::process::Command, options: &RunOptions, case_dir: &str) {
+    if let Some(images) = &options.reference_images {
+        command.arg("--reference-images").arg(images.join(case_dir));
+        return;
+    }
     let Some(library) = &options.pdfium else {
         return;
     };

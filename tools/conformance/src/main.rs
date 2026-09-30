@@ -10,8 +10,11 @@ mod corpus;
 mod corpus_pdfium;
 mod corpus_pdfjs;
 mod fetch;
+mod github;
 mod golden;
 mod inventory;
+mod issue_body;
+mod issue_state;
 mod issues;
 mod model;
 mod pdfium_build;
@@ -20,6 +23,7 @@ mod reference;
 mod regions;
 mod report_case;
 mod report_index;
+mod repro;
 mod run;
 mod safe_render;
 mod signature;
@@ -62,9 +66,9 @@ enum Command {
         /// Only cases whose id contains this text.
         #[arg(long)]
         filter: Option<String>,
-        /// Only the case with exactly this id.
+        /// Only the case with exactly this id; repeat for several cases.
         #[arg(long, conflicts_with = "filter")]
-        case: Option<String>,
+        case: Vec<String>,
         /// Only this zero-based page.
         #[arg(long)]
         page: Option<usize>,
@@ -92,23 +96,32 @@ enum Command {
         /// PDFium shared library (default: the one built by `setup-pdfium`).
         #[arg(long, env = "PDFIUM_LIBRARY")]
         pdfium: Option<PathBuf>,
+        /// Compare against reference images in `<dir>/<case dir>/pN-ref.png` instead.
+        #[arg(long, conflicts_with = "reference")]
+        reference_images: Option<PathBuf>,
     },
     /// Build PDFium from official sources for the `pdfium` reference (large, one-time).
     SetupPdfium,
-    /// File a GitHub issue per unreported failure cluster of the last run (uses `gh`).
+    /// File, update and close GitHub issues for the failure clusters of the last runs (uses `gh`).
     Issues {
-        #[arg(long, value_enum)]
-        corpus: CorpusKind,
+        /// Corpora whose last runs are reported together; repeat the flag.
+        #[arg(long, value_enum, required = true)]
+        corpus: Vec<CorpusKind>,
         /// Repository as owner/name.
         #[arg(long, env = "GITHUB_REPOSITORY")]
         repo: String,
         /// Issues created at most per run; further clusters wait for later runs.
         #[arg(long, default_value_t = 15)]
         max_new: usize,
-        /// Print planned actions and write bodies under target/conformance/<corpus>/issues/.
+        /// Print planned actions and write bodies under target/conformance/issues/.
         #[arg(long)]
         dry_run: bool,
     },
+    /// Rerun the cases of an issue against the published reference images, fetching only
+    /// the PDFs it needs. Needs no PDFium build.
+    Repro(repro::ReproArgs),
+    /// Like `repro`, but exits non-zero while any case still fails with the issue's signature.
+    Verify(repro::ReproArgs),
     /// Print the summary of a case from the last run.
     Show {
         #[arg(long, value_enum)]
@@ -137,6 +150,8 @@ enum WorkerCommand {
         password: Option<String>,
         #[arg(long)]
         pdfium: Option<PathBuf>,
+        #[arg(long)]
+        reference_images: Option<PathBuf>,
     },
     Page {
         #[arg(long)]
@@ -155,6 +170,8 @@ enum WorkerCommand {
         tolerance: f64,
         #[arg(long)]
         out_dir: PathBuf,
+        #[arg(long)]
+        reference_images: Option<PathBuf>,
     },
 }
 
@@ -192,6 +209,7 @@ fn main() -> Result<ExitCode> {
             tolerance,
             reference,
             pdfium,
+            reference_images,
         } => {
             if !(scale.is_finite() && scale > 0.0) {
                 bail!("--scale must be positive");
@@ -201,6 +219,7 @@ fn main() -> Result<ExitCode> {
                 CorpusKind::Pdfjs => ReferenceKind::Pdfium,
             });
             let pdfium = match reference {
+                _ if reference_images.is_some() => None,
                 ReferenceKind::Goldens if corpus == CorpusKind::Pdfjs => {
                     bail!("the pdf.js corpus has no golden images; use --reference pdfium")
                 }
@@ -216,7 +235,7 @@ fn main() -> Result<ExitCode> {
                         .or_else(|_| std::path::absolute(&root))?
                 },
                 filter,
-                case,
+                cases: case,
                 page,
                 jobs,
                 scale,
@@ -225,6 +244,7 @@ fn main() -> Result<ExitCode> {
                 timeout: Duration::from_secs(timeout),
                 tolerance,
                 pdfium,
+                reference_images: reference_images.map(std::path::absolute).transpose()?,
             };
             if run::run(&options)? {
                 return Ok(ExitCode::FAILURE);
@@ -251,16 +271,30 @@ fn main() -> Result<ExitCode> {
             max_new,
             dry_run,
         } => issues::run(&issues::IssueOptions {
-            kind: corpus,
+            kinds: &corpus,
             repo: &repo,
             max_new,
             dry_run,
         })?,
+        Command::Repro(args) => {
+            repro::run(&args)?;
+        }
+        Command::Verify(args) => {
+            if !repro::run(&args)? {
+                return Ok(ExitCode::FAILURE);
+            }
+        }
         Command::Worker(WorkerCommand::Read {
             pdf,
             password,
             pdfium,
-        }) => worker::read(&pdf, password.as_deref(), pdfium.as_deref())?,
+            reference_images,
+        }) => worker::read(
+            &pdf,
+            password.as_deref(),
+            pdfium.as_deref(),
+            reference_images.as_deref(),
+        )?,
         Command::Worker(WorkerCommand::Page {
             pdf,
             password,
@@ -270,6 +304,7 @@ fn main() -> Result<ExitCode> {
             max_side,
             tolerance,
             out_dir,
+            reference_images,
         }) => worker::page(&worker::PageJob {
             pdf: &pdf,
             password: password.as_deref(),
@@ -279,6 +314,7 @@ fn main() -> Result<ExitCode> {
             tolerance,
             out_dir: &out_dir,
             pdfium: pdfium.as_deref(),
+            reference_images: reference_images.as_deref(),
         })?,
     }
     Ok(ExitCode::SUCCESS)

@@ -1,6 +1,7 @@
 //! A bounds-only canvas backend that logs every drawing call with its clipped device bounds.
 
 use crate::model::DrawRef;
+use num_traits::ToPrimitive;
 use pdf_canvas::{
     CanvasPath,
     canvas_backend::{CanvasBackend, Shader},
@@ -106,12 +107,30 @@ fn grow(bounds: Option<[f32; 4]>, by: f32) -> Option<[f32; 4]> {
     bounds.map(|[x0, y0, x1, y1]| [x0 - by, y0 - by, x1 + by, y1 + by])
 }
 
+/// Formats a color as `#RRGGBB`, which GitHub and most viewers show with a swatch, plus
+/// its alpha when not opaque.
+fn hex(color: Color) -> String {
+    let channel = |value: f32| {
+        (value.clamp(0.0, 1.0) * 255.0)
+            .round()
+            .to_u8()
+            .unwrap_or_default()
+    };
+    let mut text = format!(
+        "#{:02X}{:02X}{:02X}",
+        channel(color.r),
+        channel(color.g),
+        channel(color.b)
+    );
+    if color.a < 1.0 {
+        text.push_str(&format!(" alpha {:.2}", color.a));
+    }
+    text
+}
+
 fn paint(color: Color, shader: Option<&Shader>, blend_mode: Option<BlendMode>) -> String {
     let mut text = match shader {
-        None => format!(
-            "rgba({:.2}, {:.2}, {:.2}, {:.2})",
-            color.r, color.g, color.b, color.a
-        ),
+        None => hex(color),
         Some(Shader::Shading(ShadingPaint::LinearGradient { .. })) => "axial shading".to_owned(),
         Some(Shader::Shading(ShadingPaint::RadialGradient { .. })) => "radial shading".to_owned(),
         Some(Shader::Shading(ShadingPaint::RasterImage { .. })) => {

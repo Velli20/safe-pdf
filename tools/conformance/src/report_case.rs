@@ -92,7 +92,14 @@ fn summary(
             delta_text(entry.delta, entry.baseline)
         )?;
     }
-    writeln!(text, "- File: `{}`", case.path.display())?;
+    writeln!(
+        text,
+        "- File: `{}`",
+        case.path
+            .strip_prefix(&options.root)
+            .unwrap_or(&case.path)
+            .display()
+    )?;
     if let Some(sha) = &result.sha256 {
         writeln!(text, "- SHA-256: `{sha}`")?;
     }
@@ -152,8 +159,13 @@ fn summary(
             }
             diagnostics(&mut text, &read.diagnostics, has_objects)?;
             writeln!(text, "\n## Features\n")?;
-            if read.inventory.features.is_empty() {
-                writeln!(text, "No inventory (the object graph did not load).")?;
+            if read.safe_error.is_some() {
+                writeln!(text, "No inventory: Safe-PDF did not load the document.")?;
+            } else if read.inventory.features.is_empty() {
+                writeln!(
+                    text,
+                    "No notable features: device color spaces and standard filters only."
+                )?;
             } else {
                 let features: Vec<String> = read
                     .inventory
@@ -210,6 +222,12 @@ fn page_section(
     index: &Index,
 ) -> Result<()> {
     writeln!(text, "\n## Page {}: {}\n", page.page, page.status.as_str())?;
+    if page.status == Status::FontSubstitution {
+        writeln!(
+            text,
+            "- Only text differs, and the document uses non-embedded fonts that renderers substitute differently. Expected, not a failure."
+        )?;
+    }
     if let Some(signature) = &page.signature
         && page.status.is_failure()
     {
@@ -334,21 +352,42 @@ fn cell(text: &str) -> String {
     format!("`{}`", flat.replace('`', "'"))
 }
 
-fn error_block(text: &mut String, error: &ErrorDetail) -> Result<()> {
-    writeln!(text, "```\n{}", error.message)?;
+/// Returns the error message followed by its causes, skipping causes that repeat the
+/// message above them (wrappers often display their source unchanged).
+pub fn distinct_chain(error: &ErrorDetail) -> Vec<&str> {
+    let mut messages: Vec<&str> = vec![error.message.as_str()];
     for cause in &error.chain {
-        writeln!(text, "Caused by: {cause}")?;
+        if messages
+            .last()
+            .is_none_or(|previous| !previous.ends_with(cause.as_str()))
+        {
+            messages.push(cause);
+        }
+    }
+    messages
+}
+
+fn error_block(text: &mut String, error: &ErrorDetail) -> Result<()> {
+    let messages = distinct_chain(error);
+    writeln!(text, "```")?;
+    for (depth, message) in messages.iter().enumerate() {
+        if depth == 0 {
+            writeln!(text, "{message}")?;
+        } else {
+            writeln!(text, "Caused by: {message}")?;
+        }
     }
     writeln!(text, "```")?;
-    for message in std::iter::once(&error.message).chain(&error.chain) {
-        let hints = source_hints::locate(message);
-        if !hints.is_empty() {
-            writeln!(
-                text,
-                "\nMessage template for `{message}`: {}",
-                hints.join(", ")
-            )?;
+    let mut hints: Vec<String> = Vec::new();
+    for message in &messages {
+        for hint in source_hints::locate(message) {
+            if !hints.contains(&hint) {
+                hints.push(hint);
+            }
         }
+    }
+    if !hints.is_empty() {
+        writeln!(text, "\nDefined at: {}", hints.join(", "))?;
     }
     if error.backtrace.is_none() {
         writeln!(

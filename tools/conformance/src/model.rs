@@ -201,6 +201,9 @@ pub struct ProcessEvidence {
 pub enum Status {
     /// Safe-PDF matches the reference within tolerance.
     Pass,
+    /// Only text differs, in a document with non-embedded fonts that renderers substitute
+    /// differently. Expected, so not a failure.
+    FontSubstitution,
     /// PDFium could not render the page; nothing to compare against.
     NoReference,
     /// The PDF file is not available locally.
@@ -222,6 +225,7 @@ impl Status {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Pass => "pass",
+            Self::FontSubstitution => "font_substitution",
             Self::NoReference => "no_reference",
             Self::Unavailable => "unavailable",
             Self::Mismatch => "mismatch",
@@ -234,13 +238,16 @@ impl Status {
 
     /// Returns true when the status needs attention.
     pub fn is_failure(self) -> bool {
-        !matches!(self, Self::Pass | Self::NoReference | Self::Unavailable)
+        !matches!(
+            self,
+            Self::Pass | Self::FontSubstitution | Self::NoReference | Self::Unavailable
+        )
     }
 
     /// Returns a severity rank; higher is worse.
     pub fn severity(self) -> u8 {
         match self {
-            Self::Pass | Self::NoReference | Self::Unavailable => 0,
+            Self::Pass | Self::FontSubstitution | Self::NoReference | Self::Unavailable => 0,
             Self::Mismatch => 1,
             Self::RenderError => 2,
             Self::ReadError => 3,

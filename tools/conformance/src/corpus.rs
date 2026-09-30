@@ -90,11 +90,13 @@ pub fn baseline_path(kind: CorpusKind) -> PathBuf {
         .join(format!("{}.json", kind.as_str()))
 }
 
-/// Keeps cases whose id contains `filter`, or exactly equals `case`.
-pub fn select(cases: Vec<Case>, filter: Option<&str>, case: Option<&str>) -> Result<Vec<Case>> {
+/// Keeps cases whose id contains `filter` and, when `ids` is not empty, equals one of `ids`.
+pub fn select(cases: Vec<Case>, filter: Option<&str>, ids: &[String]) -> Result<Vec<Case>> {
     let selected: Vec<Case> = cases
         .into_iter()
-        .filter(|c| filter.is_none_or(|f| c.id.contains(f)) && case.is_none_or(|id| c.id == id))
+        .filter(|c| {
+            filter.is_none_or(|f| c.id.contains(f)) && (ids.is_empty() || ids.contains(&c.id))
+        })
         .collect();
     if selected.is_empty() {
         bail!("no cases match the selection");
