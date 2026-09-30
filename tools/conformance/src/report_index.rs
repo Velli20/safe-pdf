@@ -76,6 +76,10 @@ pub struct Cluster {
     pub cases: Vec<String>,
     /// Likely crates across the cluster, most frequent first.
     pub likely_crates: Vec<(String, usize)>,
+    /// Signatures of the same failures under the clustering used before root-cause
+    /// signatures, used to find issues filed with them.
+    #[serde(default)]
+    pub legacy_signatures: Vec<String>,
 }
 
 /// The run index.
@@ -93,6 +97,9 @@ pub struct Index {
     pub scale: f32,
     /// Mismatch fraction treated as a pass.
     pub tolerance: f64,
+    /// True when only part of the corpus was checked (`--filter`, `--case` or `--page`).
+    #[serde(default)]
+    pub filtered: bool,
     /// Documents per verdict.
     pub totals: BTreeMap<String, usize>,
     /// Pages per verdict.
@@ -107,8 +114,7 @@ pub struct Index {
 pub fn build(options: &RunOptions, results: &[CaseResult], baseline: &Baseline) -> Index {
     let mut totals = BTreeMap::<String, usize>::new();
     let mut page_totals = BTreeMap::<String, usize>::new();
-    let mut clusters =
-        BTreeMap::<String, (usize, BTreeSet<String>, BTreeMap<String, usize>)>::new();
+    let mut clusters = BTreeMap::<String, ClusterAccumulator>::new();
     let mut cases = Vec::with_capacity(results.len());
     for result in results {
         bump(&mut totals, result.status.as_str());
@@ -117,12 +123,13 @@ pub fn build(options: &RunOptions, results: &[CaseResult], baseline: &Baseline) 
             .as_ref()
             .map(|read| read.inventory.likely_crates.clone())
             .unwrap_or_default();
-        let mut add_to_cluster = |signature: &str| {
+        let mut add_to_cluster = |signature: &str, legacy: Option<&String>| {
             let entry = clusters.entry(signature.to_owned()).or_default();
-            entry.0 = entry.0.saturating_add(1);
-            entry.1.insert(result.case.id.clone());
+            entry.count = entry.count.saturating_add(1);
+            entry.cases.insert(result.case.id.clone());
+            entry.legacy.extend(legacy.cloned());
             for name in &likely_crates {
-                bump(&mut entry.2, name);
+                bump(&mut entry.crates, name);
             }
         };
         let pages: Vec<IndexPage> = result
@@ -133,7 +140,7 @@ pub fn build(options: &RunOptions, results: &[CaseResult], baseline: &Baseline) 
                 if page.status.is_failure()
                     && let Some(signature) = &page.signature
                 {
-                    add_to_cluster(signature);
+                    add_to_cluster(signature, page.legacy_signature.as_ref());
                 }
                 let mismatch = page
                     .output
@@ -164,7 +171,7 @@ pub fn build(options: &RunOptions, results: &[CaseResult], baseline: &Baseline) 
             && result.pages.iter().all(|page| !page.status.is_failure())
             && let Some(signature) = &result.signature
         {
-            add_to_cluster(signature);
+            add_to_cluster(signature, result.legacy_signature.as_ref());
         }
         cases.push(IndexCase {
             id: result.case.id.clone(),
@@ -182,14 +189,15 @@ pub fn build(options: &RunOptions, results: &[CaseResult], baseline: &Baseline) 
     }
     let mut clusters: Vec<Cluster> = clusters
         .into_iter()
-        .map(|(signature, (count, cases, crates))| {
-            let mut likely_crates: Vec<(String, usize)> = crates.into_iter().collect();
+        .map(|(signature, accumulator)| {
+            let mut likely_crates: Vec<(String, usize)> = accumulator.crates.into_iter().collect();
             likely_crates.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
             Cluster {
                 signature,
-                count,
-                cases: cases.into_iter().collect(),
+                count: accumulator.count,
+                cases: accumulator.cases.into_iter().collect(),
                 likely_crates,
+                legacy_signatures: accumulator.legacy.into_iter().collect(),
             }
         })
         .collect();
@@ -211,11 +219,21 @@ pub fn build(options: &RunOptions, results: &[CaseResult], baseline: &Baseline) 
         ),
         scale: options.scale,
         tolerance: options.tolerance,
+        filtered: options.filtered(),
         totals,
         page_totals,
         clusters,
         cases,
     }
+}
+
+/// Failures collected for one signature while building the index.
+#[derive(Default)]
+struct ClusterAccumulator {
+    count: usize,
+    cases: BTreeSet<String>,
+    crates: BTreeMap<String, usize>,
+    legacy: BTreeSet<String>,
 }
 
 /// Returns true when a case gets a `summary.md` bundle.
@@ -334,6 +352,18 @@ fn triage(index: &Index) -> Result<String> {
             writeln!(text, "- {line}")?;
         }
         writeln!(text)?;
+    }
+    let substituted = index
+        .page_totals
+        .get(Status::FontSubstitution.as_str())
+        .copied()
+        .unwrap_or(0);
+    if substituted > 0 {
+        writeln!(
+            text,
+            "{substituted} pages differ only in text drawn with non-embedded fonts, which renderers substitute differently. \
+             They are reported as `font_substitution`, count as expected, and are not filed as issues.\n"
+        )?;
     }
     writeln!(
         text,

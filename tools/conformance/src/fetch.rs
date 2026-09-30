@@ -6,7 +6,7 @@ use crate::corpus::{self, CorpusKind};
 use anyhow::{Context, Result, bail};
 use md5::{Digest as _, Md5};
 use sha2::Sha256;
-use std::{fs, path::Path, process::Command};
+use std::{collections::BTreeSet, fs, path::Path, process::Command};
 
 /// Describes the PDFium library in reports: its file name and a SHA-256 prefix, so runs and
 /// baselines recorded with different builds can be told apart.
@@ -28,7 +28,7 @@ pub fn run(kind: CorpusKind, root: Option<&Path>, links: bool) -> Result<()> {
     let root = root.map_or_else(|| corpus::default_root(kind), Path::to_owned);
     checkout(kind, &root, explicit)?;
     if links && kind == CorpusKind::Pdfjs {
-        fetch_links(&root)?;
+        fetch_links(&root, None)?;
     } else if kind == CorpusKind::Pdfjs {
         println!(
             "Linked pdf.js files are not downloaded; add --links to fetch them from their original URLs."
@@ -125,15 +125,70 @@ fn checkout(kind: CorpusKind, root: &Path, explicit: bool) -> Result<()> {
     Ok(())
 }
 
+/// Checks out only `paths` of a corpus at `revision` into `root`, fetching file contents on
+/// demand, so reproducing a few cases does not download the whole corpus. Calling it again
+/// adds paths to the checkout.
+pub fn sparse_checkout(
+    kind: CorpusKind,
+    root: &Path,
+    revision: &str,
+    paths: &[String],
+) -> Result<()> {
+    let (url, _) = kind.source();
+    let git = |args: &[&str]| run_command(Command::new("git").arg("-C").arg(root).args(args));
+    if !root.join(".git").exists() {
+        fs::create_dir_all(root)?;
+        git(&["init", "-q"])?;
+        git(&["remote", "add", "origin", url])?;
+        git(&["config", "remote.origin.promisor", "true"])?;
+        git(&["config", "remote.origin.partialclonefilter", "blob:none"])?;
+        git(&["sparse-checkout", "set", "--no-cone", "/.gitignore"])?;
+    }
+    if revision_of(root).as_deref() != Some(revision) {
+        git(&[
+            "fetch",
+            "-q",
+            "--depth",
+            "1",
+            "--filter=blob:none",
+            "origin",
+            revision,
+        ])?;
+        git(&["checkout", "-q", "FETCH_HEAD"])?;
+    }
+    let mut args = vec!["sparse-checkout", "add"];
+    let patterns: Vec<String> = paths
+        .iter()
+        .map(|path| {
+            // Sparse patterns use gitignore syntax; escape its special characters.
+            let escaped: String = path
+                .chars()
+                .flat_map(|c| {
+                    let escape = matches!(c, '*' | '?' | '[' | ']' | '!' | '#' | '\\' | ' ');
+                    escape.then_some('\\').into_iter().chain(std::iter::once(c))
+                })
+                .collect();
+            format!("/{escaped}")
+        })
+        .collect();
+    args.extend(patterns.iter().map(String::as_str));
+    git(&args)
+}
+
+fn revision_of(root: &Path) -> Option<String> {
+    git_output(root, &["rev-parse", "HEAD"]).ok()
+}
+
 /// Parallel downloads of pdf.js linked files.
 const LINK_WORKERS: usize = 8;
 
 /// Downloads pdf.js `.link` files, keeping only downloads whose MD5 matches the manifest.
-fn fetch_links(root: &Path) -> Result<()> {
+/// `only` limits the downloads to these test ids.
+pub fn fetch_links(root: &Path, only: Option<&BTreeSet<String>>) -> Result<()> {
     let mut pending = Vec::new();
     let (mut present, mut failed) = (0usize, Vec::new());
     for entry in crate::corpus_pdfjs::manifest(root)? {
-        if !entry.link {
+        if !entry.link || only.is_some_and(|ids| !ids.contains(&entry.id)) {
             continue;
         }
         let pdf = root.join("test").join(&entry.file);
@@ -191,7 +246,8 @@ fn fetch_links(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn download(url: &str, destination: &Path) -> Result<()> {
+/// Downloads `url` to `destination` with curl.
+pub fn download(url: &str, destination: &Path) -> Result<()> {
     run_command(
         Command::new("curl")
             .args([

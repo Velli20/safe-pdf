@@ -39,7 +39,8 @@ fn scan_file(root: &Path, path: &Path, templates: &mut Vec<Template>) {
         .strip_prefix(root)
         .unwrap_or(path)
         .display()
-        .to_string();
+        .to_string()
+        .replace('\\', "/");
     let lines: Vec<&str> = source.lines().collect();
     for (number, line) in lines.iter().enumerate() {
         let Some(literal) = line
@@ -111,8 +112,9 @@ fn matches(template: &Template, message: &str) -> bool {
     true
 }
 
-/// Returns `path:line (Variant)` of the templates that best explain `message`.
-pub fn locate(message: &str) -> Vec<String> {
+/// Returns the templates that best explain `message`, most specific first. Ties are ordered
+/// by location so results do not depend on directory walk order.
+fn best(message: &str) -> Vec<&'static Template> {
     let mut found: Vec<(usize, &Template)> = templates()
         .iter()
         .filter(|template| matches(template, message))
@@ -122,9 +124,37 @@ pub fn locate(message: &str) -> Vec<String> {
         return Vec::new();
     };
     found.retain(|(score, _)| *score == best);
+    let mut found: Vec<&Template> = found.into_iter().map(|(_, template)| template).collect();
+    found.sort_by(|a, b| a.location.cmp(&b.location));
     found
+}
+
+/// Returns `path:line (Variant)` of the templates that best explain `message`.
+pub fn locate(message: &str) -> Vec<String> {
+    best(message)
         .into_iter()
         .take(3)
-        .map(|(_, template)| format!("{} ({})", template.location, template.variant))
+        .map(|template| format!("{} ({})", template.location, template.variant))
         .collect()
+}
+
+/// Returns the crate and enum variant whose template best explains `message`, for example
+/// `("pdf-canvas", "PathRequired")`. Line numbers are left out so the result stays stable
+/// across unrelated edits.
+pub fn origin(message: &str) -> Option<(String, String)> {
+    let template = best(message).into_iter().next()?;
+    let krate = template
+        .location
+        .strip_prefix("crates/")?
+        .split('/')
+        .next()?
+        .to_owned();
+    (!template.variant.is_empty()).then(|| (krate, template.variant.clone()))
+}
+
+/// Returns `path` and `line` of the template that best explains `message`.
+pub fn location(message: &str) -> Option<(String, usize)> {
+    let template = best(message).into_iter().next()?;
+    let (path, line) = template.location.rsplit_once(':')?;
+    Some((path.to_owned(), line.parse().ok()?))
 }

@@ -49,17 +49,76 @@ when its revision differs from the pinned one.
 ## Commands
 
 ```sh
-cargo conformance run --corpus pdfjs --filter issue1       # or --case <id> [--page N]
+cargo conformance run --corpus pdfjs --filter issue1       # or --case <id> [--page N]; --case repeats
 cargo conformance show --corpus pdfjs <case-id>            # print a case summary
 cargo conformance accept --corpus pdfjs                    # record the last run as the baseline
+cargo conformance repro <issue key or case id>             # rerun an issue's cases, no setup needed
+cargo conformance verify <issue key>                       # exits 0 once no case fails that way
 ```
+
+## Fixing an issue
+
+Every conformance issue carries a key such as `conf2-98ff16df22ee`.
+
+```sh
+cargo conformance repro conf2-98ff16df22ee
+```
+
+`repro` reads the published report on GitHub Pages, checks out only the PDFs of that
+issue at the corpus revision the report used, downloads the PDFium images of their failing
+pages, and reruns those cases against the images. It needs neither a corpus checkout nor a
+PDFium build, so it also works in cloud sessions. Results land in
+`target/conformance/<corpus>/` as for `run`. `verify` does the same and exits non-zero while
+any case still fails with the issue's signature, which makes it the done check for a fix.
+The repository is read from `origin`; pass `--repo owner/name` otherwise.
+
+The skill in `.claude/skills/fix-conformance-issue/SKILL.md` describes the whole loop for
+agents.
+
+## Reading the images
+
+- `pN-compare.png`: reference | Safe-PDF | diff. Diff colors: red = ink missing in Safe-PDF,
+  blue = extra ink in Safe-PDF, magenta = hue differs, orange = same hue but different
+  intensity (shape), yellow = anti-aliasing or 1 px displacement (tolerated), pale blue
+  hatching = annotation area (not compared), gray = matching.
+- Region classes: `missing_ink` / `extra_ink` = one renderer drew nothing there;
+  `color_shift` = same shapes, different color; `reshaped` = both drew but glyph shapes or
+  geometry differ; `offset` = same content shifted by a few pixels.
+- `pN-regionK.png`: reference | Safe-PDF crops of region K, enlarged.
+- Region pixels are `[x0, y0, x1, y1]` from the top-left. Page space is PDF user space
+  `[left, bottom, right, top]`.
+- Draw `#n` is the n-th Safe-PDF backend call on the page. Bounds are device pixels after
+  clipping. Colors print as `#RRGGBB`.
+- `pN-content.txt` lists the page's content stream operators. `report.json` has full
+  backtraces and worker stderr.
+
+## Statuses and signatures
+
+Each failing page (or document) gets a signature, and failures sharing a signature form a
+cluster, filed as one issue.
+
+- **Errors** (`read_error`, `render_error`): the innermost error message, with numbers and
+  quoted resource names such as `'F0'` normalized, plus the crate and enum variant whose
+  `#[error]` template produced it, for example
+  `render_error: … @ pdf-canvas::PathRequired`.
+- **Mismatches**: the class of the most telling differing region and the paint of the
+  Safe-PDF draw call there (shading type, tiling pattern, image format, blend mode, soft
+  mask), for example `mismatch: extra_ink / fill (tiling pattern)`.
+- **Crashes and timeouts**: the panic location or the time limit, with the worker stage.
+  A stage of the harness itself (`inventory`, `compare`, `regions`, `write`) is labelled
+  `harness` rather than `crash`.
+- **`font_substitution`**: every difference on the page is text, in a document that uses
+  non-embedded fonts. Renderers substitute such fonts differently, so these pages are
+  expected to differ. They are counted in TRIAGE.md and the viewer but are not failures and
+  are not filed.
 
 ## Output
 
 `target/conformance/<corpus>/`:
 
 - `index.html`: viewer with side-by-side, swipe, onion-skin and diff views,
-  and filters by status, signature and baseline change (`j`/`k`, `1`–`4`)
+  and filters by status, signature and baseline change (`j`/`k`, `1`–`4`).
+  `index.html#case=<id>&page=<n>` opens one page; the address follows the selection.
 - `TRIAGE.md`: failures clustered by signature, largest first
 - `index.json`, `results.json`: machine-readable run data
 - `cases/<id>/summary.md`: the entry point for fixing one case; alongside it
@@ -70,45 +129,56 @@ recorded with its stage and stderr, and it does not stop the run.
 
 ## CI
 
-`.github/workflows/conformance.yml` runs both corpora on Linux against the
-PDFium library (`--reference pdfium`), so the pdfium corpus is compared without
-annotations and includes PDFs that have no goldens.
+`.github/workflows/conformance.yml` runs both corpora on Linux against the PDFium library
+(`--reference pdfium`), so the pdfium corpus is compared without annotations and includes
+PDFs that have no goldens.
 
-- **Pull request merged to `main`, or a manual run:** it compares against the
-  baselines, uploads the `conformance-<corpus>` artifacts (viewer, `TRIAGE.md`,
-  bundles) and writes a job summary. It then runs `cargo conformance issues`.
-  Regressions show up as a warning and in issues; they never fail the run.
+- **Pull request merged to `main`, or a manual run on `main`:** each corpus is compared
+  against its baseline and uploaded as the `conformance-<corpus>` artifact (viewer,
+  `TRIAGE.md`, `results.json`, bundles) with a job summary. The `issues` job then reports
+  both corpora together with `cargo conformance issues --corpus pdfium --corpus pdfjs`.
+- **Pull requests:** once a pull request is ready for review, both corpora run in full and
+  the `pr-report` job comments what the change fixes (open issues that no longer
+  reproduce), regressions against the baselines, and new failure clusters. It is a report
+  only and never fails the pull request. Draft pull requests are skipped.
+- **Gating later:** add `pull_request` to `FAIL_ON_EVENTS` in the workflow to fail pull
+  requests on regressions against the baselines.
 - **Published viewer:** runs on `main` deploy the viewers to GitHub Pages at
-  <https://velli20.github.io/safe-pdf/conformance/>, next to the web-canvas
-  demo. Pages holds one site, so the `publish` job and `ci.yml`'s `deploy` job
-  each fetch the other half from its newest `pages-conformance` /
-  `pages-web-canvas` artifact (`.github/scripts/assemble-pages.sh`).
-- **Gating pull requests:** uncomment the `pull_request` trigger in the
-  workflow. Pull request runs then fail on regressions against the baselines,
-  because `FAIL_ON_EVENTS` lists `pull_request`, and they file no issues.
-- **Issue filing, on merged and manual runs:**
-  - One issue is filed per failure cluster not reported yet, at most 15 new
-    issues per corpus per run; the rest follow in later runs. Baseline
-    regressions and new crashes come first.
-  - Issues are labelled `conformance`, `conformance:<corpus>`, plus `crash`
-    and/or `regression` where they apply.
-  - Each issue carries a `Conformance key` derived from the corpus and the
-    cluster signature. That key is how later runs find the issue again:
-    - **Open:** later runs update it when the cluster grows or shrinks.
-    - **Closed as completed:** it's reopened if the failure comes back.
-    - **Closed as not planned:** it's never touched again.
-  - Signatures come from the harness's classification. Changing how failures
-    are classified can change keys, and so file new issues.
-  - Preview locally with `cargo conformance issues --corpus pdfium --repo
-    owner/name --dry-run`. Bodies are written to `target/conformance/<corpus>/issues/`.
-- **PDFium on CI:** both legs download the pinned prebuilt
+  <https://velli20.github.io/safe-pdf/conformance/>, next to the web-canvas demo. Issues
+  link straight into it (`#case=<id>&page=<n>`) and embed its images. Pages holds one site,
+  so the `publish` job and `ci.yml`'s `deploy` job each fetch the other half from its newest
+  `pages-conformance` / `pages-web-canvas` artifact (`.github/scripts/assemble-pages.sh`).
+- **Issues:**
+  - One issue per cause across both corpora, labelled `conformance`, `conformance:<corpus>`,
+    `area:<crate>` when the error's crate is known, and `crash`, `harness` or `regression`
+    where they apply. At most 15 new issues per run; the rest follow in later runs, worst
+    status first.
+  - Each body opens with an alert and a table of facts, links the suspect source line (GitHub
+    shows it as a snippet), shows one case's images from Pages, lists the cases with viewer,
+    summary and PDF links, gives the `repro` and `verify` commands, and ends with a JSON
+    block for agents.
+  - A hidden `conformance-state` comment holds the issue's key and, per corpus, its cluster
+    size and how many full runs in a row it was absent:
+    - **Open:** the body is refreshed silently. A comment is posted only when new documents
+      join the cluster or it shrinks by a quarter or more.
+    - **Absent from two full runs in a row:** closed as completed.
+    - **Closed as completed:** reopened if the failure comes back.
+    - **Closed as not planned:** never touched again.
+  - Issues filed under the older, per-corpus keys are adopted by the cause that now covers
+    them, and further older issues merged into the same cause are closed as duplicates.
+    Older issues for text differences with non-embedded fonts are closed as not planned.
+  - Runs limited with `--filter`, `--case` or `--page` never close issues.
+  - Preview locally with `cargo conformance issues --corpus pdfium --corpus pdfjs --repo
+    owner/name --dry-run`. Bodies are written to `target/conformance/issues/`.
+- **PDFium on CI:** the conformance legs download the pinned prebuilt
   `pdfium-linux-x64` from bblanchon/pdfium-binaries (`chromium/7881`, verified
   by SHA-256). Prebuilt binaries are used only in CI; local tooling never
   downloads them.
-- **Bootstrapping baselines:** run the workflow manually with `accept`
-  checked, download the `conformance-baseline-<corpus>` artifacts, and commit
-  them as `tools/conformance/baselines/<corpus>.json`. Until a baseline exists,
-  regressions are reported but don't fail the run.
+- **Bootstrapping baselines:** run the workflow manually with `accept` checked, download
+  the `conformance-baseline-<corpus>` artifacts, and commit them as
+  `tools/conformance/baselines/<corpus>.json`. Until a baseline exists, regressions are
+  reported but nothing is labelled `regression`. Manual runs on other branches file no
+  issues, so baselines can be recorded from a branch.
 
 ## Baselines
 

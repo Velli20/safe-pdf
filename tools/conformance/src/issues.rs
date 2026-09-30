@@ -1,34 +1,43 @@
-//! Files one GitHub issue per failure cluster, skipping clusters already reported.
+//! Keeps one GitHub issue per failure cause, across corpora.
 //!
-//! Each issue carries a key derived from the corpus and cluster signature. Existing
-//! issues are found through the issue list API (not search, which indexes with a delay):
-//! - no issue: create one (up to `max_new` per run, regressions first);
-//! - open issue: refresh its body and comment when the cluster size changed;
+//! Failures are grouped by signature over every corpus run passed in, and each group is
+//! matched to an issue through the key in the issue's hidden state:
+//! - no issue: create one (up to `max_new` per run, regressions and crashes first);
+//! - an issue filed under an older key of the same failures: adopt it, and close further
+//!   older issues it merges as duplicates;
+//! - open issue: refresh it silently, commenting only when new documents join the cluster
+//!   or it shrinks by a quarter or more;
 //! - closed as completed: reopen, since the failure is back;
 //! - closed as not planned: leave it alone.
+//!
+//! Open issues whose cluster is absent from two full runs in a row are closed as completed.
 
 use crate::{
     baseline::Delta,
     corpus::{self, CorpusKind},
-    model::Status,
+    github::{self, Issue},
+    issue_body::{self, BodyContext},
+    issue_state::{self, CorpusState, IssueState},
+    model::{CaseResult, Status},
     report_index::{Cluster, Index},
-    run,
 };
-use anyhow::{Context, Result, anyhow, bail};
-use serde::Deserialize;
-use sha2::{Digest, Sha256};
-use std::{fmt::Write as _, fs, path::Path, process::Command};
+use anyhow::{Context, Result, bail};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::PathBuf,
+};
 
-/// GitHub rejects issue bodies above 65,536 characters.
-const BODY_LIMIT: usize = 60_000;
-/// Cases listed per issue.
-const CASE_LIMIT: usize = 15;
 const LABEL: &str = "conformance";
+/// Relative shrink of a cluster that is worth a comment.
+const SHRINK_NOTICE: f64 = 0.25;
+/// Consecutive full runs without a cluster before its issue is closed.
+const CLOSE_AFTER_MISSING: u32 = 2;
 
 /// Settings of an issue run.
 pub struct IssueOptions<'a> {
-    /// Corpus whose last run is reported.
-    pub kind: CorpusKind,
+    /// Corpora whose last runs are reported together.
+    pub kinds: &'a [CorpusKind],
     /// `owner/name` of the repository.
     pub repo: &'a str,
     /// Issues created at most per run.
@@ -37,446 +46,827 @@ pub struct IssueOptions<'a> {
     pub dry_run: bool,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Issue {
-    number: u64,
-    state: String,
-    #[serde(default)]
-    state_reason: Option<String>,
-    body: String,
+/// The last run of one corpus.
+pub struct CorpusRun {
+    /// Corpus.
+    pub kind: CorpusKind,
+    /// Run index.
+    pub index: Index,
+    /// Full case results by id; empty when `results.json` is not available.
+    pub results: BTreeMap<String, CaseResult>,
 }
 
-/// Files issues for the clusters of the corpus's last run.
+impl CorpusRun {
+    /// Loads the last run of a corpus from its output directory.
+    pub fn load(kind: CorpusKind, with_results: bool) -> Result<Self> {
+        let out = corpus::output_dir(kind);
+        let index: Index = serde_json::from_slice(
+            &fs::read(out.join("index.json"))
+                .with_context(|| format!("no index.json for {}; run it first", kind.as_str()))?,
+        )?;
+        let results = match fs::read(out.join("results.json")) {
+            Ok(bytes) if with_results => serde_json::from_slice::<Vec<CaseResult>>(&bytes)?
+                .into_iter()
+                .map(|result| (result.case.id.clone(), result))
+                .collect(),
+            _ => BTreeMap::new(),
+        };
+        Ok(Self {
+            kind,
+            index,
+            results,
+        })
+    }
+}
+
+/// One corpus's share of a group.
+pub struct Part<'a> {
+    /// The corpus run.
+    pub run: &'a CorpusRun,
+    /// The run's cluster with the group's signature.
+    pub cluster: &'a Cluster,
+}
+
+/// Failures sharing a signature across corpora; one issue each.
+pub struct Group<'a> {
+    /// Shared signature.
+    pub signature: String,
+    /// Issue key.
+    pub key: String,
+    /// Clusters per corpus, in the order the corpora were given.
+    pub parts: Vec<Part<'a>>,
+}
+
+impl Group<'_> {
+    /// Returns the status named by the signature.
+    pub fn status(&self) -> Status {
+        [
+            Status::Mismatch,
+            Status::RenderError,
+            Status::ReadError,
+            Status::Crash,
+            Status::Timeout,
+        ]
+        .into_iter()
+        .find(|status| {
+            self.signature
+                .strip_prefix(status.as_str())
+                .is_some_and(|rest| rest.starts_with(':'))
+        })
+        .unwrap_or(Status::Mismatch)
+    }
+
+    /// Failing pages (or documents without pages) across corpora.
+    pub fn failures(&self) -> usize {
+        self.parts
+            .iter()
+            .fold(0, |sum, part| sum.saturating_add(part.cluster.count))
+    }
+
+    /// Documents across corpora.
+    pub fn documents(&self) -> usize {
+        self.parts
+            .iter()
+            .fold(0, |sum, part| sum.saturating_add(part.cluster.cases.len()))
+    }
+
+    /// Returns the deltas of every failure in the group against the baseline.
+    pub fn deltas(&self) -> Vec<Delta> {
+        let mut deltas = Vec::new();
+        for part in &self.parts {
+            for case in part
+                .run
+                .index
+                .cases
+                .iter()
+                .filter(|case| part.cluster.cases.contains(&case.id))
+            {
+                if case.pages.is_empty() && case.signature.as_ref() == Some(&self.signature) {
+                    deltas.push(case.delta);
+                }
+                deltas.extend(
+                    case.pages
+                        .iter()
+                        .filter(|page| page.signature.as_ref() == Some(&self.signature))
+                        .map(|page| page.delta),
+                );
+            }
+        }
+        deltas
+    }
+
+    /// Returns true when a failure is worse than the recorded baseline.
+    pub fn regressed(&self) -> bool {
+        self.deltas().contains(&Delta::Regressed)
+    }
+
+    /// Keys of issues filed for the same failures before root-cause signatures.
+    pub fn legacy_keys(&self) -> BTreeSet<String> {
+        self.parts
+            .iter()
+            .flat_map(|part| {
+                part.cluster
+                    .legacy_signatures
+                    .iter()
+                    .map(|signature| issue_state::legacy_key(part.run.kind.as_str(), signature))
+            })
+            .collect()
+    }
+
+    /// Returns the issue state describing this run's clusters.
+    pub fn corpus_states(&self) -> BTreeMap<String, CorpusState> {
+        self.parts
+            .iter()
+            .map(|part| {
+                (
+                    part.run.kind.as_str().to_owned(),
+                    CorpusState {
+                        failures: part.cluster.count,
+                        documents: part.cluster.cases.len(),
+                        missing: 0,
+                    },
+                )
+            })
+            .collect()
+    }
+}
+
+/// Groups the clusters of several corpus runs by key: worst status first, regressions
+/// first within a status, then largest.
+pub fn groups(runs: &[CorpusRun]) -> Vec<Group<'_>> {
+    let mut groups: BTreeMap<String, Group<'_>> = BTreeMap::new();
+    for run in runs {
+        for cluster in &run.index.clusters {
+            let key = issue_state::key(&cluster.signature);
+            groups
+                .entry(key.clone())
+                .or_insert_with(|| Group {
+                    signature: cluster.signature.clone(),
+                    key,
+                    parts: Vec::new(),
+                })
+                .parts
+                .push(Part { run, cluster });
+        }
+    }
+    let mut groups: Vec<Group<'_>> = groups.into_values().collect();
+    groups.sort_by_cached_key(|group| {
+        (
+            std::cmp::Reverse(group.status().severity()),
+            !group.regressed(),
+            std::cmp::Reverse(group.failures()),
+            group.signature.clone(),
+        )
+    });
+    groups
+}
+
+/// What happened to issues in one run.
+#[derive(Default)]
+struct Tally {
+    created: usize,
+    adopted: usize,
+    updated: usize,
+    reopened: usize,
+    closed: usize,
+    deferred: usize,
+    failed: usize,
+}
+
+/// Files and updates issues for the last runs of the given corpora.
 pub fn run(options: &IssueOptions<'_>) -> Result<()> {
-    let out = corpus::output_dir(options.kind);
-    let index: Index = serde_json::from_slice(
-        &fs::read(out.join("index.json")).context("no index.json; run the corpus first")?,
-    )?;
+    if options.kinds.is_empty() {
+        bail!("pass at least one --corpus");
+    }
+    let runs = options
+        .kinds
+        .iter()
+        .map(|kind| CorpusRun::load(*kind, true))
+        .collect::<Result<Vec<_>>>()?;
+    let partial = runs.iter().any(|run| run.index.filtered);
+    if partial {
+        println!(
+            "Some runs checked only part of their corpus; no issue is closed or counted as missing."
+        );
+    }
     let existing = if options.dry_run {
-        existing_issues(options.repo).unwrap_or_else(|error| {
+        github::issues(options.repo, LABEL).unwrap_or_else(|error| {
             println!("(dry run) cannot list issues, treating every cluster as new: {error:#}");
             Vec::new()
         })
     } else {
-        ensure_labels(options)?;
-        existing_issues(options.repo)?
+        github::issues(options.repo, LABEL)?
     };
-    let run_link = run_link();
-    let mut clusters: Vec<&Cluster> = index.clusters.iter().collect();
-    clusters.sort_by_key(|cluster| {
-        (
-            !regressed(&index, cluster),
-            std::cmp::Reverse(cluster.count),
-        )
-    });
-    let (mut created, mut updated, mut reopened, mut skipped, mut failed) =
-        (0usize, 0usize, 0usize, 0usize, 0usize);
-    for cluster in clusters {
-        let key = key(options.kind, &cluster.signature);
-        let body = body(
-            options.kind,
-            &index,
-            cluster,
-            &key,
-            &out,
-            run_link.as_deref(),
-        )?;
-        let issue = existing.iter().find(|issue| issue.body.contains(&key));
-        let result = match issue {
-            None if created >= options.max_new => {
-                skipped = skipped.saturating_add(1);
+    let mut sync = Sync {
+        options,
+        context: BodyContext::from_env(options.repo),
+        existing: existing
+            .into_iter()
+            .filter_map(|issue| IssueState::parse(&issue.title, &issue.body).map(|s| (issue, s)))
+            .collect(),
+        complete: runs
+            .iter()
+            .filter(|run| !run.index.filtered)
+            .map(|run| run.kind.as_str().to_owned())
+            .collect(),
+        claimed: BTreeSet::new(),
+        labels: BTreeSet::new(),
+        tally: Tally::default(),
+    };
+    for group in groups(&runs) {
+        if let Err(error) = sync.group(&group) {
+            sync.tally.failed = sync.tally.failed.saturating_add(1);
+            println!("failed for `{}`: {error:#}", group.signature);
+        }
+    }
+    if !partial {
+        sync.absent(&runs);
+    }
+    let tally = &sync.tally;
+    println!(
+        "{} created, {} adopted from older keys, {} updated, {} reopened, {} closed, {} deferred by --max-new, {} failed",
+        tally.created,
+        tally.adopted,
+        tally.updated,
+        tally.reopened,
+        tally.closed,
+        tally.deferred,
+        tally.failed
+    );
+    if tally.failed > 0 {
+        bail!("{} issue operations failed", tally.failed);
+    }
+    Ok(())
+}
+
+struct Sync<'a> {
+    options: &'a IssueOptions<'a>,
+    context: BodyContext,
+    existing: Vec<(Issue, IssueState)>,
+    /// Corpora with a full run here, whose absent clusters count as missing.
+    complete: BTreeSet<String>,
+    /// Issue numbers matched to a group in this run.
+    claimed: BTreeSet<u64>,
+    /// Labels known to exist.
+    labels: BTreeSet<String>,
+    tally: Tally,
+}
+
+impl Sync<'_> {
+    fn group(&mut self, group: &Group<'_>) -> Result<()> {
+        if let Some((issue, state)) = self
+            .existing
+            .iter()
+            .find(|(_, state)| state.key == group.key)
+            .cloned()
+        {
+            self.claimed.insert(issue.number);
+            return self.refresh(group, &issue, &state);
+        }
+        let legacy = group.legacy_keys();
+        let mut matches: Vec<(Issue, IssueState)> = self
+            .existing
+            .iter()
+            .filter(|(issue, state)| {
+                state.is_legacy()
+                    && legacy.contains(&state.key)
+                    && !self.claimed.contains(&issue.number)
+                    && (group.signature.contains(NON_EMBEDDED) || !is_font_issue(issue))
+            })
+            .cloned()
+            .collect();
+        matches.sort_by_key(|(issue, _)| (!issue.is_open(), issue.number));
+        let Some((target, _)) = matches.first().cloned() else {
+            return self.create(group);
+        };
+        for (issue, _) in &matches {
+            self.claimed.insert(issue.number);
+        }
+        if matches.iter().all(|(issue, _)| issue.is_not_planned()) {
+            return Ok(());
+        }
+        let target = matches
+            .iter()
+            .map(|(issue, _)| issue)
+            .find(|issue| !issue.is_not_planned())
+            .cloned()
+            .unwrap_or(target);
+        self.adopt(group, &target)?;
+        for (issue, _) in matches
+            .iter()
+            .filter(|(issue, _)| issue.number != target.number && issue.is_open())
+        {
+            self.close(
+                issue,
+                "not planned",
+                &format!(
+                    "Duplicate of #{}: failures are now grouped by cause, and #{} covers this one{}.",
+                    target.number,
+                    target.number,
+                    self.context.in_run()
+                ),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn create(&mut self, group: &Group<'_>) -> Result<()> {
+        if self.tally.created >= self.options.max_new {
+            self.tally.deferred = self.tally.deferred.saturating_add(1);
+            return Ok(());
+        }
+        self.tally.created = self.tally.created.saturating_add(1);
+        let state = IssueState {
+            key: group.key.clone(),
+            corpora: group.corpus_states(),
+        };
+        let body = issue_body::render(group, &state, &self.context)?;
+        let title = issue_body::title(group);
+        let labels = issue_body::labels(group);
+        let file = self.body_file(&group.key, &body)?;
+        if self.options.dry_run {
+            println!(
+                "(dry run) create `{title}` [{}] body {} ({} chars)",
+                labels.join(", "),
+                file.display(),
+                body.len()
+            );
+            return Ok(());
+        }
+        self.ensure_labels(&labels)?;
+        let file = file.display().to_string();
+        let mut args = vec![
+            "issue",
+            "create",
+            "--repo",
+            self.options.repo,
+            "--title",
+            &title,
+            "--body-file",
+            &file,
+        ];
+        for label in &labels {
+            args.extend(["--label", label.as_str()]);
+        }
+        let url = github::gh(&args)?;
+        println!("created {} for `{}`", url.trim(), group.signature);
+        Ok(())
+    }
+
+    /// Moves an issue filed under an older key to this group, silently.
+    fn adopt(&mut self, group: &Group<'_>, issue: &Issue) -> Result<()> {
+        self.tally.adopted = self.tally.adopted.saturating_add(1);
+        let state = IssueState {
+            key: group.key.clone(),
+            corpora: group.corpus_states(),
+        };
+        self.write(group, issue, &state)?;
+        if !issue.is_open() {
+            self.reopen(issue)?;
+        }
+        Ok(())
+    }
+
+    fn refresh(&mut self, group: &Group<'_>, issue: &Issue, old: &IssueState) -> Result<()> {
+        if issue.is_not_planned() {
+            return Ok(());
+        }
+        let mut state = old.clone();
+        for (corpus, entry) in &mut state.corpora {
+            if self.complete.contains(corpus) {
+                entry.missing = entry.missing.saturating_add(1);
+            }
+        }
+        state.corpora.extend(group.corpus_states());
+        // A corpus that stopped showing the failure is dropped; the others keep it open.
+        state
+            .corpora
+            .retain(|_, entry| entry.missing < CLOSE_AFTER_MISSING);
+        if !issue.is_open() {
+            self.tally.reopened = self.tally.reopened.saturating_add(1);
+            self.write(group, issue, &state)?;
+            return self.reopen(issue);
+        }
+        if state == *old {
+            return Ok(());
+        }
+        self.tally.updated = self.tally.updated.saturating_add(1);
+        self.write(group, issue, &state)?;
+        if let Some(note) = change_note(old, &state) {
+            self.comment(issue, &format!("{note}{}.", self.context.in_run()))?;
+        }
+        Ok(())
+    }
+
+    /// Counts open issues whose cluster is absent from this run, closing those absent from
+    /// enough consecutive full runs.
+    fn absent(&mut self, runs: &[CorpusRun]) {
+        let corpora: BTreeSet<&str> = runs.iter().map(|run| run.kind.as_str()).collect();
+        let absent: Vec<(Issue, IssueState)> = self
+            .existing
+            .iter()
+            .filter(|(issue, state)| {
+                issue.is_open()
+                    && !self.claimed.contains(&issue.number)
+                    && state
+                        .corpora
+                        .keys()
+                        .any(|corpus| corpora.contains(corpus.as_str()))
+            })
+            .cloned()
+            .collect();
+        for (issue, old) in absent {
+            if let Err(error) = self.absent_issue(&issue, &old, &corpora) {
+                self.tally.failed = self.tally.failed.saturating_add(1);
+                println!("failed for #{}: {error:#}", issue.number);
+            }
+        }
+    }
+
+    fn absent_issue(
+        &mut self,
+        issue: &Issue,
+        old: &IssueState,
+        corpora: &BTreeSet<&str>,
+    ) -> Result<()> {
+        if old.is_legacy() && is_font_issue(issue) {
+            return self.close(
+                issue,
+                "not planned",
+                &format!(
+                    "Text-only differences in documents with non-embedded fonts are now reported as \
+                     `font_substitution` and are not filed, because renderers substitute such fonts \
+                     differently. Pages where other content differs too are filed under their own \
+                     signatures{}.",
+                    self.context.in_run()
+                ),
+            );
+        }
+        let mut state = old.clone();
+        for (corpus, entry) in &mut state.corpora {
+            if corpora.contains(corpus.as_str()) {
+                entry.missing = entry.missing.saturating_add(1);
+            }
+        }
+        if state
+            .corpora
+            .values()
+            .all(|entry| entry.missing >= CLOSE_AFTER_MISSING)
+        {
+            return self.close(
+                issue,
+                "completed",
+                &format!(
+                    "No longer seen in {CLOSE_AFTER_MISSING} full runs in a row{}, so it looks fixed. \
+                     The workflow reopens this issue if the failure comes back.",
+                    self.context.in_run()
+                ),
+            );
+        }
+        let body = state.apply(&issue.body)?;
+        if self.options.dry_run {
+            println!("(dry run) #{}: absent from this run", issue.number);
+            return Ok(());
+        }
+        self.edit_body(issue.number, &body)
+    }
+
+    fn write(&mut self, group: &Group<'_>, issue: &Issue, state: &IssueState) -> Result<()> {
+        let body = issue_body::render(group, state, &self.context)?;
+        let title = issue_body::title(group);
+        let labels = issue_body::labels(group);
+        let file = self.body_file(&issue.number.to_string(), &body)?;
+        if self.options.dry_run {
+            println!(
+                "(dry run) update #{} as `{title}` [{}] body {}",
+                issue.number,
+                labels.join(", "),
+                file.display()
+            );
+            return Ok(());
+        }
+        self.ensure_labels(&labels)?;
+        let number = issue.number.to_string();
+        let file = file.display().to_string();
+        let mut args = vec![
+            "issue",
+            "edit",
+            &number,
+            "--repo",
+            self.options.repo,
+            "--title",
+            &title,
+            "--body-file",
+            &file,
+        ];
+        for label in &labels {
+            args.extend(["--add-label", label.as_str()]);
+        }
+        github::gh(&args)?;
+        println!("updated #{number} for `{}`", group.signature);
+        Ok(())
+    }
+
+    fn edit_body(&self, number: u64, body: &str) -> Result<()> {
+        let file = self.body_file(&number.to_string(), body)?;
+        let number = number.to_string();
+        let file = file.display().to_string();
+        github::gh(&[
+            "issue",
+            "edit",
+            &number,
+            "--repo",
+            self.options.repo,
+            "--body-file",
+            &file,
+        ])?;
+        Ok(())
+    }
+
+    fn reopen(&self, issue: &Issue) -> Result<()> {
+        let note = format!(
+            "This failure reappeared{}. Reopening.",
+            self.context.in_run()
+        );
+        if self.options.dry_run {
+            println!("(dry run) reopen #{}", issue.number);
+            return Ok(());
+        }
+        let number = issue.number.to_string();
+        github::gh(&[
+            "issue",
+            "reopen",
+            &number,
+            "--repo",
+            self.options.repo,
+            "--comment",
+            &note,
+        ])?;
+        github::gh(&[
+            "issue",
+            "edit",
+            &number,
+            "--repo",
+            self.options.repo,
+            "--add-label",
+            "regression",
+        ])?;
+        println!("reopened #{number}");
+        Ok(())
+    }
+
+    fn close(&mut self, issue: &Issue, reason: &str, note: &str) -> Result<()> {
+        self.tally.closed = self.tally.closed.saturating_add(1);
+        if self.options.dry_run {
+            println!("(dry run) close #{} as {reason}: {note}", issue.number);
+            return Ok(());
+        }
+        let number = issue.number.to_string();
+        github::gh(&[
+            "issue",
+            "close",
+            &number,
+            "--repo",
+            self.options.repo,
+            "--reason",
+            reason,
+            "--comment",
+            note,
+        ])?;
+        println!("closed #{number} as {reason}");
+        Ok(())
+    }
+
+    fn comment(&self, issue: &Issue, note: &str) -> Result<()> {
+        if self.options.dry_run {
+            println!("(dry run) comment on #{}: {note}", issue.number);
+            return Ok(());
+        }
+        let number = issue.number.to_string();
+        github::gh(&[
+            "issue",
+            "comment",
+            &number,
+            "--repo",
+            self.options.repo,
+            "--body",
+            note,
+        ])?;
+        Ok(())
+    }
+
+    /// Writes a body to a file for `--body-file`; bodies exceed argument limits.
+    fn body_file(&self, name: &str, body: &str) -> Result<PathBuf> {
+        let dir = corpus::state_dir().join("issues");
+        fs::create_dir_all(&dir)?;
+        let path = dir.join(format!("{name}.md"));
+        fs::write(&path, body)?;
+        Ok(path)
+    }
+
+    fn ensure_labels(&mut self, labels: &[String]) -> Result<()> {
+        for label in labels {
+            if self.labels.contains(label) {
                 continue;
             }
-            None => {
-                created = created.saturating_add(1);
-                create(options, &index, cluster, &key, &body, &out)
-            }
-            Some(issue) if issue.state == "OPEN" => {
-                if count_marker(&issue.body) == Some(cluster.count) {
-                    continue;
-                }
-                updated = updated.saturating_add(1);
-                refresh(options, issue, cluster, &body, run_link.as_deref())
-            }
-            Some(issue) if issue.state_reason.as_deref() == Some("NOT_PLANNED") => continue,
-            Some(issue) => {
-                reopened = reopened.saturating_add(1);
-                reopen(options, issue, &body, run_link.as_deref())
-            }
-        };
-        if let Err(error) = result {
-            failed = failed.saturating_add(1);
-            println!("failed for `{}`: {error:#}", cluster.signature);
+            let (color, description) = issue_body::label_style(label);
+            github::gh(&[
+                "label",
+                "create",
+                label,
+                "--repo",
+                self.options.repo,
+                "--color",
+                color,
+                "--description",
+                &description,
+                "--force",
+            ])?;
+            self.labels.insert(label.clone());
         }
+        Ok(())
     }
-    println!(
-        "{} clusters: {created} created, {updated} updated, {reopened} reopened, {skipped} deferred by --max-new, {failed} failed",
-        index.clusters.len()
-    );
-    if failed > 0 {
-        bail!("{failed} issue operations failed");
-    }
-    Ok(())
 }
 
-/// Returns the stable issue key of a cluster.
-fn key(kind: CorpusKind, signature: &str) -> String {
-    let digest = format!(
-        "{:x}",
-        Sha256::digest(format!("{}\n{signature}", kind.as_str()))
-    );
-    format!("conf-{}", digest.get(..12).unwrap_or_default())
+const NON_EMBEDDED: &str = "(non-embedded font)";
+
+/// Returns true for an issue filed under an older key for text differences in documents
+/// with non-embedded fonts. Those pages are now `font_substitution`, so such an issue is
+/// only adopted by a cluster that is itself about non-embedded fonts.
+fn is_font_issue(issue: &Issue) -> bool {
+    issue_state::legacy_signature(&issue.body)
+        .is_some_and(|signature| signature.contains(NON_EMBEDDED))
 }
 
-fn count_marker(body: &str) -> Option<usize> {
-    let rest = body.split("<!-- conformance-count: ").nth(1)?;
-    rest.split(' ').next()?.parse().ok()
-}
-
-/// Returns true when any failure of the cluster regressed against the baseline or is a new crash.
-fn regressed(index: &Index, cluster: &Cluster) -> bool {
-    let bad = |delta: Delta, status: Status| {
-        delta == Delta::Regressed
-            || (delta == Delta::New && matches!(status, Status::Crash | Status::Timeout))
-    };
-    index
-        .cases
+/// Returns a comment for a cluster change people should hear about: new documents in a
+/// corpus, or a total shrink of at least a quarter.
+fn change_note(old: &IssueState, new: &IssueState) -> Option<String> {
+    let grown: Vec<String> = new
+        .corpora
         .iter()
-        .filter(|case| cluster.cases.contains(&case.id))
-        .any(|case| {
-            (case.signature.as_ref() == Some(&cluster.signature) && bad(case.delta, case.status))
-                || case.pages.iter().any(|page| {
-                    page.signature.as_ref() == Some(&cluster.signature)
-                        && bad(page.delta, page.status)
-                })
+        .filter_map(|(corpus, entry)| {
+            let before = old.corpora.get(corpus).map_or(0, |entry| entry.documents);
+            (entry.documents > before && entry.missing == 0)
+                .then(|| format!("{corpus} {} → {} documents", before, entry.documents))
         })
+        .collect();
+    if !grown.is_empty() {
+        return Some(format!("New documents fail this way: {}", grown.join(", ")));
+    }
+    let (before, after) = (old.failures(), new.failures());
+    let shrink = before.checked_sub(after).and_then(|drop| {
+        let ratio = f64::from(u32::try_from(drop).ok()?) / f64::from(u32::try_from(before).ok()?);
+        (ratio >= SHRINK_NOTICE).then_some(drop)
+    })?;
+    Some(format!(
+        "{shrink} fewer failures ({before} → {after}); a fix may be partial"
+    ))
 }
 
-fn run_link() -> Option<String> {
-    let server = std::env::var("GITHUB_SERVER_URL").ok()?;
-    let repo = std::env::var("GITHUB_REPOSITORY").ok()?;
-    let id = std::env::var("GITHUB_RUN_ID").ok()?;
-    Some(format!("{server}/{repo}/actions/runs/{id}"))
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn title(kind: CorpusKind, signature: &str) -> String {
-    let mut title = format!("[conformance/{}] {signature}", kind.as_str());
-    if title.chars().count() > 200 {
-        title = title.chars().take(199).collect();
-        title.push('…');
-    }
-    title
-}
+    const LEGACY: &str = "render_error: Shading type 'LatticeFormTriangleMesh' not implemented @ <pdf_renderer::PdfRenderer>::render";
+    const CURRENT: &str = "render_error: Shading type 'LatticeFormTriangleMesh' not implemented @ pdf-canvas::UnsupportedFeature";
 
-fn labels(kind: CorpusKind, signature: &str, regressed: bool) -> Vec<String> {
-    let mut labels = vec![LABEL.to_owned(), format!("{LABEL}:{}", kind.as_str())];
-    if signature.starts_with("crash") || signature.starts_with("timeout") {
-        labels.push("crash".to_owned());
-    }
-    if regressed {
-        labels.push("regression".to_owned());
-    }
-    labels
-}
-
-fn body(
-    kind: CorpusKind,
-    index: &Index,
-    cluster: &Cluster,
-    key: &str,
-    out: &Path,
-    run_link: Option<&str>,
-) -> Result<String> {
-    let mut text = String::new();
-    writeln!(
-        text,
-        "<!-- conformance-count: {} -->\nAutomatically filed by the conformance workflow for the **{}** corpus \
-         (reference: {}).\n",
-        cluster.count,
-        kind.as_str(),
-        index.pdfium
-    )?;
-    writeln!(
-        text,
-        "**{} failures in {} documents** share the signature\n\n```\n{}\n```\n",
-        cluster.count,
-        cluster.cases.len(),
-        cluster.signature
-    )?;
-    if let Some(link) = run_link {
-        writeln!(
-            text,
-            "Latest run: {link}. Download the `conformance-{}` artifact for images, the HTML viewer and `TRIAGE.md`.\n",
-            kind.as_str()
-        )?;
-    }
-    if !cluster.likely_crates.is_empty() {
-        let crates: Vec<String> = cluster
-            .likely_crates
-            .iter()
-            .take(6)
-            .map(|(name, count)| format!("{name} ({count})"))
-            .collect();
-        writeln!(text, "Features point at: {}\n", crates.join(", "))?;
-    }
-    writeln!(text, "### Cases\n")?;
-    for id in cluster.cases.iter().take(CASE_LIMIT) {
-        let Some(case) = index.cases.iter().find(|case| &case.id == id) else {
-            continue;
-        };
-        let worst = case
-            .pages
-            .iter()
-            .filter(|page| page.signature.as_ref() == Some(&cluster.signature))
-            .filter_map(|page| page.mismatch)
-            .fold(None, |max: Option<f64>, value| {
-                Some(max.map_or(value, |m| m.max(value)))
-            });
-        writeln!(
-            text,
-            "- `{}`{}: `{}`",
-            case.id,
-            worst
-                .map(|value| format!(" (mismatch {:.2}%)", value * 100.0))
-                .unwrap_or_default(),
-            case.reproduce
-        )?;
-    }
-    if cluster.cases.len() > CASE_LIMIT {
-        writeln!(
-            text,
-            "- … {} more",
-            cluster.cases.len().saturating_sub(CASE_LIMIT)
-        )?;
-    }
-    let footer = format!(
-        "\n---\nConformance key: `{key}`. Closing this issue as *not planned* stops the workflow from reopening it.\n"
-    );
-    if let Some(first) = cluster.cases.first() {
-        let summary = out
-            .join("cases")
-            .join(run::case_dir(first))
-            .join("summary.md");
-        if let Ok(summary) = fs::read_to_string(summary) {
-            writeln!(
-                text,
-                "\n<details><summary>Summary of <code>{first}</code></summary>\n"
-            )?;
-            let budget = BODY_LIMIT
-                .saturating_sub(text.len())
-                .saturating_sub(footer.len())
-                .saturating_sub(64);
-            let mut excerpt: String = summary.chars().take(budget).collect();
-            if excerpt.len() < summary.len() {
-                excerpt.push_str("\n\n… (truncated; full summary in the artifact)");
-            }
-            writeln!(text, "{excerpt}\n\n</details>")?;
+    fn corpus_run(kind: CorpusKind) -> CorpusRun {
+        CorpusRun {
+            kind,
+            index: Index {
+                corpus: kind.as_str().to_owned(),
+                corpus_root: "/corpus".to_owned(),
+                corpus_revision: None,
+                pdfium: "PDFium".to_owned(),
+                scale: 1.5,
+                tolerance: 0.002,
+                filtered: false,
+                totals: BTreeMap::new(),
+                page_totals: BTreeMap::new(),
+                clusters: vec![Cluster {
+                    signature: CURRENT.to_owned(),
+                    count: 2,
+                    cases: vec!["a".to_owned(), "b".to_owned()],
+                    likely_crates: Vec::new(),
+                    legacy_signatures: vec![LEGACY.to_owned()],
+                }],
+                cases: Vec::new(),
+            },
+            results: BTreeMap::new(),
         }
     }
-    text.push_str(&footer);
-    Ok(text)
-}
 
-fn gh(args: &[&str]) -> Result<String> {
-    let output = Command::new("gh")
-        .args(args)
-        .output()
-        .map_err(|error| anyhow!("cannot run gh ({error}); install the GitHub CLI"))?;
-    if !output.status.success() {
-        bail!(
-            "gh {} failed: {}",
-            args.first().copied().unwrap_or_default(),
-            String::from_utf8_lossy(&output.stderr).trim()
+    fn legacy_issue(number: u64, corpus: &str, signature: &str) -> Issue {
+        Issue {
+            number,
+            title: format!("[conformance/{corpus}] {signature}"),
+            state: "OPEN".to_owned(),
+            state_reason: None,
+            body: format!(
+                "<!-- conformance-count: 2 -->\n**2 failures in 2 documents**\n\n```\n{signature}\n```\n\n---\nConformance key: `{}`.\n",
+                issue_state::legacy_key(corpus, signature)
+            ),
+        }
+    }
+
+    #[test]
+    fn adopts_old_issues_and_closes_duplicates_and_noise() {
+        let runs = [
+            corpus_run(CorpusKind::Pdfium),
+            corpus_run(CorpusKind::Pdfjs),
+        ];
+        let options = IssueOptions {
+            kinds: &[CorpusKind::Pdfium, CorpusKind::Pdfjs],
+            repo: "owner/repo",
+            max_new: 15,
+            dry_run: true,
+        };
+        let existing = vec![
+            legacy_issue(370, "pdfium", LEGACY),
+            legacy_issue(435, "pdfjs", LEGACY),
+            legacy_issue(
+                312,
+                "pdfjs",
+                "mismatch: reshaped / text (non-embedded font)",
+            ),
+            legacy_issue(999, "pdfjs", "mismatch: blank page"),
+        ];
+        let mut sync = Sync {
+            options: &options,
+            context: BodyContext {
+                repo: "owner/repo".to_owned(),
+                run_link: None,
+                sha: None,
+            },
+            existing: existing
+                .into_iter()
+                .filter_map(|issue| {
+                    IssueState::parse(&issue.title, &issue.body).map(|state| (issue, state))
+                })
+                .collect(),
+            complete: ["pdfium".to_owned(), "pdfjs".to_owned()].into(),
+            claimed: BTreeSet::new(),
+            labels: BTreeSet::new(),
+            tally: Tally::default(),
+        };
+        let groups = groups(&runs);
+        assert_eq!(groups.len(), 1);
+        for group in &groups {
+            sync.group(group).unwrap();
+        }
+        assert_eq!(sync.tally.adopted, 1);
+        assert_eq!(sync.tally.created, 0);
+        assert_eq!(sync.claimed, BTreeSet::from([370, 435]));
+        sync.absent(&runs);
+        // #435 as a duplicate of #370, #312 as font substitution; #999 is only counted.
+        assert_eq!(sync.tally.closed, 2);
+        assert_eq!(sync.tally.failed, 0);
+    }
+
+    fn state(corpora: &[(&str, usize, usize)]) -> IssueState {
+        IssueState {
+            key: "conf2-000000000000".to_owned(),
+            corpora: corpora
+                .iter()
+                .map(|(name, failures, documents)| {
+                    (
+                        (*name).to_owned(),
+                        CorpusState {
+                            failures: *failures,
+                            documents: *documents,
+                            missing: 0,
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn small_changes_stay_silent() {
+        assert_eq!(
+            change_note(
+                &state(&[("pdfjs", 220, 180)]),
+                &state(&[("pdfjs", 218, 180)])
+            ),
+            None
+        );
+        assert_eq!(
+            change_note(&state(&[("pdfjs", 4, 2)]), &state(&[("pdfjs", 6, 2)])),
+            None
         );
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
 
-fn existing_issues(repo: &str) -> Result<Vec<Issue>> {
-    let json = gh(&[
-        "issue",
-        "list",
-        "--repo",
-        repo,
-        "--label",
-        LABEL,
-        "--state",
-        "all",
-        "--limit",
-        "5000",
-        "--json",
-        "number,state,stateReason,body",
-    ])?;
-    Ok(serde_json::from_str(&json)?)
-}
-
-fn ensure_labels(options: &IssueOptions<'_>) -> Result<()> {
-    let corpus_label = format!("{LABEL}:{}", options.kind.as_str());
-    for (name, color, description) in [
-        (LABEL, "5319e7", "Filed by the conformance workflow"),
-        (corpus_label.as_str(), "c5def5", "Conformance corpus"),
-        ("crash", "b60205", "Panic, abort or timeout"),
-        ("regression", "d93f0b", "Worse than the recorded baseline"),
-    ] {
-        gh(&[
-            "label",
-            "create",
-            name,
-            "--repo",
-            options.repo,
-            "--color",
-            color,
-            "--description",
-            description,
-            "--force",
-        ])?;
-    }
-    Ok(())
-}
-
-/// Writes a body to a temporary file for `--body-file`; bodies exceed argument limits.
-fn body_file(out: &Path, key: &str, body: &str) -> Result<std::path::PathBuf> {
-    let dir = out.join("issues");
-    fs::create_dir_all(&dir)?;
-    let path = dir.join(format!("{key}.md"));
-    fs::write(&path, body)?;
-    Ok(path)
-}
-
-fn create(
-    options: &IssueOptions<'_>,
-    index: &Index,
-    cluster: &Cluster,
-    key: &str,
-    body: &str,
-    out: &Path,
-) -> Result<()> {
-    let title = title(options.kind, &cluster.signature);
-    let labels = labels(options.kind, &cluster.signature, regressed(index, cluster));
-    let file = body_file(out, key, body)?;
-    if options.dry_run {
-        println!(
-            "(dry run) create `{title}` [{}] body {} ({} chars)",
-            labels.join(", "),
-            file.display(),
-            body.len()
+    #[test]
+    fn new_documents_and_large_shrinks_are_noted() {
+        let grown = change_note(&state(&[("pdfjs", 3, 2)]), &state(&[("pdfjs", 4, 3)]));
+        assert!(grown.is_some_and(|note| note.contains("pdfjs 2 → 3")));
+        let joined = change_note(
+            &state(&[("pdfjs", 3, 2)]),
+            &state(&[("pdfjs", 3, 2), ("pdfium", 1, 1)]),
         );
-        return Ok(());
+        assert!(joined.is_some_and(|note| note.contains("pdfium 0 → 1")));
+        let shrunk = change_note(&state(&[("pdfjs", 8, 4)]), &state(&[("pdfjs", 4, 4)]));
+        assert!(shrunk.is_some_and(|note| note.starts_with("4 fewer failures")));
     }
-    let file = file.display().to_string();
-    let mut args = vec![
-        "issue",
-        "create",
-        "--repo",
-        options.repo,
-        "--title",
-        &title,
-        "--body-file",
-        &file,
-    ];
-    for label in &labels {
-        args.extend(["--label", label.as_str()]);
-    }
-    let url = gh(&args)?;
-    println!("created {} for `{}`", url.trim(), cluster.signature);
-    Ok(())
-}
-
-fn refresh(
-    options: &IssueOptions<'_>,
-    issue: &Issue,
-    cluster: &Cluster,
-    body: &str,
-    run_link: Option<&str>,
-) -> Result<()> {
-    let previous =
-        count_marker(&issue.body).map_or_else(|| "unknown".to_owned(), |n| n.to_string());
-    let note = format!(
-        "Cluster size changed: {} failures in {} documents (was {previous}){}.",
-        cluster.count,
-        cluster.cases.len(),
-        run_link
-            .map(|link| format!(" in {link}"))
-            .unwrap_or_default()
-    );
-    let number = issue.number.to_string();
-    if options.dry_run {
-        println!("(dry run) update #{number}: {note}");
-        return Ok(());
-    }
-    let file = body_file(&corpus::output_dir(options.kind), &number, body)?
-        .display()
-        .to_string();
-    gh(&[
-        "issue",
-        "edit",
-        &number,
-        "--repo",
-        options.repo,
-        "--body-file",
-        &file,
-    ])?;
-    gh(&[
-        "issue",
-        "comment",
-        &number,
-        "--repo",
-        options.repo,
-        "--body",
-        &note,
-    ])?;
-    println!("updated #{number} for `{}`", cluster.signature);
-    Ok(())
-}
-
-fn reopen(
-    options: &IssueOptions<'_>,
-    issue: &Issue,
-    body: &str,
-    run_link: Option<&str>,
-) -> Result<()> {
-    let number = issue.number.to_string();
-    let note = format!(
-        "This failure reappeared{}. Reopening.",
-        run_link
-            .map(|link| format!(" in {link}"))
-            .unwrap_or_default()
-    );
-    if options.dry_run {
-        println!("(dry run) reopen #{number}");
-        return Ok(());
-    }
-    let file = body_file(&corpus::output_dir(options.kind), &number, body)?
-        .display()
-        .to_string();
-    gh(&[
-        "issue",
-        "edit",
-        &number,
-        "--repo",
-        options.repo,
-        "--body-file",
-        &file,
-    ])?;
-    gh(&[
-        "issue",
-        "reopen",
-        &number,
-        "--repo",
-        options.repo,
-        "--comment",
-        &note,
-    ])?;
-    gh(&[
-        "issue",
-        "edit",
-        &number,
-        "--repo",
-        options.repo,
-        "--add-label",
-        "regression",
-    ])?;
-    println!("reopened #{number}");
-    Ok(())
 }

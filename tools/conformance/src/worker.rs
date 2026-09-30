@@ -40,8 +40,11 @@ pub struct PageJob<'a> {
     pub tolerance: f64,
     /// Case directory receiving images and listings.
     pub out_dir: &'a Path,
-    /// PDFium shared library; `None` compares against the corpus's golden images.
+    /// PDFium shared library; `None` compares against reference image files.
     pub pdfium: Option<&'a Path>,
+    /// Directory of published reference images (`pN-ref.png`); `None` with no PDFium uses
+    /// the corpus's golden images.
+    pub reference_images: Option<&'a Path>,
 }
 
 fn stage(name: &str) {
@@ -52,8 +55,31 @@ fn read_safe(bytes: &[u8], password: Option<&str>) -> Result<pdf_document::repor
     Ok(PdfReader.read_with_report(bytes, password.map(str::as_bytes))?)
 }
 
+/// Returns the number of pages covered by published reference images: one past the highest
+/// `pN-ref.png`. Only failing pages were published, so pages in between may be missing.
+fn published_page_count(dir: &Path) -> usize {
+    fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            name.strip_prefix('p')?
+                .strip_suffix("-ref.png")?
+                .parse::<usize>()
+                .ok()
+        })
+        .max()
+        .map_or(0, |page| page.saturating_add(1))
+}
+
 /// Reads the document with Safe-PDF and counts the reference's pages.
-pub fn read(pdf: &Path, password: Option<&str>, pdfium: Option<&Path>) -> Result<()> {
+pub fn read(
+    pdf: &Path,
+    password: Option<&str>,
+    pdfium: Option<&Path>,
+    reference_images: Option<&Path>,
+) -> Result<()> {
     let bytes = fs::read(pdf)?;
     let mut output = ReadOutput::default();
     stage("safe-read");
@@ -87,8 +113,17 @@ pub fn read(pdf: &Path, password: Option<&str>, pdfium: Option<&Path>) -> Result
         Err(error) => output.safe_error = Some(safe_render::error_detail(&error)),
     }
     stage("reference-open");
-    match pdfium {
-        Some(library) => {
+    match (pdfium, reference_images) {
+        (_, Some(dir)) => match published_page_count(dir) {
+            0 => {
+                output.reference_error = Some(format!(
+                    "no published reference images in {}",
+                    dir.display()
+                ))
+            }
+            pages => output.reference_pages = Some(pages),
+        },
+        (Some(library), None) => {
             let pdfium = reference::load(library)?;
             match pdfium.load_pdf_from_byte_slice(&bytes, password) {
                 Ok(document) => {
@@ -97,7 +132,7 @@ pub fn read(pdf: &Path, password: Option<&str>, pdfium: Option<&Path>) -> Result
                 Err(error) => output.reference_error = Some(error.to_string()),
             }
         }
-        None => match golden::page_count(pdf) {
+        (None, None) => match golden::page_count(pdf) {
             0 => {
                 output.reference_error =
                     Some("the corpus has no golden images for this PDF".to_owned())
@@ -109,10 +144,13 @@ pub fn read(pdf: &Path, password: Option<&str>, pdfium: Option<&Path>) -> Result
     Ok(())
 }
 
-/// Loads the corpus golden of a page.
+/// Loads the reference image of a page: a published image, or the corpus golden.
 fn load_golden(job: &PageJob<'_>) -> Result<RgbaImage, String> {
-    let path = golden::find(job.pdf, job.page)
-        .ok_or_else(|| format!("the corpus has no golden image for page {}", job.page))?;
+    let path = match job.reference_images {
+        Some(dir) => Some(dir.join(format!("p{}-ref.png", job.page))).filter(|path| path.is_file()),
+        None => golden::find(job.pdf, job.page),
+    }
+    .ok_or_else(|| format!("no reference image for page {}", job.page))?;
     image::open(&path)
         .map(|image| image.to_rgba8())
         .map_err(|error| format!("{}: {error}", path.display()))
@@ -262,7 +300,7 @@ pub fn page(job: &PageJob<'_>) -> Result<()> {
         (Ok(reference_image), Ok(safe_image)) => {
             stage("compare");
             // Golden images draw annotations and form fields; Safe-PDF's render does not.
-            let ignore = if job.pdfium.is_none() {
+            let ignore = if job.pdfium.is_none() && job.reference_images.is_none() {
                 renderer
                     .as_ref()
                     .ok()

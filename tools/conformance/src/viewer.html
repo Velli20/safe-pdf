@@ -35,6 +35,7 @@ td.id { word-break: break-all; }
 .sig { color: var(--muted); font-size: 12px; word-break: break-word; }
 .status { font-weight: 600; }
 .status.pass { color: var(--good); } .status.mismatch { color: var(--warn); }
+.status.font_substitution { color: var(--muted); }
 .status.render_error, .status.read_error, .status.crash, .status.timeout { color: var(--bad); }
 .delta.regressed { color: var(--bad); font-weight: 600; } .delta.improved { color: var(--good); }
 #detail { overflow: auto; padding: 12px 16px; }
@@ -62,7 +63,7 @@ code { font-size: 12px; background: var(--bg); padding: 1px 4px; border-radius: 
   <div class="meta" id="meta"></div>
 </header>
 <div class="controls">
-  <select id="status"><option value="failing">Failing pages</option><option value="all">All pages</option></select>
+  <select id="status"><option value="failing">Failing pages</option><option value="font_substitution">Font substitution (expected)</option><option value="all">All pages</option></select>
   <select id="delta"><option value="">Any baseline change</option><option value="regressed">Regressed</option>
     <option value="improved">Improved</option><option value="new">New</option><option value="unchanged">Unchanged</option></select>
   <select id="signature"><option value="">All signatures</option></select>
@@ -84,7 +85,7 @@ for (const c of data.cases) {
   if (c.pages.length === 0) rows.push({ c, p: null, status: c.status, mismatch: null, signature: c.signature, delta: c.delta });
   for (const p of c.pages) rows.push({ c, p, status: p.status, mismatch: p.mismatch, signature: p.signature, delta: p.delta });
 }
-const failing = (s) => !["pass", "no_reference", "unavailable"].includes(s);
+const failing = (s) => !["pass", "font_substitution", "no_reference", "unavailable"].includes(s);
 $("title").textContent = `${data.corpus} conformance`;
 $("meta").textContent = `${data.pdfium} · pass ≤ ${(data.tolerance * 100).toFixed(2)}% · ` +
   Object.entries(data.totals).map(([k, v]) => `${v} ${k}`).join(", ");
@@ -95,7 +96,7 @@ for (const cl of data.clusters) {
 }
 function visible() {
   const st = $("status").value, dl = $("delta").value, sg = $("signature").value, q = $("search").value.toLowerCase();
-  const list = rows.filter((r) => (st === "all" || failing(r.status)) && (!dl || r.delta === dl) &&
+  const list = rows.filter((r) => (st === "all" || (st === "failing" ? failing(r.status) : r.status === st)) && (!dl || r.delta === dl) &&
     (!sg || r.signature === sg) && (!q || r.c.id.toLowerCase().includes(q)));
   const val = (r) => sortKey === "id" ? r.c.id : sortKey === "status" ? r.status : (r.mismatch ?? -1);
   list.sort((a, b) => (val(a) < val(b) ? -1 : val(a) > val(b) ? 1 : 0) * (sortDesc ? -1 : 1));
@@ -119,6 +120,19 @@ function render() {
   });
   showDetail(current[selected]);
   const sel = tbody.querySelector(".selected"); if (sel) sel.scrollIntoView({ block: "nearest" });
+  const r = current[selected];
+  if (r) history.replaceState(null, "", `#case=${encodeURIComponent(r.c.id)}` + (r.p ? `&page=${r.p.page}` : ""));
+}
+// Links such as index.html#case=<id>&page=<n> (used by the GitHub issues) select that row.
+function selectFromHash() {
+  const params = new URLSearchParams(location.hash.slice(1));
+  const id = params.get("case");
+  if (!id) return;
+  const page = params.get("page");
+  const matches = (r) => r.c.id === id && (page === null || (r.p && String(r.p.page) === page));
+  if (!visible().some(matches)) $("status").value = "all";
+  $("signature").value = ""; $("delta").value = ""; $("search").value = "";
+  selected = Math.max(0, visible().findIndex(matches));
 }
 function el(tag, attrs = {}, text) { const e = document.createElement(tag); Object.assign(e, attrs); if (text) e.textContent = text; return e; }
 function showDetail(r) {
@@ -186,7 +200,9 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "k") { selected = Math.max(selected - 1, 0); render(); }
   else if (["1", "2", "3", "4"].includes(e.key)) { mode = ["side", "swipe", "onion", "diff"][Number(e.key) - 1]; showDetail(current[selected]); }
 });
+selectFromHash();
 render();
+window.addEventListener("hashchange", () => { selectFromHash(); render(); });
 </script>
 </body>
 </html>

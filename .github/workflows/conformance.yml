@@ -3,20 +3,22 @@ name: Conformance
 # Renders the PDFium and pdf.js test corpora with Safe-PDF and compares them with pages
 # rendered by the PDFium library without annotations or form fields, which matches Safe-PDF's
 # content-only render. (The pdfium_tests goldens draw annotations, so CI does not use them.)
-# Runs when a pull request is merged (push to main) and on manual dispatch, and files one
-# GitHub issue per unreported failure cluster. Regressions never fail these runs; they are
-# reported through issues, the job summary and the uploaded report. Runs on main publish the
-# viewers to GitHub Pages under /conformance/.
 #
-# To gate pull requests instead: uncomment the `pull_request` trigger below. Pull request
-# runs fail on regressions against tools/conformance/baselines/ (see FAIL_ON_EVENTS) and
-# never file issues. See tools/conformance/README.md.
+# - Push to main (a merged pull request) and manual runs on main: one `issues` job files,
+#   updates and closes GitHub issues for both corpora together, and the viewers are
+#   published to GitHub Pages under /conformance/.
+# - Pull requests that are ready for review: the full corpora run and a `pr-report` job
+#   comments what the change fixes and breaks. Report only; nothing fails the pull request.
+#
+# To gate pull requests on regressions later, add `pull_request` to FAIL_ON_EVENTS.
+# See tools/conformance/README.md.
 
 on:
   push:
     branches: [ main ]
-  # pull_request:
-  #   branches: [ main ]
+  pull_request:
+    branches: [ main ]
+    types: [ opened, synchronize, reopened, ready_for_review ]
   workflow_dispatch:
     inputs:
       accept:
@@ -35,8 +37,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Events whose regressions fail the job. Pushes to main only report them.
-  FAIL_ON_EVENTS: pull_request
+  # Events whose regressions fail the job; none for now, so every run only reports.
+  FAIL_ON_EVENTS: ""
   # Prebuilt PDFium (CI only) matching the `pdfium_7881` API of pdfium-render.
   PDFIUM_RELEASE: chromium/7881
   PDFIUM_SHA256: 1470e21b8b4a3b4ad7f85684e2da11d94f3b69a86d81dee11b9b6709d927ac1d
@@ -44,11 +46,12 @@ env:
 jobs:
   conformance:
     name: Conformance (${{ matrix.corpus }})
+    # Draft pull requests are skipped; the run starts when the pull request is ready for review.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 150
     permissions:
       contents: read
-      issues: write
     strategy:
       fail-fast: false
       matrix:
@@ -144,12 +147,6 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
-      - name: File GitHub issues
-        if: github.event_name != 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: cargo conformance issues --corpus ${{ matrix.corpus }} --repo "${{ github.repository }}" --max-new 15
-
       - name: Record baseline
         if: github.event_name == 'workflow_dispatch' && inputs.accept
         run: cargo conformance accept --corpus ${{ matrix.corpus }}
@@ -162,10 +159,134 @@ jobs:
           path: tools/conformance/baselines/${{ matrix.corpus }}.json
 
       - name: Fail on regressions
-        if: steps.run.outputs.status != '0' && contains(env.FAIL_ON_EVENTS, github.event_name)
+        if: steps.run.outputs.status != '0' && env.FAIL_ON_EVENTS != '' && contains(env.FAIL_ON_EVENTS, github.event_name)
         run: |
           echo "::error ::Conformance regressions against tools/conformance/baselines/${{ matrix.corpus }}.json (exit ${{ steps.run.outputs.status }}); see the job summary and the conformance-${{ matrix.corpus }} artifact."
           exit 1
+
+  # Both corpora are reported together, so one cause found in both is one issue and an issue
+  # is only closed when every corpus it was seen in no longer has it.
+  issues:
+    name: File GitHub issues
+    needs: conformance
+    if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies (Skia)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libfontconfig1-dev libfreetype6-dev
+
+      - name: Cache cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/regression
+          key: ${{ runner.os }}-conformance-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-conformance-
+
+      - name: Download reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: conformance-*
+          path: reports
+
+      - name: File, update and close issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=""
+          for corpus in pdfium pdfjs; do
+            if [ -f "reports/conformance-$corpus/index.json" ]; then
+              mkdir -p target/conformance
+              rm -rf "target/conformance/$corpus"
+              mv "reports/conformance-$corpus" "target/conformance/$corpus"
+              args="$args --corpus $corpus"
+            else
+              echo "::warning ::No $corpus report in this run; its issues are left unchanged."
+            fi
+          done
+          if [ -z "$args" ]; then
+            echo "::warning ::No reports to file issues from."
+            exit 0
+          fi
+          cargo conformance issues $args --repo "${{ github.repository }}" --max-new 15
+
+  pr-report:
+    name: Pull request report
+    needs: conformance
+    if: always() && github.event_name == 'pull_request' && !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies (Skia)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libfontconfig1-dev libfreetype6-dev
+
+      - name: Cache cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/regression
+          key: ${{ runner.os }}-conformance-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-conformance-
+
+      - name: Download reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: conformance-*
+          path: reports
+
+      - name: Write and post the report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=""
+          for corpus in pdfium pdfjs; do
+            if [ -f "reports/conformance-$corpus/index.json" ]; then
+              mkdir -p target/conformance
+              rm -rf "target/conformance/$corpus"
+              mv "reports/conformance-$corpus" "target/conformance/$corpus"
+              args="$args --corpus $corpus"
+            fi
+          done
+          if [ -z "$args" ]; then
+            echo "::warning ::No reports to compare."
+            exit 0
+          fi
+          cargo conformance pr-report $args --repo "${{ github.repository }}" --out target/conformance/pr-report.md
+          cat target/conformance/pr-report.md >> "$GITHUB_STEP_SUMMARY"
+          # Fork pull requests get a read-only token; the job summary still has the report.
+          gh pr comment "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}" \
+            --body-file target/conformance/pr-report.md --edit-last --create-if-none \
+            || echo "::warning ::Could not comment on the pull request; the report is in the job summary."
 
   publish:
     name: Publish reports to GitHub Pages

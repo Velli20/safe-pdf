@@ -16,6 +16,7 @@ cargo run --example skia --features skia -- examples/assets/webgl.pdf  # Run vie
 cargo xtask emscripten --features skia-wasm # Build WASM target
 cargo xtask web-canvas --profile debug      # Fast build for the Canvas 2D web example
 cargo xtask web-canvas --profile debug --serve --port 8080 # Build and serve at http://127.0.0.1:8080
+cargo conformance repro <issue key>         # Rerun a conformance issue's cases (no PDFium needed)
 cargo fuzz run parse_object                 # Fuzz the parser
 ```
 
@@ -86,8 +87,10 @@ CI runs on push/PR to main (`.github/workflows/ci.yml`):
 3. Web Canvas (wasm-bindgen) build of `examples/web-canvas`, deployed to GitHub Pages on push to `main`
 
 Conformance (`.github/workflows/conformance.yml`) renders the PDFium and pdf.js corpora against
-PDFium when a pull request is merged to `main`, or on manual dispatch. It files one GitHub issue
-per unreported failure cluster and never fails on regressions. To gate pull requests, uncomment
-its `pull_request` trigger. Both corpora are compared with PDFium's annotation-free render, and
-runs on `main` publish the viewers to GitHub Pages under `/conformance/`. See
+PDFium's annotation-free render. On `main` (merged pull requests and manual runs) it keeps one
+GitHub issue per failure cause across both corpora, closes issues whose failure is gone, and
+publishes the viewers to GitHub Pages under `/conformance/`. On pull requests that are ready for
+review it posts a report of what the change fixes and breaks; it never fails a pull request. To
+fix a conformance issue, follow `.claude/skills/fix-conformance-issue/SKILL.md`
+(`cargo conformance repro <key>`, then `cargo conformance verify <key>`). See
 `tools/conformance/README.md`.
