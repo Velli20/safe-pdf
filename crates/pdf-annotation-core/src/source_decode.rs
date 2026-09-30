@@ -15,7 +15,9 @@ use crate::pdf_data::{
 use pdf_graphics::{DashPattern, color::Color, rect::Rect};
 use pdf_object_reader::{
     DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
-    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    object_lookup::ObjectLookupExt,
+    object_resolver::{DanglingAsNullResolver, ObjectResolver},
+    object_variant::ObjectVariant,
     pdf_array::PdfArray,
 };
 
@@ -25,7 +27,8 @@ impl FromPdfObject for SourceAnnotation {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let context = context.dictionary()?;
         let dictionary = context.dictionary();
-        let objects = context.source();
+        // Annotations often carry stale references, which read as null (ISO 32000 §7.3.10).
+        let objects = &DanglingAsNullResolver(context.source());
         // Some PDFs omit `/Type` on annotation dictionaries even though the
         // entry is nominally expected to be `/Annot`, so only validate it when
         // the key is actually present.
@@ -121,11 +124,13 @@ impl SourceAnnotation {
         };
         let mut annotations = Vec::with_capacity(annots.len());
         for value in annots.iter() {
-            if value.is_null(context.source())? {
+            // Stale entries in `/Annots` read as null (ISO 32000 §7.3.10).
+            let objects = DanglingAsNullResolver(context.source());
+            if value.is_null(&objects)? {
                 continue;
             }
 
-            let dictionary = value.try_dictionary(context.source())?;
+            let dictionary = value.try_dictionary(&objects)?;
             if dictionary.get(b"Subtype").is_none() {
                 continue;
             }
@@ -225,6 +230,9 @@ impl AppearanceDictionary {
         };
         let mut normal_states = Vec::with_capacity(states.len());
         for (name, value) in states.iter() {
+            if value.is_null(objects)? {
+                continue;
+            }
             if !matches!(objects.resolve_object(value)?, ObjectVariant::Stream(_)) {
                 return Err(SourceDecodeError::InvalidEntry {
                     entry: b"N",
@@ -242,11 +250,9 @@ impl AppearanceCharacteristics {
         dictionary: &pdf_object_reader::dictionary::Dictionary,
         objects: &dyn ObjectResolver,
     ) -> DecodeResult<Option<Self>> {
-        let Some(value) = dictionary.get(b"MK") else {
+        let Some(dictionary) = dictionary.optional_dictionary(b"MK", objects)? else {
             return Ok(None);
         };
-
-        let dictionary = value.try_dictionary(objects)?;
         let rotation = dictionary.optional_number::<i32>(b"R", objects)?;
         let border_color = color(dictionary, b"BC", objects)?;
         let background_color = color(dictionary, b"BG", objects)?;
@@ -356,11 +362,9 @@ impl BorderStyle {
         key: &'static [u8],
         objects: &dyn ObjectResolver,
     ) -> DecodeResult<Option<Self>> {
-        let Some(value) = dictionary.get(key) else {
+        let Some(dictionary) = dictionary.optional_dictionary(key, objects)? else {
             return Ok(None);
         };
-
-        let dictionary = value.try_dictionary(objects)?;
         let width = dictionary.optional_number::<f64>(b"W", objects)?;
         let style = dictionary
             .get(b"S")
@@ -382,11 +386,9 @@ impl BorderEffect {
         key: &'static [u8],
         objects: &dyn ObjectResolver,
     ) -> DecodeResult<Option<Self>> {
-        let Some(value) = dictionary.get(key) else {
+        let Some(dictionary) = dictionary.optional_dictionary(key, objects)? else {
             return Ok(None);
         };
-
-        let dictionary = value.try_dictionary(objects)?;
         let style = dictionary
             .get(b"S")
             .map(|value| value.try_bytes(objects).map(BorderEffectStyle::from))
