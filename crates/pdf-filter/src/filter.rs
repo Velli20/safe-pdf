@@ -4,6 +4,11 @@ use bytes::Bytes;
 
 use crate::{error::FilterError, predictor::PredictorParams};
 
+use miniz_oxide::inflate::{
+    TINFLStatus,
+    core::{DecompressorOxide, decompress, inflate_flags},
+};
+
 use pdf_ccitt::CCITTFaxParams;
 use pdf_object_reader::{
     dictionary::Dictionary,
@@ -206,21 +211,64 @@ impl Filter {
 impl Filter {
     /// Decodes FlateDecode (zlib/deflate) compressed stream data.
     ///
+    /// Like PDFium and pdf.js, a stream that turns out to be corrupt part way
+    /// through (bad Huffman codes, invalid distances, a wrong Adler-32
+    /// checksum) keeps the bytes decoded before the corruption. A stream whose
+    /// zlib header is invalid is retried as raw deflate data.
+    ///
     /// # Errors
     ///
-    /// Returns [`FilterError::Decompression`] if the zlib decompression fails,
-    /// which can happen if the data is corrupted or not valid zlib-compressed data.
+    /// Returns [`FilterError::Decompression`] if no data can be decoded,
+    /// which can happen if the data is not zlib or deflate compressed at all.
     fn decode_flate(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
-        let mut decoder = flate2::read::ZlibDecoder::new(stream_data);
-        let mut decoded = Vec::new();
+        let (decoded, error) = Self::inflate(stream_data, true);
+        let Some(error) = error else {
+            return Ok(decoded);
+        };
+        if !decoded.is_empty() {
+            return Ok(decoded);
+        }
+        match Self::inflate(stream_data, false) {
+            (raw, None) => Ok(raw),
+            (raw, Some(_)) if !raw.is_empty() => Ok(raw),
+            (_, Some(_)) => Err(FilterError::Decompression(format!(
+                "corrupt deflate stream: {error:?}"
+            ))),
+        }
+    }
 
-        use std::io::Read;
-
-        decoder
-            .read_to_end(&mut decoded)
-            .map_err(|e| FilterError::Decompression(e.to_string()))?;
-
-        Ok(decoded)
+    /// Inflates `stream_data`, returning the bytes decoded so far together
+    /// with the status that stopped decoding, if it was a failure.
+    ///
+    /// Input that ends before the end-of-stream marker is not a failure.
+    fn inflate(stream_data: &[u8], zlib_header: bool) -> (Vec<u8>, Option<TINFLStatus>) {
+        let mut flags = inflate_flags::TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF;
+        if zlib_header {
+            flags |= inflate_flags::TINFL_FLAG_PARSE_ZLIB_HEADER
+                | inflate_flags::TINFL_FLAG_COMPUTE_ADLER32;
+        }
+        let mut decompressor = Box::<DecompressorOxide>::default();
+        let mut decoded = vec![0; stream_data.len().saturating_mul(2).max(64)];
+        let mut input = stream_data;
+        let mut position = 0usize;
+        loop {
+            let (status, consumed, written) =
+                decompress(&mut decompressor, input, &mut decoded, position, flags);
+            position = position.saturating_add(written);
+            let failure = match status {
+                TINFLStatus::HasMoreOutput => {
+                    input = input.get(consumed..).unwrap_or_default();
+                    decoded.resize(decoded.len().saturating_mul(2), 0);
+                    continue;
+                }
+                TINFLStatus::Done
+                | TINFLStatus::NeedsMoreInput
+                | TINFLStatus::FailedCannotMakeProgress => None,
+                failure => Some(failure),
+            };
+            decoded.truncate(position);
+            return (decoded, failure);
+        }
     }
 
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -891,5 +939,78 @@ mod tests {
 
         let decoded = decode(&stream).expect("decode failed");
         assert_eq!(decoded.as_ref(), b"X");
+    }
+
+    fn zlib_compress(data: &[u8]) -> Vec<u8> {
+        use flate2::{Compression, write::ZlibEncoder};
+        use std::io::Write;
+
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(data).expect("zlib write failed");
+        encoder.finish().expect("zlib finish failed")
+    }
+
+    #[test]
+    fn test_flate_with_bad_checksum_keeps_decoded_data() {
+        let mut compressed = zlib_compress(b"hello world");
+        let checksum = compressed.last_mut().expect("zlib output has a checksum");
+        *checksum ^= 0xFF;
+
+        let decoded = Filter::decode_flate(&compressed).expect("decode failed");
+        assert_eq!(decoded, b"hello world");
+    }
+
+    #[test]
+    fn test_flate_with_corrupt_tail_keeps_decoded_prefix() {
+        use flate2::{Compression, write::ZlibEncoder};
+        use std::io::Write;
+
+        let data: Vec<u8> = (0..4096u32).flat_map(|n| n.to_le_bytes()).collect();
+        let (head, tail) = data.split_at(data.len() / 2);
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(head).expect("zlib write failed");
+        encoder.flush().expect("zlib flush failed");
+        let flushed = encoder.get_ref().len();
+        encoder.write_all(tail).expect("zlib write failed");
+        let mut compressed = encoder.finish().expect("zlib finish failed");
+        // A stored block whose length and its complement disagree is invalid.
+        compressed.truncate(flushed);
+        compressed.extend_from_slice(&[0x00, 0x05, 0x00, 0x05, 0x00]);
+
+        let decoded = Filter::decode_flate(&compressed).expect("decode failed");
+        assert_eq!(decoded.len(), head.len());
+        assert_eq!(decoded, head);
+    }
+
+    #[test]
+    fn test_flate_without_zlib_header_decodes_raw_deflate() {
+        use flate2::{Compression, write::DeflateEncoder};
+        use std::io::Write;
+
+        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+        encoder
+            .write_all(b"raw deflate")
+            .expect("deflate write failed");
+        let compressed = encoder.finish().expect("deflate finish failed");
+
+        let decoded = Filter::decode_flate(&compressed).expect("decode failed");
+        assert_eq!(decoded, b"raw deflate");
+    }
+
+    #[test]
+    fn test_flate_with_truncated_input_keeps_decoded_prefix() {
+        let compressed = zlib_compress(b"truncated stream data");
+        let truncated = compressed
+            .get(..compressed.len() - 4)
+            .expect("zlib output is longer than its checksum");
+
+        let decoded = Filter::decode_flate(truncated).expect("decode failed");
+        assert_eq!(decoded, b"truncated stream data");
+    }
+
+    #[test]
+    fn test_flate_with_undecodable_data_fails() {
+        let err = Filter::decode_flate(&[0xFF; 16]).expect_err("expected decode failure");
+        assert!(matches!(err, FilterError::Decompression(_)));
     }
 }

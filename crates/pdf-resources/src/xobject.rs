@@ -80,15 +80,20 @@ impl FromPdfObject for Resource {
                         }
                     }
                 };
-                Ok(Self::from(
-                    decode_image_xobject(
-                        dictionary,
-                        stream,
-                        context.source(),
-                        soft_mask.as_deref(),
-                    )
-                    .map_err(PdfPagesError::from)?,
-                ))
+                // Like PDFium, image data that cannot be decoded leaves the
+                // image undrawn instead of failing the page that uses it.
+                match decode_image_xobject(
+                    dictionary,
+                    stream,
+                    context.source(),
+                    soft_mask.as_deref(),
+                ) {
+                    Ok(image) => Ok(Self::from(image)),
+                    Err(PdfImageError::Filter(_) | PdfImageError::TruncatedImageData { .. }) => {
+                        Ok(Self::UnavailableImage)
+                    }
+                    Err(error) => Err(PdfPagesError::from(error).into()),
+                }
             }
             subtype => Err(PdfPagesError::UnsupportedXObjectSubtype {
                 subtype: String::from_utf8_lossy(subtype).into_owned(),
@@ -419,6 +424,49 @@ mod tests {
         let xobject = reader
             .read::<Option<Resource>>(&ObjectVariant::Stream(stream.clone()))
             .expect("malformed image dimensions should be recoverable")
+            .expect("the unavailable image resource should be preserved");
+
+        assert!(matches!(xobject, Resource::UnavailableImage));
+    }
+
+    #[test]
+    fn undecodable_image_data_is_unavailable() {
+        let dictionary = Dictionary::new(BTreeMap::from([
+            (
+                Vec::from(b"Subtype"),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"Image".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
+            (
+                Vec::from(b"Filter"),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"FlateDecode".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
+            (Vec::from(b"Width"), ObjectVariant::Integer(4)),
+            (Vec::from(b"Height"), ObjectVariant::Integer(4)),
+            (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
+            (
+                Vec::from(b"ColorSpace"),
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"DeviceGray".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+            ),
+        ]));
+        let stream = StreamObject::new_encoded(1, 0, dictionary, vec![0xFF; 16]);
+        let resolver = MapResolver {
+            objects: BTreeMap::new(),
+        };
+
+        let reader = pdf_object_reader::ObjectReader::new(&resolver);
+
+        let xobject = reader
+            .read::<Option<Resource>>(&ObjectVariant::Stream(stream))
+            .expect("corrupt image data should not fail the resource")
             .expect("the unavailable image resource should be preserved");
 
         assert!(matches!(xobject, Resource::UnavailableImage));

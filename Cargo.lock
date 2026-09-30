@@ -2305,6 +2305,7 @@ dependencies = [
  "flate2",
  "image",
  "jpeg2k",
+ "miniz_oxide",
  "num-traits",
  "pdf-ccitt",
  "pdf-jbig2",
