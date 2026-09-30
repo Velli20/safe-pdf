@@ -19,9 +19,9 @@
 //!    boundary. Without a hint, choose the first valid candidate in byte order.
 //!
 //! Requiring `endobj` eliminates many accidental matches inside stream data, but it
-//! cannot make scanning arbitrary bytes fully unambiguous. Consequently strict parsing
-//! remains available for structural objects such as cross-reference streams, while
-//! ordinary document objects use this validated recovery path.
+//! cannot make scanning arbitrary bytes fully unambiguous. Consequently structural objects
+//! such as cross-reference streams are parsed strictly first and fall back to this path
+//! only when that fails, while ordinary document objects use it directly.
 
 use pdf_object_reader::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
@@ -81,11 +81,10 @@ impl PdfParser<'_> {
 
     /// Advances past a stream while linearly reconstructing a cross-reference table.
     ///
-    /// The linear scanner runs before indirect references can be resolved, so this
-    /// variant can use only a non-negative, directly stored integer `/Length`. Missing,
-    /// invalid, and indirect lengths are treated as unavailable hints and trigger
-    /// structural scanning. On success the parser points immediately after `endstream`;
-    /// the scanner consumes the containing `endobj` separately.
+    /// The linear scanner runs before indirect references can be resolved, so the stream
+    /// boundary is located by [`Self::stream_range_with_direct_length`]. On success the
+    /// parser points immediately after `endstream`; the scanner consumes the containing
+    /// `endobj` separately.
     ///
     /// # Errors
     ///
@@ -95,6 +94,37 @@ impl PdfParser<'_> {
         &mut self,
         dictionary: &Dictionary,
     ) -> Result<(), ParserError> {
+        self.stream_range_with_direct_length(dictionary).map(|_| ())
+    }
+
+    /// Parses and returns a raw stream body whose `/Length` cannot be resolved.
+    ///
+    /// Cross-reference streams are parsed before any object can be resolved, so, like
+    /// [`Self::skip_stream_recovering`], only a direct `/Length` is used. On success the
+    /// parser points immediately after `endstream`; the caller consumes `endobj`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `stream` is missing, no structurally plausible terminator is
+    /// present in the remaining input, or the selected byte range is outside the input.
+    pub(crate) fn parse_stream_recovering_direct_length(
+        &mut self,
+        dictionary: &Dictionary,
+    ) -> Result<Vec<u8>, ParserError> {
+        let (stream_data_start, stream_data_end) =
+            self.stream_range_with_direct_length(dictionary)?;
+        stream_bytes(self.tokenizer.input, stream_data_start, stream_data_end)
+    }
+
+    /// Locates a stream body using only a non-negative, directly stored `/Length`.
+    ///
+    /// Missing, invalid, and indirect lengths are treated as unavailable hints and trigger
+    /// structural scanning. Returns the `(start, end)` byte range of the stream data and
+    /// leaves the parser immediately after `endstream`.
+    fn stream_range_with_direct_length(
+        &mut self,
+        dictionary: &Dictionary,
+    ) -> Result<(usize, usize), ParserError> {
         self.read_keyword(STREAM_KEYWORD)?;
         let stream_data_start = self.position();
         let declared_stream_end =
@@ -103,13 +133,14 @@ impl PdfParser<'_> {
         if let Some(stream_end) = declared_stream_end
             && try_exact_stream_end(self, stream_end)
         {
-            return Ok(());
+            return Ok((stream_data_start, stream_end));
         }
 
-        let (_, terminator_end) = find_stream_end(self, stream_data_start, declared_stream_end)
-            .ok_or(ParserError::UnexpectedEndOfFile)?;
+        let (stream_data_end, terminator_end) =
+            find_stream_end(self, stream_data_start, declared_stream_end)
+                .ok_or(ParserError::UnexpectedEndOfFile)?;
         self.tokenizer.position = terminator_end;
-        Ok(())
+        Ok((stream_data_start, stream_data_end))
     }
 }
 

@@ -259,6 +259,8 @@ pub enum AnnotationDestination {
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub enum DestinationTarget {
+    /// A null page target; the destination names no page.
+    Null,
     /// A direct page dictionary; the host resolves it in the document model.
     Dictionary,
     /// A page reference into the containing source PDF.

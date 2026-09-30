@@ -200,6 +200,9 @@ fn destination_target(
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
 ) -> DecodeResult<DestinationTarget> {
+    if value.is_null(objects)? {
+        return Ok(DestinationTarget::Null);
+    }
     Ok(match value {
         ObjectVariant::Reference(id) => DestinationTarget::Reference {
             number: u64::try_from(id.number).map_err(|_| SourceDecodeError::ResourceLimit)?,

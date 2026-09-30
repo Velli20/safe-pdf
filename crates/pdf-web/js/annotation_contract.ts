@@ -468,7 +468,7 @@ phase: number, };
 /**
  * Owned DestinationTarget data retained from the source PDF.
  */
-export type DestinationTarget = "Dictionary" | { "Reference": {
+export type DestinationTarget = "Null" | "Dictionary" | { "Reference": {
 /**
  * PDF object number, distinct from Core annotation and field identities.
  */

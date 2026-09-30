@@ -2,6 +2,7 @@ mod cipher;
 mod decryption;
 pub mod diagnostic;
 pub mod document;
+mod encrypt_objects;
 mod encryption;
 pub mod error;
 mod md5_key_derivation;

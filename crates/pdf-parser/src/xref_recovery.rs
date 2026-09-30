@@ -15,13 +15,14 @@ use pdf_object_reader::{
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
     object_id::ObjectId,
     object_resolver::PassthroughResolver,
+    object_variant::ObjectVariant,
 };
 
 use crate::{
     error::ParserError,
     linear_object_scanner::LinearObjectScanner,
     parser::PdfParser,
-    xref_builder::{ParsedXrefSection, XrefSectionKind, parse_section_at},
+    xref_builder::{ParsedXrefSection, XrefSectionKind, parse_section_at, parse_stream_section},
 };
 
 const XREF_KEYWORD: &[u8] = b"xref";
@@ -91,6 +92,9 @@ impl<'input> XrefRecovery<'input> {
         match parse_section_at(&self.parser, declared_offset) {
             Ok(section) => Ok(self.repair_section(section, 0)),
             Err(original_error) => {
+                if let Ok(section) = self.parse_stream_section_recovering_length(declared_offset) {
+                    return Ok(self.repair_section(section, 0));
+                }
                 if let Some(recovered_offset) = self.recover_section_offset(declared_offset) {
                     let section = parse_section_at(&self.parser, recovered_offset)?;
                     return Ok(
@@ -102,6 +106,28 @@ impl<'input> XrefRecovery<'input> {
                     .map(|section| self.repair_section(section, 0))
                     .map_err(|_| original_error)
             }
+        }
+    }
+
+    /// Parses an xref stream at exactly `offset` whose `/Length` is indirect or wrong.
+    ///
+    /// Xref stream dictionaries must hold direct values, and nothing can be resolved
+    /// before the xref table exists, so the stream body is located by an `endstream`
+    /// search instead.
+    fn parse_stream_section_recovering_length(
+        &self,
+        offset: usize,
+    ) -> Result<ParsedXrefSection, ParserError> {
+        let mut parser = self.parser.at_offset(offset)?;
+        let identifier = parser
+            .parse_indirect_object_id()
+            .ok_or(ParserError::InvalidXrefAtOffset { offset })?;
+        match parser.parse_indirect_object_value_recovering_direct_streams(
+            identifier,
+            &PassthroughResolver,
+        )? {
+            ObjectVariant::Stream(stream) => parse_stream_section(stream),
+            _ => Err(ParserError::InvalidXrefAtOffset { offset }),
         }
     }
 
