@@ -272,6 +272,18 @@ macro_rules! context_access {
                 self.access.resolve(object)
             }
 
+            /// Returns whether an object is null or references a nonexistent object.
+            ///
+            /// Per PDF spec §7.3.10 such a reference is treated as null, and per §7.3.7 a
+            /// null dictionary value is equivalent to an absent entry.
+            pub fn is_absent(&mut self, object: &ObjectVariant) -> ReadResult<bool> {
+                match self.access.resolve(object) {
+                    Ok(resolved) => Ok(resolved.kind() == ObjectKind::Null),
+                    Err(ObjectReadError::MissingObject { .. }) => Ok(true),
+                    Err(error) => Err(error),
+                }
+            }
+
             /// Borrows the source for leaf-level raw object inspection.
             pub fn source(&self) -> &dyn crate::object_resolver::ObjectResolver {
                 self.access.source()

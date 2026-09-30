@@ -14,6 +14,7 @@
 //! 1. Prefer the declared byte boundary when it is available and structurally valid.
 //! 2. Otherwise inspect delimiter-bounded `endstream` tokens.
 //! 3. Accept only a token followed, apart from whitespace and comments, by `endobj`.
+//!    Some writers truncate the keyword to `endstrea`; that form is accepted too.
 //! 4. When `/Length` supplied a hint, choose the valid candidate nearest its declared
 //!    boundary. Without a hint, choose the first valid candidate in byte order.
 //!
@@ -31,6 +32,8 @@ use crate::{error::ParserError, parser::PdfParser};
 
 const STREAM_KEYWORD: &[u8] = b"stream";
 const ENDSTREAM_KEYWORD: &[u8] = b"endstream";
+/// The `endstream` keyword without its final byte, as emitted by some broken writers.
+const TRUNCATED_ENDSTREAM_KEYWORD: &[u8] = b"endstrea";
 
 impl PdfParser<'_> {
     /// Parses and returns a raw stream body using the recovery rules of this module.
@@ -69,11 +72,10 @@ impl PdfParser<'_> {
             return stream_bytes(self.tokenizer.input, stream_data_start, stream_end);
         }
 
-        let (stream_data_end, endstream_offset) =
+        let (stream_data_end, terminator_end) =
             find_stream_end(self, stream_data_start, declared_stream_end)
                 .ok_or(ParserError::UnexpectedEndOfFile)?;
-        self.tokenizer.position = endstream_offset;
-        self.read_keyword(ENDSTREAM_KEYWORD)?;
+        self.tokenizer.position = terminator_end;
         stream_bytes(self.tokenizer.input, stream_data_start, stream_data_end)
     }
 
@@ -104,10 +106,10 @@ impl PdfParser<'_> {
             return Ok(());
         }
 
-        let (_, endstream_offset) = find_stream_end(self, stream_data_start, declared_stream_end)
+        let (_, terminator_end) = find_stream_end(self, stream_data_start, declared_stream_end)
             .ok_or(ParserError::UnexpectedEndOfFile)?;
-        self.tokenizer.position = endstream_offset;
-        self.read_keyword(ENDSTREAM_KEYWORD)
+        self.tokenizer.position = terminator_end;
+        Ok(())
     }
 }
 
@@ -141,17 +143,42 @@ fn try_exact_stream_end(parser: &mut PdfParser<'_>, stream_end: usize) -> bool {
     let mark = parser.position();
     parser.tokenizer.position = stream_end;
     parser.try_read_end_of_line_marker();
-    let valid = parser.read_keyword(ENDSTREAM_KEYWORD).is_ok()
-        && endobj_follows(parser.tokenizer.input, parser.position());
-    if !valid {
-        parser.tokenizer.position = mark;
+    let terminator_end = endstream_terminator_len(parser.tokenizer.input, parser.position())
+        .map(|length| parser.position().saturating_add(length))
+        .filter(|&terminator_end| endobj_follows(parser.tokenizer.input, terminator_end));
+    match terminator_end {
+        Some(terminator_end) => {
+            parser.tokenizer.position = terminator_end;
+            true
+        }
+        None => {
+            parser.tokenizer.position = mark;
+            false
+        }
     }
-    valid
+}
+
+/// Returns the length of the stream terminator keyword at `offset`, if one is present.
+///
+/// Both `endstream` and its truncated form `endstrea` are recognized, provided the
+/// keyword ends at a PDF delimiter or the end of input.
+fn endstream_terminator_len(input: &[u8], offset: usize) -> Option<usize> {
+    let remaining = input.get(offset..)?;
+    [ENDSTREAM_KEYWORD, TRUNCATED_ENDSTREAM_KEYWORD]
+        .into_iter()
+        .find(|keyword| {
+            remaining.starts_with(keyword)
+                && remaining
+                    .get(keyword.len())
+                    .copied()
+                    .is_none_or(PdfParser::is_pdf_delimiter)
+        })
+        .map(<[u8]>::len)
 }
 
 /// Locates the best structurally plausible `endstream` terminator.
 ///
-/// A candidate must:
+/// A candidate is `endstream` or its truncated form `endstrea`, and must:
 ///
 /// - begin and end on PDF token boundaries; and
 /// - be followed only by whitespace/comments before `endobj`.
@@ -161,9 +188,9 @@ fn try_exact_stream_end(parser: &mut PdfParser<'_>, stream_end: usize) -> bool {
 /// earlier candidate. If no boundary is available, byte-order iteration makes the
 /// first valid candidate the best information recovery can provide.
 ///
-/// The returned pair is `(stream_data_end, endstream_offset)`. The first value excludes
-/// the separator line ending immediately before `endstream`; the second points at the
-/// first byte of the keyword.
+/// The returned pair is `(stream_data_end, terminator_end)`. The first value excludes
+/// the separator line ending immediately before the keyword; the second points just
+/// past the keyword.
 fn find_stream_end(
     parser: &PdfParser<'_>,
     stream_data_start: usize,
@@ -174,10 +201,10 @@ fn find_stream_end(
 
     for (relative_offset, window) in input
         .get(stream_data_start..)?
-        .windows(ENDSTREAM_KEYWORD.len())
+        .windows(TRUNCATED_ENDSTREAM_KEYWORD.len())
         .enumerate()
     {
-        if window != ENDSTREAM_KEYWORD {
+        if window != TRUNCATED_ENDSTREAM_KEYWORD {
             continue;
         }
 
@@ -188,35 +215,35 @@ fn find_stream_end(
         // local start remains a valid boundary even when it is not byte zero.
         let has_leading_boundary =
             endstream_offset == stream_data_start || parser.is_token_start_at(endstream_offset);
-        let after_endstream = endstream_offset.saturating_add(ENDSTREAM_KEYWORD.len());
-        let has_trailing_boundary = input
-            .get(after_endstream)
-            .copied()
-            .is_none_or(PdfParser::is_pdf_delimiter);
-        if !has_leading_boundary
-            || !has_trailing_boundary
-            || !endobj_follows(input, after_endstream)
-        {
+        let Some(terminator_end) = endstream_terminator_len(input, endstream_offset)
+            .map(|length| endstream_offset.saturating_add(length))
+        else {
+            continue;
+        };
+        if !has_leading_boundary || !endobj_follows(input, terminator_end) {
             continue;
         }
 
         let stream_data_end = trim_stream_data_end(input, stream_data_start, endstream_offset);
         let Some(declared_stream_end) = declared_stream_end else {
-            return Some((stream_data_end, endstream_offset));
+            return Some((stream_data_end, terminator_end));
         };
 
         // A stale length is still useful as a proximity hint. This reduces the chance
         // of selecting object-like text embedded much earlier or later in the payload.
         let distance = endstream_offset.abs_diff(declared_stream_end);
         match best_candidate {
-            Some((best_offset, _, best_distance))
+            Some((best_offset, _, _, best_distance))
                 if best_distance < distance
                     || (best_distance == distance && best_offset <= endstream_offset) => {}
-            _ => best_candidate = Some((endstream_offset, stream_data_end, distance)),
+            _ => {
+                best_candidate =
+                    Some((endstream_offset, stream_data_end, terminator_end, distance));
+            }
         }
     }
 
-    best_candidate.map(|(offset, data_end, _)| (data_end, offset))
+    best_candidate.map(|(_, data_end, terminator_end, _)| (data_end, terminator_end))
 }
 
 /// Checks whether an `endstream` candidate is followed by its containing `endobj`.

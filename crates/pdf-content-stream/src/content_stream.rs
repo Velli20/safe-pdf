@@ -26,6 +26,13 @@ impl FromPdfObject for ContentStream {
             ObjectKind::Array => {
                 let mut context = context.array()?;
                 for index in 0..context.array().len() {
+                    // Null and dangling entries contribute no content (ISO 32000 §7.3.10).
+                    let element = context.array().get(index).cloned();
+                    if let Some(element) = element
+                        && context.is_absent(&element)?
+                    {
+                        continue;
+                    }
                     let stream = context.at::<StreamObject>(index)?;
                     // A fresh parser keeps incomplete operands local to each stream.
                     Self::parse_decoded_stream(stream.raw_data(), &mut operators)?;
@@ -288,7 +295,7 @@ mod tests {
 
     #[test]
     fn content_stream_read_rejects_non_stream_array_entries() {
-        let contents = ObjectVariant::Array(vec![ObjectVariant::Null].into());
+        let contents = ObjectVariant::Array(vec![ObjectVariant::Integer(0)].into());
         let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
 
         let err = reader
@@ -303,7 +310,7 @@ mod tests {
                 source,
             } if matches!(*source, pdf_object_reader::ObjectReadError::TypeMismatch {
                 expected: pdf_object_reader::object_kind::ObjectKind::Stream,
-                actual: pdf_object_reader::object_kind::ObjectKind::Null,
+                actual: pdf_object_reader::object_kind::ObjectKind::Integer,
             })
         .into()));
         assert_eq!(

@@ -9,9 +9,11 @@ use serde_json::{Value as JsonValue, json};
 
 #[derive(Default)]
 pub struct ObjectCollection {
+    /// Active objects keyed by object number.
+    ///
+    /// Lookups ignore the generation of a reference, like PDFium: incremental updates
+    /// sometimes redefine an object with a different generation than its referrers use.
     pub map: HashMap<usize, ObjectVariant>,
-    /// Generations belonging to the loaded snapshot's active objects.
-    pub generations: HashMap<usize, usize>,
 }
 
 impl ObjectResolver for ObjectCollection {
@@ -27,17 +29,6 @@ impl ObjectResolver for ObjectCollection {
                 ObjectVariant::Reference(object_number) => {
                     if !in_progress.insert(*object_number) {
                         return Err(ObjectError::CyclicDependency {
-                            obj_num: object_number.number,
-                        });
-                    }
-                    if self
-                        .generations
-                        .get(&object_number.number)
-                        .copied()
-                        .unwrap_or(0)
-                        != object_number.generation
-                    {
-                        return Err(ObjectError::FailedResolveObjectReference {
                             obj_num: object_number.number,
                         });
                     }
@@ -58,7 +49,6 @@ impl ObjectCollection {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             map: HashMap::with_capacity(capacity),
-            generations: HashMap::with_capacity(capacity),
         }
     }
 
@@ -96,8 +86,6 @@ impl ObjectCollection {
             _ => {}
         }
 
-        self.generations
-            .insert(identifier.number, identifier.generation);
         if self.map.insert(identifier.number, obj).is_some() {
             return Err(ObjectError::DuplicateKeyInObjectCollection(
                 identifier.number,
@@ -114,7 +102,6 @@ impl ObjectCollection {
     /// were already registered in pass 1 (e.g., via an object stream entry in the
     /// xref table). The object-stream version is authoritative for these objects.
     pub fn insert_compressed(&mut self, obj_num: usize, obj: ObjectVariant) {
-        self.generations.insert(obj_num, 0);
         self.map.insert(obj_num, obj);
     }
 
@@ -516,9 +503,6 @@ impl pdf_object_reader::ObjectSource for ObjectCollection {
         &self,
         id: pdf_object_reader::object_id::ObjectId,
     ) -> Result<Option<pdf_object_reader::pdf_object::PdfObject>, Self::Error> {
-        if self.generations.get(&id.number()).copied().unwrap_or(0) != id.generation() {
-            return Ok(None);
-        }
         Ok(self
             .map
             .get(&id.number())
