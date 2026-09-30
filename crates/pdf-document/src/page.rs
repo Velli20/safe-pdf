@@ -93,7 +93,16 @@ impl FromPdfObject for PdfPage {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
         let dictionary = context.dictionary().clone();
-        let contents = context.optional::<ContentStream>(b"Contents")?;
+        // A dangling `/Contents` reference is null (ISO 32000 §7.3.10), leaving the page empty.
+        let contents_absent = match context.dictionary().get(b"Contents").cloned() {
+            Some(object) => context.is_absent(&object)?,
+            None => true,
+        };
+        let contents = if contents_absent {
+            None
+        } else {
+            context.optional::<ContentStream>(b"Contents")?
+        };
         let media_box = dictionary.optional_media_box(context.source())?;
         let crop_box = dictionary
             .optional_array_of::<f32, 4>(b"CropBox", context.source())?

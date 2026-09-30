@@ -272,7 +272,7 @@ fn optional_contents_parses_stream_arrays_and_allocates_monotonically() {
 
 #[test]
 fn content_stream_read_rejects_non_stream_array_entries() {
-    let contents = ObjectVariant::Array(vec![ObjectVariant::Null].into());
+    let contents = ObjectVariant::Array(vec![ObjectVariant::Integer(0)].into());
     let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
 
     let err = reader
@@ -287,7 +287,7 @@ fn content_stream_read_rejects_non_stream_array_entries() {
                 source,
             } if matches!(*source, pdf_object_reader::ObjectReadError::TypeMismatch {
                 expected: pdf_object_reader::object_kind::ObjectKind::Stream,
-                actual: pdf_object_reader::object_kind::ObjectKind::Null,
+                actual: pdf_object_reader::object_kind::ObjectKind::Integer,
             })
     .into()));
     assert_eq!(

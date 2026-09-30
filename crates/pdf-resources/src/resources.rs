@@ -8,7 +8,7 @@ use pdf_font::PdfFontSpec;
 use pdf_object_reader::object_lookup::ObjectLookupExt;
 use pdf_object_reader::{
     Dictionary, DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle,
-    ObjectReadError, ReadResult, object_kind::ObjectKind, object_variant::ObjectVariant,
+    ReadResult, object_variant::ObjectVariant,
 };
 use pdf_shading::model::Shading;
 use std::{collections::HashMap, sync::Arc};
@@ -55,7 +55,7 @@ impl Resources {
         let mut resources = Self::default();
         if let Some(dictionary) = context.optional::<Dictionary>(b"Font")? {
             for (name, value) in &dictionary.dictionary {
-                if Self::is_absent(&mut context, value)? {
+                if context.is_absent(value)? {
                     continue;
                 }
                 resources
@@ -65,7 +65,7 @@ impl Resources {
         }
         if let Some(dictionary) = context.optional::<Dictionary>(b"ExtGState")? {
             for (name, value) in &dictionary.dictionary {
-                if Self::is_absent(&mut context, value)? {
+                if context.is_absent(value)? {
                     continue;
                 }
                 resources.ext_g_states.insert(
@@ -76,7 +76,7 @@ impl Resources {
         }
         if let Some(dictionary) = context.optional::<Dictionary>(b"Pattern")? {
             for (name, value) in &dictionary.dictionary {
-                if Self::is_absent(&mut context, value)? {
+                if context.is_absent(value)? {
                     continue;
                 }
                 resources
@@ -86,7 +86,7 @@ impl Resources {
         }
         if let Some(dictionary) = context.optional::<Dictionary>(b"XObject")? {
             for (name, value) in &dictionary.dictionary {
-                if Self::is_absent(&mut context, value)? {
+                if context.is_absent(value)? {
                     continue;
                 }
                 let resolved = context.resolve(value)?;
@@ -113,7 +113,7 @@ impl Resources {
         }
         if let Some(dictionary) = context.optional::<Dictionary>(b"Shading")? {
             for (name, value) in &dictionary.dictionary {
-                if Self::is_absent(&mut context, value)? {
+                if context.is_absent(value)? {
                     continue;
                 }
                 let shading = context.read_shared::<Shading>(value)?.get()?;
@@ -124,7 +124,7 @@ impl Resources {
         }
         if let Some(dictionary) = context.optional::<Dictionary>(b"ColorSpace")? {
             for (name, value) in &dictionary.dictionary {
-                if Self::is_absent(&mut context, value)? {
+                if context.is_absent(value)? {
                     continue;
                 }
                 let color_space = context.read_shared::<ColorSpace>(value)?.get()?;
@@ -134,24 +134,6 @@ impl Resources {
             }
         }
         Ok(resources)
-    }
-
-    /// Returns whether a resource entry is null or references a nonexistent object.
-    ///
-    /// Per PDF spec §7.3.10 such a reference is treated as null, and per §7.3.7 a null
-    /// dictionary value is equivalent to an absent entry.
-    fn is_absent<A>(
-        context: &mut DictionaryContext<'_, A>,
-        value: &ObjectVariant,
-    ) -> ReadResult<bool>
-    where
-        A: ObjectAccess + ?Sized,
-    {
-        match context.resolve(value) {
-            Ok(resolved) => Ok(resolved.kind() == ObjectKind::Null),
-            Err(ObjectReadError::MissingObject { .. }) => Ok(true),
-            Err(error) => Err(error),
-        }
     }
 
     /// Returns a reference to a font resource by name, if it exists.
