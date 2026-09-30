@@ -15,6 +15,8 @@
 //! Duplicate object numbers are resolved in file order: later complete declarations
 //! replace earlier ones, matching the usual incremental-update semantics. Likewise,
 //! the last successfully parsed trailer that directly contains `/Root` is retained.
+//! Cross-reference stream dictionaries (`/Type /XRef`) count as trailers too, since
+//! files that use them have no `trailer` keyword; their stream data is not decoded.
 //! Recovery succeeds only when that root reference names an object discovered by the
 //! scan. These checks reduce false positives, but arbitrary byte scanning is inherently
 //! less authoritative than a valid cross-reference section; callers should enter this
@@ -25,6 +27,7 @@ use std::collections::BTreeMap;
 use pdf_object_reader::{
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
     object_id::ObjectId,
+    object_lookup::ObjectLookupExt,
     object_resolver::PassthroughResolver,
     object_variant::ObjectVariant,
     trailer::Trailer,
@@ -42,9 +45,12 @@ const STREAM_KEYWORD: &[u8] = b"stream";
 /// store during indexing.
 enum ScanCandidate {
     /// An indirect object declaration and the generation recorded in its header.
+    ///
+    /// `trailer` holds the dictionary of a rooted cross-reference stream object.
     IndirectObject {
         object_number: usize,
         generation_number: usize,
+        trailer: Option<Trailer>,
     },
     /// A trailer dictionary that directly exposes the document catalog through `/Root`.
     Trailer(Trailer),
@@ -117,6 +123,7 @@ impl<'input> LinearObjectScanner<'input> {
                 ScanCandidate::IndirectObject {
                     object_number,
                     generation_number,
+                    trailer: stream_trailer,
                 } => {
                     // BTreeMap::insert replaces an older declaration of the same object
                     // number, which models incremental updates encountered in file order.
@@ -124,6 +131,9 @@ impl<'input> LinearObjectScanner<'input> {
                         object_number,
                         CrossReferenceEntryType::new_normal(position, generation_number),
                     );
+                    if stream_trailer.is_some() {
+                        trailer = stream_trailer;
+                    }
                 }
                 // Later rooted trailers supersede earlier revisions.
                 ScanCandidate::Trailer(candidate) => trailer = Some(candidate),
@@ -172,11 +182,12 @@ impl<'input> LinearObjectScanner<'input> {
     /// value existed solely to prove the declaration's extent and structural validity.
     fn indirect_object_at(&self, position: usize) -> Option<(ScanCandidate, usize)> {
         let mut probe = self.parser.at_offset(position).ok()?;
-        let identifier = self.scan_indirect_object(&mut probe).ok()?;
+        let (identifier, trailer) = self.scan_indirect_object(&mut probe).ok()?;
         Some((
             ScanCandidate::IndirectObject {
                 object_number: identifier.number,
                 generation_number: identifier.generation,
+                trailer,
             },
             probe.position(),
         ))
@@ -192,13 +203,20 @@ impl<'input> LinearObjectScanner<'input> {
     /// swallowing or manufacturing adjacent objects. Non-stream objects retain the
     /// parser's narrowly defined implicit-`endobj` recovery behavior.
     ///
+    /// A stream whose dictionary has `/Type /XRef` and a direct `/Root` also yields
+    /// that dictionary as a trailer, since cross-reference stream files have no
+    /// `trailer` keyword.
+    ///
     /// On success `probe` points immediately after the object terminator.
     ///
     /// # Errors
     ///
     /// Returns an error for an invalid indirect-object header, malformed value, stream
     /// without a dictionary, unrecoverable stream boundary, or invalid terminator.
-    fn scan_indirect_object(&self, probe: &mut PdfParser<'input>) -> Result<ObjectId, ParserError> {
+    fn scan_indirect_object(
+        &self,
+        probe: &mut PdfParser<'input>,
+    ) -> Result<(ObjectId, Option<Trailer>), ParserError> {
         let object_start = probe.position();
         let identifier = probe.parse_indirect_object_id().ok_or(
             ParserError::ExpectedIndirectObjectDeclaration {
@@ -214,11 +232,16 @@ impl<'input> LinearObjectScanner<'input> {
             };
             probe.skip_stream_recovering(&dictionary)?;
             probe.consume_required_endobj()?;
-        } else {
-            probe.consume_endobj_or_implicit_boundary()?;
+            let is_rooted_xref_stream = dictionary
+                .optional_bytes(b"Type", &PassthroughResolver)
+                .is_ok_and(|type_name| type_name == Some(b"XRef".as_slice()))
+                && dictionary.get(b"Root").is_some();
+            let trailer = is_rooted_xref_stream.then(|| Trailer::new(Box::new(dictionary), None));
+            return Ok((identifier, trailer));
         }
 
-        Ok(identifier)
+        probe.consume_endobj_or_implicit_boundary()?;
+        Ok((identifier, None))
     }
 
     /// Probes a complete trailer that directly exposes `/Root`.
