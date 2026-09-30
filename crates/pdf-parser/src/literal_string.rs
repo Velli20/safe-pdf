@@ -36,6 +36,8 @@ impl PdfParser<'_> {
         //   backslash in the output). For other characters following a backslash, we
         //   emit the character as-is (backslash is ignored), which aligns with the PDF
         //   spec's permissive behavior for unknown escapes.
+        // - A backslash followed by an end-of-line marker (LF, CR, or CRLF) continues
+        //   the string on the next line; both are dropped.
         // - We still do not normalize line endings present literally in the input; they
         //   are preserved as-is.
         loop {
@@ -82,6 +84,14 @@ impl PdfParser<'_> {
                         }
                         // Escaped delimiter/backslash
                         b'(' | b')' | b'\\' => characters.push(byte),
+                        // Line continuation: neither the backslash nor the EOL marker
+                        // belongs to the string (ISO 32000 §7.3.4.2).
+                        b'\n' => {}
+                        b'\r' => {
+                            if self.tokenizer.data().first() == Some(&b'\n') {
+                                self.tokenizer.read_exactly(1)?;
+                            }
+                        }
                         // Unknown escape: keep the backslash and the byte
                         other => {
                             characters.push(b'\\');

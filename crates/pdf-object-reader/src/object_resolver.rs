@@ -45,6 +45,26 @@ impl ObjectResolver for PassthroughResolver {
     }
 }
 
+/// A resolver adapter that reads references to nonexistent objects as null.
+///
+/// ISO 32000 §7.3.10 treats an indirect reference to an undefined object as the null
+/// object. Wrap a resolver in this adapter where such references should read as absent
+/// values instead of failing the whole read.
+pub struct DanglingAsNullResolver<'a>(pub &'a dyn ObjectResolver);
+
+impl ObjectResolver for DanglingAsNullResolver<'_> {
+    fn resolve_object<'a>(
+        &'a self,
+        obj: &'a ObjectVariant,
+    ) -> Result<&'a ObjectVariant, ObjectError> {
+        static NULL: ObjectVariant = ObjectVariant::Null;
+        match self.0.resolve_object(obj) {
+            Err(ObjectError::FailedResolveObjectReference { .. }) => Ok(&NULL),
+            result => result,
+        }
+    }
+}
+
 /// Deprecated alias for [`PassthroughResolver`]. Use `PassthroughResolver` instead.
 #[deprecated(note = "Use PassthroughResolver instead")]
 pub type UnimplementedResolver = PassthroughResolver;
