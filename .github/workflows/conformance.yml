@@ -1,9 +1,12 @@
 name: Conformance
 
-# Renders the PDFium and pdf.js test corpora with Safe-PDF and compares them with PDFium.
+# Renders the PDFium and pdf.js test corpora with Safe-PDF and compares them with pages
+# rendered by the PDFium library without annotations or form fields, which matches Safe-PDF's
+# content-only render. (The pdfium_tests goldens draw annotations, so CI does not use them.)
 # Runs when a pull request is merged (push to main) and on manual dispatch, and files one
 # GitHub issue per unreported failure cluster. Regressions never fail these runs; they are
-# reported through issues, the job summary and the uploaded report.
+# reported through issues, the job summary and the uploaded report. Runs on main publish the
+# viewers to GitHub Pages under /conformance/.
 #
 # To gate pull requests instead: uncomment the `pull_request` trigger below. Pull request
 # runs fail on regressions against tools/conformance/baselines/ (see FAIL_ON_EVENTS) and
@@ -42,7 +45,7 @@ jobs:
   conformance:
     name: Conformance (${{ matrix.corpus }})
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     permissions:
       contents: read
       issues: write
@@ -95,7 +98,6 @@ jobs:
           key: ${{ steps.corpus-cache.outputs.cache-primary-key }}
 
       - name: Install prebuilt PDFium
-        if: matrix.corpus == 'pdfjs'
         run: |
           dir="$RUNNER_TEMP/pdfium"
           mkdir -p "$dir"
@@ -109,7 +111,7 @@ jobs:
         id: run
         run: |
           set +e
-          cargo conformance run --corpus ${{ matrix.corpus }} --jobs 4
+          cargo conformance run --corpus ${{ matrix.corpus }} --reference pdfium --jobs 4
           status=$?
           echo "status=$status" >> "$GITHUB_OUTPUT"
           if [ "$status" != 0 ]; then
@@ -123,6 +125,11 @@ jobs:
           if [ -f "$triage" ]; then
             {
               sed '/^## Failure clusters/,$d' "$triage"
+              if [ "${{ github.event_name }}" != pull_request ] && [ "${{ github.ref }}" = refs/heads/main ]; then
+                owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+                echo "Viewer (published when the run finishes): https://${owner}.github.io/${{ github.event.repository.name }}/conformance/${{ matrix.corpus }}/"
+                echo
+              fi
               echo "## Largest failure clusters"
               grep '^### ' "$triage" | head -25 | sed 's/^### /- /'
             } >> "$GITHUB_STEP_SUMMARY"
@@ -159,3 +166,102 @@ jobs:
         run: |
           echo "::error ::Conformance regressions against tools/conformance/baselines/${{ matrix.corpus }}.json (exit ${{ steps.run.outputs.status }}); see the job summary and the conformance-${{ matrix.corpus }} artifact."
           exit 1
+
+  publish:
+    name: Publish reports to GitHub Pages
+    needs: conformance
+    if: always() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      pages: write
+      id-token: write
+
+    # Shared with ci.yml, which deploys the same site.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}conformance/
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: conformance-*
+          path: reports
+
+      # Only the viewer and what it links to; results.json and issue bodies stay in the
+      # run artifacts.
+      - name: Stage reports
+        run: |
+          mkdir -p site/conformance
+          items=""
+          for corpus in pdfium pdfjs; do
+            src="reports/conformance-$corpus"
+            if [ ! -f "$src/index.html" ]; then
+              items="$items<li>$corpus: no report in this run</li>"
+              continue
+            fi
+            rm -rf "$src/results.json" "$src/issues"
+            mv "$src" "site/conformance/$corpus"
+            totals=$(grep -m1 -E '^[0-9]+ documents:' "site/conformance/$corpus/TRIAGE.md" || true)
+            items="$items<li><a href=\"$corpus/\">$corpus</a> · <a href=\"$corpus/TRIAGE.md\">TRIAGE.md</a><br><span>$totals</span></li>"
+          done
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          commit_url="${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
+          cat > site/conformance/index.html <<HTML
+          <!doctype html>
+          <html lang="en">
+          <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>Safe-PDF conformance</title>
+          <style>
+            :root { color-scheme: light dark; font: 15px system-ui, sans-serif; }
+            body { max-width: 720px; margin: 32px auto; padding: 0 16px; }
+            li { margin: 12px 0; }
+            span, p { color: GrayText; }
+          </style>
+          </head>
+          <body>
+          <h1>Safe-PDF conformance</h1>
+          <p>Safe-PDF compared with PDFium, both rendering page content without annotations or form fields.</p>
+          <ul>$items</ul>
+          <p>Commit <a href="$commit_url">${GITHUB_SHA::7}</a> · <a href="$run_url">workflow run</a> · $(date -u '+%Y-%m-%d %H:%M UTC')</p>
+          <p><a href="../">Safe-PDF web viewer</a></p>
+          </body>
+          </html>
+          HTML
+
+      - name: Upload conformance site
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-conformance
+          path: site/conformance
+          retention-days: 90
+
+      - name: Add web-canvas site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/assemble-pages.sh site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Job summary
+        run: |
+          echo "Conformance reports: ${{ steps.deployment.outputs.page_url }}conformance/" >> "$GITHUB_STEP_SUMMARY"

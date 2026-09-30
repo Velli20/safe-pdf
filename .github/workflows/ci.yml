@@ -152,11 +152,15 @@ jobs:
           cp examples/web-canvas/index.html examples/web-canvas/host.js site/
           cp -r examples/web-canvas/pkg site/pkg
 
-      - name: Upload Pages artifact
+      # Kept longer than the Pages artifact so conformance.yml can redeploy it next to its
+      # reports (see .github/scripts/assemble-pages.sh).
+      - name: Upload web-canvas site
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
+          name: pages-web-canvas
           path: site
+          retention-days: 90
 
   deploy:
     name: Deploy to GitHub Pages
@@ -165,14 +169,40 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     permissions:
+      contents: read
+      actions: read
       pages: write
       id-token: write
+
+    # Shared with conformance.yml, which deploys the same site.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
 
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download web-canvas site
+        uses: actions/download-artifact@v4
+        with:
+          name: pages-web-canvas
+          path: site
+
+      - name: Add conformance reports
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/assemble-pages.sh site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

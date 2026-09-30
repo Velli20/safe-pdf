@@ -43,6 +43,7 @@
       button:disabled { cursor: default; opacity: 0.6; }
       :focus-visible { outline: 2px solid #167baf; outline-offset: 2px; }
       #status { color: #52636d; font-size: 13px; }
+      .reports { margin-left: auto; color: #167baf; }
       #error { margin: 12px 24px; color: #a31515; white-space: pre-wrap; }
       #error:empty { display: none; }
 
@@ -105,6 +106,7 @@
       <button id="rotate" type="button" aria-label="Rotate clockwise 90 degrees" disabled>Rotate</button>
       <button id="copy" type="button" disabled>Copy selection</button>
       <span id="status" role="status">Loading…</span>
+      <a class="reports" href="conformance/">Conformance reports</a>
     </header>
     <div id="error" role="alert"></div>
     <noscript>This PDF viewer requires JavaScript.</noscript>
