@@ -311,7 +311,7 @@ pub(crate) fn parse_section_at(
 /// # Errors
 ///
 /// Propagates stream decoding and malformed xref-stream dictionary or entry errors.
-fn parse_stream_section(stream: StreamObject) -> Result<ParsedXrefSection, ParserError> {
+pub(crate) fn parse_stream_section(stream: StreamObject) -> Result<ParsedXrefSection, ParserError> {
     Ok(ParsedXrefSection {
         kind: XrefSectionKind::Stream,
         table: crate::cross_reference_stream::parse_xref_stream(stream, &PassthroughResolver)?,

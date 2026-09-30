@@ -13,6 +13,7 @@ const ENDOBJ_KEYWORD: &[u8] = b"endobj";
 enum StreamParseMode {
     Strict,
     Recover,
+    RecoverDirectLength,
 }
 
 fn starts_with_boundary_keyword(input: &[u8], keyword: &[u8]) -> bool {
@@ -162,6 +163,22 @@ impl PdfParser<'_> {
         self.parse_indirect_object_value_with_mode(identifier, objects, StreamParseMode::Recover)
     }
 
+    /// Parses a structural object whose stream `/Length` may be indirect or wrong.
+    ///
+    /// Used before any object can be resolved: only a direct `/Length` serves as a
+    /// boundary hint, and an `endstream` search locates the body otherwise.
+    pub(crate) fn parse_indirect_object_value_recovering_direct_streams(
+        &mut self,
+        identifier: ObjectId,
+        objects: &dyn ObjectResolver,
+    ) -> Result<ObjectVariant, ParserError> {
+        self.parse_indirect_object_value_with_mode(
+            identifier,
+            objects,
+            StreamParseMode::RecoverDirectLength,
+        )
+    }
+
     fn parse_indirect_object_value_with_mode(
         &mut self,
         identifier: ObjectId,
@@ -178,6 +195,9 @@ impl PdfParser<'_> {
             let data = match stream_mode {
                 StreamParseMode::Strict => self.parse_stream(&dictionary, objects)?,
                 StreamParseMode::Recover => self.parse_stream_recovering(&dictionary, objects)?,
+                StreamParseMode::RecoverDirectLength => {
+                    self.parse_stream_recovering_direct_length(&dictionary)?
+                }
             };
             self.consume_required_endobj()?;
             return Ok(ObjectVariant::Stream(StreamObject::new_encoded(
