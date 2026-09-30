@@ -71,7 +71,12 @@ impl FromPdfObject for SourceAnnotation {
 
         let kind = NativeAnnotation::from_dictionary(&subtype, dictionary, objects)?;
 
-        let contents = dictionary.optional_bytes_vec(b"Contents", objects)?;
+        // `/Contents` is descriptive text only; like PDFium, a malformed value (e.g. an
+        // integer) is treated as absent rather than rejecting the annotation.
+        let contents = dictionary
+            .optional_bytes_vec(b"Contents", objects)
+            .ok()
+            .flatten();
         let name = dictionary.optional_bytes_vec(b"NM", objects)?;
         let flags = dictionary
             .optional_number::<i32>(b"F", objects)?
