@@ -76,10 +76,6 @@ pub struct Cluster {
     pub cases: Vec<String>,
     /// Likely crates across the cluster, most frequent first.
     pub likely_crates: Vec<(String, usize)>,
-    /// Signatures of the same failures under the clustering used before root-cause
-    /// signatures, used to find issues filed with them.
-    #[serde(default)]
-    pub legacy_signatures: Vec<String>,
 }
 
 /// The run index.
@@ -123,11 +119,10 @@ pub fn build(options: &RunOptions, results: &[CaseResult], baseline: &Baseline) 
             .as_ref()
             .map(|read| read.inventory.likely_crates.clone())
             .unwrap_or_default();
-        let mut add_to_cluster = |signature: &str, legacy: Option<&String>| {
+        let mut add_to_cluster = |signature: &str| {
             let entry = clusters.entry(signature.to_owned()).or_default();
             entry.count = entry.count.saturating_add(1);
             entry.cases.insert(result.case.id.clone());
-            entry.legacy.extend(legacy.cloned());
             for name in &likely_crates {
                 bump(&mut entry.crates, name);
             }
@@ -140,7 +135,7 @@ pub fn build(options: &RunOptions, results: &[CaseResult], baseline: &Baseline) 
                 if page.status.is_failure()
                     && let Some(signature) = &page.signature
                 {
-                    add_to_cluster(signature, page.legacy_signature.as_ref());
+                    add_to_cluster(signature);
                 }
                 let mismatch = page
                     .output
@@ -171,7 +166,7 @@ pub fn build(options: &RunOptions, results: &[CaseResult], baseline: &Baseline) 
             && result.pages.iter().all(|page| !page.status.is_failure())
             && let Some(signature) = &result.signature
         {
-            add_to_cluster(signature, result.legacy_signature.as_ref());
+            add_to_cluster(signature);
         }
         cases.push(IndexCase {
             id: result.case.id.clone(),
@@ -197,7 +192,6 @@ pub fn build(options: &RunOptions, results: &[CaseResult], baseline: &Baseline) 
                 count: accumulator.count,
                 cases: accumulator.cases.into_iter().collect(),
                 likely_crates,
-                legacy_signatures: accumulator.legacy.into_iter().collect(),
             }
         })
         .collect();
@@ -233,7 +227,6 @@ struct ClusterAccumulator {
     count: usize,
     cases: BTreeSet<String>,
     crates: BTreeMap<String, usize>,
-    legacy: BTreeSet<String>,
 }
 
 /// Returns true when a case gets a `summary.md` bundle.

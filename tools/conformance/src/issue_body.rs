@@ -931,7 +931,6 @@ mod tests {
             read: None,
             read_process: None,
             signature: Some(SIGNATURE.to_owned()),
-            legacy_signature: None,
             pages: vec![PageResult {
                 status: Status::RenderError,
                 output: Some(PageOutput {
@@ -941,7 +940,6 @@ mod tests {
                 page: 0,
                 process: ProcessEvidence::default(),
                 signature: Some(SIGNATURE.to_owned()),
-                legacy_signature: None,
             }],
             dir: "clippath-1234abcd".to_owned(),
         };
@@ -962,7 +960,6 @@ mod tests {
                     count: 1,
                     cases: vec!["clippath".to_owned()],
                     likely_crates: Vec::new(),
-                    legacy_signatures: Vec::new(),
                 }],
                 cases: vec![case],
             },
@@ -996,7 +993,7 @@ mod tests {
             labels(group),
             ["conformance", "conformance:pdfjs", "area:pdf-canvas"]
         );
-        assert_eq!(IssueState::parse("", &body), Some(state));
+        assert_eq!(IssueState::parse(&body), Some(state));
         assert!(body.contains("> [!WARNING]\n> Safe-PDF fails to render 1 page in 1 document."));
         assert!(body.contains(
             "<img src=\"https://velli20.github.io/safe-pdf/conformance/pdfjs/cases/clippath-1234abcd/p0-ref.png\""

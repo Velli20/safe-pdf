@@ -3,8 +3,6 @@
 //! Failures are grouped by signature over every corpus run passed in, and each group is
 //! matched to an issue through the key in the issue's hidden state:
 //! - no issue: create one (up to `max_new` per run, regressions and crashes first);
-//! - an issue filed under an older key of the same failures: adopt it, and close further
-//!   older issues it merges as duplicates;
 //! - open issue: refresh it silently, commenting only when new documents join the cluster
 //!   or it shrinks by a quarter or more;
 //! - closed as completed: reopen, since the failure is back;
@@ -160,19 +158,6 @@ impl Group<'_> {
         self.deltas().contains(&Delta::Regressed)
     }
 
-    /// Keys of issues filed for the same failures before root-cause signatures.
-    pub fn legacy_keys(&self) -> BTreeSet<String> {
-        self.parts
-            .iter()
-            .flat_map(|part| {
-                part.cluster
-                    .legacy_signatures
-                    .iter()
-                    .map(|signature| issue_state::legacy_key(part.run.kind.as_str(), signature))
-            })
-            .collect()
-    }
-
     /// Returns the issue state describing this run's clusters.
     pub fn corpus_states(&self) -> BTreeMap<String, CorpusState> {
         self.parts
@@ -225,7 +210,6 @@ pub fn groups(runs: &[CorpusRun]) -> Vec<Group<'_>> {
 #[derive(Default)]
 struct Tally {
     created: usize,
-    adopted: usize,
     updated: usize,
     reopened: usize,
     closed: usize,
@@ -262,7 +246,7 @@ pub fn run(options: &IssueOptions<'_>) -> Result<()> {
         context: BodyContext::from_env(options.repo),
         existing: existing
             .into_iter()
-            .filter_map(|issue| IssueState::parse(&issue.title, &issue.body).map(|s| (issue, s)))
+            .filter_map(|issue| IssueState::parse(&issue.body).map(|state| (issue, state)))
             .collect(),
         complete: runs
             .iter()
@@ -284,14 +268,8 @@ pub fn run(options: &IssueOptions<'_>) -> Result<()> {
     }
     let tally = &sync.tally;
     println!(
-        "{} created, {} adopted from older keys, {} updated, {} reopened, {} closed, {} deferred by --max-new, {} failed",
-        tally.created,
-        tally.adopted,
-        tally.updated,
-        tally.reopened,
-        tally.closed,
-        tally.deferred,
-        tally.failed
+        "{} created, {} updated, {} reopened, {} closed, {} deferred by --max-new, {} failed",
+        tally.created, tally.updated, tally.reopened, tally.closed, tally.deferred, tally.failed
     );
     if tally.failed > 0 {
         bail!("{} issue operations failed", tally.failed);
@@ -323,51 +301,7 @@ impl Sync<'_> {
             self.claimed.insert(issue.number);
             return self.refresh(group, &issue, &state);
         }
-        let legacy = group.legacy_keys();
-        let mut matches: Vec<(Issue, IssueState)> = self
-            .existing
-            .iter()
-            .filter(|(issue, state)| {
-                state.is_legacy()
-                    && legacy.contains(&state.key)
-                    && !self.claimed.contains(&issue.number)
-                    && (group.signature.contains(NON_EMBEDDED) || !is_font_issue(issue))
-            })
-            .cloned()
-            .collect();
-        matches.sort_by_key(|(issue, _)| (!issue.is_open(), issue.number));
-        let Some((target, _)) = matches.first().cloned() else {
-            return self.create(group);
-        };
-        for (issue, _) in &matches {
-            self.claimed.insert(issue.number);
-        }
-        if matches.iter().all(|(issue, _)| issue.is_not_planned()) {
-            return Ok(());
-        }
-        let target = matches
-            .iter()
-            .map(|(issue, _)| issue)
-            .find(|issue| !issue.is_not_planned())
-            .cloned()
-            .unwrap_or(target);
-        self.adopt(group, &target)?;
-        for (issue, _) in matches
-            .iter()
-            .filter(|(issue, _)| issue.number != target.number && issue.is_open())
-        {
-            self.close(
-                issue,
-                "not planned",
-                &format!(
-                    "Duplicate of #{}: failures are now grouped by cause, and #{} covers this one{}.",
-                    target.number,
-                    target.number,
-                    self.context.in_run()
-                ),
-            )?;
-        }
-        Ok(())
+        self.create(group)
     }
 
     fn create(&mut self, group: &Group<'_>) -> Result<()> {
@@ -410,20 +344,6 @@ impl Sync<'_> {
         }
         let url = github::gh(&args)?;
         println!("created {} for `{}`", url.trim(), group.signature);
-        Ok(())
-    }
-
-    /// Moves an issue filed under an older key to this group, silently.
-    fn adopt(&mut self, group: &Group<'_>, issue: &Issue) -> Result<()> {
-        self.tally.adopted = self.tally.adopted.saturating_add(1);
-        let state = IssueState {
-            key: group.key.clone(),
-            corpora: group.corpus_states(),
-        };
-        self.write(group, issue, &state)?;
-        if !issue.is_open() {
-            self.reopen(issue)?;
-        }
         Ok(())
     }
 
@@ -489,19 +409,6 @@ impl Sync<'_> {
         old: &IssueState,
         corpora: &BTreeSet<&str>,
     ) -> Result<()> {
-        if old.is_legacy() && is_font_issue(issue) {
-            return self.close(
-                issue,
-                "not planned",
-                &format!(
-                    "Text-only differences in documents with non-embedded fonts are now reported as \
-                     `font_substitution` and are not filed, because renderers substitute such fonts \
-                     differently. Pages where other content differs too are filed under their own \
-                     signatures{}.",
-                    self.context.in_run()
-                ),
-            );
-        }
         let mut state = old.clone();
         for (corpus, entry) in &mut state.corpora {
             if corpora.contains(corpus.as_str()) {
@@ -688,16 +595,6 @@ impl Sync<'_> {
     }
 }
 
-const NON_EMBEDDED: &str = "(non-embedded font)";
-
-/// Returns true for an issue filed under an older key for text differences in documents
-/// with non-embedded fonts. Those pages are now `font_substitution`, so such an issue is
-/// only adopted by a cluster that is itself about non-embedded fonts.
-fn is_font_issue(issue: &Issue) -> bool {
-    issue_state::legacy_signature(&issue.body)
-        .is_some_and(|signature| signature.contains(NON_EMBEDDED))
-}
-
 /// Returns a comment for a cluster change people should hear about: new documents in a
 /// corpus, or a total shrink of at least a quarter.
 fn change_note(old: &IssueState, new: &IssueState) -> Option<String> {
@@ -727,7 +624,6 @@ fn change_note(old: &IssueState, new: &IssueState) -> Option<String> {
 mod tests {
     use super::*;
 
-    const LEGACY: &str = "render_error: Shading type 'LatticeFormTriangleMesh' not implemented @ <pdf_renderer::PdfRenderer>::render";
     const CURRENT: &str = "render_error: Shading type 'LatticeFormTriangleMesh' not implemented @ pdf-canvas::UnsupportedFeature";
 
     fn corpus_run(kind: CorpusKind) -> CorpusRun {
@@ -748,7 +644,6 @@ mod tests {
                     count: 2,
                     cases: vec!["a".to_owned(), "b".to_owned()],
                     likely_crates: Vec::new(),
-                    legacy_signatures: vec![LEGACY.to_owned()],
                 }],
                 cases: Vec::new(),
             },
@@ -756,21 +651,17 @@ mod tests {
         }
     }
 
-    fn legacy_issue(number: u64, corpus: &str, signature: &str) -> Issue {
+    fn issue(number: u64, body: String) -> Issue {
         Issue {
             number,
-            title: format!("[conformance/{corpus}] {signature}"),
             state: "OPEN".to_owned(),
             state_reason: None,
-            body: format!(
-                "<!-- conformance-count: 2 -->\n**2 failures in 2 documents**\n\n```\n{signature}\n```\n\n---\nConformance key: `{}`.\n",
-                issue_state::legacy_key(corpus, signature)
-            ),
+            body,
         }
     }
 
     #[test]
-    fn adopts_old_issues_and_closes_duplicates_and_noise() {
+    fn files_new_issues_and_counts_absent_ones() {
         let runs = [
             corpus_run(CorpusKind::Pdfium),
             corpus_run(CorpusKind::Pdfjs),
@@ -781,15 +672,11 @@ mod tests {
             max_new: 15,
             dry_run: true,
         };
+        let gone = state(&[("pdfjs", 2, 1)]);
         let existing = vec![
-            legacy_issue(370, "pdfium", LEGACY),
-            legacy_issue(435, "pdfjs", LEGACY),
-            legacy_issue(
-                312,
-                "pdfjs",
-                "mismatch: reshaped / text (non-embedded font)",
-            ),
-            legacy_issue(999, "pdfjs", "mismatch: blank page"),
+            // Filed before root-cause keys; it has no state, so it is not matched.
+            issue(370, "Conformance key: `conf-1b1118ae25c9`.".to_owned()),
+            issue(999, gone.apply("Body").unwrap()),
         ];
         let mut sync = Sync {
             options: &options,
@@ -800,26 +687,23 @@ mod tests {
             },
             existing: existing
                 .into_iter()
-                .filter_map(|issue| {
-                    IssueState::parse(&issue.title, &issue.body).map(|state| (issue, state))
-                })
+                .filter_map(|issue| IssueState::parse(&issue.body).map(|state| (issue, state)))
                 .collect(),
             complete: ["pdfium".to_owned(), "pdfjs".to_owned()].into(),
             claimed: BTreeSet::new(),
             labels: BTreeSet::new(),
             tally: Tally::default(),
         };
+        assert_eq!(sync.existing.len(), 1);
         let groups = groups(&runs);
         assert_eq!(groups.len(), 1);
         for group in &groups {
             sync.group(group).unwrap();
         }
-        assert_eq!(sync.tally.adopted, 1);
-        assert_eq!(sync.tally.created, 0);
-        assert_eq!(sync.claimed, BTreeSet::from([370, 435]));
+        assert_eq!(sync.tally.created, 1);
         sync.absent(&runs);
-        // #435 as a duplicate of #370, #312 as font substitution; #999 is only counted.
-        assert_eq!(sync.tally.closed, 2);
+        // Absent from one full run: counted, not closed yet.
+        assert_eq!(sync.tally.closed, 0);
         assert_eq!(sync.tally.failed, 0);
     }
 

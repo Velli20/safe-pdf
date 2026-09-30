@@ -10,9 +10,6 @@ use std::process::Command;
 pub struct Issue {
     /// Issue number.
     pub number: u64,
-    /// Title.
-    #[serde(default)]
-    pub title: String,
     /// `OPEN` or `CLOSED`.
     pub state: String,
     /// `COMPLETED`, `NOT_PLANNED` or `REOPENED` when set.
@@ -65,7 +62,7 @@ pub fn issues(repo: &str, label: &str) -> Result<Vec<Issue>> {
         "--limit",
         "5000",
         "--json",
-        "number,title,state,stateReason,body",
+        "number,state,stateReason,body",
     ])?;
     Ok(serde_json::from_str(&json)?)
 }

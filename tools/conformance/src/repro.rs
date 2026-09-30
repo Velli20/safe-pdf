@@ -23,7 +23,7 @@ use std::{
 /// Arguments of `repro` and `verify`.
 #[derive(clap::Args)]
 pub struct ReproArgs {
-    /// Issue key (`conf2-…`, or an older `conf-…`), or a case id.
+    /// Issue key (`conf2-…`) or a case id.
     pub target: String,
     /// Corpora to look in (default: all).
     #[arg(long, value_enum)]
@@ -108,13 +108,7 @@ fn select(kind: CorpusKind, index: Index, target: &str, limit: usize) -> Option<
     let clusters: Vec<_> = index
         .clusters
         .iter()
-        .filter(|cluster| {
-            issue_state::key(&cluster.signature) == target
-                || cluster
-                    .legacy_signatures
-                    .iter()
-                    .any(|legacy| issue_state::legacy_key(kind.as_str(), legacy) == target)
-        })
+        .filter(|cluster| issue_state::key(&cluster.signature) == target)
         .collect();
     let (signatures, cases): (BTreeSet<String>, Vec<String>) = if clusters.is_empty() {
         let case = index.cases.iter().find(|case| case.id == target)?;

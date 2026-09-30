@@ -200,7 +200,6 @@ fn run_case(options: &RunOptions, out: &Path, case: &Case) -> Result<CaseResult>
         read: None,
         read_process: None,
         signature: None,
-        legacy_signature: None,
         pages: Vec::new(),
         dir,
     };
@@ -228,7 +227,6 @@ fn run_case(options: &RunOptions, out: &Path, case: &Case) -> Result<CaseResult>
             Status::Crash
         };
         result.signature = Some(signature::process(result.status, &evidence));
-        result.legacy_signature.clone_from(&result.signature);
         result.read_process = Some(evidence);
         return Ok(result);
     };
@@ -236,7 +234,6 @@ fn run_case(options: &RunOptions, out: &Path, case: &Case) -> Result<CaseResult>
     if let Some(error) = &read.safe_error {
         result.status = Status::ReadError;
         result.signature = Some(signature::error(Status::ReadError, error));
-        result.legacy_signature = Some(signature::legacy_error(Status::ReadError, error));
     }
     let pages = selected_pages(options, case, &read);
     let non_embedded_fonts = !read.inventory.non_embedded_fonts.is_empty();
@@ -253,7 +250,6 @@ fn run_case(options: &RunOptions, out: &Path, case: &Case) -> Result<CaseResult>
         if result.status == Status::ReadError && page.status == Status::RenderError {
             page.status = Status::ReadError;
             page.signature.clone_from(&result.signature);
-            page.legacy_signature.clone_from(&result.legacy_signature);
         }
         result.pages.push(page);
     }
@@ -262,22 +258,16 @@ fn run_case(options: &RunOptions, out: &Path, case: &Case) -> Result<CaseResult>
             .pages
             .iter()
             .max_by_key(|page| page.status.severity())
-            .map(|page| {
-                (
-                    page.status,
-                    page.signature.clone(),
-                    page.legacy_signature.clone(),
-                )
-            });
-        (result.status, result.signature, result.legacy_signature) = match worst {
-            Some((status, signature, legacy)) if status.is_failure() => (status, signature, legacy),
+            .map(|page| (page.status, page.signature.clone()));
+        (result.status, result.signature) = match worst {
+            Some((status, signature)) if status.is_failure() => (status, signature),
             Some(_)
                 if result
                     .pages
                     .iter()
                     .all(|page| page.status == Status::NoReference) =>
             {
-                (Status::NoReference, None, None)
+                (Status::NoReference, None)
             }
             Some(_)
                 if result
@@ -285,9 +275,9 @@ fn run_case(options: &RunOptions, out: &Path, case: &Case) -> Result<CaseResult>
                     .iter()
                     .any(|page| page.status == Status::FontSubstitution) =>
             {
-                (Status::FontSubstitution, None, None)
+                (Status::FontSubstitution, None)
             }
-            _ => (Status::Pass, None, None),
+            _ => (Status::Pass, None),
         };
     }
     Ok(result)
@@ -344,15 +334,14 @@ fn run_page(
         command.arg("--password").arg(password);
     }
     let (output, process) = process::execute::<PageOutput>(command, options.timeout)?;
-    let (status, signature, legacy_signature) = match &output {
+    let (status, signature) = match &output {
         None => {
             let status = if process.timed_out {
                 Status::Timeout
             } else {
                 Status::Crash
             };
-            let signature = signature::process(status, &process);
-            (status, Some(signature.clone()), Some(signature))
+            (status, Some(signature::process(status, &process)))
         }
         Some(output) => page_verdict(output, options.tolerance, non_embedded_fonts),
     };
@@ -362,37 +351,34 @@ fn run_page(
         output,
         process,
         signature,
-        legacy_signature,
     })
 }
 
-/// Returns the page status with its signature and legacy signature.
+/// Returns the page status with its signature.
 fn page_verdict(
     output: &PageOutput,
     tolerance: f64,
     non_embedded_fonts: bool,
-) -> (Status, Option<String>, Option<String>) {
+) -> (Status, Option<String>) {
     if let Some(error) = &output.safe_error {
         return (
             Status::RenderError,
             Some(signature::error(Status::RenderError, error)),
-            Some(signature::legacy_error(Status::RenderError, error)),
         );
     }
     match &output.metrics {
-        None => (Status::NoReference, None, None),
+        None => (Status::NoReference, None),
         Some(metrics)
             if metrics.mismatch > tolerance
                 && signature::is_font_substitution(output, non_embedded_fonts) =>
         {
-            (Status::FontSubstitution, None, None)
+            (Status::FontSubstitution, None)
         }
         Some(metrics) if metrics.mismatch > tolerance => (
             Status::Mismatch,
             Some(signature::mismatch(output, non_embedded_fonts)),
-            Some(signature::legacy_mismatch(output, non_embedded_fonts)),
         ),
-        Some(_) => (Status::Pass, None, None),
+        Some(_) => (Status::Pass, None),
     }
 }
 

@@ -170,19 +170,6 @@ pub fn error(status: Status, detail: &ErrorDetail) -> String {
     )
 }
 
-/// Signature of a Safe-PDF error as computed before root-cause clustering. Issues filed
-/// with it are found again through it, so it must not change.
-pub fn legacy_error(status: Status, detail: &ErrorDetail) -> String {
-    let innermost = detail
-        .chain
-        .last()
-        .map_or(detail.message.as_str(), String::as_str);
-    let frame = innermost_frame(detail)
-        .map(|function| format!(" @ {function}"))
-        .unwrap_or_default();
-    format!("{}: {}{frame}", status.as_str(), normalize(innermost))
-}
-
 fn innermost_frame(detail: &ErrorDetail) -> Option<String> {
     detail
         .backtrace
@@ -352,47 +339,6 @@ pub fn mismatch(output: &PageOutput, non_embedded_fonts: bool) -> String {
     )
 }
 
-/// Signature of a visual mismatch as computed before root-cause clustering. Issues filed
-/// with it are found again through it, so it must not change.
-pub fn legacy_mismatch(output: &PageOutput, non_embedded_fonts: bool) -> String {
-    if let Some(metrics) = &output.metrics
-        && metrics.safe_ink == 0.0
-        && metrics.reference_ink > 0.0005
-    {
-        return "mismatch: blank page".to_owned();
-    }
-    let Some(region) = output.regions.first() else {
-        return "mismatch: scattered differences".to_owned();
-    };
-    let subject = if !region.reference_text.is_empty() && region.safe_text.is_empty() {
-        "text missing".to_owned()
-    } else if !region.reference_text.is_empty() || !region.safe_text.is_empty() {
-        "text".to_owned()
-    } else if let Some(draw) = region.draws.first() {
-        let shaded = if draw.detail.contains("shading") {
-            " (shading)"
-        } else if draw.detail.contains("tiling") {
-            " (pattern)"
-        } else {
-            ""
-        };
-        format!("{}{shaded}", draw.kind)
-    } else if region.class == RegionClass::MissingInk {
-        "nothing drawn".to_owned()
-    } else {
-        "unattributed".to_owned()
-    };
-    let substituted = if non_embedded_fonts && subject.starts_with("text") {
-        " (non-embedded font)"
-    } else {
-        ""
-    };
-    format!(
-        "mismatch: {} / {subject}{substituted}",
-        region.class.as_str()
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -413,19 +359,6 @@ mod tests {
             "Shading type 'LatticeFormTriangleMesh' not implemented"
         );
         assert_eq!(normalize_names("it's 'x1"), "it's 'x1");
-    }
-
-    #[test]
-    fn keeps_legacy_error_signatures() {
-        let detail = ErrorDetail {
-            message: "Font resource 'F2' was not found at 12".to_owned(),
-            chain: Vec::new(),
-            backtrace: None,
-        };
-        assert_eq!(
-            legacy_error(Status::RenderError, &detail),
-            "render_error: Font resource 'F2' was not found at N"
-        );
     }
 
     fn region(text: &str, detail: &str) -> Region {
@@ -472,10 +405,6 @@ mod tests {
         assert_eq!(
             mismatch(&mixed, true),
             "mismatch: extra_ink / fill (tiling pattern, blend Multiply)"
-        );
-        assert_eq!(
-            legacy_mismatch(&mixed, true),
-            "mismatch: extra_ink / text (non-embedded font)"
         );
     }
 

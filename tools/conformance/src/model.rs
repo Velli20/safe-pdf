@@ -270,10 +270,6 @@ pub struct PageResult {
     pub process: ProcessEvidence,
     /// Failure cluster key.
     pub signature: Option<String>,
-    /// Signature under the clustering used before root-cause signatures, used to find
-    /// issues filed with it.
-    #[serde(default)]
-    pub legacy_signature: Option<String>,
 }
 
 /// Everything known about one case after a run.
@@ -293,9 +289,6 @@ pub struct CaseResult {
     pub read_process: Option<ProcessEvidence>,
     /// Document-level failure cluster key.
     pub signature: Option<String>,
-    /// Document-level signature under the clustering used before root-cause signatures.
-    #[serde(default)]
-    pub legacy_signature: Option<String>,
     /// Per-page results.
     pub pages: Vec<PageResult>,
     /// Case directory relative to the run output directory.

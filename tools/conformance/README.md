@@ -165,9 +165,7 @@ PDFs that have no goldens.
     - **Absent from two full runs in a row:** closed as completed.
     - **Closed as completed:** reopened if the failure comes back.
     - **Closed as not planned:** never touched again.
-  - Issues filed under the older, per-corpus keys are adopted by the cause that now covers
-    them, and further older issues merged into the same cause are closed as duplicates.
-    Older issues for text differences with non-embedded fonts are closed as not planned.
+  - Issues without that comment (including those filed before it existed) are ignored.
   - Runs limited with `--filter`, `--case` or `--page` never close issues.
   - Preview locally with `cargo conformance issues --corpus pdfium --corpus pdfjs --repo
     owner/name --dry-run`. Bodies are written to `target/conformance/issues/`.
