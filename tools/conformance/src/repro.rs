@@ -181,6 +181,7 @@ fn rerun(args: &ReproArgs, repo: &str, selection: &Selection) -> Result<bool> {
         tolerance: selection.index.tolerance,
         pdfium: None,
         reference_images: Some(references),
+        read_only: selection.index.read_only,
     };
     run::run(&options)?;
     let index: Index =

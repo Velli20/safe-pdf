@@ -86,10 +86,14 @@ CI runs on push/PR to main (`.github/workflows/ci.yml`):
 2. Minimal feature build (no optional features)
 3. Web Canvas (wasm-bindgen) build of `examples/web-canvas`, deployed to GitHub Pages on push to `main`
 
-Conformance (`.github/workflows/conformance.yml`) renders the PDFium and pdf.js corpora against
-PDFium's annotation-free render. On `main` (merged pull requests and manual runs) it keeps one
-GitHub issue per failure cause across both corpora, closes issues whose failure is gone, and
-publishes the viewers to GitHub Pages under `/conformance/`. It does not run on pull requests. To
+Conformance (`.github/workflows/conformance.yml`) checks the PDFium and pdf.js corpora against
+PDFium. On every pull request it reads both corpora (`--read-only`: open each document and
+compare page counts, no rendering), compares the reads with the base commit's, and comments on
+the pull request when a document reads worse or better. On `main` (merged pull requests and
+manual runs) it also renders the PDFium corpus against PDFium's annotation-free render (the
+pdf.js corpus is only read), keeps one GitHub issue per failure cause across both corpora,
+closes issues whose failure is gone, and publishes the viewers to GitHub Pages under
+`/conformance/`. To
 fix a conformance issue, follow `.claude/skills/fix-conformance-issue/SKILL.md`
 (`cargo conformance repro <key>`, then `cargo conformance verify <key>`). See
 `tools/conformance/README.md`.

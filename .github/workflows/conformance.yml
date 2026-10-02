@@ -1,20 +1,25 @@
 name: Conformance
 
-# Renders the PDFium and pdf.js test corpora with Safe-PDF and compares them with pages
-# rendered by the PDFium library without annotations or form fields, which matches Safe-PDF's
-# content-only render. (The pdfium_tests goldens draw annotations, so CI does not use them.)
+# Checks Safe-PDF against the PDFium and pdf.js test corpora, with PDFium as the reference
+# (rendered without annotations or form fields, which matches Safe-PDF's content-only render;
+# the pdfium_tests goldens draw annotations, so CI does not use them).
 #
-# - Push to main (a merged pull request) and manual runs on main: one `issues` job files,
-#   updates and closes GitHub issues for both corpora together, and the viewers are
-#   published to GitHub Pages under /conformance/.
+# - `reads` (pull requests, pushes to main, manual runs): reads every document of both
+#   corpora with Safe-PDF and PDFium and compares page counts; no page is rendered. On a pull
+#   request the reads are compared with the base commit's (cached by the run on main, or read
+#   at the base commit when the cache has none), and `read-comment` posts one comment on the
+#   pull request when a document reads worse or better, updating it on later pushes.
+# - `conformance` (main and manual runs only): renders the PDFium corpus and compares every
+#   page with PDFium. The pdf.js corpus is not rendered; only its reads are reported.
+# - On main, `issues` files, updates and closes GitHub issues from the PDFium render and the
+#   pdf.js reads together, and the viewers are published to GitHub Pages under /conformance/.
 #
-# Pull requests do not run it, so they merge without waiting on the corpora. To gate pull
-# requests on regressions later, add a `pull_request` trigger and add it to FAIL_ON_EVENTS.
-# See tools/conformance/README.md.
+# Pull requests are never failed by these jobs. See tools/conformance/README.md.
 
 on:
   push:
     branches: [ main ]
+  pull_request:
   workflow_dispatch:
     inputs:
       accept:
@@ -25,10 +30,11 @@ on:
 permissions:
   contents: read
 
-# Runs queue behind each other so two runs never file the same cluster twice.
+# Runs on main queue behind each other so two runs never file the same cluster twice; a new
+# push to a pull request cancels its older run.
 concurrency:
-  group: conformance-issues
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('conformance-pr-{0}', github.event.pull_request.number) || 'conformance-issues' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -39,8 +45,200 @@ env:
   PDFIUM_SHA256: 1470e21b8b4a3b4ad7f85684e2da11d94f3b69a86d81dee11b9b6709d927ac1d
 
 jobs:
+  reads:
+    name: Reads (${{ matrix.corpus }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        corpus: [pdfium, pdfjs]
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies (Skia)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libfontconfig1-dev libfreetype6-dev
+
+      - name: Cache cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/regression
+          key: ${{ runner.os }}-conformance-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-conformance-
+
+      - name: Restore corpus
+        id: corpus-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: target/conformance/corpora/${{ matrix.corpus }}
+          key: conformance-corpus-${{ matrix.corpus }}-${{ hashFiles('tools/conformance/src/corpus.rs') }}
+
+      - name: Fetch corpus
+        if: steps.corpus-cache.outputs.cache-hit != 'true'
+        run: cargo conformance fetch --corpus ${{ matrix.corpus }} ${{ matrix.corpus == 'pdfjs' && '--links' || '' }}
+
+      - name: Save corpus
+        if: always() && steps.corpus-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: target/conformance/corpora/${{ matrix.corpus }}
+          key: ${{ steps.corpus-cache.outputs.cache-primary-key }}
+
+      - name: Install prebuilt PDFium
+        run: |
+          dir="$RUNNER_TEMP/pdfium"
+          mkdir -p "$dir"
+          curl -sSfL -o "$dir/pdfium.tgz" \
+            "https://github.com/bblanchon/pdfium-binaries/releases/download/${PDFIUM_RELEASE}/pdfium-linux-x64.tgz"
+          echo "${PDFIUM_SHA256}  $dir/pdfium.tgz" | sha256sum -c -
+          tar -xzf "$dir/pdfium.tgz" -C "$dir"
+          echo "PDFIUM_LIBRARY=$dir/lib/libpdfium.so" >> "$GITHUB_ENV"
+
+      - name: Read corpus
+        run: cargo conformance run --corpus ${{ matrix.corpus }} --reference pdfium --read-only --jobs 4
+
+      - name: Job summary
+        if: always()
+        run: |
+          triage="target/conformance/${{ matrix.corpus }}/TRIAGE.md"
+          if [ -f "$triage" ]; then
+            {
+              sed '/^## Failure clusters/,$d' "$triage"
+              echo "## Largest failure clusters"
+              grep '^### ' "$triage" | head -25 | sed 's/^### /- /'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reads-${{ matrix.corpus }}
+          path: target/conformance/${{ matrix.corpus }}
+          retention-days: 14
+          if-no-files-found: warn
+
+      # Reads of main are the base pull requests are compared with, keyed by commit.
+      - name: Stage reads for the cache
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p target/conformance/read-baseline
+          cp "target/conformance/${{ matrix.corpus }}/reads.json" "target/conformance/read-baseline/${{ matrix.corpus }}.json"
+
+      - name: Save reads
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: target/conformance/read-baseline/${{ matrix.corpus }}.json
+          key: conformance-reads-${{ matrix.corpus }}-${{ github.sha }}
+
+      - name: Restore base reads
+        id: base-reads
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v4
+        with:
+          path: target/conformance/read-baseline/${{ matrix.corpus }}.json
+          key: conformance-reads-${{ matrix.corpus }}-${{ env.BASE_SHA }}
+
+      # No run on main has cached the base commit's reads yet (it is still running, or its
+      # cache was evicted), so read the corpus at the base commit here.
+      - name: Read corpus at the base commit
+        id: base-run
+        if: github.event_name == 'pull_request' && steps.base-reads.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: |
+          base="$RUNNER_TEMP/base"
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          git worktree add --detach "$base" "$BASE_SHA"
+          cd "$base"
+          if ! grep -q 'read_only: bool' tools/conformance/src/main.rs; then
+            echo "::notice ::The base commit predates read-only conformance runs; nothing to compare with."
+            exit 0
+          fi
+          # Shares compiled dependencies with the head build; reports still land in $base/target.
+          export CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target"
+          cargo conformance run --corpus ${{ matrix.corpus }} --reference pdfium --read-only --jobs 4 \
+            --root "$GITHUB_WORKSPACE/target/conformance/corpora/${{ matrix.corpus }}"
+          mkdir -p "$GITHUB_WORKSPACE/target/conformance/read-baseline"
+          cp "target/conformance/${{ matrix.corpus }}/reads.json" \
+            "$GITHUB_WORKSPACE/target/conformance/read-baseline/${{ matrix.corpus }}.json"
+          echo "read=true" >> "$GITHUB_OUTPUT"
+
+      - name: Save base reads
+        if: steps.base-run.outputs.read == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: target/conformance/read-baseline/${{ matrix.corpus }}.json
+          key: conformance-reads-${{ matrix.corpus }}-${{ env.BASE_SHA }}
+
+      - name: Compare reads with the base commit
+        if: github.event_name == 'pull_request'
+        run: |
+          base="target/conformance/read-baseline/${{ matrix.corpus }}.json"
+          if [ ! -f "$base" ]; then
+            echo "No reads of the base commit to compare with." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          cargo conformance read-diff --corpus ${{ matrix.corpus }} --base "$base"
+          cat "target/conformance/${{ matrix.corpus }}/read-diff.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload read diff
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: read-diff-${{ matrix.corpus }}
+          path: |
+            target/conformance/${{ matrix.corpus }}/read-diff.md
+            target/conformance/${{ matrix.corpus }}/read-diff.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # One comment per pull request, posted when a document reads worse or better than on the
+  # base commit and kept up to date on later pushes.
+  read-comment:
+    name: Comment read changes
+    needs: reads
+    if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download read diffs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: read-diff-*
+          path: diffs
+
+      - name: Post or update the comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: .github/scripts/conformance-read-comment.sh diffs
+
   conformance:
     name: Conformance (${{ matrix.corpus }})
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 150
     permissions:
@@ -48,7 +246,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        corpus: [pdfium, pdfjs]
+        # pdf.js pages are not rendered; the `reads` job covers that corpus.
+        corpus: [pdfium]
 
     steps:
       - name: Checkout repository
@@ -158,10 +357,11 @@ jobs:
           exit 1
 
   # Both corpora are reported together, so one cause found in both is one issue and an issue
-  # is only closed when every corpus it was seen in no longer has it.
+  # is only closed when every corpus it was seen in no longer has it. The pdf.js report is a
+  # read-only run, which files and refreshes issues but never closes them.
   issues:
     name: File GitHub issues
-    needs: conformance
+    needs: [ conformance, reads ]
     if: always() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -194,7 +394,6 @@ jobs:
       - name: Download reports
         uses: actions/download-artifact@v4
         with:
-          pattern: conformance-*
           path: reports
 
       - name: File, update and close issues
@@ -202,11 +401,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           args=""
-          for corpus in pdfium pdfjs; do
-            if [ -f "reports/conformance-$corpus/index.json" ]; then
+          # The PDFium corpus is rendered; the pdf.js corpus is only read.
+          for report in conformance-pdfium reads-pdfjs; do
+            corpus=${report#*-}
+            if [ -f "reports/$report/index.json" ]; then
               mkdir -p target/conformance
               rm -rf "target/conformance/$corpus"
-              mv "reports/conformance-$corpus" "target/conformance/$corpus"
+              mv "reports/$report" "target/conformance/$corpus"
               args="$args --corpus $corpus"
             else
               echo "::warning ::No $corpus report in this run; its issues are left unchanged."
@@ -220,7 +421,7 @@ jobs:
 
   publish:
     name: Publish reports to GitHub Pages
-    needs: conformance
+    needs: [ conformance, reads ]
     if: always() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -246,7 +447,6 @@ jobs:
       - name: Download reports
         uses: actions/download-artifact@v4
         with:
-          pattern: conformance-*
           path: reports
 
       # Only the viewer and what it links to; results.json and issue bodies stay in the
@@ -255,8 +455,10 @@ jobs:
         run: |
           mkdir -p site/conformance
           items=""
-          for corpus in pdfium pdfjs; do
-            src="reports/conformance-$corpus"
+          # The PDFium corpus is rendered; the pdf.js corpus is only read.
+          for report in conformance-pdfium reads-pdfjs; do
+            corpus=${report#*-}
+            src="reports/$report"
             if [ ! -f "$src/index.html" ]; then
               items="$items<li>$corpus: no report in this run</li>"
               continue

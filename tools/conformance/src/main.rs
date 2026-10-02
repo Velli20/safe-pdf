@@ -19,6 +19,7 @@ mod issues;
 mod model;
 mod pdfium_build;
 mod process;
+mod read_diff;
 mod reference;
 mod regions;
 mod report_case;
@@ -99,6 +100,19 @@ enum Command {
         /// Compare against reference images in `<dir>/<case dir>/pN-ref.png` instead.
         #[arg(long, conflicts_with = "reference")]
         reference_images: Option<PathBuf>,
+        /// Only read each document and count its pages with Safe-PDF and the reference;
+        /// render and compare no page.
+        #[arg(long, conflicts_with = "page")]
+        read_only: bool,
+    },
+    /// Compare the read outcomes of the last run with an earlier run's `reads.json` and write
+    /// `read-diff.md` and `read-diff.json` next to the last run.
+    ReadDiff {
+        #[arg(long, value_enum)]
+        corpus: CorpusKind,
+        /// `reads.json` of the run to compare against, usually the base branch's.
+        #[arg(long)]
+        base: PathBuf,
     },
     /// Build PDFium from official sources for the `pdfium` reference (large, one-time).
     SetupPdfium,
@@ -210,6 +224,7 @@ fn main() -> Result<ExitCode> {
             reference,
             pdfium,
             reference_images,
+            read_only,
         } => {
             if !(scale.is_finite() && scale > 0.0) {
                 bail!("--scale must be positive");
@@ -245,6 +260,7 @@ fn main() -> Result<ExitCode> {
                 tolerance,
                 pdfium,
                 reference_images: reference_images.map(std::path::absolute).transpose()?,
+                read_only,
             };
             if run::run(&options)? {
                 return Ok(ExitCode::FAILURE);
@@ -263,6 +279,7 @@ fn main() -> Result<ExitCode> {
                 ),
             }
         }
+        Command::ReadDiff { corpus, base } => read_diff::run(corpus, &base)?,
         Command::Accept { corpus, case } => accept(corpus, case.as_deref())?,
         Command::SetupPdfium => pdfium_build::run()?,
         Command::Issues {
