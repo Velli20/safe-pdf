@@ -249,8 +249,8 @@ jobs:
           pattern: conformance-*
           path: reports
 
-      # Only the viewer and what it links to; results.json and issue bodies stay in the
-      # run artifacts.
+      # Only the viewer and what it links to; results.json, issue bodies and the
+      # side-by-side pN-compare.png images stay in the run artifacts.
       - name: Stage reports
         run: |
           mkdir -p site/conformance
@@ -262,6 +262,7 @@ jobs:
               continue
             fi
             rm -rf "$src/results.json" "$src/issues"
+            find "$src" -name '*-compare.png' -delete
             mv "$src" "site/conformance/$corpus"
             totals=$(grep -m1 -E '^[0-9]+ documents:' "site/conformance/$corpus/TRIAGE.md" || true)
             items="$items<li><a href=\"$corpus/\">$corpus</a> · <a href=\"$corpus/TRIAGE.md\">TRIAGE.md</a><br><span>$totals</span></li>"
