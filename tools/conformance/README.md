@@ -150,8 +150,8 @@ PDFs that have no goldens.
   so the `publish` job and `ci.yml`'s `deploy` job each fetch the other half from its newest
   `pages-conformance` / `pages-web-canvas` artifact (`.github/scripts/assemble-pages.sh`).
   A deploy without the web-canvas demo fails rather than replacing it. Pages sites are
-  limited to 1 GB, so `pN-compare.png` is not published, and a site over 900 MB drops the
-  region crops and then, as a last resort, the conformance reports.
+  limited to 1 GB: images of opaque pages are written as RGB PNGs to stay well under it,
+  and a site over 900 MB is deployed without the conformance reports.
 - **Issues:**
   - One issue per cause across both corpora, labelled `conformance`, `conformance:<corpus>`,
     `area:<crate>` when the error's crate is known, and `crash`, `harness` or `regression`

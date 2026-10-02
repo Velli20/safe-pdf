@@ -7,7 +7,10 @@ use crate::{
     reference, regions, safe_render,
 };
 use anyhow::{Result, anyhow};
-use image::{DynamicImage, GenericImage, Rgba, RgbaImage, imageops::FilterType};
+use image::{
+    DynamicImage, GenericImage, RgbImage, Rgba, RgbaImage, buffer::ConvertBuffer,
+    imageops::FilterType,
+};
 use num_traits::ToPrimitive;
 use pdf_canvas::PageViewport;
 use pdf_document::{document::PdfDocument, reader::PdfReader};
@@ -430,7 +433,15 @@ fn write_png(
     image: &RgbaImage,
 ) -> Result<()> {
     fs::create_dir_all(job.out_dir)?;
-    image.save(job.out_dir.join(name))?;
+    let path = job.out_dir.join(name);
+    // Renders are opaque; dropping the alpha channel makes the PNGs about 40% smaller,
+    // which keeps the published reports within GitHub Pages' 1 GB site limit.
+    if image.pixels().all(|&Rgba([.., alpha])| alpha == u8::MAX) {
+        let rgb: RgbImage = image.convert();
+        rgb.save(path)?;
+    } else {
+        image.save(path)?;
+    }
     output.files.push(name.to_owned());
     Ok(())
 }
