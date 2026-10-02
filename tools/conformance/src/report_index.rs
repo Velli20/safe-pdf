@@ -304,12 +304,11 @@ impl Index {
                 .collect::<Vec<_>>()
                 .join(", ")
         };
-        format!(
-            "{} documents: {}. Pages: {}.",
-            self.cases.len(),
-            join(&self.totals),
-            join(&self.page_totals)
-        )
+        let documents = format!("{} documents: {}.", self.cases.len(), join(&self.totals));
+        if self.read_only {
+            return format!("{documents} Read only, no page compared.");
+        }
+        format!("{documents} Pages: {}.", join(&self.page_totals))
     }
 }
 
