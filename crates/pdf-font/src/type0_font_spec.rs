@@ -11,6 +11,7 @@ use crate::{
 use pdf_cmap::{PdfCMap, Type0EncodingCMap};
 use pdf_object_reader::{
     DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
+    object_variant::ObjectVariant,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -55,6 +56,46 @@ pub struct Type0FontSpec {
     pub to_unicode: Option<Arc<dyn ToUnicodeMap>>,
 }
 
+/// `/CIDToGIDMap` of a CIDFontType2 descendant.
+enum CidToGidMap {
+    /// `/Identity` or any non-stream value: CIDs are used as glyph identifiers.
+    Identity,
+    /// Big-endian glyph identifiers indexed by CID.
+    Table(Arc<[u16]>),
+}
+
+impl CidToGidMap {
+    /// Reads the CID-to-GID table of a CIDFontType2 descendant.
+    ///
+    /// Returns `None` for CIDFontType0, an identity map, or an unreadable entry, so that a broken
+    /// map falls back to the identity mapping instead of failing the whole font.
+    fn read(
+        context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
+        kind: CidFontKind,
+    ) -> Option<Arc<[u16]>> {
+        if kind != CidFontKind::Type2 {
+            return None;
+        }
+        match context.optional::<Self>(b"CIDToGIDMap").ok().flatten()? {
+            Self::Table(table) => Some(table),
+            Self::Identity => None,
+        }
+    }
+}
+
+impl FromPdfObject for CidToGidMap {
+    /// Decodes a stream into its `u16` table, ignoring a trailing odd byte.
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let ObjectVariant::Stream(stream) = context.object().value() else {
+            return Ok(Self::Identity);
+        };
+        let (pairs, _) = stream.raw_data().as_chunks::<2>();
+        Ok(Self::Table(
+            pairs.iter().copied().map(u16::from_be_bytes).collect(),
+        ))
+    }
+}
+
 impl TryFrom<&[u8]> for CidFontKind {
     type Error = FontError;
 
@@ -92,13 +133,14 @@ impl FromPdfObject for CidFontSpec {
                 supplement: 0,
             });
         let cid_to_unicode = cid_to_unicode_map(&system_info);
+        let cid_to_gid = CidToGidMap::read(&mut context, kind);
         Ok(Self {
             kind,
             descriptor,
             program,
             system_info,
             metrics,
-            cid_to_gid: None,
+            cid_to_gid,
             cid_to_unicode,
         })
     }
