@@ -25,7 +25,7 @@ impl ContentStreamIdAllocator {
     /// cannot produce another `usize` ID.
     pub fn next_id(&self) -> Result<usize, ContentStreamIdExhausted> {
         self.next_id
-            .fetch_update(
+            .try_update(
                 std::sync::atomic::Ordering::Relaxed,
                 std::sync::atomic::Ordering::Relaxed,
                 |next| next.checked_add(1),
