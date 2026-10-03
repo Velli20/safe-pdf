@@ -18,5 +18,3 @@ pdf-utils = { path = "../pdf-utils" }
 [lints]
 workspace = true
 
-[target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies]
-jpeg2k = "0.10.1"

@@ -10,6 +10,7 @@ bench-internals = []
 bitflags = "2.9.1"
 num-traits = "0.2.19"
 pdf-ccitt = { path = "../pdf-ccitt" }
+pdf-mq-coder = { path = "../pdf-mq-coder" }
 pdf-utils = { path = "../pdf-utils" }
 thiserror = "2.0.12"
 
