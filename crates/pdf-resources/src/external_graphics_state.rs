@@ -82,9 +82,8 @@ pub struct ExternalGraphicsState {
 impl FromPdfObject for ExternalGraphicsState {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
-        let dictionary = context.dictionary().clone();
         let mut params = Vec::new();
-        for (name, value) in &dictionary.dictionary {
+        for (name, value) in &context.dictionary().dictionary {
             if name == b"Type" {
                 continue;
             }

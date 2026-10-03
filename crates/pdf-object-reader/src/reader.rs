@@ -340,10 +340,8 @@ where
             child.active_path.push(id);
             object = child.load_object(id)?;
         }
-        T::from_pdf_object(ObjectContext::new(
-            ResolvedObject::try_from(object)?,
-            &mut child,
-        ))
+        let object = ResolvedObject::try_from(object)?;
+        T::from_pdf_object(ObjectContext::new(&object, &mut child))
     }
 
     fn read_indirect<T: FromPdfObject>(&mut self, id: ObjectId) -> ReadResult<T> {

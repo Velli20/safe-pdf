@@ -212,6 +212,18 @@ impl ObjectVariant {
         matches!(self, ObjectVariant::String(value) if value.kind() == StringKind::Name)
     }
 
+    /// Returns `true` if this value, or the object it references, spells `name`.
+    ///
+    /// Like [`Self::try_bytes`], strings are accepted alongside names because malformed
+    /// PDFs sometimes encode one as the other. An unresolvable reference is not `name`.
+    pub fn is_named(&self, name: &[u8], objects: &dyn ObjectResolver) -> bool {
+        let object = match self {
+            ObjectVariant::Reference(_) => objects.resolve_object(self),
+            _ => Ok(self),
+        };
+        matches!(object, Ok(ObjectVariant::String(value)) if value.as_bytes() == name)
+    }
+
     /// Returns `true` if this value is an `Array`.
     pub fn is_array(&self) -> bool {
         matches!(self, ObjectVariant::Array(_))

@@ -25,12 +25,9 @@ impl FromPdfObject for ContentStream {
         let id = match context.object().kind() {
             ObjectKind::Array => {
                 let mut context = context.array()?;
-                for index in 0..context.array().len() {
+                for (index, element) in context.array().iter().enumerate() {
                     // Null and dangling entries contribute no content (ISO 32000 §7.3.10).
-                    let element = context.array().get(index).cloned();
-                    if let Some(element) = element
-                        && context.is_absent(&element)?
-                    {
+                    if context.is_absent(element)? {
                         continue;
                     }
                     let stream = context.at::<StreamObject>(index)?;

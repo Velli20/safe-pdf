@@ -1,8 +1,8 @@
 //! Checked direct PDF object handles.
 
 use crate::{
-    error::ObjectReadError, object_kind::ObjectKind, object_variant::ObjectVariant,
-    pdf_object::PdfObject,
+    dictionary::Dictionary, error::ObjectReadError, object_kind::ObjectKind,
+    object_variant::ObjectVariant, pdf_object::PdfObject,
 };
 
 /// Wraps an object whose top-level value is known not to be a reference.
@@ -37,5 +37,20 @@ impl ResolvedObject {
     /// Returns the kind of the resolved value.
     pub fn kind(&self) -> ObjectKind {
         self.0.kind()
+    }
+
+    /// Returns the dictionary of a resolved dictionary or stream.
+    ///
+    /// The object is already direct, so no resolver is borrowed and the dictionary
+    /// lives only as long as this object.
+    pub fn dictionary(&self) -> Result<&Dictionary, ObjectReadError> {
+        match self.value() {
+            ObjectVariant::Dictionary(dictionary) => Ok(dictionary),
+            ObjectVariant::Stream(stream) => Ok(&stream.dictionary),
+            _ => Err(ObjectReadError::TypeMismatch {
+                expected: ObjectKind::Dictionary,
+                actual: self.kind(),
+            }),
+        }
     }
 }

@@ -117,20 +117,9 @@ impl FromPdfObject for Pattern {
     fn from_pdf_object(
         mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
     ) -> ReadResult<Self> {
-        let raw = context.object().object().clone();
-        let object = raw.value();
+        let dictionary = context.object().dictionary()?;
+        let object = context.object().value();
         let objects = context.source();
-        let dictionary = match object {
-            pdf_object_reader::object_variant::ObjectVariant::Dictionary(dictionary) => dictionary,
-            pdf_object_reader::object_variant::ObjectVariant::Stream(stream) => &stream.dictionary,
-            other => {
-                return Err(pdf_object_reader::object_error::ObjectError::TypeMismatch(
-                    "Dictionary or Stream",
-                    other.name(),
-                )
-                .into());
-            }
-        };
 
         let pattern_type = dictionary.required_number::<i32>(b"PatternType", objects)?;
 

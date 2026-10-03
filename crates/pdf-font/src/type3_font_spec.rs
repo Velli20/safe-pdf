@@ -49,17 +49,15 @@ struct CharProcedures {
 impl FromPdfObject for CharProcedures {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
-        // Copy keys only so mutable child reads do not require cloning stream objects.
-        let names: Vec<_> = context.dictionary().dictionary.keys().cloned().collect();
         let mut handles = BTreeMap::new();
         let mut streams = HashMap::new();
-        for name in names {
+        for name in context.dictionary().dictionary.keys() {
             // Every procedure shares the font's traversal and document-wide stream IDs.
-            let stream: ContentStream = context.required(&name)?;
+            let stream: ContentStream = context.required(name)?;
             let handle = GlyphId(u32::try_from(stream.id).map_err(|_| {
                 FontError::InvalidDescendantFonts("Type 3 content stream ID does not fit u32")
             })?);
-            handles.insert(GlyphName(Arc::from(name)), handle);
+            handles.insert(GlyphName(Arc::from(name.as_slice())), handle);
             streams.insert(handle, stream);
         }
         Ok(Self { handles, streams })
