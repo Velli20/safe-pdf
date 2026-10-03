@@ -23,7 +23,7 @@ use crate::{dictionary::Dictionary, stream::StreamObject};
 /// this context. Shape conversions preserve that same traversal and report a
 /// type mismatch instead of silently accepting an unrelated object kind.
 pub struct ObjectContext<'read, A: ObjectAccess + ?Sized> {
-    object: ResolvedObject,
+    object: &'read ResolvedObject,
     access: &'read mut A,
 }
 
@@ -32,40 +32,33 @@ impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
     ///
     /// Custom access implementations must establish their traversal scope
     /// before constructing the context and retain it until decoding returns.
-    pub fn new(object: ResolvedObject, access: &'read mut A) -> Self {
+    pub fn new(object: &'read ResolvedObject, access: &'read mut A) -> Self {
         Self { object, access }
     }
 
     /// Returns the resolved object for custom shape inspection.
-    pub fn object(&self) -> &ResolvedObject {
-        &self.object
+    ///
+    /// The borrow outlives `&self`, so the object can be inspected while the
+    /// context reads children.
+    pub fn object(&self) -> &'read ResolvedObject {
+        self.object
     }
 
     /// Requires a dictionary or stream and transfers the traversal into its dictionary context.
     ///
     /// Streams expose their metadata dictionary through the same entry-reading API.
     pub fn dictionary(self) -> ReadResult<DictionaryContext<'read, A>> {
-        match self.object.value() {
-            ObjectVariant::Dictionary(value) => Ok(DictionaryContext {
-                dictionary: value.clone(),
-                access: self.access,
-            }),
-            ObjectVariant::Stream(value) => Ok(DictionaryContext {
-                dictionary: value.dictionary.clone(),
-                access: self.access,
-            }),
-            _ => Err(ObjectReadError::TypeMismatch {
-                expected: ObjectKind::Dictionary,
-                actual: self.object.kind(),
-            }),
-        }
+        Ok(DictionaryContext {
+            dictionary: self.object.dictionary()?,
+            access: self.access,
+        })
     }
 
     /// Requires an array and transfers the traversal into its context.
     pub fn array(self) -> ReadResult<ArrayContext<'read, A>> {
         match self.object.value() {
-            ObjectVariant::Array(value) => Ok(ArrayContext {
-                array: value.clone(),
+            ObjectVariant::Array(array) => Ok(ArrayContext {
+                array,
                 access: self.access,
             }),
             _ => Err(ObjectReadError::TypeMismatch {
@@ -78,8 +71,8 @@ impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
     /// Requires a stream and transfers the traversal into its context.
     pub fn stream(self) -> ReadResult<StreamContext<'read, A>> {
         match self.object.value() {
-            ObjectVariant::Stream(value) => Ok(StreamContext {
-                stream: value.clone(),
+            ObjectVariant::Stream(stream) => Ok(StreamContext {
+                stream,
                 access: self.access,
             }),
             _ => Err(ObjectReadError::TypeMismatch {
@@ -97,14 +90,16 @@ impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
 /// errors. Required reads reject a missing key; null follows the target decoder's
 /// contract, so a decoder explicitly accepting null can still read it.
 pub struct DictionaryContext<'read, A: ObjectAccess + ?Sized> {
-    dictionary: Dictionary,
+    dictionary: &'read Dictionary,
     access: &'read mut A,
 }
 
-impl<A: ObjectAccess + ?Sized> DictionaryContext<'_, A> {
+impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
     /// Returns the immutable dictionary for iteration or custom entry selection.
-    pub fn dictionary(&self) -> &Dictionary {
-        &self.dictionary
+    ///
+    /// The borrow outlives `&self`, so entries can be held while the context reads them.
+    pub fn dictionary(&self) -> &'read Dictionary {
+        self.dictionary
     }
 
     /// Reads a required entry and annotates failures with its byte-oriented key.
@@ -179,14 +174,16 @@ impl<A: ObjectAccess + ?Sized> DictionaryContext<'_, A> {
 
 /// Provides bounds-checked typed array reads in source order.
 pub struct ArrayContext<'read, A: ObjectAccess + ?Sized> {
-    array: PdfArray,
+    array: &'read PdfArray,
     access: &'read mut A,
 }
 
-impl<A: ObjectAccess + ?Sized> ArrayContext<'_, A> {
+impl<'read, A: ObjectAccess + ?Sized> ArrayContext<'read, A> {
     /// Returns the immutable array for length checks or custom inspection.
-    pub fn array(&self) -> &PdfArray {
-        &self.array
+    ///
+    /// The borrow outlives `&self`, so elements can be held while the context reads them.
+    pub fn array(&self) -> &'read PdfArray {
+        self.array
     }
 
     /// Reads an element, reporting an out-of-bounds error for an invalid index.
@@ -233,21 +230,23 @@ impl<A: ObjectAccess + ?Sized> ArrayContext<'_, A> {
 /// Encoded and decoded data remain distinguished by the model. Filter execution
 /// can be provided by client services and remains in the filter and document crates.
 pub struct StreamContext<'read, A: ObjectAccess + ?Sized> {
-    stream: StreamObject,
+    stream: &'read StreamObject,
     access: &'read mut A,
 }
 
-impl<A: ObjectAccess + ?Sized> StreamContext<'_, A> {
+impl<'read, A: ObjectAccess + ?Sized> StreamContext<'read, A> {
     /// Returns the stream handle, including bytes and filter-state metadata.
-    pub fn stream(&self) -> &StreamObject {
-        &self.stream
+    ///
+    /// The borrow outlives `&self`, so the stream can be held while the context reads children.
+    pub fn stream(&self) -> &'read StreamObject {
+        self.stream
     }
 
     /// Reborrows the active traversal to read the stream's dictionary entries.
     pub fn dictionary(&mut self) -> DictionaryContext<'_, A> {
         DictionaryContext {
-            dictionary: self.stream.dictionary.clone(),
-            access: self.access,
+            dictionary: &self.stream.dictionary,
+            access: &mut *self.access,
         }
     }
 }

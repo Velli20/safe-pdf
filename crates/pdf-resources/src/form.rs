@@ -21,7 +21,7 @@ pub struct FormXObject {
 
 impl FromPdfObject for FormXObject {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object().object().clone();
+        let object = context.object();
         // Both stream-backed and dictionary-only forms expose the same metadata.
         let mut context = context.dictionary()?;
         let content_stream = match object.value() {
@@ -38,12 +38,7 @@ impl FromPdfObject for FormXObject {
             .map(|bbox| bbox.normalized());
         let matrix = context.dictionary().optional_matrix(context.source())?;
         // Retain deferred handles so recursive resource graphs can finish decoding.
-        let resources = context
-            .dictionary()
-            .get(b"Resources")
-            .cloned()
-            .map(|value| context.read_shared(&value))
-            .transpose()?;
+        let resources = context.optional_shared::<Resources>(b"Resources")?;
         Ok(Self {
             bbox,
             matrix,

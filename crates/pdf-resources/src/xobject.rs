@@ -1,99 +1,132 @@
 use crate::{error::PdfPagesError, form::FormXObject, resource::Resource};
+use pdf_font::PdfFontSpec;
+use pdf_graphics::Image;
 use pdf_image::{PdfImageError, read_xobject as decode_image_xobject};
+use pdf_object_reader::object_error::ObjectError;
 use pdf_object_reader::object_lookup::ObjectLookupExt;
+use pdf_object_reader::object_resolver::ObjectResolver;
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
+    FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
+    dictionary::Dictionary, object_variant::ObjectVariant,
 };
+use std::sync::Arc;
+
+/// The `/Subtype` of an XObject.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum XObjectSubtype {
+    /// A self-contained content stream.
+    Form,
+    /// A sampled image.
+    Image,
+}
+
+impl TryFrom<&[u8]> for XObjectSubtype {
+    type Error = PdfPagesError;
+
+    fn try_from(subtype: &[u8]) -> Result<Self, Self::Error> {
+        match subtype {
+            b"Form" => Ok(Self::Form),
+            b"Image" => Ok(Self::Image),
+            _ => Err(PdfPagesError::UnsupportedXObjectSubtype {
+                subtype: String::from_utf8_lossy(subtype).into_owned(),
+            }),
+        }
+    }
+}
+
+impl XObjectSubtype {
+    /// Reads the XObject subtype of a resource object.
+    ///
+    /// Streams must name a supported subtype. A dictionary without an XObject subtype
+    /// yields `None`, since it describes a font.
+    fn read(
+        object: &ObjectVariant,
+        dictionary: &Dictionary,
+        objects: &dyn ObjectResolver,
+    ) -> Result<Option<Self>, PdfPagesError> {
+        if let ObjectVariant::Stream(_) = object {
+            return Self::try_from(dictionary.required_bytes(b"Subtype", objects)?).map(Some);
+        }
+        Ok(dictionary
+            .optional_bytes(b"Subtype", objects)?
+            .and_then(|subtype| Self::try_from(subtype).ok()))
+    }
+}
 
 impl FromPdfObject for Resource {
     fn from_pdf_object(
         mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
     ) -> ReadResult<Self> {
-        let raw = context.object().object().clone();
-        let dictionary = match raw.value() {
-            pdf_object_reader::object_variant::ObjectVariant::Dictionary(dictionary) => dictionary,
-            pdf_object_reader::object_variant::ObjectVariant::Stream(stream) => &stream.dictionary,
-            other => {
-                return Err(pdf_object_reader::object_error::ObjectError::TypeMismatch(
-                    "Dictionary or Stream",
-                    other.name(),
-                )
-                .into());
-            }
-        };
-        let subtype = dictionary.optional_bytes(b"Subtype", context.source())?;
-        if matches!(raw.value(), ObjectVariant::Dictionary(_))
-            && !matches!(subtype, Some(b"Image" | b"Form"))
-        {
-            let font: pdf_font::PdfFontSpec = context.read(raw.value())?;
-            let resources = if font.is_type3() {
-                dictionary
-                    .get(b"Resources")
-                    .map(|value| context.read_shared(value))
-                    .transpose()?
-            } else {
-                None
-            };
-            return Ok(Self::Font {
-                font: std::sync::Arc::new(font),
-                resources,
-            });
+        let object = context.object();
+        let value = object.value();
+        let dictionary = object.dictionary()?;
+        match XObjectSubtype::read(value, dictionary, context.source())? {
+            None => Self::read_font(&mut context, value, dictionary),
+            Some(XObjectSubtype::Form) => Ok(Self::from(context.read::<FormXObject>(value)?)),
+            Some(XObjectSubtype::Image) => Self::read_image(&mut context, value, dictionary),
         }
-        match dictionary.required_bytes(b"Subtype", context.source())? {
-            b"Form" => Ok(Self::from(context.read::<FormXObject>(raw.value())?)),
-            b"Image" => {
-                if !dictionary
-                    .required_size(context.source())
-                    .is_ok_and(|size| size.is_valid())
-                {
-                    return Ok(Self::UnavailableImage);
-                }
-                let ObjectVariant::Stream(stream) = raw.value() else {
-                    return Err(pdf_object_reader::object_error::ObjectError::TypeMismatch(
-                        "Stream",
-                        raw.value().name(),
-                    )
-                    .into());
-                };
-                let soft_mask = match dictionary.get(b"SMask") {
-                    None => None,
-                    Some(value) => {
-                        let resolved = context.source().resolve_object(value)?;
-                        if matches!(resolved, ObjectVariant::String(name) if name.kind() == pdf_object_reader::string_kind::StringKind::Name && name.as_bytes() == b"None")
-                        {
-                            None
-                        } else {
-                            match context.read::<Resource>(value) {
-                                Ok(Resource::Image(image)) => Some(image),
-                                Ok(Resource::UnavailableImage) => None,
-                                Err(pdf_object_reader::ObjectReadError::CyclicReference {
-                                    ..
-                                }) => None,
-                                Err(error) => return Err(error),
-                                _ => {
-                                    return Err(PdfPagesError::from(
-                                        PdfImageError::InvalidSoftMaskXObject,
-                                    )
-                                    .into());
-                                }
-                            }
-                        }
-                    }
-                };
-                Ok(Self::from(
-                    decode_image_xobject(
-                        dictionary,
-                        stream,
-                        context.source(),
-                        soft_mask.as_deref(),
-                    )
-                    .map_err(PdfPagesError::from)?,
-                ))
-            }
-            subtype => Err(PdfPagesError::UnsupportedXObjectSubtype {
-                subtype: String::from_utf8_lossy(subtype).into_owned(),
-            }
-            .into()),
+    }
+}
+
+impl Resource {
+    /// Reads a font, keeping the resources a Type 3 font's glyph procedures paint with.
+    fn read_font(
+        context: &mut ObjectContext<'_, impl ObjectAccess + ?Sized>,
+        value: &ObjectVariant,
+        dictionary: &Dictionary,
+    ) -> ReadResult<Self> {
+        let font: PdfFontSpec = context.read(value)?;
+        let resources = match dictionary.get(b"Resources") {
+            Some(resources) if font.is_type3() => Some(context.read_shared(resources)?),
+            _ => None,
+        };
+        Ok(Self::Font {
+            font: Arc::new(font),
+            resources,
+        })
+    }
+
+    /// Decodes an image XObject, or marks it unavailable when its dimensions are malformed.
+    fn read_image(
+        context: &mut ObjectContext<'_, impl ObjectAccess + ?Sized>,
+        value: &ObjectVariant,
+        dictionary: &Dictionary,
+    ) -> ReadResult<Self> {
+        if !dictionary
+            .required_size(context.source())
+            .is_ok_and(|size| size.is_valid())
+        {
+            return Ok(Self::UnavailableImage);
+        }
+        let ObjectVariant::Stream(stream) = value else {
+            return Err(ObjectError::TypeMismatch("Stream", value.name()).into());
+        };
+        let soft_mask = Self::read_soft_mask_image(context, dictionary)?;
+        let image =
+            decode_image_xobject(dictionary, stream, context.source(), soft_mask.as_deref())
+                .map_err(PdfPagesError::from)?;
+        Ok(Self::from(image))
+    }
+
+    /// Reads an image's `/SMask`.
+    ///
+    /// `/None`, an unavailable mask, or a mask that refers back to its own image leaves
+    /// the image unmasked.
+    fn read_soft_mask_image(
+        context: &mut ObjectContext<'_, impl ObjectAccess + ?Sized>,
+        dictionary: &Dictionary,
+    ) -> ReadResult<Option<Arc<Image>>> {
+        let Some(value) = dictionary.get(b"SMask") else {
+            return Ok(None);
+        };
+        if value.is_named(b"None", context.source()) {
+            return Ok(None);
+        }
+        match context.read::<Self>(value) {
+            Ok(Self::Image(image)) => Ok(Some(image)),
+            Ok(Self::UnavailableImage) | Err(ObjectReadError::CyclicReference { .. }) => Ok(None),
+            Ok(_) => Err(PdfPagesError::from(PdfImageError::InvalidSoftMaskXObject).into()),
+            Err(error) => Err(error),
         }
     }
 }

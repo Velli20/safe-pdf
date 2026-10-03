@@ -21,6 +21,14 @@ pub use pdf_cmap::{PdfCode, ToUnicodeMap};
 /// fallback for font programs whose physical metrics are missing or unusable.
 pub const PDF_GLYPH_SPACE_UNITS_PER_EM: f32 = 1_000.0;
 
+/// Advance assumed for a simple-font glyph with neither a `/Widths` entry nor a
+/// descriptor `/MissingWidth`.
+///
+/// The specification's `/MissingWidth` default of zero would stack such glyphs on one
+/// origin. Half an em approximates an average Latin glyph advance, so text whose widths
+/// are absent (notably unembedded Standard 14 fonts) keeps readable spacing.
+pub(crate) const FALLBACK_GLYPH_WIDTH: f32 = PDF_GLYPH_SPACE_UNITS_PER_EM / 2.0;
+
 /// Simple-font encoding with optional code-to-name differences.
 #[derive(Debug, Clone)]
 pub struct SimpleEncoding {

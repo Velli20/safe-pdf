@@ -14,11 +14,10 @@ use crate::pdf_data::{
 };
 use pdf_graphics::{DashPattern, color::Color, rect::Rect};
 use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
+    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
     object_lookup::ObjectLookupExt,
     object_resolver::{DanglingAsNullResolver, ObjectResolver},
     object_variant::ObjectVariant,
-    pdf_array::PdfArray,
 };
 
 pub(crate) type DecodeResult<T> = Result<T, SourceDecodeError>;
@@ -124,7 +123,17 @@ impl SourceAnnotation {
     pub fn from_page_dictionary<A: ObjectAccess + ?Sized>(
         context: &mut DictionaryContext<'_, A>,
     ) -> ReadResult<Option<Vec<Self>>> {
-        let Some(annots) = context.optional::<PdfArray>(b"Annots")? else {
+        let Some(entry) = context.dictionary().get(b"Annots") else {
+            return Ok(None);
+        };
+        // `/Annots` that resolves to anything but an array (e.g. a reference whose object
+        // number was reused by a later update) holds no annotations.
+        let resolved = match context.resolve(entry) {
+            Ok(resolved) => resolved,
+            Err(ObjectReadError::MissingObject { .. }) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let ObjectVariant::Array(annots) = resolved.value() else {
             return Ok(None);
         };
         let mut annotations = Vec::with_capacity(annots.len());

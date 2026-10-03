@@ -4,7 +4,7 @@ use crate::{
     PDF_GLYPH_SPACE_UNITS_PER_EM,
     error::FontError,
     glyph_widths_map::GlyphWidthsMap,
-    pdf::{PdfFontDescriptor, PdfGlyphMetric, PdfMetrics, SimpleEncoding},
+    pdf::{FALLBACK_GLYPH_WIDTH, PdfFontDescriptor, PdfGlyphMetric, PdfMetrics, SimpleEncoding},
     standard14::Standard14Font,
 };
 use pdf_object_reader::{
@@ -29,10 +29,11 @@ impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for PdfMet
 
     /// Reads metrics within the active font-dictionary traversal.
     ///
-    /// Simple fonts default to the descriptor's `/MissingWidth` or 500, Type 3
-    /// fonts to zero, and CID fonts to `/DW` or 1000. Missing simple widths and
-    /// reversed character ranges leave the explicit table empty. Short arrays
-    /// contribute only available widths; surplus values remain unread.
+    /// Simple fonts default to the descriptor's `/MissingWidth` or
+    /// [`FALLBACK_GLYPH_WIDTH`], Type 3 fonts to zero, and CID fonts to `/DW` or
+    /// 1000. Missing simple widths and reversed character ranges leave the
+    /// explicit table empty. Short arrays contribute only available widths;
+    /// surplus values remain unread.
     ///
     /// # Errors
     /// Returns a reader error for missing or unsupported subtypes, malformed
@@ -40,20 +41,26 @@ impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for PdfMet
     /// retain their font-domain source; optional descriptor hints remain lenient.
     fn try_from(context: &mut DictionaryContext<'_, A>) -> ReadResult<Self> {
         let subtype: Arc<[u8]> = context.required(b"Subtype")?;
-        let (default_width, cid_keyed) = match subtype.as_ref() {
+        let (default_width, explicit) = match subtype.as_ref() {
             b"Type1" | b"MMType1" | b"TrueType" => {
                 // Decode metadata only; font program loading belongs to the font spec.
                 let missing_width = context
                     .optional::<PdfFontDescriptor>(b"FontDescriptor")?
                     .and_then(|descriptor| descriptor.missing_width);
-                (missing_width.unwrap_or(500.0), false)
+                (
+                    missing_width.unwrap_or(FALLBACK_GLYPH_WIDTH),
+                    Self::simple_widths(context)?,
+                )
             }
-            b"Type3" => (0.0, false),
+            b"Type3" => (0.0, Self::simple_widths(context)?),
             b"CIDFontType0" | b"CIDFontType2" => (
                 context
                     .optional::<f32>(b"DW")?
                     .unwrap_or(PDF_GLYPH_SPACE_UNITS_PER_EM),
-                true,
+                context
+                    .optional::<GlyphWidthsMap>(GlyphWidthsMap::KEY)?
+                    .map(BTreeMap::from)
+                    .unwrap_or_default(),
             ),
             other => {
                 return Err(FontError::UnsupportedFontSubtype {
@@ -62,37 +69,31 @@ impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for PdfMet
                 .into());
             }
         };
-        let mut metrics = Self {
+        Ok(Self {
             default: horizontal_metric(default_width),
-            explicit: BTreeMap::new(),
-        };
-        if cid_keyed {
-            if let Some(widths) = context.optional::<GlyphWidthsMap>(GlyphWidthsMap::KEY)? {
-                for code in 0_u16..=u16::MAX {
-                    if let Some(width) = widths.get_width(code) {
-                        metrics
-                            .explicit
-                            .insert(u32::from(code), horizontal_metric(width));
-                    }
-                }
-            }
-        } else if let Some(array) = context.optional::<PdfArray>(b"Widths")? {
-            // Standard 14 fonts can omit widths and character bounds entirely.
-            // Retain the raw array to avoid decoding surplus entries.
-            let first: u16 = context.required(b"FirstChar")?;
-            let last: u16 = context.required(b"LastChar")?;
-            for (code, value) in (first..=last).zip(array.iter()) {
-                let width = context.read(value)?;
-                metrics
-                    .explicit
-                    .insert(u32::from(code), horizontal_metric(width));
-            }
-        }
-        Ok(metrics)
+            explicit,
+        })
     }
 }
 
 impl PdfMetrics {
+    /// Reads a simple or Type 3 font's `/Widths` array indexed from `/FirstChar`.
+    fn simple_widths(
+        context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<BTreeMap<u32, PdfGlyphMetric>> {
+        // Standard 14 fonts can omit widths and character bounds entirely.
+        let Some(array) = context.optional::<PdfArray>(b"Widths")? else {
+            return Ok(BTreeMap::new());
+        };
+        // Retain the raw array to avoid decoding surplus entries.
+        let first: u16 = context.required(b"FirstChar")?;
+        let last: u16 = context.required(b"LastChar")?;
+        (first..=last)
+            .zip(array.iter())
+            .map(|(code, value)| Ok((u32::from(code), horizontal_metric(context.read(value)?))))
+            .collect()
+    }
+
     /// Supplies Standard 14 AFM widths for encoded glyph names when the PDF lists no widths.
     ///
     /// Explicit `/Widths` entries remain authoritative, so a non-empty table is left unchanged.

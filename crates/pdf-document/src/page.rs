@@ -170,10 +170,10 @@ impl PdfPage {
 impl FromPdfObject for PdfPage {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
-        let dictionary = context.dictionary().clone();
+        let dictionary = context.dictionary();
         // A dangling `/Contents` reference is null (ISO 32000 §7.3.10), leaving the page empty.
-        let contents_absent = match context.dictionary().get(b"Contents").cloned() {
-            Some(object) => context.is_absent(&object)?,
+        let contents_absent = match dictionary.get(b"Contents") {
+            Some(object) => context.is_absent(object)?,
             None => true,
         };
         let contents = if contents_absent {
@@ -185,9 +185,7 @@ impl FromPdfObject for PdfPage {
         let crop_box = dictionary
             .optional_array_of::<f32, 4>(b"CropBox", context.source())?
             .map(Rect::from);
-        let rotation = context
-            .dictionary()
-            .optional_number::<i32>(b"Rotate", context.source())?;
+        let rotation = dictionary.optional_number::<i32>(b"Rotate", context.source())?;
         let resources = context
             .optional_shared::<Resources>(b"Resources")?
             .map(|handle| handle.get())
