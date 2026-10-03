@@ -49,7 +49,9 @@ impl PdfParser<'_> {
         loop {
             self.skip_whitespace_and_comments();
 
-            if self.tokenizer.peek().is_none() {
+            // Test the raw byte: regular characters such as `,` form no token, but can
+            // still continue a spaced name value.
+            if self.tokenizer.peek_byte().is_none() {
                 return Err(ParserError::UnexpectedEndOfFile);
             }
 
