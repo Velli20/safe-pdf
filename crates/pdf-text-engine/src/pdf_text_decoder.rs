@@ -35,6 +35,8 @@ pub(crate) struct DecodedGlyph<'a> {
     pub(crate) unicode: UnicodeSequence,
     /// PDF-specified advance in thousandths of a text-space unit.
     pub(crate) pdf_advance: TextVector,
+    /// Whether `pdf_advance` comes from a width entry rather than the font's default width.
+    pub(crate) explicit_width: bool,
 }
 
 /// Decodes `bytes` and immediately passes each logical glyph to `consume`.
@@ -108,6 +110,11 @@ fn decode_type0_mapping(font: &Type0FontSpec, mapping: CidMapping) -> DecodedGly
         selector: type0_selector(&font.descendant, mapping.cid),
         unicode: type0_unicode(font, mapping),
         pdf_advance: metric_advance(metric_for(&font.descendant.metrics, mapping.cid.0)),
+        explicit_width: font
+            .descendant
+            .metrics
+            .explicit
+            .contains_key(&mapping.cid.0),
     }
 }
 
@@ -217,6 +224,7 @@ fn decode_one_byte_mapping<'a>(
             })
             .unwrap_or_else(|| char::from(code).into()),
         pdf_advance: metric_advance(metric_for(metrics, u32::from(code))),
+        explicit_width: metrics.explicit.contains_key(&u32::from(code)),
     })
 }
 

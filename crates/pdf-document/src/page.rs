@@ -5,7 +5,11 @@ use std::sync::Arc;
 
 use pdf_annotation_core::SourceAnnotation;
 use pdf_content_stream::ContentStream;
-use pdf_graphics::rect::Rect;
+use pdf_graphics::{
+    rect::Rect,
+    size::Size,
+    viewport::{PageViewport, ViewportError},
+};
 use pdf_resources::resources::Resources;
 
 /// Represents a single page in a PDF document.
@@ -86,6 +90,80 @@ impl PdfPage {
             self.annotations = None;
         }
         Some(annotation)
+    }
+
+    /// Returns the page's displayed width and height in PDF points.
+    ///
+    /// Uses the CropBox, then the MediaBox, and swaps the axes for a sideways `/Rotate`
+    /// so hosts size their containers with the same geometry rendering uses.
+    /// Returns `None` for pages without either box or with invalid bounds.
+    pub fn page_size(&self) -> Option<Size> {
+        if self.crop_box.is_none() && self.media_box.is_none() {
+            return None;
+        }
+        let (bounds, rotation) = self.page_bounds(None, || Rect::new(1.0, 1.0))?;
+        let (width, height) = (bounds.width(), bounds.height());
+        if width <= 0.0 || height <= 0.0 {
+            return None;
+        }
+        Some(if rotation == 90 || rotation == 270 {
+            Size::new(height, width)
+        } else {
+            Size::new(width, height)
+        })
+    }
+
+    /// Fits `bounds_override`, or the page box, into `device_size` with the page `/Rotate`.
+    ///
+    /// Pages without a box fit the device size itself. Rejects invalid device
+    /// dimensions before resolving bounds, then invalid bounds.
+    pub fn viewport(
+        &self,
+        bounds_override: Option<&Rect>,
+        device_size: Size,
+    ) -> Result<PageViewport, ViewportError> {
+        if !device_size.validate() {
+            return Err(ViewportError::Dimensions);
+        }
+        let (bounds, rotation) = self
+            .page_bounds(bounds_override, || {
+                Rect::new(device_size.width, device_size.height)
+            })
+            .ok_or(ViewportError::Bounds)?;
+        PageViewport::new(bounds, rotation, device_size)
+    }
+
+    /// Resolves the page box and normalized `/Rotate` shared by rendering and layout.
+    ///
+    /// The box is chosen in priority order: `bounds_override`, then the CropBox, then
+    /// the MediaBox, and finally the box produced by `fallback`.
+    ///
+    /// # Parameters
+    ///
+    /// - `bounds_override`: Bounds in PDF page coordinates that take precedence over
+    ///   the page's own boxes, such as a caller-selected clip region.
+    /// - `fallback`: Produces the bounds used when neither an override nor a page box
+    ///   is available. It is only called in that case.
+    ///
+    /// # Returns
+    ///
+    /// The selected bounds and the page rotation in degrees, normalized into
+    /// `0..360` (an absent `/Rotate` is `0`). Returns `None` if the selected bounds
+    /// are not valid or have a nonfinite width or height.
+    pub fn page_bounds(
+        &self,
+        bounds_override: Option<&Rect>,
+        fallback: impl FnOnce() -> Rect,
+    ) -> Option<(Rect, i32)> {
+        let bounds = bounds_override
+            .or(self.crop_box.as_ref())
+            .or(self.media_box.as_ref())
+            .copied()
+            .unwrap_or_else(fallback);
+        if !bounds.is_valid() || !bounds.width().is_finite() || !bounds.height().is_finite() {
+            return None;
+        }
+        Some((bounds, self.rotation.unwrap_or_default().rem_euclid(360)))
     }
 }
 

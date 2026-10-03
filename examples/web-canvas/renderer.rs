@@ -54,9 +54,10 @@ impl WebDocument {
 
     /// Returns the displayed page dimensions in points, honoring CropBox and `/Rotate`.
     pub fn page_size(&self, page: u32) -> Result<Vec<f32>, JsValue> {
-        pdf_canvas::PageViewport::page_size(self.page(page)?)
-            .map(|size| size.to_vec())
-            .map_err(error)
+        self.page(page)?
+            .page_size()
+            .map(|size| vec![size.width, size.height])
+            .ok_or_else(|| error(pdf_canvas::ViewportError::Bounds))
     }
 
     fn page(&self, page: u32) -> Result<&pdf_document::page::PdfPage, JsValue> {

@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use crate::{
     dictionary::Dictionary, object_error::ObjectError, object_id::ObjectId,
-    object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    object_resolver::ObjectResolver,
 };
 
 /// Walks a dictionary and then each `/Parent` dictionary up to the root.
@@ -31,7 +31,7 @@ impl<'a> ParentChain<'a> {
         &mut self,
         dictionary: &'a Dictionary,
     ) -> Result<Option<&'a Dictionary>, ObjectError> {
-        let Some((parent, parent_id)) = parent_reference(dictionary) else {
+        let Some((parent, parent_id)) = dictionary.parent_reference() else {
             return Ok(None);
         };
         if !self.visited.insert(parent_id) {
@@ -51,13 +51,5 @@ impl<'a> Iterator for ParentChain<'a> {
             Err(error) => return Some(Err(error)),
         }
         Some(Ok(current))
-    }
-}
-
-/// Returns the `/Parent` entry and its object id when it is an indirect reference.
-pub fn parent_reference(dictionary: &Dictionary) -> Option<(&ObjectVariant, ObjectId)> {
-    match dictionary.get(b"Parent") {
-        Some(parent @ ObjectVariant::Reference(parent_id)) => Some((parent, *parent_id)),
-        _ => None,
     }
 }

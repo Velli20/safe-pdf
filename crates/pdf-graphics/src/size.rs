@@ -10,12 +10,14 @@ pub struct Size<T = f32> {
     pub height: T,
 }
 
-impl Size<f32> {
-    /// Creates a new floating-point size from the supplied width and height.
-    pub const fn new(width: f32, height: f32) -> Self {
+impl<T> Size<T> {
+    /// Creates a new size from the supplied width and height.
+    pub const fn new(width: T, height: T) -> Self {
         Self { width, height }
     }
+}
 
+impl Size<f32> {
     /// Returns `true` when the width and height are finite and strictly positive.
     pub fn validate(&self) -> bool {
         self.width.is_finite() && self.height.is_finite() && self.width > 0.0 && self.height > 0.0

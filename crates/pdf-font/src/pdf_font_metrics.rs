@@ -4,7 +4,8 @@ use crate::{
     PDF_GLYPH_SPACE_UNITS_PER_EM,
     error::FontError,
     glyph_widths_map::GlyphWidthsMap,
-    pdf::{PdfFontDescriptor, PdfGlyphMetric, PdfMetrics},
+    pdf::{PdfFontDescriptor, PdfGlyphMetric, PdfMetrics, SimpleEncoding},
+    standard14::Standard14Font,
 };
 use pdf_object_reader::{
     DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
@@ -88,6 +89,26 @@ impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for PdfMet
             }
         }
         Ok(metrics)
+    }
+}
+
+impl PdfMetrics {
+    /// Supplies Standard 14 AFM widths for encoded glyph names when the PDF lists no widths.
+    ///
+    /// Explicit `/Widths` entries remain authoritative, so a non-empty table is left unchanged.
+    pub(crate) fn fill_standard14_widths(
+        &mut self,
+        font: Standard14Font,
+        encoding: &SimpleEncoding,
+    ) {
+        if !self.explicit.is_empty() {
+            return;
+        }
+        self.explicit
+            .extend(encoding.differences.iter().filter_map(|(code, name)| {
+                font.glyph_width(name.0.as_ref())
+                    .map(|width| (u32::from(*code), horizontal_metric(width)))
+            }));
     }
 }
 

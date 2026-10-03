@@ -60,10 +60,15 @@ impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for Simple
         };
         let symbolic = subtype.as_ref() == b"TrueType" && descriptor.metadata.symbolic;
         let encoding = simple_encoding(context, symbolic)?;
-        let metrics = PdfMetrics::try_from(&mut *context)?;
+        let mut metrics = PdfMetrics::try_from(&mut *context)?;
         let standard14 = base_font
             .as_deref()
             .and_then(standard14::from_base_font_name);
+        if let Some(font) = standard14
+            && program.is_none()
+        {
+            metrics.fill_standard14_widths(font, &encoding);
+        }
         Ok(Self {
             base_font: base_font.unwrap_or_default(),
             descriptor,

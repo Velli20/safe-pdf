@@ -6,6 +6,7 @@ use crate::{
     error::{WebError as Error, WebResult},
 };
 use pdf_document::page::PdfPage;
+use pdf_graphics::size::Size;
 use pdf_graphics_web::WebCanvasBackend;
 use pdf_renderer::PageTextLayout;
 use pdf_text_engine::FontSystem;
@@ -16,7 +17,7 @@ pub struct WebPageOutput {
     /// Existing glyph layout captured with PdfCanvas::with_text_recording.
     pub text_layout: Arc<PageTextLayout>,
     /// Logical device dimensions used to create both glyph and page geometry.
-    pub device_size: [f32; 2],
+    pub device_size: Size,
     /// Page content revision used by text layout ingestion.
     pub content_revision: u32,
     /// Native annotation presentation, independent of page pixels.
@@ -116,12 +117,12 @@ mod tests {
             .dyn_into()
             .unwrap();
         let viewport = WebViewport::new(
-            pdf_canvas::PageViewport::from_page(page, None, [size, size]).unwrap(),
+            page.viewport(None, Size::new(size, size)).unwrap(),
             [f64::from(size), f64::from(size)],
-            [
+            Size::new(
                 num_traits::ToPrimitive::to_u32(&size).unwrap(),
                 num_traits::ToPrimitive::to_u32(&size).unwrap(),
-            ],
+            ),
             Transform::identity(),
             1,
         )

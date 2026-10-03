@@ -4,6 +4,7 @@ use crate::{BudgetedImage, WebCanvasBackend, error::WebResult, surface_pool::Sur
 use pdf_canvas::{
     CanvasViewport, ViewportError, canvas_backend::CanvasBackend, recording_canvas::RecordingCanvas,
 };
+use pdf_graphics::size::Size;
 
 /// Owns reusable Canvas 2D surfaces and accounting for retained raster images.
 pub struct WebRasterizer {
@@ -25,7 +26,7 @@ impl WebRasterizer {
         recording: &RecordingCanvas,
         viewport: &CanvasViewport,
     ) -> WebResult<BudgetedImage> {
-        if viewport.device_size() != [recording.width(), recording.height()] {
+        if viewport.device_size() != Size::new(recording.width(), recording.height()) {
             return Err(ViewportError::DeviceSizeMismatch.into());
         }
         let surface = self.surfaces.acquire(viewport.backing_size())?;

@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use pdf_graphics::{rect::Rect, transform::Transform};
 
 use crate::{
-    object_error::ObjectError, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    object_error::ObjectError, object_id::ObjectId, object_lookup::ObjectLookupExt,
+    object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
 #[derive(Debug, PartialEq, Clone)]
@@ -197,6 +197,14 @@ impl Dictionary {
         let [sx, ky, kx, sy, tx, ty] = self.required_array_of::<f32, 6>(b"Matrix", objects)?;
 
         Ok(Transform::from_row(sx, ky, kx, sy, tx, ty))
+    }
+
+    /// Returns the `/Parent` entry and its object id when it is an indirect reference.
+    pub fn parent_reference(&self) -> Option<(&ObjectVariant, ObjectId)> {
+        match self.get(b"Parent") {
+            Some(parent @ ObjectVariant::Reference(parent_id)) => Some((parent, *parent_id)),
+            _ => None,
+        }
     }
 }
 

@@ -3,20 +3,21 @@
 //! Layout ingestion and selection remain independent of browser drawing:
 //! ```no_run
 //! use std::sync::Arc;
+//! use pdf_graphics::size::Size;
 //! use pdf_renderer::{DocumentTextSelection, PageTextLayout, TextSelectionResult};
 //! /// Installs a page layout and retrieves its initial selection geometry.
 //! fn install(
 //!     selection: &mut DocumentTextSelection,
 //!     layout: Arc<PageTextLayout>,
 //! ) -> TextSelectionResult<()> {
-//!     selection.install_layout(0, 1, [800.0, 1000.0], layout)?;
+//!     selection.install_layout(0, 1, Size::new(800.0, 1000.0), layout)?;
 //!     let _updates = selection.updates(&[0], None)?;
 //!     Ok(())
 //! }
 //! ```
 
 use crate::text_selection::{PageTextLayout, TextSelection};
-use pdf_graphics::{point::Point, rect::Rect};
+use pdf_graphics::{point::Point, rect::Rect, size::Size};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -62,7 +63,7 @@ pub struct SelectionBatch {
     page: u32,
     layout_revision: u32,
     selection_revision: u32,
-    device_size: [f32; 2],
+    device_size: Size,
     keys: Vec<u32>,
     bounds: Vec<Rect>,
 }
@@ -84,7 +85,7 @@ impl SelectionBatch {
     }
 
     /// Returns the retained layout's logical device dimensions.
-    pub fn device_size(&self) -> [f32; 2] {
+    pub fn device_size(&self) -> Size {
         self.device_size
     }
 
@@ -103,7 +104,7 @@ impl SelectionBatch {
 struct IndexedLayout {
     page: u32,
     revision: u32,
-    device_size: [f32; 2],
+    device_size: Size,
     layout: Arc<PageTextLayout>,
     index: SpatialIndex,
     selection: Option<TextSelection>,
@@ -158,11 +159,11 @@ impl DocumentTextSelection {
         &mut self,
         page: u32,
         revision: u32,
-        device_size: [f32; 2],
+        device_size: Size,
         layout: Arc<PageTextLayout>,
     ) -> TextSelectionResult<()> {
         self.page_position(page)?;
-        if device_size.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+        if !device_size.validate() {
             return Err(TextSelectionError::InvalidInput("layout dimensions"));
         }
         if let Some(old) = self.layouts.iter().find(|v| v.page == page) {
@@ -516,10 +517,10 @@ mod tests {
     fn reverse_cross_page_copy_and_dirty_batches() {
         let mut selection = DocumentTextSelection::new(&[7, 3]).unwrap();
         selection
-            .install_layout(7, 1, [100.0, 100.0], layout("abc"))
+            .install_layout(7, 1, Size::new(100.0, 100.0), layout("abc"))
             .unwrap();
         selection
-            .install_layout(3, 1, [100.0, 100.0], layout("de"))
+            .install_layout(3, 1, Size::new(100.0, 100.0), layout("de"))
             .unwrap();
         let revision = selection
             .select(Some(SelectionSpan {
@@ -547,7 +548,7 @@ mod tests {
         let mut selection = DocumentTextSelection::new(&[0, 1]).unwrap();
         for page in [0, 1] {
             selection
-                .install_layout(page, 1, [100.0, 100.0], layout("abc"))
+                .install_layout(page, 1, Size::new(100.0, 100.0), layout("abc"))
                 .unwrap();
         }
         let revision = selection
@@ -578,7 +579,7 @@ mod tests {
         let mut selection = DocumentTextSelection::new(&[0, 1, 2]).unwrap();
         for page in [0, 2] {
             selection
-                .install_layout(page, 1, [100.0, 100.0], layout("a"))
+                .install_layout(page, 1, Size::new(100.0, 100.0), layout("a"))
                 .unwrap();
         }
         assert!(
@@ -611,7 +612,7 @@ mod tests {
     fn rejects_stale_or_out_of_bounds_endpoints() {
         let mut selection = DocumentTextSelection::new(&[0]).unwrap();
         selection
-            .install_layout(0, 1, [100.0, 100.0], layout("a"))
+            .install_layout(0, 1, Size::new(100.0, 100.0), layout("a"))
             .unwrap();
         assert!(
             selection
@@ -622,7 +623,7 @@ mod tests {
                 .is_err()
         );
         selection
-            .install_layout(0, 2, [100.0, 100.0], layout("a"))
+            .install_layout(0, 2, Size::new(100.0, 100.0), layout("a"))
             .unwrap();
         assert!(
             selection

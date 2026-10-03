@@ -146,6 +146,7 @@ where
     /// PDF widths remain authoritative for native faces. Horizontal glyphs supplied by an
     /// unrelated fallback face use that face's advance so its outlines retain their intended
     /// spacing, falling back to the PDF width when the substitute does not contain the glyph.
+    /// Per-glyph fallbacks wider than an explicit PDF width are compressed to that width.
     fn push(&mut self, decoded: DecodedGlyph<'_>) -> Result<(), E> {
         let resolved = if let Some(cached) = self.resolved_cache.get(&decoded.source_code) {
             cached.clone()
@@ -170,26 +171,31 @@ where
 
         let needs_fallback_advance =
             resolved.uses_fallback_face(self.font) && self.writing_mode == WritingMode::Horizontal;
-        let natural = if needs_fallback_advance {
+        let pdf_natural = TextVector {
+            x: decoded.pdf_advance.x / PDF_GLYPH_SPACE_UNITS_PER_EM,
+            y: decoded.pdf_advance.y / PDF_GLYPH_SPACE_UNITS_PER_EM,
+        };
+        let (natural, width_scale) = if needs_fallback_advance {
             match face.horizontal_advance(resolved.glyph_id) {
-                Ok(Some(advance)) => TextVector {
-                    x: advance / units_per_em(face_metrics),
-                    y: 0.0,
-                },
-                Ok(None) | Err(pdf_font::FontError::MissingGlyph { .. }) => TextVector {
-                    x: decoded.pdf_advance.x / PDF_GLYPH_SPACE_UNITS_PER_EM,
-                    y: decoded.pdf_advance.y / PDF_GLYPH_SPACE_UNITS_PER_EM,
-                },
+                Ok(Some(advance)) => fallback_fit(
+                    advance / units_per_em(face_metrics),
+                    pdf_natural,
+                    decoded.explicit_width && matches!(resolved.face, ResolvedFace::Fallback(_)),
+                ),
+                Ok(None) | Err(pdf_font::FontError::MissingGlyph { .. }) => (pdf_natural, 1.0),
                 Err(error) => return Err(E::from(TextError::from(error))),
             }
         } else {
-            TextVector {
-                x: decoded.pdf_advance.x / PDF_GLYPH_SPACE_UNITS_PER_EM,
-                y: decoded.pdf_advance.y / PDF_GLYPH_SPACE_UNITS_PER_EM,
-            }
+            (pdf_natural, 1.0)
         };
         let advance = styled_advance(&decoded, natural, self.style, self.writing_mode);
-        let transform = glyph_transform(self.font.spec(), face_metrics, self.style, self.pen);
+        let transform = glyph_transform(
+            self.font.spec(),
+            face_metrics,
+            self.style,
+            self.pen,
+            width_scale,
+        );
         let bounds = glyph_bounds(
             face_metrics,
             self.style,
@@ -331,6 +337,29 @@ fn resolve_glyph(
     })
 }
 
+/// Chooses the advance and horizontal glyph scale for a glyph drawn from a fallback face.
+///
+/// `face_width` is the fallback glyph's advance in em units. A per-glyph fallback that is wider
+/// than an explicit PDF width is compressed horizontally to that width, so a substitute symbol
+/// occupies the space the PDF font reserved for it. Otherwise the face's own advance is kept so
+/// its outline retains its intended spacing.
+fn fallback_fit(
+    face_width: f32,
+    pdf_natural: TextVector,
+    fit_to_pdf_width: bool,
+) -> (TextVector, f32) {
+    if fit_to_pdf_width && pdf_natural.x > 0.0 && face_width > pdf_natural.x {
+        return (pdf_natural, pdf_natural.x / face_width);
+    }
+    (
+        TextVector {
+            x: face_width,
+            y: 0.0,
+        },
+        1.0,
+    )
+}
+
 /// Selects a glyph already available in `face` without consulting fallback services.
 ///
 /// Whole-font substitutes prefer Unicode because embedded glyph IDs, names, and CIDs generally do
@@ -401,19 +430,20 @@ fn styled_advance(
 /// Builds the glyph-to-layout transform at `origin`.
 ///
 /// Type 3 glyphs begin in the PDF-provided font matrix. Other faces begin with a units-per-em
-/// normalization. Font size, horizontal scaling, pen position, and text rise are then composed in
+/// normalization, narrowed horizontally by `width_scale` for fitted fallback glyphs. Font size, horizontal scaling, pen position, and text rise are then composed in
 /// layout coordinates.
 fn glyph_transform(
     spec: &PdfFontSpec,
     metrics: Option<FontMetrics>,
     style: &TextStyle,
     origin: TextVector,
+    width_scale: f32,
 ) -> Transform {
     let mut transform = match spec {
         PdfFontSpec::Type3(font) => font.font_matrix,
         _ => {
             let units = units_per_em(metrics);
-            Transform::from_scale(1.0 / units, 1.0 / units)
+            Transform::from_scale(width_scale / units, 1.0 / units)
         }
     };
     transform.scale(style.font_size * style.horizontal_scale, style.font_size);

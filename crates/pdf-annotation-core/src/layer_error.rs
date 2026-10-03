@@ -12,6 +12,9 @@ pub enum AnnotationLayerError {
     /// Host coordinate conversion failed.
     #[error(transparent)]
     Transform(#[from] pdf_graphics::transform::TransformError),
+    /// Page to device projection failed.
+    #[error(transparent)]
+    Viewport(#[from] pdf_graphics::viewport::ViewportError),
     /// Invalid host geometry or event input.
     #[error("invalid annotation input: {0}")]
     InvalidInput(&'static str),

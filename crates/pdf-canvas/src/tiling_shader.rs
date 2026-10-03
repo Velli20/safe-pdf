@@ -9,14 +9,13 @@ use std::sync::Arc;
 use num_traits::ToPrimitive;
 use pdf_graphics::{
     rect::Rect,
+    size::Size,
     transform::{Transform, TransformError},
+    viewport::pixel_extent,
 };
 use thiserror::Error;
 
-use crate::{
-    recording_canvas::{MAX_NESTING, RecordingCanvas},
-    viewport::pixel_extent,
-};
+use crate::recording_canvas::{MAX_NESTING, RecordingCanvas};
 
 /// Maximum number of candidate cells examined, including discarded boundary cells.
 const MAX_CELL_CANDIDATES: usize = 4_096;
@@ -48,7 +47,7 @@ pub enum TilingShaderError {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TileRaster {
     /// Backing pixel dimensions of the period raster.
-    pub size: [u32; 2],
+    pub size: Size<u32>,
     /// Maps pattern-space cell coordinates into the period raster's pixels.
     pub cell_to_pixel: Transform,
     /// Maps pattern space into backing pixels of the target being painted.
@@ -149,14 +148,13 @@ impl TilingShader {
         pattern_to_backing.try_inverse()?;
         let [step_x, step_y] = self.repeat_step;
         let [density_x, density_y] = pattern_to_backing.axis_scales();
-        let size = [
+        let size = Size::new(
             pixel_extent(step_x * density_x).ok_or(TilingShaderError::RasterLimit)?,
             pixel_extent(step_y * density_y).ok_or(TilingShaderError::RasterLimit)?,
-        ];
-        let [width, height] = size;
+        );
         let cell_to_pixel = Transform::from_scale(
-            width.to_f32().ok_or(TilingShaderError::RasterLimit)? / step_x,
-            height.to_f32().ok_or(TilingShaderError::RasterLimit)? / step_y,
+            size.width.to_f32().ok_or(TilingShaderError::RasterLimit)? / step_x,
+            size.height.to_f32().ok_or(TilingShaderError::RasterLimit)? / step_y,
         );
         Ok(TileRaster {
             size,

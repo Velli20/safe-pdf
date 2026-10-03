@@ -105,9 +105,9 @@ impl WebAnnotationOverlay {
         page: u32,
         viewport: &WebViewport,
     ) -> WebResult<PreparedAnnotationOverlay> {
-        let prepared =
-            self.overlay
-                .prepare(page, viewport.page().page_to_device(), viewport.revision())?;
+        let prepared = self
+            .overlay
+            .prepare(page, viewport.page(), viewport.revision())?;
         Ok(PreparedAnnotationOverlay::new(prepared, viewport))
     }
 
@@ -120,9 +120,9 @@ impl WebAnnotationOverlay {
         page: u32,
         viewport: &WebViewport,
     ) -> WebResult<PreparedAnnotationOverlay> {
-        let prepared =
-            self.overlay
-                .prepared(page, viewport.page().page_to_device(), viewport.revision())?;
+        let prepared = self
+            .overlay
+            .prepared(page, viewport.page(), viewport.revision())?;
         Ok(PreparedAnnotationOverlay::new(prepared, viewport))
     }
 

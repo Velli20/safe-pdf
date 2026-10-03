@@ -1,9 +1,8 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use gl_rs as gl;
-use pdf_canvas::PageViewport;
 use pdf_document::reader::PdfReader;
-use pdf_graphics::point::Point;
+use pdf_graphics::{point::Point, size::Size};
 use pdf_graphics_skia::gpu_state::SkiaGpuState;
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
 use pdf_renderer::{
@@ -27,7 +26,7 @@ thread_local! {
     static LAYOUT_REVISION: Cell<u32> = const { Cell::new(0) };
     /// Device size of each page's retained selection layout; later renders at other
     /// sizes keep the first layout so selections survive zoom changes.
-    static LAYOUT_SIZES: RefCell<BTreeMap<usize, [f32; 2]>> = const { RefCell::new(BTreeMap::new()) };
+    static LAYOUT_SIZES: RefCell<BTreeMap<usize, Size>> = const { RefCell::new(BTreeMap::new()) };
     /// Output buffer for JSON and UTF-8 results read by JavaScript via `sk_get_scratch_ptr`.
     static SCRATCH: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
@@ -72,7 +71,7 @@ fn with_recorded_page<R>(
                         return None;
                     }
                 };
-                install_layout(page_index, [width, height], &recorded);
+                install_layout(page_index, Size::new(width, height), &recorded);
                 cache.insert(page_index, recorded);
             }
             cache.get(page_index, width, height).map(f)
@@ -81,7 +80,7 @@ fn with_recorded_page<R>(
 }
 
 /// Shares the first recorded layout of a page with the selection controller.
-fn install_layout(page_index: usize, size: [f32; 2], recorded: &RecordedPage) {
+fn install_layout(page_index: usize, size: Size, recorded: &RecordedPage) {
     let Ok(page) = u32::try_from(page_index) else {
         return;
     };
@@ -418,7 +417,7 @@ pub extern "C" fn sk_hit_test_text(
         return 0;
     }
     let layout_size =
-        |sizes: &RefCell<BTreeMap<usize, [f32; 2]>>| sizes.borrow().get(&page_index).copied();
+        |sizes: &RefCell<BTreeMap<usize, Size>>| sizes.borrow().get(&page_index).copied();
     let size = match LAYOUT_SIZES.with(layout_size) {
         Some(size) => size,
         None => {
@@ -434,7 +433,10 @@ pub extern "C" fn sk_hit_test_text(
     let Ok(page) = u32::try_from(page_index) else {
         return 0;
     };
-    let point = Point::new(x * size[0] / width as f32, y * size[1] / height as f32);
+    let point = Point::new(
+        x * size.width / width as f32,
+        y * size.height / height as f32,
+    );
     let hit = TEXT_SELECTION.with(|selection| {
         selection
             .borrow()
@@ -526,7 +528,7 @@ pub unsafe extern "C" fn sk_build_selection_updates(
                 "page": batch.page(),
                 "layout_revision": batch.layout_revision(),
                 "selection_revision": batch.selection_revision(),
-                "device_size": batch.device_size(),
+                "device_size": [batch.device_size().width, batch.device_size().height],
                 "keys": batch.keys(),
                 "bounds": batch
                     .bounds()
@@ -552,15 +554,15 @@ pub extern "C" fn sk_build_selected_text() -> usize {
     publish(text.into_bytes())
 }
 
-/// Returns the displayed page size in PDF points, or `[0, 0]` when unavailable.
-fn page_size(page_index: usize) -> [f32; 2] {
+/// Returns the displayed page size in PDF points, or a zero size when unavailable.
+fn page_size(page_index: usize) -> Size {
     CURRENT_RENDERER.with(|renderer| {
         renderer
             .borrow()
             .as_ref()
             .and_then(|renderer| renderer.document().get_page(page_index))
-            .and_then(|page| PageViewport::page_size(page).ok())
-            .unwrap_or([0.0, 0.0])
+            .and_then(|page| page.page_size())
+            .unwrap_or_default()
     })
 }
 
@@ -570,7 +572,7 @@ fn page_size(page_index: usize) -> [f32; 2] {
 /// Returns `0.0` if the page index is out of range or the page has no page box.
 #[unsafe(export_name = "sk_get_page_width")]
 pub extern "C" fn sk_get_page_width(page_index: usize) -> f32 {
-    page_size(page_index)[0]
+    page_size(page_index).width
 }
 
 /// Returns the displayed height of the given page in PDF points, honoring the
@@ -579,7 +581,7 @@ pub extern "C" fn sk_get_page_width(page_index: usize) -> f32 {
 /// Returns `0.0` if the page index is out of range or the page has no page box.
 #[unsafe(export_name = "sk_get_page_height")]
 pub extern "C" fn sk_get_page_height(page_index: usize) -> f32 {
-    page_size(page_index)[1]
+    page_size(page_index).height
 }
 
 fn main() {}

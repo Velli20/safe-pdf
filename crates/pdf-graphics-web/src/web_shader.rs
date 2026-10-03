@@ -16,7 +16,7 @@ use num_traits::ToPrimitive;
 use pdf_canvas::{
     CanvasViewport, canvas_backend::Shader, error::PdfCanvasError, tiling_shader::TilingShader,
 };
-use pdf_graphics::{rect::Rect, transform::Transform};
+use pdf_graphics::{rect::Rect, size::Size, transform::Transform};
 use pdf_shading::paint::ShadingPaint;
 use web_sys::{CanvasPattern, CanvasRenderingContext2d};
 
@@ -39,8 +39,11 @@ impl ShaderRaster {
         let size = backend.viewport.backing_size();
         let paint = paint.with_parent_transform(backend.viewport.device_to_backing());
         let _scratch = backend.surfaces.scratch(byte_size(size)?)?;
-        let image =
-            pdf_shading::pixel_processor::rasterize_shading(&paint, &raster_bounds(size)?, size)?;
+        let image = pdf_shading::pixel_processor::rasterize_shading(
+            &paint,
+            &raster_bounds(size)?,
+            [size.width, size.height],
+        )?;
         Ok(Self {
             surface: backend.surfaces.upload(&image)?,
         })
@@ -82,16 +85,18 @@ impl<'a> PatternTile<'a> {
         let step = pattern.repeat_step();
         let surface = parent.surfaces.acquire(plan.size)?;
         {
+            let [step_x, step_y] = step;
+            let step_size = Size::new(step_x, step_y);
             let mut backend = WebCanvasBackend::on_surface(
                 &surface,
-                step,
+                step_size,
                 plan.cell_to_pixel,
                 parent.surfaces.clone(),
             )?;
             // Overlapping cells must retain the order chosen during preparation.
             for cell_transform in pattern.cell_transforms() {
                 backend.set_mapping(CanvasViewport::with_transform(
-                    step,
+                    step_size,
                     plan.size,
                     plan.cell_to_pixel.post_concatenated(cell_transform),
                 )?)?;
@@ -186,7 +191,7 @@ fn tile_range(start: f32, end: f32, step: f32) -> WebResult<Range<i32>> {
     Ok(start..end)
 }
 
-fn raster_bounds([width, height]: [u32; 2]) -> WebResult<Rect> {
+fn raster_bounds(Size { width, height }: Size<u32>) -> WebResult<Rect> {
     Ok(Rect::new(
         width.to_f32().ok_or(Error::ResourceLimit)?,
         height.to_f32().ok_or(Error::ResourceLimit)?,

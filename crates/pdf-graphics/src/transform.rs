@@ -52,6 +52,30 @@ impl Transform {
         Ok(crate::point::Point::new(x, y))
     }
 
+    /// Maps all four corners of a rectangle and returns their normalized bounds,
+    /// rejecting nonfinite edges or mapped corners.
+    ///
+    /// Edges are checked before normalizing because `f32::min` and `f32::max`
+    /// discard NaN. The rectangle's extent is not checked.
+    pub fn try_map_rect(&self, rect: &Rect) -> Result<Rect, TransformError> {
+        if [rect.left, rect.top, rect.right, rect.bottom]
+            .iter()
+            .any(|value| !value.is_finite())
+        {
+            return Err(TransformError::NonFinite);
+        }
+        let rect = rect.normalized();
+        for point in [
+            crate::point::Point::new(rect.left, rect.top),
+            crate::point::Point::new(rect.right, rect.top),
+            crate::point::Point::new(rect.right, rect.bottom),
+            crate::point::Point::new(rect.left, rect.bottom),
+        ] {
+            self.try_map_point(point)?;
+        }
+        Ok(self.map_rect(&rect).normalized())
+    }
+
     /// Checks that every affine component is finite.
     pub fn validate(&self) -> Result<(), TransformError> {
         if [self.sx, self.ky, self.kx, self.sy, self.tx, self.ty]

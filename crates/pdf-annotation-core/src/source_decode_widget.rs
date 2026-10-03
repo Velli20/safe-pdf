@@ -6,10 +6,8 @@ use crate::pdf_data::{
 };
 use crate::source_decode::DecodeResult;
 use pdf_object_reader::{
-    dictionary::Dictionary,
-    object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
-    parent_chain::{ParentChain, parent_reference},
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    parent_chain::ParentChain,
 };
 
 impl WidgetAnnotation {
@@ -17,7 +15,8 @@ impl WidgetAnnotation {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> DecodeResult<Self> {
-        let field_id = parent_reference(dictionary)
+        let field_id = dictionary
+            .parent_reference()
             .map(|(_, parent_id)| {
                 u64::try_from(parent_id.number).map_err(|_| SourceDecodeError::ResourceLimit)
             })

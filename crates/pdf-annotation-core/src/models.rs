@@ -2,8 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::fields::Field;
+use crate::SourceAnnotation;
 use crate::kind::AnnotationKind;
+use crate::style::{ResolvedStyle, resolve_source_style};
+use crate::{AnnotationLayerResult, fields::Field};
 use pdf_graphics::{color::Color, polyline::Polyline};
 
 /// Current sidecar schema; version six stores live annotation bounds as normalized rectangle edges.
@@ -236,5 +238,52 @@ impl Annotation {
     pub fn can_edit_free_text(&self) -> bool {
         self.metadata.can_edit_contents()
             && matches!(&self.content, AnnotationKind::FreeText(value) if value.is_plain())
+    }
+
+    /// Live payload text, else the retained source contents.
+    pub(crate) fn text(&self) -> AnnotationLayerResult<String> {
+        match self.content.text() {
+            Some(text) => Ok(text.to_owned()),
+            None => self.source_text(),
+        }
+    }
+
+    /// Decoded source `/Contents` for kinds whose Core payload carries no text.
+    pub(crate) fn source_text(&self) -> AnnotationLayerResult<String> {
+        self.source()
+            .map(SourceAnnotation::contents)
+            .transpose()
+            .map(Option::unwrap_or_default)
+            .map_err(Into::into)
+    }
+
+    /// Whether the host may edit the content: plain free text, or a widget's field value.
+    pub(crate) fn editable(&self, field: Option<&Field>) -> bool {
+        match (&self.content, field) {
+            (AnnotationKind::FreeText(_), _) => self.can_edit_free_text(),
+            (AnnotationKind::Widget(_), Some(field)) => self.can_edit_field(field),
+            _ => false,
+        }
+    }
+
+    /// Style resolved from the retained source; default for host-created annotations.
+    fn source_style(&self) -> AnnotationLayerResult<ResolvedStyle> {
+        self.source()
+            .map(resolve_source_style)
+            .transpose()
+            .map(Option::unwrap_or_default)
+            .map_err(Into::into)
+    }
+
+    /// Live payload style; free text overlays its own style on the retained source.
+    pub(crate) fn style(&self) -> AnnotationLayerResult<ResolvedStyle> {
+        match &self.content {
+            AnnotationKind::FreeText(v) => {
+                let mut style = self.source_style()?;
+                v.style.apply_to(&mut style);
+                Ok(style)
+            }
+            content => content.live_style().map_or_else(|| self.source_style(), Ok),
+        }
     }
 }

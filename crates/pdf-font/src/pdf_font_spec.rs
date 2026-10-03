@@ -214,7 +214,13 @@ impl FallbackProvider for BundledFallbackProvider {
         let Some(pdf_font) = request.pdf_font else {
             return Ok(Vec::new());
         };
-        Ok(vec![fallback_candidate(pdf_font, request.requested)])
+        let mut candidates = vec![fallback_candidate(pdf_font, request.requested)];
+        // The CJK face also covers symbols, such as card suits and dingbats, that the
+        // Latin substitutes lack.
+        if !pdf_font.is_cjk_spec() {
+            candidates.push(cjk_candidate(request.requested));
+        }
+        Ok(candidates)
     }
 }
 
@@ -225,17 +231,31 @@ fn fallback_candidate(spec: &PdfFontSpec, metadata: &FontMetadata) -> FallbackCa
         | PdfFontSpec::TrueType(font) => font.standard14.unwrap_or_default(),
         _ => Standard14Font::Helvetica,
     };
-    let (data, format) = if spec.is_cjk_spec() {
-        (
-            Bytes::from_static(NOTO_SANS_CJK_JP_REGULAR),
-            FontProgramFormat::OpenTypeCff,
-        )
-    } else {
-        (
-            Bytes::from_static(crate::standard14::fallback_font_bytes(standard14)),
-            FontProgramFormat::TrueType,
-        )
-    };
+    if spec.is_cjk_spec() {
+        return cjk_candidate(metadata);
+    }
+    memory_candidate(
+        Bytes::from_static(crate::standard14::fallback_font_bytes(standard14)),
+        FontProgramFormat::TrueType,
+        metadata,
+    )
+}
+
+/// Returns the bundled Noto Sans CJK face as a fallback candidate.
+fn cjk_candidate(metadata: &FontMetadata) -> FallbackCandidate {
+    memory_candidate(
+        Bytes::from_static(NOTO_SANS_CJK_JP_REGULAR),
+        FontProgramFormat::OpenTypeCff,
+        metadata,
+    )
+}
+
+/// Wraps an in-memory font program as a fallback candidate.
+fn memory_candidate(
+    data: Bytes,
+    format: FontProgramFormat,
+    metadata: &FontMetadata,
+) -> FallbackCandidate {
     FallbackCandidate {
         source: FontSource::Memory {
             data,
