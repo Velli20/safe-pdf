@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 use pdf_ccitt::CcittDecodeError;
+use pdf_mq_coder::MqError;
 use pdf_utils::BitReaderError;
 
 /// Errors that can occur while decoding JBIG2 streams.
@@ -58,6 +59,16 @@ impl From<BitReaderError> for Jbig2Error {
             BitReaderError::Truncated(message) => Self::Truncated(message),
             BitReaderError::Overflow(message) => Self::Overflow(message),
             _ => Self::InvalidState("bit reader error"),
+        }
+    }
+}
+
+impl From<MqError> for Jbig2Error {
+    /// Maps a shared MQ coder failure onto this crate's own diagnostics.
+    fn from(error: MqError) -> Self {
+        match error {
+            MqError::Truncated => Self::Truncated("arithmetic stream"),
+            MqError::InvalidState => Self::InvalidState("arithmetic probability state"),
         }
     }
 }

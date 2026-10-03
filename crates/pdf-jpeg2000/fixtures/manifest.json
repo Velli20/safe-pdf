@@ -1,0 +1,1322 @@
+{
+  "version": 1,
+  "sources": {
+    "openjpeg-data": {
+      "repository": "https://github.com/uclouvain/openjpeg-data",
+      "raw_base": "https://raw.githubusercontent.com/uclouvain/openjpeg-data",
+      "revision": "39524bd3a601d90ed8e0177559400d23945f96a9",
+      "notice": "input/conformance/COPYRIGHT",
+      "terms": "Conformance inputs and references are limited to JPEG 2000 conformance use; see pinned COPYRIGHT."
+    },
+    "pdfium": {
+      "repository": "https://pdfium.googlesource.com/pdfium",
+      "raw_base": "https://raw.githubusercontent.com/chromium/pdfium",
+      "revision": "d611f5db9bc161a50daa28e1a71e8cf9a1206815",
+      "notice": "LICENSE",
+      "terms": "PDFium fixture and template tool carry its BSD-style license notice."
+    },
+    "jpylyzer-test-files": {
+      "repository": "https://github.com/openpreserve/jpylyzer-test-files",
+      "raw_base": "https://raw.githubusercontent.com/openpreserve/jpylyzer-test-files",
+      "revision": "0290e98bae9c5480c995954d3f14b4cf0a0395ff",
+      "notice": "README.md",
+      "terms": "The README identifies the Bitwiser cases as public domain with CC-BY attribution; preserve its provenance."
+    }
+  },
+  "assets": [
+    {
+      "id": "openjpeg-data/input/conformance/p0_01.j2k",
+      "source": "openjpeg-data",
+      "path": "input/conformance/p0_01.j2k",
+      "sha256": "a61ea8d21ad0f7f9b76796e0f841c3e125240f83e308e3b8d626f4356b9a1113",
+      "bytes": 7390
+    },
+    {
+      "id": "openjpeg-data/input/conformance/p0_03.j2k",
+      "source": "openjpeg-data",
+      "path": "input/conformance/p0_03.j2k",
+      "sha256": "0aa26db75e8414d554e1fa93a0c7e101f16bb203f1fe06983fdd0c01fa61ddee",
+      "bytes": 12845
+    },
+    {
+      "id": "openjpeg-data/input/conformance/p0_04.j2k",
+      "source": "openjpeg-data",
+      "path": "input/conformance/p0_04.j2k",
+      "sha256": "3d35a4eeffb00e150bb69611afec80fba9570d5fca18a04c4e644badfd052c6f",
+      "bytes": 264635
+    },
+    {
+      "id": "openjpeg-data/input/conformance/p0_05.j2k",
+      "source": "openjpeg-data",
+      "path": "input/conformance/p0_05.j2k",
+      "sha256": "35f3840030802898d5ff2fc6ff39eea3b8080cad65db859830b869d48579cf9f",
+      "bytes": 1310767
+    },
+    {
+      "id": "openjpeg-data/input/conformance/p0_10.j2k",
+      "source": "openjpeg-data",
+      "path": "input/conformance/p0_10.j2k",
+      "sha256": "0146480434740e7580ec5a413fd19654a2f1273dd7db25dc5d0b75ab98a9d706",
+      "bytes": 14131
+    },
+    {
+      "id": "openjpeg-data/input/conformance/file1.jp2",
+      "source": "openjpeg-data",
+      "path": "input/conformance/file1.jp2",
+      "sha256": "4e3d51df7bc66cf367162acfff88b0889d2b2c79ea8d99d93b2d2bd165398deb",
+      "bytes": 650678
+    },
+    {
+      "id": "openjpeg-data/input/conformance/file7.jp2",
+      "source": "openjpeg-data",
+      "path": "input/conformance/file7.jp2",
+      "sha256": "c9e6c845fde3db494035b9be8728239da45791b3269687a043a1fcedd8d11dbf",
+      "bytes": 1368095
+    },
+    {
+      "id": "openjpeg-data/input/conformance/file9.jp2",
+      "source": "openjpeg-data",
+      "path": "input/conformance/file9.jp2",
+      "sha256": "6dfea011b013b62353fedcce9520e7c061dbbe8bf0c06d9edad4ac8889274b91",
+      "bytes": 300208
+    },
+    {
+      "id": "openjpeg-data/baseline/conformance/c1p0_01_0.pgx",
+      "source": "openjpeg-data",
+      "path": "baseline/conformance/c1p0_01_0.pgx",
+      "sha256": "d1c24494c873c6c6bf84021bcbbf4606ade7c1755f9bf4ee0c2fd999ce9ae211",
+      "bytes": 16401
+    },
+    {
+      "id": "openjpeg-data/baseline/conformance/c1p0_03_0.pgx",
+      "source": "openjpeg-data",
+      "path": "baseline/conformance/c1p0_03_0.pgx",
+      "sha256": "edbdfc559b314d6ec3b3f75d94c50ba2b65040cf02ef0017a97ba92e9fedaa86",
+      "bytes": 65553
+    },
+    {
+      "id": "openjpeg-data/baseline/conformance/c1p0_04_0.pgx",
+      "source": "openjpeg-data",
+      "path": "baseline/conformance/c1p0_04_0.pgx",
+      "sha256": "51705f9c5e9a0abf2890a6d05d8e5cc509bc0dedc46a590acf04255318e25001",
+      "bytes": 307216
+    },
+    {
+      "id": "openjpeg-data/baseline/conformance/c1p0_04_1.pgx",
+      "source": "openjpeg-data",
+      "path": "baseline/conformance/c1p0_04_1.pgx",
+      "sha256": "9949ce4c13203132f6200926fec8c24ccb2381b8888ade607d9b73f403ee6c42",
+      "bytes": 307216
+    },
+    {
+      "id": "openjpeg-data/baseline/conformance/c1p0_04_2.pgx",
+      "source": "openjpeg-data",
+      "path": "baseline/conformance/c1p0_04_2.pgx",
+      "sha256": "81c8dda3f54ac601b0e9a4e18d7556ec69fddbb7997ae8aed75e3b512e6cbd60",
+      "bytes": 307216
+    },
+    {
+      "id": "openjpeg-data/baseline/conformance/c1p0_05_0.pgx",
+      "source": "openjpeg-data",
+      "path": "baseline/conformance/c1p0_05_0.pgx",
+      "sha256": "87122bc8f4a15c2b507d3d766c91b3fee54142c1935c0cdef43444a319f0a77f",
+      "bytes": 1048594
+    },
+    {
+      "id": "openjpeg-data/baseline/conformance/c1p0_05_1.pgx",
+      "source": "openjpeg-data",
+      "path": "baseline/conformance/c1p0_05_1.pgx",
+      "sha256": "92876bda577d5ea7b2ba7c4c2c2a646251043f681f9e3cbf4f92260fac3ee3b7",
+      "bytes": 1048594
+    },
+    {
+      "id": "openjpeg-data/baseline/conformance/c1p0_05_2.pgx",
+      "source": "openjpeg-data",
+      "path": "baseline/conformance/c1p0_05_2.pgx",
+      "sha256": "8183c2a7682d34b62cb09a747ab803207282f882590f5a533e61a9d6b1922511",
+      "bytes": 262160
+    },
+    {
+      "id": "openjpeg-data/baseline/conformance/c1p0_05_3.pgx",
+      "source": "openjpeg-data",
+      "path": "baseline/conformance/c1p0_05_3.pgx",
+      "sha256": "1d52fc3949c1110036d7f478f378a11bc7d91a2d02743d6c5eccde72e345cc6f",
+      "bytes": 262160
+    },
+    {
+      "id": "openjpeg-data/baseline/conformance/c1p0_10_0.pgx",
+      "source": "openjpeg-data",
+      "path": "baseline/conformance/c1p0_10_0.pgx",
+      "sha256": "feee51c4c4519bd4ddbd53fb9e8186ddc95c4e64b42ffc9681d65d26172f76c4",
+      "bytes": 4111
+    },
+    {
+      "id": "openjpeg-data/baseline/conformance/c1p0_10_1.pgx",
+      "source": "openjpeg-data",
+      "path": "baseline/conformance/c1p0_10_1.pgx",
+      "sha256": "4857f0f3247bac8bef2354dc88727cece95bb5713cbe1e83c346601c8cd395d1",
+      "bytes": 4111
+    },
+    {
+      "id": "openjpeg-data/baseline/conformance/c1p0_10_2.pgx",
+      "source": "openjpeg-data",
+      "path": "baseline/conformance/c1p0_10_2.pgx",
+      "sha256": "460dede2e04d2be3f2c74334784b58bac59bd640c2f2fbad64489e788d2c511a",
+      "bytes": 4111
+    },
+    {
+      "id": "openjpeg-data/baseline/conformance/jp2_1.tif",
+      "source": "openjpeg-data",
+      "path": "baseline/conformance/jp2_1.tif",
+      "sha256": "1d88f16d47e304affde8fdb3a593a18b328dfa28c04884ac6c889cdefa154d19",
+      "bytes": 907984
+    },
+    {
+      "id": "openjpeg-data/baseline/conformance/jp2_7.tif",
+      "source": "openjpeg-data",
+      "path": "baseline/conformance/jp2_7.tif",
+      "sha256": "65972c102d9277fbc901fbc60ee2253542f665b558c4548f986834a5488d6ed8",
+      "bytes": 756792
+    },
+    {
+      "id": "openjpeg-data/baseline/conformance/jp2_9.tif",
+      "source": "openjpeg-data",
+      "path": "baseline/conformance/jp2_9.tif",
+      "sha256": "f092ba8dcffe34f289dbb258de2c3c22eb1eab7bd511096eacf812c29c2883fb",
+      "bytes": 658544
+    },
+    {
+      "id": "openjpeg-data/input/nonregression/issue364-38.jp2",
+      "source": "openjpeg-data",
+      "path": "input/nonregression/issue364-38.jp2",
+      "sha256": "e948f6271c9d660504c604e41c491318346ada5cf2d3ee4dd9f66fa0db19337f",
+      "bytes": 47636
+    },
+    {
+      "id": "openjpeg-data/input/nonregression/issue400.jp2",
+      "source": "openjpeg-data",
+      "path": "input/nonregression/issue400.jp2",
+      "sha256": "8fbb7a837aca6c63c317cb6c81691ec80adcbcb65b02b83c563c415cd72bdb5c",
+      "bytes": 36913
+    },
+    {
+      "id": "openjpeg-data/input/nonregression/issue427-null-image-size.jp2",
+      "source": "openjpeg-data",
+      "path": "input/nonregression/issue427-null-image-size.jp2",
+      "sha256": "b2ebab4acdd841c49c874ffac390d4e8ef405fa29c0188242b545efe7bb0303c",
+      "bytes": 182
+    },
+    {
+      "id": "openjpeg-data/input/nonregression/issue432.jp2",
+      "source": "openjpeg-data",
+      "path": "input/nonregression/issue432.jp2",
+      "sha256": "fe72c01ac7db9e0a58734f1c344ed5d4f8fb3bca8717e524b27afe5ece564f53",
+      "bytes": 23084
+    },
+    {
+      "id": "openjpeg-data/input/nonregression/gdal_fuzzer_assert_in_opj_j2k_read_SQcd_SQcc.patch.jp2",
+      "source": "openjpeg-data",
+      "path": "input/nonregression/gdal_fuzzer_assert_in_opj_j2k_read_SQcd_SQcc.patch.jp2",
+      "sha256": "5c731f57b55cb15a0be47603e573d6f45b11a4c12c3b126d014390e6b9e53c06",
+      "bytes": 181
+    },
+    {
+      "id": "openjpeg-data/input/nonregression/htj2k/Bretagne1_ht.j2k",
+      "source": "openjpeg-data",
+      "path": "input/nonregression/htj2k/Bretagne1_ht.j2k",
+      "sha256": "fa82708024118771d58d90231e406ec40ad3eedf623927697c3659c123d89ec4",
+      "bytes": 392635
+    },
+    {
+      "id": "openjpeg-data/input/conformance/COPYRIGHT",
+      "source": "openjpeg-data",
+      "path": "input/conformance/COPYRIGHT",
+      "sha256": "fc966f48724e4dc48a49c6aa8df54f780e1dd5a089e1bc5b6dcb70d47a593e5e",
+      "bytes": 1250
+    },
+    {
+      "id": "pdfium/testing/resources/CMYK-alpha.jpf",
+      "source": "pdfium",
+      "path": "testing/resources/CMYK-alpha.jpf",
+      "sha256": "d42cb17b24ec092a7492ac651fce3f809fa23924db33295b57fd7ad6c38a65c3",
+      "bytes": 713
+    },
+    {
+      "id": "pdfium/testing/resources/CMYK.jpf",
+      "source": "pdfium",
+      "path": "testing/resources/CMYK.jpf",
+      "sha256": "eb1b9ffbacbee9a5f8280babff56e44670fd65f00162a4d3ad83e61d0a2c316d",
+      "bytes": 624
+    },
+    {
+      "id": "pdfium/testing/resources/RGB-alpha.jp2",
+      "source": "pdfium",
+      "path": "testing/resources/RGB-alpha.jp2",
+      "sha256": "b089e06b37a497f04f678fea70b5dd37b179fd496aee4283d40e56a3eafd6cbf",
+      "bytes": 373
+    },
+    {
+      "id": "pdfium/testing/resources/RGB.jp2",
+      "source": "pdfium",
+      "path": "testing/resources/RGB.jp2",
+      "sha256": "1df1961a2bcd66762a405f2c38070c9d2ac4b1c37c7402d9db3954f6e3fad500",
+      "bytes": 288
+    },
+    {
+      "id": "pdfium/testing/resources/gray-alpha.jp2",
+      "source": "pdfium",
+      "path": "testing/resources/gray-alpha.jp2",
+      "sha256": "b1521ee1651d9d093ac29e8d1ecd9716e522114be6a45bcae305d5f6f55be780",
+      "bytes": 279
+    },
+    {
+      "id": "pdfium/testing/resources/gray.jp2",
+      "source": "pdfium",
+      "path": "testing/resources/gray.jp2",
+      "sha256": "c82cec92dd3090a08640c8f13489e92d3a1c191ee35a6ef341974bdbf49b43f6",
+      "bytes": 211
+    },
+    {
+      "id": "pdfium/testing/resources/pixel/jpxdecode.in",
+      "source": "pdfium",
+      "path": "testing/resources/pixel/jpxdecode.in",
+      "sha256": "415c43056a0c7a57e721c7bfe1cd9ba445f0680775ed275a7015576c4e3eefbe",
+      "bytes": 2351
+    },
+    {
+      "id": "pdfium/testing/resources/pixel/jpxdecode_expected.pdf.0.png",
+      "source": "pdfium",
+      "path": "testing/resources/pixel/jpxdecode_expected.pdf.0.png",
+      "sha256": "8d8081f19b213627b30ec493b491a0f56c5f0a69c5a6da7ffc227d406a1be2d2",
+      "bytes": 290
+    },
+    {
+      "id": "pdfium/testing/tools/fixup_pdf_template.py",
+      "source": "pdfium",
+      "path": "testing/tools/fixup_pdf_template.py",
+      "sha256": "af5250530035993e485a2f67a00e7fe4dc7a6b0969acf702244a22351dd2c55b",
+      "bytes": 7706
+    },
+    {
+      "id": "pdfium/LICENSE",
+      "source": "pdfium",
+      "path": "LICENSE",
+      "sha256": "1fe9dea718fbd75cf149adaf4d8a22a4335604d964ddb76d1b45383dec8668c9",
+      "bytes": 12896
+    },
+    {
+      "id": "jpylyzer-test-files/README.md",
+      "source": "jpylyzer-test-files",
+      "path": "README.md",
+      "sha256": "f2efffa7c278a233b33db026ae355be6cd649b6d3218f51f368e96dbc60b5749",
+      "bytes": 11372
+    },
+    {
+      "id": "jpylyzer-test-files/files/bitwiser-headerbox-corrupted-boxlength-22181.jp2",
+      "source": "jpylyzer-test-files",
+      "path": "files/bitwiser-headerbox-corrupted-boxlength-22181.jp2",
+      "sha256": "7dc75b67fd4c007545e6cddf56e3691a2670f5d39eb321f5a95e31b9028da994",
+      "bytes": 2916
+    }
+  ],
+  "derived_pdf": {
+    "path": "pdfium/testing/resources/pixel/jpxdecode.pdf",
+    "sha256": "dda4bcd912963109eaa7e5d633269f5da7231c9f8bf74bfb0b81d0df4029468f",
+    "bytes": 4854
+  },
+  "cases": [
+    {
+      "id": "p0_01",
+      "input": "openjpeg-data/input/conformance/p0_01.j2k",
+      "format": "codestream",
+      "width": 128,
+      "height": 128,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "reversible",
+      "coverage": [
+        "reversible_grayscale",
+        "single_tile"
+      ],
+      "expected": {
+        "kind": "samples",
+        "source_components": [
+          "openjpeg-data/baseline/conformance/c1p0_01_0.pgx"
+        ],
+        "display_pixels": null,
+        "source_comparison": {
+          "kind": "exact"
+        },
+        "display_comparison": null
+      },
+      "provenance": "T.803 Annex C, class 1 profile 0, Tables C.2 and C.6"
+    },
+    {
+      "id": "p0_03",
+      "input": "openjpeg-data/input/conformance/p0_03.j2k",
+      "format": "codestream",
+      "width": 256,
+      "height": 256,
+      "components": [
+        {
+          "precision": 4,
+          "signed": true,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "reversible",
+      "coverage": [
+        "signed",
+        "multiple_tiles"
+      ],
+      "expected": {
+        "kind": "samples",
+        "source_components": [
+          "openjpeg-data/baseline/conformance/c1p0_03_0.pgx"
+        ],
+        "display_pixels": null,
+        "source_comparison": {
+          "kind": "exact"
+        },
+        "display_comparison": null
+      },
+      "provenance": "T.803 Annex C, class 1 profile 0, Tables C.2 and C.6"
+    },
+    {
+      "id": "p0_04",
+      "input": "openjpeg-data/input/conformance/p0_04.j2k",
+      "format": "codestream",
+      "width": 640,
+      "height": 480,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "irreversible",
+      "coverage": [
+        "irreversible_rgb"
+      ],
+      "expected": {
+        "kind": "samples",
+        "source_components": [
+          "openjpeg-data/baseline/conformance/c1p0_04_0.pgx",
+          "openjpeg-data/baseline/conformance/c1p0_04_1.pgx",
+          "openjpeg-data/baseline/conformance/c1p0_04_2.pgx"
+        ],
+        "display_pixels": null,
+        "source_comparison": {
+          "kind": "t803",
+          "peak": [
+            5,
+            4,
+            6
+          ],
+          "mse": [
+            0.776,
+            0.626,
+            1.07
+          ]
+        },
+        "display_comparison": null
+      },
+      "provenance": "T.803 Annex C, class 1 profile 0, Tables C.2 and C.6"
+    },
+    {
+      "id": "p0_05",
+      "input": "openjpeg-data/input/conformance/p0_05.j2k",
+      "format": "codestream",
+      "width": 1024,
+      "height": 1024,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            2,
+            2
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            2,
+            2
+          ]
+        }
+      ],
+      "encoding": "irreversible",
+      "coverage": [
+        "subsampled_components"
+      ],
+      "expected": {
+        "kind": "samples",
+        "source_components": [
+          "openjpeg-data/baseline/conformance/c1p0_05_0.pgx",
+          "openjpeg-data/baseline/conformance/c1p0_05_1.pgx",
+          "openjpeg-data/baseline/conformance/c1p0_05_2.pgx",
+          "openjpeg-data/baseline/conformance/c1p0_05_3.pgx"
+        ],
+        "display_pixels": null,
+        "source_comparison": {
+          "kind": "t803",
+          "peak": [
+            2,
+            2,
+            1,
+            0
+          ],
+          "mse": [
+            0.302,
+            0.307,
+            0.269,
+            0.0
+          ]
+        },
+        "display_comparison": null
+      },
+      "provenance": "T.803 Annex C, class 1 profile 0, Tables C.2 and C.6"
+    },
+    {
+      "id": "p0_10",
+      "input": "openjpeg-data/input/conformance/p0_10.j2k",
+      "format": "codestream",
+      "width": 256,
+      "height": 256,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            4,
+            4
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            4,
+            4
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            4,
+            4
+          ]
+        }
+      ],
+      "encoding": "reversible",
+      "coverage": [
+        "multiple_tiles",
+        "multiple_tile_parts",
+        "subsampled_components"
+      ],
+      "expected": {
+        "kind": "samples",
+        "source_components": [
+          "openjpeg-data/baseline/conformance/c1p0_10_0.pgx",
+          "openjpeg-data/baseline/conformance/c1p0_10_1.pgx",
+          "openjpeg-data/baseline/conformance/c1p0_10_2.pgx"
+        ],
+        "display_pixels": null,
+        "source_comparison": {
+          "kind": "exact"
+        },
+        "display_comparison": null
+      },
+      "provenance": "T.803 Annex C, class 1 profile 0, Tables C.2 and C.6"
+    },
+    {
+      "id": "file1",
+      "input": "openjpeg-data/input/conformance/file1.jp2",
+      "format": "jp2",
+      "width": 768,
+      "height": 512,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "reversible",
+      "coverage": [
+        "jp2_color_boxes"
+      ],
+      "expected": {
+        "kind": "samples",
+        "source_components": [],
+        "display_pixels": "openjpeg-data/baseline/conformance/jp2_1.tif",
+        "source_comparison": null,
+        "display_comparison": {
+          "kind": "t803",
+          "peak": 4
+        }
+      },
+      "provenance": "T.803 Annex G, Table G.1 and G.4.4"
+    },
+    {
+      "id": "file7",
+      "input": "openjpeg-data/input/conformance/file7.jp2",
+      "format": "jpx",
+      "width": 480,
+      "height": 640,
+      "components": [
+        {
+          "precision": 16,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 16,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 16,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "reversible",
+      "coverage": [
+        "high_precision",
+        "jpx_baseline",
+        "jp2_color_boxes"
+      ],
+      "expected": {
+        "kind": "samples",
+        "source_components": [],
+        "display_pixels": "openjpeg-data/baseline/conformance/jp2_7.tif",
+        "source_comparison": null,
+        "display_comparison": {
+          "kind": "t803",
+          "peak": 4
+        }
+      },
+      "provenance": "T.803 Annex G, Table G.1 and G.4.4"
+    },
+    {
+      "id": "file9",
+      "input": "openjpeg-data/input/conformance/file9.jp2",
+      "format": "jp2",
+      "width": 768,
+      "height": 512,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "reversible",
+      "coverage": [
+        "jp2_palette",
+        "jp2_color_boxes"
+      ],
+      "expected": {
+        "kind": "samples",
+        "source_components": [],
+        "display_pixels": "openjpeg-data/baseline/conformance/jp2_9.tif",
+        "source_comparison": null,
+        "display_comparison": {
+          "kind": "t803",
+          "peak": 4
+        }
+      },
+      "provenance": "T.803 Annex G, Table G.1 and G.4.4"
+    },
+    {
+      "id": "pdfium_gray",
+      "input": "pdfium/testing/resources/gray.jp2",
+      "format": "jp2",
+      "width": 4,
+      "height": 4,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "reversible",
+      "coverage": [
+        "pdf_jpx_image",
+        "opaque",
+        "grayscale"
+      ],
+      "expected": {
+        "kind": "samples",
+        "source_components": [],
+        "display_pixels": "pdfium/testing/resources/pixel/jpxdecode_expected.pdf.0.png",
+        "display_rect": [
+          8,
+          8,
+          32,
+          32
+        ],
+        "source_comparison": null,
+        "display_comparison": {
+          "kind": "reference_only"
+        }
+      },
+      "provenance": "PDFium pixel/jpxdecode.in and published expected PNG, commit d611f5d"
+    },
+    {
+      "id": "pdfium_gray_alpha",
+      "input": "pdfium/testing/resources/gray-alpha.jp2",
+      "format": "jp2",
+      "width": 4,
+      "height": 4,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "reversible",
+      "coverage": [
+        "pdf_jpx_image",
+        "opacity",
+        "grayscale"
+      ],
+      "expected": {
+        "kind": "samples",
+        "source_components": [],
+        "display_pixels": "pdfium/testing/resources/pixel/jpxdecode_expected.pdf.0.png",
+        "display_rect": [
+          48,
+          8,
+          32,
+          32
+        ],
+        "source_comparison": null,
+        "display_comparison": {
+          "kind": "reference_only"
+        }
+      },
+      "provenance": "PDFium pixel/jpxdecode.in and published expected PNG, commit d611f5d"
+    },
+    {
+      "id": "pdfium_rgb",
+      "input": "pdfium/testing/resources/RGB.jp2",
+      "format": "jp2",
+      "width": 4,
+      "height": 4,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "reversible",
+      "coverage": [
+        "pdf_jpx_image",
+        "opaque",
+        "rgb"
+      ],
+      "expected": {
+        "kind": "samples",
+        "source_components": [],
+        "display_pixels": "pdfium/testing/resources/pixel/jpxdecode_expected.pdf.0.png",
+        "display_rect": [
+          8,
+          48,
+          32,
+          32
+        ],
+        "source_comparison": null,
+        "display_comparison": {
+          "kind": "reference_only"
+        }
+      },
+      "provenance": "PDFium pixel/jpxdecode.in and published expected PNG, commit d611f5d"
+    },
+    {
+      "id": "pdfium_rgb_alpha",
+      "input": "pdfium/testing/resources/RGB-alpha.jp2",
+      "format": "jp2",
+      "width": 4,
+      "height": 4,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "reversible",
+      "coverage": [
+        "pdf_jpx_image",
+        "opacity",
+        "rgb"
+      ],
+      "expected": {
+        "kind": "samples",
+        "source_components": [],
+        "display_pixels": "pdfium/testing/resources/pixel/jpxdecode_expected.pdf.0.png",
+        "display_rect": [
+          48,
+          48,
+          32,
+          32
+        ],
+        "source_comparison": null,
+        "display_comparison": {
+          "kind": "reference_only"
+        }
+      },
+      "provenance": "PDFium pixel/jpxdecode.in and published expected PNG, commit d611f5d"
+    },
+    {
+      "id": "pdfium_cmyk",
+      "input": "pdfium/testing/resources/CMYK.jpf",
+      "format": "jpx",
+      "width": 4,
+      "height": 4,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "reversible",
+      "coverage": [
+        "pdf_jpx_image",
+        "opaque",
+        "cmyk"
+      ],
+      "expected": {
+        "kind": "samples",
+        "source_components": [],
+        "display_pixels": "pdfium/testing/resources/pixel/jpxdecode_expected.pdf.0.png",
+        "display_rect": [
+          8,
+          88,
+          32,
+          32
+        ],
+        "source_comparison": null,
+        "display_comparison": {
+          "kind": "reference_only"
+        }
+      },
+      "provenance": "PDFium pixel/jpxdecode.in and published expected PNG, commit d611f5d"
+    },
+    {
+      "id": "pdfium_cmyk_alpha",
+      "input": "pdfium/testing/resources/CMYK-alpha.jpf",
+      "format": "jpx",
+      "width": 4,
+      "height": 4,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "reversible",
+      "coverage": [
+        "pdf_jpx_image",
+        "opacity",
+        "cmyk"
+      ],
+      "expected": {
+        "kind": "samples",
+        "source_components": [],
+        "display_pixels": "pdfium/testing/resources/pixel/jpxdecode_expected.pdf.0.png",
+        "display_rect": [
+          48,
+          88,
+          32,
+          32
+        ],
+        "source_comparison": null,
+        "display_comparison": {
+          "kind": "reference_only"
+        }
+      },
+      "provenance": "PDFium pixel/jpxdecode.in and published expected PNG, commit d611f5d"
+    },
+    {
+      "id": "pdfium_jpxdecode_pdf",
+      "input": "derived_pdf",
+      "format": "pdf",
+      "width": 88,
+      "height": 128,
+      "components": [],
+      "encoding": "reversible",
+      "coverage": [
+        "pdf_jpx_image",
+        "jpx_baseline",
+        "pdf_composite"
+      ],
+      "embedded_images": [
+        "pdfium_gray",
+        "pdfium_gray_alpha",
+        "pdfium_rgb",
+        "pdfium_rgb_alpha",
+        "pdfium_cmyk",
+        "pdfium_cmyk_alpha"
+      ],
+      "expected": {
+        "kind": "samples",
+        "source_components": [],
+        "display_pixels": "pdfium/testing/resources/pixel/jpxdecode_expected.pdf.0.png",
+        "source_comparison": null,
+        "display_comparison": {
+          "kind": "reference_only"
+        }
+      },
+      "provenance": "PDFium pixel/jpxdecode.in, generated by pinned fixup_pdf_template.py"
+    },
+    {
+      "id": "negative_malformed_box_length",
+      "input": "openjpeg-data/input/nonregression/issue364-38.jp2",
+      "format": "jp2",
+      "width": 118,
+      "height": 32,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "unknown",
+      "coverage": [
+        "malformed_box_length"
+      ],
+      "expected": {
+        "kind": "error",
+        "category": "invalid_box"
+      },
+      "provenance": "OpenJPEG nonregression test_suite.ctest.in, pinned openjpeg-data input"
+    },
+    {
+      "id": "negative_malformed_siz",
+      "input": "openjpeg-data/input/nonregression/issue427-null-image-size.jp2",
+      "format": "jp2",
+      "width": 0,
+      "height": 4,
+      "components": [
+        {
+          "precision": 16,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 16,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 16,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "unknown",
+      "coverage": [
+        "malformed_siz"
+      ],
+      "expected": {
+        "kind": "error",
+        "category": "invalid_marker"
+      },
+      "provenance": "OpenJPEG nonregression test_suite.ctest.in, pinned openjpeg-data input"
+    },
+    {
+      "id": "negative_malformed_cod",
+      "input": "openjpeg-data/input/nonregression/issue400.jp2",
+      "format": "jp2",
+      "width": 303,
+      "height": 179,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "unknown",
+      "coverage": [
+        "malformed_cod"
+      ],
+      "expected": {
+        "kind": "error",
+        "category": "invalid_marker"
+      },
+      "provenance": "OpenJPEG nonregression test_suite.ctest.in, pinned openjpeg-data input"
+    },
+    {
+      "id": "negative_malformed_qcd",
+      "input": "openjpeg-data/input/nonregression/gdal_fuzzer_assert_in_opj_j2k_read_SQcd_SQcc.patch.jp2",
+      "format": "jp2",
+      "width": 20,
+      "height": 20,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "unknown",
+      "coverage": [
+        "malformed_qcd"
+      ],
+      "expected": {
+        "kind": "error",
+        "category": "invalid_marker"
+      },
+      "provenance": "OpenJPEG nonregression test_suite.ctest.in, pinned openjpeg-data input"
+    },
+    {
+      "id": "negative_absurd_dimensions",
+      "input": "openjpeg-data/input/nonregression/issue432.jp2",
+      "format": "jp2",
+      "width": 1109,
+      "height": 2098808,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "unknown",
+      "coverage": [
+        "absurd_dimensions"
+      ],
+      "expected": {
+        "kind": "error",
+        "category": "limit_exceeded"
+      },
+      "provenance": "OpenJPEG nonregression test_suite.ctest.in, pinned openjpeg-data input"
+    },
+    {
+      "id": "negative_unsupported_extension",
+      "input": "openjpeg-data/input/nonregression/htj2k/Bretagne1_ht.j2k",
+      "format": "codestream",
+      "width": 640,
+      "height": 480,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "unknown",
+      "coverage": [
+        "unsupported_extension"
+      ],
+      "expected": {
+        "kind": "error",
+        "category": "unsupported_feature"
+      },
+      "provenance": "OpenJPEG nonregression test_suite.ctest.in, pinned openjpeg-data input"
+    },
+    {
+      "id": "negative_truncated_box",
+      "input": "jpylyzer-test-files/files/bitwiser-headerbox-corrupted-boxlength-22181.jp2",
+      "format": "jp2",
+      "width": 16,
+      "height": 16,
+      "components": [
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        },
+        {
+          "precision": 8,
+          "signed": false,
+          "subsampling": [
+            1,
+            1
+          ]
+        }
+      ],
+      "encoding": "unknown",
+      "coverage": [
+        "truncated_box"
+      ],
+      "expected": {
+        "kind": "error",
+        "category": "invalid_box"
+      },
+      "provenance": "Jpylyzer test corpus README: Bitwiser-corrupted JP2 Header Box length; downstream nested box overruns its scope"
+    }
+  ]
+}

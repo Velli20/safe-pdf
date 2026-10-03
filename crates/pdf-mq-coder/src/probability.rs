@@ -1,23 +1,23 @@
-//! Probability estimation table for JBIG2 arithmetic coding.
+//! Probability estimation table for MQ arithmetic coding.
 //!
-//! ITU-T T.88 / ISO/IEC 14492 Annex A.1 defines the `QE`, `NMPS`, `NLPS`, and
-//! MPS-switch entries used by every arithmetic context.
+//! ITU-T T.88 Annex A and ITU-T T.800 Annex C define the same `Qe`, `NMPS`,
+//! `NLPS`, and MPS-switch entries, indexed by each context's state.
 
-/// One T.88 Annex A.1 probability-estimation state.
+/// One probability-estimation state of the MQ coder.
 #[derive(Debug, Clone, Copy)]
-pub(super) struct ProbabilityState {
+pub(crate) struct ProbabilityState {
     /// Probability interval subdivision value `Qe`.
-    pub(super) qe: u32,
-    /// Next state when the MPS path is decoded.
-    pub(super) nmps: u8,
-    /// Next state when the LPS path is decoded.
-    pub(super) nlps: u8,
-    /// Whether the LPS transition toggles the context MPS bit.
-    pub(super) switch_mps: bool,
+    pub(crate) qe: u32,
+    /// Next state when the more probable symbol is decoded.
+    pub(crate) nmps: u8,
+    /// Next state when the less probable symbol is decoded.
+    pub(crate) nlps: u8,
+    /// Whether the less probable transition toggles the context symbol.
+    pub(crate) switch_mps: bool,
 }
 
-/// T.88 Annex A.1 arithmetic probability-estimation table.
-pub(super) const QE_TABLE: [ProbabilityState; 47] = [
+/// The 47-state arithmetic probability-estimation table.
+pub(crate) const QE_TABLE: [ProbabilityState; 47] = [
     ProbabilityState {
         qe: 0x5601,
         nmps: 1,

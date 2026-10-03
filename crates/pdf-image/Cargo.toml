@@ -11,6 +11,7 @@ bytes = "1.10.1"
 pdf-decode = { path = "../pdf-decode" }
 pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-graphics = { path = "../pdf-graphics" }
+pdf-jpeg2000 = { path = "../pdf-jpeg2000" }
 pdf-color-space = { path = "../pdf-color-space" }
 pdf-filter = { path = "../pdf-filter" }
 thiserror = "2.0.12"

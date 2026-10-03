@@ -2,9 +2,8 @@ use std::fmt;
 
 use bytes::Bytes;
 
-use crate::{error::FilterError, predictor::PredictorParams};
+use crate::{error::FilterError, image_payload::ImagePayload};
 
-use pdf_ccitt::CCITTFaxParams;
 use pdf_object_reader::{
     dictionary::Dictionary,
     object_lookup::ObjectLookupExt,
@@ -210,7 +209,7 @@ impl Filter {
     ///
     /// Returns [`FilterError::Decompression`] if the zlib decompression fails,
     /// which can happen if the data is corrupted or not valid zlib-compressed data.
-    fn decode_flate(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
+    pub(crate) fn decode_flate(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
         let mut decoder = flate2::read::ZlibDecoder::new(stream_data);
         let mut decoded = Vec::new();
 
@@ -223,62 +222,13 @@ impl Filter {
         Ok(decoded)
     }
 
-    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-    fn decode_jpeg2000(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
-        let bitmap = jpeg2k::Image::from_bytes(stream_data)
-            .map_err(|e| FilterError::Decompression(e.to_string()))?;
-
-        let pixels = bitmap
-            .get_pixels(None)
-            .map_err(|e| FilterError::Decompression(e.to_string()))?;
-
-        Self::decode_jpeg2000_pixels(pixels)
-    }
-
-    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-    fn decode_jpeg2000_pixels(pixels: jpeg2k::ImageData) -> Result<Vec<u8>, FilterError> {
-        let data = match pixels.data {
-            jpeg2k::ImagePixelData::L8(data) | jpeg2k::ImagePixelData::Rgb8(data) => data,
-            jpeg2k::ImagePixelData::La8(data) => data
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .map(|&[luminance, _]| luminance)
-                .collect::<Vec<u8>>(),
-            jpeg2k::ImagePixelData::Rgba8(data) => data
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .flat_map(|&[r, g, b, _]| [r, g, b])
-                .collect::<Vec<u8>>(),
-            jpeg2k::ImagePixelData::L16(data) | jpeg2k::ImagePixelData::Rgb16(data) => data
-                .into_iter()
-                .flat_map(|v| v.to_be_bytes())
-                .collect::<Vec<u8>>(),
-            jpeg2k::ImagePixelData::La16(data) => data
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .flat_map(|&[luminance, _]| luminance.to_be_bytes())
-                .collect::<Vec<u8>>(),
-            jpeg2k::ImagePixelData::Rgba16(data) => data
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .flat_map(|&[r, g, b, _]| [r, g, b].into_iter().flat_map(u16::to_be_bytes))
-                .collect::<Vec<u8>>(),
-        };
-
-        Ok(data)
-    }
-
     /// Decodes DCTDecode (JPEG) compressed stream data.
     ///
     /// # Errors
     ///
     /// Returns [`FilterError::Decompression`] if the JPEG decoding fails,
     /// which can happen if the data is corrupted or not a valid JPEG image.
-    fn decode_jpeg_baseline(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
+    pub(crate) fn decode_jpeg_baseline(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
         let bitmap = image::load_from_memory_with_format(stream_data, image::ImageFormat::Jpeg)
             .map_err(|e| FilterError::Decompression(e.to_string()))?;
 
@@ -296,134 +246,21 @@ impl Filter {
 /// such as inline-image decoders do not need to construct a temporary
 /// [`StreamObject`].
 ///
+/// A `JPXDecode` chain yields no samples, because a JPEG 2000 codestream must
+/// be decoded with its own metadata; such a stream belongs to
+/// [`ImagePayload::decode`] instead.
+///
 /// # Errors
 ///
-/// Returns [`FilterError`] if a filter fails or is unsupported, except when an
-/// adjacent duplicate filter fails after its first pass succeeded.
+/// Returns [`FilterError`] if a filter fails, is unsupported, or is
+/// `JPXDecode`, except when an adjacent duplicate filter fails after its first
+/// pass succeeded.
 pub fn decode_data_with_resolver(
     dictionary: &Dictionary,
     stream_data: Bytes,
     objects: &dyn ObjectResolver,
 ) -> Result<Bytes, FilterError> {
-    let mut data = stream_data;
-    let filters = Filters::from_dictionary(dictionary, objects)?;
-
-    let Some(filters) = &filters else {
-        return Ok(data);
-    };
-
-    let decode_parms = dictionary
-        .get(b"DecodeParms")
-        .map(|entry| objects.resolve_object(entry))
-        .transpose()?;
-
-    for (index, filter) in filters.into_iter().enumerate() {
-        let param_dict = match decode_parms {
-            None => None,
-            Some(ObjectVariant::Dictionary(dictionary)) => Some(dictionary),
-            Some(ObjectVariant::Array(array)) => {
-                array.as_slice().optional_dictionary(index, objects)?
-            }
-            Some(other) => {
-                return Err(FilterError::from(
-                    pdf_object_reader::object_error::ObjectError::TypeMismatch(
-                        "Dictionary or Array",
-                        other.name(),
-                    ),
-                ));
-            }
-        };
-
-        match try_decode_data_with_resolver(filter, data.as_ref(), param_dict, dictionary, objects)
-        {
-            Ok(decoded) => data = decoded,
-            // A repeated filter can be spurious when its first pass already
-            // produced the binary data expected by the next filter.
-            Err(_)
-                if index
-                    .checked_sub(1)
-                    .and_then(|previous| filters.filters.get(previous))
-                    == Some(filter) => {}
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(data)
-}
-
-fn try_decode_data_with_resolver(
-    filter: &Filter,
-    data: &[u8],
-    param_dict: Option<&Dictionary>,
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> Result<Bytes, FilterError> {
-    let decoded = match filter {
-        Filter::FlateDecode => {
-            let decoded = Filter::decode_flate(data)?;
-            let predictor = match param_dict {
-                Some(dictionary) => PredictorParams::from_dictionary(dictionary, objects)?,
-                None => PredictorParams::default(),
-            };
-            if predictor.is_none() {
-                decoded
-            } else {
-                crate::predictor::apply_predictor(&decoded, &predictor)?
-            }
-        }
-        Filter::LZWDecode => {
-            let (early_change, predictor) = match param_dict {
-                Some(dictionary) => (
-                    dictionary
-                        .optional_number(b"EarlyChange", objects)?
-                        .unwrap_or(1)
-                        != 0,
-                    PredictorParams::from_dictionary(dictionary, objects)?,
-                ),
-                None => (true, PredictorParams::default()),
-            };
-            let decoded = crate::lzw::decode(data, early_change)?;
-            if predictor.is_none() {
-                decoded
-            } else {
-                crate::predictor::apply_predictor(&decoded, &predictor)?
-            }
-        }
-        Filter::JPXDecode => {
-            #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-            {
-                Filter::decode_jpeg2000(data)?
-            }
-            #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-            {
-                return Err(FilterError::UnsupportedFilter("JPXDecode".to_string()));
-            }
-        }
-        Filter::DCTDecode => Filter::decode_jpeg_baseline(data)?,
-        Filter::ASCII85Decode => crate::ascii85::decode_ascii85(data)?,
-        Filter::ASCIIHexDecode => crate::asciihex::decode_ascii_hex(data)?,
-        Filter::RunLengthDecode => crate::runlength::decode_run_length(data)?,
-        Filter::JBIG2Decode => {
-            let (width, height) = resolve_jbig2_dimensions(dictionary, objects)?;
-            let globals = match param_dict {
-                Some(dictionary) => resolve_jbig2_globals(dictionary, objects)?,
-                None => None,
-            };
-            pdf_jbig2::decode(data, width, height, globals.as_deref())?
-        }
-        Filter::CCITTFaxDecode => {
-            let ccitt_params = match param_dict {
-                Some(dictionary) => CCITTFaxParams::from_dictionary(dictionary, objects)?,
-                None => CCITTFaxParams::default(),
-            };
-            pdf_ccitt::decode(data, &ccitt_params)?
-        }
-        Filter::Unsupported(name) => {
-            return Err(FilterError::UnsupportedFilter(
-                String::from_utf8_lossy(name).into_owned(),
-            ));
-        }
-    };
-    Ok(decoded.into())
+    ImagePayload::decode(dictionary, stream_data, objects)?.into_samples()
 }
 
 /// Decodes a [`StreamObject`] by applying its full filter chain.
@@ -451,7 +288,7 @@ pub fn decode(stream: &StreamObject) -> Result<Bytes, FilterError> {
     decode_with_resolver(stream, &objects)
 }
 
-fn resolve_jbig2_dimensions(
+pub(crate) fn resolve_jbig2_dimensions(
     dict: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<(u16, u16), FilterError> {
@@ -471,7 +308,7 @@ fn resolve_jbig2_dimensions(
     Ok((width, height))
 }
 
-fn resolve_jbig2_globals(
+pub(crate) fn resolve_jbig2_globals(
     dict: &Dictionary,
     objects: &dyn ObjectResolver,
 ) -> Result<Option<Vec<u8>>, FilterError> {

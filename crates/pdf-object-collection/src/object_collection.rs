@@ -1,6 +1,7 @@
 use pdf_object_reader::object_resolver::ObjectResolver;
 use pdf_object_reader::{
     object_error::ObjectError, object_id::ObjectId, object_variant::ObjectVariant,
+    stream::StreamObject,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -77,7 +78,11 @@ impl ObjectCollection {
             ObjectVariant::Stream(stream) => {
                 stream.object_number = identifier.number;
                 stream.generation_number = identifier.generation;
+                // A JPXDecode stream stays encoded: its codestream carries the
+                // component, precision, colour, and opacity metadata that a
+                // flat byte buffer would lose, so the image path decodes it.
                 if !stream.filters_applied()
+                    && !carries_jpx_codestream(stream, self)
                     && let Ok(data) = pdf_filter::filter::decode_with_resolver(stream, self)
                 {
                     stream.set_filtered_data(data);
@@ -243,6 +248,19 @@ impl ObjectCollection {
             "entries": JsonValue::Object(map)
         })
     }
+}
+
+/// Returns whether a stream's filter chain leaves a JPEG 2000 codestream.
+///
+/// The `/Filter` entry is read with the collection itself as the resolver, so
+/// an indirect filter name resolves exactly as it will when the stream is
+/// decoded. An unreadable chain is not treated as JPX; the decode attempt that
+/// follows reports the problem.
+fn carries_jpx_codestream(stream: &StreamObject, objects: &dyn ObjectResolver) -> bool {
+    pdf_filter::filter::Filters::from_dictionary(&stream.dictionary, objects)
+        .ok()
+        .flatten()
+        .is_some_and(|filters| filters.has_jpx_filter())
 }
 
 #[cfg(test)]
