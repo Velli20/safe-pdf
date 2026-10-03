@@ -30,19 +30,21 @@ impl DecodeMap {
     }
 
     /// Parses a `/Decode` array into per-component ranges.
+    ///
+    /// Values beyond the two needed per component are ignored.
     pub fn parse_object(
         decode: &ObjectVariant,
         objects: &dyn ObjectResolver,
         component_count: usize,
     ) -> Result<Vec<DecodeRange>, DecodeError> {
-        let values = decode.try_array(objects)?;
+        let array = decode.try_array(objects)?;
         let expected_values = component_count.saturating_mul(2);
-        if values.len() != expected_values {
+        let Some(values) = array.as_slice().get(..expected_values) else {
             return Err(DecodeError::InvalidDecodeLength {
                 expected_values,
-                actual_values: values.len(),
+                actual_values: array.len(),
             });
-        }
+        };
 
         let mut ranges = Vec::with_capacity(component_count);
         for [min, max] in values.as_chunks::<2>().0 {
