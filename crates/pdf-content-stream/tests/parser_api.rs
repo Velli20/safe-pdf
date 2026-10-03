@@ -247,7 +247,7 @@ fn optional_contents_parses_stream_arrays_and_allocates_monotonically() {
     let resolver = MapResolver {
         objects: BTreeMap::from([
             (1, ObjectVariant::Stream(stream_object(1, b"1 2"))),
-            (2, ObjectVariant::Stream(stream_object(2, b"3 4 m"))),
+            (2, ObjectVariant::Stream(stream_object(2, b"m"))),
         ]),
     };
     let reader = pdf_object_reader::ObjectReader::new(&resolver);
@@ -261,7 +261,7 @@ fn optional_contents_parses_stream_arrays_and_allocates_monotonically() {
     assert_eq!(content_stream.id, 0);
     assert_eq!(
         recorded_operations(&content_stream.operators),
-        vec![RecordedOperation::MoveTo { x: 3.0, y: 4.0 }]
+        vec![RecordedOperation::MoveTo { x: 1.0, y: 2.0 }]
     );
 
     let next = reader

@@ -25,15 +25,21 @@ impl FromPdfObject for ContentStream {
         let id = match context.object().kind() {
             ObjectKind::Array => {
                 let mut context = context.array()?;
+                // The streams of an array form one content stream (ISO 32000 §7.8.2). They
+                // divide only at token boundaries, which need not fall between operations,
+                // so an operator's operands can end one stream and the operator start the
+                // next. A newline joins them, which also ends a trailing comment.
+                let mut joined = Vec::new();
                 for (index, element) in context.array().iter().enumerate() {
                     // Null and dangling entries contribute no content (ISO 32000 §7.3.10).
                     if context.is_absent(element)? {
                         continue;
                     }
                     let stream = context.at::<StreamObject>(index)?;
-                    // A fresh parser keeps incomplete operands local to each stream.
-                    Self::parse_decoded_stream(stream.raw_data(), &mut operators)?;
+                    joined.extend_from_slice(stream.raw_data());
+                    joined.push(b'\n');
                 }
+                Self::parse_decoded_stream(&joined, &mut operators)?;
                 // The combined operator buffer receives one ID after every entry succeeds.
                 context.content_stream_ids().next_id()?
             }
@@ -263,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn content_stream_read_parses_array_streams_in_order_without_concatenation() {
+    fn content_stream_read_parses_array_streams_as_one_stream() {
         let contents = ObjectVariant::Array(
             vec![
                 ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0).into()),
@@ -274,7 +280,7 @@ mod tests {
         let resolver = MapResolver {
             objects: BTreeMap::from([
                 (1, ObjectVariant::Stream(stream_object(1, b"1 2"))),
-                (2, ObjectVariant::Stream(stream_object(2, b"3 4 m"))),
+                (2, ObjectVariant::Stream(stream_object(2, b"m"))),
             ]),
         };
         let reader = pdf_object_reader::ObjectReader::new(&resolver);
@@ -286,7 +292,7 @@ mod tests {
         assert_eq!(parsed.id, 0);
         assert_eq!(
             recorded_operations(&parsed.operators),
-            vec![RecordedOperation::MoveTo { x: 3.0, y: 4.0 }]
+            vec![RecordedOperation::MoveTo { x: 1.0, y: 2.0 }]
         );
     }
 

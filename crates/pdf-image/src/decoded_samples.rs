@@ -5,9 +5,11 @@ use pdf_color_space::color_space::ColorSpace;
 use pdf_decode::{
     DecodeMap, DecodeRange, SampleLayout, decode_sample_bytes, expand_indexed_values,
 };
+use pdf_filter::image_payload::ImagePayload;
 
 use crate::error::PdfImageError;
 use crate::image_metadata::ImageMetadata;
+use crate::jpx_image::{JpxDisplay, JpxImage};
 
 /// Stores decoded sample bytes before the final pixel format conversion.
 #[derive(Debug, Clone)]
@@ -19,41 +21,105 @@ pub(crate) struct DecodedSamples {
 }
 
 impl DecodedSamples {
-    /// Decodes raw image bytes into component samples based on the configured color space.
-    pub(crate) fn decode(raw_data: Bytes, metadata: &ImageMetadata) -> Result<Self, PdfImageError> {
-        let decoded_samples = if let Some(decoded_samples) =
-            Self::decode_preconverted_jpx(&raw_data, metadata)
-        {
-            decoded_samples
-        } else if let Some(decoded_samples) = Self::decode_preconverted_dct(&raw_data, metadata) {
-            decoded_samples
-        } else {
-            match &metadata.color_space {
-                Some(ColorSpace::Indexed(indexed)) => {
-                    if indexed.base.is_device_space() {
-                        Self::decode_indexed(
-                            raw_data,
-                            metadata,
-                            indexed.base.num_color_components(),
-                            indexed.hival,
-                            &indexed.lookup,
-                        )
-                    } else {
-                        Self::decode_indexed_rgba(raw_data, metadata, indexed)
-                    }
-                }
-                Some(color_space) if !color_space.is_device_space() => {
-                    Self::decode_direct_rgba(raw_data, metadata, color_space)
-                }
-                Some(color_space) => {
-                    Self::decode_direct(raw_data, metadata, color_space.num_color_components())
-                }
-                None => Self::decode_direct(raw_data, metadata, 1),
-            }?
+    /// Decodes an image stream's payload into samples for the display pipeline.
+    pub(crate) fn decode(
+        payload: ImagePayload,
+        metadata: &ImageMetadata,
+    ) -> Result<Self, PdfImageError> {
+        let decoded_samples = match payload {
+            ImagePayload::Jpx(codestream) => Self::decode_jpx(&codestream, metadata)?,
+            ImagePayload::Samples(raw_data) => Self::decode_samples(raw_data, metadata)?,
         };
 
         decoded_samples.validate(metadata)?;
         Ok(decoded_samples)
+    }
+
+    /// Decodes raw image bytes into component samples based on the configured color space.
+    fn decode_samples(raw_data: Bytes, metadata: &ImageMetadata) -> Result<Self, PdfImageError> {
+        if let Some(decoded_samples) = Self::decode_preconverted_dct(&raw_data, metadata) {
+            return Ok(decoded_samples);
+        }
+
+        match &metadata.color_space {
+            Some(ColorSpace::Indexed(indexed)) => {
+                if indexed.base.is_device_space() {
+                    Self::decode_indexed(
+                        raw_data,
+                        metadata,
+                        indexed.base.num_color_components(),
+                        indexed.hival,
+                        &indexed.lookup,
+                    )
+                } else {
+                    Self::decode_indexed_rgba(raw_data, metadata, indexed)
+                }
+            }
+            Some(color_space) if !color_space.is_device_space() => {
+                Self::decode_direct_rgba(raw_data, metadata, color_space)
+            }
+            Some(color_space) => {
+                Self::decode_direct(raw_data, metadata, color_space.num_color_components())
+            }
+            None => Self::decode_direct(raw_data, metadata, 1),
+        }
+    }
+
+    /// Decodes a JPEG 2000 codestream into display samples.
+    ///
+    /// The codestream supplies the component count, precision, and colour
+    /// description, so neither `/BitsPerComponent` nor the flattened byte
+    /// length is consulted. PDF ignores `/Decode` for a JPX image, and forbids
+    /// `JPXDecode` on an image mask, so no decode array is applied here.
+    fn decode_jpx(codestream: &[u8], metadata: &ImageMetadata) -> Result<Self, PdfImageError> {
+        let JpxDisplay {
+            color_space,
+            components,
+            color,
+            alpha,
+        } = JpxImage::decode(codestream)?.into_display(
+            metadata.color_space.as_ref(),
+            metadata.smask_in_data,
+            metadata.size.width(),
+            metadata.size.height(),
+        )?;
+
+        if alpha.is_none() && color_space.is_device_space() {
+            return Ok(Self {
+                num_color_components: components,
+                image_data: color.into(),
+                is_rgba: false,
+            });
+        }
+
+        // An Indexed space reads its component as a palette index rather than a
+        // fraction of full scale, so the sample passes through unnormalized.
+        let decoded = match color_space {
+            ColorSpace::Indexed(_) => color.iter().map(|sample| f32::from(*sample)).collect(),
+            ref color_space => Self::default_color_components(&color, u8::MAX, color_space),
+        };
+        let mut image_data = Vec::new();
+        let pixels = decoded.len().checked_div(components.max(1)).unwrap_or(0);
+        image_data
+            .try_reserve_exact(pixels.saturating_mul(4))
+            .map_err(|_| PdfImageError::JpxImageTooLarge {
+                pixels,
+                channels: 4,
+            })?;
+        for (index, pixel) in decoded.chunks_exact(components.max(1)).enumerate() {
+            let [red, green, blue, _] = color_space.apply(pixel)?.to_rgba8();
+            let opacity = alpha
+                .as_ref()
+                .and_then(|plane| plane.get(index).copied())
+                .unwrap_or(u8::MAX);
+            image_data.extend_from_slice(&[red, green, blue, opacity]);
+        }
+
+        Ok(Self {
+            num_color_components: 4,
+            image_data: image_data.into(),
+            is_rgba: true,
+        })
     }
 
     /// Ensures the decoded component stream is large enough for the declared dimensions.
@@ -97,36 +163,6 @@ impl DecodedSamples {
         Some(Self {
             num_color_components,
             image_data,
-            is_rgba: false,
-        })
-    }
-
-    /// Uses JPX decoder output as display samples when the decoder already expanded pixels.
-    fn decode_preconverted_jpx(raw_data: &Bytes, metadata: &ImageMetadata) -> Option<Self> {
-        let has_jpx_filter = metadata
-            .filters
-            .as_ref()
-            .is_some_and(|filters| filters.has_jpx_filter());
-        if !has_jpx_filter {
-            return None;
-        }
-
-        let num_pixels = metadata.size.width().saturating_mul(metadata.size.height());
-        let bytes_per_pixel = raw_data.len().checked_div(num_pixels)?;
-        if bytes_per_pixel.saturating_mul(num_pixels) != raw_data.len() {
-            return None;
-        }
-
-        let num_color_components = match bytes_per_pixel {
-            1 | 2 => 1,
-            3 | 6 => 3,
-            4 => 4,
-            _ => return None,
-        };
-
-        Some(Self {
-            num_color_components,
-            image_data: raw_data.clone(),
             is_rgba: false,
         })
     }

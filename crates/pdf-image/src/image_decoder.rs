@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use pdf_filter::filter::decode_with_resolver;
+use pdf_filter::{filter::Filters, image_payload::ImagePayload};
 use pdf_graphics::Image;
 use pdf_object_reader::{
     dictionary::Dictionary, object_resolver::ObjectResolver, stream::StreamObject,
@@ -18,13 +18,29 @@ pub fn read_xobject(
     soft_mask: Option<&Image>,
 ) -> Result<Image, PdfImageError> {
     let metadata = ImageMetadata::from_dictionary(dictionary, objects)?;
-    let decoded = if stream_data.filters_applied() {
-        stream_data.shared_data()
+    let payload = if stream_data.filters_applied() {
+        image_payload(stream_data.shared_data(), &metadata)
     } else {
-        decode_with_resolver(stream_data, objects)?
+        ImagePayload::decode(dictionary, stream_data.shared_data(), objects)?
     };
 
-    decode_normalized_image_with_metadata(decoded, soft_mask, &metadata)
+    decode_normalized_image_with_metadata(payload, soft_mask, &metadata)
+}
+
+/// Classifies bytes whose filter chain was applied before this call.
+///
+/// A `JPXDecode` stream is deliberately left encoded by the object collection,
+/// because only the structured image path can read a JPEG 2000 codestream. Such
+/// a stream still reports its filters as applied, so the chain decides.
+fn image_payload(data: Bytes, metadata: &ImageMetadata) -> ImagePayload {
+    match metadata
+        .filters
+        .as_ref()
+        .is_some_and(Filters::has_jpx_filter)
+    {
+        true => ImagePayload::Jpx(data),
+        false => ImagePayload::Samples(data),
+    }
 }
 
 /// Decodes an inline image, including its filter chain and normalized sample data.
@@ -32,7 +48,11 @@ pub fn decode_inline_image(
     image: &InlineImage,
     soft_mask: Option<&Image>,
 ) -> Result<Image, PdfImageError> {
-    decode_normalized_image_with_metadata(image.shared_data(), soft_mask, image.metadata())
+    decode_normalized_image_with_metadata(
+        ImagePayload::Samples(image.shared_data()),
+        soft_mask,
+        image.metadata(),
+    )
 }
 
 /// Decodes a normalized image dictionary and shared raw bytes into a raster image.
@@ -46,15 +66,20 @@ pub fn decode_normalized_image(
     soft_mask: Option<&Image>,
 ) -> Result<Image, PdfImageError> {
     let metadata = ImageMetadata::from_dictionary(dictionary, objects)?;
-    decode_normalized_image_with_metadata(raw_data, soft_mask, &metadata)
+    let payload = image_payload(raw_data, &metadata);
+    decode_normalized_image_with_metadata(payload, soft_mask, &metadata)
 }
 
 fn decode_normalized_image_with_metadata(
-    raw_data: Bytes,
+    payload: ImagePayload,
     soft_mask: Option<&Image>,
     metadata: &ImageMetadata,
 ) -> Result<Image, PdfImageError> {
-    let decoded_samples = DecodedSamples::decode(raw_data, metadata)?;
+    // A non-zero /SMaskInData puts the image's own opacity in charge, and PDF
+    // forbids an /SMask beside it, so a stray one is dropped rather than
+    // multiplied into alpha that already describes the image.
+    let soft_mask = soft_mask.filter(|_| !metadata.smask_in_data.overrides_soft_mask());
+    let decoded_samples = DecodedSamples::decode(payload, metadata)?;
     let DecodedSamples {
         num_color_components,
         image_data,
@@ -597,32 +622,6 @@ mod tests {
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
         assert_eq!(image.data.as_ref(), &[0x00, 0xFF, 0x00, 0xFF]);
-    }
-
-    #[test]
-    fn decode_normalized_jpx_image_without_bits_per_component_infers_rgb_samples() {
-        let dictionary = Dictionary::new(BTreeMap::from([
-            (
-                Vec::from(b"Filter"),
-                pdf_object_reader::pdf_string::PdfString::from(
-                    b"JPXDecode".to_vec(),
-                    pdf_object_reader::string_kind::StringKind::Name,
-                ),
-            ),
-            (Vec::from(b"Height"), ObjectVariant::Integer(1)),
-            (Vec::from(b"Width"), ObjectVariant::Integer(2)),
-        ]));
-
-        let image = decode_normalized_image(
-            &dictionary,
-            vec![1, 2, 3, 4, 5, 6].into(),
-            &PassthroughResolver,
-            None,
-        )
-        .expect("JPX images should decode without BitsPerComponent when already expanded");
-
-        assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
-        assert_eq!(image.data.as_ref(), &[1, 2, 3, 255, 4, 5, 6, 255]);
     }
 
     #[test]
