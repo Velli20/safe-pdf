@@ -97,6 +97,8 @@ pub struct RecordingCanvas {
     commands: Vec<RecordingCommand>,
     /// Deepest chain of mask and tiling recordings replayed beneath this one.
     nesting: usize,
+    /// Commands replayed for the mask and tiling recordings used by this one.
+    nested_cost: usize,
 }
 
 /// Maximum depth of recordings nested through masks and tiling patterns.
@@ -113,6 +115,7 @@ impl RecordingCanvas {
             height,
             commands: Vec::new(),
             nesting: 0,
+            nested_cost: 0,
         }
     }
 
@@ -121,9 +124,20 @@ impl RecordingCanvas {
         self.nesting
     }
 
-    /// Raises the nesting depth for a recorded child recording.
-    fn nest(&mut self, child: &RecordingCanvas) {
+    /// Returns the number of commands a backend replays for this recording.
+    ///
+    /// Backends replay a mask or tiling recording again for every command that uses
+    /// it, so the count includes those nested replays and saturates at `usize::MAX`.
+    pub fn replay_cost(&self) -> usize {
+        self.commands.len().saturating_add(self.nested_cost)
+    }
+
+    /// Raises the nesting depth and replay cost for a use of a child recording.
+    ///
+    /// `cost` is the number of commands replayed for this use of `child`.
+    fn nest(&mut self, child: &RecordingCanvas, cost: usize) {
         self.nesting = self.nesting.max(child.nesting.saturating_add(1));
+        self.nested_cost = self.nested_cost.saturating_add(cost);
     }
 
     /// Validates save balance and mask-body boundaries before any destination is touched.
@@ -307,7 +321,7 @@ impl CanvasBackend for RecordingCanvas {
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
         if let Some(Shader::TilingPatternImage(pattern)) = shader {
-            self.nest(pattern.recording());
+            self.nest(pattern.recording(), pattern.replay_cost());
         }
         self.commands.push(RecordingCommand::FillPath {
             path: path.clone().into_owned(),
@@ -330,7 +344,7 @@ impl CanvasBackend for RecordingCanvas {
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
         if let Some(Shader::TilingPatternImage(pattern)) = shader {
-            self.nest(pattern.recording());
+            self.nest(pattern.recording(), pattern.replay_cost());
         }
         self.commands.push(RecordingCommand::StrokePath {
             path: path.clone().into_owned(),
@@ -446,7 +460,7 @@ impl CanvasBackend for RecordingCanvas {
         if result.is_err() {
             self.commands.truncate(start);
         } else {
-            self.nest(mask.recording());
+            self.nest(mask.recording(), mask.recording().replay_cost());
         }
         result
     }
@@ -533,6 +547,7 @@ mod tests {
                 height: 8.0,
                 commands,
                 nesting: 0,
+                nested_cost: 0,
             };
             let mut destination = RecordingCanvas::new(8.0, 8.0);
             assert!(recording.replay(&mut destination).is_err());
