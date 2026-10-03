@@ -51,6 +51,8 @@ when its revision differs from the pinned one.
 ```sh
 cargo conformance run --corpus pdfjs --filter issue1       # or --case <id> [--page N]; --case repeats
 cargo conformance show --corpus pdfjs <case-id>            # print a case summary
+cargo conformance run --corpus pdfjs --read-only           # only open documents and count pages
+cargo conformance read-diff --corpus pdfjs --base <reads.json>  # compare reads with an earlier run
 cargo conformance accept --corpus pdfjs                    # record the last run as the baseline
 cargo conformance repro <issue key or case id>             # rerun an issue's cases, no setup needed
 cargo conformance verify <issue key>                       # exits 0 once no case fails that way
@@ -129,21 +131,29 @@ recorded with its stage and stderr, and it does not stop the run.
 
 ## CI
 
-`.github/workflows/conformance.yml` runs both corpora on Linux against the PDFium library
+`.github/workflows/conformance.yml` checks both corpora on Linux against the PDFium library
 (`--reference pdfium`), so the pdfium corpus is compared without annotations and includes
 PDFs that have no goldens.
 
-- **Pull request merged to `main`, or a manual run on `main`:** each corpus is compared
-  against its baseline and uploaded as the `conformance-<corpus>` artifact (viewer,
-  `TRIAGE.md`, `results.json`, bundles) with a job summary. The `issues` job then reports
-  both corpora together with `cargo conformance issues --corpus pdfium --corpus pdfjs`.
-- **Pull requests:** not run, so they merge without waiting on the corpora. A regression
-  shows up after the merge as a new or reopened issue labelled `regression`. To check a
-  change before merging, run `cargo conformance repro <key>` for the issues it touches, or
-  start the workflow manually on the branch.
-- **Gating later:** add a `pull_request` trigger and add `pull_request` to
-  `FAIL_ON_EVENTS` in the workflow to fail pull requests on regressions against the
-  baselines.
+- **Reads (pull requests, `main` and manual runs):** the `reads` job runs both corpora with
+  `--read-only`: every document is opened with Safe-PDF and PDFium and their page counts are
+  compared, but no page is rendered. Each run writes `reads.json` and uploads the report as the
+  `reads-<corpus>` artifact. Runs on `main` cache `reads.json` under the commit.
+- **Pull requests:** the reads are compared with the base commit's, from that cache or, when
+  the base commit has none yet, by reading the corpus at the base commit in the same job.
+  `cargo conformance read-diff --corpus <corpus> --base <reads.json>` writes `read-diff.md`
+  and `read-diff.json`. A document regresses when Safe-PDF no longer opens it, crashes or
+  times out on it, or newly counts a different number of pages than PDFium; the reverse is an
+  improvement. When anything regressed or improved, the `read-comment` job posts one comment
+  on the pull request and updates it on later pushes (also once nothing differs any more).
+  Pull requests from forks get no comment. Pull requests are never failed by these jobs.
+- **Rendering (`main` and manual runs):** the PDFium corpus is rendered and every page is
+  compared against its baseline, uploaded as the `conformance-pdfium` artifact (viewer,
+  `TRIAGE.md`, `results.json`, bundles) with a job summary. The pdf.js corpus is not rendered.
+  The `issues` job then reports the PDFium render and the pdf.js reads together with
+  `cargo conformance issues --corpus pdfium --corpus pdfjs`.
+- **Gating later:** add `pull_request` to `FAIL_ON_EVENTS` and the `pull_request` trigger to
+  the rendering job to fail pull requests on render regressions against the baselines.
 - **Published viewer:** runs on `main` deploy the viewers to GitHub Pages at
   <https://velli20.github.io/safe-pdf/conformance/>, next to the web-canvas demo. Issues
   link straight into it (`#case=<id>&page=<n>`) and embed its images. Pages holds one site,
@@ -166,7 +176,9 @@ PDFs that have no goldens.
     - **Closed as completed:** reopened if the failure comes back.
     - **Closed as not planned:** never touched again.
   - Issues without that comment (including those filed before it existed) are ignored.
-  - Runs limited with `--filter`, `--case` or `--page` never close issues.
+  - Runs limited with `--filter`, `--case` or `--page` never close issues. Read-only runs
+    (the pdf.js corpus) file and refresh issues but never count a failure as absent, so they
+    do not close issues either.
   - Preview locally with `cargo conformance issues --corpus pdfium --corpus pdfjs --repo
     owner/name --dry-run`. Bodies are written to `target/conformance/issues/`.
 - **PDFium on CI:** the conformance legs download the pinned prebuilt

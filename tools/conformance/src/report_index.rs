@@ -96,6 +96,9 @@ pub struct Index {
     /// True when only part of the corpus was checked (`--filter`, `--case` or `--page`).
     #[serde(default)]
     pub filtered: bool,
+    /// True when documents were only read (`--read-only`), so no page was compared.
+    #[serde(default)]
+    pub read_only: bool,
     /// Documents per verdict.
     pub totals: BTreeMap<String, usize>,
     /// Pages per verdict.
@@ -214,6 +217,7 @@ pub fn build(options: &RunOptions, results: &[CaseResult], baseline: &Baseline) 
         scale: options.scale,
         tolerance: options.tolerance,
         filtered: options.filtered(),
+        read_only: options.read_only,
         totals,
         page_totals,
         clusters,
@@ -300,12 +304,11 @@ impl Index {
                 .collect::<Vec<_>>()
                 .join(", ")
         };
-        format!(
-            "{} documents: {}. Pages: {}.",
-            self.cases.len(),
-            join(&self.totals),
-            join(&self.page_totals)
-        )
+        let documents = format!("{} documents: {}.", self.cases.len(), join(&self.totals));
+        if self.read_only {
+            return format!("{documents} Read only, no page compared.");
+        }
+        format!("{documents} Pages: {}.", join(&self.page_totals))
     }
 }
 

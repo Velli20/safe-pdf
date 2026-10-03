@@ -953,6 +953,7 @@ mod tests {
                 scale: 1.5,
                 tolerance: 0.002,
                 filtered: false,
+                read_only: false,
                 totals: BTreeMap::new(),
                 page_totals: BTreeMap::new(),
                 clusters: vec![Cluster {
