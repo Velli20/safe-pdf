@@ -171,10 +171,7 @@ where
 
         let needs_fallback_advance =
             resolved.uses_fallback_face(self.font) && self.writing_mode == WritingMode::Horizontal;
-        let pdf_natural = TextVector {
-            x: decoded.pdf_advance.x / PDF_GLYPH_SPACE_UNITS_PER_EM,
-            y: decoded.pdf_advance.y / PDF_GLYPH_SPACE_UNITS_PER_EM,
-        };
+        let pdf_natural = natural_pdf_advance(self.font.spec(), decoded.pdf_advance);
         let (natural, width_scale) = if needs_fallback_advance {
             match face.horizontal_advance(resolved.glyph_id) {
                 Ok(Some(advance)) => fallback_fit(
@@ -423,6 +420,27 @@ fn styled_advance(
         WritingMode::Vertical => TextVector {
             x: natural.x * style.font_size,
             y: natural.y * style.font_size + style.character_spacing + word_spacing,
+        },
+    }
+}
+
+/// Converts a PDF width into an advance per unit of font size.
+///
+/// Type 3 widths are in glyph space and map through the PDF-provided font matrix. Other fonts
+/// express widths in thousandths of text space.
+fn natural_pdf_advance(spec: &PdfFontSpec, advance: TextVector) -> TextVector {
+    match spec {
+        PdfFontSpec::Type3(font) => {
+            let (origin_x, origin_y) = font.font_matrix.transform_point(0.0, 0.0);
+            let (x, y) = font.font_matrix.transform_point(advance.x, advance.y);
+            TextVector {
+                x: x - origin_x,
+                y: y - origin_y,
+            }
+        }
+        _ => TextVector {
+            x: advance.x / PDF_GLYPH_SPACE_UNITS_PER_EM,
+            y: advance.y / PDF_GLYPH_SPACE_UNITS_PER_EM,
         },
     }
 }
