@@ -619,7 +619,7 @@ fn example(
         let lines: Vec<&str> = process
             .stderr
             .lines()
-            .filter(|line| !line.starts_with(crate::process::STAGE_MARKER))
+            .filter(|line| !crate::process::is_marker(line))
             .collect();
         let tail = lines
             .get(lines.len().saturating_sub(STDERR_LINES)..)
@@ -812,7 +812,7 @@ fn cases(
 fn reproduce(text: &mut String, group: &Group<'_>) -> Result<()> {
     writeln!(
         text,
-        "### Reproduce\n\n> [!TIP]\n> Downloads only these PDFs and compares against the published PDFium images, so no local PDFium build is needed:\n>\n> ```console\n> cargo conformance repro {}\n> ```\n",
+        "### Reproduce\n\n> [!TIP]\n> Downloads only these PDFs and compares against the published PDFium images, so no local PDFium build is needed. For a corpus that is only read on `main`, it reruns the cases listed below without reference images, which still shows crashes, timeouts and errors:\n>\n> ```console\n> cargo conformance repro {}\n> ```\n>\n> `cargo conformance render <pdf> --page <n>` renders one downloaded PDF and times each Safe-PDF step.\n",
         group.key
     )?;
     writeln!(
@@ -893,6 +893,7 @@ mod tests {
             baseline: None,
             files: vec!["p0-ref.png".to_owned(), "p0-content.txt".to_owned()],
             reproduce: "cargo conformance run --corpus pdfjs --case clippath --page 0".to_owned(),
+            render: None,
         };
         let case = IndexCase {
             id: "clippath".to_owned(),

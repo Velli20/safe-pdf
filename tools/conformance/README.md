@@ -56,7 +56,15 @@ cargo conformance read-diff --corpus pdfjs --base <reads.json>  # compare reads 
 cargo conformance accept --corpus pdfjs                    # record the last run as the baseline
 cargo conformance repro <issue key or case id>             # rerun an issue's cases, no setup needed
 cargo conformance verify <issue key>                       # exits 0 once no case fails that way
+cargo conformance render <pdf> [--page N]                  # one local PDF, no corpus needed
 ```
+
+`render` runs one page of any PDF through the same worker as `run`. It writes the Safe-PDF
+image, the page's content-stream graph and `summary.md` to
+`target/conformance/render/<file>/`, prints how long each Safe-PDF step took, and exits
+non-zero when the page fails. Pass `--reference <png>` to compare against an image such as a
+PDFium render. Otherwise it compares against `--pdfium <lib>`, `PDFIUM_LIBRARY` or the
+`setup-pdfium` build when one exists.
 
 ## Fixing an issue
 
@@ -70,9 +78,18 @@ cargo conformance repro conf2-98ff16df22ee
 issue at the corpus revision the report used, downloads the PDFium images of their failing
 pages, and reruns those cases against the images. It needs neither a corpus checkout nor a
 PDFium build, so it also works in cloud sessions. Results land in
-`target/conformance/<corpus>/` as for `run`. `verify` does the same and exits non-zero while
-any case still fails with the issue's signature, which makes it the done check for a fix.
-The repository is read from `origin`; pass `--repo owner/name` otherwise.
+`target/conformance/<corpus>/` as for `run`. The repository is read from `origin`; pass
+`--repo owner/name` otherwise.
+
+The pdf.js corpus is only read on `main`, so it has no published report. For such an issue,
+`repro` takes the cases from the issue's machine-readable summary (through `gh`) and reruns
+them without reference images. That still shows whether a crash, timeout or error is gone, and
+`render` gives the image to compare by eye.
+
+`verify` does the same as `repro` and is the done check for a fix. It exits non-zero while any
+case still fails with the issue's signature, and also when a case now fails with a different
+signature, such as a timeout that became a wrong render. Pass `--allow-different` to accept
+that.
 
 The skill in `.claude/skills/fix-conformance-issue/SKILL.md` describes the whole loop for
 agents.
@@ -93,6 +110,16 @@ agents.
   clipping. Colors print as `#RRGGBB`.
 - `pN-content.txt` lists the page's content stream operators. `report.json` has full
   backtraces and worker stderr.
+- `pN-streams.txt` lists the content streams the page can draw through its resources: Form
+  XObjects, Type 3 fonts with their glyph procedures, tiling patterns and soft masks, each
+  under the stream that draws with it. `↻ cycle` marks a stream that leads back to one
+  already being drawn. It is read from the resources without rendering, so it is there for
+  crashes and timeouts too.
+- The summary's "Safe-PDF render" line gives the time of each step and how much replay work
+  the recording holds. Safe-PDF first records the page (`safe-record`), then replays the
+  recording onto the raster (`safe-replay`). A step reported as "did not finish" is where a
+  timeout or crash happened. The replay cost counts every replay of nested pattern cells and
+  masks, so a large cost with deep nesting explains a slow replay.
 
 ## Statuses and signatures
 
@@ -107,8 +134,9 @@ cluster, filed as one issue.
   Safe-PDF draw call there (shading type, tiling pattern, image format, blend mode, soft
   mask), for example `mismatch: extra_ink / fill (tiling pattern)`.
 - **Crashes and timeouts**: the panic location or the time limit, with the worker stage.
-  A stage of the harness itself (`inventory`, `compare`, `regions`, `write`) is labelled
-  `harness` rather than `crash`.
+  Safe-PDF's stages are `safe-read`, `safe-streams` (the content-stream graph),
+  `safe-record`, `safe-replay` and `safe-trace`. A stage of the harness itself (`inventory`,
+  `compare`, `regions`, `write`) is labelled `harness` rather than `crash`.
 - **`font_substitution`**: every difference on the page is text, in a document that uses
   non-embedded fonts. Renderers substitute such fonts differently, so these pages are
   expected to differ. They are counted in TRIAGE.md and the viewer but are not failures and
@@ -121,10 +149,12 @@ cluster, filed as one issue.
 - `index.html`: viewer with side-by-side, swipe, onion-skin and diff views,
   and filters by status, signature and baseline change (`j`/`k`, `1`–`4`).
   `index.html#case=<id>&page=<n>` opens one page; the address follows the selection.
-- `TRIAGE.md`: failures clustered by signature, largest first
+- `TRIAGE.md`: failures clustered by signature, largest first, after any pages that took
+  at least 5 s to render (not failures, but likely performance regressions)
 - `index.json`, `results.json`: machine-readable run data
 - `cases/<id>/summary.md`: the entry point for fixing one case; alongside it
-  are `report.json`, `pN-*.png` images, `pN-content.txt` and `objects.txt`
+  are `report.json`, `pN-*.png` images, `pN-content.txt`, `pN-streams.txt` and
+  `objects.txt`
 
 Workers run in separate processes. A crash, panic or timeout is therefore
 recorded with its stage and stderr, and it does not stop the run.

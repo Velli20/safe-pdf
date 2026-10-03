@@ -178,6 +178,38 @@ pub struct PageOutput {
     pub files: Vec<String>,
 }
 
+/// Cost of rendering one page with Safe-PDF, reported by the worker as each step finishes.
+///
+/// The worker reports these on stderr rather than in its final output, so a page that times
+/// out or crashes during replay still has the figures of its recording.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct RenderStats {
+    /// Milliseconds spent interpreting the page into a recording.
+    pub record_ms: Option<u128>,
+    /// Commands a backend replays for the recording, counting every replay of nested
+    /// pattern cells and masks.
+    pub replay_cost: Option<usize>,
+    /// Deepest chain of pattern and mask recordings beneath the page.
+    pub nesting: Option<usize>,
+    /// Milliseconds spent replaying the recording onto the Skia raster.
+    pub replay_ms: Option<u128>,
+}
+
+impl RenderStats {
+    /// Takes every figure `other` reports, keeping the ones it leaves out.
+    pub fn merge(&mut self, other: Self) {
+        self.record_ms = other.record_ms.or(self.record_ms);
+        self.replay_cost = other.replay_cost.or(self.replay_cost);
+        self.nesting = other.nesting.or(self.nesting);
+        self.replay_ms = other.replay_ms.or(self.replay_ms);
+    }
+
+    /// Returns the Safe-PDF render time in milliseconds, when both steps finished.
+    pub fn total_ms(&self) -> Option<u128> {
+        self.record_ms?.checked_add(self.replay_ms?)
+    }
+}
+
 /// Process-level evidence for one worker run.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ProcessEvidence {
@@ -187,8 +219,11 @@ pub struct ProcessEvidence {
     pub timed_out: bool,
     /// Wall time in milliseconds.
     pub elapsed_ms: u128,
-    /// Last worker stage reached (`reference`, `safe-read`, `safe-render`, ...).
+    /// Last worker stage reached (`reference`, `safe-read`, `safe-record`, `safe-replay`, ...).
     pub stage: Option<String>,
+    /// Safe-PDF render cost reported by a page worker before it finished or was stopped.
+    #[serde(default)]
+    pub render: Option<RenderStats>,
     /// Captured standard error, truncated from the front.
     pub stderr: String,
     /// Worker stdout when it could not be parsed.

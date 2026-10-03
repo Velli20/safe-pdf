@@ -22,6 +22,7 @@ mod process;
 mod read_diff;
 mod reference;
 mod regions;
+mod render;
 mod report_case;
 mod report_index;
 mod repro;
@@ -29,6 +30,7 @@ mod run;
 mod safe_render;
 mod signature;
 mod source_hints;
+mod stream_graph;
 mod trace_backend;
 mod worker;
 
@@ -136,6 +138,9 @@ enum Command {
     Repro(repro::ReproArgs),
     /// Like `repro`, but exits non-zero while any case still fails with the issue's signature.
     Verify(repro::ReproArgs),
+    /// Render one page of a local PDF with Safe-PDF, timing each step, and compare it with a
+    /// reference image or PDFium when one is available. Exits non-zero when the page fails.
+    Render(render::RenderArgs),
     /// Print the summary of a case from the last run.
     Show {
         #[arg(long, value_enum)]
@@ -186,6 +191,8 @@ enum WorkerCommand {
         out_dir: PathBuf,
         #[arg(long)]
         reference_images: Option<PathBuf>,
+        #[arg(long)]
+        write_safe: bool,
     },
 }
 
@@ -296,6 +303,11 @@ fn main() -> Result<ExitCode> {
         Command::Repro(args) => {
             repro::run(&args)?;
         }
+        Command::Render(args) => {
+            if !render::run(&args)? {
+                return Ok(ExitCode::FAILURE);
+            }
+        }
         Command::Verify(args) => {
             if !repro::run(&args)? {
                 return Ok(ExitCode::FAILURE);
@@ -322,6 +334,7 @@ fn main() -> Result<ExitCode> {
             tolerance,
             out_dir,
             reference_images,
+            write_safe,
         }) => worker::page(&worker::PageJob {
             pdf: &pdf,
             password: password.as_deref(),
@@ -332,6 +345,7 @@ fn main() -> Result<ExitCode> {
             out_dir: &out_dir,
             pdfium: pdfium.as_deref(),
             reference_images: reference_images.as_deref(),
+            write_safe,
         })?,
     }
     Ok(ExitCode::SUCCESS)

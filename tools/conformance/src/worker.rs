@@ -2,9 +2,10 @@
 
 use crate::{
     attribution, compare, golden, inventory,
-    model::{Diagnostic, PageOutput, ReadOutput},
-    process::STAGE_MARKER,
+    model::{Diagnostic, PageOutput, ReadOutput, RenderStats},
+    process::{STAGE_MARKER, STATS_MARKER},
     reference, regions, safe_render,
+    stream_graph::StreamGraph,
 };
 use anyhow::{Result, anyhow};
 use image::{DynamicImage, GenericImage, Rgba, RgbaImage, imageops::FilterType};
@@ -14,7 +15,7 @@ use pdf_document::{document::PdfDocument, reader::PdfReader};
 use pdf_graphics::point::Point;
 use pdf_graphics::size::Size;
 use pdf_renderer::PdfRenderer;
-use std::{fmt::Write as _, fs, path::Path};
+use std::{fmt::Write as _, fs, path::Path, time::Instant};
 
 /// Regions reported per page.
 const REGION_LIMIT: usize = 6;
@@ -46,10 +47,18 @@ pub struct PageJob<'a> {
     /// Directory of published reference images (`pN-ref.png`); `None` with no PDFium uses
     /// the corpus's golden images.
     pub reference_images: Option<&'a Path>,
+    /// Writes the Safe-PDF image even when the page matches or has no reference.
+    pub write_safe: bool,
 }
 
 fn stage(name: &str) {
     eprintln!("{STAGE_MARKER}{name}");
+}
+
+/// Reports render figures as soon as they are known, so they survive a later timeout.
+fn report_stats(stats: &RenderStats) -> Result<()> {
+    eprintln!("{STATS_MARKER}{}", serde_json::to_string(stats)?);
+    Ok(())
 }
 
 fn read_safe(bytes: &[u8], password: Option<&str>) -> Result<pdf_document::report::PdfReadReport> {
@@ -220,6 +229,21 @@ pub fn page(job: &PageJob<'_>) -> Result<()> {
             }),
         Err(_) => Err(anyhow!("document not loaded")),
     };
+    if let Some(page) = safe_document
+        .as_ref()
+        .ok()
+        .and_then(|document| document.get_page(job.page))
+    {
+        // Written before rendering, so it is there when rendering crashes or times out.
+        stage("safe-streams");
+        let name = streams_file(job.page);
+        fs::create_dir_all(job.out_dir)?;
+        fs::write(
+            job.out_dir.join(&name),
+            StreamGraph::of_page(page, job.page).text(),
+        )?;
+        output.files.push(name);
+    }
 
     stage("reference-open");
     let pdfium = job.pdfium.map(reference::load).transpose()?;
@@ -286,12 +310,28 @@ pub fn page(job: &PageJob<'_>) -> Result<()> {
         (None, None) => Err("no reference renderer".to_owned()),
     };
 
-    stage("safe-render");
+    stage("safe-record");
     let renderer = safe_document.map(PdfRenderer::new);
-    let safe_image = renderer
+    let started = Instant::now();
+    let recorded = renderer
         .as_ref()
         .map_err(|error| anyhow!("{error}"))
-        .and_then(|renderer| safe_render::render(renderer, job.page, width, height));
+        .and_then(|renderer| safe_render::record(renderer, job.page, width, height));
+    let recording = recorded.as_ref().ok().map(|recorded| recorded.recording());
+    report_stats(&RenderStats {
+        record_ms: Some(started.elapsed().as_millis()),
+        replay_cost: recording.map(|recording| recording.replay_cost()),
+        nesting: recording.map(|recording| recording.nesting()),
+        replay_ms: None,
+    })?;
+
+    stage("safe-replay");
+    let started = Instant::now();
+    let safe_image = recorded.and_then(|recorded| safe_render::replay(&recorded, width, height));
+    report_stats(&RenderStats {
+        replay_ms: Some(started.elapsed().as_millis()),
+        ..RenderStats::default()
+    })?;
 
     let prefix = format!("p{}", job.page);
     match (&reference_image, &safe_image) {
@@ -398,8 +438,20 @@ pub fn page(job: &PageJob<'_>) -> Result<()> {
             }
         }
     }
+    let safe_name = format!("{prefix}-safe.png");
+    if let Ok(image) = &safe_image
+        && job.write_safe
+        && !output.files.contains(&safe_name)
+    {
+        write_png(job, &mut output, &safe_name, image)?;
+    }
     println!("{}", serde_json::to_string(&output)?);
     Ok(())
+}
+
+/// Returns the name of the content-stream graph written for a page.
+pub fn streams_file(page: usize) -> String {
+    format!("p{page}-streams.txt")
 }
 
 /// Returns the raster size for a page, shrinking the scale if a side would exceed `max_side`.

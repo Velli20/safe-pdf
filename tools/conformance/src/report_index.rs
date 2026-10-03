@@ -3,7 +3,7 @@
 use crate::{
     baseline::{Baseline, Delta},
     fetch,
-    model::{CaseResult, Status},
+    model::{CaseResult, RenderStats, Status},
     run::RunOptions,
 };
 use anyhow::Result;
@@ -16,6 +16,8 @@ use std::{
 };
 
 const VIEWER: &str = include_str!("viewer.html");
+/// Safe-PDF render time from which a finished page is listed as slow in `TRIAGE.md`.
+const SLOW_RENDER_MS: u128 = 5_000;
 
 /// One page row of the index.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -36,6 +38,9 @@ pub struct IndexPage {
     pub files: Vec<String>,
     /// Command rerunning this page.
     pub reproduce: String,
+    /// Safe-PDF render cost, as far as the worker got.
+    #[serde(default)]
+    pub render: Option<RenderStats>,
 }
 
 /// One case row of the index.
@@ -162,6 +167,7 @@ pub fn build(options: &RunOptions, results: &[CaseResult], baseline: &Baseline) 
                         .map(|output| output.files.clone())
                         .unwrap_or_default(),
                     reproduce: options.reproduce(&result.case.id, Some(page.page)),
+                    render: page.process.render.clone(),
                 }
             })
             .collect();
@@ -325,6 +331,46 @@ pub fn write(out: &Path, index: &Index) -> Result<()> {
     Ok(())
 }
 
+/// Lists pages whose Safe-PDF render finished but took long, slowest first.
+///
+/// They are not failures, but they show performance regressions and pages close to the time
+/// limit before they turn into timeouts.
+fn slow_pages(text: &mut String, index: &Index) -> Result<()> {
+    let mut slow: Vec<(&IndexCase, &IndexPage, &RenderStats, u128)> = index
+        .cases
+        .iter()
+        .flat_map(|case| case.pages.iter().map(move |page| (case, page)))
+        .filter_map(|(case, page)| {
+            let stats = page.render.as_ref()?;
+            let total = stats.total_ms().filter(|total| *total >= SLOW_RENDER_MS)?;
+            Some((case, page, stats, total))
+        })
+        .collect();
+    if slow.is_empty() {
+        return Ok(());
+    }
+    slow.sort_by_key(|(_, _, _, total)| std::cmp::Reverse(*total));
+    writeln!(
+        text,
+        "## Slow pages\n\n{} pages took at least {} s to render with Safe-PDF. Not failures, but \
+         likely performance regressions or pages close to the time limit.\n",
+        slow.len(),
+        SLOW_RENDER_MS / 1000
+    )?;
+    for (case, page, stats, _) in slow.iter().take(25) {
+        writeln!(
+            text,
+            "- {} page {} ({}): {}",
+            case.id,
+            page.page,
+            page.status.as_str(),
+            crate::report_case::render_text(stats)
+        )?;
+    }
+    writeln!(text)?;
+    Ok(())
+}
+
 fn triage(index: &Index) -> Result<String> {
     let mut text = String::new();
     writeln!(text, "# {} conformance triage\n", index.corpus)?;
@@ -361,6 +407,7 @@ fn triage(index: &Index) -> Result<String> {
              They are reported as `font_substitution`, count as expected, and are not filed as issues.\n"
         )?;
     }
+    slow_pages(&mut text, index)?;
     writeln!(
         text,
         "## Failure clusters\n\nEach cluster groups failures with the same signature, so one fix may resolve all of them. \
