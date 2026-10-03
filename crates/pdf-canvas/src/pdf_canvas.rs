@@ -11,7 +11,7 @@ use crate::{
     stroke_style::StrokeStyle,
     text::TextGlyph,
     text_state::TextState,
-    tiling_shader::TilingShader,
+    tiling_shader::{TilingShader, TilingShaderError},
 };
 use pdf_content_stream::ContentStream;
 use pdf_content_stream_operators::variants::PdfOperatorVariant;
@@ -45,7 +45,7 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     glyph_cache: HashMap<(FontFaceId, GlyphId, u32), Arc<PdfPath>>,
     /// The stack of graphics states, supporting save/restore semantics.
     pub(crate) canvas_stack: Vec<CanvasState>,
-    /// State used to bound nested and recursive content-stream rendering.
+    /// Content streams being drawn, used to bound nesting and refuse cycles.
     content_stream_render_state: ContentStreamRenderState,
     /// Optional owned buffer for extracted text glyph positions.
     pub(crate) text_glyphs: Option<Vec<TextGlyph>>,
@@ -179,7 +179,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// Returns [`PdfCanvasError`] if rendering fails or the stream contains unsupported
     /// operations.
     pub(crate) fn record_content_stream(
-        &self,
+        &mut self,
         recording_canvas: &mut RecordingCanvas,
         content_stream: &ContentStream,
         mat: Option<Transform>,
@@ -216,12 +216,17 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             font_cache: HashMap::new(),
             glyph_cache: HashMap::new(),
             canvas_stack,
-            content_stream_render_state: self.content_stream_render_state.clone(),
+            // The recording continues this canvas's active streams, so a cycle
+            // through a pattern or soft mask is still detected inside it.
+            content_stream_render_state: std::mem::take(&mut self.content_stream_render_state),
             text_glyphs: None,
         };
 
         // Render the form's content stream into the mask canvas.
-        other.render_content_stream(content_stream, mat, Some(bbox), resources, filter)
+        let result =
+            other.render_content_stream(content_stream, mat, Some(bbox), resources, filter);
+        self.content_stream_render_state = other.content_stream_render_state;
+        result
     }
 
     /// Returns a reference to the current graphics state on the stack.
@@ -399,13 +404,24 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     filter,
                 )?;
 
-                let shader = Shader::TilingPatternImage(TilingShader::new(
+                let step = [*x_step, *y_step];
+                let shader = match TilingShader::new(
                     Arc::new(recording_canvas),
                     Some(transform),
                     bbox,
-                    [*x_step, *y_step],
-                )?);
-                Ok(Some(shader))
+                    step,
+                ) {
+                    // A cell too costly to replay, such as one built from deeply
+                    // nested patterns, paints nothing instead of failing the page.
+                    Err(TilingShaderError::ReplayLimitExceeded) => TilingShader::new(
+                        Arc::new(RecordingCanvas::new(bbox.width(), bbox.height())),
+                        Some(transform),
+                        bbox,
+                        step,
+                    )?,
+                    shader => shader?,
+                };
+                Ok(Some(Shader::TilingPatternImage(shader)))
             }
         }
     }
@@ -624,8 +640,8 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
     ) -> Result<(), PdfCanvasError> {
         let Some(invocation) = self.content_stream_render_state.enter(content_stream.id) else {
-            // Reaching either safety limit is treated as a successful no-op so
-            // malformed recursive content cannot abort the rest of the page.
+            // A refused stream is a successful no-op so a cycle or excessive
+            // nesting cannot abort the rest of the page.
             return Ok(());
         };
 

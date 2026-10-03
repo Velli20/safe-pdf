@@ -228,11 +228,48 @@ impl Filter {
         let bitmap = jpeg2k::Image::from_bytes(stream_data)
             .map_err(|e| FilterError::Decompression(e.to_string()))?;
 
+        if matches!(bitmap.color_space(), jpeg2k::ColorSpace::CMYK) {
+            return Self::decode_jpeg2000_cmyk(&bitmap);
+        }
+
         let pixels = bitmap
             .get_pixels(None)
             .map_err(|e| FilterError::Decompression(e.to_string()))?;
 
         Self::decode_jpeg2000_pixels(pixels)
+    }
+
+    /// Interleaves the cyan, magenta, yellow and black components of a CMYK
+    /// JPEG 2000 image into 8-bit CMYK samples, dropping any extra component.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FilterError::Decompression`] if the image has fewer than four
+    /// components or its color components differ in size.
+    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+    fn decode_jpeg2000_cmyk(bitmap: &jpeg2k::Image) -> Result<Vec<u8>, FilterError> {
+        let [c, m, y, k, ..] = bitmap.components() else {
+            return Err(FilterError::Decompression(format!(
+                "CMYK JPEG 2000 image has {} components",
+                bitmap.num_components()
+            )));
+        };
+        let dimensions = (c.width(), c.height());
+        if [m, y, k]
+            .iter()
+            .any(|component| (component.width(), component.height()) != dimensions)
+        {
+            return Err(FilterError::Decompression(
+                "CMYK JPEG 2000 components differ in size".to_string(),
+            ));
+        }
+
+        Ok(c.data_u8()
+            .zip(m.data_u8())
+            .zip(y.data_u8())
+            .zip(k.data_u8())
+            .flat_map(|(((c, m), y), k)| [c, m, y, k])
+            .collect())
     }
 
     #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]

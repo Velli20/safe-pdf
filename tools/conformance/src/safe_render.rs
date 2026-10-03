@@ -4,10 +4,24 @@ use crate::{model::ErrorDetail, trace_backend::TraceBackend};
 use anyhow::{Result, anyhow, bail};
 use image::RgbaImage;
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
-use pdf_renderer::{PdfRenderer, text_selection::PageTextLayout};
+use pdf_renderer::{PdfRenderer, PdfRendererError, RecordedPage, text_selection::PageTextLayout};
 
-/// Renders page content (no annotations) onto a white raster of `width` x `height` pixels.
-pub fn render(renderer: &PdfRenderer, page: usize, width: u32, height: u32) -> Result<RgbaImage> {
+/// Interprets page content (no annotations) into a recording for a `width` x `height` raster.
+pub fn record(
+    renderer: &PdfRenderer,
+    page: usize,
+    width: u32,
+    height: u32,
+) -> Result<RecordedPage> {
+    Ok(renderer.render_page_to_recording(
+        page,
+        f32::from(u16::try_from(width)?),
+        f32::from(u16::try_from(height)?),
+    )?)
+}
+
+/// Replays a page recording onto a white raster of `width` x `height` pixels.
+pub fn replay(recorded: &RecordedPage, width: u32, height: u32) -> Result<RgbaImage> {
     let (w, h) = (i32::try_from(width)?, i32::try_from(height)?);
     let mut surface = skia_safe::surfaces::raster_n32_premul((w, h))
         .ok_or_else(|| anyhow!("cannot allocate Skia raster surface"))?;
@@ -18,7 +32,10 @@ pub fn render(renderer: &PdfRenderer, page: usize, width: u32, height: u32) -> R
             width: f32::from(u16::try_from(width)?),
             height: f32::from(u16::try_from(height)?),
         };
-        renderer.render(&mut backend, page)?;
+        // Wrapped like a direct render's errors, so signatures do not depend on the path.
+        recorded
+            .replay(&mut backend)
+            .map_err(PdfRendererError::from)?;
     }
     let row_bytes = usize::try_from(width)?
         .checked_mul(4)

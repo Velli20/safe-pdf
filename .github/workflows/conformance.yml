@@ -170,8 +170,9 @@ jobs:
             echo "::notice ::The base commit predates read-only conformance runs; nothing to compare with."
             exit 0
           fi
-          # Shares compiled dependencies with the head build; reports still land in $base/target.
-          export CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target"
+          # Builds into its own target directory: workspace crates hash the same at both commits,
+          # so sharing the head's would overwrite its artifacts and break the comparison below.
+          export CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target/base-build"
           cargo conformance run --corpus ${{ matrix.corpus }} --reference pdfium --read-only --jobs 4 \
             --root "$GITHUB_WORKSPACE/target/conformance/corpora/${{ matrix.corpus }}"
           mkdir -p "$GITHUB_WORKSPACE/target/conformance/read-baseline"
