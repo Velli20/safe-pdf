@@ -15,9 +15,10 @@ use crate::fallback::{
 use crate::font::GlyphId;
 use crate::font::{FontMetadata, FontProgramFormat, FontSource};
 use crate::pdf::{
-    PdfFontDescriptor, PdfGlyphMetric, PdfMetrics, SimpleEncoding, SimpleFontSpec, Type0FontSpec,
-    Type3FontSpec,
+    FALLBACK_GLYPH_WIDTH, PdfFontDescriptor, PdfGlyphMetric, PdfMetrics, SimpleEncoding,
+    SimpleFontSpec, Type0FontSpec, Type3FontSpec,
 };
+use crate::pdf_font_metrics::horizontal_metric;
 use crate::standard14::Standard14Font;
 use pdf_cmap::WritingMode;
 
@@ -82,12 +83,7 @@ impl From<Standard14Font> for PdfFontSpec {
                 differences: std::collections::BTreeMap::new(),
             },
             metrics: PdfMetrics {
-                default: PdfGlyphMetric {
-                    advance_x: 500.0,
-                    advance_y: 0.0,
-                    vertical_origin_x: None,
-                    vertical_origin_y: None,
-                },
+                default: horizontal_metric(FALLBACK_GLYPH_WIDTH),
                 explicit: std::collections::BTreeMap::new(),
             },
             to_unicode: None,
