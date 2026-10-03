@@ -4,6 +4,7 @@ use crate::{
     budget::Reservation,
     error::{WebCanvasBackendError as Error, WebResult},
 };
+use pdf_graphics::size::Size;
 use wasm_bindgen::JsCast;
 
 /// A temporary Canvas 2D surface that retains its storage-budget reservation.
@@ -15,14 +16,13 @@ pub(crate) struct Surface {
 
 impl Surface {
     /// Creates a browser surface with the supplied dimensions and budget reservation.
-    pub(crate) fn new(size: [u32; 2], reservation: Reservation) -> WebResult<Self> {
+    pub(crate) fn new(size: Size<u32>, reservation: Reservation) -> WebResult<Self> {
         let canvas: web_sys::HtmlCanvasElement = document()?
             .create_element("canvas")?
             .dyn_into()
             .map_err(|_| Error::ContextUnavailable)?;
-        let [w, h] = size;
-        canvas.set_width(w);
-        canvas.set_height(h);
+        canvas.set_width(size.width);
+        canvas.set_height(size.height);
         let context = context(&canvas)?;
         Ok(Self {
             canvas,
@@ -42,8 +42,8 @@ impl Surface {
     }
 
     /// Returns this surface's dimensions in backing pixels.
-    pub(crate) fn size(&self) -> [u32; 2] {
-        [self.canvas.width(), self.canvas.height()]
+    pub(crate) fn size(&self) -> Size<u32> {
+        Size::new(self.canvas.width(), self.canvas.height())
     }
 }
 

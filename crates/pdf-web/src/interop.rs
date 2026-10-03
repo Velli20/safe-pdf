@@ -5,6 +5,7 @@ use crate::{
     error::{WebError, WebResult},
 };
 use pdf_annotation_core::AnnotationCommandRequest;
+use pdf_graphics::size::Size;
 use pdf_renderer::{
     DocumentTextSelection, PageTextLayout, SelectionBatch, SelectionPoint, SelectionSpan,
 };
@@ -87,7 +88,8 @@ impl WebSelectionBatch {
 
     /// Returns the retained layout's logical device dimensions for viewport mapping.
     pub fn device_size(&self) -> Vec<f32> {
-        self.batch.device_size().to_vec()
+        let size = self.batch.device_size();
+        vec![size.width, size.height]
     }
 
     /// Returns stable highlight IDs, one per exported rectangle, for host element reuse.
@@ -125,7 +127,7 @@ impl WebSelectionController {
         &mut self,
         page: u32,
         revision: u32,
-        size: [f32; 2],
+        size: Size,
         layout: Arc<PageTextLayout>,
     ) -> WebResult<()> {
         self.selection

@@ -1,3 +1,5 @@
+use num_traits::ToPrimitive;
+
 /// A 2D point.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -29,5 +31,18 @@ impl Point<f64> {
     pub fn translate(&mut self, dx: f64, dy: f64) {
         self.x += dx;
         self.y += dy;
+    }
+
+    /// Narrows both coordinates to `f32`, or returns `None` unless both stay finite.
+    pub fn to_f32(self) -> Option<Point> {
+        let narrow = |value: f64| value.to_f32().filter(|value| value.is_finite());
+        Some(Point::new(narrow(self.x)?, narrow(self.y)?))
+    }
+}
+
+impl From<Point> for Point<f64> {
+    /// Widens both coordinates losslessly.
+    fn from(point: Point) -> Self {
+        Self::new(f64::from(point.x), f64::from(point.y))
     }
 }

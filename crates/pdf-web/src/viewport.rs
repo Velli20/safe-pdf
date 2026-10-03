@@ -2,9 +2,9 @@
 
 use crate::error::{WebError as Error, WebResult};
 use num_traits::ToPrimitive;
-use pdf_canvas::{CanvasViewport, PageViewport};
+use pdf_canvas::{CanvasViewport, PageViewport, ViewportError};
 use pdf_document::page::PdfPage;
-use pdf_graphics::{point::Point, transform::Transform};
+use pdf_graphics::{point::Point, size::Size, transform::Transform};
 
 /// Validated page viewport using the engine's existing affine and geometry types.
 ///
@@ -28,7 +28,7 @@ impl WebViewport {
     pub fn new(
         page: PageViewport,
         css_size: [f64; 2],
-        backing_size: [u32; 2],
+        backing_size: Size<u32>,
         device_to_css: Transform,
         revision: u32,
     ) -> WebResult<Self> {
@@ -60,7 +60,10 @@ impl WebViewport {
         if !zoom.is_finite() || zoom <= 0.0 || !dpr.is_finite() || dpr <= 0.0 {
             return Err(Error::InvalidInput("display scale"));
         }
-        let [w, h] = PageViewport::page_size(page)?;
+        let Size {
+            width: w,
+            height: h,
+        } = page.page_size().ok_or(ViewportError::Bounds)?;
         let device_to_css = match display_rotation % 360 {
             0 => Transform::from_scale(zoom, zoom),
             90 => Transform::from_row(0.0, zoom, -zoom, 0.0, h * zoom, 0.0),
@@ -75,9 +78,9 @@ impl WebViewport {
         };
         let backing = |v: f32| (v * zoom * dpr).ceil().to_u32().ok_or(Error::ResourceLimit);
         Self::new(
-            PageViewport::from_page(page, None, [w, h])?,
+            page.viewport(None, Size::new(w, h))?,
             css,
-            [backing(w)?, backing(h)?],
+            Size::new(backing(w)?, backing(h)?),
             device_to_css,
             revision,
         )
@@ -94,7 +97,7 @@ impl WebViewport {
     }
 
     /// Returns the dimensions exposed by CanvasBackend::width and height.
-    pub fn device_size(&self) -> [f32; 2] {
+    pub fn device_size(&self) -> Size {
         self.page.device_size()
     }
 
@@ -104,7 +107,7 @@ impl WebViewport {
     }
 
     /// Returns actual bitmap dimensions, including high-DPI scaling.
-    pub fn backing_size(&self) -> [u32; 2] {
+    pub fn backing_size(&self) -> Size<u32> {
         self.canvas.backing_size()
     }
 
@@ -168,14 +171,11 @@ mod tests {
     #[test]
     fn separates_device_css_and_backing() {
         let viewport = WebViewport::new(
-            PageViewport::from_page(
-                &pdf_document::page::PdfPage::default(),
-                None,
-                [100.0, 200.0],
-            )
-            .unwrap(),
+            pdf_document::page::PdfPage::default()
+                .viewport(None, Size::new(100.0, 200.0))
+                .unwrap(),
             [150.0, 300.0],
-            [300, 600],
+            Size::new(300, 600),
             Transform::from_scale(1.5, 1.5),
             7,
         )
@@ -193,22 +193,20 @@ mod tests {
     fn rejects_nonfinite_and_singular_viewports() {
         assert!(
             WebViewport::new(
-                PageViewport::from_page(&pdf_document::page::PdfPage::default(), None, [1.0, 1.0])
+                pdf_document::page::PdfPage::default()
+                    .viewport(None, Size::new(1.0, 1.0))
                     .unwrap(),
                 [1.0, 1.0],
-                [1, 1],
+                Size::new(1, 1),
                 Transform::from_scale(0.0, 1.0),
                 0
             )
             .is_err()
         );
         assert!(
-            PageViewport::from_page(
-                &pdf_document::page::PdfPage::default(),
-                None,
-                [f32::NAN, 1.0]
-            )
-            .is_err()
+            pdf_document::page::PdfPage::default()
+                .viewport(None, Size::new(f32::NAN, 1.0))
+                .is_err()
         );
     }
 }

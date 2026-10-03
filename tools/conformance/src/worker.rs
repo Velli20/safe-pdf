@@ -9,9 +9,10 @@ use crate::{
 use anyhow::{Result, anyhow};
 use image::{DynamicImage, GenericImage, Rgba, RgbaImage, imageops::FilterType};
 use num_traits::ToPrimitive;
-use pdf_canvas::PageViewport;
+use pdf_canvas::{PageViewport, ViewportError};
 use pdf_document::{document::PdfDocument, reader::PdfReader};
 use pdf_graphics::point::Point;
+use pdf_graphics::size::Size;
 use pdf_renderer::PdfRenderer;
 use std::{fmt::Write as _, fs, path::Path};
 
@@ -179,7 +180,7 @@ fn annotation_boxes(page: &pdf_document::page::PdfPage, width: u32, height: u32)
     let Some(device) = width.to_f32().zip(height.to_f32()) else {
         return Vec::new();
     };
-    let Ok(viewport) = PageViewport::from_page(page, None, [device.0, device.1]) else {
+    let Ok(viewport) = page.viewport(None, Size::new(device.0, device.1)) else {
         return Vec::new();
     };
     page.annotations
@@ -187,14 +188,8 @@ fn annotation_boxes(page: &pdf_document::page::PdfPage, width: u32, height: u32)
         .flatten()
         .filter(|annotation| annotation.subtype != b"Link" && annotation.subtype != b"Popup")
         .filter_map(|annotation| {
-            let rect = annotation.rect.as_ref()?;
-            let rect = pdf_graphics::rect::Rect {
-                left: rect.left.to_f32()?,
-                top: rect.top.to_f32()?,
-                right: rect.right.to_f32()?,
-                bottom: rect.bottom.to_f32()?,
-            };
-            let mapped = viewport.map_rect(&rect).ok()?.normalized();
+            let rect = annotation.rect.as_ref()?.to_f32()?;
+            let mapped = viewport.map_rect(&rect).ok()?;
             let clamp = |value: f32, limit: u32| value.max(0.0).to_u32().map(|v| v.min(limit));
             Some([
                 clamp((mapped.left - 2.0).floor(), width)?,
@@ -219,7 +214,10 @@ pub fn page(job: &PageJob<'_>) -> Result<()> {
         Ok(document) => document
             .get_page(job.page)
             .ok_or_else(|| anyhow!("page {} not found", job.page))
-            .and_then(|page| Ok(PageViewport::page_size(page)?)),
+            .and_then(|page| {
+                let size = page.page_size().ok_or(ViewportError::Bounds)?;
+                Ok([size.width, size.height])
+            }),
         Err(_) => Err(anyhow!("document not loaded")),
     };
 
@@ -329,8 +327,8 @@ pub fn page(job: &PageJob<'_>) -> Result<()> {
                     .ok()
                     .and_then(|renderer| renderer.document().get_page(job.page))
                     .and_then(|page| {
-                        let device = [width.to_f32()?, height.to_f32()?];
-                        PageViewport::from_page(page, None, device).ok()
+                        let device = Size::new(width.to_f32()?, height.to_f32()?);
+                        page.viewport(None, device).ok()
                     });
                 let reference_page = reference_page.as_ref().and_then(|page| page.as_ref().ok());
                 let page_space = |pixels: [u32; 4]| match reference_page {

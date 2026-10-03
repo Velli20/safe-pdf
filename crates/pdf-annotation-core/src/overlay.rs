@@ -16,7 +16,7 @@ use crate::{
         AnnotationCommandRequest, AnnotationReceipt, AnnotationTarget, OptionalContentReceipt,
     },
 };
-use pdf_graphics::{rect::Rect, transform::Transform};
+use pdf_graphics::{rect::Rect, viewport::PageViewport};
 use pdf_object_reader::diagnostic::PdfReadDiagnostic;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -112,8 +112,8 @@ impl AnnotationOverlay {
         self.document.engine.view().data().revision
     }
 
-    /// Projects a complete page from borrowed Core state through `page_to_device`, the
-    /// host viewport's PDF page to logical device mapping. `viewport_revision`
+    /// Projects a complete page from borrowed Core state through `viewport`, the
+    /// host's PDF page to logical device mapping. `viewport_revision`
     /// identifies the host layout so stale events can be rejected.
     ///
     /// # Errors
@@ -123,10 +123,10 @@ impl AnnotationOverlay {
     pub fn prepare(
         &mut self,
         page: u32,
-        page_to_device: &Transform,
+        viewport: &PageViewport,
         viewport_revision: u32,
     ) -> AnnotationLayerResult<PreparedAnnotations> {
-        let prepared = self.project_page(page, page_to_device, viewport_revision)?;
+        let prepared = self.project_page(page, viewport, viewport_revision)?;
         self.pages.insert(page, prepared.clone());
         Ok(prepared)
     }
@@ -139,12 +139,12 @@ impl AnnotationOverlay {
     pub fn prepared(
         &mut self,
         page: u32,
-        page_to_device: &Transform,
+        viewport: &PageViewport,
         viewport_revision: u32,
     ) -> AnnotationLayerResult<PreparedAnnotations> {
         match self.cached(page, viewport_revision) {
             Some(cached) => Ok(cached.clone()),
-            None => self.prepare(page, page_to_device, viewport_revision),
+            None => self.prepare(page, viewport, viewport_revision),
         }
     }
 
@@ -259,7 +259,7 @@ impl AnnotationOverlay {
     fn project_page(
         &self,
         page: u32,
-        page_to_device: &Transform,
+        viewport: &PageViewport,
         viewport_revision: u32,
     ) -> AnnotationLayerResult<PreparedAnnotations> {
         let view = self.document.engine.view();
@@ -272,7 +272,7 @@ impl AnnotationOverlay {
             .iter()
             .map(|annotation| {
                 let has_popup = popup_parents.contains(&annotation.id.0);
-                self.project_entry(&view, annotation, page_to_device, has_popup)
+                self.project_entry(&view, annotation, viewport, has_popup)
             })
             .collect::<AnnotationLayerResult<Arc<[_]>>>()?;
         Ok(PreparedAnnotations {
@@ -307,7 +307,7 @@ impl AnnotationOverlay {
         &self,
         view: &DocumentView<'_>,
         annotation: &Annotation,
-        page_to_device: &Transform,
+        viewport: &PageViewport,
         has_popup: bool,
     ) -> AnnotationLayerResult<AnnotationEntry> {
         projection::project(
@@ -315,7 +315,7 @@ impl AnnotationOverlay {
             view,
             &self.optional_content,
             self.document.hints.get(&annotation.id.0),
-            page_to_device,
+            viewport,
             self.modified_revision(annotation.id),
             has_popup,
         )

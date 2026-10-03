@@ -4,7 +4,7 @@ use crate::{
     error::{WebCanvasBackendError as Error, WebResult},
     surface::Surface,
 };
-use pdf_graphics::{Image, PixelFormat};
+use pdf_graphics::{Image, PixelFormat, size::Size};
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen::Clamped;
 
@@ -31,7 +31,7 @@ impl SurfacePool {
     }
 
     /// Reuses a matching temporary surface or allocates one within the shared budget.
-    pub(crate) fn acquire(&self, size: [u32; 2]) -> WebResult<Surface> {
+    pub(crate) fn acquire(&self, size: Size<u32>) -> WebResult<Surface> {
         let found = self
             .available
             .borrow()
@@ -85,13 +85,15 @@ impl SurfacePool {
         let bytes = byte_size(size)?;
         let reservation = self.scratch(bytes)?;
         let _scratch = self.scratch(bytes)?;
-        let [w, h] = size;
-        let data = surface
-            .context()
-            .get_image_data(0.0, 0.0, f64::from(w), f64::from(h))?;
+        let data = surface.context().get_image_data(
+            0.0,
+            0.0,
+            f64::from(size.width),
+            f64::from(size.height),
+        )?;
         let image = Image {
-            width: usize::try_from(w).map_err(|_| Error::ResourceLimit)?,
-            height: usize::try_from(h).map_err(|_| Error::ResourceLimit)?,
+            width: usize::try_from(size.width).map_err(|_| Error::ResourceLimit)?,
+            height: usize::try_from(size.height).map_err(|_| Error::ResourceLimit)?,
             pixel_format: PixelFormat::RGBA8888,
             data: data.data().0.into(),
         };
@@ -103,7 +105,8 @@ impl SurfacePool {
     /// Reserves temporary storage before conversion and propagates image, budget,
     /// and browser failures. The returned surface retains its own storage reservation.
     pub(crate) fn upload(&self, image: &Image) -> WebResult<Surface> {
-        let size = image.dimensions().ok_or(Error::ResourceLimit)?;
+        let [w, h] = image.dimensions().ok_or(Error::ResourceLimit)?;
+        let size = Size::new(w, h);
         byte_size(size)?;
         pdf_image::raster::validate_image(image)?;
 
@@ -115,7 +118,6 @@ impl SurfacePool {
                 .ok_or(Error::ResourceLimit)?,
         )?;
         let surface = self.acquire(size)?;
-        let [w, h] = size;
         let data = pdf_image::raster::rgba(image)?;
         let data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(Clamped(&data), w, h)?;
         surface.context().put_image_data(&data, 0.0, 0.0)?;
@@ -124,8 +126,11 @@ impl SurfacePool {
 }
 
 /// Returns RGBA surface storage size, rejecting empty dimensions and byte-count overflow.
-pub(crate) fn byte_size(size: [u32; 2]) -> WebResult<usize> {
-    let [w, h] = size;
+pub(crate) fn byte_size(size: Size<u32>) -> WebResult<usize> {
+    let Size {
+        width: w,
+        height: h,
+    } = size;
     if w == 0 || h == 0 {
         return Err(Error::InvalidInput("empty surface"));
     }
@@ -171,9 +176,9 @@ mod tests {
     #[test]
     /// Verifies that rejects empty and overflowing surfaces.
     fn rejects_empty_and_overflowing_surfaces() {
-        assert!(byte_size([0, 4]).is_err());
-        assert!(byte_size([u32::MAX, u32::MAX]).is_err());
-        assert_eq!(byte_size([2, 3]).unwrap(), 24);
+        assert!(byte_size(Size::new(0, 4)).is_err());
+        assert!(byte_size(Size::new(u32::MAX, u32::MAX)).is_err());
+        assert_eq!(byte_size(Size::new(2, 3)).unwrap(), 24);
     }
 }
 
@@ -187,7 +192,7 @@ mod browser_tests {
     #[wasm_bindgen_test]
     fn impossible_request_preserves_cached_surfaces() {
         let pool = SurfacePool::new(8);
-        let surface = pool.acquire([1, 1]).unwrap();
+        let surface = pool.acquire(Size::new(1, 1)).unwrap();
         let canvas = surface.canvas().clone();
         pool.recycle(surface);
         assert!(pool.scratch(9).is_err());
@@ -199,8 +204,8 @@ mod browser_tests {
     #[wasm_bindgen_test]
     fn eviction_stops_when_request_fits() {
         let pool = SurfacePool::new(12);
-        let first = pool.acquire([1, 1]).unwrap();
-        let second = pool.acquire([2, 1]).unwrap();
+        let first = pool.acquire(Size::new(1, 1)).unwrap();
+        let second = pool.acquire(Size::new(2, 1)).unwrap();
         let first_canvas = first.canvas().clone();
         let second_canvas = second.canvas().clone();
         pool.recycle(first);
@@ -211,7 +216,7 @@ mod browser_tests {
         assert_eq!(second_canvas.width(), 0);
         assert_eq!(pool.budget.used(), 12);
         drop(scratch);
-        let reused = pool.acquire([1, 1]).unwrap();
+        let reused = pool.acquire(Size::new(1, 1)).unwrap();
         assert_eq!(reused.canvas(), &first_canvas);
         assert_eq!(pool.budget.used(), 4);
     }
@@ -219,7 +224,7 @@ mod browser_tests {
     #[wasm_bindgen_test]
     fn readback_accounts_for_peak_and_retained_pixels() {
         let pool = SurfacePool::new(12);
-        let surface = pool.acquire([1, 1]).unwrap();
+        let surface = pool.acquire(Size::new(1, 1)).unwrap();
         let image = pool.read(&surface).unwrap();
         assert_eq!(image.image().data.as_ref(), &[0, 0, 0, 0]);
         assert_eq!(pool.budget.used(), 8);
@@ -227,7 +232,7 @@ mod browser_tests {
         assert_eq!(pool.budget.used(), 4);
 
         let tight = SurfacePool::new(11);
-        let surface = tight.acquire([1, 1]).unwrap();
+        let surface = tight.acquire(Size::new(1, 1)).unwrap();
         assert!(matches!(tight.read(&surface), Err(Error::ResourceLimit)));
         assert_eq!(tight.budget.used(), 4);
     }
@@ -235,7 +240,7 @@ mod browser_tests {
     #[wasm_bindgen_test]
     fn browser_readback_error_releases_new_charges() {
         let pool = SurfacePool::new(12);
-        let surface = pool.acquire([1, 1]).unwrap();
+        let surface = pool.acquire(Size::new(1, 1)).unwrap();
         // Force a browser exception after readback reservations have been acquired.
         js_sys::Reflect::set(
             surface.context().as_ref(),

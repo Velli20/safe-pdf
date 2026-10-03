@@ -13,6 +13,7 @@ pub mod quad;
 pub mod rect;
 pub mod size;
 pub mod transform;
+pub mod viewport;
 
 pub use blend_mode::BlendMode;
 pub use bounds_accumulator::BoundsAccumulator;

@@ -1,4 +1,5 @@
 use crate::{point::Point, transform::Transform};
+use num_traits::ToPrimitive;
 
 /// An axis-aligned rectangle whose edge coordinate type defaults to `f32`.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -95,6 +96,17 @@ impl Rect<f32> {
 }
 
 impl Rect<f64> {
+    /// Narrows every edge to `f32`, or returns `None` unless all of them stay finite.
+    pub fn to_f32(&self) -> Option<Rect> {
+        let narrow = |value: f64| value.to_f32().filter(|value| value.is_finite());
+        Some(Rect {
+            left: narrow(self.left)?,
+            top: narrow(self.top)?,
+            right: narrow(self.right)?,
+            bottom: narrow(self.bottom)?,
+        })
+    }
+
     /// Orders edges so `left` and `top` are the minimum x and y coordinates.
     pub fn normalized(&self) -> Self {
         Self {
@@ -203,6 +215,18 @@ impl Rect<usize> {
     /// Returns whether the rectangle has positive width and height.
     pub const fn is_valid(&self) -> bool {
         self.width() > 0 && self.height() > 0
+    }
+}
+
+impl From<Rect<f32>> for Rect<f64> {
+    /// Widens each edge losslessly.
+    fn from(rect: Rect<f32>) -> Self {
+        Self {
+            left: f64::from(rect.left),
+            top: f64::from(rect.top),
+            right: f64::from(rect.right),
+            bottom: f64::from(rect.bottom),
+        }
     }
 }
 

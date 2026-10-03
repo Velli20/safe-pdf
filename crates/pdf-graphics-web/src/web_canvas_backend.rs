@@ -24,7 +24,7 @@ use pdf_canvas::{
     stroke_style::{StrokeStyle, device_stroke_width},
 };
 use pdf_graphics::{
-    BlendMode, Image, PathFillType, color::Color, rect::Rect, transform::Transform,
+    BlendMode, Image, PathFillType, color::Color, rect::Rect, size::Size, transform::Transform,
 };
 use web_sys::{CanvasPattern, CanvasRenderingContext2d, CanvasWindingRule, Path2d};
 
@@ -105,10 +105,10 @@ impl WebCanvasBackend {
 
     /// Sizes the host canvas for the viewport, clearing its pixels, and opens fresh scopes.
     fn install(&mut self, viewport: CanvasViewport) -> WebResult<()> {
-        let [w, h] = viewport.backing_size();
-        byte_size([w, h])?;
-        self.canvas.set_width(w);
-        self.canvas.set_height(h);
+        let size = viewport.backing_size();
+        byte_size(size)?;
+        self.canvas.set_width(size.width);
+        self.canvas.set_height(size.height);
         self.viewport = viewport;
         self.reset_scopes()
     }
@@ -135,7 +135,7 @@ impl WebCanvasBackend {
     /// surface owner controls its backing dimensions and budget reservation.
     pub(crate) fn on_surface(
         surface: &Surface,
-        device_size: [f32; 2],
+        device_size: Size,
         mapping: Transform,
         pool: SurfacePool,
     ) -> WebResult<Self> {
@@ -169,14 +169,14 @@ impl WebCanvasBackend {
     pub(crate) fn replay_surface(
         &self,
         recording: &RecordingCanvas,
-        size: [u32; 2],
+        size: Size<u32>,
         mapping: Transform,
     ) -> WebResult<Surface> {
         let surface = self.surfaces.acquire(size)?;
         {
             let mut backend = Self::on_surface(
                 &surface,
-                [recording.width(), recording.height()],
+                Size::new(recording.width(), recording.height()),
                 mapping,
                 self.surfaces.clone(),
             )?;
@@ -188,13 +188,11 @@ impl WebCanvasBackend {
 
 impl CanvasBackend for WebCanvasBackend {
     fn width(&self) -> f32 {
-        let [width, _] = self.viewport.device_size();
-        width
+        self.viewport.device_size().width
     }
 
     fn height(&self) -> f32 {
-        let [_, height] = self.viewport.device_size();
-        height
+        self.viewport.device_size().height
     }
 
     fn fill_path(

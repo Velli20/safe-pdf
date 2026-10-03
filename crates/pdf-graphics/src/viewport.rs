@@ -1,12 +1,13 @@
 //! Validated page geometry and logical-device to bitmap mappings.
 
-use num_traits::ToPrimitive;
-use pdf_document::page::PdfPage;
-use pdf_graphics::{
+use crate::{
     point::Point,
+    quad::Quad,
     rect::Rect,
+    size::Size,
     transform::{Transform, TransformError},
 };
+use num_traits::ToPrimitive;
 
 /// Invalid viewport geometry or incompatible rendering dimensions.
 #[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
@@ -31,7 +32,7 @@ pub struct PageViewport {
     /// PDF-space bounds fitted into the logical device viewport.
     bounds: Rect,
     /// Width and height of the target's logical device coordinate space.
-    device_size: [f32; 2],
+    device_size: Size,
     /// Affine mapping from PDF page coordinates to logical device coordinates.
     page_to_device: Transform,
     /// Inverse affine mapping from logical device coordinates to PDF page coordinates.
@@ -39,16 +40,20 @@ pub struct PageViewport {
 }
 
 impl PageViewport {
-    /// Fits explicit bounds, or the page media box, independently along each axis.
-    /// Missing bounds use the device size. Supplied invalid bounds are rejected.
-    pub fn from_page(
-        page: &PdfPage,
-        bounds_override: Option<&Rect>,
-        device_size: [f32; 2],
-    ) -> Result<Self, ViewportError> {
-        let [width, height] = device_size;
-        validate_size(device_size)?;
-        let (bounds, rotation) = page_bounds(page, bounds_override, || Rect::new(width, height))?;
+    /// Fits page `bounds` into `device_size` independently along each axis, applying a
+    /// clockwise `rotation` in degrees.
+    ///
+    /// Rejects invalid device dimensions, invalid bounds, rotations that are not a
+    /// multiple of 90 degrees, and mappings that cannot be inverted.
+    pub fn new(bounds: Rect, rotation: i32, device_size: Size) -> Result<Self, ViewportError> {
+        let rotation = rotation.rem_euclid(360);
+        if !device_size.validate() {
+            return Err(ViewportError::Dimensions);
+        }
+        if !bounds.is_valid() {
+            return Err(ViewportError::Bounds);
+        }
+        let Size { width, height } = device_size;
         let sideways = rotation == 90 || rotation == 270;
         let (unrotated_width, unrotated_height) = if sideways {
             (height, width)
@@ -82,34 +87,13 @@ impl PageViewport {
         })
     }
 
-    /// Returns the page's displayed width and height in PDF points.
-    ///
-    /// Uses the CropBox, then the MediaBox, and swaps the axes for a sideways `/Rotate`
-    /// so hosts size their containers with the same geometry `from_page` renders with.
-    /// Pages without either box are rejected.
-    pub fn page_size(page: &PdfPage) -> Result<[f32; 2], ViewportError> {
-        if page.crop_box.is_none() && page.media_box.is_none() {
-            return Err(ViewportError::Bounds);
-        }
-        let (bounds, rotation) = page_bounds(page, None, || Rect::new(1.0, 1.0))?;
-        let (width, height) = (bounds.width(), bounds.height());
-        if width <= 0.0 || height <= 0.0 {
-            return Err(ViewportError::Bounds);
-        }
-        Ok(if rotation == 90 || rotation == 270 {
-            [height, width]
-        } else {
-            [width, height]
-        })
-    }
-
     /// Returns the fitted bounds in PDF page coordinates.
     pub fn bounds(&self) -> &Rect {
         &self.bounds
     }
 
     /// Returns the logical device dimensions.
-    pub fn device_size(&self) -> [f32; 2] {
+    pub fn device_size(&self) -> Size {
         self.device_size
     }
 
@@ -135,25 +119,33 @@ impl PageViewport {
 
     /// Maps all corners of a finite page rectangle into normalized device bounds.
     pub fn map_rect(&self, rect: &Rect) -> Result<Rect, ViewportError> {
-        if [rect.left, rect.top, rect.right, rect.bottom]
-            .iter()
-            .any(|v| !v.is_finite())
-        {
+        let mapped = self.page_to_device.try_map_rect(rect)?;
+        // The edges are finite once mapping succeeds, so normalizing keeps them.
+        if !rect.normalized().is_valid() {
             return Err(ViewportError::Bounds);
         }
-        let rect = rect.normalized();
-        if !rect.is_valid() {
-            return Err(ViewportError::Bounds);
+        Ok(mapped)
+    }
+
+    /// Maps the corners of an `f64` page quad and returns their enclosing device bounds.
+    /// Rejects corners without a finite `f32` representation or a nonfinite result.
+    pub fn map_quad(&self, quad: &Quad<f64>) -> Result<Rect<f64>, ViewportError> {
+        let mut corners = quad.corners;
+        for corner in &mut corners {
+            let page = corner.to_f32().ok_or(TransformError::NonFinite)?;
+            *corner = self.map_page_point(page)?.into();
         }
-        for point in [
-            Point::new(rect.left, rect.top),
-            Point::new(rect.right, rect.top),
-            Point::new(rect.right, rect.bottom),
-            Point::new(rect.left, rect.bottom),
-        ] {
-            self.map_page_point(point)?;
-        }
-        Ok(self.page_to_device.map_rect(&rect).normalized())
+        Ok(Quad { corners }.bounds())
+    }
+
+    /// Maps a y-down local frame anchored at page point `origin` into logical device
+    /// coordinates: local `(x, y)` is page `(origin.x + x, origin.y - y)`. Rejects a
+    /// nonfinite result.
+    pub fn local_frame(&self, origin: Point) -> Result<Transform, ViewportError> {
+        let local_to_page = Transform::from_row(1.0, 0.0, 0.0, -1.0, origin.x, origin.y);
+        let local_to_device = self.page_to_device.post_concatenated(&local_to_page);
+        local_to_device.validate()?;
+        Ok(local_to_device)
     }
 
     /// Maps a device-space movement without applying the page origin translation.
@@ -168,32 +160,39 @@ impl PageViewport {
 /// Maps logical device geometry into a bitmap, independently of page or host layout.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CanvasViewport {
-    device_size: [f32; 2],
-    backing_size: [u32; 2],
+    device_size: Size,
+    backing_size: Size<u32>,
     device_to_backing: Transform,
 }
 
 impl CanvasViewport {
     /// Derives scaling from the actual backing dimensions, including pixel rounding.
-    pub fn new(device_size: [f32; 2], backing_size: [u32; 2]) -> Result<Self, ViewportError> {
-        validate_size(device_size)?;
-        let [dw, dh] = device_size;
-        let [w, h] = backing_size;
+    pub fn new(device_size: Size, backing_size: Size<u32>) -> Result<Self, ViewportError> {
+        if !device_size.validate() {
+            return Err(ViewportError::Dimensions);
+        }
         let mapping = Transform::from_scale(
-            w.to_f32().ok_or(ViewportError::Dimensions)? / dw,
-            h.to_f32().ok_or(ViewportError::Dimensions)? / dh,
+            backing_size
+                .width
+                .to_f32()
+                .ok_or(ViewportError::Dimensions)?
+                / device_size.width,
+            backing_size
+                .height
+                .to_f32()
+                .ok_or(ViewportError::Dimensions)?
+                / device_size.height,
         );
         Self::with_transform(device_size, backing_size, mapping)
     }
 
     /// Uses an explicit device-to-backing mapping, such as a cropped recording origin.
     pub fn with_transform(
-        device_size: [f32; 2],
-        backing_size: [u32; 2],
+        device_size: Size,
+        backing_size: Size<u32>,
         device_to_backing: Transform,
     ) -> Result<Self, ViewportError> {
-        validate_size(device_size)?;
-        if backing_size.contains(&0) {
+        if !device_size.validate() || backing_size.width == 0 || backing_size.height == 0 {
             return Err(ViewportError::Dimensions);
         }
         device_to_backing.try_inverse()?;
@@ -205,12 +204,12 @@ impl CanvasViewport {
     }
 
     /// Returns the dimensions exposed by the canvas backend.
-    pub fn device_size(&self) -> [f32; 2] {
+    pub fn device_size(&self) -> Size {
         self.device_size
     }
 
     /// Returns the bitmap dimensions.
-    pub fn backing_size(&self) -> [u32; 2] {
+    pub fn backing_size(&self) -> Size<u32> {
         self.backing_size
     }
 
@@ -231,28 +230,4 @@ pub fn pixel_extent(value: f32) -> Option<u32> {
         return None;
     }
     value.ceil().to_u32().filter(|extent| *extent > 0)
-}
-
-/// Resolves the page box and normalized `/Rotate` shared by rendering and layout.
-fn page_bounds(
-    page: &PdfPage,
-    bounds_override: Option<&Rect>,
-    fallback: impl FnOnce() -> Rect,
-) -> Result<(Rect, i32), ViewportError> {
-    let bounds = bounds_override
-        .or(page.crop_box.as_ref())
-        .or(page.media_box.as_ref())
-        .copied()
-        .unwrap_or_else(fallback);
-    if !bounds.is_valid() || !bounds.width().is_finite() || !bounds.height().is_finite() {
-        return Err(ViewportError::Bounds);
-    }
-    Ok((bounds, page.rotation.unwrap_or_default().rem_euclid(360)))
-}
-
-fn validate_size(size: [f32; 2]) -> Result<(), ViewportError> {
-    if size.iter().any(|v| !v.is_finite() || *v <= 0.0) {
-        return Err(ViewportError::Dimensions);
-    }
-    Ok(())
 }

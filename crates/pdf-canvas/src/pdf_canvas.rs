@@ -19,7 +19,7 @@ use pdf_document::page::PdfPage;
 use pdf_font::pdf_font_handle::PdfFontHandle;
 use pdf_font::{FontError, FontFaceId, GlyphGeometry, GlyphId, PdfFontSpec};
 use pdf_graphics::{
-    BlendMode, PaintMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect,
+    BlendMode, PaintMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect, size::Size,
     transform::Transform,
 };
 use pdf_resources::{
@@ -69,8 +69,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         bb: Option<&Rect>,
         font_system: Arc<FontSystem>,
     ) -> Result<Self, PdfCanvasError> {
-        let viewport =
-            crate::PageViewport::from_page(page, bb, [backend.width(), backend.height()])?;
+        let viewport = page.viewport(bb, Size::new(backend.width(), backend.height()))?;
         Self::new_with_viewport(backend, page, &viewport, font_system)
     }
 
@@ -82,7 +81,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         viewport: &crate::PageViewport,
         font_system: Arc<FontSystem>,
     ) -> Result<Self, PdfCanvasError> {
-        if viewport.device_size() != [backend.width(), backend.height()] {
+        if viewport.device_size() != Size::new(backend.width(), backend.height()) {
             return Err(crate::ViewportError::DeviceSizeMismatch.into());
         }
         let transform = *viewport.page_to_device();

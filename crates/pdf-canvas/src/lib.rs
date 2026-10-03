@@ -28,9 +28,7 @@ pub mod error;
 /// Validated mask descriptions and portable coverage preparation.
 pub mod mask_layer;
 
-/// Shared page and bitmap coordinate mappings.
-pub mod viewport;
-pub use viewport::{CanvasViewport, PageViewport, ViewportError};
+pub use pdf_graphics::viewport::{CanvasViewport, PageViewport, ViewportError};
 
 /// Path geometry.
 mod path_geometry;

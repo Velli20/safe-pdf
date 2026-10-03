@@ -7,11 +7,10 @@ use pdf_canvas::{
     mask_layer::{CoverageTarget, MaskLayer},
     stroke_style::{StrokeStyle, device_stroke_width},
     tiling_shader::TilingShader,
-    viewport::pixel_extent,
 };
 use pdf_graphics::{
-    BlendMode, Image, PathFillType, PixelFormat, color::Color, pdf_path::PathVerb,
-    transform::Transform,
+    BlendMode, Image, PathFillType, PixelFormat, color::Color, pdf_path::PathVerb, size::Size,
+    transform::Transform, viewport::pixel_extent,
 };
 use pdf_shading::paint::ShadingPaint;
 
@@ -113,7 +112,7 @@ fn to_skia_tiling_image(
     device_to_backing: &Transform,
 ) -> Result<(skia_safe::Image, skia_safe::Matrix), PdfCanvasError> {
     let plan = pattern.raster_plan(device_to_backing)?;
-    let [width, height] = plan.size;
+    let Size { width, height } = plan.size;
     let info = skia_safe::ImageInfo::new(
         (
             i32::try_from(width).map_err(SkiaCanvasBackendError::from)?,
