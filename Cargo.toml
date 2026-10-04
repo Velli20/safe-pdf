@@ -38,3 +38,17 @@ opt-level = 3
 
 [profile.regression.package.pdf-conformance]
 opt-level = 3
+
+# The JPEG 2000 codec stands in for the optimized C library it replaced, and reading a
+# document decodes every image it uses, so it is optimized even in debug builds.
+[profile.dev.package.pdf-jpeg2000]
+opt-level = 3
+
+[profile.dev.package.pdf-mq-coder]
+opt-level = 3
+
+[profile.regression.package.pdf-jpeg2000]
+opt-level = 3
+
+[profile.regression.package.pdf-mq-coder]
+opt-level = 3

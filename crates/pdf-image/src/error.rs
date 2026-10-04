@@ -1,6 +1,7 @@
 use pdf_color_space::error::ColorSpaceError;
 use pdf_decode::DecodeError;
 use pdf_filter::error::FilterError;
+use pdf_jpeg2000::Jpeg2000Error;
 use thiserror::Error;
 
 /// Errors that can occur while parsing or decoding PDF image data.
@@ -12,6 +13,14 @@ pub enum PdfImageError {
     ColorSpace(#[from] ColorSpaceError),
     #[error("{0}")]
     Filter(#[from] FilterError),
+    #[error("JPEG 2000 image data could not be decoded: {0}")]
+    Jpx(#[from] Jpeg2000Error),
+    #[error("JPEG 2000 image is too large to store: {pixels} pixels across {channels} channels")]
+    JpxImageTooLarge { pixels: usize, channels: usize },
+    #[error("inline images may not use the JPXDecode filter")]
+    InlineJpxFilter,
+    #[error("unsupported /SMaskInData value: {value} (supported: 0, 1, 2)")]
+    UnsupportedSMaskInData { value: i64 },
     #[error("invalid soft mask XObject: /SMask must reference an image XObject")]
     InvalidSoftMaskXObject,
     #[error("invalid image dimensions: width={width}, height={height}")]

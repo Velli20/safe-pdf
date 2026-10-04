@@ -6,7 +6,7 @@ use pdf_object_reader::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
 };
 
-use crate::error::PdfImageError;
+use crate::{error::PdfImageError, smask_in_data::SMaskInData};
 
 /// Stores the normalized metadata needed to decode an image stream.
 #[derive(Debug, Clone)]
@@ -26,6 +26,8 @@ pub(crate) struct ImageMetadata {
     pub(crate) filters: Option<Filters>,
     /// Optional mapping from encoded component samples to decoded component values.
     pub(crate) decode: Option<DecodeMap>,
+    /// How a JPX image's own opacity channel is used.
+    pub(crate) smask_in_data: SMaskInData,
 }
 
 impl ImageMetadata {
@@ -52,6 +54,7 @@ impl ImageMetadata {
             .optional_boolean(b"ImageMask", objects)?
             .unwrap_or(false);
         let filters = Filters::from_dictionary(dictionary, objects)?;
+        let jpx = filters.as_ref().is_some_and(Filters::has_jpx_filter);
         let bits_per_component =
             read_bits_per_component(dictionary, objects, image_mask, filters.as_ref())?;
         let color_space = if image_mask {
@@ -59,7 +62,14 @@ impl ImageMetadata {
         } else {
             ColorSpace::from_dictionary(dictionary, objects)?
         };
-        validate_bits_per_component(bits_per_component, image_mask, color_space.as_ref())?;
+        // PDF ignores /BitsPerComponent for a JPX image: the codestream states
+        // the precision of every component, so the entry constrains nothing.
+        if !jpx {
+            validate_bits_per_component(bits_per_component, image_mask, color_space.as_ref())?;
+        }
+        let smask_in_data = dictionary
+            .optional_number::<i64>(b"SMaskInData", objects)?
+            .map_or_else(|| Ok(SMaskInData::default()), SMaskInData::try_from)?;
         let num_color_components = color_space
             .as_ref()
             .map_or(1, ColorSpace::num_color_components);
@@ -72,6 +82,7 @@ impl ImageMetadata {
             image_mask,
             filters,
             decode,
+            smask_in_data,
         })
     }
 }

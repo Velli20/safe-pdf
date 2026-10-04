@@ -1,69 +1,59 @@
 //! JBIG2 arithmetic decoder state and facade.
 //!
 //! This module owns the decoder state and construction path for ITU-T T.88 /
-//! ISO/IEC 14492 Annex A arithmetic streams. The actual Annex A.1 coding
-//! step, byte input, context pools, Annex A.2 integers, and Annex A.3 IAID
-//! procedures are split into sibling modules.
+//! ISO/IEC 14492 Annex A arithmetic streams. The Annex A.1 coding step itself
+//! is the MQ coder shared with JPEG 2000 and lives in `pdf-mq-coder`; the
+//! context pools, Annex A.2 integers, and Annex A.3 IAID procedures are split
+//! into sibling modules.
 
-use crate::arith_decoder::{
-    byte_input::ARITHMETIC_BYTE_FALLBACK,
-    coding::{DEFAULT_INTERVAL, INITIAL_CODE_REGISTER_SHIFT, POST_BYTE_IN_CODE_SHIFT},
-    context::JBig2ArithCtx,
-};
+use crate::arith_decoder::segment_source::SegmentSource;
 use crate::error::Jbig2Error;
+use pdf_mq_coder::{MqContext, MqRegisters};
 use pdf_utils::BitReader;
 
 /// JBIG2 arithmetic decoder state for T.88 Annex A streams.
 ///
-/// The decoder keeps the Annex A.1 code and interval registers, byte-input
-/// marker state, and all adaptive context pools needed by generic-region,
-/// integer, and IAID decoding procedures.
+/// The decoder keeps the shared MQ registers alongside all the adaptive
+/// context pools needed by generic-region, integer, and IAID decoding
+/// procedures.
 #[derive(Debug)]
 pub(crate) struct JBig2ArithDecoder<'stream, 'data> {
     /// Shared JBIG2 segment bit reader that supplies arithmetic bytes.
     pub(super) stream: &'stream mut BitReader<'data>,
     /// Optional exclusive byte position limiting decoding to the current segment.
     pub(super) byte_limit: Option<usize>,
-    /// Whether decoding was initialized without any real arithmetic byte.
-    pub(super) complete: bool,
-    /// Most recently loaded byte for Annex A.1 `BYTEIN`.
-    pub(super) current_byte: u8,
-    /// Annex A.1 code register `C`.
-    pub(super) code: u32,
-    /// Annex A.1 interval register `A`.
-    pub(super) interval: u32,
-    /// Annex A.1 byte-input bit counter `CT`.
-    pub(super) bit_count: u32,
+    /// Interval, code, and byte-input state of the shared MQ coder.
+    pub(super) registers: MqRegisters,
     /// Generic-region contexts used by T.88 section 6.2.5.7.
-    pub(super) generic_region_contexts: Vec<JBig2ArithCtx>,
+    pub(super) generic_region_contexts: Vec<MqContext>,
     /// `IADT` contexts for text-region delta `T` arithmetic integers.
-    pub(super) iadt_contexts: Vec<JBig2ArithCtx>,
+    pub(super) iadt_contexts: Vec<MqContext>,
     /// `IAFS` contexts for first-symbol `S` arithmetic integers.
-    pub(super) iafs_contexts: Vec<JBig2ArithCtx>,
+    pub(super) iafs_contexts: Vec<MqContext>,
     /// `IAIT` contexts for text-instance `T` arithmetic integers.
-    pub(super) iait_contexts: Vec<JBig2ArithCtx>,
+    pub(super) iait_contexts: Vec<MqContext>,
     /// `IADS` contexts for text delta `S` arithmetic integers.
-    pub(super) iads_contexts: Vec<JBig2ArithCtx>,
+    pub(super) iads_contexts: Vec<MqContext>,
     /// `IADH` contexts for symbol-height delta arithmetic integers.
-    pub(super) iadh_contexts: Vec<JBig2ArithCtx>,
+    pub(super) iadh_contexts: Vec<MqContext>,
     /// `IADW` contexts for symbol-width delta arithmetic integers.
-    pub(super) iadw_contexts: Vec<JBig2ArithCtx>,
+    pub(super) iadw_contexts: Vec<MqContext>,
     /// `IAEX` contexts for symbol export run-length arithmetic integers.
-    pub(super) iaex_contexts: Vec<JBig2ArithCtx>,
+    pub(super) iaex_contexts: Vec<MqContext>,
     /// `IAAI` contexts for refinement aggregate instance counts.
-    pub(super) iaai_contexts: Vec<JBig2ArithCtx>,
+    pub(super) iaai_contexts: Vec<MqContext>,
     /// `IARDW` contexts for refinement width deltas.
-    pub(super) iardw_contexts: Vec<JBig2ArithCtx>,
+    pub(super) iardw_contexts: Vec<MqContext>,
     /// `IARDH` contexts for refinement height deltas.
-    pub(super) iardh_contexts: Vec<JBig2ArithCtx>,
+    pub(super) iardh_contexts: Vec<MqContext>,
     /// `IARDX` contexts for refinement x deltas.
-    pub(super) iardx_contexts: Vec<JBig2ArithCtx>,
+    pub(super) iardx_contexts: Vec<MqContext>,
     /// `IARDY` contexts for refinement y deltas.
-    pub(super) iardy_contexts: Vec<JBig2ArithCtx>,
+    pub(super) iardy_contexts: Vec<MqContext>,
     /// `IARI` contexts for refinement instance flags.
-    pub(super) iari_contexts: Vec<JBig2ArithCtx>,
+    pub(super) iari_contexts: Vec<MqContext>,
     /// Annex A.3 IAID context tree.
-    pub(super) iaid_contexts: Vec<JBig2ArithCtx>,
+    pub(super) iaid_contexts: Vec<MqContext>,
     /// Code length used to size the current Annex A.3 IAID context tree.
     pub(super) iaid_code_length: Option<u8>,
 }
@@ -94,16 +84,12 @@ impl<'stream, 'data> JBig2ArithDecoder<'stream, 'data> {
 
     /// Initialize Annex A.1 decoder state with an optional segment byte limit.
     fn new_with_limit(stream: &'stream mut BitReader<'data>, byte_limit: Option<usize>) -> Self {
-        let has_initial_byte = Self::has_current_byte(stream, byte_limit);
-        let current_byte = Self::peek_byte_or(stream, byte_limit, ARITHMETIC_BYTE_FALLBACK);
-        let mut decoder = Self {
-            stream,
+        let mut source = SegmentSource::new(stream, byte_limit);
+        let registers = MqRegisters::new(&mut source);
+        Self {
+            stream: source.into_stream(),
             byte_limit,
-            complete: !has_initial_byte,
-            current_byte,
-            code: u32::from(current_byte ^ ARITHMETIC_BYTE_FALLBACK) << INITIAL_CODE_REGISTER_SHIFT,
-            interval: DEFAULT_INTERVAL,
-            bit_count: 0,
+            registers,
             generic_region_contexts: Vec::new(),
             iadt_contexts: Vec::new(),
             iafs_contexts: Vec::new(),
@@ -120,11 +106,31 @@ impl<'stream, 'data> JBig2ArithDecoder<'stream, 'data> {
             iari_contexts: Vec::new(),
             iaid_contexts: Vec::new(),
             iaid_code_length: None,
-        };
-        decoder.byte_in();
-        decoder.code = decoder.code.wrapping_shl(POST_BYTE_IN_CODE_SHIFT);
-        decoder.bit_count = decoder.bit_count.saturating_sub(POST_BYTE_IN_CODE_SHIFT);
-        decoder
+        }
+    }
+
+    /// Decode one binary decision against an adaptive context.
+    ///
+    /// The coding step is the MQ procedure of T.88 Annex A.1, shared with
+    /// JPEG 2000; only the context pools above it are JBIG2's own.
+    pub(super) fn decode(&mut self, context: &mut MqContext) -> Result<u8, Jbig2Error> {
+        let Self {
+            stream,
+            byte_limit,
+            registers,
+            ..
+        } = self;
+        let mut source = SegmentSource::new(stream, *byte_limit);
+        Ok(u8::from(registers.decode(&mut source, context)?))
+    }
+
+    /// Return whether Annex A.1 byte input has reached the stream or segment end.
+    #[cfg(test)]
+    pub(super) fn stream_exhausted(&self) -> bool {
+        self.stream.exhausted()
+            || self
+                .byte_limit
+                .is_some_and(|limit| self.stream.byte_pos() >= limit)
     }
 }
 
