@@ -45,6 +45,8 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     glyph_cache: HashMap<(FontFaceId, GlyphId, u32), Arc<PdfPath>>,
     /// The stack of graphics states, supporting save/restore semantics.
     pub(crate) canvas_stack: Vec<CanvasState>,
+    /// Stack depth that a restore in the current content stream may not pop below.
+    restore_floor: usize,
     /// Content streams being drawn, used to bound nesting and refuse cycles.
     content_stream_render_state: ContentStreamRenderState,
     /// Optional owned buffer for extracted text glyph positions.
@@ -101,6 +103,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             font_cache: HashMap::new(),
             glyph_cache: HashMap::new(),
             canvas_stack,
+            restore_floor: 1,
             content_stream_render_state: ContentStreamRenderState::default(),
             text_glyphs: None,
         })
@@ -216,6 +219,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             font_cache: HashMap::new(),
             glyph_cache: HashMap::new(),
             canvas_stack,
+            restore_floor: 1,
             // The recording continues this canvas's active streams, so a cycle
             // through a pattern or soft mask is still detected inside it.
             content_stream_render_state: std::mem::take(&mut self.content_stream_render_state),
@@ -655,7 +659,10 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         result
     }
 
-    /// Renders an admitted content stream and balances graphics state on failure.
+    /// Renders an admitted content stream and balances graphics state on exit.
+    ///
+    /// Restores in the stream cannot pop states saved by its caller, and states the
+    /// stream saved without restoring are restored when it ends.
     fn render_admitted_content_stream(
         &mut self,
         content_stream: &ContentStream,
@@ -664,7 +671,9 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         resources: Option<Arc<Resources>>,
         mut filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
     ) -> Result<(), PdfCanvasError> {
+        let depth = self.canvas_stack.len();
         self.save()?;
+        let outer_floor = std::mem::replace(&mut self.restore_floor, self.canvas_stack.len());
 
         let result = (|| {
             if let Some(mat) = mat {
@@ -697,8 +706,19 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             Ok(())
         })();
 
-        let restore_result = self.restore();
+        self.restore_floor = outer_floor;
+        let restore_result = self.restore_to(depth);
         result.and(restore_result)
+    }
+
+    /// Restores saved graphics states until the stack is `depth` states deep.
+    ///
+    /// Stops at the first failed restore, which leaves the stack unchanged.
+    fn restore_to(&mut self, depth: usize) -> Result<(), PdfCanvasError> {
+        while self.canvas_stack.len() > depth.max(self.restore_floor) {
+            self.restore()?;
+        }
+        Ok(())
     }
 
     /// Saves the entire current graphics state onto a stack.
@@ -716,14 +736,14 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     ///
     /// If the restored state included a clipping path, the clipping path is reset on the backend.
     pub(crate) fn restore(&mut self) -> Result<(), PdfCanvasError> {
-        // Do not allow popping the initial/base graphics state. There is no
-        // corresponding backend `save()` for it, so ignore unmatched restore
-        // operations to keep the canvas stack and backend stack in sync.
-        if self.canvas_stack.len() <= 1 {
+        // Ignore unmatched restores: they may not pop the initial state, which has
+        // no backend `save()`, nor states saved by the caller of the current
+        // content stream. This keeps the canvas and backend stacks in sync.
+        if self.canvas_stack.len() <= self.restore_floor {
             return Ok(());
         }
 
-        // At this point there is at least one saved state beyond the base,
+        // At this point the top state was saved within the current stream,
         // so popping is safe and has a matching backend `save()`.
         self.canvas.restore()?;
         self.canvas_stack.pop();
