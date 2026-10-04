@@ -81,6 +81,19 @@ pub fn decode_sample_bytes<'a>(
         return Ok(Cow::Borrowed(samples));
     }
 
+    if bits_per_sample < 8 {
+        let (samples_per_row, rows) = match layout {
+            SampleLayout::Contiguous { sample_count } => (sample_count, 1),
+            SampleLayout::RowAligned {
+                width,
+                height,
+                samples_per_pixel,
+            } => (width.saturating_mul(samples_per_pixel), height),
+        };
+        return unpack_sub_byte_samples(data, bits_per_sample, samples_per_row, rows)
+            .map(Cow::Owned);
+    }
+
     let samples = decode_sample_codes(data, bits_per_sample, layout)?
         .into_iter()
         .map(|sample| u8::try_from(sample).map_err(|_| DecodeError::InvalidSampleData))
@@ -241,6 +254,41 @@ where
     let mut out = Vec::with_capacity(sample_count);
     for chunk in data.chunks_exact(bytes_per_sample).take(sample_count) {
         out.push(decode_chunk(chunk));
+    }
+    Ok(out)
+}
+
+/// Unpacks 1-, 2- or 4-bit samples straight into one byte each, dropping the padding bits
+/// at the end of every row.
+fn unpack_sub_byte_samples(
+    data: &[u8],
+    bits_per_sample: usize,
+    samples_per_row: usize,
+    rows: usize,
+) -> Result<Vec<u8>, DecodeError> {
+    let bytes_per_row = samples_per_row.saturating_mul(bits_per_sample).div_ceil(8);
+    ensure_len(data, rows.saturating_mul(bytes_per_row))?;
+    if bytes_per_row == 0 {
+        return Ok(Vec::new());
+    }
+    let bits = u32::try_from(bits_per_sample)
+        .map_err(|_| DecodeError::InvalidBitsPerSample { bits_per_sample })?;
+    let mask = 1u8
+        .checked_shl(bits)
+        .ok_or(DecodeError::InvalidBitsPerSample { bits_per_sample })?
+        .wrapping_sub(1);
+    // Shifts that bring each sample of a byte, most significant first, to the low bits.
+    let shifts: Vec<u32> = (0..8u32).step_by(bits_per_sample).rev().collect();
+
+    let mut out = Vec::with_capacity(samples_per_row.saturating_mul(rows));
+    for row in data.chunks(bytes_per_row).take(rows) {
+        let row_end = out.len().saturating_add(samples_per_row);
+        for byte in row {
+            for shift in &shifts {
+                out.push((byte >> shift) & mask);
+            }
+        }
+        out.truncate(row_end);
     }
     Ok(out)
 }
