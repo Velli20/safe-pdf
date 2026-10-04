@@ -1,6 +1,6 @@
 use bytes::Bytes;
 
-use crate::PixelFormat;
+use crate::{PixelFormat, transform::Transform};
 
 /// Represents render-ready raster image pixels.
 #[derive(Debug, Clone, PartialEq)]
@@ -13,6 +13,8 @@ pub struct Image {
     pub height: usize,
     /// The pixel format of the image data.
     pub pixel_format: PixelFormat,
+    /// Whether the PDF asks for the image to be smoothed when it is enlarged (`/Interpolate`).
+    pub interpolate: bool,
 }
 
 impl Image {
@@ -38,6 +40,30 @@ impl Image {
         Some([width, height])
     }
 
+    /// Smallest ratio of device area to source area at which an image drawn without
+    /// `/Interpolate` stops being smoothed; milder enlargements are still smoothed.
+    const PIXEL_REPLICATION_AREA_RATIO: f64 = 8.0;
+
+    /// Returns whether drawing through `unit_to_device` enlarges the image so much,
+    /// without `/Interpolate`, that each source pixel is replicated rather than smoothed.
+    ///
+    /// `unit_to_device` maps the image's unit square to device pixels. Replication needs
+    /// both axes to grow and the device area to reach
+    /// [`Self::PIXEL_REPLICATION_AREA_RATIO`] times the source area; otherwise the image
+    /// is smoothed, and an axis that shrinks averages the source pixels it covers.
+    pub fn replicates_pixels(&self, unit_to_device: &Transform) -> bool {
+        if self.interpolate {
+            return false;
+        }
+        let source_len = |len: usize| f64::from(u32::try_from(len).unwrap_or(u32::MAX));
+        let (source_width, source_height) = (source_len(self.width), source_len(self.height));
+        let [device_width, device_height] = unit_to_device.axis_scales().map(f64::from);
+        device_width >= source_width
+            && device_height >= source_height
+            && device_width * device_height
+                >= Self::PIXEL_REPLICATION_AREA_RATIO * source_width * source_height
+    }
+
     /// Creates a render-ready image from decoded component samples.
     ///
     /// Single-component images without a soft mask retain their grayscale
@@ -48,6 +74,7 @@ impl Image {
         height: usize,
         num_color_components: usize,
         soft_mask: Option<&Self>,
+        interpolate: bool,
     ) -> Self {
         let convert_to_rgba = soft_mask.is_some() || num_color_components != 1;
         if !convert_to_rgba {
@@ -56,6 +83,7 @@ impl Image {
                 width,
                 height,
                 pixel_format: PixelFormat::Gray8,
+                interpolate,
             };
         }
 
@@ -70,6 +98,7 @@ impl Image {
             width,
             height,
             pixel_format: PixelFormat::RGBA8888,
+            interpolate,
         }
     }
 
@@ -237,6 +266,7 @@ mod tests {
             width: 1,
             height: 1,
             pixel_format: PixelFormat::RGBA8888,
+            interpolate: false,
         };
 
         assert_eq!(image.clone().data.as_ptr(), data.as_ptr());
@@ -245,7 +275,7 @@ mod tests {
     #[test]
     fn grayscale_without_soft_mask_reuses_samples() {
         let data = Bytes::from_static(&[12, 34]);
-        let image = Image::from_decoded_samples(data.clone(), 2, 1, 1, None);
+        let image = Image::from_decoded_samples(data.clone(), 2, 1, 1, None, false);
 
         assert_eq!(image.data.as_ptr(), data.as_ptr());
         assert_eq!(image.pixel_format, PixelFormat::Gray8);
@@ -253,7 +283,7 @@ mod tests {
 
     #[test]
     fn rgb_samples_are_expanded_to_rgba() {
-        let image = Image::from_decoded_samples(vec![10, 20, 30].into(), 1, 1, 3, None);
+        let image = Image::from_decoded_samples(vec![10, 20, 30].into(), 1, 1, 3, None, false);
 
         assert_eq!(image.pixel_format, PixelFormat::RGBA8888);
         assert_eq!(image.data.as_ref(), &[10, 20, 30, 255]);
@@ -261,14 +291,14 @@ mod tests {
 
     #[test]
     fn cmyk_samples_are_converted_to_rgba() {
-        let image = Image::from_decoded_samples(vec![0, 0, 0, 0].into(), 1, 1, 4, None);
+        let image = Image::from_decoded_samples(vec![0, 0, 0, 0].into(), 1, 1, 4, None, false);
 
         assert_eq!(image.data.as_ref(), &[255, 255, 255, 255]);
     }
 
     #[test]
     fn uncommon_component_counts_use_available_color_channels() {
-        let image = Image::from_decoded_samples(vec![10, 20].into(), 1, 1, 2, None);
+        let image = Image::from_decoded_samples(vec![10, 20].into(), 1, 1, 2, None, false);
 
         assert_eq!(image.data.as_ref(), &[10, 20, 0, 255]);
     }
@@ -280,8 +310,10 @@ mod tests {
             width: 2,
             height: 1,
             pixel_format: PixelFormat::Gray8,
+            interpolate: false,
         };
-        let image = Image::from_decoded_samples(vec![0x20, 0xC0].into(), 2, 1, 1, Some(&soft_mask));
+        let image =
+            Image::from_decoded_samples(vec![0x20, 0xC0].into(), 2, 1, 1, Some(&soft_mask), false);
 
         assert_eq!(
             image.data.as_ref(),
@@ -296,8 +328,10 @@ mod tests {
             width: 1,
             height: 1,
             pixel_format: PixelFormat::Gray8,
+            interpolate: false,
         };
-        let image = Image::from_decoded_samples(vec![0x20, 0xC0].into(), 2, 1, 1, Some(&soft_mask));
+        let image =
+            Image::from_decoded_samples(vec![0x20, 0xC0].into(), 2, 1, 1, Some(&soft_mask), false);
 
         assert_eq!(
             image.data.as_ref(),
@@ -307,7 +341,7 @@ mod tests {
 
     #[test]
     fn zero_components_produce_an_empty_rgba_image() {
-        let image = Image::from_decoded_samples(vec![10, 20].into(), 1, 1, 0, None);
+        let image = Image::from_decoded_samples(vec![10, 20].into(), 1, 1, 0, None, false);
 
         assert_eq!(image.pixel_format, PixelFormat::RGBA8888);
         assert!(image.data.is_empty());
@@ -315,14 +349,16 @@ mod tests {
 
     #[test]
     fn incomplete_trailing_components_are_ignored() {
-        let image = Image::from_decoded_samples(vec![10, 20, 30, 40, 50].into(), 2, 1, 3, None);
+        let image =
+            Image::from_decoded_samples(vec![10, 20, 30, 40, 50].into(), 2, 1, 3, None, false);
 
         assert_eq!(image.data.as_ref(), &[10, 20, 30, 255]);
     }
 
     #[test]
     fn conversion_stops_at_the_declared_pixel_count() {
-        let image = Image::from_decoded_samples(vec![10, 20, 30, 40, 50, 60].into(), 1, 1, 3, None);
+        let image =
+            Image::from_decoded_samples(vec![10, 20, 30, 40, 50, 60].into(), 1, 1, 3, None, false);
 
         assert_eq!(image.data.as_ref(), &[10, 20, 30, 255]);
     }

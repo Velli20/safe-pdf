@@ -21,6 +21,7 @@ fn benchmark_image_conversion(criterion: &mut Criterion) {
         width: WIDTH,
         height: HEIGHT,
         pixel_format: PixelFormat::Gray8,
+        interpolate: false,
     };
 
     let mut group = criterion.benchmark_group("image_conversion");
@@ -34,6 +35,7 @@ fn benchmark_image_conversion(criterion: &mut Criterion) {
                 HEIGHT,
                 1,
                 Some(&soft_mask),
+                false,
             ))
         });
     });
@@ -45,6 +47,7 @@ fn benchmark_image_conversion(criterion: &mut Criterion) {
                 HEIGHT,
                 3,
                 None,
+                false,
             ))
         });
     });
@@ -56,6 +59,7 @@ fn benchmark_image_conversion(criterion: &mut Criterion) {
                 HEIGHT,
                 4,
                 None,
+                false,
             ))
         });
     });
@@ -67,6 +71,7 @@ fn benchmark_image_conversion(criterion: &mut Criterion) {
                 HEIGHT,
                 2,
                 None,
+                false,
             ))
         });
     });

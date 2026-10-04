@@ -227,6 +227,7 @@ mod tests {
             width: 2,
             height: 1,
             pixel_format: PixelFormat::RGBA8888,
+            interpolate: false,
         };
         let recording = Arc::new(RecordingCanvas::new(2.0, 1.0));
         let alpha = MaskLayer::new(

@@ -91,6 +91,7 @@ fn decode_normalized_image_with_metadata(
             metadata.size.width(),
             metadata.size.height(),
             soft_mask,
+            metadata.interpolate,
         ));
     }
     Ok(Image::from_decoded_samples(
@@ -99,11 +100,18 @@ fn decode_normalized_image_with_metadata(
         metadata.size.height(),
         num_color_components,
         soft_mask,
+        metadata.interpolate,
     ))
 }
 
 /// Builds a render image from color-space-converted RGBA and combines its alpha with `/SMask`.
-fn image_from_rgba(data: Bytes, width: usize, height: usize, soft_mask: Option<&Image>) -> Image {
+fn image_from_rgba(
+    data: Bytes,
+    width: usize,
+    height: usize,
+    soft_mask: Option<&Image>,
+    interpolate: bool,
+) -> Image {
     let byte_len = width
         .saturating_mul(height)
         .saturating_mul(4)
@@ -114,6 +122,7 @@ fn image_from_rgba(data: Bytes, width: usize, height: usize, soft_mask: Option<&
             width,
             height,
             pixel_format: pdf_graphics::PixelFormat::RGBA8888,
+            interpolate,
         };
     }
 
@@ -134,6 +143,7 @@ fn image_from_rgba(data: Bytes, width: usize, height: usize, soft_mask: Option<&
         width,
         height,
         pixel_format: pdf_graphics::PixelFormat::RGBA8888,
+        interpolate,
     }
 }
 
@@ -511,6 +521,7 @@ mod tests {
             width: 1,
             height: 1,
             pixel_format: PixelFormat::Gray8,
+            interpolate: false,
         };
 
         let image = decode_normalized_image(
@@ -769,6 +780,7 @@ mod tests {
             height: 1,
             data: vec![0x10, 0xE0].into(),
             pixel_format: PixelFormat::Gray8,
+            interpolate: false,
         };
 
         let image = decode_normalized_image(

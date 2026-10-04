@@ -95,6 +95,7 @@ impl SurfacePool {
             width: usize::try_from(size.width).map_err(|_| Error::ResourceLimit)?,
             height: usize::try_from(size.height).map_err(|_| Error::ResourceLimit)?,
             pixel_format: PixelFormat::RGBA8888,
+            interpolate: false,
             data: data.data().0.into(),
         };
         Ok(BudgetedImage::new(image, reservation))
@@ -161,6 +162,7 @@ mod tests {
                 width: 1,
                 height: 1,
                 pixel_format: PixelFormat::RGBA8888,
+                interpolate: false,
                 data: vec![0; 4].into(),
             },
             pool.scratch(4).unwrap(),

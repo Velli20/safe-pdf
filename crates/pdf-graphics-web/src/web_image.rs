@@ -19,6 +19,7 @@ pub(crate) struct ImageDraw<'a> {
     pool: &'a SurfacePool,
     image: &'a Image,
     placement: ImagePlacement,
+    smoothing: bool,
     composite: &'static str,
 }
 
@@ -29,11 +30,16 @@ impl<'a> ImageDraw<'a> {
         mode: Option<BlendMode>,
         transform: Transform,
     ) -> WebResult<Self> {
+        let unit_to_backing = backend
+            .viewport
+            .device_to_backing()
+            .post_concatenated(&transform);
         Ok(Self {
             context: &backend.context,
             pool: &backend.surfaces,
             image,
             placement: ImagePlacement::new(transform)?,
+            smoothing: !image.replicates_pixels(&unit_to_backing),
             composite: web_paint::blend(mode.as_ref()),
         })
     }
@@ -44,7 +50,7 @@ impl<'a> ImageDraw<'a> {
         self.context.set_global_alpha(1.0);
         self.context
             .set_global_composite_operation(self.composite)?;
-        self.context.set_image_smoothing_enabled(true);
+        self.context.set_image_smoothing_enabled(self.smoothing);
         self.placement.draw(self.context, &surface)
     }
 }
