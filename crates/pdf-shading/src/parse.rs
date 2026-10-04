@@ -6,6 +6,7 @@
 
 use pdf_color_space::color_space::ColorSpace;
 use pdf_function::function::{Function, FunctionImpl};
+use pdf_graphics::color::Color;
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ReadResult, dictionary::Dictionary,
     object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
@@ -94,11 +95,17 @@ fn parse_axial(
     let color_space = required_color_space(dictionary, objects)?;
     let function = Function::parse(dictionary.get_or_err(b"Function")?, objects)?;
     let color_stops = ColorStops::from_function_domain(&function, &color_space, domain)?;
+    let extend = read_extend(dictionary, objects)?;
+    let background = read_background(dictionary, objects, &color_space)?;
+    let bbox = dictionary.optional_bbox(objects)?;
 
     Ok(Shading::Axial {
         color_space,
         coords,
         color_stops,
+        extend,
+        background,
+        bbox,
     })
 }
 
@@ -115,13 +122,47 @@ fn parse_radial(
     let bbox = dictionary.optional_bbox(objects)?;
     let function = Function::parse(dictionary.get_or_err(b"Function")?, objects)?;
     let color_stops = ColorStops::from_function_domain(&function, &color_space, domain)?;
+    let extend = read_extend(dictionary, objects)?;
+    let background = read_background(dictionary, objects, &color_space)?;
 
     Ok(Shading::Radial {
         color_space,
         coords,
         color_stops,
+        extend,
+        background,
         bbox,
     })
+}
+
+/// Reads `/Extend`, which says whether an axial or radial shading continues past its
+/// start and end. Both ends default to not extending.
+fn read_extend(
+    dictionary: &Dictionary,
+    objects: &dyn ObjectResolver,
+) -> Result<[bool; 2], PdfShadingError> {
+    let Some(extend) = dictionary.optional_array(b"Extend", objects)? else {
+        return Ok([false; 2]);
+    };
+    let extend = extend.as_slice();
+    Ok([
+        extend.optional_boolean(0, objects)?.unwrap_or(false),
+        extend.optional_boolean(1, objects)?.unwrap_or(false),
+    ])
+}
+
+/// Reads `/Background` as a color in the shading color space.
+///
+/// A background whose components the color space rejects is ignored rather than
+/// failing the shading.
+fn read_background(
+    dictionary: &Dictionary,
+    objects: &dyn ObjectResolver,
+    color_space: &ColorSpace,
+) -> Result<Option<Color>, PdfShadingError> {
+    Ok(dictionary
+        .optional_vec_of::<f32>(b"Background", objects)?
+        .and_then(|components| color_space.apply(&components).ok()))
 }
 
 /// Reads the required color space shared by shading types 2 through 7.

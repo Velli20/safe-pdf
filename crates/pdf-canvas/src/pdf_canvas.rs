@@ -1,6 +1,7 @@
 //! PDF operator interpretation and painting orchestration.
 use std::{collections::HashMap, sync::Arc};
 
+use crate::shading::{shading_bbox_clip, with_clip};
 use crate::{
     CanvasPath,
     canvas_backend::{CanvasBackend, Shader},
@@ -281,6 +282,8 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     ///
     /// - `shading`: The shading pattern definition.
     /// - `matrix`: Optional transformation matrix for the shading.
+    /// - `use_background`: Whether the shading's `/Background` fills uncovered areas,
+    ///   which applies to shading patterns but not to the `sh` operator.
     ///
     /// # Returns
     ///
@@ -289,10 +292,39 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         &mut self,
         shading: &Shading,
         transform: &Option<Transform>,
+        use_background: bool,
     ) -> Result<Shader, PdfCanvasError> {
-        build_shading_paint(shading, *transform)
+        build_shading_paint(shading, *transform, use_background)
             .map(Shader::Shading)
             .map_err(|error| PdfCanvasError::UnsupportedFeature(error.to_string()))
+    }
+
+    /// Returns the transform that maps `pattern` space into logical device space.
+    ///
+    /// Patterns are anchored to their parent stream's default user space,
+    /// independently of later `cm` operators. Paths already use logical
+    /// device coordinates, so shaders are prepared in the same coordinates.
+    fn pattern_transform(state: &CanvasState, pattern: &Pattern) -> Transform {
+        let transform = state.pattern_parent_transform;
+        pattern
+            .matrix()
+            .map_or(transform, |matrix| transform.post_concatenated(matrix))
+    }
+
+    /// Returns the device-space clip of the active shading pattern's `/BBox`, if any.
+    fn pattern_bbox_clip(&self, for_stroke: bool) -> Result<Option<PdfPath>, PdfCanvasError> {
+        let state = self.current_state()?;
+        let pattern = if for_stroke {
+            &state.stroke_pattern
+        } else {
+            &state.fill_pattern
+        };
+        Ok(match pattern.as_deref() {
+            Some(pattern @ Pattern::Shading { shading, .. }) => {
+                shading_bbox_clip(shading, &Self::pattern_transform(state, pattern))
+            }
+            _ => None,
+        })
     }
 
     /// Computes the current shader based on the active pattern.
@@ -311,18 +343,11 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         let Some(pattern) = pattern else {
             return Ok(None);
         };
-
-        // Patterns are anchored to their parent stream's default user space,
-        // independently of later `cm` operators. Paths already use logical
-        // device coordinates, so prepare the shader in the same coordinates.
-        let transform = state.pattern_parent_transform;
-        let transform = pattern
-            .matrix()
-            .map_or(transform, |matrix| transform.post_concatenated(matrix));
+        let transform = Self::pattern_transform(state, &pattern);
 
         match pattern.as_ref() {
             Pattern::Shading { shading, .. } => {
-                let shader = self.build_shading_shader(shading, &Some(transform))?;
+                let shader = self.build_shading_shader(shading, &Some(transform), true)?;
                 Ok(Some(shader))
             }
             Pattern::Tiling {
@@ -414,6 +439,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 paint.fill_color,
                 paint.blend_mode.clone(),
                 self.compute_shader(false)?,
+                self.pattern_bbox_clip(false)?,
             ))
         } else {
             None
@@ -426,16 +452,21 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 state.paint.line_width * state.transform.sx,
                 StrokeStyle::from_paint(&state.paint, state.transform.sx)?,
                 self.compute_shader(true)?,
+                self.pattern_bbox_clip(true)?,
             ))
         } else {
             None
         };
         self.with_soft_mask(|backend| {
-            if let Some((color, blend, shader)) = fill {
-                backend.fill_path(path, fill_type, color, shader.as_ref(), blend)?;
+            if let Some((color, blend, shader, clip)) = fill {
+                with_clip(backend, clip.as_ref(), |backend| {
+                    backend.fill_path(path, fill_type, color, shader.as_ref(), blend)
+                })?;
             }
-            if let Some((color, blend, width, style, shader)) = stroke {
-                backend.stroke_path(path, color, width, &style, shader.as_ref(), blend)?;
+            if let Some((color, blend, width, style, shader, clip)) = stroke {
+                with_clip(backend, clip.as_ref(), |backend| {
+                    backend.stroke_path(path, color, width, &style, shader.as_ref(), blend)
+                })?;
             }
             Ok(())
         })

@@ -18,7 +18,7 @@ use pdf_graphics::{Image, PixelFormat, point::Point, rect::Rect, transform::Tran
 /// independently of the bounds' dimensions. Pixels are packed in row-major order,
 /// with the first row sampling nearest `bounds.top`.
 ///
-/// Gradient parameters are clamped to `0.0..=1.0` before interpolating stops.
+/// Gradient parameters past the stops take the nearest end stop's color.
 /// Radial samples without a valid circle intersection are transparent. Raster
 /// paints use nearest-neighbor sampling in source-pixel coordinates. Samples outside
 /// the source image's half-open bounds are transparent.
@@ -182,8 +182,8 @@ fn sample(paint: &ShadingPaint, p: Point) -> Result<[u8; 4], Error> {
                 .ok_or(Error::InvalidInput("raster sample"));
         }
     };
-    // Extend the gradient at its endpoints; duplicate-stop handling lives in interpolate.
-    interpolate(t.clamp(0.0, 1.0), positions, colors)
+    // Pad past the end stops; duplicate-stop handling lives in interpolate.
+    interpolate(t, positions, colors)
 }
 
 /// Applies a transform and rejects arithmetic overflow or other nonfinite coordinates.

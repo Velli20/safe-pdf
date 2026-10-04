@@ -68,6 +68,33 @@ impl ColorStops {
             positions: positions.into(),
         })
     }
+
+    /// Returns stops that paint `outside` past each end that does not extend.
+    ///
+    /// Each such end gets a hard stop holding `outside`. Backends pad past the end
+    /// stops, so the area beyond that end takes `outside` instead of the end color.
+    pub fn bounded(&self, extend: [bool; 2], outside: Color) -> Self {
+        let [extend_start, extend_end] = extend;
+        if extend_start && extend_end {
+            return self.clone();
+        }
+        let start = (!extend_start).then_some((0.0, outside));
+        let end = (!extend_end).then_some((1.0, outside));
+        let (positions, colors): (Vec<f32>, Vec<Color>) = start
+            .into_iter()
+            .chain(
+                self.positions
+                    .iter()
+                    .copied()
+                    .zip(self.colors.iter().copied()),
+            )
+            .chain(end)
+            .unzip();
+        Self {
+            colors: colors.into(),
+            positions: positions.into(),
+        }
+    }
 }
 
 impl TryFrom<&Function> for ColorStops {
