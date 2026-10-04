@@ -126,8 +126,13 @@ pub fn run(args: &RenderArgs) -> Result<bool> {
     if let Some(password) = &args.password {
         command.arg("--password").arg(password);
     }
-    let (output, process) =
-        process::execute::<PageOutput>(command, Duration::from_secs(args.timeout))?;
+    let (output, process) = process::execute::<PageOutput>(
+        command,
+        process::Limits::new(
+            Duration::from_secs(args.timeout),
+            process::DEFAULT_MEMORY_LIMIT_MIB,
+        ),
+    )?;
     let (status, signature) = match &output {
         None => {
             let status = if process.timed_out {

@@ -133,7 +133,8 @@ cluster, filed as one issue.
 - **Mismatches**: the class of the most telling differing region and the paint of the
   Safe-PDF draw call there (shading type, tiling pattern, image format, blend mode, soft
   mask), for example `mismatch: extra_ink / fill (tiling pattern)`.
-- **Crashes and timeouts**: the panic location or the time limit, with the worker stage.
+- **Crashes and timeouts**: the panic location, the time limit or the memory limit, with the
+  worker stage.
   Safe-PDF's stages are `safe-read`, `safe-streams` (the content-stream graph),
   `safe-record`, `safe-replay` and `safe-trace`. A stage of the harness itself (`inventory`,
   `compare`, `regions`, `write`) is labelled `harness` rather than `crash`.
@@ -157,7 +158,10 @@ cluster, filed as one issue.
   `objects.txt`
 
 Workers run in separate processes. A crash, panic or timeout is therefore
-recorded with its stage and stderr, and it does not stop the run.
+recorded with its stage and stderr, and it does not stop the run. A worker is also killed
+once its resident memory passes `--memory-limit` (3072 MiB by default, 0 for none; checked
+through `/proc`, so Linux only) and recorded as a crash with `memory limit exceeded`, so a
+runaway read cannot exhaust the machine and take the run down with it.
 
 ## CI
 

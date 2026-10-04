@@ -90,6 +90,9 @@ enum Command {
         /// Seconds before a worker is killed.
         #[arg(long, default_value_t = 60)]
         timeout: u64,
+        /// MiB of resident memory before a worker is killed; 0 is unlimited.
+        #[arg(long, default_value_t = process::DEFAULT_MEMORY_LIMIT_MIB)]
+        memory_limit: u64,
         /// Fraction of mismatched pixels still counted as a pass.
         #[arg(long, default_value_t = 0.002)]
         tolerance: f64,
@@ -227,6 +230,7 @@ fn main() -> Result<ExitCode> {
             max_side,
             max_pages,
             timeout,
+            memory_limit,
             tolerance,
             reference,
             pdfium,
@@ -263,7 +267,7 @@ fn main() -> Result<ExitCode> {
                 scale,
                 max_side,
                 max_pages,
-                timeout: Duration::from_secs(timeout),
+                limits: process::Limits::new(Duration::from_secs(timeout), memory_limit),
                 tolerance,
                 pdfium,
                 reference_images: reference_images.map(std::path::absolute).transpose()?,
