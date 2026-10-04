@@ -292,7 +292,15 @@ impl<'a> PdfParser<'a> {
         self.skip_whitespace_and_comments();
 
         let Some(token) = self.tokenizer.peek() else {
-            return Ok(ObjectVariant::EndOfFile);
+            // A remaining byte without a token (such as `{` or `}`) is malformed input, not
+            // the end of the data; reporting it as EOF would leave the cursor in place.
+            return match self.tokenizer.peek_byte() {
+                None => Ok(ObjectVariant::EndOfFile),
+                Some(byte) => Err(ParserError::UnexpectedTokenAt {
+                    token: format!("{:?}", char::from(byte)),
+                    position: self.tokenizer.position,
+                }),
+            };
         };
 
         let value = match token {
@@ -785,5 +793,24 @@ mod tests {
                 String::from_utf8_lossy(input)
             );
         }
+    }
+
+    #[test]
+    fn parse_object_reports_untokenized_byte_instead_of_end_of_file() {
+        for input in [b" }".as_slice(), b"{"] {
+            let mut parser = PdfParser::from(input);
+            let result = parser.parse_object(&PassthroughResolver);
+            assert!(
+                matches!(result, Err(ParserError::UnexpectedTokenAt { .. })),
+                "Expected an error for `{}`, got {result:?}",
+                String::from_utf8_lossy(input)
+            );
+        }
+
+        let mut parser = PdfParser::from(b"  ".as_slice());
+        assert_eq!(
+            parser.parse_object(&PassthroughResolver),
+            Ok(ObjectVariant::EndOfFile)
+        );
     }
 }
