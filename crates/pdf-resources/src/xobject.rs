@@ -86,7 +86,8 @@ impl Resource {
         })
     }
 
-    /// Decodes an image XObject, or marks it unavailable when its dimensions are malformed.
+    /// Decodes an image XObject, or marks it unavailable when its dimensions are malformed
+    /// or its stream data cannot be decoded into samples.
     fn read_image(
         context: &mut ObjectContext<'_, impl ObjectAccess + ?Sized>,
         value: &ObjectVariant,
@@ -102,10 +103,11 @@ impl Resource {
             return Err(ObjectError::TypeMismatch("Stream", value.name()).into());
         };
         let soft_mask = Self::read_soft_mask_image(context, dictionary)?;
-        let image =
-            decode_image_xobject(dictionary, stream, context.source(), soft_mask.as_deref())
-                .map_err(PdfPagesError::from)?;
-        Ok(Self::from(image))
+        match decode_image_xobject(dictionary, stream, context.source(), soft_mask.as_deref()) {
+            Ok(image) => Ok(Self::from(image)),
+            Err(error) if error.is_unreadable_data() => Ok(Self::UnavailableImage),
+            Err(error) => Err(PdfPagesError::from(error).into()),
+        }
     }
 
     /// Reads an image's `/SMask`.

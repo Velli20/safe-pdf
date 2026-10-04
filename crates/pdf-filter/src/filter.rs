@@ -47,9 +47,9 @@ pub enum Filter {
     ASCII85Decode,
     /// The ASCII hexadecimal filter, which decodes ASCIIHex-encoded stream data.
     ///
-    /// ASCIIHex encodes arbitrary binary data as hexadecimal digits. ASCII
-    /// whitespace is ignored, `>` marks end-of-data, and a final single digit
-    /// is padded with a trailing `0` nibble.
+    /// ASCIIHex encodes arbitrary binary data as hexadecimal digits. Bytes
+    /// that are not hexadecimal digits are ignored, `>` marks end-of-data, and
+    /// a final single digit is padded with a trailing `0` nibble.
     ASCIIHexDecode,
     /// The LZW (Lempel-Ziv-Welch) filter, a lossless compression algorithm.
     ///
