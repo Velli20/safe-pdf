@@ -19,6 +19,7 @@ mod pdf_path_pen;
 mod query_cache;
 pub mod simple_font_spec;
 pub mod standard14;
+mod standard14_widths;
 pub mod true_type;
 pub mod type0;
 pub mod type0_font_spec;

@@ -143,10 +143,10 @@ where
 
     /// Resolves, positions, and appends one decoded glyph, then advances the pen.
     ///
-    /// PDF widths remain authoritative for native faces. Horizontal glyphs supplied by an
-    /// unrelated fallback face use that face's advance so its outlines retain their intended
-    /// spacing, falling back to the PDF width when the substitute does not contain the glyph.
-    /// Per-glyph fallbacks wider than an explicit PDF width are compressed to that width.
+    /// PDF widths remain authoritative for native faces. Horizontal glyphs supplied by a
+    /// substitute or fallback face advance by the explicit PDF width when the font lists one,
+    /// and are compressed to it when the face glyph is wider. Without an explicit width they use
+    /// the face's own advance, falling back to the PDF default when the face lacks the glyph.
     fn push(&mut self, decoded: DecodedGlyph<'_>) -> Result<(), E> {
         let resolved = if let Some(cached) = self.resolved_cache.get(&decoded.source_code) {
             cached.clone()
@@ -177,7 +177,7 @@ where
                 Ok(Some(advance)) => fallback_fit(
                     advance / units_per_em(face_metrics),
                     pdf_natural,
-                    decoded.explicit_width && matches!(resolved.face, ResolvedFace::Fallback(_)),
+                    decoded.explicit_width,
                 ),
                 Ok(None) | Err(pdf_font::FontError::MissingGlyph { .. }) => (pdf_natural, 1.0),
                 Err(error) => return Err(E::from(TextError::from(error))),
@@ -336,17 +336,22 @@ fn resolve_glyph(
 
 /// Chooses the advance and horizontal glyph scale for a glyph drawn from a fallback face.
 ///
-/// `face_width` is the fallback glyph's advance in em units. A per-glyph fallback that is wider
-/// than an explicit PDF width is compressed horizontally to that width, so a substitute symbol
-/// occupies the space the PDF font reserved for it. Otherwise the face's own advance is kept so
-/// its outline retains its intended spacing.
+/// `face_width` is the fallback glyph's advance in em units. When `fit_to_pdf_width` is set, the
+/// glyph advances by the PDF width and a glyph wider than it is compressed horizontally, so the
+/// substitute occupies exactly the space the PDF font reserved. Otherwise the face's own advance
+/// is kept so its outline retains its intended spacing.
 fn fallback_fit(
     face_width: f32,
     pdf_natural: TextVector,
     fit_to_pdf_width: bool,
 ) -> (TextVector, f32) {
-    if fit_to_pdf_width && pdf_natural.x > 0.0 && face_width > pdf_natural.x {
-        return (pdf_natural, pdf_natural.x / face_width);
+    if fit_to_pdf_width {
+        let scale = if pdf_natural.x > 0.0 && face_width > pdf_natural.x {
+            pdf_natural.x / face_width
+        } else {
+            1.0
+        };
+        return (pdf_natural, scale);
     }
     (
         TextVector {
