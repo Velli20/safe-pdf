@@ -141,6 +141,7 @@ fn white_alpha_mask(
         width: image.width,
         height: image.height,
         pixel_format: PixelFormat::RGBA8888,
+        interpolate: image.interpolate,
         data: data.into(),
     })
 }
@@ -155,6 +156,7 @@ mod tests {
             width: 2,
             height: 1,
             pixel_format: PixelFormat::Gray8,
+            interpolate: false,
             data: vec![0, 127].into(),
         };
         assert_eq!(rgba(&gray).unwrap(), vec![0, 0, 0, 255, 127, 127, 127, 255]);
@@ -162,6 +164,7 @@ mod tests {
             width: 1,
             height: 1,
             pixel_format: PixelFormat::RGBA8888,
+            interpolate: false,
             data: vec![255, 20, 0, 3].into(),
         };
         assert_eq!(rgba(&color).unwrap(), vec![255, 20, 0, 3]);
@@ -173,6 +176,7 @@ mod tests {
             width: 1,
             height: 1,
             pixel_format: PixelFormat::RGBA8888,
+            interpolate: false,
             data: vec![0].into(),
         };
         assert!(rgba(&image).is_err());
@@ -185,6 +189,7 @@ mod tests {
             height: 1,
             data: vec![255, 0, 0, 64].into(),
             pixel_format: PixelFormat::RGBA8888,
+            interpolate: false,
         };
         assert_eq!(
             luminosity_mask(&image).unwrap().data.as_ref(),
@@ -199,6 +204,7 @@ mod tests {
             height: 1,
             data: vec![0, 255].into(),
             pixel_format: PixelFormat::Gray8,
+            interpolate: false,
         };
         let mask = luminosity_mask(&image).unwrap();
         assert_eq!(mask.pixel_format, PixelFormat::RGBA8888);

@@ -545,13 +545,22 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         }
 
         let canvas = self.surface.canvas();
+        let unit_to_device =
+            from_skia_matrix(&canvas.local_to_device_as_3x3()).post_concatenated(&transform);
+        let sampling = if image.replicates_pixels(&unit_to_device) {
+            skia_safe::SamplingOptions::new(
+                skia_safe::FilterMode::Nearest,
+                skia_safe::MipmapMode::None,
+            )
+        } else {
+            skia_safe::SamplingOptions::new(
+                skia_safe::FilterMode::Linear,
+                skia_safe::MipmapMode::Nearest,
+            )
+        };
+
         canvas.save();
         canvas.concat(&to_skia_matrix(&transform));
-
-        let sampling = skia_safe::SamplingOptions::new(
-            skia_safe::FilterMode::Linear,
-            skia_safe::MipmapMode::Nearest,
-        );
         canvas.draw_image_rect_with_sampling_options(
             &skia_image,
             None,
@@ -699,6 +708,7 @@ impl CoverageTarget for MaskRaster {
             width: w,
             height: h,
             pixel_format: PixelFormat::RGBA8888,
+            interpolate: false,
         })
     }
 

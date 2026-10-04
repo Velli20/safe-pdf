@@ -82,6 +82,7 @@ pub fn rasterize_shading(
         width: usize::try_from(w).map_err(|_| Error::ResourceLimit)?,
         height: usize::try_from(h).map_err(|_| Error::ResourceLimit)?,
         pixel_format: PixelFormat::RGBA8888,
+        interpolate: false,
         data: data.into(),
     })
 }
@@ -297,6 +298,7 @@ mod tests {
                 width: 2,
                 height: 1,
                 pixel_format: PixelFormat::RGBA8888,
+                interpolate: false,
             },
             Rect::new(2.0, 1.0),
             Some(Transform::from_translate(3.0, 4.0)),
@@ -382,6 +384,7 @@ mod tests {
                     width,
                     height,
                     pixel_format: PixelFormat::RGBA8888,
+                    interpolate: false,
                 },
                 transform: Transform::identity(),
             };
@@ -393,6 +396,7 @@ mod tests {
                 width: 1,
                 height: 1,
                 pixel_format: PixelFormat::Gray8,
+                interpolate: false,
             },
             transform: Transform::identity(),
         };

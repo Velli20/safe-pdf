@@ -28,6 +28,8 @@ pub(crate) struct ImageMetadata {
     pub(crate) decode: Option<DecodeMap>,
     /// How a JPX image's own opacity channel is used.
     pub(crate) smask_in_data: SMaskInData,
+    /// Whether the image is smoothed when it is enlarged (`/Interpolate`).
+    pub(crate) interpolate: bool,
 }
 
 impl ImageMetadata {
@@ -74,6 +76,9 @@ impl ImageMetadata {
             .as_ref()
             .map_or(1, ColorSpace::num_color_components);
         let decode = DecodeMap::from_dictionary(dictionary, objects, num_color_components)?;
+        let interpolate = dictionary
+            .optional_boolean(b"Interpolate", objects)?
+            .unwrap_or(false);
 
         Ok(Self {
             size,
@@ -83,6 +88,7 @@ impl ImageMetadata {
             filters,
             decode,
             smask_in_data,
+            interpolate,
         })
     }
 }

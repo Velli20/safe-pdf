@@ -589,6 +589,7 @@ mod tests {
             width: 1,
             height: 1,
             pixel_format: PixelFormat::RGBA8888,
+            interpolate: false,
         };
         let mut canvas = RecordingCanvas::new(1.0, 1.0);
 

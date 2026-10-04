@@ -350,6 +350,7 @@ pub fn build_shading_paint(
                     width: raster.width,
                     height: raster.height,
                     pixel_format: PixelFormat::RGBA8888,
+                    interpolate: false,
                 },
                 raster.bounds,
                 None,
@@ -390,6 +391,7 @@ pub fn build_shading_paint(
                     width: raster.width,
                     height: raster.height,
                     pixel_format: PixelFormat::RGBA8888,
+                    interpolate: false,
                 },
                 raster.bounds,
                 None,
@@ -419,6 +421,7 @@ fn transparent_raster_paint() -> ShadingPaint {
             width: 1,
             height: 1,
             pixel_format: PixelFormat::RGBA8888,
+            interpolate: false,
         },
         transform: Transform::identity(),
     }
