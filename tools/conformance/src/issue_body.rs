@@ -7,8 +7,8 @@
 
 use crate::{
     baseline::Delta,
-    corpus::CorpusKind,
-    issue_state::IssueState,
+    corpus::{self, CorpusKind},
+    issue_state::{self, IssueState},
     issues::{Group, Part},
     model::{CaseResult, ErrorDetail, PageOutput, ProcessEvidence, Status},
     report_case,
@@ -18,7 +18,7 @@ use crate::{
 };
 use anyhow::Result;
 use serde_json::json;
-use std::fmt::Write as _;
+use std::{collections::BTreeMap, fmt::Write as _, path::PathBuf};
 
 /// GitHub rejects issue bodies above 65,536 characters.
 const BODY_LIMIT: usize = 60_000;
@@ -39,6 +39,8 @@ pub struct BodyContext {
     pub run_link: Option<String>,
     /// Commit the run checked, for source permalinks.
     pub sha: Option<String>,
+    /// Published link of each local image; images without one link into the Pages report.
+    pub images: BTreeMap<PathBuf, String>,
 }
 
 impl BodyContext {
@@ -54,6 +56,7 @@ impl BodyContext {
             repo: repo.to_owned(),
             run_link,
             sha: std::env::var("GITHUB_SHA").ok(),
+            images: BTreeMap::new(),
         }
     }
 
@@ -332,6 +335,51 @@ fn entries<'a>(group: &'a Group<'a>) -> Vec<Entry<'a>> {
     entries
 }
 
+/// Returns the case whose images and details the body shows.
+fn showcase<'a, 'b>(entries: &'b [Entry<'a>]) -> Option<&'b Entry<'a>> {
+    entries
+        .iter()
+        .max_by_key(|entry| (entry.images(), entry.result().is_some()))
+        .or_else(|| entries.first())
+}
+
+/// The images shown for one case: caption, file name in the case directory, local path.
+fn example_images(entry: &Entry<'_>) -> Vec<(&'static str, String, PathBuf)> {
+    let Some(page) = entry.pages.first() else {
+        return Vec::new();
+    };
+    let dir = corpus::output_dir(entry.part.run.kind)
+        .join("cases")
+        .join(&entry.case.dir);
+    [
+        ("ref", "PDFium"),
+        ("safe", "Safe-PDF"),
+        ("diff", "Difference"),
+    ]
+    .into_iter()
+    .filter_map(|(suffix, caption)| {
+        let file = format!("p{}-{suffix}.png", page.page);
+        page.files.contains(&file).then(|| {
+            let path = dir.join(&file);
+            (caption, file, path)
+        })
+    })
+    .collect()
+}
+
+/// Returns the local images the body of a group embeds.
+pub fn embedded_images(group: &Group<'_>) -> Vec<PathBuf> {
+    let entries = entries(group);
+    showcase(&entries)
+        .map(|entry| {
+            example_images(entry)
+                .into_iter()
+                .map(|(_, _, path)| path)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Renders the issue body, shortening lists until it fits GitHub's limit.
 pub fn render(group: &Group<'_>, state: &IssueState, context: &BodyContext) -> Result<String> {
     let mut body = String::new();
@@ -351,10 +399,7 @@ fn render_with(
     limit: usize,
 ) -> Result<String> {
     let entries = entries(group);
-    let showcase = entries
-        .iter()
-        .max_by_key(|entry| (entry.images(), entry.result().is_some()))
-        .or_else(|| entries.first());
+    let showcase = showcase(&entries);
     let mut text = String::new();
     writeln!(text, "{}\n", state.marker()?)?;
     headline(&mut text, group)?;
@@ -563,16 +608,15 @@ fn example(
     )?;
     if let Some(page) = page {
         let viewer = viewer_link(&base, &entry.case.id, Some(page.page));
-        let cells: Vec<String> = [("ref", "PDFium"), ("safe", "Safe-PDF"), ("diff", "Difference")]
+        let cells: Vec<String> = example_images(entry)
             .into_iter()
-            .filter_map(|(suffix, caption)| {
-                let file = format!("p{}-{suffix}.png", page.page);
-                page.files.contains(&file).then(|| {
-                    format!(
-                        "<td align=\"center\"><a href=\"{viewer}\"><img src=\"{base}cases/{}/{file}\" width=\"{IMAGE_WIDTH}\" alt=\"{caption}\"></a><br><sub>{caption}</sub></td>",
-                        entry.case.dir
-                    )
-                })
+            .map(|(caption, file, path)| {
+                let src = context.images.get(&path).cloned().unwrap_or_else(|| {
+                    format!("{base}cases/{}/{file}", entry.case.dir)
+                });
+                format!(
+                    "<td align=\"center\"><a href=\"{viewer}\"><img src=\"{src}\" width=\"{IMAGE_WIDTH}\" alt=\"{caption}\"></a><br><sub>{caption}</sub></td>"
+                )
             })
             .collect();
         if !cells.is_empty() {
@@ -974,10 +1018,12 @@ mod tests {
             repo: "Velli20/safe-pdf".to_owned(),
             run_link: Some("https://github.com/Velli20/safe-pdf/actions/runs/1".to_owned()),
             sha: Some("0123456789abcdef".to_owned()),
+            images: BTreeMap::new(),
         };
         let state = IssueState {
             key: group.key.clone(),
             corpora: group.corpus_states(),
+            format: issue_state::FORMAT,
         };
         let body = render(group, &state, &context).unwrap();
         if std::env::var_os("SHOW_BODY").is_some() {
@@ -1000,6 +1046,18 @@ mod tests {
             "[PDF](https://github.com/mozilla/pdf.js/blob/abc123/test/pdfs/clippath.pdf)"
         ));
         assert_eq!(body.matches("requires an active path\n").count(), 1);
+
+        // A published image replaces the Pages link.
+        let local =
+            corpus::output_dir(CorpusKind::Pdfjs).join("cases/clippath-1234abcd/p0-ref.png");
+        assert_eq!(embedded_images(group), [local.clone()]);
+        let link = "https://raw.githubusercontent.com/Velli20/safe-pdf/conformance-assets/abc.png";
+        let context = BodyContext {
+            images: BTreeMap::from([(local, link.to_owned())]),
+            ..context
+        };
+        let body = render(group, &state, &context).unwrap();
+        assert!(body.contains(&format!("<img src=\"{link}\"")));
         assert!(body.contains(&format!("cargo conformance verify {}", group.key)));
     }
 
