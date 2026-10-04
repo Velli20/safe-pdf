@@ -4,50 +4,23 @@
 //! - **Image XObjects**: Raster images embedded in PDF documents
 //! - **Form XObjects**: Reusable content streams (like vector graphics groups)
 //!
-//! The main complexity lies in handling the coordinate space transformations
-//! between PDF image space (top-left origin, Y down) and PDF user space
-//! (bottom-left origin, Y up).
+//! Images are placed by handing the backend the full image-space to device-space
+//! matrix, so rotation, shear and mirroring in the CTM are all preserved.
 
 use pdf_content_stream_operators::pdf_operator_backend::XObjectOps;
-use pdf_graphics::{Image, rect::Rect, transform::Transform};
+use pdf_graphics::{Image, transform::Transform};
 use pdf_image::{InlineImage, decode_inline_image};
 use pdf_resources::resource::Resource;
 
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
-/// Tolerance in degrees for detecting right-angle rotations.
-const ROTATION_TOLERANCE_DEGREES: f32 = 1e-3;
-
-/// Transformation matrix that flips the Y axis for image-space to user-space conversion.
+/// Maps image space onto the PDF unit square.
 ///
-/// This matrix `[ 1 0 0 -1 0 1 ]` performs:
-/// - Scale Y by -1 (flip vertically)
-/// - Translate Y by +1 (move origin from top-left to bottom-left)
+/// Image samples start at the top-left with rows growing downward, while the unit
+/// square that the CTM places on the page has its origin at the bottom-left. The
+/// matrix `[ 1 0 0 -1 0 1 ]` maps `(u, v)` to `(u, 1 - v)`, so the first sample row
+/// lands on the top edge of the placed image.
 const IMAGE_SPACE_Y_FLIP: Transform = Transform::from_row(1.0, 0.0, 0.0, -1.0, 0.0, 1.0);
-
-/// Compose the CTM with an image-space correction transform.
-///
-/// PDF image XObjects are defined in a normalized unit square (`[0,1] × [0,1]`)
-/// where the origin is at the top-left and the Y axis grows downward, while
-/// PDF user space has its origin at the bottom-left with the Y axis growing
-/// upward. This function post-concatenates the provided Current
-/// Transformation Matrix (CTM) with the matrix `[ 1 0 0 -1 0 1 ]`, which
-/// flips the Y axis and translates by +1 in Y, so that the unit square maps
-/// correctly into user space without vertical inversion.
-///
-/// # Parameters
-///
-/// - `ctm`: The current transformation matrix that positions and scales the
-///   image on the page.
-///
-/// # Returns
-///
-/// A [`Transform`] that maps the unit square `(0,0,1,1)` into the destination
-/// rectangle with the correct orientation for rendering.
-fn generate_image_orientation_matrix(mut ctm: Transform) -> Transform {
-    ctm.post_concat(&IMAGE_SPACE_Y_FLIP);
-    ctm
-}
 
 impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
     type ErrorType = PdfCanvasError;
@@ -59,10 +32,9 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
     ///
     /// Raster images are rendered by:
     /// 1. Extracting image metadata (dimensions, color space, encoding)
-    /// 2. Computing the destination rectangle via CTM transformation
-    /// 3. Handling coordinate space conversion (image space → user space)
-    /// 4. Expanding indexed colors to RGB if necessary
-    /// 5. Delegating actual drawing to the canvas backend
+    /// 2. Composing the CTM with the image-space to unit-square mapping
+    /// 3. Expanding indexed colors to RGB if necessary
+    /// 4. Delegating actual drawing to the canvas backend
     ///
     /// ## Form XObjects
     ///
@@ -127,43 +99,17 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         image: &Image,
         inline_image: bool,
     ) -> Result<(), PdfCanvasError> {
-        let transform = self.current_state()?.transform;
-        let rotation_degrees = transform.rotation_degrees();
-        let transform = generate_image_orientation_matrix(transform);
-        let dest_rect = Self::compute_destination_rect(&transform, rotation_degrees);
-
+        let transform = self
+            .current_state()?
+            .transform
+            .post_concatenated(&IMAGE_SPACE_Y_FLIP);
         let blend_mode = self.current_state()?.paint.blend_mode.clone();
         self.with_soft_mask(|backend| {
             if inline_image {
-                backend.draw_inline_image(image, blend_mode, dest_rect, Some(rotation_degrees))
+                backend.draw_inline_image(image, blend_mode, transform)
             } else {
-                backend.draw_image_rect(image, blend_mode, dest_rect, Some(rotation_degrees))
+                backend.draw_image(image, blend_mode, transform)
             }
         })
-    }
-
-    /// Computes the destination rectangle for image rendering.
-    ///
-    /// Maps the normalized unit square through the transform and adjusts
-    /// for right-angle rotations where width/height need to be swapped.
-    fn compute_destination_rect(transform: &Transform, rotation_degrees: f32) -> Rect {
-        let mut dest_rect = transform.map_rect(&Rect::UNIT_RECT);
-
-        // For right-angle rotations (±90°, ±270°), the mapped rect's
-        // width/height are swapped. Preserve the center and swap extents.
-        let angle_mod_180 = rotation_degrees.rem_euclid(180.0);
-        if (angle_mod_180 - 90.0).abs() <= ROTATION_TOLERANCE_DEGREES {
-            let center_x = (dest_rect.left + dest_rect.right) * 0.5;
-            let center_y = (dest_rect.top + dest_rect.bottom) * 0.5;
-            let half_width = dest_rect.height() * 0.5;
-            let half_height = dest_rect.width() * 0.5;
-
-            dest_rect.left = center_x - half_width;
-            dest_rect.right = center_x + half_width;
-            dest_rect.top = center_y - half_height;
-            dest_rect.bottom = center_y + half_height;
-        }
-
-        dest_rect
     }
 }

@@ -24,7 +24,7 @@ use pdf_canvas::{
     stroke_style::{StrokeStyle, device_stroke_width},
 };
 use pdf_graphics::{
-    BlendMode, Image, PathFillType, color::Color, rect::Rect, size::Size, transform::Transform,
+    BlendMode, Image, PathFillType, color::Color, size::Size, transform::Transform,
 };
 use web_sys::{CanvasPattern, CanvasRenderingContext2d, CanvasWindingRule, Path2d};
 
@@ -247,14 +247,13 @@ impl CanvasBackend for WebCanvasBackend {
         Ok(())
     }
 
-    fn draw_image_rect(
+    fn draw_image(
         &mut self,
         image: &Image,
         mode: Option<BlendMode>,
-        rect: Rect,
-        rotation: Option<f32>,
+        transform: Transform,
     ) -> Result<(), PdfCanvasError> {
-        ImageDraw::new(self, image, mode, rect, rotation)?
+        ImageDraw::new(self, image, mode, transform)?
             .draw()
             .map_err(Into::into)
     }

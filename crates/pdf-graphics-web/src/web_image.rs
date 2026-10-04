@@ -7,7 +7,7 @@ use crate::{
     web_canvas_backend::{SavedContext, WebCanvasBackend},
     web_paint,
 };
-use pdf_graphics::{BlendMode, Image, rect::Rect};
+use pdf_graphics::{BlendMode, Image, transform::Transform};
 use web_sys::CanvasRenderingContext2d;
 
 /// Validated image placement for one target.
@@ -27,14 +27,13 @@ impl<'a> ImageDraw<'a> {
         backend: &'a WebCanvasBackend,
         image: &'a Image,
         mode: Option<BlendMode>,
-        rect: Rect,
-        rotation: Option<f32>,
+        transform: Transform,
     ) -> WebResult<Self> {
         Ok(Self {
             context: &backend.context,
             pool: &backend.surfaces,
             image,
-            placement: ImagePlacement::new(rect, rotation)?,
+            placement: ImagePlacement::new(transform)?,
             composite: web_paint::blend(mode.as_ref()),
         })
     }
@@ -50,39 +49,30 @@ impl<'a> ImageDraw<'a> {
     }
 }
 
-/// A valid logical-device rectangle and optional finite rotation in radians.
+/// A finite mapping from the image's unit square to logical device space.
 struct ImagePlacement {
-    rect: Rect,
-    rotation: Option<f64>,
+    transform: Transform,
 }
 
 impl ImagePlacement {
-    fn new(rect: Rect, rotation: Option<f32>) -> WebResult<Self> {
-        if !rect.is_valid() || rotation.is_some_and(|angle| !angle.is_finite()) {
-            return Err(Error::InvalidInput("image placement"));
-        }
-        Ok(Self {
-            rect,
-            rotation: rotation.map(|angle| f64::from(angle).to_radians()),
-        })
+    fn new(transform: Transform) -> WebResult<Self> {
+        transform
+            .validate()
+            .map_err(|_| Error::InvalidInput("image placement"))?;
+        Ok(Self { transform })
     }
 
     fn draw(&self, context: &CanvasRenderingContext2d, surface: &Surface) -> WebResult<()> {
-        if let Some(angle) = self.rotation {
-            // Rotate about the placed rectangle's center before the existing
-            // device-to-backing mapping is applied.
-            let x = f64::from(self.rect.left) + f64::from(self.rect.width()) / 2.0;
-            let y = f64::from(self.rect.top) + f64::from(self.rect.height()) / 2.0;
-            context.translate(x, y)?;
-            context.rotate(angle)?;
-            context.translate(-x, -y)?;
-        }
+        // Applied after the existing device-to-backing mapping, so the unit square
+        // lands where the transform places it in logical device space.
+        let [a, b, c, d, e, f] = self.transform.to_row().map(f64::from);
+        context.transform(a, b, c, d, e, f)?;
         context.draw_image_with_html_canvas_element_and_dw_and_dh(
             surface.canvas(),
-            f64::from(self.rect.left),
-            f64::from(self.rect.top),
-            f64::from(self.rect.width()),
-            f64::from(self.rect.height()),
+            0.0,
+            0.0,
+            1.0,
+            1.0,
         )?;
         Ok(())
     }

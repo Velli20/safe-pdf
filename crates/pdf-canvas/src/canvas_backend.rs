@@ -1,5 +1,5 @@
 //! Low-level drawing and lexically scoped masking.
-use pdf_graphics::{BlendMode, Image, PathFillType, color::Color, rect::Rect};
+use pdf_graphics::{BlendMode, Image, PathFillType, color::Color, transform::Transform};
 use pdf_shading::paint::ShadingPaint;
 
 use crate::{
@@ -88,33 +88,31 @@ pub trait CanvasBackend {
     /// Restores the most recently saved graphics state.
     fn restore(&mut self) -> Result<(), PdfCanvasError>;
 
-    /// Draws an image onto the canvas at the current transformation.
+    /// Draws an image onto the canvas.
     ///
     /// # Parameters
     ///
     /// - `image`: The image to draw.
     /// - `blend_mode`: Optional blend mode to use when compositing the image.
-    /// - `dest_rect`: The destination rectangle on the canvas where the image should be drawn.
-    /// - `image_rotation`: An optional rotation (in degrees) to apply to the image.
-    fn draw_image_rect(
+    /// - `transform`: Maps the unit square to device space, with the image's first pixel
+    ///   row along `y = 0` and its first column along `x = 0`.
+    fn draw_image(
         &mut self,
         image: &Image,
         blend_mode: Option<BlendMode>,
-        dest_rect: Rect,
-        image_rotation: Option<f32>,
+        transform: Transform,
     ) -> Result<(), PdfCanvasError>;
 
     /// Draws an inline image onto the canvas.
     ///
-    /// The default implementation forwards to [`CanvasBackend::draw_image_rect`].
+    /// The default implementation forwards to [`CanvasBackend::draw_image`].
     fn draw_inline_image(
         &mut self,
         image: &Image,
         blend_mode: Option<BlendMode>,
-        dest_rect: Rect,
-        image_rotation: Option<f32>,
+        transform: Transform,
     ) -> Result<(), PdfCanvasError> {
-        self.draw_image_rect(image, blend_mode, dest_rect, image_rotation)
+        self.draw_image(image, blend_mode, transform)
     }
 
     /// Paints isolated content and applies the supplied mask only after successful painting.

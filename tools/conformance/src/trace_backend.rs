@@ -9,7 +9,10 @@ use pdf_canvas::{
     mask_layer::MaskLayer,
     stroke_style::StrokeStyle,
 };
-use pdf_graphics::{BlendMode, Image, PathFillType, color::Color, pdf_path::PathVerb, rect::Rect};
+use pdf_graphics::{
+    BlendMode, Image, PathFillType, color::Color, pdf_path::PathVerb, rect::Rect,
+    transform::Transform,
+};
 use pdf_shading::paint::ShadingPaint;
 
 /// Records drawing calls without rasterizing them.
@@ -88,8 +91,8 @@ fn path_bounds(path: &CanvasPath<'_>) -> Option<[f32; 4]> {
     bounds
 }
 
-fn rect_bounds(rect: &Rect) -> [f32; 4] {
-    let rect = rect.normalized();
+fn image_bounds(transform: &Transform) -> [f32; 4] {
+    let rect = transform.map_rect(&Rect::UNIT_RECT);
     [rect.left, rect.top, rect.right, rect.bottom]
 }
 
@@ -210,15 +213,14 @@ impl CanvasBackend for TraceBackend {
         Ok(())
     }
 
-    fn draw_image_rect(
+    fn draw_image(
         &mut self,
         image: &Image,
         blend_mode: Option<BlendMode>,
-        dest_rect: Rect,
-        image_rotation: Option<f32>,
+        transform: Transform,
     ) -> Result<(), PdfCanvasError> {
-        let detail = image_detail(image, blend_mode, image_rotation);
-        self.push("image", Some(rect_bounds(&dest_rect)), detail);
+        let detail = image_detail(image, blend_mode, &transform);
+        self.push("image", Some(image_bounds(&transform)), detail);
         Ok(())
     }
 
@@ -226,11 +228,10 @@ impl CanvasBackend for TraceBackend {
         &mut self,
         image: &Image,
         blend_mode: Option<BlendMode>,
-        dest_rect: Rect,
-        image_rotation: Option<f32>,
+        transform: Transform,
     ) -> Result<(), PdfCanvasError> {
-        let detail = image_detail(image, blend_mode, image_rotation);
-        self.push("inline_image", Some(rect_bounds(&dest_rect)), detail);
+        let detail = image_detail(image, blend_mode, &transform);
+        self.push("inline_image", Some(image_bounds(&transform)), detail);
         Ok(())
     }
 
@@ -246,13 +247,11 @@ impl CanvasBackend for TraceBackend {
     }
 }
 
-fn image_detail(image: &Image, blend_mode: Option<BlendMode>, rotation: Option<f32>) -> String {
+fn image_detail(image: &Image, blend_mode: Option<BlendMode>, transform: &Transform) -> String {
     let mut text = format!("{}x{} {:?}", image.width, image.height, image.pixel_format);
     if let Some(mode) = blend_mode {
         text.push_str(&format!(", blend {mode:?}"));
     }
-    if let Some(rotation) = rotation {
-        text.push_str(&format!(", rotated {rotation}°"));
-    }
+    text.push_str(&format!(", matrix {:?}", transform.to_row()));
     text
 }

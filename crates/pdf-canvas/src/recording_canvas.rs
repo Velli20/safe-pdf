@@ -7,7 +7,9 @@ use crate::{
     mask_layer::MaskLayer,
     stroke_style::StrokeStyle,
 };
-use pdf_graphics::{BlendMode, Image as BackendImage, PathFillType, color::Color, rect::Rect};
+use pdf_graphics::{
+    BlendMode, Image as BackendImage, PathFillType, color::Color, transform::Transform,
+};
 
 /// Enum representing each drawing command that can be recorded.
 #[derive(Clone)]
@@ -57,10 +59,8 @@ enum RecordingCommand {
         image: BackendImage,
         /// Optional compositing operation.
         blend_mode: Option<BlendMode>,
-        /// Image destination in device coordinates.
-        dest_rect: Rect,
-        /// Optional image rotation in degrees.
-        image_rotation: Option<f32>,
+        /// Unit square to device space mapping of the image.
+        transform: Transform,
     },
     /// Draw decoded inline image pixels.
     DrawInlineImage {
@@ -68,10 +68,8 @@ enum RecordingCommand {
         image: BackendImage,
         /// Optional compositing operation.
         blend_mode: Option<BlendMode>,
-        /// Image destination in device coordinates.
-        dest_rect: Rect,
-        /// Optional image rotation in degrees.
-        image_rotation: Option<f32>,
+        /// Unit square to device space mapping of the image.
+        transform: Transform,
     },
     /// Scoped content occupies the following `len` commands in this same buffer.
     Mask {
@@ -262,28 +260,16 @@ fn replay_commands<B: CanvasBackend>(
                 DrawImage {
                     image,
                     blend_mode,
-                    dest_rect,
-                    image_rotation,
+                    transform,
                 } => {
-                    backend.draw_image_rect(
-                        image,
-                        blend_mode.clone(),
-                        *dest_rect,
-                        *image_rotation,
-                    )?;
+                    backend.draw_image(image, blend_mode.clone(), *transform)?;
                 }
                 DrawInlineImage {
                     image,
                     blend_mode,
-                    dest_rect,
-                    image_rotation,
+                    transform,
                 } => {
-                    backend.draw_inline_image(
-                        image,
-                        blend_mode.clone(),
-                        *dest_rect,
-                        *image_rotation,
-                    )?;
+                    backend.draw_inline_image(image, blend_mode.clone(), *transform)?;
                 }
                 Mask { mask, len } => {
                     let (body, rest) = commands
@@ -392,19 +378,17 @@ impl CanvasBackend for RecordingCanvas {
         Ok(())
     }
 
-    /// Draws decoded image pixels into the supplied destination rectangle.
-    fn draw_image_rect(
+    /// Records decoded image pixels placed by the supplied unit-square transform.
+    fn draw_image(
         &mut self,
         image: &BackendImage,
         blend_mode: Option<BlendMode>,
-        dest_rect: Rect,
-        image_rotation: Option<f32>,
+        transform: Transform,
     ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::DrawImage {
             image: image.clone(),
             blend_mode,
-            dest_rect,
-            image_rotation,
+            transform,
         });
         Ok(())
     }
@@ -414,14 +398,12 @@ impl CanvasBackend for RecordingCanvas {
         &mut self,
         image: &BackendImage,
         blend_mode: Option<BlendMode>,
-        dest_rect: Rect,
-        image_rotation: Option<f32>,
+        transform: Transform,
     ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::DrawInlineImage {
             image: image.clone(),
             blend_mode,
-            dest_rect,
-            image_rotation,
+            transform,
         });
         Ok(())
     }
@@ -468,8 +450,8 @@ impl CanvasBackend for RecordingCanvas {
 
 #[cfg(test)]
 mod tests {
+    use pdf_graphics::pdf_path::PdfPath;
     use pdf_graphics::{MaskMode, PixelFormat};
-    use pdf_graphics::{pdf_path::PdfPath, transform::Transform};
     use pdf_shading::paint::ShadingPaint;
     use std::sync::Arc;
 
@@ -611,7 +593,7 @@ mod tests {
         let mut canvas = RecordingCanvas::new(1.0, 1.0);
 
         canvas
-            .draw_image_rect(&image, None, Rect::UNIT_RECT, None)
+            .draw_image(&image, None, Transform::identity())
             .expect("image should be recorded");
 
         assert!(canvas.commands.iter().any(|command| {

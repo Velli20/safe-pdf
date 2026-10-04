@@ -8,7 +8,7 @@ use pdf_canvas::{
     mask_layer::MaskLayer,
     stroke_style::StrokeStyle,
 };
-use pdf_graphics::{BlendMode, Image, PathFillType, pdf_path::PathVerb};
+use pdf_graphics::{BlendMode, Image, PathFillType, pdf_path::PathVerb, transform::Transform};
 
 /// Converts PDF path verbs into equivalent FemtoVG path geometry.
 fn to_femtovg_path(pdf_path: &CanvasPath<'_>) -> Result<Path, PdfCanvasError> {
@@ -137,12 +137,11 @@ impl CanvasBackend for CanvasImpl<'_> {
     }
 
     /// Accepts image placement; image rendering is not yet implemented by this backend.
-    fn draw_image_rect(
+    fn draw_image(
         &mut self,
         _image: &Image,
         _blend_mode: Option<BlendMode>,
-        _dest_rect: pdf_graphics::rect::Rect,
-        _image_rotation: Option<f32>,
+        _transform: Transform,
     ) -> Result<(), PdfCanvasError> {
         // Not yet implemented in femtovg backend
         Ok(())
