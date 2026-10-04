@@ -10,7 +10,9 @@ use pdf_canvas::{
     stroke_style::StrokeStyle,
 };
 use pdf_content_stream::ContentStream;
-use pdf_graphics::{BlendMode, Image, PathFillType, PixelFormat, color::Color, rect::Rect};
+use pdf_graphics::{
+    BlendMode, Image, PathFillType, PixelFormat, color::Color, transform::Transform,
+};
 use pdf_object_reader::{
     dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     stream::StreamObject,
@@ -23,8 +25,7 @@ pub struct ObservedImage {
     pub height: usize,
     pub pixel_format: PixelFormat,
     pub blend_mode: Option<BlendMode>,
-    pub dest_rect: Rect,
-    pub image_rotation: Option<f32>,
+    pub transform: Transform,
 }
 
 #[derive(Default)]
@@ -43,8 +44,7 @@ impl ObservingCanvas {
     fn observed_image(
         image: &Image,
         blend_mode: Option<BlendMode>,
-        dest_rect: Rect,
-        image_rotation: Option<f32>,
+        transform: Transform,
     ) -> ObservedImage {
         ObservedImage {
             data: image.data.to_vec(),
@@ -52,8 +52,7 @@ impl ObservingCanvas {
             height: image.height,
             pixel_format: image.pixel_format,
             blend_mode,
-            dest_rect,
-            image_rotation,
+            transform,
         }
     }
 }
@@ -117,20 +116,15 @@ impl CanvasBackend for ObservingCanvas {
         Ok(())
     }
 
-    /// Draws decoded image pixels into the supplied destination rectangle.
-    fn draw_image_rect(
+    /// Draws decoded image pixels placed by the supplied unit-square transform.
+    fn draw_image(
         &mut self,
         image: &Image,
         blend_mode: Option<BlendMode>,
-        dest_rect: Rect,
-        image_rotation: Option<f32>,
+        transform: Transform,
     ) -> Result<(), PdfCanvasError> {
-        self.images.push(Self::observed_image(
-            image,
-            blend_mode,
-            dest_rect,
-            image_rotation,
-        ));
+        self.images
+            .push(Self::observed_image(image, blend_mode, transform));
         Ok(())
     }
 
@@ -139,15 +133,10 @@ impl CanvasBackend for ObservingCanvas {
         &mut self,
         image: &Image,
         blend_mode: Option<BlendMode>,
-        dest_rect: Rect,
-        image_rotation: Option<f32>,
+        transform: Transform,
     ) -> Result<(), PdfCanvasError> {
-        self.inline_images.push(Self::observed_image(
-            image,
-            blend_mode,
-            dest_rect,
-            image_rotation,
-        ));
+        self.inline_images
+            .push(Self::observed_image(image, blend_mode, transform));
         Ok(())
     }
 

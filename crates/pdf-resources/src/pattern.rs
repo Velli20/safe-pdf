@@ -113,6 +113,15 @@ pub enum Pattern {
     },
 }
 
+impl Pattern {
+    /// Returns the matrix mapping pattern space into the parent stream's default user space.
+    pub fn matrix(&self) -> Option<&Transform> {
+        match self {
+            Self::Tiling { matrix, .. } | Self::Shading { matrix, .. } => matrix.as_ref(),
+        }
+    }
+}
+
 impl FromPdfObject for Pattern {
     fn from_pdf_object(
         mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,

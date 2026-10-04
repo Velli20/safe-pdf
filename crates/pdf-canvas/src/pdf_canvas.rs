@@ -158,22 +158,18 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// bottom-left) into a typical device space, this method renders into a coordinate system
     /// whose origin is the **top-left** (device-style, like Skia).
     ///
-    /// Concretely, the initial transformation matrix is constructed to:
-    ///
-    /// - scale the form/pattern `bbox` to exactly fit `recording_canvas` (independently in X/Y)
-    /// - **not** apply a Y-axis flip
-    /// - start with no translation; clipping is applied by `render_content_stream` when `bbox`
-    ///   is provided
+    /// Concretely, the recording is the size of `bbox` and starts in the stream's content
+    /// space without a Y-axis flip or translation; clipping to `bbox` is applied by
+    /// `render_content_stream`.
     ///
     /// This matches the expectation that the consumer of the resulting `RecordingCanvas`
     /// (e.g. a shader/mask client in the backend) also uses a top-left-origin coordinate system.
     ///
     /// # Parameters
     ///
-    /// - `recording_canvas`: Target offscreen canvas to record into.
     /// - `content_stream`: The content stream containing the PDF operators to execute.
     /// - `mat`: Optional additional matrix (applied like a PDF `cm` / XObject `/Matrix`).
-    /// - `bbox`: The content-space bounding box to map to the recording surface.
+    /// - `bbox`: The content-space bounding box that sizes the recording surface.
     /// - `resources`: Optional resource dictionary for resolving fonts, patterns, etc.
     /// - `filter`: Optional filter function to skip certain operations.
     ///
@@ -183,37 +179,23 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// operations.
     pub(crate) fn record_content_stream(
         &mut self,
-        recording_canvas: &mut RecordingCanvas,
         content_stream: &ContentStream,
         mat: Option<Transform>,
         bbox: &Rect,
         resources: Option<Arc<Resources>>,
         filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
-    ) -> Result<(), PdfCanvasError> {
-        // Calculate scale factors.
-        let scale_x = recording_canvas.width() / bbox.width();
-        let scale_y = recording_canvas.height() / bbox.height();
-
-        // Directly construct the userspace transformation matrix.
-        let transform = Transform::from_row(
-            scale_x, // sx: Scale X
-            0.0,     // ky: Skew Y (none)
-            0.0,     // kx: Skew X (none)
-            scale_y, // sy: Scale Y
-            0.0,     // tx: Translate X (none)
-            0.0,     // ty: Translate Y (none)
-        );
-
+    ) -> Result<RecordingCanvas, PdfCanvasError> {
+        let mut recording_canvas = RecordingCanvas::new(bbox.width(), bbox.height());
         let canvas_stack = vec![CanvasState {
-            transform,
-            pattern_parent_transform: transform,
+            transform: Transform::identity(),
+            pattern_parent_transform: Transform::identity(),
             text_state: TextState::default(),
             ..Default::default()
         }];
 
         let mut other = PdfCanvas::<RecordingCanvas> {
             current_path: None,
-            canvas: recording_canvas,
+            canvas: &mut recording_canvas,
             page: self.page,
             font_system: Arc::clone(&self.font_system),
             font_cache: HashMap::new(),
@@ -230,7 +212,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         let result =
             other.render_content_stream(content_stream, mat, Some(bbox), resources, filter);
         self.content_stream_render_state = other.content_stream_render_state;
-        result
+        result.map(|()| recording_canvas)
     }
 
     /// Returns a reference to the current graphics state on the stack.
@@ -330,32 +312,23 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             return Ok(None);
         };
 
+        // Patterns are anchored to their parent stream's default user space,
+        // independently of later `cm` operators. Paths already use logical
+        // device coordinates, so prepare the shader in the same coordinates.
+        let transform = state.pattern_parent_transform;
+        let transform = pattern
+            .matrix()
+            .map_or(transform, |matrix| transform.post_concatenated(matrix));
+
         match pattern.as_ref() {
-            Pattern::Shading {
-                shading, matrix, ..
-            } => {
-                let device_height = self.canvas.height();
-                let mut shader_transform = Transform::from_row(
-                    1.0,           // sx: keep X scale
-                    0.0,           // ky: no skew
-                    0.0,           // kx: no skew
-                    -1.0,          // sy: flip Y (PDF up -> device down)
-                    0.0,           // tx: no translation in X
-                    device_height, // ty: translate after Y flip to keep content on-canvas
-                );
-
-                if let Some(pattern_matrix) = matrix {
-                    shader_transform.post_concat(pattern_matrix);
-                }
-
-                let shader = self.build_shading_shader(shading, &Some(shader_transform))?;
+            Pattern::Shading { shading, .. } => {
+                let shader = self.build_shading_shader(shading, &Some(transform))?;
                 Ok(Some(shader))
             }
             Pattern::Tiling {
                 bbox,
                 resources,
                 content_stream,
-                matrix,
                 x_step,
                 y_step,
                 paint_type,
@@ -365,14 +338,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 if !Self::can_record_offscreen_bbox(&bbox) {
                     return Ok(None);
                 }
-
-                // Patterns are anchored to their parent stream's default user space,
-                // independently of later `cm` operators. Paths already use logical
-                // device coordinates, so prepare the shader in the same coordinates.
-                let transform = self.current_state()?.pattern_parent_transform;
-                let transform = matrix
-                    .as_ref()
-                    .map_or(transform, |matrix| transform.post_concatenated(matrix));
 
                 // Uncolored patterns use the current color from the graphics state,
                 // so we filter out color-setting operators from the content stream.
@@ -395,12 +360,8 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     PaintType::Uncolored => Some(&mut uncolored_filter),
                 };
 
-                // Create a recording canvas to render the tiling pattern.
-                let mut recording_canvas = RecordingCanvas::new(bbox.width(), bbox.height());
-
                 // Render the tiling content into a temporary canvas.
-                self.record_content_stream(
-                    &mut recording_canvas,
+                let recording_canvas = self.record_content_stream(
                     content_stream,
                     None,
                     &bbox,

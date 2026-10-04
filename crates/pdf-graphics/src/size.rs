@@ -15,6 +15,15 @@ impl<T> Size<T> {
     pub const fn new(width: T, height: T) -> Self {
         Self { width, height }
     }
+
+    /// Swaps the width and height when `degrees` is a sideways quarter turn (90 or 270
+    /// after normalizing into `0..360`).
+    pub fn quarter_turned(self, degrees: i32) -> Self {
+        match degrees.rem_euclid(360) {
+            90 | 270 => Self::new(self.height, self.width),
+            _ => self,
+        }
+    }
 }
 
 impl Size<f32> {

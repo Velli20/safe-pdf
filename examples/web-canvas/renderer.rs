@@ -80,7 +80,7 @@ impl WebDocument {
         let page = page_of(&self.document, page_index)?;
         let viewport = WebViewport::for_page(page, zoom, dpr, rotation, self.viewport_revision)
             .map_err(error)?;
-        let size = viewport.device_size();
+        let size = viewport.page().device_size();
         let mut backend =
             WebCanvasBackend::new(canvas, *viewport.canvas(), WebCanvasOptions::default())
                 .map_err(error)?;

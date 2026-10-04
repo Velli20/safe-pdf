@@ -5,10 +5,7 @@ use pdf_content_stream_operators::pdf_operator_backend::GraphicsStateOps;
 use pdf_graphics::{DashPattern, LineCap, LineJoin, MaskMode, transform::Transform};
 use pdf_resources::{external_graphics_state::ExternalGraphicsStateKey, resource::Resource};
 
-use crate::{
-    canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas,
-    recording_canvas::RecordingCanvas,
-};
+use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
 impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
     type ErrorType = PdfCanvasError;
@@ -164,13 +161,8 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                             continue;
                         }
 
-                        // Create a recording canvas to act as the mask layer.
-                        let mut recording_canvas =
-                            RecordingCanvas::new(bbox.width(), bbox.height());
-
                         // Render the form's content stream into the mask canvas.
-                        self.record_content_stream(
-                            &mut recording_canvas,
+                        let recording_canvas = self.record_content_stream(
                             &form.content_stream,
                             form.matrix,
                             bbox,
