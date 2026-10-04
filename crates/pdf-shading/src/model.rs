@@ -84,6 +84,12 @@ pub enum Shading {
         coords: [f32; 4],
         /// Sampled color stops used by render backends.
         color_stops: ColorStops,
+        /// Whether the shading extends beyond the start and end of the axis.
+        extend: [bool; 2],
+        /// Background color painted where a shading pattern does not cover.
+        background: Option<Color>,
+        /// Optional bounding box in shading space.
+        bbox: Option<Rect>,
     },
     /// Type 3 radial shading.
     Radial {
@@ -93,6 +99,10 @@ pub enum Shading {
         coords: [f32; 6],
         /// Sampled color stops used by render backends.
         color_stops: ColorStops,
+        /// Whether the shading extends beyond the start and end circles.
+        extend: [bool; 2],
+        /// Background color painted where a shading pattern does not cover.
+        background: Option<Color>,
         /// Optional bounding box in shading space.
         bbox: Option<Rect>,
     },
@@ -179,10 +189,11 @@ impl Shading {
     pub fn bbox(&self) -> Option<&Rect> {
         match self {
             Self::FunctionBased { bbox, .. }
+            | Self::Axial { bbox, .. }
             | Self::Radial { bbox, .. }
             | Self::FreeFormTriangleMesh { bbox, .. }
             | Self::PatchMesh { bbox, .. } => bbox.as_ref(),
-            Self::Axial { .. } | Self::Unsupported { .. } => None,
+            Self::Unsupported { .. } => None,
         }
     }
 }

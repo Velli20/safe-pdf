@@ -286,33 +286,43 @@ fn normalized_colors(colors: &[Color]) -> Result<Arc<[Color]>, ShadingRasterErro
 }
 
 /// Builds backend-facing paint data for a parsed shading and optional transform.
+///
+/// Gradients paint `/Background` past each end that does not extend when
+/// `use_background` is set, and nothing there otherwise. A shading painted with the
+/// `sh` operator ignores its background, so only pattern fills set it.
 pub fn build_shading_paint(
     shading: &Shading,
     transform: Option<Transform>,
+    use_background: bool,
 ) -> Result<ShadingPaint, PdfShadingError> {
+    let outside = |background: &Option<Color>| {
+        background
+            .filter(|_| use_background)
+            .unwrap_or(Color::from_rgba(0.0, 0.0, 0.0, 0.0))
+    };
     match shading {
         Shading::Axial {
             coords,
             color_stops,
+            extend,
+            background,
             ..
-        } => ShadingPaint::linear_gradient(
-            *coords,
-            transform,
-            Arc::clone(&color_stops.positions),
-            Arc::clone(&color_stops.colors),
-        )
-        .map_err(|error| PdfShadingError::UnsupportedFeature(error.to_string())),
+        } => {
+            let stops = color_stops.bounded(*extend, outside(background));
+            ShadingPaint::linear_gradient(*coords, transform, stops.positions, stops.colors)
+                .map_err(|error| PdfShadingError::UnsupportedFeature(error.to_string()))
+        }
         Shading::Radial {
             coords,
             color_stops,
+            extend,
+            background,
             ..
-        } => ShadingPaint::radial_gradient(
-            *coords,
-            transform,
-            Arc::clone(&color_stops.positions),
-            Arc::clone(&color_stops.colors),
-        )
-        .map_err(|error| PdfShadingError::UnsupportedFeature(error.to_string())),
+        } => {
+            let stops = color_stops.bounded(*extend, outside(background));
+            ShadingPaint::radial_gradient(*coords, transform, stops.positions, stops.colors)
+                .map_err(|error| PdfShadingError::UnsupportedFeature(error.to_string()))
+        }
         Shading::FunctionBased { .. } => Err(PdfShadingError::UnsupportedFeature(
             "FunctionBased shading not implemented".to_string(),
         )),

@@ -31,7 +31,7 @@ fn builds_transformed_free_form_triangle_raster_paint() {
         }],
     };
 
-    let paint = build_shading_paint(&shading, Some(Transform::from_translate(2.0, 3.0)))
+    let paint = build_shading_paint(&shading, Some(Transform::from_translate(2.0, 3.0)), false)
         .expect("free-form triangle mesh should build raster paint");
     assert!(matches!(paint, ShadingPaint::RasterImage { .. }));
     let ShadingPaint::RasterImage { image, transform } = paint else {
@@ -84,8 +84,8 @@ fn free_form_triangle_mesh_falls_back_from_empty_bbox_to_geometry() {
         }],
     };
 
-    let paint =
-        build_shading_paint(&shading, None).expect("triangle geometry should provide bounds");
+    let paint = build_shading_paint(&shading, None, false)
+        .expect("triangle geometry should provide bounds");
     let ShadingPaint::RasterImage { image, transform } = paint else {
         return;
     };
@@ -110,7 +110,8 @@ fn fully_degenerate_free_form_mesh_builds_transparent_paint() {
         }],
     };
 
-    let paint = build_shading_paint(&shading, None).expect("degenerate mesh should be a no-op");
+    let paint =
+        build_shading_paint(&shading, None, false).expect("degenerate mesh should be a no-op");
     let ShadingPaint::RasterImage { image, .. } = paint else {
         return;
     };
