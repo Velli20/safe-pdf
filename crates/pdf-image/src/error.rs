@@ -49,6 +49,14 @@ pub enum PdfImageError {
     },
 }
 
+impl PdfImageError {
+    /// Returns whether the image's stream data could not be decoded or is too
+    /// short for its dimensions, so the image has no samples to draw.
+    pub fn is_unreadable_data(&self) -> bool {
+        matches!(self, Self::Filter(_) | Self::TruncatedImageData { .. })
+    }
+}
+
 impl From<DecodeError> for PdfImageError {
     fn from(value: DecodeError) -> Self {
         match value {

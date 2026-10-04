@@ -340,8 +340,9 @@ mod tests {
             b"/W 1 /H 1 /BPC 8 /CS /G /F /ASCIIHexDecode ID aa EIxyz\nEI Q".as_slice(),
         );
 
-        assert!(parser.parse_inline_image(&PassthroughResolver).is_err());
+        let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
 
+        assert_eq!(image.shared_data().as_ref(), &[0xAA, 0xE0]);
         assert_eq!(parser.tokenizer.data(), b" Q");
     }
 

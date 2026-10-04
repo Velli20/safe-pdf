@@ -23,7 +23,8 @@ pub enum Resource {
     ExternalGraphicsState(ObjectHandle<ExternalGraphicsState>),
     /// An image XObject resource.
     Image(Arc<Image>),
-    /// An image XObject whose dimensions are malformed and cannot be rendered.
+    /// An image XObject whose dimensions are malformed or whose data cannot be
+    /// decoded, so it cannot be rendered.
     UnavailableImage,
     /// A form XObject resource.
     Form(ObjectHandle<FormXObject>),
