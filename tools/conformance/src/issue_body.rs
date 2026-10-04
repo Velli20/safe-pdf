@@ -8,7 +8,7 @@
 use crate::{
     baseline::Delta,
     corpus::{self, CorpusKind},
-    issue_state::{self, IssueState},
+    issue_state::IssueState,
     issues::{Group, Part},
     model::{CaseResult, ErrorDetail, PageOutput, ProcessEvidence, Status},
     report_case,
@@ -1023,7 +1023,7 @@ mod tests {
         let state = IssueState {
             key: group.key.clone(),
             corpora: group.corpus_states(),
-            format: issue_state::FORMAT,
+            format: crate::issue_state::FORMAT,
         };
         let body = render(group, &state, &context).unwrap();
         if std::env::var_os("SHOW_BODY").is_some() {
