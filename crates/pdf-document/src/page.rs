@@ -106,11 +106,7 @@ impl PdfPage {
         if width <= 0.0 || height <= 0.0 {
             return None;
         }
-        Some(if rotation == 90 || rotation == 270 {
-            Size::new(height, width)
-        } else {
-            Size::new(width, height)
-        })
+        Some(Size::new(width, height).quarter_turned(rotation))
     }
 
     /// Fits `bounds_override`, or the page box, into `device_size` with the page `/Rotate`.

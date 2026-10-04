@@ -46,37 +46,25 @@ impl PageViewport {
     /// Rejects invalid device dimensions, invalid bounds, rotations that are not a
     /// multiple of 90 degrees, and mappings that cannot be inverted.
     pub fn new(bounds: Rect, rotation: i32, device_size: Size) -> Result<Self, ViewportError> {
-        let rotation = rotation.rem_euclid(360);
         if !device_size.validate() {
             return Err(ViewportError::Dimensions);
         }
         if !bounds.is_valid() {
             return Err(ViewportError::Bounds);
         }
-        let Size { width, height } = device_size;
-        let sideways = rotation == 90 || rotation == 270;
-        let (unrotated_width, unrotated_height) = if sideways {
-            (height, width)
-        } else {
-            (width, height)
-        };
-        let sx = unrotated_width / bounds.width();
-        let sy = unrotated_height / bounds.height();
+        let unrotated = device_size.quarter_turned(rotation);
+        let sx = unrotated.width / bounds.width();
+        let sy = unrotated.height / bounds.height();
         let base = Transform::from_row(
             sx,
             0.0,
             0.0,
             -sy,
             -bounds.left * sx,
-            unrotated_height + bounds.top * sy,
+            unrotated.height + bounds.top * sy,
         );
-        let turn = match rotation {
-            0 => Transform::identity(),
-            90 => Transform::from_row(0.0, 1.0, -1.0, 0.0, width, 0.0),
-            180 => Transform::from_row(-1.0, 0.0, 0.0, -1.0, width, height),
-            270 => Transform::from_row(0.0, -1.0, 1.0, 0.0, 0.0, height),
-            _ => return Err(ViewportError::Bounds),
-        };
+        let turn =
+            Transform::from_quarter_turn(rotation, device_size).ok_or(ViewportError::Bounds)?;
         let page_to_device = turn.post_concatenated(&base);
         let device_to_page = page_to_device.try_inverse()?;
         Ok(Self {
@@ -150,10 +138,7 @@ impl PageViewport {
 
     /// Maps a device-space movement without applying the page origin translation.
     pub fn map_device_delta(&self, delta: Point) -> Result<Point, ViewportError> {
-        let mut linear = self.device_to_page;
-        linear.tx = 0.0;
-        linear.ty = 0.0;
-        Ok(linear.try_map_point(delta)?)
+        Ok(self.device_to_page.linear().try_map_point(delta)?)
     }
 }
 

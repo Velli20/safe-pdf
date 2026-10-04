@@ -1,4 +1,4 @@
-use crate::rect::Rect;
+use crate::{rect::Rect, size::Size};
 
 /// Failure while validating or inverting an affine transform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -135,6 +135,31 @@ impl Transform {
 
     pub fn from_scale(sx: f32, sy: f32) -> Self {
         Transform::from_row(sx, 0.0, 0.0, sy, 0.0, 0.0)
+    }
+
+    /// Rotates y-down coordinates clockwise by `degrees` and translates the result into a
+    /// box of the rotated `size`, so the rotated content stays at the origin.
+    ///
+    /// Returns `None` unless `degrees` is a multiple of 90.
+    pub fn from_quarter_turn(degrees: i32, size: Size) -> Option<Self> {
+        let Size { width, height } = size;
+        match degrees.rem_euclid(360) {
+            0 => Some(Transform::identity()),
+            90 => Some(Transform::from_row(0.0, 1.0, -1.0, 0.0, width, 0.0)),
+            180 => Some(Transform::from_row(-1.0, 0.0, 0.0, -1.0, width, height)),
+            270 => Some(Transform::from_row(0.0, -1.0, 1.0, 0.0, 0.0, height)),
+            _ => None,
+        }
+    }
+
+    /// Returns the linear part of this transform, dropping its translation, for mapping
+    /// displacements rather than positions.
+    pub fn linear(&self) -> Self {
+        Transform {
+            tx: 0.0,
+            ty: 0.0,
+            ..*self
+        }
     }
 
     /// Applies a translation to this transform.
@@ -491,6 +516,18 @@ mod tests {
 
     fn approx_eq(a: f32, b: f32, eps: f32) -> bool {
         (a - b).abs() <= eps
+    }
+
+    #[test]
+    fn inverse_round_trips_rotated_scaled_points() {
+        let t = Transform::from_row(0.0, 2.0, -3.0, 0.0, 80.0, 10.0);
+        let p = crate::point::Point::new(7.0, 11.0);
+        let result = t
+            .try_inverse()
+            .unwrap()
+            .try_map_point(t.try_map_point(p).unwrap())
+            .unwrap();
+        assert!((result.x - p.x).abs() < 0.0001 && (result.y - p.y).abs() < 0.0001);
     }
 
     #[test]

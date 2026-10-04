@@ -58,7 +58,7 @@ impl WebPageRenderer {
         overlay: &mut WebAnnotationOverlay,
     ) -> WebResult<WebPageOutput> {
         backend.finish_page()?;
-        let device_size = viewport.device_size();
+        let device_size = viewport.page().device_size();
         if backend.viewport() != viewport.canvas() {
             return Err(Error::InvalidInput(
                 "backend canvas viewport differs from presentation",
@@ -118,7 +118,6 @@ mod tests {
             .unwrap();
         let viewport = WebViewport::new(
             page.viewport(None, Size::new(size, size)).unwrap(),
-            [f64::from(size), f64::from(size)],
             Size::new(
                 num_traits::ToPrimitive::to_u32(&size).unwrap(),
                 num_traits::ToPrimitive::to_u32(&size).unwrap(),

@@ -4,7 +4,7 @@ use crate::error::{WebError as Error, WebResult};
 use num_traits::ToPrimitive;
 use pdf_canvas::{CanvasViewport, PageViewport, ViewportError};
 use pdf_document::page::PdfPage;
-use pdf_graphics::{point::Point, size::Size, transform::Transform};
+use pdf_graphics::{point::Point, size::Size, transform::Transform, viewport::pixel_extent};
 
 /// Validated page viewport using the engine's existing affine and geometry types.
 ///
@@ -16,8 +16,8 @@ use pdf_graphics::{point::Point, size::Size, transform::Transform};
 pub struct WebViewport {
     page: PageViewport,
     canvas: CanvasViewport,
-    css_size: [f64; 2],
     device_to_css: Transform,
+    css_to_device: Transform,
     revision: u32,
 }
 
@@ -27,21 +27,17 @@ impl WebViewport {
     /// Device dimensions are logical engine dimensions, not necessarily bitmap pixels.
     pub fn new(
         page: PageViewport,
-        css_size: [f64; 2],
         backing_size: Size<u32>,
         device_to_css: Transform,
         revision: u32,
     ) -> WebResult<Self> {
-        if css_size.iter().any(|v| !v.is_finite() || *v <= 0.0) {
-            return Err(Error::InvalidInput("CSS dimensions"));
-        }
-        device_to_css.try_inverse()?;
+        let css_to_device = device_to_css.try_inverse()?;
         let canvas = CanvasViewport::new(page.device_size(), backing_size)?;
         Ok(Self {
             page,
             canvas,
-            css_size,
             device_to_css,
+            css_to_device,
             revision,
         })
     }
@@ -60,27 +56,16 @@ impl WebViewport {
         if !zoom.is_finite() || zoom <= 0.0 || !dpr.is_finite() || dpr <= 0.0 {
             return Err(Error::InvalidInput("display scale"));
         }
-        let Size {
-            width: w,
-            height: h,
-        } = page.page_size().ok_or(ViewportError::Bounds)?;
-        let device_to_css = match display_rotation % 360 {
-            0 => Transform::from_scale(zoom, zoom),
-            90 => Transform::from_row(0.0, zoom, -zoom, 0.0, h * zoom, 0.0),
-            180 => Transform::from_row(-zoom, 0.0, 0.0, -zoom, w * zoom, h * zoom),
-            270 => Transform::from_row(0.0, -zoom, zoom, 0.0, 0.0, w * zoom),
-            _ => return Err(Error::InvalidInput("display rotation")),
-        };
-        let css = if display_rotation.is_multiple_of(180) {
-            [f64::from(w * zoom), f64::from(h * zoom)]
-        } else {
-            [f64::from(h * zoom), f64::from(w * zoom)]
-        };
-        let backing = |v: f32| (v * zoom * dpr).ceil().to_u32().ok_or(Error::ResourceLimit);
+        let size = page.page_size().ok_or(ViewportError::Bounds)?;
+        let rotation = i32::try_from(display_rotation % 360)
+            .map_err(|_| Error::InvalidInput("display rotation"))?;
+        let turn = Transform::from_quarter_turn(rotation, size.quarter_turned(rotation))
+            .ok_or(Error::InvalidInput("display rotation"))?;
+        let device_to_css = Transform::from_scale(zoom, zoom).post_concatenated(&turn);
+        let backing = |v: f32| pixel_extent(v * zoom * dpr).ok_or(Error::ResourceLimit);
         Self::new(
-            page.viewport(None, Size::new(w, h))?,
-            css,
-            Size::new(backing(w)?, backing(h)?),
+            page.viewport(None, size)?,
+            Size::new(backing(size.width)?, backing(size.height)?),
             device_to_css,
             revision,
         )
@@ -96,56 +81,28 @@ impl WebViewport {
         &self.canvas
     }
 
-    /// Returns the dimensions exposed by CanvasBackend::width and height.
-    pub fn device_size(&self) -> Size {
-        self.page.device_size()
-    }
-
-    /// Returns the host-assigned CSS size for the canvas and overlay containers.
-    pub fn css_size(&self) -> [f64; 2] {
-        self.css_size
-    }
-
-    /// Returns actual bitmap dimensions, including high-DPI scaling.
-    pub fn backing_size(&self) -> Size<u32> {
-        self.canvas.backing_size()
-    }
-
-    /// Returns the page mapping shared with annotation placement; do not reapply to paths.
-    pub fn page_to_device(&self) -> &Transform {
-        self.page.page_to_device()
-    }
-
     /// Returns the host DOM mapping, independent of temporary content/mask transforms.
     pub fn device_to_css(&self) -> &Transform {
         &self.device_to_css
     }
 
-    /// Returns the validated logical device to bitmap mapping.
-    pub fn device_to_backing(&self) -> &Transform {
-        self.canvas.device_to_backing()
-    }
-
     /// Maps a container-local CSS pointer into the current engine device coordinates.
     pub fn pointer_to_device(&self, point: Point) -> WebResult<Point> {
-        Ok(self.device_to_css.try_inverse()?.try_map_point(point)?)
+        Ok(self.css_to_device.try_map_point(point)?)
     }
 
     /// Converts a CSS pixel displacement into a PDF page displacement for drag input.
     /// Only the linear part of the mapping applies; the origin translation is ignored.
     pub fn css_delta_to_page(&self, dx: f64, dy: f64) -> WebResult<[f64; 2]> {
-        let inverse = self
-            .device_to_css
-            .post_concatenated(self.page_to_device())
-            .try_inverse()?;
-        let delta = [
-            f64::from(inverse.sx) * dx + f64::from(inverse.kx) * dy,
-            f64::from(inverse.ky) * dx + f64::from(inverse.sy) * dy,
-        ];
-        if delta.iter().any(|v| !v.is_finite()) {
+        let (Some(dx), Some(dy)) = (dx.to_f32(), dy.to_f32()) else {
             return Err(Error::InvalidInput("drag displacement"));
-        }
-        Ok(delta)
+        };
+        let device = self
+            .css_to_device
+            .linear()
+            .try_map_point(Point::new(dx, dy))?;
+        let page = self.page.map_device_delta(device)?;
+        Ok([f64::from(page.x), f64::from(page.y)])
     }
 
     /// Identifies this viewport for rejection of delayed framework updates.
@@ -158,30 +115,18 @@ impl WebViewport {
 mod tests {
     use super::*;
     #[test]
-    fn inverse_round_trips_rotated_scaled_points() {
-        let t = Transform::from_row(0.0, 2.0, -3.0, 0.0, 80.0, 10.0);
-        let p = Point::new(7.0, 11.0);
-        let result = t
-            .try_inverse()
-            .unwrap()
-            .try_map_point(t.try_map_point(p).unwrap())
-            .unwrap();
-        assert!((result.x - p.x).abs() < 0.0001 && (result.y - p.y).abs() < 0.0001);
-    }
-    #[test]
     fn separates_device_css_and_backing() {
         let viewport = WebViewport::new(
             pdf_document::page::PdfPage::default()
                 .viewport(None, Size::new(100.0, 200.0))
                 .unwrap(),
-            [150.0, 300.0],
             Size::new(300, 600),
             Transform::from_scale(1.5, 1.5),
             7,
         )
         .unwrap();
         assert_eq!(
-            *viewport.device_to_backing(),
+            *viewport.canvas().device_to_backing(),
             Transform::from_scale(3.0, 3.0)
         );
         assert_eq!(
@@ -196,7 +141,6 @@ mod tests {
                 pdf_document::page::PdfPage::default()
                     .viewport(None, Size::new(1.0, 1.0))
                     .unwrap(),
-                [1.0, 1.0],
                 Size::new(1, 1),
                 Transform::from_scale(0.0, 1.0),
                 0
