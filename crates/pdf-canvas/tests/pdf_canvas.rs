@@ -120,7 +120,7 @@ fn draw_path_forwards_dash_pattern_to_backend() {
 }
 
 #[test]
-fn renders_recursive_stream_until_the_depth_limit() {
+fn does_not_reenter_an_active_stream() {
     let root = content_stream(1, b"/Self Do");
     let resources = Arc::new(form_resource(
         "Self",
@@ -132,17 +132,17 @@ fn renders_recursive_stream_until_the_depth_limit() {
     let mut recording = RecordingCanvas::new(100.0, 100.0);
 
     render(&mut recording, &root, Some(Arc::clone(&resources)))
-        .expect("recursive render should stop at the depth limit");
+        .expect("a self-referencing stream should render once");
     render(&mut recording, &root, Some(Arc::clone(&resources)))
-        .expect("stream depth and active IDs should be released after rendering");
+        .expect("active IDs should be released after rendering");
 
     let observer = replay(&recording);
-    assert_eq!(observer.save_count, 80);
-    assert_eq!(observer.restore_count, 80);
+    assert_eq!(observer.save_count, 2);
+    assert_eq!(observer.restore_count, 2);
 }
 
 #[test]
-fn bounds_branching_recursive_streams_by_invocation_budget() {
+fn does_not_reenter_an_active_stream_from_branches() {
     let root = content_stream(2, b"/Self Do /Self Do");
     let resources = Arc::new(form_resource(
         "Self",
@@ -154,11 +154,11 @@ fn bounds_branching_recursive_streams_by_invocation_budget() {
     let mut recording = RecordingCanvas::new(100.0, 100.0);
 
     render(&mut recording, &root, Some(Arc::clone(&resources)))
-        .expect("branching recursion should stop at the invocation budget");
+        .expect("a branching self-reference should render once");
 
     let observer = replay(&recording);
-    assert_eq!(observer.save_count, 4097);
-    assert_eq!(observer.restore_count, 4097);
+    assert_eq!(observer.save_count, 1);
+    assert_eq!(observer.restore_count, 1);
 }
 
 #[test]
@@ -200,12 +200,12 @@ fn releases_render_state_after_an_operator_error() {
 
     canvas
         .render_content_stream(&recursive, None, None, Some(Arc::clone(&resources)), None)
-        .expect("rendering should use the full depth budget after an error");
+        .expect("the stream should be admitted again after an error");
     drop(canvas);
 
     let observer = replay(&recording);
-    assert_eq!(observer.save_count, 41);
-    assert_eq!(observer.restore_count, 41);
+    assert_eq!(observer.save_count, 2);
+    assert_eq!(observer.restore_count, 2);
 }
 
 #[test]

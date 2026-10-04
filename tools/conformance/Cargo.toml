@@ -11,12 +11,14 @@ workspace = true
 [dependencies]
 pdf-canvas = { path = "../../crates/pdf-canvas" }
 pdf-document = { path = "../../crates/pdf-document", features = ["error-backtrace"] }
+pdf-font = { path = "../../crates/pdf-font" }
 pdf-graphics = { path = "../../crates/pdf-graphics" }
 pdf-graphics-skia = { path = "../../crates/pdf-graphics-skia" }
 pdf-object-collection = { path = "../../crates/pdf-object-collection" }
 pdf-object-reader = { path = "../../crates/pdf-object-reader" }
 pdf-shading = { path = "../../crates/pdf-shading" }
 pdf-renderer = { path = "../../crates/pdf-renderer", features = ["error-backtrace"] }
+pdf-resources = { path = "../../crates/pdf-resources" }
 pdf-utils = { path = "../../crates/pdf-utils", features = ["error-backtrace"] }
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }

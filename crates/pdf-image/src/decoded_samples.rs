@@ -120,6 +120,7 @@ impl DecodedSamples {
         let num_color_components = match bytes_per_pixel {
             1 | 2 => 1,
             3 | 6 => 3,
+            4 => 4,
             _ => return None,
         };
 

@@ -4,7 +4,7 @@ use crate::{
     baseline::Baseline,
     corpus::{self, CorpusKind},
     model::{Case, CaseResult, PageOutput, PageResult, ReadOutput, Status},
-    process, read_diff, report_case, report_index, signature,
+    process, read_diff, report_case, report_index, signature, worker,
 };
 use anyhow::{Result, anyhow};
 use md5::{Digest as _, Md5};
@@ -359,6 +359,11 @@ fn run_page(
         }
         Some(output) => page_verdict(output, options.tolerance, non_embedded_fonts),
     };
+    if !status.is_failure() {
+        // Only failing pages keep evidence; passing cases get no bundle.
+        let _ = fs::remove_file(case_out.join(worker::streams_file(page)));
+        let _ = fs::remove_dir(case_out);
+    }
     Ok(PageResult {
         status,
         page,
@@ -369,7 +374,7 @@ fn run_page(
 }
 
 /// Returns the page status with its signature.
-fn page_verdict(
+pub fn page_verdict(
     output: &PageOutput,
     tolerance: f64,
     non_embedded_fonts: bool,
@@ -397,16 +402,19 @@ fn page_verdict(
 }
 
 /// Passes the reference to a worker: published images of the case, or the PDFium library.
-/// A component build keeps its dependent shared libraries next to `libpdfium`, so that
-/// directory joins the dynamic loader path.
 fn add_reference(command: &mut std::process::Command, options: &RunOptions, case_dir: &str) {
     if let Some(images) = &options.reference_images {
         command.arg("--reference-images").arg(images.join(case_dir));
         return;
     }
-    let Some(library) = &options.pdfium else {
-        return;
-    };
+    if let Some(library) = &options.pdfium {
+        add_pdfium(command, library);
+    }
+}
+
+/// Passes the PDFium library to a worker. A component build keeps its dependent shared
+/// libraries next to `libpdfium`, so that directory joins the dynamic loader path.
+pub fn add_pdfium(command: &mut std::process::Command, library: &Path) {
     command.arg("--pdfium").arg(library);
     if let Some(dir) = library.parent() {
         let variable = if cfg!(target_os = "macos") {

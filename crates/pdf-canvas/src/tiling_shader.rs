@@ -20,6 +20,13 @@ use crate::recording_canvas::{MAX_NESTING, RecordingCanvas};
 /// Maximum number of candidate cells examined, including discarded boundary cells.
 const MAX_CELL_CANDIDATES: usize = 4_096;
 
+/// Maximum number of recorded commands replayed to populate one repeat period.
+///
+/// Backends replay the cell recording once per intersecting cell, and a pattern
+/// used inside that recording is replayed again for each of those copies, so the
+/// work multiplies with every nesting level.
+const MAX_REPLAY_COST: usize = 1 << 20;
+
 /// Failure to prepare a tiling pattern's geometry for replay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum TilingShaderError {
@@ -29,7 +36,8 @@ pub enum TilingShaderError {
     /// The pattern transform or its inverse cannot be represented.
     #[error("invalid tiling pattern transform: {0}")]
     InvalidTransform(#[from] TransformError),
-    /// Candidate enumeration exceeds the work limit or numeric representation limits.
+    /// Candidate enumeration or cell replay exceeds the work limit, or an index or
+    /// offset exceeds numeric representation limits.
     #[error("tiling pattern replay limit exceeded")]
     ReplayLimitExceeded,
     /// The cell recording nests more masks or patterns than backends replay.
@@ -85,7 +93,8 @@ impl TilingShader {
     /// Returns [`TilingShaderError::InvalidGeometry`] for invalid bounds or steps,
     /// [`TilingShaderError::InvalidTransform`] if inversion fails,
     /// [`TilingShaderError::ReplayLimitExceeded`] if enumeration requires more than
-    /// 4,096 candidates or an index or offset cannot be represented faithfully, or
+    /// 4,096 candidates, replaying the cells exceeds the replay work limit, or an index
+    /// or offset cannot be represented faithfully, or
     /// [`TilingShaderError::NestingLimit`] if the recording nests too deeply.
     pub fn new(
         recording: Arc<RecordingCanvas>,
@@ -105,6 +114,13 @@ impl TilingShader {
         let y_axis = RepeatAxis::new(cell_bounds.top, cell_bounds.bottom, y_step)?;
         let capacity = candidate_capacity(&x_axis, &y_axis)?;
         let cell_transforms = collect_cell_transforms(&cell_bounds, &x_axis, &y_axis, capacity)?;
+        if recording
+            .replay_cost()
+            .saturating_mul(cell_transforms.len())
+            > MAX_REPLAY_COST
+        {
+            return Err(TilingShaderError::ReplayLimitExceeded);
+        }
 
         Ok(Self {
             recording,
@@ -118,6 +134,13 @@ impl TilingShader {
     /// Returns the recorded cell content to replay at each cell translation.
     pub fn recording(&self) -> &RecordingCanvas {
         &self.recording
+    }
+
+    /// Returns the number of recorded commands replayed to populate one repeat period.
+    pub fn replay_cost(&self) -> usize {
+        self.recording
+            .replay_cost()
+            .saturating_mul(self.cell_transforms.len())
     }
 
     /// Returns the pattern-to-logical-device mapping, composed with backend replay mappings.

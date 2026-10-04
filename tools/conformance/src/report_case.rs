@@ -2,7 +2,9 @@
 
 use crate::{
     baseline::Delta,
-    model::{CaseResult, Diagnostic, ErrorDetail, PageResult, ProcessEvidence, Status},
+    model::{
+        CaseResult, Diagnostic, ErrorDetail, PageResult, ProcessEvidence, RenderStats, Status,
+    },
     report_index::{self, Index, IndexCase},
     run::RunOptions,
     signature, source_hints,
@@ -35,7 +37,7 @@ pub fn write(options: &RunOptions, out: &Path, result: &CaseResult, index: &Inde
     let entry = index.cases.iter().find(|case| case.id == result.case.id);
     fs::write(
         dir.join("summary.md"),
-        summary(options, result, entry, index, !excerpts.is_empty())?,
+        summary(options, result, entry, index, !excerpts.is_empty(), &dir)?,
     )?;
     Ok(())
 }
@@ -74,6 +76,7 @@ fn summary(
     entry: Option<&IndexCase>,
     index: &Index,
     has_objects: bool,
+    dir: &Path,
 ) -> Result<String> {
     let mut text = String::new();
     let case = &result.case;
@@ -196,7 +199,7 @@ fn summary(
     }
 
     for page in &result.pages {
-        page_section(&mut text, options, result, page, index)?;
+        page_section(&mut text, options, result, page, index, dir)?;
     }
 
     writeln!(text, "\n## Legend\n")?;
@@ -220,6 +223,7 @@ fn page_section(
     result: &CaseResult,
     page: &PageResult,
     index: &Index,
+    dir: &Path,
 ) -> Result<()> {
     writeln!(text, "\n## Page {}: {}\n", page.page, page.status.as_str())?;
     if page.status == Status::FontSubstitution {
@@ -242,6 +246,16 @@ fn page_section(
         "- Reproduce: `{}`",
         options.reproduce(&result.case.id, Some(page.page))
     )?;
+    if let Some(line) = render_line(&page.process) {
+        writeln!(text, "- Safe-PDF render: {line}")?;
+    }
+    let streams = crate::worker::streams_file(page.page);
+    if dir.join(&streams).is_file() {
+        writeln!(
+            text,
+            "- Content streams reachable through resources, with cycles marked: [{streams}]({streams})"
+        )?;
+    }
     let Some(output) = &page.output else {
         writeln!(text)?;
         return process_block(text, &page.process);
@@ -338,6 +352,37 @@ fn page_section(
         writeln!(text, "\nWorker stderr (tail):\n\n```\n{stderr}\n```")?;
     }
     Ok(())
+}
+
+/// Describes the Safe-PDF render steps a worker reached; `None` when it stopped before them.
+pub fn render_line(process: &ProcessEvidence) -> Option<String> {
+    match (&process.render, process.stage.as_deref()) {
+        (Some(stats), _) => Some(render_text(stats)),
+        // Stopped while recording, before reporting anything.
+        (None, Some("safe-record")) => Some(render_text(&RenderStats::default())),
+        (None, _) => None,
+    }
+}
+
+/// Describes how long each Safe-PDF render step took and how much replay work it recorded.
+///
+/// A step without a time did not finish: the worker was stopped in it.
+pub fn render_text(stats: &RenderStats) -> String {
+    let step = |name: &str, ms: Option<u128>| match ms {
+        Some(ms) => format!("{name} {ms} ms"),
+        None => format!("{name} did not finish"),
+    };
+    let mut parts = vec![step("record", stats.record_ms)];
+    if stats.record_ms.is_some() {
+        parts.push(step("replay", stats.replay_ms));
+    }
+    if let Some(cost) = stats.replay_cost {
+        parts.push(format!("{cost} replayed commands"));
+    }
+    if let Some(nesting) = stats.nesting {
+        parts.push(format!("pattern and mask nesting {nesting}"));
+    }
+    parts.join("; ")
 }
 
 fn cell(text: &str) -> String {
@@ -466,7 +511,7 @@ fn diagnostics(text: &mut String, diagnostics: &[Diagnostic], has_objects: bool)
 fn stderr_tail(stderr: &str) -> String {
     let lines: Vec<&str> = stderr
         .lines()
-        .filter(|line| !line.starts_with(crate::process::STAGE_MARKER))
+        .filter(|line| !crate::process::is_marker(line))
         .collect();
     lines
         .get(lines.len().saturating_sub(STDERR_LINES)..)

@@ -1,6 +1,6 @@
 //! Runs workers as isolated child processes with timeouts and full output capture.
 
-use crate::model::ProcessEvidence;
+use crate::model::{ProcessEvidence, RenderStats};
 use anyhow::{Context, Result, anyhow};
 use serde::de::DeserializeOwned;
 use std::{
@@ -12,6 +12,9 @@ use std::{
 
 /// Prefix of the stderr lines workers print when entering a stage.
 pub const STAGE_MARKER: &str = "conformance-stage: ";
+
+/// Prefix of the stderr lines carrying a JSON [`RenderStats`] update from a page worker.
+pub const STATS_MARKER: &str = "conformance-stats: ";
 
 /// Keeps the tail of stderr; panics and backtraces end there.
 const STDERR_LIMIT: usize = 64 * 1024;
@@ -43,6 +46,7 @@ pub fn execute<T: DeserializeOwned>(
             .rev()
             .find_map(|line| line.strip_prefix(STAGE_MARKER))
             .map(str::to_owned),
+        render: render_stats(&stderr),
         stderr: tail(&stderr, STDERR_LIMIT),
         stdout: None,
     };
@@ -61,6 +65,23 @@ pub fn execute<T: DeserializeOwned>(
         None
     };
     Ok((value, evidence))
+}
+
+/// Merges the render figures a worker reported, in order; `None` when it reported none.
+fn render_stats(stderr: &str) -> Option<RenderStats> {
+    stderr
+        .lines()
+        .filter_map(|line| line.strip_prefix(STATS_MARKER))
+        .filter_map(|json| serde_json::from_str::<RenderStats>(json).ok())
+        .reduce(|mut stats, update| {
+            stats.merge(update);
+            stats
+        })
+}
+
+/// Returns true for the progress lines workers print for the harness rather than for readers.
+pub fn is_marker(line: &str) -> bool {
+    line.starts_with(STAGE_MARKER) || line.starts_with(STATS_MARKER)
 }
 
 fn tail(text: &str, limit: usize) -> String {
