@@ -358,8 +358,15 @@ impl DecodedSamples {
         } else {
             DecodeRange::identity()
         };
+        // Map every possible code once rather than every pixel.
+        let mapped: Vec<u8> = (0..=sample_max)
+            .map(|code| default_range.map_byte(code, sample_max, output_max))
+            .collect();
         for sample in decoded.iter_mut() {
-            *sample = default_range.map_byte(*sample, sample_max, output_max);
+            *sample = mapped
+                .get(usize::from(*sample))
+                .copied()
+                .unwrap_or_else(|| default_range.map_byte(*sample, sample_max, output_max));
         }
         decoded.freeze()
     }
