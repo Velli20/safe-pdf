@@ -476,4 +476,47 @@ mod tests {
             Some(PdfOperatorVariant::RestoreGraphicsState(_))
         ));
     }
+
+    #[test]
+    fn parse_next_item_skips_untokenized_delimiters() {
+        let mut out = Vec::new();
+        let mut parser = OperatorStreamParser::new(b"} { q", &mut out);
+
+        while parser
+            .parse_next_item()
+            .expect("brace delimiters should be skipped")
+        {}
+
+        assert!(parser.operands.is_empty());
+        assert_eq!(parser.out.len(), 1);
+        assert!(matches!(
+            parser.out.first(),
+            Some(PdfOperatorVariant::SaveGraphicsState(_))
+        ));
+    }
+
+    #[test]
+    fn parse_next_item_reads_inline_image_ending_directly_after_binary_data() {
+        let mut out = Vec::new();
+        let mut parser = OperatorStreamParser::new(
+            b"BI /IM true /W 8 /H 1 /F /CCF /DP << /K -1 /Columns 8 >> ID \x01}\x10EI\nQ",
+            &mut out,
+        );
+
+        while parser
+            .parse_next_item()
+            .expect("inline image and trailing operator should parse")
+        {}
+
+        assert!(parser.operands.is_empty());
+        assert_eq!(parser.out.len(), 2);
+        assert!(matches!(
+            parser.out.first(),
+            Some(PdfOperatorVariant::InlineImage(_))
+        ));
+        assert!(matches!(
+            parser.out.get(1),
+            Some(PdfOperatorVariant::RestoreGraphicsState(_))
+        ));
+    }
 }

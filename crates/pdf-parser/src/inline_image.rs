@@ -115,9 +115,10 @@ impl PdfParser<'_> {
 
     /// Finds the first valid inline-image `EI` end marker by scanning binary data.
     ///
-    /// The fallback path intentionally keeps the conservative whitespace-before-`EI`
-    /// guard so binary or compressed inline-image payloads do not terminate early on
-    /// embedded `EI` byte sequences.
+    /// The scan first keeps the conservative whitespace-before-`EI` guard so binary or
+    /// compressed inline-image payloads do not terminate early on embedded `EI` byte
+    /// sequences. Some producers write `EI` directly after the binary data, so when no
+    /// guarded end exists the scan accepts the first `EI` keyword without that guard.
     fn find_inline_image_data_end_by_scan(&mut self) -> Result<usize, ParserError> {
         let current = self.tokenizer.position;
         let candidates: Vec<usize> = self
@@ -128,17 +129,22 @@ impl PdfParser<'_> {
             .filter_map(|(offset, byte)| (*byte == b'E').then_some(current.saturating_add(offset)))
             .collect();
 
-        for candidate in candidates {
-            if !self.has_whitespace_before(candidate) {
-                continue;
-            }
+        self.find_inline_image_end_candidate(&candidates, true)
+            .or_else(|| self.find_inline_image_end_candidate(&candidates, false))
+            .ok_or(ParserError::InlineImageMissingDataEnd)
+    }
 
-            if self.try_consume_inline_image_end(candidate) {
-                return Ok(candidate);
-            }
-        }
-
-        Err(ParserError::InlineImageMissingDataEnd)
+    /// Returns the first candidate offset that holds a valid `EI` keyword, optionally
+    /// requiring PDF whitespace immediately before it.
+    fn find_inline_image_end_candidate(
+        &mut self,
+        candidates: &[usize],
+        require_whitespace_before: bool,
+    ) -> Option<usize> {
+        candidates.iter().copied().find(|&candidate| {
+            (!require_whitespace_before || self.has_whitespace_before(candidate))
+                && self.try_consume_inline_image_end(candidate)
+        })
     }
 
     /// Computes the raw payload length for an unfiltered inline image when possible.
@@ -355,6 +361,16 @@ mod tests {
 
         assert_eq!(image.shared_data().as_ref(), b"x\n");
         assert_eq!(parser.tokenizer.data(), b"");
+    }
+
+    #[test]
+    fn filtered_inline_image_accepts_ei_directly_after_binary_data() {
+        let mut parser = PdfParser::from(
+            b"/IM true /W 8 /H 1 /F /CCF /DP << /K -1 /Columns 8 >> ID \x01}\x10EI\nQ".as_slice(),
+        );
+
+        assert!(parser.parse_inline_image(&PassthroughResolver).is_ok());
+        assert_eq!(parser.tokenizer.data(), b"Q");
     }
 
     #[test]
