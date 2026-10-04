@@ -217,6 +217,9 @@ pub struct ProcessEvidence {
     pub exit_status: String,
     /// True when the worker was killed for exceeding the timeout.
     pub timed_out: bool,
+    /// True when the worker was killed for exceeding the memory limit.
+    #[serde(default)]
+    pub memory_exceeded: bool,
     /// Wall time in milliseconds.
     pub elapsed_ms: u128,
     /// Last worker stage reached (`reference`, `safe-read`, `safe-record`, `safe-replay`, ...).
@@ -228,6 +231,19 @@ pub struct ProcessEvidence {
     pub stderr: String,
     /// Worker stdout when it could not be parsed.
     pub stdout: Option<String>,
+}
+
+impl ProcessEvidence {
+    /// Describes how the worker ended: `timed out`, `exceeded the memory limit` or `crashed`.
+    pub fn ending(&self) -> &'static str {
+        if self.timed_out {
+            "timed out"
+        } else if self.memory_exceeded {
+            "exceeded the memory limit"
+        } else {
+            "crashed"
+        }
+    }
 }
 
 /// Outcome category for a page or a whole document.

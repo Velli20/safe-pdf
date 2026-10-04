@@ -628,11 +628,7 @@ fn example(
         writeln!(
             text,
             "Worker {} after {} ms in stage `{}` ({}).\n",
-            if process.timed_out {
-                "timed out"
-            } else {
-                "crashed"
-            },
+            process.ending(),
             process.elapsed_ms,
             process.stage.as_deref().unwrap_or("startup"),
             process.exit_status
