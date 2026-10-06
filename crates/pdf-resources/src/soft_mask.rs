@@ -24,11 +24,11 @@ pub struct SoftMask {
 impl FromPdfObject for SoftMask {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
-        let mask_type = MaskMode::from(
-            context
-                .dictionary()
-                .required_bytes(b"S", context.source())?,
-        );
+        let mask_type = context
+            .dictionary()
+            .required_bytes(b"S", context.source())
+            .map(MaskMode::from)?;
+
         Self::require_form_group(context.dictionary(), context.source())?;
         let shape = context.required_shared(b"G")?;
         let transfer = Self::read_transfer(context.dictionary().get(b"TR"), context.source())?;
