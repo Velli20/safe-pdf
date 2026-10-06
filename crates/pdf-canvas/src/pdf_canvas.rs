@@ -34,6 +34,9 @@ use pdf_text_engine::FontSystem;
 pub struct PdfCanvas<'a, B: CanvasBackend> {
     /// The current path being constructed or drawn, if any.
     pub(crate) current_path: Option<PdfPath>,
+    /// Clip rule requested by `W`/`W*`, applied to the current path once the next
+    /// path-painting operator ends it.
+    pub(crate) pending_clip: Option<PathFillType>,
     /// The drawing backend implementing `CanvasBackend` for rendering operations.
     pub(crate) canvas: &'a mut B,
     /// The PDF page associated with this canvas.
@@ -98,6 +101,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
         Ok(Self {
             current_path: None,
+            pending_clip: None,
             canvas: backend,
             page,
             font_system,
@@ -196,6 +200,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
         let mut other = PdfCanvas::<RecordingCanvas> {
             current_path: None,
+            pending_clip: None,
             canvas: &mut recording_canvas,
             page: self.page,
             font_system: Arc::clone(&self.font_system),
@@ -507,26 +512,35 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         Ok(())
     }
 
-    /// Paints the current path (if any) using the specified paint mode and fill type, then clears the path.
+    /// Ends the current path: paints it (if `paint` is given), then intersects the clip with
+    /// it when `W`/`W*` marked it, and clears the path.
+    ///
+    /// The marked clip takes effect only after painting, so the painting itself is not
+    /// restricted by it.
     ///
     /// # Parameters
     ///
-    /// - `mode`: The paint mode (fill, stroke, or fill and stroke).
-    /// - `fill_type`: The fill rule to use.
+    /// - `paint`: The paint mode and fill rule, or `None` to end the path without painting.
     ///
     /// # Errors
     ///
-    /// Returns an error if there is no active path or if drawing fails.
-    pub(crate) fn paint_taken_path(
+    /// Returns an error if drawing or clipping fails.
+    pub(crate) fn end_path(
         &mut self,
-        mode: PaintMode,
-        fill_type: PathFillType,
+        paint: Option<(PaintMode, PathFillType)>,
     ) -> Result<(), PdfCanvasError> {
+        let pending_clip = self.pending_clip.take();
         let Some(path) = self.current_path.take() else {
             return Ok(());
         };
-        let path = CanvasPath::transformed(&path, self.current_state()?.transform)?;
-        self.draw_path(&path, mode, fill_type)
+        if let Some((mode, fill_type)) = paint {
+            let device_path = CanvasPath::transformed(&path, self.current_state()?.transform)?;
+            self.draw_path(&device_path, mode, fill_type)?;
+        }
+        match pending_clip {
+            Some(clip_rule) => self.set_clip_path(path, clip_rule),
+            None => Ok(()),
+        }
     }
 
     /// Sets the clipping path for subsequent drawing operations.
