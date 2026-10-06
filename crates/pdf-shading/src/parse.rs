@@ -16,6 +16,7 @@ use crate::{
     color_stops::ColorStops,
     error::PdfShadingError,
     free_form_mesh::parse_free_form_triangle_mesh,
+    function_shading::FunctionShading,
     model::{Shading, ShadingType},
     patch_mesh::parse_patch_mesh,
 };
@@ -30,7 +31,9 @@ impl FromPdfObject for Shading {
             .try_into()?;
 
         match shading_type {
-            ShadingType::FunctionBased => parse_function_based(dictionary, objects),
+            ShadingType::FunctionBased => {
+                FunctionShading::parse(dictionary, objects).map(Shading::FunctionBased)
+            }
             ShadingType::Axial => parse_axial(dictionary, objects),
             ShadingType::Radial => parse_radial(dictionary, objects),
             ShadingType::FreeFormTriangleMesh => parse_free_form_triangle_mesh(object, objects),
@@ -59,28 +62,6 @@ pub(crate) fn parse_functions(
             .collect(),
         value => Ok(vec![Function::parse(value, objects)?]),
     }
-}
-
-/// Parses a Type 1 function-based shading dictionary.
-fn parse_function_based(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> Result<Shading, PdfShadingError> {
-    let color_space = ColorSpace::from_dictionary(dictionary, objects)?;
-    let background = dictionary.optional_vec_of::<f32>(b"Background", objects)?;
-    let bbox = dictionary.optional_bbox(objects)?;
-    let domain = dictionary.optional_vec_of::<f32>(b"Domain", objects)?;
-    let anti_alias = dictionary.optional_boolean(b"AntiAlias", objects)?;
-    let functions = parse_functions(dictionary, objects)?;
-
-    Ok(Shading::FunctionBased {
-        color_space,
-        background,
-        bbox,
-        anti_alias,
-        domain,
-        functions,
-    })
 }
 
 /// Parses a Type 2 axial shading dictionary.
@@ -155,7 +136,7 @@ fn read_extend(
 ///
 /// A background whose components the color space rejects is ignored rather than
 /// failing the shading.
-fn read_background(
+pub(crate) fn read_background(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,
     color_space: &ColorSpace,
@@ -165,7 +146,7 @@ fn read_background(
         .and_then(|components| color_space.apply(&components).ok()))
 }
 
-/// Reads the required color space shared by shading types 2 through 7.
+/// Reads the required color space shared by shading types 1 through 7.
 pub(crate) fn required_color_space(
     dictionary: &Dictionary,
     objects: &dyn ObjectResolver,

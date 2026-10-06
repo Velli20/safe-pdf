@@ -3,6 +3,7 @@
 pub mod color_stops;
 pub mod error;
 mod free_form_mesh;
+pub mod function_shading;
 pub mod mesh;
 mod mesh_bit_widths;
 mod mesh_decoder;

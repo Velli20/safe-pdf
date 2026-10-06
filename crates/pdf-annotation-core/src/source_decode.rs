@@ -357,7 +357,7 @@ pub(crate) fn color(
         });
     }
     if components.is_empty() {
-        return Ok(Some(Color::from_rgba(0.0, 0.0, 0.0, 0.0)));
+        return Ok(Some(Color::TRANSPARENT));
     }
     Color::from_device_components(&components)
         .map(Some)

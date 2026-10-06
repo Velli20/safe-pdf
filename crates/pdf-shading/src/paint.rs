@@ -298,7 +298,7 @@ pub fn build_shading_paint(
     let outside = |background: &Option<Color>| {
         background
             .filter(|_| use_background)
-            .unwrap_or(Color::from_rgba(0.0, 0.0, 0.0, 0.0))
+            .unwrap_or(Color::TRANSPARENT)
     };
     match shading {
         Shading::Axial {
@@ -323,9 +323,7 @@ pub fn build_shading_paint(
             ShadingPaint::radial_gradient(*coords, transform, stops.positions, stops.colors)
                 .map_err(|error| PdfShadingError::UnsupportedFeature(error.to_string()))
         }
-        Shading::FunctionBased { .. } => Err(PdfShadingError::UnsupportedFeature(
-            "FunctionBased shading not implemented".to_string(),
-        )),
+        Shading::FunctionBased(shading) => shading.paint(transform, use_background),
         Shading::FreeFormTriangleMesh {
             bbox, triangles, ..
         } => {
@@ -414,7 +412,7 @@ fn has_paintable_bounds(bounds: &Rect) -> bool {
         && normalized.height() > 0.0
 }
 
-fn transparent_raster_paint() -> ShadingPaint {
+pub(crate) fn transparent_raster_paint() -> ShadingPaint {
     ShadingPaint::RasterImage {
         image: Image {
             data: Bytes::from_static(&[0_u8, 0, 0, 0]),

@@ -13,6 +13,9 @@ pub struct Color {
 }
 
 impl Color {
+    /// Fully transparent black, which paints nothing.
+    pub const TRANSPARENT: Self = Self::from_rgba(0.0, 0.0, 0.0, 0.0);
+
     /// Returs color value from rgba component values.
     ///
     /// # Arguments
