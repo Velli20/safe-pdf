@@ -23,6 +23,7 @@ fn replay_preserves_stroke_style() {
         line_cap: pdf_graphics::LineCap::Round,
         line_join: pdf_graphics::LineJoin::Bevel,
         miter_limit: 8.0,
+        transform: pdf_graphics::transform::Transform::identity(),
     };
 
     recording

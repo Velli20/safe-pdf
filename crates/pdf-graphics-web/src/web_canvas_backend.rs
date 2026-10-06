@@ -203,7 +203,7 @@ impl CanvasBackend for WebCanvasBackend {
         shader: Option<&Shader>,
         mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
-        PreparedPath::new(self, path, color, shader, mode)?
+        PreparedPath::new(self, path, color, shader, mode, None)?
             .fill(rule)
             .map_err(Into::into)
     }
@@ -217,9 +217,19 @@ impl CanvasBackend for WebCanvasBackend {
         shader: Option<&Shader>,
         mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
-        PreparedPath::new(self, path, color, shader, mode)?
-            .stroke(width, style)
-            .map_err(Into::into)
+        match style.stroke_space_path(path, width)? {
+            Some(stroke_space) => PreparedPath::new(
+                self,
+                &CanvasPath::device(&stroke_space),
+                color,
+                shader,
+                mode,
+                Some(style.transform),
+            )?,
+            None => PreparedPath::new(self, path, color, shader, mode, None)?,
+        }
+        .stroke(width, style)
+        .map_err(Into::into)
     }
 
     fn set_clip_region(
@@ -298,6 +308,9 @@ struct PreparedPath<'a> {
     viewport: &'a CanvasViewport,
     geometry: Path2d,
     paint: PathPaint,
+    /// Stroke transform applied on top of the device mapping, when the geometry is in
+    /// stroke space rather than device space.
+    transform: Option<Transform>,
 }
 
 impl<'a> PreparedPath<'a> {
@@ -307,14 +320,16 @@ impl<'a> PreparedPath<'a> {
         color: Color,
         shader: Option<&Shader>,
         mode: Option<BlendMode>,
+        transform: Option<Transform>,
     ) -> WebResult<Self> {
         let geometry = web_path::prepare(path)?;
-        let paint = PathPaint::new(backend, color, shader, mode)?;
+        let paint = PathPaint::new(backend, color, shader, mode, transform.as_ref())?;
         Ok(Self {
             context: &backend.context,
             viewport: &backend.viewport,
             geometry,
             paint,
+            transform,
         })
     }
 
@@ -329,6 +344,17 @@ impl<'a> PreparedPath<'a> {
     fn stroke(self, width: f32, style: &StrokeStyle) -> WebResult<()> {
         let stroke = PreparedStroke::new(width, style, self.viewport)?;
         let _saved = SavedContext::new(self.context);
+        if let Some(t) = &self.transform {
+            t.validate()?;
+            self.context.transform(
+                f64::from(t.sx),
+                f64::from(t.ky),
+                f64::from(t.kx),
+                f64::from(t.sy),
+                f64::from(t.tx),
+                f64::from(t.ty),
+            )?;
+        }
         self.paint.apply(self.context)?;
         stroke.apply(self.context)?;
         self.context.stroke_with_path(&self.geometry);
@@ -358,12 +384,18 @@ impl PathPaint {
         color: Color,
         shader: Option<&Shader>,
         mode: Option<BlendMode>,
+        transform: Option<&Transform>,
     ) -> WebResult<Self> {
         let source = match shader {
             Some(shader) => {
                 let raster = ShaderRaster::new(backend, shader)?;
-                let pattern =
-                    raster.pattern(&backend.context, backend.viewport.device_to_backing())?;
+                let device_to_backing = backend.viewport.device_to_backing();
+                // A pattern is sampled under the transform active when it paints.
+                let mapping = match transform {
+                    Some(transform) => device_to_backing.post_concatenated(transform),
+                    None => *device_to_backing,
+                };
+                let pattern = raster.pattern(&backend.context, &mapping)?;
                 PathSource::Pattern {
                     pattern,
                     _raster: raster,

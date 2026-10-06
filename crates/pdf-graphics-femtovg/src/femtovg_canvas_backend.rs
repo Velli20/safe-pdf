@@ -1,6 +1,6 @@
 //! FemtoVG drawing; unsupported soft masks fail before painting begins.
 
-use femtovg::{Canvas, Color, FillRule, Paint, Path};
+use femtovg::{Canvas, Color, FillRule, Paint, Path, Transform2D};
 use pdf_canvas::{
     CanvasPath,
     canvas_backend::{CanvasBackend, Shader},
@@ -70,7 +70,8 @@ impl CanvasBackend for CanvasImpl<'_> {
         Ok(())
     }
 
-    /// Strokes device-space geometry using the supplied width and stroke style.
+    /// Strokes device-space geometry using the supplied width and stroke style, in the
+    /// style's stroke space when the CTM scales unevenly or shears.
     fn stroke_path(
         &mut self,
         path: &CanvasPath<'_>,
@@ -80,7 +81,11 @@ impl CanvasBackend for CanvasImpl<'_> {
         _shader: Option<&Shader>,
         _blend_mode: Option<pdf_graphics::BlendMode>,
     ) -> Result<(), PdfCanvasError> {
-        let path = to_femtovg_path(path)?;
+        let stroke_space = stroke_style.stroke_space_path(path, line_width)?;
+        let path = match &stroke_space {
+            Some(stroke_space) => to_femtovg_path(&CanvasPath::device(stroke_space))?,
+            None => to_femtovg_path(path)?,
+        };
 
         let mut stroke_paint = Paint::color(Color::rgbf(color.r, color.g, color.b));
         stroke_paint.set_anti_alias(true);
@@ -96,7 +101,16 @@ impl CanvasBackend for CanvasImpl<'_> {
             pdf_graphics::LineJoin::Bevel => femtovg::LineJoin::Bevel,
         });
         stroke_paint.set_miter_limit(stroke_style.miter_limit);
-        self.canvas.stroke_path(&path, &stroke_paint);
+        if stroke_space.is_some() {
+            let [sx, ky, kx, sy, tx, ty] = stroke_style.transform.to_row();
+            self.canvas.save();
+            self.canvas
+                .set_transform(&Transform2D::new(sx, ky, kx, sy, tx, ty));
+            self.canvas.stroke_path(&path, &stroke_paint);
+            self.canvas.restore();
+        } else {
+            self.canvas.stroke_path(&path, &stroke_paint);
+        }
         Ok(())
     }
 

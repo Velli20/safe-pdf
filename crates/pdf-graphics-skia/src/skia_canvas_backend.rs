@@ -443,7 +443,8 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         Ok(())
     }
 
-    /// Strokes device-space geometry using the supplied width and stroke style.
+    /// Strokes device-space geometry using the supplied width and stroke style, in the
+    /// style's stroke space when the CTM scales unevenly or shears.
     fn stroke_path(
         &mut self,
         path: &CanvasPath<'_>,
@@ -453,7 +454,11 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         shader: Option<&Shader>,
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
-        let sk_path = to_skia_path(path)?;
+        let stroke_space = stroke_style.stroke_space_path(path, line_width)?;
+        let sk_path = match &stroke_space {
+            Some(stroke_space) => to_skia_path(&CanvasPath::device(stroke_space))?,
+            None => to_skia_path(path)?,
+        };
         // Skia draws zero-width strokes as hairlines.
         let line_width = device_stroke_width(line_width, 0.0)
             .ok_or(SkiaCanvasBackendError::InvalidStrokeWidth)?;
@@ -481,10 +486,24 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         }
         if let Some(shader_spec) = shader {
             let mapping = from_skia_matrix(&self.surface.canvas().local_to_device_as_3x3());
-            paint.set_shader(to_skia_shader(shader_spec, &mapping)?);
+            let shader = to_skia_shader(shader_spec, &mapping)?;
+            paint.set_shader(match &stroke_space {
+                // Keep the shader in device space under the stroke transform.
+                Some(_) => shader
+                    .with_local_matrix(&to_skia_matrix(&stroke_style.transform.try_inverse()?)),
+                None => shader,
+            });
         }
 
-        self.surface.canvas().draw_path(&sk_path, &paint);
+        let canvas = self.surface.canvas();
+        if stroke_space.is_some() {
+            canvas.save();
+            canvas.concat(&to_skia_matrix(&stroke_style.transform));
+            canvas.draw_path(&sk_path, &paint);
+            canvas.restore();
+        } else {
+            canvas.draw_path(&sk_path, &paint);
+        }
         Ok(())
     }
 
