@@ -454,8 +454,8 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             Some((
                 state.paint.stroke_color,
                 state.paint.blend_mode.clone(),
-                state.paint.line_width * state.transform.sx,
-                StrokeStyle::from_paint(&state.paint, state.transform.sx)?,
+                state.paint.line_width * state.transform.area_scale(),
+                StrokeStyle::from_paint(&state.paint, &state.transform)?,
                 self.compute_shader(true)?,
                 self.pattern_bbox_clip(true)?,
             ))

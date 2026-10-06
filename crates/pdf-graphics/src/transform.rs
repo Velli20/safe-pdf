@@ -481,6 +481,21 @@ impl Transform {
         x.max(y)
     }
 
+    /// Returns the square root of the absolute determinant: the factor by which the
+    /// linear part scales lengths on average, and exactly when it is a similarity.
+    pub fn area_scale(&self) -> f32 {
+        (self.sx * self.sy - self.kx * self.ky).abs().sqrt()
+    }
+
+    /// Returns whether the linear part preserves angles: a uniform scale combined with
+    /// rotation or reflection, with no uneven scaling or shear.
+    pub fn is_similarity(&self) -> bool {
+        let [x, y] = self.axis_scales();
+        let dot = self.sx * self.kx + self.ky * self.sy;
+        let tolerance = 1e-4 * x.max(y) * x.max(y);
+        (x * x - y * y).abs() <= tolerance && dot.abs() <= tolerance
+    }
+
     /// Returns the rotation angle (in degrees, counter-clockwise) encoded by the
     /// linear part of this affine transform.
     ///
