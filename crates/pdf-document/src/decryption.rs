@@ -27,7 +27,7 @@ use thiserror::Error;
 
 use crate::{
     cipher::{aes_128_cbc_decrypt, aes_256_cbc_decrypt, rc4_crypt},
-    encryption::{CryptFilterMethod, EncryptDictionary, EncryptionFilter, EncryptionVersion},
+    encryption::{CryptFilterMethod, EncryptDictionary, EncryptionVersion},
     md5_key_derivation::{Md5KeyDerivation, compute_object_key},
     sha2_key_derivation::Sha2KeyDerivation,
 };
@@ -92,11 +92,6 @@ impl DocumentDecryptor {
         document_id: &[u8],
         password: &[u8],
     ) -> Result<Self, DecryptionError> {
-        if let EncryptionFilter::Other(filter) = &encrypt.filter {
-            return Err(DecryptionError::UnsupportedSecurityHandler(
-                String::from_utf8_lossy(filter).into_owned(),
-            ));
-        }
         match encrypt.version {
             EncryptionVersion::V1 | EncryptionVersion::V2 | EncryptionVersion::V4 => {
                 Self::new_md5(encrypt, document_id, password)

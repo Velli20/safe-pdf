@@ -14,16 +14,8 @@ use pdf_object_reader::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
 };
 
+use crate::decryption::DecryptionError;
 use crate::error::PdfReaderError;
-
-/// Standard security handler filter names.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum EncryptionFilter {
-    /// Standard security handler (password-based encryption).
-    Standard,
-    /// Other or unsupported filter.
-    Other(Vec<u8>),
-}
 
 /// Encryption method selected by a document-default crypt filter.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -52,15 +44,6 @@ impl TryFrom<&[u8]> for CryptFilterMethod {
                 "unsupported crypt filter method: {}",
                 String::from_utf8_lossy(method)
             ))),
-        }
-    }
-}
-
-impl From<&[u8]> for EncryptionFilter {
-    fn from(name: &[u8]) -> Self {
-        match name {
-            b"Standard" => EncryptionFilter::Standard,
-            other => EncryptionFilter::Other(Vec::from(other)),
         }
     }
 }
@@ -120,12 +103,15 @@ impl TryFrom<i32> for EncryptionVersion {
 /// The encryption dictionary specifies the security handler and encryption
 /// parameters needed to decrypt the document.
 ///
+/// Only the Standard (password-based) security handler is supported, so `Filter` must be
+/// `/Standard`.
+///
 /// # Required Entries
 ///
-/// - `Filter`: The name of the security handler (e.g., `/Standard`).
+/// - `Filter`: The name of the security handler.
 /// - `V`: The algorithm version number.
 ///
-/// # Standard Security Handler Entries (when Filter = Standard)
+/// # Standard Security Handler Entries
 ///
 /// - `R`: The revision of the standard security handler.
 /// - `O`: A 32-byte string used to verify the owner password.
@@ -134,12 +120,9 @@ impl TryFrom<i32> for EncryptionVersion {
 /// - `Length`: (Optional) The length of the encryption key in bits.
 #[derive(Debug, Clone)]
 pub(crate) struct EncryptDictionary {
-    /// The security handler filter (e.g., Standard).
-    pub filter: EncryptionFilter,
     /// The encryption algorithm version (V entry).
     pub version: EncryptionVersion,
     /// The revision of the standard security handler (R entry).
-    /// Only applicable when filter is Standard.
     pub revision: i32,
     /// Owner password verification string (O entry).
     /// A 32-byte string for Standard handler.
@@ -184,14 +167,22 @@ impl EncryptDictionary {
     ///
     /// # Returns
     ///
-    /// An `EncryptDictionary` on success, or a `PdfReaderError` if parsing fails.
+    /// An `EncryptDictionary` on success, or a `PdfReaderError` if parsing fails or the
+    /// security handler is not `/Standard`.
     pub fn from_dictionary(
         dict: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Self, PdfReaderError> {
-        let filter = dict
-            .required_bytes(b"Filter", objects)
-            .map(EncryptionFilter::from)?;
+        // Other handlers (such as the public-key `/Adobe.PubSec`) lack the Standard entries
+        // below and need keys this reader cannot obtain.
+        let filter = dict.required_bytes(b"Filter", objects)?;
+        if filter != b"Standard" {
+            return Err(PdfReaderError::from_decryption_setup(
+                DecryptionError::UnsupportedSecurityHandler(
+                    String::from_utf8_lossy(filter).into_owned(),
+                ),
+            ));
+        }
 
         let version_num = dict.required_number::<i32>(b"V", objects)?;
         let version = EncryptionVersion::try_from(version_num)?;
@@ -223,7 +214,6 @@ impl EncryptDictionary {
         };
 
         Ok(EncryptDictionary {
-            filter,
             version,
             revision,
             owner_password_hash,
@@ -364,18 +354,6 @@ mod tests {
     }
 
     #[test]
-    fn test_encryption_filter_conversion() {
-        assert_eq!(
-            EncryptionFilter::from(b"Standard".as_slice()),
-            EncryptionFilter::Standard
-        );
-        assert_eq!(
-            EncryptionFilter::from(b"Custom".as_slice()),
-            EncryptionFilter::Other(Vec::from(b"Custom"))
-        );
-    }
-
-    #[test]
     fn test_parse_full_encrypt_dictionary() {
         let dict = make_dictionary(vec![
             (
@@ -411,7 +389,6 @@ mod tests {
         assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
         let encrypt = result.unwrap();
 
-        assert_eq!(encrypt.filter, EncryptionFilter::Standard);
         assert_eq!(encrypt.version, EncryptionVersion::V4);
         assert_eq!(encrypt.revision, 4);
         assert_eq!(encrypt.owner_password_hash, vec![0u8; 32]);
