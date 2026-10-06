@@ -116,6 +116,12 @@ impl EncryptionContext {
                 }
                 Err(error) => return Err(error),
             };
+        if encryption.leaves_streams_and_strings_unencrypted() {
+            return Ok(Self {
+                decryptor: None,
+                dictionary_object_number,
+            });
+        }
         let document_id = extract_document_id(trailer)?;
         let decryptor = DocumentDecryptor::new(&encryption, document_id, password)
             .map_err(PdfReaderError::from_decryption_setup)?;

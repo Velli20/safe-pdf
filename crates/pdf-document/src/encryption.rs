@@ -253,6 +253,15 @@ impl EncryptDictionary {
             EncryptionVersion::V5 => 256,
         }
     }
+
+    /// Returns whether both document-default crypt filters are `/Identity`.
+    ///
+    /// Such documents store every stream and string unencrypted, so reading them needs no
+    /// password even when other crypt filters (for example `/EFF` for embedded files) do.
+    pub(crate) fn leaves_streams_and_strings_unencrypted(&self) -> bool {
+        self.stream_method == CryptFilterMethod::Identity
+            && self.string_method == CryptFilterMethod::Identity
+    }
 }
 
 /// Resolves one of the document-default V=4 crypt filters.
