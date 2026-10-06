@@ -32,10 +32,7 @@ impl FromPdfObject for FormXObject {
             },
             _ => context.read::<ContentStream>(object.value())?,
         };
-        let bbox = context
-            .dictionary()
-            .optional_bbox(context.source())?
-            .map(|bbox| bbox.normalized());
+        let bbox = context.dictionary().optional_bbox(context.source())?;
         let matrix = context.dictionary().optional_matrix(context.source())?;
         // Retain deferred handles so recursive resource graphs can finish decoding.
         let resources = context.optional_shared::<Resources>(b"Resources")?;

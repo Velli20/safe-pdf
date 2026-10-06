@@ -44,6 +44,9 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     font_cache: HashMap<*const PdfFontSpec, PdfFontHandle>,
     /// Scalable outlines reused by repeated glyphs during this page render.
     glyph_cache: HashMap<(FontFaceId, GlyphId, u32), Arc<PdfPath>>,
+    /// The last shading-pattern shader, reused while the same pattern fills at the same
+    /// transform, such as across the glyphs of one text run.
+    pattern_shading_cache: Option<(Arc<Pattern>, Transform, Shader)>,
     /// The stack of graphics states, supporting save/restore semantics.
     pub(crate) canvas_stack: Vec<CanvasState>,
     /// Stack depth that a restore in the current content stream may not pop below.
@@ -103,6 +106,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             font_system,
             font_cache: HashMap::new(),
             glyph_cache: HashMap::new(),
+            pattern_shading_cache: None,
             canvas_stack,
             restore_floor: 1,
             content_stream_render_state: ContentStreamRenderState::default(),
@@ -201,6 +205,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             font_system: Arc::clone(&self.font_system),
             font_cache: HashMap::new(),
             glyph_cache: HashMap::new(),
+            pattern_shading_cache: None,
             canvas_stack,
             restore_floor: 1,
             // The recording continues this canvas's active streams, so a cycle
@@ -347,7 +352,15 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
         match pattern.as_ref() {
             Pattern::Shading { shading, .. } => {
+                if let Some((cached, cached_transform, shader)) = &self.pattern_shading_cache
+                    && Arc::ptr_eq(cached, &pattern)
+                    && *cached_transform == transform
+                {
+                    return Ok(Some(shader.clone()));
+                }
                 let shader = self.build_shading_shader(shading, &Some(transform), true)?;
+                self.pattern_shading_cache =
+                    Some((Arc::clone(&pattern), transform, shader.clone()));
                 Ok(Some(shader))
             }
             Pattern::Tiling {

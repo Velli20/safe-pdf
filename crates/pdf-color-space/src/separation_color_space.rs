@@ -50,7 +50,7 @@ impl SeparationColorSpace {
         // If the name is "None", it represents the absence of all colorants.
         // Produce fully transparent output regardless of tint value.
         if self.name == b"None" {
-            return Ok(Color::from_rgba(0.0, 0.0, 0.0, 0.0));
+            return Ok(Color::TRANSPARENT);
         }
 
         let tint = components

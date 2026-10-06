@@ -3,7 +3,7 @@
 use pdf_color_space::color_space::ColorSpace;
 use pdf_graphics::{color::Color, point::Point, rect::Rect};
 
-use crate::{color_stops::ColorStops, error::PdfShadingError};
+use crate::{color_stops::ColorStops, error::PdfShadingError, function_shading::FunctionShading};
 
 /// The `/ShadingType` discriminator used by PDF shading dictionaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -62,20 +62,7 @@ impl TryFrom<i32> for ShadingType {
 #[derive(Debug, Clone)]
 pub enum Shading {
     /// Type 1 function-based shading.
-    FunctionBased {
-        /// The output color space, if explicitly defined.
-        color_space: Option<ColorSpace>,
-        /// Optional background color component values.
-        background: Option<Vec<f32>>,
-        /// Optional bounding box in shading space.
-        bbox: Option<Rect>,
-        /// Optional anti-aliasing preference.
-        anti_alias: Option<bool>,
-        /// Optional function domain values.
-        domain: Option<Vec<f32>>,
-        /// The shading functions.
-        functions: Vec<pdf_function::function::Function>,
-    },
+    FunctionBased(FunctionShading),
     /// Type 2 axial shading.
     Axial {
         /// The shading color space.
@@ -176,7 +163,7 @@ impl Shading {
     /// Returns the shading color space when the shading type defines one.
     pub fn color_space(&self) -> Option<&ColorSpace> {
         match self {
-            Self::FunctionBased { color_space, .. } => color_space.as_ref(),
+            Self::FunctionBased(shading) => Some(&shading.color_space),
             Self::Axial { color_space, .. }
             | Self::Radial { color_space, .. }
             | Self::FreeFormTriangleMesh { color_space, .. }
@@ -188,7 +175,7 @@ impl Shading {
     /// Returns the optional bounding box associated with this shading.
     pub fn bbox(&self) -> Option<&Rect> {
         match self {
-            Self::FunctionBased { bbox, .. }
+            Self::FunctionBased(FunctionShading { bbox, .. })
             | Self::Axial { bbox, .. }
             | Self::Radial { bbox, .. }
             | Self::FreeFormTriangleMesh { bbox, .. }

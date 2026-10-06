@@ -119,19 +119,19 @@ impl Dictionary {
     /// Reads the optional `/BBox` entry as a rectangle.
     ///
     /// Missing entries and explicit PDF `null` values are treated as absent.
-    /// The coordinates are returned in their original order.
+    /// The rectangle is normalized so that `left <= right` and `top <= bottom`.
     pub fn optional_bbox(&self, objects: &dyn ObjectResolver) -> Result<Option<Rect>, ObjectError> {
         Ok(self
             .optional_array_of::<f32, 4>(b"BBox", objects)?
-            .map(Rect::from))
+            .map(|bbox| Rect::from(bbox).normalized()))
     }
 
     /// Reads the required `/BBox` entry as a rectangle.
     ///
-    /// The coordinates are returned in their original order.
+    /// The rectangle is normalized so that `left <= right` and `top <= bottom`.
     pub fn required_bbox(&self, objects: &dyn ObjectResolver) -> Result<Rect, ObjectError> {
         self.required_array_of::<f32, 4>(b"BBox", objects)
-            .map(Rect::from)
+            .map(|bbox| Rect::from(bbox).normalized())
     }
 
     /// Reads optional `/Width` and `/Height` entries as an origin-based integer rectangle.
