@@ -104,14 +104,6 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                 ExternalGraphicsStateKey::DashPattern(dash_pattern) => {
                     self.current_state_mut()?.paint.dash_pattern = Some(dash_pattern.clone());
                 }
-                ExternalGraphicsStateKey::RenderingIntent(_) => {
-                    return Err(PdfCanvasError::UnsupportedFeature(
-                        "ExtGState: RenderingIntent".into(),
-                    ));
-                }
-                ExternalGraphicsStateKey::OverprintStroke(_) => {}
-                ExternalGraphicsStateKey::OverprintFill(_) => {}
-                ExternalGraphicsStateKey::OverprintMode(_) => {}
                 ExternalGraphicsStateKey::Font(font, font_size) => {
                     let resource = font.get()?;
                     if let Resource::Font { font, resources } = resource.as_ref() {
@@ -129,18 +121,8 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
 
                     self.current_state_mut()?.text_state.style.font_size = *font_size;
                 }
-                ExternalGraphicsStateKey::BlendMode(modes) => {
-                    // Store the blend mode(s) in the current graphics state.
-                    // PDF spec: If multiple blend modes are specified, use the first one supported.
-                    // We only support the first for now.
-                    if modes.len() > 1 {
-                        return Err(PdfCanvasError::UnsupportedFeature(
-                            "ExtGState: Only one blend mode is supported".into(),
-                        ));
-                    }
-                    if let Some(mode) = modes.first() {
-                        self.current_state_mut()?.paint.blend_mode = Some(mode.clone());
-                    }
+                ExternalGraphicsStateKey::BlendMode(mode) => {
+                    self.current_state_mut()?.paint.blend_mode = Some(mode.clone());
                 }
                 ExternalGraphicsStateKey::SoftMask(smask) => {
                     // Handle the `/SMask` entry from an `ExtGState` dictionary.
@@ -192,12 +174,6 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                 ExternalGraphicsStateKey::NonStrokingAlpha(alpha) => {
                     self.current_state_mut()?.paint.fill_color.a = *alpha
                 }
-                ExternalGraphicsStateKey::StrokeAdjustment(_) => {}
-                ExternalGraphicsStateKey::AppleAntiAliasing(_) => {}
-                ExternalGraphicsStateKey::AlphaIsShape(_) => {}
-                ExternalGraphicsStateKey::SmoothnessTolerance(_) => {}
-                ExternalGraphicsStateKey::TransferFunction => {}
-                ExternalGraphicsStateKey::TransferFunctionNew => {}
             }
         }
         Ok(())

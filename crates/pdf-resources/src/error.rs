@@ -5,6 +5,7 @@ use pdf_font::error::FontError;
 use pdf_function::{
     error::FunctionReadError, function_interpolation_error::FunctionInterpolationError,
 };
+use pdf_graphics::dash_pattern::DashPatternError;
 use pdf_image::PdfImageError;
 use pdf_shading::error::PdfShadingError;
 
@@ -28,16 +29,26 @@ pub enum PdfPagesError {
     FunctionInterpolation(#[from] FunctionInterpolationError),
     #[error("failed to process font: {0}")]
     Font(#[from] FontError),
+    #[error("invalid /ExtGState entry '/{entry}': expected an array of 2 elements, found {found}")]
+    InvalidExtGStateArrayLength { entry: &'static str, found: usize },
+    #[error("invalid /ExtGState entry '/D': {0}")]
+    InvalidExtGStateDashPattern(#[from] DashPatternError),
+    #[error("invalid /ExtGState entry '/LC': unsupported line cap value {0} (expected 0, 1, or 2)")]
+    InvalidExtGStateLineCap(i32),
     #[error(
-        "invalid /ExtGState entry '/{entry}': expected {expected_structure}, found {actual_structure}"
+        "invalid /ExtGState entry '/LJ': unsupported line join value {0} (expected 0, 1, or 2)"
     )]
-    InvalidExtGStateEntryStructure {
-        entry: String,
-        expected_structure: &'static str,
-        actual_structure: String,
-    },
-    #[error("invalid /ExtGState entry '/{entry}': {reason}")]
-    InvalidExtGStateEntryValue { entry: String, reason: String },
+    InvalidExtGStateLineJoin(i32),
+    #[error(
+        "invalid /ExtGState entry '/SMask': expected a soft mask dictionary or the name 'None'"
+    )]
+    InvalidExtGStateSoftMask,
+    #[error(
+        "invalid /ExtGState entry '/SMask': group XObject must have /Subtype /Form, found /{subtype}"
+    )]
+    SoftMaskGroupNotForm { subtype: String },
+    #[error("invalid /ExtGState entry '/SMask': /TR must produce one finite output")]
+    InvalidSoftMaskTransfer,
     #[error("invalid /PaintType value: {value}")]
     InvalidPaintType { value: i32 },
     #[error("invalid /PatternType value: {value}")]

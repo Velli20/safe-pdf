@@ -51,12 +51,8 @@ impl SoftMask {
         if matches!(XObjectSubtype::try_from(subtype), Ok(XObjectSubtype::Form)) {
             return Ok(());
         }
-        Err(PdfPagesError::InvalidExtGStateEntryValue {
-            entry: "SMask".into(),
-            reason: format!(
-                "group XObject must have /Subtype /Form, found /{}",
-                String::from_utf8_lossy(subtype)
-            ),
+        Err(PdfPagesError::SoftMaskGroupNotForm {
+            subtype: String::from_utf8_lossy(subtype).into_owned(),
         })
     }
 
@@ -82,10 +78,7 @@ impl SoftMask {
             [value] if value.is_finite() => (value.clamp(0.0, 1.0) * 255.0).round().to_u8(),
             _ => None,
         }
-        .ok_or_else(|| PdfPagesError::InvalidExtGStateEntryValue {
-            entry: "SMask.TR".into(),
-            reason: "expected one finite output".into(),
-        })
+        .ok_or(PdfPagesError::InvalidSoftMaskTransfer)
     }
 }
 
@@ -272,7 +265,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            pdf_object_reader::ObjectReadError::Decode { source, .. } if matches!(source.downcast_ref::<PdfPagesError>(), Some(PdfPagesError::InvalidExtGStateEntryValue { entry, .. }) if entry == "SMask")
+            pdf_object_reader::ObjectReadError::Decode { source, .. } if matches!(source.downcast_ref::<PdfPagesError>(), Some(PdfPagesError::SoftMaskGroupNotForm { .. }))
         ));
     }
 }

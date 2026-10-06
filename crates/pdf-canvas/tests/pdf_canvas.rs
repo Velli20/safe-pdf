@@ -236,9 +236,7 @@ fn inline_image_render_path_matches_image_xobject_path() {
     .expect("image XObject should decode");
     let graphics_state = Resource::ExternalGraphicsState(pdf_object_reader::ObjectHandle::from(
         ExternalGraphicsState {
-            params: vec![ExternalGraphicsStateKey::BlendMode(vec![
-                BlendMode::Multiply,
-            ])],
+            params: vec![ExternalGraphicsStateKey::BlendMode(BlendMode::Multiply)],
         },
     ));
     let resources = Arc::new(Resources {
