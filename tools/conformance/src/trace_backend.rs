@@ -217,9 +217,10 @@ impl CanvasBackend for TraceBackend {
         &mut self,
         image: &Image,
         blend_mode: Option<BlendMode>,
+        alpha: f32,
         transform: Transform,
     ) -> Result<(), PdfCanvasError> {
-        let detail = image_detail(image, blend_mode, &transform);
+        let detail = image_detail(image, blend_mode, alpha, &transform);
         self.push("image", Some(image_bounds(&transform)), detail);
         Ok(())
     }
@@ -228,9 +229,10 @@ impl CanvasBackend for TraceBackend {
         &mut self,
         image: &Image,
         blend_mode: Option<BlendMode>,
+        alpha: f32,
         transform: Transform,
     ) -> Result<(), PdfCanvasError> {
-        let detail = image_detail(image, blend_mode, &transform);
+        let detail = image_detail(image, blend_mode, alpha, &transform);
         self.push("inline_image", Some(image_bounds(&transform)), detail);
         Ok(())
     }
@@ -247,10 +249,18 @@ impl CanvasBackend for TraceBackend {
     }
 }
 
-fn image_detail(image: &Image, blend_mode: Option<BlendMode>, transform: &Transform) -> String {
+fn image_detail(
+    image: &Image,
+    blend_mode: Option<BlendMode>,
+    alpha: f32,
+    transform: &Transform,
+) -> String {
     let mut text = format!("{}x{} {:?}", image.width, image.height, image.pixel_format);
     if let Some(mode) = blend_mode {
         text.push_str(&format!(", blend {mode:?}"));
+    }
+    if alpha < 1.0 {
+        text.push_str(&format!(", alpha {alpha}"));
     }
     text.push_str(&format!(", matrix {:?}", transform.to_row()));
     text

@@ -94,12 +94,14 @@ pub trait CanvasBackend {
     ///
     /// - `image`: The image to draw.
     /// - `blend_mode`: Optional blend mode to use when compositing the image.
+    /// - `alpha`: Constant opacity, from 0.0 to 1.0, applied to every image sample.
     /// - `transform`: Maps the unit square to device space, with the image's first pixel
     ///   row along `y = 0` and its first column along `x = 0`.
     fn draw_image(
         &mut self,
         image: &Image,
         blend_mode: Option<BlendMode>,
+        alpha: f32,
         transform: Transform,
     ) -> Result<(), PdfCanvasError>;
 
@@ -110,9 +112,10 @@ pub trait CanvasBackend {
         &mut self,
         image: &Image,
         blend_mode: Option<BlendMode>,
+        alpha: f32,
         transform: Transform,
     ) -> Result<(), PdfCanvasError> {
-        self.draw_image(image, blend_mode, transform)
+        self.draw_image(image, blend_mode, alpha, transform)
     }
 
     /// Paints isolated content and applies the supplied mask only after successful painting.

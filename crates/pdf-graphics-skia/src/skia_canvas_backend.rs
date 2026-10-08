@@ -546,6 +546,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         &mut self,
         image: &Image,
         blend_mode: Option<BlendMode>,
+        alpha: f32,
         transform: Transform,
     ) -> Result<(), PdfCanvasError> {
         if image.width == 0 || image.height == 0 {
@@ -559,6 +560,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         let skia_image = to_skia_image(image)?;
 
         let mut paint = skia_safe::Paint::default();
+        paint.set_alpha_f(alpha);
         if let Some(mode) = blend_mode {
             paint.set_blend_mode(to_skia_blend_mode(mode));
         }

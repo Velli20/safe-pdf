@@ -121,6 +121,7 @@ impl CanvasBackend for ObservingCanvas {
         &mut self,
         image: &Image,
         blend_mode: Option<BlendMode>,
+        _alpha: f32,
         transform: Transform,
     ) -> Result<(), PdfCanvasError> {
         self.images
@@ -133,6 +134,7 @@ impl CanvasBackend for ObservingCanvas {
         &mut self,
         image: &Image,
         blend_mode: Option<BlendMode>,
+        _alpha: f32,
         transform: Transform,
     ) -> Result<(), PdfCanvasError> {
         self.inline_images

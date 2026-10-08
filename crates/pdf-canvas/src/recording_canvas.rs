@@ -59,6 +59,8 @@ enum RecordingCommand {
         image: BackendImage,
         /// Optional compositing operation.
         blend_mode: Option<BlendMode>,
+        /// Constant opacity applied to every image sample.
+        alpha: f32,
         /// Unit square to device space mapping of the image.
         transform: Transform,
     },
@@ -68,6 +70,8 @@ enum RecordingCommand {
         image: BackendImage,
         /// Optional compositing operation.
         blend_mode: Option<BlendMode>,
+        /// Constant opacity applied to every image sample.
+        alpha: f32,
         /// Unit square to device space mapping of the image.
         transform: Transform,
     },
@@ -260,16 +264,18 @@ fn replay_commands<B: CanvasBackend>(
                 DrawImage {
                     image,
                     blend_mode,
+                    alpha,
                     transform,
                 } => {
-                    backend.draw_image(image, blend_mode.clone(), *transform)?;
+                    backend.draw_image(image, blend_mode.clone(), *alpha, *transform)?;
                 }
                 DrawInlineImage {
                     image,
                     blend_mode,
+                    alpha,
                     transform,
                 } => {
-                    backend.draw_inline_image(image, blend_mode.clone(), *transform)?;
+                    backend.draw_inline_image(image, blend_mode.clone(), *alpha, *transform)?;
                 }
                 Mask { mask, len } => {
                     let (body, rest) = commands
@@ -383,11 +389,13 @@ impl CanvasBackend for RecordingCanvas {
         &mut self,
         image: &BackendImage,
         blend_mode: Option<BlendMode>,
+        alpha: f32,
         transform: Transform,
     ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::DrawImage {
             image: image.clone(),
             blend_mode,
+            alpha,
             transform,
         });
         Ok(())
@@ -398,11 +406,13 @@ impl CanvasBackend for RecordingCanvas {
         &mut self,
         image: &BackendImage,
         blend_mode: Option<BlendMode>,
+        alpha: f32,
         transform: Transform,
     ) -> Result<(), PdfCanvasError> {
         self.commands.push(RecordingCommand::DrawInlineImage {
             image: image.clone(),
             blend_mode,
+            alpha,
             transform,
         });
         Ok(())
@@ -594,7 +604,7 @@ mod tests {
         let mut canvas = RecordingCanvas::new(1.0, 1.0);
 
         canvas
-            .draw_image(&image, None, Transform::identity())
+            .draw_image(&image, None, 1.0, Transform::identity())
             .expect("image should be recorded");
 
         assert!(canvas.commands.iter().any(|command| {
