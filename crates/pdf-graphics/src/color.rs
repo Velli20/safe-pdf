@@ -12,6 +12,60 @@ pub struct Color {
     pub a: f32,
 }
 
+/// Polynomial coefficients, one row per sRGB output channel (red, green, blue),
+/// that approximate the SWOP press profile on the 0..=255 scale. Each row
+/// weights the terms `c², cm, cy, ck, c, m², my, mk, m, y², yk, y, k², k`.
+const SWOP_TO_SRGB: [[f32; 14]; 3] = [
+    [
+        -4.387_332,
+        54.486_15,
+        18.822_905,
+        212.256_62,
+        -285.233_1,
+        1.714_976_3,
+        -5.609_674,
+        -17.873_87,
+        -5.497_006_4,
+        -2.521_734,
+        -21.248_923,
+        17.511_927,
+        -21.861_221,
+        -189.481_8,
+    ],
+    [
+        8.841_041,
+        60.118_027,
+        6.871_425_6,
+        31.159_1,
+        -79.297_08,
+        -15.310_361,
+        17.575_25,
+        131.352_51,
+        -190.945_33,
+        4.444_339,
+        9.863_286,
+        -24.867_416,
+        -20.737_326,
+        -187.804_54,
+    ],
+    [
+        0.884_252_24,
+        8.078_678,
+        30.899_783,
+        -0.238_832_39,
+        -14.183_577,
+        10.495_933,
+        63.023_785,
+        50.606_957,
+        -112.238_84,
+        0.032_960_41,
+        115.603_84,
+        -193.582_1,
+        -22.338_168,
+        -180.126_14,
+    ],
+];
+
 impl Color {
     /// Fully transparent black, which paints nothing.
     pub const TRANSPARENT: Self = Self::from_rgba(0.0, 0.0, 0.0, 0.0);
@@ -64,14 +118,39 @@ impl Color {
 
     /// Returns color value from CMYK component values.
     ///
-    /// All component values should be in the range [0.0, 1.0]. Conversion uses
-    /// the standard formula: r = (1 - c) * (1 - k), g = (1 - m) * (1 - k),
-    /// b = (1 - y) * (1 - k).
+    /// Component values are clamped to [0.0, 1.0]. Instead of the naive
+    /// `(1 - c) * (1 - k)` inversion, which renders press colors too bright and
+    /// saturated, the conversion approximates the U.S. Web Coated (SWOP) press
+    /// profile with a second-order polynomial in the four components, so that
+    /// DeviceCMYK colors appear as they would on a CMYK-managed display.
     /// Alpha defaults to 1.0 (opaque).
-    pub const fn from_cmyk(c: f32, m: f32, y: f32, k: f32) -> Self {
-        let r = (1.0 - c) * (1.0 - k);
-        let g = (1.0 - m) * (1.0 - k);
-        let b = (1.0 - y) * (1.0 - k);
+    pub fn from_cmyk(c: f32, m: f32, y: f32, k: f32) -> Self {
+        let [c, m, y, k] = [c, m, y, k].map(|component| component.clamp(0.0, 1.0));
+        // Second-order terms in the order the coefficient rows expect.
+        let terms = [
+            c * c,
+            c * m,
+            c * y,
+            c * k,
+            c,
+            m * m,
+            m * y,
+            m * k,
+            m,
+            y * y,
+            y * k,
+            y,
+            k * k,
+            k,
+        ];
+        let [r, g, b] = SWOP_TO_SRGB.map(|coefficients| {
+            let offset: f32 = coefficients
+                .iter()
+                .zip(terms)
+                .map(|(coefficient, term)| coefficient * term)
+                .sum();
+            ((255.0 + offset) / 255.0).clamp(0.0, 1.0)
+        });
         Self { r, g, b, a: 1.0 }
     }
 
@@ -177,18 +256,16 @@ mod tests {
         assert!(approx_eq(white.r, 1.0) && approx_eq(white.g, 1.0) && approx_eq(white.b, 1.0));
 
         let black = Color::from_cmyk(0.0, 0.0, 0.0, 1.0);
-        assert!(approx_eq(black.r, 0.0) && approx_eq(black.g, 0.0) && approx_eq(black.b, 0.0));
+        assert!(black.r < 0.25 && black.g < 0.25 && black.b < 0.25);
 
         let cyan = Color::from_cmyk(1.0, 0.0, 0.0, 0.0);
-        assert!(approx_eq(cyan.r, 0.0) && approx_eq(cyan.g, 1.0) && approx_eq(cyan.b, 1.0));
+        assert!(cyan.r < cyan.g && cyan.r < cyan.b);
 
         let magenta = Color::from_cmyk(0.0, 1.0, 0.0, 0.0);
-        assert!(
-            approx_eq(magenta.r, 1.0) && approx_eq(magenta.g, 0.0) && approx_eq(magenta.b, 1.0)
-        );
+        assert!(magenta.g < magenta.r && magenta.g < magenta.b);
 
         let yellow = Color::from_cmyk(0.0, 0.0, 1.0, 0.0);
-        assert!(approx_eq(yellow.r, 1.0) && approx_eq(yellow.g, 1.0) && approx_eq(yellow.b, 0.0));
+        assert!(yellow.b < yellow.r && yellow.b < yellow.g);
     }
 
     #[test]

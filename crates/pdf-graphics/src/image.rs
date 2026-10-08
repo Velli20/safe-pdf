@@ -1,6 +1,6 @@
 use bytes::Bytes;
 
-use crate::{PixelFormat, Size, transform::Transform};
+use crate::{PixelFormat, Size, color::Color, transform::Transform};
 
 /// Represents render-ready raster image pixels.
 #[derive(Debug, Clone, PartialEq)]
@@ -227,20 +227,9 @@ impl Image {
         let [r, g, b, a] = out else {
             return;
         };
-        *r = Self::cmyk_channel(c, k);
-        *g = Self::cmyk_channel(m, k);
-        *b = Self::cmyk_channel(y, k);
+        let [c, m, y, k] = [c, m, y, k].map(|component| f32::from(component) / 255.0);
+        [*r, *g, *b, _] = Color::from_cmyk(c, m, y, k).to_rgba8();
         *a = alpha;
-    }
-
-    /// Converts one CMYK color channel to its RGB equivalent.
-    #[inline]
-    fn cmyk_channel(component: u8, key: u8) -> u8 {
-        let component = 255u16.saturating_sub(u16::from(component));
-        let key = 255u16.saturating_sub(u16::from(key));
-        let channel = component.saturating_mul(key) / 255;
-
-        u8::try_from(channel).unwrap_or(u8::MAX)
     }
 
     /// Appends a best-effort RGBA pixel for unsupported component counts.
