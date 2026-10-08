@@ -471,13 +471,16 @@ impl Transform {
 
     /// Returns the lengths of the transformed unit axes: how many output units one
     /// input unit spans along x and along y, including any rotation or shear.
-    pub fn axis_scales(&self) -> [f32; 2] {
-        [self.sx.hypot(self.ky), self.kx.hypot(self.sy)]
+    pub fn axis_scales(&self) -> Size<f32> {
+        Size::new(self.sx.hypot(self.ky), self.kx.hypot(self.sy))
     }
 
     /// Returns the larger of the two axis scales.
     pub fn max_scale(&self) -> f32 {
-        let [x, y] = self.axis_scales();
+        let Size {
+            width: x,
+            height: y,
+        } = self.axis_scales();
         x.max(y)
     }
 
@@ -490,7 +493,10 @@ impl Transform {
     /// Returns whether the linear part preserves angles: a uniform scale combined with
     /// rotation or reflection, with no uneven scaling or shear.
     pub fn is_similarity(&self) -> bool {
-        let [x, y] = self.axis_scales();
+        let Size {
+            width: x,
+            height: y,
+        } = self.axis_scales();
         let dot = self.sx * self.kx + self.ky * self.sy;
         let tolerance = 1e-4 * x.max(y) * x.max(y);
         (x * x - y * y).abs() <= tolerance && dot.abs() <= tolerance

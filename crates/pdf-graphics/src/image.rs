@@ -1,6 +1,6 @@
 use bytes::Bytes;
 
-use crate::{PixelFormat, transform::Transform};
+use crate::{PixelFormat, Size, transform::Transform};
 
 /// Represents render-ready raster image pixels.
 #[derive(Debug, Clone, PartialEq)]
@@ -42,7 +42,7 @@ impl Image {
 
     /// Smallest ratio of device area to source area at which an image drawn without
     /// `/Interpolate` stops being smoothed; milder enlargements are still smoothed.
-    const PIXEL_REPLICATION_AREA_RATIO: f64 = 8.0;
+    const PIXEL_REPLICATION_AREA_RATIO: f32 = 8.0;
 
     /// Returns whether drawing through `unit_to_device` enlarges the image so much,
     /// without `/Interpolate`, that each source pixel is replicated rather than smoothed.
@@ -55,9 +55,14 @@ impl Image {
         if self.interpolate {
             return false;
         }
-        let source_len = |len: usize| f64::from(u32::try_from(len).unwrap_or(u32::MAX));
+        // A side longer than `u16::MAX` can never be outgrown on a device, so it maps to
+        // infinity and the image is smoothed.
+        let source_len = |len: usize| u16::try_from(len).map_or(f32::INFINITY, f32::from);
         let (source_width, source_height) = (source_len(self.width), source_len(self.height));
-        let [device_width, device_height] = unit_to_device.axis_scales().map(f64::from);
+        let Size {
+            width: device_width,
+            height: device_height,
+        } = unit_to_device.axis_scales();
         device_width >= source_width
             && device_height >= source_height
             && device_width * device_height
