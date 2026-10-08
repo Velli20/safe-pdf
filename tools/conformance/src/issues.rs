@@ -475,7 +475,7 @@ impl Sync<'_> {
         for label in &labels {
             args.extend(["--add-label", label.as_str()]);
         }
-        github::gh(&args)?;
+        github::gh_idempotent(&args)?;
         println!("updated #{number} for `{}`", group.signature);
         Ok(())
     }
@@ -484,7 +484,7 @@ impl Sync<'_> {
         let file = self.body_file(&number.to_string(), body)?;
         let number = number.to_string();
         let file = file.display().to_string();
-        github::gh(&[
+        github::gh_idempotent(&[
             "issue",
             "edit",
             &number,
@@ -515,7 +515,7 @@ impl Sync<'_> {
             "--comment",
             &note,
         ])?;
-        github::gh(&[
+        github::gh_idempotent(&[
             "issue",
             "edit",
             &number,
@@ -583,7 +583,7 @@ impl Sync<'_> {
                 continue;
             }
             let (color, description) = issue_body::label_style(label);
-            github::gh(&[
+            github::gh_idempotent(&[
                 "label",
                 "create",
                 label,
