@@ -91,6 +91,14 @@ impl ImageMetadata {
             interpolate,
         })
     }
+
+    /// Returns the bit depth of the samples handed to the display pipeline.
+    ///
+    /// Sixteen-bit samples are narrowed to their most significant byte, so they
+    /// are carried as eight-bit samples.
+    pub(crate) fn sample_bits(&self) -> usize {
+        self.bits_per_component.min(8)
+    }
 }
 
 /// Reads the image bit depth, applying the defaults allowed for masks and JPX images.
@@ -143,7 +151,7 @@ fn validate_bits_per_component(
     }
 
     match bits_per_component {
-        1 | 8 => Ok(()),
+        1 | 2 | 4 | 8 | 16 => Ok(()),
         _ => Err(PdfImageError::UnsupportedImageBitsPerComponent { bits_per_component }),
     }
 }
@@ -266,15 +274,15 @@ mod tests {
 
     #[test]
     fn direct_images_reject_unsupported_bit_components() {
-        let dictionary = direct_dictionary(1, 1, 2);
+        let dictionary = direct_dictionary(1, 1, 3);
 
         let error = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
-            .expect_err("2-bpc direct metadata should be rejected");
+            .expect_err("3-bpc direct metadata should be rejected");
 
         assert!(matches!(
             error,
             PdfImageError::UnsupportedImageBitsPerComponent {
-                bits_per_component: 2
+                bits_per_component: 3
             }
         ));
     }

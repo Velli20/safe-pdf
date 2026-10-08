@@ -25,7 +25,9 @@ pub enum PdfImageError {
     InvalidSoftMaskXObject,
     #[error("invalid image dimensions: width={width}, height={height}")]
     InvalidImageDimensions { width: usize, height: usize },
-    #[error("unsupported image BitsPerComponent value: {bits_per_component} (supported: 1, 8)")]
+    #[error(
+        "unsupported image BitsPerComponent value: {bits_per_component} (supported: 1, 2, 4, 8, 16)"
+    )]
     UnsupportedImageBitsPerComponent { bits_per_component: usize },
     #[error(
         "unsupported indexed BitsPerComponent value: {bits_per_component} (supported: 1, 2, 4, 8)"
