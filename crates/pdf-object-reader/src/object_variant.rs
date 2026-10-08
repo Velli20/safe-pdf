@@ -251,13 +251,14 @@ impl ObjectVariant {
     /// Resolves an `ObjectVariant` into a fixed-size array of numeric values.
     ///
     /// This function attempts to convert an array object into a Rust array of type `[T; N]`,
-    /// where each element is parsed as a numeric value.
+    /// where each element is parsed as a numeric value. Some producers pad fixed-size arrays
+    /// with extra entries, so only the leading `N` elements are read and the rest are ignored.
     ///
     /// # Type Parameters
     ///
     /// - `T`: The numeric type to convert each element to. Must implement `FromPrimitive`,
     ///   `Copy`, and `Default`.
-    /// - `N`: The expected length of the array (compile-time constant).
+    /// - `N`: The number of leading elements to read (compile-time constant).
     ///
     /// # Parameters
     ///
@@ -267,8 +268,8 @@ impl ObjectVariant {
     ///
     /// `[T; N]` or `Err` if:
     /// - The object is not an array.
-    /// - The array length does not match `N`.
-    /// - Any element cannot be converted to type `T`.
+    /// - The array holds fewer than `N` elements.
+    /// - Any of the first `N` elements cannot be converted to type `T`.
     pub fn try_array_of<T, const N: usize>(
         &self,
         objects: &dyn ObjectResolver,
@@ -278,7 +279,7 @@ impl ObjectVariant {
     {
         let values = self.try_array(objects)?;
 
-        if values.len() != N {
+        if values.len() < N {
             return Err(ObjectError::InvalidArrayLength {
                 expected: N,
                 found: values.len(),

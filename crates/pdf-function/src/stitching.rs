@@ -120,27 +120,30 @@ impl FunctionImpl for StitchingFunction {
             .collect::<Result<Vec<_>, _>>()?;
 
         // Parse /Bounds array (boundaries between sub-functions)
-        let bounds = dictionary.required_vec_of::<f32>(b"Bounds", objects)?;
+        let mut bounds = dictionary.required_vec_of::<f32>(b"Bounds", objects)?;
 
         // Parse /Encode array (input mapping for each sub-function)
-        let encode = dictionary.required_vec_of::<f32>(b"Encode", objects)?;
+        let mut encode = dictionary.required_vec_of::<f32>(b"Encode", objects)?;
 
-        // Validate structural relationships
+        // Validate structural relationships. Producers sometimes pad /Bounds or /Encode, so
+        // extra trailing values are dropped rather than rejected.
         let expected_bounds = functions
             .len()
             .checked_sub(1)
             .ok_or(FunctionReadError::InvalidBoundsLength)?;
-        if bounds.len() != expected_bounds {
+        if bounds.len() < expected_bounds {
             return Err(FunctionReadError::InvalidBoundsLength);
         }
+        bounds.truncate(expected_bounds);
 
         let expected_encode = functions
             .len()
             .checked_mul(2)
             .ok_or(FunctionReadError::InvalidEncodeLength)?;
-        if encode.len() != expected_encode {
+        if encode.len() < expected_encode {
             return Err(FunctionReadError::InvalidEncodeLength);
         }
+        encode.truncate(expected_encode);
 
         Ok(Function::Stitching(StitchingFunction {
             functions,

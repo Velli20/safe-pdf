@@ -9,11 +9,11 @@ pub enum FunctionReadError {
     /// The `/FunctionType` entry is missing or has an unsupported value.
     #[error("Invalid /FunctionType value")]
     InvalidFunctionType,
-    /// The `/Encode` array length must be exactly `2 * number of functions`.
-    #[error("Encode array length must be exactly 2 * number of functions")]
+    /// The `/Encode` array holds fewer than `2 * number of functions` values.
+    #[error("Encode array must hold at least 2 * number of functions values")]
     InvalidEncodeLength,
-    /// The `/Bounds` array length must be `number of functions - 1`.
-    #[error("Bounds array length must be number of functions - 1")]
+    /// The `/Bounds` array holds fewer than `number of functions - 1` values.
+    #[error("Bounds array must hold at least number of functions - 1 values")]
     InvalidBoundsLength,
     #[error("{0}")]
     ObjectError(#[from] ObjectError),
