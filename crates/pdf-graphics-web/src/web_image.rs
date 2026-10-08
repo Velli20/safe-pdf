@@ -21,6 +21,7 @@ pub(crate) struct ImageDraw<'a> {
     placement: ImagePlacement,
     smoothing: bool,
     composite: &'static str,
+    alpha: f32,
 }
 
 impl<'a> ImageDraw<'a> {
@@ -28,6 +29,7 @@ impl<'a> ImageDraw<'a> {
         backend: &'a WebCanvasBackend,
         image: &'a Image,
         mode: Option<BlendMode>,
+        alpha: f32,
         transform: Transform,
     ) -> WebResult<Self> {
         let unit_to_backing = backend
@@ -41,13 +43,14 @@ impl<'a> ImageDraw<'a> {
             placement: ImagePlacement::new(transform)?,
             smoothing: !image.replicates_pixels(&unit_to_backing),
             composite: web_paint::blend(mode.as_ref()),
+            alpha,
         })
     }
 
     pub(crate) fn draw(self) -> WebResult<()> {
         let surface = self.pool.upload(self.image)?;
         let _saved = SavedContext::new(self.context);
-        self.context.set_global_alpha(1.0);
+        self.context.set_global_alpha(f64::from(self.alpha));
         self.context
             .set_global_composite_operation(self.composite)?;
         self.context.set_image_smoothing_enabled(self.smoothing);

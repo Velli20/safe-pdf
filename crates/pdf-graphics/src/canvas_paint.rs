@@ -33,6 +33,30 @@ pub struct CanvasPaint {
     pub rendering_mode: TextRenderingMode,
 }
 
+impl CanvasPaint {
+    /// Replaces the stroking color while keeping the current stroking alpha constant.
+    ///
+    /// PDF colors carry no alpha; the alpha constant (`CA`) is a separate graphics state
+    /// parameter that a color operator does not change.
+    pub fn set_stroke_color(&mut self, color: Color) {
+        self.stroke_color = Color {
+            a: self.stroke_color.a,
+            ..color
+        };
+    }
+
+    /// Replaces the non-stroking color while keeping the current non-stroking alpha constant.
+    ///
+    /// PDF colors carry no alpha; the alpha constant (`ca`) is a separate graphics state
+    /// parameter that a color operator does not change.
+    pub fn set_fill_color(&mut self, color: Color) {
+        self.fill_color = Color {
+            a: self.fill_color.a,
+            ..color
+        };
+    }
+}
+
 impl Default for CanvasPaint {
     fn default() -> Self {
         Self {

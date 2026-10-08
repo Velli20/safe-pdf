@@ -103,12 +103,15 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
             .current_state()?
             .transform
             .post_concatenated(&IMAGE_SPACE_Y_FLIP);
-        let blend_mode = self.current_state()?.paint.blend_mode.clone();
+        let paint = &self.current_state()?.paint;
+        let blend_mode = paint.blend_mode.clone();
+        // Images paint with the non-stroking alpha constant (`ca`).
+        let alpha = paint.fill_color.a;
         self.with_soft_mask(|backend| {
             if inline_image {
-                backend.draw_inline_image(image, blend_mode, transform)
+                backend.draw_inline_image(image, blend_mode, alpha, transform)
             } else {
-                backend.draw_image(image, blend_mode, transform)
+                backend.draw_image(image, blend_mode, alpha, transform)
             }
         })
     }

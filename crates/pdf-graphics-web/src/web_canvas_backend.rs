@@ -261,9 +261,10 @@ impl CanvasBackend for WebCanvasBackend {
         &mut self,
         image: &Image,
         mode: Option<BlendMode>,
+        alpha: f32,
         transform: Transform,
     ) -> Result<(), PdfCanvasError> {
-        ImageDraw::new(self, image, mode, transform)?
+        ImageDraw::new(self, image, mode, alpha, transform)?
             .draw()
             .map_err(Into::into)
     }

@@ -155,6 +155,7 @@ impl CanvasBackend for CanvasImpl<'_> {
         &mut self,
         _image: &Image,
         _blend_mode: Option<BlendMode>,
+        _alpha: f32,
         _transform: Transform,
     ) -> Result<(), PdfCanvasError> {
         // Not yet implemented in femtovg backend

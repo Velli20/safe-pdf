@@ -813,12 +813,12 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             if is_stroking {
                 state.stroke_color_space = Some(Arc::clone(&cs));
                 if let Some(color) = initial_color {
-                    state.paint.stroke_color = color;
+                    state.paint.set_stroke_color(color);
                 }
             } else {
                 state.fill_color_space = Some(Arc::clone(&cs));
                 if let Some(color) = initial_color {
-                    state.paint.fill_color = color;
+                    state.paint.set_fill_color(color);
                 }
             }
             return Ok(());
