@@ -40,8 +40,7 @@ impl FromPdfObject for PdfDocument {
             .transpose()?;
         let mut pages = Vec::new();
         for value in kids.iter() {
-            let raw = context.resolve(value)?;
-            let dictionary = raw.value().try_dictionary(context.source())?;
+            let dictionary = value.try_dictionary(context.source())?;
             match dictionary.required_bytes(b"Type", context.source())? {
                 PdfPage::KEY => pages.push(context.read(value)?),
                 Self::KEY => match context.read::<Self>(value) {

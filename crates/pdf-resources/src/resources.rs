@@ -1,14 +1,10 @@
 //! Resource namespaces and typed decoding.
-use crate::{
-    error::PdfPagesError, external_graphics_state::ExternalGraphicsState, form::FormXObject,
-    pattern::Pattern, resource::Resource,
-};
+use crate::{external_graphics_state::ExternalGraphicsState, pattern::Pattern, resource::Resource};
 use pdf_color_space::color_space::ColorSpace;
 use pdf_font::PdfFontSpec;
-use pdf_object_reader::object_lookup::ObjectLookupExt;
 use pdf_object_reader::{
-    Dictionary, DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle,
-    ReadResult, object_variant::ObjectVariant,
+    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult,
+    object_variant::ObjectVariant,
 };
 use pdf_shading::model::Shading;
 use std::{collections::HashMap, sync::Arc};
@@ -48,92 +44,30 @@ impl FromPdfObject for Resources {
 }
 
 impl Resources {
+    /// Decodes the resource categories of a resource dictionary (PDF spec §7.8.3).
     fn decode_dictionary<A>(mut context: DictionaryContext<'_, A>) -> ReadResult<Self>
     where
         A: ObjectAccess + ?Sized,
     {
-        let mut resources = Self::default();
-        if let Some(dictionary) = context.optional::<Dictionary>(b"Font")? {
-            for (name, value) in &dictionary.dictionary {
-                if context.is_absent(value)? {
-                    continue;
-                }
-                resources
-                    .fonts
-                    .insert(name.clone(), context.read_shared::<Resource>(value)?);
-            }
-        }
-        if let Some(dictionary) = context.optional::<Dictionary>(b"ExtGState")? {
-            for (name, value) in &dictionary.dictionary {
-                if context.is_absent(value)? {
-                    continue;
-                }
-                resources.ext_g_states.insert(
-                    name.clone(),
-                    Resource::ExternalGraphicsState(context.read_shared(value)?),
-                );
-            }
-        }
-        if let Some(dictionary) = context.optional::<Dictionary>(b"Pattern")? {
-            for (name, value) in &dictionary.dictionary {
-                if context.is_absent(value)? {
-                    continue;
-                }
-                resources
-                    .patterns
-                    .insert(name.clone(), Resource::Pattern(context.read_shared(value)?));
-            }
-        }
-        if let Some(dictionary) = context.optional::<Dictionary>(b"XObject")? {
-            for (name, value) in &dictionary.dictionary {
-                if context.is_absent(value)? {
-                    continue;
-                }
-                let resolved = context.resolve(value)?;
-                let dictionary = resolved.value().try_dictionary(context.source())?;
-                let resource =
-                    if dictionary.required_bytes(b"Subtype", context.source())? == b"Form" {
-                        Resource::Form(context.read_shared::<FormXObject>(value)?)
-                    } else {
-                        let subtype = dictionary.required_bytes(b"Subtype", context.source())?;
-                        if subtype != b"Image" {
-                            return Err(PdfPagesError::UnsupportedXObjectSubtype {
-                                subtype: String::from_utf8_lossy(subtype).into_owned(),
-                            }
-                            .into());
-                        }
-                        context
-                            .read_shared::<Resource>(value)?
-                            .get()?
-                            .as_ref()
-                            .clone()
-                    };
-                resources.xobjects.insert(name.clone(), resource);
-            }
-        }
-        if let Some(dictionary) = context.optional::<Dictionary>(b"Shading")? {
-            for (name, value) in &dictionary.dictionary {
-                if context.is_absent(value)? {
-                    continue;
-                }
-                let shading = context.read_shared::<Shading>(value)?.get()?;
-                resources
-                    .shadings
-                    .insert(name.clone(), Resource::Shading(shading));
-            }
-        }
-        if let Some(dictionary) = context.optional::<Dictionary>(b"ColorSpace")? {
-            for (name, value) in &dictionary.dictionary {
-                if context.is_absent(value)? {
-                    continue;
-                }
-                let color_space = context.read_shared::<ColorSpace>(value)?.get()?;
-                resources
-                    .color_spaces
-                    .insert(name.clone(), Resource::ColorSpace(color_space));
-            }
-        }
-        Ok(resources)
+        Ok(Self {
+            fonts: context
+                .optional_entries(b"Font", |context, value| context.read_shared(value))?,
+            ext_g_states: context.optional_entries(b"ExtGState", |context, value| {
+                context
+                    .read_shared(value)
+                    .map(Resource::ExternalGraphicsState)
+            })?,
+            patterns: context.optional_entries(b"Pattern", |context, value| {
+                context.read_shared(value).map(Resource::Pattern)
+            })?,
+            xobjects: context.optional_entries(b"XObject", Resource::read_xobject)?,
+            shadings: context.optional_entries(b"Shading", |context, value| {
+                Ok(Resource::Shading(context.read_shared(value)?.get()?))
+            })?,
+            color_spaces: context.optional_entries(b"ColorSpace", |context, value| {
+                Ok(Resource::ColorSpace(context.read_shared(value)?.get()?))
+            })?,
+        })
     }
 
     /// Returns a reference to a font resource by name, if it exists.

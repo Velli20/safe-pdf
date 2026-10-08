@@ -6,7 +6,7 @@ use pdf_object_reader::object_error::ObjectError;
 use pdf_object_reader::object_lookup::ObjectLookupExt;
 use pdf_object_reader::object_resolver::ObjectResolver;
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
+    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
     dictionary::Dictionary, object_variant::ObjectVariant,
 };
 use std::sync::Arc;
@@ -69,6 +69,27 @@ impl FromPdfObject for Resource {
 }
 
 impl Resource {
+    /// Reads an XObject resource entry by its `/Subtype`.
+    ///
+    /// A form stays a shared handle so a form that paints itself is read as pending
+    /// instead of recursing; an image is decoded eagerly.
+    pub(crate) fn read_xobject(
+        context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
+        value: &ObjectVariant,
+    ) -> ReadResult<Self> {
+        let subtype = XObjectSubtype::try_from(
+            value
+                .try_dictionary(context.source())?
+                .required_bytes(b"Subtype", context.source())?,
+        )?;
+        match subtype {
+            XObjectSubtype::Form => Ok(Self::Form(context.read_shared(value)?)),
+            XObjectSubtype::Image => {
+                Ok(context.read_shared::<Self>(value)?.get()?.as_ref().clone())
+            }
+        }
+    }
+
     /// Reads a font, keeping the resources a Type 3 font's glyph procedures paint with.
     fn read_font(
         context: &mut ObjectContext<'_, impl ObjectAccess + ?Sized>,
