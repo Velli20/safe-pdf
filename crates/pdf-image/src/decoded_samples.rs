@@ -3,7 +3,8 @@ use std::borrow::Cow;
 use bytes::{Bytes, BytesMut};
 use pdf_color_space::color_space::ColorSpace;
 use pdf_decode::{
-    DecodeMap, DecodeRange, SampleLayout, decode_sample_bytes, expand_indexed_values,
+    DecodeError, DecodeMap, DecodeRange, SampleLayout, decode_sample_bytes, decode_sample_codes,
+    expand_indexed_values,
 };
 use pdf_filter::image_payload::ImagePayload;
 
@@ -188,7 +189,7 @@ impl DecodedSamples {
         lookup: &Bytes,
     ) -> Result<Self, PdfImageError> {
         let sample_codes = Self::decode_image_sample_codes(raw_data, 1, metadata)?;
-        let sample_max = Self::sample_max(metadata.bits_per_component)?;
+        let sample_max = Self::sample_max(metadata.sample_bits())?;
         let decoded_indices = Self::apply_decode(
             sample_codes,
             metadata.decode.as_ref(),
@@ -218,7 +219,7 @@ impl DecodedSamples {
         indexed: &pdf_color_space::indexed_color_space::IndexedColorSpace,
     ) -> Result<Self, PdfImageError> {
         let sample_codes = Self::decode_image_sample_codes(raw_data, 1, metadata)?;
-        let sample_max = Self::sample_max(metadata.bits_per_component)?;
+        let sample_max = Self::sample_max(metadata.sample_bits())?;
         let indices = Self::apply_decode(
             sample_codes,
             metadata.decode.as_ref(),
@@ -259,7 +260,7 @@ impl DecodedSamples {
     ) -> Result<Self, PdfImageError> {
         let sample_codes =
             Self::decode_image_sample_codes(raw_data, num_color_components, metadata)?;
-        let sample_max = Self::sample_max(metadata.bits_per_component)?;
+        let sample_max = Self::sample_max(metadata.sample_bits())?;
 
         Ok(Self {
             num_color_components,
@@ -282,7 +283,7 @@ impl DecodedSamples {
     ) -> Result<Self, PdfImageError> {
         let components = color_space.num_color_components();
         let sample_codes = Self::decode_image_sample_codes(raw_data, components, metadata)?;
-        let sample_max = Self::sample_max(metadata.bits_per_component)?;
+        let sample_max = Self::sample_max(metadata.sample_bits())?;
         let decoded = metadata.decode.as_ref().map_or_else(
             || Self::default_color_components(sample_codes.as_ref(), sample_max, color_space),
             |decode| decode.apply_to_f32(sample_codes.as_ref(), sample_max),
@@ -376,20 +377,40 @@ impl DecodedSamples {
         samples_per_pixel: usize,
         metadata: &ImageMetadata,
     ) -> Result<Bytes, PdfImageError> {
-        let sample_codes = decode_sample_bytes(
-            raw_data.as_ref(),
-            metadata.bits_per_component,
-            SampleLayout::RowAligned {
-                width: metadata.size.width(),
-                height: metadata.size.height(),
-                samples_per_pixel,
-            },
-        )?;
+        let layout = SampleLayout::RowAligned {
+            width: metadata.size.width(),
+            height: metadata.size.height(),
+            samples_per_pixel,
+        };
+        if metadata.bits_per_component > 8 {
+            return Self::decode_wide_sample_codes(&raw_data, metadata.bits_per_component, layout);
+        }
+
+        let sample_codes =
+            decode_sample_bytes(raw_data.as_ref(), metadata.bits_per_component, layout)?;
 
         Ok(match sample_codes {
             Cow::Borrowed(samples) => raw_data.slice(..samples.len()),
             Cow::Owned(samples) => samples.into(),
         })
+    }
+
+    /// Decodes samples wider than a byte, keeping the most significant byte of each.
+    fn decode_wide_sample_codes(
+        raw_data: &[u8],
+        bits_per_component: usize,
+        layout: SampleLayout,
+    ) -> Result<Bytes, PdfImageError> {
+        let shift = u32::try_from(bits_per_component.saturating_sub(8))
+            .map_err(|_| PdfImageError::UnsupportedImageBitsPerComponent { bits_per_component })?;
+        decode_sample_codes(raw_data, bits_per_component, layout)?
+            .into_iter()
+            .map(|sample| {
+                u8::try_from(sample.checked_shr(shift).unwrap_or(0))
+                    .map_err(|_| PdfImageError::from(DecodeError::InvalidSampleData))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Bytes::from)
     }
 
     /// Returns the maximum encoded sample value for a supported bit depth.
