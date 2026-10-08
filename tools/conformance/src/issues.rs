@@ -2,7 +2,8 @@
 //!
 //! Failures are grouped by signature over every corpus run passed in, and each group is
 //! matched to an issue through the key in the issue's hidden state:
-//! - no issue: create one (up to `max_new` per run, regressions and crashes first);
+//! - no issue: create one (up to `max_new` per run, regressions and crashes first; no limit
+//!   while the repository has no conformance issue yet);
 //! - open issue: refresh it silently, commenting only when new documents join the cluster
 //!   or it shrinks by a quarter or more;
 //! - closed as completed: reopen, since the failure is back;
@@ -10,11 +11,15 @@
 //!
 //! Open issues whose cluster is absent from two full runs in a row are closed as completed.
 //! Read-only runs file and refresh issues but never count a cluster as absent.
+//!
+//! Before any issue is written, the images the bodies embed are published to the
+//! `conformance-assets` branch (see [`crate::issue_assets`]), so no body links to a missing image.
 
 use crate::{
     baseline::Delta,
     corpus::{self, CorpusKind},
     github::{self, Issue},
+    issue_assets::Assets,
     issue_body::{self, BodyContext},
     issue_state::{self, CorpusState, IssueState},
     model::{CaseResult, Status},
@@ -25,6 +30,8 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::PathBuf,
+    thread,
+    time::Duration,
 };
 
 const LABEL: &str = "conformance";
@@ -32,6 +39,10 @@ const LABEL: &str = "conformance";
 const SHRINK_NOTICE: f64 = 0.25;
 /// Consecutive full runs without a cluster before its issue is closed.
 const CLOSE_AFTER_MISSING: u32 = 2;
+/// Pause after creating or rewriting an issue. GitHub's secondary rate limit allows about
+/// 80 content-creating requests a minute, which a first run filing every cluster or a
+/// layout change rewriting every issue would otherwise exceed.
+const WRITE_PAUSE: Duration = Duration::from_secs(1);
 
 /// Settings of an issue run.
 pub struct IssueOptions<'a> {
@@ -39,7 +50,8 @@ pub struct IssueOptions<'a> {
     pub kinds: &'a [CorpusKind],
     /// `owner/name` of the repository.
     pub repo: &'a str,
-    /// Issues created at most per run.
+    /// Issues created at most per run; 0 for no limit. Not applied while the repository has
+    /// no conformance issue yet, so the first run files every cluster.
     pub max_new: usize,
     /// Print planned actions and write bodies to disk without calling GitHub.
     pub dry_run: bool,
@@ -242,13 +254,17 @@ pub fn run(options: &IssueOptions<'_>) -> Result<()> {
     } else {
         github::issues(options.repo, LABEL)?
     };
+    let existing: Vec<(Issue, IssueState)> = existing
+        .into_iter()
+        .filter_map(|issue| IssueState::parse(&issue.body).map(|state| (issue, state)))
+        .collect();
+    let groups = groups(&runs);
+    let mut context = BodyContext::from_env(options.repo);
+    context.images = publish_images(options, &groups, &existing)?;
     let mut sync = Sync {
         options,
-        context: BodyContext::from_env(options.repo),
-        existing: existing
-            .into_iter()
-            .filter_map(|issue| IssueState::parse(&issue.body).map(|state| (issue, state)))
-            .collect(),
+        context,
+        existing,
         complete: runs
             .iter()
             .filter(|run| !run.index.filtered && !run.index.read_only)
@@ -258,8 +274,8 @@ pub fn run(options: &IssueOptions<'_>) -> Result<()> {
         labels: BTreeSet::new(),
         tally: Tally::default(),
     };
-    for group in groups(&runs) {
-        if let Err(error) = sync.group(&group) {
+    for group in &groups {
+        if let Err(error) = sync.group(group) {
             sync.tally.failed = sync.tally.failed.saturating_add(1);
             println!("failed for `{}`: {error:#}", group.signature);
         }
@@ -276,6 +292,40 @@ pub fn run(options: &IssueOptions<'_>) -> Result<()> {
         bail!("{} issue operations failed", tally.failed);
     }
     Ok(())
+}
+
+/// Publishes the images the bodies of `groups` embed, keeping those open issues still link
+/// to, and returns the link of each local image.
+fn publish_images(
+    options: &IssueOptions<'_>,
+    groups: &[Group<'_>],
+    existing: &[(Issue, IssueState)],
+) -> Result<BTreeMap<PathBuf, String>> {
+    let mut assets = Assets::new(options.repo);
+    let mut links = BTreeMap::new();
+    for path in groups.iter().flat_map(issue_body::embedded_images) {
+        if let Some(link) = assets.stage(&path)? {
+            links.insert(path, link);
+        }
+    }
+    if options.dry_run {
+        let dir = corpus::state_dir().join("issues").join("assets");
+        assets.copy_to(&dir)?;
+        println!(
+            "(dry run) {} images copied to {} instead of the assets branch",
+            assets.count(),
+            dir.display()
+        );
+        return Ok(links);
+    }
+    let open = existing
+        .iter()
+        .filter(|(issue, _)| issue.is_open())
+        .map(|(issue, _)| issue.body.as_str());
+    assets
+        .publish(open)
+        .context("publishing issue images; no issue was changed")?;
+    Ok(links)
 }
 
 struct Sync<'a> {
@@ -306,7 +356,9 @@ impl Sync<'_> {
     }
 
     fn create(&mut self, group: &Group<'_>) -> Result<()> {
-        if self.tally.created >= self.options.max_new {
+        // The first run files every cluster; later runs add at most `max_new` at a time.
+        let limited = self.options.max_new > 0 && !self.existing.is_empty();
+        if limited && self.tally.created >= self.options.max_new {
             self.tally.deferred = self.tally.deferred.saturating_add(1);
             return Ok(());
         }
@@ -314,6 +366,7 @@ impl Sync<'_> {
         let state = IssueState {
             key: group.key.clone(),
             corpora: group.corpus_states(),
+            format: issue_state::FORMAT,
         };
         let body = issue_body::render(group, &state, &self.context)?;
         let title = issue_body::title(group);
@@ -345,6 +398,7 @@ impl Sync<'_> {
         }
         let url = github::gh(&args)?;
         println!("created {} for `{}`", url.trim(), group.signature);
+        thread::sleep(WRITE_PAUSE);
         Ok(())
     }
 
@@ -353,6 +407,8 @@ impl Sync<'_> {
             return Ok(());
         }
         let mut state = old.clone();
+        // An older body layout is rewritten even when the cluster did not change.
+        state.format = issue_state::FORMAT;
         for (corpus, entry) in &mut state.corpora {
             if self.complete.contains(corpus) {
                 entry.missing = entry.missing.saturating_add(1);
@@ -477,6 +533,7 @@ impl Sync<'_> {
         }
         github::gh(&args)?;
         println!("updated #{number} for `{}`", group.signature);
+        thread::sleep(WRITE_PAUSE);
         Ok(())
     }
 
@@ -691,6 +748,7 @@ mod tests {
                 repo: "owner/repo".to_owned(),
                 run_link: None,
                 sha: None,
+                images: BTreeMap::new(),
             },
             existing: existing
                 .into_iter()
@@ -716,6 +774,7 @@ mod tests {
 
     fn state(corpora: &[(&str, usize, usize)]) -> IssueState {
         IssueState {
+            format: issue_state::FORMAT,
             key: "conf2-000000000000".to_owned(),
             corpora: corpora
                 .iter()

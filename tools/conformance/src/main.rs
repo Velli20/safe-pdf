@@ -13,6 +13,7 @@ mod fetch;
 mod github;
 mod golden;
 mod inventory;
+mod issue_assets;
 mod issue_body;
 mod issue_state;
 mod issues;
@@ -129,7 +130,8 @@ enum Command {
         /// Repository as owner/name.
         #[arg(long, env = "GITHUB_REPOSITORY")]
         repo: String,
-        /// Issues created at most per run; further clusters wait for later runs.
+        /// Issues created at most per run; further clusters wait for later runs. 0 for no limit.
+        /// The first run, when the repository has no conformance issue yet, files every cluster.
         #[arg(long, default_value_t = 15)]
         max_new: usize,
         /// Print planned actions and write bodies under target/conformance/issues/.

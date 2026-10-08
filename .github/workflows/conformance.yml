@@ -13,6 +13,8 @@ name: Conformance
 #   page with PDFium. The pdf.js corpus is not rendered; only its reads are reported.
 # - On main, `issues` files, updates and closes GitHub issues from the PDFium render and the
 #   pdf.js reads together, and the viewers are published to GitHub Pages under /conformance/.
+#   The images issues embed are pushed to the `conformance-assets` branch first, which the
+#   job replaces on every run with only the images open issues use.
 #
 # Pull requests are never failed by these jobs. See tools/conformance/README.md.
 
@@ -365,9 +367,10 @@ jobs:
     needs: [ conformance, reads ]
     if: always() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     permissions:
-      contents: read
+      # Pushes the images the issues embed to the `conformance-assets` branch.
+      contents: write
       issues: write
     steps:
       - name: Checkout repository
