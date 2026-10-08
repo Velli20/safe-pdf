@@ -179,19 +179,22 @@ macro_rules! number_decoder {
 
 number_decoder!(f32, u16, u32, usize);
 
-/// Reads exactly N elements, validating length before decoding any child.
+/// Reads the first N elements, validating length before decoding any child.
+///
+/// Some producers pad fixed-size arrays with extra entries, so trailing elements are ignored.
 impl<T: FromPdfObject, const N: usize> FromPdfObject for [T; N] {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.array()?;
-        if context.array().len() != N {
+        if context.array().len() < N {
             return Err(crate::object_error::ObjectError::InvalidArrayLength {
                 expected: N,
                 found: context.array().len(),
             }
             .into());
         }
-        context
-            .read_all::<T>()?
+        (0..N)
+            .map(|index| context.at::<T>(index))
+            .collect::<ReadResult<Vec<T>>>()?
             .try_into()
             .map_err(|values: Vec<T>| {
                 crate::object_error::ObjectError::InvalidArrayLength {

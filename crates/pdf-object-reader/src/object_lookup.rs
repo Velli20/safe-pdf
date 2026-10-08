@@ -361,7 +361,7 @@ pub trait ObjectLookupExt<K> {
     /// # Type Parameters
     ///
     /// - `T`: The numeric type to convert each array item to.
-    /// - `N`: The expected array length.
+    /// - `N`: The number of leading array items to read; extra trailing items are ignored.
     ///
     /// # Parameters
     ///
@@ -390,7 +390,7 @@ pub trait ObjectLookupExt<K> {
     /// # Type Parameters
     ///
     /// - `T`: The numeric type to convert each array item to.
-    /// - `N`: The expected array length.
+    /// - `N`: The number of leading array items to read; extra trailing items are ignored.
     ///
     /// # Parameters
     ///
