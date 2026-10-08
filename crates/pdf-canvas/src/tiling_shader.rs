@@ -170,7 +170,10 @@ impl TilingShader {
         let pattern_to_backing = device_to_backing.post_concatenated(&self.pattern_transform);
         pattern_to_backing.try_inverse()?;
         let [step_x, step_y] = self.repeat_step;
-        let [density_x, density_y] = pattern_to_backing.axis_scales();
+        let Size {
+            width: density_x,
+            height: density_y,
+        } = pattern_to_backing.axis_scales();
         let size = Size::new(
             pixel_extent(step_x * density_x).ok_or(TilingShaderError::RasterLimit)?,
             pixel_extent(step_y * density_y).ok_or(TilingShaderError::RasterLimit)?,

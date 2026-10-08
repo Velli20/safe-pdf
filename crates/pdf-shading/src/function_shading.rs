@@ -139,7 +139,10 @@ impl FunctionShading {
     /// Each edge is clamped to `1..=MAX_RASTER_DIMENSION`. A NaN extent stays NaN, which
     /// [`Self::rasterize`] rejects.
     fn raster_size(domain: &Rect, to_device: &Transform) -> Size {
-        let [scale_x, scale_y] = to_device.axis_scales();
+        let Size {
+            width: scale_x,
+            height: scale_y,
+        } = to_device.axis_scales();
         let pixels = |extent: f32| extent.ceil().clamp(1.0, MAX_RASTER_DIMENSION);
         Size::new(
             pixels(domain.width() * scale_x),

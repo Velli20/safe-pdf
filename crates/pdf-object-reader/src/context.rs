@@ -16,6 +16,7 @@ use crate::pdf_name::PdfName;
 use crate::reader::ObjectAccess;
 use crate::resolved_object::ResolvedObject;
 use crate::{dictionary::Dictionary, stream::StreamObject};
+use std::collections::HashMap;
 
 /// The single argument passed to a typed decoder.
 ///
@@ -169,6 +170,28 @@ impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
             location: ReadLocation::DictionaryKey(PdfName::from_bytes(key)),
             source: Box::new(source),
         })
+    }
+
+    /// Decodes each entry of an optional sub-dictionary with `decode`, keyed by entry name.
+    ///
+    /// A missing or null sub-dictionary yields an empty map. Null entries and references to
+    /// missing objects are skipped, since per PDF spec §7.3.7 and §7.3.10 they are equivalent
+    /// to absent entries.
+    pub fn optional_entries<T>(
+        &mut self,
+        key: &[u8],
+        mut decode: impl FnMut(&mut Self, &ObjectVariant) -> ReadResult<T>,
+    ) -> ReadResult<HashMap<Vec<u8>, T>> {
+        let Some(dictionary) = self.optional::<Dictionary>(key)? else {
+            return Ok(HashMap::new());
+        };
+        let mut entries = HashMap::with_capacity(dictionary.dictionary.len());
+        for (name, value) in &dictionary.dictionary {
+            if !self.is_absent(value)? {
+                entries.insert(name.clone(), decode(self, value)?);
+            }
+        }
+        Ok(entries)
     }
 }
 

@@ -1,9 +1,7 @@
 use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
+    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
 };
-use pdf_object_reader::{
-    object_kind::ObjectKind, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-};
+use pdf_object_reader::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
 use crate::{error::PdfPagesError, resource::Resource, soft_mask::SoftMask};
 use num_traits::FromPrimitive;
@@ -103,12 +101,31 @@ fn parse_font<A: ObjectAccess + ?Sized>(
     Ok(ExternalGraphicsStateKey::Font(font, font_size))
 }
 
+/// Parses `/SMask`: a soft mask dictionary, or the name `/None`, which removes the mask.
+fn parse_soft_mask<A: ObjectAccess + ?Sized>(
+    value: &ObjectVariant,
+    context: &mut DictionaryContext<'_, A>,
+) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
+    let soft_mask = if matches!(
+        context.source().resolve_object(value)?,
+        ObjectVariant::Dictionary(_)
+    ) {
+        Some(context.read_shared::<SoftMask>(value)?)
+    } else if value.try_bytes(context.source())? == b"None" {
+        None
+    } else {
+        return Err(PdfPagesError::InvalidExtGStateSoftMask);
+    };
+    Ok(ExternalGraphicsStateKey::SoftMask(soft_mask))
+}
+
 fn parse_blend_mode(
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
 ) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
     // An array lists blend modes in order of preference; the first recognized one applies
     // and `Normal` is used when none is recognized.
+    let value = objects.resolve_object(value)?;
     let mode = if value.is_array() {
         let mut recognized = None;
         for name in value.try_array(objects)?.iter() {
@@ -135,16 +152,11 @@ fn parse_entry<A: ObjectAccess + ?Sized>(
     value: &ObjectVariant,
     context: &mut DictionaryContext<'_, A>,
 ) -> Result<Option<ExternalGraphicsStateKey>, PdfPagesError> {
-    let raw_value = value;
     // A null value or a reference to a nonexistent object is equivalent to
-    // an absent entry (ISO 32000 §7.3.7, §7.3.10).
-    let resolved = match context.resolve(value) {
-        Ok(resolved) if resolved.kind() == ObjectKind::Null => return Ok(None),
-        Ok(resolved) => resolved,
-        Err(ObjectReadError::MissingObject { .. }) => return Ok(None),
-        Err(error) => return Err(error.into()),
-    };
-    let value = resolved.value();
+    // an absent entry.
+    if context.is_absent(value)? {
+        return Ok(None);
+    }
     let objects = context.source();
     let parsed = match name {
         b"LW" => ExternalGraphicsStateKey::LineWidth(value.try_number::<f32>(objects)?),
@@ -167,16 +179,7 @@ fn parse_entry<A: ObjectAccess + ?Sized>(
         },
         b"Font" => parse_font(value, context)?,
         b"BM" => parse_blend_mode(value, objects)?,
-        b"SMask" => {
-            let soft_mask = match value {
-                ObjectVariant::Dictionary(_) => Some(context.read_shared::<SoftMask>(raw_value)?),
-                other => match other.try_bytes(objects)? {
-                    b"None" => None,
-                    _ => return Err(PdfPagesError::InvalidExtGStateSoftMask),
-                },
-            };
-            ExternalGraphicsStateKey::SoftMask(soft_mask)
-        }
+        b"SMask" => parse_soft_mask(value, context)?,
         b"CA" => ExternalGraphicsStateKey::StrokingAlpha(value.try_number::<f32>(objects)?),
         b"ca" => ExternalGraphicsStateKey::NonStrokingAlpha(value.try_number::<f32>(objects)?),
         _ => return Ok(None),
