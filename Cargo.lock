@@ -2302,6 +2302,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "pdf-decode",
+ "pdf-graphics",
  "pdf-object-reader",
  "pdf-postscript",
  "thiserror 2.0.12",

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use pdf_graphics::{rect::Rect, transform::Transform};
+use pdf_graphics::{interval::Interval, rect::Rect, transform::Transform};
 
 use crate::{
     object_error::ObjectError, object_id::ObjectId, object_lookup::ObjectLookupExt,
@@ -197,6 +197,55 @@ impl Dictionary {
         let [sx, ky, kx, sy, tx, ty] = self.required_array_of::<f32, 6>(b"Matrix", objects)?;
 
         Ok(Transform::from_row(sx, ky, kx, sy, tx, ty))
+    }
+
+    /// Reads an optional two-number array, such as a shading `/Domain`, as an interval.
+    ///
+    /// Missing entries and explicit PDF `null` values are treated as absent.
+    pub fn optional_interval(
+        &self,
+        key: &[u8],
+        objects: &dyn ObjectResolver,
+    ) -> Result<Option<Interval>, ObjectError> {
+        Ok(self
+            .optional_array_of::<f32, 2>(key, objects)?
+            .map(Interval::from))
+    }
+
+    /// Reads a required two-number array, such as a function `/Domain`, as an interval.
+    pub fn required_interval(
+        &self,
+        key: &[u8],
+        objects: &dyn ObjectResolver,
+    ) -> Result<Interval, ObjectError> {
+        self.required_array_of::<f32, 2>(key, objects)
+            .map(Interval::from)
+    }
+
+    /// Reads an optional flat `[min0 max0 min1 max1 ...]` array as one interval per pair.
+    ///
+    /// Missing entries and explicit PDF `null` values are treated as absent. A trailing
+    /// unpaired value is ignored.
+    pub fn optional_intervals(
+        &self,
+        key: &[u8],
+        objects: &dyn ObjectResolver,
+    ) -> Result<Option<Vec<Interval>>, ObjectError> {
+        Ok(self
+            .optional_vec_of::<f32>(key, objects)?
+            .map(|values| Interval::from_pairs(&values)))
+    }
+
+    /// Reads a required flat `[min0 max0 min1 max1 ...]` array as one interval per pair.
+    ///
+    /// A trailing unpaired value is ignored.
+    pub fn required_intervals(
+        &self,
+        key: &[u8],
+        objects: &dyn ObjectResolver,
+    ) -> Result<Vec<Interval>, ObjectError> {
+        self.required_vec_of::<f32>(key, objects)
+            .map(|values| Interval::from_pairs(&values))
     }
 
     /// Returns the `/Parent` entry and its object id when it is an indirect reference.

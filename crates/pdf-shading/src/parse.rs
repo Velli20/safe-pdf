@@ -6,7 +6,7 @@
 
 use pdf_color_space::color_space::ColorSpace;
 use pdf_function::function::{Function, FunctionImpl};
-use pdf_graphics::color::Color;
+use pdf_graphics::{color::Color, interval::Interval};
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ReadResult, dictionary::Dictionary,
     object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
@@ -71,8 +71,8 @@ fn parse_axial(
 ) -> Result<Shading, PdfShadingError> {
     let coords = dictionary.required_array_of::<f32, 4>(b"Coords", objects)?;
     let domain = dictionary
-        .optional_array_of::<f32, 2>(b"Domain", objects)?
-        .unwrap_or(crate::color_stops::DEFAULT_DOMAIN);
+        .optional_interval(b"Domain", objects)?
+        .unwrap_or(Interval::UNIT);
     let color_space = required_color_space(dictionary, objects)?;
     let function = Function::parse(dictionary.get_or_err(b"Function")?, objects)?;
     let color_stops = ColorStops::from_function_domain(&function, &color_space, domain)?;
@@ -97,8 +97,8 @@ fn parse_radial(
 ) -> Result<Shading, PdfShadingError> {
     let coords = dictionary.required_array_of::<f32, 6>(b"Coords", objects)?;
     let domain = dictionary
-        .optional_array_of::<f32, 2>(b"Domain", objects)?
-        .unwrap_or(crate::color_stops::DEFAULT_DOMAIN);
+        .optional_interval(b"Domain", objects)?
+        .unwrap_or(Interval::UNIT);
     let color_space = required_color_space(dictionary, objects)?;
     let bbox = dictionary.optional_bbox(objects)?;
     let function = Function::parse(dictionary.get_or_err(b"Function")?, objects)?;

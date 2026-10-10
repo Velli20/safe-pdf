@@ -4,13 +4,10 @@ use std::sync::Arc;
 
 use pdf_color_space::color_space::ColorSpace;
 use pdf_function::function::{Function, FunctionImpl};
-use pdf_graphics::color::Color;
+use pdf_graphics::{color::Color, interval::Interval};
 
 use crate::error::{PdfShadingError, ShadingRasterError};
 use num_traits::ToPrimitive;
-
-/// Default domain range for shading functions when not explicitly specified.
-pub(crate) const DEFAULT_DOMAIN: [f32; 2] = [0.0, 1.0];
 
 /// A collection of sampled colors and normalized positions for gradient-style shadings.
 #[derive(Debug, Clone, Default)]
@@ -30,7 +27,7 @@ impl ColorStops {
         function: &Function,
         color_space: &ColorSpace,
     ) -> Result<Self, PdfShadingError> {
-        let domain = function.domain().unwrap_or(DEFAULT_DOMAIN);
+        let domain = function.domain().unwrap_or(Interval::UNIT);
         Self::from_function_domain(function, color_space, domain)
     }
 
@@ -38,11 +35,9 @@ impl ColorStops {
     pub fn from_function_domain(
         function: &Function,
         color_space: &ColorSpace,
-        domain: [f32; 2],
+        domain: Interval,
     ) -> Result<Self, PdfShadingError> {
-        let domain_range = domain[1] - domain[0];
-
-        if domain.iter().any(|value| !value.is_finite()) || domain_range <= 0.0 {
+        if !domain.is_increasing() {
             return Err(PdfShadingError::UnsupportedFeature(
                 "invalid shading domain".to_string(),
             ));
@@ -55,8 +50,7 @@ impl ColorStops {
         let denominator = f32::from(Self::DEFAULT_NUM_COLOR_STOPS - 1);
         for i in 0..Self::DEFAULT_NUM_COLOR_STOPS {
             let t = f32::from(i) / denominator;
-            let x = domain[0] + t * domain_range;
-            let components = function.interpolate(&[x])?;
+            let components = function.interpolate(&[domain.lerp(t)])?;
             let color = color_space.apply(&components)?;
 
             positions.push(t);
@@ -173,10 +167,14 @@ mod tests {
             vec![0.0; 3],
             vec![1.0; 3],
             1.0,
-            [0.0, 10.0],
+            Interval::new(0.0, 10.0),
         ));
-        let stops = ColorStops::from_function_domain(&function, &ColorSpace::DeviceRGB, [2.0, 8.0])
-            .unwrap();
+        let stops = ColorStops::from_function_domain(
+            &function,
+            &ColorSpace::DeviceRGB,
+            Interval::new(2.0, 8.0),
+        )
+        .unwrap();
 
         assert_eq!(stops.positions.first(), Some(&0.0));
         assert_eq!(stops.positions.last(), Some(&1.0));

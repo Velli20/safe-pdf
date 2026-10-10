@@ -1,12 +1,13 @@
 use std::cmp::Ordering;
 
+use pdf_graphics::interval::Interval;
 use pdf_object_reader::{
     object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
 use crate::{
     error::FunctionReadError,
-    function::{Function, FunctionImpl, get_pair, linear_interpolate},
+    function::{Function, FunctionImpl},
     function_interpolation_error::FunctionInterpolationError,
 };
 
@@ -16,17 +17,17 @@ pub struct StitchingFunction {
     functions: Vec<Function>,
     /// Boundary values dividing the domain into sub-domains.
     bounds: Vec<f32>,
-    /// Encoding values mapping sub-domains to sub-function domains.
-    encode: Vec<f32>,
-    /// Input domain `[min, max]`.
-    domain: [f32; 2],
+    /// Per-function intervals that sub-domains are mapped onto.
+    encode: Vec<Interval>,
+    /// Input domain.
+    domain: Interval,
 }
 
 impl StitchingFunction {
     /// Returns the sub-domain `[b0, b1]` for the given segment index.
-    fn get_subdomain(&self, index: usize) -> Result<(f32, f32), FunctionInterpolationError> {
+    fn get_subdomain(&self, index: usize) -> Result<Interval, FunctionInterpolationError> {
         let b0 = if index == 0 {
-            self.domain[0]
+            self.domain.min
         } else {
             let prev_idx = index
                 .checked_sub(1)
@@ -38,7 +39,7 @@ impl StitchingFunction {
         };
 
         let b1 = if index >= self.bounds.len() {
-            self.domain[1]
+            self.domain.max
         } else {
             *self
                 .bounds
@@ -46,7 +47,7 @@ impl StitchingFunction {
                 .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?
         };
 
-        Ok((b0, b1))
+        Ok(Interval::new(b0, b1))
     }
 }
 
@@ -71,7 +72,7 @@ impl FunctionImpl for StitchingFunction {
         }
 
         // Clamp input to domain
-        let x_clamped = x.clamp(self.domain[0], self.domain[1]);
+        let x_clamped = self.domain.clamp(x);
 
         // Find which sub-function to use via binary search on bounds.
         // SAFETY: NaN-free bounds checked above; partial_cmp always returns Some.
@@ -83,14 +84,13 @@ impl FunctionImpl for StitchingFunction {
             Err(pos) => pos,
         };
 
-        // Determine the sub-domain [b0, b1] for this segment
-        let (b0, b1) = self.get_subdomain(index)?;
-
-        // Get encoding values [e0, e1] for mapping to sub-function domain
-        let (e0, e1) = get_pair(&self.encode, index)
+        // Map the input from this segment's sub-domain onto its encode interval
+        let subdomain = self.get_subdomain(index)?;
+        let encode = self
+            .encode
+            .get(index)
             .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
-        // Map input from [b0, b1] to [e0, e1]
-        let x_mapped = linear_interpolate(x_clamped, b0, b1, e0, e1);
+        let x_mapped = subdomain.remap(x_clamped, encode);
 
         // Evaluate the selected sub-function
         let func = self
@@ -100,7 +100,7 @@ impl FunctionImpl for StitchingFunction {
         func.interpolate(&[x_mapped])
     }
 
-    fn domain(&self) -> Option<[f32; 2]> {
+    fn domain(&self) -> Option<Interval> {
         Some(self.domain)
     }
 
@@ -110,7 +110,7 @@ impl FunctionImpl for StitchingFunction {
     ) -> Result<Function, FunctionReadError> {
         let dictionary = object.try_dictionary(objects)?;
 
-        let domain = dictionary.required_array_of::<f32, 2>(b"Domain", objects)?;
+        let domain = dictionary.required_interval(b"Domain", objects)?;
 
         // Parse /Functions array (sub-functions to stitch together)
         let functions_arr = dictionary.required_array(b"Functions", objects)?;
@@ -123,7 +123,7 @@ impl FunctionImpl for StitchingFunction {
         let mut bounds = dictionary.required_vec_of::<f32>(b"Bounds", objects)?;
 
         // Parse /Encode array (input mapping for each sub-function)
-        let mut encode = dictionary.required_vec_of::<f32>(b"Encode", objects)?;
+        let mut encode = dictionary.required_intervals(b"Encode", objects)?;
 
         // Validate structural relationships. Producers sometimes pad /Bounds or /Encode, so
         // extra trailing values are dropped rather than rejected.
@@ -136,14 +136,10 @@ impl FunctionImpl for StitchingFunction {
         }
         bounds.truncate(expected_bounds);
 
-        let expected_encode = functions
-            .len()
-            .checked_mul(2)
-            .ok_or(FunctionReadError::InvalidEncodeLength)?;
-        if encode.len() < expected_encode {
+        if encode.len() < functions.len() {
             return Err(FunctionReadError::InvalidEncodeLength);
         }
-        encode.truncate(expected_encode);
+        encode.truncate(functions.len());
 
         Ok(Function::Stitching(StitchingFunction {
             functions,
@@ -163,7 +159,12 @@ mod tests {
     };
 
     fn make_linear_exp(c0: f32, c1: f32, domain: [f32; 2]) -> Function {
-        Function::Exponential(ExponentialFunction::new(vec![c0], vec![c1], 1.0, domain))
+        Function::Exponential(ExponentialFunction::new(
+            vec![c0],
+            vec![c1],
+            1.0,
+            Interval::from(domain),
+        ))
     }
 
     fn make_stitch(
@@ -174,8 +175,8 @@ mod tests {
         StitchingFunction {
             functions,
             bounds,
-            encode,
-            domain: [0.0, 1.0],
+            encode: Interval::from_pairs(&encode),
+            domain: Interval::UNIT,
         }
     }
 
