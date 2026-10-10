@@ -161,7 +161,10 @@ fn decode_filter(
                 crate::predictor::apply_predictor(&decoded, &predictor)?
             }
         }
-        Filter::DCTDecode => Filter::decode_jpeg_baseline(data)?,
+        Filter::DCTDecode => {
+            let height = dictionary.optional_number::<u16>(b"Height", objects)?;
+            Filter::decode_jpeg_baseline(data, height)?
+        }
         Filter::ASCII85Decode => crate::ascii85::decode_ascii85(data)?,
         Filter::ASCIIHexDecode => crate::asciihex::decode_ascii_hex(data),
         Filter::RunLengthDecode => crate::runlength::decode_run_length(data)?,
