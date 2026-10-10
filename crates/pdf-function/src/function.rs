@@ -6,6 +6,7 @@
 //! - Type 3: Stitching functions (combining multiple functions)
 //! - Type 4: PostScript Calculator functions
 
+use pdf_graphics::interval::Interval;
 use pdf_object_reader::{
     object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
@@ -63,8 +64,8 @@ pub trait FunctionImpl {
     /// - A PostScript calculation fails
     fn interpolate(&self, inputs: &[f32]) -> Result<Vec<f32>, FunctionInterpolationError>;
 
-    /// Returns the input domain of this function as `[min, max]`.
-    fn domain(&self) -> Option<[f32; 2]>;
+    /// Returns the input domain of this function's first input dimension.
+    fn domain(&self) -> Option<Interval>;
 
     fn parse(
         object: &ObjectVariant,
@@ -98,7 +99,7 @@ impl FunctionImpl for Function {
         }
     }
 
-    fn domain(&self) -> Option<[f32; 2]> {
+    fn domain(&self) -> Option<Interval> {
         match self {
             Function::Sampled(function) => function.domain(),
             Function::Exponential(function) => function.domain(),
@@ -147,43 +148,6 @@ impl Function {
     pub fn apply(&self, inputs: &[f32]) -> Result<Vec<f32>, FunctionInterpolationError> {
         FunctionImpl::interpolate(self, inputs)
     }
-}
-
-/// Clamps a value to a domain and returns the normalized position in `[0, 1]`.
-///
-/// Returns `None` if the domain is degenerate (min >= max).
-#[inline]
-pub fn clamp_and_normalize(x: f32, domain: [f32; 2]) -> Option<f32> {
-    let [min, max] = domain;
-    if min >= max {
-        return None;
-    }
-    let clamped = x.clamp(min, max);
-    Some((clamped - min) / (max - min))
-}
-
-/// Performs linear interpolation from `[a, b]` to `[c, d]`.
-///
-/// Maps the position of `x` within `[a, b]` to the corresponding position in `[c, d]`.
-#[inline]
-pub fn linear_interpolate(x: f32, a: f32, b: f32, c: f32, d: f32) -> f32 {
-    let t = if (b - a).abs() < f32::EPSILON {
-        0.0
-    } else {
-        (x - a) / (b - a)
-    };
-    c + t * (d - c)
-}
-
-/// Safely retrieves a pair of values at index `i` from a slice of pairs.
-///
-/// For a slice `[v0, v1, v2, v3, ...]`, returns `(slice[2*i], slice[2*i+1])`.
-#[inline]
-pub fn get_pair(slice: &[f32], i: usize) -> Option<(f32, f32)> {
-    let base = i.checked_mul(2)?;
-    let first = *slice.get(base)?;
-    let second = *slice.get(base.checked_add(1)?)?;
-    Some((first, second))
 }
 
 /// Ensures the underlying stream contains at least `expected` bytes.

@@ -1,13 +1,14 @@
 use num_derive::FromPrimitive;
 use num_traits::{FromPrimitive, ToPrimitive};
 use pdf_decode::decode_normalized_samples;
+use pdf_graphics::interval::Interval;
 use pdf_object_reader::{
     object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
 use crate::{
     error::FunctionReadError,
-    function::{Function, FunctionImpl, get_pair, linear_interpolate},
+    function::{Function, FunctionImpl},
     function_interpolation_error::FunctionInterpolationError,
 };
 
@@ -27,14 +28,14 @@ pub struct SampledFunction {
     bits_per_sample: usize,
     /// Interpolation order.
     order: InterpolationOrder,
-    /// Input encoding: maps domain to sample indices, stored as pairs per dimension.
-    encode: Vec<f32>,
-    /// Output decoding: maps sample values to output range, stored as pairs per output.
-    decode: Vec<f32>,
-    /// Input domain as pairs `[min0, max0, min1, max1, ...]`.
-    domain: Vec<f32>,
-    /// Output range as pairs `[min0, max0, min1, max1, ...]`.
-    range: Vec<f32>,
+    /// Input encoding: maps each domain dimension onto sample indices.
+    encode: Vec<Interval>,
+    /// Output decoding: maps each output's sample values onto its output range.
+    decode: Vec<Interval>,
+    /// Input domain, one interval per input dimension.
+    domain: Vec<Interval>,
+    /// Output range, one interval per output.
+    range: Vec<Interval>,
     /// The decoded sample values, stored as f32.
     /// Layout: samples[(i0 * size[1] * ... * size[m-1] + ... + i[m-1]) * output_count + j]
     samples: Vec<f32>,
@@ -65,21 +66,24 @@ impl FunctionImpl for SampledFunction {
         // Encode each input dimension to a continuous sample coordinate.
         let mut enc_coords: Vec<f32> = Vec::with_capacity(m);
         for i in 0..m {
-            let (domain_min, domain_max) = get_pair(&self.domain, i)
-                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
-            let x_clamped = inputs
+            let domain = self
+                .domain
                 .get(i)
-                .copied()
-                .ok_or(FunctionInterpolationError::InsufficientInputs {
-                    expected: m,
-                    got: inputs.len(),
-                })?
-                .clamp(domain_min, domain_max);
-
-            let (encode_min, encode_max) = get_pair(&self.encode, i)
                 .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
-            let encoded =
-                linear_interpolate(x_clamped, domain_min, domain_max, encode_min, encode_max);
+            let x =
+                inputs
+                    .get(i)
+                    .copied()
+                    .ok_or(FunctionInterpolationError::InsufficientInputs {
+                        expected: m,
+                        got: inputs.len(),
+                    })?;
+
+            let encode = self
+                .encode
+                .get(i)
+                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
+            let encoded = domain.remap(domain.clamp(x), encode);
 
             let size_i = self
                 .size
@@ -204,22 +208,22 @@ impl FunctionImpl for SampledFunction {
         // Apply decode mapping and range clamping (ISO 32000 §7.10.2).
         let mut outputs = Vec::with_capacity(self.output_count);
         for (j, &interp) in accum.iter().enumerate() {
-            let (decode_min, decode_max) = get_pair(&self.decode, j)
+            let decode = self
+                .decode
+                .get(j)
                 .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
-            let decoded = decode_min + interp * (decode_max - decode_min);
-
-            let (range_min, range_max) = get_pair(&self.range, j)
+            let range = self
+                .range
+                .get(j)
                 .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
-            outputs.push(decoded.clamp(range_min, range_max));
+            outputs.push(range.clamp(decode.lerp(interp)));
         }
 
         Ok(outputs)
     }
 
-    fn domain(&self) -> Option<[f32; 2]> {
-        let first = *self.domain.first()?;
-        let second = *self.domain.get(1)?;
-        Some([first, second])
+    fn domain(&self) -> Option<Interval> {
+        self.domain.first().copied()
     }
 
     /// Parses a Type 0 (Sampled) function.
@@ -234,10 +238,10 @@ impl FunctionImpl for SampledFunction {
         let dictionary = &stream.dictionary;
 
         // /Domain: Required. Array of 2*m numbers defining input domain.
-        let domain = dictionary.required_vec_of::<f32>(b"Domain", objects)?;
+        let domain = dictionary.required_intervals(b"Domain", objects)?;
 
         // /Range: Required for sampled functions. Array of 2*n numbers.
-        let range = dictionary.required_vec_of::<f32>(b"Range", objects)?;
+        let range = dictionary.required_intervals(b"Range", objects)?;
 
         // /Size: Required. Array of m integers specifying samples per input dimension.
         let size = dictionary.required_vec_of::<usize>(b"Size", objects)?;
@@ -245,7 +249,7 @@ impl FunctionImpl for SampledFunction {
             return Err(FunctionReadError::InvalidSizeArray);
         }
 
-        let output_count = range.len() / 2;
+        let output_count = range.len();
 
         // /BitsPerSample: Required. Must be 1, 2, 4, 8, 12, 16, 24, or 32.
         let bits_per_sample = dictionary.required_number::<usize>(b"BitsPerSample", objects)?;
@@ -265,27 +269,22 @@ impl FunctionImpl for SampledFunction {
 
         // /Encode: Optional. Defaults to [0, Size[i]-1] per dimension.
         let encode = dictionary
-            .get(b"Encode")
-            .map(|o| o.try_vec_of::<f32>(objects))
-            .transpose()?
+            .optional_intervals(b"Encode", objects)?
             .unwrap_or_else(|| {
                 size.iter()
-                    .flat_map(|&s| {
+                    .map(|&s| {
                         // size[i] values fit in usize; to_f32() always returns Some here
-                        let max_f32 = s.saturating_sub(1).to_f32().unwrap_or(0.0);
-                        [0.0, max_f32]
+                        Interval::new(0.0, s.saturating_sub(1).to_f32().unwrap_or(0.0))
                     })
                     .collect()
             });
 
         // /Decode: Optional. Defaults to Range values.
         let decode = dictionary
-            .get(b"Decode")
-            .map(|o| o.try_vec_of::<f32>(objects))
-            .transpose()?
+            .optional_intervals(b"Decode", objects)?
             .unwrap_or_else(|| range.clone());
 
-        if decode.len() != output_count.saturating_mul(2) {
+        if decode.len() != output_count {
             return Err(FunctionReadError::InvalidDecodeLength);
         }
 
@@ -327,10 +326,10 @@ mod tests {
             size,
             bits_per_sample: 8,
             order: InterpolationOrder::Linear,
-            encode: (0..m).flat_map(|_| [0.0_f32, 1.0]).collect(),
-            decode: (0..n).flat_map(|_| [0.0_f32, 1.0]).collect(),
-            domain: (0..m).flat_map(|_| [0.0_f32, 1.0]).collect(),
-            range: (0..n).flat_map(|_| [0.0_f32, 1.0]).collect(),
+            encode: vec![Interval::UNIT; m],
+            decode: vec![Interval::UNIT; n],
+            domain: vec![Interval::UNIT; m],
+            range: vec![Interval::UNIT; n],
             samples,
             output_count,
         }
