@@ -1,114 +1,70 @@
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, dictionary::Dictionary,
-    object_resolver::ObjectResolver, object_variant::ObjectVariant,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
 };
 
 use crate::{
-    cal_gray_color_space::parse_cal_gray_color_space,
-    cal_rgb_color_space::parse_cal_rgb_color_space,
-    device_n_color_space::parse_device_n_color_space,
-    icc_based_color_space::parse_icc_based_color_space,
-    indexed_color_space::parse_indexed_color_space, lab_color_space::parse_lab_color_space,
-    separation_color_space::parse_separation_color_space,
+    color_space::ColorSpace, device_n_color_space::DeviceNColorSpace, error::ColorSpaceError,
+    indexed_color_space::IndexedColorSpace, separation_color_space::SeparationColorSpace,
 };
-use crate::{color_space::ColorSpace, error::ColorSpaceError};
 
-/// Maximum nesting depth for color space definitions.
+/// Reads a color space given as a name (e.g., `/DeviceRGB`) or as an array
+/// (e.g., `[/Indexed /DeviceRGB 255 <lookup data>]`).
 ///
-/// Prevents stack overflow from maliciously crafted PDFs with deeply nested
-/// color spaces (e.g., Indexed within Indexed within Indexed...).
-const MAX_COLOR_SPACE_DEPTH: usize = 8;
-
-impl ColorSpace {
-    const KEY: &'static [u8] = b"ColorSpace";
-
-    pub fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Option<ColorSpace>, ColorSpaceError> {
-        let Some(color_space_obj) = dictionary.get(Self::KEY) else {
-            return Ok(None);
-        };
-
-        parse_color_space_object(objects, color_space_obj, 0).map(Some)
-    }
-}
-
+/// Nested color spaces are read through the same traversal, so the reader's
+/// decode-depth limit and cycle detection bound maliciously nested definitions.
 impl FromPdfObject for ColorSpace {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        parse_color_space_object(context.source(), context.object().value(), 0).map_err(Into::into)
+        let value = context.object().value();
+        let ObjectVariant::Array(array) = value else {
+            return Ok(Self::try_from(value.try_bytes(context.source())?)?);
+        };
+        let family = array
+            .first()
+            .ok_or_else(|| ColorSpaceError::InvalidColorSpace {
+                description: "empty color space array".into(),
+            })?
+            .try_bytes(context.source())?;
+        if array.len() == 1 {
+            return Ok(Self::try_from(family)?);
+        }
+
+        match family {
+            b"Indexed" => IndexedColorSpace::from_pdf_object(context).map(Self::Indexed),
+            b"Separation" => SeparationColorSpace::from_pdf_object(context).map(Self::Separation),
+            b"DeviceN" => DeviceNColorSpace::from_pdf_object(context).map(Self::DeviceN),
+            b"ICCBased" => sole_operand(context, "ICCBased").map(Self::ICCBased),
+            b"Lab" => sole_operand(context, "Lab").map(Self::Lab),
+            b"CalGray" => sole_operand(context, "CalGray").map(Self::CalGray),
+            b"CalRGB" => sole_operand(context, "CalRGB").map(Self::CalRGB),
+            // The second element is the underlying color space used with uncolored
+            // tiling patterns.
+            b"Pattern" => Ok(Self::Pattern(Some(Box::new(context.array()?.at(1)?)))),
+            unknown => Err(ColorSpaceError::InvalidColorSpace {
+                description: format!(
+                    "unsupported color space type: /{} (array with {} elements)",
+                    String::from_utf8_lossy(unknown),
+                    array.len()
+                ),
+            }
+            .into()),
+        }
     }
 }
 
-/// Parses a color space from a PDF object.
-///
-/// Color spaces can be specified as:
-/// - A name (e.g., `/DeviceRGB`)
-/// - An array (e.g., `[/Indexed /DeviceRGB 255 <lookup data>]`)
-pub(crate) fn parse_color_space_object(
-    objects: &dyn ObjectResolver,
-    obj: &ObjectVariant,
-    depth: usize,
-) -> Result<ColorSpace, ColorSpaceError> {
-    // Guard against deeply-nested color spaces.
-    if depth >= MAX_COLOR_SPACE_DEPTH {
+/// Reads the single operand of a `[/Family operand]` color space array.
+fn sole_operand<T: FromPdfObject>(
+    context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    family: &str,
+) -> ReadResult<T> {
+    let mut array = context.array()?;
+    let found = array.array().len();
+    if found != 2 {
         return Err(ColorSpaceError::InvalidColorSpace {
-            description: "color space nesting exceeds maximum depth".into(),
-        });
-    }
-
-    match objects.resolve_object(obj)? {
-        ObjectVariant::Array(arr) => {
-            parse_color_space_array(objects, arr.as_slice(), depth.saturating_add(1))
+            description: format!("/{family} requires 2 elements, found {found}"),
         }
-        other => ColorSpace::try_from(other.try_bytes(objects)?),
+        .into());
     }
-}
-
-/// Parses a color space defined as an array.
-///
-/// Array-based color spaces have the form `[/Type param1 param2 ...]`.
-fn parse_color_space_array(
-    objects: &dyn ObjectResolver,
-    arr: &[ObjectVariant],
-    depth: usize,
-) -> Result<ColorSpace, ColorSpaceError> {
-    if let [single] = arr {
-        return ColorSpace::try_from(single.try_bytes(objects)?);
-    }
-
-    // Get the color space type (first element)
-    let cs_type = arr
-        .first()
-        .ok_or_else(|| ColorSpaceError::InvalidColorSpace {
-            description: "empty color space array".into(),
-        })?;
-
-    match cs_type.try_bytes(objects)? {
-        b"Indexed" => parse_indexed_color_space(objects, arr, depth),
-        b"ICCBased" => parse_icc_based_color_space(objects, arr, depth),
-        b"Separation" => parse_separation_color_space(objects, arr, depth),
-        b"Lab" => parse_lab_color_space(objects, arr),
-        b"CalGray" => parse_cal_gray_color_space(objects, arr),
-        b"CalRGB" => parse_cal_rgb_color_space(objects, arr),
-        b"DeviceN" => parse_device_n_color_space(objects, arr, depth),
-        b"Pattern" => {
-            // Optional second element is the underlying color space used with
-            // uncolored tiling patterns.
-            let underlying = arr
-                .get(1)
-                .map(|obj| parse_color_space_object(objects, obj, depth).map(Box::new))
-                .transpose()?;
-            Ok(ColorSpace::Pattern(underlying))
-        }
-        unknown => Err(ColorSpaceError::InvalidColorSpace {
-            description: format!(
-                "unsupported color space type: /{} (array with {} elements)",
-                String::from_utf8_lossy(unknown),
-                arr.len()
-            ),
-        }),
-    }
+    array.at(1)
 }
 
 #[cfg(test)]

@@ -306,6 +306,11 @@ macro_rules! context_access {
                 }
             }
 
+            /// Reborrows the active traversal for decoders that take an access directly.
+            pub fn access(&mut self) -> &mut A {
+                self.access
+            }
+
             /// Borrows the source for leaf-level raw object inspection.
             pub fn source(&self) -> &dyn crate::object_resolver::ObjectResolver {
                 self.access.source()

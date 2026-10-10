@@ -285,12 +285,14 @@ fn cached_form_xobjects_keep_their_generated_ids() {
         .and_then(|handle| handle.get())
         .expect("xobjects should parse");
 
-    let shared_a = form_content_stream_id(parsed.xobject("SharedA").expect("SharedA should exist"))
-        .expect("SharedA should be a form XObject");
-    let shared_b = form_content_stream_id(parsed.xobject("SharedB").expect("SharedB should exist"))
-        .expect("SharedB should be a form XObject");
+    let shared_a =
+        form_content_stream_id(&parsed.xobject("SharedA").expect("SharedA should exist"))
+            .expect("SharedA should be a form XObject");
+    let shared_b =
+        form_content_stream_id(&parsed.xobject("SharedB").expect("SharedB should exist"))
+            .expect("SharedB should be a form XObject");
     let distinct_id =
-        form_content_stream_id(parsed.xobject("Distinct").expect("Distinct should exist"))
+        form_content_stream_id(&parsed.xobject("Distinct").expect("Distinct should exist"))
             .expect("Distinct should be a form XObject");
 
     assert_eq!(shared_b, shared_a);
@@ -301,7 +303,7 @@ fn cached_form_xobjects_keep_their_generated_ids() {
         .and_then(|handle| handle.get())
         .expect("cached xobjects should parse");
     let shared_again = form_content_stream_id(
-        parsed_again
+        &parsed_again
             .xobject("SharedA")
             .expect("SharedA should exist"),
     )
@@ -318,7 +320,7 @@ fn cached_form_xobjects_keep_their_generated_ids() {
         )
         .and_then(|handle| handle.get())
         .expect("later xobject should parse");
-    let later_id = form_content_stream_id(later.xobject("Later").expect("Later should exist"))
+    let later_id = form_content_stream_id(&later.xobject("Later").expect("Later should exist"))
         .expect("Later should be a form XObject");
 
     assert_eq!(later_id, 2);
@@ -369,8 +371,9 @@ fn form_resources_accept_an_indirect_stream_dictionary() {
         .read_shared::<Resources>(page.get(b"Resources").expect("resource entry"))
         .and_then(|handle| handle.get())
         .expect("page resources should parse");
-    assert!(matches!(resources.xobject("Form"), Some(Resource::Form(_))));
-    let Some(Resource::Form(form)) = resources.xobject("Form") else {
+    let form = resources.xobject("Form");
+    assert!(matches!(form.as_deref(), Some(Resource::Form(_))));
+    let Some(Resource::Form(form)) = form.as_deref() else {
         return;
     };
     let form = form.get().expect("form should be published");
@@ -447,10 +450,10 @@ fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
 
     let xobject = resources.xobject("Meta6");
     assert!(
-        matches!(xobject, Some(Resource::Form(_))),
+        matches!(xobject.as_deref(), Some(Resource::Form(_))),
         "expected dictionary-only form xobject"
     );
-    let Some(Resource::Form(form)) = xobject else {
+    let Some(Resource::Form(form)) = xobject.as_deref() else {
         return;
     };
     let form = form.get().expect("published form");
@@ -550,10 +553,10 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
 
     let form = resources.xobject("Self");
     assert!(
-        matches!(form, Some(Resource::Form(_))),
+        matches!(form.as_deref(), Some(Resource::Form(_))),
         "expected the self-referential form xobject to be parsed"
     );
-    let Some(Resource::Form(form)) = form else {
+    let Some(Resource::Form(form)) = form.as_deref() else {
         return;
     };
     let form = form.get().expect("published form");
@@ -568,10 +571,10 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
         .xobject("Self")
         .expect("recursive lookup should resolve the same form");
     assert!(
-        matches!(nested_form, Resource::Form(_)),
+        matches!(nested_form.as_ref(), Resource::Form(_)),
         "expected the recursive lookup to resolve the cached form xobject"
     );
-    let Resource::Form(nested_form) = nested_form else {
+    let Resource::Form(nested_form) = nested_form.as_ref() else {
         return;
     };
     let nested_form = nested_form.get().expect("published form");
@@ -620,26 +623,26 @@ fn mutually_recursive_form_xobjects_resolve_lazily() {
         .expect("mutually recursive forms should parse");
 
     let first = resources.xobject("First");
-    assert!(matches!(first, Some(Resource::Form(_))));
-    let Some(Resource::Form(first)) = first else {
+    assert!(matches!(first.as_deref(), Some(Resource::Form(_))));
+    let Some(Resource::Form(first)) = first.as_deref() else {
         return;
     };
     let first = first.get().expect("published form");
     let second = first
         .resources
         .as_ref()
-        .and_then(|nested| nested.get().ok()?.xobject("Next").cloned());
-    assert!(matches!(second, Some(Resource::Form(_))));
-    let Some(Resource::Form(second)) = second else {
+        .and_then(|nested| nested.get().ok()?.xobject("Next"));
+    assert!(matches!(second.as_deref(), Some(Resource::Form(_))));
+    let Some(Resource::Form(second)) = second.as_deref() else {
         return;
     };
     let second = second.get().expect("published form");
     let back_to_first = second
         .resources
         .as_ref()
-        .and_then(|nested| nested.get().ok()?.xobject("Back").cloned());
-    assert!(matches!(back_to_first, Some(Resource::Form(_))));
-    let Some(Resource::Form(back_to_first)) = back_to_first else {
+        .and_then(|nested| nested.get().ok()?.xobject("Back"));
+    assert!(matches!(back_to_first.as_deref(), Some(Resource::Form(_))));
+    let Some(Resource::Form(back_to_first)) = back_to_first.as_deref() else {
         return;
     };
     let back_to_first = back_to_first.get().expect("published form");

@@ -1,11 +1,8 @@
 use pdf_graphics::color::Color;
-use pdf_object_reader::object_lookup::ObjectLookupExt;
-use pdf_object_reader::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 use crate::cal_gray_color_space::xyz_to_srgb;
-use crate::{
-    cie_color_space::CieColorSpaceParams, color_space::ColorSpace, error::ColorSpaceError,
-};
+use crate::{cie_color_space::CieColorSpaceParams, error::ColorSpaceError};
 
 /// Calibrated RGB color space.
 ///
@@ -26,34 +23,26 @@ pub struct CalRGBColorSpace {
     pub matrix: [f32; 9],
 }
 
-/// Parses a CalRGB color space: `[/CalRGB dict]`
-pub(crate) fn parse_cal_rgb_color_space(
-    objects: &dyn ObjectResolver,
-    arr: &[ObjectVariant],
-) -> Result<ColorSpace, ColorSpaceError> {
-    let [_, dict_obj] = arr else {
-        return Err(ColorSpaceError::InvalidColorSpace {
-            description: format!("/CalRGB requires 2 elements, found {}", arr.len()),
-        });
-    };
-    let dict = dict_obj.try_dictionary(objects)?;
-    let CieColorSpaceParams {
-        white_point,
-        black_point,
-    } = CieColorSpaceParams::from_dictionary(dict, objects)?;
-    let gamma = dict
-        .optional_array_of::<f32, 3>(b"Gamma", objects)?
-        .unwrap_or([1.0, 1.0, 1.0]);
-    // Column-major 3×3: [Xa Ya Za Xb Yb Zb Xc Yc Zc], default identity.
-    let matrix = dict
-        .optional_array_of::<f32, 9>(b"Matrix", objects)?
-        .unwrap_or([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
-    Ok(ColorSpace::CalRGB(CalRGBColorSpace {
-        white_point,
-        black_point,
-        gamma,
-        matrix,
-    }))
+/// Reads the dictionary operand of a CalRGB color space, `[/CalRGB dict]`.
+impl FromPdfObject for CalRGBColorSpace {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
+        let CieColorSpaceParams {
+            white_point,
+            black_point,
+        } = CieColorSpaceParams::read(&mut dictionary)?;
+        let gamma = dictionary.optional(b"Gamma")?.unwrap_or([1.0, 1.0, 1.0]);
+        // Column-major 3×3: [Xa Ya Za Xb Yb Zb Xc Yc Zc], default identity.
+        let matrix = dictionary
+            .optional(b"Matrix")?
+            .unwrap_or([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+        Ok(Self {
+            white_point,
+            black_point,
+            gamma,
+            matrix,
+        })
+    }
 }
 
 impl CalRGBColorSpace {

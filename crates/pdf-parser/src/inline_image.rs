@@ -1,5 +1,5 @@
 use pdf_image::InlineImage;
-use pdf_object_reader::{dictionary::Dictionary, object_resolver::ObjectResolver};
+use pdf_object_reader::{ObjectAccess, dictionary::Dictionary, object_resolver::ObjectResolver};
 
 use crate::{error::ParserError, parser::PdfParser};
 
@@ -12,13 +12,13 @@ impl PdfParser<'_> {
     /// Returns the canonical `pdf_image::InlineImage` representation.
     pub fn parse_inline_image(
         &mut self,
-        objects: &dyn ObjectResolver,
+        access: &mut (impl ObjectAccess + ?Sized),
     ) -> Result<InlineImage, ParserError> {
-        let dictionary = self.parse_inline_image_dictionary(objects)?;
+        let dictionary = self.parse_inline_image_dictionary(access.source())?;
         self.read_keyword_with_optional_eol(INLINE_IMAGE_DATA_BEGIN, false)?;
         self.consume_inline_image_data_separator()?;
-        let data = self.read_inline_image_data_until_end(&dictionary, objects)?;
-        InlineImage::new(dictionary, data, objects)
+        let data = self.read_inline_image_data_until_end(&dictionary, access.source())?;
+        InlineImage::new(dictionary, data, access)
             .map_err(|error| ParserError::InlineImageError(error.to_string()))
     }
 
@@ -252,7 +252,11 @@ mod tests {
     fn rejects_non_whitespace_after_id() {
         let mut parser = PdfParser::from(b"/W 1 /H 1 ID/abc EI".as_slice());
 
-        let error = parser.parse_inline_image(&PassthroughResolver).unwrap_err();
+        let error = parser
+            .parse_inline_image(
+                &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            )
+            .unwrap_err();
         assert!(matches!(
             error,
             ParserError::InlineImageMissingDataSeparator {
@@ -266,7 +270,11 @@ mod tests {
     fn returns_specific_error_when_ei_is_missing() {
         let mut parser = PdfParser::from(b"/W 1 /H 1 ID abc".as_slice());
 
-        let error = parser.parse_inline_image(&PassthroughResolver).unwrap_err();
+        let error = parser
+            .parse_inline_image(
+                &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            )
+            .unwrap_err();
         assert_eq!(error, ParserError::InlineImageMissingDataEnd);
     }
 
@@ -274,7 +282,11 @@ mod tests {
     fn ignores_embedded_ei_without_whitespace_boundary() {
         let mut parser = PdfParser::from(b"/W 1 /H 1 /BPC 8 /CS /G ID abcEIxdef\nEI Q".as_slice());
 
-        let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
+        let image = parser
+            .parse_inline_image(
+                &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            )
+            .unwrap();
 
         assert_eq!(image.shared_data().as_ref(), b"abcEIxdef\n");
         assert_eq!(parser.tokenizer.data(), b" Q");
@@ -287,7 +299,11 @@ mod tests {
         input.extend_from_slice(b"EI Q");
 
         let mut parser = PdfParser::from(input.as_slice());
-        let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
+        let image = parser
+            .parse_inline_image(
+                &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            )
+            .unwrap();
 
         assert_eq!(image.shared_data().len(), 34);
         assert!(
@@ -305,7 +321,11 @@ mod tests {
         let mut parser =
             PdfParser::from(b"/W 10 /H 1 /BPC 8 /CS /DeviceGray ID abc EIxyzjEI Q".as_slice());
 
-        let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
+        let image = parser
+            .parse_inline_image(
+                &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            )
+            .unwrap();
 
         assert_eq!(image.shared_data().as_ref(), b"abc EIxyzj");
         assert_eq!(parser.tokenizer.data(), b" Q");
@@ -315,7 +335,11 @@ mod tests {
     fn exact_length_inline_image_allows_whitespace_before_ei() {
         let mut parser = PdfParser::from(b"/W 1 /H 1 /BPC 1 /IM true ID \x00\nEI Q".as_slice());
 
-        let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
+        let image = parser
+            .parse_inline_image(
+                &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            )
+            .unwrap();
 
         assert_eq!(image.shared_data().as_ref(), b"\x00\n");
         assert_eq!(parser.tokenizer.data(), b" Q");
@@ -328,7 +352,11 @@ mod tests {
         input.extend_from_slice(b"\nEI Q");
 
         let mut parser = PdfParser::from(input.as_slice());
-        let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
+        let image = parser
+            .parse_inline_image(
+                &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            )
+            .unwrap();
 
         assert_eq!(image.shared_data().as_ref(), &[0xFF, 0x80, b'\n']);
         assert_eq!(parser.tokenizer.data(), b" Q");
@@ -340,7 +368,11 @@ mod tests {
             b"/W 1 /H 1 /BPC 8 /CS /G /F /ASCIIHexDecode ID aa EIxyz\nEI Q".as_slice(),
         );
 
-        let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
+        let image = parser
+            .parse_inline_image(
+                &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            )
+            .unwrap();
 
         assert_eq!(image.shared_data().as_ref(), &[0xAA, 0xE0]);
         assert_eq!(parser.tokenizer.data(), b" Q");
@@ -350,7 +382,13 @@ mod tests {
     fn rejects_empty_inline_image_dictionary() {
         let mut parser = PdfParser::from(b"ID x\nEI".as_slice());
 
-        assert!(parser.parse_inline_image(&PassthroughResolver).is_err());
+        assert!(
+            parser
+                .parse_inline_image(
+                    &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session()
+                )
+                .is_err()
+        );
         assert_eq!(parser.tokenizer.data(), b"");
     }
 
@@ -358,7 +396,11 @@ mod tests {
     fn inline_image_metadata_stops_before_id_after_name_value() {
         let mut parser = PdfParser::from(b"/W 1 /H 1 /BPC 8 /CS /DeviceGray ID x\nEI".as_slice());
 
-        let image = parser.parse_inline_image(&PassthroughResolver).unwrap();
+        let image = parser
+            .parse_inline_image(
+                &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            )
+            .unwrap();
 
         assert_eq!(image.shared_data().as_ref(), b"x\n");
         assert_eq!(parser.tokenizer.data(), b"");
@@ -370,7 +412,13 @@ mod tests {
             b"/IM true /W 8 /H 1 /F /CCF /DP << /K -1 /Columns 8 >> ID \x01}\x10EI\nQ".as_slice(),
         );
 
-        assert!(parser.parse_inline_image(&PassthroughResolver).is_ok());
+        assert!(
+            parser
+                .parse_inline_image(
+                    &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session()
+                )
+                .is_ok()
+        );
         assert_eq!(parser.tokenizer.data(), b"Q");
     }
 
@@ -378,6 +426,12 @@ mod tests {
     fn inline_image_dictionary_rejects_trailing_key_without_value() {
         let mut parser = PdfParser::from(b"/Title ID x\nEI".as_slice());
 
-        assert!(parser.parse_inline_image(&PassthroughResolver).is_err());
+        assert!(
+            parser
+                .parse_inline_image(
+                    &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session()
+                )
+                .is_err()
+        );
     }
 }

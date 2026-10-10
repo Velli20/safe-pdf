@@ -2,9 +2,7 @@ use std::collections::BTreeMap;
 
 use bytes::Bytes;
 use pdf_filter::filter::{Filters, decode_data_with_resolver};
-use pdf_object_reader::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-};
+use pdf_object_reader::{ObjectAccess, dictionary::Dictionary, object_variant::ObjectVariant};
 
 use crate::{error::PdfImageError, image_metadata::ImageMetadata};
 
@@ -20,10 +18,10 @@ impl InlineImage {
     pub fn new(
         dictionary: Dictionary,
         data: impl Into<Bytes>,
-        objects: &dyn ObjectResolver,
+        access: &mut (impl ObjectAccess + ?Sized),
     ) -> Result<Self, PdfImageError> {
         let dictionary = normalize_inline_image_dictionary(&dictionary);
-        let metadata = ImageMetadata::from_dictionary(&dictionary, objects)?;
+        let metadata = ImageMetadata::from_dictionary(&dictionary, access)?;
         // ISO 32000 restricts inline images to the filters that need no
         // out-of-band metadata; JPXDecode is not among them. Reject it before
         // filtering so the payload is never handed to a decoder that cannot
@@ -35,7 +33,7 @@ impl InlineImage {
         {
             return Err(PdfImageError::InlineJpxFilter);
         }
-        let data = decode_data_with_resolver(&dictionary, data.into(), objects)?;
+        let data = decode_data_with_resolver(&dictionary, data.into(), access.source())?;
 
         Ok(Self { metadata, data })
     }
@@ -260,8 +258,12 @@ mod tests {
     #[test]
     fn inline_image_shares_unfiltered_samples() {
         let data = Bytes::from_static(&[1, 2]);
-        let image = InlineImage::new(gray_dictionary(), data.clone(), &PassthroughResolver)
-            .expect("unfiltered image should be constructed");
+        let image = InlineImage::new(
+            gray_dictionary(),
+            data.clone(),
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+        )
+        .expect("unfiltered image should be constructed");
 
         assert_eq!(image.shared_data().as_ptr(), data.as_ptr());
     }
@@ -277,8 +279,12 @@ mod tests {
             ),
         );
 
-        let image = InlineImage::new(dictionary, b"2A>".to_vec(), &PassthroughResolver)
-            .expect("filter should decode during construction");
+        let image = InlineImage::new(
+            dictionary,
+            b"2A>".to_vec(),
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+        )
+        .expect("filter should decode during construction");
 
         assert_eq!(image.shared_data().as_ref(), &[0x2A]);
     }
@@ -288,7 +294,7 @@ mod tests {
         let error = InlineImage::new(
             Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
             vec![1],
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
         )
         .expect_err("invalid metadata should prevent construction");
 

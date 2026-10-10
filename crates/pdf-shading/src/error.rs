@@ -3,7 +3,7 @@ use pdf_decode::DecodeError;
 use pdf_function::{
     error::FunctionReadError, function_interpolation_error::FunctionInterpolationError,
 };
-use pdf_object_reader::object_error::ObjectError;
+use pdf_object_reader::{ObjectReadError, object_error::ObjectError};
 use thiserror::Error;
 
 pub use crate::{
@@ -15,6 +15,8 @@ pub use crate::{
 pub enum PdfShadingError {
     #[error("{0}")]
     Object(#[from] ObjectError),
+    #[error("{0}")]
+    Read(#[from] ObjectReadError),
     #[error("{0}")]
     ColorSpace(#[from] ColorSpaceError),
     #[error("{0}")]
@@ -37,11 +39,14 @@ pub enum PdfShadingError {
     UnsupportedFeature(String),
 }
 
-impl From<PdfShadingError> for pdf_object_reader::ObjectReadError {
+impl From<PdfShadingError> for ObjectReadError {
     fn from(source: PdfShadingError) -> Self {
-        Self::Decode {
-            target: "PDF shading",
-            source: Box::new(source),
+        match source {
+            PdfShadingError::Read(source) => source,
+            source => Self::Decode {
+                target: "PDF shading",
+                source: Box::new(source),
+            },
         }
     }
 }

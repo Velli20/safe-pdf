@@ -6,9 +6,7 @@ use pdf_function::function::{Function, FunctionImpl};
 use pdf_graphics::{
     Image, PixelFormat, color::Color, rect::Rect, size::Size, transform::Transform,
 };
-use pdf_object_reader::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-};
+use pdf_object_reader::{ObjectAccess, dictionary::Dictionary, object_lookup::ObjectLookupExt};
 
 use crate::{
     error::PdfShadingError,
@@ -51,9 +49,10 @@ impl FunctionShading {
     /// Parses a Type 1 function-based shading dictionary.
     pub(crate) fn parse(
         dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
+        access: &mut (impl ObjectAccess + ?Sized),
     ) -> Result<Self, PdfShadingError> {
-        let color_space = required_color_space(dictionary, objects)?;
+        let color_space = required_color_space(dictionary, access)?;
+        let objects = access.source();
         Ok(Self {
             background: read_background(dictionary, objects, &color_space)?,
             color_space,

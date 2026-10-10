@@ -10,6 +10,8 @@ pub enum PdfImageError {
     #[error("{0}")]
     Object(#[from] pdf_object_reader::object_error::ObjectError),
     #[error("{0}")]
+    Read(#[from] pdf_object_reader::ObjectReadError),
+    #[error("{0}")]
     ColorSpace(#[from] ColorSpaceError),
     #[error("{0}")]
     Filter(#[from] FilterError),

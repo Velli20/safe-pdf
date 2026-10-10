@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use pdf_image::InlineImage;
-use pdf_object_reader::object_resolver::PassthroughResolver;
+use pdf_object_reader::{ObjectReader, object_resolver::PassthroughResolver};
 use pdf_parser::parser::PdfParser;
 
 use crate::{
@@ -53,7 +53,8 @@ impl PdfOperator for InlineImage {
     fn parse<'a>(
         parser: &mut PdfParser<'a>,
     ) -> Result<Option<PdfOperatorVariant>, PdfOperatorError> {
-        let image = parser.parse_inline_image(&PassthroughResolver)?;
+        let reader = ObjectReader::new(PassthroughResolver);
+        let image = parser.parse_inline_image(&mut reader.session())?;
         Ok(Some(PdfOperatorVariant::InlineImage(Arc::new(image))))
     }
 
@@ -68,7 +69,8 @@ mod tests {
 
     use pdf_image::InlineImage;
     use pdf_object_reader::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+        ObjectReader, dictionary::Dictionary, object_resolver::PassthroughResolver,
+        object_variant::ObjectVariant,
     };
 
     use crate::{
@@ -92,7 +94,7 @@ mod tests {
                 (Vec::from(b"W"), ObjectVariant::Integer(2)),
             ])),
             vec![0x01, 0x02],
-            &PassthroughResolver,
+            &mut ObjectReader::new(PassthroughResolver).session(),
         )
         .expect("unfiltered inline image should be constructed");
         let mut backend = RecordingBackend::default();
