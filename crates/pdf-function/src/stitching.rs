@@ -13,41 +13,25 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct StitchingFunction {
-    /// Sub-functions to be stitched together.
-    functions: Vec<Function>,
+    /// Sub-functions to be stitched together, each with the interval its
+    /// sub-domain is mapped onto.
+    segments: Vec<(Function, Interval)>,
     /// Boundary values dividing the domain into sub-domains.
     bounds: Vec<f32>,
-    /// Per-function intervals that sub-domains are mapped onto.
-    encode: Vec<Interval>,
     /// Input domain.
     domain: Interval,
 }
 
 impl StitchingFunction {
     /// Returns the sub-domain `[b0, b1]` for the given segment index.
-    fn get_subdomain(&self, index: usize) -> Result<Interval, FunctionInterpolationError> {
-        let b0 = if index == 0 {
-            self.domain.min
-        } else {
-            let prev_idx = index
-                .checked_sub(1)
-                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
-            *self
-                .bounds
-                .get(prev_idx)
-                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?
-        };
-
-        let b1 = if index >= self.bounds.len() {
-            self.domain.max
-        } else {
-            *self
-                .bounds
-                .get(index)
-                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?
-        };
-
-        Ok(Interval::new(b0, b1))
+    fn subdomain(&self, index: usize) -> Interval {
+        let b0 = index
+            .checked_sub(1)
+            .and_then(|prev| self.bounds.get(prev))
+            .copied()
+            .unwrap_or(self.domain.min);
+        let b1 = self.bounds.get(index).copied().unwrap_or(self.domain.max);
+        Interval::new(b0, b1)
     }
 }
 
@@ -85,18 +69,13 @@ impl FunctionImpl for StitchingFunction {
         };
 
         // Map the input from this segment's sub-domain onto its encode interval
-        let subdomain = self.get_subdomain(index)?;
-        let encode = self
-            .encode
+        let (func, encode) = self
+            .segments
             .get(index)
             .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
-        let x_mapped = subdomain.remap(x_clamped, encode);
+        let x_mapped = self.subdomain(index).remap(x_clamped, encode);
 
         // Evaluate the selected sub-function
-        let func = self
-            .functions
-            .get(index)
-            .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
         func.interpolate(&[x_mapped])
     }
 
@@ -123,7 +102,7 @@ impl FunctionImpl for StitchingFunction {
         let mut bounds = dictionary.required_vec_of::<f32>(b"Bounds", objects)?;
 
         // Parse /Encode array (input mapping for each sub-function)
-        let mut encode = dictionary.required_intervals(b"Encode", objects)?;
+        let encode = dictionary.required_intervals(b"Encode", objects)?;
 
         // Validate structural relationships. Producers sometimes pad /Bounds or /Encode, so
         // extra trailing values are dropped rather than rejected.
@@ -139,12 +118,11 @@ impl FunctionImpl for StitchingFunction {
         if encode.len() < functions.len() {
             return Err(FunctionReadError::InvalidEncodeLength);
         }
-        encode.truncate(functions.len());
+        let segments = functions.into_iter().zip(encode).collect();
 
         Ok(Function::Stitching(StitchingFunction {
-            functions,
+            segments,
             bounds,
-            encode,
             domain,
         }))
     }
@@ -173,9 +151,11 @@ mod tests {
         functions: Vec<Function>,
     ) -> StitchingFunction {
         StitchingFunction {
-            functions,
+            segments: functions
+                .into_iter()
+                .zip(Interval::from_pairs(&encode))
+                .collect(),
             bounds,
-            encode: Interval::from_pairs(&encode),
             domain: Interval::UNIT,
         }
     }

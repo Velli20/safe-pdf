@@ -34,6 +34,9 @@ pub enum FunctionReadError {
     /// The `/Order` value is invalid (must be 1 or 3).
     #[error("Order must be 1 (linear) or 3 (cubic)")]
     InvalidOrder,
+    /// `/Domain` or `/Encode` describes fewer input dimensions than `/Size`.
+    #[error("Domain and Encode arrays must hold 2 * number of Size entries values")]
+    MismatchedSampleDimensions,
     /// The `/Decode` array length is invalid.
     #[error("Decode array length must be exactly 2 * number of outputs")]
     InvalidDecodeLength,
