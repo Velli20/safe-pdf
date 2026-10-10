@@ -9,8 +9,8 @@ use pdf_canvas::{
     tiling_shader::TilingShader,
 };
 use pdf_graphics::{
-    BlendMode, Image, PathFillType, PixelFormat, color::Color, pdf_path::PathVerb, size::Size,
-    transform::Transform, viewport::pixel_extent,
+    BlendMode, DashPattern, Image, PathFillType, PixelFormat, color::Color, pdf_path::PathVerb,
+    size::Size, transform::Transform, viewport::pixel_extent,
 };
 use pdf_shading::paint::ShadingPaint;
 
@@ -196,10 +196,23 @@ fn to_skia_image(image: &Image) -> Result<skia_safe::Image, PdfCanvasError> {
 }
 
 /// Resolves device-coordinate geometry into a Skia path.
-fn to_skia_path(pdf_path: &CanvasPath<'_>) -> Result<skia_safe::Path, PdfCanvasError> {
+///
+/// Without `point_contours`, a subpath that closes right after its move-to is left open, so
+/// Skia strokes nothing for it instead of a cap.
+fn to_skia_path(
+    pdf_path: &CanvasPath<'_>,
+    point_contours: bool,
+) -> Result<skia_safe::Path, PdfCanvasError> {
     let mut builder = skia_safe::PathBuilder::new();
+    let mut after_move = false;
     for verb in pdf_path.verbs() {
-        match &verb? {
+        let verb = verb?;
+        let is_point_close = after_move && matches!(verb, PathVerb::Close);
+        after_move = matches!(verb, PathVerb::MoveTo { .. });
+        if is_point_close && !point_contours {
+            continue;
+        }
+        match &verb {
             PathVerb::MoveTo { x, y } => {
                 builder.move_to((*x, *y));
             }
@@ -225,6 +238,28 @@ fn to_skia_path(pdf_path: &CanvasPath<'_>) -> Result<skia_safe::Path, PdfCanvasE
         };
     }
     Ok(builder.detach())
+}
+
+/// Returns zero-length segments at the ends of open contours where a dash starts.
+///
+/// Skia's dash effect drops a dash that starts exactly where its contour ends, so its caps
+/// are stroked from these segments instead. Returns `None` when no contour ends that way.
+fn contour_end_dashes(
+    path: &skia_safe::Path,
+    dash_pattern: &DashPattern,
+) -> Option<skia_safe::Path> {
+    let mut builder = skia_safe::PathBuilder::new();
+    for contour in skia_safe::ContourMeasureIter::new(path, false, None) {
+        let length = contour.length();
+        if contour.is_closed() || !dash_pattern.starts_dash_at(length) {
+            continue;
+        }
+        if let Some((end, _)) = contour.pos_tan(length) {
+            builder.move_to(end);
+            builder.line_to(end);
+        }
+    }
+    (!builder.is_empty()).then(|| builder.detach())
 }
 
 /// Converts a PDF Transform to a Skia Matrix.
@@ -431,7 +466,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         shader: Option<&Shader>,
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
-        let mut sk_path = to_skia_path(path)?;
+        let mut sk_path = to_skia_path(path, true)?;
         sk_path.set_fill_type(to_skia_fill_type(fill_type));
         let mut paint = make_paint(color, skia_safe::paint::Style::Fill, None, blend_mode);
         if let Some(shader_spec) = shader {
@@ -455,9 +490,11 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         blend_mode: Option<BlendMode>,
     ) -> Result<(), PdfCanvasError> {
         let stroke_space = stroke_style.stroke_space_path(path, line_width)?;
+        // A single-point subpath has no direction, so only a round cap can mark it.
+        let point_contours = stroke_style.line_cap == pdf_graphics::LineCap::Round;
         let sk_path = match &stroke_space {
-            Some(stroke_space) => to_skia_path(&CanvasPath::device(stroke_space))?,
-            None => to_skia_path(path)?,
+            Some(stroke_space) => to_skia_path(&CanvasPath::device(stroke_space), point_contours)?,
+            None => to_skia_path(path, point_contours)?,
         };
         // Skia draws zero-width strokes as hairlines.
         let line_width = device_stroke_width(line_width, 0.0)
@@ -479,10 +516,14 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
             pdf_graphics::LineJoin::Bevel => skia_safe::paint::Join::Bevel,
         });
         paint.set_stroke_miter(stroke_style.miter_limit);
+        let mut end_dashes = None;
         if let Some(dash_pattern) = &stroke_style.dash_pattern {
             let effect = skia_safe::PathEffect::dash(&dash_pattern.intervals, dash_pattern.phase)
                 .ok_or(SkiaCanvasBackendError::DashPathEffectCreationFailed)?;
             paint.set_path_effect(effect);
+            if stroke_style.line_cap != pdf_graphics::LineCap::Butt {
+                end_dashes = contour_end_dashes(&sk_path, dash_pattern);
+            }
         }
         if let Some(shader_spec) = shader {
             let mapping = from_skia_matrix(&self.surface.canvas().local_to_device_as_3x3());
@@ -499,10 +540,15 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         if stroke_space.is_some() {
             canvas.save();
             canvas.concat(&to_skia_matrix(&stroke_style.transform));
-            canvas.draw_path(&sk_path, &paint);
+        }
+        canvas.draw_path(&sk_path, &paint);
+        if let Some(end_dashes) = end_dashes {
+            // The dash effect would drop these zero-length dashes again.
+            paint.set_path_effect(None);
+            canvas.draw_path(&end_dashes, &paint);
+        }
+        if stroke_space.is_some() {
             canvas.restore();
-        } else {
-            canvas.draw_path(&sk_path, &paint);
         }
         Ok(())
     }
@@ -523,7 +569,7 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         path: &CanvasPath<'_>,
         mode: PathFillType,
     ) -> Result<(), PdfCanvasError> {
-        let mut sk_path = to_skia_path(path)?;
+        let mut sk_path = to_skia_path(path, true)?;
         sk_path.set_fill_type(to_skia_fill_type(mode));
         self.surface.canvas().clip_path(&sk_path, None, Some(true));
         Ok(())

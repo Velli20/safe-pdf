@@ -11,6 +11,10 @@ pub enum DashPatternError {
     InvalidPhase,
 }
 
+/// Length a zero-length dash is stroked with, so butt caps still leave a mark and the
+/// pattern advances past each dash.
+const MIN_DASH_LENGTH: f32 = 0.1;
+
 /// Dash pattern used for stroking paths.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -50,7 +54,12 @@ impl DashPattern {
             return Err(DashPatternError::InvalidPhase);
         }
 
-        let normalized_intervals = normalize_intervals(intervals);
+        let mut normalized_intervals = normalize_intervals(intervals);
+        for dash in normalized_intervals.iter_mut().step_by(2) {
+            if *dash == 0.0 {
+                *dash = MIN_DASH_LENGTH;
+            }
+        }
 
         Ok(Some(Self {
             intervals: normalized_intervals,
@@ -70,6 +79,28 @@ impl DashPattern {
             .collect();
         let phase = self.phase * scale;
         Ok(Self::new(&intervals, phase)?.unwrap_or(Self { intervals, phase }))
+    }
+
+    /// Returns whether a dash starts at `distance` along a contour, within a tolerance
+    /// relative to the pattern's period.
+    ///
+    /// A contour that ends where a dash starts still strokes that dash, as a zero-length
+    /// dash showing only its caps.
+    pub fn starts_dash_at(&self, distance: f32) -> bool {
+        let period: f32 = self.intervals.iter().sum();
+        if !(period > 0.0 && period.is_finite() && distance.is_finite()) {
+            return false;
+        }
+        let tolerance = period * 1e-4;
+        let position = (self.phase + distance).rem_euclid(period);
+        let mut start = 0.0;
+        for (index, interval) in self.intervals.iter().enumerate() {
+            if index % 2 == 0 && (position - start).abs() <= tolerance {
+                return true;
+            }
+            start += interval;
+        }
+        (period - position).abs() <= tolerance
     }
 }
 
