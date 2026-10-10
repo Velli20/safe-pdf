@@ -20,34 +20,11 @@ pub struct PostScriptCalculatorFunction {
 }
 
 impl PostScriptCalculatorFunction {
-    /// Builds the PostScript input stack, clamping each value to its domain entry.
-    fn build_postscript_stack(
-        inputs: &[f32],
-        domain: &[Interval],
-    ) -> Result<Vec<Value>, FunctionInterpolationError> {
-        domain
-            .iter()
-            .enumerate()
-            .map(|(i, interval)| {
-                let val = inputs.get(i).copied().ok_or(
-                    FunctionInterpolationError::InsufficientInputs {
-                        expected: domain.len(),
-                        got: inputs.len(),
-                    },
-                )?;
-                Ok(Value::Real(f64::from(interval.clamp(val))))
-            })
-            .collect()
-    }
-
     /// Extracts and clamps outputs from the PostScript result stack.
-    fn extract_postscript_outputs(
-        result_stack: &[Value],
-        range: &[Interval],
-    ) -> Result<Vec<f32>, FunctionInterpolationError> {
-        let mut outputs = Vec::with_capacity(range.len());
+    fn outputs(&self, result_stack: &[Value]) -> Result<Vec<f32>, FunctionInterpolationError> {
+        let mut outputs = Vec::with_capacity(self.range.len());
 
-        for (i, interval) in range.iter().enumerate() {
+        for (i, interval) in self.range.iter().enumerate() {
             let val = result_stack
                 .get(i)
                 .ok_or(FunctionInterpolationError::PostScriptResultStackUnderflow)?;
@@ -76,22 +53,25 @@ impl FunctionImpl for PostScriptCalculatorFunction {
     /// All input values are taken from `inputs` in order, clamped to their respective
     /// domain entries, and pushed onto the PostScript stack before execution.
     fn interpolate(&self, inputs: &[f32]) -> Result<Vec<f32>, FunctionInterpolationError> {
-        let input_count = self.domain.len();
-
-        if inputs.len() < input_count {
-            return Err(FunctionInterpolationError::InsufficientInputs {
-                expected: input_count,
+        let inputs = inputs.get(..self.domain.len()).ok_or(
+            FunctionInterpolationError::InsufficientInputs {
+                expected: self.domain.len(),
                 got: inputs.len(),
-            });
-        }
+            },
+        )?;
 
         // Build the input stack, clamping each input to its domain
-        let stack = Self::build_postscript_stack(inputs, &self.domain)?;
+        let stack: Vec<Value> = self
+            .domain
+            .iter()
+            .zip(inputs)
+            .map(|(interval, &x)| Value::Real(f64::from(interval.clamp(x))))
+            .collect();
         // Execute PostScript operators
         let result_stack = pdf_postscript::calculator::execute(&stack, &self.operators)?;
 
         // Extract and clamp outputs
-        Self::extract_postscript_outputs(&result_stack, &self.range)
+        self.outputs(&result_stack)
     }
 
     fn domain(&self) -> Option<Interval> {

@@ -19,28 +19,69 @@ enum InterpolationOrder {
     Cubic = 3,
 }
 
+/// One input dimension of a sample table.
+#[derive(Debug, Clone)]
+struct SampleAxis {
+    /// Input domain of this dimension.
+    domain: Interval,
+    /// Interval the domain is mapped onto, in sample index units.
+    encode: Interval,
+    /// Largest sample index along this axis (`Size[i] - 1`).
+    last: usize,
+    /// `last` as f32, used to clamp encoded coordinates.
+    max_index: f32,
+    /// Distance in the sample table between neighbouring indices along this axis,
+    /// already multiplied by the number of outputs.
+    stride: usize,
+}
+
+/// The two sample offsets bracketing an input along one axis, and the weight of the upper one.
+struct AxisPosition {
+    low: usize,
+    high: usize,
+    frac: f32,
+}
+
+impl SampleAxis {
+    /// Encodes `x` into this axis's sample coordinates and returns the bracketing offsets.
+    fn position(&self, x: f32) -> Result<AxisPosition, FunctionInterpolationError> {
+        let encoded = self
+            .domain
+            .remap(self.domain.clamp(x), &self.encode)
+            .clamp(0.0, self.max_index);
+        let low = encoded
+            .floor()
+            .to_usize()
+            .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
+        let high = low.saturating_add(1).min(self.last);
+        // `parse` proved `last * stride` fits in the sample table, so neither product saturates.
+        Ok(AxisPosition {
+            low: low.saturating_mul(self.stride),
+            high: high.saturating_mul(self.stride),
+            frac: encoded.fract(),
+        })
+    }
+}
+
+/// One output of a sample table.
+#[derive(Debug, Clone)]
+struct SampleOutput {
+    /// Maps sample values onto the output.
+    decode: Interval,
+    /// Interval the output is clamped to.
+    range: Interval,
+}
+
 #[derive(Debug, Clone)]
 pub struct SampledFunction {
-    /// Number of samples in each input dimension.
-    size: Vec<usize>,
-    /// Number of bits per sample value (stored for debugging/introspection).
-    #[allow(dead_code)]
-    bits_per_sample: usize,
     /// Interpolation order.
     order: InterpolationOrder,
-    /// Input encoding: maps each domain dimension onto sample indices.
-    encode: Vec<Interval>,
-    /// Output decoding: maps each output's sample values onto its output range.
-    decode: Vec<Interval>,
-    /// Input domain, one interval per input dimension.
-    domain: Vec<Interval>,
-    /// Output range, one interval per output.
-    range: Vec<Interval>,
-    /// The decoded sample values, stored as f32.
-    /// Layout: samples[(i0 * size[1] * ... * size[m-1] + ... + i[m-1]) * output_count + j]
+    /// Input dimensions, outermost first.
+    axes: Vec<SampleAxis>,
+    /// Outputs produced at each sample point.
+    outputs: Vec<SampleOutput>,
+    /// The decoded sample values, row-major with the outputs of one sample point adjacent.
     samples: Vec<f32>,
-    /// Number of output values per sample point.
-    output_count: usize,
 }
 
 impl FunctionImpl for SampledFunction {
@@ -50,180 +91,61 @@ impl FunctionImpl for SampledFunction {
     /// Cubic spline interpolation (Order=3) is recognised in the dictionary but not yet
     /// implemented; it returns [`FunctionInterpolationError::CubicInterpolationUnsupported`].
     fn interpolate(&self, inputs: &[f32]) -> Result<Vec<f32>, FunctionInterpolationError> {
-        let m = self.size.len();
-
-        if inputs.len() < m {
-            return Err(FunctionInterpolationError::InsufficientInputs {
-                expected: m,
+        let inputs = inputs.get(..self.axes.len()).ok_or(
+            FunctionInterpolationError::InsufficientInputs {
+                expected: self.axes.len(),
                 got: inputs.len(),
-            });
-        }
+            },
+        )?;
 
         if self.order == InterpolationOrder::Cubic {
             return Err(FunctionInterpolationError::CubicInterpolationUnsupported);
         }
 
-        // Encode each input dimension to a continuous sample coordinate.
-        let mut enc_coords: Vec<f32> = Vec::with_capacity(m);
-        for i in 0..m {
-            let domain = self
-                .domain
-                .get(i)
-                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
-            let x =
-                inputs
-                    .get(i)
-                    .copied()
-                    .ok_or(FunctionInterpolationError::InsufficientInputs {
-                        expected: m,
-                        got: inputs.len(),
-                    })?;
+        let positions = self
+            .axes
+            .iter()
+            .zip(inputs)
+            .map(|(axis, &x)| axis.position(x))
+            .collect::<Result<Vec<_>, _>>()?;
 
-            let encode = self
-                .encode
-                .get(i)
-                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
-            let encoded = domain.remap(domain.clamp(x), encode);
+        // Expand the 2^m corners of the enclosing hypercube one axis at a time,
+        // as (sample offset, weight) pairs.
+        let corners = positions.iter().fold(vec![(0usize, 1.0f32)], |corners, p| {
+            corners
+                .into_iter()
+                .flat_map(|(offset, weight)| {
+                    [
+                        (offset.saturating_add(p.low), weight * (1.0 - p.frac)),
+                        (offset.saturating_add(p.high), weight * p.frac),
+                    ]
+                })
+                .collect()
+        });
 
-            let size_i = self
-                .size
-                .get(i)
-                .copied()
-                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
-            let max_i = size_i
-                .saturating_sub(1)
-                .to_f32()
+        let output_count = self.outputs.len();
+        let mut accum = vec![0.0f32; output_count];
+        for (offset, weight) in corners {
+            let values = offset
+                .checked_add(output_count)
+                .and_then(|end| self.samples.get(offset..end))
                 .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-
-            enc_coords.push(encoded.clamp(0.0, max_i));
-        }
-
-        // Decompose each encoded coordinate into floor index, ceiling index, and fraction.
-        let mut idx_low: Vec<usize> = Vec::with_capacity(m);
-        let mut idx_high: Vec<usize> = Vec::with_capacity(m);
-        let mut fracs: Vec<f32> = Vec::with_capacity(m);
-        for (i, &enc) in enc_coords.iter().enumerate() {
-            let size_i = self
-                .size
-                .get(i)
-                .copied()
-                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
-            let max_i_idx = size_i.saturating_sub(1);
-            let low = enc
-                .floor()
-                .to_usize()
-                .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-            let high = low.saturating_add(1).min(max_i_idx);
-            idx_low.push(low);
-            idx_high.push(high);
-            fracs.push(enc.fract());
-        }
-
-        // Compute row-major strides: stride[i] = product(size[i+1..m]).
-        let mut strides = vec![1usize; m];
-        for i in (0..m.saturating_sub(1)).rev() {
-            let next = i.saturating_add(1);
-            let next_size = self
-                .size
-                .get(next)
-                .copied()
-                .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-            let next_stride = strides
-                .get(next)
-                .copied()
-                .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-            let s = strides
-                .get_mut(i)
-                .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-            *s = next_size
-                .checked_mul(next_stride)
-                .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-        }
-
-        // Multilinear interpolation: iterate over all 2^m corners of the hypercube.
-        let m_u32 = u32::try_from(m)
-            .map_err(|_| FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-        let num_corners = 1usize
-            .checked_shl(m_u32)
-            .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-
-        let mut accum = vec![0.0f32; self.output_count];
-        for corner in 0..num_corners {
-            let mut weight = 1.0f32;
-            let mut flat_index = 0usize;
-
-            for dim in 0..m {
-                let dim_u32 = u32::try_from(dim)
-                    .map_err(|_| FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-                let use_high = (corner >> dim_u32) & 1 == 1;
-                let (idx, frac_part) = if use_high {
-                    let i = idx_high
-                        .get(dim)
-                        .copied()
-                        .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-                    let f = fracs
-                        .get(dim)
-                        .copied()
-                        .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-                    (i, f)
-                } else {
-                    let i = idx_low
-                        .get(dim)
-                        .copied()
-                        .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-                    let f = fracs
-                        .get(dim)
-                        .copied()
-                        .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-                    (i, 1.0 - f)
-                };
-                weight *= frac_part;
-
-                let stride = strides
-                    .get(dim)
-                    .copied()
-                    .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-                flat_index = flat_index
-                    .checked_add(
-                        idx.checked_mul(stride)
-                            .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?,
-                    )
-                    .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-            }
-
-            for (j, accum_j) in accum.iter_mut().enumerate() {
-                let sample_idx = flat_index
-                    .checked_mul(self.output_count)
-                    .and_then(|v| v.checked_add(j))
-                    .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-                let sample = self
-                    .samples
-                    .get(sample_idx)
-                    .copied()
-                    .ok_or(FunctionInterpolationError::SampleCoordinateOutOfBounds)?;
-                *accum_j += weight * sample;
+            for (sum, &value) in accum.iter_mut().zip(values) {
+                *sum += weight * value;
             }
         }
 
         // Apply decode mapping and range clamping (ISO 32000 §7.10.2).
-        let mut outputs = Vec::with_capacity(self.output_count);
-        for (j, &interp) in accum.iter().enumerate() {
-            let decode = self
-                .decode
-                .get(j)
-                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
-            let range = self
-                .range
-                .get(j)
-                .ok_or(FunctionInterpolationError::FunctionDataIndexOutOfBounds)?;
-            outputs.push(range.clamp(decode.lerp(interp)));
-        }
-
-        Ok(outputs)
+        Ok(self
+            .outputs
+            .iter()
+            .zip(accum)
+            .map(|(output, value)| output.range.clamp(output.decode.lerp(value)))
+            .collect())
     }
 
     fn domain(&self) -> Option<Interval> {
-        self.domain.first().copied()
+        self.axes.first().map(|axis| axis.domain)
     }
 
     /// Parses a Type 0 (Sampled) function.
@@ -249,8 +171,6 @@ impl FunctionImpl for SampledFunction {
             return Err(FunctionReadError::InvalidSizeArray);
         }
 
-        let output_count = range.len();
-
         // /BitsPerSample: Required. Must be 1, 2, 4, 8, 12, 16, 24, or 32.
         let bits_per_sample = dictionary.required_number::<usize>(b"BitsPerSample", objects)?;
         if !matches!(bits_per_sample, 1 | 2 | 4 | 8 | 12 | 16 | 24 | 32) {
@@ -268,48 +188,66 @@ impl FunctionImpl for SampledFunction {
             .unwrap_or_default();
 
         // /Encode: Optional. Defaults to [0, Size[i]-1] per dimension.
-        let encode = dictionary
-            .optional_intervals(b"Encode", objects)?
-            .unwrap_or_else(|| {
-                size.iter()
-                    .map(|&s| {
-                        // size[i] values fit in usize; to_f32() always returns Some here
-                        Interval::new(0.0, s.saturating_sub(1).to_f32().unwrap_or(0.0))
-                    })
-                    .collect()
-            });
+        let encode = dictionary.optional_intervals(b"Encode", objects)?;
+        if domain.len() < size.len() || encode.as_ref().is_some_and(|e| e.len() < size.len()) {
+            return Err(FunctionReadError::MismatchedSampleDimensions);
+        }
 
         // /Decode: Optional. Defaults to Range values.
         let decode = dictionary
             .optional_intervals(b"Decode", objects)?
             .unwrap_or_else(|| range.clone());
-
-        if decode.len() != output_count {
+        if decode.len() != range.len() {
             return Err(FunctionReadError::InvalidDecodeLength);
         }
 
-        // Calculate total number of samples
-        let total_samples: usize = size.iter().try_fold(1usize, |acc, &dim| {
-            acc.checked_mul(dim)
+        // Row-major strides, innermost axis last; the final product is the sample count.
+        let mut strides = Vec::with_capacity(size.len());
+        let samples_count = size.iter().rev().try_fold(range.len(), |stride, &dim| {
+            strides.push(stride);
+            stride
+                .checked_mul(dim)
                 .ok_or(FunctionReadError::InvalidSizeArray)
         })?;
-        let samples_count = total_samples
-            .checked_mul(output_count)
-            .ok_or(FunctionReadError::InvalidSizeArray)?;
+        strides.reverse();
 
-        // Decode samples from the stream
+        let axes = size
+            .iter()
+            .zip(strides)
+            .zip(domain)
+            .enumerate()
+            .map(|(i, ((&dim, stride), domain))| {
+                let last = dim.saturating_sub(1);
+                // usize to f32 conversion always succeeds.
+                let max_index = last.to_f32().unwrap_or(0.0);
+                let encode = encode
+                    .as_ref()
+                    .and_then(|e| e.get(i))
+                    .copied()
+                    .unwrap_or_else(|| Interval::new(0.0, max_index));
+                SampleAxis {
+                    domain,
+                    encode,
+                    last,
+                    max_index,
+                    stride,
+                }
+            })
+            .collect();
+
+        let outputs = decode
+            .into_iter()
+            .zip(range)
+            .map(|(decode, range)| SampleOutput { decode, range })
+            .collect();
+
         let samples = decode_normalized_samples(stream.raw_data(), bits_per_sample, samples_count)?;
 
         Ok(Function::Sampled(SampledFunction {
-            size,
-            bits_per_sample,
             order,
-            encode,
-            decode,
-            domain,
-            range,
+            axes,
+            outputs,
             samples,
-            output_count,
         }))
     }
 }
@@ -320,18 +258,34 @@ mod tests {
 
     /// Build a minimal SampledFunction directly for unit testing.
     fn make_sampled(size: Vec<usize>, samples: Vec<f32>, output_count: usize) -> SampledFunction {
-        let m = size.len();
-        let n = output_count;
+        let mut stride = output_count;
+        let mut axes: Vec<SampleAxis> = size
+            .iter()
+            .rev()
+            .map(|&dim| {
+                let axis = SampleAxis {
+                    domain: Interval::UNIT,
+                    encode: Interval::UNIT,
+                    last: dim - 1,
+                    max_index: (dim - 1) as f32,
+                    stride,
+                };
+                stride *= dim;
+                axis
+            })
+            .collect();
+        axes.reverse();
         SampledFunction {
-            size,
-            bits_per_sample: 8,
             order: InterpolationOrder::Linear,
-            encode: vec![Interval::UNIT; m],
-            decode: vec![Interval::UNIT; n],
-            domain: vec![Interval::UNIT; m],
-            range: vec![Interval::UNIT; n],
+            axes,
+            outputs: vec![
+                SampleOutput {
+                    decode: Interval::UNIT,
+                    range: Interval::UNIT,
+                };
+                output_count
+            ],
             samples,
-            output_count,
         }
     }
 
