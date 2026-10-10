@@ -1,7 +1,4 @@
-use pdf_object_reader::{
-    dictionary::Dictionary, object_error::ObjectError, object_lookup::ObjectLookupExt,
-    object_resolver::ObjectResolver,
-};
+use pdf_object_reader::{DictionaryContext, ObjectAccess, ReadResult};
 
 /// Parameters shared by the CalGray, CalRGB, and Lab color spaces.
 #[derive(Debug, PartialEq)]
@@ -15,14 +12,12 @@ pub(crate) struct CieColorSpaceParams {
 }
 
 impl CieColorSpaceParams {
-    pub(crate) fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Self, ObjectError> {
-        let white_point = dictionary.required_array_of::<f32, 3>(b"WhitePoint", objects)?;
-        let black_point = dictionary
-            .optional_array_of::<f32, 3>(b"BlackPoint", objects)?
-            .unwrap_or_default();
+    /// Reads `/WhitePoint` and `/BlackPoint` from a CIE-based color space dictionary.
+    pub(crate) fn read(
+        dictionary: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let white_point = dictionary.required(b"WhitePoint")?;
+        let black_point = dictionary.optional(b"BlackPoint")?.unwrap_or_default();
 
         Ok(Self {
             white_point,
@@ -34,10 +29,17 @@ impl CieColorSpaceParams {
 #[cfg(test)]
 mod tests {
     use pdf_object_reader::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+        ObjectReader, dictionary::Dictionary, object_resolver::PassthroughResolver,
+        object_variant::ObjectVariant,
     };
 
-    use super::CieColorSpaceParams;
+    use crate::cal_gray_color_space::CalGrayColorSpace;
+
+    fn read_cal_gray(dictionary: Dictionary) -> CalGrayColorSpace {
+        ObjectReader::new(&PassthroughResolver)
+            .read::<CalGrayColorSpace>(&ObjectVariant::Dictionary(dictionary))
+            .unwrap()
+    }
 
     fn array(values: &[f64]) -> ObjectVariant {
         ObjectVariant::Array(values.iter().copied().map(ObjectVariant::Real).collect())
@@ -50,25 +52,18 @@ mod tests {
             (b"WhitePoint", array(&[0.9, 1.0, 0.8])),
         ]);
 
-        let params =
-            CieColorSpaceParams::from_dictionary(&dictionary, &PassthroughResolver).unwrap();
+        let cal_gray = read_cal_gray(dictionary);
 
-        assert_eq!(
-            params,
-            CieColorSpaceParams {
-                white_point: [0.9, 1.0, 0.8],
-                black_point: [0.1, 0.2, 0.3],
-            }
-        );
+        assert_eq!(cal_gray.white_point, [0.9, 1.0, 0.8]);
+        assert_eq!(cal_gray.black_point, [0.1, 0.2, 0.3]);
     }
 
     #[test]
     fn defaults_missing_black_point_to_zero() {
         let dictionary = Dictionary::from_entries([(b"WhitePoint", array(&[0.9, 1.0, 0.8]))]);
 
-        let params =
-            CieColorSpaceParams::from_dictionary(&dictionary, &PassthroughResolver).unwrap();
+        let cal_gray = read_cal_gray(dictionary);
 
-        assert_eq!(params.black_point, [0.0, 0.0, 0.0]);
+        assert_eq!(cal_gray.black_point, [0.0, 0.0, 0.0]);
     }
 }

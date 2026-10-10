@@ -1,9 +1,7 @@
 use bytes::Bytes;
 use pdf_filter::{filter::Filters, image_payload::ImagePayload};
 use pdf_graphics::Image;
-use pdf_object_reader::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, stream::StreamObject,
-};
+use pdf_object_reader::{ObjectAccess, dictionary::Dictionary, stream::StreamObject};
 
 use crate::InlineImage;
 use crate::decoded_samples::DecodedSamples;
@@ -14,14 +12,14 @@ use crate::image_metadata::ImageMetadata;
 pub fn read_xobject(
     dictionary: &Dictionary,
     stream_data: &StreamObject,
-    objects: &dyn ObjectResolver,
+    access: &mut (impl ObjectAccess + ?Sized),
     soft_mask: Option<&Image>,
 ) -> Result<Image, PdfImageError> {
-    let metadata = ImageMetadata::from_dictionary(dictionary, objects)?;
+    let metadata = ImageMetadata::from_dictionary(dictionary, access)?;
     let payload = if stream_data.filters_applied() {
         image_payload(stream_data.shared_data(), &metadata)
     } else {
-        ImagePayload::decode(dictionary, stream_data.shared_data(), objects)?
+        ImagePayload::decode(dictionary, stream_data.shared_data(), access.source())?
     };
 
     decode_normalized_image_with_metadata(payload, soft_mask, &metadata)
@@ -62,10 +60,10 @@ pub fn decode_inline_image(
 pub fn decode_normalized_image(
     dictionary: &Dictionary,
     raw_data: Bytes,
-    objects: &dyn ObjectResolver,
+    access: &mut (impl ObjectAccess + ?Sized),
     soft_mask: Option<&Image>,
 ) -> Result<Image, PdfImageError> {
-    let metadata = ImageMetadata::from_dictionary(dictionary, objects)?;
+    let metadata = ImageMetadata::from_dictionary(dictionary, access)?;
     let payload = image_payload(raw_data, &metadata);
     decode_normalized_image_with_metadata(payload, soft_mask, &metadata)
 }
@@ -267,8 +265,13 @@ mod tests {
         let dictionary = filtered_gray_dictionary();
         let stream = StreamObject::new(1, 0, dictionary.clone(), vec![0x2A]);
 
-        let image = read_xobject(&dictionary, &stream, &PassthroughResolver, None)
-            .expect("predecoded image data should not be filtered again");
+        let image = read_xobject(
+            &dictionary,
+            &stream,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            None,
+        )
+        .expect("predecoded image data should not be filtered again");
 
         assert_eq!(image.data.as_ptr(), stream.data.as_ptr());
         assert_eq!(image.data.as_ref(), &[0x2A]);
@@ -279,8 +282,13 @@ mod tests {
         let dictionary = filtered_gray_dictionary();
         let stream = StreamObject::new_encoded(1, 0, dictionary.clone(), b"2A>".to_vec());
 
-        let image = read_xobject(&dictionary, &stream, &PassthroughResolver, None)
-            .expect("encoded image data should have its filter applied");
+        let image = read_xobject(
+            &dictionary,
+            &stream,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            None,
+        )
+        .expect("encoded image data should have its filter applied");
 
         assert_eq!(image.data.as_ref(), &[0x2A]);
     }
@@ -309,7 +317,7 @@ mod tests {
         let image = decode_normalized_image(
             &dictionary,
             vec![0b1010_0000].into(),
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
             None,
         )
         .expect("1-bpc decoded grayscale image should decode");
@@ -339,9 +347,13 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
 
-        let image =
-            decode_normalized_image(&dictionary, vec![0, 255].into(), &PassthroughResolver, None)
-                .expect("8-bpc decoded grayscale image should decode");
+        let image = decode_normalized_image(
+            &dictionary,
+            vec![0, 255].into(),
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            None,
+        )
+        .expect("8-bpc decoded grayscale image should decode");
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
         assert_eq!(image.data.as_ref(), &[0x00, 0x80]);
@@ -385,7 +397,7 @@ mod tests {
         let image = decode_normalized_image(
             &dictionary,
             vec![0b1000_0000].into(),
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
             None,
         )
         .expect("decoded indexed image should decode");
@@ -417,9 +429,13 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
-        let image =
-            decode_normalized_image(&dictionary, vec![0].into(), &PassthroughResolver, None)
-                .expect("Indexed DeviceN image should convert through its alternate space");
+        let image = decode_normalized_image(
+            &dictionary,
+            vec![0].into(),
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            None,
+        )
+        .expect("Indexed DeviceN image should convert through its alternate space");
 
         assert_eq!(image.pixel_format, PixelFormat::RGBA8888);
         assert_eq!(image.data.as_ref(), &[255, 255, 255, 255]);
@@ -437,7 +453,7 @@ mod tests {
         let image = decode_normalized_image(
             &dictionary,
             vec![0, 255, 255, 255].into(),
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
             None,
         )
         .expect("DeviceN image should convert through its tint transform");
@@ -468,9 +484,13 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
-        let image =
-            decode_normalized_image(&dictionary, vec![0].into(), &PassthroughResolver, None)
-                .expect("Indexed DeviceCMYK image should retain its existing conversion");
+        let image = decode_normalized_image(
+            &dictionary,
+            vec![0].into(),
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            None,
+        )
+        .expect("Indexed DeviceCMYK image should retain its existing conversion");
 
         assert_eq!(image.data.as_ref(), &[255, 255, 255, 255]);
     }
@@ -527,7 +547,7 @@ mod tests {
         let image = decode_normalized_image(
             &dictionary,
             vec![255].into(),
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
             Some(&soft_mask),
         )
         .expect("Separation alpha should survive soft-mask application");
@@ -554,8 +574,13 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
-        let err = decode_normalized_image(&dictionary, vec![0].into(), &PassthroughResolver, None)
-            .expect_err("invalid /Decode length should fail");
+        let err = decode_normalized_image(
+            &dictionary,
+            vec![0].into(),
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            None,
+        )
+        .expect_err("invalid /Decode length should fail");
 
         assert!(matches!(
             err,
@@ -582,9 +607,13 @@ mod tests {
         ]));
 
         let samples = Bytes::from_static(&[12, 34]);
-        let image =
-            decode_normalized_image(&dictionary, samples.clone(), &PassthroughResolver, None)
-                .expect("grayscale image without /Decode should decode");
+        let image = decode_normalized_image(
+            &dictionary,
+            samples.clone(),
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            None,
+        )
+        .expect("grayscale image without /Decode should decode");
 
         assert_eq!(image.data.as_ptr(), samples.as_ptr());
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
@@ -607,9 +636,13 @@ mod tests {
         ]));
         let samples = Bytes::from_static(&[12, 34, 56]);
 
-        let image =
-            decode_normalized_image(&dictionary, samples.clone(), &PassthroughResolver, None)
-                .expect("trailing samples should be ignored");
+        let image = decode_normalized_image(
+            &dictionary,
+            samples.clone(),
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            None,
+        )
+        .expect("trailing samples should be ignored");
 
         assert_eq!(image.data.as_ptr(), samples.as_ptr());
         assert_eq!(image.data.as_ref(), &[12, 34]);
@@ -626,7 +659,7 @@ mod tests {
         let image = decode_normalized_image(
             &dictionary,
             vec![0b1010_0000].into(),
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
             None,
         )
         .expect("image masks should default missing BitsPerComponent to 1");
@@ -649,8 +682,13 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
-        let err = decode_normalized_image(&dictionary, vec![0].into(), &PassthroughResolver, None)
-            .expect_err("non-mask images should still require BitsPerComponent");
+        let err = decode_normalized_image(
+            &dictionary,
+            vec![0].into(),
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            None,
+        )
+        .expect_err("non-mask images should still require BitsPerComponent");
 
         assert!(matches!(
             err,
@@ -683,7 +721,7 @@ mod tests {
         let image = decode_normalized_image(
             &dictionary,
             vec![10, 20, 30, 40, 50, 60].into(),
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
             None,
         )
         .expect("DCT-decoded RGB bytes should not be validated as CMYK samples");
@@ -710,7 +748,7 @@ mod tests {
         let err = decode_normalized_image(
             &dictionary,
             vec![10, 20, 30, 40, 50, 60].into(),
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
             None,
         )
         .expect_err("non-DCT CMYK image data should still require four components");
@@ -749,7 +787,7 @@ mod tests {
         let image = decode_normalized_image(
             &dictionary,
             vec![0xAA, 0x10, 0x20].into(),
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
             None,
         )
         .expect("single decoded DCT pixel should expand to the declared image size");
@@ -786,7 +824,7 @@ mod tests {
         let image = decode_normalized_image(
             &dictionary,
             vec![0x20, 0xC0].into(),
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
             Some(&soft_mask),
         )
         .expect("resolved soft mask should be applied");
@@ -821,7 +859,7 @@ mod tests {
                 (Vec::from(b"W"), ObjectVariant::Integer(1)),
             ])),
             b"2A>".to_vec(),
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
         )
         .expect("inline image filters should decode");
 
@@ -847,7 +885,7 @@ mod tests {
                 (Vec::from(b"W"), ObjectVariant::Integer(4)),
             ])),
             vec![0b1010_0000],
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
         )
         .expect("inline image should be constructed");
 
@@ -874,7 +912,7 @@ mod tests {
                 (Vec::from(b"W"), ObjectVariant::Integer(2)),
             ])),
             vec![12, 34],
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
         )
         .expect("inline image should be constructed");
         let samples = image.shared_data();
@@ -916,7 +954,7 @@ mod tests {
                 (Vec::from(b"W"), ObjectVariant::Integer(4)),
             ])),
             vec![0b1010_0000],
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
         )
         .expect("inline image should be constructed");
 
@@ -950,7 +988,7 @@ mod tests {
         let image = decode_normalized_image(
             &dictionary,
             vec![0b1011_0010].into(),
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
             None,
         )
         .expect("1-bpc image should decode");
@@ -968,7 +1006,7 @@ mod tests {
         let image = decode_normalized_image(
             &dictionary,
             vec![0b1010_0000].into(),
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
             None,
         )
         .expect("1-bpc indexed image should decode");
@@ -985,9 +1023,13 @@ mod tests {
     #[test]
     fn decode_normalized_indexed_image_2bpc_expands_samples() {
         let dictionary = indexed_dictionary(2);
-        let image =
-            decode_normalized_image(&dictionary, vec![0x1B].into(), &PassthroughResolver, None)
-                .expect("2-bpc indexed image should decode");
+        let image = decode_normalized_image(
+            &dictionary,
+            vec![0x1B].into(),
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            None,
+        )
+        .expect("2-bpc indexed image should decode");
 
         assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::RGBA8888);
         assert_eq!(
@@ -1004,7 +1046,7 @@ mod tests {
         let image = decode_normalized_image(
             &dictionary,
             vec![0x01, 0x23].into(),
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
             None,
         )
         .expect("4-bpc indexed image should decode");
@@ -1024,7 +1066,7 @@ mod tests {
         let image = decode_normalized_image(
             &dictionary,
             vec![0, 1, 2, 3].into(),
-            &PassthroughResolver,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
             None,
         )
         .expect("8-bpc indexed image should decode");

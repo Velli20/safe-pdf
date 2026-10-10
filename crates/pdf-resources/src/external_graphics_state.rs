@@ -1,7 +1,7 @@
 use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
+    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult,
+    object_kind::ObjectKind, object_variant::ObjectVariant,
 };
-use pdf_object_reader::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
 
 use crate::{error::PdfPagesError, resource::Resource, soft_mask::SoftMask};
 use num_traits::FromPrimitive;
@@ -64,83 +64,62 @@ impl FromPdfObject for ExternalGraphicsState {
     }
 }
 
-fn parse_dash_pattern(
-    value: &ObjectVariant,
-    objects: &dyn ObjectResolver,
-) -> Result<Option<ExternalGraphicsStateKey>, PdfPagesError> {
-    let arr = value.try_array(objects)?.as_slice();
-    let [dash_array, dash_phase] = arr else {
-        return Err(PdfPagesError::InvalidExtGStateArrayLength {
-            entry: "D",
-            found: arr.len(),
-        });
-    };
+/// A `/D` entry, `[dash_array dash_phase]`; `None` when the empty dash array draws a
+/// solid line.
+struct DashEntry(Option<DashPattern>);
 
-    let dash_array = dash_array.try_vec_of::<f32>(objects)?;
-    let dash_phase = dash_phase.try_number::<f32>(objects)?;
-    let Some(dash_pattern) = DashPattern::new(&dash_array, dash_phase)? else {
-        return Ok(None);
-    };
-
-    Ok(Some(ExternalGraphicsStateKey::DashPattern(dash_pattern)))
+impl FromPdfObject for DashEntry {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut array = context.array()?;
+        let found = array.array().len();
+        if found != 2 {
+            return Err(PdfPagesError::InvalidExtGStateArrayLength { entry: "D", found }.into());
+        }
+        let intervals: Vec<f32> = array.at(0)?;
+        let phase: f32 = array.at(1)?;
+        Ok(Self(
+            DashPattern::new(&intervals, phase).map_err(PdfPagesError::from)?,
+        ))
+    }
 }
 
-fn parse_font<A: ObjectAccess + ?Sized>(
-    value: &ObjectVariant,
-    context: &mut DictionaryContext<'_, A>,
-) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
-    let arr = value.try_array(context.source())?.to_vec();
-    let [font_ref, font_size] = arr.as_slice() else {
-        return Err(PdfPagesError::InvalidExtGStateArrayLength {
-            entry: "Font",
-            found: arr.len(),
-        });
-    };
-    let font_size = font_size.try_number::<f32>(context.source())?;
-    let font = context.read_shared::<Resource>(font_ref)?;
-    Ok(ExternalGraphicsStateKey::Font(font, font_size))
+/// A `/Font` entry, `[font size]`: the shared font resource and the font size.
+struct FontEntry(ObjectHandle<Resource>, f32);
+
+impl FromPdfObject for FontEntry {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut array = context.array()?;
+        let found = array.array().len();
+        if found != 2 {
+            return Err(PdfPagesError::InvalidExtGStateArrayLength {
+                entry: "Font",
+                found,
+            }
+            .into());
+        }
+        Ok(Self(array.shared_at(0)?, array.at(1)?))
+    }
 }
 
-/// Parses `/SMask`: a soft mask dictionary, or the name `/None`, which removes the mask.
-fn parse_soft_mask<A: ObjectAccess + ?Sized>(
-    value: &ObjectVariant,
-    context: &mut DictionaryContext<'_, A>,
-) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
-    let soft_mask = if matches!(
-        context.source().resolve_object(value)?,
-        ObjectVariant::Dictionary(_)
-    ) {
-        Some(context.read_shared::<SoftMask>(value)?)
-    } else if value.try_bytes(context.source())? == b"None" {
-        None
-    } else {
-        return Err(PdfPagesError::InvalidExtGStateSoftMask);
-    };
-    Ok(ExternalGraphicsStateKey::SoftMask(soft_mask))
-}
+/// A `/BM` entry: a blend mode name, or an array listing blend modes in order of
+/// preference, where the first recognized one applies and `Normal` is used when none is.
+struct BlendModeEntry(BlendMode);
 
-fn parse_blend_mode(
-    value: &ObjectVariant,
-    objects: &dyn ObjectResolver,
-) -> Result<ExternalGraphicsStateKey, PdfPagesError> {
-    // An array lists blend modes in order of preference; the first recognized one applies
-    // and `Normal` is used when none is recognized.
-    let value = objects.resolve_object(value)?;
-    let mode = if value.is_array() {
-        let mut recognized = None;
-        for name in value.try_array(objects)?.iter() {
+impl FromPdfObject for BlendModeEntry {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let objects = context.source();
+        let value = context.object().value();
+        let ObjectVariant::Array(names) = value else {
+            return Ok(Self(BlendMode::from(value.try_bytes(objects)?)));
+        };
+        for name in names.iter() {
             let mode = BlendMode::from(name.try_bytes(objects)?);
             if !matches!(mode, BlendMode::Unknown(_)) {
-                recognized = Some(mode);
-                break;
+                return Ok(Self(mode));
             }
         }
-        recognized.unwrap_or(BlendMode::Normal)
-    } else {
-        BlendMode::from(value.try_bytes(objects)?)
-    };
-
-    Ok(ExternalGraphicsStateKey::BlendMode(mode))
+        Ok(Self(BlendMode::Normal))
+    }
 }
 
 /// Parse a single key/value pair of the ExtGState dictionary.
@@ -151,37 +130,50 @@ fn parse_entry<A: ObjectAccess + ?Sized>(
     name: &[u8],
     value: &ObjectVariant,
     context: &mut DictionaryContext<'_, A>,
-) -> Result<Option<ExternalGraphicsStateKey>, PdfPagesError> {
+) -> ReadResult<Option<ExternalGraphicsStateKey>> {
     // A null value or a reference to a nonexistent object is equivalent to
     // an absent entry.
     if context.is_absent(value)? {
         return Ok(None);
     }
-    let objects = context.source();
     let parsed = match name {
-        b"LW" => ExternalGraphicsStateKey::LineWidth(value.try_number::<f32>(objects)?),
+        b"LW" => ExternalGraphicsStateKey::LineWidth(context.read(value)?),
         b"LC" => {
-            let cap_val = value.try_number::<i32>(objects)?;
-            let cap = LineCap::from_i32(cap_val)
-                .ok_or(PdfPagesError::InvalidExtGStateLineCap(cap_val))?;
-            ExternalGraphicsStateKey::LineCap(cap)
+            let cap = context.read::<i32>(value)?;
+            ExternalGraphicsStateKey::LineCap(
+                LineCap::from_i32(cap).ok_or(PdfPagesError::InvalidExtGStateLineCap(cap))?,
+            )
         }
         b"LJ" => {
-            let join_val = value.try_number::<i32>(objects)?;
-            let join = LineJoin::from_i32(join_val)
-                .ok_or(PdfPagesError::InvalidExtGStateLineJoin(join_val))?;
-            ExternalGraphicsStateKey::LineJoin(join)
+            let join = context.read::<i32>(value)?;
+            ExternalGraphicsStateKey::LineJoin(
+                LineJoin::from_i32(join).ok_or(PdfPagesError::InvalidExtGStateLineJoin(join))?,
+            )
         }
-        b"ML" => ExternalGraphicsStateKey::MiterLimit(value.try_number::<f32>(objects)?),
-        b"D" => match parse_dash_pattern(value, objects)? {
-            Some(param) => param,
-            None => return Ok(None),
+        b"ML" => ExternalGraphicsStateKey::MiterLimit(context.read(value)?),
+        b"D" => match context.read::<DashEntry>(value)? {
+            DashEntry(Some(pattern)) => ExternalGraphicsStateKey::DashPattern(pattern),
+            DashEntry(None) => return Ok(None),
         },
-        b"Font" => parse_font(value, context)?,
-        b"BM" => parse_blend_mode(value, objects)?,
-        b"SMask" => parse_soft_mask(value, context)?,
-        b"CA" => ExternalGraphicsStateKey::StrokingAlpha(value.try_number::<f32>(objects)?),
-        b"ca" => ExternalGraphicsStateKey::NonStrokingAlpha(value.try_number::<f32>(objects)?),
+        b"Font" => {
+            let FontEntry(font, size) = context.read(value)?;
+            ExternalGraphicsStateKey::Font(font, size)
+        }
+        b"BM" => ExternalGraphicsStateKey::BlendMode(context.read::<BlendModeEntry>(value)?.0),
+        // A soft mask dictionary is read as a shared handle from this dictionary, since a
+        // decoder of the value itself cannot read that same value shared.
+        b"SMask" => {
+            let soft_mask = if context.resolve(value)?.kind() == ObjectKind::Dictionary {
+                Some(context.read_shared::<SoftMask>(value)?)
+            } else if value.is_named(b"None", context.source()) {
+                None
+            } else {
+                return Err(PdfPagesError::InvalidExtGStateSoftMask.into());
+            };
+            ExternalGraphicsStateKey::SoftMask(soft_mask)
+        }
+        b"CA" => ExternalGraphicsStateKey::StrokingAlpha(context.read(value)?),
+        b"ca" => ExternalGraphicsStateKey::NonStrokingAlpha(context.read(value)?),
         _ => return Ok(None),
     };
 

@@ -25,7 +25,7 @@ pub struct Resources {
     /// The /Pattern resource namespace.
     pub patterns: HashMap<Vec<u8>, Resource>,
     /// The /XObject resource namespace.
-    pub xobjects: HashMap<Vec<u8>, Resource>,
+    pub xobjects: HashMap<Vec<u8>, ObjectHandle<Resource>>,
     /// The /Shading resource namespace.
     pub shadings: HashMap<Vec<u8>, Resource>,
     /// The /ColorSpace resource namespace.
@@ -60,7 +60,8 @@ impl Resources {
             patterns: context.optional_entries(b"Pattern", |context, value| {
                 context.read_shared(value).map(Resource::Pattern)
             })?,
-            xobjects: context.optional_entries(b"XObject", Resource::read_xobject)?,
+            xobjects: context
+                .optional_entries(b"XObject", |context, value| context.read_shared(value))?,
             shadings: context.optional_entries(b"Shading", |context, value| {
                 Ok(Resource::Shading(context.read_shared(value)?.get()?))
             })?,
@@ -116,8 +117,8 @@ impl Resources {
     ///
     /// An `Option` containing the resolved [`Resource::Image`],
     /// [`Resource::UnavailableImage`], or [`Resource::Form`] entry if found.
-    pub fn xobject<N: AsRef<[u8]>>(&self, name: N) -> Option<&Resource> {
-        self.xobjects.get(name.as_ref())
+    pub fn xobject<N: AsRef<[u8]>>(&self, name: N) -> Option<Arc<Resource>> {
+        self.xobjects.get(name.as_ref())?.get().ok()
     }
 
     /// Returns a reference to a pattern resource by name, if it exists.

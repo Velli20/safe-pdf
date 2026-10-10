@@ -3,11 +3,9 @@ use pdf_function::{
     function_interpolation_error::FunctionInterpolationError,
 };
 use pdf_graphics::color::Color;
-use pdf_object_reader::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
-use crate::{
-    color_space::ColorSpace, color_space_reader::parse_color_space_object, error::ColorSpaceError,
-};
+use crate::{color_space::ColorSpace, error::ColorSpaceError};
 
 /// DeviceN color space.
 ///
@@ -26,37 +24,37 @@ pub struct DeviceNColorSpace {
     pub tint_transform: Function,
 }
 
-/// Parses a DeviceN color space: `[/DeviceN names alternateSpace tintTransform]`
+/// Reads a DeviceN color space: `[/DeviceN names alternateSpace tintTransform]`
 ///
 /// An optional fifth element (attributes dictionary) is accepted and ignored.
-pub(crate) fn parse_device_n_color_space(
-    objects: &dyn ObjectResolver,
-    arr: &[ObjectVariant],
-    depth: usize,
-) -> Result<ColorSpace, ColorSpaceError> {
-    let [_, names_obj, alt_obj, tint_transform, ..] = arr else {
-        return Err(ColorSpaceError::InvalidColorSpace {
-            description: format!(
-                "/DeviceN requires [/DeviceN names alternateSpace tintTransform] with an optional attributes dictionary; found {} element(s)",
-                arr.len()
-            ),
-        });
-    };
+impl FromPdfObject for DeviceNColorSpace {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut array = context.array()?;
+        let [_, names, _, tint_transform, ..] = array.array().as_slice() else {
+            return Err(ColorSpaceError::InvalidColorSpace {
+                description: format!(
+                    "/DeviceN requires [/DeviceN names alternateSpace tintTransform] with an optional attributes dictionary; found {} element(s)",
+                    array.array().len()
+                ),
+            }
+            .into());
+        };
 
-    let names = names_obj
-        .try_array(objects)?
-        .iter()
-        .map(|name| name.try_bytes(objects).map(Vec::from))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let alternate_space = parse_color_space_object(objects, alt_obj, depth)?;
-    let tint_transform = Function::parse(objects.resolve_object(tint_transform)?, objects)?;
-
-    Ok(ColorSpace::DeviceN(DeviceNColorSpace {
-        names,
-        alternate_space: Box::new(alternate_space),
-        tint_transform,
-    }))
+        let objects = array.source();
+        let names = names
+            .try_array(objects)?
+            .iter()
+            .map(|name| name.try_bytes(objects).map(Vec::from))
+            .collect::<Result<Vec<_>, _>>()?;
+        let alternate_space = Box::new(array.at(2)?);
+        let tint_transform = array.resolve(tint_transform)?;
+        Ok(Self {
+            names,
+            alternate_space,
+            tint_transform: Function::parse(tint_transform.value(), array.source())
+                .map_err(ColorSpaceError::from)?,
+        })
+    }
 }
 
 impl DeviceNColorSpace {
@@ -96,14 +94,13 @@ impl DeviceNColorSpace {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_device_n_color_space;
     use crate::{color_space::ColorSpace, error::ColorSpaceError};
     use pdf_function::{
         function::Function, function_interpolation_error::FunctionInterpolationError,
     };
     use pdf_object_reader::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver,
-        object_variant::ObjectVariant, stream::StreamObject,
+        ObjectReadError, ObjectReader, ReadResult, dictionary::Dictionary,
+        object_resolver::PassthroughResolver, object_variant::ObjectVariant, stream::StreamObject,
     };
     use std::collections::BTreeMap;
 
@@ -118,6 +115,11 @@ mod tests {
         let mut array = vec![name("DeviceN")];
         array.append(&mut entries);
         array
+    }
+
+    fn read_device_n(arr: Vec<ObjectVariant>) -> ReadResult<ColorSpace> {
+        ObjectReader::new(&PassthroughResolver)
+            .read::<ColorSpace>(&ObjectVariant::Array(arr.into()))
     }
 
     fn function_stream(code: &str, output_components: usize) -> ObjectVariant {
@@ -162,7 +164,7 @@ mod tests {
             function_stream("pop pop 0.1 0.2 0.3", 3),
         ]);
 
-        let parsed = parse_device_n_color_space(&PassthroughResolver, &arr, 0).unwrap();
+        let parsed = read_device_n(arr).unwrap();
 
         let ColorSpace::DeviceN(device_n) = parsed else {
             panic!("expected DeviceN color space");
@@ -190,7 +192,7 @@ mod tests {
             attrs,
         ]);
 
-        let parsed = parse_device_n_color_space(&PassthroughResolver, &arr, 0).unwrap();
+        let parsed = read_device_n(arr).unwrap();
 
         let ColorSpace::DeviceN(device_n) = parsed else {
             panic!("expected DeviceN color space");
@@ -208,7 +210,7 @@ mod tests {
             function_stream("pop pop pop 0.25 0.5 0.75", 3),
         ]);
 
-        let parsed = parse_device_n_color_space(&PassthroughResolver, &arr, 0).unwrap();
+        let parsed = read_device_n(arr).unwrap();
         let ColorSpace::DeviceN(device_n) = parsed else {
             panic!("expected DeviceN color space");
         };
@@ -229,7 +231,7 @@ mod tests {
             function_stream("pop pop 0.25 0.5", 2),
         ]);
 
-        let parsed = parse_device_n_color_space(&PassthroughResolver, &arr, 0).unwrap();
+        let parsed = read_device_n(arr).unwrap();
         let ColorSpace::DeviceN(device_n) = parsed else {
             panic!("expected DeviceN color space");
         };
@@ -254,7 +256,7 @@ mod tests {
             function_stream("pop pop 0.1 0.2 0.3", 3),
         ]);
 
-        let parsed = parse_device_n_color_space(&PassthroughResolver, &arr, 0).unwrap();
+        let parsed = read_device_n(arr).unwrap();
         let ColorSpace::DeviceN(device_n) = parsed else {
             panic!("expected DeviceN color space");
         };
@@ -272,13 +274,13 @@ mod tests {
             name("DeviceRGB"),
         ];
 
-        let err = parse_device_n_color_space(&PassthroughResolver, &arr, 0).unwrap_err();
+        let err = read_device_n(arr).unwrap_err();
 
         assert!(matches!(
             err,
-            ColorSpaceError::InvalidColorSpace { description }
+            ObjectReadError::Decode { source, .. } if matches!(source.downcast_ref::<ColorSpaceError>(), Some(ColorSpaceError::InvalidColorSpace { description })
                 if description.contains("/DeviceN requires [/DeviceN names alternateSpace tintTransform]")
-                    && description.contains("found 3 element(s)")
+                    && description.contains("found 3 element(s)"))
         ));
     }
 }

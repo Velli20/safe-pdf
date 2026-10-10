@@ -4,7 +4,7 @@
 //! packed-stream decoding, and patch reconstruction live in dedicated sibling
 //! modules so each stage can be understood independently.
 
-use pdf_object_reader::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object_reader::{ObjectAccess, object_error::ObjectError, object_variant::ObjectVariant};
 use thiserror::Error;
 
 use crate::{
@@ -41,12 +41,14 @@ pub enum PatchMeshError {
 /// Parses a Type 6 or Type 7 patch-mesh shading stream.
 pub(crate) fn parse_patch_mesh(
     object: &ObjectVariant,
-    objects: &dyn ObjectResolver,
+    access: &mut (impl ObjectAccess + ?Sized),
     shading_type: ShadingType,
 ) -> Result<Shading, PdfShadingError> {
     let kind = PatchKind::from_shading_type(shading_type)?;
-    let stream = object.try_stream(objects)?;
-    let config = PatchMeshConfig::parse(&stream.dictionary, objects)?;
+    let ObjectVariant::Stream(stream) = object else {
+        return Err(ObjectError::TypeMismatch("Stream", object.name()).into());
+    };
+    let config = PatchMeshConfig::parse(&stream.dictionary, access)?;
     let patches = PatchMeshParser::new(stream.raw_data(), &config, kind)?.parse()?;
 
     Ok(config.into_shading(shading_type, patches))

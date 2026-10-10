@@ -3,7 +3,8 @@ use pdf_decode::DecodeMap;
 use pdf_filter::filter::Filters;
 use pdf_graphics::rect::Rect;
 use pdf_object_reader::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    ObjectAccess, dictionary::Dictionary, object_lookup::ObjectLookupExt,
+    object_resolver::ObjectResolver,
 };
 
 use crate::{error::PdfImageError, smask_in_data::SMaskInData};
@@ -42,8 +43,16 @@ impl ImageMetadata {
     /// Reads and validates normalized image metadata from an image dictionary.
     pub(crate) fn from_dictionary(
         dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
+        access: &mut (impl ObjectAccess + ?Sized),
     ) -> Result<Self, PdfImageError> {
+        let image_mask = dictionary
+            .optional_boolean(b"ImageMask", access.source())?
+            .unwrap_or(false);
+        let color_space = match dictionary.get(b"ColorSpace") {
+            Some(color_space) if !image_mask => Some(access.read::<ColorSpace>(color_space)?),
+            _ => None,
+        };
+        let objects = access.source();
         let size = dictionary.required_size(objects)?;
         let width = size.width();
         let height = size.height();
@@ -52,18 +61,10 @@ impl ImageMetadata {
             return Err(PdfImageError::InvalidImageDimensions { width, height });
         }
 
-        let image_mask = dictionary
-            .optional_boolean(b"ImageMask", objects)?
-            .unwrap_or(false);
         let filters = Filters::from_dictionary(dictionary, objects)?;
         let jpx = filters.as_ref().is_some_and(Filters::has_jpx_filter);
         let bits_per_component =
             read_bits_per_component(dictionary, objects, image_mask, filters.as_ref())?;
-        let color_space = if image_mask {
-            None
-        } else {
-            ColorSpace::from_dictionary(dictionary, objects)?
-        };
         // PDF ignores /BitsPerComponent for a JPX image: the codestream states
         // the precision of every component, so the entry constrains nothing.
         if !jpx {
@@ -174,8 +175,11 @@ mod tests {
     fn rejects_zero_dimensions() {
         let dictionary = direct_dictionary(0, 1, 8);
 
-        let error = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
-            .expect_err("zero width should be rejected");
+        let error = ImageMetadata::from_dictionary(
+            &dictionary,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+        )
+        .expect_err("zero width should be rejected");
 
         assert!(matches!(
             error,
@@ -194,8 +198,11 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
-        let metadata = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
-            .expect("image mask metadata should be valid");
+        let metadata = ImageMetadata::from_dictionary(
+            &dictionary,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+        )
+        .expect("image mask metadata should be valid");
 
         assert_eq!(metadata.bits_per_component, 1);
         assert!(metadata.color_space.is_none());
@@ -212,8 +219,11 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
-        let error = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
-            .expect_err("8-bpc image mask should be rejected");
+        let error = ImageMetadata::from_dictionary(
+            &dictionary,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+        )
+        .expect_err("8-bpc image mask should be rejected");
 
         assert!(matches!(
             error,
@@ -238,8 +248,11 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
-        let metadata = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
-            .expect("image mask filter should parse");
+        let metadata = ImageMetadata::from_dictionary(
+            &dictionary,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+        )
+        .expect("image mask filter should parse");
 
         assert_eq!(
             metadata.filters,
@@ -251,8 +264,11 @@ mod tests {
     fn indexed_images_accept_two_bit_components() {
         let dictionary = indexed_dictionary(2);
 
-        let metadata = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
-            .expect("2-bpc indexed metadata should be valid");
+        let metadata = ImageMetadata::from_dictionary(
+            &dictionary,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+        )
+        .expect("2-bpc indexed metadata should be valid");
 
         assert_eq!(metadata.bits_per_component, 2);
     }
@@ -261,8 +277,11 @@ mod tests {
     fn indexed_images_reject_unsupported_bit_components() {
         let dictionary = indexed_dictionary(3);
 
-        let error = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
-            .expect_err("3-bpc indexed metadata should be rejected");
+        let error = ImageMetadata::from_dictionary(
+            &dictionary,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+        )
+        .expect_err("3-bpc indexed metadata should be rejected");
 
         assert!(matches!(
             error,
@@ -276,8 +295,11 @@ mod tests {
     fn direct_images_reject_unsupported_bit_components() {
         let dictionary = direct_dictionary(1, 1, 3);
 
-        let error = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
-            .expect_err("3-bpc direct metadata should be rejected");
+        let error = ImageMetadata::from_dictionary(
+            &dictionary,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+        )
+        .expect_err("3-bpc direct metadata should be rejected");
 
         assert!(matches!(
             error,
@@ -301,8 +323,11 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
-        let metadata = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
-            .expect("JPX metadata should default missing BitsPerComponent");
+        let metadata = ImageMetadata::from_dictionary(
+            &dictionary,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+        )
+        .expect("JPX metadata should default missing BitsPerComponent");
 
         assert_eq!(metadata.bits_per_component, 8);
         assert_eq!(
@@ -331,8 +356,11 @@ mod tests {
             ),
         );
 
-        let metadata = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
-            .expect("ordered filter chain should parse");
+        let metadata = ImageMetadata::from_dictionary(
+            &dictionary,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+        )
+        .expect("ordered filter chain should parse");
 
         assert_eq!(
             metadata.filters,
@@ -350,8 +378,11 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
-        let error = ImageMetadata::from_dictionary(&dictionary, &PassthroughResolver)
-            .expect_err("non-JPX metadata should require BitsPerComponent");
+        let error = ImageMetadata::from_dictionary(
+            &dictionary,
+            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+        )
+        .expect_err("non-JPX metadata should require BitsPerComponent");
 
         assert!(matches!(
             error,

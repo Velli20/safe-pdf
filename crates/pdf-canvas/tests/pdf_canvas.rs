@@ -12,7 +12,8 @@ use pdf_document::page::PdfPage;
 use pdf_graphics::{BlendMode, PixelFormat, rect::Rect};
 use pdf_image::InlineImage;
 use pdf_object_reader::{
-    dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+    ObjectHandle, dictionary::Dictionary, object_resolver::PassthroughResolver,
+    object_variant::ObjectVariant,
 };
 use pdf_resources::{
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateKey},
@@ -36,7 +37,7 @@ fn form_resource(name: &str, stream: ContentStream) -> Resources {
     Resources {
         xobjects: HashMap::from([(
             name.as_bytes().to_vec(),
-            Resource::from(FormXObject {
+            ObjectHandle::from(Resource::from(FormXObject {
                 bbox: Some(Rect {
                     left: 0.0,
                     top: 0.0,
@@ -46,7 +47,7 @@ fn form_resource(name: &str, stream: ContentStream) -> Resources {
                 matrix: None,
                 resources: None,
                 content_stream: stream,
-            }),
+            })),
         )]),
         ..Default::default()
     }
@@ -94,7 +95,7 @@ fn inline_image() -> InlineImage {
             (Vec::from(b"W"), ObjectVariant::Integer(4)),
         ])),
         vec![0b1010_0000],
-        &PassthroughResolver,
+        &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
     )
     .expect("inline image should be constructed")
 }
@@ -212,7 +213,10 @@ fn releases_render_state_after_an_operator_error() {
 fn unavailable_image_xobject_is_a_no_op() {
     let stream = content_stream(1, b"/Im Do");
     let resources = Arc::new(Resources {
-        xobjects: HashMap::from([(b"Im".to_vec(), Resource::UnavailableImage)]),
+        xobjects: HashMap::from([(
+            b"Im".to_vec(),
+            ObjectHandle::from(Resource::UnavailableImage),
+        )]),
         ..Default::default()
     });
     let mut recording = RecordingCanvas::new(100.0, 100.0);
@@ -230,7 +234,10 @@ fn inline_image_render_path_matches_image_xobject_path() {
     let image = pdf_image::decode_normalized_image(
         &image_dictionary(),
         vec![0b1010_0000].into(),
-        &pdf_object_reader::object_resolver::PassthroughResolver,
+        &mut pdf_object_reader::ObjectReader::new(
+            pdf_object_reader::object_resolver::PassthroughResolver,
+        )
+        .session(),
         None,
     )
     .expect("image XObject should decode");
@@ -241,7 +248,7 @@ fn inline_image_render_path_matches_image_xobject_path() {
     ));
     let resources = Arc::new(Resources {
         ext_g_states: HashMap::from([(b"GS".to_vec(), graphics_state)]),
-        xobjects: HashMap::from([(b"Im".to_vec(), Resource::from(image))]),
+        xobjects: HashMap::from([(b"Im".to_vec(), ObjectHandle::from(Resource::from(image)))]),
         ..Default::default()
     });
 

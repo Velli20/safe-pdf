@@ -1,10 +1,11 @@
 use bytes::Bytes;
 use pdf_graphics::color::Color;
-use pdf_object_reader::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
-
-use crate::{
-    color_space::ColorSpace, color_space_reader::parse_color_space_object, error::ColorSpaceError,
+use pdf_object_reader::{
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
+
+use crate::{color_space::ColorSpace, error::ColorSpaceError};
 
 /// Indexed (palette-based) color space.
 ///
@@ -20,32 +21,30 @@ pub struct IndexedColorSpace {
     pub lookup: Bytes,
 }
 
-/// Parses an Indexed color space: `[/Indexed base hival lookup]`
+/// Reads an Indexed color space: `[/Indexed base hival lookup]`
 ///
 /// - `base`: The base color space for palette entries
 /// - `hival`: Maximum index value (0-255)
 /// - `lookup`: Lookup table (string or stream)
-pub(crate) fn parse_indexed_color_space(
-    objects: &dyn ObjectResolver,
-    arr: &[ObjectVariant],
-    depth: usize,
-) -> Result<ColorSpace, ColorSpaceError> {
-    // Expected format: [/Indexed base hival lookup]
-    let [_, base, hival, lookup] = arr else {
-        return Err(ColorSpaceError::InvalidColorSpace {
-            description: format!("/Indexed requires 4 elements, found {}", arr.len()),
-        });
-    };
+impl FromPdfObject for IndexedColorSpace {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut array = context.array()?;
+        let [_, _, _, lookup] = array.array().as_slice() else {
+            return Err(ColorSpaceError::InvalidColorSpace {
+                description: format!(
+                    "/Indexed requires 4 elements, found {}",
+                    array.array().len()
+                ),
+            }
+            .into());
+        };
 
-    let base_cs = parse_color_space_object(objects, base, depth)?;
-    let hival = hival.try_number::<u8>(objects)?;
-    let lookup = extract_lookup_table(objects, lookup)?;
-
-    Ok(ColorSpace::Indexed(IndexedColorSpace {
-        base: Box::new(base_cs),
-        hival,
-        lookup,
-    }))
+        Ok(Self {
+            base: Box::new(array.at(1)?),
+            hival: array.at(2)?,
+            lookup: extract_lookup_table(array.source(), lookup)?,
+        })
+    }
 }
 
 /// Extracts the lookup table bytes from an Indexed color space.

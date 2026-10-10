@@ -4,8 +4,8 @@ use pdf_color_space::color_space::ColorSpace;
 use pdf_function::function::Function;
 use pdf_graphics::rect::Rect;
 use pdf_object_reader::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    ObjectAccess, dictionary::Dictionary, object_error::ObjectError,
+    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 use pdf_utils::BitReader;
 use thiserror::Error;
@@ -44,10 +44,12 @@ pub enum FreeFormMeshError {
 /// Parses a Type 4 shading stream into independent mesh triangles.
 pub(crate) fn parse_free_form_triangle_mesh(
     object: &ObjectVariant,
-    objects: &dyn ObjectResolver,
+    access: &mut (impl ObjectAccess + ?Sized),
 ) -> Result<Shading, PdfShadingError> {
-    let stream = object.try_stream(objects)?;
-    let config = FreeFormMeshConfig::parse(&stream.dictionary, objects)?;
+    let ObjectVariant::Stream(stream) = object else {
+        return Err(ObjectError::TypeMismatch("Stream", object.name()).into());
+    };
+    let config = FreeFormMeshConfig::parse(&stream.dictionary, access)?;
     let triangles = FreeFormMeshParser::new(stream.raw_data(), &config)?.parse()?;
 
     Ok(Shading::FreeFormTriangleMesh {
@@ -72,9 +74,10 @@ impl FreeFormMeshConfig {
     /// Reads and validates the mesh-specific shading dictionary entries.
     fn parse(
         dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
+        access: &mut (impl ObjectAccess + ?Sized),
     ) -> Result<Self, PdfShadingError> {
-        let color_space = required_color_space(dictionary, objects)?;
+        let color_space = required_color_space(dictionary, access)?;
+        let objects = access.source();
         let widths = MeshBitWidths::from_dictionary(dictionary, objects)?;
         let decode = dictionary.required_vec_of::<f32>(b"Decode", objects)?;
         let bbox = dictionary.optional_bbox(objects)?;

@@ -177,7 +177,7 @@ macro_rules! number_decoder {
     };
 }
 
-number_decoder!(f32, u16, u32, usize);
+number_decoder!(f32, i32, u8, u16, u32, usize);
 
 /// Reads the first N elements, validating length before decoding any child.
 ///
