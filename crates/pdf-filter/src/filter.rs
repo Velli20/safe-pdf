@@ -2,7 +2,7 @@ use std::fmt;
 
 use bytes::Bytes;
 
-use crate::{error::FilterError, image_payload::ImagePayload};
+use crate::{error::FilterError, image_payload::ImagePayload, jpeg_frame::JpegFrameHeader};
 
 use pdf_object_reader::{
     dictionary::Dictionary,
@@ -224,12 +224,27 @@ impl Filter {
 
     /// Decodes DCTDecode (JPEG) compressed stream data.
     ///
+    /// `dictionary_height` is the image dictionary's `/Height`. It replaces a
+    /// frame header height of `0` or `0xFFFF`, which only stands in for the
+    /// real number of lines; decoding with that placeholder would read the
+    /// scans past the rows they encode.
+    ///
     /// # Errors
     ///
     /// Returns [`FilterError::Decompression`] if the JPEG decoding fails,
     /// which can happen if the data is corrupted or not a valid JPEG image.
-    pub(crate) fn decode_jpeg_baseline(stream_data: &[u8]) -> Result<Vec<u8>, FilterError> {
-        let bitmap = image::load_from_memory_with_format(stream_data, image::ImageFormat::Jpeg)
+    pub(crate) fn decode_jpeg_baseline(
+        stream_data: &[u8],
+        dictionary_height: Option<u16>,
+    ) -> Result<Vec<u8>, FilterError> {
+        let patched = JpegFrameHeader::find(stream_data).and_then(|header| {
+            header
+                .replacement_height(dictionary_height)
+                .map(|height| header.with_height(stream_data, height))
+        });
+        let jpeg = patched.as_deref().unwrap_or(stream_data);
+
+        let bitmap = image::load_from_memory_with_format(jpeg, image::ImageFormat::Jpeg)
             .map_err(|e| FilterError::Decompression(e.to_string()))?;
 
         Ok(bitmap.as_bytes().to_vec())
