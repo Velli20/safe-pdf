@@ -6,8 +6,8 @@ use pdf_object_reader::object_error::ObjectError;
 use pdf_object_reader::object_lookup::ObjectLookupExt;
 use pdf_object_reader::object_resolver::ObjectResolver;
 use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-    dictionary::Dictionary, object_variant::ObjectVariant,
+    FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
+    object_variant::ObjectVariant, resolved_object::ResolvedObject,
 };
 use std::sync::Arc;
 
@@ -40,12 +40,14 @@ impl XObjectSubtype {
     /// Streams must name a supported subtype. A dictionary without an XObject subtype
     /// yields `None`, since it describes a font.
     fn read(
-        object: &ObjectVariant,
-        dictionary: &Dictionary,
+        object: &ResolvedObject,
         objects: &dyn ObjectResolver,
-    ) -> Result<Option<Self>, PdfPagesError> {
-        if let ObjectVariant::Stream(_) = object {
-            return Self::try_from(dictionary.required_bytes(b"Subtype", objects)?).map(Some);
+    ) -> Result<Option<Self>, ObjectReadError> {
+        let dictionary = object.dictionary()?;
+        if let ObjectVariant::Stream(_) = object.value() {
+            return Ok(Some(Self::try_from(
+                dictionary.required_bytes(b"Subtype", objects)?,
+            )?));
         }
         Ok(dictionary
             .optional_bytes(b"Subtype", objects)?
@@ -57,47 +59,22 @@ impl FromPdfObject for Resource {
     fn from_pdf_object(
         mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
     ) -> ReadResult<Self> {
-        let object = context.object();
-        let value = object.value();
-        let dictionary = object.dictionary()?;
-        match XObjectSubtype::read(value, dictionary, context.source())? {
-            None => Self::read_font(&mut context, value, dictionary),
-            Some(XObjectSubtype::Form) => Ok(Self::from(context.read::<FormXObject>(value)?)),
-            Some(XObjectSubtype::Image) => Self::read_image(&mut context, value, dictionary),
+        match XObjectSubtype::read(context.object(), context.source())? {
+            None => Self::read_font(&mut context),
+            Some(XObjectSubtype::Form) => Ok(Self::from(
+                context.read::<FormXObject>(context.object().value())?,
+            )),
+            Some(XObjectSubtype::Image) => Self::read_image(&mut context),
         }
     }
 }
 
 impl Resource {
-    /// Reads an XObject resource entry by its `/Subtype`.
-    ///
-    /// A form stays a shared handle so a form that paints itself is read as pending
-    /// instead of recursing; an image is decoded eagerly.
-    pub(crate) fn read_xobject(
-        context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
-        value: &ObjectVariant,
-    ) -> ReadResult<Self> {
-        let subtype = XObjectSubtype::try_from(
-            value
-                .try_dictionary(context.source())?
-                .required_bytes(b"Subtype", context.source())?,
-        )?;
-        match subtype {
-            XObjectSubtype::Form => Ok(Self::Form(context.read_shared(value)?)),
-            XObjectSubtype::Image => {
-                Ok(context.read_shared::<Self>(value)?.get()?.as_ref().clone())
-            }
-        }
-    }
-
     /// Reads a font, keeping the resources a Type 3 font's glyph procedures paint with.
-    fn read_font(
-        context: &mut ObjectContext<'_, impl ObjectAccess + ?Sized>,
-        value: &ObjectVariant,
-        dictionary: &Dictionary,
-    ) -> ReadResult<Self> {
-        let font: PdfFontSpec = context.read(value)?;
-        let resources = match dictionary.get(b"Resources") {
+    fn read_font(context: &mut ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object();
+        let font: PdfFontSpec = context.read(object.value())?;
+        let resources = match object.dictionary()?.get(b"Resources") {
             Some(resources) if font.is_type3() => Some(context.read_shared(resources)?),
             _ => None,
         };
@@ -109,22 +86,20 @@ impl Resource {
 
     /// Decodes an image XObject, or marks it unavailable when its dimensions are malformed
     /// or its stream data cannot be decoded into samples.
-    fn read_image(
-        context: &mut ObjectContext<'_, impl ObjectAccess + ?Sized>,
-        value: &ObjectVariant,
-        dictionary: &Dictionary,
-    ) -> ReadResult<Self> {
+    fn read_image(context: &mut ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object();
+        let dictionary = object.dictionary()?;
         if !dictionary
             .required_size(context.source())
             .is_ok_and(|size| size.is_valid())
         {
             return Ok(Self::UnavailableImage);
         }
-        let ObjectVariant::Stream(stream) = value else {
-            return Err(ObjectError::TypeMismatch("Stream", value.name()).into());
+        let ObjectVariant::Stream(stream) = object.value() else {
+            return Err(ObjectError::TypeMismatch("Stream", object.value().name()).into());
         };
-        let soft_mask = Self::read_soft_mask_image(context, dictionary)?;
-        match decode_image_xobject(dictionary, stream, context.source(), soft_mask.as_deref()) {
+        let soft_mask = Self::read_soft_mask_image(context)?;
+        match decode_image_xobject(dictionary, stream, context.access(), soft_mask.as_deref()) {
             Ok(image) => Ok(Self::from(image)),
             Err(error) if error.is_unreadable_data() => Ok(Self::UnavailableImage),
             Err(error) => Err(PdfPagesError::from(error).into()),
@@ -137,9 +112,8 @@ impl Resource {
     /// the image unmasked.
     fn read_soft_mask_image(
         context: &mut ObjectContext<'_, impl ObjectAccess + ?Sized>,
-        dictionary: &Dictionary,
     ) -> ReadResult<Option<Arc<Image>>> {
-        let Some(value) = dictionary.get(b"SMask") else {
+        let Some(value) = context.object().dictionary()?.get(b"SMask") else {
             return Ok(None);
         };
         if value.is_named(b"None", context.source()) {

@@ -22,23 +22,26 @@ use crate::{
 };
 
 impl FromPdfObject for Shading {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object().value();
-        let objects = context.source();
-        let dictionary = object.try_dictionary(objects)?;
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let object = context.object();
+        let dictionary = object.dictionary()?;
         let shading_type = dictionary
-            .required_number::<i32>(b"ShadingType", objects)?
+            .required_number::<i32>(b"ShadingType", context.source())?
             .try_into()?;
+        let access = context.access();
+        let object = object.value();
 
         match shading_type {
             ShadingType::FunctionBased => {
-                FunctionShading::parse(dictionary, objects).map(Shading::FunctionBased)
+                FunctionShading::parse(dictionary, access).map(Shading::FunctionBased)
             }
-            ShadingType::Axial => parse_axial(dictionary, objects),
-            ShadingType::Radial => parse_radial(dictionary, objects),
-            ShadingType::FreeFormTriangleMesh => parse_free_form_triangle_mesh(object, objects),
+            ShadingType::Axial => parse_axial(dictionary, access),
+            ShadingType::Radial => parse_radial(dictionary, access),
+            ShadingType::FreeFormTriangleMesh => parse_free_form_triangle_mesh(object, access),
             ShadingType::CoonsPatchMesh | ShadingType::TensorProductPatchMesh => {
-                parse_patch_mesh(object, objects, shading_type)
+                parse_patch_mesh(object, access, shading_type)
             }
             unsupported => Ok(Shading::Unsupported {
                 name: unsupported.to_string(),
@@ -67,13 +70,14 @@ pub(crate) fn parse_functions(
 /// Parses a Type 2 axial shading dictionary.
 fn parse_axial(
     dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
+    access: &mut (impl ObjectAccess + ?Sized),
 ) -> Result<Shading, PdfShadingError> {
+    let color_space = required_color_space(dictionary, access)?;
+    let objects = access.source();
     let coords = dictionary.required_array_of::<f32, 4>(b"Coords", objects)?;
     let domain = dictionary
         .optional_array_of::<f32, 2>(b"Domain", objects)?
         .unwrap_or(crate::color_stops::DEFAULT_DOMAIN);
-    let color_space = required_color_space(dictionary, objects)?;
     let function = Function::parse(dictionary.get_or_err(b"Function")?, objects)?;
     let color_stops = ColorStops::from_function_domain(&function, &color_space, domain)?;
     let extend = read_extend(dictionary, objects)?;
@@ -93,13 +97,14 @@ fn parse_axial(
 /// Parses a Type 3 radial shading dictionary.
 fn parse_radial(
     dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
+    access: &mut (impl ObjectAccess + ?Sized),
 ) -> Result<Shading, PdfShadingError> {
+    let color_space = required_color_space(dictionary, access)?;
+    let objects = access.source();
     let coords = dictionary.required_array_of::<f32, 6>(b"Coords", objects)?;
     let domain = dictionary
         .optional_array_of::<f32, 2>(b"Domain", objects)?
         .unwrap_or(crate::color_stops::DEFAULT_DOMAIN);
-    let color_space = required_color_space(dictionary, objects)?;
     let bbox = dictionary.optional_bbox(objects)?;
     let function = Function::parse(dictionary.get_or_err(b"Function")?, objects)?;
     let color_stops = ColorStops::from_function_domain(&function, &color_space, domain)?;
@@ -149,9 +154,13 @@ pub(crate) fn read_background(
 /// Reads the required color space shared by shading types 1 through 7.
 pub(crate) fn required_color_space(
     dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
+    access: &mut (impl ObjectAccess + ?Sized),
 ) -> Result<ColorSpace, PdfShadingError> {
-    ColorSpace::from_dictionary(dictionary, objects)?.ok_or(PdfShadingError::MissingRequiredEntry {
-        entry: "ColorSpace",
-    })
+    let color_space =
+        dictionary
+            .get(b"ColorSpace")
+            .ok_or(PdfShadingError::MissingRequiredEntry {
+                entry: "ColorSpace",
+            })?;
+    Ok(access.read::<ColorSpace>(color_space)?)
 }

@@ -1,12 +1,8 @@
 use bytes::Bytes;
 use pdf_graphics::color::Color;
-use pdf_object_reader::{
-    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
-use crate::{
-    color_space::ColorSpace, color_space_reader::parse_color_space_object, error::ColorSpaceError,
-};
+use crate::{color_space::ColorSpace, error::ColorSpaceError};
 
 /// ICC profile-based color space.
 ///
@@ -26,46 +22,35 @@ pub struct ICCBasedColorSpace {
     pub profile_data: Bytes,
 }
 
-/// Parses an ICCBased color space: `[/ICCBased stream]`
+/// Reads the stream operand of an ICCBased color space, `[/ICCBased stream]`.
 ///
 /// The stream dictionary must contain an `/N` entry (1, 3, or 4).
 /// The optional `/Alternate` entry names the fallback color space.
-pub(crate) fn parse_icc_based_color_space(
-    objects: &dyn ObjectResolver,
-    arr: &[ObjectVariant],
-    depth: usize,
-) -> Result<ColorSpace, ColorSpaceError> {
-    // Expected format: [/ICCBased icc-stream]
-    let [_, icc_stream] = arr else {
-        return Err(ColorSpaceError::InvalidColorSpace {
-            description: format!("/ICCBased requires 2 elements, found {}", arr.len()),
-        });
-    };
+impl FromPdfObject for ICCBasedColorSpace {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut stream = context.stream()?;
+        let profile_data = stream.stream().shared_data();
+        let mut dictionary = stream.dictionary();
+        let num_components = dictionary.required::<usize>(b"N")?;
 
-    let stream = icc_stream.try_stream(objects)?;
-    let num_components = stream.dictionary.required_number::<usize>(b"N", objects)?;
+        // N shall be 1, 3, or 4.
+        if !matches!(num_components, 1 | 3 | 4) {
+            return Err(ColorSpaceError::InvalidColorSpace {
+                description: format!("/ICCBased /N must be 1, 3, or 4; found {num_components}"),
+            }
+            .into());
+        }
 
-    // N shall be 1, 3, or 4.
-    if !matches!(num_components, 1 | 3 | 4) {
-        return Err(ColorSpaceError::InvalidColorSpace {
-            description: format!("/ICCBased /N must be 1, 3, or 4; found {num_components}"),
-        });
+        let alternate_space = dictionary
+            .optional::<ColorSpace>(b"Alternate")?
+            .map(Box::new);
+
+        Ok(Self {
+            num_components,
+            alternate_space,
+            profile_data,
+        })
     }
-
-    let alternate_space = stream
-        .dictionary
-        .get(b"Alternate")
-        .map(|alt| parse_color_space_object(objects, alt, depth))
-        .transpose()?
-        .map(Box::new);
-
-    let profile_data = stream.shared_data();
-
-    Ok(ColorSpace::ICCBased(ICCBasedColorSpace {
-        num_components,
-        alternate_space,
-        profile_data,
-    }))
 }
 
 impl ICCBasedColorSpace {
@@ -95,11 +80,12 @@ mod tests {
     use bytes::Bytes;
     use pdf_graphics::color::Color;
     use pdf_object_reader::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver,
+        ObjectReader, dictionary::Dictionary, object_resolver::PassthroughResolver,
         object_variant::ObjectVariant, stream::StreamObject,
     };
 
-    use super::{ICCBasedColorSpace, parse_icc_based_color_space};
+    use super::ICCBasedColorSpace;
+    use crate::color_space::ColorSpace;
 
     fn icc_based(num_components: usize) -> ICCBasedColorSpace {
         ICCBasedColorSpace {
@@ -118,17 +104,21 @@ mod tests {
             vec![1, 2, 3, 4],
         );
         let stream_data = stream.shared_data();
-        let array = [
-            pdf_object_reader::pdf_string::PdfString::from(
-                b"ICCBased".to_vec(),
-                pdf_object_reader::string_kind::StringKind::Name,
-            ),
-            ObjectVariant::Stream(stream),
-        ];
+        let array = ObjectVariant::Array(
+            vec![
+                pdf_object_reader::pdf_string::PdfString::from(
+                    b"ICCBased".to_vec(),
+                    pdf_object_reader::string_kind::StringKind::Name,
+                ),
+                ObjectVariant::Stream(stream),
+            ]
+            .into(),
+        );
 
-        let parsed = parse_icc_based_color_space(&PassthroughResolver, &array, 0)
+        let parsed = ObjectReader::new(&PassthroughResolver)
+            .read::<ColorSpace>(&array)
             .expect("ICCBased color space should parse");
-        let crate::color_space::ColorSpace::ICCBased(icc_based) = parsed else {
+        let ColorSpace::ICCBased(icc_based) = parsed else {
             panic!("expected ICCBased color space");
         };
 

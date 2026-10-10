@@ -1,11 +1,7 @@
 use pdf_graphics::color::Color;
-use pdf_object_reader::{
-    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
-use crate::{
-    cie_color_space::CieColorSpaceParams, color_space::ColorSpace, error::ColorSpaceError,
-};
+use crate::{cie_color_space::CieColorSpaceParams, error::ColorSpaceError};
 
 /// Calibrated Gray color space.
 ///
@@ -21,29 +17,21 @@ pub struct CalGrayColorSpace {
     pub gamma: f32,
 }
 
-/// Parses a CalGray color space: `[/CalGray dict]`
-pub(crate) fn parse_cal_gray_color_space(
-    objects: &dyn ObjectResolver,
-    arr: &[ObjectVariant],
-) -> Result<ColorSpace, ColorSpaceError> {
-    let [_, dict_obj] = arr else {
-        return Err(ColorSpaceError::InvalidColorSpace {
-            description: format!("/CalGray requires 2 elements, found {}", arr.len()),
-        });
-    };
-    let dict = dict_obj.try_dictionary(objects)?;
-    let CieColorSpaceParams {
-        white_point,
-        black_point,
-    } = CieColorSpaceParams::from_dictionary(dict, objects)?;
-    let gamma = dict
-        .optional_number::<f32>(b"Gamma", objects)?
-        .unwrap_or(1.0);
-    Ok(ColorSpace::CalGray(CalGrayColorSpace {
-        white_point,
-        black_point,
-        gamma,
-    }))
+/// Reads the dictionary operand of a CalGray color space, `[/CalGray dict]`.
+impl FromPdfObject for CalGrayColorSpace {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
+        let CieColorSpaceParams {
+            white_point,
+            black_point,
+        } = CieColorSpaceParams::read(&mut dictionary)?;
+        let gamma = dictionary.optional(b"Gamma")?.unwrap_or(1.0);
+        Ok(Self {
+            white_point,
+            black_point,
+            gamma,
+        })
+    }
 }
 
 impl CalGrayColorSpace {

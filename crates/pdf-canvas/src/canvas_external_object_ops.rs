@@ -52,7 +52,7 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
             PdfCanvasError::XObjectNotFound(String::from_utf8_lossy(xobject_name).into_owned())
         })?;
 
-        match xobj {
+        match xobj.as_ref() {
             Resource::Image(image) => self.render_image_xobject(image)?,
             Resource::UnavailableImage => {}
             Resource::Form(form) => {

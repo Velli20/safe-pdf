@@ -157,9 +157,14 @@ fn nodes(resources: &Resources) -> Vec<Result<Node, String>> {
     for (name, handle) in sorted(&resources.fonts) {
         nodes.push(font_node(name, handle).transpose());
     }
-    for (name, resource) in sorted(&resources.xobjects) {
-        if let Resource::Form(handle) = resource {
-            nodes.push(Some(form_node(&format!("form /{name}"), handle)));
+    for (name, handle) in sorted(&resources.xobjects) {
+        match handle.get() {
+            Ok(resource) => {
+                if let Resource::Form(form) = resource.as_ref() {
+                    nodes.push(Some(form_node(&format!("form /{name}"), form)));
+                }
+            }
+            Err(error) => nodes.push(Some(Err(format!("xobject /{name}: unreadable ({error})")))),
         }
     }
     for (name, resource) in sorted(&resources.patterns) {

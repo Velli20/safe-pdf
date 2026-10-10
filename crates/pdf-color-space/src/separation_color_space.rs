@@ -1,10 +1,8 @@
 use pdf_function::function::{Function, FunctionImpl};
 use pdf_graphics::color::Color;
-use pdf_object_reader::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
-use crate::{
-    color_space::ColorSpace, color_space_reader::parse_color_space_object, error::ColorSpaceError,
-};
+use crate::{color_space::ColorSpace, error::ColorSpaceError};
 
 /// Separation color space.
 ///
@@ -21,28 +19,29 @@ pub struct SeparationColorSpace {
     pub tint_transform: Function,
 }
 
-/// Parses a Separation color space: `[/Separation name alternateSpace tintTransform]`
-pub(crate) fn parse_separation_color_space(
-    objects: &dyn ObjectResolver,
-    arr: &[ObjectVariant],
-    depth: usize,
-) -> Result<ColorSpace, ColorSpaceError> {
-    // Expected format: [/Separation name alternateSpace tintTransform]
-    let [_, name, alternate_space, tint_transform] = arr else {
-        return Err(ColorSpaceError::InvalidColorSpace {
-            description: format!("/Separation requires 4 elements, found {}", arr.len()),
-        });
-    };
+/// Reads a Separation color space: `[/Separation name alternateSpace tintTransform]`
+impl FromPdfObject for SeparationColorSpace {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut array = context.array()?;
+        let [_, name, _, tint_transform] = array.array().as_slice() else {
+            return Err(ColorSpaceError::InvalidColorSpace {
+                description: format!(
+                    "/Separation requires 4 elements, found {}",
+                    array.array().len()
+                ),
+            }
+            .into());
+        };
 
-    let name = Vec::from(name.try_bytes(objects)?);
-    let alternate_space = parse_color_space_object(objects, alternate_space, depth)?;
-    let tint_transform = Function::parse(objects.resolve_object(tint_transform)?, objects)?;
-
-    Ok(ColorSpace::Separation(SeparationColorSpace {
-        name,
-        alternate_space: Box::new(alternate_space),
-        tint_transform,
-    }))
+        let alternate_space = Box::new(array.at(2)?);
+        let tint_transform = array.resolve(tint_transform)?;
+        Ok(Self {
+            name: Vec::from(name.try_bytes(array.source())?),
+            alternate_space,
+            tint_transform: Function::parse(tint_transform.value(), array.source())
+                .map_err(ColorSpaceError::from)?,
+        })
+    }
 }
 
 impl SeparationColorSpace {

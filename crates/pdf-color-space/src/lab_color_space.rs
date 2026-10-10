@@ -1,11 +1,7 @@
 use pdf_graphics::color::Color;
-use pdf_object_reader::{
-    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
-use crate::{
-    cie_color_space::CieColorSpaceParams, color_space::ColorSpace, error::ColorSpaceError,
-};
+use crate::{cie_color_space::CieColorSpaceParams, error::ColorSpaceError};
 
 /// CIE 1976 L*a*b* color space.
 ///
@@ -22,32 +18,26 @@ pub struct LabColorSpace {
     pub range: [f32; 4],
 }
 
-/// Parses a Lab color space: `[/Lab dict]`
+/// Reads the dictionary operand of a Lab color space, `[/Lab dict]`.
 ///
 /// The dictionary must contain a `WhitePoint` entry and may contain `BlackPoint`
 /// and `Range` entries.
-pub(crate) fn parse_lab_color_space(
-    objects: &dyn ObjectResolver,
-    arr: &[ObjectVariant],
-) -> Result<ColorSpace, ColorSpaceError> {
-    let [_, dict_obj] = arr else {
-        return Err(ColorSpaceError::InvalidColorSpace {
-            description: format!("/Lab requires 2 elements, found {}", arr.len()),
-        });
-    };
-    let dict = dict_obj.try_dictionary(objects)?;
-    let CieColorSpaceParams {
-        white_point,
-        black_point,
-    } = CieColorSpaceParams::from_dictionary(dict, objects)?;
-    let range = dict
-        .optional_array_of::<f32, 4>(b"Range", objects)?
-        .unwrap_or([-100.0, 100.0, -100.0, 100.0]);
-    Ok(ColorSpace::Lab(LabColorSpace {
-        white_point,
-        black_point,
-        range,
-    }))
+impl FromPdfObject for LabColorSpace {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
+        let CieColorSpaceParams {
+            white_point,
+            black_point,
+        } = CieColorSpaceParams::read(&mut dictionary)?;
+        let range = dictionary
+            .optional(b"Range")?
+            .unwrap_or([-100.0, 100.0, -100.0, 100.0]);
+        Ok(Self {
+            white_point,
+            black_point,
+            range,
+        })
+    }
 }
 
 impl LabColorSpace {
