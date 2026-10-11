@@ -33,7 +33,7 @@ use pdf_object_reader::{
     trailer::Trailer,
 };
 
-use crate::{error::ParserError, parser::PdfParser};
+use crate::{error::ParserError, parser::PdfParser, stream_recovery::direct_stream_length};
 
 const TRAILER_KEYWORD: &[u8] = b"trailer";
 const STREAM_KEYWORD: &[u8] = b"stream";
@@ -197,7 +197,7 @@ impl<'input> LinearObjectScanner<'input> {
     ///
     /// The cross-reference table does not exist yet, so ordinary references are parsed
     /// through [`PassthroughResolver`] and are not followed. For stream objects, the
-    /// value must be a dictionary and [`PdfParser::skip_stream_recovering`] locates the
+    /// value must be a dictionary and [`PdfParser::recover_stream_range`] locates the
     /// containing `endstream` without resolving an indirect `/Length`. Stream objects
     /// require an explicit `endobj`, preventing recovered stream terminators from
     /// swallowing or manufacturing adjacent objects. Non-stream objects retain the
@@ -230,7 +230,7 @@ impl<'input> LinearObjectScanner<'input> {
             let ObjectVariant::Dictionary(dictionary) = object else {
                 return Err(ParserError::StreamObjectWithoutDictionary);
             };
-            probe.skip_stream_recovering(&dictionary)?;
+            probe.recover_stream_range(direct_stream_length(&dictionary))?;
             probe.consume_required_endobj()?;
             let is_rooted_xref_stream = dictionary
                 .optional_bytes(b"Type", &PassthroughResolver)
