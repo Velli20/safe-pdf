@@ -1,13 +1,11 @@
 //! Embedded program selection and format handling, separate from font metadata.
 
-use bytes::Bytes;
 use pdf_object_reader::{
     DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
 };
 use std::sync::Arc;
 
 use crate::{
-    cff_builder::build_cff_font,
     error::FontError,
     font::{FontProgramFormat, FontSource},
 };
@@ -26,7 +24,7 @@ pub(crate) struct Type1Program(FontSource);
 pub(crate) struct TrueTypeProgram(FontSource);
 /// CID-keyed CFF program stored in FontFile3.
 pub(crate) struct CidCffProgram(FontSource);
-/// Simple CFF stream whose standalone data needs an OpenType wrapper.
+/// Simple-font CFF stream, either bare CFF or an OpenType container.
 struct SimpleCffProgram(FontSource);
 /// Raw Type 1 stream.
 struct RawType1Program(FontSource);
@@ -93,11 +91,9 @@ impl FromPdfObject for SimpleCffProgram {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.stream()?;
         let subtype = context.dictionary().optional::<Arc<[u8]>>(b"Subtype")?;
-        let data = match subtype.as_deref().unwrap_or(b"OpenType") {
-            b"Type1C" | b"CIDFontType0C" => {
-                Bytes::from(build_cff_font(context.stream().raw_data())?)
-            }
-            b"OpenType" => context.stream().shared_data(),
+        let format = match subtype.as_deref().unwrap_or(b"OpenType") {
+            b"Type1C" | b"CIDFontType0C" => FontProgramFormat::Cff,
+            b"OpenType" => FontProgramFormat::OpenTypeCff,
             other => {
                 return Err(FontError::UnsupportedFontSubtype {
                     subtype: String::from_utf8_lossy(other).into_owned(),
@@ -106,8 +102,8 @@ impl FromPdfObject for SimpleCffProgram {
             }
         };
         Ok(Self(FontSource::Memory {
-            data,
-            format: FontProgramFormat::OpenTypeCff,
+            data: context.stream().shared_data(),
+            format,
             face_index: 0,
         }))
     }
@@ -199,14 +195,14 @@ mod tests {
     }
 
     #[test]
-    fn simple_type1c_is_still_wrapped_as_open_type() {
+    fn simple_type1c_remains_raw_cff() {
         let descriptor = descriptor_with_cff(b"Type1C", b"raw-cff");
         let source = ObjectReader::new(PassthroughResolver)
             .read::<ProgramFixture<Type1Program>>(&ObjectVariant::Dictionary(descriptor))
-            .expect("the simple CFF source should be wrapped");
+            .expect("the raw simple CFF source should parse");
         let (data, format) = memory_source(source.0.into_source());
 
-        assert_eq!(format, FontProgramFormat::OpenTypeCff);
-        assert_ne!(data.as_ref(), b"raw-cff");
+        assert_eq!(format, FontProgramFormat::Cff);
+        assert_eq!(data.as_ref(), b"raw-cff");
     }
 }

@@ -30,12 +30,12 @@ fn benchmark(c: &mut Criterion) {
     let PdfFontSpec::Type1(simple) = font else {
         unreachable!("Helvetica should create a simple Type 1 specification");
     };
-    let font = PdfFontSpec::TrueType(pdf_font::SimpleFontSpec {
+    let font = PdfFontSpec::Type1(pdf_font::SimpleFontSpec {
         program: Some(FontSource::Memory {
             data: Bytes::from_static(pdf_font::standard14::fallback_font_bytes(
                 pdf_font::Standard14Font::Helvetica,
             )),
-            format: FontProgramFormat::TrueType,
+            format: FontProgramFormat::Cff,
             face_index: 0,
         }),
         ..simple
