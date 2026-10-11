@@ -1,5 +1,5 @@
 pub mod base_encoding;
-mod cff_builder;
+pub mod cff;
 pub mod encoding;
 pub mod error;
 pub mod fallback;

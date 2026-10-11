@@ -17,6 +17,7 @@ pub use system::FontSystem;
 pub fn bundled_font_system() -> std::sync::Arc<FontSystem> {
     let mut registry = pdf_font::FontRegistry::new();
     registry.register(std::sync::Arc::new(pdf_font::type1::Type1FontDriver::new()));
+    registry.register(std::sync::Arc::new(pdf_font::cff::CffFontDriver::new()));
     registry.register(std::sync::Arc::new(pdf_font::type0::Type0FontDriver::new()));
     registry.register(std::sync::Arc::new(
         pdf_font::true_type::TrueTypeFontDriver::new(),

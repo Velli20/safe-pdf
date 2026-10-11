@@ -211,8 +211,8 @@ impl FallbackProvider for BundledFallbackProvider {
             return Ok(Vec::new());
         };
         let mut candidates = vec![fallback_candidate(pdf_font, request.requested)];
-        // The CJK face also covers symbols, such as card suits and dingbats, that the
-        // Latin substitutes lack.
+        // The CJK face also covers Greek, Cyrillic, and symbols, such as card suits, that the
+        // Western Latin substitutes lack.
         if !pdf_font.is_cjk_spec() {
             candidates.push(cjk_candidate(request.requested));
         }
@@ -220,19 +220,27 @@ impl FallbackProvider for BundledFallbackProvider {
     }
 }
 
+impl PdfFontSpec {
+    /// Returns the Standard 14 identity whose bundled face substitutes for this font.
+    fn substitute_standard14(&self) -> Standard14Font {
+        match self {
+            PdfFontSpec::Type1(font)
+            | PdfFontSpec::MultipleMasterType1(font)
+            | PdfFontSpec::TrueType(font) => font.standard14.unwrap_or_default(),
+            _ => Standard14Font::Helvetica,
+        }
+    }
+}
+
 fn fallback_candidate(spec: &PdfFontSpec, metadata: &FontMetadata) -> FallbackCandidate {
-    let standard14 = match spec {
-        PdfFontSpec::Type1(font)
-        | PdfFontSpec::MultipleMasterType1(font)
-        | PdfFontSpec::TrueType(font) => font.standard14.unwrap_or_default(),
-        _ => Standard14Font::Helvetica,
-    };
     if spec.is_cjk_spec() {
         return cjk_candidate(metadata);
     }
     memory_candidate(
-        Bytes::from_static(crate::standard14::fallback_font_bytes(standard14)),
-        FontProgramFormat::TrueType,
+        Bytes::from_static(crate::standard14::fallback_font_bytes(
+            spec.substitute_standard14(),
+        )),
+        FontProgramFormat::Cff,
         metadata,
     )
 }

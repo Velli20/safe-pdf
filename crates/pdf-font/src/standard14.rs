@@ -65,31 +65,38 @@ impl std::fmt::Display for Standard14Font {
     }
 }
 
-/// Returns the bundled TrueType substitute for a Standard 14 identity.
+/// Returns the bundled CFF substitute for a Standard 14 identity.
+///
+/// These are the name-keyed CFF programs PDFium draws the Standard 14 fonts with; see
+/// `assets/LICENSE_FOXIT`. Their glyph set covers Western Latin, so characters outside it
+/// fall back to the bundled Noto Sans CJK face.
 #[must_use]
 pub fn fallback_font_bytes(font: Standard14Font) -> &'static [u8] {
     match font {
-        Standard14Font::Courier => include_bytes!("../../pdf-font/assets/RobotoMono-Regular.ttf"),
-        Standard14Font::CourierBold => include_bytes!("../../pdf-font/assets/RobotoMono-Bold.ttf"),
+        Standard14Font::Courier => include_bytes!("../../pdf-font/assets/FoxitFixed.cff"),
+        Standard14Font::CourierBold => include_bytes!("../../pdf-font/assets/FoxitFixedBold.cff"),
         Standard14Font::CourierOblique => {
-            include_bytes!("../../pdf-font/assets/RobotoMono-Italic.ttf")
+            include_bytes!("../../pdf-font/assets/FoxitFixedItalic.cff")
         }
         Standard14Font::CourierBoldOblique => {
-            include_bytes!("../../pdf-font/assets/RobotoMono-BoldItalic.ttf")
+            include_bytes!("../../pdf-font/assets/FoxitFixedBoldItalic.cff")
         }
-        Standard14Font::Helvetica
-        | Standard14Font::Symbol
-        | Standard14Font::ZapfDingbats
-        | Standard14Font::TimesRoman => include_bytes!("../../pdf-font/assets/Roboto-Regular.ttf"),
-        Standard14Font::HelveticaBold | Standard14Font::TimesBold => {
-            include_bytes!("../../pdf-font/assets/Roboto-Bold.ttf")
+        Standard14Font::Helvetica => include_bytes!("../../pdf-font/assets/FoxitSans.cff"),
+        Standard14Font::HelveticaBold => include_bytes!("../../pdf-font/assets/FoxitSansBold.cff"),
+        Standard14Font::HelveticaOblique => {
+            include_bytes!("../../pdf-font/assets/FoxitSansItalic.cff")
         }
-        Standard14Font::HelveticaOblique | Standard14Font::TimesItalic => {
-            include_bytes!("../../pdf-font/assets/Roboto-Italic.ttf")
+        Standard14Font::HelveticaBoldOblique => {
+            include_bytes!("../../pdf-font/assets/FoxitSansBoldItalic.cff")
         }
-        Standard14Font::HelveticaBoldOblique | Standard14Font::TimesBoldItalic => {
-            include_bytes!("../../pdf-font/assets/Roboto-BoldItalic.ttf")
+        Standard14Font::TimesRoman => include_bytes!("../../pdf-font/assets/FoxitSerif.cff"),
+        Standard14Font::TimesBold => include_bytes!("../../pdf-font/assets/FoxitSerifBold.cff"),
+        Standard14Font::TimesItalic => include_bytes!("../../pdf-font/assets/FoxitSerifItalic.cff"),
+        Standard14Font::TimesBoldItalic => {
+            include_bytes!("../../pdf-font/assets/FoxitSerifBoldItalic.cff")
         }
+        Standard14Font::Symbol => include_bytes!("../../pdf-font/assets/FoxitSymbol.cff"),
+        Standard14Font::ZapfDingbats => include_bytes!("../../pdf-font/assets/FoxitDingbats.cff"),
     }
 }
 
