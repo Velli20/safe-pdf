@@ -84,6 +84,114 @@ pub fn rgba(image: &Image) -> Result<Vec<u8>, ImageRasterError> {
     Ok(data)
 }
 
+/// Combines an image with a soft mask of a different size into `width` ×
+/// `height` straight RGBA pixels, in one pass.
+///
+/// Each output pixel takes its color from the image pixel it falls in and
+/// multiplies that pixel's alpha by the mask coverage averaged over a 2 × 2
+/// grid of samples spread across the mask area it covers. Enlarging thus
+/// replicates pixels, while shrinking a mask keeps detail finer than the
+/// output, such as thin strokes, as partial coverage, at a cost bounded by the
+/// output size however large the mask is. Unlike the public operations this
+/// accepts the short buffers decoders may produce: pixels missing from either
+/// source read as zero.
+///
+/// # Errors
+///
+/// Returns a resource-limit error if the output byte count overflows or its
+/// allocation fails.
+pub(crate) fn resample_with_soft_mask(
+    image: &Image,
+    mask: &Image,
+    width: usize,
+    height: usize,
+) -> Result<Vec<u8>, ImageRasterError> {
+    let byte_len = width
+        .checked_mul(height)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or(ImageRasterError::ResourceLimit)?;
+    let mut data = Vec::new();
+    data.try_reserve_exact(byte_len)
+        .map_err(|_| ImageRasterError::ResourceLimit)?;
+    let columns: Vec<_> = (0..width)
+        .map(|x| {
+            let [image_column, _] = sample_positions(x, image.width, width);
+            (image_column, sample_positions(x, mask.width, width))
+        })
+        .collect();
+    for y in 0..height {
+        let [image_row, _] = sample_positions(y, image.height, height);
+        let image_row_start = image_row.saturating_mul(image.width);
+        let mask_row_starts =
+            sample_positions(y, mask.height, height).map(|row| row.saturating_mul(mask.width));
+        for (image_column, mask_columns) in &columns {
+            let [r, g, b, alpha] = pixel_at(image, image_row_start.saturating_add(*image_column));
+            let coverage = average_coverage(mask, mask_row_starts, mask_columns);
+            let alpha = u16::from(alpha).saturating_mul(u16::from(coverage)) / 255;
+            data.extend_from_slice(&[r, g, b, u8::try_from(alpha).unwrap_or(u8::MAX)]);
+        }
+    }
+    Ok(data)
+}
+
+/// Averages the soft-mask coverage of the mask pixels at each pair of a row
+/// start and a column.
+fn average_coverage(mask: &Image, row_starts: [usize; 2], columns: &[usize; 2]) -> u8 {
+    let mut total = 0_u16;
+    for row_start in row_starts {
+        for &column in columns {
+            let coverage = soft_mask_coverage(pixel_at(mask, row_start.saturating_add(column)));
+            total = total.saturating_add(u16::from(coverage));
+        }
+    }
+    u8::try_from(total / 4).unwrap_or(u8::MAX)
+}
+
+/// Returns the coverage a straight RGBA soft-mask pixel gives.
+///
+/// Expanded Gray8 has alpha 255, so this is its original sample. RGBA masks
+/// keep integer truncation rather than luminosity weighting.
+pub(crate) fn soft_mask_coverage([gray, _, _, alpha]: [u8; 4]) -> u8 {
+    let coverage = u16::from(gray).saturating_mul(u16::from(alpha)) / 255;
+    u8::try_from(coverage).unwrap_or(u8::MAX)
+}
+
+/// Returns two source rows or columns spread over the span that output row or
+/// column `index` covers when `source_len` of them are scaled to `len`.
+///
+/// A span of one gives that one twice.
+fn sample_positions(index: usize, source_len: usize, len: usize) -> [usize; 2] {
+    let scale = |index: usize| {
+        index
+            .saturating_mul(source_len)
+            .checked_div(len)
+            .unwrap_or(0)
+    };
+    let start = scale(index);
+    let span = scale(index.saturating_add(1)).saturating_sub(start);
+    [span / 4, span.saturating_mul(3) / 4].map(|offset| start.saturating_add(offset))
+}
+
+/// Reads one pixel as straight RGBA, expanding Gray8 to opaque RGB.
+///
+/// A pixel beyond the end of the buffer reads as zero.
+fn pixel_at(image: &Image, index: usize) -> [u8; 4] {
+    match image.pixel_format {
+        PixelFormat::Gray8 => image
+            .data
+            .get(index)
+            .map_or([0; 4], |&gray| [gray, gray, gray, 255]),
+        PixelFormat::RGBA8888 => {
+            let start = index.saturating_mul(4);
+            image
+                .data
+                .get(start..start.saturating_add(4))
+                .and_then(|pixel| <[u8; 4]>::try_from(pixel).ok())
+                .unwrap_or([0; 4])
+        }
+    }
+}
+
 /// Creates a white RGBA mask whose alpha is the source RGB luminosity.
 ///
 /// Uses straight RGB independently of source alpha, expanding Gray8 first.

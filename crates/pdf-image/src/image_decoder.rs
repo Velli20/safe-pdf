@@ -7,6 +7,7 @@ use crate::InlineImage;
 use crate::decoded_samples::DecodedSamples;
 use crate::error::PdfImageError;
 use crate::image_metadata::ImageMetadata;
+use crate::raster;
 
 /// Parses an Image XObject from a PDF stream dictionary and data.
 pub fn read_xobject(
@@ -78,28 +79,83 @@ fn decode_normalized_image_with_metadata(
     // multiplied into alpha that already describes the image.
     let soft_mask = soft_mask.filter(|_| !metadata.smask_in_data.overrides_soft_mask());
     let decoded_samples = DecodedSamples::decode(payload, metadata)?;
+    let size = (metadata.size.width(), metadata.size.height());
+    match soft_mask {
+        Some(mask) if (mask.width, mask.height) != size => {
+            let image = render_ready_image(decoded_samples, None, metadata);
+            apply_resized_soft_mask(&image, mask)
+        }
+        _ => Ok(render_ready_image(decoded_samples, soft_mask, metadata)),
+    }
+}
+
+/// Builds a render image from decoded samples whose soft mask, if any, has the image's size.
+fn render_ready_image(
+    decoded_samples: DecodedSamples,
+    soft_mask: Option<&Image>,
+    metadata: &ImageMetadata,
+) -> Image {
     let DecodedSamples {
         num_color_components,
         image_data,
         is_rgba,
     } = decoded_samples;
     if is_rgba {
-        return Ok(image_from_rgba(
+        return image_from_rgba(
             image_data,
             metadata.size.width(),
             metadata.size.height(),
             soft_mask,
             metadata.interpolate,
-        ));
+        );
     }
-    Ok(Image::from_decoded_samples(
+    Image::from_decoded_samples(
         image_data,
         metadata.size.width(),
         metadata.size.height(),
         num_color_components,
         soft_mask,
         metadata.interpolate,
-    ))
+    )
+}
+
+/// Most pixels an image combined with a soft mask of a different size is
+/// given, unless the image alone already has more.
+///
+/// A mask can be far finer than the area it is drawn on, and the combined
+/// image is held in memory and uploaded for drawing at its full size.
+const MAX_COMBINED_PIXELS: usize = 1 << 22;
+
+/// Combines an image with a soft mask of different dimensions.
+///
+/// Both cover the same unit square, so they are combined at the larger width
+/// and the larger height, which keeps the detail of a fine mask over a coarse
+/// color image and the reverse. A size beyond [`MAX_COMBINED_PIXELS`] is
+/// reduced, with the finer mask averaged down to it.
+fn apply_resized_soft_mask(image: &Image, mask: &Image) -> Result<Image, PdfImageError> {
+    let (width, height) = combined_size(image, mask);
+    Ok(Image {
+        data: raster::resample_with_soft_mask(image, mask, width, height)?.into(),
+        width,
+        height,
+        pixel_format: pdf_graphics::PixelFormat::RGBA8888,
+        interpolate: image.interpolate,
+    })
+}
+
+/// Returns the size an image and its differently sized soft mask are combined at.
+///
+/// That is the larger width and the larger height, divided by the smallest
+/// whole factor that brings the pixel count within [`MAX_COMBINED_PIXELS`] or
+/// the image's own pixel count, whichever is larger.
+fn combined_size(image: &Image, mask: &Image) -> (usize, usize) {
+    let width = image.width.max(mask.width);
+    let height = image.height.max(mask.height);
+    let limit = MAX_COMBINED_PIXELS.max(image.width.saturating_mul(image.height));
+    (1..=width.max(height))
+        .map(|factor| (width.div_ceil(factor), height.div_ceil(factor)))
+        .find(|(width, height)| width.saturating_mul(*height) <= limit)
+        .unwrap_or((1, 1))
 }
 
 /// Builds a render image from color-space-converted RGBA and combines its alpha with `/SMask`.
@@ -151,12 +207,7 @@ fn image_from_rgba(
 /// Incomplete RGBA pixels are ignored. The caller zips these values with output
 /// pixels, leaving destination alpha unchanged when the mask ends early.
 fn soft_mask_alphas(mask: &Image) -> impl Iterator<Item = u8> + '_ {
-    crate::raster::rgba_pixels(mask).map(|[gray, _, _, alpha]| {
-        // Expanded Gray8 has alpha 255, so this preserves its original sample.
-        // RGBA masks retain integer truncation rather than luminosity weighting.
-        let combined = u16::from(gray).saturating_mul(u16::from(alpha)) / 255;
-        u8::try_from(combined).unwrap_or(u8::MAX)
-    })
+    raster::rgba_pixels(mask).map(raster::soft_mask_coverage)
 }
 
 #[cfg(test)]

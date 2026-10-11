@@ -25,6 +25,8 @@ pub enum PdfImageError {
     UnsupportedSMaskInData { value: i64 },
     #[error("invalid soft mask XObject: /SMask must reference an image XObject")]
     InvalidSoftMaskXObject,
+    #[error("{0}")]
+    Raster(#[from] ImageRasterError),
     #[error("invalid image dimensions: width={width}, height={height}")]
     InvalidImageDimensions { width: usize, height: usize },
     #[error(
