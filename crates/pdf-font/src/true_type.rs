@@ -8,7 +8,11 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use read_fonts::{TableProvider, tables::post::DEFAULT_GLYPH_NAMES, types::Version16Dot16};
+use read_fonts::{
+    TableProvider,
+    tables::{cmap::PlatformId, post::DEFAULT_GLYPH_NAMES},
+    types::Version16Dot16,
+};
 use self_cell::self_cell;
 use skrifa::{
     FontRef, GlyphNames, MetadataProvider,
@@ -51,6 +55,22 @@ impl<'a> TrueTypeProgramRef<'a> {
             glyph_names,
             outlines,
         })
+    }
+
+    /// Looks up a character code in the cmap subtable with the given platform and encoding.
+    ///
+    /// Glyph zero is `.notdef`, so it counts as a miss.
+    fn code_glyph(&self, platform: PlatformId, encoding: u16, code: u32) -> Option<GlyphId> {
+        let cmap = self.font.cmap().ok()?;
+        let record = cmap
+            .encoding_records()
+            .iter()
+            .find(|record| record.platform_id() == platform && record.encoding_id() == encoding)?;
+        let glyph = record
+            .subtable(cmap.offset_data())
+            .ok()?
+            .map_codepoint(code)?;
+        (glyph.to_u32() != 0).then(|| GlyphId(glyph.to_u32()))
     }
 }
 
@@ -228,6 +248,17 @@ impl FontFace for TrueTypeFontFace {
 
     fn glyph_for_name(&self, name: &GlyphName) -> Option<GlyphId> {
         self.resolve_glyph_name(name)
+    }
+
+    /// Looks the code up in a (3,0) Microsoft Symbol subtable, directly and in the `0xF000`
+    /// private-use range, then in a (1,0) Macintosh Roman subtable.
+    fn glyph_for_code(&self, code: u8) -> Option<GlyphId> {
+        let program = self.program.borrow_dependent();
+        let code = u32::from(code);
+        program
+            .code_glyph(PlatformId::Windows, 0, code)
+            .or_else(|| program.code_glyph(PlatformId::Windows, 0, 0xF000 | code))
+            .or_else(|| program.code_glyph(PlatformId::Macintosh, 0, code))
     }
 
     fn horizontal_advance(&self, glyph: GlyphId) -> Result<Option<f32>, FontError> {

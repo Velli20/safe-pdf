@@ -275,12 +275,7 @@ fn resolve_glyph(
     cache: &mut FallbackCache,
     decoded: &DecodedGlyph<'_>,
 ) -> Result<ResolvedGlyph, TextError> {
-    if let Some(glyph_id) = select_glyph(
-        font.primary().as_ref(),
-        &decoded.selector,
-        decoded.unicode.as_slice(),
-        font.uses_substitute(),
-    ) {
+    if let Some(glyph_id) = select_glyph(font.primary().as_ref(), decoded, font.uses_substitute()) {
         return Ok(ResolvedGlyph {
             face: ResolvedFace::Primary,
             glyph_id,
@@ -366,26 +361,41 @@ fn fallback_fit(
 ///
 /// Whole-font substitutes prefer Unicode because embedded glyph IDs, names, and CIDs generally do
 /// not address the substitute's glyph space. Native faces try their explicit PDF selector first,
-/// then use the first Unicode scalar as a recovery path.
+/// then use the first Unicode scalar as a recovery path. Without an explicit selector, a one-byte
+/// code is looked up in the face's code-keyed cmap subtables: before Unicode for a symbolic font,
+/// whose codes address those subtables directly, and after it otherwise.
 fn select_glyph(
     face: &dyn FontFace,
-    selector: &GlyphSelector<'_>,
-    unicode: &[char],
+    decoded: &DecodedGlyph<'_>,
     prefer_unicode: bool,
 ) -> Option<GlyphId> {
     let unicode_glyph = || {
-        unicode
+        decoded
+            .unicode
+            .as_slice()
             .first()
             .and_then(|character| face.glyph_for_char(*character))
     };
     if prefer_unicode && let Some(glyph) = unicode_glyph() {
         return Some(glyph);
     }
-    let selected = match selector {
+    let selected = match &decoded.selector {
         GlyphSelector::GlyphId(glyph) => Some(*glyph),
         GlyphSelector::GlyphName(name) => face.glyph_for_name(name),
         GlyphSelector::Cid(Cid(cid)) => Some(GlyphId(*cid)),
-        GlyphSelector::Unspecified => None,
+        GlyphSelector::Unspecified => {
+            let code_glyph = || {
+                (decoded.source_code.byte_len() == 1)
+                    .then(|| u8::try_from(decoded.source_code.value()).ok())
+                    .flatten()
+                    .and_then(|code| face.glyph_for_code(code))
+            };
+            return if face.metadata().symbolic {
+                code_glyph().or_else(unicode_glyph)
+            } else {
+                unicode_glyph().or_else(code_glyph)
+            };
+        }
     };
     selected.or_else(unicode_glyph)
 }

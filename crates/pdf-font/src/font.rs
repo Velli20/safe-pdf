@@ -213,6 +213,14 @@ pub trait FontFace: Send + Sync {
     /// Resolves a PostScript glyph name when supported by the face.
     fn glyph_for_name(&self, name: &GlyphName) -> Option<GlyphId>;
 
+    /// Resolves a one-byte simple-font character code through the face's code-keyed cmap
+    /// subtables, as symbolic TrueType fonts require.
+    ///
+    /// Faces without such subtables return `None`.
+    fn glyph_for_code(&self, _code: u8) -> Option<GlyphId> {
+        None
+    }
+
     /// Returns the glyph's horizontal advance in font design units when available.
     ///
     /// PDF layout uses this only when an unrelated fallback face supplies the glyph. Native PDF
