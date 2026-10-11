@@ -1,9 +1,5 @@
 //! PDF `/Decode` map parsing and application helpers.
 
-use pdf_object_reader::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-};
-
 use crate::{error::DecodeError, range::DecodeRange};
 
 /// Stores the per-component decode ranges used to transform packed samples.
@@ -13,48 +9,26 @@ pub struct DecodeMap {
 }
 
 impl DecodeMap {
-    /// Builds a decode map from a PDF dictionary and object resolver.
-    ///
-    /// Returns `None` when the dictionary does not contain a `/Decode` entry.
-    pub fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-        component_count: usize,
-    ) -> Result<Option<Self>, DecodeError> {
-        let Some(value) = dictionary.get(b"Decode") else {
-            return Ok(None);
-        };
-        let ranges = Self::parse_object(value, objects, component_count)?;
-
-        Ok(Some(Self { ranges }))
-    }
-
-    /// Parses a `/Decode` array into per-component ranges.
+    /// Builds a decode map from the values of a `/Decode` array.
     ///
     /// Values beyond the two needed per component are ignored.
-    pub fn parse_object(
-        decode: &ObjectVariant,
-        objects: &dyn ObjectResolver,
-        component_count: usize,
-    ) -> Result<Vec<DecodeRange>, DecodeError> {
-        let array = decode.try_array(objects)?;
+    pub fn new(values: &[f32], component_count: usize) -> Result<Self, DecodeError> {
         let expected_values = component_count.saturating_mul(2);
-        let Some(values) = array.as_slice().get(..expected_values) else {
+        let Some(values) = values.get(..expected_values) else {
             return Err(DecodeError::InvalidDecodeLength {
                 expected_values,
-                actual_values: array.len(),
+                actual_values: values.len(),
             });
         };
 
-        let mut ranges = Vec::with_capacity(component_count);
-        for [min, max] in values.as_chunks::<2>().0 {
-            ranges.push(DecodeRange::new(
-                min.try_number::<f32>(objects)?,
-                max.try_number::<f32>(objects)?,
-            )?);
-        }
+        let ranges = values
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&[min, max]| DecodeRange::new(min, max))
+            .collect::<Result<_, _>>()?;
 
-        Ok(ranges)
+        Ok(Self { ranges })
     }
 
     /// Applies the decode map to packed sample bytes.
@@ -88,33 +62,11 @@ impl DecodeMap {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use std::collections::BTreeMap;
-
-    use pdf_object_reader::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
-    };
-
     use super::*;
 
     #[test]
-    fn decode_map_is_absent_without_decode_entry() {
-        let dictionary = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
-        let map = DecodeMap::from_dictionary(&dictionary, &PassthroughResolver, 2).unwrap();
-
-        assert!(map.is_none());
-    }
-
-    #[test]
     fn decode_map_rejects_invalid_length() {
-        let err = DecodeMap::from_dictionary(
-            &Dictionary::from_entries([(
-                b"Decode",
-                ObjectVariant::Array(vec![ObjectVariant::Integer(0.into())].into()),
-            )]),
-            &PassthroughResolver,
-            1,
-        )
-        .expect_err("invalid decode length should fail");
+        let err = DecodeMap::new(&[0.0], 1).expect_err("invalid decode length should fail");
 
         assert!(matches!(
             err,
@@ -127,42 +79,14 @@ mod tests {
 
     #[test]
     fn decode_map_rejects_non_finite_values() {
-        let err = DecodeMap::from_dictionary(
-            &Dictionary::from_entries([(
-                b"Decode",
-                ObjectVariant::Array(
-                    vec![
-                        ObjectVariant::Real(f64::NAN.into()),
-                        ObjectVariant::Integer(1),
-                    ]
-                    .into(),
-                ),
-            )]),
-            &PassthroughResolver,
-            1,
-        )
-        .expect_err("nan decode values should fail");
+        let err = DecodeMap::new(&[f32::NAN, 1.0], 1).expect_err("nan decode values should fail");
 
         assert!(matches!(err, DecodeError::InvalidDecodeValue));
     }
 
     #[test]
     fn decode_map_cycles_ranges_per_component() {
-        let dictionary = Dictionary::from_entries([(
-            b"Decode",
-            ObjectVariant::Array(
-                vec![
-                    ObjectVariant::Integer(0.into()),
-                    ObjectVariant::Real(0.5),
-                    ObjectVariant::Integer(1),
-                    ObjectVariant::Integer(0),
-                ]
-                .into(),
-            ),
-        )]);
-        let map = DecodeMap::from_dictionary(&dictionary, &PassthroughResolver, 2)
-            .unwrap()
-            .expect("explicit /Decode should create a map");
+        let map = DecodeMap::new(&[0.0, 0.5, 1.0, 0.0], 2).unwrap();
         let out = map.apply_to_bytes(&[255, 0, 0, 255], 255, 255);
 
         assert_eq!(out, vec![128, 255, 0, 0]);

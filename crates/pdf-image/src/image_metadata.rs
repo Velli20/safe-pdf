@@ -3,8 +3,8 @@ use pdf_decode::DecodeMap;
 use pdf_filter::filter::Filters;
 use pdf_graphics::rect::Rect;
 use pdf_object_reader::{
-    ObjectAccess, dictionary::Dictionary, object_lookup::ObjectLookupExt,
-    object_resolver::ObjectResolver,
+    DictionaryContext, ObjectAccess, ReadResult, object_error::ObjectError,
+    object_variant::ObjectVariant,
 };
 
 use crate::{error::PdfImageError, smask_in_data::SMaskInData};
@@ -41,56 +41,10 @@ impl ImageMetadata {
     const DEFAULT_JPX_BITS_PER_COMPONENT: usize = 8;
 
     /// Reads and validates normalized image metadata from an image dictionary.
-    pub(crate) fn from_dictionary(
-        dictionary: &Dictionary,
-        access: &mut (impl ObjectAccess + ?Sized),
+    pub(crate) fn read(
+        context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
     ) -> Result<Self, PdfImageError> {
-        let image_mask = dictionary
-            .optional_boolean(b"ImageMask", access.source())?
-            .unwrap_or(false);
-        let color_space = match dictionary.get(b"ColorSpace") {
-            Some(color_space) if !image_mask => Some(access.read::<ColorSpace>(color_space)?),
-            _ => None,
-        };
-        let objects = access.source();
-        let size = dictionary.required_size(objects)?;
-        let width = size.width();
-        let height = size.height();
-
-        if width == 0 || height == 0 {
-            return Err(PdfImageError::InvalidImageDimensions { width, height });
-        }
-
-        let filters = Filters::from_dictionary(dictionary, objects)?;
-        let jpx = filters.as_ref().is_some_and(Filters::has_jpx_filter);
-        let bits_per_component =
-            read_bits_per_component(dictionary, objects, image_mask, filters.as_ref())?;
-        // PDF ignores /BitsPerComponent for a JPX image: the codestream states
-        // the precision of every component, so the entry constrains nothing.
-        if !jpx {
-            validate_bits_per_component(bits_per_component, image_mask, color_space.as_ref())?;
-        }
-        let smask_in_data = dictionary
-            .optional_number::<i64>(b"SMaskInData", objects)?
-            .map_or_else(|| Ok(SMaskInData::default()), SMaskInData::try_from)?;
-        let num_color_components = color_space
-            .as_ref()
-            .map_or(1, ColorSpace::num_color_components);
-        let decode = DecodeMap::from_dictionary(dictionary, objects, num_color_components)?;
-        let interpolate = dictionary
-            .optional_boolean(b"Interpolate", objects)?
-            .unwrap_or(false);
-
-        Ok(Self {
-            size,
-            bits_per_component,
-            color_space,
-            image_mask,
-            filters,
-            decode,
-            smask_in_data,
-            interpolate,
-        })
+        Self::try_from(ImageEntries::read(context)?)
     }
 
     /// Returns the bit depth of the samples handed to the display pipeline.
@@ -102,32 +56,120 @@ impl ImageMetadata {
     }
 }
 
-/// Reads the image bit depth, applying the defaults allowed for masks and JPX images.
-fn read_bits_per_component(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
+impl TryFrom<ImageEntries> for ImageMetadata {
+    type Error = PdfImageError;
+
+    /// Applies the defaults PDF allows and rejects values the decoders cannot handle.
+    fn try_from(entries: ImageEntries) -> Result<Self, Self::Error> {
+        let missing_key = |key: &str| ObjectError::MissingRequiredKey {
+            key: key.to_string(),
+        };
+        let width = entries.width.ok_or_else(|| missing_key("Width"))?;
+        let height = entries.height.ok_or_else(|| missing_key("Height"))?;
+        if width == 0 || height == 0 {
+            return Err(PdfImageError::InvalidImageDimensions { width, height });
+        }
+
+        let bits_per_component = entries
+            .bits_per_component
+            .or_else(|| entries.default_bits_per_component())
+            .ok_or_else(|| missing_key("BitsPerComponent"))?;
+        // PDF ignores /BitsPerComponent for a JPX image: the codestream states
+        // the precision of every component, so the entry constrains nothing.
+        if !entries.is_jpx() {
+            validate_bits_per_component(
+                bits_per_component,
+                entries.image_mask,
+                entries.color_space.as_ref(),
+            )?;
+        }
+        let smask_in_data = entries
+            .smask_in_data
+            .map_or_else(|| Ok(SMaskInData::default()), SMaskInData::try_from)?;
+        let num_color_components = entries
+            .color_space
+            .as_ref()
+            .map_or(1, ColorSpace::num_color_components);
+        let decode = entries
+            .decode
+            .map(|values| DecodeMap::new(&values, num_color_components))
+            .transpose()?;
+
+        Ok(Self {
+            size: Rect::<usize>::from_size(width, height),
+            bits_per_component,
+            color_space: entries.color_space,
+            image_mask: entries.image_mask,
+            filters: entries.filters,
+            decode,
+            smask_in_data,
+            interpolate: entries.interpolate,
+        })
+    }
+}
+
+/// The entries of an image dictionary, read in one pass before validation.
+#[derive(Default)]
+struct ImageEntries {
+    width: Option<usize>,
+    height: Option<usize>,
+    bits_per_component: Option<usize>,
     image_mask: bool,
-    filters: Option<&Filters>,
-) -> Result<usize, PdfImageError> {
-    const BITS_PER_COMPONENT_KEY: &[u8] = b"BitsPerComponent";
+    color_space: Option<ColorSpace>,
+    filters: Option<Filters>,
+    decode: Option<Vec<f32>>,
+    smask_in_data: Option<i64>,
+    interpolate: bool,
+}
 
-    // Image masks and JPX images may omit BitsPerComponent, with different
-    // defaults. Every other image must provide the value explicitly.
-    let default = if image_mask {
-        Some(ImageMetadata::DEFAULT_IMAGE_MASK_BITS_PER_COMPONENT)
-    } else if filters.is_some_and(Filters::has_jpx_filter) {
-        Some(ImageMetadata::DEFAULT_JPX_BITS_PER_COMPONENT)
-    } else {
-        None
-    };
+impl ImageEntries {
+    /// Reads every image entry of the context's dictionary; null entries count as absent.
+    ///
+    /// `/ColorSpace` is decoded only for an image that is not a mask, because a
+    /// mask's samples carry no color and its `/ColorSpace` is never used.
+    fn read(context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut entries = Self::default();
+        let mut color_space: Option<&ObjectVariant> = None;
+        for (key, value) in context.dictionary().iter() {
+            if context.is_absent(value)? {
+                continue;
+            }
+            match key {
+                b"Width" => entries.width = Some(context.read(value)?),
+                b"Height" => entries.height = Some(context.read(value)?),
+                b"BitsPerComponent" => entries.bits_per_component = Some(context.read(value)?),
+                b"ImageMask" => entries.image_mask = context.read(value)?,
+                b"ColorSpace" => color_space = Some(value),
+                b"Filter" => entries.filters = Some(context.read(value)?),
+                b"Decode" => entries.decode = Some(context.read(value)?),
+                b"SMaskInData" => entries.smask_in_data = Some(context.read(value)?),
+                b"Interpolate" => entries.interpolate = context.read(value)?,
+                _ => {}
+            }
+        }
+        if !entries.image_mask {
+            entries.color_space = color_space.map(|value| context.read(value)).transpose()?;
+        }
+        Ok(entries)
+    }
 
-    // Use the optional dictionary reader only when a default is available.
-    // The required reader preserves the missing-key error for all other images.
-    match default {
-        Some(default) => Ok(dictionary
-            .optional_number::<usize>(BITS_PER_COMPONENT_KEY, objects)?
-            .unwrap_or(default)),
-        None => Ok(dictionary.required_number::<usize>(BITS_PER_COMPONENT_KEY, objects)?),
+    /// Returns whether the filter chain leaves a JPEG 2000 codestream.
+    fn is_jpx(&self) -> bool {
+        self.filters.as_ref().is_some_and(Filters::has_jpx_filter)
+    }
+
+    /// Returns the bit depth used when `/BitsPerComponent` is omitted.
+    ///
+    /// Image masks and JPX images may omit the entry, with different defaults.
+    /// Every other image must provide it.
+    fn default_bits_per_component(&self) -> Option<usize> {
+        if self.image_mask {
+            Some(ImageMetadata::DEFAULT_IMAGE_MASK_BITS_PER_COMPONENT)
+        } else if self.is_jpx() {
+            Some(ImageMetadata::DEFAULT_JPX_BITS_PER_COMPONENT)
+        } else {
+            None
+        }
     }
 }
 
@@ -164,8 +206,8 @@ mod tests {
 
     use pdf_filter::filter::{Filter, Filters};
     use pdf_object_reader::{
-        dictionary::Dictionary, object_error::ObjectError, object_resolver::PassthroughResolver,
-        object_variant::ObjectVariant,
+        DictionaryContext, dictionary::Dictionary, object_error::ObjectError,
+        object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     };
 
     use super::ImageMetadata;
@@ -175,10 +217,10 @@ mod tests {
     fn rejects_zero_dimensions() {
         let dictionary = direct_dictionary(0, 1, 8);
 
-        let error = ImageMetadata::from_dictionary(
+        let error = ImageMetadata::read(&mut DictionaryContext::new(
             &dictionary,
             &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
-        )
+        ))
         .expect_err("zero width should be rejected");
 
         assert!(matches!(
@@ -198,10 +240,10 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
-        let metadata = ImageMetadata::from_dictionary(
+        let metadata = ImageMetadata::read(&mut DictionaryContext::new(
             &dictionary,
             &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
-        )
+        ))
         .expect("image mask metadata should be valid");
 
         assert_eq!(metadata.bits_per_component, 1);
@@ -219,10 +261,10 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
-        let error = ImageMetadata::from_dictionary(
+        let error = ImageMetadata::read(&mut DictionaryContext::new(
             &dictionary,
             &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
-        )
+        ))
         .expect_err("8-bpc image mask should be rejected");
 
         assert!(matches!(
@@ -248,10 +290,10 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
-        let metadata = ImageMetadata::from_dictionary(
+        let metadata = ImageMetadata::read(&mut DictionaryContext::new(
             &dictionary,
             &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
-        )
+        ))
         .expect("image mask filter should parse");
 
         assert_eq!(
@@ -264,10 +306,10 @@ mod tests {
     fn indexed_images_accept_two_bit_components() {
         let dictionary = indexed_dictionary(2);
 
-        let metadata = ImageMetadata::from_dictionary(
+        let metadata = ImageMetadata::read(&mut DictionaryContext::new(
             &dictionary,
             &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
-        )
+        ))
         .expect("2-bpc indexed metadata should be valid");
 
         assert_eq!(metadata.bits_per_component, 2);
@@ -277,10 +319,10 @@ mod tests {
     fn indexed_images_reject_unsupported_bit_components() {
         let dictionary = indexed_dictionary(3);
 
-        let error = ImageMetadata::from_dictionary(
+        let error = ImageMetadata::read(&mut DictionaryContext::new(
             &dictionary,
             &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
-        )
+        ))
         .expect_err("3-bpc indexed metadata should be rejected");
 
         assert!(matches!(
@@ -295,10 +337,10 @@ mod tests {
     fn direct_images_reject_unsupported_bit_components() {
         let dictionary = direct_dictionary(1, 1, 3);
 
-        let error = ImageMetadata::from_dictionary(
+        let error = ImageMetadata::read(&mut DictionaryContext::new(
             &dictionary,
             &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
-        )
+        ))
         .expect_err("3-bpc direct metadata should be rejected");
 
         assert!(matches!(
@@ -323,10 +365,10 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
-        let metadata = ImageMetadata::from_dictionary(
+        let metadata = ImageMetadata::read(&mut DictionaryContext::new(
             &dictionary,
             &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
-        )
+        ))
         .expect("JPX metadata should default missing BitsPerComponent");
 
         assert_eq!(metadata.bits_per_component, 8);
@@ -356,10 +398,10 @@ mod tests {
             ),
         );
 
-        let metadata = ImageMetadata::from_dictionary(
+        let metadata = ImageMetadata::read(&mut DictionaryContext::new(
             &dictionary,
             &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
-        )
+        ))
         .expect("ordered filter chain should parse");
 
         assert_eq!(
@@ -378,10 +420,10 @@ mod tests {
             (Vec::from(b"Width"), ObjectVariant::Integer(1)),
         ]));
 
-        let error = ImageMetadata::from_dictionary(
+        let error = ImageMetadata::read(&mut DictionaryContext::new(
             &dictionary,
             &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
-        )
+        ))
         .expect_err("non-JPX metadata should require BitsPerComponent");
 
         assert!(matches!(

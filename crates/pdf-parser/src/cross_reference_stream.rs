@@ -36,7 +36,7 @@ pub fn parse_xref_stream(
     }
 
     let subsections = parse_subsections(&stream, objects, size)?;
-    let data = pdf_filter::filter::decode_with_resolver(&stream, objects)?;
+    let data = pdf_filter::filter::decode(&stream)?;
     let mut entries = BTreeMap::new();
 
     let mut decoder = XrefStreamEntryDecoder::new(&data, layout);

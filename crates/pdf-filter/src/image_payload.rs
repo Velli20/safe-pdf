@@ -9,13 +9,15 @@
 use bytes::Bytes;
 use pdf_ccitt::CCITTFaxParams;
 use pdf_object_reader::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
+    dictionary::Dictionary, object_kind::ObjectKind, object_variant::ObjectVariant,
+    pdf_array::PdfArray, stream::StreamObject,
 };
 
 use crate::{
     error::FilterError,
-    filter::{Filter, Filters, resolve_jbig2_dimensions, resolve_jbig2_globals},
+    filter::{Filter, Filters},
+    lzw::LzwParams,
     predictor::PredictorParams,
 };
 
@@ -44,20 +46,17 @@ impl ImagePayload {
     pub fn decode(
         dictionary: &Dictionary,
         stream_data: Bytes,
-        objects: &dyn ObjectResolver,
+        access: &mut (impl ObjectAccess + ?Sized),
     ) -> Result<Self, FilterError> {
-        let mut data = stream_data;
-        let filters = Filters::from_dictionary(dictionary, objects)?;
-
-        let Some(filters) = &filters else {
-            return Ok(Self::Samples(data));
+        let mut context = DictionaryContext::new(dictionary, access);
+        let Some(filters) = context.optional::<Filters>(Filters::KEY)? else {
+            return Ok(Self::Samples(stream_data));
         };
+        let decode_parms = context
+            .optional::<DecodeParms>(b"DecodeParms")?
+            .unwrap_or_default();
 
-        let decode_parms = dictionary
-            .get(b"DecodeParms")
-            .map(|entry| objects.resolve_object(entry))
-            .transpose()?;
-
+        let mut data = stream_data;
         let mut codestream = None;
         let mut previous = None;
         for (index, filter) in filters.into_iter().enumerate() {
@@ -67,26 +66,10 @@ impl ImagePayload {
                 )));
             }
 
-            let param_dict = match decode_parms {
-                None => None,
-                Some(ObjectVariant::Dictionary(dictionary)) => Some(dictionary),
-                Some(ObjectVariant::Array(array)) => {
-                    array.as_slice().optional_dictionary(index, objects)?
-                }
-                Some(other) => {
-                    return Err(FilterError::from(
-                        pdf_object_reader::object_error::ObjectError::TypeMismatch(
-                            "Dictionary or Array",
-                            other.name(),
-                        ),
-                    ));
-                }
-            };
-
             if let Filter::JPXDecode = filter {
                 codestream = Some(data.clone());
             } else {
-                match decode_filter(filter, data.as_ref(), param_dict, dictionary, objects) {
+                match filter.apply(data.as_ref(), &decode_parms, index, &mut context) {
                     Ok(decoded) => data = decoded,
                     // A repeated filter can be spurious when its first pass
                     // already produced the binary data expected by the next filter.
@@ -119,78 +102,134 @@ impl ImagePayload {
     }
 }
 
-/// Applies one byte-to-byte `filter` to `data`.
-///
-/// `JPXDecode` is not a byte filter; [`ImagePayload::decode`] handles it before
-/// reaching this function, and it is rejected here.
-fn decode_filter(
-    filter: &Filter,
-    data: &[u8],
-    param_dict: Option<&Dictionary>,
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> Result<Bytes, FilterError> {
-    let decoded = match filter {
-        Filter::FlateDecode => {
-            let decoded = Filter::decode_flate(data)?;
-            let predictor = match param_dict {
-                Some(dictionary) => PredictorParams::from_dictionary(dictionary, objects)?,
-                None => PredictorParams::default(),
-            };
-            if predictor.is_none() {
-                decoded
-            } else {
-                crate::predictor::apply_predictor(&decoded, &predictor)?
+/// The `/DecodeParms` entry of a stream dictionary.
+#[derive(Default)]
+enum DecodeParms {
+    /// No parameters; every filter uses its defaults.
+    #[default]
+    Absent,
+    /// One parameter dictionary, applied to every filter of the chain.
+    Shared(ObjectVariant),
+    /// One entry per filter, matched by position; null entries keep the defaults.
+    PerFilter(PdfArray),
+}
+
+impl FromPdfObject for DecodeParms {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match context.object().value() {
+            dictionary @ ObjectVariant::Dictionary(_) => Ok(Self::Shared(dictionary.clone())),
+            ObjectVariant::Array(array) => Ok(Self::PerFilter(array.clone())),
+            _ => Err(ObjectReadError::TypeMismatch {
+                expected: ObjectKind::Dictionary,
+                actual: context.object().kind(),
+            }),
+        }
+    }
+}
+
+impl DecodeParms {
+    /// Reads the parameters of the filter at `index`, falling back to their defaults.
+    fn read<T: FromPdfObject + Default>(
+        &self,
+        index: usize,
+        context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<T> {
+        let entry = match self {
+            Self::Absent => None,
+            Self::Shared(dictionary) => Some(dictionary),
+            Self::PerFilter(array) => array.get(index),
+        };
+        match entry {
+            Some(entry) => Ok(context.read::<Option<T>>(entry)?.unwrap_or_default()),
+            None => Ok(T::default()),
+        }
+    }
+}
+
+/// `/DecodeParms` of the JBIG2Decode filter (PDF spec §7.4.7, Table 12).
+#[derive(Default)]
+struct Jbig2Params {
+    /// The stream of segments shared by several JBIG2 images.
+    globals: Option<StreamObject>,
+}
+
+impl FromPdfObject for Jbig2Params {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        Ok(Self {
+            globals: context.dictionary()?.optional(b"JBIG2Globals")?,
+        })
+    }
+}
+
+impl Filter {
+    /// Applies this byte-to-byte filter, the `index`-th of its chain, to `data`.
+    ///
+    /// `context` reads the stream dictionary, whose image entries some filters
+    /// need. `JPXDecode` is not a byte filter; [`ImagePayload::decode`] handles
+    /// it before reaching this method, and it is rejected here.
+    fn apply(
+        &self,
+        data: &[u8],
+        decode_parms: &DecodeParms,
+        index: usize,
+        context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> Result<Bytes, FilterError> {
+        let decoded = match self {
+            Self::FlateDecode => {
+                let predictor = decode_parms.read::<PredictorParams>(index, context)?;
+                let decoded = Self::decode_flate(data)?;
+                if predictor.is_none() {
+                    decoded
+                } else {
+                    crate::predictor::apply_predictor(&decoded, &predictor)?
+                }
             }
-        }
-        Filter::LZWDecode => {
-            let (early_change, predictor) = match param_dict {
-                Some(dictionary) => (
-                    dictionary
-                        .optional_number(b"EarlyChange", objects)?
-                        .unwrap_or(1)
-                        != 0,
-                    PredictorParams::from_dictionary(dictionary, objects)?,
-                ),
-                None => (true, PredictorParams::default()),
-            };
-            let decoded = crate::lzw::decode(data, early_change)?;
-            if predictor.is_none() {
-                decoded
-            } else {
-                crate::predictor::apply_predictor(&decoded, &predictor)?
+            Self::LZWDecode => {
+                let params = decode_parms.read::<LzwParams>(index, context)?;
+                let decoded = crate::lzw::decode(data, params.early_change)?;
+                if params.predictor.is_none() {
+                    decoded
+                } else {
+                    crate::predictor::apply_predictor(&decoded, &params.predictor)?
+                }
             }
-        }
-        Filter::DCTDecode => {
-            let height = dictionary.optional_number::<u16>(b"Height", objects)?;
-            Filter::decode_jpeg_baseline(data, height)?
-        }
-        Filter::ASCII85Decode => crate::ascii85::decode_ascii85(data)?,
-        Filter::ASCIIHexDecode => crate::asciihex::decode_ascii_hex(data),
-        Filter::RunLengthDecode => crate::runlength::decode_run_length(data)?,
-        Filter::JBIG2Decode => {
-            let (width, height) = resolve_jbig2_dimensions(dictionary, objects)?;
-            let globals = match param_dict {
-                Some(dictionary) => resolve_jbig2_globals(dictionary, objects)?,
-                None => None,
-            };
-            pdf_jbig2::decode(data, width, height, globals.as_deref())?
-        }
-        Filter::CCITTFaxDecode => {
-            let ccitt_params = match param_dict {
-                Some(dictionary) => CCITTFaxParams::from_dictionary(dictionary, objects)?,
-                None => CCITTFaxParams::default(),
-            };
-            pdf_ccitt::decode(data, &ccitt_params)?
-        }
-        Filter::JPXDecode => {
-            return Err(FilterError::UnsupportedFilter("JPXDecode".to_string()));
-        }
-        Filter::Unsupported(name) => {
-            return Err(FilterError::UnsupportedFilter(
-                String::from_utf8_lossy(name).into_owned(),
-            ));
-        }
-    };
-    Ok(decoded.into())
+            Self::DCTDecode => {
+                Self::decode_jpeg_baseline(data, context.optional::<u16>(b"Height")?)?
+            }
+            Self::ASCII85Decode => crate::ascii85::decode_ascii85(data)?,
+            Self::ASCIIHexDecode => crate::asciihex::decode_ascii_hex(data),
+            Self::RunLengthDecode => crate::runlength::decode_run_length(data)?,
+            Self::JBIG2Decode => {
+                let missing_dimensions_error = || {
+                    FilterError::Decompression(
+                        "JBIG2Decode requires positive Width and Height".into(),
+                    )
+                };
+                let width = context
+                    .optional::<u16>(b"Width")?
+                    .filter(|width| *width != 0)
+                    .ok_or_else(missing_dimensions_error)?;
+                let height = context
+                    .optional::<u16>(b"Height")?
+                    .filter(|height| *height != 0)
+                    .ok_or_else(missing_dimensions_error)?;
+                let params = decode_parms.read::<Jbig2Params>(index, context)?;
+                let globals = params.globals.as_ref().map(StreamObject::raw_data);
+                pdf_jbig2::decode(data, width, height, globals)?
+            }
+            Self::CCITTFaxDecode => {
+                let params = decode_parms.read::<CCITTFaxParams>(index, context)?;
+                pdf_ccitt::decode(data, &params)?
+            }
+            Self::JPXDecode => {
+                return Err(FilterError::UnsupportedFilter("JPXDecode".to_string()));
+            }
+            Self::Unsupported(name) => {
+                return Err(FilterError::UnsupportedFilter(
+                    String::from_utf8_lossy(name).into_owned(),
+                ));
+            }
+        };
+        Ok(decoded.into())
+    }
 }

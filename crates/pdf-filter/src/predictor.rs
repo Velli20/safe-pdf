@@ -1,6 +1,7 @@
 use crate::error::FilterError;
 use pdf_object_reader::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
+    object_variant::ObjectVariant,
 };
 
 /// Parameters for the Predictor post-processing step shared by
@@ -28,30 +29,37 @@ impl Default for PredictorParams {
     }
 }
 
+/// Reads a `/DecodeParms` dictionary; missing keys keep the PDF-specified defaults.
+impl FromPdfObject for PredictorParams {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        let mut params = Self::default();
+        for (key, value) in context.dictionary().iter() {
+            params.absorb(key, value, &mut context)?;
+        }
+        Ok(params)
+    }
+}
+
 impl PredictorParams {
-    /// Parse predictor parameters from a `/DecodeParms` dictionary.
-    ///
-    /// Missing keys fall back to the PDF-specified defaults.
-    pub fn from_dictionary(
-        dict: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Self, FilterError> {
-        let mut p = Self::default();
-
-        if let Some(value) = dict.optional_number::<u8>(b"Predictor", objects)? {
-            p.predictor = value;
+    /// Records `value` when `key` is a predictor entry; null values keep the default.
+    pub(crate) fn absorb(
+        &mut self,
+        key: &[u8],
+        value: &ObjectVariant,
+        context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<()> {
+        if context.is_absent(value)? {
+            return Ok(());
         }
-        if let Some(value) = dict.optional_number::<usize>(b"Colors", objects)? {
-            p.colors = value;
+        match key {
+            b"Predictor" => self.predictor = context.read(value)?,
+            b"Colors" => self.colors = context.read(value)?,
+            b"BitsPerComponent" => self.bits_per_component = context.read(value)?,
+            b"Columns" => self.columns = context.read(value)?,
+            _ => {}
         }
-        if let Some(value) = dict.optional_number::<usize>(b"BitsPerComponent", objects)? {
-            p.bits_per_component = value;
-        }
-        if let Some(value) = dict.optional_number::<usize>(b"Columns", objects)? {
-            p.columns = value;
-        }
-
-        Ok(p)
+        Ok(())
     }
 
     /// Returns `true` if no prediction is needed.

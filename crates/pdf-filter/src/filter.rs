@@ -5,11 +5,8 @@ use bytes::Bytes;
 use crate::{error::FilterError, image_payload::ImagePayload, jpeg_frame::JpegFrameHeader};
 
 use pdf_object_reader::{
-    dictionary::Dictionary,
-    object_lookup::ObjectLookupExt,
-    object_resolver::{ObjectResolver, PassthroughResolver},
-    object_variant::ObjectVariant,
-    stream::StreamObject,
+    FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult, dictionary::Dictionary,
+    object_resolver::PassthroughResolver, object_variant::ObjectVariant, stream::StreamObject,
 };
 
 /// Represents the compression filter applied to a stream or image in a PDF.
@@ -80,7 +77,8 @@ pub struct Filters {
 }
 
 impl Filters {
-    const KEY: &'static [u8] = b"Filter";
+    /// The dictionary key holding a stream's filter chain.
+    pub const KEY: &'static [u8] = b"Filter";
 
     /// Returns whether the chain contains `filter`.
     pub fn has_filter(&self, filter: &Filter) -> bool {
@@ -96,40 +94,25 @@ impl Filters {
     pub fn has_dct_filter(&self) -> bool {
         self.has_filter(&Filter::DCTDecode)
     }
+}
 
-    /// Parses the `/Filter` entry from a PDF object dictionary.
-    ///
-    /// Returns `Ok(None)` when no `/Filter` key is present, or
-    /// `Ok(Some(filters))` with the ordered chain of filters to apply.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`FilterError::Object`] if an object reference cannot be
-    /// resolved or a name cannot be extracted.
-    pub fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Option<Self>, FilterError> {
-        let Some(filter_obj) = dictionary.get(Self::KEY) else {
-            return Ok(None);
+/// Reads a `/Filter` value: one filter name or an array applied in order.
+impl FromPdfObject for Filters {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let filters = match context.object().value() {
+            ObjectVariant::Array(_) => context.array()?.read_all()?,
+            _ => vec![Filter::from_pdf_object(context)?],
         };
+        Ok(Self { filters })
+    }
+}
 
-        let resolved = objects.resolve_object(filter_obj)?;
-
-        // Parse the `/Filter` entry: can be either a single Name or an Array of Names.
-        // Per PDF spec, filters are applied in order when multiple are present.
-        let filters = match resolved {
-            ObjectVariant::Array(arr) => arr
-                .iter()
-                .map(|item| item.try_bytes(objects).map(Filter::from))
-                .collect::<Result<Vec<_>, _>>()?,
-            other => {
-                // Accept a malformed string where the filter Name is expected.
-                vec![Filter::from(other.try_bytes(objects)?)]
-            }
-        };
-
-        Ok(Some(Self { filters }))
+/// Reads a filter name, accepting a malformed string where the name is expected.
+impl FromPdfObject for Filter {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        Ok(Self::from(
+            context.object().value().try_bytes(context.source())?,
+        ))
     }
 }
 
@@ -179,25 +162,6 @@ impl fmt::Display for Filter {
             Self::JBIG2Decode => f.write_str("JBIG2Decode"),
             Self::Unsupported(name) => write!(f, "{}", String::from_utf8_lossy(name)),
         }
-    }
-}
-
-/// Methods for parsing the `/Filter` entry from a PDF dictionary.
-impl Filter {
-    /// Parses the `/Filter` entry from a PDF object dictionary.
-    ///
-    /// Returns `Ok(None)` when no `/Filter` key is present, or
-    /// `Ok(Some(filters))` with the ordered list of filters to apply.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`FilterError::Object`] if an object reference cannot be
-    /// resolved or a name cannot be extracted.
-    pub fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Option<Vec<Filter>>, FilterError> {
-        Ok(Filters::from_dictionary(dictionary, objects)?.map(|filters| filters.filters))
     }
 }
 
@@ -270,12 +234,12 @@ impl Filter {
 /// Returns [`FilterError`] if a filter fails, is unsupported, or is
 /// `JPXDecode`, except when an adjacent duplicate filter fails after its first
 /// pass succeeded.
-pub fn decode_data_with_resolver(
+pub fn decode_data_with_access(
     dictionary: &Dictionary,
     stream_data: Bytes,
-    objects: &dyn ObjectResolver,
+    access: &mut (impl ObjectAccess + ?Sized),
 ) -> Result<Bytes, FilterError> {
-    ImagePayload::decode(dictionary, stream_data, objects)?.into_samples()
+    ImagePayload::decode(dictionary, stream_data, access)?.into_samples()
 }
 
 /// Decodes a [`StreamObject`] by applying its full filter chain.
@@ -287,51 +251,22 @@ pub fn decode_data_with_resolver(
 ///
 /// Returns [`FilterError`] if a filter fails or is unsupported, except when an
 /// adjacent duplicate filter fails after its first pass succeeded.
-pub fn decode_with_resolver(
+pub fn decode_with_access(
     stream: &StreamObject,
-    objects: &dyn ObjectResolver,
+    access: &mut (impl ObjectAccess + ?Sized),
 ) -> Result<Bytes, FilterError> {
-    decode_data_with_resolver(&stream.dictionary, stream.shared_data(), objects)
+    decode_data_with_access(&stream.dictionary, stream.shared_data(), access)
 }
 
 /// Decodes a [`StreamObject`] by applying its full filter chain.
 ///
-/// This convenience wrapper uses a passthrough resolver, so it only supports
-/// direct `/Filter` and `/DecodeParms` values.
+/// This convenience wrapper reads without an object source, so it only
+/// supports direct `/Filter` and `/DecodeParms` values.
 pub fn decode(stream: &StreamObject) -> Result<Bytes, FilterError> {
-    let objects = PassthroughResolver;
-    decode_with_resolver(stream, &objects)
-}
-
-pub(crate) fn resolve_jbig2_dimensions(
-    dict: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> Result<(u16, u16), FilterError> {
-    let missing_dimensions_error =
-        || FilterError::Decompression("JBIG2Decode requires positive Width and Height".into());
-
-    let width = dict
-        .optional_number::<u16>(b"Width", objects)?
-        .ok_or_else(missing_dimensions_error)?;
-    let height = dict
-        .optional_number::<u16>(b"Height", objects)?
-        .ok_or_else(missing_dimensions_error)?;
-    if width == 0 || height == 0 {
-        return Err(missing_dimensions_error());
-    }
-
-    Ok((width, height))
-}
-
-pub(crate) fn resolve_jbig2_globals(
-    dict: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> Result<Option<Vec<u8>>, FilterError> {
-    let Some(globals_stream) = dict.optional_stream(b"JBIG2Globals", objects)? else {
-        return Ok(None);
-    };
-
-    Ok(Some(globals_stream.raw_data().to_vec()))
+    decode_with_access(
+        stream,
+        &mut ObjectReader::new(PassthroughResolver).session(),
+    )
 }
 
 #[cfg(test)]
@@ -380,8 +315,12 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
         let data = Bytes::from_static(b"stream data");
 
-        let decoded = decode_data_with_resolver(&dictionary, data.clone(), &PassthroughResolver)
-            .expect("unfiltered data should decode");
+        let decoded = decode_data_with_access(
+            &dictionary,
+            data.clone(),
+            &mut ObjectReader::new(PassthroughResolver).session(),
+        )
+        .expect("unfiltered data should decode");
 
         assert_eq!(decoded.as_ptr(), data.as_ptr());
         assert_eq!(decoded.as_ref(), b"stream data");
@@ -398,8 +337,12 @@ mod tests {
         )]));
 
         let encoded = Bytes::from_static(b"48 65 6c 6c 6f>");
-        let decoded = decode_data_with_resolver(&dictionary, encoded.clone(), &PassthroughResolver)
-            .expect("filtered data should decode");
+        let decoded = decode_data_with_access(
+            &dictionary,
+            encoded.clone(),
+            &mut ObjectReader::new(PassthroughResolver).session(),
+        )
+        .expect("filtered data should decode");
 
         assert!(decoded.is_unique());
         assert_ne!(decoded.as_ptr(), encoded.as_ptr());
@@ -415,8 +358,7 @@ mod tests {
             b"shared stream data".to_vec(),
         );
 
-        let decoded = decode_with_resolver(&stream, &PassthroughResolver)
-            .expect("unfiltered data should decode");
+        let decoded = decode(&stream).expect("unfiltered data should decode");
 
         assert_eq!(decoded.as_ptr(), stream.data.as_ptr());
         assert_eq!(decoded.as_ref(), b"shared stream data");
@@ -440,11 +382,11 @@ mod tests {
 
     #[test]
     fn test_jbig2_decode_parms_globals_are_resolved() {
-        use std::cell::Cell;
+        use std::sync::atomic::{AtomicBool, Ordering};
 
         struct TrackingResolver {
             objects: BTreeMap<usize, ObjectVariant>,
-            resolved_globals: Cell<bool>,
+            resolved_globals: AtomicBool,
         }
 
         impl ObjectResolver for TrackingResolver {
@@ -455,9 +397,6 @@ mod tests {
             {
                 match obj {
                     ObjectVariant::Reference(object_number) => {
-                        if object_number.number == 3 {
-                            self.resolved_globals.set(true);
-                        }
                         self.objects.get(&object_number.number).ok_or(
                             pdf_object_reader::object_error::ObjectError::FailedResolveObjectReference {
                                 obj_num: object_number.number,
@@ -466,6 +405,24 @@ mod tests {
                     }
                     other => Ok(other),
                 }
+            }
+        }
+
+        impl pdf_object_reader::ObjectSource for TrackingResolver {
+            type Error = pdf_object_reader::object_error::ObjectError;
+
+            fn read_object(
+                &self,
+                object_id: pdf_object_reader::object_id::ObjectId,
+            ) -> Result<Option<pdf_object_reader::pdf_object::PdfObject>, Self::Error> {
+                if object_id.number() == 3 {
+                    self.resolved_globals.store(true, Ordering::Relaxed);
+                }
+                Ok(self
+                    .objects
+                    .get(&object_id.number())
+                    .cloned()
+                    .map(pdf_object_reader::pdf_object::PdfObject::new))
             }
         }
 
@@ -508,12 +465,12 @@ mod tests {
 
         let resolver = TrackingResolver {
             objects,
-            resolved_globals: Cell::new(false),
+            resolved_globals: AtomicBool::new(false),
         };
 
-        let _ = decode_with_resolver(&stream, &resolver)
+        let _ = decode_with_access(&stream, &mut ObjectReader::new(&resolver).session())
             .expect_err("empty JBIG2 stream should fail after globals resolution");
-        assert!(resolver.resolved_globals.get());
+        assert!(resolver.resolved_globals.load(Ordering::Relaxed));
     }
 
     #[test]
@@ -580,6 +537,21 @@ mod tests {
         }
     }
 
+    impl pdf_object_reader::ObjectSource for TestResolver {
+        type Error = pdf_object_reader::object_error::ObjectError;
+
+        fn read_object(
+            &self,
+            object_id: pdf_object_reader::object_id::ObjectId,
+        ) -> Result<Option<pdf_object_reader::pdf_object::PdfObject>, Self::Error> {
+            Ok(self
+                .objects
+                .get(&object_id.number())
+                .cloned()
+                .map(pdf_object_reader::pdf_object::PdfObject::new))
+        }
+    }
+
     #[test]
     fn test_decode_with_indirect_filter_array() {
         use flate2::{Compression, write::ZlibEncoder};
@@ -614,7 +586,8 @@ mod tests {
         );
         let resolver = TestResolver { objects };
 
-        let decoded = decode_with_resolver(&stream, &resolver).expect("decode failed");
+        let decoded = decode_with_access(&stream, &mut ObjectReader::new(&resolver).session())
+            .expect("decode failed");
         assert_eq!(decoded.as_ref(), b"hello");
     }
 
@@ -657,10 +630,10 @@ mod tests {
             ),
         ]));
 
-        let decoded = decode_data_with_resolver(
+        let decoded = decode_data_with_access(
             &dictionary,
             encoded.into_bytes().into(),
-            &PassthroughResolver,
+            &mut ObjectReader::new(PassthroughResolver).session(),
         )
         .expect("decode failed");
 
@@ -700,8 +673,12 @@ mod tests {
                 )),
             )]),
         };
-        let decoded = decode_data_with_resolver(&dictionary, compressed.into(), &resolver)
-            .expect("decode failed");
+        let decoded = decode_data_with_access(
+            &dictionary,
+            compressed.into(),
+            &mut ObjectReader::new(&resolver).session(),
+        )
+        .expect("decode failed");
 
         assert_eq!(decoded.as_ref(), b"hello");
     }

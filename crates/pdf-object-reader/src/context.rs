@@ -96,6 +96,14 @@ pub struct DictionaryContext<'read, A: ObjectAccess + ?Sized> {
 }
 
 impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
+    /// Binds a direct dictionary the caller already holds to an active access implementation.
+    ///
+    /// Entries are read within the access's current traversal, as if the
+    /// dictionary had been reached through it.
+    pub fn new(dictionary: &'read Dictionary, access: &'read mut A) -> Self {
+        Self { dictionary, access }
+    }
+
     /// Returns the immutable dictionary for iteration or custom entry selection.
     ///
     /// The borrow outlives `&self`, so entries can be held while the context reads them.
