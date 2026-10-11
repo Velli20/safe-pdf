@@ -10,21 +10,13 @@ use pdf_canvas::{
 };
 use pdf_graphics::{
     BlendMode, DashPattern, Image, PathFillType, PixelFormat, color::Color, pdf_path::PathVerb,
-    size::Size, transform::Transform, viewport::pixel_extent,
+    size::Size, transform::Transform,
 };
 use pdf_shading::paint::ShadingPaint;
 
 /// Native allocation, conversion, and mask replay failures.
 #[derive(Debug, thiserror::Error)]
 pub enum SkiaCanvasBackendError {
-    /// Logical mask dimensions cannot be represented by Skia.
-    #[error("mask dimensions exceed Skia limits: {width} x {height}")]
-    MaskDimensions {
-        /// Requested width, retained for diagnostics.
-        width: f32,
-        /// Requested height, retained for diagnostics.
-        height: f32,
-    },
     /// A checked native size conversion failed.
     #[error(transparent)]
     Integer(#[from] std::num::TryFromIntError),
@@ -651,22 +643,32 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         if mask.is_passthrough() {
             return paint_content(self);
         }
-        let coverage = mask.render_coverage(&mut MaskRaster)?;
+        let canvas = self.surface.canvas();
+        let mask_to_device =
+            from_skia_matrix(&canvas.local_to_device_as_3x3()).post_concatenated(mask.transform());
+        let mask_bounds =
+            skia_safe::Rect::from_wh(mask.recording().width(), mask.recording().height());
+        let (device_bounds, _) = to_skia_matrix(&mask_to_device).map_rect(mask_bounds);
+        // Content outside the visible mask bounds cannot show, so nothing is painted.
+        let Some(region) = canvas.device_clip_bounds().and_then(|clip| {
+            skia_safe::IRect::intersect(&clip, &skia_safe::RoundOut::round_out(&device_bounds))
+        }) else {
+            return Ok(());
+        };
+        let origin = skia_safe::Rect::from(region);
+        // Coverage is sampled at destination density so scaled-up masks keep their detail.
+        let mut raster = MaskRaster {
+            size: Size::new(region.width(), region.height()),
+            mask_to_pixel: Transform::from_translate(-origin.left, -origin.top)
+                .post_concatenated(&mask_to_device),
+        };
+        let coverage = mask.render_coverage(&mut raster)?;
         let canvas = self.surface.canvas();
         let parent = canvas.save_count();
         canvas.save();
         let mapping = canvas.local_to_device();
         canvas.concat(&to_skia_matrix(mask.transform()));
-        canvas.clip_rect(
-            skia_safe::Rect::from_xywh(
-                0.0,
-                0.0,
-                mask.recording().width(),
-                mask.recording().height(),
-            ),
-            skia_safe::ClipOp::Intersect,
-            None,
-        );
+        canvas.clip_rect(mask_bounds, skia_safe::ClipOp::Intersect, None);
         canvas.set_matrix(&mapping);
         canvas.save_layer(&Default::default());
         let layer = canvas.save_count();
@@ -676,10 +678,10 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
         let canvas = self.surface.canvas();
         canvas.restore_to_count(layer);
         if result.is_ok() {
-            canvas.concat(&to_skia_matrix(mask.transform()));
+            canvas.reset_matrix();
             let mut paint = skia_safe::Paint::default();
             paint.set_blend_mode(skia_safe::BlendMode::DstIn);
-            canvas.draw_image(coverage, (0.0, 0.0), Some(&paint));
+            canvas.draw_image(coverage, (origin.left, origin.top), Some(&paint));
         } else {
             canvas.clear(skia_safe::Color::TRANSPARENT);
         }
@@ -688,23 +690,12 @@ impl CanvasBackend for SkiaCanvasBackend<'_> {
     }
 }
 
-/// Rasterizes mask coverage in mask space; the mask transform is applied when compositing.
-struct MaskRaster;
-
-/// Resolves the mask recording's logical dimensions into native pixel dimensions.
-fn mask_dimensions(mask: &MaskLayer) -> Result<(i32, i32), SkiaCanvasBackendError> {
-    let extent = |value: f32| {
-        pixel_extent(value)
-            .and_then(|extent| i32::try_from(extent).ok())
-            .ok_or(SkiaCanvasBackendError::MaskDimensions {
-                width: mask.recording().width(),
-                height: mask.recording().height(),
-            })
-    };
-    Ok((
-        extent(mask.recording().width())?,
-        extent(mask.recording().height())?,
-    ))
+/// Rasterizes mask coverage over one region of the destination's native pixels.
+struct MaskRaster {
+    /// Native pixel dimensions of the destination region.
+    size: Size<i32>,
+    /// Mask coordinates to the region's native pixels.
+    mask_to_pixel: Transform,
 }
 
 impl CoverageTarget for MaskRaster {
@@ -712,7 +703,7 @@ impl CoverageTarget for MaskRaster {
 
     /// Renders native coverage before any content layer is opened on the destination.
     fn replay_mask(&mut self, mask: &MaskLayer) -> Result<Self::Raster, PdfCanvasError> {
-        let (width, height) = mask_dimensions(mask)?;
+        let Size { width, height } = self.size;
         let info = if mask.needs_processing() {
             skia_safe::ImageInfo::new(
                 (width, height),
@@ -730,10 +721,20 @@ impl CoverageTarget for MaskRaster {
                 height: u32::try_from(height).map_err(SkiaCanvasBackendError::from)?,
             },
         )?;
+        let mask_width = mask.recording().width();
+        let mask_height = mask.recording().height();
+        let canvas = surface.canvas();
+        canvas.concat(&to_skia_matrix(&self.mask_to_pixel));
+        // Mask content outside the group bounds contributes no coverage.
+        canvas.clip_rect(
+            skia_safe::Rect::from_wh(mask_width, mask_height),
+            skia_safe::ClipOp::Intersect,
+            None,
+        );
         let mut backend = SkiaCanvasBackend {
             surface: &mut surface,
-            width: mask.recording().width(),
-            height: mask.recording().height(),
+            width: mask_width,
+            height: mask_height,
         };
         mask.recording().replay(&mut backend)?;
         Ok(surface.image_snapshot())
@@ -905,29 +906,6 @@ mod tests {
             })
             .unwrap();
         assert_eq!(pixel(backend.surface, 12, 12), [0, 0, 255, 255]);
-        assert_eq!(backend.surface.canvas().save_count(), count);
-    }
-    /// Oversized native raster dimensions fail before painting or changing the destination.
-    #[test]
-    fn preparation_failure_skips_callback() {
-        use pdf_canvas::canvas_backend::CanvasBackend;
-        let mut surface = skia_safe::surfaces::raster_n32_premul((16, 16)).unwrap();
-        let count = surface.canvas().save_count();
-        let mut backend = super::SkiaCanvasBackend {
-            surface: &mut surface,
-            width: 16.0,
-            height: 16.0,
-        };
-        let mut called = false;
-        assert!(
-            backend
-                .with_mask_layer(&mask(f32::MAX, 1.0), |_| {
-                    called = true;
-                    Ok(())
-                })
-                .is_err()
-        );
-        assert!(!called);
         assert_eq!(backend.surface.canvas().save_count(), count);
     }
 
