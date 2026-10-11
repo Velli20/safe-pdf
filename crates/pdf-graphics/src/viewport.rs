@@ -115,13 +115,12 @@ impl PageViewport {
         Ok(mapped)
     }
 
-    /// Maps the corners of an `f64` page quad and returns their enclosing device bounds.
-    /// Rejects corners without a finite `f32` representation or a nonfinite result.
-    pub fn map_quad(&self, quad: &Quad<f64>) -> Result<Rect<f64>, ViewportError> {
+    /// Maps the corners of a page quad and returns their enclosing device bounds.
+    /// Rejects nonfinite corners or a nonfinite result.
+    pub fn map_quad(&self, quad: &Quad) -> Result<Rect, ViewportError> {
         let mut corners = quad.corners;
         for corner in &mut corners {
-            let page = corner.to_f32().ok_or(TransformError::NonFinite)?;
-            *corner = self.map_page_point(page)?.into();
+            *corner = self.map_page_point(*corner)?;
         }
         Ok(Quad { corners }.bounds())
     }

@@ -106,7 +106,7 @@ impl FreeTextAlignment {
 impl BorderStyle {
     /// Resolve retained `/W`: absent means one page unit and negative means zero.
     /// Returns `InvalidStyle` for a nonfinite width; does not mutate metadata or panic.
-    pub fn resolved_width(&self) -> Result<f64, ValidationError> {
+    pub fn resolved_width(&self) -> Result<f32, ValidationError> {
         let width = self.width.unwrap_or(1.0);
         if !width.is_finite() {
             return Err(ValidationError::InvalidStyle {
@@ -127,7 +127,7 @@ impl SourceAnnotation {
     ///
     /// Returns `MissingRect` when the record has no rectangle and `InvalidBounds`
     /// when the normalized rectangle is nonfinite or empty. Does not panic.
-    pub fn bounds(&self) -> Result<Rect<f64>, ValidationError> {
+    pub fn bounds(&self) -> Result<Rect, ValidationError> {
         let rect = self
             .rect
             .ok_or(ValidationError::MissingRect { source_id: self.id })?

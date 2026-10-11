@@ -177,7 +177,7 @@ export class FormControl extends AnnotationComponent {
   updateSelection(node, p) {
     node.multiple = p.multiple;
     const rowHeight = this.entry.style.font_size * LINE_SPACING;
-    node.size = p.list_box ? Math.max(2, Math.floor(this.entry.size[1] / rowHeight)) : 1;
+    node.size = p.list_box ? Math.max(2, Math.floor(this.entry.size.height / rowHeight)) : 1;
     for (const option of node.options) option.selected = p.selected.includes(option.index);
     if (!p.selected.length) node.selectedIndex = -1;
     if (!this.initialScroll && p.list_box) { node.scrollTop = p.top_index * rowHeight; this.initialScroll = true; }

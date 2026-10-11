@@ -299,7 +299,7 @@ border_effect: BorderEffect | null,
 /**
  * Optional left, top, right, bottom difference rectangle.
  */
-insets: [number, number, number, number] | null, };
+insets: Rect | null, };
 
 /**
  * Push button that triggers a host-owned action and never holds a value.
@@ -328,9 +328,9 @@ properties: CaretAnnotation, };
  */
 export type CaretAnnotation = {
 /**
- * The difference rectangle.
+ * The `/RD` difference rectangle: left, top, right, and bottom insets from `/Rect`.
  */
-difference_rect: [number, number, number, number] | null,
+difference_rect: Rect | null,
 /**
  * The caret style.
  */
@@ -411,9 +411,9 @@ interior_color: Color | null,
  */
 border_effect: BorderEffect | null,
 /**
- * The difference rectangle.
+ * The `/RD` difference rectangle: left, top, right, and bottom insets from `/Rect`.
  */
-difference_rect: [number, number, number, number] | null, };
+difference_rect: Rect | null, };
 
 /**
  * Unpremultiplied color with RGBA channel
@@ -693,9 +693,9 @@ callout_line: Polyline | null,
  */
 border_effect: BorderEffect | null,
 /**
- * The difference rectangle.
+ * The `/RD` difference rectangle: left, top, right, and bottom insets from `/Rect`.
  */
-difference_rect: [number, number, number, number] | null,
+difference_rect: Rect | null,
 /**
  * The intent.
  */
@@ -737,7 +737,7 @@ border: FreeTextBorder | null,
 /**
  * Nonnegative left, top, right, bottom text insets, in that order.
  */
-insets: [number, number, number, number],
+insets: Rect,
 /**
  * Horizontal text alignment.
  */
@@ -1489,6 +1489,22 @@ dash: Array<number>,
 round: boolean, };
 
 /**
+ * A generic two-dimensional size value with a `f32` default coordinate type.
+ *
+ * The type stores the width and height as a width/height pair and is intended
+ * as the reusable size analogue for the crate's other geometry models.
+ */
+export type Size = {
+/**
+ * The horizontal dimension of the size.
+ */
+width: number,
+/**
+ * The vertical dimension of the size.
+ */
+height: number, };
+
+/**
  * Native PDF annotation data retained from a page object.
  */
 export type SourceAnnotation = {
@@ -1575,9 +1591,9 @@ interior_color: Color | null,
  */
 border_effect: BorderEffect | null,
 /**
- * The difference rectangle.
+ * The `/RD` difference rectangle: left, top, right, and bottom insets from `/Rect`.
  */
-difference_rect: [number, number, number, number] | null, };
+difference_rect: Rect | null, };
 
 /**
  * Owned SquigglyAnnotation data retained from the source PDF.
@@ -1713,6 +1729,11 @@ text: string,
 color: Color, };
 
 /**
+ * An affine transformation matrix.
+ */
+export type Transform = { sx: number, kx: number, ky: number, sy: number, tx: number, ty: number, };
+
+/**
  * Owned UnderlineAnnotation data retained from the source PDF.
  */
 export type UnderlineAnnotation = {
@@ -1798,20 +1819,20 @@ unsupported: string | null,
 /**
  * Device-space interaction rectangles.
  */
-bounds: Array<[number, number, number, number]>,
+bounds: Array<Rect>,
 /**
  * Page-space bottom-left corner of the `size` box; local coordinates are
- * `[x - origin[0], origin[1] + size[1] - y]`.
+ * `[x - origin.x, origin.y + size.height - y]`.
  */
-origin: [number, number],
+origin: Point,
 /**
  * Local page-unit width and height.
  */
-size: [number, number],
+size: Size,
 /**
  * Local top-left to device affine matrix.
  */
-transform: [number, number, number, number, number, number],
+transform: Transform,
 /**
  * Preserve physical size under zoom.
  */

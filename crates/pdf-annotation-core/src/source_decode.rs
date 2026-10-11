@@ -56,7 +56,7 @@ impl FromPdfObject for SourceAnnotation {
             .map(|value| {
                 // `/Rect` is `[left, bottom, right, top]`; keep the source
                 // edges as-is so inverted rectangles survive decoding.
-                value.try_array_of::<f64, 4>(objects).map(|arr| {
+                value.try_array_of::<f32, 4>(objects).map(|arr| {
                     let [left, bottom, right, top] = arr;
                     Rect {
                         left,
@@ -301,9 +301,9 @@ impl AnnotationBorder {
             });
         };
 
-        let horizontal_radius = horizontal_radius.try_number::<f64>(objects)?;
-        let vertical_radius = vertical_radius.try_number::<f64>(objects)?;
-        let width = width.try_number::<f64>(objects)?;
+        let horizontal_radius = horizontal_radius.try_number::<f32>(objects)?;
+        let vertical_radius = vertical_radius.try_number::<f32>(objects)?;
+        let width = width.try_number::<f32>(objects)?;
 
         // The dash array is nominally nested, but some writers flatten it into the
         // `/Border` array itself.
@@ -379,12 +379,12 @@ impl BorderStyle {
         let Some(dictionary) = dictionary.optional_dictionary(key, objects)? else {
             return Ok(None);
         };
-        let width = dictionary.optional_number::<f64>(b"W", objects)?;
+        let width = dictionary.optional_number::<f32>(b"W", objects)?;
         let style = dictionary
             .get(b"S")
             .map(|value| value.try_bytes(objects).map(BorderStyleName::from))
             .transpose()?;
-        let dash_pattern = dictionary.optional_vec_of::<f64>(b"D", objects)?;
+        let dash_pattern = dictionary.optional_vec_of::<f32>(b"D", objects)?;
 
         Ok(Some(Self {
             width,

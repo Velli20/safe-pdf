@@ -58,11 +58,11 @@ impl<'de> serde::Deserialize<'de> for WidgetFieldFlags {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct AnnotationBorder {
     /// Horizontal corner radius.
-    pub horizontal_radius: f64,
+    pub horizontal_radius: f32,
     /// Vertical corner radius.
-    pub vertical_radius: f64,
+    pub vertical_radius: f32,
     /// Border width.
-    pub width: f64,
+    pub width: f32,
     /// Optional validated dash pattern; `None` is a solid border.
     pub dash_pattern: Option<DashPattern>,
 }
@@ -73,11 +73,11 @@ pub struct AnnotationBorder {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct BorderStyle {
     /// Border width.
-    pub width: Option<f64>,
+    pub width: Option<f32>,
     /// Border style name.
     pub style: Option<BorderStyleName>,
     /// Optional dash pattern.
-    pub dash_pattern: Option<Vec<f64>>,
+    pub dash_pattern: Option<Vec<f32>>,
 }
 
 /// Owned BorderStyleName data retained from the source PDF.
@@ -463,7 +463,7 @@ impl AnnotationAction {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct InkList {
     /// The parsed stroke lists.
-    pub strokes: Vec<Polyline<f64>>,
+    pub strokes: Vec<Polyline>,
 }
 
 /// Owned CaretAnnotation data retained from the source PDF.
@@ -471,8 +471,8 @@ pub struct InkList {
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct CaretAnnotation {
-    /// The difference rectangle.
-    pub difference_rect: Option<[f64; 4]>,
+    /// The `/RD` difference rectangle: left, top, right, and bottom insets from `/Rect`.
+    pub difference_rect: Option<Rect>,
     /// The caret style.
     pub style: Option<CaretSymbolStyle>,
 }
@@ -488,8 +488,8 @@ pub struct CircleAnnotation {
     pub interior_color: Option<Color>,
     /// The border effect.
     pub border_effect: Option<BorderEffect>,
-    /// The difference rectangle.
-    pub difference_rect: Option<[f64; 4]>,
+    /// The `/RD` difference rectangle: left, top, right, and bottom insets from `/Rect`.
+    pub difference_rect: Option<Rect>,
 }
 
 /// Owned FreeTextAlignment data retained from the source PDF.
@@ -519,11 +519,11 @@ pub struct FreeTextAnnotation {
     /// The default style string.
     pub default_style: Option<Vec<u8>>,
     /// The open callout line, from its starting point to its attachment point.
-    pub callout_line: Option<Polyline<f64>>,
+    pub callout_line: Option<Polyline>,
     /// The border effect.
     pub border_effect: Option<BorderEffect>,
-    /// The difference rectangle.
-    pub difference_rect: Option<[f64; 4]>,
+    /// The `/RD` difference rectangle: left, top, right, and bottom insets from `/Rect`.
+    pub difference_rect: Option<Rect>,
     /// The intent.
     pub intent: Option<Vec<u8>>,
 }
@@ -560,7 +560,7 @@ pub struct InkAnnotation {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct LineAnnotation {
     /// The required line endpoints.
-    pub line: [f64; 4],
+    pub line: [f32; 4],
     /// The line ending styles.
     pub line_endings: Option<[LineEndingStyle; 2]>,
     /// The border style.
@@ -568,9 +568,9 @@ pub struct LineAnnotation {
     /// The interior color.
     pub interior_color: Option<Color>,
     /// The leader line length.
-    pub leader_line_length: Option<f64>,
+    pub leader_line_length: Option<f32>,
     /// The leader line extension length.
-    pub leader_line_extension: Option<f64>,
+    pub leader_line_extension: Option<f32>,
     /// Whether the caption is positioned at the line's end.
     pub caption: Option<bool>,
     /// The intent.
@@ -602,7 +602,7 @@ pub struct LinkAnnotation {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct PolygonAnnotation {
     /// The required polygon vertices.
-    pub vertices: Polyline<f64>,
+    pub vertices: Polyline,
     /// The line ending styles.
     pub line_endings: Option<[LineEndingStyle; 2]>,
     /// The interior color.
@@ -619,7 +619,7 @@ pub struct PolygonAnnotation {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct PolyLineAnnotation {
     /// The required polyline vertices.
-    pub vertices: Polyline<f64>,
+    pub vertices: Polyline,
     /// The line ending styles.
     pub line_endings: Option<[LineEndingStyle; 2]>,
     /// The interior color.
@@ -654,8 +654,8 @@ pub struct SquareAnnotation {
     pub interior_color: Option<Color>,
     /// The border effect.
     pub border_effect: Option<BorderEffect>,
-    /// The difference rectangle.
-    pub difference_rect: Option<[f64; 4]>,
+    /// The `/RD` difference rectangle: left, top, right, and bottom insets from `/Rect`.
+    pub difference_rect: Option<Rect>,
 }
 
 /// Owned SquigglyAnnotation data retained from the source PDF.
@@ -868,7 +868,7 @@ pub struct SourceAnnotation {
     /// The optional annotation rectangle from `/Rect`, in PDF page user space
     /// where `bottom` is the lower `y` edge. Edges keep their source values and
     /// order, so inverted rectangles are preserved rather than normalized.
-    pub rect: Option<Rect<f64>>,
+    pub rect: Option<Rect>,
     /// The optional annotation contents.
     pub contents: Option<Vec<u8>>,
     /// The optional annotation name from `/NM`.

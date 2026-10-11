@@ -42,7 +42,7 @@ pub struct Widget {
     pub style: Option<crate::style::ResolvedStyle>,
     /// Placement on the containing annotation's page.
     /// Bounds, including their maximum corner, must remain finite after edits.
-    pub bounds: Rect<f64>,
+    pub bounds: Rect,
     /// Immutable binding; delete and create an annotation to change its field/option.
     pub binding: WidgetBinding,
 }

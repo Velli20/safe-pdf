@@ -9,7 +9,7 @@ use crate::pdf_data::{
     StampAnnotation, StrikeOutAnnotation, TextAnnotation, UnderlineAnnotation, WidgetAnnotation,
 };
 use crate::source_decode::{DecodeResult, color};
-use pdf_graphics::polyline::Polyline;
+use pdf_graphics::{polyline::Polyline, rect::Rect};
 use pdf_object_reader::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
     object_variant::ObjectVariant,
@@ -141,7 +141,9 @@ impl FreeTextAnnotation {
             .get(b"CL")
             .map(|value| callout_line(value, objects))
             .transpose()?;
-        let difference_rect = dictionary.optional_array_of::<f64, 4>(b"RD", objects)?;
+        let difference_rect = dictionary
+            .optional_array_of::<f32, 4>(b"RD", objects)?
+            .map(Rect::from);
         let intent = dictionary.optional_bytes(b"IT", objects)?.map(Vec::from);
         let border_effect = BorderEffect::from_dictionary(dictionary, b"BE", objects)?;
 
@@ -165,12 +167,12 @@ impl LineAnnotation {
     ) -> DecodeResult<Self> {
         let line = dictionary
             .get_or_err(b"L")?
-            .try_array_of::<f64, 4>(objects)?;
+            .try_array_of::<f32, 4>(objects)?;
         let line_endings = line_endings(dictionary, objects)?;
         let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
         let interior_color = color(dictionary, b"IC", objects)?;
-        let leader_line_length = dictionary.optional_number::<f64>(b"LL", objects)?;
-        let leader_line_extension = dictionary.optional_number::<f64>(b"LLE", objects)?;
+        let leader_line_length = dictionary.optional_number::<f32>(b"LL", objects)?;
+        let leader_line_extension = dictionary.optional_number::<f32>(b"LLE", objects)?;
         let caption = dictionary.optional_boolean(b"Cap", objects)?;
         let intent = dictionary.optional_bytes(b"IT", objects)?.map(Vec::from);
 
@@ -195,7 +197,9 @@ impl SquareAnnotation {
         let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
         let interior_color = color(dictionary, b"IC", objects)?;
         let border_effect = BorderEffect::from_dictionary(dictionary, b"BE", objects)?;
-        let difference_rect = dictionary.optional_array_of::<f64, 4>(b"RD", objects)?;
+        let difference_rect = dictionary
+            .optional_array_of::<f32, 4>(b"RD", objects)?
+            .map(Rect::from);
 
         Ok(Self {
             border_style,
@@ -214,7 +218,9 @@ impl CircleAnnotation {
         let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
         let interior_color = color(dictionary, b"IC", objects)?;
         let border_effect = BorderEffect::from_dictionary(dictionary, b"BE", objects)?;
-        let difference_rect = dictionary.optional_array_of::<f64, 4>(b"RD", objects)?;
+        let difference_rect = dictionary
+            .optional_array_of::<f32, 4>(b"RD", objects)?
+            .map(Rect::from);
 
         Ok(Self {
             border_style,
@@ -356,7 +362,9 @@ impl CaretAnnotation {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> DecodeResult<Self> {
-        let difference_rect = dictionary.optional_array_of::<f64, 4>(b"RD", objects)?;
+        let difference_rect = dictionary
+            .optional_array_of::<f32, 4>(b"RD", objects)?
+            .map(Rect::from);
         let style = dictionary
             .get(b"Sy")
             .map(|value| value.try_bytes(objects).map(CaretSymbolStyle::from))
@@ -433,7 +441,7 @@ fn point_list(
     value: &ObjectVariant,
     objects: &dyn ObjectResolver,
 ) -> DecodeResult<Vec<Point>> {
-    let values = value.try_vec_of::<f64>(objects)?;
+    let values = value.try_vec_of::<f32>(objects)?;
     if !values.len().is_multiple_of(2) {
         return Err(SourceDecodeError::InvalidEntry {
             entry: key,
@@ -450,10 +458,7 @@ fn point_list(
 }
 
 /// Parses a free-text callout's required two or three vertices.
-fn callout_line(
-    value: &ObjectVariant,
-    objects: &dyn ObjectResolver,
-) -> DecodeResult<Polyline<f64>> {
+fn callout_line(value: &ObjectVariant, objects: &dyn ObjectResolver) -> DecodeResult<Polyline> {
     let points = point_list(b"CL", value, objects)?;
     if !matches!(points.len(), 2 | 3) {
         return Err(SourceDecodeError::InvalidEntry {
@@ -474,7 +479,7 @@ fn quad_points(
     let Some(value) = dictionary.get(b"QuadPoints") else {
         return Ok(None);
     };
-    let values = value.try_vec_of::<f64>(objects)?;
+    let values = value.try_vec_of::<f32>(objects)?;
     if !values.len().is_multiple_of(8) {
         return Err(SourceDecodeError::InvalidEntry {
             entry: b"QuadPoints",

@@ -134,7 +134,7 @@ impl WebAnnotationOverlay {
         &mut self,
         command: AnnotationCommandRequest,
         viewport: Option<&WebViewport>,
-        page_bounds: Option<Rect<f64>>,
+        page_bounds: Option<Rect>,
     ) -> WebResult<AnnotationReceipt> {
         Ok(self
             .overlay

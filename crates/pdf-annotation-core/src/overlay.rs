@@ -160,7 +160,7 @@ impl AnnotationOverlay {
         &mut self,
         mut command: AnnotationCommandRequest,
         viewport_revision: Option<u32>,
-        page_bounds: Option<Rect<f64>>,
+        page_bounds: Option<Rect>,
     ) -> AnnotationLayerResult<AnnotationReceipt> {
         if let Some(target) = &command.target {
             let annotation = self.mounted_annotation(target, viewport_revision)?;
@@ -357,7 +357,7 @@ impl AnnotationOverlay {
         &self,
         annotation: &Annotation,
         delta: Point,
-        page_bounds: Option<Rect<f64>>,
+        page_bounds: Option<Rect>,
     ) -> AnnotationLayerResult<Point> {
         let page = page_bounds.ok_or(AnnotationLayerError::InvalidInput("drag page bounds"))?;
         let layout = self

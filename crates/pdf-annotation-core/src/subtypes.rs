@@ -15,9 +15,9 @@ use serde::{Deserialize, Serialize};
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct PathAnnotation {
     /// Annotation rectangle; translations move it together with all vertices.
-    pub bounds: Rect<f64>,
+    pub bounds: Rect,
     /// Ordered vertices; `closed` is true only for polygons and never duplicates a vertex.
-    pub vertices: Polyline<f64>,
+    pub vertices: Polyline,
     /// Optional endpoint decorations, preserving unknown names.
     pub endings: Option<[LineEndingStyle; 2]>,
     /// Current stroke/fill style.
@@ -30,13 +30,13 @@ pub struct PathAnnotation {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct BoxAnnotation {
     /// Page-space rectangle enclosing the shape.
-    pub bounds: Rect<f64>,
+    pub bounds: Rect,
     /// Current stroke/fill style.
     pub style: ResolvedStyle,
     /// Optional border effect, which may be unsupported by a host.
     pub border_effect: Option<BorderEffect>,
     /// Optional left, top, right, bottom difference rectangle.
-    pub insets: Option<[f64; 4]>,
+    pub insets: Option<Rect>,
 }
 
 /// Underline, squiggly, or strikeout regions, in Core perimeter order.
@@ -56,7 +56,7 @@ pub struct Markup {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct Link {
     /// Fallback interaction bounds.
-    pub bounds: Rect<f64>,
+    pub bounds: Rect,
     /// Optional quadrilateral interaction regions in perimeter order.
     pub quads: Option<Vec<Quad>>,
     /// Pointer highlight feedback metadata.
@@ -86,7 +86,7 @@ impl Link {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct Stamp {
     /// Page-space stamp rectangle.
-    pub bounds: Rect<f64>,
+    pub bounds: Rect,
     /// Original stamp name bytes.
     pub name: Vec<u8>,
     /// Current style.
@@ -122,7 +122,7 @@ impl Stamp {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct Popup {
     /// Popup placement.
-    pub bounds: Rect<f64>,
+    pub bounds: Rect,
     /// Live parent identity, distinct from retained PDF object references.
     pub parent: Option<AnnotationId>,
     /// Initial visibility requested from the host.
@@ -137,7 +137,7 @@ pub struct Popup {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct Caret {
     /// Placement rectangle.
-    pub bounds: Rect<f64>,
+    pub bounds: Rect,
     /// Legacy caret properties.
     pub properties: crate::pdf_data::CaretAnnotation,
 }
@@ -150,5 +150,5 @@ pub struct UnknownAnnotation {
     /// Original subtype name bytes.
     pub subtype: Vec<u8>,
     /// Optional usable page-space bounds.
-    pub bounds: Option<Rect<f64>>,
+    pub bounds: Option<Rect>,
 }

@@ -76,7 +76,7 @@ export class NativeAnnotationLayer {
   update(component) {
     const { entry, node, container } = component, { style, css } = entry;
     component.baseTransform = css.transform;
-    Object.assign(container.style, { transform: css.transform, width: `${entry.size[0]}px`, height: `${entry.size[1]}px`, opacity: style.opacity, color: css.color });
+    Object.assign(container.style, { transform: css.transform, width: `${entry.size.width}px`, height: `${entry.size.height}px`, opacity: style.opacity, color: css.color });
     container.dataset.annotationId = String(entry.id); container.dataset.kind = entry.content.kind;
     container.tabIndex = entry.editable || entry.draggable ? 0 : -1;
     container.setAttribute('aria-label', entry.text || entry.subtype);

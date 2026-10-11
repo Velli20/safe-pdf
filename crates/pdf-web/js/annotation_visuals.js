@@ -20,7 +20,7 @@ const paintAttributes = paint => ({
 /** Draws Core-provided local-unit shapes; no PDF geometry is interpreted here.
  * @param {import('./annotation_contract').WebAnnotationEntry} entry */
 export function drawSvg(entry) {
-  const [w, h] = entry.size;
+  const { width: w, height: h } = entry.size;
   const svg = svgElement('svg', { viewBox: `0 0 ${w} ${h}`, width: '100%', height: '100%', 'aria-hidden': 'true' });
   for (const shape of entry.shapes) {
     const paint = paintAttributes(shape.paint);

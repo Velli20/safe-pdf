@@ -44,10 +44,10 @@ pub struct Revision(
 );
 
 /// Position in unrotated PDF page user space, before any viewport transform.
-pub type Point = pdf_graphics::point::Point<f64>;
+pub type Point = pdf_graphics::point::Point<f32>;
 
 /// Convex highlight region with four distinct corners in perimeter order.
-pub type Quad = pdf_graphics::quad::Quad<f64>;
+pub type Quad = pdf_graphics::quad::Quad<f32>;
 
 /// Selected regions supplied by the host's text-selection system.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -94,9 +94,9 @@ pub struct Ink {
     #[serde(default)]
     pub style: Option<crate::style::ResolvedStyle>,
     /// Nonempty open strokes, each containing at least two points.
-    pub strokes: Vec<Polyline<f64>>,
+    pub strokes: Vec<Polyline>,
     /// Finite, strictly positive stroke width in page user-space units.
-    pub width: f64,
+    pub width: f32,
     /// Stroke color; alpha is the annotation opacity.
     pub color: Color,
 }

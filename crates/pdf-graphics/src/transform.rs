@@ -13,6 +13,9 @@ pub enum TransformError {
 
 /// An affine transformation matrix.
 #[derive(Debug, Copy, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct Transform {
     pub sx: f32,
     pub kx: f32,

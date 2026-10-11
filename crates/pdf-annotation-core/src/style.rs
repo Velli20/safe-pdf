@@ -7,13 +7,13 @@ use pdf_graphics::{color::Color, rect::Rect};
 use serde::{Deserialize, Serialize};
 
 /// Stroke width used when a resolved style has no positive border width.
-const DEFAULT_STROKE_WIDTH: f64 = 1.0;
+const DEFAULT_STROKE_WIDTH: f32 = 1.0;
 
 /// Line height, in ems, an auto-sized single-line widget must fit within its height.
-const AUTO_SIZE_LINE_FACTOR: f64 = 1.35;
+const AUTO_SIZE_LINE_FACTOR: f32 = 1.35;
 
 /// Estimated average glyph advance, in ems, used to fit a push-button caption's width.
-const AVERAGE_GLYPH_EM: f64 = 0.6;
+const AVERAGE_GLYPH_EM: f32 = 0.6;
 
 /// Fill and stroke of one shape.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -25,9 +25,9 @@ pub struct ShapePaint {
     /// Interior color whose alpha is the interior opacity; `None` leaves the interior unpainted.
     pub fill: Option<Color>,
     /// Outline width in local units.
-    pub width: f64,
+    pub width: f32,
     /// Dash lengths; empty means solid.
-    pub dash: Vec<f64>,
+    pub dash: Vec<f32>,
     /// Round caps and joins instead of the host default.
     pub round: bool,
 }
@@ -59,13 +59,13 @@ pub struct ResolvedStyle {
     /// Optional opaque border color.
     pub border_color: Option<Color>,
     /// Nonnegative border width in page units.
-    pub border_width: f64,
+    pub border_width: f32,
     /// Nonnegative dash lengths; empty means solid.
-    pub dash: Vec<f64>,
+    pub dash: Vec<f32>,
     /// Opacity in the range zero through one.
     pub opacity: f64,
     /// Positive font size in page units.
-    pub font_size: f64,
+    pub font_size: f32,
     /// Host-facing font family or generic fallback.
     pub font_family: String,
     /// Horizontal text alignment.
@@ -91,7 +91,7 @@ impl Default for ResolvedStyle {
 impl ResolvedStyle {
     /// Style from a compact payload color, whose alpha is the opacity, and stroke width.
     /// The color is made opaque; other fields keep their defaults.
-    pub fn from_compact(color: Color, width: f64) -> Self {
+    pub fn from_compact(color: Color, width: f32) -> Self {
         Self {
             color: Color::from_rgb(color.r, color.g, color.b),
             opacity: f64::from(color.a),
@@ -119,7 +119,7 @@ impl ResolvedStyle {
 
     /// Returns the positive border width, or one page unit when no positive width is set.
     /// This preserves the outline fallback; it does not validate the style.
-    pub fn stroke_width(&self) -> f64 {
+    pub fn stroke_width(&self) -> f32 {
         if self.border_width > 0.0 {
             self.border_width
         } else {
@@ -239,7 +239,7 @@ pub fn apply_default_style(bytes: &[u8], style: &mut ResolvedStyle) -> bool {
         match token {
             "Tf" => {
                 if let [name, size] = operands.as_slice() {
-                    let size = size.parse::<f64>().ok().filter(|size| size.is_finite());
+                    let size = size.parse::<f32>().ok().filter(|size| size.is_finite());
                     auto_size = size == Some(0.0);
                     if let Some(size) = size.filter(|size| *size > 0.0) {
                         style.font_size = size;
@@ -262,7 +262,7 @@ pub fn apply_default_style(bytes: &[u8], style: &mut ResolvedStyle) -> bool {
                 }
                 operands.clear();
             }
-            value if value.starts_with('/') || value.parse::<f64>().is_ok() => {
+            value if value.starts_with('/') || value.parse::<f32>().is_ok() => {
                 if operands.len() < 4 {
                     operands.push(value);
                 } else {
@@ -282,7 +282,7 @@ impl WidgetAnnotation {
     /// Only single-line text, combo boxes, and push buttons are auto-sized; a push
     /// button's `/MK /CA` caption must also fit the width. Returns `None` when the
     /// border leaves no room. Does not panic.
-    pub fn auto_font_size(&self, rect: &Rect<f64>, border_width: f64) -> Option<f64> {
+    pub fn auto_font_size(&self, rect: &Rect, border_width: f32) -> Option<f32> {
         let single_line = match self.field_type.as_deref() {
             Some(b"Tx") => self.text_mode() != TextMode::Multiline,
             Some(b"Ch") => self.is_combo_box(),
@@ -300,7 +300,7 @@ impl WidgetAnnotation {
             .flatten()
             .and_then(|mk| mk.normal_caption.as_deref())
             .map(|caption| String::from_utf8_lossy(caption).chars().count())
-            .and_then(|count| count.to_f64())
+            .and_then(|count| count.to_f32())
             .filter(|count| *count > 0.0);
         if let Some(count) = caption_chars {
             size = size.min((rect.width() - inset) / (AVERAGE_GLYPH_EM * count));
@@ -336,7 +336,7 @@ pub fn resolve_source_style(
         style.dash = border
             .dash_pattern
             .as_ref()
-            .map(|pattern| pattern.intervals.iter().copied().map(f64::from).collect())
+            .map(|pattern| pattern.intervals.clone())
             .unwrap_or_default();
     }
     let (border, interior) = match &annotation.kind {

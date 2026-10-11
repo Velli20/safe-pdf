@@ -180,7 +180,7 @@ fn line(
 /// Polygon and polyline vertices are retained as parsed, including closure.
 fn path(
     source: &SourceAnnotation,
-    vertices: &Polyline<f64>,
+    vertices: &Polyline,
     endings: &Option<[LineEndingStyle; 2]>,
     style: ResolvedStyle,
 ) -> Result<PathAnnotation, ValidationError> {
@@ -196,7 +196,7 @@ fn path(
 fn shape(
     source: &SourceAnnotation,
     border_effect: &Option<BorderEffect>,
-    insets: Option<[f64; 4]>,
+    insets: Option<Rect>,
     style: ResolvedStyle,
 ) -> Result<BoxAnnotation, ValidationError> {
     Ok(BoxAnnotation {
@@ -252,7 +252,7 @@ fn unknown(
     source: &SourceAnnotation,
     subtype: &[u8],
 ) -> Result<UnknownAnnotation, ValidationError> {
-    let bounds: Option<Rect<f64>> = source.rect.map(|_| source.bounds()).transpose()?;
+    let bounds: Option<Rect> = source.rect.map(|_| source.bounds()).transpose()?;
     Ok(UnknownAnnotation {
         subtype: subtype.to_vec(),
         bounds,
