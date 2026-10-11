@@ -190,16 +190,18 @@ PDFs that have no goldens.
   the rendering job to fail pull requests on render regressions against the baselines.
 - **Published viewer:** runs on `main` deploy the viewers to GitHub Pages at
   <https://velli20.github.io/safe-pdf/conformance/>, next to the web-canvas demo. Issues
-  link straight into it (`#case=<id>&page=<n>`) and embed its images. Pages holds one site,
+  link straight into it (`#case=<id>&page=<n>`). Pages holds one site,
   so the `publish` job and `ci.yml`'s `deploy` job each fetch the other half from its newest
   `pages-conformance` / `pages-web-canvas` artifact (`.github/scripts/assemble-pages.sh`).
 - **Issues:**
   - One issue per cause across both corpora, labelled `conformance`, `conformance:<corpus>`,
     `area:<crate>` when the error's crate is known, and `crash`, `harness` or `regression`
-    where they apply. At most 15 new issues per run; the rest follow in later runs, worst
-    status first.
+    where they apply. The first run, when the repository has no conformance issue yet, files
+    every cluster; later runs file at most 15 new issues each (`--max-new`, 0 for no limit)
+    and the rest follow in later runs, worst status first. Issues are written about one a
+    second to stay under GitHub's secondary rate limit.
   - Each body opens with an alert and a table of facts, links the suspect source line (GitHub
-    shows it as a snippet), shows one case's images from Pages, lists the cases with viewer,
+    shows it as a snippet), shows one case's images, lists the cases with viewer,
     summary and PDF links, gives the `repro` and `verify` commands, and ends with a JSON
     block for agents.
   - A hidden `conformance-state` comment holds the issue's key and, per corpus, its cluster
@@ -209,7 +211,19 @@ PDFs that have no goldens.
     - **Absent from two full runs in a row:** closed as completed.
     - **Closed as completed:** reopened if the failure comes back.
     - **Closed as not planned:** never touched again.
+    - **Older body layout:** an open issue written with an older layout (the state's
+      `format` below the current one) is rewritten on the next run even when its cluster did
+      not change.
   - Issues without that comment (including those filed before it existed) are ignored.
+  - **Images:** GitHub's API cannot attach files to issues and the Pages site is replaced on
+    every deploy, so before writing any issue the job commits the images the bodies embed to
+    the `conformance-assets` branch and the bodies link them through
+    `raw.githubusercontent.com`. Files are named by a hash of their content, so a link keeps
+    showing the image it was written with. Each run replaces the branch with one
+    parentless commit holding only the images open issues link to, so images of closed
+    issues drop out and the branch stays small. Contributors who do not want it in their
+    clone can use `git clone --single-branch`. A dry run copies the images to
+    `target/conformance/issues/assets/` instead.
   - Runs limited with `--filter`, `--case` or `--page` never close issues. Read-only runs
     (the pdf.js corpus) file and refresh issues but never count a failure as absent, so they
     do not close issues either.

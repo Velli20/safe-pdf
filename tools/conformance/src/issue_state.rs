@@ -10,6 +10,9 @@ use std::collections::BTreeMap;
 
 const MARKER: &str = "<!-- conformance-state: ";
 const MARKER_END: &str = " -->";
+/// Version of the issue body layout. Raising it rewrites every open issue on the next run.
+/// 1: images link to the `conformance-assets` branch instead of the Pages report.
+pub const FORMAT: u32 = 1;
 /// Prefix of issue keys.
 pub const KEY_PREFIX: &str = "conf2-";
 
@@ -33,6 +36,9 @@ pub struct IssueState {
     /// Cluster size per corpus name.
     #[serde(default)]
     pub corpora: BTreeMap<String, CorpusState>,
+    /// Body layout the issue was last written with; see [`FORMAT`].
+    #[serde(default)]
+    pub format: u32,
 }
 
 /// Returns the key of a signature. Keys do not depend on the corpus, so one cause found in
@@ -86,6 +92,7 @@ mod tests {
         let mut state = IssueState {
             key: key("mismatch: blank page"),
             corpora: BTreeMap::new(),
+            format: FORMAT,
         };
         state.corpora.insert(
             "pdfium".to_owned(),
