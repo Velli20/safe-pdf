@@ -8,7 +8,7 @@ use pdf_decode::{
 };
 use pdf_filter::image_payload::ImagePayload;
 
-use crate::error::PdfImageError;
+use crate::error::{ImageRasterError, PdfImageError};
 use crate::image_metadata::ImageMetadata;
 use crate::jpx_image::{JpxDisplay, JpxImage};
 
@@ -43,25 +43,22 @@ impl DecodedSamples {
         }
 
         match &metadata.color_space {
-            Some(ColorSpace::Indexed(indexed)) => {
-                if indexed.base.is_device_space() {
-                    Self::decode_indexed(
-                        raw_data,
-                        metadata,
-                        indexed.base.num_color_components(),
-                        indexed.hival,
-                        &indexed.lookup,
-                    )
-                } else {
-                    Self::decode_indexed_rgba(raw_data, metadata, indexed)
+            Some(ColorSpace::Indexed(indexed)) => match indexed.base.device_equivalent() {
+                Some(base) => Self::decode_indexed(
+                    raw_data,
+                    metadata,
+                    base.num_color_components(),
+                    indexed.hival,
+                    &indexed.lookup,
+                ),
+                None => Self::decode_indexed_rgba(raw_data, metadata, indexed),
+            },
+            Some(color_space) => match color_space.device_equivalent() {
+                Some(device) => {
+                    Self::decode_direct(raw_data, metadata, device.num_color_components())
                 }
-            }
-            Some(color_space) if !color_space.is_device_space() => {
-                Self::decode_direct_rgba(raw_data, metadata, color_space)
-            }
-            Some(color_space) => {
-                Self::decode_direct(raw_data, metadata, color_space.num_color_components())
-            }
+                None => Self::decode_direct_rgba(raw_data, metadata, color_space),
+            },
             None => Self::decode_direct(raw_data, metadata, 1),
         }
     }
@@ -85,7 +82,7 @@ impl DecodedSamples {
             metadata.size.height(),
         )?;
 
-        if alpha.is_none() && color_space.is_device_space() {
+        if alpha.is_none() && color_space.device_equivalent().is_some() {
             return Ok(Self {
                 num_color_components: components,
                 image_data: color.into(),
@@ -93,28 +90,13 @@ impl DecodedSamples {
             });
         }
 
-        // An Indexed space reads its component as a palette index rather than a
-        // fraction of full scale, so the sample passes through unnormalized.
-        let decoded = match color_space {
-            ColorSpace::Indexed(_) => color.iter().map(|sample| f32::from(*sample)).collect(),
-            ref color_space => Self::default_color_components(&color, u8::MAX, color_space),
-        };
-        let mut image_data = Vec::new();
-        let pixels = decoded.len().checked_div(components.max(1)).unwrap_or(0);
-        image_data
-            .try_reserve_exact(pixels.saturating_mul(4))
-            .map_err(|_| PdfImageError::JpxImageTooLarge {
-                pixels,
-                channels: 4,
-            })?;
-        for (index, pixel) in decoded.chunks_exact(components.max(1)).enumerate() {
-            let [red, green, blue, _] = color_space.apply(pixel)?.to_rgba8();
-            let opacity = alpha
-                .as_ref()
-                .and_then(|plane| plane.get(index).copied())
-                .unwrap_or(u8::MAX);
-            image_data.extend_from_slice(&[red, green, blue, opacity]);
-        }
+        // PDF ignores `/Decode` for a JPX image.
+        let image_data = ComponentDomain::new(&color_space, None).to_rgba(
+            &color,
+            u8::MAX,
+            &color_space,
+            alpha.as_deref(),
+        )?;
 
         Ok(Self {
             num_color_components: 4,
@@ -284,55 +266,18 @@ impl DecodedSamples {
         let components = color_space.num_color_components();
         let sample_codes = Self::decode_image_sample_codes(raw_data, components, metadata)?;
         let sample_max = Self::sample_max(metadata.sample_bits())?;
-        let decoded = metadata.decode.as_ref().map_or_else(
-            || Self::default_color_components(sample_codes.as_ref(), sample_max, color_space),
-            |decode| decode.apply_to_f32(sample_codes.as_ref(), sample_max),
-        );
-        let mut image_data = Vec::with_capacity(
-            decoded
-                .len()
-                .checked_div(components)
-                .unwrap_or(0)
-                .saturating_mul(4),
-        );
-        for pixel in decoded.chunks_exact(components) {
-            image_data.extend_from_slice(&color_space.apply(pixel)?.to_rgba8());
-        }
+        let image_data = ComponentDomain::new(color_space, metadata.decode.as_ref()).to_rgba(
+            &sample_codes,
+            sample_max,
+            color_space,
+            None,
+        )?;
 
         Ok(Self {
             num_color_components: 4,
             image_data: image_data.into(),
             is_rgba: true,
         })
-    }
-
-    /// Applies the implicit decode domains for non-device color spaces.
-    fn default_color_components(
-        samples: &[u8],
-        sample_max: u8,
-        color_space: &ColorSpace,
-    ) -> Vec<f32> {
-        let denominator = f32::from(sample_max.max(1));
-        match color_space {
-            ColorSpace::Lab(lab) => samples
-                .as_chunks::<3>()
-                .0
-                .iter()
-                .flat_map(|&[l, a, b]| {
-                    let [amin, amax, bmin, bmax] = lab.range;
-                    let normalized = |sample| f32::from(sample) / denominator;
-                    [
-                        normalized(l) * 100.0,
-                        amin + normalized(a) * (amax - amin),
-                        bmin + normalized(b) * (bmax - bmin),
-                    ]
-                })
-                .collect(),
-            _ => samples
-                .iter()
-                .map(|sample| f32::from(*sample) / denominator)
-                .collect(),
-        }
     }
 
     /// Applies an explicit decode map or the implicit PDF identity/inverted default.
@@ -422,6 +367,85 @@ impl DecodedSamples {
             8 => Ok(255),
             _ => Err(PdfImageError::UnsupportedImageBitsPerComponent { bits_per_component }),
         }
+    }
+}
+
+/// How a non-device color space reads one pixel's samples as color components.
+enum ComponentDomain<'a> {
+    /// An explicit `/Decode` array maps each sample into its component range.
+    Decode(&'a DecodeMap),
+    /// An Indexed space reads its component as a palette index rather than a
+    /// fraction of full scale, so the sample passes through unnormalized.
+    Index,
+    /// `L*a*b*` samples span L* 0 to 100 and the space's `[amin amax bmin bmax]` ranges.
+    Lab([f32; 4]),
+    /// Samples are fractions of full scale.
+    Fraction,
+}
+
+impl<'a> ComponentDomain<'a> {
+    /// Selects the domain of `color_space`, or of `decode` when the image gives one.
+    fn new(color_space: &ColorSpace, decode: Option<&'a DecodeMap>) -> Self {
+        match (decode, color_space) {
+            (Some(decode), _) => Self::Decode(decode),
+            (None, ColorSpace::Indexed(_)) => Self::Index,
+            (None, ColorSpace::Lab(lab)) => Self::Lab(lab.range),
+            (None, _) => Self::Fraction,
+        }
+    }
+
+    /// Writes the color components of one pixel's samples into `components`.
+    fn read(&self, pixel: &[u8], sample_max: u8, components: &mut [f32]) {
+        let denominator = match self {
+            Self::Index => 1.0,
+            _ => f32::from(sample_max.max(1)),
+        };
+        let normalized = |sample: u8| f32::from(sample) / denominator;
+        match self {
+            Self::Decode(decode) => decode.apply_to_f32(pixel, sample_max, components),
+            Self::Lab([amin, amax, bmin, bmax]) => {
+                if let ([l, a, b, ..], [cl, ca, cb, ..]) = (pixel, components) {
+                    *cl = normalized(*l) * 100.0;
+                    *ca = amin + normalized(*a) * (amax - amin);
+                    *cb = bmin + normalized(*b) * (bmax - bmin);
+                }
+            }
+            Self::Index | Self::Fraction => {
+                for (sample, component) in pixel.iter().zip(components.iter_mut()) {
+                    *component = normalized(*sample);
+                }
+            }
+        }
+    }
+
+    /// Converts interleaved samples through `color_space` into RGBA, one pixel at a time,
+    /// so no intermediate copy of the whole image is held in floating point.
+    ///
+    /// Opacity comes from `alpha`, one value per pixel, when it is given, and otherwise
+    /// from the color the space produces.
+    fn to_rgba(
+        &self,
+        samples: &[u8],
+        sample_max: u8,
+        color_space: &ColorSpace,
+        alpha: Option<&[u8]>,
+    ) -> Result<Vec<u8>, PdfImageError> {
+        let components = color_space.num_color_components().max(1);
+        let pixels = samples.len().checked_div(components).unwrap_or(0);
+        let mut image_data = Vec::new();
+        image_data
+            .try_reserve_exact(pixels.saturating_mul(4))
+            .map_err(|_| PdfImageError::Raster(ImageRasterError::ResourceLimit))?;
+        let mut pixel = vec![0.0; components];
+        for (index, samples) in samples.chunks_exact(components).enumerate() {
+            self.read(samples, sample_max, &mut pixel);
+            let [red, green, blue, color_alpha] = color_space.apply(&pixel)?.to_rgba8();
+            let opacity = alpha
+                .and_then(|plane| plane.get(index).copied())
+                .unwrap_or(color_alpha);
+            image_data.extend_from_slice(&[red, green, blue, opacity]);
+        }
+        Ok(image_data)
     }
 }
 

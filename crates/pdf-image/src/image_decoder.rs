@@ -182,7 +182,9 @@ fn image_from_rgba(
         };
     }
 
-    let mut rgba = data.get(..byte_len).map_or_else(Vec::new, <[u8]>::to_vec);
+    // Freshly decoded samples are not shared, so this takes over their buffer without a copy.
+    let mut rgba = Vec::from(data);
+    rgba.truncate(byte_len);
     if let Some(mask) = soft_mask {
         for ([_, _, _, alpha], mask_alpha) in rgba
             .as_chunks_mut::<4>()

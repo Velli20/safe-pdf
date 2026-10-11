@@ -44,18 +44,16 @@ impl DecodeMap {
         out
     }
 
-    /// Applies the decode ranges while retaining their floating-point component domains.
-    #[must_use]
-    pub fn apply_to_f32(&self, samples: &[u8], sample_max: u8) -> Vec<f32> {
-        if self.ranges.is_empty() {
-            return Vec::new();
-        }
-
-        samples
+    /// Applies the decode ranges to `samples`, writing their floating-point component values
+    /// into `out`. Writing stops at the shorter of the two slices.
+    pub fn apply_to_f32(&self, samples: &[u8], sample_max: u8, out: &mut [f32]) {
+        for ((sample, range), value) in samples
             .iter()
             .zip(self.ranges.iter().cycle())
-            .map(|(sample, range)| range.map_f32(*sample, sample_max))
-            .collect()
+            .zip(out.iter_mut())
+        {
+            *value = range.map_f32(*sample, sample_max);
+        }
     }
 }
 
@@ -98,6 +96,8 @@ mod tests {
             ranges: vec![DecodeRange::new(-100.0, 100.0).unwrap()],
         };
 
-        assert_eq!(map.apply_to_f32(&[0, 255], 255), vec![-100.0, 100.0]);
+        let mut values = [0.0; 2];
+        map.apply_to_f32(&[0, 255], 255, &mut values);
+        assert_eq!(values, [-100.0, 100.0]);
     }
 }

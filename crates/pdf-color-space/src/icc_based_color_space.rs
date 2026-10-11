@@ -54,6 +54,23 @@ impl FromPdfObject for ICCBasedColorSpace {
 }
 
 impl ICCBasedColorSpace {
+    /// Returns the device space this space draws as: its alternate's device equivalent,
+    /// or the device space with its number of components when it names no alternate.
+    ///
+    /// An alternate with a different number of components has none.
+    pub(crate) fn device_equivalent(&self) -> Option<ColorSpace> {
+        let space = match self.alternate_space.as_deref() {
+            Some(alternate) => alternate.device_equivalent()?,
+            None => match self.num_components {
+                1 => ColorSpace::DeviceGray,
+                3 => ColorSpace::DeviceRGB,
+                4 => ColorSpace::DeviceCMYK,
+                _ => return None,
+            },
+        };
+        (space.num_color_components() == self.num_components).then_some(space)
+    }
+
     pub(crate) fn apply(&self, components: &[f32]) -> Result<Color, ColorSpaceError> {
         if components.len() != self.num_components {
             return Err(ColorSpaceError::InsufficientComponents(
