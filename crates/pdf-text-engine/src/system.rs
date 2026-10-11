@@ -35,15 +35,52 @@
 //! let _system = FontSystem::new(registry, Arc::new(EmptyFallback));
 //! ```
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use crate::error::TextError;
 use crate::text::{PdfTextRun, PositionedGlyph, TextLayout, TextVector};
 use pdf_font::fallback::WholeFontFallbackRequest;
 use pdf_font::pdf_font_handle::PdfFontHandle;
 use pdf_font::{
-    FallbackProvider, FontFace, FontMetadata, FontRegistry, FontSource, PdfFontSpec, Type3FontSpec,
+    FallbackCandidate, FallbackProvider, FontFace, FontMetadata, FontProgramFormat, FontRegistry,
+    FontSource, PdfFontSpec, Type3FontSpec,
 };
+
+/// Identity of an in-memory fallback program: its buffer address and length, format, and face.
+///
+/// Keying by address avoids hashing large bundled programs. Each cache entry retains its source,
+/// so the buffer stays alive and its address cannot be reused by another program.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct FallbackSourceKey {
+    address: usize,
+    length: usize,
+    format: FontProgramFormat,
+    face_index: u32,
+}
+
+impl FallbackSourceKey {
+    /// Returns the key of an in-memory source, or `None` for sources that are not cached.
+    fn from_source(source: &FontSource) -> Option<Self> {
+        let FontSource::Memory {
+            data,
+            format,
+            face_index,
+        } = source
+        else {
+            return None;
+        };
+        Some(Self {
+            address: data.as_ptr().addr(),
+            length: data.len(),
+            format: *format,
+            face_index: *face_index,
+        })
+    }
+}
+
+/// Glyph-fallback faces loaded so far, with the sources that keep their buffers alive.
+type FallbackFaces = HashMap<FallbackSourceKey, (FontSource, Arc<dyn FontFace>)>;
 
 /// Thread-safe façade for loading PDF fonts and producing positioned glyph layouts.
 pub struct FontSystem {
@@ -51,6 +88,8 @@ pub struct FontSystem {
     registry: FontRegistry,
     /// Application policy for whole-font and per-glyph substitution.
     fallback: Arc<dyn FallbackProvider>,
+    /// Glyph-fallback faces, loaded once so runs and pages share faces and their glyph caches.
+    fallback_faces: RwLock<FallbackFaces>,
 }
 
 impl FontSystem {
@@ -60,7 +99,11 @@ impl FontSystem {
     /// allows callers to reuse an immutable policy without another wrapper type.
     #[must_use]
     pub fn new(registry: FontRegistry, fallback: Arc<dyn FallbackProvider>) -> Self {
-        Self { registry, fallback }
+        Self {
+            registry,
+            fallback,
+            fallback_faces: RwLock::new(HashMap::new()),
+        }
     }
 
     /// Returns the configured font driver registry.
@@ -135,6 +178,37 @@ impl FontSystem {
         metadata_hint: FontMetadata,
     ) -> Result<Arc<dyn FontFace>, pdf_font::FontError> {
         self.registry.load(source, metadata_hint)
+    }
+
+    /// Loads a glyph-fallback candidate, reusing the face loaded earlier for the same program.
+    ///
+    /// In-memory candidates are cached for the lifetime of the system; other sources load anew.
+    /// Fallback face metadata only describes the substitute, so one face serves every request.
+    pub(crate) fn load_fallback_face(
+        &self,
+        candidate: FallbackCandidate,
+    ) -> Result<Arc<dyn FontFace>, pdf_font::FontError> {
+        let Some(key) = FallbackSourceKey::from_source(&candidate.source) else {
+            return self.load_with_metadata(candidate.source, candidate.metadata);
+        };
+        // Entries are inserted only after their face has loaded, so a poisoned map is still valid.
+        let cached = match self.fallback_faces.read() {
+            Ok(faces) => faces.get(&key).map(|(_, face)| Arc::clone(face)),
+            Err(poisoned) => poisoned
+                .into_inner()
+                .get(&key)
+                .map(|(_, face)| Arc::clone(face)),
+        };
+        if let Some(face) = cached {
+            return Ok(face);
+        }
+        let face = self.load_with_metadata(candidate.source.clone(), candidate.metadata)?;
+        let entry = (candidate.source, Arc::clone(&face));
+        match self.fallback_faces.write() {
+            Ok(mut faces) => faces.insert(key, entry),
+            Err(poisoned) => poisoned.into_inner().insert(key, entry),
+        };
+        Ok(face)
     }
 
     /// Returns the first loadable whole-font fallback candidate in provider order.
