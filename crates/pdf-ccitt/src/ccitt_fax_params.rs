@@ -1,7 +1,4 @@
-use pdf_object_reader::{
-    dictionary::Dictionary, object_error::ObjectError, object_lookup::ObjectLookupExt,
-    object_resolver::ObjectResolver,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 /// Decode parameters for the `CCITTFaxDecode` filter (PDF spec §7.4.6, Table 11).
 #[derive(Debug, Clone)]
@@ -48,44 +45,32 @@ impl CCITTFaxParams {
         black_is1: false,
         damaged_rows_before_error: 0,
     };
+}
 
-    /// Build a [`CCITTFaxParams`] from a PDF `/DecodeParms` dictionary.
-    ///
-    /// Every key is optional; missing or invalid values fall back to the PDF
-    /// specification defaults.  This impl is infallible because the spec treats
-    /// all entries as optional with well-defined defaults.
-    pub fn from_dictionary(
-        dict: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Self, ObjectError> {
-        let mut p = Self::default();
-
-        if let Some(value) = dict.optional_number::<i32>(b"K", objects)? {
-            p.k = value;
+/// Reads a `/DecodeParms` dictionary; missing or null keys keep the PDF-specified defaults.
+impl FromPdfObject for CCITTFaxParams {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        let mut params = Self::default();
+        for (key, value) in context.dictionary().iter() {
+            if context.is_absent(value)? {
+                continue;
+            }
+            match key {
+                b"K" => params.k = context.read(value)?,
+                b"Columns" => params.columns = context.read(value)?,
+                b"Rows" => params.rows = context.read(value)?,
+                b"EndOfLine" => params.end_of_line = context.read(value)?,
+                b"EncodedByteAlign" => params.encoded_byte_align = context.read(value)?,
+                b"EndOfBlock" => params.end_of_block = context.read(value)?,
+                b"BlackIs1" => params.black_is1 = context.read(value)?,
+                b"DamagedRowsBeforeError" => {
+                    params.damaged_rows_before_error = context.read(value)?;
+                }
+                _ => {}
+            }
         }
-        if let Some(value) = dict.optional_number::<usize>(b"Columns", objects)? {
-            p.columns = value;
-        }
-        if let Some(value) = dict.optional_number::<usize>(b"Rows", objects)? {
-            p.rows = value;
-        }
-        if let Some(obj) = dict.optional_boolean(b"EndOfLine", objects)? {
-            p.end_of_line = obj;
-        }
-        if let Some(obj) = dict.optional_boolean(b"EncodedByteAlign", objects)? {
-            p.encoded_byte_align = obj;
-        }
-        if let Some(obj) = dict.optional_boolean(b"EndOfBlock", objects)? {
-            p.end_of_block = obj;
-        }
-        if let Some(obj) = dict.optional_boolean(b"BlackIs1", objects)? {
-            p.black_is1 = obj;
-        }
-        if let Some(value) = dict.optional_number::<u32>(b"DamagedRowsBeforeError", objects)? {
-            p.damaged_rows_before_error = value;
-        }
-
-        Ok(p)
+        Ok(params)
     }
 }
 
@@ -94,14 +79,15 @@ mod tests {
     use super::*;
     use pdf_object_reader::object_resolver::PassthroughResolver;
     use pdf_object_reader::object_variant::ObjectVariant;
+    use pdf_object_reader::{Dictionary, ObjectReader};
     use std::collections::BTreeMap;
 
     #[test]
-    fn params_from_empty_dict_uses_defaults() -> Result<(), ObjectError> {
+    fn params_from_empty_dict_uses_defaults() -> ReadResult<()> {
         use std::collections::BTreeMap;
         let dict = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
-        let objects = PassthroughResolver;
-        let p = CCITTFaxParams::from_dictionary(&dict, &objects)?;
+        let p = ObjectReader::new(PassthroughResolver)
+            .read::<CCITTFaxParams>(&ObjectVariant::Dictionary(dict))?;
         assert_eq!(p.k, 0);
         assert_eq!(p.columns, 1728);
         assert_eq!(p.rows, 0);
@@ -114,7 +100,7 @@ mod tests {
     }
 
     #[test]
-    fn params_from_dict_reads_all_keys() -> Result<(), ObjectError> {
+    fn params_from_dict_reads_all_keys() -> ReadResult<()> {
         use pdf_object_reader::object_variant::ObjectVariant;
 
         let mut dict = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
@@ -137,8 +123,8 @@ mod tests {
             ObjectVariant::Integer(2),
         );
 
-        let objects = PassthroughResolver;
-        let p = CCITTFaxParams::from_dictionary(&dict, &objects)?;
+        let p = ObjectReader::new(PassthroughResolver)
+            .read::<CCITTFaxParams>(&ObjectVariant::Dictionary(dict))?;
 
         assert_eq!(p.k, -1);
         assert_eq!(p.columns, 800);

@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
-use pdf_filter::filter::{Filters, decode_data_with_resolver};
-use pdf_object_reader::{ObjectAccess, dictionary::Dictionary, object_variant::ObjectVariant};
+use pdf_filter::filter::{Filters, decode_data_with_access};
+use pdf_object_reader::{
+    DictionaryContext, ObjectAccess, dictionary::Dictionary, object_variant::ObjectVariant,
+};
 
 use crate::{error::PdfImageError, image_metadata::ImageMetadata};
 
@@ -21,7 +23,7 @@ impl InlineImage {
         access: &mut (impl ObjectAccess + ?Sized),
     ) -> Result<Self, PdfImageError> {
         let dictionary = normalize_inline_image_dictionary(&dictionary);
-        let metadata = ImageMetadata::from_dictionary(&dictionary, access)?;
+        let metadata = ImageMetadata::read(&mut DictionaryContext::new(&dictionary, access))?;
         // ISO 32000 restricts inline images to the filters that need no
         // out-of-band metadata; JPXDecode is not among them. Reject it before
         // filtering so the payload is never handed to a decoder that cannot
@@ -33,7 +35,7 @@ impl InlineImage {
         {
             return Err(PdfImageError::InlineJpxFilter);
         }
-        let data = decode_data_with_resolver(&dictionary, data.into(), access.source())?;
+        let data = decode_data_with_access(&dictionary, data.into(), access)?;
 
         Ok(Self { metadata, data })
     }

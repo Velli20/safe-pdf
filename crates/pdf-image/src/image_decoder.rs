@@ -1,7 +1,9 @@
 use bytes::Bytes;
 use pdf_filter::{filter::Filters, image_payload::ImagePayload};
 use pdf_graphics::Image;
-use pdf_object_reader::{ObjectAccess, dictionary::Dictionary, stream::StreamObject};
+use pdf_object_reader::{
+    DictionaryContext, ObjectAccess, dictionary::Dictionary, stream::StreamObject,
+};
 
 use crate::InlineImage;
 use crate::decoded_samples::DecodedSamples;
@@ -15,11 +17,11 @@ pub fn read_xobject(
     access: &mut (impl ObjectAccess + ?Sized),
     soft_mask: Option<&Image>,
 ) -> Result<Image, PdfImageError> {
-    let metadata = ImageMetadata::from_dictionary(dictionary, access)?;
+    let metadata = ImageMetadata::read(&mut DictionaryContext::new(dictionary, access))?;
     let payload = if stream_data.filters_applied() {
         image_payload(stream_data.shared_data(), &metadata)
     } else {
-        ImagePayload::decode(dictionary, stream_data.shared_data(), access.source())?
+        ImagePayload::decode(dictionary, stream_data.shared_data(), access)?
     };
 
     decode_normalized_image_with_metadata(payload, soft_mask, &metadata)
@@ -63,7 +65,7 @@ pub fn decode_normalized_image(
     access: &mut (impl ObjectAccess + ?Sized),
     soft_mask: Option<&Image>,
 ) -> Result<Image, PdfImageError> {
-    let metadata = ImageMetadata::from_dictionary(dictionary, access)?;
+    let metadata = ImageMetadata::read(&mut DictionaryContext::new(dictionary, access))?;
     let payload = image_payload(raw_data, &metadata);
     decode_normalized_image_with_metadata(payload, soft_mask, &metadata)
 }

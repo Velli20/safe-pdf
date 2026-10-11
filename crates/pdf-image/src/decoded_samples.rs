@@ -457,10 +457,10 @@ mod tests {
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
-        let metadata = ImageMetadata::from_dictionary(
+        let metadata = ImageMetadata::read(&mut pdf_object_reader::DictionaryContext::new(
             &dictionary,
             &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
-        )
+        ))
         .expect("direct image metadata should be valid");
         let samples = Bytes::from_static(&[12, 34]);
 

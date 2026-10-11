@@ -60,6 +60,12 @@ impl From<pdf_object_reader::object_error::ObjectError> for FilterError {
     }
 }
 
+impl From<pdf_object_reader::ObjectReadError> for FilterError {
+    fn from(err: pdf_object_reader::ObjectReadError) -> Self {
+        Self::Object(err.to_string())
+    }
+}
+
 impl From<FilterError> for pdf_object_reader::object_error::ObjectError {
     fn from(err: FilterError) -> Self {
         match err {

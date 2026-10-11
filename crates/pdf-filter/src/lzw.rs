@@ -1,5 +1,6 @@
-use crate::error::FilterError;
+use crate::{error::FilterError, predictor::PredictorParams};
 
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use pdf_utils::BitReader;
 
 /// Clear-table code (resets the string table).
@@ -12,6 +13,40 @@ const FIRST_CODE: u16 = 258;
 const MAX_CODE_WIDTH: u8 = 12;
 /// Maximum number of table entries (2^12).
 const MAX_TABLE_SIZE: usize = 4096;
+
+/// `/DecodeParms` of the LZWDecode filter (PDF spec §7.4.4.2, Table 9).
+#[derive(Debug, Clone)]
+pub(crate) struct LzwParams {
+    /// Whether the code width grows one code early (`/EarlyChange`, default 1).
+    pub early_change: bool,
+    /// The predictor applied after decompression.
+    pub predictor: PredictorParams,
+}
+
+impl Default for LzwParams {
+    fn default() -> Self {
+        Self {
+            early_change: true,
+            predictor: PredictorParams::default(),
+        }
+    }
+}
+
+impl FromPdfObject for LzwParams {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        let mut params = Self::default();
+        for (key, value) in context.dictionary().iter() {
+            match key {
+                b"EarlyChange" if !context.is_absent(value)? => {
+                    params.early_change = context.read::<i32>(value)? != 0;
+                }
+                _ => params.predictor.absorb(key, value, &mut context)?,
+            }
+        }
+        Ok(params)
+    }
+}
 
 /// Decodes LZW-compressed data per PDF specification §7.4.4.
 ///

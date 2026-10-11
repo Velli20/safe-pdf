@@ -177,7 +177,19 @@ macro_rules! number_decoder {
     };
 }
 
-number_decoder!(f32, i32, u8, u16, u32, usize);
+number_decoder!(f32, i32, i64, u8, u16, u32, usize);
+
+impl FromPdfObject for bool {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match context.object().value() {
+            ObjectVariant::Boolean(value) => Ok(*value),
+            _ => Err(ObjectReadError::TypeMismatch {
+                expected: ObjectKind::Boolean,
+                actual: context.object().kind(),
+            }),
+        }
+    }
+}
 
 /// Reads the first N elements, validating length before decoding any child.
 ///
