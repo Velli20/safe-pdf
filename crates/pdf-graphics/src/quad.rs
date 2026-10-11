@@ -6,7 +6,7 @@ use crate::{point::Point, polyline::Polyline, rect::Rect};
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(
     feature = "typescript",
-    ts(export_to = "annotation_contract.ts", concrete(T = f64))
+    ts(export_to = "annotation_contract.ts", concrete(T = f32))
 )]
 pub struct Quad<T = f32> {
     /// Clockwise or counterclockwise perimeter; crossing edges are invalid.
@@ -20,14 +20,14 @@ impl<T: Copy> From<&Quad<T>> for Polyline<T> {
     }
 }
 
-impl Quad<f64> {
+impl Quad<f32> {
     /// Whether every corner is finite.
     pub fn is_finite(&self) -> bool {
         self.corners.iter().all(|corner| corner.is_finite())
     }
 
     /// Axis-aligned rectangle enclosing all four corners, with `left`/`top` the minima.
-    pub fn bounds(&self) -> Rect<f64> {
+    pub fn bounds(&self) -> Rect {
         let [first, rest @ ..] = self.corners;
         rest.iter().fold(
             Rect {
@@ -59,8 +59,8 @@ impl Quad<f64> {
 // Positive scaling of each axis preserves winding. Normalize edge differences
 // independently so huge offsets, subnormal extents, and extreme aspect ratios do
 // not overflow or underflow merely when computing a cross product.
-fn turn(a: Point<f64>, b: Point<f64>, c: Point<f64>) -> f64 {
-    let normalize = |a: f64, b: f64, c: f64| {
+fn turn(a: Point, b: Point, c: Point) -> f32 {
+    let normalize = |a: f32, b: f32, c: f32| {
         let (mut ab, mut bc) = (b - a, c - b);
         if !ab.is_finite() || !bc.is_finite() {
             ab = b * 0.5 - a * 0.5;

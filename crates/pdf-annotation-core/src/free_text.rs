@@ -9,7 +9,12 @@ use pdf_graphics::{color::Color, polyline::Polyline, rect::Rect};
 use serde::{Deserialize, Serialize};
 
 /// Left, top, right, and bottom text insets used when the source supplies none.
-const DEFAULT_INSETS: [f64; 4] = [2.0; 4];
+const DEFAULT_INSETS: Rect = Rect {
+    left: 2.0,
+    top: 2.0,
+    right: 2.0,
+    bottom: 2.0,
+};
 
 /// Solid free-text border in page units.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -19,7 +24,7 @@ pub struct FreeTextBorder {
     /// Unquantized opaque sRGB color.
     pub color: Color,
     /// Nonnegative border width.
-    pub width: f64,
+    pub width: f32,
 }
 
 /// Explicit native free-text style, independent of retained PDF source metadata.
@@ -30,13 +35,13 @@ pub struct FreeTextStyle {
     /// Plain PDF font resource name; no slash or PDF delimiters.
     pub font_name: Vec<u8>,
     /// Strictly positive font size in page units.
-    pub font_size: f64,
+    pub font_size: f32,
     /// Unquantized opaque text sRGB color.
     pub text_color: Color,
     /// Optional solid border.
     pub border: Option<FreeTextBorder>,
     /// Nonnegative left, top, right, bottom text insets, in that order.
-    pub insets: [f64; 4],
+    pub insets: Rect,
     /// Horizontal text alignment.
     pub alignment: Alignment,
 }
@@ -59,7 +64,7 @@ impl FreeTextStyle {
     ///
     /// The border is present only when the style has a border color; `insets`
     /// default to two page units per side. Does not validate the result.
-    pub fn from_resolved(style: &ResolvedStyle, insets: Option<[f64; 4]>) -> Self {
+    pub fn from_resolved(style: &ResolvedStyle, insets: Option<Rect>) -> Self {
         Self {
             font_name: style.font_resource_name().to_vec(),
             font_size: style.font_size,
@@ -102,7 +107,14 @@ impl FreeTextStyle {
             || [self.text_color.r, self.text_color.g, self.text_color.b]
                 .iter()
                 .any(|v| !v.is_finite() || *v < 0.0)
-            || self.insets.iter().any(|v| !v.is_finite() || *v < 0.0)
+            || [
+                self.insets.left,
+                self.insets.top,
+                self.insets.right,
+                self.insets.bottom,
+            ]
+            .iter()
+            .any(|v| !v.is_finite() || *v < 0.0)
             || self.border.as_ref().is_some_and(|b| {
                 !b.width.is_finite()
                     || b.width < 0.0
@@ -123,7 +135,7 @@ impl FreeTextStyle {
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct FreeText {
     /// Page-space placement.
-    pub bounds: Rect<f64>,
+    pub bounds: Rect,
     /// Current Unicode text.
     pub text: String,
     /// Current text and border style.
@@ -131,7 +143,7 @@ pub struct FreeText {
     /// Rich text retained without claiming a rich-text editor or renderer.
     pub rich_contents: Option<Vec<u8>>,
     /// Optional open two- or three-point callout, translated with the annotation.
-    pub callout: Option<Polyline<f64>>,
+    pub callout: Option<Polyline>,
     /// Retained border effect, unsupported by the plain-text editor.
     pub border_effect: Option<BorderEffect>,
 }

@@ -9,9 +9,9 @@ use crate::{
 use num_traits::ToPrimitive;
 
 /// Distance between squiggle vertices along the baseline.
-const SQUIGGLE_STEP: f64 = 2.0;
+const SQUIGGLE_STEP: f32 = 2.0;
 /// Perpendicular squiggle displacement.
-const SQUIGGLE_AMPLITUDE: f64 = 1.0;
+const SQUIGGLE_AMPLITUDE: f32 = 1.0;
 
 /// One sequence of straight segments, with closure stored separately from vertices.
 ///
@@ -21,7 +21,7 @@ const SQUIGGLE_AMPLITUDE: f64 = 1.0;
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(
     feature = "typescript",
-    ts(export_to = "annotation_contract.ts", concrete(T = f64))
+    ts(export_to = "annotation_contract.ts", concrete(T = f32))
 )]
 pub struct Polyline<T = f32> {
     /// Vertices in order, without duplication of the closing point.
@@ -107,21 +107,12 @@ impl Polyline<f32> {
         }
         path
     }
-}
-
-impl Polyline<f64> {
-    /// Moves every vertex by the given displacement without validating.
-    pub fn translate(&mut self, dx: f64, dy: f64) {
-        for point in &mut self.points {
-            point.translate(dx, dy);
-        }
-    }
 
     /// Axis-aligned rectangle enclosing every vertex; `None` for empty geometry.
     ///
-    /// Unlike [`Polyline::<f32>::bounds`], vertices are taken as-is: no transform is
+    /// Unlike [`Polyline::bounds`], vertices are taken as-is: no transform is
     /// applied and nonfinite coordinates propagate into the result unvalidated.
-    pub fn bounds(&self) -> Option<Rect<f64>> {
+    pub fn vertex_bounds(&self) -> Option<Rect> {
         self.points
             .iter()
             .map(|point| Rect {
@@ -139,7 +130,7 @@ impl Polyline<f64> {
     /// units, with alternating perpendicular offsets of -1.0 and +1.0 units.
     /// The endpoints are baseline anchors, not the first and last generated vertices.
     /// Coincident anchors produce two coincident vertices. Inputs are not validated.
-    pub fn squiggle(a: Point<f64>, b: Point<f64>) -> Self {
+    pub fn squiggle(a: Point, b: Point) -> Self {
         let (dx, dy) = (b.x - a.x, b.y - a.y);
         let length = dx.hypot(dy);
         let unit = if length > 0.0 { length } else { 1.0 };
@@ -147,7 +138,7 @@ impl Polyline<f64> {
         let count = steps.to_usize().unwrap_or(1);
         let points = (0..=count)
             .map(|i| {
-                let t = i.to_f64().unwrap_or(0.0) / steps;
+                let t = i.to_f32().unwrap_or(0.0) / steps;
                 let shift = if i % 2 == 1 {
                     SQUIGGLE_AMPLITUDE
                 } else {

@@ -3,6 +3,12 @@
 /// The type stores the width and height as a width/height pair and is intended
 /// as the reusable size analogue for the crate's other geometry models.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "typescript",
+    ts(export_to = "annotation_contract.ts", concrete(T = f32))
+)]
 pub struct Size<T = f32> {
     /// The horizontal dimension of the size.
     pub width: T,

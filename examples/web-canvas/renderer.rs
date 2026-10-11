@@ -172,15 +172,7 @@ impl WebDocument {
             .and_then(|p| usize::try_from(p).ok())
             .and_then(|p| self.document.pages.get(p))
             .and_then(|p| p.crop_box.or(p.media_box))
-            .map(|r| {
-                let r = r.normalized();
-                pdf_graphics::rect::Rect {
-                    left: f64::from(r.left),
-                    top: f64::from(r.top),
-                    right: f64::from(r.right),
-                    bottom: f64::from(r.bottom),
-                }
-            });
+            .map(|r| r.normalized());
         let receipt = self
             .overlay
             .accept_event(event, viewport, bounds)

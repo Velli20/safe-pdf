@@ -1,5 +1,4 @@
 use crate::{point::Point, transform::Transform};
-use num_traits::ToPrimitive;
 
 /// An axis-aligned rectangle whose edge coordinate type defaults to `f32`.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
@@ -7,7 +6,7 @@ use num_traits::ToPrimitive;
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(
     feature = "typescript",
-    ts(export_to = "annotation_contract.ts", concrete(T = f64))
+    ts(export_to = "annotation_contract.ts", concrete(T = f32))
 )]
 pub struct Rect<T = f32> {
     /// The left edge of the rectangle.
@@ -56,14 +55,67 @@ impl Rect<f32> {
         self.bottom - self.top
     }
 
-    /// Returns whether this rectangle has finite edges and positive dimensions.
+    /// Returns whether this rectangle has finite edges and finite, positive dimensions.
     pub fn is_valid(&self) -> bool {
-        self.left.is_finite()
-            && self.top.is_finite()
-            && self.right.is_finite()
-            && self.bottom.is_finite()
+        [
+            self.left,
+            self.top,
+            self.right,
+            self.bottom,
+            self.width(),
+            self.height(),
+        ]
+        .iter()
+        .all(|value| value.is_finite())
             && self.width() > 0.0
             && self.height() > 0.0
+    }
+
+    /// Smallest rectangle containing both, assuming both are normalized.
+    pub fn union(&self, other: &Self) -> Self {
+        Self {
+            left: self.left.min(other.left),
+            top: self.top.min(other.top),
+            right: self.right.max(other.right),
+            bottom: self.bottom.max(other.bottom),
+        }
+    }
+
+    /// Moves all edges by the given displacement without normalizing or validating.
+    pub fn translate(&mut self, dx: f32, dy: f32) {
+        self.left += dx;
+        self.right += dx;
+        self.top += dy;
+        self.bottom += dy;
+    }
+
+    /// Clamps a displacement so this normalized rectangle stays inside `page` on each axis.
+    /// Oversized rectangles are frozen on that axis; the other axis can still move.
+    ///
+    /// Returns `None` when either rectangle or the displacement is invalid, or when the
+    /// displacement limits overflow.
+    pub fn clamp_translation(&self, delta: Point, page: &Self) -> Option<Point> {
+        if !self.is_valid() || !page.is_valid() || !delta.is_finite() {
+            return None;
+        }
+        let clamp = |start: f32, end: f32, page_start: f32, page_end: f32, delta: f32| {
+            if end - start > page_end - page_start {
+                return Some(0.0);
+            }
+            let min = page_start - start;
+            let max = page_end - end;
+            if !min.is_finite() || !max.is_finite() || min > max {
+                return None;
+            }
+            Some(delta.clamp(min, max))
+        };
+        let result = Point {
+            x: clamp(self.left, self.right, page.left, page.right, delta.x)?,
+            y: clamp(self.top, self.bottom, page.top, page.bottom, delta.y)?,
+        };
+        let mut moved = *self;
+        moved.translate(result.x, result.y);
+        moved.is_valid().then_some(result)
     }
 
     /// Returns whether a point lies inside or on this rectangle's boundary.
@@ -95,102 +147,6 @@ impl Rect<f32> {
     }
 }
 
-impl Rect<f64> {
-    /// Narrows every edge to `f32`, or returns `None` unless all of them stay finite.
-    pub fn to_f32(&self) -> Option<Rect> {
-        let narrow = |value: f64| value.to_f32().filter(|value| value.is_finite());
-        Some(Rect {
-            left: narrow(self.left)?,
-            top: narrow(self.top)?,
-            right: narrow(self.right)?,
-            bottom: narrow(self.bottom)?,
-        })
-    }
-
-    /// Orders edges so `left` and `top` are the minimum x and y coordinates.
-    pub fn normalized(&self) -> Self {
-        Self {
-            left: self.left.min(self.right),
-            top: self.top.min(self.bottom),
-            right: self.left.max(self.right),
-            bottom: self.top.max(self.bottom),
-        }
-    }
-
-    /// Returns the horizontal extent.
-    pub fn width(&self) -> f64 {
-        self.right - self.left
-    }
-
-    /// Returns the vertical extent toward increasing y.
-    pub fn height(&self) -> f64 {
-        self.bottom - self.top
-    }
-
-    /// Smallest rectangle containing both, assuming both are normalized.
-    pub fn union(&self, other: &Self) -> Self {
-        Self {
-            left: self.left.min(other.left),
-            top: self.top.min(other.top),
-            right: self.right.max(other.right),
-            bottom: self.bottom.max(other.bottom),
-        }
-    }
-
-    /// Moves all edges by the given displacement without normalizing or validating.
-    pub fn translate(&mut self, dx: f64, dy: f64) {
-        self.left += dx;
-        self.right += dx;
-        self.top += dy;
-        self.bottom += dy;
-    }
-
-    /// Returns whether this rectangle has finite edges and finite, positive dimensions.
-    pub fn is_valid(&self) -> bool {
-        [
-            self.left,
-            self.top,
-            self.right,
-            self.bottom,
-            self.width(),
-            self.height(),
-        ]
-        .iter()
-        .all(|value| value.is_finite())
-            && self.width() > 0.0
-            && self.height() > 0.0
-    }
-
-    /// Clamps a displacement so this normalized rectangle stays inside `page` on each axis.
-    /// Oversized rectangles are frozen on that axis; the other axis can still move.
-    ///
-    /// Returns `None` when either rectangle or the displacement is invalid, or when the
-    /// displacement limits overflow.
-    pub fn clamp_translation(&self, delta: Point<f64>, page: &Self) -> Option<Point<f64>> {
-        if !self.is_valid() || !page.is_valid() || !delta.is_finite() {
-            return None;
-        }
-        let clamp = |start: f64, end: f64, page_start: f64, page_end: f64, delta: f64| {
-            if end - start > page_end - page_start {
-                return Some(0.0);
-            }
-            let min = page_start - start;
-            let max = page_end - end;
-            if !min.is_finite() || !max.is_finite() || min > max {
-                return None;
-            }
-            Some(delta.clamp(min, max))
-        };
-        let result = Point {
-            x: clamp(self.left, self.right, page.left, page.right, delta.x)?,
-            y: clamp(self.top, self.bottom, page.top, page.bottom, delta.y)?,
-        };
-        let mut moved = *self;
-        moved.translate(result.x, result.y);
-        moved.is_valid().then_some(result)
-    }
-}
-
 impl Rect<usize> {
     /// Creates an integer rectangle with the given size and its top-left corner at the origin.
     pub const fn from_size(width: usize, height: usize) -> Self {
@@ -215,18 +171,6 @@ impl Rect<usize> {
     /// Returns whether the rectangle has positive width and height.
     pub const fn is_valid(&self) -> bool {
         self.width() > 0 && self.height() > 0
-    }
-}
-
-impl From<Rect<f32>> for Rect<f64> {
-    /// Widens each edge losslessly.
-    fn from(rect: Rect<f32>) -> Self {
-        Self {
-            left: f64::from(rect.left),
-            top: f64::from(rect.top),
-            right: f64::from(rect.right),
-            bottom: f64::from(rect.bottom),
-        }
     }
 }
 

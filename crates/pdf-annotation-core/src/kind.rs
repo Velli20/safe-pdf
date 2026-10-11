@@ -16,7 +16,7 @@ use pdf_graphics::rect::Rect;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SourceLayout {
     /// Normalized copy of the source rectangle.
-    pub rect: Rect<f64>,
+    pub rect: Rect,
     /// Page point `rect` was measured against: the first ink point, else its origin.
     pub anchor: Point,
 }
@@ -67,7 +67,7 @@ pub enum AnnotationKind {
 }
 
 /// Union of every quad's bounds; markup without quads has no geometry.
-fn quads_bounds(quads: &[Quad]) -> Result<Rect<f64>, ValidationError> {
+fn quads_bounds(quads: &[Quad]) -> Result<Rect, ValidationError> {
     quads
         .iter()
         .map(Quad::bounds)
@@ -85,7 +85,7 @@ impl AnnotationKind {
     /// # Errors
     /// Returns `InvalidHighlight` for markup without quads, `InvalidInk` for ink without
     /// strokes, and `InvalidBounds` when the result is not a finite, positive rectangle.
-    pub fn bounds(&self, layout: Option<&SourceLayout>) -> Result<Rect<f64>, ValidationError> {
+    pub fn bounds(&self, layout: Option<&SourceLayout>) -> Result<Rect, ValidationError> {
         let result = match self {
             Self::FreeText(v) => v.bounds,
             Self::Link(v) => v.bounds,
@@ -122,7 +122,7 @@ impl AnnotationKind {
                     let b = v
                         .strokes
                         .iter()
-                        .filter_map(|stroke| stroke.bounds())
+                        .filter_map(|stroke| stroke.vertex_bounds())
                         .reduce(|a, b| a.union(&b))
                         .ok_or(ValidationError::InvalidInk)?;
                     Rect {
@@ -337,7 +337,7 @@ impl AnnotationKind {
                     return Err(ValidationError::InvalidBounds);
                 }
                 if v.insets
-                    .is_some_and(|values| values.iter().any(|value| *value < 0.0))
+                    .is_some_and(|r| [r.left, r.top, r.right, r.bottom].iter().any(|v| *v < 0.0))
                 {
                     return Err(ValidationError::InvalidStyle {
                         field: "shape insets",
@@ -409,14 +409,14 @@ impl AnnotationKind {
             Self::TextNote(value) => value.anchor.translate(delta.x, delta.y),
             Self::Ink(value) => {
                 for line in value.strokes.iter_mut() {
-                    line.translate(delta.x, delta.y);
+                    line.translate(delta);
                 }
             }
             Self::Widget(value) => value.bounds.translate(delta.x, delta.y),
             Self::FreeText(v) => v.translate(delta),
             Self::Line(v) | Self::Polygon(v) | Self::PolyLine(v) => {
                 v.bounds.translate(delta.x, delta.y);
-                v.vertices.translate(delta.x, delta.y);
+                v.vertices.translate(delta);
             }
             Self::Square(v) | Self::Circle(v) => v.bounds.translate(delta.x, delta.y),
             Self::Underline(v) | Self::Squiggly(v) | Self::StrikeOut(v) => {

@@ -95,25 +95,15 @@ pub fn css_color(color: Option<Color>) -> String {
 
 /// Local-to-CSS matrix; no-zoom keeps unit scale and no-rotate drops rotation and skew.
 fn css_matrix(entry: &AnnotationEntry, device_to_css: &Transform) -> String {
-    let d = [
-        device_to_css.sx,
-        device_to_css.ky,
-        device_to_css.kx,
-        device_to_css.sy,
-        device_to_css.tx,
-        device_to_css.ty,
-    ]
-    .map(f64::from);
-    let t = entry.transform;
     // device_to_css × transform, in CSS `matrix(a,b,c,d,e,f)` component order.
-    let [mut a, mut b, mut c, mut dd] = [
-        d[0] * t[0] + d[2] * t[1],
-        d[1] * t[0] + d[3] * t[1],
-        d[0] * t[2] + d[2] * t[3],
-        d[1] * t[2] + d[3] * t[3],
-    ];
-    let e = d[0] * t[4] + d[2] * t[5] + d[4];
-    let f = d[1] * t[4] + d[3] * t[5] + d[5];
+    let Transform {
+        sx: mut a,
+        ky: mut b,
+        kx: mut c,
+        sy: mut dd,
+        tx: e,
+        ty: f,
+    } = device_to_css.post_concatenated(&entry.transform);
     if entry.no_zoom {
         let (x, y) = (a.hypot(b), c.hypot(dd));
         if x > 0.0 {

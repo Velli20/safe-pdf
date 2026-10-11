@@ -11,11 +11,7 @@ use crate::{
     pdf_data::AnnotationAction,
     shapes, widget_control,
 };
-use pdf_graphics::{
-    point::Point,
-    rect::Rect,
-    viewport::{PageViewport, ViewportError},
-};
+use pdf_graphics::{point::Point, rect::Rect, size::Size, viewport::PageViewport};
 
 /// The shared field a widget is bound to; `None` for other kinds.
 fn widget_field<'a>(
@@ -46,28 +42,20 @@ fn unsupported_reason(annotation: &Annotation, field: Option<&Field>) -> Option<
 /// Device-space interaction rectangles: one per quad, else the payload bounds.
 fn device_regions(
     annotation: &Annotation,
-    bounds: &Rect<f64>,
+    bounds: &Rect,
     viewport: &PageViewport,
-) -> AnnotationLayerResult<Vec<[f64; 4]>> {
+) -> AnnotationLayerResult<Vec<Rect>> {
     let regions = match annotation.content.quads().filter(|q| !q.is_empty()) {
         Some(quads) => quads
             .iter()
             .map(|quad| viewport.map_quad(quad))
             .collect::<Result<Vec<_>, _>>()?,
-        None => {
-            let rect = bounds.to_f32().ok_or(ViewportError::Bounds)?;
-            vec![viewport.map_rect(&rect)?.into()]
-        }
+        None => vec![viewport.map_rect(bounds)?],
     };
-    regions
-        .into_iter()
-        .map(|region| {
-            if !region.is_valid() {
-                return Err(AnnotationLayerError::InvalidInput("device bounds"));
-            }
-            Ok([region.left, region.top, region.right, region.bottom])
-        })
-        .collect()
+    if !regions.iter().all(|region| region.is_valid()) {
+        return Err(AnnotationLayerError::InvalidInput("device bounds"));
+    }
+    Ok(regions)
 }
 
 pub(crate) fn project(
@@ -102,16 +90,9 @@ pub(crate) fn project(
         subtype: annotation.content.subtype_name().into_owned(),
         unsupported: unsupported_reason(annotation, field),
         bounds: device_regions(annotation, &bounds, viewport)?,
-        origin: [bounds.left, bounds.top],
-        size: [bounds.width(), bounds.height()],
-        transform: viewport
-            .local_frame(
-                Point::new(bounds.left, bounds.bottom)
-                    .to_f32()
-                    .ok_or(ViewportError::Bounds)?,
-            )?
-            .to_row()
-            .map(f64::from),
+        origin: Point::new(bounds.left, bounds.top),
+        size: Size::new(bounds.width(), bounds.height()),
+        transform: viewport.local_frame(Point::new(bounds.left, bounds.bottom))?,
         no_zoom: annotation.metadata.no_zoom(),
         no_rotate: annotation.metadata.no_rotate(),
         draggable: annotation.can_translate(),

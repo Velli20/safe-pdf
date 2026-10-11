@@ -14,9 +14,9 @@ use serde::{Deserialize, Serialize};
 /// Fill alpha of highlight quadrilaterals.
 const HIGHLIGHT_ALPHA: f32 = 0.35;
 /// Smallest line-ending decoration.
-const MIN_DECORATION_SIZE: f64 = 3.0;
+const MIN_DECORATION_SIZE: f32 = 3.0;
 /// Line-ending decoration size relative to the stroke width.
-const DECORATION_STROKE_SCALE: f64 = 3.0;
+const DECORATION_STROKE_SCALE: f32 = 3.0;
 
 pub use crate::style::ShapePaint;
 
@@ -29,33 +29,33 @@ pub enum Shape {
     /// Open polyline or closed polygon; a straight segment is two open vertices.
     Polyline {
         /// Vertices in drawing order and whether the outline closes back to the first.
-        path: Polyline<f64>,
+        path: Polyline,
         /// Paint for the outline and interior.
         paint: ShapePaint,
     },
     /// Axis-aligned ellipse inscribed in its bounds.
     Ellipse {
         /// Enclosing rectangle.
-        bounds: Rect<f64>,
+        bounds: Rect,
         /// Paint for the outline and interior.
         paint: ShapePaint,
     },
     /// Axis-aligned rectangle.
     Rect {
         /// Rectangle edges.
-        bounds: Rect<f64>,
+        bounds: Rect,
         /// Paint for the outline and interior.
         paint: ShapePaint,
     },
 }
 
 /// Converts a page point into local top-left units of `bounds`.
-fn local(bounds: &Rect<f64>, point: Point) -> Point {
+fn local(bounds: &Rect, point: Point) -> Point {
     Point::new(point.x - bounds.left, bounds.bottom - point.y)
 }
 
 /// Rectangle inset from the local box of `bounds` by half the stroke width.
-fn inset_rect(bounds: &Rect<f64>, style: &ResolvedStyle) -> Rect<f64> {
+fn inset_rect(bounds: &Rect, style: &ResolvedStyle) -> Rect {
     let inset = style.stroke_width() / 2.0;
     Rect {
         left: inset,
@@ -71,11 +71,7 @@ fn opaque(color: Color) -> Color {
 }
 
 /// Builds the local shapes for `annotation`, or none for kinds with native presentation.
-pub(crate) fn shapes(
-    annotation: &Annotation,
-    bounds: &Rect<f64>,
-    style: &ResolvedStyle,
-) -> Vec<Shape> {
+pub(crate) fn shapes(annotation: &Annotation, bounds: &Rect, style: &ResolvedStyle) -> Vec<Shape> {
     match &annotation.content {
         Kind::Highlight(v) => v
             .quads
@@ -131,9 +127,9 @@ pub(crate) fn shapes(
 /// Draws one decoration per quad along the line `ratio` of the way from top to bottom.
 fn markup(
     quads: &[crate::models::Quad],
-    bounds: &Rect<f64>,
+    bounds: &Rect,
     style: &ResolvedStyle,
-    ratio: f64,
+    ratio: f32,
     squiggly: bool,
 ) -> Vec<Shape> {
     quads
@@ -155,15 +151,15 @@ fn markup(
         .collect()
 }
 
-fn lerp(a: Point, b: Point, t: f64) -> Point {
+fn lerp(a: Point, b: Point, t: f32) -> Point {
     Point::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)
 }
 
 /// Path outline plus its endpoint decorations.
 fn path(
-    vertices: &Polyline<f64>,
+    vertices: &Polyline,
     endings: Option<&[LineEndingStyle; 2]>,
-    bounds: &Rect<f64>,
+    bounds: &Rect,
     style: &ResolvedStyle,
 ) -> Vec<Shape> {
     let path = vertices.map(|p| local(bounds, p));
@@ -193,16 +189,16 @@ fn ending(
     let size = (style.stroke_width() * DECORATION_STROKE_SCALE).max(MIN_DECORATION_SIZE);
     let half = size / 2.0;
     let (sin, cos) = (end.y - adjacent.y).atan2(end.x - adjacent.x).sin_cos();
-    let place = |[x, y]: [f64; 2]| Point::new(end.x + x * cos - y * sin, end.y + x * sin + y * cos);
+    let place = |[x, y]: [f32; 2]| Point::new(end.x + x * cos - y * sin, end.y + x * sin + y * cos);
     let filled = ShapePaint {
         fill: Some(opaque(style.color)),
         ..style.outline(false)
     };
-    let closed = |points: &[[f64; 2]]| Shape::Polyline {
+    let closed = |points: &[[f32; 2]]| Shape::Polyline {
         path: Polyline::new(points.iter().map(|p| place(*p)).collect(), true),
         paint: filled.clone(),
     };
-    let open = |points: &[[f64; 2]]| Shape::Polyline {
+    let open = |points: &[[f32; 2]]| Shape::Polyline {
         path: Polyline::new(points.iter().map(|p| place(*p)).collect(), false),
         paint: style.outline(false),
     };
