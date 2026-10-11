@@ -5,6 +5,7 @@ mod image_metadata;
 pub mod inline_image;
 mod jpx_image;
 pub mod raster;
+mod reduced_image;
 mod smask_in_data;
 
 pub use error::{ImageRasterError, PdfImageError};

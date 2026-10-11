@@ -10,6 +10,7 @@ use crate::decoded_samples::DecodedSamples;
 use crate::error::PdfImageError;
 use crate::image_metadata::ImageMetadata;
 use crate::raster;
+use crate::reduced_image::{BandDecode, PixelBudget, ReduceImage};
 
 /// Parses an Image XObject from a PDF stream dictionary and data.
 pub fn read_xobject(
@@ -71,6 +72,16 @@ pub fn decode_normalized_image(
     decode_normalized_image_with_metadata(payload, soft_mask, &metadata)
 }
 
+/// Limits on the pixels a decoded image is held at.
+///
+/// Drawing never needs far more pixels than the device shows, and backends cannot
+/// create images beyond a few gigabytes or wider than a GPU texture, so a larger
+/// image is reduced while it is decoded.
+const IMAGE_BUDGET: PixelBudget = PixelBudget {
+    pixels: 1 << 25,
+    side: 1 << 14,
+};
+
 fn decode_normalized_image_with_metadata(
     payload: ImagePayload,
     soft_mask: Option<&Image>,
@@ -80,8 +91,16 @@ fn decode_normalized_image_with_metadata(
     // forbids an /SMask beside it, so a stray one is dropped rather than
     // multiplied into alpha that already describes the image.
     let soft_mask = soft_mask.filter(|_| !metadata.smask_in_data.overrides_soft_mask());
-    let decoded_samples = DecodedSamples::decode(payload, metadata)?;
     let size = (metadata.size.width(), metadata.size.height());
+    let factor = IMAGE_BUDGET.reduction_factor(size.0, size.1);
+    if factor > 1 {
+        let image = decode_reduced_image(payload, metadata, factor)?;
+        return match soft_mask {
+            Some(mask) => apply_resized_soft_mask(&image, mask),
+            None => Ok(image),
+        };
+    }
+    let decoded_samples = DecodedSamples::decode(payload, metadata)?;
     match soft_mask {
         Some(mask) if (mask.width, mask.height) != size => {
             let image = render_ready_image(decoded_samples, None, metadata);
@@ -89,6 +108,36 @@ fn decode_normalized_image_with_metadata(
         }
         _ => Ok(render_ready_image(decoded_samples, soft_mask, metadata)),
     }
+}
+
+/// Decodes an image reduced by `factor`, without its soft mask.
+///
+/// Filtered samples are decoded a band of rows at a time. A JPEG 2000 codestream, or
+/// samples shorter than the declared rows, are decoded whole and then reduced.
+fn decode_reduced_image(
+    payload: ImagePayload,
+    metadata: &ImageMetadata,
+    factor: usize,
+) -> Result<Image, PdfImageError> {
+    if let ImagePayload::Samples(samples) = &payload
+        && let Some(bands) = BandDecode::new(samples, metadata, factor)
+    {
+        let reduced = bands.decode(|band, band_metadata| {
+            let decoded = DecodedSamples::decode(ImagePayload::Samples(band), band_metadata)?;
+            if decoded.is_rgba || matches!(decoded.num_color_components, 1 | 3) {
+                return Ok(decoded);
+            }
+            let image = render_ready_image(decoded, None, band_metadata);
+            Ok(DecodedSamples {
+                num_color_components: 4,
+                image_data: image.data,
+                is_rgba: true,
+            })
+        })?;
+        return Ok(render_ready_image(reduced, None, &bands.reduced_metadata()));
+    }
+    let decoded_samples = DecodedSamples::decode(payload, metadata)?;
+    render_ready_image(decoded_samples, None, metadata).reduced(factor)
 }
 
 /// Builds a render image from decoded samples whose soft mask, if any, has the image's size.
@@ -149,15 +198,17 @@ fn apply_resized_soft_mask(image: &Image, mask: &Image) -> Result<Image, PdfImag
 ///
 /// That is the larger width and the larger height, divided by the smallest
 /// whole factor that brings the pixel count within [`MAX_COMBINED_PIXELS`] or
-/// the image's own pixel count, whichever is larger.
+/// the image's own pixel count, whichever is larger, and each side within
+/// [`IMAGE_BUDGET`].
 fn combined_size(image: &Image, mask: &Image) -> (usize, usize) {
     let width = image.width.max(mask.width);
     let height = image.height.max(mask.height);
-    let limit = MAX_COMBINED_PIXELS.max(image.width.saturating_mul(image.height));
-    (1..=width.max(height))
-        .map(|factor| (width.div_ceil(factor), height.div_ceil(factor)))
-        .find(|(width, height)| width.saturating_mul(*height) <= limit)
-        .unwrap_or((1, 1))
+    let budget = PixelBudget {
+        pixels: MAX_COMBINED_PIXELS.max(image.width.saturating_mul(image.height)),
+        side: IMAGE_BUDGET.side,
+    };
+    let factor = budget.reduction_factor(width, height);
+    (width.div_ceil(factor), height.div_ceil(factor))
 }
 
 /// Builds a render image from color-space-converted RGBA and combines its alpha with `/SMask`.
