@@ -316,7 +316,7 @@ fn resolve_glyph(
             excluded_faces: &excluded,
         })?;
     for candidate in candidates {
-        let Ok(face) = system.load_with_metadata(candidate.source, candidate.metadata) else {
+        let Ok(face) = system.load_fallback_face(candidate) else {
             continue;
         };
         if let Some(glyph_id) = face.glyph_for_char(character) {
