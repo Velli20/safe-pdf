@@ -93,6 +93,20 @@ impl ColorSpace {
         matches!(self, Self::DeviceGray | Self::DeviceRGB | Self::DeviceCMYK)
     }
 
+    /// Returns the device space that draws this space's samples unchanged, if there is one.
+    ///
+    /// A device space is its own equivalent. An ICCBased space draws through its
+    /// alternate until ICC colour management exists, so it has one when that alternate
+    /// does.
+    #[must_use]
+    pub fn device_equivalent(&self) -> Option<Self> {
+        match self {
+            Self::ICCBased(icc) => icc.device_equivalent(),
+            space if space.is_device_space() => Some(space.clone()),
+            _ => None,
+        }
+    }
+
     pub fn apply(&self, components: &[f32]) -> Result<Color, ColorSpaceError> {
         match self {
             ColorSpace::Indexed(indexed) => indexed.apply(components),
