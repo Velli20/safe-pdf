@@ -178,9 +178,7 @@ impl FromPdfObject for PdfPage {
             context.optional::<ContentStream>(b"Contents")?
         };
         let media_box = dictionary.optional_media_box(context.source())?;
-        let crop_box = dictionary
-            .optional_array_of::<f32, 4>(b"CropBox", context.source())?
-            .map(Rect::from);
+        let crop_box = dictionary.optional_rect(b"CropBox", context.source())?;
         let rotation = dictionary.optional_number::<i32>(b"Rotate", context.source())?;
         let resources = context
             .optional_shared::<Resources>(b"Resources")?

@@ -29,8 +29,7 @@ impl FromPdfObject for PdfDocument {
         let media_box = context.dictionary().optional_media_box(context.source())?;
         let crop_box = context
             .dictionary()
-            .optional_array_of::<f32, 4>(b"CropBox", context.source())?
-            .map(Rect::from);
+            .optional_rect(b"CropBox", context.source())?;
         let rotation = context
             .dictionary()
             .optional_number::<i32>(b"Rotate", context.source())?;

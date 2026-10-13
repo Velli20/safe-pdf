@@ -116,22 +116,48 @@ impl Dictionary {
             })
     }
 
+    /// Reads the optional rectangle entry with the given key.
+    ///
+    /// Missing entries and explicit PDF `null` values are treated as absent.
+    /// The coordinates are returned in their original order.
+    pub fn optional_rect(
+        &self,
+        key: &[u8],
+        objects: &dyn ObjectResolver,
+    ) -> Result<Option<Rect>, ObjectError> {
+        Ok(self
+            .optional_array_of::<f32, 4>(key, objects)?
+            .map(Rect::from))
+    }
+
+    /// Reads the required rectangle entry with the given key.
+    ///
+    /// The coordinates are returned in their original order.
+    pub fn required_rect(
+        &self,
+        key: &[u8],
+        objects: &dyn ObjectResolver,
+    ) -> Result<Rect, ObjectError> {
+        self.required_array_of::<f32, 4>(key, objects)
+            .map(Rect::from)
+    }
+
     /// Reads the optional `/BBox` entry as a rectangle.
     ///
     /// Missing entries and explicit PDF `null` values are treated as absent.
     /// The rectangle is normalized so that `left <= right` and `top <= bottom`.
     pub fn optional_bbox(&self, objects: &dyn ObjectResolver) -> Result<Option<Rect>, ObjectError> {
         Ok(self
-            .optional_array_of::<f32, 4>(b"BBox", objects)?
-            .map(|bbox| Rect::from(bbox).normalized()))
+            .optional_rect(b"BBox", objects)?
+            .map(|bbox| bbox.normalized()))
     }
 
     /// Reads the required `/BBox` entry as a rectangle.
     ///
     /// The rectangle is normalized so that `left <= right` and `top <= bottom`.
     pub fn required_bbox(&self, objects: &dyn ObjectResolver) -> Result<Rect, ObjectError> {
-        self.required_array_of::<f32, 4>(b"BBox", objects)
-            .map(|bbox| Rect::from(bbox).normalized())
+        self.required_rect(b"BBox", objects)
+            .map(|bbox| bbox.normalized())
     }
 
     /// Reads optional `/Width` and `/Height` entries as an origin-based integer rectangle.
@@ -175,9 +201,7 @@ impl Dictionary {
         &self,
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Rect>, ObjectError> {
-        Ok(self
-            .optional_array_of::<f32, 4>(b"MediaBox", objects)?
-            .map(Rect::from))
+        self.optional_rect(b"MediaBox", objects)
     }
 
     /// Reads the optional `/Matrix` entry as an affine transform.
