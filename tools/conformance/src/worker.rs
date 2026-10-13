@@ -14,7 +14,7 @@ use pdf_canvas::{PageViewport, ViewportError};
 use pdf_document::{document::PdfDocument, reader::PdfReader};
 use pdf_graphics::point::Point;
 use pdf_graphics::size::Size;
-use pdf_renderer::PdfRenderer;
+use pdf_renderer::{PdfRenderer, text_selection::PageTextLayout};
 use std::{fmt::Write as _, fs, path::Path, time::Instant};
 
 /// Regions reported per page.
@@ -210,6 +210,24 @@ fn annotation_boxes(page: &pdf_document::page::PdfPage, width: u32, height: u32)
         .collect()
 }
 
+/// Returns the pixel boxes of Safe-PDF's glyphs, grown by one pixel and clamped to the image.
+fn glyph_boxes(layout: &PageTextLayout, width: u32, height: u32) -> Vec<[u32; 4]> {
+    let clamp = |value: f32, limit: u32| value.max(0.0).to_u32().map(|v| v.min(limit));
+    layout
+        .glyphs()
+        .iter()
+        .filter_map(|glyph| {
+            let bounds = glyph.bounds.normalized();
+            Some([
+                clamp((bounds.left - 1.0).floor(), width)?,
+                clamp((bounds.top - 1.0).floor(), height)?,
+                clamp((bounds.right + 1.0).ceil(), width)?,
+                clamp((bounds.bottom + 1.0).ceil(), height)?,
+            ])
+        })
+        .collect()
+}
+
 /// Renders one page with Safe-PDF, compares it with the reference, and writes evidence files.
 pub fn page(job: &PageJob<'_>) -> Result<()> {
     let bytes = fs::read(job.pdf)?;
@@ -348,14 +366,24 @@ pub fn page(job: &PageJob<'_>) -> Result<()> {
             } else {
                 Vec::new()
             };
-            let comparison = compare::compare(reference_image, safe_image, &ignore)?;
+            let mut comparison = compare::compare(reference_image, safe_image, &ignore)?;
+            let mut traced = None;
+            if comparison.metrics.mismatch > job.tolerance {
+                stage("safe-trace");
+                traced = renderer.as_ref().ok().and_then(|renderer| {
+                    safe_render::trace(renderer, job.page, width, height).ok()
+                });
+                if let Some((_, layout)) = &traced {
+                    comparison.tolerate_glyph_rasterization(
+                        reference_image,
+                        safe_image,
+                        &glyph_boxes(layout, width, height),
+                    );
+                }
+            }
             let failed = comparison.metrics.mismatch > job.tolerance;
             output.metrics = Some(comparison.metrics);
             if failed {
-                stage("safe-trace");
-                let traced = renderer.as_ref().ok().and_then(|renderer| {
-                    safe_render::trace(renderer, job.page, width, height).ok()
-                });
                 output.draw_count = traced
                     .as_ref()
                     .map_or(0, |(backend, _)| backend.draws.len());

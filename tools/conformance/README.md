@@ -46,6 +46,30 @@ when its revision differs from the pinned one.
   command line tools.
 - **No prebuilt downloads.** The harness never downloads prebuilt PDFium binaries.
 
+## Text rasterization
+
+PDFium and Safe-PDF rasterize text differently, so glyph edges differ on almost every page
+with text. Neither render is wrong:
+
+- PDFium (Skia) draws text from cached glyph masks. It snaps each glyph's origin to a whole
+  pixel vertically and to a quarter pixel horizontally. On small text the masks are also darker
+  than the exact outline, by about 10%.
+- Safe-PDF fills each glyph's exact outline at its exact position.
+
+The result is a sub-pixel shift, constant along a line, plus heavier coverage. The plain
+anti-aliasing and 1 px displacement tests don't catch it, so it used to show as orange and could
+push text-heavy pages over the tolerance.
+
+When a page exceeds the tolerance, the worker therefore takes Safe-PDF's glyph bounds (grown by
+1 px). Inside them it accepts a differing pixel when both images show the same hue and each
+image's darkness lies within the range of the other's 3x3 neighbourhood, widened by
+`GLYPH_COVERAGE_SLACK` (40%, in `src/compare.rs`). Then it decides pass or fail again. Accepted
+pixels are drawn yellow.
+
+Differences outside glyph bounds are compared as before, including vector shapes such as barcode
+bars that PDFium snaps to pixels. Missing or extra glyphs, wrong glyphs or colors, and shapes off
+by more than a pixel still count.
+
 ## Commands
 
 ```sh
@@ -98,7 +122,8 @@ agents.
 
 - `pN-compare.png`: reference | Safe-PDF | diff. Diff colors: red = ink missing in Safe-PDF,
   blue = extra ink in Safe-PDF, magenta = hue differs, orange = same hue but different
-  intensity (shape), yellow = anti-aliasing or 1 px displacement (tolerated), pale blue
+  intensity (shape), yellow = anti-aliasing, 1 px displacement or glyph rasterization (see
+  [Text rasterization](#text-rasterization); tolerated), pale blue
   hatching = annotation area (not compared), gray = matching.
 - Region classes: `missing_ink` / `extra_ink` = one renderer drew nothing there;
   `color_shift` = same shapes, different color; `reshaped` = both drew but glyph shapes or

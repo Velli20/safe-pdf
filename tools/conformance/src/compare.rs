@@ -34,6 +34,17 @@ pub struct Comparison {
 /// Squared YIQ distance for pixelmatch's default threshold of 0.1.
 const MAX_DELTA: f64 = 35215.0 * 0.1 * 0.1;
 
+/// Relative darkness by which a glyph pixel may exceed the other image's local range.
+///
+/// PDFium draws text from cached glyph masks: each glyph's origin is snapped to a whole pixel
+/// vertically and a quarter pixel horizontally, and the masks cover more than the exact outline
+/// on small text. Safe-PDF fills the exact outline at its exact position, so glyph edges differ by
+/// a sub-pixel shift plus heavier coverage.
+const GLYPH_COVERAGE_SLACK: f64 = 0.4;
+
+/// Diff color of differences tolerated as anti-aliasing or rasterization.
+const TOLERATED: Rgba<u8> = Rgba([255, 220, 0, 255]);
+
 /// Luma below which a pixel counts as ink.
 const INK_LUMA: f64 = 200.0;
 
@@ -90,7 +101,7 @@ pub fn compare(reference: &RgbaImage, safe: &RgbaImage, ignore: &[[u32; 4]]) -> 
                 || antialiased(safe, x, y, reference)
                 || displaced(reference, safe, x, y)
             {
-                (PixelDiff::Same, Rgba([255, 220, 0, 255]))
+                (PixelDiff::Same, TOLERATED)
             } else if luma_a < INK_LUMA && luma_b >= INK_LUMA {
                 (PixelDiff::Missing, Rgba([230, 0, 0, 255]))
             } else if luma_b < INK_LUMA && luma_a >= INK_LUMA {
@@ -120,6 +131,69 @@ pub fn compare(reference: &RgbaImage, safe: &RgbaImage, ignore: &[[u32; 4]]) -> 
         diff,
         mask,
     })
+}
+
+impl Comparison {
+    /// Accepts differing pixels inside the `glyphs` boxes (`[x0, y0, x1, y1]`, exclusive) that
+    /// differ only by glyph-mask rasterization: the same hue, placed within a pixel, with up to
+    /// [`GLYPH_COVERAGE_SLACK`] more or less coverage. Updates the mismatch ratio.
+    pub fn tolerate_glyph_rasterization(
+        &mut self,
+        reference: &RgbaImage,
+        safe: &RgbaImage,
+        glyphs: &[[u32; 4]],
+    ) {
+        let width = reference.width();
+        for &[x0, y0, x1, y1] in glyphs {
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let index = u64::from(y)
+                        .saturating_mul(u64::from(width))
+                        .saturating_add(u64::from(x));
+                    let Some(outcome) = usize::try_from(index)
+                        .ok()
+                        .and_then(|index| self.mask.get_mut(index))
+                    else {
+                        continue;
+                    };
+                    if *outcome == PixelDiff::Same || !rasterized_glyph(reference, safe, x, y) {
+                        continue;
+                    }
+                    *outcome = PixelDiff::Same;
+                    self.diff.put_pixel(x, y, TOLERATED);
+                }
+            }
+        }
+        let mismatched = self
+            .mask
+            .iter()
+            .filter(|&&outcome| outcome != PixelDiff::Same)
+            .count();
+        let count = f64::from(reference.width()) * f64::from(reference.height());
+        self.metrics.mismatch =
+            to_f64(u64::try_from(mismatched).unwrap_or(u64::MAX)) / count.max(1.0);
+    }
+}
+
+/// Returns whether the pixel differs only as a glyph mask rasterized on a coarser grid: both
+/// images show the same hue, and each image's darkness lies within the darkness range of the
+/// other's 3x3 neighbourhood, widened by [`GLYPH_COVERAGE_SLACK`].
+fn rasterized_glyph(reference: &RgbaImage, safe: &RgbaImage, x: u32, y: u32) -> bool {
+    let a = pixel(reference, x, y);
+    let b = pixel(safe, x, y);
+    let within = |darkness: f64, other: &RgbaImage| {
+        let (low, high) = neighbours(other, x, y)
+            .chain(std::iter::once((x, y)))
+            .map(|(nx, ny)| 255.0 - luma(pixel(other, nx, ny)))
+            .fold((f64::MAX, f64::MIN), |(low, high), value| {
+                (low.min(value), high.max(value))
+            });
+        darkness >= low * (1.0 - GLYPH_COVERAGE_SLACK)
+            && darkness <= (high * (1.0 + GLYPH_COVERAGE_SLACK)).min(255.0).max(high)
+    };
+    chroma_delta(a, b) <= MIN_CHROMA_DELTA
+        && within(255.0 - luma(a), safe)
+        && within(255.0 - luma(b), reference)
 }
 
 /// Converts a count to `f64`; counts here stay far below 2^53.
