@@ -1,19 +1,21 @@
 //! Composite Type 0 specifications and their CID descendant fonts.
 
 use crate::{
+    cid_to_unicode::CidToUnicode,
     error::FontError,
     font::FontSource,
     pdf::{CidSystemInfo, PdfFontDescriptor, PdfMetrics, ToUnicodeMap},
     pdf_font_descriptor::{cid_to_unicode_map, descriptor},
     pdf_font_parser::{base_font, to_unicode},
     pdf_font_program::{CidCffProgram, TrueTypeProgram},
+    standard14::{Standard14Font, from_base_font_name},
 };
 use pdf_cmap::{PdfCMap, Type0EncodingCMap};
 use pdf_object_reader::{
     DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
     object_variant::ObjectVariant,
 };
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 /// Descendant subtype used by a Type 0 composite font.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -39,8 +41,8 @@ pub struct CidFontSpec {
     pub metrics: PdfMetrics,
     /// Optional CID-to-glyph identifier mapping for CIDFontType2.
     pub cid_to_gid: Option<Arc<[u16]>>,
-    /// Best-effort CID-to-Unicode mapping for collection-backed font substitution.
-    pub cid_to_unicode: Option<Arc<HashMap<u16, char>>>,
+    /// Best-effort CID-to-Unicode mapping for font substitution.
+    pub cid_to_unicode: Option<CidToUnicode>,
 }
 
 /// Normalized Type 0 composite font.
@@ -132,8 +134,17 @@ impl FromPdfObject for CidFontSpec {
                 ordering: Arc::default(),
                 supplement: 0,
             });
-        let cid_to_unicode = cid_to_unicode_map(&system_info);
         let cid_to_gid = CidToGidMap::read(&mut context, kind);
+        // A substituted TrueType core font without its own glyph map is indexed by CID.
+        let indexes_core_font = kind == CidFontKind::Type2
+            && program.is_none()
+            && cid_to_gid.is_none()
+            && base_font
+                .as_deref()
+                .and_then(from_base_font_name)
+                .is_some_and(Standard14Font::has_standard_glyph_order);
+        let cid_to_unicode = cid_to_unicode_map(&system_info)
+            .or_else(|| indexes_core_font.then_some(CidToUnicode::StandardGlyphOrder));
         Ok(Self {
             kind,
             descriptor,
