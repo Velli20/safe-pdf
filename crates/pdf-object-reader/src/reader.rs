@@ -277,7 +277,8 @@ where
                 object_id: id,
                 source: Box::new(source),
             })?
-            .ok_or(ObjectReadError::MissingObject { object_id: id })?;
+            // A reference to a nonexistent object is null (ISO 32000 §7.3.10).
+            .unwrap_or_else(|| PdfObject::new(ObjectVariant::Null));
         self.reader
             .raw_cache
             .insert_if_absent(id, object)

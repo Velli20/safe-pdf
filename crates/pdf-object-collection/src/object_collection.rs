@@ -83,7 +83,7 @@ impl ObjectCollection {
                 // component, precision, colour, and opacity metadata that a
                 // flat byte buffer would lose, so the image path decodes it.
                 if !stream.filters_applied() {
-                    let reader = ObjectReader::new(&*self);
+                    let reader = ObjectReader::new(LoadedObjects(&*self));
                     let mut session = reader.session();
                     if !carries_jpx_codestream(stream, &mut session)
                         && let Ok(data) =
@@ -521,6 +521,37 @@ mod tests {
 
         assert!(collection.map.capacity() >= 12);
         assert!(collection.map.is_empty());
+    }
+}
+
+/// Reads the objects inserted so far, failing on a reference to one not yet loaded.
+///
+/// Insertion decodes stream filters before later objects arrive, so an object missing
+/// here may still be defined. Failing the read keeps such a stream encoded for a later
+/// decode, where [`ObjectCollection`] resolves an object that is still missing to null.
+struct LoadedObjects<'a>(&'a ObjectCollection);
+
+impl ObjectResolver for LoadedObjects<'_> {
+    fn resolve_object<'a>(
+        &'a self,
+        obj: &'a ObjectVariant,
+    ) -> Result<&'a ObjectVariant, ObjectError> {
+        self.0.resolve_object(obj)
+    }
+}
+
+impl pdf_object_reader::ObjectSource for LoadedObjects<'_> {
+    type Error = ObjectError;
+    fn read_object(
+        &self,
+        id: pdf_object_reader::object_id::ObjectId,
+    ) -> Result<Option<pdf_object_reader::pdf_object::PdfObject>, Self::Error> {
+        self.0
+            .read_object(id)?
+            .map(Some)
+            .ok_or_else(|| ObjectError::FailedResolveObjectReference {
+                obj_num: id.number(),
+            })
     }
 }
 
