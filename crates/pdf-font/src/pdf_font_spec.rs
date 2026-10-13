@@ -19,7 +19,7 @@ use crate::pdf::{
     SimpleFontSpec, Type0FontSpec, Type3FontSpec,
 };
 use crate::pdf_font_metrics::horizontal_metric;
-use crate::standard14::Standard14Font;
+use crate::standard14::{Standard14Font, from_base_font_name};
 use pdf_cmap::WritingMode;
 
 const NOTO_SANS_CJK_JP_REGULAR: &[u8] =
@@ -227,6 +227,9 @@ impl PdfFontSpec {
             PdfFontSpec::Type1(font)
             | PdfFontSpec::MultipleMasterType1(font)
             | PdfFontSpec::TrueType(font) => font.standard14.unwrap_or_default(),
+            PdfFontSpec::Type0(font) => {
+                from_base_font_name(&font.base_font).unwrap_or(Standard14Font::Helvetica)
+            }
             _ => Standard14Font::Helvetica,
         }
     }

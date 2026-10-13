@@ -1,5 +1,6 @@
 pub mod base_encoding;
 pub mod cff;
+pub mod cid_to_unicode;
 pub mod encoding;
 pub mod error;
 pub mod fallback;

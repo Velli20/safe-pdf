@@ -153,8 +153,7 @@ fn type0_unicode(font: &Type0FontSpec, mapping: CidMapping) -> UnicodeSequence {
             font.descendant
                 .cid_to_unicode
                 .as_ref()?
-                .get(&cid)
-                .copied()
+                .get(cid)
                 .map(Into::into)
         })
         .unwrap_or_default()
