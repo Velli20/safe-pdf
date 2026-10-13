@@ -1,4 +1,7 @@
-use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult};
+use pdf_object_reader::{
+    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
+    pdf_array::PdfArray,
+};
 use std::sync::Arc;
 
 use crate::page::PdfPage;
@@ -22,53 +25,46 @@ impl PdfDocument {
     pub const KEY: &'static [u8] = b"Pages";
 }
 
+/// A `/Kids` entry of a page-tree node, dispatched on its `/Type`.
+enum PageTreeNode {
+    /// A leaf `/Page` object.
+    Page(PdfPage),
+    /// An intermediate `/Pages` node.
+    Pages(PdfDocument),
+}
+
+impl FromPdfObject for PageTreeNode {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match context
+            .object()
+            .dictionary()?
+            .required_bytes(b"Type", context.source())?
+        {
+            PdfPage::KEY => PdfPage::from_pdf_object(context).map(Self::Page),
+            PdfDocument::KEY => PdfDocument::from_pdf_object(context).map(Self::Pages),
+            other => Err(PdfPagesError::InvalidKidsEntryType {
+                found_type: String::from_utf8_lossy(other).into_owned(),
+            }
+            .into()),
+        }
+    }
+}
+
 impl FromPdfObject for PdfDocument {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
-        let kids = context.required::<pdf_object_reader::pdf_array::PdfArray>(b"Kids")?;
-        let media_box = context.dictionary().optional_media_box(context.source())?;
-        let crop_box = context
-            .dictionary()
-            .optional_rect(b"CropBox", context.source())?;
-        let rotation = context
-            .dictionary()
-            .optional_number::<i32>(b"Rotate", context.source())?;
-        let resources = context
-            .optional_shared::<Resources>(b"Resources")?
-            .map(|handle| handle.get())
-            .transpose()?;
+        let kids = context.required::<PdfArray>(b"Kids")?;
+        let inherited = InheritedAttributes::read(&mut context)?;
         let mut pages = Vec::new();
         for value in kids.iter() {
-            let dictionary = value.try_dictionary(context.source())?;
-            match dictionary.required_bytes(b"Type", context.source())? {
-                PdfPage::KEY => pages.push(context.read(value)?),
-                Self::KEY => match context.read::<Self>(value) {
-                    Ok(child) => pages.extend(child.pages),
-                    Err(ObjectReadError::CyclicReference { .. }) => continue,
-                    Err(error) => return Err(error),
-                },
-                other => {
-                    return Err(PdfPagesError::InvalidKidsEntryType {
-                        found_type: String::from_utf8_lossy(other).into_owned(),
-                    }
-                    .into());
-                }
+            match context.read::<PageTreeNode>(value) {
+                Ok(PageTreeNode::Page(page)) => pages.push(page),
+                Ok(PageTreeNode::Pages(child)) => pages.extend(child.pages),
+                Err(ObjectReadError::CyclicReference { .. }) => continue,
+                Err(error) => return Err(error),
             }
         }
-        if let Some(resources) = resources {
-            Self::apply_resource_inheritance(&mut pages, &resources);
-        }
-        if let Some(media_box) = media_box {
-            Self::apply_media_box_inheritance(&mut pages, &media_box);
-        }
-        for page in &mut pages {
-            if page.crop_box.is_none() {
-                page.crop_box = crop_box;
-            }
-            if page.rotation.is_none() {
-                page.rotation = rotation;
-            }
-        }
+        pages.iter_mut().for_each(|page| inherited.apply_to(page));
         // This reads the `/Pages` node, not the catalog, so optional content is
         // attached by the document reader once the catalog is available.
         Ok(Self {
@@ -78,36 +74,52 @@ impl FromPdfObject for PdfDocument {
     }
 }
 
-impl PdfDocument {
-    /// Applies inherited `/MediaBox` from an ancestor `/Pages` node to leaf pages
-    /// that do not define their own.
-    ///
-    /// Per PDF spec §7.7.3.4, `/MediaBox` is an inheritable attribute.  A page
-    /// that does not carry its own `/MediaBox` receives the nearest ancestor's
-    /// value.  Pages that already have a `/MediaBox` are left unchanged.
-    fn apply_media_box_inheritance(pages: &mut [PdfPage], media_box: &Rect) {
-        for page in pages {
-            if page.media_box.is_none() {
-                page.media_box = Some(*media_box);
-            }
-        }
+/// Page attributes a `/Pages` node passes down to descendants that omit them (PDF spec §7.7.3.4).
+#[derive(Default)]
+struct InheritedAttributes {
+    resources: Option<Arc<Resources>>,
+    media_box: Option<Rect>,
+    crop_box: Option<Rect>,
+    rotation: Option<i32>,
+}
+
+impl InheritedAttributes {
+    /// Reads the inheritable attributes of a `/Pages` node.
+    fn read<A: ObjectAccess + ?Sized>(context: &mut DictionaryContext<'_, A>) -> ReadResult<Self> {
+        Ok(Self {
+            resources: context
+                .optional_shared::<Resources>(b"Resources")?
+                .map(|handle| handle.get())
+                .transpose()?,
+            media_box: context.dictionary().optional_media_box(context.source())?,
+            crop_box: context
+                .dictionary()
+                .optional_rect(b"CropBox", context.source())?,
+            rotation: context.optional::<i32>(b"Rotate")?,
+        })
     }
 
-    /// Applies inherited resources from an ancestor `/Pages` node to a set of leaf pages.
+    /// Fills in the attributes a descendant page does not define itself.
     ///
-    /// Per PDF spec §7.7.4:
-    /// - A page with no `/Resources` inherits the ancestor's resources directly.
-    /// - A page with its own `/Resources` keeps its own entries and fills in any
-    ///   categories or names that are absent from the ancestor.
-    fn apply_resource_inheritance(pages: &mut [PdfPage], resources: &Arc<Resources>) {
-        for page in pages {
-            if let Some(page_resources) = page.resources.as_ref() {
-                if let Some(merged) = page_resources.merged_with_parent(resources) {
+    /// Per PDF spec §7.7.4, a page with no `/Resources` inherits the ancestor's resources
+    /// directly, while a page with its own `/Resources` keeps its entries and fills in any
+    /// categories or names it lacks from the ancestor.
+    fn apply_to(&self, page: &mut PdfPage) {
+        page.media_box = page.media_box.or(self.media_box);
+        page.crop_box = page.crop_box.or(self.crop_box);
+        page.rotation = page.rotation.or(self.rotation);
+        let Some(inherited) = &self.resources else {
+            return;
+        };
+        match &page.resources {
+            // The same shared resources object: nothing to merge.
+            Some(own) if Arc::ptr_eq(own, inherited) => {}
+            Some(own) => {
+                if let Some(merged) = own.merged_with_parent(inherited) {
                     page.resources = Some(Arc::new(merged));
                 }
-            } else {
-                page.resources = Some(Arc::clone(resources));
             }
+            None => page.resources = Some(Arc::clone(inherited)),
         }
     }
 }
@@ -148,7 +160,11 @@ mod tests {
             read_state: None,
         };
 
-        PdfDocument::apply_resource_inheritance(std::slice::from_mut(&mut page), &parent);
+        InheritedAttributes {
+            resources: Some(Arc::clone(&parent)),
+            ..Default::default()
+        }
+        .apply_to(&mut page);
 
         let inherited = page
             .resources
@@ -190,7 +206,11 @@ mod tests {
             read_state: None,
         };
 
-        PdfDocument::apply_resource_inheritance(std::slice::from_mut(&mut page), &parent);
+        InheritedAttributes {
+            resources: Some(Arc::clone(&parent)),
+            ..Default::default()
+        }
+        .apply_to(&mut page);
 
         let result = page
             .resources
@@ -242,7 +262,11 @@ mod tests {
             read_state: None,
         };
 
-        PdfDocument::apply_resource_inheritance(std::slice::from_mut(&mut page), &parent);
+        InheritedAttributes {
+            resources: Some(Arc::clone(&parent)),
+            ..Default::default()
+        }
+        .apply_to(&mut page);
 
         let result = page.resources.as_ref().expect("page should have resources");
 
@@ -282,7 +306,11 @@ mod tests {
             read_state: None,
         };
 
-        PdfDocument::apply_media_box_inheritance(std::slice::from_mut(&mut page), &parent_mb);
+        InheritedAttributes {
+            media_box: Some(parent_mb),
+            ..Default::default()
+        }
+        .apply_to(&mut page);
 
         let inherited = page
             .media_box
@@ -318,7 +346,11 @@ mod tests {
             read_state: None,
         };
 
-        PdfDocument::apply_media_box_inheritance(std::slice::from_mut(&mut page), &parent_mb);
+        InheritedAttributes {
+            media_box: Some(parent_mb),
+            ..Default::default()
+        }
+        .apply_to(&mut page);
 
         let result = page.media_box.expect("page should still have media box");
         assert_eq!(
