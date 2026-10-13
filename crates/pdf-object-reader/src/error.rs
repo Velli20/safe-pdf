@@ -63,12 +63,6 @@ pub enum ObjectReadError {
         #[source]
         source: BoxedError,
     },
-    /// The source had no value for a referenced indirect object.
-    #[error("indirect object {object_id:?} was not found")]
-    MissingObject {
-        /// The unresolved object identifier.
-        object_id: ObjectId,
-    },
     /// Reference traversal revisited an object active in the current read.
     #[error("cyclic reference encountered at {repeated:?}; active path: {path:?}")]
     CyclicReference {

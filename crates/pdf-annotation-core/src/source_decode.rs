@@ -14,7 +14,7 @@ use crate::pdf_data::{
 };
 use pdf_graphics::{DashPattern, color::Color, rect::Rect};
 use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
+    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
     object_lookup::ObjectLookupExt,
     object_resolver::{DanglingAsNullResolver, ObjectResolver},
     object_variant::ObjectVariant,
@@ -128,11 +128,7 @@ impl SourceAnnotation {
         };
         // `/Annots` that resolves to anything but an array (e.g. a reference whose object
         // number was reused by a later update) holds no annotations.
-        let resolved = match context.resolve(entry) {
-            Ok(resolved) => resolved,
-            Err(ObjectReadError::MissingObject { .. }) => return Ok(None),
-            Err(error) => return Err(error),
-        };
+        let resolved = context.resolve(entry)?;
         let ObjectVariant::Array(annots) = resolved.value() else {
             return Ok(None);
         };

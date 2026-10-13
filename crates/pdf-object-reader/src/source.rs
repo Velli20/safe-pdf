@@ -22,7 +22,9 @@ pub trait ObjectSource: crate::object_resolver::ObjectResolver + Send + Sync {
 
     /// Reads one indirect object without recursively resolving its references.
     ///
-    /// `Ok(None)` indicates that the identifier is absent. Returned objects may
+    /// `Ok(None)` indicates that the identifier is absent, which the reader resolves
+    /// to null (ISO 32000 §7.3.10). Return an error instead where absence must fail
+    /// the read, such as an object that has not been loaded yet. Returned objects may
     /// themselves be references and may contain references at any depth.
     fn read_object(&self, object_id: ObjectId) -> Result<Option<PdfObject>, Self::Error>;
 }

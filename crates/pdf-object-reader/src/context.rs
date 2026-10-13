@@ -302,16 +302,12 @@ macro_rules! context_access {
                 self.access.resolve(object)
             }
 
-            /// Returns whether an object is null or references a nonexistent object.
+            /// Returns whether an object resolves to null.
             ///
-            /// Per PDF spec §7.3.10 such a reference is treated as null, and per §7.3.7 a
-            /// null dictionary value is equivalent to an absent entry.
+            /// A reference to a nonexistent object resolves to null (PDF spec §7.3.10), and
+            /// per §7.3.7 a null dictionary value is equivalent to an absent entry.
             pub fn is_absent(&mut self, object: &ObjectVariant) -> ReadResult<bool> {
-                match self.access.resolve(object) {
-                    Ok(resolved) => Ok(resolved.kind() == ObjectKind::Null),
-                    Err(ObjectReadError::MissingObject { .. }) => Ok(true),
-                    Err(error) => Err(error),
-                }
+                Ok(self.access.resolve(object)?.kind() == ObjectKind::Null)
             }
 
             /// Reborrows the active traversal for decoders that take an access directly.
