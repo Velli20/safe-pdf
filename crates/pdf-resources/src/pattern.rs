@@ -2,7 +2,6 @@ use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle
 
 use pdf_content_stream::ContentStream;
 use pdf_graphics::{rect::Rect, transform::Transform};
-use pdf_object_reader::object_lookup::ObjectLookupExt;
 use pdf_shading::model::Shading;
 
 use crate::{
@@ -18,14 +17,12 @@ pub enum PaintType {
     Uncolored = 2,
 }
 
-impl TryFrom<i32> for PaintType {
-    type Error = PdfPagesError;
-
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        match value {
+impl FromPdfObject for PaintType {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match i32::from_pdf_object(context)? {
             1 => Ok(PaintType::Colored),
             2 => Ok(PaintType::Uncolored),
-            _ => Err(PdfPagesError::InvalidPaintType { value }),
+            value => Err(PdfPagesError::InvalidPaintType { value }.into()),
         }
     }
 }
@@ -39,14 +36,12 @@ pub enum PatternType {
     Shading = 2,
 }
 
-impl TryFrom<i32> for PatternType {
-    type Error = PdfPagesError;
-
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        match value {
+impl FromPdfObject for PatternType {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match i32::from_pdf_object(context)? {
             1 => Ok(PatternType::Tiling),
             2 => Ok(PatternType::Shading),
-            _ => Err(PdfPagesError::InvalidPatternType { value }),
+            value => Err(PdfPagesError::InvalidPatternType { value }.into()),
         }
     }
 }
@@ -63,15 +58,13 @@ pub enum TilingType {
     ConstantSpacingFast = 3,
 }
 
-impl TryFrom<i32> for TilingType {
-    type Error = PdfPagesError;
-
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        match value {
+impl FromPdfObject for TilingType {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match i32::from_pdf_object(context)? {
             1 => Ok(TilingType::ConstantSpacing),
             2 => Ok(TilingType::NoDistortion),
             3 => Ok(TilingType::ConstantSpacingFast),
-            _ => Err(PdfPagesError::InvalidTilingType { value }),
+            value => Err(PdfPagesError::InvalidTilingType { value }.into()),
         }
     }
 }
@@ -123,72 +116,30 @@ impl Pattern {
 }
 
 impl FromPdfObject for Pattern {
-    fn from_pdf_object(
-        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
-    ) -> ReadResult<Self> {
-        let dictionary = context.object().dictionary()?;
-        let object = context.object().value();
-        let objects = context.source();
-
-        let pattern_type = dictionary.required_number::<i32>(b"PatternType", objects)?;
-
-        // Read the transformation matrix for the pattern. Defaults to identity.
-        let matrix = dictionary.optional_matrix(objects)?;
-
-        match PatternType::try_from(pattern_type)? {
-            PatternType::Tiling => {
-                // Read the `/PaintType` entry.
-                let paint_type_int = dictionary.required_number::<i32>(b"PaintType", objects)?;
-
-                let paint_type = PaintType::try_from(paint_type_int)?;
-
-                // Read the `/TilingType` entry.
-                let tiling_type_int = dictionary.required_number::<i32>(b"TilingType", objects)?;
-                let tiling_type = TilingType::try_from(tiling_type_int)?;
-
-                // Read the `/BBox` entry.
-                let bbox = dictionary.required_bbox(objects)?;
-
-                // Read the `/XStep` entry.
-                let x_step = dictionary.required_number::<f32>(b"XStep", objects)?;
-
-                // Read the `/YStep` entry.
-                let y_step = dictionary.required_number::<f32>(b"YStep", objects)?;
-
-                let content_stream = context.read::<ContentStream>(object)?;
-                let resources = dictionary
-                    .get(b"Resources")
-                    .map(|value| context.read_shared(value))
-                    .transpose()?
-                    .unwrap_or_else(|| ObjectHandle::from(Resources::default()));
-
-                Ok(Pattern::Tiling {
-                    paint_type,
-                    tiling_type,
-                    bbox,
-                    x_step,
-                    y_step,
-                    matrix,
-                    resources,
-                    content_stream,
-                })
-            }
-            PatternType::Shading => {
-                let shading_object = dictionary.get_or_err(b"Shading")?;
-                // Read the shading object that defines the gradient fill.
-                let shading = context.read::<Shading>(shading_object)?;
-
-                let ext_g_state = dictionary
-                    .get(b"ExtGState")
-                    .map(|value| context.read(value))
-                    .transpose()?;
-
-                Ok(Pattern::Shading {
-                    shading,
-                    matrix,
-                    ext_g_state,
-                })
-            }
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object();
+        // Tiling patterns are streams and shading patterns are dictionaries; both expose the same entries.
+        let mut context = context.dictionary()?;
+        let matrix = context.dictionary().optional_matrix(context.source())?;
+        match context.required::<PatternType>(b"PatternType")? {
+            PatternType::Tiling => Ok(Pattern::Tiling {
+                paint_type: context.required(b"PaintType")?,
+                tiling_type: context.required(b"TilingType")?,
+                bbox: context.dictionary().required_bbox(context.source())?,
+                x_step: context.required(b"XStep")?,
+                y_step: context.required(b"YStep")?,
+                matrix,
+                // Keep a deferred handle so resources that refer back to this pattern can finish decoding.
+                resources: context
+                    .optional_shared::<Resources>(b"Resources")?
+                    .unwrap_or_else(|| ObjectHandle::from(Resources::default())),
+                content_stream: context.read::<ContentStream>(object.value())?,
+            }),
+            PatternType::Shading => Ok(Pattern::Shading {
+                shading: context.required::<Shading>(b"Shading")?,
+                matrix,
+                ext_g_state: context.optional::<ExternalGraphicsState>(b"ExtGState")?,
+            }),
         }
     }
 }
