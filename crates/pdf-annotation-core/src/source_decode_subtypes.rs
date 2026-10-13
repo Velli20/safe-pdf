@@ -9,7 +9,7 @@ use crate::pdf_data::{
     StampAnnotation, StrikeOutAnnotation, TextAnnotation, UnderlineAnnotation, WidgetAnnotation,
 };
 use crate::source_decode::{DecodeResult, color};
-use pdf_graphics::{polyline::Polyline, rect::Rect};
+use pdf_graphics::polyline::Polyline;
 use pdf_object_reader::{
     dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
     object_variant::ObjectVariant,
@@ -141,9 +141,7 @@ impl FreeTextAnnotation {
             .get(b"CL")
             .map(|value| callout_line(value, objects))
             .transpose()?;
-        let difference_rect = dictionary
-            .optional_array_of::<f32, 4>(b"RD", objects)?
-            .map(Rect::from);
+        let difference_rect = dictionary.optional_rect(b"RD", objects)?;
         let intent = dictionary.optional_bytes(b"IT", objects)?.map(Vec::from);
         let border_effect = BorderEffect::from_dictionary(dictionary, b"BE", objects)?;
 
@@ -197,9 +195,7 @@ impl SquareAnnotation {
         let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
         let interior_color = color(dictionary, b"IC", objects)?;
         let border_effect = BorderEffect::from_dictionary(dictionary, b"BE", objects)?;
-        let difference_rect = dictionary
-            .optional_array_of::<f32, 4>(b"RD", objects)?
-            .map(Rect::from);
+        let difference_rect = dictionary.optional_rect(b"RD", objects)?;
 
         Ok(Self {
             border_style,
@@ -218,9 +214,7 @@ impl CircleAnnotation {
         let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
         let interior_color = color(dictionary, b"IC", objects)?;
         let border_effect = BorderEffect::from_dictionary(dictionary, b"BE", objects)?;
-        let difference_rect = dictionary
-            .optional_array_of::<f32, 4>(b"RD", objects)?
-            .map(Rect::from);
+        let difference_rect = dictionary.optional_rect(b"RD", objects)?;
 
         Ok(Self {
             border_style,
@@ -362,9 +356,7 @@ impl CaretAnnotation {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> DecodeResult<Self> {
-        let difference_rect = dictionary
-            .optional_array_of::<f32, 4>(b"RD", objects)?
-            .map(Rect::from);
+        let difference_rect = dictionary.optional_rect(b"RD", objects)?;
         let style = dictionary
             .get(b"Sy")
             .map(|value| value.try_bytes(objects).map(CaretSymbolStyle::from))
