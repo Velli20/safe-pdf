@@ -9,9 +9,7 @@ use crate::{
 };
 use pdf_content_stream::ContentStream;
 use pdf_graphics::{rect::Rect, transform::Transform};
-use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
@@ -65,38 +63,29 @@ impl FromPdfObject for CharProcedures {
 }
 
 impl FromPdfObject for Type3FontSpec {
-    /// Decodes the concrete font dictionary without whole-font substitution.
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Self::try_from(&mut context.dictionary()?)
-    }
-}
-
-impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for Type3FontSpec {
-    type Error = ObjectReadError;
-
-    /// Reads a Type 3 dictionary, whose absent glyph widths default to zero.
+    /// Decodes a Type 3 dictionary without whole-font substitution; absent glyph widths
+    /// default to zero.
     #[allow(clippy::arc_with_non_send_sync)]
-    fn try_from(context: &mut DictionaryContext<'_, A>) -> ReadResult<Self> {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let value = context.object().value();
+        let mut context = context.dictionary()?;
         let [a, b, c, d, e, f] = context.required::<[f32; 6]>(b"FontMatrix")?;
-        let [left, top, right, bottom] = context.required::<[f32; 4]>(b"FontBBox")?;
-        let encoding = simple_encoding(context, false)?;
-        let metrics = PdfMetrics::try_from(&mut *context)?;
+        let bounds = context
+            .dictionary()
+            .required_rect(b"FontBBox", context.source())?;
+        let encoding = simple_encoding(&mut context, false)?;
+        let metrics: PdfMetrics = context.read(value)?;
         let procedures: CharProcedures = context.required(b"CharProcs")?;
         Ok(Self {
-            base_font: base_font(context).unwrap_or_default(),
+            base_font: base_font(&mut context).unwrap_or_default(),
             metadata: FontMetadata::default(),
             font_matrix: Transform::from_row(a, b, c, d, e, f),
-            bounds: Rect {
-                left,
-                top,
-                right,
-                bottom,
-            },
+            bounds,
             encoding,
             metrics,
             char_procedures: Arc::new(procedures.handles),
             type3_procedures: Arc::new(procedures.streams),
-            to_unicode: to_unicode(context)?,
+            to_unicode: to_unicode(&mut context)?,
         })
     }
 }

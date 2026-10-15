@@ -12,7 +12,7 @@ use crate::error::PdfReaderError;
 use crate::reader::object_id;
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{
-    cross_reference_table::CrossReferenceEntryType, object_error::ObjectError,
+    ObjectReader, cross_reference_table::CrossReferenceEntryType, object_error::ObjectError,
     object_resolver::PassthroughResolver, object_variant::ObjectVariant,
 };
 use pdf_parser::{error::ParserError, parser::PdfParser};
@@ -48,7 +48,7 @@ impl<'a, 'input> EncryptObjectLoader<'a, 'input> {
             object => object,
         };
         let objects = self.load_referenced_objects(&dictionary)?;
-        EncryptDictionary::from_dictionary(dictionary.try_dictionary(&objects)?, &objects)
+        Ok(ObjectReader::new(&objects).read::<EncryptDictionary>(&dictionary)?)
     }
 
     /// Loads the objects referenced from `root` into a collection used for resolution.

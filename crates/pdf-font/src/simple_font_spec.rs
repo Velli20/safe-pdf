@@ -10,9 +10,7 @@ use crate::{
     pdf_font_program::{TrueTypeProgram, Type1Program},
     standard14::{self, Standard14Font},
 };
-use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use std::sync::Arc;
 
 /// Data shared by Type 1, Multiple Master Type 1, and TrueType simple fonts.
@@ -35,22 +33,18 @@ pub struct SimpleFontSpec {
 }
 
 impl FromPdfObject for SimpleFontSpec {
-    /// Decodes the concrete font dictionary without whole-font substitution.
+    /// Decodes the concrete font dictionary without whole-font substitution, choosing its
+    /// program and encoding policy from Subtype.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Self::try_from(&mut context.dictionary()?)
-    }
-}
-
-impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for SimpleFontSpec {
-    type Error = ObjectReadError;
-
-    /// Reads a simple font, choosing its program and encoding policy from Subtype.
-    fn try_from(context: &mut DictionaryContext<'_, A>) -> ReadResult<Self> {
+        let value = context.object().value();
+        let mut context = context.dictionary()?;
         let subtype: Arc<[u8]> = context.required(b"Subtype")?;
-        let base_font = base_font(context);
+        let base_font = base_font(&mut context);
         let (descriptor, program) = match subtype.as_ref() {
-            b"Type1" | b"MMType1" => descriptor::<Type1Program>(context, base_font.as_deref())?,
-            b"TrueType" => descriptor::<TrueTypeProgram>(context, base_font.as_deref())?,
+            b"Type1" | b"MMType1" => {
+                descriptor::<Type1Program>(&mut context, base_font.as_deref())?
+            }
+            b"TrueType" => descriptor::<TrueTypeProgram>(&mut context, base_font.as_deref())?,
             other => {
                 return Err(FontError::UnsupportedFontSubtype {
                     subtype: String::from_utf8_lossy(other).into_owned(),
@@ -59,8 +53,8 @@ impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for Simple
             }
         };
         let symbolic = subtype.as_ref() == b"TrueType" && descriptor.metadata.symbolic;
-        let encoding = simple_encoding(context, symbolic)?;
-        let mut metrics = PdfMetrics::try_from(&mut *context)?;
+        let encoding = simple_encoding(&mut context, symbolic)?;
+        let mut metrics: PdfMetrics = context.read(value)?;
         let standard14 = base_font
             .as_deref()
             .and_then(standard14::from_base_font_name);
@@ -76,7 +70,7 @@ impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for Simple
             standard14,
             encoding,
             metrics,
-            to_unicode: to_unicode(context)?,
+            to_unicode: to_unicode(&mut context)?,
         })
     }
 }

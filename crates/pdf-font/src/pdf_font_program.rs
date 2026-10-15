@@ -1,8 +1,6 @@
 //! Embedded program selection and format handling, separate from font metadata.
 
-use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use std::sync::Arc;
 
 use crate::{
@@ -10,27 +8,24 @@ use crate::{
     font::{FontProgramFormat, FontSource},
 };
 
-/// Selects the descriptor entry appropriate to a font subtype.
-pub(crate) trait DescriptorProgram: Sized {
-    /// Reads the embedded program from an already active descriptor context.
-    fn read(context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self>;
-    /// Returns the normalized in-memory source.
-    fn into_source(self) -> FontSource;
-}
-
-/// Type 1 program, with FontFile3 taking precedence over FontFile.
+/// Type 1 program read from a FontDescriptor, with FontFile3 taking precedence over FontFile.
 pub(crate) struct Type1Program(FontSource);
-/// TrueType program stored in FontFile2.
+/// TrueType program read from a FontDescriptor's FontFile2.
 pub(crate) struct TrueTypeProgram(FontSource);
-/// CID-keyed CFF program stored in FontFile3.
-pub(crate) struct CidCffProgram(FontSource);
+/// CID-keyed CFF program read from a FontDescriptor's FontFile3.
+pub(crate) struct CidType0Program(FontSource);
 /// Simple-font CFF stream, either bare CFF or an OpenType container.
 struct SimpleCffProgram(FontSource);
+/// CID-keyed CFF stream, either bare CFF or an OpenType container.
+struct CidCffProgram(FontSource);
 /// Raw Type 1 stream.
 struct RawType1Program(FontSource);
+/// Raw TrueType stream.
+struct RawTrueTypeProgram(FontSource);
 
-impl DescriptorProgram for Type1Program {
-    fn read(context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+impl FromPdfObject for Type1Program {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
         // Presence, including an invalid value, deliberately prevents FontFile fallback.
         if context.dictionary().get(b"FontFile3").is_some() {
             context
@@ -42,26 +37,41 @@ impl DescriptorProgram for Type1Program {
                 .map(|program| Self(program.0))
         }
     }
-    fn into_source(self) -> FontSource {
-        self.0
+}
+
+impl FromPdfObject for TrueTypeProgram {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        context
+            .dictionary()?
+            .required::<RawTrueTypeProgram>(b"FontFile2")
+            .map(|program| Self(program.0))
     }
 }
 
-impl DescriptorProgram for TrueTypeProgram {
-    fn read(context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        context.required(b"FontFile2")
-    }
-    fn into_source(self) -> FontSource {
-        self.0
+impl FromPdfObject for CidType0Program {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        context
+            .dictionary()?
+            .required::<CidCffProgram>(b"FontFile3")
+            .map(|program| Self(program.0))
     }
 }
 
-impl DescriptorProgram for CidCffProgram {
-    fn read(context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        context.required(b"FontFile3")
+impl From<Type1Program> for FontSource {
+    fn from(program: Type1Program) -> Self {
+        program.0
     }
-    fn into_source(self) -> FontSource {
-        self.0
+}
+
+impl From<TrueTypeProgram> for FontSource {
+    fn from(program: TrueTypeProgram) -> Self {
+        program.0
+    }
+}
+
+impl From<CidType0Program> for FontSource {
+    fn from(program: CidType0Program) -> Self {
+        program.0
     }
 }
 
@@ -76,7 +86,7 @@ impl FromPdfObject for RawType1Program {
     }
 }
 
-impl FromPdfObject for TrueTypeProgram {
+impl FromPdfObject for RawTrueTypeProgram {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let context = context.stream()?;
         Ok(Self(FontSource::Memory {
@@ -142,15 +152,6 @@ mod tests {
         object_variant::ObjectVariant, stream::StreamObject,
     };
 
-    struct ProgramFixture<P>(P);
-
-    impl<P: DescriptorProgram> FromPdfObject for ProgramFixture<P> {
-        fn from_pdf_object(
-            context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
-        ) -> ReadResult<Self> {
-            P::read(&mut context.dictionary()?).map(Self)
-        }
-    }
     fn descriptor_with_cff(subtype: &[u8], data: &'static [u8]) -> Dictionary {
         let stream_dictionary = Dictionary::from_entries([(
             b"Subtype".as_slice(),
@@ -174,9 +175,9 @@ mod tests {
     fn cid_font_type0c_remains_raw_cff() {
         let descriptor = descriptor_with_cff(b"CIDFontType0C", b"raw-cff");
         let source = ObjectReader::new(PassthroughResolver)
-            .read::<ProgramFixture<CidCffProgram>>(&ObjectVariant::Dictionary(descriptor))
+            .read::<CidType0Program>(&ObjectVariant::Dictionary(descriptor))
             .expect("the raw CID-CFF source should parse");
-        let (data, format) = memory_source(source.0.into_source());
+        let (data, format) = memory_source(FontSource::from(source));
 
         assert_eq!(format, FontProgramFormat::CidCff);
         assert_eq!(data.as_ref(), b"raw-cff");
@@ -186,9 +187,9 @@ mod tests {
     fn cid_open_type_remains_open_type() {
         let descriptor = descriptor_with_cff(b"OpenType", b"open-type");
         let source = ObjectReader::new(PassthroughResolver)
-            .read::<ProgramFixture<CidCffProgram>>(&ObjectVariant::Dictionary(descriptor))
+            .read::<CidType0Program>(&ObjectVariant::Dictionary(descriptor))
             .expect("the OpenType source should parse");
-        let (data, format) = memory_source(source.0.into_source());
+        let (data, format) = memory_source(FontSource::from(source));
 
         assert_eq!(format, FontProgramFormat::OpenTypeCff);
         assert_eq!(data.as_ref(), b"open-type");
@@ -198,9 +199,9 @@ mod tests {
     fn simple_type1c_remains_raw_cff() {
         let descriptor = descriptor_with_cff(b"Type1C", b"raw-cff");
         let source = ObjectReader::new(PassthroughResolver)
-            .read::<ProgramFixture<Type1Program>>(&ObjectVariant::Dictionary(descriptor))
+            .read::<Type1Program>(&ObjectVariant::Dictionary(descriptor))
             .expect("the raw simple CFF source should parse");
-        let (data, format) = memory_source(source.0.into_source());
+        let (data, format) = memory_source(FontSource::from(source));
 
         assert_eq!(format, FontProgramFormat::Cff);
         assert_eq!(data.as_ref(), b"raw-cff");

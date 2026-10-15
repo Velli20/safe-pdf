@@ -11,7 +11,8 @@
 //! - Before reading other objects, the encryption dictionary must be resolved first.
 
 use pdf_object_reader::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, dictionary::Dictionary,
+    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
 };
 
 use crate::decryption::DecryptionError;
@@ -157,22 +158,13 @@ impl EncryptDictionary {
     const ENCRYPT_METADATA_DEFAULT: bool = true;
 }
 
-impl EncryptDictionary {
-    /// Parses an encryption dictionary from a PDF Dictionary object.
+impl FromPdfObject for EncryptDictionary {
+    /// Parses an encryption dictionary.
     ///
-    /// # Arguments
-    ///
-    /// - `dict`: The encryption dictionary to parse.
-    /// - `objects`: The object collection for resolving indirect references.
-    ///
-    /// # Returns
-    ///
-    /// An `EncryptDictionary` on success, or a `PdfReaderError` if parsing fails or the
-    /// security handler is not `/Standard`.
-    pub fn from_dictionary(
-        dict: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Self, PdfReaderError> {
+    /// Fails if parsing fails or the security handler is not `/Standard`.
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let dict = context.object().dictionary()?;
+        let objects = context.source();
         // Other handlers (such as the public-key `/Adobe.PubSec`) lack the Standard entries
         // below and need keys this reader cannot obtain.
         let filter = dict.required_bytes(b"Filter", objects)?;
@@ -181,7 +173,8 @@ impl EncryptDictionary {
                 DecryptionError::UnsupportedSecurityHandler(
                     String::from_utf8_lossy(filter).into_owned(),
                 ),
-            ));
+            )
+            .into());
         }
 
         let version_num = dict.required_number::<i32>(b"V", objects)?;
@@ -228,7 +221,9 @@ impl EncryptDictionary {
             string_method,
         })
     }
+}
 
+impl EncryptDictionary {
     /// Returns the effective key length in bits.
     ///
     /// - For V=1, always returns 40.
@@ -384,7 +379,8 @@ mod tests {
             ("EncryptMetadata", ObjectVariant::Boolean(false)),
         ]);
 
-        let result = EncryptDictionary::from_dictionary(&dict, &PassthroughResolver);
+        let result = pdf_object_reader::ObjectReader::new(PassthroughResolver)
+            .read::<EncryptDictionary>(&ObjectVariant::Dictionary(dict));
 
         assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
         let encrypt = result.unwrap();
@@ -479,7 +475,9 @@ mod tests {
             ),
         ]);
 
-        let encrypt = EncryptDictionary::from_dictionary(&dict, &PassthroughResolver).unwrap();
+        let encrypt = pdf_object_reader::ObjectReader::new(PassthroughResolver)
+            .read::<EncryptDictionary>(&ObjectVariant::Dictionary(dict))
+            .unwrap();
 
         assert_eq!(encrypt.version, EncryptionVersion::V5);
         assert_eq!(encrypt.stream_method, CryptFilterMethod::Aes256);

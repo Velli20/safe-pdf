@@ -4,10 +4,8 @@ use crate::{
     flags::FontFlags,
     font::{FontSlant, FontSource, FontWeight},
     pdf::{CidSystemInfo, PdfFontDescriptor},
-    pdf_font_program::DescriptorProgram,
 };
 use pdf_cmap::predefined::PredefinedCMap;
-use pdf_graphics::rect::Rect;
 use pdf_object_reader::{
     DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
 };
@@ -19,34 +17,32 @@ struct Descriptor<P> {
     program: Option<P>,
 }
 
-impl<P: DescriptorProgram> FromPdfObject for Descriptor<P> {
+impl<P: FromPdfObject + Into<FontSource>> FromPdfObject for Descriptor<P> {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let value = context.object().value();
         let mut context = context.dictionary()?;
         // Bad optional hints or programs must not discard an otherwise usable font.
-        let metadata = PdfFontDescriptor::from(&mut context);
-        let program = P::read(&mut context).ok();
+        let metadata: PdfFontDescriptor = context.read(value)?;
+        let program = context.read::<P>(value).ok();
         Ok(Self { metadata, program })
     }
 }
 
-impl<A: ObjectAccess + ?Sized> From<&mut DictionaryContext<'_, A>> for PdfFontDescriptor {
-    /// Reads a FontDescriptor dictionary, not the enclosing font dictionary.
-    fn from(context: &mut DictionaryContext<'_, A>) -> Self {
+impl FromPdfObject for PdfFontDescriptor {
+    /// Reads a FontDescriptor dictionary, not the enclosing font dictionary, tolerating
+    /// malformed optional metadata.
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
         let flags = context
             .optional::<FontFlags>(b"Flags")
             .ok()
             .flatten()
             .unwrap_or_default();
         let bounds = context
-            .optional::<[f32; 4]>(b"FontBBox")
+            .dictionary()
+            .optional_rect(b"FontBBox", context.source())
             .ok()
-            .flatten()
-            .map(|[left, top, right, bottom]| Rect {
-                left,
-                top,
-                right,
-                bottom,
-            });
+            .flatten();
         let mut descriptor = Self {
             bounds,
             missing_width: context.optional(b"MissingWidth").ok().flatten(),
@@ -65,27 +61,17 @@ impl<A: ObjectAccess + ?Sized> From<&mut DictionaryContext<'_, A>> for PdfFontDe
             FontSlant::Normal
         };
         descriptor.metadata.symbolic = flags.contains(FontFlags::SYMBOLIC);
-        descriptor
-    }
-}
-
-impl FromPdfObject for PdfFontDescriptor {
-    /// Reads descriptor hints, tolerating malformed optional metadata.
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(Self::from(&mut context.dictionary()?))
+        Ok(descriptor)
     }
 }
 
 /// Reads the descriptor once and derives family metadata from the enclosing BaseFont.
-pub(crate) fn descriptor<P: DescriptorProgram>(
+pub(crate) fn descriptor<P: FromPdfObject + Into<FontSource>>(
     context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
     base_font: Option<&[u8]>,
 ) -> ReadResult<(PdfFontDescriptor, Option<FontSource>)> {
     let (mut descriptor, program) = match context.optional::<Descriptor<P>>(b"FontDescriptor")? {
-        Some(value) => (
-            value.metadata,
-            value.program.map(DescriptorProgram::into_source),
-        ),
+        Some(value) => (value.metadata, value.program.map(Into::into)),
         None => (PdfFontDescriptor::default(), None),
     };
     let family = base_font.map(|name| Arc::<str>::from(String::from_utf8_lossy(name).into_owned()));

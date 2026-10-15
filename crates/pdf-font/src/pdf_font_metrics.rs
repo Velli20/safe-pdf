@@ -8,8 +8,7 @@ use crate::{
     standard14::Standard14Font,
 };
 use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-    pdf_array::PdfArray,
+    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult, pdf_array::PdfArray,
 };
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -19,15 +18,6 @@ impl FromPdfObject for PdfMetrics {
     /// The input is the whole font dictionary, since character bounds and
     /// default widths are stored outside the width arrays. Type 0 containers
     /// obtain their metrics from a descendant rather than this decoder.
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Self::try_from(&mut context.dictionary()?)
-    }
-}
-
-impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for PdfMetrics {
-    type Error = ObjectReadError;
-
-    /// Reads metrics within the active font-dictionary traversal.
     ///
     /// Simple fonts default to the descriptor's `/MissingWidth` or
     /// [`FALLBACK_GLYPH_WIDTH`], Type 3 fonts to zero, and CID fonts to `/DW` or
@@ -39,7 +29,8 @@ impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for PdfMet
     /// Returns a reader error for missing or unsupported subtypes, malformed
     /// width entries, or invalid required character bounds. CID range errors
     /// retain their font-domain source; optional descriptor hints remain lenient.
-    fn try_from(context: &mut DictionaryContext<'_, A>) -> ReadResult<Self> {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
         let subtype: Arc<[u8]> = context.required(b"Subtype")?;
         let (default_width, explicit) = match subtype.as_ref() {
             b"Type1" | b"MMType1" | b"TrueType" => {
@@ -49,10 +40,10 @@ impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for PdfMet
                     .and_then(|descriptor| descriptor.missing_width);
                 (
                     missing_width.unwrap_or(FALLBACK_GLYPH_WIDTH),
-                    Self::simple_widths(context)?,
+                    Self::simple_widths(&mut context)?,
                 )
             }
-            b"Type3" => (0.0, Self::simple_widths(context)?),
+            b"Type3" => (0.0, Self::simple_widths(&mut context)?),
             b"CIDFontType0" | b"CIDFontType2" => (
                 context
                     .optional::<f32>(b"DW")?
