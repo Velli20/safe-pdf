@@ -15,12 +15,13 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use crate::diagnostic::{PdfReadDiagnostic, PdfReadDiagnosticKind};
+use crate::encryption_context::EncryptionContext;
 use crate::error::PdfReaderError;
 use crate::object_stream::read_object_stream;
-use crate::reader::{EncryptionContext, object_id};
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{
-    cross_reference_table::CrossReferenceEntryType, object_error::ObjectError,
+    cross_reference_table::CrossReferenceEntryType, object_error::ObjectError, object_id::ObjectId,
+    object_variant::ObjectVariant,
 };
 use pdf_parser::{error::ParserError, parser::PdfParser};
 
@@ -249,8 +250,8 @@ impl ObjectLoadQueue {
 pub(super) struct ObjectLoader<'input, 'loader> {
     /// Random-access parser over the source PDF bytes.
     parser: &'loader PdfParser<'input>,
-    /// Optional document decryptor and encryption-dictionary exclusion.
-    encryption: EncryptionContext,
+    /// Decryption state, absent when the document's objects are stored unencrypted.
+    encryption: Option<EncryptionContext>,
     /// Objects available for resolving references during subsequent parses.
     objects: ObjectCollection,
     /// Dependency-aware work scheduler.
@@ -264,7 +265,7 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
     pub(super) fn new(
         entries: &BTreeMap<usize, CrossReferenceEntryType>,
         parser: &'loader PdfParser<'input>,
-        encryption: EncryptionContext,
+        encryption: Option<EncryptionContext>,
         diagnostics: &'loader mut Vec<PdfReadDiagnostic>,
     ) -> Self {
         let plan = LoadPlan::from_entries(entries);
@@ -372,20 +373,8 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
             .parse_indirect_object_value_recovering_streams(identifier, &self.objects)
             .map_err(PdfReaderError::from)?;
 
-        let object = match self.encryption.decryptor_for(Some(identifier)) {
-            Some(decryptor) => match decryptor.decrypt_object(identifier, object) {
-                Ok(object) => object,
-                Err(error) => {
-                    self.diagnostics.push(PdfReadDiagnostic::new(
-                        PdfReadDiagnosticKind::ObjectDecryption,
-                        Some(byte_offset),
-                        None,
-                        error,
-                    ));
-                    return Ok(None);
-                }
-            },
-            None => object,
+        let Some(object) = self.decrypt(byte_offset, identifier, object) else {
+            return Ok(None);
         };
         self.objects
             .insert(identifier, object)
@@ -396,6 +385,31 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
             .get(identifier.number)
             .is_some()
             .then_some(identifier.number))
+    }
+
+    /// Decrypts a parsed object when the document is encrypted.
+    ///
+    /// A decryption failure is recorded as a diagnostic and drops the object.
+    fn decrypt(
+        &mut self,
+        byte_offset: usize,
+        identifier: ObjectId,
+        object: ObjectVariant,
+    ) -> Option<ObjectVariant> {
+        let Some(encryption) = &self.encryption else {
+            return Some(object);
+        };
+        encryption
+            .decrypt(identifier, object)
+            .map_err(|error| {
+                self.diagnostics.push(PdfReadDiagnostic::new(
+                    PdfReadDiagnosticKind::ObjectDecryption,
+                    Some(byte_offset),
+                    None,
+                    error,
+                ));
+            })
+            .ok()
     }
 
     /// Parses one available object stream and inserts all xref-requested members.
@@ -465,7 +479,8 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
         self.diagnostics.push(PdfReadDiagnostic::new(
             PdfReadDiagnosticKind::CompressedObject,
             None,
-            Some(object_id(expected_object_number)),
+            // Objects stored in object streams always have generation zero.
+            Some(ObjectId::new(expected_object_number, 0)),
             "xref compressed object number differed from its object stream entry",
         ));
     }

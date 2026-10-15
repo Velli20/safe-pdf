@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use pdf_color_space::color_space::ColorSpace;
-use pdf_document::document::PdfDocument;
+use pdf_document::page_tree::PageTree;
 use pdf_object_reader::{
     dictionary::Dictionary, object_error::ObjectError, object_resolver::ObjectResolver,
     object_variant::ObjectVariant,
@@ -190,10 +190,10 @@ fn inherited_resources_and_media_box_apply_to_leaf_pages() {
     let reader = pdf_object_reader::ObjectReader::new(&resolver);
 
     let pages = reader
-        .read::<PdfDocument>(
+        .read::<PageTree>(
             &pdf_object_reader::object_variant::ObjectVariant::Dictionary((&root_pages).clone()),
         )
-        .map(|document| document.pages)
+        .map(|tree| tree.pages)
         .expect("page tree should parse");
 
     assert_eq!(pages.len(), 1);
@@ -245,10 +245,10 @@ fn child_resources_keep_their_own_entries_while_inheriting_missing_ones() {
     let reader = pdf_object_reader::ObjectReader::new(&resolver);
 
     let pages = reader
-        .read::<PdfDocument>(
+        .read::<PageTree>(
             &pdf_object_reader::object_variant::ObjectVariant::Dictionary((&root_pages).clone()),
         )
-        .map(|document| document.pages)
+        .map(|tree| tree.pages)
         .expect("page tree should parse");
 
     let page = pages.first().expect("page should exist");

@@ -863,7 +863,6 @@ mod tests {
             resources: None,
             rotation: None,
             annotation_id_high_watermark: 0,
-            read_state: None,
         }
     }
 

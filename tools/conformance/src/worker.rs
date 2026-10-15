@@ -112,13 +112,7 @@ pub fn read(
             let document = report.document();
             output.safe_pages = Some(document.pages.len());
             stage("inventory");
-            if let Some(state) = document
-                .pages
-                .iter()
-                .find_map(|page| page.read_state.as_ref())
-            {
-                output.inventory = inventory::scan(state.source());
-            }
+            output.inventory = inventory::scan(document.objects());
         }
         Err(error) => output.safe_error = Some(safe_render::error_detail(&error)),
     }
