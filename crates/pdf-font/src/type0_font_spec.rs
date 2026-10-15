@@ -6,11 +6,11 @@ use crate::{
     pdf::{CidSystemInfo, PdfFontDescriptor, PdfMetrics, ToUnicodeMap},
     pdf_font_descriptor::{cid_to_unicode_map, descriptor},
     pdf_font_parser::{base_font, to_unicode},
-    pdf_font_program::{CidCffProgram, TrueTypeProgram},
+    pdf_font_program::{CidType0Program, TrueTypeProgram},
 };
 use pdf_cmap::{PdfCMap, Type0EncodingCMap};
 use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
+    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
     object_variant::ObjectVariant,
 };
 use std::{collections::HashMap, sync::Arc};
@@ -114,17 +114,20 @@ impl TryFrom<&[u8]> for CidFontKind {
 impl FromPdfObject for CidFontSpec {
     /// Parses the descendant within its parent font's traversal.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let value = context.object().value();
         let mut context = context.dictionary()?;
         let subtype: Arc<[u8]> = context.required(b"Subtype")?;
         let kind = CidFontKind::try_from(subtype.as_ref())?;
         let base_font = base_font(&mut context);
         let (descriptor, program) = match kind {
-            CidFontKind::Type0 => descriptor::<CidCffProgram>(&mut context, base_font.as_deref())?,
+            CidFontKind::Type0 => {
+                descriptor::<CidType0Program>(&mut context, base_font.as_deref())?
+            }
             CidFontKind::Type2 => {
                 descriptor::<TrueTypeProgram>(&mut context, base_font.as_deref())?
             }
         };
-        let metrics = PdfMetrics::try_from(&mut context)?;
+        let metrics: PdfMetrics = context.read(value)?;
         let system_info = context
             .optional::<CidSystemInfo>(b"CIDSystemInfo")?
             .unwrap_or_else(|| CidSystemInfo {
@@ -147,27 +150,20 @@ impl FromPdfObject for CidFontSpec {
 }
 
 impl FromPdfObject for Type0FontSpec {
-    /// Decodes the concrete font dictionary without whole-font substitution.
+    /// Decodes a Type 0 dictionary without whole-font substitution, requiring exactly one
+    /// descendant and defaulting to an Identity-H encoding.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Self::try_from(&mut context.dictionary()?)
-    }
-}
-
-impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for Type0FontSpec {
-    type Error = ObjectReadError;
-
-    /// Reads a Type 0 dictionary with exactly one descendant and an Identity-H encoding default.
-    fn try_from(context: &mut DictionaryContext<'_, A>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
         let [descendant] = context.required::<[CidFontSpec; 1]>(b"DescendantFonts")?;
         let encoding = match context.optional::<Type0EncodingCMap>(b"Encoding")? {
             Some(encoding) => encoding,
             None => Type0EncodingCMap::from_name(b"Identity-H")?,
         };
         Ok(Self {
-            base_font: base_font(context).unwrap_or_default(),
+            base_font: base_font(&mut context).unwrap_or_default(),
             encoding: Arc::new(encoding),
             descendant,
-            to_unicode: to_unicode(context)?,
+            to_unicode: to_unicode(&mut context)?,
         })
     }
 }

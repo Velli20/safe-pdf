@@ -4,10 +4,9 @@ use pdf_graphics::Image;
 use pdf_image::{PdfImageError, read_xobject as decode_image_xobject};
 use pdf_object_reader::object_error::ObjectError;
 use pdf_object_reader::object_lookup::ObjectLookupExt;
-use pdf_object_reader::object_resolver::ObjectResolver;
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-    object_variant::ObjectVariant, resolved_object::ResolvedObject,
+    object_variant::ObjectVariant,
 };
 use std::sync::Arc;
 
@@ -34,32 +33,29 @@ impl TryFrom<&[u8]> for XObjectSubtype {
     }
 }
 
-impl XObjectSubtype {
-    /// Reads the XObject subtype of a resource object.
-    ///
-    /// Streams must name a supported subtype. A dictionary without an XObject subtype
-    /// yields `None`, since it describes a font.
-    fn read(
-        object: &ResolvedObject,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Option<Self>, ObjectReadError> {
-        let dictionary = object.dictionary()?;
-        if let ObjectVariant::Stream(_) = object.value() {
-            return Ok(Some(Self::try_from(
-                dictionary.required_bytes(b"Subtype", objects)?,
-            )?));
-        }
-        Ok(dictionary
-            .optional_bytes(b"Subtype", objects)?
-            .and_then(|subtype| Self::try_from(subtype).ok()))
+/// Reads the required `/Subtype` of an XObject stream or dictionary.
+impl FromPdfObject for XObjectSubtype {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let subtype = context
+            .object()
+            .dictionary()?
+            .required_bytes(b"Subtype", context.source())?;
+        Ok(Self::try_from(subtype)?)
     }
 }
 
 impl FromPdfObject for Resource {
+    /// Streams must name a supported XObject subtype. A dictionary without one describes
+    /// a font.
     fn from_pdf_object(
         mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
     ) -> ReadResult<Self> {
-        match XObjectSubtype::read(context.object(), context.source())? {
+        let value = context.object().value();
+        let subtype = match value {
+            ObjectVariant::Stream(_) => Some(context.read::<XObjectSubtype>(value)?),
+            _ => context.read::<XObjectSubtype>(value).ok(),
+        };
+        match subtype {
             None => Self::read_font(&mut context),
             Some(XObjectSubtype::Form) => Ok(Self::from(
                 context.read::<FormXObject>(context.object().value())?,

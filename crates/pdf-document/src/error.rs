@@ -1,4 +1,4 @@
-use pdf_object_reader::object_error::ObjectError;
+use pdf_object_reader::{ObjectReadError, object_error::ObjectError};
 use pdf_parser::{error::ParserError, header::HeaderError};
 use pdf_resources::error::PdfPagesError;
 use pdf_utils::{ErrorTrace, TracedError};
@@ -84,9 +84,28 @@ impl PdfReaderError {
 }
 
 impl From<pdf_object_reader::ObjectReadError> for PdfReaderError {
+    /// Unwraps reader errors raised by this crate's own decoders, so they keep their variant.
     #[track_caller]
     fn from(error: pdf_object_reader::ObjectReadError) -> Self {
+        let error = match error {
+            ObjectReadError::Decode { target, source } => {
+                match source.downcast::<PdfReaderError>() {
+                    Ok(error) => return *error,
+                    Err(source) => ObjectReadError::Decode { target, source },
+                }
+            }
+            error => error,
+        };
         Self::ObjectRead(TracedError::new(error))
+    }
+}
+
+impl From<PdfReaderError> for ObjectReadError {
+    fn from(source: PdfReaderError) -> Self {
+        Self::Decode {
+            target: "PDF document",
+            source: Box::new(source),
+        }
     }
 }
 
