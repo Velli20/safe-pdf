@@ -1,5 +1,4 @@
-use pdf_object_collection::object_collection::ObjectCollection;
-use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use std::sync::Arc;
 
 use pdf_annotation_core::SourceAnnotation;
@@ -34,9 +33,6 @@ pub struct PdfPage {
     /// Next page-scoped annotation identifier.
     #[doc(hidden)]
     pub annotation_id_high_watermark: usize,
-    /// Retains the source and typed resources when a page is detached from its document.
-    #[doc(hidden)]
-    pub read_state: Option<Arc<ObjectReader<ObjectCollection>>>,
 }
 
 impl PdfPage {
@@ -184,7 +180,6 @@ impl FromPdfObject for PdfPage {
             resources,
             annotations,
             annotation_id_high_watermark,
-            read_state: None,
         })
     }
 }
