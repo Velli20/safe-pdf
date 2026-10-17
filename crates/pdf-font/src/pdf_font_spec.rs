@@ -149,7 +149,7 @@ impl PdfFontSpec {
         let Self::Type3(font) = self else {
             return None;
         };
-        font.type3_procedures.get(&glyph)
+        font.char_procedures.get(glyph)
     }
 
     /// Returns the bundled Standard 14 identity, when present.

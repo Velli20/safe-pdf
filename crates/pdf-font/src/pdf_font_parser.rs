@@ -12,11 +12,7 @@ use std::sync::Arc;
 pub(crate) fn to_unicode(
     context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
 ) -> ReadResult<Option<Arc<dyn ToUnicodeMap>>> {
-    let Some(value) = context
-        .optional::<ResolvedObject>(b"ToUnicode")
-        .ok()
-        .flatten()
-    else {
+    let Some(value) = context.lenient::<ResolvedObject>(b"ToUnicode") else {
         return Ok(None);
     };
     if matches!(value.value(), ObjectVariant::Stream(_)) {
@@ -32,13 +28,6 @@ pub(crate) fn to_unicode(
             let map: Arc<dyn ToUnicodeMap> = Arc::new(map);
             map
         }))
-}
-
-/// BaseFont is a best-effort matching hint, including when constructing a fallback.
-pub(crate) fn base_font(
-    context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
-) -> Option<Arc<[u8]>> {
-    context.optional(b"BaseFont").ok().flatten()
 }
 
 #[cfg(test)]

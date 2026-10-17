@@ -4,8 +4,7 @@ use crate::{
     error::FontError,
     font::FontSource,
     pdf::{CidSystemInfo, PdfFontDescriptor, PdfMetrics, ToUnicodeMap},
-    pdf_font_descriptor::{cid_to_unicode_map, descriptor},
-    pdf_font_parser::{base_font, to_unicode},
+    pdf_font_parser::to_unicode,
     pdf_font_program::{CidType0Program, TrueTypeProgram},
 };
 use pdf_cmap::{PdfCMap, Type0EncodingCMap};
@@ -76,7 +75,7 @@ impl CidToGidMap {
         if kind != CidFontKind::Type2 {
             return None;
         }
-        match context.optional::<Self>(b"CIDToGIDMap").ok().flatten()? {
+        match context.lenient::<Self>(b"CIDToGIDMap")? {
             Self::Table(table) => Some(table),
             Self::Identity => None,
         }
@@ -118,24 +117,25 @@ impl FromPdfObject for CidFontSpec {
         let mut context = context.dictionary()?;
         let subtype: Arc<[u8]> = context.required(b"Subtype")?;
         let kind = CidFontKind::try_from(subtype.as_ref())?;
-        let base_font = base_font(&mut context);
-        let (descriptor, program) = match kind {
-            CidFontKind::Type0 => {
-                descriptor::<CidType0Program>(&mut context, base_font.as_deref())?
-            }
-            CidFontKind::Type2 => {
-                descriptor::<TrueTypeProgram>(&mut context, base_font.as_deref())?
-            }
+        let base_font: Option<Arc<[u8]>> = context.lenient(b"BaseFont");
+        // A bad program must not discard an otherwise usable font.
+        let program: Option<FontSource> = match kind {
+            CidFontKind::Type0 => context
+                .lenient::<CidType0Program>(b"FontDescriptor")
+                .map(Into::into),
+            CidFontKind::Type2 => context
+                .lenient::<TrueTypeProgram>(b"FontDescriptor")
+                .map(Into::into),
         };
+        let descriptor = context
+            .optional::<PdfFontDescriptor>(b"FontDescriptor")?
+            .unwrap_or_default()
+            .named(base_font.as_deref());
         let metrics: PdfMetrics = context.read(value)?;
         let system_info = context
             .optional::<CidSystemInfo>(b"CIDSystemInfo")?
-            .unwrap_or_else(|| CidSystemInfo {
-                registry: Arc::default(),
-                ordering: Arc::default(),
-                supplement: 0,
-            });
-        let cid_to_unicode = cid_to_unicode_map(&system_info);
+            .unwrap_or_default();
+        let cid_to_unicode = system_info.cid_to_unicode_map();
         let cid_to_gid = CidToGidMap::read(&mut context, kind);
         Ok(Self {
             kind,
@@ -160,7 +160,7 @@ impl FromPdfObject for Type0FontSpec {
             None => Type0EncodingCMap::from_name(b"Identity-H")?,
         };
         Ok(Self {
-            base_font: base_font(&mut context).unwrap_or_default(),
+            base_font: context.lenient(b"BaseFont").unwrap_or_default(),
             encoding: Arc::new(encoding),
             descendant,
             to_unicode: to_unicode(&mut context)?,

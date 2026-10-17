@@ -142,6 +142,29 @@ impl Dictionary {
             .map(Rect::from)
     }
 
+    /// Reads the optional affine transform entry with the given key.
+    ///
+    /// Missing entries and explicit PDF `null` values are treated as absent.
+    pub fn optional_transform(
+        &self,
+        key: &[u8],
+        objects: &dyn ObjectResolver,
+    ) -> Result<Option<Transform>, ObjectError> {
+        Ok(self
+            .optional_array_of::<f32, 6>(key, objects)?
+            .map(Transform::from))
+    }
+
+    /// Reads the required affine transform entry with the given key.
+    pub fn required_transform(
+        &self,
+        key: &[u8],
+        objects: &dyn ObjectResolver,
+    ) -> Result<Transform, ObjectError> {
+        self.required_array_of::<f32, 6>(key, objects)
+            .map(Transform::from)
+    }
+
     /// Reads the optional `/BBox` entry as a rectangle.
     ///
     /// Missing entries and explicit PDF `null` values are treated as absent.
@@ -211,16 +234,12 @@ impl Dictionary {
         &self,
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Transform>, ObjectError> {
-        Ok(self
-            .optional_array_of::<f32, 6>(b"Matrix", objects)?
-            .map(|[sx, ky, kx, sy, tx, ty]| Transform::from_row(sx, ky, kx, sy, tx, ty)))
+        self.optional_transform(b"Matrix", objects)
     }
 
     /// Reads the required `/Matrix` entry as an affine transform.
     pub fn required_matrix(&self, objects: &dyn ObjectResolver) -> Result<Transform, ObjectError> {
-        let [sx, ky, kx, sy, tx, ty] = self.required_array_of::<f32, 6>(b"Matrix", objects)?;
-
-        Ok(Transform::from_row(sx, ky, kx, sy, tx, ty))
+        self.required_transform(b"Matrix", objects)
     }
 
     /// Reads an optional two-number array, such as a shading `/Domain`, as an interval.

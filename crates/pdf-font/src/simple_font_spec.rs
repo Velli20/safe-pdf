@@ -5,8 +5,7 @@ use crate::{
     error::FontError,
     font::FontSource,
     pdf::{PdfFontDescriptor, PdfMetrics, SimpleEncoding, ToUnicodeMap},
-    pdf_font_descriptor::descriptor,
-    pdf_font_parser::{base_font, to_unicode},
+    pdf_font_parser::to_unicode,
     pdf_font_program::{TrueTypeProgram, Type1Program},
     standard14::{self, Standard14Font},
 };
@@ -39,12 +38,15 @@ impl FromPdfObject for SimpleFontSpec {
         let value = context.object().value();
         let mut context = context.dictionary()?;
         let subtype: Arc<[u8]> = context.required(b"Subtype")?;
-        let base_font = base_font(&mut context);
-        let (descriptor, program) = match subtype.as_ref() {
-            b"Type1" | b"MMType1" => {
-                descriptor::<Type1Program>(&mut context, base_font.as_deref())?
-            }
-            b"TrueType" => descriptor::<TrueTypeProgram>(&mut context, base_font.as_deref())?,
+        let base_font: Option<Arc<[u8]>> = context.lenient(b"BaseFont");
+        // A bad program must not discard an otherwise usable font.
+        let program: Option<FontSource> = match subtype.as_ref() {
+            b"Type1" | b"MMType1" => context
+                .lenient::<Type1Program>(b"FontDescriptor")
+                .map(Into::into),
+            b"TrueType" => context
+                .lenient::<TrueTypeProgram>(b"FontDescriptor")
+                .map(Into::into),
             other => {
                 return Err(FontError::UnsupportedFontSubtype {
                     subtype: String::from_utf8_lossy(other).into_owned(),
@@ -52,6 +54,10 @@ impl FromPdfObject for SimpleFontSpec {
                 .into());
             }
         };
+        let descriptor = context
+            .optional::<PdfFontDescriptor>(b"FontDescriptor")?
+            .unwrap_or_default()
+            .named(base_font.as_deref());
         let symbolic = subtype.as_ref() == b"TrueType" && descriptor.metadata.symbolic;
         let encoding = simple_encoding(&mut context, symbolic)?;
         let mut metrics: PdfMetrics = context.read(value)?;

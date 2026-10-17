@@ -138,6 +138,11 @@ impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
             })
     }
 
+    /// Reads an optional entry whose malformed value is treated as absent, for best-effort hints.
+    pub fn lenient<T: FromPdfObject>(&mut self, key: &[u8]) -> Option<T> {
+        self.optional(key).unwrap_or_default()
+    }
+
     /// Reads a required entry as a shared value or a pending recursive handle.
     pub fn required_shared<T>(&mut self, key: &[u8]) -> ReadResult<ObjectHandle<T>>
     where
