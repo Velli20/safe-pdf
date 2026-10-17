@@ -283,9 +283,7 @@ pub struct ConcatMatrix {
 impl ConcatMatrix {
     pub fn new(matrix: [f32; 6]) -> Self {
         Self {
-            matrix: Transform::from_row(
-                matrix[0], matrix[1], matrix[2], matrix[3], matrix[4], matrix[5],
-            ),
+            matrix: Transform::from(matrix),
         }
     }
 }

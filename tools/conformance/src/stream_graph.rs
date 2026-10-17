@@ -204,6 +204,7 @@ fn font_node(name: String, handle: &ObjectHandle<Resource>) -> Result<Option<Nod
     let key = NodeKey::of(handle, font);
     let glyphs: Vec<String> = type3
         .char_procedures
+        .handles
         .keys()
         .map(|glyph| String::from_utf8_lossy(&glyph.0).into_owned())
         .collect();

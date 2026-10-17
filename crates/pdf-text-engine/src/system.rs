@@ -242,6 +242,6 @@ impl FontSystem {
 /// glyph handles needed by the Type 3 driver and renderer.
 fn type3_source(font: &Type3FontSpec) -> FontSource {
     FontSource::Type3 {
-        glyphs: Arc::clone(&font.char_procedures),
+        glyphs: Arc::clone(&font.char_procedures.handles),
     }
 }

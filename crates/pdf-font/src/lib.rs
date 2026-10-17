@@ -38,7 +38,7 @@ pub use font::{
 };
 pub use font_registry::FontRegistry;
 pub use pdf::{
-    CidFontKind, CidFontSpec, CidSystemInfo, PDF_GLYPH_SPACE_UNITS_PER_EM, PdfCode,
+    CharProcedures, CidFontKind, CidFontSpec, CidSystemInfo, PDF_GLYPH_SPACE_UNITS_PER_EM, PdfCode,
     PdfFontDescriptor, PdfGlyphMetric, PdfMetrics, SimpleEncoding, SimpleFontSpec, ToUnicodeMap,
     Type0FontSpec, Type3FontSpec,
 };
