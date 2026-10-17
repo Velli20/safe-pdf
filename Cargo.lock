@@ -2473,6 +2473,7 @@ dependencies = [
  "pdf-decode",
  "pdf-function",
  "pdf-graphics",
+ "pdf-image",
  "pdf-object-reader",
  "pdf-utils",
  "thiserror 2.0.12",

@@ -61,17 +61,6 @@ impl From<wasm_bindgen::JsValue> for WebCanvasBackendError {
     }
 }
 
-impl From<pdf_shading::error::ShadingRasterError> for WebCanvasBackendError {
-    fn from(error: pdf_shading::error::ShadingRasterError) -> Self {
-        match error {
-            pdf_shading::error::ShadingRasterError::InvalidInput(message) => {
-                Self::InvalidInput(message)
-            }
-            pdf_shading::error::ShadingRasterError::ResourceLimit => Self::ResourceLimit,
-        }
-    }
-}
-
 impl From<pdf_image::ImageRasterError> for WebCanvasBackendError {
     /// Preserves raster validation and allocation error categories at the web boundary.
     fn from(error: pdf_image::ImageRasterError) -> Self {
