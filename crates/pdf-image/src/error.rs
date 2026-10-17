@@ -1,6 +1,7 @@
 use pdf_color_space::error::ColorSpaceError;
 use pdf_decode::DecodeError;
 use pdf_filter::error::FilterError;
+use pdf_graphics::transform::TransformError;
 use pdf_jpeg2000::Jpeg2000Error;
 use thiserror::Error;
 
@@ -111,4 +112,26 @@ pub enum ImageRasterError {
     /// The requested buffer size overflows or its allocation fails.
     #[error("image raster allocation limit exceeded")]
     ResourceLimit,
+}
+
+impl From<std::collections::TryReserveError> for ImageRasterError {
+    fn from(_: std::collections::TryReserveError) -> Self {
+        Self::ResourceLimit
+    }
+}
+
+impl From<std::num::TryFromIntError> for ImageRasterError {
+    /// A dimension that does not fit the target integer type exceeds the raster's limits.
+    fn from(_: std::num::TryFromIntError) -> Self {
+        Self::ResourceLimit
+    }
+}
+
+impl From<TransformError> for ImageRasterError {
+    fn from(error: TransformError) -> Self {
+        match error {
+            TransformError::NonFinite => Self::InvalidInput("nonfinite transform"),
+            TransformError::Singular => Self::InvalidInput("singular transform"),
+        }
+    }
 }

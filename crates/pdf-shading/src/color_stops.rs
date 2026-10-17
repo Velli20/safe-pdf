@@ -6,8 +6,9 @@ use pdf_color_space::color_space::ColorSpace;
 use pdf_function::function::{Function, FunctionImpl};
 use pdf_graphics::{color::Color, interval::Interval};
 
-use crate::error::{PdfShadingError, ShadingRasterError};
+use crate::error::PdfShadingError;
 use num_traits::ToPrimitive;
+use pdf_image::ImageRasterError;
 
 /// A collection of sampled colors and normalized positions for gradient-style shadings.
 #[derive(Debug, Clone, Default)]
@@ -101,10 +102,7 @@ impl TryFrom<&Function> for ColorStops {
 }
 
 /// Validates borrowed backend gradient stops before sampling.
-pub(crate) fn validate_stops(
-    positions: &[f32],
-    colors: &[Color],
-) -> Result<(), ShadingRasterError> {
+pub(crate) fn validate_stops(positions: &[f32], colors: &[Color]) -> Result<(), ImageRasterError> {
     if positions.len() != colors.len()
         || positions.len() < 2
         || positions
@@ -115,7 +113,7 @@ pub(crate) fn validate_stops(
             .iter()
             .any(|c| [c.r, c.g, c.b, c.a].iter().any(|v| !v.is_finite()))
     {
-        return Err(ShadingRasterError::InvalidInput(
+        return Err(ImageRasterError::InvalidInput(
             "gradient stops or coordinates",
         ));
     }
@@ -127,9 +125,9 @@ pub(crate) fn interpolate(
     t: f64,
     positions: &[f32],
     colors: &[Color],
-) -> Result<[u8; 4], ShadingRasterError> {
+) -> Result<[u8; 4], ImageRasterError> {
     let Some((first_pos, first)) = positions.first().zip(colors.first()) else {
-        return Err(ShadingRasterError::InvalidInput("empty stops"));
+        return Err(ImageRasterError::InvalidInput("empty stops"));
     };
     if t < f64::from(*first_pos) {
         return Ok(first.to_rgba8());
@@ -140,7 +138,7 @@ pub(crate) fn interpolate(
         {
             let f = ((t - f64::from(*a)) / f64::from(*b - *a))
                 .to_f32()
-                .ok_or(ShadingRasterError::InvalidInput("stop interpolation"))?;
+                .ok_or(ImageRasterError::InvalidInput("stop interpolation"))?;
             return Ok(Color::from_rgba(
                 ca.r + (cb.r - ca.r) * f,
                 ca.g + (cb.g - ca.g) * f,
@@ -153,7 +151,7 @@ pub(crate) fn interpolate(
     colors
         .last()
         .map(|c| c.to_rgba8())
-        .ok_or(ShadingRasterError::InvalidInput("empty stops"))
+        .ok_or(ImageRasterError::InvalidInput("empty stops"))
 }
 
 #[cfg(test)]

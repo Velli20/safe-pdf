@@ -35,6 +35,55 @@ pub fn validate_image(image: &Image) -> Result<(), ImageRasterError> {
     Ok(())
 }
 
+/// Reserves an empty buffer for exactly `width` × `height` packed RGBA8 pixels.
+///
+/// # Errors
+///
+/// Returns a resource-limit error if the byte count overflows or the allocation fails.
+pub fn rgba_buffer(width: usize, height: usize) -> Result<Vec<u8>, ImageRasterError> {
+    let bytes = width
+        .checked_mul(height)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or(ImageRasterError::ResourceLimit)?;
+    let mut data = Vec::new();
+    data.try_reserve_exact(bytes)?;
+    Ok(data)
+}
+
+/// Returns the centers of `count` equal pixel spans across `start..start + extent`.
+///
+/// The intermediate arithmetic uses `f64` so that centers stay accurate for large
+/// counts before being narrowed to the `f32` coordinates transforms operate on.
+///
+/// # Errors
+///
+/// Returns an invalid-input error if a center cannot be represented as `f32`.
+pub fn pixel_centers(start: f32, extent: f32, count: u32) -> Result<Vec<f32>, ImageRasterError> {
+    let (start, extent, len) = (f64::from(start), f64::from(extent), f64::from(count));
+    (0..count)
+        .map(|index| {
+            (start + (f64::from(index) + 0.5) * extent / len)
+                .to_f32()
+                .ok_or(ImageRasterError::InvalidInput("pixel center"))
+        })
+        .collect()
+}
+
+/// Reads the pixel containing `(x, y)` in source-pixel coordinates as straight RGBA.
+///
+/// Returns `None` outside the image's half-open bounds. Gray8 expands to opaque RGB.
+pub fn nearest_pixel(image: &Image, x: f32, y: f32) -> Option<[u8; 4]> {
+    let column = x
+        .floor()
+        .to_usize()
+        .filter(|column| *column < image.width)?;
+    let row = y.floor().to_usize().filter(|row| *row < image.height)?;
+    Some(pixel_at(
+        image,
+        row.checked_mul(image.width)?.checked_add(column)?,
+    ))
+}
+
 /// Iterates complete pixels as straight RGBA, expanding Gray8 with opaque alpha.
 ///
 /// This iterator borrows the buffer without validating declared dimensions.
@@ -66,13 +115,7 @@ pub(crate) fn rgba_pixels(image: &Image) -> impl Iterator<Item = [u8; 4]> + '_ {
 /// if the output allocation fails.
 pub fn rgba(image: &Image) -> Result<Vec<u8>, ImageRasterError> {
     validate_image(image)?;
-    let mut data = Vec::new();
-    data.try_reserve_exact(
-        image
-            .rgba_byte_size()
-            .ok_or(ImageRasterError::ResourceLimit)?,
-    )
-    .map_err(|_| ImageRasterError::ResourceLimit)?;
+    let mut data = rgba_buffer(image.width, image.height)?;
     match image.pixel_format {
         PixelFormat::RGBA8888 => data.extend_from_slice(&image.data),
         PixelFormat::Gray8 => {
@@ -106,13 +149,7 @@ pub(crate) fn resample_with_soft_mask(
     width: usize,
     height: usize,
 ) -> Result<Vec<u8>, ImageRasterError> {
-    let byte_len = width
-        .checked_mul(height)
-        .and_then(|pixels| pixels.checked_mul(4))
-        .ok_or(ImageRasterError::ResourceLimit)?;
-    let mut data = Vec::new();
-    data.try_reserve_exact(byte_len)
-        .map_err(|_| ImageRasterError::ResourceLimit)?;
+    let mut data = rgba_buffer(width, height)?;
     let columns: Vec<_> = (0..width)
         .map(|x| {
             let [image_column, _] = sample_positions(x, image.width, width);
@@ -235,13 +272,7 @@ fn white_alpha_mask(
     mut alpha: impl FnMut([u8; 4]) -> Result<u8, ImageRasterError>,
 ) -> Result<Image, ImageRasterError> {
     validate_image(image)?;
-    let mut data = Vec::new();
-    data.try_reserve_exact(
-        image
-            .rgba_byte_size()
-            .ok_or(ImageRasterError::ResourceLimit)?,
-    )
-    .map_err(|_| ImageRasterError::ResourceLimit)?;
+    let mut data = rgba_buffer(image.width, image.height)?;
     for pixel in rgba_pixels(image) {
         data.extend_from_slice(&[255, 255, 255, alpha(pixel)?]);
     }
