@@ -2213,6 +2213,7 @@ name = "pdf-document"
 version = "0.1.0"
 dependencies = [
  "aes",
+ "bytes",
  "cbc",
  "md-5",
  "pdf-annotation-core",
