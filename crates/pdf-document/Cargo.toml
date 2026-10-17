@@ -17,6 +17,7 @@ pdf-parser = { path = "../pdf-parser" }
 pdf-resources = { path = "../pdf-resources" }
 pdf-graphics = { path = "../pdf-graphics" }
 thiserror = "2.0.12"
+bytes = "1.10.1"
 serde = { version = "1", features = ["derive"], optional = true }
 
 md-5 = "0.10.6"

@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use crate::diagnostic::{PdfReadDiagnostic, PdfReadDiagnosticKind};
 use crate::encryption_context::EncryptionContext;
 use crate::error::PdfReaderError;
-use crate::object_stream::read_object_stream;
+use crate::object_stream::ObjectStream;
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{
     cross_reference_table::CrossReferenceEntryType, object_error::ObjectError, object_id::ObjectId,
@@ -414,9 +414,8 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
 
     /// Parses one available object stream and inserts all xref-requested members.
     ///
-    /// Parsed values are wrapped in `Option` so the normal case can take ownership
-    /// by index without cloning. A clone is required only when a malformed xref
-    /// maps more than one object number to the same object-stream index.
+    /// The header is walked once, in step with the index-ordered plan, and only
+    /// requested members are parsed. Reading stops after the last requested index.
     ///
     /// Returns the inserted object numbers so the scheduler can wake their dependents.
     fn load_compressed_stream(
@@ -429,42 +428,55 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
                 obj_num: object_stream_number,
             },
         )?;
-        let stream = stream_object.try_stream(&self.objects)?;
-        let mut objects = read_object_stream(stream, &self.objects)?
-            .into_iter()
-            .map(Some)
-            .collect::<Vec<_>>();
-        let loaded_capacity = stream_plan
-            .values()
-            .map(Vec::len)
-            .fold(0usize, usize::saturating_add);
-        let mut loaded = Vec::with_capacity(loaded_capacity);
+        let object_stream =
+            ObjectStream::from_stream(stream_object.try_stream(&self.objects)?, &self.objects)?;
+        let mut loaded = Vec::with_capacity(stream_plan.len());
+        let mut requests = stream_plan.into_iter().peekable();
 
-        for (index_within_stream, object_numbers) in stream_plan {
-            let Some(object) = objects.get_mut(index_within_stream).and_then(Option::take) else {
-                continue;
-            };
-            let Some((&last_object_number, duplicate_object_numbers)) = object_numbers.split_last()
+        for (index_within_stream, entry) in object_stream.entries().enumerate() {
+            if requests.peek().is_none() {
+                break;
+            }
+            let entry = entry?;
+            let Some((_, object_numbers)) =
+                requests.next_if(|(requested_index, _)| *requested_index == index_within_stream)
             else {
                 continue;
             };
-
-            // Preserve duplicate-index recovery, but move the value for the final
-            // target so valid PDFs take the allocation-free path.
-            for &object_number in duplicate_object_numbers {
-                self.report_compressed_number_mismatch(object_number, object.number);
-                self.objects
-                    .insert_compressed(object_number, object.value.clone());
-                loaded.push(object_number);
-            }
-
-            self.report_compressed_number_mismatch(last_object_number, object.number);
-            self.objects
-                .insert_compressed(last_object_number, object.value);
-            loaded.push(last_object_number);
+            let Some(value) = object_stream.parse_member(&entry, &self.objects)? else {
+                continue;
+            };
+            self.insert_compressed_member(&object_numbers, entry.number, value, &mut loaded);
         }
 
         Ok(loaded)
+    }
+
+    /// Inserts one parsed object-stream member under every xref number that requested it.
+    ///
+    /// A clone is required only when a malformed xref maps more than one object
+    /// number to the same object-stream index; the final target takes ownership.
+    fn insert_compressed_member(
+        &mut self,
+        object_numbers: &[usize],
+        stream_object_number: usize,
+        value: ObjectVariant,
+        loaded: &mut Vec<usize>,
+    ) {
+        let Some((&last_object_number, duplicate_object_numbers)) = object_numbers.split_last()
+        else {
+            return;
+        };
+
+        for &object_number in duplicate_object_numbers {
+            self.report_compressed_number_mismatch(object_number, stream_object_number);
+            self.objects.insert_compressed(object_number, value.clone());
+            loaded.push(object_number);
+        }
+
+        self.report_compressed_number_mismatch(last_object_number, stream_object_number);
+        self.objects.insert_compressed(last_object_number, value);
+        loaded.push(last_object_number);
     }
 
     /// Records a recoverable diagnostic when xref and object-stream numbers disagree.
