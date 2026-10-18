@@ -181,6 +181,8 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     /// - `bbox`: The content-space bounding box that sizes the recording surface.
     /// - `resources`: Optional resource dictionary for resolving fonts, patterns, etc.
     /// - `filter`: Optional filter function to skip certain operations.
+    /// - `cell_color`: Optional initial fill and stroke color, used by uncolored tiling
+    ///   patterns whose cell is painted in the color selected with the pattern.
     ///
     /// # Errors
     ///
@@ -193,14 +195,20 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         bbox: &Rect,
         resources: Option<Arc<Resources>>,
         filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
+        cell_color: Option<Color>,
     ) -> Result<RecordingCanvas, PdfCanvasError> {
         let mut recording_canvas = RecordingCanvas::new(bbox.width(), bbox.height());
-        let canvas_stack = vec![CanvasState {
+        let mut initial_state = CanvasState {
             transform: Transform::identity(),
             pattern_parent_transform: Transform::identity(),
             text_state: TextState::default(),
             ..Default::default()
-        }];
+        };
+        if let Some(color) = cell_color {
+            initial_state.paint.set_fill_color(color);
+            initial_state.paint.set_stroke_color(color);
+        }
+        let canvas_stack = vec![initial_state];
 
         let mut other = PdfCanvas::<RecordingCanvas> {
             current_path: None,
@@ -403,6 +411,15 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     PaintType::Uncolored => Some(&mut uncolored_filter),
                 };
 
+                // The cell of an uncolored pattern is painted in the color selected
+                // together with the pattern.
+                let paint = &self.current_state()?.paint;
+                let cell_color = match paint_type {
+                    PaintType::Colored => None,
+                    PaintType::Uncolored if for_stroke => Some(paint.stroke_color),
+                    PaintType::Uncolored => Some(paint.fill_color),
+                };
+
                 // Render the tiling content into a temporary canvas.
                 let recording_canvas = self.record_content_stream(
                     content_stream,
@@ -410,6 +427,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                     &bbox,
                     Some(resources.get()?),
                     filter,
+                    cell_color,
                 )?;
 
                 let step = [*x_step, *y_step];
