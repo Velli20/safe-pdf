@@ -74,7 +74,7 @@ impl PixelLayout {
 impl From<PixelFormat> for PixelLayout {
     fn from(format: PixelFormat) -> Self {
         match format {
-            PixelFormat::Gray8 => Self::Gray,
+            PixelFormat::Gray8 | PixelFormat::Alpha8 => Self::Gray,
             PixelFormat::RGBA8888 => Self::Rgba,
         }
     }

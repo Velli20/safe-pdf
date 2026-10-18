@@ -160,14 +160,22 @@ fn render_ready_image(
             metadata.interpolate,
         );
     }
-    Image::from_decoded_samples(
+    let image = Image::from_decoded_samples(
         image_data,
         metadata.size.width(),
         metadata.size.height(),
         num_color_components,
         soft_mask,
         metadata.interpolate,
-    )
+    );
+    // An image mask's samples are coverage, painted later in the fill color.
+    match metadata.image_mask && image.pixel_format == pdf_graphics::PixelFormat::Gray8 {
+        true => Image {
+            pixel_format: pdf_graphics::PixelFormat::Alpha8,
+            ..image
+        },
+        false => image,
+    }
 }
 
 /// Most pixels an image combined with a soft mask of a different size is
@@ -770,7 +778,7 @@ mod tests {
         )
         .expect("image masks should default missing BitsPerComponent to 1");
 
-        assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Gray8);
+        assert_eq!(image.pixel_format, pdf_graphics::PixelFormat::Alpha8);
         assert_eq!(image.data.as_ref(), &[0x00, 0xFF, 0x00, 0xFF]);
     }
 
