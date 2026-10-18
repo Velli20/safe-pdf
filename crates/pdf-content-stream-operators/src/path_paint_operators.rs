@@ -1,10 +1,9 @@
 use crate::{
-    error::PdfOperatorError,
-    operands::Operands,
-    operator_trait::PdfOperator,
+    operator_trait::{OperandContext, PdfOperator},
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
+use pdf_object_reader::ReadResult;
 
 /// Strokes the current path.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -15,7 +14,7 @@ impl PdfOperator for StrokePath {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::StrokePath(Self))
     }
 
@@ -34,7 +33,7 @@ impl PdfOperator for CloseStrokePath {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::CloseStrokePath(Self))
     }
 
@@ -52,7 +51,7 @@ impl PdfOperator for FillPathNonZero {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::FillPathNonZero(Self))
     }
 
@@ -70,7 +69,7 @@ impl PdfOperator for FillPathEvenOdd {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::FillPathEvenOdd(Self))
     }
 
@@ -89,7 +88,7 @@ impl PdfOperator for FillAndStrokePathNonZero {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::FillAndStrokePathNonZero(Self))
     }
 
@@ -108,7 +107,7 @@ impl PdfOperator for FillAndStrokePathEvenOdd {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::FillAndStrokePathEvenOdd(Self))
     }
 
@@ -127,7 +126,7 @@ impl PdfOperator for CloseFillAndStrokePathNonZero {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::CloseFillAndStrokePathNonZero(Self))
     }
 
@@ -146,7 +145,7 @@ impl PdfOperator for CloseFillAndStrokePathEvenOdd {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::CloseFillAndStrokePathEvenOdd(Self))
     }
 
@@ -165,7 +164,7 @@ impl PdfOperator for EndPath {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::EndPath(Self))
     }
 

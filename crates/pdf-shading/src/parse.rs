@@ -31,7 +31,6 @@ impl FromPdfObject for Shading {
             .required_number::<i32>(b"ShadingType", context.source())?
             .try_into()?;
         let access = context.access();
-        let object = object.value();
 
         match shading_type {
             ShadingType::FunctionBased => {

@@ -1,10 +1,9 @@
 use crate::{
-    error::PdfOperatorError,
-    operands::Operands,
-    operator_trait::PdfOperator,
+    operator_trait::{OperandContext, PdfOperator},
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
+use pdf_object_reader::ReadResult;
 
 /// Begins a text object, initializing the text matrix and text line matrix to
 /// the identity matrix.
@@ -16,7 +15,7 @@ impl PdfOperator for BeginText {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::BeginText(Self))
     }
 
@@ -34,7 +33,7 @@ impl PdfOperator for EndText {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::EndText(Self))
     }
 

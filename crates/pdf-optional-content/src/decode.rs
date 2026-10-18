@@ -37,7 +37,7 @@ impl FromPdfObject for OptionalContentConfiguration {
 /// Reads a `/BaseState` name. An absent entry is the caller's `On` default.
 impl FromPdfObject for OptionalContentBaseState {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().value().try_bytes(context.source())? {
+        match context.object().try_bytes(context.source())? {
             b"ON" => Ok(Self::On),
             b"OFF" => Ok(Self::Off),
             other => Err(OptionalContentError::InvalidEntry {
@@ -52,7 +52,7 @@ impl FromPdfObject for OptionalContentBaseState {
 /// Reads a `/P` policy name. An absent entry is the caller's `AnyOn` default.
 impl FromPdfObject for OptionalContentPolicy {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().value().try_bytes(context.source())? {
+        match context.object().try_bytes(context.source())? {
             b"AnyOn" => Ok(Self::AnyOn),
             b"AllOn" => Ok(Self::AllOn),
             b"AnyOff" => Ok(Self::AnyOff),

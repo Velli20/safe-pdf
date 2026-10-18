@@ -4,7 +4,6 @@ pub mod compatibility_operators;
 pub mod error;
 pub mod graphics_state_operators;
 pub mod marked_content_operators;
-pub mod operands;
 pub mod operation_map;
 pub mod variants;
 
@@ -24,6 +23,10 @@ pub mod xobject_and_image_operators;
 extern crate alloc;
 use std::sync::Arc;
 
+use pdf_object_reader::{
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
+};
+
 /// One operand from a PDF `Tj` or `TJ` text-showing operation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PdfTextItem {
@@ -31,4 +34,15 @@ pub enum PdfTextItem {
     Text(Arc<[u8]>),
     /// Numeric text-position adjustment in thousandths of a text-space unit.
     Adjustment(f32),
+}
+
+/// Decodes a `TJ` array element: strings are shown, any other value is an adjustment.
+impl FromPdfObject for PdfTextItem {
+    #[inline]
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match context.object() {
+            ObjectVariant::String(value) => Ok(Self::Text(Arc::clone(&value.bytes))),
+            value => Ok(Self::Adjustment(value.try_number(context.source())?)),
+        }
+    }
 }

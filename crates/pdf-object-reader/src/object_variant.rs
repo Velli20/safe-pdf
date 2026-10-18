@@ -1,5 +1,7 @@
 //! PDF object variants and checked accessors.
 
+use crate::error::ObjectReadError;
+use crate::object_kind::ObjectKind;
 use crate::pdf_array::PdfArray;
 use crate::pdf_string::PdfString;
 use crate::string_kind::StringKind;
@@ -204,6 +206,40 @@ impl ObjectVariant {
                 T::from_f64(*value).ok_or(ObjectError::NumberConversionError)
             }
             _ => Err(ObjectError::TypeMismatch("Number", object.name())),
+        }
+    }
+
+    /// Returns the runtime kind of this value.
+    pub fn kind(&self) -> ObjectKind {
+        match self {
+            ObjectVariant::Null => ObjectKind::Null,
+            ObjectVariant::Boolean(_) => ObjectKind::Boolean,
+            ObjectVariant::Integer(_) => ObjectKind::Integer,
+            ObjectVariant::Real(_) => ObjectKind::Real,
+            ObjectVariant::String(value) if value.kind() == StringKind::Name => ObjectKind::Name,
+            ObjectVariant::String(_) => ObjectKind::String,
+            ObjectVariant::Array(_) => ObjectKind::Array,
+            ObjectVariant::Dictionary(_) => ObjectKind::Dictionary,
+            ObjectVariant::Stream(_) => ObjectKind::Stream,
+            ObjectVariant::Reference(_) => ObjectKind::Reference,
+            ObjectVariant::Trailer(_) => ObjectKind::Trailer,
+            ObjectVariant::CrossReferenceTable(_) => ObjectKind::CrossReferenceTable,
+            ObjectVariant::EndOfFile => ObjectKind::EndOfFile,
+        }
+    }
+
+    /// Returns the dictionary of a direct dictionary or stream.
+    ///
+    /// No reference is followed, so no resolver is borrowed and the dictionary
+    /// lives as long as this value.
+    pub fn dictionary(&self) -> Result<&Dictionary, ObjectReadError> {
+        match self {
+            ObjectVariant::Dictionary(dictionary) => Ok(dictionary),
+            ObjectVariant::Stream(stream) => Ok(&stream.dictionary),
+            _ => Err(ObjectReadError::TypeMismatch {
+                expected: ObjectKind::Dictionary,
+                actual: self.kind(),
+            }),
         }
     }
 

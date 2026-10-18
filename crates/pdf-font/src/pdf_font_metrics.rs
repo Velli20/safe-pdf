@@ -28,7 +28,7 @@ impl FromPdfObject for PdfMetrics {
     /// retain their font-domain source; optional descriptor hints remain lenient.
     /// The explicit table itself is read by [`crate::glyph_widths_map::GlyphWidthsMap`].
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let value = context.object().value();
+        let value = context.object();
         let mut context = context.dictionary()?;
         let subtype: Arc<[u8]> = context.required(b"Subtype")?;
         let default_width = match subtype.as_ref() {

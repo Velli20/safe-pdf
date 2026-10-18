@@ -108,7 +108,7 @@ struct BlendModeEntry(BlendMode);
 impl FromPdfObject for BlendModeEntry {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let objects = context.source();
-        let value = context.object().value();
+        let value = context.object();
         let ObjectVariant::Array(names) = value else {
             return Ok(Self(BlendMode::from(value.try_bytes(objects)?)));
         };

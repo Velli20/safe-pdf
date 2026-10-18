@@ -12,13 +12,6 @@ pub enum PdfOperatorError {
     UnsupportedOperator(&'static str),
     #[error("Unknown PDF operator '{0}'")]
     UnknownOperator(String),
-    #[error("Missing operand; expected {expected}")]
-    OperandMissing { expected: &'static str },
-    #[error("Invalid operand type; expected {expected}, found {found}")]
-    OperandTypeMismatch {
-        expected: &'static str,
-        found: &'static str,
-    },
     #[error("Invalid operand value; expected {expected}, found '{found}'")]
     InvalidOperandValue {
         expected: &'static str,

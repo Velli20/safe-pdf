@@ -99,7 +99,7 @@ impl Filters {
 /// Reads a `/Filter` value: one filter name or an array applied in order.
 impl FromPdfObject for Filters {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let filters = match context.object().value() {
+        let filters = match context.object() {
             ObjectVariant::Array(_) => context.array()?.read_all()?,
             _ => vec![Filter::from_pdf_object(context)?],
         };
@@ -110,9 +110,7 @@ impl FromPdfObject for Filters {
 /// Reads a filter name, accepting a malformed string where the name is expected.
 impl FromPdfObject for Filter {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(Self::from(
-            context.object().value().try_bytes(context.source())?,
-        ))
+        Ok(Self::from(context.object().try_bytes(context.source())?))
     }
 }
 

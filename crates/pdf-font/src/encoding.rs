@@ -72,7 +72,7 @@ impl TryFrom<BaseEncoding> for Encoding {
 impl FromPdfObject for Encoding {
     /// Reads a base-encoding name or an encoding dictionary in the active traversal.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        if !matches!(context.object().value(), ObjectVariant::Dictionary(_)) {
+        if !matches!(context.object(), ObjectVariant::Dictionary(_)) {
             let name = Arc::<[u8]>::from_pdf_object(context)?;
             return Ok(Self::try_from(BaseEncoding::from(name.as_ref()))?);
         }

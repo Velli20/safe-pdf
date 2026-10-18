@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
-use pdf_object_reader::object_variant::ObjectVariant;
+use pdf_object_reader::{ReadResult, object_variant::ObjectVariant, pdf_string::PdfString};
 
 use crate::{
-    error::PdfOperatorError,
-    operands::Operands,
-    operator_trait::PdfOperator,
+    operator_trait::{OperandContext, PdfOperator},
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
@@ -29,8 +27,8 @@ impl PdfOperator for BeginMarkedContent {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let tag = operands.get_string_bytes()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let tag = operands.at::<PdfString>(0)?.bytes;
         Ok(PdfOperatorVariant::BeginMarkedContent(Self::new(tag)))
     }
 
@@ -62,10 +60,10 @@ impl PdfOperator for BeginMarkedContentWithProps {
 
     const OPERAND_COUNT: Option<usize> = Some(2);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let tag = operands.get_string_bytes()?;
-        let properties = match operands.peek_next() {
-            Some(ObjectVariant::String(_)) => Some(operands.get_string_bytes()?),
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let tag = operands.at::<PdfString>(0)?.bytes;
+        let properties = match operands.array().get(1) {
+            Some(ObjectVariant::String(_)) => Some(operands.at::<PdfString>(1)?.bytes),
             _ => None,
         };
         Ok(PdfOperatorVariant::BeginMarkedContentWithProps(Self::new(
@@ -87,7 +85,7 @@ impl PdfOperator for EndMarkedContent {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::EndMarkedContent(Self))
     }
 

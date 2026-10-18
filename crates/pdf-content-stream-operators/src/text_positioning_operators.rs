@@ -1,12 +1,11 @@
 use pdf_graphics::transform::Transform;
 
 use crate::{
-    error::PdfOperatorError,
-    operands::Operands,
-    operator_trait::PdfOperator,
+    operator_trait::{OperandContext, PdfOperator},
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
+use pdf_object_reader::ReadResult;
 
 /// Moves to the start of the next line, offset from the start of the current line by (`tx`, `ty`).
 /// `tx` and `ty` are numbers expressed in unscaled text space units.
@@ -31,8 +30,8 @@ impl PdfOperator for MoveTextPosition {
 
     const OPERAND_COUNT: Option<usize> = Some(2);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [tx, ty] = operands.try_array_of::<f32, 2>()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let [tx, ty] = operands.read_array()?;
         Ok(PdfOperatorVariant::MoveTextPosition(Self::new(tx, ty)))
     }
 
@@ -63,8 +62,8 @@ impl PdfOperator for MoveTextPositionAndSetLeading {
 
     const OPERAND_COUNT: Option<usize> = Some(2);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [tx, ty] = operands.try_array_of::<f32, 2>()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let [tx, ty] = operands.read_array()?;
         Ok(PdfOperatorVariant::MoveTextPositionAndSetLeading(
             Self::new(tx, ty),
         ))
@@ -100,11 +99,10 @@ impl PdfOperator for SetTextMatrix {
 
     const OPERAND_COUNT: Option<usize> = Some(6);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [a, b, c, d, e, f] = operands.try_array_of::<f32, 6>()?;
-        Ok(PdfOperatorVariant::SetTextMatrix(Self::new([
-            a, b, c, d, e, f,
-        ])))
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        Ok(PdfOperatorVariant::SetTextMatrix(Self::new(
+            operands.read_array()?,
+        )))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
@@ -123,7 +121,7 @@ impl PdfOperator for MoveToNextLine {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::MoveToNextLine(Self))
     }
 

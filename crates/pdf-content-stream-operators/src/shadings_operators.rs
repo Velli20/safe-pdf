@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
 use crate::{
-    error::PdfOperatorError,
-    operands::Operands,
-    operator_trait::PdfOperator,
+    operator_trait::{OperandContext, PdfOperator},
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
+use pdf_object_reader::{ReadResult, pdf_string::PdfString};
 
 /// Paints the shape and color shading defined by a shading dictionary resource.
 /// The `sh` operator takes one operand, the name of a shading dictionary.
@@ -28,8 +27,8 @@ impl PdfOperator for PaintShading {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let name = operands.get_string_bytes()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let name = operands.at::<PdfString>(0)?.bytes;
         Ok(PdfOperatorVariant::PaintShading(Self::new(name)))
     }
 

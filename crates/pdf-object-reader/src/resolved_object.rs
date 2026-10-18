@@ -44,13 +44,6 @@ impl ResolvedObject {
     /// The object is already direct, so no resolver is borrowed and the dictionary
     /// lives only as long as this object.
     pub fn dictionary(&self) -> Result<&Dictionary, ObjectReadError> {
-        match self.value() {
-            ObjectVariant::Dictionary(dictionary) => Ok(dictionary),
-            ObjectVariant::Stream(stream) => Ok(&stream.dictionary),
-            _ => Err(ObjectReadError::TypeMismatch {
-                expected: ObjectKind::Dictionary,
-                actual: self.kind(),
-            }),
-        }
+        self.value().dictionary()
     }
 }

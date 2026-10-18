@@ -1,8 +1,8 @@
 use crate::operator_stream_parser::OperatorStreamParser;
 use pdf_content_stream_operators::{error::PdfOperatorError, variants::PdfOperatorVariant};
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_kind::ObjectKind,
-    stream::StreamObject,
+    FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult, object_kind::ObjectKind,
+    object_resolver::PassthroughResolver, stream::StreamObject,
 };
 
 /// Represents one materialized PDF content stream as parsed operators plus its
@@ -59,7 +59,9 @@ impl ContentStream {
         input: &[u8],
         operators: &mut Vec<PdfOperatorVariant>,
     ) -> Result<(), PdfOperatorError> {
-        let mut parser = OperatorStreamParser::new(input, operators);
+        let reader = ObjectReader::new(PassthroughResolver);
+        let mut session = reader.session();
+        let mut parser = OperatorStreamParser::new(input, &mut session, operators);
         while parser.parse_next_item()? {}
         Ok(())
     }

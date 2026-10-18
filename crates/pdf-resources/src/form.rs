@@ -24,13 +24,13 @@ impl FromPdfObject for FormXObject {
         let object = context.object();
         // Both stream-backed and dictionary-only forms expose the same metadata.
         let mut context = context.dictionary()?;
-        let content_stream = match object.value() {
+        let content_stream = match object {
             // Dictionary-only forms still receive an ID, but have no drawing operators.
             ObjectVariant::Dictionary(_) => ContentStream {
                 operators: Vec::new(),
                 id: context.content_stream_ids().next_id()?,
             },
-            _ => context.read::<ContentStream>(object.value())?,
+            _ => context.read::<ContentStream>(object)?,
         };
         let bbox = context.dictionary().optional_bbox(context.source())?;
         let matrix = context.dictionary().optional_matrix(context.source())?;

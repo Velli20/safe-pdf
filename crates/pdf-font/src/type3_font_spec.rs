@@ -78,7 +78,7 @@ impl FromPdfObject for Type3FontSpec {
     /// Decodes a Type 3 dictionary without whole-font substitution; absent glyph widths
     /// default to zero.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let value = context.object().value();
+        let value = context.object();
         let mut context = context.dictionary()?;
         let font_matrix = context
             .dictionary()

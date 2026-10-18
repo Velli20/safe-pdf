@@ -40,7 +40,7 @@ impl FromPdfObject for ToUnicodeMap {
     /// Propagates malformed CMap streams. Unsupported names and other values decode to an
     /// empty map, which falls back the same way an absent entry does.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let value = context.object().value();
+        let value = context.object();
         if matches!(value, ObjectVariant::Stream(_)) {
             return ToUnicodeCMap::from_pdf_object(context).map(Self::CMap);
         }

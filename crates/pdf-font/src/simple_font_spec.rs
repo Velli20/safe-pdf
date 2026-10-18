@@ -34,7 +34,7 @@ impl FromPdfObject for SimpleFontSpec {
     /// Decodes the concrete font dictionary without whole-font substitution, choosing its
     /// program and encoding policy from Subtype.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let value = context.object().value();
+        let value = context.object();
         let mut context = context.dictionary()?;
         let subtype: Arc<[u8]> = context.required(b"Subtype")?;
         let base_font: Option<Arc<[u8]>> = context.lenient(b"BaseFont");

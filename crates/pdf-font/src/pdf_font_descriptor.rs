@@ -9,7 +9,7 @@ impl FromPdfObject for PdfFontDescriptor {
     /// Reads a FontDescriptor dictionary, not the enclosing font dictionary, tolerating
     /// malformed optional metadata.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let value = context.object().value();
+        let value = context.object();
         let mut context = context.dictionary()?;
         Ok(Self {
             metadata: context.read(value)?,

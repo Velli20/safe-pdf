@@ -61,7 +61,7 @@ macro_rules! value_decoder {
             fn from_pdf_object(
                 context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
             ) -> ReadResult<Self> {
-                match context.object().value() {
+                match context.object() {
                     ObjectVariant::$variant(value) => Ok(value.clone()),
                     _ => Err(ObjectReadError::TypeMismatch {
                         expected: ObjectKind::$kind,
@@ -78,7 +78,7 @@ value_decoder!(StreamObject, Stream, Stream);
 
 impl FromPdfObject for () {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().value() {
+        match context.object() {
             ObjectVariant::Null => Ok(()),
             _ => Err(ObjectReadError::TypeMismatch {
                 expected: ObjectKind::Null,
@@ -94,7 +94,7 @@ impl FromPdfObject for f64 {
         reason = "PDF integer-to-real conversion intentionally permits rounding"
     )]
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().value() {
+        match context.object() {
             ObjectVariant::Real(value) => Ok(*value),
             ObjectVariant::Integer(value) => Ok(*value as f64),
             _ => Err(ObjectReadError::TypeMismatch {
@@ -107,13 +107,13 @@ impl FromPdfObject for f64 {
 
 impl FromPdfObject for PdfObject {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(context.object().object().clone())
+        Ok(PdfObject::new(context.object().clone()))
     }
 }
 
 impl FromPdfObject for ResolvedObject {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(context.object().clone())
+        Self::try_from(PdfObject::new(context.object().clone()))
     }
 }
 
@@ -138,8 +138,9 @@ impl<T: FromPdfObject> FromPdfObject for Vec<T> {
 }
 
 impl FromPdfObject for PdfString {
+    #[inline]
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().value() {
+        match context.object() {
             ObjectVariant::String(value) => Ok(value.clone()),
             _ => Err(ObjectReadError::TypeMismatch {
                 expected: ObjectKind::String,
@@ -151,7 +152,7 @@ impl FromPdfObject for PdfString {
 
 impl FromPdfObject for PdfArray {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().value() {
+        match context.object() {
             ObjectVariant::Array(value) => Ok(value.clone()),
             _ => Err(ObjectReadError::TypeMismatch {
                 expected: ObjectKind::Array,
@@ -166,11 +167,12 @@ macro_rules! number_decoder {
         $(
             impl FromPdfObject for $type {
                 /// Decodes a resolved number with the model's checked numeric conversion.
+                #[inline]
                 fn from_pdf_object(
                     context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
                 ) -> ReadResult<Self> {
                     // The context has already resolved references and owns their scope.
-                    Ok(context.object().value().try_number(context.source())?)
+                    Ok(context.object().try_number(context.source())?)
                 }
             }
         )+
@@ -181,7 +183,7 @@ number_decoder!(f32, i32, i64, u8, u16, u32, usize);
 
 impl FromPdfObject for bool {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().value() {
+        match context.object() {
             ObjectVariant::Boolean(value) => Ok(*value),
             _ => Err(ObjectReadError::TypeMismatch {
                 expected: ObjectKind::Boolean,
@@ -223,8 +225,6 @@ impl<T: FromPdfObject, const N: usize> FromPdfObject for [T; N] {
 /// Use `PdfName` or `PdfString` when the PDF object kind must be enforced.
 impl FromPdfObject for std::sync::Arc<[u8]> {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(Self::from(
-            context.object().value().try_bytes(context.source())?,
-        ))
+        Ok(Self::from(context.object().try_bytes(context.source())?))
     }
 }

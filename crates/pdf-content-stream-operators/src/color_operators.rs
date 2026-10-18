@@ -2,12 +2,11 @@ use std::sync::Arc;
 
 use crate::{
     error::PdfOperatorError,
-    operands::Operands,
-    operator_trait::PdfOperator,
+    operator_trait::{OperandContext, PdfOperator},
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
-use pdf_object_reader::object_resolver::PassthroughResolver;
+use pdf_object_reader::{ReadResult, pdf_string::PdfString};
 
 /// Sets the fill color to a grayscale value.
 /// The gray level applies to subsequent fill operations.
@@ -33,10 +32,8 @@ impl PdfOperator for SetGrayFill {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let gray = operands
-            .take_next()?
-            .try_number::<f32>(&PassthroughResolver)?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let gray = operands.at(0)?;
         Ok(PdfOperatorVariant::SetGrayFill(Self::new(gray)))
     }
 
@@ -64,10 +61,8 @@ impl PdfOperator for SetGrayStroke {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let gray = operands
-            .take_next()?
-            .try_number::<f32>(&PassthroughResolver)?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let gray = operands.at(0)?;
         Ok(PdfOperatorVariant::SetGrayStroke(Self::new(gray)))
     }
 
@@ -104,8 +99,8 @@ impl PdfOperator for SetRGBFill {
 
     const OPERAND_COUNT: Option<usize> = Some(3);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [r, g, b] = operands.try_array_of::<f32, 3>()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let [r, g, b] = operands.read_array()?;
         Ok(PdfOperatorVariant::SetRGBFill(Self::new(r, g, b)))
     }
 
@@ -137,8 +132,8 @@ impl PdfOperator for SetRGBStroke {
 
     const OPERAND_COUNT: Option<usize> = Some(3);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [r, g, b] = operands.try_array_of::<f32, 3>()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let [r, g, b] = operands.read_array()?;
         Ok(PdfOperatorVariant::SetRGBStroke(Self::new(r, g, b)))
     }
 
@@ -177,8 +172,8 @@ impl PdfOperator for SetCMYKFill {
 
     const OPERAND_COUNT: Option<usize> = Some(4);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [c, m, y, k] = operands.try_array_of::<f32, 4>()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let [c, m, y, k] = operands.read_array()?;
         Ok(PdfOperatorVariant::SetCMYKFill(Self::new(c, m, y, k)))
     }
 
@@ -212,8 +207,8 @@ impl PdfOperator for SetCMYKStroke {
 
     const OPERAND_COUNT: Option<usize> = Some(4);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [c, m, y, k] = operands.try_array_of::<f32, 4>()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let [c, m, y, k] = operands.read_array()?;
         Ok(PdfOperatorVariant::SetCMYKStroke(Self::new(c, m, y, k)))
     }
 
@@ -239,8 +234,8 @@ impl PdfOperator for SetStrokeColorSpace {
     const NAME: &'static [u8] = b"CS";
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let name = operands.get_string_bytes()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let name = operands.at::<PdfString>(0)?.bytes;
         Ok(PdfOperatorVariant::SetStrokeColorSpace(Self::new(name)))
     }
 
@@ -266,8 +261,8 @@ impl PdfOperator for SetNonStrokingColorSpace {
     const NAME: &'static [u8] = b"cs";
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let name = operands.get_string_bytes()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let name = operands.at::<PdfString>(0)?.bytes;
         Ok(PdfOperatorVariant::SetNonStrokingColorSpace(Self::new(
             name,
         )))
@@ -301,28 +296,17 @@ impl PdfOperator for SetStrokingColor {
     const NAME: &'static [u8] = b"SCN";
     const OPERAND_COUNT: Option<usize> = None;
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let mut values = vec![];
-        while let Some(value) = operands.peek_next() {
-            if value.is_name() {
-                break;
-            }
-            let v = operands
-                .take_next()?
-                .try_number::<f32>(&PassthroughResolver)?;
-            values.push(v);
-        }
-
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         // The pattern name should come last, after the numeric color components
-        let pattern = if operands
-            .peek_next()
-            .map(|obj| obj.is_name())
-            .unwrap_or(false)
-        {
-            operands.get_string_bytes().ok()
-        } else {
-            None
-        };
+        let count = operands
+            .array()
+            .iter()
+            .take_while(|value| !value.is_name())
+            .count();
+        let values = (0..count)
+            .map(|index| operands.at(index))
+            .collect::<ReadResult<_>>()?;
+        let pattern = operands.at::<PdfString>(count).ok().map(|name| name.bytes);
 
         Ok(PdfOperatorVariant::SetStrokingColor(Self::new(
             values, pattern,
@@ -361,28 +345,17 @@ impl PdfOperator for SetNonStrokingColor {
     const NAME: &'static [u8] = b"scn";
     const OPERAND_COUNT: Option<usize> = None;
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let mut values = vec![];
-        while let Some(value) = operands.peek_next() {
-            if value.is_name() {
-                break;
-            }
-            let v = operands
-                .take_next()?
-                .try_number::<f32>(&PassthroughResolver)?;
-            values.push(v);
-        }
-
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         // The pattern name should come last, after the numeric color components
-        let pattern = if operands
-            .peek_next()
-            .map(|obj| obj.is_name())
-            .unwrap_or(false)
-        {
-            operands.get_string_bytes().ok()
-        } else {
-            None
-        };
+        let count = operands
+            .array()
+            .iter()
+            .take_while(|value| !value.is_name())
+            .count();
+        let values = (0..count)
+            .map(|index| operands.at(index))
+            .collect::<ReadResult<_>>()?;
+        let pattern = operands.at::<PdfString>(count).ok().map(|name| name.bytes);
 
         Ok(PdfOperatorVariant::SetNonStrokingColor(Self::new(
             values, pattern,
@@ -414,22 +387,16 @@ impl PdfOperator for SetNonStrokingColorSc {
         Ok(())
     }
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let mut values = vec![];
-        while operands.peek_next().is_some() {
-            values.push(
-                operands
-                    .take_next()?
-                    .try_number::<f32>(&PassthroughResolver)?,
-            );
-        }
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let values: Vec<f32> = operands.read_all()?;
 
         if values.is_empty() {
             return Err(PdfOperatorError::OperandCountMismatch {
                 operator: "sc".to_string(),
                 expected: 1,
                 actual: 0,
-            });
+            }
+            .into());
         }
 
         Ok(PdfOperatorVariant::SetNonStrokingColor(
@@ -454,22 +421,16 @@ impl PdfOperator for SetStrokingColorSc {
         Ok(())
     }
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let mut values = vec![];
-        while operands.peek_next().is_some() {
-            values.push(
-                operands
-                    .take_next()?
-                    .try_number::<f32>(&PassthroughResolver)?,
-            );
-        }
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let values: Vec<f32> = operands.read_all()?;
 
         if values.is_empty() {
             return Err(PdfOperatorError::OperandCountMismatch {
                 operator: "SC".to_string(),
                 expected: 1,
                 actual: 0,
-            });
+            }
+            .into());
         }
 
         Ok(PdfOperatorVariant::SetStrokingColor(SetStrokingColor::new(

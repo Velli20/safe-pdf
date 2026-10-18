@@ -37,7 +37,7 @@ pub struct Resources {
 
 impl FromPdfObject for Resources {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        if matches!(context.object().value(), ObjectVariant::Stream(_)) {
+        if matches!(context.object(), ObjectVariant::Stream(_)) {
             let mut stream = context.stream()?;
             Self::decode_dictionary(stream.dictionary())
         } else {

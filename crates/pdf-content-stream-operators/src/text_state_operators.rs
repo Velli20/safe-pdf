@@ -2,14 +2,13 @@ use std::sync::Arc;
 
 use crate::{
     error::PdfOperatorError,
-    operands::Operands,
-    operator_trait::PdfOperator,
+    operator_trait::{OperandContext, PdfOperator},
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
 use num_traits::FromPrimitive;
 use pdf_graphics::TextRenderingMode;
-use pdf_object_reader::object_resolver::PassthroughResolver;
+use pdf_object_reader::{ReadResult, pdf_string::PdfString};
 
 /// Sets the character spacing, `Tc`, which is a number expressed in unscaled text space units.
 #[derive(Debug, Clone, PartialEq)]
@@ -29,10 +28,8 @@ impl PdfOperator for SetCharacterSpacing {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let spacing = operands
-            .take_next()?
-            .try_number::<f32>(&PassthroughResolver)?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let spacing = operands.at(0)?;
         Ok(PdfOperatorVariant::SetCharacterSpacing(Self::new(spacing)))
     }
 
@@ -60,10 +57,8 @@ impl PdfOperator for SetWordSpacing {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let spacing = operands
-            .take_next()?
-            .try_number::<f32>(&PassthroughResolver)?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let spacing = operands.at(0)?;
         Ok(PdfOperatorVariant::SetWordSpacing(Self::new(spacing)))
     }
 
@@ -91,10 +86,8 @@ impl PdfOperator for SetHorizontalScaling {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let scale = operands
-            .take_next()?
-            .try_number::<f32>(&PassthroughResolver)?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let scale = operands.at(0)?;
         Ok(PdfOperatorVariant::SetHorizontalScaling(Self::new(scale)))
     }
 
@@ -128,10 +121,8 @@ impl PdfOperator for SetLeading {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let leading = operands
-            .take_next()?
-            .try_number::<f32>(&PassthroughResolver)?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let leading = operands.at(0)?;
         Ok(PdfOperatorVariant::SetLeading(Self::new(leading)))
     }
 
@@ -171,11 +162,9 @@ impl PdfOperator for SetFont {
 
     const OPERAND_COUNT: Option<usize> = Some(2);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let name = operands.get_string_bytes()?;
-        let size = operands
-            .take_next()?
-            .try_number::<f32>(&PassthroughResolver)?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let name = operands.at::<PdfString>(0)?.bytes;
+        let size = operands.at(1)?;
         Ok(PdfOperatorVariant::SetFont(Self::new(name, size)))
     }
 
@@ -209,8 +198,8 @@ impl PdfOperator for SetRenderingMode {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let mode = operands.get_u8()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let mode = operands.at(0)?;
         Ok(PdfOperatorVariant::SetRenderingMode(Self::new(mode)?))
     }
 
@@ -238,10 +227,8 @@ impl PdfOperator for SetTextRise {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let rise = operands
-            .take_next()?
-            .try_number::<f32>(&PassthroughResolver)?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let rise = operands.at(0)?;
         Ok(PdfOperatorVariant::SetTextRise(Self::new(rise)))
     }
 

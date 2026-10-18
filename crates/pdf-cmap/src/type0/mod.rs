@@ -91,7 +91,7 @@ impl PdfCMap for Type0EncodingCMap {
 impl FromPdfObject for Type0EncodingCMap {
     /// Decodes an embedded stream or predefined name using the active object traversal.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().value() {
+        match context.object() {
             ObjectVariant::Stream(_) => {
                 let context = context.stream()?;
                 Ok(Self::from_bytes(context.stream().raw_data())?)
