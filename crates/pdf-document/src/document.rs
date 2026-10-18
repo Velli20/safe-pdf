@@ -1,6 +1,6 @@
-use pdf_annotation_core::OptionalContentProperties;
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::ObjectReader;
+use pdf_optional_content::OptionalContentProperties;
 
 use crate::page::PdfPage;
 

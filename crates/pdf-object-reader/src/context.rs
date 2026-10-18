@@ -206,6 +206,47 @@ impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
         }
         Ok(entries)
     }
+
+    /// Decodes each entry of an optional sub-dictionary as `T`, keyed by entry name, skipping
+    /// entries that do not decode as `T`, for namespaces that mix value kinds.
+    ///
+    /// A missing or null sub-dictionary yields an empty map, as with [`Self::optional_entries`].
+    pub fn lenient_entries<T: FromPdfObject>(
+        &mut self,
+        key: &[u8],
+    ) -> ReadResult<HashMap<Vec<u8>, T>> {
+        let Some(dictionary) = self.optional::<Dictionary>(key)? else {
+            return Ok(HashMap::new());
+        };
+        Ok(dictionary
+            .dictionary
+            .iter()
+            .filter_map(|(name, value)| Some((name.clone(), self.access.read(value).ok()?)))
+            .collect())
+    }
+
+    /// Reads an entry holding one value or an array of values, as a list.
+    ///
+    /// A missing or null entry yields an empty list, and null array members, such as
+    /// references to missing objects, are skipped.
+    pub fn optional_list<T: FromPdfObject>(&mut self, key: &[u8]) -> ReadResult<Vec<T>> {
+        let Some(object) = self.dictionary.get(key) else {
+            return Ok(Vec::new());
+        };
+        let resolved = self.access.resolve(object);
+        let result = resolved.and_then(|resolved| match resolved.value() {
+            ObjectVariant::Array(array) => array
+                .iter()
+                .filter_map(|member| self.access.read::<Option<T>>(member).transpose())
+                .collect(),
+            ObjectVariant::Null => Ok(Vec::new()),
+            _ => Ok(vec![self.access.read(object)?]),
+        });
+        result.map_err(|source| ObjectReadError::At {
+            location: ReadLocation::DictionaryKey(PdfName::from_bytes(key)),
+            source: Box::new(source),
+        })
+    }
 }
 
 /// Provides bounds-checked typed array reads in source order.

@@ -8,6 +8,7 @@ edition = "2024"
 workspace = true
 
 [dependencies]
+pdf-optional-content = { path = "../pdf-optional-content" }
 pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-object-collection = { path = "../pdf-object-collection" }
 pdf-content-stream-operators = { path = "../pdf-content-stream-operators" }

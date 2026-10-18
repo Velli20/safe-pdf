@@ -6,6 +6,7 @@ use pdf_annotation_core::{
 };
 use pdf_document::{diagnostic::PdfReadDiagnostic, document::PdfDocument};
 use pdf_graphics::{rect::Rect, transform::Transform};
+use pdf_optional_content::OptionalContentState;
 
 /// Prepared page entries placed for the DOM host.
 #[derive(Clone)]
@@ -150,6 +151,11 @@ impl WebAnnotationOverlay {
         action: &AnnotationAction,
     ) -> WebResult<OptionalContentReceipt> {
         Ok(self.overlay.set_optional_content_state(action)?)
+    }
+
+    /// Returns the runtime optional content visibility page content is rendered with.
+    pub(crate) fn optional_content(&self) -> &OptionalContentState {
+        self.overlay.optional_content()
     }
 
     /// Drops only a page's disposable entries; Core values survive eviction.

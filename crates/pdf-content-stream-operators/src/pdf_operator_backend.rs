@@ -807,11 +807,17 @@ pub trait MarkedContentOps {
     /// # Parameters
     ///
     /// - `tag`: The tag for the marked-content sequence.
+    /// - `properties`: The name of a property list in the `/Properties` resource
+    ///   subdictionary, or `None` when the property list is an inline dictionary.
     ///
     /// # Returns
     ///
     /// A `Result` indicating success or an `ErrorType` on failure.
-    fn begin_marked_content_with_properties(&mut self, tag: &[u8]) -> Result<(), Self::ErrorType>;
+    fn begin_marked_content_with_properties(
+        &mut self,
+        tag: &[u8],
+        properties: Option<&[u8]>,
+    ) -> Result<(), Self::ErrorType>;
 
     /// Ends a marked-content sequence.
     ///

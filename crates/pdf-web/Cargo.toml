@@ -13,6 +13,7 @@ typescript = ["dep:ts-rs", "pdf-annotation-core/typescript"]
 [dependencies]
 ts-rs = { version = "12", optional = true }
 pdf-annotation-core = { path = "../pdf-annotation-core" }
+pdf-optional-content = { path = "../pdf-optional-content" }
 pdf-font = { path = "../pdf-font" }
 pdf-canvas = { path = "../pdf-canvas" }
 pdf-graphics = { path = "../pdf-graphics" }

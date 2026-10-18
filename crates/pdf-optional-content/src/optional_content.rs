@@ -1,10 +1,11 @@
-//! Optional content group visibility applied to annotation presentation.
+//! Optional content group visibility applied to page content and annotations.
 //!
 //! The catalog's `/OCProperties` seeds which groups start visible; an annotation's
-//! `/OC` entry names the group or membership dictionary its display depends on.
+//! `/OC` entry, or a `/Properties` resource named by a marked-content sequence,
+//! names the group or membership dictionary its display depends on.
 //! Visibility is host presentation state: it never enters the sidecar and never
 //! advances the document revision.
-use crate::error::SourceDecodeError;
+use crate::error::OptionalContentError;
 use crate::ocg_state::{OcgStateEntry, OcgTarget};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -26,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub enum OptionalContentGroupId {
     /// A group identified by the indirect object number of its `/OCG` dictionary.
     Object {
-        /// PDF object number, distinct from Core annotation and field identities.
+        /// PDF object number of the group's dictionary.
         #[serde(with = "crate::wire")]
         #[cfg_attr(feature = "typescript", ts(type = "string"))]
         number: u64,
@@ -36,6 +37,25 @@ pub enum OptionalContentGroupId {
         /// The group's `/Name` bytes.
         name: Vec<u8>,
     },
+}
+
+impl OptionalContentGroupId {
+    /// Identifies a group by the object number of its dictionary or, for a direct
+    /// dictionary, by its `/Name`.
+    pub(crate) fn new(
+        object_number: Option<usize>,
+        name: Option<&[u8]>,
+    ) -> Result<Self, OptionalContentError> {
+        match (object_number, name) {
+            (Some(number), _) => Ok(Self::Object {
+                number: u64::try_from(number).map_err(|_| OptionalContentError::ResourceLimit)?,
+            }),
+            (None, Some(name)) => Ok(Self::Name {
+                name: name.to_vec(),
+            }),
+            (None, None) => Err(OptionalContentError::MissingEntry { entry: b"Name" }),
+        }
+    }
 }
 
 /// The `/P` visibility policy of an `/OCMD` membership dictionary.
@@ -54,32 +74,16 @@ pub enum OptionalContentPolicy {
     AllOff,
 }
 
-/// Reads a `/P` policy name. An absent entry is the `AnyOn` default and never
-/// reaches this conversion.
-impl TryFrom<&[u8]> for OptionalContentPolicy {
-    type Error = SourceDecodeError;
-
-    fn try_from(name: &[u8]) -> Result<Self, Self::Error> {
-        match name {
-            b"AnyOn" => Ok(Self::AnyOn),
-            b"AllOn" => Ok(Self::AllOn),
-            b"AnyOff" => Ok(Self::AnyOff),
-            b"AllOff" => Ok(Self::AllOff),
-            other => Err(SourceDecodeError::InvalidEntry {
-                entry: b"P",
-                reason: format!("unsupported optional content policy '{other:?}'"),
-            }),
-        }
-    }
-}
-
-/// Owned `/OCMD` membership dictionary retained from the source PDF.
+/// The optional content an annotation or marked-content sequence depends on.
+///
+/// Declared either as an `/OCMD` membership dictionary or as a single `/OCG`, which
+/// means the same as a membership of that one group under the default `AnyOn` policy.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct OptionalContentMembership {
-    /// The `/OCGs` member groups. A single group reference is retained as a
-    /// one-element list. Null members are dropped rather than retained.
+    /// The member groups. A single group is retained as a one-element list. Null
+    /// members are dropped rather than retained.
     pub groups: Vec<OptionalContentGroupId>,
     /// The `/P` policy; `AnyOn` when the entry is absent.
     pub policy: OptionalContentPolicy,
@@ -89,26 +93,12 @@ pub struct OptionalContentMembership {
     pub has_visibility_expression: bool,
 }
 
-/// Owned `/OC` entry of an annotation: a single group, or a membership dictionary.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
-#[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
-pub enum AnnotationOptionalContent {
-    /// A direct `/OCG` group reference.
-    Group(OptionalContentGroupId),
-    /// An `/OCMD` membership dictionary.
-    Membership(Box<OptionalContentMembership>),
-}
-
-impl AnnotationOptionalContent {
+impl OptionalContentMembership {
     /// Whether any group this content's visibility depends on appears in `changed`.
     ///
     /// Callers use this to refresh only the pages a state change can affect.
     pub fn depends_on(&self, changed: &BTreeSet<OptionalContentGroupId>) -> bool {
-        match self {
-            Self::Group(id) => changed.contains(id),
-            Self::Membership(membership) => membership.groups.iter().any(|id| changed.contains(id)),
-        }
+        self.groups.iter().any(|id| changed.contains(id))
     }
 }
 
@@ -155,8 +145,7 @@ pub struct OptionalContentProperties {
 
 /// Runtime visibility of a document's optional content groups.
 ///
-/// This is disposable presentation state owned by the annotation overlay. It is
-/// seeded from [`OptionalContentProperties`] and mutated by `SetOCGState` actions;
+/// This is disposable presentation state. It is seeded from [`OptionalContentProperties`] and mutated by `SetOCGState` actions;
 /// it is never serialized into the sidecar and never advances a document revision.
 #[derive(Clone, Debug, Default)]
 pub struct OptionalContentState {
@@ -199,26 +188,21 @@ impl OptionalContentState {
         state
     }
 
-    /// Whether an annotation carrying `content` is currently displayed.
+    /// Whether content depending on `content` is currently displayed.
     ///
     /// An `/OCMD` with no member groups imposes no restriction, and one carrying a
     /// `/VE` visibility expression is treated as visible because the expression
     /// takes precedence over `/OCGs` and is not evaluated here.
-    pub fn is_visible(&self, content: &AnnotationOptionalContent) -> bool {
-        match content {
-            AnnotationOptionalContent::Group(id) => self.group_visible(id),
-            AnnotationOptionalContent::Membership(membership) => {
-                if membership.has_visibility_expression || membership.groups.is_empty() {
-                    return true;
-                }
-                let mut groups = membership.groups.iter().map(|id| self.group_visible(id));
-                match membership.policy {
-                    OptionalContentPolicy::AnyOn => groups.any(|on| on),
-                    OptionalContentPolicy::AllOn => groups.all(|on| on),
-                    OptionalContentPolicy::AnyOff => groups.any(|on| !on),
-                    OptionalContentPolicy::AllOff => groups.all(|on| !on),
-                }
-            }
+    pub fn is_visible(&self, content: &OptionalContentMembership) -> bool {
+        if content.has_visibility_expression || content.groups.is_empty() {
+            return true;
+        }
+        let mut groups = content.groups.iter().map(|id| self.group_visible(id));
+        match content.policy {
+            OptionalContentPolicy::AnyOn => groups.any(|on| on),
+            OptionalContentPolicy::AllOn => groups.all(|on| on),
+            OptionalContentPolicy::AnyOff => groups.any(|on| !on),
+            OptionalContentPolicy::AllOff => groups.all(|on| !on),
         }
     }
 
@@ -256,6 +240,11 @@ impl OptionalContentState {
             }
         }
         changed
+    }
+
+    /// Whether any tracked group is off; when none is, no content depends on this state.
+    pub fn hides_any(&self) -> bool {
+        self.visible.values().any(|visible| !visible)
     }
 
     /// Whether one group is on. An untracked group is visible, the safe default for

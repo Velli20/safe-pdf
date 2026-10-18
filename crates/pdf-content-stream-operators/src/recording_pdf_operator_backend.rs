@@ -207,6 +207,7 @@ pub enum RecordedOperation {
     },
     BeginMarkedContentWithProperties {
         tag: Vec<u8>,
+        properties: Option<Vec<u8>>,
     },
     EndMarkedContent,
 }
@@ -729,9 +730,16 @@ impl MarkedContentOps for RecordingBackend {
         Ok(())
     }
 
-    fn begin_marked_content_with_properties(&mut self, tag: &[u8]) -> Result<(), Self::ErrorType> {
+    fn begin_marked_content_with_properties(
+        &mut self,
+        tag: &[u8],
+        properties: Option<&[u8]>,
+    ) -> Result<(), Self::ErrorType> {
         self.operations
-            .push(RecordedOperation::BeginMarkedContentWithProperties { tag: tag.to_vec() });
+            .push(RecordedOperation::BeginMarkedContentWithProperties {
+                tag: tag.to_vec(),
+                properties: properties.map(<[u8]>::to_vec),
+            });
         Ok(())
     }
 

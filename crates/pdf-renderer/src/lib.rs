@@ -3,6 +3,7 @@ use pdf_canvas::{
     recording_canvas::RecordingCanvas,
 };
 use pdf_document::document::PdfDocument;
+use pdf_optional_content::OptionalContentState;
 use pdf_text_engine::FontSystem;
 use std::sync::Arc;
 use thiserror::Error;
@@ -18,15 +19,18 @@ pub use text_selection::{
 };
 
 /// Renders page content and captures text using a shared viewport, excluding annotations.
+/// Content in optional content groups that are off in `optional_content` is hidden.
 /// Backend lifecycle and any separate annotation pass remain the caller's responsibility.
 pub fn render_page_content_with_text_layout<B: CanvasBackend>(
     backend: &mut B,
     page: &pdf_document::page::PdfPage,
     viewport: &pdf_canvas::PageViewport,
     fonts: Arc<FontSystem>,
+    optional_content: &OptionalContentState,
 ) -> Result<PageTextLayout, PdfCanvasError> {
-    let mut canvas =
-        PdfCanvas::new_with_viewport(backend, page, viewport, fonts)?.with_text_recording();
+    let mut canvas = PdfCanvas::new_with_viewport(backend, page, viewport, fonts)?
+        .with_text_recording()
+        .with_optional_content(optional_content);
     if let Some(content) = &page.contents {
         canvas.render_content_stream(content, None, None, page.resources.clone(), None)?;
     }
@@ -150,9 +154,11 @@ impl PdfRenderer {
         page_index: usize,
     ) -> Result<(), PdfRendererError> {
         let page = self.page(page_index)?;
+        let optional_content = self.optional_content();
         {
             let mut canvas =
-                PdfCanvas::new(canvas_backend, page, None, Arc::clone(&self.font_system))?;
+                PdfCanvas::new(canvas_backend, page, None, Arc::clone(&self.font_system))?
+                    .with_optional_content(&optional_content);
             if let Some(cs) = &page.contents {
                 canvas.render_content_stream(cs, None, None, page.resources.clone(), None)?;
             }
@@ -167,8 +173,10 @@ impl PdfRenderer {
         page_index: usize,
     ) -> Result<PageTextLayout, PdfRendererError> {
         let page = self.page(page_index)?;
+        let optional_content = self.optional_content();
         let mut canvas = PdfCanvas::new(canvas_backend, page, None, Arc::clone(&self.font_system))?
-            .with_text_recording();
+            .with_text_recording()
+            .with_optional_content(&optional_content);
         if let Some(cs) = &page.contents {
             canvas.render_content_stream(cs, None, None, page.resources.clone(), None)?;
         }
@@ -188,10 +196,12 @@ impl PdfRenderer {
     ) -> Result<RecordedPage, PdfRendererError> {
         let page = self.page(page_index)?;
         let mut recording = RecordingCanvas::new(width, height);
+        let optional_content = self.optional_content();
         let glyphs = {
             let mut canvas =
                 PdfCanvas::new(&mut recording, page, None, Arc::clone(&self.font_system))?
-                    .with_text_recording();
+                    .with_text_recording()
+                    .with_optional_content(&optional_content);
             if let Some(cs) = &page.contents {
                 canvas.render_content_stream(cs, None, None, page.resources.clone(), None)?;
             }
@@ -201,6 +211,15 @@ impl PdfRenderer {
             recording,
             text_layout: Arc::new(PageTextLayout::new(glyphs)),
         })
+    }
+
+    /// Returns the visibility the document's default optional content configuration sets.
+    fn optional_content(&self) -> OptionalContentState {
+        self.document
+            .optional_content
+            .as_ref()
+            .map(OptionalContentState::from_properties)
+            .unwrap_or_default()
     }
 
     fn page(&self, page_index: usize) -> Result<&pdf_document::page::PdfPage, PdfRendererError> {

@@ -8,8 +8,6 @@ use crate::{
     kind::AnnotationKind,
     layer_error::{AnnotationLayerError, AnnotationLayerResult},
     models::{Annotation, AnnotationId, Point, Revision},
-    ocg_state::OcgStateEntry,
-    optional_content::{OptionalContentProperties, OptionalContentState},
     pdf_data::{AnnotationAction, SourceAnnotation},
     projection,
     requests::{
@@ -18,6 +16,7 @@ use crate::{
 };
 use pdf_graphics::{rect::Rect, viewport::PageViewport};
 use pdf_object_reader::diagnostic::PdfReadDiagnostic;
+use pdf_optional_content::{OcgStateEntry, OptionalContentProperties, OptionalContentState};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -100,6 +99,11 @@ impl AnnotationOverlay {
                 OptionalContentState::from_properties,
             ),
         })
+    }
+
+    /// Returns the runtime optional content visibility shared with page content.
+    pub fn optional_content(&self) -> &OptionalContentState {
+        &self.optional_content
     }
 
     /// Returns import diagnostics ordered by page and object; does not mutate state.
