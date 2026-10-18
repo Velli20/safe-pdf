@@ -1,27 +1,32 @@
 use crate::{
+    UnicodeSequence,
     cmap::{
         parser::CMapParser,
         token::CMapToken,
-        unicode::{
-            bytes_to_char_code, codepoint_to_chars, sequential_base_code, utf16_bytes_to_chars,
-            utf16_bytes_to_chars_non_empty,
-        },
+        unicode::{SequentialDestination, utf16_destination},
     },
+    cmap_support::bytes_to_u32,
     error::CMapError,
 };
+
+/// Largest number of source codes one sequential `bfrange` may map.
+///
+/// Source codes are up to four bytes wide, so this bounds the work and memory a
+/// single malformed range such as `<00000000> <FFFFFFFF>` can demand.
+const MAX_SEQUENTIAL_RANGE_SPAN: u16 = u16::MAX;
 
 /// Parser state while reading a `beginbfchar` section.
 enum BfCharState {
     NeedSource,
-    NeedDestination(u16),
+    NeedDestination(u32),
 }
 
 /// Parser state while reading a `beginbfrange` section.
 enum BfRangeState {
     NeedStart,
-    NeedEnd(u16),
-    NeedValue { start: u16, end: u16 },
-    Array { code: u16, end: u16 },
+    NeedEnd(u32),
+    NeedValue { start: u32, end: u32 },
+    Array { code: u32, end: u32 },
 }
 
 impl CMapParser<'_> {
@@ -103,29 +108,23 @@ impl CMapParser<'_> {
     /// The next bfchar parser state after consuming the token.
     fn handle_bfchar_hex_token(&mut self, state: BfCharState, bytes: &[u8]) -> BfCharState {
         match state {
-            BfCharState::NeedSource => BfCharState::NeedDestination(bytes_to_char_code(bytes)),
+            BfCharState::NeedSource => BfCharState::NeedDestination(bytes_to_u32(bytes)),
             BfCharState::NeedDestination(source) => {
-                self.insert_bfchar_mapping(source, bytes);
+                self.insert_mapping(source, utf16_destination(bytes));
                 BfCharState::NeedSource
             }
         }
     }
 
-    /// Insert one direct ToUnicode mapping from a bfchar destination string.
+    /// Insert one ToUnicode mapping, omitting destinations that decoded to nothing.
     ///
     /// # Parameters
     ///
-    /// - `source`: The source character code to map.
-    /// - `bytes`: The destination UTF-16BE byte string.
-    ///
-    /// # Returns
-    ///
-    /// Nothing. The mapping is inserted into the parser's output map when the
-    /// decoded destination is not empty.
-    fn insert_bfchar_mapping(&mut self, source: u16, bytes: &[u8]) {
-        let chars = utf16_bytes_to_chars(bytes);
-        if !chars.is_empty() {
-            self.to_unicode_map.insert(source, chars);
+    /// - `source`: The packed source character code to map.
+    /// - `destination`: The decoded Unicode destination.
+    fn insert_mapping(&mut self, source: u32, destination: UnicodeSequence) {
+        if destination != UnicodeSequence::Empty {
+            self.to_unicode_map.insert(source, destination);
         }
     }
 
@@ -164,17 +163,17 @@ impl CMapParser<'_> {
     /// The next bfrange parser state after consuming the token.
     fn handle_bfrange_hex_token(&mut self, state: BfRangeState, bytes: &[u8]) -> BfRangeState {
         match state {
-            BfRangeState::NeedStart => BfRangeState::NeedEnd(bytes_to_char_code(bytes)),
+            BfRangeState::NeedStart => BfRangeState::NeedEnd(bytes_to_u32(bytes)),
             BfRangeState::NeedEnd(start) => BfRangeState::NeedValue {
                 start,
-                end: bytes_to_char_code(bytes),
+                end: bytes_to_u32(bytes),
             },
             BfRangeState::NeedValue { start, end } => {
                 self.insert_sequential_range(start, end, bytes);
                 BfRangeState::NeedStart
             }
             BfRangeState::Array { code, end } => {
-                self.insert_bfrange_array_mapping(code, bytes);
+                self.insert_mapping(code, utf16_destination(bytes));
                 Self::next_bfrange_array_state(code, end)
             }
         }
@@ -245,23 +244,6 @@ impl CMapParser<'_> {
         }
     }
 
-    /// Insert one array entry from a `beginbfrange` destination list.
-    ///
-    /// # Parameters
-    ///
-    /// - `code`: The source code that corresponds to the current array entry.
-    /// - `bytes`: The destination UTF-16BE byte string.
-    ///
-    /// # Returns
-    ///
-    /// Nothing. The mapping is inserted into the parser's output map when the
-    /// decoded destination is not empty.
-    fn insert_bfrange_array_mapping(&mut self, code: u16, bytes: &[u8]) {
-        if let Some(chars) = utf16_bytes_to_chars_non_empty(bytes) {
-            self.to_unicode_map.insert(code, chars);
-        }
-    }
-
     /// Advance the array-entry state for a `beginbfrange` mapping.
     ///
     /// # Parameters
@@ -272,7 +254,7 @@ impl CMapParser<'_> {
     /// # Returns
     ///
     /// The next array state, or `NeedStart` once the inclusive end is reached.
-    fn next_bfrange_array_state(code: u16, end: u16) -> BfRangeState {
+    fn next_bfrange_array_state(code: u32, end: u32) -> BfRangeState {
         if code >= end {
             BfRangeState::NeedStart
         } else {
@@ -290,26 +272,25 @@ impl CMapParser<'_> {
     /// - `start`: The first source code in the inclusive range.
     /// - `end`: The last source code in the inclusive range.
     /// - `base_bytes`: The UTF-16BE destination bytes for the first entry in
-    ///   the range.
+    ///   the range. Each later source code advances the final code unit by one.
     ///
     /// # Returns
     ///
     /// Nothing. Each valid sequential destination is inserted into the parser's
-    /// output map.
-    fn insert_sequential_range(&mut self, start: u16, end: u16, base_bytes: &[u8]) {
+    /// output map. Ranges stop after [`MAX_SEQUENTIAL_RANGE_SPAN`] codes or once
+    /// the destination's final code unit would overflow.
+    fn insert_sequential_range(&mut self, start: u32, end: u32, base_bytes: &[u8]) {
+        let destination = SequentialDestination::from(base_bytes);
         let mut code = start;
-        let mut base = sequential_base_code(base_bytes);
+        let mut offset = 0_u16;
 
-        loop {
-            let chars = codepoint_to_chars(base);
-            if !chars.is_empty() {
-                self.to_unicode_map.insert(code, chars);
-            }
-            if code >= end {
+        while let Some(sequence) = destination.at(offset) {
+            self.insert_mapping(code, sequence);
+            if code >= end || offset == MAX_SEQUENTIAL_RANGE_SPAN {
                 break;
             }
             code = code.saturating_add(1);
-            base = base.saturating_add(1);
+            offset = offset.saturating_add(1);
         }
     }
 }

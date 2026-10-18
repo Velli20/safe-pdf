@@ -1,3 +1,5 @@
+use crate::{Cid, CidMapping, PdfCode};
+
 /// Convert a big-endian byte slice into a `u32`.
 ///
 /// # Parameters
@@ -27,30 +29,39 @@ pub(crate) fn bytes_to_u32(bytes: &[u8]) -> u32 {
 ///
 /// # Returns
 ///
-/// The packed source code, consumed byte length, and mapped CID. Unknown or unmapped input returns
-/// the first byte with CID 0 so a streaming caller can advance safely. Empty input returns `None`.
+/// The consumed source code and its mapped CID. Unknown or unmapped input returns the first byte
+/// with CID 0 so a streaming caller can advance safely. Empty input returns `None`.
 pub(crate) fn decode_next_with_code_space<HasCodeSpace, MapCode>(
     text: &[u8],
     allowed_code_lengths: &[usize],
     mut has_code_space: HasCodeSpace,
     mut map_code: MapCode,
-) -> Option<(u32, usize, u16)>
+) -> Option<CidMapping>
 where
     HasCodeSpace: FnMut(u32, usize) -> bool,
     MapCode: FnMut(u32) -> Option<u16>,
 {
-    let first = text.first().copied()?;
     for len in allowed_code_lengths.iter().rev() {
-        let Some(bytes) = text.get(..*len) else {
+        let Some(source) = text
+            .get(..*len)
+            .and_then(|bytes| PdfCode::try_from(bytes).ok())
+        else {
             continue;
         };
 
-        let code = bytes_to_u32(bytes);
-        if has_code_space(code, *len) {
-            return Some((code, *len, map_code(code).unwrap_or(0)));
+        if has_code_space(source.value(), *len) {
+            let cid = map_code(source.value()).unwrap_or(0);
+            return Some(CidMapping {
+                source,
+                cid: Cid(u32::from(cid)),
+            });
         }
     }
-    Some((u32::from(first), 1, 0))
+    let source = PdfCode::try_from(text.get(..1)?).ok()?;
+    Some(CidMapping {
+        source,
+        cid: Cid(0),
+    })
 }
 
 /// Shared lookup contract for Type0 encoding CMaps.
@@ -102,10 +113,10 @@ pub(crate) trait Type0CodeMap {
     ///
     /// # Returns
     ///
-    /// The source code, consumed length, and CID selected by the longest valid code-space match.
+    /// The source code and CID selected by the longest valid code-space match.
     /// Non-empty input always consumes at least one byte, including malformed or unmapped input, so
     /// repeated calls cannot stall a streaming decoder.
-    fn decode_next(&self, text: &[u8]) -> Option<(u32, usize, u16)> {
+    fn decode_next(&self, text: &[u8]) -> Option<CidMapping> {
         decode_next_with_code_space(
             text,
             self.allowed_code_lengths(),

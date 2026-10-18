@@ -1,6 +1,6 @@
 //! Parsing and compact storage for PDF `/ToUnicode` character maps.
 //!
-//! Parsed vectors are converted once into [`UnicodeSequence`], keeping the common zero- and
+//! Destinations are parsed directly into [`UnicodeSequence`], keeping the common zero- and
 //! one-scalar mappings inline and sharing storage only for genuine multi-scalar expansions.
 
 use std::collections::HashMap;
@@ -26,10 +26,12 @@ pub enum ToUnicodeMap {
 impl ToUnicodeMap {
     /// Returns all Unicode scalars represented by `code` when a mapping exists.
     pub fn map(&self, code: PdfCode) -> Option<UnicodeSequence> {
-        let value = u16::try_from(code.value()).ok()?;
         match self {
-            Self::CMap(map) => map.map_char_code(value).cloned(),
-            Self::Identity => char::from_u32(u32::from(value)).map(Into::into),
+            Self::CMap(map) => map.map_char_code(code.value()).cloned(),
+            Self::Identity => u16::try_from(code.value())
+                .ok()
+                .and_then(|value| char::from_u32(u32::from(value)))
+                .map(Into::into),
         }
     }
 }
@@ -51,14 +53,17 @@ impl FromPdfObject for ToUnicodeMap {
 
 /// A parsed ToUnicode CMap that maps PDF character codes to Unicode scalar values.
 #[derive(Debug, Default)]
-pub struct ToUnicodeCMap(HashMap<u16, UnicodeSequence>);
+pub struct ToUnicodeCMap(HashMap<u32, UnicodeSequence>);
 
 impl ToUnicodeCMap {
-    /// Looks up the Unicode characters for the given PDF character code.
+    /// Looks up the Unicode characters for the given packed PDF character code.
+    ///
+    /// Codes are matched by numeric value regardless of their byte width, so a two-byte
+    /// `<0041>` source also maps the one-byte code `0x41`.
     ///
     /// The returned sequence is borrowed from the map; callers that need to retain it can clone the
     /// compact value without cloning a multi-scalar buffer.
-    pub fn map_char_code(&self, code: u16) -> Option<&UnicodeSequence> {
+    pub fn map_char_code(&self, code: u32) -> Option<&UnicodeSequence> {
         self.0.get(&code)
     }
 }
@@ -66,14 +71,9 @@ impl ToUnicodeCMap {
 impl TryFrom<&[u8]> for ToUnicodeCMap {
     type Error = CMapError;
 
-    /// Parses a `/ToUnicode` CMap stream and compacts each parsed destination sequence.
+    /// Parses a `/ToUnicode` CMap stream.
     fn try_from(data: &[u8]) -> Result<Self, Self::Error> {
-        let mappings = CMapParser::from(data)
-            .into_unicode_map()?
-            .into_iter()
-            .map(|(code, characters)| (code, UnicodeSequence::from(characters)))
-            .collect();
-        Ok(Self(mappings))
+        CMapParser::from(data).into_unicode_map().map(Self)
     }
 }
 
@@ -94,7 +94,7 @@ mod tests {
         string_kind::StringKind,
     };
 
-    fn mapped(map: &ToUnicodeCMap, code: u16) -> Option<&[char]> {
+    fn mapped(map: &ToUnicodeCMap, code: u32) -> Option<&[char]> {
         map.map_char_code(code).map(UnicodeSequence::as_slice)
     }
 
