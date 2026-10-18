@@ -5,7 +5,6 @@ use crate::{
     error::FontError,
     font::FontSource,
     pdf::{PdfFontDescriptor, PdfMetrics, SimpleEncoding, ToUnicodeMap},
-    pdf_font_parser::to_unicode,
     pdf_font_program::{TrueTypeProgram, Type1Program},
     standard14::{self, Standard14Font},
 };
@@ -28,7 +27,7 @@ pub struct SimpleFontSpec {
     /// Explicit PDF width data.
     pub metrics: PdfMetrics,
     /// Optional source-code-to-Unicode map.
-    pub to_unicode: Option<Arc<dyn ToUnicodeMap>>,
+    pub to_unicode: Option<Arc<ToUnicodeMap>>,
 }
 
 impl FromPdfObject for SimpleFontSpec {
@@ -76,7 +75,7 @@ impl FromPdfObject for SimpleFontSpec {
             standard14,
             encoding,
             metrics,
-            to_unicode: to_unicode(&mut context)?,
+            to_unicode: context.optional(b"ToUnicode")?.map(Arc::new),
         })
     }
 }

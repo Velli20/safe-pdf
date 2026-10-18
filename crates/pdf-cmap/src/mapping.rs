@@ -1,6 +1,6 @@
 //! Shared character-code and mapping contracts for PDF CMaps.
 
-use crate::{UnicodeSequence, WritingMode, error::CMapError};
+use crate::{WritingMode, error::CMapError};
 
 /// Packed one-to-four-byte character code consumed from a PDF string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -69,10 +69,4 @@ pub trait PdfCMap: Send + Sync {
 
     /// Reports whether the map uses horizontal or vertical writing.
     fn writing_mode(&self) -> WritingMode;
-}
-
-/// Object-safe mapping from PDF source codes to extraction Unicode.
-pub trait ToUnicodeMap: Send + Sync {
-    /// Returns all Unicode scalars represented by `code` when a mapping exists.
-    fn map(&self, code: PdfCode) -> Option<UnicodeSequence>;
 }

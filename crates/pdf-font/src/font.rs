@@ -121,9 +121,16 @@ pub enum FontStretch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FontWeight(pub u16);
 
+impl FontWeight {
+    /// The CSS `normal` weight.
+    pub const NORMAL: Self = Self(400);
+    /// The CSS `bold` weight.
+    pub const BOLD: Self = Self(700);
+}
+
 impl Default for FontWeight {
     fn default() -> Self {
-        Self(400)
+        Self::NORMAL
     }
 }
 

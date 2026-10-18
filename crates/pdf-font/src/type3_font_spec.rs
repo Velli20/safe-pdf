@@ -5,7 +5,6 @@ use crate::{
     error::FontError,
     font::{FontMetadata, GlyphId, GlyphName},
     pdf::{PdfMetrics, SimpleEncoding, ToUnicodeMap},
-    pdf_font_parser::to_unicode,
 };
 use pdf_content_stream::ContentStream;
 use pdf_graphics::{rect::Rect, transform::Transform};
@@ -33,7 +32,7 @@ pub struct Type3FontSpec {
     /// Character procedures and their opaque glyph handles.
     pub char_procedures: CharProcedures,
     /// Optional source-code-to-Unicode map.
-    pub to_unicode: Option<Arc<dyn ToUnicodeMap>>,
+    pub to_unicode: Option<Arc<ToUnicodeMap>>,
 }
 
 /// Type 3 glyph procedures and their opaque handles, decoded in the CharProcs scope.
@@ -97,7 +96,7 @@ impl FromPdfObject for Type3FontSpec {
             encoding,
             metrics,
             char_procedures: context.required(b"CharProcs")?,
-            to_unicode: to_unicode(&mut context)?,
+            to_unicode: context.optional(b"ToUnicode")?.map(Arc::new),
         })
     }
 }

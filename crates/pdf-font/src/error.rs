@@ -65,3 +65,9 @@ impl From<FontError> for pdf_object_reader::ObjectReadError {
         }
     }
 }
+
+impl From<GlyphWidthsMapError> for pdf_object_reader::ObjectReadError {
+    fn from(source: GlyphWidthsMapError) -> Self {
+        FontError::from(source).into()
+    }
+}

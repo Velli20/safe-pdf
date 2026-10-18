@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::WritingMode;
 
 use crate::{
-    cmap::token::CMapToken, cmap_support::Type0CodeMap, error::CMapError,
+    CodeRange, CodeRanges, cmap::token::CMapToken, cmap_support::Type0CodeMap, error::CMapError,
     type0::parser::EmbeddedCMapBuilder,
 };
 
@@ -16,7 +16,7 @@ pub struct EmbeddedCMap {
     pub(super) allowed_code_lengths: Vec<usize>,
     /// Explicit source-code-to-CID entries.
     pub(super) cid_chars: HashMap<u32, u16>,
-    /// Sequential source-code-to-CID ranges.
+    /// Sequential source-code-to-CID ranges, sorted and disjoint.
     pub(super) cid_ranges: Vec<CidRange>,
     /// Direction declared by `/WMode`.
     pub(super) writing_mode: WritingMode,
@@ -70,15 +70,25 @@ impl Type0CodeMap for EmbeddedCMap {
             return Some(*cid);
         }
 
-        self.cid_ranges.iter().find_map(|range| {
-            if range.start <= code && code <= range.end {
-                let offset = code.saturating_sub(range.start);
-                let offset = u16::try_from(offset).ok()?;
-                range.cid_start.checked_add(offset)
-            } else {
-                None
-            }
-        })
+        let (range, offset) = self.cid_ranges.covering(code)?;
+        range.cid_at(offset)
+    }
+}
+
+impl CidRange {
+    /// Returns the CID mapped from the code `offset` places past the range start.
+    fn cid_at(&self, offset: u32) -> Option<u16> {
+        self.cid_start.checked_add(u16::try_from(offset).ok()?)
+    }
+}
+
+impl CodeRange for CidRange {
+    fn first(&self) -> u32 {
+        self.start
+    }
+
+    fn last(&self) -> u32 {
+        self.end
     }
 }
 

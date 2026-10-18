@@ -2,15 +2,13 @@
 
 use crate::{
     error::FontError,
-    font::FontSource,
+    font::{FontSource, GlyphId},
     pdf::{CidSystemInfo, PdfFontDescriptor, PdfMetrics, ToUnicodeMap},
-    pdf_font_parser::to_unicode,
     pdf_font_program::{CidType0Program, TrueTypeProgram},
 };
-use pdf_cmap::{PdfCMap, Type0EncodingCMap};
+use pdf_cmap::{Cid, PdfCMap, Type0EncodingCMap};
 use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
-    object_variant::ObjectVariant,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
 };
 use std::{collections::HashMap, sync::Arc};
 
@@ -36,8 +34,8 @@ pub struct CidFontSpec {
     pub system_info: CidSystemInfo,
     /// Horizontal and vertical CID metrics.
     pub metrics: PdfMetrics,
-    /// Optional CID-to-glyph identifier mapping for CIDFontType2.
-    pub cid_to_gid: Option<Arc<[u16]>>,
+    /// CID-to-glyph identifier mapping, used by CIDFontType2 only.
+    pub cid_to_gid: CidToGidMap,
     /// Best-effort CID-to-Unicode mapping for collection-backed font substitution.
     pub cid_to_unicode: Option<Arc<HashMap<u16, char>>>,
 }
@@ -52,33 +50,28 @@ pub struct Type0FontSpec {
     /// The single descendant CID font.
     pub descendant: CidFontSpec,
     /// Optional source-code-to-Unicode map.
-    pub to_unicode: Option<Arc<dyn ToUnicodeMap>>,
+    pub to_unicode: Option<Arc<ToUnicodeMap>>,
 }
 
-/// `/CIDToGIDMap` of a CIDFontType2 descendant.
-enum CidToGidMap {
+/// `/CIDToGIDMap` of a CID descendant; CIDFontType0 descendants ignore it.
+#[derive(Clone, Default)]
+pub enum CidToGidMap {
     /// `/Identity` or any non-stream value: CIDs are used as glyph identifiers.
+    #[default]
     Identity,
     /// Big-endian glyph identifiers indexed by CID.
     Table(Arc<[u16]>),
 }
 
 impl CidToGidMap {
-    /// Reads the CID-to-GID table of a CIDFontType2 descendant.
-    ///
-    /// Returns `None` for CIDFontType0, an identity map, or an unreadable entry, so that a broken
-    /// map falls back to the identity mapping instead of failing the whole font.
-    fn read(
-        context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
-        kind: CidFontKind,
-    ) -> Option<Arc<[u16]>> {
-        if kind != CidFontKind::Type2 {
+    /// Returns the glyph identifier the table assigns to `cid`, or `None` for an identity map
+    /// or a CID outside the table.
+    pub fn glyph(&self, cid: Cid) -> Option<GlyphId> {
+        let Self::Table(table) = self else {
             return None;
-        }
-        match context.lenient::<Self>(b"CIDToGIDMap")? {
-            Self::Table(table) => Some(table),
-            Self::Identity => None,
-        }
+        };
+        let gid = table.get(usize::try_from(cid.0).ok()?)?;
+        Some(GlyphId(u32::from(*gid)))
     }
 }
 
@@ -95,17 +88,16 @@ impl FromPdfObject for CidToGidMap {
     }
 }
 
-impl TryFrom<&[u8]> for CidFontKind {
-    type Error = FontError;
-
-    /// Converts the descendant dictionary's Subtype name into a supported CID kind.
-    fn try_from(name: &[u8]) -> Result<Self, Self::Error> {
-        match name {
+impl FromPdfObject for CidFontKind {
+    /// Decodes the descendant dictionary's Subtype name into a supported CID kind.
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match context.object().value().try_bytes(context.source())? {
             b"CIDFontType0" => Ok(Self::Type0),
             b"CIDFontType2" => Ok(Self::Type2),
             other => Err(FontError::UnsupportedCidFontSubtype {
                 subtype: String::from_utf8_lossy(other).into_owned(),
-            }),
+            }
+            .into()),
         }
     }
 }
@@ -115,8 +107,7 @@ impl FromPdfObject for CidFontSpec {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let value = context.object().value();
         let mut context = context.dictionary()?;
-        let subtype: Arc<[u8]> = context.required(b"Subtype")?;
-        let kind = CidFontKind::try_from(subtype.as_ref())?;
+        let kind: CidFontKind = context.required(b"Subtype")?;
         let base_font: Option<Arc<[u8]>> = context.lenient(b"BaseFont");
         // A bad program must not discard an otherwise usable font.
         let program: Option<FontSource> = match kind {
@@ -136,7 +127,7 @@ impl FromPdfObject for CidFontSpec {
             .optional::<CidSystemInfo>(b"CIDSystemInfo")?
             .unwrap_or_default();
         let cid_to_unicode = system_info.cid_to_unicode_map();
-        let cid_to_gid = CidToGidMap::read(&mut context, kind);
+        let cid_to_gid = context.lenient(b"CIDToGIDMap").unwrap_or_default();
         Ok(Self {
             kind,
             descriptor,
@@ -163,7 +154,7 @@ impl FromPdfObject for Type0FontSpec {
             base_font: context.lenient(b"BaseFont").unwrap_or_default(),
             encoding: Arc::new(encoding),
             descendant,
-            to_unicode: to_unicode(&mut context)?,
+            to_unicode: context.optional(b"ToUnicode")?.map(Arc::new),
         })
     }
 }

@@ -13,10 +13,9 @@ use crate::fallback::{
 use crate::font::GlyphId;
 use crate::font::{FontMetadata, FontProgramFormat, FontSource};
 use crate::pdf::{
-    FALLBACK_GLYPH_WIDTH, PdfFontDescriptor, PdfGlyphMetric, PdfMetrics, SimpleEncoding,
-    SimpleFontSpec, Type0FontSpec, Type3FontSpec,
+    FALLBACK_GLYPH_WIDTH, PdfFontDescriptor, PdfMetrics, SimpleEncoding, SimpleFontSpec,
+    Type0FontSpec, Type3FontSpec,
 };
-use crate::pdf_font_metrics::horizontal_metric;
 use crate::standard14::Standard14Font;
 use pdf_cmap::WritingMode;
 
@@ -71,8 +70,8 @@ impl From<Standard14Font> for PdfFontSpec {
                 differences: std::collections::BTreeMap::new(),
             },
             metrics: PdfMetrics {
-                default: horizontal_metric(FALLBACK_GLYPH_WIDTH),
-                explicit: std::collections::BTreeMap::new(),
+                default: FALLBACK_GLYPH_WIDTH,
+                explicit: crate::glyph_widths_map::GlyphWidthsMap::default(),
             },
             to_unicode: None,
         })
@@ -80,26 +79,6 @@ impl From<Standard14Font> for PdfFontSpec {
 }
 
 impl PdfFontSpec {
-    /// Returns the PDF metric for a character code or CID.
-    ///
-    /// Sparse explicit entries take precedence; the normalized table's required default is
-    /// returned for every missing code, so callers do not need another optional layer.
-    #[must_use]
-    pub fn metric(&self, code: u32) -> PdfGlyphMetric {
-        let metrics = match self {
-            Self::Type0(font) => &font.descendant.metrics,
-            Self::Type1(font) | Self::MultipleMasterType1(font) | Self::TrueType(font) => {
-                &font.metrics
-            }
-            Self::Type3(font) => &font.metrics,
-        };
-        metrics
-            .explicit
-            .get(&code)
-            .copied()
-            .unwrap_or(metrics.default)
-    }
-
     /// Borrows the normalized metadata associated with this PDF font.
     ///
     /// Borrowing avoids cloning names and classification data during face loading and fallback

@@ -118,16 +118,23 @@ impl Dictionary {
 
     /// Reads the optional rectangle entry with the given key.
     ///
-    /// Missing entries and explicit PDF `null` values are treated as absent.
+    /// Missing entries, explicit PDF `null` values, and values that are not an array of at
+    /// least four numbers are treated as absent; reference resolution failures propagate.
     /// The coordinates are returned in their original order.
     pub fn optional_rect(
         &self,
         key: &[u8],
         objects: &dyn ObjectResolver,
     ) -> Result<Option<Rect>, ObjectError> {
-        Ok(self
-            .optional_array_of::<f32, 4>(key, objects)?
-            .map(Rect::from))
+        match self.optional_array_of::<f32, 4>(key, objects) {
+            Ok(rect) => Ok(rect.map(Rect::from)),
+            Err(
+                ObjectError::TypeMismatch(..)
+                | ObjectError::InvalidArrayLength { .. }
+                | ObjectError::NumberConversionError,
+            ) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     /// Reads the required rectangle entry with the given key.
@@ -608,7 +615,7 @@ mod tests {
     }
 
     #[test]
-    fn optional_media_box_propagates_invalid_array_length() {
+    fn optional_media_box_treats_invalid_array_length_as_absent() {
         let dictionary = dictionary_with(
             b"MediaBox",
             ObjectVariant::Array(
@@ -621,16 +628,11 @@ mod tests {
             ),
         );
 
-        let error = dictionary
-            .optional_media_box(&PassthroughResolver)
-            .expect_err("media box must contain four numbers");
-
         assert_eq!(
-            error,
-            ObjectError::InvalidArrayLength {
-                expected: 4,
-                found: 3,
-            }
+            dictionary
+                .optional_media_box(&PassthroughResolver)
+                .expect("a malformed media box should be ignored"),
+            None
         );
     }
 
