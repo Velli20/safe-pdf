@@ -8,8 +8,8 @@
 //! matrix, so rotation, shear and mirroring in the CTM are all preserved.
 
 use pdf_content_stream_operators::pdf_operator_backend::XObjectOps;
-use pdf_graphics::{Image, transform::Transform};
-use pdf_image::{InlineImage, decode_inline_image};
+use pdf_graphics::{Image, PixelFormat, transform::Transform};
+use pdf_image::{InlineImage, decode_inline_image, raster::stencil_image};
 use pdf_resources::resource::Resource;
 
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
@@ -94,11 +94,18 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
     }
 
     /// Computes image placement before entering the backend-only mask callback.
+    ///
+    /// An image mask's coverage is painted in the current non-stroking color.
     fn render_decoded_image(
         &mut self,
         image: &Image,
         inline_image: bool,
     ) -> Result<(), PdfCanvasError> {
+        if image.pixel_format == PixelFormat::Alpha8 {
+            let [r, g, b, _] = self.current_state()?.paint.fill_color.to_rgba8();
+            let stencil = stencil_image(image, [r, g, b])?;
+            return self.render_decoded_image(&stencil, inline_image);
+        }
         let transform = self
             .current_state()?
             .transform

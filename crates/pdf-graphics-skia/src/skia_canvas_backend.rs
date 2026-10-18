@@ -171,6 +171,7 @@ fn to_skia_image(image: &Image) -> Result<skia_safe::Image, PdfCanvasError> {
     let color_type = match pixel_format {
         PixelFormat::RGBA8888 => skia_safe::ColorType::RGBA8888,
         PixelFormat::Gray8 => skia_safe::ColorType::Gray8,
+        PixelFormat::Alpha8 => skia_safe::ColorType::Alpha8,
     };
 
     let image_info = skia_safe::ImageInfo::new(

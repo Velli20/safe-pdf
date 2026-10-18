@@ -280,26 +280,33 @@ impl DecodedSamples {
         })
     }
 
-    /// Applies an explicit decode map or the implicit PDF identity/inverted default.
+    /// Applies an explicit decode map or the implicit PDF identity default.
+    ///
+    /// An image mask paints where its decoded value is 0, so its samples are
+    /// returned as coverage instead: `output_max` where the mask paints.
     fn apply_decode(
         sample_codes: Bytes,
         decode: Option<&DecodeMap>,
         sample_max: u8,
         output_max: u8,
-        default_inverted: bool,
+        image_mask: bool,
     ) -> Bytes {
         if let Some(decode) = decode {
-            return decode
-                .apply_to_bytes(sample_codes.as_ref(), sample_max, output_max)
-                .into();
+            let mut decoded = decode.apply_to_bytes(sample_codes.as_ref(), sample_max, output_max);
+            if image_mask {
+                decoded
+                    .iter_mut()
+                    .for_each(|value| *value = output_max.saturating_sub(*value));
+            }
+            return decoded.into();
         }
 
-        if sample_max == output_max && !default_inverted {
+        if sample_max == output_max && !image_mask {
             return sample_codes;
         }
 
         let mut decoded = BytesMut::from(sample_codes);
-        let default_range = if default_inverted {
+        let default_range = if image_mask {
             DecodeRange::inverted_identity()
         } else {
             DecodeRange::identity()

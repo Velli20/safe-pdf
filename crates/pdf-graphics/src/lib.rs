@@ -99,4 +99,6 @@ pub enum PixelFormat {
     RGBA8888,
     /// Grayscale format with 8 bits per pixel.
     Gray8,
+    /// Coverage of an image mask with 8 bits per pixel, painted in the current fill color.
+    Alpha8,
 }
