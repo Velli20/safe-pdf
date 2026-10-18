@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use pdf_object_reader::object_variant::ObjectVariant;
 use pdf_parser::{error::ParserError, parser::PdfParser};
 
-use crate::{cmap::token::CMapToken, error::CMapError};
+use crate::{UnicodeSequence, cmap::token::CMapToken, error::CMapError};
 
 /// Token reader for the small PostScript-like subset used in embedded CMaps.
 ///
@@ -11,7 +11,7 @@ use crate::{cmap::token::CMapToken, error::CMapError};
 /// needed by font CMap consumers rather than the full PDF object grammar.
 pub struct CMapParser<'a> {
     parser: PdfParser<'a>,
-    pub(super) to_unicode_map: HashMap<u16, Vec<char>>,
+    pub(super) to_unicode_map: HashMap<u32, UnicodeSequence>,
 }
 
 impl<'a> From<&'a [u8]> for CMapParser<'a> {
@@ -179,7 +179,7 @@ impl<'a> CMapParser<'a> {
     }
 
     /// Parse and return the ToUnicode mappings from this parser.
-    pub fn into_unicode_map(mut self) -> Result<HashMap<u16, Vec<char>>, CMapError> {
+    pub fn into_unicode_map(mut self) -> Result<HashMap<u32, UnicodeSequence>, CMapError> {
         loop {
             let token = self.next_token_lenient()?;
 

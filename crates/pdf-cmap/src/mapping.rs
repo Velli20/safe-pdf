@@ -1,6 +1,6 @@
 //! Shared character-code and mapping contracts for PDF CMaps.
 
-use crate::{WritingMode, error::CMapError};
+use crate::{WritingMode, cmap_support::bytes_to_u32, error::CMapError};
 
 /// Packed one-to-four-byte character code consumed from a PDF string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -46,6 +46,18 @@ impl PdfCode {
     #[must_use]
     pub const fn byte_len(self) -> u8 {
         self.byte_len
+    }
+}
+
+impl TryFrom<&[u8]> for PdfCode {
+    type Error = CMapError;
+
+    /// Packs one to four big-endian source bytes, recording their width.
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        let byte_len = u8::try_from(bytes.len()).map_err(|_| {
+            CMapError::InvalidPdfCode("character codes must contain one to four bytes")
+        })?;
+        Self::new(bytes_to_u32(bytes), byte_len)
     }
 }
 

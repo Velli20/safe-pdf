@@ -1,11 +1,9 @@
 //! Type0 font encoding CMap support.
 
-use std::convert::TryFrom;
+use std::{convert::TryFrom, sync::Arc};
 
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, dictionary::Dictionary,
-    object_resolver::ObjectResolver, object_variant::ObjectVariant,
-    text_encoding::BigEndianU16Units,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
 };
 mod embedded;
 mod parser;
@@ -29,23 +27,6 @@ pub enum Type0EncodingCMap {
 }
 
 impl Type0EncodingCMap {
-    /// Parse the optional `/Encoding` entry of a Type0 font dictionary.
-    pub fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Option<Self>, CMapError> {
-        dictionary
-            .get(b"Encoding")
-            .map(|value| {
-                let resolved = objects.resolve_object(value)?;
-                match resolved {
-                    ObjectVariant::Stream(stream) => Self::from_bytes(stream.raw_data()),
-                    _ => Self::from_name(value.try_bytes(objects)?),
-                }
-            })
-            .transpose()
-    }
-
     /// Build a Type0 encoding CMap from a predefined CMap name.
     pub fn from_name(name: &[u8]) -> Result<Self, CMapError> {
         if let Ok(writing_mode) = WritingMode::try_from(name) {
@@ -66,83 +47,35 @@ impl Type0EncodingCMap {
     pub fn from_bytes(data: &[u8]) -> Result<Self, CMapError> {
         EmbeddedCMap::try_from(data).map(Self::Embedded)
     }
-
-    /// Decode raw text bytes using the predefined Identity-H/V mapping.
-    ///
-    /// Identity CMaps define fixed-width 2-byte big-endian character codes,
-    /// and each code maps directly to the resulting CID.
-    pub fn decode_identity(text: &[u8]) -> Vec<u16> {
-        let decoded = BigEndianU16Units::from(text);
-        let mut units = decoded.units;
-
-        // A non-empty remainder means the source text ended with an incomplete
-        // final code. That is malformed input, but we keep the decode
-        // infallible and emit CID 0 (`.notdef`) as the best-effort replacement.
-        if decoded.trailing_byte.is_some() {
-            units.push(0);
-        }
-
-        units
-    }
-
-    /// Decodes all raw text bytes into CIDs using this CMap.
-    ///
-    /// This allocating convenience method is intended for callers that need the complete CID list.
-    /// The text engine instead calls [`PdfCMap::decode_next`] and consumes mappings one at a time.
-    /// Unknown codes and an incomplete final identity code become CID 0 (`.notdef`) while still
-    /// consuming input, guaranteeing forward progress on malformed text.
-    pub fn decode(&self, text: &[u8]) -> Vec<u16> {
-        let mut remaining = text;
-        let mut decoded = Vec::new();
-        while let Some(mapping) = self.decode_mapping(remaining) {
-            decoded.push(u16::try_from(mapping.cid.0).unwrap_or_default());
-            let Some(next) = remaining.get(usize::from(mapping.source.byte_len())..) else {
-                break;
-            };
-            remaining = next;
-        }
-        decoded
-    }
-
-    /// Return whether this CMap is one of the predefined identity mappings.
-    pub fn is_identity(&self) -> bool {
-        matches!(self, Self::Identity { .. })
-    }
-}
-
-impl Type0EncodingCMap {
-    /// Decodes one source code without allocating an intermediate collection.
-    ///
-    /// The returned mapping preserves both the packed source code and its byte length for
-    /// `/ToUnicode` lookup and exact stream advancement. Identity CMaps consume two-byte codes when
-    /// possible; an unmatched trailing byte is consumed as a one-byte `.notdef` mapping. Embedded
-    /// and predefined maps apply their longest valid code-space match.
-    fn decode_mapping(&self, bytes: &[u8]) -> Option<CidMapping> {
-        let (code, byte_len, cid) = match self {
-            Self::Identity { .. } => {
-                let first = bytes.first().copied()?;
-                if let Some([first, second]) = bytes.get(..2) {
-                    let cid = u16::from_be_bytes([*first, *second]);
-                    (u32::from(cid), 2, cid)
-                } else {
-                    (u32::from(first), 1, 0)
-                }
-            }
-            Self::Predefined(cmap) => cmap.decode_next(bytes)?,
-            Self::Embedded(cmap) => cmap.decode_next(bytes)?,
-        };
-        let byte_len = u8::try_from(byte_len).ok()?;
-        Some(CidMapping {
-            source: PdfCode::new(code, byte_len).ok()?,
-            cid: Cid(u32::from(cid)),
-        })
-    }
 }
 
 impl PdfCMap for Type0EncodingCMap {
     /// Streams the first mapping in `bytes` using the CMap's malformed-input recovery policy.
+    ///
+    /// The returned mapping preserves both the packed source code and its byte length for
+    /// `/ToUnicode` lookup and exact stream advancement. Identity CMaps consume two-byte codes,
+    /// mapping each directly to its CID; an unmatched trailing byte is consumed as a one-byte
+    /// `.notdef` mapping. Embedded and predefined maps apply their longest valid code-space match.
     fn decode_next(&self, bytes: &[u8]) -> Result<Option<CidMapping>, CMapError> {
-        Ok(self.decode_mapping(bytes))
+        Ok(match self {
+            Self::Identity { .. } => match bytes.get(..2).or_else(|| bytes.get(..1)) {
+                Some(source) => {
+                    let source = PdfCode::try_from(source)?;
+                    let cid = if source.byte_len() == 2 {
+                        source.value()
+                    } else {
+                        0
+                    };
+                    Some(CidMapping {
+                        source,
+                        cid: Cid(cid),
+                    })
+                }
+                None => None,
+            },
+            Self::Predefined(cmap) => cmap.decode_next(bytes),
+            Self::Embedded(cmap) => cmap.decode_next(bytes),
+        })
     }
 
     /// Returns the writing mode declared by the identity, predefined, or embedded CMap.
@@ -164,7 +97,7 @@ impl FromPdfObject for Type0EncodingCMap {
                 Ok(Self::from_bytes(context.stream().raw_data())?)
             }
             _ => {
-                let name = std::sync::Arc::<[u8]>::from_pdf_object(context)?;
+                let name = Arc::<[u8]>::from_pdf_object(context)?;
                 Ok(Self::from_name(&name)?)
             }
         }
@@ -176,12 +109,22 @@ impl FromPdfObject for Type0EncodingCMap {
 mod tests {
     use super::*;
 
+    /// Decodes all of `text` into CIDs, one mapping at a time.
+    fn decode(cmap: &Type0EncodingCMap, mut text: &[u8]) -> Vec<u32> {
+        let mut decoded = Vec::new();
+        while let Some(mapping) = cmap.decode_next(text).unwrap() {
+            decoded.push(mapping.cid.0);
+            text = &text[usize::from(mapping.source.byte_len())..];
+        }
+        decoded
+    }
+
     #[test]
     fn identity_h_decodes_big_endian_pairs() {
         let cmap = Type0EncodingCMap::from_name(b"Identity-H").unwrap();
 
-        assert_eq!(cmap.decode(&[0x00, 0x01, 0x12, 0x34]), vec![1, 0x1234]);
-        assert!(cmap.is_identity());
+        assert_eq!(decode(&cmap, &[0x00, 0x01, 0x12, 0x34]), vec![1, 0x1234]);
+        assert!(matches!(cmap, Type0EncodingCMap::Identity { .. }));
         assert_eq!(cmap.writing_mode(), WritingMode::Horizontal);
     }
 
@@ -189,17 +132,7 @@ mod tests {
     fn identity_h_decodes_trailing_incomplete_code_as_notdef() {
         let cmap = Type0EncodingCMap::from_name(b"Identity-H").unwrap();
 
-        assert_eq!(cmap.decode(&[0x00, 0x01, 0xFF]), vec![1, 0]);
-    }
-
-    #[test]
-    fn decode_identity_handles_complete_pairs_empty_input_and_trailing_byte() {
-        assert_eq!(Type0EncodingCMap::decode_identity(&[0xFF]), vec![0]);
-        assert_eq!(
-            Type0EncodingCMap::decode_identity(&[0x00, 0x01, 0x12, 0x34]),
-            vec![1, 0x1234]
-        );
-        assert_eq!(Type0EncodingCMap::decode_identity(&[]), Vec::<u16>::new());
+        assert_eq!(decode(&cmap, &[0x00, 0x01, 0xFF]), vec![1, 0]);
     }
 
     #[test]
@@ -207,7 +140,7 @@ mod tests {
         let cmap = Type0EncodingCMap::from_name(b"Identity-V").unwrap();
 
         assert_eq!(
-            cmap.decode(&[0x00, 0x01, 0x12, 0x34, 0xFF]),
+            decode(&cmap, &[0x00, 0x01, 0x12, 0x34, 0xFF]),
             vec![1, 0x1234, 0]
         );
         assert_eq!(cmap.writing_mode(), WritingMode::Vertical);
@@ -234,7 +167,7 @@ mod tests {
         let cmap = Type0EncodingCMap::from_bytes(data).unwrap();
 
         assert_eq!(
-            cmap.decode(&[0x20, 0x01, 0x00, 0x01, 0x02]),
+            decode(&cmap, &[0x20, 0x01, 0x00, 0x01, 0x02]),
             vec![7, 50, 52]
         );
         assert_eq!(cmap.writing_mode(), WritingMode::Horizontal);
@@ -261,7 +194,7 @@ mod tests {
 
         let cmap = Type0EncodingCMap::from_bytes(data).unwrap();
 
-        assert_eq!(cmap.decode(&[0x00, 0x41]), vec![7]);
+        assert_eq!(decode(&cmap, &[0x00, 0x41]), vec![7]);
         assert_eq!(cmap.writing_mode(), WritingMode::Horizontal);
     }
 
@@ -291,7 +224,7 @@ mod tests {
 
         let cmap = Type0EncodingCMap::from_bytes(data).unwrap();
 
-        assert_eq!(cmap.decode(&[0x20, 0xE3, 0x80, 0x81]), vec![1, 38]);
+        assert_eq!(decode(&cmap, &[0x20, 0xE3, 0x80, 0x81]), vec![1, 38]);
     }
 
     #[test]
@@ -310,7 +243,10 @@ mod tests {
 
         let cmap = Type0EncodingCMap::from_bytes(data).unwrap();
 
-        assert_eq!(cmap.decode(&[0x00, 0x01, 0x00, 0x02, 0xFF]), vec![4, 0, 0]);
+        assert_eq!(
+            decode(&cmap, &[0x00, 0x01, 0x00, 0x02, 0xFF]),
+            vec![4, 0, 0]
+        );
         assert_eq!(cmap.writing_mode(), WritingMode::Vertical);
     }
 
@@ -332,14 +268,17 @@ mod tests {
 
         let cmap = Type0EncodingCMap::from_bytes(data).unwrap();
 
-        assert_eq!(cmap.decode(&[0x00, 0x20, 0x00, 0x43]), vec![3, 72]);
+        assert_eq!(decode(&cmap, &[0x00, 0x20, 0x00, 0x43]), vec![3, 72]);
     }
 
     #[test]
     fn predefined_japanese_shift_jis_cmap_decodes_single_and_double_byte_codes() {
         let cmap = Type0EncodingCMap::from_name(b"90ms-RKSJ-H").unwrap();
 
-        assert_eq!(cmap.decode(&[0x20, 0x81, 0x40, 0x7E]), vec![231, 633, 631]);
+        assert_eq!(
+            decode(&cmap, &[0x20, 0x81, 0x40, 0x7E]),
+            vec![231, 633, 631]
+        );
         assert_eq!(cmap.writing_mode(), WritingMode::Horizontal);
     }
 
@@ -347,7 +286,7 @@ mod tests {
     fn predefined_vertical_cmap_uses_horizontal_base_cmap() {
         let cmap = Type0EncodingCMap::from_name(b"90ms-RKSJ-V").unwrap();
 
-        assert_eq!(cmap.decode(&[0x20, 0x81, 0x40]), vec![231, 633]);
+        assert_eq!(decode(&cmap, &[0x20, 0x81, 0x40]), vec![231, 633]);
         assert_eq!(cmap.writing_mode(), WritingMode::Vertical);
     }
 }
