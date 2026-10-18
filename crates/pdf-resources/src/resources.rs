@@ -6,6 +6,7 @@ use pdf_object_reader::{
     DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult,
     object_variant::ObjectVariant,
 };
+use pdf_optional_content::OptionalContentMembership;
 use pdf_shading::model::Shading;
 use std::{collections::HashMap, sync::Arc};
 
@@ -30,6 +31,8 @@ pub struct Resources {
     pub shadings: HashMap<Vec<u8>, Resource>,
     /// The /ColorSpace resource namespace.
     pub color_spaces: HashMap<Vec<u8>, Resource>,
+    /// The optional content group and membership entries of the /Properties namespace.
+    pub optional_content: HashMap<Vec<u8>, OptionalContentMembership>,
 }
 
 impl FromPdfObject for Resources {
@@ -68,6 +71,8 @@ impl Resources {
             color_spaces: context.optional_entries(b"ColorSpace", |context, value| {
                 Ok(Resource::ColorSpace(context.read_shared(value)?.get()?))
             })?,
+            // Other property lists, such as tagged content's, are skipped.
+            optional_content: context.lenient_entries(b"Properties")?,
         })
     }
 
@@ -119,6 +124,15 @@ impl Resources {
     /// [`Resource::UnavailableImage`], or [`Resource::Form`] entry if found.
     pub fn xobject<N: AsRef<[u8]>>(&self, name: N) -> Option<Arc<Resource>> {
         self.xobjects.get(name.as_ref())?.get().ok()
+    }
+
+    /// Returns the optional content a `/Properties` entry names, if it exists.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: The property list name as referenced by a `BDC` operator.
+    pub fn optional_content<N: AsRef<[u8]>>(&self, name: N) -> Option<&OptionalContentMembership> {
+        self.optional_content.get(name.as_ref())
     }
 
     /// Returns a reference to a pattern resource by name, if it exists.
@@ -181,6 +195,10 @@ impl Resources {
             xobjects: Self::merged_category(&child.xobjects, &parent.xobjects),
             shadings: Self::merged_category(&child.shadings, &parent.shadings),
             color_spaces: Self::merged_category(&child.color_spaces, &parent.color_spaces),
+            optional_content: Self::merged_category(
+                &child.optional_content,
+                &parent.optional_content,
+            ),
         })
     }
 

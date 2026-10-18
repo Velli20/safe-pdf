@@ -19,13 +19,15 @@ use pdf_object_reader::{
     object_resolver::{DanglingAsNullResolver, ObjectResolver},
     object_variant::ObjectVariant,
 };
+use pdf_optional_content::OptionalContentMembership;
 
 pub(crate) type DecodeResult<T> = Result<T, SourceDecodeError>;
 
 impl FromPdfObject for SourceAnnotation {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let context = context.dictionary()?;
+        let mut context = context.dictionary()?;
         let dictionary = context.dictionary();
+        let optional_content = context.optional::<OptionalContentMembership>(b"OC")?;
         // Annotations often carry stale references, which read as null (ISO 32000 §7.3.10).
         let objects = &DanglingAsNullResolver(context.source());
         // Some PDFs omit `/Type` on annotation dictionaries even though the
@@ -85,8 +87,6 @@ impl FromPdfObject for SourceAnnotation {
             .map(|value| value.try_bytes(objects).map(Vec::from))
             .transpose()?;
         let struct_parent = dictionary.optional_number::<u64>(b"StructParent", objects)?;
-        let optional_content =
-            crate::source_decode_optional_content::optional_content(dictionary, objects)?;
 
         let border = AnnotationBorder::from_dictionary(dictionary, objects)?;
         let color = color(dictionary, b"C", objects)?;

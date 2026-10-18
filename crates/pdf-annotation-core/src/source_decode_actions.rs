@@ -1,6 +1,5 @@
 //! Action, destination, and file-specification decoding; nothing is executed.
 use crate::error::SourceDecodeError;
-use crate::ocg_state::{OcgStateEntry, OcgTarget};
 use crate::pdf_data::{
     AnnotationAction, AnnotationDestination, DestinationTarget, ExplicitDestination,
     FileSpecification, FileSpecificationDictionary,
@@ -10,6 +9,7 @@ use pdf_object_reader::{
     dictionary::Dictionary, object_error::ObjectError, object_lookup::ObjectLookupExt,
     object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
+use pdf_optional_content::{OcgStateEntry, OcgTarget};
 
 impl AnnotationAction {
     pub(crate) fn from_dictionary(

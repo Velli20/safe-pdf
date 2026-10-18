@@ -301,7 +301,8 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                         self.paint_outline(&outline, &glyph_transform)?;
                     }
                 }
-                if let Some(recorded) = &mut self.text_glyphs {
+                let hidden = self.content_hidden();
+                if let Some(recorded) = self.text_glyphs.as_mut().filter(|_| !hidden) {
                     let bounds = base_transform.map_rect(&glyph.bounds).normalized();
                     if bounds.is_valid() {
                         recorded.push(crate::text::TextGlyph {

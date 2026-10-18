@@ -70,6 +70,7 @@ impl WebPageRenderer {
                 page,
                 viewport.page(),
                 Arc::clone(&self.fonts),
+                overlay.optional_content(),
             )?);
             backend.finish_page()?;
             let annotations = overlay.prepare(page_index, viewport)?;

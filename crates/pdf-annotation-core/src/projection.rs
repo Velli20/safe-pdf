@@ -7,11 +7,11 @@ use crate::{
     kind::AnnotationKind as Kind,
     layer_error::{AnnotationLayerError, AnnotationLayerResult},
     models::{Annotation, Revision},
-    optional_content::OptionalContentState,
     pdf_data::AnnotationAction,
     shapes, widget_control,
 };
 use pdf_graphics::{point::Point, rect::Rect, size::Size, viewport::PageViewport};
+use pdf_optional_content::OptionalContentState;
 
 /// The shared field a widget is bound to; `None` for other kinds.
 fn widget_field<'a>(

@@ -2082,6 +2082,7 @@ dependencies = [
  "num-traits",
  "pdf-graphics",
  "pdf-object-reader",
+ "pdf-optional-content",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -2104,6 +2105,7 @@ dependencies = [
  "pdf-graphics",
  "pdf-image",
  "pdf-object-reader",
+ "pdf-optional-content",
  "pdf-resources",
  "pdf-shading",
  "pdf-text-engine",
@@ -2222,6 +2224,7 @@ dependencies = [
  "pdf-graphics",
  "pdf-object-collection",
  "pdf-object-reader",
+ "pdf-optional-content",
  "pdf-parser",
  "pdf-resources",
  "pdf-utils",
@@ -2409,6 +2412,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdf-optional-content"
+version = "0.1.0"
+dependencies = [
+ "pdf-object-reader",
+ "serde",
+ "thiserror 2.0.12",
+ "ts-rs",
+]
+
+[[package]]
 name = "pdf-parser"
 version = "0.1.0"
 dependencies = [
@@ -2439,6 +2452,7 @@ dependencies = [
  "pdf-document",
  "pdf-font",
  "pdf-graphics",
+ "pdf-optional-content",
  "pdf-text-engine",
  "pdf-utils",
  "thiserror 2.0.12",
@@ -2460,6 +2474,7 @@ dependencies = [
  "pdf-image",
  "pdf-object-collection",
  "pdf-object-reader",
+ "pdf-optional-content",
  "pdf-shading",
  "thiserror 2.0.12",
 ]
@@ -2517,6 +2532,7 @@ dependencies = [
  "pdf-font",
  "pdf-graphics",
  "pdf-graphics-web",
+ "pdf-optional-content",
  "pdf-renderer",
  "pdf-text-engine",
  "serde",

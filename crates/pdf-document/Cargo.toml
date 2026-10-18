@@ -11,6 +11,7 @@ serde = ["dep:serde", "pdf-object-reader/serde"]
 pdf-utils = { path = "../pdf-utils" }
 pdf-content-stream = { path = "../pdf-content-stream" }
 pdf-annotation-core = { path = "../pdf-annotation-core" }
+pdf-optional-content = { path = "../pdf-optional-content" }
 pdf-object-collection = { path = "../pdf-object-collection" }
 pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-parser = { path = "../pdf-parser" }

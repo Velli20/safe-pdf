@@ -1,11 +1,11 @@
 //! Decodes the document catalog referenced by the trailer's `/Root` entry.
 
-use pdf_annotation_core::OptionalContentProperties;
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult, object_id::ObjectId,
     object_variant::ObjectVariant,
 };
+use pdf_optional_content::OptionalContentProperties;
 
 use crate::diagnostic::{PdfReadDiagnostic, PdfReadDiagnosticKind};
 use crate::document::PdfDocument;

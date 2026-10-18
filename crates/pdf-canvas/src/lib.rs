@@ -27,6 +27,8 @@ mod content_stream_render_state;
 pub mod error;
 /// Validated mask descriptions and portable coverage preparation.
 pub mod mask_layer;
+/// Hiding of marked-content sequences whose optional content is off.
+mod optional_content_filter;
 
 pub use pdf_graphics::viewport::{CanvasViewport, PageViewport, ViewportError};
 

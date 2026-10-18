@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use pdf_object_reader::object_variant::ObjectVariant;
+
 use crate::{
     error::PdfOperatorError,
     operands::Operands,
@@ -44,11 +46,14 @@ impl PdfOperator for BeginMarkedContent {
 pub struct BeginMarkedContentWithProps {
     /// The tag indicating the role or nature of the marked-content sequence.
     tag: Arc<[u8]>,
+    /// The name of a property list in the `/Properties` resource subdictionary, or
+    /// `None` when the property list is an inline dictionary.
+    properties: Option<Arc<[u8]>>,
 }
 
 impl BeginMarkedContentWithProps {
-    pub fn new(tag: Arc<[u8]>) -> Self {
-        Self { tag }
+    pub fn new(tag: Arc<[u8]>, properties: Option<Arc<[u8]>>) -> Self {
+        Self { tag, properties }
     }
 }
 
@@ -59,13 +64,17 @@ impl PdfOperator for BeginMarkedContentWithProps {
 
     fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
         let tag = operands.get_string_bytes()?;
+        let properties = match operands.peek_next() {
+            Some(ObjectVariant::String(_)) => Some(operands.get_string_bytes()?),
+            _ => None,
+        };
         Ok(PdfOperatorVariant::BeginMarkedContentWithProps(Self::new(
-            tag,
+            tag, properties,
         )))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
-        backend.begin_marked_content_with_properties(&self.tag)
+        backend.begin_marked_content_with_properties(&self.tag, self.properties.as_deref())
     }
 }
 

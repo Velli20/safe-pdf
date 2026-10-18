@@ -23,6 +23,9 @@ use pdf_graphics::{
     BlendMode, PaintMode, PathFillType, color::Color, pdf_path::PdfPath, rect::Rect, size::Size,
     transform::Transform,
 };
+use pdf_optional_content::OptionalContentState;
+
+use crate::optional_content_filter::OptionalContentFilter;
 use pdf_resources::{
     pattern::{PaintType, Pattern},
     resources::Resources,
@@ -58,6 +61,8 @@ pub struct PdfCanvas<'a, B: CanvasBackend> {
     content_stream_render_state: ContentStreamRenderState,
     /// Optional owned buffer for extracted text glyph positions.
     pub(crate) text_glyphs: Option<Vec<TextGlyph>>,
+    /// Hides content whose optional content is off; `None` when nothing can be hidden.
+    pub(crate) optional_content: Option<OptionalContentFilter<'a>>,
 }
 
 impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
@@ -115,6 +120,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             restore_floor: 1,
             content_stream_render_state: ContentStreamRenderState::default(),
             text_glyphs: None,
+            optional_content: None,
         })
     }
 
@@ -123,6 +129,22 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
     pub fn with_text_recording(mut self) -> Self {
         self.text_glyphs = Some(Vec::new());
         self
+    }
+
+    /// Hides content in marked-content sequences whose optional content is off in `state`.
+    ///
+    /// A state with every group on is not attached, so marked content costs nothing.
+    #[must_use]
+    pub fn with_optional_content(mut self, state: &'a OptionalContentState) -> Self {
+        self.optional_content = OptionalContentFilter::new(state);
+        self
+    }
+
+    /// Returns whether an open marked-content sequence hides the content being drawn.
+    pub(crate) fn content_hidden(&self) -> bool {
+        self.optional_content
+            .as_ref()
+            .is_some_and(OptionalContentFilter::is_hidden)
     }
 
     /// Takes the glyph metadata collected by [`Self::with_text_recording`].
@@ -225,6 +247,10 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
             // through a pattern or soft mask is still detected inside it.
             content_stream_render_state: std::mem::take(&mut self.content_stream_render_state),
             text_glyphs: None,
+            optional_content: self
+                .optional_content
+                .as_ref()
+                .map(OptionalContentFilter::restarted),
         };
 
         // Render the form's content stream into the mask canvas.
@@ -515,6 +541,10 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         &mut self,
         paint: impl FnOnce(&mut B) -> Result<(), PdfCanvasError>,
     ) -> Result<(), PdfCanvasError> {
+        // Hidden optional content still updates graphics state, but paints nothing.
+        if self.content_hidden() {
+            return Ok(());
+        }
         let Some(mask) = self.current_state()?.soft_mask.clone() else {
             return paint(self.canvas);
         };
@@ -709,6 +739,10 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         mut filter: Option<&mut (dyn FnMut(&PdfOperatorVariant) -> bool + '_)>,
     ) -> Result<(), PdfCanvasError> {
         let depth = self.canvas_stack.len();
+        let marked_content_depth = self
+            .optional_content
+            .as_ref()
+            .map(OptionalContentFilter::depth);
         self.save()?;
         let outer_floor = std::mem::replace(&mut self.restore_floor, self.canvas_stack.len());
 
@@ -744,6 +778,10 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
         })();
 
         self.restore_floor = outer_floor;
+        // Marked-content sequences cannot span streams, so close any left open.
+        if let (Some(filter), Some(depth)) = (&mut self.optional_content, marked_content_depth) {
+            filter.close_to(depth);
+        }
         let restore_result = self.restore_to(depth);
         result.and(restore_result)
     }
