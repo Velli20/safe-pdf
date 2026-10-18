@@ -4,6 +4,7 @@ use crate::WritingMode;
 
 use crate::{
     cmap::{parser::CMapParser, token::CMapToken},
+    code_range,
     error::CMapError,
 };
 
@@ -90,7 +91,7 @@ impl EmbeddedCMapBuilder<'_> {
             code_space_ranges: self.code_space_ranges,
             allowed_code_lengths: self.code_lengths.into_iter().collect(),
             cid_chars: self.cid_chars,
-            cid_ranges: self.cid_ranges,
+            cid_ranges: code_range::disjoint(self.cid_ranges),
             writing_mode: self.writing_mode,
         })
     }

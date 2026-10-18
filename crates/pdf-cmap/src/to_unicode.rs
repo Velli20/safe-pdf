@@ -5,36 +5,52 @@
 
 use std::collections::HashMap;
 
-use crate::{UnicodeSequence, cmap::parser::CMapParser, error::CMapError};
-use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
+use crate::{PdfCode, UnicodeSequence, cmap::parser::CMapParser, error::CMapError};
+use pdf_object_reader::{
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
+};
 
-/// A named identity `/ToUnicode` map covering the Unicode basic multilingual plane.
-///
-/// Some producers write `/ToUnicode /Identity-H` or `/Identity-V` instead of
-/// embedding the stream required by the PDF specification. Common readers
-/// interpret those names as a direct character-code-to-Unicode mapping.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct IdentityToUnicodeMap;
+/// A `/ToUnicode` map from PDF source codes to extraction Unicode.
+#[derive(Debug)]
+pub enum ToUnicodeMap {
+    /// A CMap parsed from an embedded `/ToUnicode` stream.
+    CMap(ToUnicodeCMap),
+    /// A named identity map covering the Unicode basic multilingual plane.
+    ///
+    /// Some producers write `/ToUnicode /Identity-H` or `/Identity-V` instead of
+    /// embedding the stream required by the PDF specification. Common readers
+    /// interpret those names as a direct character-code-to-Unicode mapping.
+    Identity,
+}
 
-impl IdentityToUnicodeMap {
-    /// Returns an identity map for the supported horizontal and vertical names.
-    #[must_use]
-    pub fn from_name(name: &[u8]) -> Option<Self> {
-        matches!(name, b"Identity-H" | b"Identity-V").then_some(Self)
+impl ToUnicodeMap {
+    /// Returns all Unicode scalars represented by `code` when a mapping exists.
+    pub fn map(&self, code: PdfCode) -> Option<UnicodeSequence> {
+        let value = u16::try_from(code.value()).ok()?;
+        match self {
+            Self::CMap(map) => map.map_char_code(value).cloned(),
+            Self::Identity => char::from_u32(u32::from(value)).map(Into::into),
+        }
     }
 }
 
-impl crate::ToUnicodeMap for IdentityToUnicodeMap {
-    fn map(&self, code: crate::PdfCode) -> Option<UnicodeSequence> {
-        u16::try_from(code.value())
-            .ok()
-            .and_then(|value| char::from_u32(u32::from(value)))
-            .map(Into::into)
+impl FromPdfObject for ToUnicodeMap {
+    /// Propagates malformed CMap streams. Unsupported names and other values decode to an
+    /// empty map, which falls back the same way an absent entry does.
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let value = context.object().value();
+        if matches!(value, ObjectVariant::Stream(_)) {
+            return ToUnicodeCMap::from_pdf_object(context).map(Self::CMap);
+        }
+        Ok(match value.try_bytes(context.source()) {
+            Ok(b"Identity-H" | b"Identity-V") => Self::Identity,
+            _ => Self::CMap(ToUnicodeCMap::default()),
+        })
     }
 }
 
 /// A parsed ToUnicode CMap that maps PDF character codes to Unicode scalar values.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ToUnicodeCMap(HashMap<u16, UnicodeSequence>);
 
 impl ToUnicodeCMap {
@@ -61,14 +77,6 @@ impl TryFrom<&[u8]> for ToUnicodeCMap {
     }
 }
 
-impl crate::ToUnicodeMap for ToUnicodeCMap {
-    fn map(&self, code: crate::PdfCode) -> Option<UnicodeSequence> {
-        u16::try_from(code.value())
-            .ok()
-            .and_then(|value| self.map_char_code(value).cloned())
-    }
-}
-
 impl FromPdfObject for ToUnicodeCMap {
     /// Parses a stream within the caller's traversal; named identity maps are handled separately.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
@@ -78,33 +86,58 @@ impl FromPdfObject for ToUnicodeCMap {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::{PdfCode, ToUnicodeMap};
+    use pdf_object_reader::{
+        ObjectReader, object_resolver::PassthroughResolver, pdf_string::PdfString,
+        string_kind::StringKind,
+    };
 
     fn mapped(map: &ToUnicodeCMap, code: u16) -> Option<&[char]> {
         map.map_char_code(code).map(UnicodeSequence::as_slice)
     }
 
+    fn read_named(name: &[u8]) -> ToUnicodeMap {
+        ObjectReader::new(PassthroughResolver)
+            .read::<ToUnicodeMap>(&PdfString::from(name, StringKind::Name))
+            .expect("named maps should remain non-fatal")
+    }
+
     #[test]
     fn identity_map_maps_valid_bmp_codes() {
-        let map = IdentityToUnicodeMap::from_name(b"Identity-H").unwrap();
+        let map = ToUnicodeMap::Identity;
 
         for (code, expected) in [(0x55, 'U'), (0x11B, 'ě'), (0xED, 'í'), (0x2013, '–')] {
             let code = PdfCode::new(code, 2).unwrap();
             assert_eq!(map.map(code), Some(expected.into()));
         }
-        assert!(IdentityToUnicodeMap::from_name(b"Identity-V").is_some());
-        assert!(IdentityToUnicodeMap::from_name(b"Adobe-Identity-UCS").is_none());
     }
 
     #[test]
     fn identity_map_rejects_surrogates_and_codes_outside_the_bmp() {
-        let map = IdentityToUnicodeMap;
+        let map = ToUnicodeMap::Identity;
 
         assert_eq!(map.map(PdfCode::new(0xD800, 2).unwrap()), None);
         assert_eq!(map.map(PdfCode::new(0x10000, 3).unwrap()), None);
+    }
+
+    #[test]
+    fn named_identity_to_unicode_map_is_supported() {
+        let code = PdfCode::new(0x11B, 2).expect("the Czech character code should be valid");
+
+        assert_eq!(
+            read_named(b"Identity-H").map(code),
+            Some(UnicodeSequence::from('ě'))
+        );
+        assert!(matches!(read_named(b"Identity-V"), ToUnicodeMap::Identity));
+    }
+
+    #[test]
+    fn unsupported_named_to_unicode_map_is_ignored() {
+        let code = PdfCode::new(0x41, 1).unwrap();
+
+        assert_eq!(read_named(b"Unsupported-H").map(code), None);
     }
 
     #[test]

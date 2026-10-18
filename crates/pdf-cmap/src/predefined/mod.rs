@@ -4,7 +4,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use crate::WritingMode;
 
-use crate::{cmap_support::Type0CodeMap, error::CMapError};
+use crate::{CodeRange, CodeRanges, cmap_support::Type0CodeMap, error::CMapError};
 
 /// Generated predefined CMap metadata.
 #[derive(Debug, Clone, Copy)]
@@ -128,7 +128,11 @@ impl PredefinedCMap {
         let mut result = HashMap::new();
         for map in self.maps.iter().rev() {
             for range in map.cid_ranges {
-                insert_cid_range_unicode(&mut result, range);
+                result.extend(
+                    (range.start..=range.end)
+                        .zip(range.cid_start..=u16::MAX)
+                        .filter_map(|(code, cid)| Some((cid, char::from_u32(code)?))),
+                );
             }
             for ch in map.cid_chars {
                 if let Some(c) = char::from_u32(ch.code) {
@@ -161,7 +165,11 @@ impl Type0CodeMap for PredefinedCMap {
             if let Some(cid) = find_cid_char(map.cid_chars, code) {
                 return Some(cid);
             }
-            if let Some(cid) = find_cid_range(map.cid_ranges, code) {
+            if let Some(cid) = map
+                .cid_ranges
+                .covering(code)
+                .and_then(|(range, offset)| range.cid_at(offset))
+            {
                 return Some(cid);
             }
         }
@@ -185,47 +193,20 @@ fn find_cid_char(chars: &[GeneratedCidChar], code: u32) -> Option<u16> {
         .and_then(|index| chars.get(index).map(|entry| entry.cid))
 }
 
-/// Find a generated sequential code-to-CID range containing a source code.
-fn find_cid_range(ranges: &[GeneratedCidRange], code: u32) -> Option<u16> {
-    let mut left = 0usize;
-    let mut right = ranges.len();
-
-    while left < right {
-        let mid = left.checked_add((right.checked_sub(left)?) / 2)?;
-        let range = ranges.get(mid)?;
-        if code < range.start {
-            right = mid;
-        } else if code > range.end {
-            left = mid.saturating_add(1);
-        } else {
-            let offset = code.checked_sub(range.start)?;
-            let offset = u16::try_from(offset).ok()?;
-            return range.cid_start.checked_add(offset);
-        }
+impl GeneratedCidRange {
+    /// Returns the CID mapped from the code `offset` places past the range start.
+    fn cid_at(&self, offset: u32) -> Option<u16> {
+        self.cid_start.checked_add(u16::try_from(offset).ok()?)
     }
-
-    None
 }
 
-fn insert_cid_range_unicode(result: &mut HashMap<u16, char>, range: &GeneratedCidRange) {
-    let mut code = range.start;
-    while code <= range.end {
-        let Some(offset) = code.checked_sub(range.start) else {
-            break;
-        };
-        let Ok(offset) = u16::try_from(offset) else {
-            break;
-        };
-        let Some(cid) = range.cid_start.checked_add(offset) else {
-            break;
-        };
-        if let Some(c) = char::from_u32(code) {
-            result.insert(cid, c);
-        }
-        let Some(next) = code.checked_add(1) else {
-            break;
-        };
-        code = next;
+impl CodeRange for GeneratedCidRange {
+    fn first(&self) -> u32 {
+        self.start
+    }
+
+    fn last(&self) -> u32 {
+        self.end
     }
 }
 

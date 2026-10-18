@@ -1,12 +1,7 @@
 //! Best-effort font descriptor metadata and CID collection information.
 
-use crate::{
-    flags::FontFlags,
-    font::{FontMetadata, FontSlant, FontWeight},
-    pdf::{CidSystemInfo, PdfFontDescriptor},
-};
+use crate::pdf::{CidSystemInfo, PdfFontDescriptor};
 use pdf_cmap::predefined::PredefinedCMap;
-use pdf_graphics::rect::Rect;
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use std::{collections::HashMap, sync::Arc};
 
@@ -14,24 +9,13 @@ impl FromPdfObject for PdfFontDescriptor {
     /// Reads a FontDescriptor dictionary, not the enclosing font dictionary, tolerating
     /// malformed optional metadata.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let value = context.object().value();
         let mut context = context.dictionary()?;
-        let flags = context.lenient::<FontFlags>(b"Flags").unwrap_or_default();
         Ok(Self {
-            metadata: FontMetadata {
-                weight: FontWeight(if flags.contains(FontFlags::FORCE_BOLD) {
-                    700
-                } else {
-                    400
-                }),
-                slant: if flags.contains(FontFlags::ITALIC) {
-                    FontSlant::Italic
-                } else {
-                    FontSlant::Normal
-                },
-                symbolic: flags.contains(FontFlags::SYMBOLIC),
-                ..FontMetadata::default()
-            },
-            bounds: context.lenient::<[f32; 4]>(b"FontBBox").map(Rect::from),
+            metadata: context.read(value)?,
+            bounds: context
+                .dictionary()
+                .optional_rect(b"FontBBox", context.source())?,
             missing_width: context.lenient(b"MissingWidth"),
             italic_angle: context.lenient(b"ItalicAngle"),
             stem_v: context.lenient(b"StemV"),

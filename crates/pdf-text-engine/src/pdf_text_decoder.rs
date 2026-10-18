@@ -9,8 +9,8 @@ use crate::error::TextError;
 use crate::text::TextVector;
 use pdf_cmap::{Cid, CidMapping, PdfCode, ToUnicodeMap, UnicodeSequence};
 use pdf_font::{
-    CidFontKind, CidFontSpec, GlyphId, GlyphName, PdfFontSpec, PdfGlyphMetric, PdfMetrics,
-    SimpleEncoding, Type0FontSpec,
+    CidFontKind, CidFontSpec, GlyphId, GlyphName, PdfFontSpec, PdfMetrics, SimpleEncoding,
+    Type0FontSpec,
 };
 
 /// Borrowed glyph-selection data valid only while its font specification is borrowed.
@@ -105,16 +105,14 @@ where
 
 /// Converts one CMap result into the selector, Unicode mapping, and PDF advance used by layout.
 fn decode_type0_mapping(font: &Type0FontSpec, mapping: CidMapping) -> DecodedGlyph<'static> {
+    let metrics = &font.descendant.metrics;
+    let width = metrics.explicit.get(mapping.cid.0);
     DecodedGlyph {
         source_code: mapping.source,
         selector: type0_selector(&font.descendant, mapping.cid),
         unicode: type0_unicode(font, mapping),
-        pdf_advance: metric_advance(metric_for(&font.descendant.metrics, mapping.cid.0)),
-        explicit_width: font
-            .descendant
-            .metrics
-            .explicit
-            .contains_key(&mapping.cid.0),
+        pdf_advance: horizontal_advance(width.unwrap_or(metrics.default)),
+        explicit_width: width.is_some(),
     }
 }
 
@@ -128,15 +126,10 @@ fn type0_selector(descendant: &CidFontSpec, cid: Cid) -> GlyphSelector<'static> 
         return GlyphSelector::Cid(cid);
     }
 
-    let Some(map) = descendant.cid_to_gid.as_deref() else {
-        return GlyphSelector::Cid(cid);
-    };
-    let Ok(index) = usize::try_from(cid.0) else {
-        return GlyphSelector::Cid(cid);
-    };
-    map.get(index)
-        .copied()
-        .map(|glyph| GlyphSelector::GlyphId(GlyphId(u32::from(glyph))))
+    descendant
+        .cid_to_gid
+        .glyph(cid)
+        .map(GlyphSelector::GlyphId)
         .unwrap_or(GlyphSelector::Cid(cid))
 }
 
@@ -184,7 +177,7 @@ fn advance_type0_input<'a>(
 fn decode_one_byte_font<'a, E>(
     encoding: &'a SimpleEncoding,
     metrics: &PdfMetrics,
-    to_unicode: Option<&dyn ToUnicodeMap>,
+    to_unicode: Option<&ToUnicodeMap>,
     bytes: &[u8],
     consume: &mut impl FnMut(DecodedGlyph<'a>) -> Result<(), E>,
 ) -> Result<(), E>
@@ -200,10 +193,11 @@ where
 fn decode_one_byte_mapping<'a>(
     encoding: &'a SimpleEncoding,
     metrics: &PdfMetrics,
-    to_unicode: Option<&dyn ToUnicodeMap>,
+    to_unicode: Option<&ToUnicodeMap>,
     code: u8,
 ) -> Result<DecodedGlyph<'a>, TextError> {
     let source = PdfCode::new(u32::from(code), 1)?;
+    let width = metrics.explicit.get(u32::from(code));
     Ok(DecodedGlyph {
         source_code: source,
         selector: encoding
@@ -223,24 +217,12 @@ fn decode_one_byte_mapping<'a>(
                     .map(Into::into)
             })
             .unwrap_or_else(|| char::from(code).into()),
-        pdf_advance: metric_advance(metric_for(metrics, u32::from(code))),
-        explicit_width: metrics.explicit.contains_key(&u32::from(code)),
+        pdf_advance: horizontal_advance(width.unwrap_or(metrics.default)),
+        explicit_width: width.is_some(),
     })
 }
 
-/// Returns an explicit PDF metric or the table's normalized default.
-fn metric_for(metrics: &PdfMetrics, code: u32) -> PdfGlyphMetric {
-    metrics
-        .explicit
-        .get(&code)
-        .copied()
-        .unwrap_or(metrics.default)
-}
-
-/// Retains only the advance components needed by the layout stage.
-const fn metric_advance(metric: PdfGlyphMetric) -> TextVector {
-    TextVector {
-        x: metric.advance_x,
-        y: metric.advance_y,
-    }
+/// PDF font widths advance horizontally only.
+const fn horizontal_advance(width: f32) -> TextVector {
+    TextVector { x: width, y: 0.0 }
 }
