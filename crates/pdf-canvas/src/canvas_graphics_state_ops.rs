@@ -153,6 +153,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                                 .map(|resources| resources.get())
                                 .transpose()?,
                             None,
+                            None,
                         )?;
 
                         let transform = self.current_state()?.transform;
