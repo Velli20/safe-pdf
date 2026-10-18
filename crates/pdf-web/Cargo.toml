@@ -20,7 +20,6 @@ pdf-graphics = { path = "../pdf-graphics" }
 pdf-graphics-web = { path = "../pdf-graphics-web" }
 pdf-document = { path = "../pdf-document", features = ["serde"] }
 pdf-renderer = { path = "../pdf-renderer" }
-pdf-text-engine = { path = "../pdf-text-engine" }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2.0.12"

@@ -2534,7 +2534,6 @@ dependencies = [
  "pdf-graphics-web",
  "pdf-optional-content",
  "pdf-renderer",
- "pdf-text-engine",
  "serde",
  "serde_json",
  "thiserror 2.0.12",

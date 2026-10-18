@@ -2,7 +2,7 @@
 use pdf_annotation_core::pdf_data::AnnotationAction;
 use pdf_document::{document::PdfDocument, reader::PdfReader};
 use pdf_graphics_web::{WebCanvasBackend, WebCanvasOptions};
-use pdf_renderer::DocumentTextSelection;
+use pdf_renderer::{DocumentTextSelection, PdfRenderer};
 use pdf_web::{
     WebAnnotationOverlay, WebPageRenderer, WebViewport,
     interop::{
@@ -12,10 +12,9 @@ use pdf_web::{
 use std::{collections::BTreeMap, sync::Arc};
 use wasm_bindgen::prelude::*;
 
-/// Browser example's document, layouts and overlay resources.
+/// Browser example's renderer-owned document, layouts and overlay resources.
 #[wasm_bindgen]
 pub struct WebDocument {
-    document: PdfDocument,
     renderer: WebPageRenderer,
     overlay: WebAnnotationOverlay,
     selection: WebSelectionController,
@@ -34,8 +33,10 @@ impl WebDocument {
         let count = u32::try_from(document.pages.len()).map_err(error)?;
         let overlay = WebAnnotationOverlay::new(&document).map_err(error)?;
         Ok(Self {
-            document,
-            renderer: WebPageRenderer::new(pdf_text_engine::bundled_font_system()),
+            renderer: WebPageRenderer::new(PdfRenderer::new_with_font_system(
+                document,
+                pdf_text_engine::bundled_font_system(),
+            )),
             overlay,
             selection: WebSelectionController::from_selection(
                 DocumentTextSelection::new(&(0..count).collect::<Vec<_>>()).map_err(error)?,
@@ -49,7 +50,7 @@ impl WebDocument {
 
     /// Number of pages in this document.
     pub fn page_count(&self) -> Result<u32, JsValue> {
-        u32::try_from(self.document.pages.len()).map_err(error)
+        u32::try_from(self.renderer.document().pages.len()).map_err(error)
     }
 
     /// Returns the displayed page dimensions in points, honoring CropBox and `/Rotate`.
@@ -61,7 +62,7 @@ impl WebDocument {
     }
 
     fn page(&self, page: u32) -> Result<&pdf_document::page::PdfPage, JsValue> {
-        page_of(&self.document, page)
+        page_of(self.renderer.document(), page)
     }
 
     /// Renders page pixels and returns independently prepared annotation models.
@@ -77,7 +78,7 @@ impl WebDocument {
             .viewport_revision
             .checked_add(1)
             .ok_or_else(|| error("viewport revision overflow"))?;
-        let page = page_of(&self.document, page_index)?;
+        let page = page_of(self.renderer.document(), page_index)?;
         let viewport = WebViewport::for_page(page, zoom, dpr, rotation, self.viewport_revision)
             .map_err(error)?;
         let size = viewport.page().device_size();
@@ -88,7 +89,6 @@ impl WebDocument {
             .renderer
             .render(
                 page_index,
-                page,
                 self.content_revision,
                 &mut backend,
                 &viewport,
@@ -170,7 +170,7 @@ impl WebDocument {
         let viewport = page.and_then(|p| self.viewports.get(&p));
         let bounds = page
             .and_then(|p| usize::try_from(p).ok())
-            .and_then(|p| self.document.pages.get(p))
+            .and_then(|p| self.renderer.document().pages.get(p))
             .and_then(|p| p.crop_box.or(p.media_box))
             .map(|r| r.normalized());
         let receipt = self
