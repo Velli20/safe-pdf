@@ -20,19 +20,6 @@ impl Interval {
         Self { min, max }
     }
 
-    /// Groups a flat `[min0 max0 min1 max1 ...]` array into intervals.
-    ///
-    /// A trailing unpaired value is ignored.
-    pub fn from_pairs(values: &[f32]) -> Vec<Self> {
-        values
-            .as_chunks::<2>()
-            .0
-            .iter()
-            .copied()
-            .map(Self::from)
-            .collect()
-    }
-
     /// Returns `max - min`.
     pub fn span(&self) -> f32 {
         self.max - self.min
@@ -89,18 +76,6 @@ impl From<[f32; 2]> for Interval {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn from_pairs_groups_values_and_drops_trailing_value() {
-        let intervals = Interval::from_pairs(&[0.0, 1.0, -2.0, 4.0, 9.0]);
-
-        assert_eq!(
-            intervals,
-            vec![Interval::new(0.0, 1.0), Interval::new(-2.0, 4.0)]
-        );
-        assert!(Interval::from_pairs(&[]).is_empty());
-        assert!(Interval::from_pairs(&[3.0]).is_empty());
-    }
 
     #[test]
     fn is_increasing_rejects_degenerate_inverted_and_nonfinite_bounds() {

@@ -1,22 +1,29 @@
-use num_derive::FromPrimitive;
-use num_traits::{FromPrimitive, ToPrimitive};
+use num_traits::ToPrimitive;
 use pdf_decode::decode_normalized_samples;
 use pdf_graphics::interval::Interval;
-use pdf_object_reader::{
-    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 use crate::{
-    error::FunctionReadError,
-    function::{Function, FunctionImpl},
+    error::FunctionReadError, function::FunctionImpl,
     function_interpolation_error::FunctionInterpolationError,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, FromPrimitive, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 enum InterpolationOrder {
     #[default]
     Linear = 1,
     Cubic = 3,
+}
+
+/// Reads a sampled function's `/Order`; an absent entry is the caller's linear default.
+impl FromPdfObject for InterpolationOrder {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match context.object().try_number::<i32>(context.source())? {
+            1 => Ok(Self::Linear),
+            3 => Ok(Self::Cubic),
+            _ => Err(FunctionReadError::InvalidOrder.into()),
+        }
+    }
 }
 
 /// One input dimension of a sample table.
@@ -147,58 +154,51 @@ impl FunctionImpl for SampledFunction {
     fn domain(&self) -> Option<Interval> {
         self.axes.first().map(|axis| axis.domain)
     }
+}
 
-    /// Parses a Type 0 (Sampled) function.
-    ///
-    /// Sampled functions use a lookup table of sample values with optional
-    /// linear or cubic spline interpolation between samples.
-    fn parse(
-        object: &ObjectVariant,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Function, FunctionReadError> {
-        let stream = object.try_stream(objects)?;
-        let dictionary = &stream.dictionary;
+/// Reads a Type 0 (Sampled) function stream.
+///
+/// Sampled functions use a lookup table of sample values with optional
+/// linear or cubic spline interpolation between samples.
+impl FromPdfObject for SampledFunction {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.stream()?;
+        let stream = context.stream();
+        let mut dictionary = context.dictionary();
 
         // /Domain: Required. Array of 2*m numbers defining input domain.
-        let domain = dictionary.required_intervals(b"Domain", objects)?;
+        let domain = dictionary.required_intervals(b"Domain")?;
 
         // /Range: Required for sampled functions. Array of 2*n numbers.
-        let range = dictionary.required_intervals(b"Range", objects)?;
+        let range = dictionary.required_intervals(b"Range")?;
 
         // /Size: Required. Array of m integers specifying samples per input dimension.
-        let size = dictionary.required_vec_of::<usize>(b"Size", objects)?;
+        let size = dictionary.required::<Vec<usize>>(b"Size")?;
         if size.is_empty() {
-            return Err(FunctionReadError::InvalidSizeArray);
+            return Err(FunctionReadError::InvalidSizeArray.into());
         }
 
         // /BitsPerSample: Required. Must be 1, 2, 4, 8, 12, 16, 24, or 32.
-        let bits_per_sample = dictionary.required_number::<usize>(b"BitsPerSample", objects)?;
+        let bits_per_sample = dictionary.required::<usize>(b"BitsPerSample")?;
         if !matches!(bits_per_sample, 1 | 2 | 4 | 8 | 12 | 16 | 24 | 32) {
-            return Err(FunctionReadError::InvalidBitsPerSample);
+            return Err(FunctionReadError::InvalidBitsPerSample.into());
         }
 
         // /Order: Optional. 1 = linear (default), 3 = cubic spline.
-        let order = dictionary
-            .get(b"Order")
-            .map(|o| {
-                InterpolationOrder::from_i32(o.try_number::<i32>(objects)?)
-                    .ok_or(FunctionReadError::InvalidOrder)
-            })
-            .transpose()?
-            .unwrap_or_default();
+        let order = dictionary.optional(b"Order")?.unwrap_or_default();
 
         // /Encode: Optional. Defaults to [0, Size[i]-1] per dimension.
-        let encode = dictionary.optional_intervals(b"Encode", objects)?;
+        let encode = dictionary.optional_intervals(b"Encode")?;
         if domain.len() < size.len() || encode.as_ref().is_some_and(|e| e.len() < size.len()) {
-            return Err(FunctionReadError::MismatchedSampleDimensions);
+            return Err(FunctionReadError::MismatchedSampleDimensions.into());
         }
 
         // /Decode: Optional. Defaults to Range values.
         let decode = dictionary
-            .optional_intervals(b"Decode", objects)?
+            .optional_intervals(b"Decode")?
             .unwrap_or_else(|| range.clone());
         if decode.len() != range.len() {
-            return Err(FunctionReadError::InvalidDecodeLength);
+            return Err(FunctionReadError::InvalidDecodeLength.into());
         }
 
         // Row-major strides, innermost axis last; the final product is the sample count.
@@ -241,14 +241,15 @@ impl FunctionImpl for SampledFunction {
             .map(|(decode, range)| SampleOutput { decode, range })
             .collect();
 
-        let samples = decode_normalized_samples(stream.raw_data(), bits_per_sample, samples_count)?;
+        let samples = decode_normalized_samples(stream.raw_data(), bits_per_sample, samples_count)
+            .map_err(FunctionReadError::from)?;
 
-        Ok(Function::Sampled(SampledFunction {
+        Ok(Self {
             order,
             axes,
             outputs,
             samples,
-        }))
+        })
     }
 }
 

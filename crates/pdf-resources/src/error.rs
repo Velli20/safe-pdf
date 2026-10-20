@@ -2,9 +2,7 @@ use pdf_color_space::error::ColorSpaceError;
 use pdf_content_stream_operators::error::PdfOperatorError;
 use pdf_decode::DecodeError;
 use pdf_font::error::FontError;
-use pdf_function::{
-    error::FunctionReadError, function_interpolation_error::FunctionInterpolationError,
-};
+use pdf_function::function_interpolation_error::FunctionInterpolationError;
 use pdf_graphics::dash_pattern::DashPatternError;
 use pdf_image::PdfImageError;
 use pdf_shading::error::PdfShadingError;
@@ -55,8 +53,6 @@ pub enum PdfPagesError {
     UnsupportedXObjectSubtype { subtype: String },
     #[error("failed to process image: {0}")]
     Image(#[from] PdfImageError),
-    #[error("{0}")]
-    FunctionRead(#[from] FunctionReadError),
     #[error("{0}")]
     Decode(#[from] DecodeError),
     #[error("{0}")]

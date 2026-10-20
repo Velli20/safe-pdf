@@ -14,6 +14,7 @@ use crate::object_variant::ObjectVariant;
 use crate::pdf_name::PdfName;
 use crate::reader::ObjectAccess;
 use crate::{dictionary::Dictionary, stream::StreamObject};
+use pdf_graphics::interval::Interval;
 use std::collections::HashMap;
 
 /// The single argument passed to a typed decoder.
@@ -246,6 +247,43 @@ impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
             source: Box::new(source),
         })
     }
+
+    /// Reads an optional flat `[min0 max0 min1 max1 ...]` array as one interval per pair.
+    ///
+    /// A missing or null entry is absent, and a trailing unpaired value is ignored.
+    pub fn optional_intervals(&mut self, key: &[u8]) -> ReadResult<Option<Vec<Interval>>> {
+        let Some(object) = self.dictionary.get(key) else {
+            return Ok(None);
+        };
+        let resolved = self.access.resolve(object);
+        let result = resolved.and_then(|resolved| match resolved.value() {
+            ObjectVariant::Array(array) => ArrayContext::new(array, &mut *self.access)
+                .read_intervals()
+                .map(Some),
+            ObjectVariant::Null => Ok(None),
+            value => Err(ObjectReadError::TypeMismatch {
+                expected: ObjectKind::Array,
+                actual: value.kind(),
+            }),
+        });
+        result.map_err(|source| ObjectReadError::At {
+            location: ReadLocation::DictionaryKey(PdfName::from_bytes(key)),
+            source: Box::new(source),
+        })
+    }
+
+    /// Reads a required flat `[min0 max0 min1 max1 ...]` array as one interval per pair.
+    ///
+    /// A trailing unpaired value is ignored.
+    pub fn required_intervals(&mut self, key: &[u8]) -> ReadResult<Vec<Interval>> {
+        self.optional_intervals(key)?
+            .ok_or_else(|| ObjectReadError::At {
+                location: ReadLocation::DictionaryKey(PdfName::from_bytes(key)),
+                source: Box::new(ObjectReadError::MissingDictionaryKey {
+                    key: PdfName::from_bytes(key),
+                }),
+            })
+    }
 }
 
 /// Provides bounds-checked typed array reads in source order.
@@ -323,6 +361,21 @@ impl<'read, A: ObjectAccess + ?Sized> ArrayContext<'read, A> {
             );
         }
         Ok(values)
+    }
+
+    /// Reads the elements as a flat `[min0 max0 min1 max1 ...]` list, one interval per pair.
+    ///
+    /// A trailing unpaired value is ignored.
+    pub fn read_intervals(&mut self) -> ReadResult<Vec<Interval>> {
+        (0..self.array.len().saturating_sub(1))
+            .step_by(2)
+            .map(|min| {
+                Ok(Interval::new(
+                    self.at(min)?,
+                    self.at(min.saturating_add(1))?,
+                ))
+            })
+            .collect()
     }
 
     /// Decodes the first `N` elements in source order, validating the length first.

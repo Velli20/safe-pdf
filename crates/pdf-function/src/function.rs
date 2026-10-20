@@ -7,9 +7,7 @@
 //! - Type 4: PostScript Calculator functions
 
 use pdf_graphics::interval::Interval;
-use pdf_object_reader::{
-    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 use crate::{
     error::FunctionReadError, exponential_interpolation::ExponentialFunction,
@@ -31,20 +29,15 @@ pub enum FunctionType {
     PostScriptCalculator = 4,
 }
 
-impl FunctionType {
-    /// Creates a `FunctionType` from an integer value.
-    ///
-    /// # Returns
-    ///
-    /// `Some(FunctionType)` if the value corresponds to a supported function type,
-    /// `None` otherwise.
-    pub fn from_i32(val: i32) -> Option<Self> {
-        match val {
-            0 => Some(Self::Sampled),
-            2 => Some(Self::ExponentialInterpolation),
-            3 => Some(Self::Stitching),
-            4 => Some(Self::PostScriptCalculator),
-            _ => None,
+/// Reads the `/FunctionType` entry of a function dictionary.
+impl FromPdfObject for FunctionType {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match context.object().try_number::<i32>(context.source())? {
+            0 => Ok(Self::Sampled),
+            2 => Ok(Self::ExponentialInterpolation),
+            3 => Ok(Self::Stitching),
+            4 => Ok(Self::PostScriptCalculator),
+            _ => Err(FunctionReadError::InvalidFunctionType.into()),
         }
     }
 }
@@ -66,11 +59,6 @@ pub trait FunctionImpl {
 
     /// Returns the input domain of this function's first input dimension.
     fn domain(&self) -> Option<Interval>;
-
-    fn parse(
-        object: &ObjectVariant,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Function, FunctionReadError>;
 }
 
 /// A PDF Function object for mapping input values to output values.
@@ -107,35 +95,22 @@ impl FunctionImpl for Function {
             Function::PostScriptCalculator(function) => function.domain(),
         }
     }
+}
 
-    /// Parses a PDF Function object from a dictionary.
-    ///
-    /// # Parameters
-    ///
-    /// - `dictionary`: The function dictionary containing function parameters.
-    /// - `objects`: The object collection for resolving indirect references.
-    /// - `stream`: Optional stream data (required for Type 4 PostScript functions).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the dictionary is malformed or contains invalid values.
-    fn parse(
-        object: &ObjectVariant,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Function, FunctionReadError> {
-        let function_type = object
-            .try_dictionary(objects)?
-            .required_number::<i32>(b"FunctionType", objects)
-            .map(FunctionType::from_i32)?
-            .ok_or(FunctionReadError::InvalidFunctionType)?;
-
-        match function_type {
-            FunctionType::ExponentialInterpolation => ExponentialFunction::parse(object, objects),
-            FunctionType::Stitching => StitchingFunction::parse(object, objects),
-            FunctionType::PostScriptCalculator => {
-                PostScriptCalculatorFunction::parse(object, objects)
+/// Reads a function dictionary or stream, dispatching on its `/FunctionType`.
+impl FromPdfObject for Function {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object();
+        let mut context = context.dictionary()?;
+        match context.required::<FunctionType>(b"FunctionType")? {
+            FunctionType::Sampled => context.read(object).map(Function::Sampled),
+            FunctionType::ExponentialInterpolation => {
+                context.read(object).map(Function::Exponential)
             }
-            FunctionType::Sampled => SampledFunction::parse(object, objects),
+            FunctionType::Stitching => context.read(object).map(Function::Stitching),
+            FunctionType::PostScriptCalculator => {
+                context.read(object).map(Function::PostScriptCalculator)
+            }
         }
     }
 }

@@ -1,21 +1,13 @@
 //! Parsing for Type 4 free-form Gouraud triangle meshes.
 
-use pdf_color_space::color_space::ColorSpace;
-use pdf_function::function::Function;
-use pdf_graphics::rect::Rect;
-use pdf_object_reader::{
-    ObjectAccess, dictionary::Dictionary, object_error::ObjectError,
-    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-};
 use pdf_utils::BitReader;
 use thiserror::Error;
 
 use crate::{
     error::PdfShadingError,
-    mesh_bit_widths::MeshBitWidths,
+    mesh_config::MeshConfig,
     mesh_decoder::{MeshDecoder, read_mesh_bits},
     model::{MeshTriangle, MeshVertex, Shading},
-    parse::{parse_functions, required_color_space},
 };
 
 /// Errors produced while reconstructing a Type 4 free-form triangle mesh.
@@ -41,56 +33,16 @@ pub enum FreeFormMeshError {
     EmptyMesh,
 }
 
-/// Parses a Type 4 shading stream into independent mesh triangles.
-pub(crate) fn parse_free_form_triangle_mesh(
-    object: &ObjectVariant,
-    access: &mut (impl ObjectAccess + ?Sized),
-) -> Result<Shading, PdfShadingError> {
-    let ObjectVariant::Stream(stream) = object else {
-        return Err(ObjectError::TypeMismatch("Stream", object.name()).into());
-    };
-    let config = FreeFormMeshConfig::parse(&stream.dictionary, access)?;
-    let triangles = FreeFormMeshParser::new(stream.raw_data(), &config)?.parse()?;
+impl MeshConfig {
+    /// Decodes this Type 4 stream into independent mesh triangles.
+    pub(crate) fn free_form_triangle_mesh(self) -> Result<Shading, PdfShadingError> {
+        let triangles = FreeFormMeshParser::new(&self)?.parse()?;
 
-    Ok(Shading::FreeFormTriangleMesh {
-        color_space: config.color_space,
-        bbox: config.bbox,
-        anti_alias: config.anti_alias,
-        triangles,
-    })
-}
-
-/// Owned dictionary values needed while parsing a Type 4 stream.
-struct FreeFormMeshConfig {
-    color_space: ColorSpace,
-    bbox: Option<Rect>,
-    anti_alias: Option<bool>,
-    widths: MeshBitWidths,
-    decode: Vec<f32>,
-    functions: Vec<Function>,
-}
-
-impl FreeFormMeshConfig {
-    /// Reads and validates the mesh-specific shading dictionary entries.
-    fn parse(
-        dictionary: &Dictionary,
-        access: &mut (impl ObjectAccess + ?Sized),
-    ) -> Result<Self, PdfShadingError> {
-        let color_space = required_color_space(dictionary, access)?;
-        let objects = access.source();
-        let widths = MeshBitWidths::from_dictionary(dictionary, objects)?;
-        let decode = dictionary.required_vec_of::<f32>(b"Decode", objects)?;
-        let bbox = dictionary.optional_bbox(objects)?;
-        let anti_alias = dictionary.optional_boolean(b"AntiAlias", objects)?;
-        let functions = optional_functions(dictionary, objects)?;
-
-        Ok(Self {
-            color_space,
-            bbox,
-            anti_alias,
-            widths,
-            decode,
-            functions,
+        Ok(Shading::FreeFormTriangleMesh {
+            color_space: self.color_space,
+            bbox: self.bbox,
+            anti_alias: self.anti_alias,
+            triangles,
         })
     }
 }
@@ -103,18 +55,12 @@ struct FreeFormMeshParser<'a> {
 }
 
 impl<'a> FreeFormMeshParser<'a> {
-    /// Creates a parser borrowing the stream and its validated configuration.
-    fn new(data: &'a [u8], config: &'a FreeFormMeshConfig) -> Result<Self, PdfShadingError> {
+    /// Creates a parser borrowing the stream data and its validated configuration.
+    fn new(config: &'a MeshConfig) -> Result<Self, PdfShadingError> {
         Ok(Self {
-            reader: BitReader::new(data),
-            decoder: MeshDecoder::new(
-                config.widths,
-                &config.decode,
-                &config.functions,
-                &config.color_space,
-                "Free-form triangle mesh",
-            )?,
-            flag_width: config.widths.flag(),
+            reader: BitReader::new(&config.data),
+            decoder: config.decoder("Free-form triangle mesh")?,
+            flag_width: config.flag_width(),
         })
     }
 
@@ -194,15 +140,4 @@ fn continue_triangle(
         }
     };
     Ok(MeshTriangle { vertices })
-}
-
-fn optional_functions(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> Result<Vec<Function>, PdfShadingError> {
-    if dictionary.get(b"Function").is_some() {
-        parse_functions(dictionary, objects)
-    } else {
-        Ok(Vec::new())
-    }
 }

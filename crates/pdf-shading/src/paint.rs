@@ -272,31 +272,14 @@ pub fn build_shading_paint(
     transform: Option<Transform>,
     use_background: bool,
 ) -> Result<ShadingPaint, PdfShadingError> {
-    let outside = |background: &Option<Color>| {
-        background
-            .filter(|_| use_background)
-            .unwrap_or(Color::TRANSPARENT)
-    };
     match shading {
-        Shading::Axial {
-            coords,
-            color_stops,
-            extend,
-            background,
-            ..
-        } => {
-            let stops = color_stops.bounded(*extend, outside(background));
+        Shading::Axial { coords, gradient } => {
+            let stops = gradient.bounded_stops(use_background);
             ShadingPaint::linear_gradient(*coords, transform, stops.positions, stops.colors)
                 .map_err(|error| PdfShadingError::UnsupportedFeature(error.to_string()))
         }
-        Shading::Radial {
-            coords,
-            color_stops,
-            extend,
-            background,
-            ..
-        } => {
-            let stops = color_stops.bounded(*extend, outside(background));
+        Shading::Radial { coords, gradient } => {
+            let stops = gradient.bounded_stops(use_background);
             ShadingPaint::radial_gradient(*coords, transform, stops.positions, stops.colors)
                 .map_err(|error| PdfShadingError::UnsupportedFeature(error.to_string()))
         }

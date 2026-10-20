@@ -1,13 +1,12 @@
 //! External graphics-state soft mask decoding.
 use crate::{error::PdfPagesError, form::FormXObject, xobject::XObjectSubtype};
 use num_traits::ToPrimitive;
-use pdf_function::function::{Function, FunctionImpl};
+use pdf_function::function::Function;
 use pdf_graphics::MaskMode;
 use pdf_object_reader::object_lookup::ObjectLookupExt;
 use pdf_object_reader::object_resolver::ObjectResolver;
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult, dictionary::Dictionary,
-    object_variant::ObjectVariant,
 };
 use std::sync::Arc;
 
@@ -31,7 +30,13 @@ impl FromPdfObject for SoftMask {
 
         Self::require_form_group(context.dictionary(), context.source())?;
         let shape = context.required_shared(b"G")?;
-        let transfer = Self::read_transfer(context.dictionary().get(b"TR"), context.source())?;
+        // `/Identity` leaves coverage unchanged, so it needs no table.
+        let transfer = match context.dictionary().get(b"TR") {
+            Some(value) if !value.is_named(b"Identity", context.source()) => {
+                Some(Self::transfer_table(&context.read::<Function>(value)?)?)
+            }
+            _ => None,
+        };
         Ok(Self {
             mask_type,
             shape,
@@ -56,20 +61,13 @@ impl SoftMask {
         })
     }
 
-    /// Samples a `/TR` transfer function into a lookup table; `/Identity` needs none.
-    fn read_transfer(
-        value: Option<&ObjectVariant>,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Option<Arc<[u8; 256]>>, PdfPagesError> {
-        let Some(value) = value.filter(|value| !value.is_named(b"Identity", objects)) else {
-            return Ok(None);
-        };
-        let function = Function::parse(value, objects)?;
+    /// Samples a `/TR` transfer function into a lookup table.
+    fn transfer_table(function: &Function) -> Result<Arc<[u8; 256]>, PdfPagesError> {
         let mut table = [0; 256];
         for (input, output) in (0_u8..=255).zip(&mut table) {
-            *output = Self::sample_transfer(&function, input)?;
+            *output = Self::sample_transfer(function, input)?;
         }
-        Ok(Some(Arc::new(table)))
+        Ok(Arc::new(table))
     }
 
     /// Maps one 8-bit mask coverage value through the transfer function.
