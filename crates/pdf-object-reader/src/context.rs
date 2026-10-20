@@ -11,10 +11,8 @@ use crate::handle::ObjectHandle;
 use crate::object_id::ObjectId;
 use crate::object_kind::ObjectKind;
 use crate::object_variant::ObjectVariant;
-use crate::pdf_array::PdfArray;
 use crate::pdf_name::PdfName;
 use crate::reader::ObjectAccess;
-use crate::resolved_object::ResolvedObject;
 use crate::{dictionary::Dictionary, stream::StreamObject};
 use std::collections::HashMap;
 
@@ -24,16 +22,17 @@ use std::collections::HashMap;
 /// this context. Shape conversions preserve that same traversal and report a
 /// type mismatch instead of silently accepting an unrelated object kind.
 pub struct ObjectContext<'read, A: ObjectAccess + ?Sized> {
-    object: &'read ResolvedObject,
+    object: &'read ObjectVariant,
     access: &'read mut A,
 }
 
 impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
-    /// Binds a validated direct object to an active access implementation.
+    /// Binds a direct object to an active access implementation.
     ///
+    /// The object must already be resolved: a top-level reference is never followed.
     /// Custom access implementations must establish their traversal scope
     /// before constructing the context and retain it until decoding returns.
-    pub fn new(object: &'read ResolvedObject, access: &'read mut A) -> Self {
+    pub fn new(object: &'read ObjectVariant, access: &'read mut A) -> Self {
         Self { object, access }
     }
 
@@ -41,7 +40,7 @@ impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
     ///
     /// The borrow outlives `&self`, so the object can be inspected while the
     /// context reads children.
-    pub fn object(&self) -> &'read ResolvedObject {
+    pub fn object(&self) -> &'read ObjectVariant {
         self.object
     }
 
@@ -57,7 +56,7 @@ impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
 
     /// Requires an array and transfers the traversal into its context.
     pub fn array(self) -> ReadResult<ArrayContext<'read, A>> {
-        match self.object.value() {
+        match self.object {
             ObjectVariant::Array(array) => Ok(ArrayContext {
                 array,
                 access: self.access,
@@ -71,7 +70,7 @@ impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
 
     /// Requires a stream and transfers the traversal into its context.
     pub fn stream(self) -> ReadResult<StreamContext<'read, A>> {
-        match self.object.value() {
+        match self.object {
             ObjectVariant::Stream(stream) => Ok(StreamContext {
                 stream,
                 access: self.access,
@@ -251,31 +250,45 @@ impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
 
 /// Provides bounds-checked typed array reads in source order.
 pub struct ArrayContext<'read, A: ObjectAccess + ?Sized> {
-    array: &'read PdfArray,
+    array: &'read [ObjectVariant],
     access: &'read mut A,
 }
 
 impl<'read, A: ObjectAccess + ?Sized> ArrayContext<'read, A> {
-    /// Returns the immutable array for length checks or custom inspection.
+    /// Binds a direct sequence of values the caller already holds to an active access
+    /// implementation.
+    ///
+    /// Elements are read within the access's current traversal, as if the array had
+    /// been reached through it.
+    pub fn new(array: &'read [ObjectVariant], access: &'read mut A) -> Self {
+        Self { array, access }
+    }
+
+    /// Returns the immutable elements for length checks or custom inspection.
     ///
     /// The borrow outlives `&self`, so elements can be held while the context reads them.
-    pub fn array(&self) -> &'read PdfArray {
+    pub fn array(&self) -> &'read [ObjectVariant] {
         self.array
     }
 
     /// Reads an element, reporting an out-of-bounds error for an invalid index.
+    #[inline]
     pub fn at<T: FromPdfObject>(&mut self, index: usize) -> ReadResult<T> {
-        let result = match self.array.get(index) {
-            Some(object) => self.access.read(object),
-            None => Err(ObjectReadError::ArrayIndexOutOfBounds {
-                index,
-                length: self.array.len(),
-            }),
+        let Some(object) = self.array.get(index) else {
+            return Err(ObjectReadError::At {
+                location: ReadLocation::ArrayIndex(index),
+                source: Box::new(ObjectReadError::ArrayIndexOutOfBounds {
+                    index,
+                    length: self.array.len(),
+                }),
+            });
         };
-        result.map_err(|source| ObjectReadError::At {
-            location: ReadLocation::ArrayIndex(index),
-            source: Box::new(source),
-        })
+        self.access
+            .read(object)
+            .map_err(|source| ObjectReadError::At {
+                location: ReadLocation::ArrayIndex(index),
+                source: Box::new(source),
+            })
     }
 
     /// Reads an element through typed caching while retaining array diagnostics.
@@ -298,7 +311,43 @@ impl<'read, A: ObjectAccess + ?Sized> ArrayContext<'read, A> {
 
     /// Eagerly decodes every element in source order, stopping at the first error.
     pub fn read_all<T: FromPdfObject>(&mut self) -> ReadResult<Vec<T>> {
-        (0..self.array.len()).map(|index| self.at(index)).collect()
+        let mut values = Vec::with_capacity(self.array.len());
+        for (index, object) in self.array.iter().enumerate() {
+            values.push(
+                self.access
+                    .read(object)
+                    .map_err(|source| ObjectReadError::At {
+                        location: ReadLocation::ArrayIndex(index),
+                        source: Box::new(source),
+                    })?,
+            );
+        }
+        Ok(values)
+    }
+
+    /// Decodes the first `N` elements in source order, validating the length first.
+    ///
+    /// Trailing elements are ignored, like the `[T; N]` decoder.
+    #[inline]
+    pub fn read_array<T: FromPdfObject + Default, const N: usize>(&mut self) -> ReadResult<[T; N]> {
+        if self.array.len() < N {
+            return Err(crate::object_error::ObjectError::InvalidArrayLength {
+                expected: N,
+                found: self.array.len(),
+            }
+            .into());
+        }
+        let mut values = std::array::from_fn(|_| T::default());
+        for (index, (value, object)) in values.iter_mut().zip(self.array).enumerate() {
+            *value = self
+                .access
+                .read(object)
+                .map_err(|source| ObjectReadError::At {
+                    location: ReadLocation::ArrayIndex(index),
+                    source: Box::new(source),
+                })?;
+        }
+        Ok(values)
     }
 }
 
@@ -344,7 +393,10 @@ macro_rules! context_access {
                 self.access.read_shared(object)
             }
             /// Resolves a raw child without entering its eager decoding scope.
-            pub fn resolve(&mut self, object: &ObjectVariant) -> ReadResult<ResolvedObject> {
+            pub fn resolve(
+                &mut self,
+                object: &ObjectVariant,
+            ) -> ReadResult<crate::resolved_object::ResolvedObject> {
                 self.access.resolve(object)
             }
 

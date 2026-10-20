@@ -2,12 +2,11 @@ use std::sync::Arc;
 
 use num_traits::FromPrimitive;
 use pdf_graphics::{LineCap, LineJoin, transform::Transform};
-use pdf_object_reader::object_resolver::PassthroughResolver;
+use pdf_object_reader::{ReadResult, pdf_string::PdfString};
 
 use crate::{
     error::PdfOperatorError,
-    operands::Operands,
-    operator_trait::PdfOperator,
+    operator_trait::{OperandContext, PdfOperator},
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
@@ -30,10 +29,8 @@ impl PdfOperator for SetLineWidth {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let width = operands
-            .take_next()?
-            .try_number::<f32>(&PassthroughResolver)?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let width = operands.at(0)?;
         Ok(PdfOperatorVariant::SetLineWidth(Self::new(width)))
     }
 
@@ -66,8 +63,8 @@ impl PdfOperator for SetLineCapStyle {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let style = operands.get_u8()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let style = operands.at(0)?;
         Ok(PdfOperatorVariant::SetLineCapStyle(Self::new(style)?))
     }
 
@@ -100,8 +97,8 @@ impl PdfOperator for SetLineJoinStyle {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let style = operands.get_u8()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let style = operands.at(0)?;
         Ok(PdfOperatorVariant::SetLineJoinStyle(Self::new(style)?))
     }
 
@@ -129,10 +126,8 @@ impl PdfOperator for SetMiterLimit {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let limit = operands
-            .take_next()?
-            .try_number::<f32>(&PassthroughResolver)?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let limit = operands.at(0)?;
         Ok(PdfOperatorVariant::SetMiterLimit(Self::new(limit)))
     }
 
@@ -161,11 +156,9 @@ impl PdfOperator for SetDashPattern {
 
     const OPERAND_COUNT: Option<usize> = Some(2);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let array = operands.get_f32_array()?;
-        let phase = operands
-            .take_next()?
-            .try_number::<f32>(&PassthroughResolver)?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let array = operands.at(0)?;
+        let phase = operands.at(1)?;
         Ok(PdfOperatorVariant::SetDashPattern(Self::new(array, phase)))
     }
 
@@ -193,10 +186,8 @@ impl PdfOperator for SetFlatnessTolerance {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let tolerance = operands
-            .take_next()?
-            .try_number::<f32>(&PassthroughResolver)?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let tolerance = operands.at(0)?;
         Ok(PdfOperatorVariant::SetFlatnessTolerance(Self::new(
             tolerance,
         )))
@@ -227,8 +218,8 @@ impl PdfOperator for SetRenderingIntent {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let intent = operands.get_string_bytes()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let intent = operands.at::<PdfString>(0)?.bytes;
         Ok(PdfOperatorVariant::SetRenderingIntent(Self::new(intent)))
     }
 
@@ -246,7 +237,7 @@ impl PdfOperator for SaveGraphicsState {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::SaveGraphicsState(Self))
     }
 
@@ -264,7 +255,7 @@ impl PdfOperator for RestoreGraphicsState {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::RestoreGraphicsState(Self))
     }
 
@@ -293,11 +284,10 @@ impl PdfOperator for ConcatMatrix {
 
     const OPERAND_COUNT: Option<usize> = Some(6);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [a, b, c, d, e, f] = operands.try_array_of::<f32, 6>()?;
-        Ok(PdfOperatorVariant::ConcatMatrix(Self::new([
-            a, b, c, d, e, f,
-        ])))
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        Ok(PdfOperatorVariant::ConcatMatrix(Self::new(
+            operands.read_array()?,
+        )))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
@@ -324,8 +314,8 @@ impl PdfOperator for SetGraphicsStateFromDict {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let dict_name = operands.get_string_bytes()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let dict_name = operands.at::<PdfString>(0)?.bytes;
         Ok(PdfOperatorVariant::SetGraphicsStateFromDict(Self::new(
             dict_name,
         )))

@@ -116,7 +116,7 @@ enum DecodeParms {
 
 impl FromPdfObject for DecodeParms {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().value() {
+        match context.object() {
             dictionary @ ObjectVariant::Dictionary(_) => Ok(Self::Shared(dictionary.clone())),
             ObjectVariant::Array(array) => Ok(Self::PerFilter(array.clone())),
             _ => Err(ObjectReadError::TypeMismatch {

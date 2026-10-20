@@ -14,7 +14,7 @@ use crate::{
 /// decode-depth limit and cycle detection bound maliciously nested definitions.
 impl FromPdfObject for ColorSpace {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let value = context.object().value();
+        let value = context.object();
         let ObjectVariant::Array(array) = value else {
             return Ok(Self::try_from(value.try_bytes(context.source())?)?);
         };

@@ -23,7 +23,7 @@ pub struct SeparationColorSpace {
 impl FromPdfObject for SeparationColorSpace {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut array = context.array()?;
-        let [_, name, _, tint_transform] = array.array().as_slice() else {
+        let [_, name, _, tint_transform] = array.array() else {
             return Err(ColorSpaceError::InvalidColorSpace {
                 description: format!(
                     "/Separation requires 4 elements, found {}",

@@ -50,16 +50,16 @@ impl FromPdfObject for Resource {
     fn from_pdf_object(
         mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
     ) -> ReadResult<Self> {
-        let value = context.object().value();
+        let value = context.object();
         let subtype = match value {
             ObjectVariant::Stream(_) => Some(context.read::<XObjectSubtype>(value)?),
             _ => context.read::<XObjectSubtype>(value).ok(),
         };
         match subtype {
             None => Self::read_font(&mut context),
-            Some(XObjectSubtype::Form) => Ok(Self::from(
-                context.read::<FormXObject>(context.object().value())?,
-            )),
+            Some(XObjectSubtype::Form) => {
+                Ok(Self::from(context.read::<FormXObject>(context.object())?))
+            }
             Some(XObjectSubtype::Image) => Self::read_image(&mut context),
         }
     }
@@ -69,7 +69,7 @@ impl Resource {
     /// Reads a font, keeping the resources a Type 3 font's glyph procedures paint with.
     fn read_font(context: &mut ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let object = context.object();
-        let font: PdfFontSpec = context.read(object.value())?;
+        let font: PdfFontSpec = context.read(object)?;
         let resources = match object.dictionary()?.get(b"Resources") {
             Some(resources) if font.is_type3() => Some(context.read_shared(resources)?),
             _ => None,
@@ -91,8 +91,8 @@ impl Resource {
         {
             return Ok(Self::UnavailableImage);
         }
-        let ObjectVariant::Stream(stream) = object.value() else {
-            return Err(ObjectError::TypeMismatch("Stream", object.value().name()).into());
+        let ObjectVariant::Stream(stream) = object else {
+            return Err(ObjectError::TypeMismatch("Stream", object.name()).into());
         };
         let soft_mask = Self::read_soft_mask_image(context)?;
         match decode_image_xobject(dictionary, stream, context.access(), soft_mask.as_deref()) {

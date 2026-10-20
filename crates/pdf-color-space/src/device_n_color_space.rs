@@ -30,7 +30,7 @@ pub struct DeviceNColorSpace {
 impl FromPdfObject for DeviceNColorSpace {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut array = context.array()?;
-        let [_, names, _, tint_transform, ..] = array.array().as_slice() else {
+        let [_, names, _, tint_transform, ..] = array.array() else {
             return Err(ColorSpaceError::InvalidColorSpace {
                 description: format!(
                     "/DeviceN requires [/DeviceN names alternateSpace tintTransform] with an optional attributes dictionary; found {} element(s)",

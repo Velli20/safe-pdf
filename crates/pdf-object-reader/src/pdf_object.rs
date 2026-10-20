@@ -25,24 +25,6 @@ impl PdfObject {
 
     /// Returns the runtime kind of this object.
     pub fn kind(&self) -> ObjectKind {
-        match self.value() {
-            ObjectVariant::Null => ObjectKind::Null,
-            ObjectVariant::Boolean(_) => ObjectKind::Boolean,
-            ObjectVariant::Integer(_) => ObjectKind::Integer,
-            ObjectVariant::Real(_) => ObjectKind::Real,
-            ObjectVariant::String(value)
-                if value.kind() == crate::string_kind::StringKind::Name =>
-            {
-                ObjectKind::Name
-            }
-            ObjectVariant::String(_) => ObjectKind::String,
-            ObjectVariant::Array(_) => ObjectKind::Array,
-            ObjectVariant::Dictionary(_) => ObjectKind::Dictionary,
-            ObjectVariant::Stream(_) => ObjectKind::Stream,
-            ObjectVariant::Reference(_) => ObjectKind::Reference,
-            ObjectVariant::Trailer(_) => ObjectKind::Trailer,
-            ObjectVariant::CrossReferenceTable(_) => ObjectKind::CrossReferenceTable,
-            ObjectVariant::EndOfFile => ObjectKind::EndOfFile,
-        }
+        self.value().kind()
     }
 }

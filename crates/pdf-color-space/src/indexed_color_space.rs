@@ -29,7 +29,7 @@ pub struct IndexedColorSpace {
 impl FromPdfObject for IndexedColorSpace {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut array = context.array()?;
-        let [_, _, _, lookup] = array.array().as_slice() else {
+        let [_, _, _, lookup] = array.array() else {
             return Err(ColorSpaceError::InvalidColorSpace {
                 description: format!(
                     "/Indexed requires 4 elements, found {}",

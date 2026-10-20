@@ -1,16 +1,10 @@
-use std::sync::Arc;
-
 use crate::PdfTextItem;
-use crate::operands::Operands;
-use crate::operator_trait::PdfOperator;
+use crate::operator_trait::{OperandContext, PdfOperator};
 use crate::{
-    error::PdfOperatorError,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
-use pdf_object_reader::{
-    object_error::ObjectError, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
-};
+use pdf_object_reader::{ReadResult, pdf_string::PdfString};
 
 /// Shows a text string.
 #[derive(Debug, Clone, PartialEq)]
@@ -31,8 +25,8 @@ impl PdfOperator for ShowText {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let text = operands.get_string_bytes()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let text = operands.at::<PdfString>(0)?.bytes;
         Ok(PdfOperatorVariant::ShowText(Self::new(PdfTextItem::Text(
             text,
         ))))
@@ -61,8 +55,8 @@ impl PdfOperator for MoveNextLineShowText {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let text = operands.get_string_bytes()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let text = operands.at::<PdfString>(0)?.bytes;
         Ok(PdfOperatorVariant::MoveNextLineShowText(Self::new(
             PdfTextItem::Text(text),
         )))
@@ -100,9 +94,9 @@ impl PdfOperator for SetSpacingMoveShowText {
 
     const OPERAND_COUNT: Option<usize> = Some(3);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [word_spacing, char_spacing] = operands.try_array_of::<f32, 2>()?;
-        let text = operands.get_string_bytes()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let [word_spacing, char_spacing] = operands.read_array()?;
+        let text = operands.at::<PdfString>(2)?.bytes;
 
         Ok(PdfOperatorVariant::SetSpacingMoveShowText(Self::new(
             word_spacing,
@@ -137,26 +131,10 @@ impl PdfOperator for ShowTextArray {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let object = operands.take_next()?;
-        let ObjectVariant::Array(values) = object else {
-            return Err(ObjectError::TypeMismatch("Array", object.name()).into());
-        };
-
-        let mut elements = Vec::with_capacity(values.len());
-        for value in values.iter() {
-            match value {
-                ObjectVariant::String(value) => {
-                    elements.push(PdfTextItem::Text(Arc::clone(&value.bytes)));
-                }
-                other => {
-                    let amount = other.try_number::<f32>(&PassthroughResolver)?;
-                    elements.push(PdfTextItem::Adjustment(amount));
-                }
-            }
-        }
-
-        Ok(PdfOperatorVariant::ShowTextArray(Self::new(elements)))
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        Ok(PdfOperatorVariant::ShowTextArray(Self::new(
+            operands.at(0)?,
+        )))
     }
 
     fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
@@ -167,6 +145,13 @@ impl PdfOperator for ShowTextArray {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
+    use std::sync::Arc;
+
+    use pdf_object_reader::{
+        ArrayContext, ObjectReader, object_resolver::PassthroughResolver,
+        object_variant::ObjectVariant,
+    };
+
     use super::*;
 
     #[test]
@@ -175,14 +160,17 @@ mod tests {
 
         let original_pointer = text.as_ptr();
 
-        let mut operands = Operands::from(vec![ObjectVariant::String(
+        let operands = [ObjectVariant::String(
             pdf_object_reader::pdf_string::PdfString {
                 bytes: text,
                 kind: pdf_object_reader::string_kind::StringKind::Literal,
             },
-        )]);
+        )];
+        let reader = ObjectReader::new(PassthroughResolver);
+        let mut session = reader.session();
 
-        let operator = ShowText::read(&mut operands).expect("text should parse");
+        let operator = ShowText::read(&mut ArrayContext::new(&operands, &mut session))
+            .expect("text should parse");
         let PdfOperatorVariant::ShowText(operator) = operator else {
             panic!("expected ShowText variant");
         };
@@ -196,27 +184,26 @@ mod tests {
 
     #[test]
     fn spacing_move_show_text_groups_numeric_prefix_before_text() {
-        let mut operands = Operands::from(vec![
+        let operands = [
             ObjectVariant::Real(1.5),
             ObjectVariant::Integer(2),
             pdf_object_reader::pdf_string::PdfString::from(
                 b"text",
                 pdf_object_reader::string_kind::StringKind::Literal,
             ),
-        ]);
+        ];
+        let reader = ObjectReader::new(PassthroughResolver);
+        let mut session = reader.session();
 
-        let operator = SetSpacingMoveShowText::read(&mut operands)
-            .expect("mixed operands should parse successfully");
+        let operator =
+            SetSpacingMoveShowText::read(&mut ArrayContext::new(&operands, &mut session))
+                .expect("mixed operands should parse successfully");
         let PdfOperatorVariant::SetSpacingMoveShowText(operator) = operator else {
             panic!("expected SetSpacingMoveShowText variant");
         };
 
         assert_eq!(operator.word_spacing, 1.5);
         assert_eq!(operator.char_spacing, 2.0);
-        assert_eq!(
-            operator.text,
-            PdfTextItem::Text(std::sync::Arc::from(&b"text"[..]))
-        );
-        assert!(operands.is_empty());
+        assert_eq!(operator.text, PdfTextItem::Text(Arc::from(&b"text"[..])));
     }
 }

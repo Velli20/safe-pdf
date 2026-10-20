@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
 use pdf_image::InlineImage;
-use pdf_object_reader::{ObjectReader, object_resolver::PassthroughResolver};
+use pdf_object_reader::{
+    ObjectReader, ReadResult, object_resolver::PassthroughResolver, pdf_string::PdfString,
+};
 use pdf_parser::parser::PdfParser;
 
 use crate::{
     error::PdfOperatorError,
-    operands::Operands,
-    operator_trait::PdfOperator,
+    operator_trait::{OperandContext, PdfOperator},
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
@@ -31,8 +32,8 @@ impl PdfOperator for InvokeXObject {
 
     const OPERAND_COUNT: Option<usize> = Some(1);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let name = operands.get_string_bytes()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let name = operands.at::<PdfString>(0)?.bytes;
         Ok(PdfOperatorVariant::InvokeXObject(Self::new(name)))
     }
 
@@ -46,8 +47,8 @@ impl PdfOperator for InlineImage {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        Err(PdfOperatorError::UnsupportedOperator("BI"))
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        Err(PdfOperatorError::UnsupportedOperator("BI").into())
     }
 
     fn parse<'a>(

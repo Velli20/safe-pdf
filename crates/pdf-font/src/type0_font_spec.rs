@@ -78,7 +78,7 @@ impl CidToGidMap {
 impl FromPdfObject for CidToGidMap {
     /// Decodes a stream into its `u16` table, ignoring a trailing odd byte.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let ObjectVariant::Stream(stream) = context.object().value() else {
+        let ObjectVariant::Stream(stream) = context.object() else {
             return Ok(Self::Identity);
         };
         let (pairs, _) = stream.raw_data().as_chunks::<2>();
@@ -91,7 +91,7 @@ impl FromPdfObject for CidToGidMap {
 impl FromPdfObject for CidFontKind {
     /// Decodes the descendant dictionary's Subtype name into a supported CID kind.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().value().try_bytes(context.source())? {
+        match context.object().try_bytes(context.source())? {
             b"CIDFontType0" => Ok(Self::Type0),
             b"CIDFontType2" => Ok(Self::Type2),
             other => Err(FontError::UnsupportedCidFontSubtype {
@@ -105,7 +105,7 @@ impl FromPdfObject for CidFontKind {
 impl FromPdfObject for CidFontSpec {
     /// Parses the descendant within its parent font's traversal.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let value = context.object().value();
+        let value = context.object();
         let mut context = context.dictionary()?;
         let kind: CidFontKind = context.required(b"Subtype")?;
         let base_font: Option<Arc<[u8]>> = context.lenient(b"BaseFont");

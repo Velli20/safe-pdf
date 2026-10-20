@@ -310,39 +310,22 @@ where
         ResolvedObject::try_from(object)
     }
 
+    #[inline]
     fn read<T: FromPdfObject>(&mut self, object: &ObjectVariant) -> ReadResult<T> {
         if self.decode_depth >= self.reader.limits.max_decode_depth().get() {
             return Err(ObjectReadError::DecodeDepthExceeded {
                 maximum: self.reader.limits.max_decode_depth().get(),
             });
         }
-        // The child owns its traversal scope. Parent state remains intact on errors and unwinding.
-        let mut child = ReadSession {
-            reader: self.reader,
-            active_path: self.active_path.clone(),
-            active_ids: self.active_ids.clone(),
-            decode_depth: self.decode_depth.saturating_add(1),
+        let ObjectVariant::Reference(id) = object else {
+            // A direct value adds nothing to the active path, so it decodes in this
+            // session without copying the value or the traversal state.
+            self.decode_depth = self.decode_depth.saturating_add(1);
+            let result = T::from_pdf_object(ObjectContext::new(object, self));
+            self.decode_depth = self.decode_depth.saturating_sub(1);
+            return result;
         };
-        let mut object = PdfObject::new(object.clone());
-        while let ObjectVariant::Reference(id) = object.value() {
-            let id = *id;
-            if !child.active_ids.insert(id) {
-                return Err(ObjectReadError::CyclicReference {
-                    repeated: id,
-                    path: child.active_path,
-                });
-            }
-            if child.active_path.len() >= child.reader.limits.max_reference_depth().get() {
-                return Err(ObjectReadError::ReferenceDepthExceeded {
-                    maximum: child.reader.limits.max_reference_depth().get(),
-                    path: child.active_path,
-                });
-            }
-            child.active_path.push(id);
-            object = child.load_object(id)?;
-        }
-        let object = ResolvedObject::try_from(object)?;
-        T::from_pdf_object(ObjectContext::new(&object, &mut child))
+        self.read_reference(*id)
     }
 
     fn read_indirect<T: FromPdfObject>(&mut self, id: ObjectId) -> ReadResult<T> {
@@ -381,5 +364,45 @@ where
         T: FromPdfObject + Send + Sync + 'static,
     {
         self.read_shared(&ObjectVariant::Reference(id))
+    }
+}
+
+impl<S, C> ReadSession<'_, S, C>
+where
+    S: ObjectSource,
+    C: ObjectCache,
+{
+    /// Follows a reference chain and decodes its target in a child traversal scope.
+    ///
+    /// Kept out of [`ObjectAccess::read`] so the direct-value path stays small enough to inline.
+    fn read_reference<T: FromPdfObject>(&mut self, mut id: ObjectId) -> ReadResult<T> {
+        // The child owns its traversal scope. Parent state remains intact on errors and unwinding.
+        let mut child = ReadSession {
+            reader: self.reader,
+            active_path: self.active_path.clone(),
+            active_ids: self.active_ids.clone(),
+            decode_depth: self.decode_depth.saturating_add(1),
+        };
+        let object = loop {
+            if !child.active_ids.insert(id) {
+                return Err(ObjectReadError::CyclicReference {
+                    repeated: id,
+                    path: child.active_path,
+                });
+            }
+            if child.active_path.len() >= child.reader.limits.max_reference_depth().get() {
+                return Err(ObjectReadError::ReferenceDepthExceeded {
+                    maximum: child.reader.limits.max_reference_depth().get(),
+                    path: child.active_path,
+                });
+            }
+            child.active_path.push(id);
+            let object = child.load_object(id)?;
+            match object.value() {
+                ObjectVariant::Reference(next) => id = *next,
+                _ => break object,
+            }
+        };
+        T::from_pdf_object(ObjectContext::new(object.value(), &mut child))
     }
 }

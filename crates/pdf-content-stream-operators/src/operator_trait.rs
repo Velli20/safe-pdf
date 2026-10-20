@@ -1,9 +1,17 @@
+use pdf_object_reader::{
+    ArrayContext, ReadResult, ReadSession, object_resolver::PassthroughResolver,
+};
+
 use crate::{
     error::PdfOperatorError,
-    operands::Operands,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
+
+/// The operands collected before an operator token, read in place through a
+/// session that does not resolve references.
+pub type OperandContext<'read, 'reader> =
+    ArrayContext<'read, ReadSession<'reader, PassthroughResolver>>;
 
 /// Represents a PDF content stream operator.
 ///
@@ -20,13 +28,12 @@ pub trait PdfOperator {
     /// The number of operands this operator consumes from the operand stack.
     const OPERAND_COUNT: Option<usize>;
 
-    /// Reads and consumes the necessary operands from the provided `Operands`
-    /// slice and constructs the specific `PdfOperatorVariant`.
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError>;
+    /// Decodes the operator's operands and constructs the specific `PdfOperatorVariant`.
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant>;
 
     /// Optional custom parsing hook.
     ///
-    /// Operators that cannot be parsed solely from the pre-collected `Operands`
+    /// Operators that cannot be parsed solely from the pre-collected operands
     /// (for example, operators that need to read additional bytes from the
     /// content stream or use a non-standard grammar) should implement this
     /// method so they can perform custom parsing using the low-level

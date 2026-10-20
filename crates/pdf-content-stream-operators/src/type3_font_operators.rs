@@ -1,10 +1,9 @@
 use crate::{
-    error::PdfOperatorError,
-    operands::Operands,
-    operator_trait::PdfOperator,
+    operator_trait::{OperandContext, PdfOperator},
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
+use pdf_object_reader::ReadResult;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SetCharWidthAndBoundingBox {
@@ -27,8 +26,8 @@ impl PdfOperator for SetCharWidthAndBoundingBox {
 
     const OPERAND_COUNT: Option<usize> = Some(6);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [wx, wy, llx, lly, urx, ury] = operands.try_array_of::<f32, 6>()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let [wx, wy, llx, lly, urx, ury] = operands.read_array()?;
 
         Ok(PdfOperatorVariant::SetCharWidthAndBoundingBox(Self {
             wx,
@@ -58,8 +57,8 @@ impl PdfOperator for SetCharWidth {
 
     const OPERAND_COUNT: Option<usize> = Some(2);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [wx, wy] = operands.try_array_of::<f32, 2>()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let [wx, wy] = operands.read_array()?;
 
         Ok(PdfOperatorVariant::SetCharWidth(Self { wx, wy }))
     }

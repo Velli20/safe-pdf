@@ -1,10 +1,9 @@
 use crate::{
-    error::PdfOperatorError,
-    operands::Operands,
-    operator_trait::PdfOperator,
+    operator_trait::{OperandContext, PdfOperator},
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
+use pdf_object_reader::ReadResult;
 
 /// Modifies the current clipping path by intersecting it with the current path, using the non-zero winding number rule to determine the region to clip.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -15,7 +14,7 @@ impl PdfOperator for ClipNonZero {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::ClipNonZero(Self))
     }
 
@@ -33,7 +32,7 @@ impl PdfOperator for ClipEvenOdd {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::ClipEvenOdd(Self))
     }
 

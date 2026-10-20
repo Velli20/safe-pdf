@@ -133,7 +133,7 @@ impl FromPdfObject for Pattern {
                 resources: context
                     .optional_shared::<Resources>(b"Resources")?
                     .unwrap_or_else(|| ObjectHandle::from(Resources::default())),
-                content_stream: context.read::<ContentStream>(object.value())?,
+                content_stream: context.read::<ContentStream>(object)?,
             }),
             PatternType::Shading => Ok(Pattern::Shading {
                 shading: context.required::<Shading>(b"Shading")?,

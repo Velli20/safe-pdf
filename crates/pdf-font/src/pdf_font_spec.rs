@@ -40,7 +40,7 @@ pub enum PdfFontSpec {
 impl FromPdfObject for PdfFontSpec {
     /// Reads a font resource, substituting a Standard 14 font on parsing failure.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let value = context.object().value();
+        let value = context.object();
         let mut context = context.dictionary()?;
         // Keep recovery at the resource boundary: a missing or unsupported subtype, or a
         // concrete font that fails to parse, falls back to a Standard 14 font.

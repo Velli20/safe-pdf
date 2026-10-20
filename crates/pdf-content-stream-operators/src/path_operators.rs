@@ -1,10 +1,9 @@
 use crate::{
-    error::PdfOperatorError,
-    operands::Operands,
-    operator_trait::PdfOperator,
+    operator_trait::{OperandContext, PdfOperator},
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
     variants::PdfOperatorVariant,
 };
+use pdf_object_reader::ReadResult;
 
 /// Begins a new subpath by moving the current point to coordinates (x, y), omitting any connecting line segment.
 /// If the `m` operator is the first operator in a path, it sets the current point.
@@ -27,8 +26,8 @@ impl PdfOperator for MoveTo {
 
     const OPERAND_COUNT: Option<usize> = Some(2);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [x, y] = operands.try_array_of::<f32, 2>()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let [x, y] = operands.read_array()?;
         Ok(PdfOperatorVariant::MoveTo(Self::new(x, y)))
     }
 
@@ -58,8 +57,8 @@ impl PdfOperator for LineTo {
 
     const OPERAND_COUNT: Option<usize> = Some(2);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [x, y] = operands.try_array_of::<f32, 2>()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let [x, y] = operands.read_array()?;
         Ok(PdfOperatorVariant::LineTo(Self::new(x, y)))
     }
 
@@ -105,8 +104,8 @@ impl PdfOperator for CurveTo {
 
     const OPERAND_COUNT: Option<usize> = Some(6);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [x1, y1, x2, y2, x3, y3] = operands.try_array_of::<f32, 6>()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let [x1, y1, x2, y2, x3, y3] = operands.read_array()?;
         Ok(PdfOperatorVariant::CurveTo(Self::new(
             x1, y1, x2, y2, x3, y3,
         )))
@@ -144,8 +143,8 @@ impl PdfOperator for CurveToV {
 
     const OPERAND_COUNT: Option<usize> = Some(4);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [x2, y2, x3, y3] = operands.try_array_of::<f32, 4>()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let [x2, y2, x3, y3] = operands.read_array()?;
         Ok(PdfOperatorVariant::CurveToV(Self::new(x2, y2, x3, y3)))
     }
 
@@ -180,8 +179,8 @@ impl PdfOperator for CurveToY {
 
     const OPERAND_COUNT: Option<usize> = Some(4);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [x1, y1, x3, y3] = operands.try_array_of::<f32, 4>()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let [x1, y1, x3, y3] = operands.read_array()?;
         Ok(PdfOperatorVariant::CurveToY(Self::new(x1, y1, x3, y3)))
     }
 
@@ -200,7 +199,7 @@ impl PdfOperator for ClosePath {
 
     const OPERAND_COUNT: Option<usize> = Some(0);
 
-    fn read(_operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
+    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
         Ok(PdfOperatorVariant::ClosePath(Self))
     }
 
@@ -240,8 +239,8 @@ impl PdfOperator for Rectangle {
 
     const OPERAND_COUNT: Option<usize> = Some(4);
 
-    fn read(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError> {
-        let [x, y, width, height] = operands.try_array_of::<f32, 4>()?;
+    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+        let [x, y, width, height] = operands.read_array()?;
         Ok(PdfOperatorVariant::Rectangle(Self::new(
             x, y, width, height,
         )))

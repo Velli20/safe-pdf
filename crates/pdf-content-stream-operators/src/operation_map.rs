@@ -5,8 +5,7 @@ use crate::{
     error::PdfOperatorError,
     graphics_state_operators::*,
     marked_content_operators::*,
-    operands::Operands,
-    operator_trait::PdfOperator,
+    operator_trait::{OperandContext, PdfOperator},
     path_operators::*,
     path_paint_operators::*,
     shadings_operators::PaintShading,
@@ -20,6 +19,7 @@ use crate::{
 };
 
 use pdf_image::InlineImage;
+use pdf_object_reader::ReadResult;
 use pdf_parser::parser::PdfParser;
 
 /// Custom parser used by operators whose bytes are not represented by the
@@ -34,7 +34,7 @@ pub type OperatorParseHook =
 #[derive(Clone, Copy)]
 pub struct OpDescriptor {
     pub operand_count: Option<usize>,
-    pub parser: fn(operands: &mut Operands) -> Result<PdfOperatorVariant, PdfOperatorError>,
+    pub parser: fn(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant>,
     pub parse_hook: Option<OperatorParseHook>,
 }
 
