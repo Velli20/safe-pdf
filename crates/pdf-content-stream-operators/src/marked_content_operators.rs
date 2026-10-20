@@ -3,9 +3,8 @@ use std::sync::Arc;
 use pdf_object_reader::{ReadResult, object_variant::ObjectVariant, pdf_string::PdfString};
 
 use crate::{
-    operator_trait::{OperandContext, PdfOperator},
+    OperandContext,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
-    variants::PdfOperatorVariant,
 };
 
 /// Begins a marked-content sequence.
@@ -20,19 +19,18 @@ impl BeginMarkedContent {
     pub fn new(tag: Arc<[u8]>) -> Self {
         Self { tag }
     }
-}
 
-impl PdfOperator for BeginMarkedContent {
-    const NAME: &'static [u8] = b"BMC";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let tag = operands.at::<PdfString>(0)?.bytes;
-        Ok(PdfOperatorVariant::BeginMarkedContent(Self::new(tag)))
+        Ok(Self::new(tag))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.begin_marked_content(&self.tag)
     }
 }
@@ -53,43 +51,22 @@ impl BeginMarkedContentWithProps {
     pub fn new(tag: Arc<[u8]>, properties: Option<Arc<[u8]>>) -> Self {
         Self { tag, properties }
     }
-}
 
-impl PdfOperator for BeginMarkedContentWithProps {
-    const NAME: &'static [u8] = b"BDC";
-
-    const OPERAND_COUNT: Option<usize> = Some(2);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let tag = operands.at::<PdfString>(0)?.bytes;
         let properties = match operands.array().get(1) {
             Some(ObjectVariant::String(_)) => Some(operands.at::<PdfString>(1)?.bytes),
             _ => None,
         };
-        Ok(PdfOperatorVariant::BeginMarkedContentWithProps(Self::new(
-            tag, properties,
-        )))
+        Ok(Self::new(tag, properties))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.begin_marked_content_with_properties(&self.tag, self.properties.as_deref())
-    }
-}
-
-/// Ends a marked-content sequence begun by a `BMC` or `BDC` operator.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct EndMarkedContent;
-
-impl PdfOperator for EndMarkedContent {
-    const NAME: &'static [u8] = b"EMC";
-
-    const OPERAND_COUNT: Option<usize> = Some(0);
-
-    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
-        Ok(PdfOperatorVariant::EndMarkedContent(Self))
-    }
-
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
-        backend.end_marked_content()
     }
 }

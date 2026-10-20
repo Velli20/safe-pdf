@@ -1,7 +1,6 @@
 use crate::{
-    operator_trait::{OperandContext, PdfOperator},
+    OperandContext,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
-    variants::PdfOperatorVariant,
 };
 use pdf_object_reader::ReadResult;
 
@@ -21,25 +20,26 @@ pub struct SetCharWidthAndBoundingBox {
     ury: f32,
 }
 
-impl PdfOperator for SetCharWidthAndBoundingBox {
-    const NAME: &'static [u8] = b"d1";
-
-    const OPERAND_COUNT: Option<usize> = Some(6);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+impl SetCharWidthAndBoundingBox {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let [wx, wy, llx, lly, urx, ury] = operands.read_array()?;
 
-        Ok(PdfOperatorVariant::SetCharWidthAndBoundingBox(Self {
+        Ok(Self {
             wx,
             wy,
             llx,
             lly,
             urx,
             ury,
-        }))
+        })
     }
 
-    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        _backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         Ok(())
     }
 }
@@ -52,18 +52,19 @@ pub struct SetCharWidth {
     wy: f32,
 }
 
-impl PdfOperator for SetCharWidth {
-    const NAME: &'static [u8] = b"d0";
-
-    const OPERAND_COUNT: Option<usize> = Some(2);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+impl SetCharWidth {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let [wx, wy] = operands.read_array()?;
 
-        Ok(PdfOperatorVariant::SetCharWidth(Self { wx, wy }))
+        Ok(Self { wx, wy })
     }
 
-    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        _backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         Ok(())
     }
 }

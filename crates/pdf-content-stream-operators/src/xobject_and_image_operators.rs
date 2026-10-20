@@ -1,16 +1,10 @@
 use std::sync::Arc;
 
-use pdf_image::InlineImage;
-use pdf_object_reader::{
-    ObjectReader, ReadResult, object_resolver::PassthroughResolver, pdf_string::PdfString,
-};
-use pdf_parser::parser::PdfParser;
+use pdf_object_reader::{ReadResult, pdf_string::PdfString};
 
 use crate::{
-    error::PdfOperatorError,
-    operator_trait::{OperandContext, PdfOperator},
+    OperandContext,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
-    variants::PdfOperatorVariant,
 };
 
 /// Invokes a named XObject.
@@ -25,48 +19,25 @@ impl InvokeXObject {
     pub fn new(name: Arc<[u8]>) -> Self {
         Self { name }
     }
-}
 
-impl PdfOperator for InvokeXObject {
-    const NAME: &'static [u8] = b"Do";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let name = operands.at::<PdfString>(0)?.bytes;
-        Ok(PdfOperatorVariant::InvokeXObject(Self::new(name)))
+        Ok(Self::new(name))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.invoke_xobject(&self.name)
-    }
-}
-
-impl PdfOperator for InlineImage {
-    const NAME: &'static [u8] = b"BI";
-
-    const OPERAND_COUNT: Option<usize> = Some(0);
-
-    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
-        Err(PdfOperatorError::UnsupportedOperator("BI").into())
-    }
-
-    fn parse<'a>(
-        parser: &mut PdfParser<'a>,
-    ) -> Result<Option<PdfOperatorVariant>, PdfOperatorError> {
-        let reader = ObjectReader::new(PassthroughResolver);
-        let image = parser.parse_inline_image(&mut reader.session())?;
-        Ok(Some(PdfOperatorVariant::InlineImage(Arc::new(image))))
-    }
-
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
-        backend.paint_inline_image(self)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, sync::Arc};
 
     use pdf_image::InlineImage;
     use pdf_object_reader::{
@@ -75,8 +46,8 @@ mod tests {
     };
 
     use crate::{
-        operator_trait::PdfOperator,
         recording_pdf_operator_backend::{RecordedOperation, RecordingBackend},
+        variants::PdfOperatorVariant,
     };
 
     #[test]
@@ -98,9 +69,10 @@ mod tests {
             &mut ObjectReader::new(PassthroughResolver).session(),
         )
         .expect("unfiltered inline image should be constructed");
+        let image = Arc::new(image);
         let mut backend = RecordingBackend::default();
 
-        image
+        PdfOperatorVariant::InlineImage(Arc::clone(&image))
             .call(&mut backend)
             .expect("inline image should dispatch");
 

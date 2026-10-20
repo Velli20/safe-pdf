@@ -3,5 +3,3 @@ mod operator_stream_parser;
 
 pub use content_stream::ContentStream;
 pub use pdf_object_reader::ContentStreamIdAllocator;
-
-pub use pdf_content_stream_operators::operator_trait::PdfOperator;

@@ -1,9 +1,8 @@
 use pdf_graphics::transform::Transform;
 
 use crate::{
-    operator_trait::{OperandContext, PdfOperator},
+    OperandContext,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
-    variants::PdfOperatorVariant,
 };
 use pdf_object_reader::ReadResult;
 
@@ -23,19 +22,18 @@ impl MoveTextPosition {
     pub fn new(tx: f32, ty: f32) -> Self {
         Self { tx, ty }
     }
-}
 
-impl PdfOperator for MoveTextPosition {
-    const NAME: &'static [u8] = b"Td";
-
-    const OPERAND_COUNT: Option<usize> = Some(2);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let [tx, ty] = operands.read_array()?;
-        Ok(PdfOperatorVariant::MoveTextPosition(Self::new(tx, ty)))
+        Ok(Self::new(tx, ty))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.move_text_position(self.tx, self.ty)
     }
 }
@@ -55,21 +53,18 @@ impl MoveTextPositionAndSetLeading {
     pub fn new(tx: f32, ty: f32) -> Self {
         Self { tx, ty }
     }
-}
 
-impl PdfOperator for MoveTextPositionAndSetLeading {
-    const NAME: &'static [u8] = b"TD";
-
-    const OPERAND_COUNT: Option<usize> = Some(2);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let [tx, ty] = operands.read_array()?;
-        Ok(PdfOperatorVariant::MoveTextPositionAndSetLeading(
-            Self::new(tx, ty),
-        ))
+        Ok(Self::new(tx, ty))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.move_text_position_and_set_leading(self.tx, self.ty)
     }
 }
@@ -92,40 +87,17 @@ impl SetTextMatrix {
     pub const fn matrix(&self) -> &Transform {
         &self.matrix
     }
-}
 
-impl PdfOperator for SetTextMatrix {
-    const NAME: &'static [u8] = b"Tm";
-
-    const OPERAND_COUNT: Option<usize> = Some(6);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
-        Ok(PdfOperatorVariant::SetTextMatrix(Self::new(
-            operands.read_array()?,
-        )))
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
+        Ok(Self::new(operands.read_array()?))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_text_matrix(&self.matrix)
-    }
-}
-
-/// Moves to the start of the next line.
-/// This has the same effect as `MoveTextPosition { tx: 0.0, ty: -leading }`,
-/// where `leading` is the current value of the text leading parameter in the text state.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct MoveToNextLine;
-
-impl PdfOperator for MoveToNextLine {
-    const NAME: &'static [u8] = b"T*";
-
-    const OPERAND_COUNT: Option<usize> = Some(0);
-
-    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
-        Ok(PdfOperatorVariant::MoveToNextLine(Self))
-    }
-
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
-        backend.move_to_start_of_next_line()
     }
 }
