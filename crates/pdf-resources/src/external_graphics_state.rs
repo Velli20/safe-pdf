@@ -4,7 +4,6 @@ use pdf_object_reader::{
 };
 
 use crate::{error::PdfPagesError, resource::Resource, soft_mask::SoftMask};
-use num_traits::FromPrimitive;
 use pdf_graphics::{BlendMode, DashPattern, LineCap, LineJoin};
 
 /// One parsed entry of a graphics state parameter dictionary (`ExtGState`).
@@ -138,18 +137,8 @@ fn parse_entry<A: ObjectAccess + ?Sized>(
     }
     let parsed = match name {
         b"LW" => ExternalGraphicsStateKey::LineWidth(context.read(value)?),
-        b"LC" => {
-            let cap = context.read::<i32>(value)?;
-            ExternalGraphicsStateKey::LineCap(
-                LineCap::from_i32(cap).ok_or(PdfPagesError::InvalidExtGStateLineCap(cap))?,
-            )
-        }
-        b"LJ" => {
-            let join = context.read::<i32>(value)?;
-            ExternalGraphicsStateKey::LineJoin(
-                LineJoin::from_i32(join).ok_or(PdfPagesError::InvalidExtGStateLineJoin(join))?,
-            )
-        }
+        b"LC" => ExternalGraphicsStateKey::LineCap(context.read(value)?),
+        b"LJ" => ExternalGraphicsStateKey::LineJoin(context.read(value)?),
         b"ML" => ExternalGraphicsStateKey::MiterLimit(context.read(value)?),
         b"D" => match context.read::<DashEntry>(value)? {
             DashEntry(Some(pattern)) => ExternalGraphicsStateKey::DashPattern(pattern),

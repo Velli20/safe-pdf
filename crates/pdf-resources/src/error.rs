@@ -33,12 +33,6 @@ pub enum PdfPagesError {
     InvalidExtGStateArrayLength { entry: &'static str, found: usize },
     #[error("invalid /ExtGState entry '/D': {0}")]
     InvalidExtGStateDashPattern(#[from] DashPatternError),
-    #[error("invalid /ExtGState entry '/LC': unsupported line cap value {0} (expected 0, 1, or 2)")]
-    InvalidExtGStateLineCap(i32),
-    #[error(
-        "invalid /ExtGState entry '/LJ': unsupported line join value {0} (expected 0, 1, or 2)"
-    )]
-    InvalidExtGStateLineJoin(i32),
     #[error(
         "invalid /ExtGState entry '/SMask': expected a soft mask dictionary or the name 'None'"
     )]

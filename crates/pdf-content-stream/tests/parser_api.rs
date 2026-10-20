@@ -5,7 +5,6 @@ use pdf_content_stream::ContentStream;
 use pdf_content_stream_operators::{
     PdfTextItem,
     recording_pdf_operator_backend::{RecordedOperation, RecordingBackend},
-    text_showing_operators::ShowTextArray,
     variants::PdfOperatorVariant,
 };
 use pdf_object_reader::{
@@ -122,9 +121,9 @@ fn content_stream_read_handles_bare_sign_text_array_adjustment() {
 
     assert!(matches!(
         parsed.operators.get(3),
-        Some(PdfOperatorVariant::ShowTextArray(op))
-            if op
-                == &ShowTextArray::new(vec![
+        Some(PdfOperatorVariant::ShowTextArray { elements })
+            if elements
+                == &vec![
                     PdfTextItem::Text(Arc::from(&b"e"[..])),
                     PdfTextItem::Adjustment(-4.0),
                     PdfTextItem::Text(Arc::from(&b"x"[..])),
@@ -146,7 +145,7 @@ fn content_stream_read_handles_bare_sign_text_array_adjustment() {
                     PdfTextItem::Text(Arc::from(&b"l"[..])),
                     PdfTextItem::Adjustment(3.0),
                     PdfTextItem::Text(Arc::from(&b"y"[..])),
-                ])
+                ]
     ));
 }
 

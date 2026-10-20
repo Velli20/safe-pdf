@@ -219,7 +219,10 @@ mod tests {
             &mut ArrayContext::new(&operands, &mut reader.session()),
         );
 
-        assert!(matches!(operator, Ok(Some(PdfOperatorVariant::MoveTo(_)))));
+        assert!(matches!(
+            operator,
+            Ok(Some(PdfOperatorVariant::MoveTo { .. }))
+        ));
         assert_eq!(operands.len(), 2);
     }
 
@@ -330,11 +333,11 @@ mod tests {
         assert_eq!(parser.out.len(), 2);
         assert!(matches!(
             parser.out.first(),
-            Some(PdfOperatorVariant::SetLineJoinStyle(_))
+            Some(PdfOperatorVariant::SetLineJoinStyle { .. })
         ));
         assert!(matches!(
             parser.out.get(1),
-            Some(PdfOperatorVariant::SetLineCapStyle(_))
+            Some(PdfOperatorVariant::SetLineCapStyle { .. })
         ));
     }
 
@@ -374,7 +377,7 @@ mod tests {
         assert_eq!(parser.out.len(), 1);
         assert!(matches!(
             parser.out.first(),
-            Some(PdfOperatorVariant::SetLineCapStyle(_))
+            Some(PdfOperatorVariant::SetLineCapStyle { .. })
         ));
     }
 

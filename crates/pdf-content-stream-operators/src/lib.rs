@@ -1,18 +1,10 @@
 pub mod color_operators;
 pub mod error;
-pub mod graphics_state_operators;
 pub mod marked_content_operators;
 pub mod variants;
 
-pub mod path_operators;
 pub mod pdf_operator_backend;
 pub mod recording_pdf_operator_backend;
-pub mod shadings_operators;
-pub mod text_positioning_operators;
-pub mod text_showing_operators;
-pub mod text_state_operators;
-pub mod type3_font_operators;
-pub mod xobject_and_image_operators;
 
 extern crate alloc;
 use std::sync::Arc;
