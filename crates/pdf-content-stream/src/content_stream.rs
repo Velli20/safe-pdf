@@ -75,7 +75,6 @@ mod tests {
     use pdf_content_stream_operators::{
         PdfTextItem,
         recording_pdf_operator_backend::{RecordedOperation, RecordingBackend},
-        text_showing_operators::ShowTextArray,
         variants::PdfOperatorVariant,
     };
     use pdf_object_reader::{
@@ -194,9 +193,9 @@ mod tests {
 
         assert!(matches!(
             parsed.operators.get(3),
-            Some(PdfOperatorVariant::ShowTextArray(op))
-                if op
-                    == &ShowTextArray::new(vec![
+            Some(PdfOperatorVariant::ShowTextArray { elements })
+                if elements
+                    == &vec![
                         PdfTextItem::Text(Arc::from(&b"e"[..])),
                         PdfTextItem::Adjustment(-4.0),
                         PdfTextItem::Text(Arc::from(&b"x"[..])),
@@ -218,7 +217,7 @@ mod tests {
                         PdfTextItem::Text(Arc::from(&b"l"[..])),
                         PdfTextItem::Adjustment(3.0),
                         PdfTextItem::Text(Arc::from(&b"y"[..])),
-                    ])
+                    ]
         ));
     }
 

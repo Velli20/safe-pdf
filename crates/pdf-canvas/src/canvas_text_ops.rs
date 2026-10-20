@@ -239,8 +239,8 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         let mut filter = |operator: &PdfOperatorVariant| {
             matches!(
                 operator,
-                PdfOperatorVariant::SetCharWidth(_)
-                    | PdfOperatorVariant::SetCharWidthAndBoundingBox(_)
+                PdfOperatorVariant::SetCharWidth { .. }
+                    | PdfOperatorVariant::SetCharWidthAndBoundingBox { .. }
             )
         };
 

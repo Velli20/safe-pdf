@@ -423,12 +423,12 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                         op,
                         PdfOperatorVariant::SetNonStrokingColor(_)
                             | PdfOperatorVariant::SetStrokingColor(_)
-                            | PdfOperatorVariant::SetGrayFill(_)
-                            | PdfOperatorVariant::SetGrayStroke(_)
-                            | PdfOperatorVariant::SetRGBFill(_)
-                            | PdfOperatorVariant::SetRGBStroke(_)
-                            | PdfOperatorVariant::SetCMYKFill(_)
-                            | PdfOperatorVariant::SetCMYKStroke(_)
+                            | PdfOperatorVariant::SetGrayFill { .. }
+                            | PdfOperatorVariant::SetGrayStroke { .. }
+                            | PdfOperatorVariant::SetRGBFill { .. }
+                            | PdfOperatorVariant::SetRGBStroke { .. }
+                            | PdfOperatorVariant::SetCMYKFill { .. }
+                            | PdfOperatorVariant::SetCMYKStroke { .. }
                     )
                 };
 

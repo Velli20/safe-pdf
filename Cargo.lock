@@ -2191,7 +2191,6 @@ name = "pdf-content-stream-operators"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "num-traits",
  "pdf-graphics",
  "pdf-image",
  "pdf-object-reader",

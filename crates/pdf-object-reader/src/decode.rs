@@ -1,7 +1,11 @@
 //! Extensible typed decoding with one object-bound context per invocation.
 
+use num_traits::FromPrimitive;
+use pdf_graphics::{LineCap, LineJoin, TextRenderingMode};
+
 use crate::context::ObjectContext;
 use crate::error::{ObjectReadError, ReadResult};
+use crate::object_error::ObjectError;
 use crate::object_kind::ObjectKind;
 use crate::object_variant::ObjectVariant;
 use crate::pdf_array::PdfArray;
@@ -180,6 +184,31 @@ macro_rules! number_decoder {
 }
 
 number_decoder!(f32, i32, i64, u8, u16, u32, usize);
+
+macro_rules! enumerated_number_decoder {
+    ($($type:ty => $expected:literal),+ $(,)?) => {
+        $(
+            impl FromPdfObject for $type {
+                /// Decodes the number that names one value of this parameter.
+                fn from_pdf_object(
+                    context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+                ) -> ReadResult<Self> {
+                    let found = context.object().try_number::<i32>(context.source())?;
+                    Ok(Self::from_i32(found).ok_or(ObjectError::InvalidEnumValue {
+                        expected: $expected,
+                        found,
+                    })?)
+                }
+            }
+        )+
+    };
+}
+
+enumerated_number_decoder!(
+    LineCap => "a line cap style (0 butt, 1 round, 2 projecting square)",
+    LineJoin => "a line join style (0 miter, 1 round, 2 bevel)",
+    TextRenderingMode => "a text rendering mode (0 to 7)",
+);
 
 impl FromPdfObject for bool {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {

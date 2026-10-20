@@ -7,34 +7,6 @@ use crate::{
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
 };
 
-/// Begins a marked-content sequence.
-/// Marked-content sequences associate a tag with a sequence of content stream operations.
-#[derive(Debug, Clone, PartialEq)]
-pub struct BeginMarkedContent {
-    /// The tag indicating the role or nature of the marked-content sequence.
-    tag: Arc<[u8]>,
-}
-
-impl BeginMarkedContent {
-    pub fn new(tag: Arc<[u8]>) -> Self {
-        Self { tag }
-    }
-
-    /// Reads the operator from its operands.
-    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
-        let tag = operands.at::<PdfString>(0)?.bytes;
-        Ok(Self::new(tag))
-    }
-
-    /// Dispatches the operator to `backend`.
-    pub(crate) fn call<T: PdfOperatorBackend>(
-        &self,
-        backend: &mut T,
-    ) -> Result<(), BackendError<T>> {
-        backend.begin_marked_content(&self.tag)
-    }
-}
-
 /// Begins a marked-content sequence with an associated property list.
 /// The property list can be either a name (referring to an entry in the Properties subdictionary
 /// of the current resource dictionary) or an inline dictionary.
