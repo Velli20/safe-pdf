@@ -74,7 +74,6 @@ mod tests {
 
     use pdf_content_stream_operators::{
         PdfTextItem,
-        graphics_state_operators::SaveGraphicsState,
         recording_pdf_operator_backend::{RecordedOperation, RecordingBackend},
         text_showing_operators::ShowTextArray,
         variants::PdfOperatorVariant,
@@ -167,11 +166,11 @@ mod tests {
         assert_eq!(parsed.id, 0);
         assert!(matches!(
             parsed.operators.first(),
-            Some(PdfOperatorVariant::BeginCompatibility(_))
+            Some(PdfOperatorVariant::BeginCompatibility)
         ));
         assert!(matches!(
             parsed.operators.get(1),
-            Some(PdfOperatorVariant::EndCompatibility(_))
+            Some(PdfOperatorVariant::EndCompatibility)
         ));
         assert_eq!(
             recorded_operations(&parsed.operators),
@@ -413,7 +412,7 @@ mod tests {
     #[test]
     fn content_stream_is_plain_data_after_parsing() {
         let content_stream = ContentStream {
-            operators: vec![PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState)],
+            operators: vec![PdfOperatorVariant::SaveGraphicsState],
             id: 9,
         };
 

@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
 use crate::{
+    OperandContext,
     error::PdfOperatorError,
-    operator_trait::{OperandContext, PdfOperator},
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
-    variants::PdfOperatorVariant,
 };
 use num_traits::FromPrimitive;
 use pdf_graphics::TextRenderingMode;
@@ -21,19 +20,18 @@ impl SetCharacterSpacing {
     pub fn new(spacing: f32) -> Self {
         Self { spacing }
     }
-}
 
-impl PdfOperator for SetCharacterSpacing {
-    const NAME: &'static [u8] = b"Tc";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let spacing = operands.at(0)?;
-        Ok(PdfOperatorVariant::SetCharacterSpacing(Self::new(spacing)))
+        Ok(Self::new(spacing))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_character_spacing(self.spacing)
     }
 }
@@ -50,19 +48,18 @@ impl SetWordSpacing {
     pub fn new(spacing: f32) -> Self {
         Self { spacing }
     }
-}
 
-impl PdfOperator for SetWordSpacing {
-    const NAME: &'static [u8] = b"Tw";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let spacing = operands.at(0)?;
-        Ok(PdfOperatorVariant::SetWordSpacing(Self::new(spacing)))
+        Ok(Self::new(spacing))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_word_spacing(self.spacing)
     }
 }
@@ -79,19 +76,18 @@ impl SetHorizontalScaling {
     pub fn new(scale: f32) -> Self {
         Self { scale }
     }
-}
 
-impl PdfOperator for SetHorizontalScaling {
-    const NAME: &'static [u8] = b"Tz";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let scale = operands.at(0)?;
-        Ok(PdfOperatorVariant::SetHorizontalScaling(Self::new(scale)))
+        Ok(Self::new(scale))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_horizontal_text_scaling(self.scale)
     }
 }
@@ -114,19 +110,18 @@ impl SetLeading {
     pub const fn leading(&self) -> f32 {
         self.leading
     }
-}
 
-impl PdfOperator for SetLeading {
-    const NAME: &'static [u8] = b"TL";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let leading = operands.at(0)?;
-        Ok(PdfOperatorVariant::SetLeading(Self::new(leading)))
+        Ok(Self::new(leading))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_text_leading(self.leading)
     }
 }
@@ -155,20 +150,19 @@ impl SetFont {
     pub const fn size(&self) -> f32 {
         self.size
     }
-}
 
-impl PdfOperator for SetFont {
-    const NAME: &'static [u8] = b"Tf";
-
-    const OPERAND_COUNT: Option<usize> = Some(2);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let name = operands.at::<PdfString>(0)?.bytes;
         let size = operands.at(1)?;
-        Ok(PdfOperatorVariant::SetFont(Self::new(name, size)))
+        Ok(Self::new(name, size))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_font_and_size(&self.name, self.size)
     }
 }
@@ -191,19 +185,18 @@ impl SetRenderingMode {
             }),
         }
     }
-}
 
-impl PdfOperator for SetRenderingMode {
-    const NAME: &'static [u8] = b"Tr";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let mode = operands.at(0)?;
-        Ok(PdfOperatorVariant::SetRenderingMode(Self::new(mode)?))
+        Ok(Self::new(mode)?)
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_text_rendering_mode(self.mode)
     }
 }
@@ -220,19 +213,18 @@ impl SetTextRise {
     pub fn new(rise: f32) -> Self {
         Self { rise }
     }
-}
 
-impl PdfOperator for SetTextRise {
-    const NAME: &'static [u8] = b"Ts";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let rise = operands.at(0)?;
-        Ok(PdfOperatorVariant::SetTextRise(Self::new(rise)))
+        Ok(Self::new(rise))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_text_rise(self.rise)
     }
 }

@@ -1,9 +1,6 @@
+use crate::OperandContext;
 use crate::PdfTextItem;
-use crate::operator_trait::{OperandContext, PdfOperator};
-use crate::{
-    pdf_operator_backend::{BackendError, PdfOperatorBackend},
-    variants::PdfOperatorVariant,
-};
+use crate::pdf_operator_backend::{BackendError, PdfOperatorBackend};
 use pdf_object_reader::{ReadResult, pdf_string::PdfString};
 
 /// Shows a text string.
@@ -18,21 +15,18 @@ impl ShowText {
     pub fn new(text: PdfTextItem) -> Self {
         Self { text }
     }
-}
 
-impl PdfOperator for ShowText {
-    const NAME: &'static [u8] = b"Tj";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let text = operands.at::<PdfString>(0)?.bytes;
-        Ok(PdfOperatorVariant::ShowText(Self::new(PdfTextItem::Text(
-            text,
-        ))))
+        Ok(Self::new(PdfTextItem::Text(text)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.show_text(&self.text)
     }
 }
@@ -48,21 +42,18 @@ impl MoveNextLineShowText {
     pub fn new(text: PdfTextItem) -> Self {
         Self { text }
     }
-}
 
-impl PdfOperator for MoveNextLineShowText {
-    const NAME: &'static [u8] = b"'";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let text = operands.at::<PdfString>(0)?.bytes;
-        Ok(PdfOperatorVariant::MoveNextLineShowText(Self::new(
-            PdfTextItem::Text(text),
-        )))
+        Ok(Self::new(PdfTextItem::Text(text)))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.move_to_next_line_and_show_text(&self.text)
     }
 }
@@ -87,25 +78,24 @@ impl SetSpacingMoveShowText {
             text,
         }
     }
-}
 
-impl PdfOperator for SetSpacingMoveShowText {
-    const NAME: &'static [u8] = b"\"";
-
-    const OPERAND_COUNT: Option<usize> = Some(3);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let [word_spacing, char_spacing] = operands.read_array()?;
         let text = operands.at::<PdfString>(2)?.bytes;
 
-        Ok(PdfOperatorVariant::SetSpacingMoveShowText(Self::new(
+        Ok(Self::new(
             word_spacing,
             char_spacing,
             PdfTextItem::Text(text),
-        )))
+        ))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_spacing_and_show_text(self.word_spacing, self.char_spacing, &self.text)
     }
 }
@@ -124,20 +114,17 @@ impl ShowTextArray {
     pub fn new(elements: Vec<PdfTextItem>) -> Self {
         Self { elements }
     }
-}
 
-impl PdfOperator for ShowTextArray {
-    const NAME: &'static [u8] = b"TJ";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
-        Ok(PdfOperatorVariant::ShowTextArray(Self::new(
-            operands.at(0)?,
-        )))
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
+        Ok(Self::new(operands.at(0)?))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.show_text_with_glyph_positioning(&self.elements)
     }
 }
@@ -171,10 +158,6 @@ mod tests {
 
         let operator = ShowText::read(&mut ArrayContext::new(&operands, &mut session))
             .expect("text should parse");
-        let PdfOperatorVariant::ShowText(operator) = operator else {
-            panic!("expected ShowText variant");
-        };
-
         let PdfTextItem::Text(text) = operator.text else {
             panic!("expected text item");
         };
@@ -198,10 +181,6 @@ mod tests {
         let operator =
             SetSpacingMoveShowText::read(&mut ArrayContext::new(&operands, &mut session))
                 .expect("mixed operands should parse successfully");
-        let PdfOperatorVariant::SetSpacingMoveShowText(operator) = operator else {
-            panic!("expected SetSpacingMoveShowText variant");
-        };
-
         assert_eq!(operator.word_spacing, 1.5);
         assert_eq!(operator.char_spacing, 2.0);
         assert_eq!(operator.text, PdfTextItem::Text(Arc::from(&b"text"[..])));

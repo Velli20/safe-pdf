@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
 use crate::{
+    OperandContext,
     error::PdfOperatorError,
-    operator_trait::{OperandContext, PdfOperator},
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
-    variants::PdfOperatorVariant,
 };
 use pdf_object_reader::{ReadResult, pdf_string::PdfString};
 
@@ -25,19 +24,18 @@ impl SetGrayFill {
     pub const fn gray(&self) -> f32 {
         self.gray
     }
-}
 
-impl PdfOperator for SetGrayFill {
-    const NAME: &'static [u8] = b"g";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let gray = operands.at(0)?;
-        Ok(PdfOperatorVariant::SetGrayFill(Self::new(gray)))
+        Ok(Self::new(gray))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_non_stroking_gray(self.gray)
     }
 }
@@ -54,19 +52,18 @@ impl SetGrayStroke {
     pub fn new(gray: f32) -> Self {
         Self { gray }
     }
-}
 
-impl PdfOperator for SetGrayStroke {
-    const NAME: &'static [u8] = b"G";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let gray = operands.at(0)?;
-        Ok(PdfOperatorVariant::SetGrayStroke(Self::new(gray)))
+        Ok(Self::new(gray))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_stroking_gray(self.gray)
     }
 }
@@ -92,19 +89,18 @@ impl SetRGBFill {
     pub const fn components(&self) -> [f32; 3] {
         [self.r, self.g, self.b]
     }
-}
 
-impl PdfOperator for SetRGBFill {
-    const NAME: &'static [u8] = b"rg";
-
-    const OPERAND_COUNT: Option<usize> = Some(3);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let [r, g, b] = operands.read_array()?;
-        Ok(PdfOperatorVariant::SetRGBFill(Self::new(r, g, b)))
+        Ok(Self::new(r, g, b))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_non_stroking_rgb(self.r, self.g, self.b)
     }
 }
@@ -125,19 +121,18 @@ impl SetRGBStroke {
     pub fn new(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b }
     }
-}
 
-impl PdfOperator for SetRGBStroke {
-    const NAME: &'static [u8] = b"RG";
-
-    const OPERAND_COUNT: Option<usize> = Some(3);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let [r, g, b] = operands.read_array()?;
-        Ok(PdfOperatorVariant::SetRGBStroke(Self::new(r, g, b)))
+        Ok(Self::new(r, g, b))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_stroking_rgb(self.r, self.g, self.b)
     }
 }
@@ -165,19 +160,18 @@ impl SetCMYKFill {
     pub const fn components(&self) -> [f32; 4] {
         [self.c, self.m, self.y, self.k]
     }
-}
 
-impl PdfOperator for SetCMYKFill {
-    const NAME: &'static [u8] = b"k";
-
-    const OPERAND_COUNT: Option<usize> = Some(4);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let [c, m, y, k] = operands.read_array()?;
-        Ok(PdfOperatorVariant::SetCMYKFill(Self::new(c, m, y, k)))
+        Ok(Self::new(c, m, y, k))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_non_stroking_cmyk(self.c, self.m, self.y, self.k)
     }
 }
@@ -200,19 +194,18 @@ impl SetCMYKStroke {
     pub fn new(c: f32, m: f32, y: f32, k: f32) -> Self {
         Self { c, m, y, k }
     }
-}
 
-impl PdfOperator for SetCMYKStroke {
-    const NAME: &'static [u8] = b"K";
-
-    const OPERAND_COUNT: Option<usize> = Some(4);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let [c, m, y, k] = operands.read_array()?;
-        Ok(PdfOperatorVariant::SetCMYKStroke(Self::new(c, m, y, k)))
+        Ok(Self::new(c, m, y, k))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_stroking_cmyk(self.c, self.m, self.y, self.k)
     }
 }
@@ -228,18 +221,18 @@ impl SetStrokeColorSpace {
     pub fn new(name: Arc<[u8]>) -> Self {
         Self { name }
     }
-}
 
-impl PdfOperator for SetStrokeColorSpace {
-    const NAME: &'static [u8] = b"CS";
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let name = operands.at::<PdfString>(0)?.bytes;
-        Ok(PdfOperatorVariant::SetStrokeColorSpace(Self::new(name)))
+        Ok(Self::new(name))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_stroking_color_space(&self.name)
     }
 }
@@ -255,20 +248,18 @@ impl SetNonStrokingColorSpace {
     pub fn new(name: Arc<[u8]>) -> Self {
         Self { name }
     }
-}
 
-impl PdfOperator for SetNonStrokingColorSpace {
-    const NAME: &'static [u8] = b"cs";
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let name = operands.at::<PdfString>(0)?.bytes;
-        Ok(PdfOperatorVariant::SetNonStrokingColorSpace(Self::new(
-            name,
-        )))
+        Ok(Self::new(name))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_non_stroking_color_space(&self.name)
     }
 }
@@ -290,13 +281,9 @@ impl SetStrokingColor {
             pattern,
         }
     }
-}
 
-impl PdfOperator for SetStrokingColor {
-    const NAME: &'static [u8] = b"SCN";
-    const OPERAND_COUNT: Option<usize> = None;
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         // The pattern name should come last, after the numeric color components
         let count = operands
             .array()
@@ -308,12 +295,30 @@ impl PdfOperator for SetStrokingColor {
             .collect::<ReadResult<_>>()?;
         let pattern = operands.at::<PdfString>(count).ok().map(|name| name.bytes);
 
-        Ok(PdfOperatorVariant::SetStrokingColor(Self::new(
-            values, pattern,
-        )))
+        Ok(Self::new(values, pattern))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Reads the operator from the color components of `SC`, which takes no pattern.
+    pub(crate) fn read_without_pattern(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
+        let values: Vec<f32> = operands.read_all()?;
+
+        if values.is_empty() {
+            return Err(PdfOperatorError::OperandCountMismatch {
+                operator: "SC".to_string(),
+                expected: 1,
+                actual: 0,
+            }
+            .into());
+        }
+
+        Ok(Self::new(values, None))
+    }
+
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         if let Some(pattern) = &self.pattern {
             backend.set_stroking_color_extended(&self.components, pattern)
         } else {
@@ -339,13 +344,9 @@ impl SetNonStrokingColor {
             pattern,
         }
     }
-}
 
-impl PdfOperator for SetNonStrokingColor {
-    const NAME: &'static [u8] = b"scn";
-    const OPERAND_COUNT: Option<usize> = None;
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         // The pattern name should come last, after the numeric color components
         let count = operands
             .array()
@@ -357,37 +358,11 @@ impl PdfOperator for SetNonStrokingColor {
             .collect::<ReadResult<_>>()?;
         let pattern = operands.at::<PdfString>(count).ok().map(|name| name.bytes);
 
-        Ok(PdfOperatorVariant::SetNonStrokingColor(Self::new(
-            values, pattern,
-        )))
+        Ok(Self::new(values, pattern))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
-        if let Some(pattern) = &self.pattern {
-            backend.set_non_stroking_color_extended(&self.components, pattern)
-        } else {
-            backend.set_non_stroking_color(&self.components)
-        }
-    }
-}
-
-/// Sets the non-stroking color when the color space requires
-/// multiple color components, without pattern support.
-/// This handles the "sc" operator and maps to `SetNonStrokingColor` internally.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SetNonStrokingColorSc;
-
-impl PdfOperator for SetNonStrokingColorSc {
-    const NAME: &'static [u8] = b"sc";
-    const OPERAND_COUNT: Option<usize> = None;
-
-    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
-        // Unreachable: read() always produces a SetNonStrokingColor variant,
-        // so this type is never dispatched through PdfOperatorVariant::call.
-        Ok(())
-    }
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from the color components of `sc`, which takes no pattern.
+    pub(crate) fn read_without_pattern(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let values: Vec<f32> = operands.read_all()?;
 
         if values.is_empty() {
@@ -399,42 +374,18 @@ impl PdfOperator for SetNonStrokingColorSc {
             .into());
         }
 
-        Ok(PdfOperatorVariant::SetNonStrokingColor(
-            SetNonStrokingColor::new(values, None),
-        ))
-    }
-}
-
-/// Sets the stroking color when the color space requires
-/// multiple color components, without pattern support.
-/// This handles the "SC" operator and maps to `SetStrokingColor` internally.
-#[derive(Debug, Clone, PartialEq)]
-pub struct SetStrokingColorSc;
-
-impl PdfOperator for SetStrokingColorSc {
-    const NAME: &'static [u8] = b"SC";
-    const OPERAND_COUNT: Option<usize> = None;
-
-    fn call<T: PdfOperatorBackend>(&self, _backend: &mut T) -> Result<(), BackendError<T>> {
-        // Unreachable: read() always produces a SetStrokingColor variant,
-        // so this type is never dispatched through PdfOperatorVariant::call.
-        Ok(())
+        Ok(Self::new(values, None))
     }
 
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
-        let values: Vec<f32> = operands.read_all()?;
-
-        if values.is_empty() {
-            return Err(PdfOperatorError::OperandCountMismatch {
-                operator: "SC".to_string(),
-                expected: 1,
-                actual: 0,
-            }
-            .into());
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
+        if let Some(pattern) = &self.pattern {
+            backend.set_non_stroking_color_extended(&self.components, pattern)
+        } else {
+            backend.set_non_stroking_color(&self.components)
         }
-
-        Ok(PdfOperatorVariant::SetStrokingColor(SetStrokingColor::new(
-            values, None,
-        )))
     }
 }

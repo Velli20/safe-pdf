@@ -5,10 +5,9 @@ use pdf_graphics::{LineCap, LineJoin, transform::Transform};
 use pdf_object_reader::{ReadResult, pdf_string::PdfString};
 
 use crate::{
+    OperandContext,
     error::PdfOperatorError,
-    operator_trait::{OperandContext, PdfOperator},
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
-    variants::PdfOperatorVariant,
 };
 
 /// Sets the line width for path stroking.
@@ -22,19 +21,18 @@ impl SetLineWidth {
     pub fn new(width: f32) -> Self {
         Self { width }
     }
-}
 
-impl PdfOperator for SetLineWidth {
-    const NAME: &'static [u8] = b"w";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let width = operands.at(0)?;
-        Ok(PdfOperatorVariant::SetLineWidth(Self::new(width)))
+        Ok(Self::new(width))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_line_width(self.width)
     }
 }
@@ -56,19 +54,18 @@ impl SetLineCapStyle {
             }),
         }
     }
-}
 
-impl PdfOperator for SetLineCapStyle {
-    const NAME: &'static [u8] = b"J";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let style = operands.at(0)?;
-        Ok(PdfOperatorVariant::SetLineCapStyle(Self::new(style)?))
+        Ok(Self::new(style)?)
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_line_cap(self.style)
     }
 }
@@ -90,19 +87,18 @@ impl SetLineJoinStyle {
             }),
         }
     }
-}
 
-impl PdfOperator for SetLineJoinStyle {
-    const NAME: &'static [u8] = b"j";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let style = operands.at(0)?;
-        Ok(PdfOperatorVariant::SetLineJoinStyle(Self::new(style)?))
+        Ok(Self::new(style)?)
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_line_join(self.style)
     }
 }
@@ -119,19 +115,18 @@ impl SetMiterLimit {
     pub fn new(limit: f32) -> Self {
         Self { limit }
     }
-}
 
-impl PdfOperator for SetMiterLimit {
-    const NAME: &'static [u8] = b"M";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let limit = operands.at(0)?;
-        Ok(PdfOperatorVariant::SetMiterLimit(Self::new(limit)))
+        Ok(Self::new(limit))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_miter_limit(self.limit)
     }
 }
@@ -149,20 +144,19 @@ impl SetDashPattern {
     pub fn new(array: Vec<f32>, phase: f32) -> Self {
         Self { array, phase }
     }
-}
 
-impl PdfOperator for SetDashPattern {
-    const NAME: &'static [u8] = b"d";
-
-    const OPERAND_COUNT: Option<usize> = Some(2);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let array = operands.at(0)?;
         let phase = operands.at(1)?;
-        Ok(PdfOperatorVariant::SetDashPattern(Self::new(array, phase)))
+        Ok(Self::new(array, phase))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_dash_pattern(&self.array, self.phase)
     }
 }
@@ -179,21 +173,18 @@ impl SetFlatnessTolerance {
     pub fn new(tolerance: f32) -> Self {
         Self { tolerance }
     }
-}
 
-impl PdfOperator for SetFlatnessTolerance {
-    const NAME: &'static [u8] = b"i";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let tolerance = operands.at(0)?;
-        Ok(PdfOperatorVariant::SetFlatnessTolerance(Self::new(
-            tolerance,
-        )))
+        Ok(Self::new(tolerance))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_flatness_tolerance(self.tolerance)
     }
 }
@@ -211,56 +202,19 @@ impl SetRenderingIntent {
     pub fn new(intent: Arc<[u8]>) -> Self {
         Self { intent }
     }
-}
 
-impl PdfOperator for SetRenderingIntent {
-    const NAME: &'static [u8] = b"ri";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let intent = operands.at::<PdfString>(0)?.bytes;
-        Ok(PdfOperatorVariant::SetRenderingIntent(Self::new(intent)))
+        Ok(Self::new(intent))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_rendering_intent(&self.intent)
-    }
-}
-
-/// Saves the current graphics state on the graphics state stack.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct SaveGraphicsState;
-
-impl PdfOperator for SaveGraphicsState {
-    const NAME: &'static [u8] = b"q";
-
-    const OPERAND_COUNT: Option<usize> = Some(0);
-
-    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
-        Ok(PdfOperatorVariant::SaveGraphicsState(Self))
-    }
-
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
-        backend.save_graphics_state()
-    }
-}
-
-/// Restores the graphics state by removing the most recently saved state from the stack.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct RestoreGraphicsState;
-
-impl PdfOperator for RestoreGraphicsState {
-    const NAME: &'static [u8] = b"Q";
-
-    const OPERAND_COUNT: Option<usize> = Some(0);
-
-    fn read(_operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
-        Ok(PdfOperatorVariant::RestoreGraphicsState(Self))
-    }
-
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
-        backend.restore_graphics_state()
     }
 }
 
@@ -277,20 +231,17 @@ impl ConcatMatrix {
             matrix: Transform::from(matrix),
         }
     }
-}
 
-impl PdfOperator for ConcatMatrix {
-    const NAME: &'static [u8] = b"cm";
-
-    const OPERAND_COUNT: Option<usize> = Some(6);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
-        Ok(PdfOperatorVariant::ConcatMatrix(Self::new(
-            operands.read_array()?,
-        )))
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
+        Ok(Self::new(operands.read_array()?))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.concat_matrix(&self.matrix)
     }
 }
@@ -307,21 +258,18 @@ impl SetGraphicsStateFromDict {
     pub fn new(dict_name: Arc<[u8]>) -> Self {
         Self { dict_name }
     }
-}
 
-impl PdfOperator for SetGraphicsStateFromDict {
-    const NAME: &'static [u8] = b"gs";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let dict_name = operands.at::<PdfString>(0)?.bytes;
-        Ok(PdfOperatorVariant::SetGraphicsStateFromDict(Self::new(
-            dict_name,
-        )))
+        Ok(Self::new(dict_name))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.set_graphics_state_from_dict(&self.dict_name)
     }
 }

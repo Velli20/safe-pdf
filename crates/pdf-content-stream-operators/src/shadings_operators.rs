@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    operator_trait::{OperandContext, PdfOperator},
+    OperandContext,
     pdf_operator_backend::{BackendError, PdfOperatorBackend},
-    variants::PdfOperatorVariant,
 };
 use pdf_object_reader::{ReadResult, pdf_string::PdfString};
 
@@ -20,19 +19,18 @@ impl PaintShading {
     pub fn new(name: Arc<[u8]>) -> Self {
         Self { name }
     }
-}
 
-impl PdfOperator for PaintShading {
-    const NAME: &'static [u8] = b"sh";
-
-    const OPERAND_COUNT: Option<usize> = Some(1);
-
-    fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<PdfOperatorVariant> {
+    /// Reads the operator from its operands.
+    pub(crate) fn read(operands: &mut OperandContext<'_, '_>) -> ReadResult<Self> {
         let name = operands.at::<PdfString>(0)?.bytes;
-        Ok(PdfOperatorVariant::PaintShading(Self::new(name)))
+        Ok(Self::new(name))
     }
 
-    fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
+    /// Dispatches the operator to `backend`.
+    pub(crate) fn call<T: PdfOperatorBackend>(
+        &self,
+        backend: &mut T,
+    ) -> Result<(), BackendError<T>> {
         backend.paint_shading(&self.name)
     }
 }
