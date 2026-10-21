@@ -5,10 +5,8 @@ use pdf_image::PdfImage;
 use pdf_object_reader::{ReadResult, pdf_string::PdfString};
 
 use crate::{
-    OperandContext, PdfTextItem,
-    color_operators::ColorOperands,
+    OperandContext, PdfTextItem, color_operators::ColorOperands,
     marked_content_operators::BeginMarkedContentWithProps,
-    pdf_operator_backend::{BackendError, PdfOperatorBackend},
 };
 
 /// One PDF content-stream operation with its decoded operands.
@@ -595,130 +593,17 @@ impl PdfOperatorVariant {
         };
         Ok(Some(operator))
     }
-
-    /// Dispatches the operation to `backend`.
-    pub fn call<T: PdfOperatorBackend>(&self, backend: &mut T) -> Result<(), BackendError<T>> {
-        match self {
-            Self::LineTo { x, y } => backend.line_to(*x, *y),
-            Self::MoveTo { x, y } => backend.move_to(*x, *y),
-            Self::CurveTo {
-                x1,
-                y1,
-                x2,
-                y2,
-                x3,
-                y3,
-            } => backend.curve_to(*x1, *y1, *x2, *y2, *x3, *y3),
-            Self::CurveToV { x2, y2, x3, y3 } => backend.curve_to_v(*x2, *y2, *x3, *y3),
-            Self::CurveToY { x1, y1, x3, y3 } => backend.curve_to_y(*x1, *y1, *x3, *y3),
-            Self::ClosePath => backend.close_path(),
-            Self::Rectangle {
-                x,
-                y,
-                width,
-                height,
-            } => backend.rectangle(*x, *y, *width, *height),
-            Self::StrokePath => backend.stroke_path(),
-            Self::CloseStrokePath => backend.close_and_stroke_path(),
-            Self::FillPathNonZero => backend.fill_path_nonzero_winding(),
-            Self::FillPathEvenOdd => backend.fill_path_even_odd(),
-            Self::FillAndStrokePathNonZero => backend.fill_and_stroke_path_nonzero_winding(),
-            Self::FillAndStrokePathEvenOdd => backend.fill_and_stroke_path_even_odd(),
-            Self::CloseFillAndStrokePathNonZero => {
-                backend.close_fill_and_stroke_path_nonzero_winding()
-            }
-            Self::CloseFillAndStrokePathEvenOdd => backend.close_fill_and_stroke_path_even_odd(),
-            Self::EndPath => backend.end_path_no_op(),
-            Self::ClipNonZero => backend.clip_path_nonzero_winding(),
-            Self::ClipEvenOdd => backend.clip_path_even_odd(),
-            Self::SetGrayFill { gray } => backend.set_non_stroking_gray(*gray),
-            Self::SetGrayStroke { gray } => backend.set_stroking_gray(*gray),
-            Self::SetRGBFill { r, g, b } => backend.set_non_stroking_rgb(*r, *g, *b),
-            Self::SetRGBStroke { r, g, b } => backend.set_stroking_rgb(*r, *g, *b),
-            Self::SetCMYKFill { c, m, y, k } => backend.set_non_stroking_cmyk(*c, *m, *y, *k),
-            Self::SetCMYKStroke { c, m, y, k } => backend.set_stroking_cmyk(*c, *m, *y, *k),
-            Self::SetLineWidth { width } => backend.set_line_width(*width),
-            Self::SetLineCapStyle { style } => backend.set_line_cap(*style),
-            Self::SetLineJoinStyle { style } => backend.set_line_join(*style),
-            Self::SetMiterLimit { limit } => backend.set_miter_limit(*limit),
-            Self::SetDashPattern { array, phase } => backend.set_dash_pattern(array, *phase),
-            Self::SetFlatnessTolerance { tolerance } => backend.set_flatness_tolerance(*tolerance),
-            Self::SetGraphicsStateFromDict { dict_name } => {
-                backend.set_graphics_state_from_dict(dict_name)
-            }
-            Self::SaveGraphicsState => backend.save_graphics_state(),
-            Self::RestoreGraphicsState => backend.restore_graphics_state(),
-            Self::ConcatMatrix { matrix } => backend.concat_matrix(matrix),
-            Self::BeginMarkedContent { tag } => backend.begin_marked_content(tag),
-            Self::BeginMarkedContentWithProps(op) => op.call(backend),
-            Self::EndMarkedContent => backend.end_marked_content(),
-            Self::BeginText => backend.begin_text_object(),
-            Self::EndText => backend.end_text_object(),
-            Self::MoveTextPosition { tx, ty } => backend.move_text_position(*tx, *ty),
-            Self::MoveTextPositionAndSetLeading { tx, ty } => {
-                backend.move_text_position_and_set_leading(*tx, *ty)
-            }
-            Self::SetTextMatrix { matrix } => backend.set_text_matrix(matrix),
-            Self::MoveToNextLine => backend.move_to_start_of_next_line(),
-            Self::ShowText { text } => backend.show_text(text),
-            Self::MoveNextLineShowText { text } => backend.move_to_next_line_and_show_text(text),
-            Self::SetSpacingMoveShowText {
-                word_spacing,
-                char_spacing,
-                text,
-            } => backend.set_spacing_and_show_text(*word_spacing, *char_spacing, text),
-            Self::ShowTextArray { elements } => backend.show_text_with_glyph_positioning(elements),
-            Self::SetCharacterSpacing { spacing } => backend.set_character_spacing(*spacing),
-            Self::SetWordSpacing { spacing } => backend.set_word_spacing(*spacing),
-            Self::SetHorizontalScaling { scale } => backend.set_horizontal_text_scaling(*scale),
-            Self::SetLeading { leading } => backend.set_text_leading(*leading),
-            Self::SetFont { name, size } => backend.set_font_and_size(name, *size),
-            Self::SetRenderingMode { mode } => backend.set_text_rendering_mode(*mode),
-            Self::SetTextRise { rise } => backend.set_text_rise(*rise),
-            Self::InvokeXObject { name } => backend.invoke_xobject(name),
-            Self::BeginCompatibility => Ok(()),
-            Self::InlineImage(image) => backend.paint_inline_image(image),
-            Self::EndCompatibility => Ok(()),
-            Self::PaintShading { name } => backend.paint_shading(name),
-            Self::SetCharWidthAndBoundingBox { .. } => Ok(()),
-            Self::SetCharWidth { .. } => Ok(()),
-            Self::SetRenderingIntent { intent } => backend.set_rendering_intent(intent),
-            Self::SetStrokeColorSpace { name } => backend.set_stroking_color_space(name),
-            Self::SetNonStrokingColorSpace { name } => backend.set_non_stroking_color_space(name),
-            Self::SetStrokingColor(color) => match &color.pattern {
-                Some(pattern) => backend.set_stroking_color_extended(&color.components, pattern),
-                None => backend.set_stroking_color(&color.components),
-            },
-            Self::SetNonStrokingColor(color) => match &color.pattern {
-                Some(pattern) => {
-                    backend.set_non_stroking_color_extended(&color.components, pattern)
-                }
-                None => backend.set_non_stroking_color(&color.components),
-            },
-        }
-    }
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use pdf_object_reader::{
-        ArrayContext, ObjectReader, dictionary::Dictionary, object_resolver::PassthroughResolver,
+        ArrayContext, ObjectReader, object_resolver::PassthroughResolver,
         object_variant::ObjectVariant,
     };
 
-    use crate::recording_pdf_operator_backend::{RecordedOperation, RecordingBackend};
-
     use super::*;
-
-    #[test]
-    fn test_path_operations() {
-        let mut backend = RecordingBackend::default();
-        let a = PdfOperatorVariant::MoveTo { x: 0.0, y: 0.0 };
-        a.call(&mut backend).unwrap();
-    }
 
     #[test]
     fn show_text_moves_the_operand_byte_allocation() {
@@ -775,39 +660,5 @@ mod tests {
         assert_eq!(word_spacing, 1.5);
         assert_eq!(char_spacing, 2.0);
         assert_eq!(text, PdfTextItem::Text(Arc::from(&b"text"[..])));
-    }
-
-    #[test]
-    fn inline_image_call_dispatches_to_backend_hook() {
-        let image = PdfImage::inline(
-            Dictionary::new(BTreeMap::from([
-                (Vec::from(b"BPC"), ObjectVariant::Integer(8)),
-                (
-                    Vec::from(b"CS"),
-                    pdf_object_reader::pdf_string::PdfString::from(
-                        b"G",
-                        pdf_object_reader::string_kind::StringKind::Name,
-                    ),
-                ),
-                (Vec::from(b"H"), ObjectVariant::Integer(1)),
-                (Vec::from(b"W"), ObjectVariant::Integer(2)),
-            ])),
-            vec![0x01, 0x02],
-            &mut ObjectReader::new(PassthroughResolver).session(),
-        )
-        .expect("unfiltered inline image should be constructed");
-        let image = Arc::new(image);
-        let mut backend = RecordingBackend::default();
-
-        PdfOperatorVariant::InlineImage(Arc::clone(&image))
-            .call(&mut backend)
-            .expect("inline image should dispatch");
-
-        assert_eq!(
-            backend.operations,
-            vec![RecordedOperation::PaintInlineImage {
-                data: image.shared_data()
-            }]
-        );
     }
 }

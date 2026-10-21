@@ -74,8 +74,7 @@ mod tests {
 
     use pdf_content_stream_operators::{
         PdfTextItem,
-        recording_pdf_operator_backend::{RecordedOperation, RecordingBackend},
-        variants::PdfOperatorVariant,
+        variants::PdfOperatorVariant::{self, *},
     };
     use pdf_object_reader::{
         dictionary::Dictionary, object_error::ObjectError, object_resolver::ObjectResolver,
@@ -104,16 +103,6 @@ mod tests {
             Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
             data.to_vec(),
         )
-    }
-
-    fn recorded_operations(operators: &[PdfOperatorVariant]) -> Vec<RecordedOperation> {
-        let mut backend = RecordingBackend::default();
-        for operator in operators {
-            operator
-                .call(&mut backend)
-                .expect("operator should dispatch");
-        }
-        backend.operations
     }
 
     struct MapResolver {
@@ -164,20 +153,14 @@ mod tests {
 
         assert_eq!(parsed.id, 0);
         assert!(matches!(
-            parsed.operators.first(),
-            Some(PdfOperatorVariant::BeginCompatibility)
-        ));
-        assert!(matches!(
-            parsed.operators.get(1),
-            Some(PdfOperatorVariant::EndCompatibility)
-        ));
-        assert_eq!(
-            recorded_operations(&parsed.operators),
-            vec![
-                RecordedOperation::MoveTo { x: 10.0, y: 20.0 },
-                RecordedOperation::LineTo { x: 30.0, y: 40.0 },
+            parsed.operators.as_slice(),
+            [
+                BeginCompatibility,
+                EndCompatibility,
+                MoveTo { x: 10.0, y: 20.0 },
+                LineTo { x: 30.0, y: 40.0 }
             ]
-        );
+        ));
     }
 
     #[test]
@@ -222,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn parsed_inline_image_can_be_dispatched() {
+    fn content_stream_read_parses_inline_image() {
         let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
         let parsed = reader
             .read::<ContentStream>(&ObjectVariant::Stream(stream_object(
@@ -230,29 +213,8 @@ mod tests {
                 b"BI /W 1 /H 1 /BPC 8 /CS /G ID \x00 EI",
             )))
             .expect("inline image should parse");
-        let inline_image = parsed
-            .operators
-            .first()
-            .and_then(|operator| match operator {
-                PdfOperatorVariant::InlineImage(image) => Some(image),
-                _ => None,
-            })
-            .expect("expected inline image");
 
-        let mut backend = RecordingBackend::default();
-        parsed
-            .operators
-            .first()
-            .expect("inline image operator")
-            .call(&mut backend)
-            .expect("dispatch should succeed");
-
-        assert_eq!(
-            backend.operations,
-            vec![RecordedOperation::PaintInlineImage {
-                data: inline_image.shared_data(),
-            }]
-        );
+        assert!(matches!(parsed.operators.as_slice(), [InlineImage(_)]));
     }
 
     #[test]
@@ -262,10 +224,7 @@ mod tests {
             .read::<ContentStream>(&ObjectVariant::Stream(stream_object(1, b"@ q")))
             .expect("stream should parse");
 
-        assert_eq!(
-            recorded_operations(&parsed.operators),
-            vec![RecordedOperation::SaveGraphicsState]
-        );
+        assert!(matches!(parsed.operators.as_slice(), [SaveGraphicsState]));
     }
 
     #[test]
@@ -290,10 +249,10 @@ mod tests {
             .expect("contents array should parse");
 
         assert_eq!(parsed.id, 0);
-        assert_eq!(
-            recorded_operations(&parsed.operators),
-            vec![RecordedOperation::MoveTo { x: 1.0, y: 2.0 }]
-        );
+        assert!(matches!(
+            parsed.operators.as_slice(),
+            [MoveTo { x: 1.0, y: 2.0 }]
+        ));
     }
 
     #[test]
@@ -336,10 +295,10 @@ mod tests {
             .expect("malformed inline image should be skipped");
 
         assert_eq!(parsed.id, 0);
-        assert_eq!(
-            recorded_operations(&parsed.operators),
-            vec![RecordedOperation::RestoreGraphicsState]
-        );
+        assert!(matches!(
+            parsed.operators.as_slice(),
+            [RestoreGraphicsState]
+        ));
         assert_eq!(
             reader
                 .content_stream_ids()
@@ -394,13 +353,10 @@ mod tests {
             .expect("page should have a content stream");
 
         assert_eq!(content_stream.id, 0);
-        assert_eq!(
-            recorded_operations(&content_stream.operators),
-            vec![
-                RecordedOperation::SaveGraphicsState,
-                RecordedOperation::RestoreGraphicsState,
-            ]
-        );
+        assert!(matches!(
+            content_stream.operators.as_slice(),
+            [SaveGraphicsState, RestoreGraphicsState]
+        ));
 
         let next = reader
             .read::<ContentStream>(&ObjectVariant::Stream(stream_object(3, b"q")))

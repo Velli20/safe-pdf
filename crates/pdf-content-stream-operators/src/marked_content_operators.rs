@@ -2,10 +2,7 @@ use std::sync::Arc;
 
 use pdf_object_reader::{ReadResult, object_variant::ObjectVariant, pdf_string::PdfString};
 
-use crate::{
-    OperandContext,
-    pdf_operator_backend::{BackendError, PdfOperatorBackend},
-};
+use crate::OperandContext;
 
 /// Begins a marked-content sequence with an associated property list.
 /// The property list can be either a name (referring to an entry in the Properties subdictionary
@@ -34,11 +31,14 @@ impl BeginMarkedContentWithProps {
         Ok(Self::new(tag, properties))
     }
 
-    /// Dispatches the operator to `backend`.
-    pub(crate) fn call<T: PdfOperatorBackend>(
-        &self,
-        backend: &mut T,
-    ) -> Result<(), BackendError<T>> {
-        backend.begin_marked_content_with_properties(&self.tag, self.properties.as_deref())
+    /// The tag indicating the role or nature of the marked-content sequence.
+    pub fn tag(&self) -> &[u8] {
+        &self.tag
+    }
+
+    /// The name of the property list in the `/Properties` resource subdictionary, or `None`
+    /// when the property list is an inline dictionary.
+    pub fn properties(&self) -> Option<&[u8]> {
+        self.properties.as_deref()
     }
 }

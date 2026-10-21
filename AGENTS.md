@@ -60,7 +60,7 @@ PDF bytes → pdf-tokenizer → pdf-parser → pdf-object → pdf-document
 
 Key architectural traits:
 - **`CanvasBackend`** (in `pdf-canvas`): Abstracts rendering. Skia and FemtoVG are current implementations.
-- **`PdfOperatorBackend`**: Content stream operators dispatched via traits, enabling substitution with analyzers/exporters without modifying core logic.
+- **`PdfOperatorVariant`** (in `pdf-content-stream-operators`): A closed enum of parsed content stream operators. Consumers (the canvas, analyzers, exporters) match on it directly; `PdfCanvas::apply_operator` dispatches it for rendering.
 
 Supporting crates:
 - `pdf-font`: Font decoding (Type1/TrueType/Type3), isolated from rendering
