@@ -3,7 +3,7 @@ use pdf_graphics::LineCap;
 use pdf_graphics::LineJoin;
 use pdf_graphics::TextRenderingMode;
 use pdf_graphics::transform::Transform;
-use pdf_image::InlineImage;
+use pdf_image::PdfImage;
 use thiserror::Error;
 
 use crate::PdfTextItem;
@@ -685,7 +685,7 @@ impl XObjectOps for RecordingBackend {
         Ok(())
     }
 
-    fn paint_inline_image(&mut self, image: &InlineImage) -> Result<(), Self::ErrorType> {
+    fn paint_inline_image(&mut self, image: &PdfImage) -> Result<(), Self::ErrorType> {
         self.operations.push(RecordedOperation::PaintInlineImage {
             data: image.shared_data(),
         });

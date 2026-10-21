@@ -9,7 +9,7 @@
 
 use pdf_content_stream_operators::pdf_operator_backend::XObjectOps;
 use pdf_graphics::{Image, PixelFormat, transform::Transform};
-use pdf_image::{InlineImage, decode_inline_image, raster::stencil_image};
+use pdf_image::{PdfImage, raster::stencil_image};
 use pdf_resources::resource::Resource;
 
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
@@ -79,8 +79,9 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
     }
 
     /// Decodes inline image samples before applying the current painting state.
-    fn paint_inline_image(&mut self, image: &InlineImage) -> Result<(), Self::ErrorType> {
-        let decoded = decode_inline_image(image, None)
+    fn paint_inline_image(&mut self, image: &PdfImage) -> Result<(), Self::ErrorType> {
+        let decoded = image
+            .decode(None)
             .map_err(|e| PdfCanvasError::InvalidImageData(e.to_string()))?;
 
         self.render_decoded_image(&decoded, true)

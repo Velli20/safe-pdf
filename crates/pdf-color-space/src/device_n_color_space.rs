@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use pdf_function::{function::Function, function_interpolation_error::FunctionInterpolationError};
 use pdf_graphics::color::Color;
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
@@ -14,7 +16,7 @@ use crate::{color_space::ColorSpace, error::ColorSpaceError};
 #[derive(Debug, Clone)]
 pub struct DeviceNColorSpace {
     /// Ordered list of colorant names (e.g., `["Cyan", "Magenta"]`).
-    pub names: Vec<Vec<u8>>,
+    pub names: Vec<Arc<[u8]>>,
     /// Fallback color space used when the colorants are not available.
     pub alternate_space: Box<ColorSpace>,
     /// Tint transform function used to map DeviceN components into the alternate space.
@@ -27,7 +29,7 @@ pub struct DeviceNColorSpace {
 impl FromPdfObject for DeviceNColorSpace {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut array = context.array()?;
-        let [_, names, _, _, ..] = array.array() else {
+        let [_, _, _, _, ..] = array.array() else {
             return Err(ColorSpaceError::InvalidColorSpace {
                 description: format!(
                     "/DeviceN requires [/DeviceN names alternateSpace tintTransform] with an optional attributes dictionary; found {} element(s)",
@@ -37,14 +39,8 @@ impl FromPdfObject for DeviceNColorSpace {
             .into());
         };
 
-        let objects = array.source();
-        let names = names
-            .try_array(objects)?
-            .iter()
-            .map(|name| name.try_bytes(objects).map(Vec::from))
-            .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
-            names,
+            names: array.at(1)?,
             alternate_space: Box::new(array.at(2)?),
             tint_transform: array.at(3)?,
         })
@@ -96,7 +92,7 @@ mod tests {
         ObjectReadError, ObjectReader, ReadResult, dictionary::Dictionary,
         object_resolver::PassthroughResolver, object_variant::ObjectVariant, stream::StreamObject,
     };
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, sync::Arc};
 
     fn name(value: &str) -> ObjectVariant {
         pdf_object_reader::pdf_string::PdfString::from(
@@ -166,7 +162,7 @@ mod tests {
 
         assert_eq!(
             device_n.names,
-            vec![Vec::from(b"Cyan"), Vec::from(b"Magenta")]
+            vec![Arc::from(&b"Cyan"[..]), Arc::from(&b"Magenta"[..])]
         );
         assert!(matches!(*device_n.alternate_space, ColorSpace::DeviceRGB));
         assert!(matches!(
@@ -192,7 +188,7 @@ mod tests {
             panic!("expected DeviceN color space");
         };
 
-        assert_eq!(device_n.names, vec![Vec::from(b"Spot")]);
+        assert_eq!(device_n.names, vec![Arc::from(&b"Spot"[..])]);
         assert!(matches!(*device_n.alternate_space, ColorSpace::DeviceCMYK));
     }
 

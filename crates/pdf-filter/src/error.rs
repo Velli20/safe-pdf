@@ -66,6 +66,15 @@ impl From<pdf_object_reader::ObjectReadError> for FilterError {
     }
 }
 
+impl From<FilterError> for pdf_object_reader::ObjectReadError {
+    fn from(source: FilterError) -> Self {
+        Self::Decode {
+            target: "stream filter",
+            source: Box::new(source),
+        }
+    }
+}
+
 impl From<FilterError> for pdf_object_reader::object_error::ObjectError {
     fn from(err: FilterError) -> Self {
         match err {

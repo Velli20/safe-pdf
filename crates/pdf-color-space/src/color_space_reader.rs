@@ -1,11 +1,10 @@
+use std::sync::Arc;
+
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
 };
 
-use crate::{
-    color_space::ColorSpace, device_n_color_space::DeviceNColorSpace, error::ColorSpaceError,
-    indexed_color_space::IndexedColorSpace, separation_color_space::SeparationColorSpace,
-};
+use crate::{color_space::ColorSpace, error::ColorSpaceError};
 
 /// Reads a color space given as a name (e.g., `/DeviceRGB`) or as an array
 /// (e.g., `[/Indexed /DeviceRGB 255 <lookup data>]`).
@@ -13,32 +12,66 @@ use crate::{
 /// Nested color spaces are read through the same traversal, so the reader's
 /// decode-depth limit and cycle detection bound maliciously nested definitions.
 impl FromPdfObject for ColorSpace {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let value = context.object();
-        let ObjectVariant::Array(array) = value else {
-            return Ok(Self::try_from(value.try_bytes(context.source())?)?);
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let object = context.object();
+        let ObjectVariant::Array(array) = object else {
+            return match object.try_bytes(context.source())? {
+                b"DeviceRGB" => Ok(Self::DeviceRGB),
+                b"DeviceCMYK" => Ok(Self::DeviceCMYK),
+                b"DeviceGray" => Ok(Self::DeviceGray),
+                // Default color spaces substitute for the device spaces when a resource-level
+                // override is not available. Without access to the resource dictionary here,
+                // fall back to the corresponding device space.
+                b"DefaultGray" => Ok(Self::DeviceGray),
+                b"DefaultRGB" => Ok(Self::DeviceRGB),
+                b"DefaultCMYK" => Ok(Self::DeviceCMYK),
+                b"Pattern" => Ok(Self::Pattern(None)),
+                unknown => Err(ColorSpaceError::InvalidColorSpace {
+                    description: format!("unsupported color space name: /{unknown:?}"),
+                }
+                .into()),
+            };
         };
-        let family = array
-            .first()
-            .ok_or_else(|| ColorSpaceError::InvalidColorSpace {
+        let Some(first) = array.first() else {
+            return Err(ColorSpaceError::InvalidColorSpace {
                 description: "empty color space array".into(),
-            })?
-            .try_bytes(context.source())?;
+            }
+            .into());
+        };
+        // A one-element array names its family alone, as in `[/DeviceRGB]`.
         if array.len() == 1 {
-            return Ok(Self::try_from(family)?);
+            return context.read(first);
         }
 
-        match family {
-            b"Indexed" => IndexedColorSpace::from_pdf_object(context).map(Self::Indexed),
-            b"Separation" => SeparationColorSpace::from_pdf_object(context).map(Self::Separation),
-            b"DeviceN" => DeviceNColorSpace::from_pdf_object(context).map(Self::DeviceN),
-            b"ICCBased" => sole_operand(context, "ICCBased").map(Self::ICCBased),
-            b"Lab" => sole_operand(context, "Lab").map(Self::Lab),
-            b"CalGray" => sole_operand(context, "CalGray").map(Self::CalGray),
-            b"CalRGB" => sole_operand(context, "CalRGB").map(Self::CalRGB),
+        let family = context.read::<Arc<[u8]>>(first)?;
+        match &*family {
+            b"Indexed" => context.read(object).map(Self::Indexed),
+            b"Separation" => context.read(object).map(Self::Separation),
+            b"DeviceN" => context.read(object).map(Self::DeviceN),
             // The second element is the underlying color space used with uncolored
             // tiling patterns.
             b"Pattern" => Ok(Self::Pattern(Some(Box::new(context.array()?.at(1)?)))),
+            family @ (b"ICCBased" | b"Lab" | b"CalGray" | b"CalRGB") => {
+                let mut array = context.array()?;
+                let found = array.array().len();
+                if found != 2 {
+                    return Err(ColorSpaceError::InvalidColorSpace {
+                        description: format!(
+                            "/{} requires 2 elements, found {found}",
+                            String::from_utf8_lossy(family)
+                        ),
+                    }
+                    .into());
+                }
+                match family {
+                    b"ICCBased" => array.at(1).map(Self::ICCBased),
+                    b"Lab" => array.at(1).map(Self::Lab),
+                    b"CalGray" => array.at(1).map(Self::CalGray),
+                    _ => array.at(1).map(Self::CalRGB),
+                }
+            }
             unknown => Err(ColorSpaceError::InvalidColorSpace {
                 description: format!(
                     "unsupported color space type: /{} (array with {} elements)",
@@ -49,22 +82,6 @@ impl FromPdfObject for ColorSpace {
             .into()),
         }
     }
-}
-
-/// Reads the single operand of a `[/Family operand]` color space array.
-fn sole_operand<T: FromPdfObject>(
-    context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
-    family: &str,
-) -> ReadResult<T> {
-    let mut array = context.array()?;
-    let found = array.array().len();
-    if found != 2 {
-        return Err(ColorSpaceError::InvalidColorSpace {
-            description: format!("/{family} requires 2 elements, found {found}"),
-        }
-        .into());
-    }
-    array.at(1)
 }
 
 #[cfg(test)]

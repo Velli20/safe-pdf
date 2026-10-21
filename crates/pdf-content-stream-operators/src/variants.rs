@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use pdf_graphics::{LineCap, LineJoin, TextRenderingMode, transform::Transform};
-use pdf_image::InlineImage;
+use pdf_image::PdfImage;
 use pdf_object_reader::{ReadResult, pdf_string::PdfString};
 
 use crate::{
@@ -352,7 +352,7 @@ pub enum PdfOperatorVariant {
     /// by higher-level logic. Backends may choose to track nesting depth,
     /// but by default these operators are no-ops.
     BeginCompatibility,
-    InlineImage(Arc<InlineImage>),
+    InlineImage(Arc<PdfImage>),
     /// Ends a compatibility section (EX).
     EndCompatibility,
     /// Paints the shape and color shading defined by a shading dictionary resource.
@@ -779,7 +779,7 @@ mod tests {
 
     #[test]
     fn inline_image_call_dispatches_to_backend_hook() {
-        let image = InlineImage::new(
+        let image = PdfImage::inline(
             Dictionary::new(BTreeMap::from([
                 (Vec::from(b"BPC"), ObjectVariant::Integer(8)),
                 (

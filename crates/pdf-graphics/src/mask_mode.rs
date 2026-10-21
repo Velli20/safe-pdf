@@ -8,13 +8,3 @@ pub enum MaskMode {
     /// An unrecognized soft mask mode.
     Unknown(Vec<u8>),
 }
-
-impl From<&[u8]> for MaskMode {
-    fn from(value: &[u8]) -> Self {
-        match value {
-            b"Alpha" => Self::Alpha,
-            b"Luminosity" => Self::Luminosity,
-            other => Self::Unknown(Vec::from(other)),
-        }
-    }
-}

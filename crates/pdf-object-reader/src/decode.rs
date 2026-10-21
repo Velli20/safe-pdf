@@ -1,7 +1,7 @@
 //! Extensible typed decoding with one object-bound context per invocation.
 
 use num_traits::FromPrimitive;
-use pdf_graphics::{LineCap, LineJoin, TextRenderingMode};
+use pdf_graphics::{LineCap, LineJoin, MaskMode, TextRenderingMode};
 
 use crate::context::ObjectContext;
 use crate::error::{ObjectReadError, ReadResult};
@@ -14,7 +14,7 @@ use crate::pdf_string::PdfString;
 use crate::reader::ObjectAccess;
 use crate::resolved_object::ResolvedObject;
 use crate::{dictionary::Dictionary, stream::StreamObject};
-use pdf_graphics::interval::Interval;
+use pdf_graphics::{interval::Interval, rect::Rect, transform::Transform};
 
 /// Decodes a resolved PDF value using one object-bound context.
 ///
@@ -257,6 +257,35 @@ impl FromPdfObject for Interval {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let [min, max] = context.array()?.read_array::<f32, 2>()?;
         Ok(Self::new(min, max))
+    }
+}
+
+/// Reads a rectangle `[x1 y1 x2 y2]` in its original coordinate order.
+///
+/// Trailing elements are ignored, like the `[T; N]` decoder.
+impl FromPdfObject for Rect {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        Ok(Self::from(context.array()?.read_array::<f32, 4>()?))
+    }
+}
+
+/// Reads an affine matrix `[a b c d e f]`.
+///
+/// Trailing elements are ignored, like the `[T; N]` decoder.
+impl FromPdfObject for Transform {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        Ok(Self::from(context.array()?.read_array::<f32, 6>()?))
+    }
+}
+
+/// Reads a soft mask's `/S` subtype. Unrecognized names are kept as `Unknown`.
+impl FromPdfObject for MaskMode {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        Ok(match context.object().try_bytes(context.source())? {
+            b"Alpha" => Self::Alpha,
+            b"Luminosity" => Self::Luminosity,
+            other => Self::Unknown(Vec::from(other)),
+        })
     }
 }
 

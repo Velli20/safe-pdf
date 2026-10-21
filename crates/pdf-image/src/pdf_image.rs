@@ -1,52 +1,74 @@
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
-use pdf_filter::filter::{Filters, decode_data_with_access};
+use pdf_filter::image_payload::ImagePayload;
 use pdf_object_reader::{
-    DictionaryContext, ObjectAccess, dictionary::Dictionary, object_variant::ObjectVariant,
+    FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
+    dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject,
 };
 
 use crate::{error::PdfImageError, image_metadata::ImageMetadata};
 
-/// Canonical parsed representation of a PDF inline image.
+/// An image stream's metadata and filtered payload, ready to decode into a raster.
+///
+/// Image XObjects are read from their stream; inline images from their dictionary
+/// and data, see [`PdfImage::inline`].
 #[derive(Debug)]
-pub struct InlineImage {
-    metadata: ImageMetadata,
-    data: Bytes,
+pub struct PdfImage {
+    pub(crate) metadata: ImageMetadata,
+    pub(crate) payload: ImagePayload,
 }
 
-impl InlineImage {
-    /// Creates an inline image from its parsed dictionary and encoded payload bytes.
-    pub fn new(
+impl FromPdfObject for PdfImage {
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let object = context.object();
+        Ok(Self {
+            metadata: context.read(object)?,
+            payload: context.read(object)?,
+        })
+    }
+}
+
+impl PdfImage {
+    /// Reads an inline image from its parsed dictionary and encoded payload bytes.
+    ///
+    /// ISO 32000 restricts inline images to the filters that need no out-of-band
+    /// metadata; JPXDecode is not among them. The filter chain stops at JPXDecode,
+    /// so such an image is rejected without decoding its codestream.
+    pub fn inline(
         dictionary: Dictionary,
         data: impl Into<Bytes>,
         access: &mut (impl ObjectAccess + ?Sized),
     ) -> Result<Self, PdfImageError> {
         let dictionary = normalize_inline_image_dictionary(&dictionary);
-        let metadata = ImageMetadata::read(&mut DictionaryContext::new(&dictionary, access))?;
-        // ISO 32000 restricts inline images to the filters that need no
-        // out-of-band metadata; JPXDecode is not among them. Reject it before
-        // filtering so the payload is never handed to a decoder that cannot
-        // report the image's own components and colour.
-        if metadata
-            .filters
-            .as_ref()
-            .is_some_and(Filters::has_jpx_filter)
-        {
-            return Err(PdfImageError::InlineJpxFilter);
+        let stream = StreamObject::new_encoded(0, 0, dictionary, data);
+        let image = access.read::<Self>(&ObjectVariant::Stream(stream))?;
+        match image.payload {
+            ImagePayload::Jpx(_) => Err(PdfImageError::InlineJpxFilter),
+            ImagePayload::Samples(_) => Ok(image),
         }
-        let data = decode_data_with_access(&dictionary, data.into(), access)?;
-
-        Ok(Self { metadata, data })
     }
 
-    /// Returns shared ownership of the filter-decoded inline-image samples.
+    /// Returns whether a failed read leaves the image without samples to draw: its
+    /// dimensions are missing or invalid, or its filter chain failed.
+    pub fn is_unreadable(error: &ObjectReadError) -> bool {
+        let ObjectReadError::Decode { source, .. } = error else {
+            return false;
+        };
+        source.is::<pdf_filter::error::FilterError>()
+            || matches!(
+                source.downcast_ref::<PdfImageError>(),
+                Some(PdfImageError::InvalidImageDimensions { .. })
+            )
+    }
+
+    /// Returns shared ownership of the filtered payload bytes.
     pub fn shared_data(&self) -> Bytes {
-        self.data.clone()
-    }
-
-    pub(crate) fn metadata(&self) -> &ImageMetadata {
-        &self.metadata
+        match &self.payload {
+            ImagePayload::Samples(data) | ImagePayload::Jpx(data) => data.clone(),
+        }
     }
 }
 
@@ -120,7 +142,7 @@ mod tests {
         dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
     };
 
-    use super::{InlineImage, normalize_inline_image_dictionary};
+    use super::{PdfImage, normalize_inline_image_dictionary};
 
     #[test]
     fn normalize_inline_image_dictionary_expands_abbreviations() {
@@ -260,7 +282,7 @@ mod tests {
     #[test]
     fn inline_image_shares_unfiltered_samples() {
         let data = Bytes::from_static(&[1, 2]);
-        let image = InlineImage::new(
+        let image = PdfImage::inline(
             gray_dictionary(),
             data.clone(),
             &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
@@ -281,7 +303,7 @@ mod tests {
             ),
         );
 
-        let image = InlineImage::new(
+        let image = PdfImage::inline(
             dictionary,
             b"2A>".to_vec(),
             &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
@@ -293,14 +315,17 @@ mod tests {
 
     #[test]
     fn invalid_metadata_is_rejected_during_construction() {
-        let error = InlineImage::new(
+        let error = PdfImage::inline(
             Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
             vec![1],
             &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
         )
         .expect_err("invalid metadata should prevent construction");
 
-        assert!(matches!(error, crate::error::PdfImageError::Object(_)));
+        assert!(matches!(
+            error,
+            crate::error::PdfImageError::InvalidImageDimensions { .. }
+        ));
     }
 
     fn gray_dictionary() -> Dictionary {

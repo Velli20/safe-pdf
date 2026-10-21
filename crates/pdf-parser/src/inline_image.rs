@@ -1,4 +1,4 @@
-use pdf_image::InlineImage;
+use pdf_image::PdfImage;
 use pdf_object_reader::{ObjectAccess, dictionary::Dictionary, object_resolver::ObjectResolver};
 
 use crate::{error::ParserError, parser::PdfParser};
@@ -9,16 +9,16 @@ const INLINE_IMAGE_DATA_END: &[u8] = b"EI";
 impl PdfParser<'_> {
     /// Parses an inline image after the `BI` operator has already been consumed.
     ///
-    /// Returns the canonical `pdf_image::InlineImage` representation.
+    /// Returns the canonical `pdf_image::PdfImage` representation.
     pub fn parse_inline_image(
         &mut self,
         access: &mut (impl ObjectAccess + ?Sized),
-    ) -> Result<InlineImage, ParserError> {
+    ) -> Result<PdfImage, ParserError> {
         let dictionary = self.parse_inline_image_dictionary(access.source())?;
         self.read_keyword_with_optional_eol(INLINE_IMAGE_DATA_BEGIN, false)?;
         self.consume_inline_image_data_separator()?;
         let data = self.read_inline_image_data_until_end(&dictionary, access.source())?;
-        InlineImage::new(dictionary, data, access)
+        PdfImage::inline(dictionary, data, access)
             .map_err(|error| ParserError::InlineImageError(error.to_string()))
     }
 

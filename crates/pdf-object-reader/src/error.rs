@@ -154,6 +154,8 @@ pub enum ObjectReadError {
         #[source]
         source: BoxedError,
     },
+    #[error("unsupported XObject /Subtype: '{subtype}'")]
+    UnsupportedXObjectSubtype { subtype: String },
 }
 
 impl From<crate::object_error::ObjectError> for ObjectReadError {

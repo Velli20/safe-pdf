@@ -163,7 +163,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                                 Arc::new(recording_canvas),
                                 transform,
                                 smask.mask_type.clone(),
-                                smask.transfer.clone(),
+                                smask.transfer.table().cloned(),
                             )?);
                     } else {
                         self.current_state_mut()?.soft_mask = None;

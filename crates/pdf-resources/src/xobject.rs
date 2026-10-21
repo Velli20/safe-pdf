@@ -1,9 +1,8 @@
 use crate::{error::PdfPagesError, form::FormXObject, resource::Resource};
 use pdf_font::PdfFontSpec;
 use pdf_graphics::Image;
-use pdf_image::{PdfImageError, read_xobject as decode_image_xobject};
-use pdf_object_reader::object_error::ObjectError;
-use pdf_object_reader::object_lookup::ObjectLookupExt;
+use pdf_image::{PdfImage, PdfImageError};
+use pdf_object_reader::pdf_string::PdfString;
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
     object_variant::ObjectVariant,
@@ -19,28 +18,17 @@ pub(crate) enum XObjectSubtype {
     Image,
 }
 
-impl TryFrom<&[u8]> for XObjectSubtype {
-    type Error = PdfPagesError;
-
-    fn try_from(subtype: &[u8]) -> Result<Self, Self::Error> {
-        match subtype {
-            b"Form" => Ok(Self::Form),
-            b"Image" => Ok(Self::Image),
-            _ => Err(PdfPagesError::UnsupportedXObjectSubtype {
-                subtype: String::from_utf8_lossy(subtype).into_owned(),
-            }),
-        }
-    }
-}
-
 /// Reads the required `/Subtype` of an XObject stream or dictionary.
 impl FromPdfObject for XObjectSubtype {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let subtype = context
-            .object()
-            .dictionary()?
-            .required_bytes(b"Subtype", context.source())?;
-        Ok(Self::try_from(subtype)?)
+        let subtype = context.dictionary()?.required::<PdfString>(b"Subtype")?;
+        match subtype.as_ref() {
+            b"Form" => Ok(Self::Form),
+            b"Image" => Ok(Self::Image),
+            other => Err(ObjectReadError::UnsupportedXObjectSubtype {
+                subtype: String::from_utf8_lossy(other).into_owned(),
+            }),
+        }
     }
 }
 
@@ -83,19 +71,13 @@ impl Resource {
     /// Decodes an image XObject, or marks it unavailable when its dimensions are malformed
     /// or its stream data cannot be decoded into samples.
     fn read_image(context: &mut ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
-        let dictionary = object.dictionary()?;
-        if !dictionary
-            .required_size(context.source())
-            .is_ok_and(|size| size.is_valid())
-        {
-            return Ok(Self::UnavailableImage);
-        }
-        let ObjectVariant::Stream(stream) = object else {
-            return Err(ObjectError::TypeMismatch("Stream", object.name()).into());
+        let image = match context.read::<PdfImage>(context.object()) {
+            Ok(image) => image,
+            Err(error) if PdfImage::is_unreadable(&error) => return Ok(Self::UnavailableImage),
+            Err(error) => return Err(error),
         };
         let soft_mask = Self::read_soft_mask_image(context)?;
-        match decode_image_xobject(dictionary, stream, context.access(), soft_mask.as_deref()) {
+        match image.decode(soft_mask.as_deref()) {
             Ok(image) => Ok(Self::from(image)),
             Err(error) if error.is_unreadable_data() => Ok(Self::UnavailableImage),
             Err(error) => Err(PdfPagesError::from(error).into()),
@@ -129,12 +111,12 @@ impl Resource {
 mod tests {
     use pdf_object_collection::object_collection::ObjectCollection;
     use pdf_object_reader::{
-        dictionary::Dictionary, object_error::ObjectError, object_id::ObjectId,
+        ObjectReadError, dictionary::Dictionary, object_error::ObjectError, object_id::ObjectId,
         object_resolver::ObjectResolver, object_variant::ObjectVariant, stream::StreamObject,
     };
     use std::collections::BTreeMap;
 
-    use crate::{error::PdfPagesError, resource::Resource};
+    use crate::resource::Resource;
 
     fn object_id(number: usize) -> ObjectId {
         ObjectId {
@@ -335,8 +317,7 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(pdf_object_reader::ObjectReadError::Decode { source, .. })
-                if matches!(source.downcast_ref::<PdfPagesError>(), Some(PdfPagesError::UnsupportedXObjectSubtype { subtype }) if subtype == "Unsupported")
+            Err(ObjectReadError::UnsupportedXObjectSubtype { subtype }) if subtype == "Unsupported"
         ));
     }
 

@@ -10,7 +10,7 @@ use pdf_content_stream::ContentStream;
 use pdf_content_stream_operators::variants::PdfOperatorVariant;
 use pdf_document::page::PdfPage;
 use pdf_graphics::{BlendMode, PixelFormat, rect::Rect};
-use pdf_image::InlineImage;
+use pdf_image::PdfImage;
 use pdf_object_reader::{
     ObjectHandle, dictionary::Dictionary, object_resolver::PassthroughResolver,
     object_variant::ObjectVariant,
@@ -74,8 +74,8 @@ fn image_dictionary() -> Dictionary {
     ]))
 }
 
-fn inline_image() -> InlineImage {
-    InlineImage::new(
+fn inline_image() -> PdfImage {
+    PdfImage::inline(
         Dictionary::new(std::collections::BTreeMap::from([
             (Vec::from(b"BPC"), ObjectVariant::Integer(1)),
             (
@@ -231,15 +231,13 @@ fn unavailable_image_xobject_is_a_no_op() {
 
 #[test]
 fn inline_image_render_path_matches_image_xobject_path() {
-    let image = pdf_image::decode_normalized_image(
-        &image_dictionary(),
-        vec![0b1010_0000].into(),
-        &mut pdf_object_reader::ObjectReader::new(
-            pdf_object_reader::object_resolver::PassthroughResolver,
-        )
-        .session(),
-        None,
+    let image = pdf_object_reader::ObjectReader::new(
+        pdf_object_reader::object_resolver::PassthroughResolver,
     )
+    .read::<PdfImage>(&pdf_object_reader::object_variant::ObjectVariant::Stream(
+        pdf_object_reader::stream::StreamObject::new(1, 0, image_dictionary(), vec![0b1010_0000]),
+    ))
+    .and_then(|image| Ok(image.decode(None)?))
     .expect("image XObject should decode");
     let graphics_state = Resource::ExternalGraphicsState(pdf_object_reader::ObjectHandle::from(
         ExternalGraphicsState {

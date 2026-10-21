@@ -120,12 +120,12 @@ impl FromPdfObject for Pattern {
         let object = context.object();
         // Tiling patterns are streams and shading patterns are dictionaries; both expose the same entries.
         let mut context = context.dictionary()?;
-        let matrix = context.dictionary().optional_matrix(context.source())?;
+        let matrix = context.optional::<Transform>(b"Matrix")?;
         match context.required::<PatternType>(b"PatternType")? {
             PatternType::Tiling => Ok(Pattern::Tiling {
                 paint_type: context.required(b"PaintType")?,
                 tiling_type: context.required(b"TilingType")?,
-                bbox: context.dictionary().required_bbox(context.source())?,
+                bbox: context.required::<Rect>(b"BBox")?.normalized(),
                 x_step: context.required(b"XStep")?,
                 y_step: context.required(b"YStep")?,
                 matrix,

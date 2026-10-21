@@ -10,8 +10,8 @@ use bytes::Bytes;
 use pdf_ccitt::CCITTFaxParams;
 use pdf_object_reader::{
     DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-    dictionary::Dictionary, object_kind::ObjectKind, object_variant::ObjectVariant,
-    pdf_array::PdfArray, stream::StreamObject,
+    object_kind::ObjectKind, object_variant::ObjectVariant, pdf_array::PdfArray,
+    stream::StreamObject,
 };
 
 use crate::{
@@ -30,8 +30,32 @@ pub enum ImagePayload {
     Jpx(Bytes),
 }
 
+/// Reads an image stream's payload.
+///
+/// A stream whose filter chain was already applied is only classified: a
+/// `JPXDecode` stream is deliberately left encoded by the object collection,
+/// because only the structured image path can read a JPEG 2000 codestream, yet
+/// it still reports its filters as applied.
+impl FromPdfObject for ImagePayload {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.stream()?;
+        let stream = context.stream();
+        let mut context = context.dictionary();
+        if !stream.filters_applied() {
+            return Ok(Self::filtered(stream.shared_data(), &mut context)?);
+        }
+        let jpx = context
+            .optional::<Filters>(Filters::KEY)?
+            .is_some_and(|filters| filters.has_jpx_filter());
+        Ok(match jpx {
+            true => Self::Jpx(stream.shared_data()),
+            false => Self::Samples(stream.shared_data()),
+        })
+    }
+}
+
 impl ImagePayload {
-    /// Applies the `/Filter` chain of `dictionary` to `stream_data`.
+    /// Applies the `/Filter` chain of the context's dictionary to `stream_data`.
     ///
     /// Filters are applied in order until the chain ends or `JPXDecode` is
     /// reached. PDF requires `JPXDecode` to be the last filter of an image
@@ -43,12 +67,10 @@ impl ImagePayload {
     /// Returns [`FilterError`] if a filter fails, is unsupported, or follows
     /// `JPXDecode`, except when an adjacent duplicate filter fails after its
     /// first pass succeeded.
-    pub fn decode(
-        dictionary: &Dictionary,
+    pub(crate) fn filtered(
         stream_data: Bytes,
-        access: &mut (impl ObjectAccess + ?Sized),
+        context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
     ) -> Result<Self, FilterError> {
-        let mut context = DictionaryContext::new(dictionary, access);
         let Some(filters) = context.optional::<Filters>(Filters::KEY)? else {
             return Ok(Self::Samples(stream_data));
         };
@@ -69,7 +91,7 @@ impl ImagePayload {
             if let Filter::JPXDecode = filter {
                 codestream = Some(data.clone());
             } else {
-                match filter.apply(data.as_ref(), &decode_parms, index, &mut context) {
+                match filter.apply(data.as_ref(), &decode_parms, index, context) {
                     Ok(decoded) => data = decoded,
                     // A repeated filter can be spurious when its first pass
                     // already produced the binary data expected by the next filter.
@@ -165,7 +187,7 @@ impl Filter {
     /// Applies this byte-to-byte filter, the `index`-th of its chain, to `data`.
     ///
     /// `context` reads the stream dictionary, whose image entries some filters
-    /// need. `JPXDecode` is not a byte filter; [`ImagePayload::decode`] handles
+    /// need. `JPXDecode` is not a byte filter; the [`ImagePayload`] decoder handles
     /// it before reaching this method, and it is rejected here.
     fn apply(
         &self,
