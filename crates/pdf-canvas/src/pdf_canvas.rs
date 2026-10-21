@@ -771,7 +771,7 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
                 if filter.as_mut().is_some_and(|filter| filter(op)) {
                     continue;
                 }
-                op.call(self)?;
+                self.apply_operator(op)?;
             }
 
             Ok(())
@@ -901,7 +901,6 @@ impl<'a, B: CanvasBackend> PdfCanvas<'a, B> {
 
 #[cfg(test)]
 mod tests {
-    use pdf_content_stream_operators::pdf_operator_backend::GraphicsStateOps;
     use pdf_document::page::PdfPage;
     use pdf_graphics::rect::Rect;
     use pdf_text_engine::bundled_font_system;

@@ -3,9 +3,6 @@ pub mod error;
 pub mod marked_content_operators;
 pub mod variants;
 
-pub mod pdf_operator_backend;
-pub mod recording_pdf_operator_backend;
-
 extern crate alloc;
 use std::sync::Arc;
 

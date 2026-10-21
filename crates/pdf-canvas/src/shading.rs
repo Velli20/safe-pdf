@@ -1,15 +1,13 @@
 //! Shading operators and shared paint preparation.
 use crate::CanvasPath;
-use pdf_content_stream_operators::pdf_operator_backend::ShadingOps;
 use pdf_graphics::{PathFillType, pdf_path::PdfPath, rect::Rect, transform::Transform};
 use pdf_shading::model::Shading;
 
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
-impl<B: CanvasBackend> ShadingOps for PdfCanvas<'_, B> {
-    type ErrorType = PdfCanvasError;
+impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Prepares a shading paint and fills the current clip through the selected soft mask.
-    fn paint_shading(&mut self, shading_name: &[u8]) -> Result<(), Self::ErrorType> {
+    pub(crate) fn paint_shading(&mut self, shading_name: &[u8]) -> Result<(), PdfCanvasError> {
         let state = self.current_state()?;
 
         let Some(shading) = state

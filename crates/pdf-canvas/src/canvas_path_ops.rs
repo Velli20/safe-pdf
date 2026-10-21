@@ -1,25 +1,26 @@
-use pdf_content_stream_operators::pdf_operator_backend::{PathConstructionOps, PathPaintingOps};
 use pdf_graphics::{PaintMode, PathFillType, pdf_path::PdfPath};
 
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
-impl<B: CanvasBackend> PathConstructionOps for PdfCanvas<'_, B> {
-    type ErrorType = PdfCanvasError;
-    fn move_to(&mut self, x: f32, y: f32) -> Result<(), Self::ErrorType> {
+impl<B: CanvasBackend> PdfCanvas<'_, B> {
+    /// Handles `m`: begins a new subpath at (x, y).
+    pub(crate) fn move_to(&mut self, x: f32, y: f32) -> Result<(), PdfCanvasError> {
         self.current_path
             .get_or_insert_with(PdfPath::default)
             .move_to(x, y);
         Ok(())
     }
 
-    fn line_to(&mut self, x: f32, y: f32) -> Result<(), Self::ErrorType> {
+    /// Handles `l`: appends a line segment to (x, y).
+    pub(crate) fn line_to(&mut self, x: f32, y: f32) -> Result<(), PdfCanvasError> {
         self.current_path
             .get_or_insert_with(PdfPath::default)
             .line_to(x, y);
         Ok(())
     }
 
-    fn curve_to(
+    /// Handles `c`: appends a cubic Bézier curve.
+    pub(crate) fn curve_to(
         &mut self,
         x1: f32,
         y1: f32,
@@ -27,14 +28,21 @@ impl<B: CanvasBackend> PathConstructionOps for PdfCanvas<'_, B> {
         y2: f32,
         x3: f32,
         y3: f32,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         self.current_path
             .get_or_insert_with(PdfPath::default)
             .curve_to(x1, y1, x2, y2, x3, y3);
         Ok(())
     }
 
-    fn curve_to_v(&mut self, x2: f32, y2: f32, x3: f32, y3: f32) -> Result<(), Self::ErrorType> {
+    /// Handles `v`: appends a Bézier curve whose first control point is the current point.
+    pub(crate) fn curve_to_v(
+        &mut self,
+        x2: f32,
+        y2: f32,
+        x3: f32,
+        y3: f32,
+    ) -> Result<(), PdfCanvasError> {
         let path = self.current_path.get_or_insert_with(PdfPath::default);
         if let Some((x, y)) = path.current_point() {
             path.curve_to(x, y, x2, y2, x3, y3);
@@ -44,27 +52,36 @@ impl<B: CanvasBackend> PathConstructionOps for PdfCanvas<'_, B> {
         }
     }
 
-    fn curve_to_y(&mut self, x1: f32, y1: f32, x3: f32, y3: f32) -> Result<(), Self::ErrorType> {
+    /// Handles `y`: appends a Bézier curve whose second control point is its end point.
+    pub(crate) fn curve_to_y(
+        &mut self,
+        x1: f32,
+        y1: f32,
+        x3: f32,
+        y3: f32,
+    ) -> Result<(), PdfCanvasError> {
         self.current_path
             .get_or_insert_with(PdfPath::default)
             .curve_to(x1, y1, x3, y3, x3, y3);
         Ok(())
     }
 
-    fn close_path(&mut self) -> Result<(), Self::ErrorType> {
+    /// Handles `h`: closes the current subpath.
+    pub(crate) fn close_path(&mut self) -> Result<(), PdfCanvasError> {
         self.current_path
             .get_or_insert_with(PdfPath::default)
             .close();
         Ok(())
     }
 
-    fn rectangle(
+    /// Handles `re`: appends a closed rectangle subpath.
+    pub(crate) fn rectangle(
         &mut self,
         x: f32,
         y: f32,
         width: f32,
         height: f32,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         let path = self.current_path.get_or_insert_with(PdfPath::default);
 
         path.move_to(x, y);
@@ -76,44 +93,54 @@ impl<B: CanvasBackend> PathConstructionOps for PdfCanvas<'_, B> {
     }
 }
 
-impl<B: CanvasBackend> PathPaintingOps for PdfCanvas<'_, B> {
-    type ErrorType = PdfCanvasError;
-    fn stroke_path(&mut self) -> Result<(), Self::ErrorType> {
+impl<B: CanvasBackend> PdfCanvas<'_, B> {
+    /// Handles `S`: strokes the current path.
+    pub(crate) fn stroke_path(&mut self) -> Result<(), PdfCanvasError> {
         self.end_path(Some((PaintMode::Stroke, PathFillType::default())))
     }
 
-    fn close_and_stroke_path(&mut self) -> Result<(), Self::ErrorType> {
+    /// Handles `s`: closes and strokes the current path.
+    pub(crate) fn close_and_stroke_path(&mut self) -> Result<(), PdfCanvasError> {
         self.close_path()?;
-        PathPaintingOps::stroke_path(self)
+        self.stroke_path()
     }
 
-    fn fill_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
+    /// Handles `f`/`F`: fills the current path with the nonzero winding rule.
+    pub(crate) fn fill_path_nonzero_winding(&mut self) -> Result<(), PdfCanvasError> {
         self.end_path(Some((PaintMode::Fill, PathFillType::Winding)))
     }
 
-    fn fill_path_even_odd(&mut self) -> Result<(), Self::ErrorType> {
+    /// Handles `f*`: fills the current path with the even-odd rule.
+    pub(crate) fn fill_path_even_odd(&mut self) -> Result<(), PdfCanvasError> {
         self.end_path(Some((PaintMode::Fill, PathFillType::EvenOdd)))
     }
 
-    fn fill_and_stroke_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
+    /// Handles `B`: fills (nonzero winding) and strokes the current path.
+    pub(crate) fn fill_and_stroke_path_nonzero_winding(&mut self) -> Result<(), PdfCanvasError> {
         self.end_path(Some((PaintMode::FillAndStroke, PathFillType::Winding)))
     }
 
-    fn fill_and_stroke_path_even_odd(&mut self) -> Result<(), Self::ErrorType> {
+    /// Handles `B*`: fills (even-odd) and strokes the current path.
+    pub(crate) fn fill_and_stroke_path_even_odd(&mut self) -> Result<(), PdfCanvasError> {
         self.end_path(Some((PaintMode::FillAndStroke, PathFillType::EvenOdd)))
     }
 
-    fn close_fill_and_stroke_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
+    /// Handles `b`: closes, fills (nonzero winding) and strokes the current path.
+    pub(crate) fn close_fill_and_stroke_path_nonzero_winding(
+        &mut self,
+    ) -> Result<(), PdfCanvasError> {
         self.close_path()?;
         self.fill_and_stroke_path_nonzero_winding()
     }
 
-    fn close_fill_and_stroke_path_even_odd(&mut self) -> Result<(), Self::ErrorType> {
+    /// Handles `b*`: closes, fills (even-odd) and strokes the current path.
+    pub(crate) fn close_fill_and_stroke_path_even_odd(&mut self) -> Result<(), PdfCanvasError> {
         self.close_path()?;
         self.fill_and_stroke_path_even_odd()
     }
 
-    fn end_path_no_op(&mut self) -> Result<(), Self::ErrorType> {
+    /// Handles `n`: ends the current path without painting it.
+    pub(crate) fn end_path_no_op(&mut self) -> Result<(), PdfCanvasError> {
         self.end_path(None)
     }
 }
