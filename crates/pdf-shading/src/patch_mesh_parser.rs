@@ -5,10 +5,10 @@ use pdf_utils::BitReader;
 
 use crate::{
     error::PdfShadingError,
+    mesh_config::MeshConfig,
     mesh_decoder::{MeshDecoder, read_mesh_bits},
     model::MeshPatch,
     patch_mesh::PatchMeshError,
-    patch_mesh_config::PatchMeshConfig,
     patch_mesh_kind::PatchKind,
 };
 
@@ -21,15 +21,11 @@ pub(crate) struct PatchMeshParser<'a> {
 }
 
 impl<'a> PatchMeshParser<'a> {
-    /// Creates a parser borrowing the stream and its validated configuration.
-    pub(crate) fn new(
-        data: &'a [u8],
-        config: &'a PatchMeshConfig,
-        kind: PatchKind,
-    ) -> Result<Self, PdfShadingError> {
+    /// Creates a parser borrowing the stream data and its validated configuration.
+    pub(crate) fn new(config: &'a MeshConfig, kind: PatchKind) -> Result<Self, PdfShadingError> {
         Ok(Self {
-            reader: BitReader::new(data),
-            decoder: config.decoder()?,
+            reader: BitReader::new(&config.data),
+            decoder: config.decoder("Patch mesh")?,
             flag_width: config.flag_width(),
             kind,
         })

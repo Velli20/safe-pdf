@@ -1,13 +1,27 @@
 //! Unit tests for mesh bit-width parsing and validation.
 
 use pdf_object_reader::{
-    dictionary::Dictionary, object_error::ObjectError, object_resolver::PassthroughResolver,
-    object_variant::ObjectVariant,
+    ObjectReadError, ObjectReader, ReadResult, dictionary::Dictionary,
+    object_resolver::PassthroughResolver, object_variant::ObjectVariant,
 };
 
 use crate::{error::PdfShadingError, mesh_decoder::MeshDecoderError};
 
 use super::MeshBitWidths;
+
+fn read_widths(dictionary: Dictionary) -> ReadResult<MeshBitWidths> {
+    ObjectReader::new(&PassthroughResolver).read(&ObjectVariant::Dictionary(dictionary))
+}
+
+fn decoder_error(result: ReadResult<MeshBitWidths>) -> Option<MeshDecoderError> {
+    match result {
+        Err(ObjectReadError::Decode { source, .. }) => match source.downcast_ref() {
+            Some(PdfShadingError::MeshDecoder(error)) => Some(error.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
 
 fn mesh_widths_dictionary(coordinate: i64, component: i64, flag: i64) -> Dictionary {
     Dictionary::from_entries([
@@ -20,35 +34,28 @@ fn mesh_widths_dictionary(coordinate: i64, component: i64, flag: i64) -> Diction
 #[test]
 fn validates_pdf_mesh_bit_widths() {
     let valid = mesh_widths_dictionary(12, 4, 2);
-    let widths = MeshBitWidths::from_dictionary(&valid, &PassthroughResolver)
-        .expect("valid widths should parse");
+    let widths = read_widths(valid).expect("valid widths should parse");
     assert_eq!(widths.coordinate(), 12);
     assert_eq!(widths.component(), 4);
     assert_eq!(widths.flag(), 2);
 
     let invalid_coordinate = mesh_widths_dictionary(3, 4, 2);
-    assert!(matches!(
-        MeshBitWidths::from_dictionary(&invalid_coordinate, &PassthroughResolver),
-        Err(PdfShadingError::MeshDecoder(
-            MeshDecoderError::InvalidBitsPerCoordinate { value: 3 }
-        ))
-    ));
+    assert_eq!(
+        decoder_error(read_widths(invalid_coordinate)),
+        Some(MeshDecoderError::InvalidBitsPerCoordinate { value: 3 })
+    );
 
     let invalid_component = mesh_widths_dictionary(8, 32, 2);
-    assert!(matches!(
-        MeshBitWidths::from_dictionary(&invalid_component, &PassthroughResolver),
-        Err(PdfShadingError::MeshDecoder(
-            MeshDecoderError::InvalidBitsPerComponent { value: 32 }
-        ))
-    ));
+    assert_eq!(
+        decoder_error(read_widths(invalid_component)),
+        Some(MeshDecoderError::InvalidBitsPerComponent { value: 32 })
+    );
 
     let invalid_flag = mesh_widths_dictionary(8, 8, 1);
-    assert!(matches!(
-        MeshBitWidths::from_dictionary(&invalid_flag, &PassthroughResolver),
-        Err(PdfShadingError::MeshDecoder(
-            MeshDecoderError::InvalidBitsPerFlag { value: 1 }
-        ))
-    ));
+    assert_eq!(
+        decoder_error(read_widths(invalid_flag)),
+        Some(MeshDecoderError::InvalidBitsPerFlag { value: 1 })
+    );
 }
 
 #[test]
@@ -57,8 +64,8 @@ fn mesh_bit_widths_require_all_dictionary_entries() {
     dictionary.take(b"BitsPerFlag");
 
     assert!(matches!(
-        MeshBitWidths::from_dictionary(&dictionary, &PassthroughResolver),
-        Err(PdfShadingError::Object(ObjectError::MissingRequiredKey { ref key }))
-            if key == "BitsPerFlag"
+        read_widths(dictionary),
+        Err(ObjectReadError::At { source, .. })
+            if matches!(*source, ObjectReadError::MissingDictionaryKey { ref key } if key.as_bytes() == b"BitsPerFlag")
     ));
 }

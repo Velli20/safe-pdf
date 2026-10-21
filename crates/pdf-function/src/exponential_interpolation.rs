@@ -1,11 +1,8 @@
 use pdf_graphics::interval::Interval;
-use pdf_object_reader::{
-    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 use crate::{
-    error::FunctionReadError,
-    function::{Function, FunctionImpl},
+    error::FunctionReadError, function::FunctionImpl,
     function_interpolation_error::FunctionInterpolationError,
 };
 
@@ -82,43 +79,38 @@ impl FunctionImpl for ExponentialFunction {
     fn domain(&self) -> Option<Interval> {
         Some(self.domain)
     }
+}
 
-    /// Parses a Type 2 (Exponential Interpolation) function.
-    fn parse(
-        object: &ObjectVariant,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Function, FunctionReadError> {
-        let dictionary = object.try_dictionary(objects)?;
-        let domain = dictionary.required_interval(b"Domain", objects)?;
+/// Reads a Type 2 (Exponential Interpolation) function dictionary.
+impl FromPdfObject for ExponentialFunction {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        let domain = context.required::<Interval>(b"Domain")?;
 
         // /C0: Output values at domain.min. Defaults to [0.0].
-        let c0 = dictionary
-            .optional_vec_of::<f32>(b"C0", objects)?
+        let c0 = context
+            .optional::<Vec<f32>>(b"C0")?
             .unwrap_or_else(|| vec![0.0]);
 
         // /C1: Output values at domain.max. Defaults to [1.0].
-        let c1 = dictionary
-            .optional_vec_of::<f32>(b"C1", objects)?
+        let c1 = context
+            .optional::<Vec<f32>>(b"C1")?
             .unwrap_or_else(|| vec![1.0]);
 
         // Validate C0/C1 length match at parse time.
         if c0.len() != c1.len() {
-            return Err(FunctionReadError::MismatchedC0C1Length);
+            return Err(FunctionReadError::MismatchedC0C1Length.into());
         }
 
-        // /N: Interpolation exponent (required).
-        let exponent = dictionary.required_number::<f32>(b"N", objects)?;
-
-        // /Range: Optional. Output range for clamping (ISO 32000 §7.10.3).
-        let range = dictionary.optional_intervals(b"Range", objects)?;
-
-        Ok(Function::Exponential(ExponentialFunction {
+        Ok(Self {
             c0,
             c1,
-            exponent,
+            // /N: Interpolation exponent (required).
+            exponent: context.required(b"N")?,
             domain,
-            range,
-        }))
+            // /Range: Optional. Output range for clamping (ISO 32000 §7.10.3).
+            range: context.optional_intervals(b"Range")?,
+        })
     }
 }
 

@@ -1,8 +1,6 @@
 use pdf_color_space::error::ColorSpaceError;
 use pdf_decode::DecodeError;
-use pdf_function::{
-    error::FunctionReadError, function_interpolation_error::FunctionInterpolationError,
-};
+use pdf_function::function_interpolation_error::FunctionInterpolationError;
 use pdf_object_reader::{ObjectReadError, object_error::ObjectError};
 use thiserror::Error;
 
@@ -21,8 +19,6 @@ pub enum PdfShadingError {
     ColorSpace(#[from] ColorSpaceError),
     #[error("{0}")]
     FunctionInterpolation(#[from] FunctionInterpolationError),
-    #[error("{0}")]
-    FunctionRead(#[from] FunctionReadError),
     #[error("{0}")]
     Decode(#[from] DecodeError),
     #[error("missing required dictionary entry '/{entry}'")]

@@ -2,8 +2,11 @@
 
 use pdf_color_space::color_space::ColorSpace;
 use pdf_graphics::{color::Color, point::Point, rect::Rect};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
-use crate::{color_stops::ColorStops, error::PdfShadingError, function_shading::FunctionShading};
+use crate::{
+    error::PdfShadingError, function_shading::FunctionShading, gradient_shading::GradientShading,
+};
 
 /// The `/ShadingType` discriminator used by PDF shading dictionaries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -40,12 +43,10 @@ impl std::fmt::Display for ShadingType {
     }
 }
 
-impl TryFrom<i32> for ShadingType {
-    type Error = PdfShadingError;
-
-    /// Converts a numeric `/ShadingType` value into the typed enum.
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        match value {
+/// Reads the numeric `/ShadingType` entry of a shading dictionary.
+impl FromPdfObject for ShadingType {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match context.object().try_number::<i32>(context.source())? {
             1 => Ok(Self::FunctionBased),
             2 => Ok(Self::Axial),
             3 => Ok(Self::Radial),
@@ -53,7 +54,7 @@ impl TryFrom<i32> for ShadingType {
             5 => Ok(Self::LatticeFormTriangleMesh),
             6 => Ok(Self::CoonsPatchMesh),
             7 => Ok(Self::TensorProductPatchMesh),
-            _ => Err(PdfShadingError::InvalidShadingType { value }),
+            value => Err(PdfShadingError::InvalidShadingType { value }.into()),
         }
     }
 }
@@ -65,33 +66,17 @@ pub enum Shading {
     FunctionBased(FunctionShading),
     /// Type 2 axial shading.
     Axial {
-        /// The shading color space.
-        color_space: ColorSpace,
         /// Gradient axis coordinates `[x0, y0, x1, y1]`.
         coords: [f32; 4],
-        /// Sampled color stops used by render backends.
-        color_stops: ColorStops,
-        /// Whether the shading extends beyond the start and end of the axis.
-        extend: [bool; 2],
-        /// Background color painted where a shading pattern does not cover.
-        background: Option<Color>,
-        /// Optional bounding box in shading space.
-        bbox: Option<Rect>,
+        /// The color ramp along the axis.
+        gradient: GradientShading,
     },
     /// Type 3 radial shading.
     Radial {
-        /// The shading color space.
-        color_space: ColorSpace,
         /// Gradient circle coordinates `[x0, y0, r0, x1, y1, r1]`.
         coords: [f32; 6],
-        /// Sampled color stops used by render backends.
-        color_stops: ColorStops,
-        /// Whether the shading extends beyond the start and end circles.
-        extend: [bool; 2],
-        /// Background color painted where a shading pattern does not cover.
-        background: Option<Color>,
-        /// Optional bounding box in shading space.
-        bbox: Option<Rect>,
+        /// The color ramp between the circles.
+        gradient: GradientShading,
     },
     /// Type 4 free-form Gouraud-shaded triangle mesh.
     FreeFormTriangleMesh {
@@ -164,9 +149,10 @@ impl Shading {
     pub fn color_space(&self) -> Option<&ColorSpace> {
         match self {
             Self::FunctionBased(shading) => Some(&shading.color_space),
-            Self::Axial { color_space, .. }
-            | Self::Radial { color_space, .. }
-            | Self::FreeFormTriangleMesh { color_space, .. }
+            Self::Axial { gradient, .. } | Self::Radial { gradient, .. } => {
+                Some(&gradient.color_space)
+            }
+            Self::FreeFormTriangleMesh { color_space, .. }
             | Self::PatchMesh { color_space, .. } => Some(color_space),
             Self::Unsupported { .. } => None,
         }
@@ -176,8 +162,14 @@ impl Shading {
     pub fn bbox(&self) -> Option<&Rect> {
         match self {
             Self::FunctionBased(FunctionShading { bbox, .. })
-            | Self::Axial { bbox, .. }
-            | Self::Radial { bbox, .. }
+            | Self::Axial {
+                gradient: GradientShading { bbox, .. },
+                ..
+            }
+            | Self::Radial {
+                gradient: GradientShading { bbox, .. },
+                ..
+            }
             | Self::FreeFormTriangleMesh { bbox, .. }
             | Self::PatchMesh { bbox, .. } => bbox.as_ref(),
             Self::Unsupported { .. } => None,

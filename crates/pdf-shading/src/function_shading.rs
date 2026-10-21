@@ -6,12 +6,11 @@ use pdf_function::function::{Function, FunctionImpl};
 use pdf_graphics::{
     Image, PixelFormat, color::Color, rect::Rect, size::Size, transform::Transform,
 };
-use pdf_object_reader::{ObjectAccess, dictionary::Dictionary, object_lookup::ObjectLookupExt};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 use crate::{
     error::PdfShadingError,
     paint::{ShadingPaint, transparent_raster_paint},
-    parse::{parse_functions, read_background, required_color_space},
 };
 
 /// Largest raster edge sampled for a function-based shading, bounding per-pixel function calls.
@@ -45,29 +44,35 @@ pub struct FunctionShading {
     pub functions: Vec<Function>,
 }
 
-impl FunctionShading {
-    /// Parses a Type 1 function-based shading dictionary.
-    pub(crate) fn parse(
-        dictionary: &Dictionary,
-        access: &mut (impl ObjectAccess + ?Sized),
-    ) -> Result<Self, PdfShadingError> {
-        let color_space = required_color_space(dictionary, access)?;
-        let objects = access.source();
+/// Reads a Type 1 function-based shading dictionary.
+///
+/// A background whose components the color space rejects is ignored rather than
+/// failing the shading.
+impl FromPdfObject for FunctionShading {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        let color_space = context.required::<ColorSpace>(b"ColorSpace")?;
+        let functions = context.optional_list::<Function>(b"Function")?;
+        if functions.is_empty() {
+            return Err(PdfShadingError::MissingRequiredEntry { entry: "Function" }.into());
+        }
         Ok(Self {
-            background: read_background(dictionary, objects, &color_space)?,
+            background: context
+                .optional::<Vec<f32>>(b"Background")?
+                .and_then(|components| color_space.apply(&components).ok()),
             color_space,
-            bbox: dictionary.optional_bbox(objects)?,
-            anti_alias: dictionary.optional_boolean(b"AntiAlias", objects)?,
-            domain: dictionary
-                .optional_array_of::<f32, 4>(b"Domain", objects)?
-                .unwrap_or(DEFAULT_DOMAIN),
-            matrix: dictionary
-                .optional_matrix(objects)?
-                .unwrap_or_else(Transform::identity),
-            functions: parse_functions(dictionary, objects)?,
+            bbox: context.dictionary().optional_bbox(context.source())?,
+            anti_alias: context.optional(b"AntiAlias")?,
+            domain: context.optional(b"Domain")?.unwrap_or(DEFAULT_DOMAIN),
+            matrix: context
+                .optional::<[f32; 6]>(b"Matrix")?
+                .map_or_else(Transform::identity, Transform::from),
+            functions,
         })
     }
+}
 
+impl FunctionShading {
     /// Builds a raster paint covering the domain, mapped by `/Matrix` and then `transform`.
     ///
     /// With `use_background`, a `/Background` also fills the part of `/BBox` outside the

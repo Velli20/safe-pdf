@@ -14,6 +14,7 @@ use crate::pdf_string::PdfString;
 use crate::reader::ObjectAccess;
 use crate::resolved_object::ResolvedObject;
 use crate::{dictionary::Dictionary, stream::StreamObject};
+use pdf_graphics::interval::Interval;
 
 /// Decodes a resolved PDF value using one object-bound context.
 ///
@@ -246,6 +247,16 @@ impl<T: FromPdfObject, const N: usize> FromPdfObject for [T; N] {
                 }
                 .into()
             })
+    }
+}
+
+/// Reads a `[min max]` array, such as a function `/Domain`, as an interval.
+///
+/// Trailing elements are ignored, like the `[T; N]` decoder.
+impl FromPdfObject for Interval {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let [min, max] = context.array()?.read_array::<f32, 2>()?;
+        Ok(Self::new(min, max))
     }
 }
 

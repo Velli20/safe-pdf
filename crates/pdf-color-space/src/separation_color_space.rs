@@ -1,4 +1,4 @@
-use pdf_function::function::{Function, FunctionImpl};
+use pdf_function::function::Function;
 use pdf_graphics::color::Color;
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
@@ -23,7 +23,7 @@ pub struct SeparationColorSpace {
 impl FromPdfObject for SeparationColorSpace {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut array = context.array()?;
-        let [_, name, _, tint_transform] = array.array() else {
+        let [_, name, _, _] = array.array() else {
             return Err(ColorSpaceError::InvalidColorSpace {
                 description: format!(
                     "/Separation requires 4 elements, found {}",
@@ -33,13 +33,10 @@ impl FromPdfObject for SeparationColorSpace {
             .into());
         };
 
-        let alternate_space = Box::new(array.at(2)?);
-        let tint_transform = array.resolve(tint_transform)?;
         Ok(Self {
             name: Vec::from(name.try_bytes(array.source())?),
-            alternate_space,
-            tint_transform: Function::parse(tint_transform.value(), array.source())
-                .map_err(ColorSpaceError::from)?,
+            alternate_space: Box::new(array.at(2)?),
+            tint_transform: array.at(3)?,
         })
     }
 }

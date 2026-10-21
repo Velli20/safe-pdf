@@ -4,13 +4,12 @@
 //! packed-stream decoding, and patch reconstruction live in dedicated sibling
 //! modules so each stage can be understood independently.
 
-use pdf_object_reader::{ObjectAccess, object_error::ObjectError, object_variant::ObjectVariant};
 use thiserror::Error;
 
 use crate::{
     error::PdfShadingError,
+    mesh_config::MeshConfig,
     model::{Shading, ShadingType},
-    patch_mesh_config::PatchMeshConfig,
     patch_mesh_kind::PatchKind,
     patch_mesh_parser::PatchMeshParser,
 };
@@ -38,18 +37,18 @@ pub enum PatchMeshError {
     EmptyMesh,
 }
 
-/// Parses a Type 6 or Type 7 patch-mesh shading stream.
-pub(crate) fn parse_patch_mesh(
-    object: &ObjectVariant,
-    access: &mut (impl ObjectAccess + ?Sized),
-    shading_type: ShadingType,
-) -> Result<Shading, PdfShadingError> {
-    let kind = PatchKind::from_shading_type(shading_type)?;
-    let ObjectVariant::Stream(stream) = object else {
-        return Err(ObjectError::TypeMismatch("Stream", object.name()).into());
-    };
-    let config = PatchMeshConfig::parse(&stream.dictionary, access)?;
-    let patches = PatchMeshParser::new(stream.raw_data(), &config, kind)?.parse()?;
+impl MeshConfig {
+    /// Decodes this Type 6 or Type 7 stream into a patch-mesh shading.
+    pub(crate) fn patch_mesh(self, shading_type: ShadingType) -> Result<Shading, PdfShadingError> {
+        let kind = PatchKind::from_shading_type(shading_type)?;
+        let patches = PatchMeshParser::new(&self, kind)?.parse()?;
 
-    Ok(config.into_shading(shading_type, patches))
+        Ok(Shading::PatchMesh {
+            shading_type,
+            color_space: self.color_space,
+            bbox: self.bbox,
+            anti_alias: self.anti_alias,
+            patches,
+        })
+    }
 }
