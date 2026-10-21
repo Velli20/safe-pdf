@@ -24,18 +24,21 @@ impl FromPdfObject for SoftMask {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
         // A dictionary-only form would read as an empty group and mask out everything
-        // painted under it, so the group must be a stream.
+        // painted under it, so the group must be a stream. The group may be the form being
+        // decoded, so it is checked on its resolved value: an eager read of /G would reenter
+        // the active path.
         if let Some(group) = context.dictionary().get(b"G") {
-            let actual = context.resolve(group)?.kind();
+            let group = context.resolve(group)?;
+            let actual = group.kind();
             if actual != ObjectKind::Stream {
                 return Err(ObjectReadError::TypeMismatch {
                     expected: ObjectKind::Stream,
                     actual,
                 });
             }
-        }
-        if let XObjectSubtype::Image = context.required::<XObjectSubtype>(b"G")? {
-            return Err(PdfPagesError::SoftMaskGroupNotForm.into());
+            if let XObjectSubtype::Image = context.read::<XObjectSubtype>(group.value())? {
+                return Err(PdfPagesError::SoftMaskGroupNotForm.into());
+            }
         }
         Ok(Self {
             mask_type: context.required(b"S")?,
