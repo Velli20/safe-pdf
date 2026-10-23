@@ -27,7 +27,6 @@ use std::collections::BTreeMap;
 use pdf_object_reader::{
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
     object_id::ObjectId,
-    object_lookup::ObjectLookupExt,
     object_resolver::PassthroughResolver,
     object_variant::ObjectVariant,
     trailer::Trailer,
@@ -233,8 +232,8 @@ impl<'input> LinearObjectScanner<'input> {
             probe.recover_stream_range(direct_stream_length(&dictionary))?;
             probe.consume_required_endobj()?;
             let is_rooted_xref_stream = dictionary
-                .optional_bytes(b"Type", &PassthroughResolver)
-                .is_ok_and(|type_name| type_name == Some(b"XRef".as_slice()))
+                .get(b"Type")
+                .is_some_and(|type_name| type_name.is_named(b"XRef", &PassthroughResolver))
                 && dictionary.get(b"Root").is_some();
             let trailer = is_rooted_xref_stream.then(|| Trailer::new(Box::new(dictionary), None));
             return Ok((identifier, trailer));

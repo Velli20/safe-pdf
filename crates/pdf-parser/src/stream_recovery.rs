@@ -18,8 +18,7 @@
 use std::ops::Range;
 
 use pdf_object_reader::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
 };
 
 use crate::{error::ParserError, parser::PdfParser};
@@ -43,7 +42,10 @@ impl PdfParser<'_> {
         dictionary: &Dictionary,
         objects: &dyn ObjectResolver,
     ) -> Result<Vec<u8>, ParserError> {
-        let length = dictionary.optional_number::<usize>(b"Length", objects)?;
+        let length = match dictionary.get(b"Length") {
+            Some(length) if !length.is_null(objects)? => Some(length.try_number::<usize>(objects)?),
+            _ => None,
+        };
         self.recovered_stream_bytes(length)
     }
 

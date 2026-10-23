@@ -1,7 +1,5 @@
 use crate::{error::ParserError, parser::PdfParser};
-use pdf_object_reader::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-};
+use pdf_object_reader::{dictionary::Dictionary, object_resolver::ObjectResolver};
 
 impl PdfParser<'_> {
     /// Parses a PDF stream object from the input, using a pre-parsed dictionary.
@@ -25,7 +23,9 @@ impl PdfParser<'_> {
         const STREAM_END: &[u8] = b"endstream";
 
         self.read_keyword(STREAM_START)?;
-        let length = dictionary.required_number::<usize>(b"Length", objects)?;
+        let length = dictionary
+            .get_or_err(b"Length")?
+            .try_number::<usize>(objects)?;
         let stream_data = self.tokenizer.read_exactly(length)?.to_vec();
         self.try_read_end_of_line_marker();
         self.read_keyword(STREAM_END)?;

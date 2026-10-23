@@ -1,11 +1,6 @@
 use std::collections::BTreeMap;
 
-use pdf_graphics::rect::Rect;
-
-use crate::{
-    object_error::ObjectError, object_id::ObjectId, object_lookup::ObjectLookupExt,
-    object_resolver::ObjectResolver, object_variant::ObjectVariant,
-};
+use crate::{object_error::ObjectError, object_id::ObjectId, object_variant::ObjectVariant};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Dictionary {
@@ -91,27 +86,6 @@ impl Dictionary {
             .ok_or_else(|| ObjectError::MissingRequiredKey {
                 key: String::from_utf8_lossy(key).into_owned(),
             })
-    }
-
-    /// Reads the optional rectangle entry with the given key.
-    ///
-    /// Missing entries, explicit PDF `null` values, and values that are not an array of at
-    /// least four numbers are treated as absent; reference resolution failures propagate.
-    /// The coordinates are returned in their original order.
-    pub fn optional_rect(
-        &self,
-        key: &[u8],
-        objects: &dyn ObjectResolver,
-    ) -> Result<Option<Rect>, ObjectError> {
-        match self.optional_array_of::<f32, 4>(key, objects) {
-            Ok(rect) => Ok(rect.map(Rect::from)),
-            Err(
-                ObjectError::TypeMismatch(..)
-                | ObjectError::InvalidArrayLength { .. }
-                | ObjectError::NumberConversionError,
-            ) => Ok(None),
-            Err(error) => Err(error),
-        }
     }
 
     /// Returns the `/Parent` entry and its object id when it is an indirect reference.

@@ -3,6 +3,7 @@
 //! A group is identified by the object number of its dictionary, so group references are
 //! resolved only to read that number and the group's `/Name`.
 use crate::error::OptionalContentError;
+use crate::ocg_state::OcgTarget;
 use crate::optional_content::{
     OptionalContentBaseState, OptionalContentConfiguration, OptionalContentGroup,
     OptionalContentGroupId, OptionalContentMembership, OptionalContentPolicy,
@@ -120,5 +121,25 @@ impl FromPdfObject for OptionalContentMembership {
                 })
             }
         }
+    }
+}
+
+/// Decodes a direct `/OCG` dictionary of a `SetOCGState` `/State` array, retaining its `/Name`.
+///
+/// Group references keep their identity unresolved and never reach this decoder.
+impl FromPdfObject for OcgTarget {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        let group_type = context.required::<Arc<[u8]>>(b"Type")?;
+        if group_type.as_ref() != b"OCG" {
+            return Err(OptionalContentError::InvalidEntry {
+                entry: b"State",
+                reason: format!("optional content group has type '{group_type:?}'"),
+            }
+            .into());
+        }
+        Ok(Self::Dictionary {
+            name: context.required::<Arc<[u8]>>(b"Name")?.to_vec(),
+        })
     }
 }

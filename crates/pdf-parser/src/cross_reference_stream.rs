@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 
 use pdf_object_reader::{
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
-    object_lookup::ObjectLookupExt,
     object_resolver::ObjectResolver,
     stream::StreamObject,
     trailer::Trailer,
@@ -26,7 +25,8 @@ pub fn parse_xref_stream(
     let layout = XrefStreamLayout::from_dictionary(&stream, objects)?;
     let size = stream
         .dictionary
-        .required_number::<usize>(b"Size", objects)?;
+        .get_or_err(b"Size")?
+        .try_number::<usize>(objects)?;
 
     if layout.entry_width == 0 {
         return Ok(CrossReferenceTable::new(
@@ -63,7 +63,12 @@ fn validate_stream_type(
     stream: &StreamObject,
     objects: &dyn ObjectResolver,
 ) -> Result<(), ParserError> {
-    let Some(type_name) = stream.dictionary.optional_bytes(b"Type", objects)? else {
+    let Some(type_name) = stream
+        .dictionary
+        .get(b"Type")
+        .map(|type_name| type_name.try_bytes(objects))
+        .transpose()?
+    else {
         return Ok(());
     };
 
@@ -94,7 +99,8 @@ impl XrefStreamLayout {
     ) -> Result<Self, ParserError> {
         let [type_width, second_field_width, third_field_width] = stream
             .dictionary
-            .required_array_of::<usize, 3>(b"W", objects)?;
+            .get_or_err(b"W")?
+            .try_array_of::<usize, 3>(objects)?;
 
         Ok(Self {
             type_width,

@@ -2,7 +2,7 @@
 
 use pdf_object_reader::{
     DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-    object_lookup::ObjectLookupExt, pdf_array::PdfArray,
+    pdf_array::PdfArray,
 };
 use std::sync::Arc;
 
@@ -35,7 +35,8 @@ impl FromPdfObject for PageTreeNode {
         match context
             .object()
             .dictionary()?
-            .required_bytes(b"Type", context.source())?
+            .get_or_err(b"Type")?
+            .try_bytes(context.source())?
         {
             PdfPage::KEY => PdfPage::from_pdf_object(context).map(Self::Page),
             PageTree::KEY => PageTree::from_pdf_object(context).map(Self::Pages),

@@ -189,12 +189,8 @@ pub mod cross_reference_table;
 pub mod dictionary;
 /// PDF object error model and parsing operations.
 pub mod object_error;
-/// PDF object lookup model and parsing operations.
-pub mod object_lookup;
 /// PDF object resolver model and parsing operations.
 pub mod object_resolver;
-/// Iteration over `/Parent` dictionary chains.
-pub mod parent_chain;
 /// PDF stream model and parsing operations.
 pub mod stream;
 /// PDF text encoding model and parsing operations.
