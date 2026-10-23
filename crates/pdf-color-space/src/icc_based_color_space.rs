@@ -93,6 +93,7 @@ impl ICCBasedColorSpace {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use bytes::Bytes;
     use pdf_graphics::color::Color;
@@ -124,7 +125,7 @@ mod tests {
         let array = ObjectVariant::Array(
             vec![
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"ICCBased".to_vec(),
+                    b"ICCBased",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
                 ObjectVariant::Stream(stream),

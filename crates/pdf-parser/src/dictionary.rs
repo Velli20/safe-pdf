@@ -235,7 +235,7 @@ mod tests {
         assert_eq!(
             result.get(b"AnyName"),
             Some(&pdf_object_reader::pdf_string::PdfString::from(
-                b"A B".to_vec(),
+                b"A B",
                 pdf_object_reader::string_kind::StringKind::Name
             ))
         );
@@ -250,7 +250,7 @@ mod tests {
         assert_eq!(
             result.get(b"AnyName"),
             Some(&pdf_object_reader::pdf_string::PdfString::from(
-                b"A B C".to_vec(),
+                b"A B C",
                 pdf_object_reader::string_kind::StringKind::Name
             ))
         );
@@ -265,14 +265,14 @@ mod tests {
         assert_eq!(
             result.get(b"Name"),
             Some(&pdf_object_reader::pdf_string::PdfString::from(
-                b"Value".to_vec(),
+                b"Value",
                 pdf_object_reader::string_kind::StringKind::Name
             ))
         );
         assert_eq!(
             result.get(b"Next"),
             Some(&pdf_object_reader::pdf_string::PdfString::from(
-                b"Other".to_vec(),
+                b"Other",
                 pdf_object_reader::string_kind::StringKind::Name
             ))
         );
@@ -355,7 +355,7 @@ mod tests {
         assert_eq!(
             result.get(b"CS"),
             Some(&pdf_object_reader::pdf_string::PdfString::from(
-                b"DeviceGray".to_vec(),
+                b"DeviceGray",
                 pdf_object_reader::string_kind::StringKind::Name
             ))
         );

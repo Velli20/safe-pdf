@@ -65,7 +65,7 @@ mod tests {
                 Vec::from(b"BBox"),
                 ObjectVariant::Array(
                     vec![
-                        ObjectVariant::Real(265.077.into()),
+                        ObjectVariant::Real(265.077),
                         ObjectVariant::Real(71.8304),
                         ObjectVariant::Real(301.321),
                         ObjectVariant::Real(43.3206),
@@ -76,7 +76,7 @@ mod tests {
             (
                 Vec::from(b"Subtype"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"Form".to_vec(),
+                    b"Form",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -103,7 +103,7 @@ mod tests {
                 Vec::from(b"BBox"),
                 ObjectVariant::Array(
                     vec![
-                        ObjectVariant::Real(0.0.into()),
+                        ObjectVariant::Real(0.0),
                         ObjectVariant::Real(0.0),
                         ObjectVariant::Real(10.0),
                         ObjectVariant::Real(10.0),
@@ -114,7 +114,7 @@ mod tests {
             (
                 Vec::from(b"Subtype"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"Form".to_vec(),
+                    b"Form",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -122,7 +122,7 @@ mod tests {
                 Vec::from(b"Matrix"),
                 ObjectVariant::Array(
                     vec![
-                        ObjectVariant::Real(2.0.into()),
+                        ObjectVariant::Real(2.0),
                         ObjectVariant::Real(0.0),
                         ObjectVariant::Real(0.0),
                         ObjectVariant::Real(3.0),
@@ -138,9 +138,7 @@ mod tests {
 
         let form = reader
             .read::<FormXObject>(
-                &pdf_object_reader::object_variant::ObjectVariant::Dictionary(
-                    (&dictionary).clone(),
-                ),
+                &pdf_object_reader::object_variant::ObjectVariant::Dictionary(dictionary.clone()),
             )
             .expect("dictionary-only form should parse");
 

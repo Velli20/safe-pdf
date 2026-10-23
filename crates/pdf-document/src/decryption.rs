@@ -379,7 +379,7 @@ mod tests {
             entries.insert(
                 Vec::from(b"Type"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    type_name.to_vec(),
+                    type_name,
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             );
@@ -499,7 +499,7 @@ mod tests {
             (
                 Vec::from(b"Subtype"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"FreeText".to_vec(),
+                    b"FreeText",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -518,7 +518,7 @@ mod tests {
         assert_eq!(
             dictionary.get(b"Contents"),
             Some(&pdf_object_reader::pdf_string::PdfString::from(
-                contents.to_vec(),
+                contents,
                 pdf_object_reader::string_kind::StringKind::Literal
             ))
         );
@@ -526,8 +526,8 @@ mod tests {
             dictionary.get(b"RC"),
             Some(&ObjectVariant::Array(
                 vec![pdf_object_reader::pdf_string::PdfString::from(
-                    rich_contents.to_vec(),
-                    pdf_object_reader::string_kind::StringKind::Hexadecimal.into()
+                    rich_contents,
+                    pdf_object_reader::string_kind::StringKind::Hexadecimal
                 )]
                 .into()
             ))
@@ -535,7 +535,7 @@ mod tests {
         assert_eq!(
             dictionary.get(b"Subtype"),
             Some(&pdf_object_reader::pdf_string::PdfString::from(
-                b"FreeText".to_vec(),
+                b"FreeText",
                 pdf_object_reader::string_kind::StringKind::Name
             ))
         );
@@ -589,7 +589,7 @@ mod tests {
         assert_eq!(
             stream.dictionary.get(b"Label"),
             Some(&pdf_object_reader::pdf_string::PdfString::from(
-                b"annotation appearance".to_vec(),
+                b"annotation appearance",
                 pdf_object_reader::string_kind::StringKind::Literal
             ))
         );
@@ -606,7 +606,7 @@ mod tests {
             (
                 Vec::from(b"Type"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"Sig".to_vec(),
+                    b"Sig",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),

@@ -151,7 +151,7 @@ mod tests {
             (
                 Vec::from(b"CS"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"RGB".to_vec(),
+                    b"RGB",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -160,7 +160,7 @@ mod tests {
             (
                 Vec::from(b"F"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"DCTDecode".to_vec(),
+                    b"DCTDecode",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -179,7 +179,7 @@ mod tests {
                 (
                     b"ColorSpace".to_vec(),
                     pdf_object_reader::pdf_string::PdfString::from(
-                        b"DeviceRGB".to_vec(),
+                        b"DeviceRGB",
                         pdf_object_reader::string_kind::StringKind::Name
                     )
                 ),
@@ -188,7 +188,7 @@ mod tests {
                 (
                     b"Filter".to_vec(),
                     pdf_object_reader::pdf_string::PdfString::from(
-                        b"DCTDecode".to_vec(),
+                        b"DCTDecode",
                         pdf_object_reader::string_kind::StringKind::Name
                     )
                 ),
@@ -213,7 +213,7 @@ mod tests {
             let dictionary = pdf_object_reader::dictionary::Dictionary::new(BTreeMap::from([(
                 Vec::from(b"CS"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    abbreviated.as_bytes().to_vec(),
+                    abbreviated.as_bytes(),
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             )]));
@@ -223,7 +223,7 @@ mod tests {
             assert_eq!(
                 normalized.dictionary.get(b"ColorSpace".as_slice()),
                 Some(&pdf_object_reader::pdf_string::PdfString::from(
-                    canonical.as_bytes().to_vec(),
+                    canonical.as_bytes(),
                     pdf_object_reader::string_kind::StringKind::Name
                 ))
             );
@@ -237,11 +237,11 @@ mod tests {
             ObjectVariant::Array(
                 vec![
                     pdf_object_reader::pdf_string::PdfString::from(
-                        b"I".to_vec(),
+                        b"I",
                         pdf_object_reader::string_kind::StringKind::Name,
                     ),
                     pdf_object_reader::pdf_string::PdfString::from(
-                        b"RGB".to_vec(),
+                        b"RGB",
                         pdf_object_reader::string_kind::StringKind::Name,
                     ),
                     ObjectVariant::Integer(1),
@@ -261,11 +261,11 @@ mod tests {
             Some(&ObjectVariant::Array(
                 vec![
                     pdf_object_reader::pdf_string::PdfString::from(
-                        b"Indexed".to_vec(),
-                        pdf_object_reader::string_kind::StringKind::Name.into()
+                        b"Indexed",
+                        pdf_object_reader::string_kind::StringKind::Name
                     ),
                     pdf_object_reader::pdf_string::PdfString::from(
-                        b"DeviceRGB".to_vec(),
+                        b"DeviceRGB",
                         pdf_object_reader::string_kind::StringKind::Name
                     ),
                     ObjectVariant::Integer(1),
@@ -298,7 +298,7 @@ mod tests {
         dictionary.dictionary.insert(
             b"F".to_vec(),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"ASCIIHexDecode".to_vec(),
+                b"ASCIIHexDecode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
@@ -334,7 +334,7 @@ mod tests {
             (
                 Vec::from(b"CS"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"G".to_vec(),
+                    b"G",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),

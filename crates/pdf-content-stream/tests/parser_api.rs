@@ -191,7 +191,7 @@ fn optional_contents_preserves_allocator_for_missing_contents() {
 fn optional_contents_parses_stream_arrays_and_allocates_monotonically() {
     let contents = ObjectVariant::Array(
         vec![
-            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0).into()),
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0)),
             ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(2, 0)),
         ]
         .into(),
@@ -234,15 +234,14 @@ fn content_stream_read_rejects_non_stream_array_entries() {
         .expect("non-stream array entries should fail");
 
     assert!(matches!(
-        err,
-        pdf_object_reader::ObjectReadError::At {
-                location: pdf_object_reader::ReadLocation::ArrayIndex(0),
-                source,
-            } if matches!(*source, pdf_object_reader::ObjectReadError::TypeMismatch {
-                expected: pdf_object_reader::object_kind::ObjectKind::Stream,
-                actual: pdf_object_reader::object_kind::ObjectKind::Integer,
-            })
-    .into()));
+    err,
+    pdf_object_reader::ObjectReadError::At {
+            location: pdf_object_reader::ReadLocation::ArrayIndex(0),
+            source,
+        } if matches!(*source, pdf_object_reader::ObjectReadError::TypeMismatch {
+            expected: pdf_object_reader::object_kind::ObjectKind::Stream,
+            actual: pdf_object_reader::object_kind::ObjectKind::Integer,
+        })));
     assert_eq!(
         reader
             .content_stream_ids()

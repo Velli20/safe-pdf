@@ -97,7 +97,7 @@ impl<'a> Md5KeyDerivation<'a> {
     ///
     /// Implements Algorithm 4 for revision 2 and Algorithm 5 for revisions 3 and 4.
     fn is_valid_file_key(&self, file_key: &[u8]) -> Result<bool, DecryptionError> {
-        let user_hash = self.encrypt.user_password_hash.as_slice();
+        let user_hash = self.encrypt.user_password_hash.as_ref();
         if self.encrypt.revision == 2 {
             return Ok(rc4_crypt(file_key, &PADDING)? == user_hash);
         }
@@ -118,7 +118,7 @@ impl<'a> Md5KeyDerivation<'a> {
     /// in reverse).
     fn recover_user_password(&self, owner_password: &[u8]) -> Result<Vec<u8>, DecryptionError> {
         let owner_key = self.stretch_key(Md5::digest(pad_password(owner_password)).to_vec())?;
-        let owner_hash = self.encrypt.owner_password_hash.as_slice();
+        let owner_hash = self.encrypt.owner_password_hash.as_ref();
         if self.encrypt.revision == 2 {
             return rc4_crypt(&owner_key, owner_hash);
         }

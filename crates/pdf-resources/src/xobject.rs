@@ -107,7 +107,7 @@ impl Resource {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use pdf_object_collection::object_collection::ObjectCollection;
     use pdf_object_reader::{
@@ -164,7 +164,7 @@ mod tests {
             (
                 Vec::from(b"Subtype"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"Image".to_vec(),
+                    b"Image",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -174,7 +174,7 @@ mod tests {
             (
                 Vec::from(b"ColorSpace"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"DeviceGray".to_vec(),
+                    b"DeviceGray",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -220,7 +220,7 @@ mod tests {
                 (
                     Vec::from(b"Subtype"),
                     pdf_object_reader::pdf_string::PdfString::from(
-                        b"Image".to_vec(),
+                        b"Image",
                         pdf_object_reader::string_kind::StringKind::Name,
                     ),
                 ),
@@ -230,7 +230,7 @@ mod tests {
                 (
                     Vec::from(b"ColorSpace"),
                     pdf_object_reader::pdf_string::PdfString::from(
-                        b"DeviceGray".to_vec(),
+                        b"DeviceGray",
                         pdf_object_reader::string_kind::StringKind::Name,
                     ),
                 ),
@@ -248,7 +248,7 @@ mod tests {
                 (
                     Vec::from(b"Subtype"),
                     pdf_object_reader::pdf_string::PdfString::from(
-                        b"Image".to_vec(),
+                        b"Image",
                         pdf_object_reader::string_kind::StringKind::Name,
                     ),
                 ),
@@ -258,7 +258,7 @@ mod tests {
                 (
                     Vec::from(b"ColorSpace"),
                     pdf_object_reader::pdf_string::PdfString::from(
-                        b"DeviceGray".to_vec(),
+                        b"DeviceGray",
                         pdf_object_reader::string_kind::StringKind::Name,
                     ),
                 ),
@@ -301,7 +301,7 @@ mod tests {
             Dictionary::new(BTreeMap::from([(
                 Vec::from(b"Subtype"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"Unsupported".to_vec(),
+                    b"Unsupported",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             )])),
@@ -328,7 +328,7 @@ mod tests {
             (
                 Vec::from(b"ColorSpace"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"DeviceGray".to_vec(),
+                    b"DeviceGray",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -339,7 +339,7 @@ mod tests {
             (
                 Vec::from(b"Filter"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"ASCIIHexDecode".to_vec(),
+                    b"ASCIIHexDecode",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -347,7 +347,7 @@ mod tests {
             (
                 Vec::from(b"Subtype"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"Image".to_vec(),
+                    b"Image",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -395,14 +395,14 @@ mod tests {
                 (
                     Vec::from(b"Subtype"),
                     pdf_object_reader::pdf_string::PdfString::from(
-                        b"Image".to_vec(),
+                        b"Image",
                         pdf_object_reader::string_kind::StringKind::Name,
                     ),
                 ),
                 (
                     Vec::from(b"Width"),
                     pdf_object_reader::pdf_string::PdfString::from(
-                        b"Height".to_vec(),
+                        b"Height",
                         pdf_object_reader::string_kind::StringKind::Name,
                     ),
                 ),
@@ -410,7 +410,7 @@ mod tests {
                 (
                     Vec::from(b"ColorSpace"),
                     pdf_object_reader::pdf_string::PdfString::from(
-                        b"DeviceGray".to_vec(),
+                        b"DeviceGray",
                         pdf_object_reader::string_kind::StringKind::Name,
                     ),
                 ),

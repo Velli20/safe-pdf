@@ -142,15 +142,17 @@ fn triangle_mesh_bounds_and_raster_preserve_transparent_unpainted_pixels() {
     let raster = rasterize_triangle_mesh(std::iter::once(&triangle), bounds, &transform, 16);
     let painted = raster
         .pixels
-        .chunks_exact(4)
-        .next()
+        .as_chunks::<4>()
+        .0
+        .first()
         .expect("raster should contain a first pixel");
     let unpainted = raster
         .pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
         .last()
         .expect("raster should contain a last pixel");
 
     assert_eq!(painted.get(3), Some(&u8::MAX));
-    assert_eq!(unpainted, [0, 0, 0, 0]);
+    assert_eq!(*unpainted, [0, 0, 0, 0]);
 }

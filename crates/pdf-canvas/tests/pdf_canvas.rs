@@ -59,7 +59,7 @@ fn image_dictionary() -> Dictionary {
         (
             Vec::from(b"ColorSpace"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"DeviceGray".to_vec(),
+                b"DeviceGray",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         ),
@@ -81,7 +81,7 @@ fn inline_image() -> PdfImage {
             (
                 Vec::from(b"CS"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"DeviceGray".to_vec(),
+                    b"DeviceGray",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),

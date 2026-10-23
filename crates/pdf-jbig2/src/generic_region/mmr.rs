@@ -62,6 +62,7 @@ pub(crate) fn decode_mmr_region_from_reader(
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::{decode_mmr_region, decode_mmr_region_from_reader};
     use crate::error::Jbig2Error;

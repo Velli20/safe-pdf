@@ -220,7 +220,7 @@ mod tests {
             (
                 Vec::from(b"Filter"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"ASCIIHexDecode".to_vec(),
+                    b"ASCIIHexDecode",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -280,7 +280,7 @@ mod tests {
             (
                 Vec::from(b"Filter"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"JPXDecode".to_vec(),
+                    b"JPXDecode",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -306,11 +306,11 @@ mod tests {
             ObjectVariant::Array(
                 vec![
                     pdf_object_reader::pdf_string::PdfString::from(
-                        b"ASCII85Decode".to_vec(),
+                        b"ASCII85Decode",
                         pdf_object_reader::string_kind::StringKind::Name,
                     ),
                     pdf_object_reader::pdf_string::PdfString::from(
-                        b"DCTDecode".to_vec(),
+                        b"DCTDecode",
                         pdf_object_reader::string_kind::StringKind::Name,
                     ),
                 ]
@@ -355,7 +355,7 @@ mod tests {
             (
                 Vec::from(b"ColorSpace"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"DeviceGray".to_vec(),
+                    b"DeviceGray",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -375,11 +375,11 @@ mod tests {
                 ObjectVariant::Array(
                     vec![
                         pdf_object_reader::pdf_string::PdfString::from(
-                            b"Indexed".to_vec(),
+                            b"Indexed",
                             pdf_object_reader::string_kind::StringKind::Name,
                         ),
                         pdf_object_reader::pdf_string::PdfString::from(
-                            b"DeviceRGB".to_vec(),
+                            b"DeviceRGB",
                             pdf_object_reader::string_kind::StringKind::Name,
                         ),
                         ObjectVariant::Integer(1),

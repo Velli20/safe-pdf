@@ -66,7 +66,7 @@ jobs:
         run: cargo test --no-fail-fast
 
       - name: Run clippy (lints)
-        run: cargo clippy --workspace --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Rustfmt check
         run: |

@@ -52,7 +52,7 @@ impl ObjectResolver for MapResolver {
 
 fn name(value: &str) -> ObjectVariant {
     pdf_object_reader::pdf_string::PdfString::from(
-        value.as_bytes().to_vec(),
+        value.as_bytes(),
         pdf_object_reader::string_kind::StringKind::Name,
     )
 }
@@ -62,16 +62,16 @@ fn integer(value: i64) -> ObjectVariant {
 }
 
 fn color_space(value: &str) -> ObjectVariant {
-    ObjectVariant::Array(vec![name(value.into())].into())
+    ObjectVariant::Array(vec![name(value)].into())
 }
 
 fn resources_dictionary(entries: &[(&str, &str)]) -> Dictionary {
-    let color_spaces = Dictionary::new(BTreeMap::from(
+    let color_spaces = Dictionary::new(
         entries
             .iter()
             .map(|(name, value)| (Vec::from(name.as_bytes()), color_space(value)))
             .collect::<BTreeMap<_, _>>(),
-    ));
+    );
 
     Dictionary::new(BTreeMap::from([(
         Vec::from(b"ColorSpace"),
@@ -105,13 +105,7 @@ fn page_dictionary(
         entries.insert(
             Vec::from(b"MediaBox"),
             ObjectVariant::Array(
-                vec![
-                    integer(left.into()),
-                    integer(bottom),
-                    integer(right),
-                    integer(top),
-                ]
-                .into(),
+                vec![integer(left), integer(bottom), integer(right), integer(top)].into(),
             ),
         );
     }
@@ -153,13 +147,7 @@ fn pages_dictionary(
         entries.insert(
             Vec::from(b"MediaBox"),
             ObjectVariant::Array(
-                vec![
-                    integer(left.into()),
-                    integer(bottom),
-                    integer(right),
-                    integer(top),
-                ]
-                .into(),
+                vec![integer(left), integer(bottom), integer(right), integer(top)].into(),
             ),
         );
     }
@@ -191,7 +179,7 @@ fn inherited_resources_and_media_box_apply_to_leaf_pages() {
 
     let pages = reader
         .read::<PageTree>(
-            &pdf_object_reader::object_variant::ObjectVariant::Dictionary((&root_pages).clone()),
+            &pdf_object_reader::object_variant::ObjectVariant::Dictionary(root_pages.clone()),
         )
         .map(|tree| tree.pages)
         .expect("page tree should parse");
@@ -246,7 +234,7 @@ fn child_resources_keep_their_own_entries_while_inheriting_missing_ones() {
 
     let pages = reader
         .read::<PageTree>(
-            &pdf_object_reader::object_variant::ObjectVariant::Dictionary((&root_pages).clone()),
+            &pdf_object_reader::object_variant::ObjectVariant::Dictionary(root_pages.clone()),
         )
         .map(|tree| tree.pages)
         .expect("page tree should parse");

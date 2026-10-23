@@ -269,7 +269,53 @@ fn carries_jpx_codestream(stream: &StreamObject, access: &mut impl ObjectAccess)
         .is_some_and(|filters| filters.has_jpx_filter())
 }
 
+/// Reads the objects inserted so far, failing on a reference to one not yet loaded.
+///
+/// Insertion decodes stream filters before later objects arrive, so an object missing
+/// here may still be defined. Failing the read keeps such a stream encoded for a later
+/// decode, where [`ObjectCollection`] resolves an object that is still missing to null.
+struct LoadedObjects<'a>(&'a ObjectCollection);
+
+impl ObjectResolver for LoadedObjects<'_> {
+    fn resolve_object<'a>(
+        &'a self,
+        obj: &'a ObjectVariant,
+    ) -> Result<&'a ObjectVariant, ObjectError> {
+        self.0.resolve_object(obj)
+    }
+}
+
+impl pdf_object_reader::ObjectSource for LoadedObjects<'_> {
+    type Error = ObjectError;
+    fn read_object(
+        &self,
+        id: pdf_object_reader::object_id::ObjectId,
+    ) -> Result<Option<pdf_object_reader::pdf_object::PdfObject>, Self::Error> {
+        self.0
+            .read_object(id)?
+            .map(Some)
+            .ok_or_else(|| ObjectError::FailedResolveObjectReference {
+                obj_num: id.number(),
+            })
+    }
+}
+
+impl pdf_object_reader::ObjectSource for ObjectCollection {
+    type Error = ObjectError;
+    fn read_object(
+        &self,
+        id: pdf_object_reader::object_id::ObjectId,
+    ) -> Result<Option<pdf_object_reader::pdf_object::PdfObject>, Self::Error> {
+        Ok(self
+            .map
+            .get(&id.number())
+            .cloned()
+            .map(pdf_object_reader::pdf_object::PdfObject::new))
+    }
+}
+
 #[cfg(test)]
+#[allow(clippy::as_conversions)]
 mod tests {
     use std::collections::BTreeMap;
 
@@ -413,7 +459,7 @@ mod tests {
         stream_dict.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"FlateDecode".to_vec(),
+                b"FlateDecode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
@@ -461,7 +507,7 @@ mod tests {
             (
                 Vec::from(b"Filter"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"ASCIIHexDecode".to_vec(),
+                    b"ASCIIHexDecode",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -521,50 +567,5 @@ mod tests {
 
         assert!(collection.map.capacity() >= 12);
         assert!(collection.map.is_empty());
-    }
-}
-
-/// Reads the objects inserted so far, failing on a reference to one not yet loaded.
-///
-/// Insertion decodes stream filters before later objects arrive, so an object missing
-/// here may still be defined. Failing the read keeps such a stream encoded for a later
-/// decode, where [`ObjectCollection`] resolves an object that is still missing to null.
-struct LoadedObjects<'a>(&'a ObjectCollection);
-
-impl ObjectResolver for LoadedObjects<'_> {
-    fn resolve_object<'a>(
-        &'a self,
-        obj: &'a ObjectVariant,
-    ) -> Result<&'a ObjectVariant, ObjectError> {
-        self.0.resolve_object(obj)
-    }
-}
-
-impl pdf_object_reader::ObjectSource for LoadedObjects<'_> {
-    type Error = ObjectError;
-    fn read_object(
-        &self,
-        id: pdf_object_reader::object_id::ObjectId,
-    ) -> Result<Option<pdf_object_reader::pdf_object::PdfObject>, Self::Error> {
-        self.0
-            .read_object(id)?
-            .map(Some)
-            .ok_or_else(|| ObjectError::FailedResolveObjectReference {
-                obj_num: id.number(),
-            })
-    }
-}
-
-impl pdf_object_reader::ObjectSource for ObjectCollection {
-    type Error = ObjectError;
-    fn read_object(
-        &self,
-        id: pdf_object_reader::object_id::ObjectId,
-    ) -> Result<Option<pdf_object_reader::pdf_object::PdfObject>, Self::Error> {
-        Ok(self
-            .map
-            .get(&id.number())
-            .cloned()
-            .map(pdf_object_reader::pdf_object::PdfObject::new))
     }
 }

@@ -156,7 +156,7 @@ mod tests {
         let stream_dictionary = Dictionary::from_entries([(
             b"Subtype".as_slice(),
             pdf_object_reader::pdf_string::PdfString::from(
-                subtype.to_vec(),
+                subtype,
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         )]);

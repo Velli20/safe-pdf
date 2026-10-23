@@ -75,7 +75,7 @@ pub(crate) fn bits_to_bytes(bits: &[bool]) -> Vec<u8> {
             current = 0;
         }
     }
-    if bits.len() % 8 != 0 {
+    if !bits.len().is_multiple_of(8) {
         bytes.push(current);
     }
     bytes

@@ -59,9 +59,17 @@ impl<'a> Sha2KeyDerivation<'a> {
 
         Ok(Self {
             encrypt,
-            owner_encrypted_key: required_v5_entry(&encrypt.owner_encrypted_key, "OE", 32)?,
-            user_encrypted_key: required_v5_entry(&encrypt.user_encrypted_key, "UE", 32)?,
-            encrypted_permissions: required_v5_entry(&encrypt.encrypted_permissions, "Perms", 16)?,
+            owner_encrypted_key: required_v5_entry(
+                encrypt.owner_encrypted_key.as_deref(),
+                "OE",
+                32,
+            )?,
+            user_encrypted_key: required_v5_entry(encrypt.user_encrypted_key.as_deref(), "UE", 32)?,
+            encrypted_permissions: required_v5_entry(
+                encrypt.encrypted_permissions.as_deref(),
+                "Perms",
+                16,
+            )?,
         })
     }
 
@@ -78,8 +86,8 @@ impl<'a> Sha2KeyDerivation<'a> {
     /// Unwraps the file key with whichever of the user or owner entries `password` opens.
     fn unwrap_file_key(&self, password: &[u8]) -> Result<Option<Vec<u8>>, DecryptionError> {
         let revision = self.encrypt.revision;
-        let user_hash = self.encrypt.user_password_hash.as_slice();
-        let owner_hash = self.encrypt.owner_password_hash.as_slice();
+        let user_hash = self.encrypt.user_password_hash.as_ref();
+        let owner_hash = self.encrypt.owner_password_hash.as_ref();
 
         let (password_entry, owner_input, encrypted_key) =
             if validate_v5_password(password, revision, user_hash, None)? {
@@ -128,11 +136,11 @@ impl<'a> Sha2KeyDerivation<'a> {
 
 /// Returns a required V=5 encryption dictionary entry with its expected length.
 fn required_v5_entry<'a>(
-    entry: &'a Option<Vec<u8>>,
+    entry: Option<&'a [u8]>,
     name: &str,
     expected_length: usize,
 ) -> Result<&'a [u8], DecryptionError> {
-    let value = entry.as_deref().ok_or_else(|| {
+    let value = entry.ok_or_else(|| {
         DecryptionError::InvalidData(format!("V=5 encryption dictionary is missing /{name}"))
     })?;
     validate_v5_entry(value, name, expected_length)?;
@@ -302,7 +310,9 @@ mod tests {
     fn decode_hex(value: &str) -> Vec<u8> {
         value
             .as_bytes()
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| {
                 let pair = std::str::from_utf8(pair).expect("test hex is ASCII");
                 u8::from_str_radix(pair, 16).expect("test hex is valid")

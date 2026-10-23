@@ -266,7 +266,7 @@ mod tests {
             assert_eq!(
                 object,
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"HELLO".to_vec(),
+                    b"HELLO",
                     pdf_object_reader::string_kind::StringKind::Literal
                 )
             );

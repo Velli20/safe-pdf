@@ -99,7 +99,7 @@ impl MaskTransfer {
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use std::collections::BTreeMap;
 
@@ -130,7 +130,7 @@ mod tests {
             (
                 Vec::from(b"Subtype"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    subtype.as_bytes().to_vec(),
+                    subtype.as_bytes(),
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -142,7 +142,7 @@ mod tests {
             (
                 Vec::from(b"S"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"Alpha".to_vec(),
+                    b"Alpha",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -206,9 +206,7 @@ mod tests {
 
         let soft_mask = reader
             .read::<Option<SoftMask>>(
-                &pdf_object_reader::object_variant::ObjectVariant::Dictionary(
-                    (&dictionary).clone(),
-                ),
+                &pdf_object_reader::object_variant::ObjectVariant::Dictionary(dictionary.clone()),
             )
             .expect("soft mask should parse")
             .expect("soft mask should be present");
@@ -273,7 +271,7 @@ mod tests {
         let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
 
         let error = match reader.read::<Option<SoftMask>>(
-            &pdf_object_reader::object_variant::ObjectVariant::Dictionary((&dictionary).clone()),
+            &pdf_object_reader::object_variant::ObjectVariant::Dictionary(dictionary.clone()),
         ) {
             Err(error) => error,
             Ok(_) => panic!("an image cannot be used as an ExtGState soft-mask group"),

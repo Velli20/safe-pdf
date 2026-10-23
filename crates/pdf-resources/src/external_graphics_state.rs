@@ -170,7 +170,7 @@ fn parse_entry<A: ObjectAccess + ?Sized>(
 }
 
 #[cfg(test)]
-#[allow(clippy::expect_used)]
+#[allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 mod tests {
     use std::collections::BTreeMap;
 
@@ -216,9 +216,7 @@ mod tests {
 
         let ext_gstate = reader
             .read::<Option<ExternalGraphicsState>>(
-                &pdf_object_reader::object_variant::ObjectVariant::Dictionary(
-                    (&dictionary).clone(),
-                ),
+                &pdf_object_reader::object_variant::ObjectVariant::Dictionary(dictionary.clone()),
             )
             .expect("extgstate should parse")
             .expect("extgstate should be present");
@@ -243,7 +241,7 @@ mod tests {
         let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
 
         let error = match reader.read::<Option<ExternalGraphicsState>>(
-            &pdf_object_reader::object_variant::ObjectVariant::Dictionary((&dictionary).clone()),
+            &pdf_object_reader::object_variant::ObjectVariant::Dictionary(dictionary.clone()),
         ) {
             Err(error) => error,
             Ok(_) => panic!("invalid dash pattern should fail"),
@@ -263,9 +261,7 @@ mod tests {
 
         let ext_gstate = reader
             .read::<Option<ExternalGraphicsState>>(
-                &pdf_object_reader::object_variant::ObjectVariant::Dictionary(
-                    (&dictionary).clone(),
-                ),
+                &pdf_object_reader::object_variant::ObjectVariant::Dictionary(dictionary.clone()),
             )
             .expect("extgstate should parse")
             .expect("extgstate should be present");
@@ -278,7 +274,7 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::from([(
             Vec::from(b"SMask"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"None".to_vec(),
+                b"None",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         )]));
@@ -298,7 +294,7 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::from([(
             Vec::from(b"SMask"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"Invalid".to_vec(),
+                b"Invalid",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         )]));

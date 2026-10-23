@@ -81,7 +81,7 @@ fn mesh_entries(
         (
             Vec::from(b"ColorSpace"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"DeviceRGB".to_vec(),
+                b"DeviceRGB",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         ),
