@@ -245,6 +245,7 @@ pub fn decode(stream: &StreamObject) -> Result<Bytes, FilterError> {
 }
 
 #[cfg(test)]
+#[allow(clippy::as_conversions)]
 mod tests {
     use std::collections::BTreeMap;
 
@@ -305,7 +306,7 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::from([(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"ASCIIHexDecode".to_vec(),
+                b"ASCIIHexDecode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         )]));
@@ -343,7 +344,7 @@ mod tests {
         dict.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"JBIG2Decode".to_vec(),
+                b"JBIG2Decode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
@@ -403,7 +404,7 @@ mod tests {
         globals_dict.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"JBIG2Decode".to_vec(),
+                b"JBIG2Decode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
@@ -419,7 +420,7 @@ mod tests {
         dict.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"JBIG2Decode".to_vec(),
+                b"JBIG2Decode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
@@ -452,7 +453,7 @@ mod tests {
         dict.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"JBIG2Decode".to_vec(),
+                b"JBIG2Decode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
@@ -471,7 +472,7 @@ mod tests {
         dict.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"ASCIIHexDecode".to_vec(),
+                b"ASCIIHexDecode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
@@ -551,7 +552,7 @@ mod tests {
             3,
             ObjectVariant::Array(
                 vec![pdf_object_reader::pdf_string::PdfString::from(
-                    b"FlateDecode".to_vec(),
+                    b"FlateDecode",
                     pdf_object_reader::string_kind::StringKind::Name,
                 )]
                 .into(),
@@ -586,11 +587,11 @@ mod tests {
                 ObjectVariant::Array(
                     vec![
                         pdf_object_reader::pdf_string::PdfString::from(
-                            b"ASCIIHexDecode".to_vec(),
+                            b"ASCIIHexDecode",
                             pdf_object_reader::string_kind::StringKind::Name,
                         ),
                         pdf_object_reader::pdf_string::PdfString::from(
-                            b"FlateDecode".to_vec(),
+                            b"FlateDecode",
                             pdf_object_reader::string_kind::StringKind::Name,
                         ),
                     ]
@@ -627,7 +628,7 @@ mod tests {
             (
                 Vec::from(b"Filter"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"FlateDecode".to_vec(),
+                    b"FlateDecode",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -660,7 +661,7 @@ mod tests {
         dict.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"RunLengthDecode".to_vec(),
+                b"RunLengthDecode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
@@ -682,7 +683,7 @@ mod tests {
         dict.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"RL".to_vec(),
+                b"RL",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );

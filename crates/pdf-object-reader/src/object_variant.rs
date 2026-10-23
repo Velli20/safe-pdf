@@ -521,7 +521,7 @@ mod tests {
             .try_number::<u16>(&PassthroughResolver)
             .expect_err("non-number object should not decode as number");
 
-        assert_eq!(err, ObjectError::TypeMismatch("Number", "Array".into()));
+        assert_eq!(err, ObjectError::TypeMismatch("Number", "Array"));
     }
 
     #[test]

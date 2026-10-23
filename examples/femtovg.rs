@@ -47,6 +47,10 @@ impl App {
             .with_title("Hello");
 
         // Use winit's new window creation API, similar to skia.rs
+        #[allow(
+            deprecated,
+            reason = "moving this example onto ApplicationHandler is a separate restructure"
+        )]
         let window = el
             .create_window(window_attributes)
             .expect("Failed to create window");
@@ -197,7 +201,7 @@ fn main() {
         "PDF annotations are unsupported in the FemtoVG viewer; use web-canvas for annotation presentation and interaction."
     );
     const INPUT: &[u8] = include_bytes!("assets/dd5cf1a7d6d190f94a28201777f11bf4.pdf");
-    let document = PdfReader::default().read_from_bytes(INPUT, None).unwrap();
+    let document = PdfReader.read_from_bytes(INPUT, None).unwrap();
 
     let mut app = App::new(595, 842, true, document);
     let rend = Renderer2 {};

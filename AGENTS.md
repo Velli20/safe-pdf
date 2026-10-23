@@ -9,7 +9,7 @@ cargo test                                  # Run all tests
 cargo test -p pdf-parser                    # Run tests for a single crate
 cargo test -p pdf-parser -- test_name       # Run a single test
 cargo check                                 # Type-check all crates
-cargo clippy --all --workspace              # Run lints
+cargo clippy --workspace --all-targets      # Run lints (CI adds --all-features -D warnings)
 cargo fmt                                   # Format code
 cargo build --example skia --features skia  # Build Skia example
 cargo run --example skia --features skia -- examples/assets/webgl.pdf  # Run viewer

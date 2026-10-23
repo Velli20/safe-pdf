@@ -254,6 +254,11 @@ impl FromPdfObject for SampledFunction {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions
+)]
 mod tests {
     use super::*;
 

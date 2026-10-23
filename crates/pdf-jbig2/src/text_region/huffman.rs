@@ -325,6 +325,7 @@ impl TextRegionStripDecodeDriver for HuffmanTextRegionDecoder<'_> {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::arithmetic_side_effects)]
 mod tests {
     use pdf_utils::BitReader;
 

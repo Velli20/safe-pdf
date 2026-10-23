@@ -85,6 +85,7 @@ impl FromPdfObject for ColorSpace {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use pdf_object_reader::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
 
@@ -92,7 +93,7 @@ mod tests {
 
     fn name(value: &str) -> ObjectVariant {
         pdf_object_reader::pdf_string::PdfString::from(
-            value.as_bytes().to_vec(),
+            value.as_bytes(),
             pdf_object_reader::string_kind::StringKind::Name,
         )
     }
@@ -101,15 +102,15 @@ mod tests {
     fn parses_single_name_device_color_space_arrays() {
         let cases = [
             (
-                ObjectVariant::Array(vec![name("DeviceGray".into())].into()),
+                ObjectVariant::Array(vec![name("DeviceGray")].into()),
                 ColorSpace::DeviceGray,
             ),
             (
-                ObjectVariant::Array(vec![name("DeviceRGB".into())].into()),
+                ObjectVariant::Array(vec![name("DeviceRGB")].into()),
                 ColorSpace::DeviceRGB,
             ),
             (
-                ObjectVariant::Array(vec![name("DeviceCMYK".into())].into()),
+                ObjectVariant::Array(vec![name("DeviceCMYK")].into()),
                 ColorSpace::DeviceCMYK,
             ),
         ];
@@ -133,7 +134,7 @@ mod tests {
     #[test]
     fn parses_single_name_pattern_array() {
         let parsed = pdf_object_reader::ObjectReader::new(&PassthroughResolver)
-            .read::<ColorSpace>(&ObjectVariant::Array(vec![name("Pattern".into())].into()))
+            .read::<ColorSpace>(&ObjectVariant::Array(vec![name("Pattern")].into()))
             .unwrap();
 
         assert!(matches!(parsed, ColorSpace::Pattern(None)));
@@ -157,7 +158,7 @@ mod tests {
     fn rejects_unsupported_multi_element_color_space_array() {
         let error = pdf_object_reader::ObjectReader::new(&PassthroughResolver)
             .read::<ColorSpace>(&ObjectVariant::Array(
-                vec![name("DeviceGray".into()), ObjectVariant::Integer(1)].into(),
+                vec![name("DeviceGray"), ObjectVariant::Integer(1)].into(),
             ))
             .unwrap_err();
 

@@ -331,6 +331,7 @@ pub(crate) fn compose_text_region_instance(
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::{
         DecodedTextRegionInstance, TextRegionDecodeContext, TextRegionPlacementContext,

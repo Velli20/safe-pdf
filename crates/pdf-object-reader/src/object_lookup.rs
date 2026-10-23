@@ -960,17 +960,11 @@ mod tests {
             ),
             (
                 b"String".to_vec(),
-                crate::pdf_string::PdfString::from(
-                    b"Name".to_vec(),
-                    crate::string_kind::StringKind::Name,
-                ),
+                crate::pdf_string::PdfString::from(b"Name", crate::string_kind::StringKind::Name),
             ),
             (
                 b"Bytes".to_vec(),
-                crate::pdf_string::PdfString::from(
-                    b"abc".to_vec(),
-                    crate::string_kind::StringKind::Literal,
-                ),
+                crate::pdf_string::PdfString::from(b"abc", crate::string_kind::StringKind::Literal),
             ),
             (b"Boolean".to_vec(), ObjectVariant::Boolean(true)),
             (
@@ -1052,10 +1046,7 @@ mod tests {
             ObjectVariant::Array(
                 vec![ObjectVariant::Integer(1.into()), ObjectVariant::Integer(2)].into(),
             ),
-            crate::pdf_string::PdfString::from(
-                b"text".to_vec(),
-                crate::string_kind::StringKind::Literal,
-            ),
+            crate::pdf_string::PdfString::from(b"text", crate::string_kind::StringKind::Literal),
             ObjectVariant::Boolean(false),
             ObjectVariant::Reference(crate::object_id::ObjectId::new(3, 0)),
         ];

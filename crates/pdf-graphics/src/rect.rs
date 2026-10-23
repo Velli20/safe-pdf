@@ -261,7 +261,7 @@ mod tests {
     fn distance_computes_distance_from_point_to_rectangle() {
         let rect = Rect::new(10.0, 10.0);
         assert_eq!(rect.distance(Point::new(0.0, 0.0)), 0.0);
-        assert_eq!(rect.distance(Point::new(20.0, 20.0)), 14.1421356);
+        assert_eq!(rect.distance(Point::new(20.0, 20.0)), 14.142136);
     }
 
     #[test]

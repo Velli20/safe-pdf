@@ -44,15 +44,12 @@ fn builds_transformed_free_form_triangle_raster_paint() {
     assert!(
         image
             .data
-            .chunks_exact(4)
-            .any(|pixel| pixel.get(3) == Some(&u8::MAX))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|[_, _, _, alpha]| *alpha == u8::MAX)
     );
-    assert!(
-        image
-            .data
-            .chunks_exact(4)
-            .any(|pixel| pixel == [0, 0, 0, 0])
-    );
+    assert!(image.data.as_chunks::<4>().0.contains(&[0, 0, 0, 0]));
 }
 
 #[test]

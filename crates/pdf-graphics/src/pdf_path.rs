@@ -314,6 +314,7 @@ impl PdfPath {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic, clippy::indexing_slicing)]
 mod tests {
     use super::{PathVerb, PdfPath};
     use crate::rect::Rect;

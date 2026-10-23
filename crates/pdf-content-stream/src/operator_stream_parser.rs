@@ -174,14 +174,14 @@ mod tests {
 
     #[test]
     fn next_item_is_operator_rejects_numeric_prefixes() {
-        for byte in [b'+', b'-', b'.', b'0', b'9'] {
+        for byte in *b"+-.09" {
             assert!(
                 !next_item_is_operator(byte),
                 "byte {byte:?} should be an operand"
             );
         }
 
-        for byte in [b'q', b'B', b'*', b'@'] {
+        for byte in *b"qB*@" {
             assert!(
                 next_item_is_operator(byte),
                 "byte {byte:?} should be an operator"

@@ -229,7 +229,7 @@ mod tests {
         dict_map.insert(
             Vec::from(b"Type"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"XRef".to_vec(),
+                b"XRef",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
@@ -392,7 +392,7 @@ mod tests {
         dict_map.insert(
             Vec::from(b"Type"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"XRef".to_vec(),
+                b"XRef",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
@@ -418,7 +418,7 @@ mod tests {
         dict_map.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"FlateDecode".to_vec(),
+                b"FlateDecode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );

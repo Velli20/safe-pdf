@@ -97,7 +97,7 @@ mod tests {
             .chain([(
                 b"Subtype".to_vec(),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"Type1".to_vec(),
+                    b"Type1",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             )])

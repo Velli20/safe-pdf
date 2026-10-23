@@ -83,6 +83,7 @@ impl DeviceNColorSpace {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use crate::{color_space::ColorSpace, error::ColorSpaceError};
     use pdf_function::{
@@ -96,7 +97,7 @@ mod tests {
 
     fn name(value: &str) -> ObjectVariant {
         pdf_object_reader::pdf_string::PdfString::from(
-            value.as_bytes().to_vec(),
+            value.as_bytes(),
             pdf_object_reader::string_kind::StringKind::Name,
         )
     }
@@ -119,7 +120,7 @@ mod tests {
             Vec::from(b"Domain"),
             ObjectVariant::Array(
                 vec![
-                    ObjectVariant::Real(0.0.into()),
+                    ObjectVariant::Real(0.0),
                     ObjectVariant::Real(1.0),
                     ObjectVariant::Real(0.0),
                     ObjectVariant::Real(1.0),
@@ -149,7 +150,7 @@ mod tests {
     #[test]
     fn parses_four_element_device_n_array() {
         let arr = device_n_array(vec![
-            ObjectVariant::Array(vec![name("Cyan".into()), name("Magenta")].into()),
+            ObjectVariant::Array(vec![name("Cyan"), name("Magenta")].into()),
             name("DeviceRGB"),
             function_stream("pop pop 0.1 0.2 0.3", 3),
         ]);
@@ -176,7 +177,7 @@ mod tests {
         let attrs =
             ObjectVariant::Dictionary(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()));
         let arr = device_n_array(vec![
-            ObjectVariant::Array(vec![name("Spot".into())].into()),
+            ObjectVariant::Array(vec![name("Spot")].into()),
             name("DeviceCMYK"),
             function_stream("pop 0.2 0.4 0.6 0.8", 4),
             attrs,
@@ -195,7 +196,7 @@ mod tests {
     #[test]
     fn applies_device_n_through_tint_transform_and_alternate_space() {
         let arr = device_n_array(vec![
-            ObjectVariant::Array(vec![name("Cyan".into()), name("Magenta"), name("Yellow")].into()),
+            ObjectVariant::Array(vec![name("Cyan"), name("Magenta"), name("Yellow")].into()),
             name("DeviceRGB"),
             function_stream("pop pop pop 0.25 0.5 0.75", 3),
         ]);
@@ -216,7 +217,7 @@ mod tests {
     #[test]
     fn rejects_device_n_tint_transform_output_arity_mismatch() {
         let arr = device_n_array(vec![
-            ObjectVariant::Array(vec![name("Cyan".into()), name("Magenta"), name("Yellow")].into()),
+            ObjectVariant::Array(vec![name("Cyan"), name("Magenta"), name("Yellow")].into()),
             name("DeviceRGB"),
             function_stream("pop pop 0.25 0.5", 2),
         ]);
@@ -241,7 +242,7 @@ mod tests {
     #[test]
     fn rejects_device_n_with_too_few_input_components() {
         let arr = device_n_array(vec![
-            ObjectVariant::Array(vec![name("Cyan".into()), name("Magenta")].into()),
+            ObjectVariant::Array(vec![name("Cyan"), name("Magenta")].into()),
             name("DeviceRGB"),
             function_stream("pop pop 0.1 0.2 0.3", 3),
         ]);
@@ -260,7 +261,7 @@ mod tests {
     fn rejects_three_element_device_n_array() {
         let arr = vec![
             name("DeviceN"),
-            ObjectVariant::Array(vec![name("Cyan".into())].into()),
+            ObjectVariant::Array(vec![name("Cyan")].into()),
             name("DeviceRGB"),
         ];
 
