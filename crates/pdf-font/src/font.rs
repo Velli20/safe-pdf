@@ -17,6 +17,15 @@ pub struct FontFaceId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GlyphId(pub u32);
 
+impl TryFrom<usize> for GlyphId {
+    type Error = std::num::TryFromIntError;
+
+    /// Converts an index to a glyph ID, failing when it does not fit `u32`.
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        u32::try_from(value).map(Self)
+    }
+}
+
 /// Opaque key understood by an application-provided external font source.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ExternalFontKey(pub Arc<str>);
