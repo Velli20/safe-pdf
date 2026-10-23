@@ -5,7 +5,7 @@ use bytes::Bytes;
 use crate::{error::FilterError, image_payload::ImagePayload, jpeg_frame::JpegFrameHeader};
 
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult, dictionary::Dictionary,
+    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult,
     object_resolver::PassthroughResolver, object_variant::ObjectVariant, stream::StreamObject,
 };
 
@@ -213,33 +213,6 @@ impl Filter {
     }
 }
 
-/// Decodes stream data by applying the filter chain from its dictionary.
-///
-/// Reads the `/Filter` entry from `dictionary` and applies each filter in order.
-/// Returns shared ownership of the fully decoded bytes.
-/// Unfiltered input retains the original shared allocation.
-///
-/// This entry point accepts a dictionary and shared data separately so callers
-/// such as inline-image decoders do not need to construct a temporary
-/// [`StreamObject`].
-///
-/// A `JPXDecode` chain yields no samples, because a JPEG 2000 codestream must
-/// be decoded with its own metadata; such a stream belongs to
-/// [`ImagePayload::decode`] instead.
-///
-/// # Errors
-///
-/// Returns [`FilterError`] if a filter fails, is unsupported, or is
-/// `JPXDecode`, except when an adjacent duplicate filter fails after its first
-/// pass succeeded.
-pub fn decode_data_with_access(
-    dictionary: &Dictionary,
-    stream_data: Bytes,
-    access: &mut (impl ObjectAccess + ?Sized),
-) -> Result<Bytes, FilterError> {
-    ImagePayload::decode(dictionary, stream_data, access)?.into_samples()
-}
-
 /// Decodes a [`StreamObject`] by applying its full filter chain.
 ///
 /// Unfiltered data shares the stream's existing allocation. Filtered data is
@@ -253,7 +226,11 @@ pub fn decode_with_access(
     stream: &StreamObject,
     access: &mut (impl ObjectAccess + ?Sized),
 ) -> Result<Bytes, FilterError> {
-    decode_data_with_access(&stream.dictionary, stream.shared_data(), access)
+    ImagePayload::filtered(
+        stream.shared_data(),
+        &mut DictionaryContext::new(&stream.dictionary, access),
+    )?
+    .into_samples()
 }
 
 /// Decodes a [`StreamObject`] by applying its full filter chain.
@@ -313,9 +290,8 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
         let data = Bytes::from_static(b"stream data");
 
-        let decoded = decode_data_with_access(
-            &dictionary,
-            data.clone(),
+        let decoded = decode_with_access(
+            &StreamObject::new_encoded(1, 0, dictionary, data.clone()),
             &mut ObjectReader::new(PassthroughResolver).session(),
         )
         .expect("unfiltered data should decode");
@@ -335,9 +311,8 @@ mod tests {
         )]));
 
         let encoded = Bytes::from_static(b"48 65 6c 6c 6f>");
-        let decoded = decode_data_with_access(
-            &dictionary,
-            encoded.clone(),
+        let decoded = decode_with_access(
+            &StreamObject::new_encoded(1, 0, dictionary, encoded.clone()),
             &mut ObjectReader::new(PassthroughResolver).session(),
         )
         .expect("filtered data should decode");
@@ -628,9 +603,8 @@ mod tests {
             ),
         ]));
 
-        let decoded = decode_data_with_access(
-            &dictionary,
-            encoded.into_bytes().into(),
+        let decoded = decode_with_access(
+            &StreamObject::new_encoded(1, 0, dictionary, encoded.into_bytes()),
             &mut ObjectReader::new(PassthroughResolver).session(),
         )
         .expect("decode failed");
@@ -671,9 +645,8 @@ mod tests {
                 )),
             )]),
         };
-        let decoded = decode_data_with_access(
-            &dictionary,
-            compressed.into(),
+        let decoded = decode_with_access(
+            &StreamObject::new_encoded(1, 0, dictionary, compressed),
             &mut ObjectReader::new(&resolver).session(),
         )
         .expect("decode failed");

@@ -36,9 +36,9 @@ pub enum PdfPagesError {
     )]
     InvalidExtGStateSoftMask,
     #[error(
-        "invalid /ExtGState entry '/SMask': group XObject must have /Subtype /Form, found /{subtype}"
+        "invalid /ExtGState entry '/SMask': group XObject must have /Subtype /Form, found /Image"
     )]
-    SoftMaskGroupNotForm { subtype: String },
+    SoftMaskGroupNotForm,
     #[error("invalid /ExtGState entry '/SMask': /TR must produce one finite output")]
     InvalidSoftMaskTransfer,
     #[error("invalid /PaintType value: {value}")]
@@ -49,8 +49,6 @@ pub enum PdfPagesError {
     InvalidTilingType { value: i32 },
     #[error("invalid /ShadingType value: {value}")]
     InvalidShadingType { value: i32 },
-    #[error("unsupported XObject /Subtype: '{subtype}'")]
-    UnsupportedXObjectSubtype { subtype: String },
     #[error("failed to process image: {0}")]
     Image(#[from] PdfImageError),
     #[error("{0}")]

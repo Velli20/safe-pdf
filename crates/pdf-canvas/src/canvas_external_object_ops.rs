@@ -7,9 +7,8 @@
 //! Images are placed by handing the backend the full image-space to device-space
 //! matrix, so rotation, shear and mirroring in the CTM are all preserved.
 
-use pdf_content_stream_operators::pdf_operator_backend::XObjectOps;
 use pdf_graphics::{Image, PixelFormat, transform::Transform};
-use pdf_image::{InlineImage, decode_inline_image, raster::stencil_image};
+use pdf_image::{PdfImage, raster::stencil_image};
 use pdf_resources::resource::Resource;
 
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
@@ -22,8 +21,7 @@ use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::Pd
 /// lands on the top edge of the placed image.
 const IMAGE_SPACE_Y_FLIP: Transform = Transform::from_row(1.0, 0.0, 0.0, -1.0, 0.0, 1.0);
 
-impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
-    type ErrorType = PdfCanvasError;
+impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Invokes (renders) an XObject by name from the current resource dictionary.
     ///
     /// This method handles two types of XObjects:
@@ -41,7 +39,7 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
     /// Form XObjects are self-contained content streams that can include
     /// their own resources. They are rendered by recursively processing
     /// the form's content stream with the form's transformation matrix.
-    fn invoke_xobject(&mut self, xobject_name: &[u8]) -> Result<(), Self::ErrorType> {
+    pub(crate) fn invoke_xobject(&mut self, xobject_name: &[u8]) -> Result<(), PdfCanvasError> {
         let resources = self
             .current_state()?
             .resources
@@ -79,8 +77,9 @@ impl<B: CanvasBackend> XObjectOps for PdfCanvas<'_, B> {
     }
 
     /// Decodes inline image samples before applying the current painting state.
-    fn paint_inline_image(&mut self, image: &InlineImage) -> Result<(), Self::ErrorType> {
-        let decoded = decode_inline_image(image, None)
+    pub(crate) fn paint_inline_image(&mut self, image: &PdfImage) -> Result<(), PdfCanvasError> {
+        let decoded = image
+            .decode(None)
             .map_err(|e| PdfCanvasError::InvalidImageData(e.to_string()))?;
 
         self.render_decoded_image(&decoded, true)

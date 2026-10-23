@@ -32,14 +32,14 @@ impl FromPdfObject for FormXObject {
             },
             _ => context.read::<ContentStream>(object)?,
         };
-        let bbox = context.dictionary().optional_bbox(context.source())?;
-        let matrix = context.dictionary().optional_matrix(context.source())?;
-        // Retain deferred handles so recursive resource graphs can finish decoding.
-        let resources = context.optional_shared::<Resources>(b"Resources")?;
         Ok(Self {
-            bbox,
-            matrix,
-            resources,
+            // A malformed /BBox leaves the form unclipped.
+            bbox: context
+                .lenient::<Rect>(b"BBox")
+                .map(|bbox| bbox.normalized()),
+            matrix: context.optional(b"Matrix")?,
+            // Retain deferred handles so recursive resource graphs can finish decoding.
+            resources: context.optional_shared(b"Resources")?,
             content_stream,
         })
     }
