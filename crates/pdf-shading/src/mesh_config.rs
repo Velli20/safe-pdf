@@ -38,7 +38,9 @@ impl FromPdfObject for MeshConfig {
         let mut dictionary = context.dictionary();
         Ok(Self {
             color_space: dictionary.required(b"ColorSpace")?,
-            bbox: dictionary.dictionary().optional_bbox(dictionary.source())?,
+            bbox: dictionary
+                .lenient::<Rect>(b"BBox")
+                .map(|bbox| bbox.normalized()),
             anti_alias: dictionary.optional(b"AntiAlias")?,
             widths: dictionary.read(object)?,
             decode: dictionary.required(b"Decode")?,

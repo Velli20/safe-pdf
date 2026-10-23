@@ -61,9 +61,9 @@ impl FromPdfObject for CharProcedures {
         for name in context.dictionary().dictionary.keys() {
             // Every procedure shares the font's traversal and document-wide stream IDs.
             let stream: ContentStream = context.required(name)?;
-            let handle = GlyphId(u32::try_from(stream.id).map_err(|_| {
+            let handle = GlyphId::try_from(stream.id).map_err(|_| {
                 FontError::InvalidDescendantFonts("Type 3 content stream ID does not fit u32")
-            })?);
+            })?;
             handles.insert(GlyphName(Arc::from(name.as_slice())), handle);
             streams.insert(handle, stream);
         }
@@ -80,12 +80,8 @@ impl FromPdfObject for Type3FontSpec {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let value = context.object();
         let mut context = context.dictionary()?;
-        let font_matrix = context
-            .dictionary()
-            .required_transform(b"FontMatrix", context.source())?;
-        let bounds = context
-            .dictionary()
-            .required_rect(b"FontBBox", context.source())?;
+        let font_matrix = context.required(b"FontMatrix")?;
+        let bounds = context.required(b"FontBBox")?;
         let encoding = simple_encoding(&mut context, false)?;
         let metrics: PdfMetrics = context.read(value)?;
         Ok(Self {
