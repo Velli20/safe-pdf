@@ -75,64 +75,6 @@ impl ObjectVariant {
         }
     }
 
-    /// Resolves an `ObjectVariant` into a `StreamObject`.
-    ///
-    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
-    /// into a `StreamObject`.
-    ///
-    /// # Parameters
-    ///
-    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
-    ///
-    /// # Returns
-    ///
-    /// `StreamObject` or `Err` if the object is not a stream or if a reference cannot be
-    /// resolved.
-    pub fn try_stream<'a>(
-        &'a self,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a StreamObject, ObjectError> {
-        let object = if let ObjectVariant::Reference(_) = self {
-            objects.resolve_object(self)?
-        } else {
-            self
-        };
-
-        match object {
-            ObjectVariant::Stream(s) => Ok(s),
-            _ => Err(ObjectError::TypeMismatch("Stream", object.name())),
-        }
-    }
-
-    /// Resolves an `ObjectVariant` into an `Array`.
-    ///
-    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
-    /// into an `Array`.
-    ///
-    /// # Parameters
-    ///
-    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
-    ///
-    /// # Returns
-    ///
-    /// `Array` or `Err` if the object is not an array or if a reference cannot be
-    /// resolved.
-    pub fn try_array<'a>(
-        &'a self,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a PdfArray, ObjectError> {
-        let object = if let ObjectVariant::Reference(_) = self {
-            objects.resolve_object(self)?
-        } else {
-            self
-        };
-
-        match object {
-            ObjectVariant::Array(arr) => Ok(arr),
-            _ => Err(ObjectError::TypeMismatch("Array", object.name())),
-        }
-    }
-
     /// Creates an owned PDF Name from borrowed bytes.
     ///
     /// Parsed names should be moved directly into [`ObjectVariant::String`].
@@ -140,39 +82,6 @@ impl ObjectVariant {
     /// borrowed byte literal or slice.
     pub fn name_from_bytes(name: &[u8]) -> Self {
         PdfString::from(name, StringKind::Name)
-    }
-
-    /// Resolves an `ObjectVariant` into a `Vec<T>` of numeric values.
-    ///
-    /// This function attempts to convert an array object into a dynamically-sized
-    /// vector where each element is parsed as a numeric value.
-    ///
-    /// # Type Parameters
-    ///
-    /// - `T`: The numeric type to convert each element to. Must implement `FromPrimitive`,
-    ///   `Copy`, and `Default`.
-    ///
-    /// # Parameters
-    ///
-    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
-    ///
-    /// # Returns
-    ///
-    /// `Vec<T>` or `Err` if:
-    /// - The object is not an array.
-    /// - Any element cannot be converted to type `T`.
-    pub fn try_vec_of<T>(&self, objects: &dyn ObjectResolver) -> Result<Vec<T>, ObjectError>
-    where
-        T: FromPrimitive + Copy + Default,
-    {
-        let values = self.try_array(objects)?;
-
-        let mut result: Vec<T> = Vec::new();
-        for v in values.iter() {
-            result.push(v.try_number(objects)?);
-        }
-
-        Ok(result)
     }
 
     /// Resolves an `ObjectVariant` into a numeric type `T`.
@@ -282,56 +191,6 @@ impl ObjectVariant {
         };
 
         Ok(matches!(object, ObjectVariant::Null))
-    }
-
-    /// Resolves an `ObjectVariant` into a fixed-size array of numeric values.
-    ///
-    /// This function attempts to convert an array object into a Rust array of type `[T; N]`,
-    /// where each element is parsed as a numeric value. Some producers pad fixed-size arrays
-    /// with extra entries, so only the leading `N` elements are read and the rest are ignored.
-    ///
-    /// # Type Parameters
-    ///
-    /// - `T`: The numeric type to convert each element to. Must implement `FromPrimitive`,
-    ///   `Copy`, and `Default`.
-    /// - `N`: The number of leading elements to read (compile-time constant).
-    ///
-    /// # Parameters
-    ///
-    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
-    ///
-    /// # Returns
-    ///
-    /// `[T; N]` or `Err` if:
-    /// - The object is not an array.
-    /// - The array holds fewer than `N` elements.
-    /// - Any of the first `N` elements cannot be converted to type `T`.
-    pub fn try_array_of<T, const N: usize>(
-        &self,
-        objects: &dyn ObjectResolver,
-    ) -> Result<[T; N], ObjectError>
-    where
-        T: FromPrimitive + Copy + Default,
-    {
-        let values = self.try_array(objects)?;
-
-        if values.len() < N {
-            return Err(ObjectError::InvalidArrayLength {
-                expected: N,
-                found: values.len(),
-            });
-        }
-
-        let mut result = [T::default(); N];
-        result
-            .iter_mut()
-            .zip(values.iter())
-            .try_for_each(|(out, v)| {
-                *out = v.try_number(objects)?;
-                Ok::<(), ObjectError>(())
-            })?;
-
-        Ok(result)
     }
 
     /// Resolves an `ObjectVariant` into raw bytes.
@@ -522,23 +381,6 @@ mod tests {
             .expect_err("non-number object should not decode as number");
 
         assert_eq!(err, ObjectError::TypeMismatch("Number", "Array"));
-    }
-
-    #[test]
-    fn try_stream_returns_type_mismatch_for_non_stream() {
-        let null_object = ObjectVariant::Null;
-        let null_err = null_object
-            .try_stream(&PassthroughResolver)
-            .expect_err("null object should not decode as a stream");
-        assert_eq!(null_err, ObjectError::TypeMismatch("Stream", "Null"));
-
-        let dict_object = ObjectVariant::Dictionary(crate::dictionary::Dictionary::new(
-            std::collections::BTreeMap::<Vec<u8>, ObjectVariant>::new(),
-        ));
-        let dict_err = dict_object
-            .try_stream(&PassthroughResolver)
-            .expect_err("dictionary object should not decode as a stream");
-        assert_eq!(dict_err, ObjectError::TypeMismatch("Stream", "Dictionary"));
     }
 
     #[test]

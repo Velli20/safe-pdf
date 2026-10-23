@@ -64,4 +64,12 @@ pub enum ParserError {
     FilterError(#[from] FilterError),
     #[error("Inline image error: {0}")]
     InlineImageError(String),
+    #[error("Object read error: {0}")]
+    ObjectRead(String),
+}
+
+impl From<pdf_object_reader::ObjectReadError> for ParserError {
+    fn from(error: pdf_object_reader::ObjectReadError) -> Self {
+        Self::ObjectRead(error.to_string())
+    }
 }
