@@ -329,6 +329,19 @@ impl<'read, A: ObjectAccess + ?Sized> ArrayContext<'read, A> {
             })
     }
 
+    /// Reads an optional element: an index past the end or a value resolving to null is absent.
+    pub fn optional_at<T: FromPdfObject>(&mut self, index: usize) -> ReadResult<Option<T>> {
+        let Some(object) = self.array.get(index) else {
+            return Ok(None);
+        };
+        self.access
+            .read(object)
+            .map_err(|source| ObjectReadError::At {
+                location: ReadLocation::ArrayIndex(index),
+                source: Box::new(source),
+            })
+    }
+
     /// Reads an element through typed caching while retaining array diagnostics.
     pub fn shared_at<T>(&mut self, index: usize) -> ReadResult<ObjectHandle<T>>
     where

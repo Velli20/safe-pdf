@@ -14,7 +14,7 @@ use crate::pdf_string::PdfString;
 use crate::reader::ObjectAccess;
 use crate::resolved_object::ResolvedObject;
 use crate::{dictionary::Dictionary, stream::StreamObject};
-use pdf_graphics::{interval::Interval, rect::Rect, transform::Transform};
+use pdf_graphics::{color::Color, interval::Interval, rect::Rect, transform::Transform};
 
 /// Decodes a resolved PDF value using one object-bound context.
 ///
@@ -184,7 +184,7 @@ macro_rules! number_decoder {
     };
 }
 
-number_decoder!(f32, i32, i64, u8, u16, u32, usize);
+number_decoder!(f32, i32, i64, u8, u16, u32, u64, usize);
 
 macro_rules! enumerated_number_decoder {
     ($($type:ty => $expected:literal),+ $(,)?) => {
@@ -275,6 +275,30 @@ impl FromPdfObject for Rect {
 impl FromPdfObject for Transform {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         Ok(Self::from(context.array()?.read_array::<f32, 6>()?))
+    }
+}
+
+/// Reads a device color array: one gray, three RGB, or four CMYK components.
+///
+/// An empty array is transparent, as for annotation colors. Nonfinite components and
+/// other component counts are rejected.
+impl FromPdfObject for Color {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let components: Vec<f32> = context.array()?.read_all()?;
+        if components.iter().any(|component| !component.is_finite()) {
+            return Err(ObjectError::NumberConversionError.into());
+        }
+        if components.is_empty() {
+            return Ok(Self::TRANSPARENT);
+        }
+        Self::from_device_components(&components).ok_or_else(|| ObjectReadError::Decode {
+            target: "device color",
+            source: format!(
+                "expected one, three, or four color components, found {}",
+                components.len()
+            )
+            .into(),
+        })
     }
 }
 

@@ -1,7 +1,6 @@
 use bytes::Bytes;
 use pdf_object_reader::{
-    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-    stream::StreamObject,
+    object_resolver::ObjectResolver, object_variant::ObjectVariant, stream::StreamObject,
 };
 use pdf_parser::parser::PdfParser;
 
@@ -41,10 +40,14 @@ impl ObjectStream {
         objects: &dyn ObjectResolver,
     ) -> Result<Self, PdfReaderError> {
         Ok(Self {
-            count: stream.dictionary.required_number::<usize>(b"N", objects)?,
+            count: stream
+                .dictionary
+                .get_or_err(b"N")?
+                .try_number::<usize>(objects)?,
             first: stream
                 .dictionary
-                .required_number::<usize>(b"First", objects)?,
+                .get_or_err(b"First")?
+                .try_number::<usize>(objects)?,
             data: stream.shared_data(),
         })
     }
