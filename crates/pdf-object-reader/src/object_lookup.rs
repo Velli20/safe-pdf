@@ -39,28 +39,6 @@ pub trait ObjectLookupExt<K> {
         objects: &'a dyn ObjectResolver,
     ) -> Result<Option<&'a Dictionary>, ObjectError>;
 
-    /// Returns a required dictionary value from this container.
-    ///
-    /// This method looks up a value by key or index and converts it using
-    /// [`ObjectVariant::try_dictionary`].
-    ///
-    /// # Parameters
-    ///
-    /// - `key`: The dictionary key or array index to look up.
-    /// - `objects`: The object resolver used when the looked-up value is an
-    ///   indirect reference.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(&Dictionary)` when the value exists and converts
-    /// successfully, or `Err` if the value is missing, reference resolution
-    /// fails, or conversion fails.
-    fn required_dictionary<'a>(
-        &'a self,
-        key: K,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a Dictionary, ObjectError>;
-
     /// Returns an optional stream value from this container.
     ///
     /// This method looks up a value by key or index and converts it using
@@ -83,28 +61,6 @@ pub trait ObjectLookupExt<K> {
         key: K,
         objects: &'a dyn ObjectResolver,
     ) -> Result<Option<&'a StreamObject>, ObjectError>;
-
-    /// Returns a required stream value from this container.
-    ///
-    /// This method looks up a value by key or index and converts it using
-    /// [`ObjectVariant::try_stream`].
-    ///
-    /// # Parameters
-    ///
-    /// - `key`: The dictionary key or array index to look up.
-    /// - `objects`: The object resolver used when the looked-up value is an
-    ///   indirect reference.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(&StreamObject)` when the value exists and converts
-    /// successfully, or `Err` if the value is missing, reference resolution
-    /// fails, or conversion fails.
-    fn required_stream<'a>(
-        &'a self,
-        key: K,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a StreamObject, ObjectError>;
 
     /// Returns an optional array value from this container.
     ///
@@ -496,14 +452,6 @@ impl ObjectLookupExt<usize> for [ObjectVariant] {
             .transpose()
     }
 
-    fn required_dictionary<'a>(
-        &'a self,
-        index: usize,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a Dictionary, ObjectError> {
-        required_slice_value(self, index)?.try_dictionary(objects)
-    }
-
     fn optional_stream<'a>(
         &'a self,
         index: usize,
@@ -512,14 +460,6 @@ impl ObjectLookupExt<usize> for [ObjectVariant] {
         optional_resolved_value(self.get(index), objects)?
             .map(|value| value.try_stream(objects))
             .transpose()
-    }
-
-    fn required_stream<'a>(
-        &'a self,
-        index: usize,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a StreamObject, ObjectError> {
-        required_slice_value(self, index)?.try_stream(objects)
     }
 
     fn optional_array<'a>(
@@ -688,14 +628,6 @@ impl ObjectLookupExt<&[u8]> for Dictionary {
             .transpose()
     }
 
-    fn required_dictionary<'a>(
-        &'a self,
-        key: &[u8],
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a Dictionary, ObjectError> {
-        self.get_or_err(key)?.try_dictionary(objects)
-    }
-
     fn optional_stream<'a>(
         &'a self,
         key: &[u8],
@@ -704,14 +636,6 @@ impl ObjectLookupExt<&[u8]> for Dictionary {
         optional_resolved_value(self.get(key), objects)?
             .map(|value| value.try_stream(objects))
             .transpose()
-    }
-
-    fn required_stream<'a>(
-        &'a self,
-        key: &[u8],
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a StreamObject, ObjectError> {
-        self.get_or_err(key)?.try_stream(objects)
     }
 
     fn optional_array<'a>(
@@ -1027,21 +951,7 @@ mod tests {
 
     #[test]
     fn dictionary_lookup_methods_convert_common_types() {
-        let nested = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
         let dictionary = Dictionary::new(BTreeMap::from([
-            (
-                b"Dictionary".to_vec(),
-                ObjectVariant::Dictionary(nested.clone()),
-            ),
-            (
-                b"Stream".to_vec(),
-                ObjectVariant::Stream(StreamObject::new(
-                    7,
-                    0,
-                    Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
-                    Vec::new(),
-                )),
-            ),
             (
                 b"Array".to_vec(),
                 ObjectVariant::Array(
@@ -1069,17 +979,6 @@ mod tests {
             ),
         ]));
 
-        let stream = dictionary
-            .required_stream(b"Stream", &PassthroughResolver)
-            .expect("stream exists");
-
-        assert_eq!(
-            dictionary
-                .required_dictionary(b"Dictionary", &PassthroughResolver)
-                .expect("dictionary exists"),
-            &nested
-        );
-        assert_eq!(stream.object_number, 7);
         assert_eq!(
             dictionary
                 .required_array(b"Array", &PassthroughResolver)
@@ -1148,9 +1047,8 @@ mod tests {
 
     #[test]
     fn slice_lookup_methods_convert_common_types() {
-        let nested = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
         let values = [
-            ObjectVariant::Dictionary(nested.clone()),
+            ObjectVariant::Dictionary(Dictionary::new(BTreeMap::new())),
             ObjectVariant::Array(
                 vec![ObjectVariant::Integer(1.into()), ObjectVariant::Integer(2)].into(),
             ),
@@ -1162,12 +1060,6 @@ mod tests {
             ObjectVariant::Reference(crate::object_id::ObjectId::new(3, 0)),
         ];
 
-        assert_eq!(
-            values
-                .required_dictionary(0, &PassthroughResolver)
-                .expect("dictionary exists"),
-            &nested
-        );
         assert_eq!(
             values
                 .required_array(1, &PassthroughResolver)
