@@ -61,7 +61,9 @@ impl FromPdfObject for FunctionShading {
                 .optional::<Vec<f32>>(b"Background")?
                 .and_then(|components| color_space.apply(&components).ok()),
             color_space,
-            bbox: context.dictionary().optional_bbox(context.source())?,
+            bbox: context
+                .lenient::<Rect>(b"BBox")
+                .map(|bbox| bbox.normalized()),
             anti_alias: context.optional(b"AntiAlias")?,
             domain: context.optional(b"Domain")?.unwrap_or(DEFAULT_DOMAIN),
             matrix: context

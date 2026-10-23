@@ -83,10 +83,8 @@ impl InheritedAttributes {
                 .optional_shared::<Resources>(b"Resources")?
                 .map(|handle| handle.get())
                 .transpose()?,
-            media_box: context.dictionary().optional_media_box(context.source())?,
-            crop_box: context
-                .dictionary()
-                .optional_rect(b"CropBox", context.source())?,
+            media_box: context.lenient(b"MediaBox"),
+            crop_box: context.lenient(b"CropBox"),
             rotation: context.optional::<i32>(b"Rotate")?,
         })
     }

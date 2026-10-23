@@ -13,9 +13,7 @@ impl FromPdfObject for PdfFontDescriptor {
         let mut context = context.dictionary()?;
         Ok(Self {
             metadata: context.read(value)?,
-            bounds: context
-                .dictionary()
-                .optional_rect(b"FontBBox", context.source())?,
+            bounds: context.lenient(b"FontBBox"),
             missing_width: context.lenient(b"MissingWidth"),
             italic_angle: context.lenient(b"ItalicAngle"),
             stem_v: context.lenient(b"StemV"),

@@ -53,7 +53,9 @@ impl FromPdfObject for GradientShading {
             background: context
                 .optional::<Vec<f32>>(b"Background")?
                 .and_then(|components| color_space.apply(&components).ok()),
-            bbox: context.dictionary().optional_bbox(context.source())?,
+            bbox: context
+                .lenient::<Rect>(b"BBox")
+                .map(|bbox| bbox.normalized()),
             color_space,
         })
     }

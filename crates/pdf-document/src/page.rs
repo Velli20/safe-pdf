@@ -161,10 +161,9 @@ impl PdfPage {
 impl FromPdfObject for PdfPage {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
-        let dictionary = context.dictionary();
         let contents = context.optional::<ContentStream>(b"Contents")?;
-        let media_box = dictionary.optional_media_box(context.source())?;
-        let crop_box = dictionary.optional_rect(b"CropBox", context.source())?;
+        let media_box = context.lenient(b"MediaBox");
+        let crop_box = context.lenient(b"CropBox");
         let rotation = context.optional::<i32>(b"Rotate")?;
         let resources = context
             .optional_shared::<Resources>(b"Resources")?
