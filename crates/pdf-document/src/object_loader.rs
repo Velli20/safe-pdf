@@ -20,8 +20,8 @@ use crate::error::PdfReaderError;
 use crate::object_stream::ObjectStream;
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{
-    cross_reference_table::CrossReferenceEntryType, object_error::ObjectError, object_id::ObjectId,
-    object_variant::ObjectVariant,
+    ObjectReader, cross_reference_table::CrossReferenceEntryType, object_error::ObjectError,
+    object_id::ObjectId, object_variant::ObjectVariant,
 };
 use pdf_parser::{error::ParserError, parser::PdfParser};
 
@@ -428,8 +428,7 @@ impl<'input, 'loader> ObjectLoader<'input, 'loader> {
                 obj_num: object_stream_number,
             },
         )?;
-        let object_stream =
-            ObjectStream::from_stream(stream_object.try_stream(&self.objects)?, &self.objects)?;
+        let object_stream: ObjectStream = ObjectReader::new(&self.objects).read(stream_object)?;
         let mut loaded = Vec::with_capacity(stream_plan.len());
         let mut requests = stream_plan.into_iter().peekable();
 

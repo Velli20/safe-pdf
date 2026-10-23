@@ -1,8 +1,11 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use pdf_object_reader::{
+    FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ObjectReader, ReadResult,
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
-    object_resolver::ObjectResolver,
+    object_resolver::PassthroughResolver,
+    object_variant::ObjectVariant,
     stream::StreamObject,
     trailer::Trailer,
 };
@@ -17,68 +20,65 @@ use crate::error::ParserError;
 ///
 /// The stream data is decoded (filters such as FlateDecode and predictors
 /// are applied) before reading the binary xref entries.
-pub fn parse_xref_stream(
-    stream: StreamObject,
-    objects: &dyn ObjectResolver,
-) -> Result<CrossReferenceTable, ParserError> {
-    validate_stream_type(&stream, objects)?;
-    let layout = XrefStreamLayout::from_dictionary(&stream, objects)?;
-    let size = stream
-        .dictionary
-        .get_or_err(b"Size")?
-        .try_number::<usize>(objects)?;
-
-    if layout.entry_width == 0 {
-        return Ok(CrossReferenceTable::new(
-            BTreeMap::new(),
-            Trailer::new(Box::new(stream.dictionary), None),
-        ));
-    }
-
-    let subsections = parse_subsections(&stream, objects, size)?;
-    let data = pdf_filter::filter::decode(&stream)?;
-    let mut entries = BTreeMap::new();
-
-    let mut decoder = XrefStreamEntryDecoder::new(&data, layout);
-    for subsection in subsections {
-        for object_offset in 0..subsection.count {
-            let Some(entry) = decoder.next_entry() else {
-                return Ok(CrossReferenceTable::new(
-                    entries,
-                    Trailer::new(Box::new(stream.dictionary), None),
-                ));
-            };
-
-            let object_number = subsection.start.saturating_add(object_offset);
-            entries.insert(object_number, entry);
-        }
-    }
-
-    let trailer = Trailer::new(Box::new(stream.dictionary), None);
-    Ok(CrossReferenceTable::new(entries, trailer))
+pub fn parse_xref_stream(stream: StreamObject) -> Result<CrossReferenceTable, ParserError> {
+    let XrefStream(table) =
+        ObjectReader::new(PassthroughResolver).read(&ObjectVariant::Stream(stream))?;
+    Ok(table)
 }
 
-/// Validates the optional `/Type` entry when it is present.
-fn validate_stream_type(
-    stream: &StreamObject,
-    objects: &dyn ObjectResolver,
-) -> Result<(), ParserError> {
-    let Some(type_name) = stream
-        .dictionary
-        .get(b"Type")
-        .map(|type_name| type_name.try_bytes(objects))
-        .transpose()?
-    else {
-        return Ok(());
-    };
+/// A cross-reference stream decoded into its table of entries and its trailer.
+struct XrefStream(CrossReferenceTable);
 
-    if type_name == b"XRef" {
-        Ok(())
-    } else {
-        Err(ParserError::InvalidKeyword(
-            "XRef".to_owned(),
-            String::from_utf8_lossy(type_name).into_owned(),
-        ))
+impl FromPdfObject for XrefStream {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut stream = context.stream()?;
+        let mut dictionary = stream.dictionary();
+        if let Some(type_name) = dictionary.optional::<Arc<[u8]>>(b"Type")?
+            && *type_name != *b"XRef"
+        {
+            return Err(ObjectReadError::Decode {
+                target: "cross-reference stream",
+                source: format!(
+                    "expected /Type XRef, found {}",
+                    String::from_utf8_lossy(&type_name)
+                )
+                .into(),
+            });
+        }
+        let layout: XrefStreamLayout = dictionary.required(b"W")?;
+        let size: usize = dictionary.required(b"Size")?;
+        let index: Vec<usize> = dictionary
+            .optional(b"Index")?
+            .unwrap_or_else(|| vec![0, size]);
+        let trailer = Trailer::new(Box::new(stream.stream().dictionary.clone()), None);
+
+        if layout.entry_width == 0 {
+            return Ok(Self(CrossReferenceTable::new(BTreeMap::new(), trailer)));
+        }
+
+        let (subsections, []) = index.as_chunks::<2>() else {
+            return Err(ObjectReadError::Decode {
+                target: "cross-reference stream",
+                source: format!(
+                    "expected an /Index array with an even number of elements, found {}",
+                    index.len()
+                )
+                .into(),
+            });
+        };
+        let data = pdf_filter::filter::decode_with_access(stream.stream(), stream.access())?;
+        let mut decoder = XrefStreamEntryDecoder::new(&data, layout);
+        let mut entries = BTreeMap::new();
+        for &[start, count] in subsections {
+            for object_offset in 0..count {
+                let Some(entry) = decoder.next_entry() else {
+                    return Ok(Self(CrossReferenceTable::new(entries, trailer)));
+                };
+                entries.insert(start.saturating_add(object_offset), entry);
+            }
+        }
+
+        Ok(Self(CrossReferenceTable::new(entries, trailer)))
     }
 }
 
@@ -91,17 +91,11 @@ struct XrefStreamLayout {
     entry_width: usize,
 }
 
-impl XrefStreamLayout {
-    /// Reads the `/W` field widths from the stream dictionary.
-    fn from_dictionary(
-        stream: &StreamObject,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Self, ParserError> {
-        let [type_width, second_field_width, third_field_width] = stream
-            .dictionary
-            .get_or_err(b"W")?
-            .try_array_of::<usize, 3>(objects)?;
-
+/// Reads the `/W` field widths.
+impl FromPdfObject for XrefStreamLayout {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let [type_width, second_field_width, third_field_width] =
+            context.array()?.read_array::<usize, 3>()?;
         Ok(Self {
             type_width,
             second_field_width,
@@ -111,39 +105,6 @@ impl XrefStreamLayout {
                 .saturating_add(third_field_width),
         })
     }
-}
-
-/// A contiguous range of object numbers described by the `/Index` array.
-#[derive(Clone, Copy)]
-struct XrefSubsection {
-    start: usize,
-    count: usize,
-}
-
-/// Resolves `/Index`, defaulting to the full range declared by `/Size`.
-fn parse_subsections(
-    stream: &StreamObject,
-    objects: &dyn ObjectResolver,
-    size: usize,
-) -> Result<Vec<XrefSubsection>, ParserError> {
-    let index_values = stream.dictionary.get(b"Index").map_or_else(
-        || Ok(vec![0, size]),
-        |index_value| index_value.try_vec_of::<usize>(objects),
-    )?;
-
-    if index_values.len() % 2 != 0 {
-        return Err(ParserError::InvalidKeyword(
-            "Index array with even number of elements".to_string(),
-            format!("Index array with {} elements", index_values.len()),
-        ));
-    }
-
-    Ok(index_values
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .map(|&[start, count]| XrefSubsection { start, count })
-        .collect())
 }
 
 /// Consumes fixed-width entries from decoded cross-reference stream data.
@@ -218,7 +179,7 @@ fn read_field(bytes: &[u8]) -> usize {
 mod tests {
     use pdf_object_reader::{
         cross_reference_table::CrossReferenceEntryType, dictionary::Dictionary,
-        object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+        object_variant::ObjectVariant,
     };
     use std::collections::BTreeMap;
 
@@ -280,7 +241,7 @@ mod tests {
         data.extend_from_slice(&[1, 2, 0, 0]);
 
         let stream = build_xref_stream([1, 2, 1], None, 4, data);
-        let table = parse_xref_stream(stream, &PassthroughResolver).unwrap();
+        let table = parse_xref_stream(stream).unwrap();
 
         assert_eq!(table.entries.len(), 4);
 
@@ -315,7 +276,7 @@ mod tests {
         data.extend_from_slice(&[0, 200]);
 
         let stream = build_xref_stream([0, 2, 0], None, 2, data);
-        let table = parse_xref_stream(stream, &PassthroughResolver).unwrap();
+        let table = parse_xref_stream(stream).unwrap();
 
         assert_eq!(table.entries.len(), 2);
         assert_eq!(table.entries[&0].byte_offset(), Some(100));
@@ -331,7 +292,7 @@ mod tests {
         data.extend_from_slice(&[1, 100, 0]);
 
         let stream = build_xref_stream([1, 1, 1], Some(vec![5, 2, 10, 1]), 11, data);
-        let table = parse_xref_stream(stream, &PassthroughResolver).unwrap();
+        let table = parse_xref_stream(stream).unwrap();
 
         assert_eq!(table.entries.len(), 3);
         assert_eq!(table.entries[&5].byte_offset(), Some(50));
@@ -345,7 +306,7 @@ mod tests {
     fn test_parse_xref_stream_keeps_complete_entries_from_truncated_data() {
         let stream = build_xref_stream([1, 1, 1], None, 2, vec![1, 42, 0, 1, 84]);
 
-        let table = parse_xref_stream(stream, &PassthroughResolver).unwrap();
+        let table = parse_xref_stream(stream).unwrap();
 
         assert_eq!(table.entries.len(), 1);
         assert_eq!(table.entries[&0].byte_offset(), Some(42));
@@ -355,7 +316,7 @@ mod tests {
     fn test_parse_xref_stream_maps_unknown_entry_types_to_free_entries() {
         let stream = build_xref_stream([1, 1, 1], None, 1, vec![9, 42, 7]);
 
-        let table = parse_xref_stream(stream, &PassthroughResolver).unwrap();
+        let table = parse_xref_stream(stream).unwrap();
 
         assert_eq!(table.entries[&0], CrossReferenceEntryType::new_free(0, 0));
     }
@@ -471,7 +432,7 @@ mod tests {
             raw_entries,
             5, // columns = w1+w2+w3
         );
-        let table = parse_xref_stream(stream, &PassthroughResolver).unwrap();
+        let table = parse_xref_stream(stream).unwrap();
 
         assert_eq!(table.entries.len(), 4);
 

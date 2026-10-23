@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use pdf_object_reader::{
-    object_resolver::ObjectResolver, object_variant::ObjectVariant, stream::StreamObject,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_resolver::ObjectResolver,
+    object_variant::ObjectVariant,
 };
 use pdf_parser::parser::PdfParser;
 
@@ -28,30 +29,22 @@ pub(crate) struct ObjectStream {
     count: usize,
 }
 
-impl ObjectStream {
-    /// Reads the `/N` and `/First` entries of an object stream.
-    ///
-    /// # Parameters
-    ///
-    /// - `stream`: The object stream to read.
-    /// - `objects`: Object resolver for indirect dictionary values.
-    pub(crate) fn from_stream(
-        stream: &StreamObject,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Self, PdfReaderError> {
+/// Reads the `/N` and `/First` entries of an object stream.
+impl FromPdfObject for ObjectStream {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut stream = context.stream()?;
+        let mut dictionary = stream.dictionary();
+        let count = dictionary.required(b"N")?;
+        let first = dictionary.required(b"First")?;
         Ok(Self {
-            count: stream
-                .dictionary
-                .get_or_err(b"N")?
-                .try_number::<usize>(objects)?,
-            first: stream
-                .dictionary
-                .get_or_err(b"First")?
-                .try_number::<usize>(objects)?,
-            data: stream.shared_data(),
+            data: stream.stream().shared_data(),
+            first,
+            count,
         })
     }
+}
 
+impl ObjectStream {
     /// Returns a lazy iterator over the header's `(object number, offset)` pairs, in stream order.
     pub(crate) fn entries(&self) -> ObjectStreamEntries<'_> {
         ObjectStreamEntries {
