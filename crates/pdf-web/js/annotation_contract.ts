@@ -800,7 +800,7 @@ color: Color, };
  */
 export type InkAnnotation = {
 /**
- * The required ink list.
+ * The ink list; empty when `/InkList` is absent.
  */
 ink_list: InkList,
 /**

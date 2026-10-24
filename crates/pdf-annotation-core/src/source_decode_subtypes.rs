@@ -231,7 +231,9 @@ impl FromPdfObject for InkAnnotation {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut dictionary = context.dictionary()?;
         Ok(Self {
-            ink_list: dictionary.required(b"InkList")?,
+            // Producers omit `/InkList` when the strokes live only in the appearance stream,
+            // which still draws the annotation, so a missing entry reads as no strokes.
+            ink_list: dictionary.optional(b"InkList")?.unwrap_or_default(),
             border_style: dictionary.optional(b"BS")?,
             interior_color: dictionary.optional(b"IC")?,
         })

@@ -456,7 +456,7 @@ impl AnnotationAction {
 }
 
 /// Owned InkList data retained from the source PDF.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct InkList {
@@ -544,7 +544,7 @@ pub struct HighlightAnnotation {
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct InkAnnotation {
-    /// The required ink list.
+    /// The ink list; empty when `/InkList` is absent.
     pub ink_list: InkList,
     /// The border style.
     pub border_style: Option<BorderStyle>,
