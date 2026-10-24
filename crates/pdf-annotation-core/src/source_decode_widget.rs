@@ -4,8 +4,7 @@ use std::sync::Arc;
 use crate::error::SourceDecodeError;
 use crate::pdf_data::{WidgetAnnotation, WidgetChoiceOption, WidgetFieldFlags, WidgetFieldValue};
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-    object_variant::ObjectVariant,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
 };
 
 impl FromPdfObject for WidgetAnnotation {
@@ -13,9 +12,8 @@ impl FromPdfObject for WidgetAnnotation {
         let object = context.object();
         let mut dictionary = context.dictionary()?;
         let field_id = dictionary
-            .dictionary()
-            .parent_reference()
-            .map(|(_, parent_id)| {
+            .reference(b"Parent")
+            .map(|parent_id| {
                 u64::try_from(parent_id.number).map_err(|_| SourceDecodeError::ResourceLimit)
             })
             .transpose()?;
@@ -66,12 +64,9 @@ struct FieldProperties {
 impl FromPdfObject for FieldProperties {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut dictionary = context.dictionary()?;
-        let parent = match dictionary.dictionary().get(b"Parent") {
-            Some(parent) => match dictionary.read::<Option<Self>>(parent) {
-                Err(ObjectReadError::CyclicReference { .. }) => None,
-                result => result?,
-            },
-            None => None,
+        let parent = match dictionary.optional::<Self>(b"Parent") {
+            Err(error) if error.is_cyclic_reference() => None,
+            result => result?,
         }
         .unwrap_or_default();
 
@@ -115,7 +110,7 @@ impl FromPdfObject for FieldProperties {
 impl FromPdfObject for WidgetChoiceOption {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         if !matches!(context.object(), ObjectVariant::Array(_)) {
-            let bytes = context.object().try_bytes(context.source())?.to_vec();
+            let bytes = context.decode::<Arc<[u8]>>()?.to_vec();
             return Ok(Self {
                 export_value: bytes.clone(),
                 display_value: bytes,

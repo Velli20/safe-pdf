@@ -27,7 +27,7 @@ impl FromPdfObject for Type1Program {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
         // Presence, including an invalid value, deliberately prevents FontFile fallback.
-        if context.dictionary().get(b"FontFile3").is_some() {
+        if context.contains(b"FontFile3") {
             context
                 .required::<SimpleCffProgram>(b"FontFile3")
                 .map(|program| Self(program.0))
@@ -148,8 +148,8 @@ impl FromPdfObject for CidCffProgram {
 mod tests {
     use super::*;
     use pdf_object_reader::{
-        ObjectReader, dictionary::Dictionary, object_resolver::PassthroughResolver,
-        object_variant::ObjectVariant, stream::StreamObject,
+        EmptySource, ObjectReader, dictionary::Dictionary, object_variant::ObjectVariant,
+        stream::StreamObject,
     };
 
     fn descriptor_with_cff(subtype: &[u8], data: &'static [u8]) -> Dictionary {
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn cid_font_type0c_remains_raw_cff() {
         let descriptor = descriptor_with_cff(b"CIDFontType0C", b"raw-cff");
-        let source = ObjectReader::new(PassthroughResolver)
+        let source = ObjectReader::new(EmptySource)
             .read::<CidType0Program>(&ObjectVariant::Dictionary(descriptor))
             .expect("the raw CID-CFF source should parse");
         let (data, format) = memory_source(FontSource::from(source));
@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn cid_open_type_remains_open_type() {
         let descriptor = descriptor_with_cff(b"OpenType", b"open-type");
-        let source = ObjectReader::new(PassthroughResolver)
+        let source = ObjectReader::new(EmptySource)
             .read::<CidType0Program>(&ObjectVariant::Dictionary(descriptor))
             .expect("the OpenType source should parse");
         let (data, format) = memory_source(FontSource::from(source));
@@ -198,7 +198,7 @@ mod tests {
     #[test]
     fn simple_type1c_remains_raw_cff() {
         let descriptor = descriptor_with_cff(b"Type1C", b"raw-cff");
-        let source = ObjectReader::new(PassthroughResolver)
+        let source = ObjectReader::new(EmptySource)
             .read::<Type1Program>(&ObjectVariant::Dictionary(descriptor))
             .expect("the raw simple CFF source should parse");
         let (data, format) = memory_source(FontSource::from(source));

@@ -1,11 +1,11 @@
-use crate::{error::PdfPagesError, form::FormXObject, resource::Resource};
+use crate::{error::PdfPagesError, form::FormXObject, resource::Resource, resources::Resources};
 use pdf_font::PdfFontSpec;
 use pdf_graphics::Image;
 use pdf_image::{PdfImage, PdfImageError};
 use pdf_object_reader::pdf_string::PdfString;
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-    object_variant::ObjectVariant,
+    FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ObjectReadError, ReadResult,
+    object_variant::ObjectVariant, pdf_name::PdfName,
 };
 use std::sync::Arc;
 
@@ -44,62 +44,96 @@ impl FromPdfObject for Resource {
             _ => context.read::<XObjectSubtype>(value).ok(),
         };
         match subtype {
-            None => Self::read_font(&mut context),
-            Some(XObjectSubtype::Form) => {
-                Ok(Self::from(context.read::<FormXObject>(context.object())?))
-            }
-            Some(XObjectSubtype::Image) => Self::read_image(&mut context),
+            None => context.read::<FontResource>(value).map(Self::from),
+            Some(XObjectSubtype::Form) => context.read::<FormXObject>(value).map(Self::from),
+            Some(XObjectSubtype::Image) => context.read::<ImageResource>(value).map(Self::from),
         }
     }
 }
 
-impl Resource {
-    /// Reads a font, keeping the resources a Type 3 font's glyph procedures paint with.
-    fn read_font(context: &mut ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let object = context.object();
-        let font: PdfFontSpec = context.read(object)?;
-        let resources = match object.dictionary()?.get(b"Resources") {
-            Some(resources) if font.is_type3() => Some(context.read_shared(resources)?),
-            _ => None,
+/// A font, with the resources a Type 3 font's glyph procedures paint with.
+struct FontResource {
+    font: PdfFontSpec,
+    resources: Option<ObjectHandle<Resources>>,
+}
+
+impl FromPdfObject for FontResource {
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let font: PdfFontSpec = context.read(context.object())?;
+        let resources = match font.is_type3() {
+            true => context.dictionary()?.optional_shared(b"Resources")?,
+            false => None,
         };
-        Ok(Self::Font {
+        Ok(Self { font, resources })
+    }
+}
+
+impl From<FontResource> for Resource {
+    fn from(FontResource { font, resources }: FontResource) -> Self {
+        Self::Font {
             font: Arc::new(font),
             resources,
-        })
+        }
     }
+}
 
-    /// Decodes an image XObject, or marks it unavailable when its dimensions are malformed
-    /// or its stream data cannot be decoded into samples.
-    fn read_image(context: &mut ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let image = match context.read::<PdfImage>(context.object()) {
+/// An image XObject decoded into a raster, or unavailable when its dimensions are
+/// malformed or its stream data cannot be decoded into samples.
+enum ImageResource {
+    Available(Image),
+    Unavailable,
+}
+
+impl FromPdfObject for ImageResource {
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let object = context.object();
+        let image = match context.read::<PdfImage>(object) {
             Ok(image) => image,
-            Err(error) if PdfImage::is_unreadable(&error) => return Ok(Self::UnavailableImage),
+            Err(error) if PdfImage::is_unreadable(&error) => return Ok(Self::Unavailable),
             Err(error) => return Err(error),
         };
-        let soft_mask = Self::read_soft_mask_image(context)?;
+        let SoftMaskImage(soft_mask) = context.read(object)?;
         match image.decode(soft_mask.as_deref()) {
-            Ok(image) => Ok(Self::from(image)),
-            Err(error) if error.is_unreadable_data() => Ok(Self::UnavailableImage),
+            Ok(image) => Ok(Self::Available(image)),
+            Err(error) if error.is_unreadable_data() => Ok(Self::Unavailable),
             Err(error) => Err(PdfPagesError::from(error).into()),
         }
     }
+}
 
-    /// Reads an image's `/SMask`.
-    ///
-    /// `/None`, an unavailable mask, or a mask that refers back to its own image leaves
-    /// the image unmasked.
-    fn read_soft_mask_image(
-        context: &mut ObjectContext<'_, impl ObjectAccess + ?Sized>,
-    ) -> ReadResult<Option<Arc<Image>>> {
-        let Some(value) = context.object().dictionary()?.get(b"SMask") else {
-            return Ok(None);
-        };
-        if value.is_named(b"None", context.source()) {
-            return Ok(None);
+impl From<ImageResource> for Resource {
+    fn from(image: ImageResource) -> Self {
+        match image {
+            ImageResource::Available(image) => Self::from(image),
+            ImageResource::Unavailable => Self::UnavailableImage,
         }
-        match context.read::<Self>(value) {
-            Ok(Self::Image(image)) => Ok(Some(image)),
-            Ok(Self::UnavailableImage) | Err(ObjectReadError::CyclicReference { .. }) => Ok(None),
+    }
+}
+
+/// An image's `/SMask`.
+///
+/// `/None`, an unavailable mask, or a mask that refers back to its own image leaves the
+/// image unmasked.
+struct SoftMaskImage(Option<Arc<Image>>);
+
+impl FromPdfObject for SoftMaskImage {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        if !context.contains(b"SMask")
+            || context
+                .lenient::<PdfName>(b"SMask")
+                .is_some_and(|name| name.as_bytes() == b"None")
+        {
+            return Ok(Self(None));
+        }
+        match context.required::<Resource>(b"SMask") {
+            Ok(Resource::Image(image)) => Ok(Self(Some(image))),
+            Ok(Resource::UnavailableImage) => Ok(Self(None)),
+            Err(error) if error.is_cyclic_reference() => Ok(Self(None)),
             Ok(_) => Err(PdfPagesError::from(PdfImageError::InvalidSoftMaskXObject).into()),
             Err(error) => Err(error),
         }
@@ -112,7 +146,7 @@ mod tests {
     use pdf_object_collection::object_collection::ObjectCollection;
     use pdf_object_reader::{
         ObjectReadError, dictionary::Dictionary, object_error::ObjectError, object_id::ObjectId,
-        object_resolver::ObjectResolver, object_variant::ObjectVariant, stream::StreamObject,
+        object_variant::ObjectVariant, stream::StreamObject,
     };
     use std::collections::BTreeMap;
 
@@ -140,22 +174,6 @@ mod tests {
                 .get(&id.number())
                 .cloned()
                 .map(pdf_object_reader::pdf_object::PdfObject::new))
-        }
-    }
-
-    impl ObjectResolver for MapResolver {
-        fn resolve_object<'a>(
-            &'a self,
-            obj: &'a ObjectVariant,
-        ) -> Result<&'a ObjectVariant, pdf_object_reader::object_error::ObjectError> {
-            match obj {
-                ObjectVariant::Reference(obj_num) => self.objects.get(&obj_num.number).ok_or(
-                    ObjectError::FailedResolveObjectReference {
-                        obj_num: obj_num.number,
-                    },
-                ),
-                _ => Ok(obj),
-            }
         }
     }
 
@@ -315,9 +333,12 @@ mod tests {
 
         let result = reader.read::<Option<Resource>>(&ObjectVariant::Stream(image_stream.clone()));
 
+        let Err(ObjectReadError::At { source, .. }) = result else {
+            panic!("the error should name the /SMask entry");
+        };
         assert!(matches!(
-            result,
-            Err(ObjectReadError::UnsupportedXObjectSubtype { subtype }) if subtype == "Unsupported"
+            *source,
+            ObjectReadError::UnsupportedXObjectSubtype { subtype } if subtype == "Unsupported"
         ));
     }
 

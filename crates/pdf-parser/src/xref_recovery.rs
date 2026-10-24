@@ -12,17 +12,19 @@ use std::{
 };
 
 use pdf_object_reader::{
+    EmptySource, ObjectReader,
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
     object_id::ObjectId,
-    object_resolver::PassthroughResolver,
     object_variant::ObjectVariant,
 };
 
 use crate::{
+    cross_reference_stream::XrefStream,
     error::ParserError,
+    indirect_object::{IndirectValue, StreamHeader},
     linear_object_scanner::LinearObjectScanner,
     parser::PdfParser,
-    xref_builder::{ParsedXrefSection, XrefSectionKind, parse_section_at, parse_stream_section},
+    xref_builder::{ParsedXrefSection, XrefSectionKind},
 };
 
 const XREF_KEYWORD: &[u8] = b"xref";
@@ -62,13 +64,19 @@ impl OffsetRepairPolicy {
 /// Owns an independent cursor used exclusively for xref recovery probes.
 pub(crate) struct XrefRecovery<'input> {
     parser: PdfParser<'input>,
+    /// The builder's objects, through which recovered sections are read.
+    objects: &'input ObjectReader<EmptySource>,
 }
 
 impl<'input> XrefRecovery<'input> {
     /// Creates a recovery context over the parser's complete immutable input.
-    pub(crate) fn new(parser: &PdfParser<'input>) -> Self {
+    pub(crate) fn new(
+        parser: &PdfParser<'input>,
+        objects: &'input ObjectReader<EmptySource>,
+    ) -> Self {
         Self {
             parser: PdfParser::from(parser.tokenizer.input),
+            objects,
         }
     }
 
@@ -76,12 +84,85 @@ impl<'input> XrefRecovery<'input> {
     fn at_offset(&self, offset: usize) -> Result<Self, ParserError> {
         Ok(Self {
             parser: self.parser.at_offset(offset)?,
+            objects: self.objects,
         })
     }
 
     /// Reconstructs an object index when no numeric `startxref` is available.
     pub(crate) fn rebuild_without_xref(&self) -> Result<CrossReferenceTable, ParserError> {
-        self.validate(LinearObjectScanner::new(&self.parser).scan()?, 0)
+        self.validate(
+            LinearObjectScanner::new(&self.parser, self.objects).scan()?,
+            0,
+        )
+    }
+
+    /// Strictly parses a cross-reference section at exactly `offset`.
+    ///
+    /// Traditional tables begin directly with the `xref` object syntax. Xref streams begin
+    /// with an indirect-object header, so the initial identifier probe selects the correct
+    /// parsing route without consuming state on failure. No object is loaded at this
+    /// stage: section syntax is parsed, but references are not followed, so an xref stream
+    /// needs a direct `/Length`.
+    ///
+    /// The resulting object must be either a traditional table or a stream decodable as an
+    /// xref stream. No surrounding search, offset adjustment, or entry repair occurs here,
+    /// so recovery can test candidate offsets without duplicating normal parsing behavior.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ParserError::InvalidXrefAtOffset`] when `offset` is outside the input or
+    /// the parsed object is not an xref section. Object, stream, filter, and xref-stream
+    /// decoding errors are otherwise propagated unchanged.
+    pub(crate) fn parse_section_at(&self, offset: usize) -> Result<ParsedXrefSection, ParserError> {
+        let mut parser = self
+            .parser
+            .at_offset(offset)
+            .map_err(|_| ParserError::InvalidXrefAtOffset { offset })?;
+        let Some(identifier) = parser.parse_indirect_object_id() else {
+            return match parser.parse_object()? {
+                ObjectVariant::CrossReferenceTable(table) => Ok(ParsedXrefSection {
+                    kind: XrefSectionKind::Traditional,
+                    table,
+                }),
+                _ => Err(ParserError::InvalidXrefAtOffset { offset }),
+            };
+        };
+        let IndirectValue::Stream(header) = parser.parse_indirect_object_value(identifier)? else {
+            return Err(ParserError::InvalidXrefAtOffset { offset });
+        };
+        let length = self
+            .objects
+            .read::<usize>(header.dictionary().get_or_err(b"Length")?)?;
+        let stream = parser.parse_stream_body(header, length)?;
+        self.parse_stream_section(&stream)
+    }
+
+    /// Decodes one parsed stream as a cross-reference stream section.
+    ///
+    /// Stream filters and `/W`/`/Index` field interpretation belong to the [`XrefStream`]
+    /// decoder. Tagging the result as [`XrefSectionKind::Stream`] preserves the
+    /// source-specific validation policy for recovery.
+    ///
+    /// # Errors
+    ///
+    /// Propagates stream decoding and malformed xref-stream dictionary or entry errors.
+    fn parse_stream_section(
+        &self,
+        stream: &ObjectVariant,
+    ) -> Result<ParsedXrefSection, ParserError> {
+        let XrefStream(table) = self.objects.read(stream)?;
+        Ok(ParsedXrefSection {
+            kind: XrefSectionKind::Stream,
+            table,
+        })
+    }
+
+    /// Returns a stream's direct `/Length`; nothing can be resolved before the xref table
+    /// exists, so a reference or a malformed value is no length.
+    fn direct_length(&self, header: &StreamHeader) -> Option<usize> {
+        header
+            .length()
+            .and_then(|length| self.objects.read::<usize>(length).ok())
     }
 
     /// Parses exactly first, then tries nearby sections and malformed row layouts.
@@ -89,14 +170,14 @@ impl<'input> XrefRecovery<'input> {
         &mut self,
         declared_offset: usize,
     ) -> Result<CrossReferenceTable, ParserError> {
-        match parse_section_at(&self.parser, declared_offset) {
+        match self.parse_section_at(declared_offset) {
             Ok(section) => Ok(self.repair_section(section, 0)),
             Err(original_error) => {
                 if let Ok(section) = self.parse_stream_section_recovering_length(declared_offset) {
                     return Ok(self.repair_section(section, 0));
                 }
                 if let Some(recovered_offset) = self.recover_section_offset(declared_offset) {
-                    let section = parse_section_at(&self.parser, recovered_offset)?;
+                    let section = self.parse_section_at(recovered_offset)?;
                     return Ok(
                         self.repair_section(section, declared_offset.abs_diff(recovered_offset))
                     );
@@ -112,8 +193,8 @@ impl<'input> XrefRecovery<'input> {
     /// Parses an xref stream at exactly `offset` whose `/Length` is indirect or wrong.
     ///
     /// Xref stream dictionaries must hold direct values, and nothing can be resolved
-    /// before the xref table exists, so the stream body is located by an `endstream`
-    /// search instead.
+    /// before the xref table exists, so an indirect length reads as absent and the stream
+    /// body is located by an `endstream` search instead.
     fn parse_stream_section_recovering_length(
         &self,
         offset: usize,
@@ -122,13 +203,12 @@ impl<'input> XrefRecovery<'input> {
         let identifier = parser
             .parse_indirect_object_id()
             .ok_or(ParserError::InvalidXrefAtOffset { offset })?;
-        match parser.parse_indirect_object_value_recovering_direct_streams(
-            identifier,
-            &PassthroughResolver,
-        )? {
-            ObjectVariant::Stream(stream) => parse_stream_section(stream),
-            _ => Err(ParserError::InvalidXrefAtOffset { offset }),
-        }
+        let IndirectValue::Stream(header) = parser.parse_indirect_object_value(identifier)? else {
+            return Err(ParserError::InvalidXrefAtOffset { offset });
+        };
+        let length = self.direct_length(&header);
+        let stream = parser.recover_stream_body(header, length)?;
+        self.parse_stream_section(&stream)
     }
 
     /// Attempts to parse malformed xref rows at or near a declared offset.
@@ -205,7 +285,7 @@ impl<'input> XrefRecovery<'input> {
             return Err(self.invalid_xref_error());
         }
 
-        let trailer = self.parser.parse_trailer(&PassthroughResolver)?;
+        let trailer = self.parser.parse_trailer()?;
         Ok(ParsedXrefSection {
             kind: XrefSectionKind::Traditional,
             table: CrossReferenceTable::new(entries, trailer),
@@ -338,7 +418,7 @@ impl<'input> XrefRecovery<'input> {
 
         candidates
             .into_iter()
-            .find(|candidate| parse_section_at(&self.parser, *candidate).is_ok())
+            .find(|candidate| self.parse_section_at(*candidate).is_ok())
     }
 
     /// Checks whether `offset` starts a complete whitespace-terminated xref row.
@@ -545,7 +625,8 @@ mod tests {
         let parser = PdfParser::from(b"not-an-xref entry".as_slice())
             .at_offset(3)
             .unwrap();
-        let mut recovery = XrefRecovery::new(&parser);
+        let objects = ObjectReader::new(EmptySource);
+        let mut recovery = XrefRecovery::new(&parser, &objects);
         recovery.parser.tokenizer.position = 3;
 
         let result = recovery.try_parse_malformed_entry();
@@ -559,7 +640,8 @@ mod tests {
         let mut data = format_xref_entry(12, 34, 'n');
         data.extend_from_slice(b"trailer");
         let parser = PdfParser::from(data.as_slice());
-        let mut recovery = XrefRecovery::new(&parser);
+        let objects = ObjectReader::new(EmptySource);
+        let mut recovery = XrefRecovery::new(&parser, &objects);
 
         let entry = recovery.try_parse_malformed_entry().unwrap();
 
@@ -574,12 +656,13 @@ mod tests {
     fn malformed_entry_detection_requires_terminator() {
         let data = format_xref_entry(12, 34, 'n');
         let parser = PdfParser::from(data.as_slice());
-        let recovery = XrefRecovery::new(&parser);
+        let objects = ObjectReader::new(EmptySource);
+        let recovery = XrefRecovery::new(&parser, &objects);
         assert!(recovery.looks_like_malformed_entry(0));
 
         let truncated = b"0000000012 00034 n".to_vec();
         let parser = PdfParser::from(truncated.as_slice());
-        let recovery = XrefRecovery::new(&parser);
+        let recovery = XrefRecovery::new(&parser, &objects);
 
         assert!(!recovery.looks_like_malformed_entry(0));
         assert_eq!(recovery.parser.position(), 0);

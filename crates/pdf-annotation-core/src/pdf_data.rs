@@ -846,6 +846,9 @@ pub enum NativeAnnotation {
     },
 }
 
+/// The annotations of a page's `/Annots` entry, or `None` when it is not an array.
+pub struct PageAnnotations(pub Option<Vec<SourceAnnotation>>);
+
 /// Native PDF annotation data retained from a page object.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]

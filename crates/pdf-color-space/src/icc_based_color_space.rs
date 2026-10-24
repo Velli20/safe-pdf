@@ -98,8 +98,8 @@ mod tests {
     use bytes::Bytes;
     use pdf_graphics::color::Color;
     use pdf_object_reader::{
-        ObjectReader, dictionary::Dictionary, object_resolver::PassthroughResolver,
-        object_variant::ObjectVariant, stream::StreamObject,
+        EmptySource, ObjectReader, dictionary::Dictionary, object_variant::ObjectVariant,
+        stream::StreamObject,
     };
 
     use super::ICCBasedColorSpace;
@@ -133,7 +133,7 @@ mod tests {
             .into(),
         );
 
-        let parsed = ObjectReader::new(&PassthroughResolver)
+        let parsed = ObjectReader::new(EmptySource)
             .read::<ColorSpace>(&array)
             .expect("ICCBased color space should parse");
         let ColorSpace::ICCBased(icc_based) = parsed else {

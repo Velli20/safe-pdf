@@ -3,8 +3,8 @@ use std::{collections::BTreeMap, sync::Arc};
 use pdf_graphics::transform::Transform;
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{
-    dictionary::Dictionary, object_id::ObjectId, object_resolver::PassthroughResolver,
-    object_variant::ObjectVariant, stream::StreamObject,
+    EmptySource, dictionary::Dictionary, object_id::ObjectId, object_variant::ObjectVariant,
+    stream::StreamObject,
 };
 
 use pdf_resources::{pattern::Pattern, resource::Resource, resources::Resources};
@@ -471,7 +471,7 @@ fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
 fn inline_shading_resource_without_object_number_parses() {
     let page_dict = page_resources(vec![("Inline", inline_axial_shading())]);
 
-    let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+    let reader = pdf_object_reader::ObjectReader::new(EmptySource);
 
     let resources = reader
         .read_shared::<Resources>(page_dict.get(b"Resources").expect("resource entry"))
@@ -720,7 +720,7 @@ fn fallback_fonts_do_not_read_nested_type3_resources() {
         )]))),
     )]));
 
-    let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+    let reader = pdf_object_reader::ObjectReader::new(EmptySource);
 
     let resources = reader
         .read_shared::<Resources>(page_dict.get(b"Resources").expect("resource entry"))

@@ -263,14 +263,19 @@ impl FromPdfObject for PopupAnnotation {
         let mut dictionary = context.dictionary()?;
         Ok(Self {
             // The parent is identified by its object number and never resolved.
-            parent: dictionary
-                .dictionary()
-                .get(b"Parent")
-                .map(|parent| {
-                    let number = parent.try_object_number()?;
-                    u64::try_from(number).map_err(|_| SourceDecodeError::ResourceLimit)
-                })
-                .transpose()?,
+            parent: match dictionary.reference(b"Parent") {
+                Some(parent) => Some(
+                    u64::try_from(parent.number).map_err(|_| SourceDecodeError::ResourceLimit)?,
+                ),
+                None if dictionary.contains(b"Parent") => {
+                    return Err(SourceDecodeError::InvalidEntry {
+                        entry: b"Parent",
+                        reason: "expected an indirect reference".into(),
+                    }
+                    .into());
+                }
+                None => None,
+            },
             open: dictionary.optional(b"Open")?,
         })
     }
@@ -279,7 +284,8 @@ impl FromPdfObject for PopupAnnotation {
 /// Reads a `/Sy` caret symbol name, preserving unknown names.
 impl FromPdfObject for CaretSymbolStyle {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(match context.object().try_bytes(context.source())? {
+        let name = context.decode::<Arc<[u8]>>()?;
+        Ok(match &*name {
             b"P" => Self::P,
             b"None" => Self::None,
             other => Self::Unknown(Vec::from(other)),
@@ -290,7 +296,8 @@ impl FromPdfObject for CaretSymbolStyle {
 /// Reads a link's `/H` highlight mode name, preserving unknown names.
 impl FromPdfObject for LinkHighlightMode {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(match context.object().try_bytes(context.source())? {
+        let name = context.decode::<Arc<[u8]>>()?;
+        Ok(match &*name {
             b"I" => Self::Invert,
             b"O" => Self::Outline,
             b"P" => Self::Push,
@@ -304,7 +311,8 @@ impl FromPdfObject for LinkHighlightMode {
 /// Reads one `/LE` line ending name, preserving unknown names.
 impl FromPdfObject for LineEndingStyle {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(match context.object().try_bytes(context.source())? {
+        let name = context.decode::<Arc<[u8]>>()?;
+        Ok(match &*name {
             b"S" => Self::Slash,
             b"B" | b"Square" => Self::Square,
             b"C" | b"Circle" => Self::Circle,

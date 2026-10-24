@@ -181,7 +181,7 @@ pub use decode::FromPdfObject;
 pub use error::{BoxedError, ObjectReadError, ReadLocation, ReadResult};
 pub use handle::{HandleState, ObjectHandle};
 pub use reader::{ObjectAccess, ObjectReader, ReadLimits, ReadSession};
-pub use source::ObjectSource;
+pub use source::{EmptySource, ObjectSource};
 
 /// PDF cross reference table model and parsing operations.
 pub mod cross_reference_table;
@@ -189,8 +189,6 @@ pub mod cross_reference_table;
 pub mod dictionary;
 /// PDF object error model and parsing operations.
 pub mod object_error;
-/// PDF object resolver model and parsing operations.
-pub mod object_resolver;
 /// PDF stream model and parsing operations.
 pub mod stream;
 /// PDF text encoding model and parsing operations.

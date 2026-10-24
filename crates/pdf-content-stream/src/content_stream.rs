@@ -1,8 +1,8 @@
 use crate::operator_stream_parser::OperatorStreamParser;
 use pdf_content_stream_operators::{error::PdfOperatorError, variants::PdfOperatorVariant};
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult, object_kind::ObjectKind,
-    object_resolver::PassthroughResolver, stream::StreamObject,
+    EmptySource, FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult,
+    object_kind::ObjectKind, stream::StreamObject,
 };
 
 /// Represents one materialized PDF content stream as parsed operators plus its
@@ -59,7 +59,7 @@ impl ContentStream {
         input: &[u8],
         operators: &mut Vec<PdfOperatorVariant>,
     ) -> Result<(), PdfOperatorError> {
-        let reader = ObjectReader::new(PassthroughResolver);
+        let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
         let mut parser = OperatorStreamParser::new(input, &mut session, operators);
         while parser.parse_next_item()? {}
@@ -77,8 +77,7 @@ mod tests {
         variants::PdfOperatorVariant::{self, *},
     };
     use pdf_object_reader::{
-        dictionary::Dictionary, object_error::ObjectError, object_resolver::ObjectResolver,
-        object_resolver::PassthroughResolver, object_variant::ObjectVariant, stream::StreamObject,
+        EmptySource, dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject,
     };
 
     use super::ContentStream;
@@ -124,26 +123,9 @@ mod tests {
         }
     }
 
-    impl ObjectResolver for MapResolver {
-        fn resolve_object<'a>(
-            &'a self,
-            obj: &'a ObjectVariant,
-        ) -> Result<&'a ObjectVariant, ObjectError> {
-            match obj {
-                ObjectVariant::Reference(object_number) => self
-                    .objects
-                    .get(&object_number.number)
-                    .ok_or(ObjectError::FailedResolveObjectReference {
-                        obj_num: object_number.number,
-                    }),
-                _ => Ok(obj),
-            }
-        }
-    }
-
     #[test]
     fn content_stream_read_returns_expected_operators_and_assigns_ids() {
-        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let reader = pdf_object_reader::ObjectReader::new(EmptySource);
         let parsed = reader
             .read::<ContentStream>(&ObjectVariant::Stream(stream_object(
                 1,
@@ -165,7 +147,7 @@ mod tests {
 
     #[test]
     fn content_stream_read_handles_bare_sign_text_array_adjustment() {
-        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let reader = pdf_object_reader::ObjectReader::new(EmptySource);
         let parsed = reader.read::<ContentStream>(
             &ObjectVariant::Stream(stream_object(
                 1,
@@ -206,7 +188,7 @@ mod tests {
 
     #[test]
     fn content_stream_read_parses_inline_image() {
-        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let reader = pdf_object_reader::ObjectReader::new(EmptySource);
         let parsed = reader
             .read::<ContentStream>(&ObjectVariant::Stream(stream_object(
                 1,
@@ -219,7 +201,7 @@ mod tests {
 
     #[test]
     fn content_stream_read_skips_unknown_operator_and_recovers() {
-        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let reader = pdf_object_reader::ObjectReader::new(EmptySource);
         let parsed = reader
             .read::<ContentStream>(&ObjectVariant::Stream(stream_object(1, b"@ q")))
             .expect("stream should parse");
@@ -258,7 +240,7 @@ mod tests {
     #[test]
     fn content_stream_read_rejects_non_stream_array_entries() {
         let contents = ObjectVariant::Array(vec![ObjectVariant::Integer(0)].into());
-        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let reader = pdf_object_reader::ObjectReader::new(EmptySource);
 
         let err = reader
             .read::<ContentStream>(&contents)
@@ -285,7 +267,7 @@ mod tests {
 
     #[test]
     fn content_stream_read_skips_malformed_inline_image_and_consumes_an_id() {
-        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let reader = pdf_object_reader::ObjectReader::new(EmptySource);
         let parsed = reader
             .read::<ContentStream>(&ObjectVariant::Stream(stream_object(
                 1,
@@ -310,7 +292,7 @@ mod tests {
     #[test]
     fn optional_contents_preserves_allocator_for_missing_contents() {
         let page = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
-        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let reader = pdf_object_reader::ObjectReader::new(EmptySource);
 
         let contents = reader
             .read::<PageContents>(&ObjectVariant::Dictionary(page))

@@ -9,6 +9,7 @@ use crate::object_error::ObjectError;
 use crate::object_kind::ObjectKind;
 use crate::object_variant::ObjectVariant;
 use crate::pdf_array::PdfArray;
+use crate::pdf_name::PdfName;
 use crate::pdf_object::PdfObject;
 use crate::pdf_string::PdfString;
 use crate::reader::ObjectAccess;
@@ -177,7 +178,14 @@ macro_rules! number_decoder {
                     context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
                 ) -> ReadResult<Self> {
                     // The context has already resolved references and owns their scope.
-                    Ok(context.object().try_number(context.source())?)
+                    let value = match context.object() {
+                        ObjectVariant::Integer(value) => Self::from_i64(*value),
+                        ObjectVariant::Real(value) => Self::from_f64(*value),
+                        other => {
+                            return Err(ObjectError::TypeMismatch("Number", other.name()).into());
+                        }
+                    };
+                    Ok(value.ok_or(ObjectError::NumberConversionError)?)
                 }
             }
         )+
@@ -194,7 +202,7 @@ macro_rules! enumerated_number_decoder {
                 fn from_pdf_object(
                     context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
                 ) -> ReadResult<Self> {
-                    let found = context.object().try_number::<i32>(context.source())?;
+                    let found = context.decode::<i32>()?;
                     Ok(Self::from_i32(found).ok_or(ObjectError::InvalidEnumValue {
                         expected: $expected,
                         found,
@@ -305,7 +313,8 @@ impl FromPdfObject for Color {
 /// Reads a soft mask's `/S` subtype. Unrecognized names are kept as `Unknown`.
 impl FromPdfObject for MaskMode {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(match context.object().try_bytes(context.source())? {
+        let name = context.decode::<std::sync::Arc<[u8]>>()?;
+        Ok(match &*name {
             b"Alpha" => Self::Alpha,
             b"Luminosity" => Self::Luminosity,
             other => Self::Unknown(Vec::from(other)),
@@ -313,11 +322,27 @@ impl FromPdfObject for MaskMode {
     }
 }
 
-/// Reads the bytes of a name or string, accepting producer substitutions between them.
+/// Reads a name, accepting a string in its place as producers substitute one for the
+/// other. The bytes are shared with the object, not copied.
+impl FromPdfObject for PdfName {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match context.object() {
+            ObjectVariant::String(value) => Ok(Self(std::sync::Arc::clone(&value.bytes))),
+            other => Err(ObjectError::TypeMismatch("Name", other.name()).into()),
+        }
+    }
+}
+
+/// Reads the bytes of a name or string, accepting producer substitutions between them,
+/// or the raw data of a stream.
 ///
-/// Use `PdfName` or `PdfString` when the PDF object kind must be enforced.
+/// Use `PdfString` when the PDF object kind must be enforced.
 impl FromPdfObject for std::sync::Arc<[u8]> {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(Self::from(context.object().try_bytes(context.source())?))
+        match context.object() {
+            ObjectVariant::String(value) => Ok(Self::clone(&value.bytes)),
+            ObjectVariant::Stream(stream) => Ok(Self::from(stream.raw_data())),
+            other => Err(ObjectError::TypeMismatch("Bytes", other.name()).into()),
+        }
     }
 }

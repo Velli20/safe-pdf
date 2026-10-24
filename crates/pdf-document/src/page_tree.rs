@@ -1,8 +1,7 @@
 //! Decodes a `/Pages` node and its descendants into an ordered list of pages.
 
 use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-    pdf_array::PdfArray,
+    FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult, pdf_array::PdfArray,
 };
 use std::sync::Arc;
 
@@ -31,13 +30,12 @@ enum PageTreeNode {
 }
 
 impl FromPdfObject for PageTreeNode {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context
-            .object()
-            .dictionary()?
-            .get_or_err(b"Type")?
-            .try_bytes(context.source())?
-        {
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let node_type: Arc<[u8]> =
+            context.read(context.object().dictionary()?.get_or_err(b"Type")?)?;
+        match &*node_type {
             PdfPage::KEY => PdfPage::from_pdf_object(context).map(Self::Page),
             PageTree::KEY => PageTree::from_pdf_object(context).map(Self::Pages),
             other => Err(PdfPagesError::InvalidKidsEntryType {
@@ -50,9 +48,10 @@ impl FromPdfObject for PageTreeNode {
 
 impl FromPdfObject for PageTree {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object();
         let mut context = context.dictionary()?;
         let kids = context.required::<PdfArray>(b"Kids")?;
-        let inherited = InheritedAttributes::read(&mut context)?;
+        let inherited: InheritedAttributes = context.read(object)?;
         let mut pages = Vec::new();
         for value in kids.iter() {
             match context.read::<PageTreeNode>(value) {
@@ -76,9 +75,10 @@ struct InheritedAttributes {
     rotation: Option<i32>,
 }
 
-impl InheritedAttributes {
-    /// Reads the inheritable attributes of a `/Pages` node.
-    fn read<A: ObjectAccess + ?Sized>(context: &mut DictionaryContext<'_, A>) -> ReadResult<Self> {
+/// Reads the inheritable attributes of a `/Pages` node.
+impl FromPdfObject for InheritedAttributes {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
         Ok(Self {
             resources: context
                 .optional_shared::<Resources>(b"Resources")?
@@ -89,7 +89,9 @@ impl InheritedAttributes {
             rotation: context.optional::<i32>(b"Rotate")?,
         })
     }
+}
 
+impl InheritedAttributes {
     /// Fills in the attributes a descendant page does not define itself.
     ///
     /// Per PDF spec §7.7.4, a page with no `/Resources` inherits the ancestor's resources

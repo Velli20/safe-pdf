@@ -34,9 +34,9 @@ pub mod pdf_data;
 /// Canonical native PDF annotation record and subtype vocabulary.
 pub use pdf_data::{
     CaretAnnotation, CircleAnnotation, FreeTextAnnotation, HighlightAnnotation, InkAnnotation,
-    LineAnnotation, LinkAnnotation, NativeAnnotation, PolyLineAnnotation, PolygonAnnotation,
-    PopupAnnotation, SourceAnnotation, SquareAnnotation, SquigglyAnnotation, StampAnnotation,
-    StrikeOutAnnotation, TextAnnotation, UnderlineAnnotation, WidgetAnnotation,
+    LineAnnotation, LinkAnnotation, NativeAnnotation, PageAnnotations, PolyLineAnnotation,
+    PolygonAnnotation, PopupAnnotation, SourceAnnotation, SquareAnnotation, SquigglyAnnotation,
+    StampAnnotation, StrikeOutAnnotation, TextAnnotation, UnderlineAnnotation, WidgetAnnotation,
 };
 /// Device-independent style conversion and interpretation.
 pub mod style;

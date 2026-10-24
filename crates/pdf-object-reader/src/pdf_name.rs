@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 /// Stores a PDF name as immutable shared bytes.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PdfName(Arc<[u8]>);
+pub struct PdfName(pub(crate) Arc<[u8]>);
 
 impl PdfName {
     /// Copies a byte sequence into a new PDF name.

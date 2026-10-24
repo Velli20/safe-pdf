@@ -7,14 +7,13 @@ extern crate alloc;
 use std::sync::Arc;
 
 use pdf_object_reader::{
-    ArrayContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult, ReadSession,
-    object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+    ArrayContext, EmptySource, FromPdfObject, ObjectAccess, ObjectContext, ReadResult, ReadSession,
+    object_variant::ObjectVariant,
 };
 
 /// The operands collected before an operator token, read in place through a
 /// session that does not resolve references.
-pub type OperandContext<'read, 'reader> =
-    ArrayContext<'read, ReadSession<'reader, PassthroughResolver>>;
+pub type OperandContext<'read, 'reader> = ArrayContext<'read, ReadSession<'reader, EmptySource>>;
 
 /// One operand from a PDF `Tj` or `TJ` text-showing operation.
 #[derive(Debug, Clone, PartialEq)]
@@ -31,7 +30,7 @@ impl FromPdfObject for PdfTextItem {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         match context.object() {
             ObjectVariant::String(value) => Ok(Self::Text(Arc::clone(&value.bytes))),
-            value => Ok(Self::Adjustment(value.try_number(context.source())?)),
+            _ => Ok(Self::Adjustment(context.decode()?)),
         }
     }
 }

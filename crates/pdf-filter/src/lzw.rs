@@ -32,19 +32,17 @@ impl Default for LzwParams {
     }
 }
 
+/// Reads a `/DecodeParms` dictionary; missing or null keys keep the PDF-specified defaults.
 impl FromPdfObject for LzwParams {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let mut context = context.dictionary()?;
-        let mut params = Self::default();
-        for (key, value) in context.dictionary().iter() {
-            match key {
-                b"EarlyChange" if !context.is_absent(value)? => {
-                    params.early_change = context.read::<i32>(value)? != 0;
-                }
-                _ => params.predictor.absorb(key, value, &mut context)?,
-            }
-        }
-        Ok(params)
+    fn from_pdf_object(
+        mut context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+    ) -> ReadResult<Self> {
+        let predictor = context.read(context.object())?;
+        let early_change = context.dictionary()?.optional::<i32>(b"EarlyChange")?;
+        Ok(Self {
+            early_change: early_change.is_none_or(|early_change| early_change != 0),
+            predictor,
+        })
     }
 }
 

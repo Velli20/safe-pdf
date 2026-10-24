@@ -101,18 +101,8 @@ pub fn fallback_font_bytes(font: Standard14Font) -> &'static [u8] {
 }
 
 /// Selects a Standard 14 identity from a best-effort BaseFont hint and fallback flags.
-pub(crate) fn from_context(
-    context: &mut pdf_object_reader::DictionaryContext<
-        '_,
-        impl pdf_object_reader::ObjectAccess + ?Sized,
-    >,
-    flags: FontFlags,
-) -> Standard14Font {
-    context
-        .optional::<std::sync::Arc<[u8]>>(b"BaseFont")
-        .ok()
-        .flatten()
-        .as_deref()
+pub(crate) fn select(base_font: Option<&[u8]>, flags: FontFlags) -> Standard14Font {
+    base_font
         .and_then(from_base_font_name)
         .unwrap_or_else(|| from_flags(flags))
 }

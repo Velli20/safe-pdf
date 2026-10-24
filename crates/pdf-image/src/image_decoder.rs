@@ -217,7 +217,7 @@ mod tests {
 
     use bytes::Bytes;
     use pdf_object_reader::{
-        dictionary::Dictionary, object_error::ObjectError, object_resolver::PassthroughResolver,
+        EmptySource, dictionary::Dictionary, object_error::ObjectError,
         object_variant::ObjectVariant, stream::StreamObject,
     };
 
@@ -227,7 +227,7 @@ mod tests {
 
     /// Reads an image XObject stream and decodes it.
     fn decode(stream: StreamObject, soft_mask: Option<&Image>) -> Result<Image, PdfImageError> {
-        pdf_object_reader::ObjectReader::new(PassthroughResolver)
+        pdf_object_reader::ObjectReader::new(EmptySource)
             .read::<PdfImage>(&ObjectVariant::Stream(stream))?
             .decode(soft_mask)
     }
@@ -862,7 +862,7 @@ mod tests {
                 (Vec::from(b"W"), ObjectVariant::Integer(1)),
             ])),
             b"2A>".to_vec(),
-            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            &mut pdf_object_reader::ObjectReader::new(EmptySource).session(),
         )
         .expect("inline image filters should decode");
 
@@ -888,7 +888,7 @@ mod tests {
                 (Vec::from(b"W"), ObjectVariant::Integer(4)),
             ])),
             vec![0b1010_0000],
-            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            &mut pdf_object_reader::ObjectReader::new(EmptySource).session(),
         )
         .expect("inline image should be constructed");
 
@@ -916,7 +916,7 @@ mod tests {
                 (Vec::from(b"W"), ObjectVariant::Integer(2)),
             ])),
             vec![12, 34],
-            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            &mut pdf_object_reader::ObjectReader::new(EmptySource).session(),
         )
         .expect("inline image should be constructed");
         let samples = image.shared_data();
@@ -959,7 +959,7 @@ mod tests {
                 (Vec::from(b"W"), ObjectVariant::Integer(4)),
             ])),
             vec![0b1010_0000],
-            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            &mut pdf_object_reader::ObjectReader::new(EmptySource).session(),
         )
         .expect("inline image should be constructed");
 

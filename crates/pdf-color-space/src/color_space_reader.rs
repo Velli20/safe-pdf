@@ -17,7 +17,7 @@ impl FromPdfObject for ColorSpace {
     ) -> ReadResult<Self> {
         let object = context.object();
         let ObjectVariant::Array(array) = object else {
-            return match object.try_bytes(context.source())? {
+            return match &*context.decode::<Arc<[u8]>>()? {
                 b"DeviceRGB" => Ok(Self::DeviceRGB),
                 b"DeviceCMYK" => Ok(Self::DeviceCMYK),
                 b"DeviceGray" => Ok(Self::DeviceGray),
@@ -87,7 +87,7 @@ impl FromPdfObject for ColorSpace {
 #[cfg(test)]
 #[allow(clippy::panic)]
 mod tests {
-    use pdf_object_reader::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
+    use pdf_object_reader::{EmptySource, object_variant::ObjectVariant};
 
     use crate::{color_space::ColorSpace, error::ColorSpaceError};
 
@@ -116,7 +116,7 @@ mod tests {
         ];
 
         for (object, expected) in cases {
-            let parsed = pdf_object_reader::ObjectReader::new(&PassthroughResolver)
+            let parsed = pdf_object_reader::ObjectReader::new(EmptySource)
                 .read::<ColorSpace>(&object)
                 .unwrap();
 
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn parses_single_name_pattern_array() {
-        let parsed = pdf_object_reader::ObjectReader::new(&PassthroughResolver)
+        let parsed = pdf_object_reader::ObjectReader::new(EmptySource)
             .read::<ColorSpace>(&ObjectVariant::Array(vec![name("Pattern")].into()))
             .unwrap();
 
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn rejects_empty_color_space_array() {
-        let error = pdf_object_reader::ObjectReader::new(&PassthroughResolver)
+        let error = pdf_object_reader::ObjectReader::new(EmptySource)
             .read::<ColorSpace>(&ObjectVariant::Array(
                 pdf_object_reader::pdf_array::PdfArray::new(Vec::new()),
             ))
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_multi_element_color_space_array() {
-        let error = pdf_object_reader::ObjectReader::new(&PassthroughResolver)
+        let error = pdf_object_reader::ObjectReader::new(EmptySource)
             .read::<ColorSpace>(&ObjectVariant::Array(
                 vec![name("DeviceGray"), ObjectVariant::Integer(1)].into(),
             ))

@@ -44,7 +44,7 @@ impl FromPdfObject for ToUnicodeMap {
         if matches!(value, ObjectVariant::Stream(_)) {
             return ToUnicodeCMap::from_pdf_object(context).map(Self::CMap);
         }
-        Ok(match value.try_bytes(context.source()) {
+        Ok(match context.decode::<std::sync::Arc<[u8]>>().as_deref() {
             Ok(b"Identity-H" | b"Identity-V") => Self::Identity,
             _ => Self::CMap(ToUnicodeCMap::default()),
         })
@@ -90,8 +90,7 @@ impl FromPdfObject for ToUnicodeCMap {
 mod tests {
     use super::*;
     use pdf_object_reader::{
-        ObjectReader, object_resolver::PassthroughResolver, pdf_string::PdfString,
-        string_kind::StringKind,
+        EmptySource, ObjectReader, pdf_string::PdfString, string_kind::StringKind,
     };
 
     fn mapped(map: &ToUnicodeCMap, code: u32) -> Option<&[char]> {
@@ -99,7 +98,7 @@ mod tests {
     }
 
     fn read_named(name: &[u8]) -> ToUnicodeMap {
-        ObjectReader::new(PassthroughResolver)
+        ObjectReader::new(EmptySource)
             .read::<ToUnicodeMap>(&PdfString::from(name, StringKind::Name))
             .expect("named maps should remain non-fatal")
     }

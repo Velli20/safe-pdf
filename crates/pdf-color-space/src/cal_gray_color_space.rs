@@ -20,11 +20,12 @@ pub struct CalGrayColorSpace {
 /// Reads the dictionary operand of a CalGray color space, `[/CalGray dict]`.
 impl FromPdfObject for CalGrayColorSpace {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object();
         let mut dictionary = context.dictionary()?;
         let CieColorSpaceParams {
             white_point,
             black_point,
-        } = CieColorSpaceParams::read(&mut dictionary)?;
+        } = dictionary.read(object)?;
         let gamma = dictionary.optional(b"Gamma")?.unwrap_or(1.0);
         Ok(Self {
             white_point,

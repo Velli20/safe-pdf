@@ -90,8 +90,8 @@ mod tests {
         function::Function, function_interpolation_error::FunctionInterpolationError,
     };
     use pdf_object_reader::{
-        ObjectReadError, ObjectReader, ReadResult, dictionary::Dictionary,
-        object_resolver::PassthroughResolver, object_variant::ObjectVariant, stream::StreamObject,
+        EmptySource, ObjectReadError, ObjectReader, ReadResult, dictionary::Dictionary,
+        object_variant::ObjectVariant, stream::StreamObject,
     };
     use std::{collections::BTreeMap, sync::Arc};
 
@@ -109,8 +109,7 @@ mod tests {
     }
 
     fn read_device_n(arr: Vec<ObjectVariant>) -> ReadResult<ColorSpace> {
-        ObjectReader::new(&PassthroughResolver)
-            .read::<ColorSpace>(&ObjectVariant::Array(arr.into()))
+        ObjectReader::new(EmptySource).read::<ColorSpace>(&ObjectVariant::Array(arr.into()))
     }
 
     fn function_stream(code: &str, output_components: usize) -> ObjectVariant {

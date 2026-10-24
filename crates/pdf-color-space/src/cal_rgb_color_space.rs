@@ -25,11 +25,12 @@ pub struct CalRGBColorSpace {
 /// Reads the dictionary operand of a CalRGB color space, `[/CalRGB dict]`.
 impl FromPdfObject for CalRGBColorSpace {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object();
         let mut dictionary = context.dictionary()?;
         let CieColorSpaceParams {
             white_point,
             black_point,
-        } = CieColorSpaceParams::read(&mut dictionary)?;
+        } = dictionary.read(object)?;
         let gamma = dictionary.optional(b"Gamma")?.unwrap_or([1.0, 1.0, 1.0]);
         // Column-major 3×3: [Xa Ya Za Xb Yb Zb Xc Yc Zc], default identity.
         let matrix = dictionary

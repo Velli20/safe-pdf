@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use bytes::Bytes;
-use pdf_filter::image_payload::ImagePayload;
+use pdf_filter::{filter::Filters, image_payload::ImagePayload};
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
     dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject,
@@ -32,19 +32,17 @@ impl FromPdfObject for PdfImage {
 }
 
 impl PdfImage {
-    /// Reads an inline image from its parsed dictionary and encoded payload bytes.
+    /// Reads an inline image from its header and encoded payload bytes.
     ///
     /// ISO 32000 restricts inline images to the filters that need no out-of-band
     /// metadata; JPXDecode is not among them. The filter chain stops at JPXDecode,
     /// so such an image is rejected without decoding its codestream.
     pub fn inline(
-        dictionary: Dictionary,
+        header: impl Into<InlineImageHeader>,
         data: impl Into<Bytes>,
         access: &mut (impl ObjectAccess + ?Sized),
     ) -> Result<Self, PdfImageError> {
-        let dictionary = normalize_inline_image_dictionary(&dictionary);
-        let stream = StreamObject::new_encoded(0, 0, dictionary, data);
-        let image = access.read::<Self>(&ObjectVariant::Stream(stream))?;
+        let image = access.read::<Self>(&header.into().into_stream(data))?;
         match image.payload {
             ImagePayload::Jpx(_) => Err(PdfImageError::InlineJpxFilter),
             ImagePayload::Samples(_) => Ok(image),
@@ -72,32 +70,98 @@ impl PdfImage {
     }
 }
 
-/// Normalizes an inline-image dictionary to canonical image keys.
+/// An inline image's dictionary with its abbreviated keys and colour-space names
+/// expanded, read before the image data that follows it.
+#[derive(Debug)]
+pub struct InlineImageHeader(ObjectVariant);
+
+impl From<Dictionary> for InlineImageHeader {
+    fn from(dictionary: Dictionary) -> Self {
+        Self(ObjectVariant::Dictionary(
+            normalize_inline_image_dictionary(dictionary),
+        ))
+    }
+}
+
+impl InlineImageHeader {
+    /// Returns the expanded dictionary as an object, for reading [`InlineDataLength`].
+    pub fn object(&self) -> &ObjectVariant {
+        &self.0
+    }
+
+    /// Combines the dictionary with the image's encoded data.
+    fn into_stream(self, data: impl Into<Bytes>) -> ObjectVariant {
+        let dictionary = match self.0 {
+            ObjectVariant::Dictionary(dictionary) => dictionary,
+            // Unreachable: a header is only built from a dictionary.
+            _ => Dictionary::new(BTreeMap::new()),
+        };
+        ObjectVariant::Stream(StreamObject::new_encoded(0, 0, dictionary, data))
+    }
+}
+
+/// The byte length of an inline image's data, when its header determines it: the
+/// image is unfiltered and its dimensions, depth, and component count are known.
 ///
-/// The parser preserves the abbreviated inline-image keys from the content stream.
-/// This helper expands the keys that are commonly shared with image XObjects.
-fn normalize_inline_image_dictionary(dictionary: &Dictionary) -> Dictionary {
+/// It is a hint for finding the end of the data, so unreadable entries make it unknown
+/// rather than failing the read.
+pub struct InlineDataLength(pub Option<usize>);
+
+impl FromPdfObject for InlineDataLength {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        if context.contains(Filters::KEY) {
+            return Ok(Self(None));
+        }
+        let components = match context.lenient(b"ImageMask").unwrap_or(false) {
+            true => Some(1),
+            false => match context.lenient::<Arc<[u8]>>(b"ColorSpace").as_deref() {
+                Some(b"DeviceGray" | b"Indexed") => Some(1),
+                Some(b"DeviceRGB") => Some(3),
+                Some(b"DeviceCMYK") => Some(4),
+                _ => None,
+            },
+        };
+        let length = (|| {
+            let width: usize = context.lenient(b"Width")?;
+            let height: usize = context.lenient(b"Height")?;
+            let bits_per_component: usize = context.lenient(b"BitsPerComponent")?;
+            let bits_per_row = width
+                .checked_mul(components?)?
+                .checked_mul(bits_per_component)?;
+            height.checked_mul(bits_per_row.div_ceil(8))
+        })();
+        Ok(Self(length))
+    }
+}
+
+/// Expands an inline-image dictionary's abbreviated keys to their image XObject names.
+///
+/// The parser preserves the abbreviated inline-image keys from the content stream. Where
+/// both spellings of a key are present, the abbreviation wins.
+fn normalize_inline_image_dictionary(dictionary: Dictionary) -> Dictionary {
     let mut normalized = BTreeMap::new();
 
-    for (key, value) in &dictionary.dictionary {
+    for (key, value) in dictionary.dictionary {
         let canonical_key = match key.as_slice() {
-            b"W" => b"Width".as_slice(),
-            b"H" => b"Height".as_slice(),
-            b"BPC" => b"BitsPerComponent".as_slice(),
-            b"CS" => b"ColorSpace".as_slice(),
-            b"IM" => b"ImageMask".as_slice(),
-            b"I" => b"Interpolate".as_slice(),
-            b"F" => b"Filter".as_slice(),
-            b"D" => b"Decode".as_slice(),
-            b"DP" => b"DecodeParms".as_slice(),
-            other => other,
+            b"W" => b"Width".to_vec(),
+            b"H" => b"Height".to_vec(),
+            b"BPC" => b"BitsPerComponent".to_vec(),
+            b"CS" => b"ColorSpace".to_vec(),
+            b"IM" => b"ImageMask".to_vec(),
+            b"I" => b"Interpolate".to_vec(),
+            b"F" => b"Filter".to_vec(),
+            b"D" => b"Decode".to_vec(),
+            b"DP" => b"DecodeParms".to_vec(),
+            _ => key,
         };
 
-        let canonical_value = normalize_inline_image_value(canonical_key, value);
+        let canonical_value = match canonical_key.as_slice() {
+            b"ColorSpace" => normalize_inline_color_space(value),
+            _ => value,
+        };
 
-        normalized
-            .entry(canonical_key.to_vec())
-            .or_insert(canonical_value);
+        normalized.entry(canonical_key).or_insert(canonical_value);
     }
 
     Dictionary {
@@ -106,11 +170,8 @@ fn normalize_inline_image_dictionary(dictionary: &Dictionary) -> Dictionary {
     }
 }
 
-fn normalize_inline_image_value(key: &[u8], value: &ObjectVariant) -> ObjectVariant {
-    if key != b"ColorSpace" {
-        return value.clone();
-    }
-
+/// Expands abbreviated device colour-space names, including inside an array.
+fn normalize_inline_color_space(value: ObjectVariant) -> ObjectVariant {
     match value {
         ObjectVariant::String(name)
             if name.kind() == pdf_object_reader::string_kind::StringKind::Name =>
@@ -120,16 +181,17 @@ fn normalize_inline_image_value(key: &[u8], value: &ObjectVariant) -> ObjectVari
                 b"RGB" => ObjectVariant::name_from_bytes(b"DeviceRGB"),
                 b"CMYK" => ObjectVariant::name_from_bytes(b"DeviceCMYK"),
                 b"I" => ObjectVariant::name_from_bytes(b"Indexed"),
-                _ => value.clone(),
+                _ => ObjectVariant::String(name),
             }
         }
         ObjectVariant::Array(values) => ObjectVariant::Array(
             values
                 .iter()
-                .map(|item| normalize_inline_image_value(b"ColorSpace", item))
+                .cloned()
+                .map(normalize_inline_color_space)
                 .collect(),
         ),
-        _ => value.clone(),
+        other => other,
     }
 }
 
@@ -138,9 +200,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use bytes::Bytes;
-    use pdf_object_reader::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
-    };
+    use pdf_object_reader::{EmptySource, dictionary::Dictionary, object_variant::ObjectVariant};
 
     use super::{PdfImage, normalize_inline_image_dictionary};
 
@@ -170,7 +230,7 @@ mod tests {
             (Vec::from(b"W"), ObjectVariant::Integer(1)),
         ]));
 
-        let normalized = normalize_inline_image_dictionary(&dictionary);
+        let normalized = normalize_inline_image_dictionary(dictionary);
 
         assert_eq!(
             normalized.dictionary,
@@ -218,7 +278,7 @@ mod tests {
                 ),
             )]));
 
-            let normalized = normalize_inline_image_dictionary(&dictionary);
+            let normalized = normalize_inline_image_dictionary(dictionary);
 
             assert_eq!(
                 normalized.dictionary.get(b"ColorSpace".as_slice()),
@@ -254,7 +314,7 @@ mod tests {
             ),
         )]));
 
-        let normalized = normalize_inline_image_dictionary(&dictionary);
+        let normalized = normalize_inline_image_dictionary(dictionary);
 
         assert_eq!(
             normalized.dictionary.get(b"ColorSpace".as_slice()),
@@ -285,7 +345,7 @@ mod tests {
         let image = PdfImage::inline(
             gray_dictionary(),
             data.clone(),
-            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            &mut pdf_object_reader::ObjectReader::new(EmptySource).session(),
         )
         .expect("unfiltered image should be constructed");
 
@@ -306,7 +366,7 @@ mod tests {
         let image = PdfImage::inline(
             dictionary,
             b"2A>".to_vec(),
-            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            &mut pdf_object_reader::ObjectReader::new(EmptySource).session(),
         )
         .expect("filter should decode during construction");
 
@@ -318,7 +378,7 @@ mod tests {
         let error = PdfImage::inline(
             Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()),
             vec![1],
-            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+            &mut pdf_object_reader::ObjectReader::new(EmptySource).session(),
         )
         .expect_err("invalid metadata should prevent construction");
 

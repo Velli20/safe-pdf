@@ -2,10 +2,9 @@
 
 use pdf_cmap::{CodeRange, CodeRanges, code_range};
 use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
-    object_variant::ObjectVariant, pdf_array::PdfArray,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
+    pdf_array::PdfArray,
 };
-use std::iter;
 use thiserror::Error;
 
 /// Errors that can occur while reading a `/W` array.
@@ -77,23 +76,89 @@ impl FromPdfObject for GlyphWidthsMap {
     ///
     /// Overlapping `/W` entries resolve to the lower-starting entry.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object();
         let mut context = context.dictionary()?;
-        let runs = if let Some(entries) = context.optional::<PdfArray>(b"W")? {
-            let mut items = entries.iter();
-            iter::from_fn(|| WidthRun::read_next(&mut context, &mut items).transpose())
-                .filter(|run| !matches!(run, Ok(run) if run.is_empty()))
-                .collect::<ReadResult<_>>()?
-        } else if let Some(widths) = context.optional::<PdfArray>(b"Widths")? {
-            WidthRun::read_simple(&mut context, &widths)?
+        let runs = match context.optional::<CidWidthRuns>(b"W")? {
+            Some(CidWidthRuns(runs)) => runs,
+            None => context
+                .read::<SimpleWidthRun>(object)?
+                .0
                 .into_iter()
-                .collect()
-        } else {
-            // Standard 14 fonts can omit widths and character bounds entirely.
-            Vec::new()
+                .collect(),
         };
         Ok(Self {
             runs: code_range::disjoint(runs),
         })
+    }
+}
+
+/// The runs of a CID font's `/W` array, omitting empty ones.
+struct CidWidthRuns(Vec<WidthRun>);
+
+/// Reads each `c_first [w1 ... wn]` or `c_first c_last w` entry of a `/W` array.
+impl FromPdfObject for CidWidthRuns {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut items = context.array()?;
+        let mut entries = items.array().iter();
+        let mut runs = Vec::new();
+        while let Some(first) = entries.next() {
+            let first = items.read::<u32>(first)?;
+            let second = entries
+                .next()
+                .ok_or(GlyphWidthsMapError::IncompleteCIDEntry { cid: first })?;
+            // The second item selects the form; an indirect width array is allowed.
+            let second = items.resolve(second)?;
+            if let ObjectVariant::Array(_) = second.value() {
+                let widths = items.read::<Vec<f32>>(second.value())?;
+                if !widths.is_empty() {
+                    runs.push(WidthRun::explicit(first, widths.into_boxed_slice()));
+                }
+                continue;
+            }
+            let last = items.read::<u32>(second.value())?;
+            let width = entries
+                .next()
+                .ok_or(GlyphWidthsMapError::MissingWidthForCIDRange { c_first: first })?;
+            let width = items.read::<f32>(width)?;
+            if last < first {
+                return Err(GlyphWidthsMapError::InvalidCIDRange {
+                    c_first: first,
+                    c_last: last,
+                }
+                .into());
+            }
+            runs.push(WidthRun::uniform(first, last, width));
+        }
+        Ok(Self(runs))
+    }
+}
+
+/// A simple or Type 3 font's `/Widths` as one run starting at `/FirstChar`.
+///
+/// Fonts without `/Widths`, such as Standard 14 fonts, have no run. Only the
+/// `/FirstChar..=/LastChar` widths are decoded, so surplus items stay unread; a reversed
+/// or empty range yields no run.
+struct SimpleWidthRun(Option<WidthRun>);
+
+impl FromPdfObject for SimpleWidthRun {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        let Some(widths) = context.optional::<PdfArray>(b"Widths")? else {
+            return Ok(Self(None));
+        };
+        let first: u16 = context.required(b"FirstChar")?;
+        let last: u16 = context.required(b"LastChar")?;
+        let count = usize::from(last)
+            .checked_sub(usize::from(first))
+            .map_or(0, |span| span.saturating_add(1));
+        let widths = widths
+            .iter()
+            .take(count)
+            .map(|width| context.read(width))
+            .collect::<ReadResult<Box<[f32]>>>()?;
+        Ok(Self(
+            (!widths.is_empty()).then(|| WidthRun::explicit(u32::from(first), widths)),
+        ))
     }
 }
 
@@ -134,72 +199,12 @@ impl WidthRun {
         }
     }
 
-    /// Reports whether the run lists no widths, as for an empty `c_first []` entry.
-    fn is_empty(&self) -> bool {
-        matches!(&self.widths, RunWidths::Explicit(widths) if widths.is_empty())
-    }
-
     /// Returns the width `offset` codes past the start of the run.
     fn width(&self, offset: u32) -> Option<f32> {
         match &self.widths {
             RunWidths::Uniform(width) => Some(*width),
             RunWidths::Explicit(widths) => widths.get(usize::try_from(offset).ok()?).copied(),
         }
-    }
-
-    /// Reads the next `c_first [w1 ... wn]` or `c_first c_last w` entry of a `/W` array, or
-    /// `None` once `items` is exhausted.
-    fn read_next<'a>(
-        context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
-        items: &mut impl Iterator<Item = &'a ObjectVariant>,
-    ) -> ReadResult<Option<Self>> {
-        let Some(first) = items.next() else {
-            return Ok(None);
-        };
-        let first = context.read::<u32>(first)?;
-        let second = items
-            .next()
-            .ok_or(GlyphWidthsMapError::IncompleteCIDEntry { cid: first })?;
-        // The second item selects the form; an indirect width array is allowed.
-        let second = context.resolve(second)?;
-        if let ObjectVariant::Array(_) = second.value() {
-            let widths = context.read::<Vec<f32>>(second.value())?;
-            return Ok(Some(Self::explicit(first, widths.into_boxed_slice())));
-        }
-        let last = context.read::<u32>(second.value())?;
-        let width = items
-            .next()
-            .ok_or(GlyphWidthsMapError::MissingWidthForCIDRange { c_first: first })?;
-        let width = context.read::<f32>(width)?;
-        if last < first {
-            return Err(GlyphWidthsMapError::InvalidCIDRange {
-                c_first: first,
-                c_last: last,
-            }
-            .into());
-        }
-        Ok(Some(Self::uniform(first, last, width)))
-    }
-
-    /// Reads a simple font's `/Widths` as one run starting at `/FirstChar`.
-    ///
-    /// Only the `/FirstChar..=/LastChar` widths are decoded, so surplus items stay unread; a
-    /// reversed or empty range yields no run.
-    fn read_simple(
-        context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
-        widths: &PdfArray,
-    ) -> ReadResult<Option<Self>> {
-        let first: u16 = context.required(b"FirstChar")?;
-        let last: u16 = context.required(b"LastChar")?;
-        let count = usize::from(last)
-            .checked_sub(usize::from(first))
-            .map_or(0, |span| span.saturating_add(1));
-        let widths = widths
-            .iter()
-            .take(count)
-            .map(|width| context.read(width))
-            .collect::<ReadResult<Box<[f32]>>>()?;
-        Ok((!widths.is_empty()).then(|| Self::explicit(u32::from(first), widths)))
     }
 }
 
@@ -219,8 +224,7 @@ mod tests {
     use super::*;
     use crate::error::FontError;
     use pdf_object_reader::{
-        object_error::ObjectError, object_resolver::ObjectResolver,
-        object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+        EmptySource, object_error::ObjectError, object_variant::ObjectVariant,
     };
 
     // Wrap a `/W` array in the font dictionary the decoder reads.
@@ -233,7 +237,7 @@ mod tests {
 
     // Keep domain-error assertions while exercising the context reader exclusively.
     fn read_widths(array: &[ObjectVariant]) -> Result<GlyphWidthsMap, GlyphWidthsMapError> {
-        pdf_object_reader::ObjectReader::new(PassthroughResolver)
+        pdf_object_reader::ObjectReader::new(EmptySource)
             .read::<GlyphWidthsMap>(&font_dictionary(array.to_vec()))
             .map_err(|error| {
                 let mut source: &dyn std::error::Error = &error;
@@ -284,18 +288,6 @@ mod tests {
                 (object_id == pdf_object_reader::object_id::ObjectId::new(42, 0))
                     .then(|| pdf_object_reader::pdf_object::PdfObject::new(self.resolved.clone())),
             )
-        }
-    }
-
-    impl ObjectResolver for SingleObjectResolver {
-        fn resolve_object<'a>(
-            &'a self,
-            obj: &'a ObjectVariant,
-        ) -> Result<&'a ObjectVariant, ObjectError> {
-            match obj {
-                ObjectVariant::Reference(_) => Ok(&self.resolved),
-                _ => Ok(obj),
-            }
         }
     }
 

@@ -40,8 +40,8 @@ impl PdfDocument {
         self.pages.get(index)
     }
 
-    /// Returns the parsed indirect objects the document was read from.
-    pub fn objects(&self) -> &ObjectCollection {
-        self.objects.source()
+    /// Returns the reader over the parsed indirect objects the document was read from.
+    pub fn objects(&self) -> &ObjectReader<ObjectCollection> {
+        &self.objects
     }
 }
