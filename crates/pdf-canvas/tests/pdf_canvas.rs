@@ -12,8 +12,7 @@ use pdf_document::page::PdfPage;
 use pdf_graphics::{BlendMode, PixelFormat, rect::Rect};
 use pdf_image::PdfImage;
 use pdf_object_reader::{
-    ObjectHandle, dictionary::Dictionary, object_resolver::PassthroughResolver,
-    object_variant::ObjectVariant,
+    EmptySource, ObjectHandle, dictionary::Dictionary, object_variant::ObjectVariant,
 };
 use pdf_resources::{
     external_graphics_state::{ExternalGraphicsState, ExternalGraphicsStateKey},
@@ -95,7 +94,7 @@ fn inline_image() -> PdfImage {
             (Vec::from(b"W"), ObjectVariant::Integer(4)),
         ])),
         vec![0b1010_0000],
-        &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
+        &mut pdf_object_reader::ObjectReader::new(EmptySource).session(),
     )
     .expect("inline image should be constructed")
 }
@@ -231,14 +230,17 @@ fn unavailable_image_xobject_is_a_no_op() {
 
 #[test]
 fn inline_image_render_path_matches_image_xobject_path() {
-    let image = pdf_object_reader::ObjectReader::new(
-        pdf_object_reader::object_resolver::PassthroughResolver,
-    )
-    .read::<PdfImage>(&pdf_object_reader::object_variant::ObjectVariant::Stream(
-        pdf_object_reader::stream::StreamObject::new(1, 0, image_dictionary(), vec![0b1010_0000]),
-    ))
-    .and_then(|image| Ok(image.decode(None)?))
-    .expect("image XObject should decode");
+    let image = pdf_object_reader::ObjectReader::new(pdf_object_reader::EmptySource)
+        .read::<PdfImage>(&pdf_object_reader::object_variant::ObjectVariant::Stream(
+            pdf_object_reader::stream::StreamObject::new(
+                1,
+                0,
+                image_dictionary(),
+                vec![0b1010_0000],
+            ),
+        ))
+        .and_then(|image| Ok(image.decode(None)?))
+        .expect("image XObject should decode");
     let graphics_state = Resource::ExternalGraphicsState(pdf_object_reader::ObjectHandle::from(
         ExternalGraphicsState {
             params: vec![ExternalGraphicsStateKey::BlendMode(BlendMode::Multiply)],

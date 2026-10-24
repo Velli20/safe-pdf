@@ -8,12 +8,13 @@ use crate::error::SourceDecodeError;
 use crate::metadata::AnnotationFlags;
 use crate::pdf_data::{
     AnnotationBorder, AppearanceCharacteristics, AppearanceDictionary, BorderEffect,
-    BorderEffectStyle, BorderStyle, BorderStyleName, NativeAnnotation, SourceAnnotation,
+    BorderEffectStyle, BorderStyle, BorderStyleName, NativeAnnotation, PageAnnotations,
+    SourceAnnotation,
 };
 use pdf_graphics::{DashPattern, rect::Rect};
 use pdf_object_reader::{
-    ArrayContext, DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
-    object_kind::ObjectKind, object_variant::ObjectVariant,
+    ArrayContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_kind::ObjectKind,
+    object_variant::ObjectVariant,
 };
 use pdf_optional_content::OptionalContentMembership;
 
@@ -80,24 +81,20 @@ impl FromPdfObject for SourceAnnotation {
     }
 }
 
-impl SourceAnnotation {
-    /// Read page annotations and assign stable page-local identifiers.
-    pub fn from_page_dictionary<A: ObjectAccess + ?Sized>(
-        context: &mut DictionaryContext<'_, A>,
-    ) -> ReadResult<Option<Vec<Self>>> {
-        let Some(entry) = context.dictionary().get(b"Annots") else {
-            return Ok(None);
+/// Reads a page's `/Annots` array, assigning stable page-local identifiers.
+///
+/// `/Annots` that resolves to anything but an array (e.g. a reference whose object
+/// number was reused by a later update) holds no annotations.
+impl FromPdfObject for PageAnnotations {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let ObjectVariant::Array(_) = context.object() else {
+            return Ok(Self(None));
         };
-        // `/Annots` that resolves to anything but an array (e.g. a reference whose object
-        // number was reused by a later update) holds no annotations.
-        let resolved = context.resolve(entry)?;
-        let ObjectVariant::Array(annots) = resolved.value() else {
-            return Ok(None);
-        };
-        let mut annotations = Vec::with_capacity(annots.len());
-        for value in annots.iter() {
+        let mut annots = context.array()?;
+        let mut annotations = Vec::with_capacity(annots.array().len());
+        for value in annots.array() {
             // Stale entries in `/Annots` resolve to null (ISO 32000 §7.3.10).
-            let resolved = context.resolve(value)?;
+            let resolved = annots.resolve(value)?;
             if resolved.kind() == ObjectKind::Null {
                 continue;
             }
@@ -113,7 +110,7 @@ impl SourceAnnotation {
                     .and_then(|number| u64::try_from(number).ok()),
             };
             let defines_field = dictionary.get(b"T").is_some();
-            let mut annotation: Self = context.read(value)?;
+            let mut annotation: SourceAnnotation = annots.read(value)?;
             // A merged field/widget with its own partial name is a terminal
             // field. Its Parent may be a nonterminal name-tree node, not the
             // owner of a shared value; grouping by that parent merges siblings.
@@ -125,7 +122,7 @@ impl SourceAnnotation {
             annotation.object_number = object_number;
             annotations.push(annotation);
         }
-        Ok(Some(annotations))
+        Ok(Self(Some(annotations)))
     }
 }
 
@@ -133,12 +130,11 @@ impl SourceAnnotation {
 impl FromPdfObject for AppearanceDictionary {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut appearance = context.dictionary()?;
-        let Some(normal) = appearance.dictionary().get(b"N") else {
+        let Some(normal) = appearance.resolve_entry(b"N")? else {
             return Ok(Self {
                 normal_states: Vec::new(),
             });
         };
-        let normal = appearance.resolve(normal)?;
         let states = match normal.value() {
             ObjectVariant::Dictionary(states) => states,
             ObjectVariant::Stream(_) | ObjectVariant::Null => {
@@ -257,7 +253,8 @@ impl FromPdfObject for BorderEffect {
 /// Reads a `/BS` `/S` border style name, preserving unknown names.
 impl FromPdfObject for BorderStyleName {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(match context.object().try_bytes(context.source())? {
+        let name = context.decode::<Arc<[u8]>>()?;
+        Ok(match &*name {
             b"S" => Self::Solid,
             b"D" => Self::Dashed,
             b"B" => Self::Beveled,
@@ -271,7 +268,8 @@ impl FromPdfObject for BorderStyleName {
 /// Reads a `/BE` `/S` border effect name, preserving unknown names.
 impl FromPdfObject for BorderEffectStyle {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(match context.object().try_bytes(context.source())? {
+        let name = context.decode::<Arc<[u8]>>()?;
+        Ok(match &*name {
             b"S" => Self::None,
             b"C" => Self::Cloudy,
             other => Self::Unknown(Vec::from(other)),

@@ -3,7 +3,6 @@
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult, object_id::ObjectId,
-    object_variant::ObjectVariant,
 };
 use pdf_optional_content::OptionalContentProperties;
 
@@ -31,17 +30,12 @@ impl FromPdfObject for Catalog {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut catalog = context.dictionary()?;
         let pages = catalog.required::<PageTree>(b"Pages")?;
-        let optional_content =
-            catalog
-                .dictionary()
-                .get(b"OCProperties")
-                .map(|value| OptionalContentEntry {
-                    object: match value {
-                        ObjectVariant::Reference(identifier) => Some(*identifier),
-                        _ => None,
-                    },
-                    properties: catalog.read::<OptionalContentProperties>(value),
-                });
+        let optional_content = catalog
+            .contains(b"OCProperties")
+            .then(|| OptionalContentEntry {
+                object: catalog.reference(b"OCProperties"),
+                properties: catalog.required::<OptionalContentProperties>(b"OCProperties"),
+            });
         Ok(Self {
             pages,
             optional_content,

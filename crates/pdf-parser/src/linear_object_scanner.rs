@@ -25,14 +25,15 @@
 use std::collections::BTreeMap;
 
 use pdf_object_reader::{
+    EmptySource, ObjectReader,
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
     object_id::ObjectId,
-    object_resolver::PassthroughResolver,
     object_variant::ObjectVariant,
+    pdf_name::PdfName,
     trailer::Trailer,
 };
 
-use crate::{error::ParserError, parser::PdfParser, stream_recovery::direct_stream_length};
+use crate::{error::ParserError, parser::PdfParser};
 
 const TRAILER_KEYWORD: &[u8] = b"trailer";
 const STREAM_KEYWORD: &[u8] = b"stream";
@@ -61,6 +62,8 @@ enum ScanCandidate {
 /// It never changes the cursor or nesting state of the parser supplied to [`Self::new`].
 pub(crate) struct LinearObjectScanner<'input> {
     parser: PdfParser<'input>,
+    /// The builder's objects, through which stream dictionaries are read.
+    objects: &'input ObjectReader<EmptySource>,
 }
 
 impl<'input> LinearObjectScanner<'input> {
@@ -68,9 +71,13 @@ impl<'input> LinearObjectScanner<'input> {
     ///
     /// Scanning always begins at byte zero, regardless of the supplied parser's current
     /// position. Only the input slice and its lifetime are shared.
-    pub(crate) fn new(parser: &PdfParser<'input>) -> Self {
+    pub(crate) fn new(
+        parser: &PdfParser<'input>,
+        objects: &'input ObjectReader<EmptySource>,
+    ) -> Self {
         Self {
             parser: PdfParser::from(parser.tokenizer.input),
+            objects,
         }
     }
 
@@ -194,10 +201,10 @@ impl<'input> LinearObjectScanner<'input> {
 
     /// Parses one indirect object far enough to determine its complete byte extent.
     ///
-    /// The cross-reference table does not exist yet, so ordinary references are parsed
-    /// through [`PassthroughResolver`] and are not followed. For stream objects, the
-    /// value must be a dictionary and [`PdfParser::recover_stream_range`] locates the
-    /// containing `endstream` without resolving an indirect `/Length`. Stream objects
+    /// The cross-reference table does not exist yet, so the builder's objects are empty
+    /// and references are not followed. For stream objects, the value must be a
+    /// dictionary and [`PdfParser::recover_stream_range`] locates the containing
+    /// `endstream`, using only a direct `/Length` as its hint. Stream objects
     /// require an explicit `endobj`, preventing recovered stream terminators from
     /// swallowing or manufacturing adjacent objects. Non-stream objects retain the
     /// parser's narrowly defined implicit-`endobj` recovery behavior.
@@ -222,18 +229,22 @@ impl<'input> LinearObjectScanner<'input> {
                 position: object_start,
             },
         )?;
-        let object = probe.parse_object(&PassthroughResolver)?;
+        let object = probe.parse_object()?;
         probe.skip_whitespace_and_comments();
 
         if probe.remaining_input().starts_with(STREAM_KEYWORD) {
             let ObjectVariant::Dictionary(dictionary) = object else {
                 return Err(ParserError::StreamObjectWithoutDictionary);
             };
-            probe.recover_stream_range(direct_stream_length(&dictionary))?;
+            let length = dictionary
+                .get(b"Length")
+                .and_then(|length| self.objects.read::<usize>(length).ok());
+            probe.recover_stream_range(length)?;
             probe.consume_required_endobj()?;
             let is_rooted_xref_stream = dictionary
                 .get(b"Type")
-                .is_some_and(|type_name| type_name.is_named(b"XRef", &PassthroughResolver))
+                .and_then(|type_name| self.objects.read::<PdfName>(type_name).ok())
+                .is_some_and(|type_name| type_name.as_bytes() == b"XRef")
                 && dictionary.get(b"Root").is_some();
             let trailer = is_rooted_xref_stream.then(|| Trailer::new(Box::new(dictionary), None));
             return Ok((identifier, trailer));
@@ -259,7 +270,7 @@ impl<'input> LinearObjectScanner<'input> {
         }
 
         let mut probe = self.parser.at_offset(position).ok()?;
-        let trailer = probe.parse_trailer(&PassthroughResolver).ok()?;
+        let trailer = probe.parse_trailer().ok()?;
         let _ = trailer.dictionary.get(b"Root")?;
         Some((ScanCandidate::Trailer(trailer), probe.position()))
     }
@@ -279,9 +290,12 @@ mod tests {
             .position(|window| window == b"1 2 obj")
             .unwrap();
 
-        let table = LinearObjectScanner::new(&PdfParser::from(input.as_slice()))
-            .scan()
-            .unwrap();
+        let table = LinearObjectScanner::new(
+            &PdfParser::from(input.as_slice()),
+            &ObjectReader::new(EmptySource),
+        )
+        .scan()
+        .unwrap();
         let object = table.entries.get(&1).expect("object 1 should be indexed");
 
         assert_eq!(
@@ -299,9 +313,12 @@ mod tests {
             String::from_utf8_lossy(fake_object)
         );
 
-        let table = LinearObjectScanner::new(&PdfParser::from(input.as_bytes()))
-            .scan()
-            .unwrap();
+        let table = LinearObjectScanner::new(
+            &PdfParser::from(input.as_bytes()),
+            &ObjectReader::new(EmptySource),
+        )
+        .scan()
+        .unwrap();
 
         assert_eq!(table.entries.len(), 1);
         assert!(!table.entries.contains_key(&99));
@@ -311,9 +328,12 @@ mod tests {
     fn skips_object_syntax_inside_top_level_comments() {
         let input = b"%PDF-1.7\n% 99 0 obj null endobj\n1 0 obj\nnull\nendobj\ntrailer\n<< /Root 1 0 R >>\n";
 
-        let table = LinearObjectScanner::new(&PdfParser::from(input.as_slice()))
-            .scan()
-            .unwrap();
+        let table = LinearObjectScanner::new(
+            &PdfParser::from(input.as_slice()),
+            &ObjectReader::new(EmptySource),
+        )
+        .scan()
+        .unwrap();
 
         assert_eq!(table.entries.len(), 1);
         assert!(!table.entries.contains_key(&99));
@@ -328,9 +348,12 @@ mod tests {
             payload.len()
         );
 
-        let table = LinearObjectScanner::new(&PdfParser::from(input.as_bytes()))
-            .scan()
-            .unwrap();
+        let table = LinearObjectScanner::new(
+            &PdfParser::from(input.as_bytes()),
+            &ObjectReader::new(EmptySource),
+        )
+        .scan()
+        .unwrap();
 
         assert_eq!(table.entries.len(), 2);
         assert!(table.entries.contains_key(&1));
@@ -346,9 +369,12 @@ mod tests {
             String::from_utf8_lossy(payload),
         );
 
-        let table = LinearObjectScanner::new(&PdfParser::from(input.as_bytes()))
-            .scan()
-            .unwrap();
+        let table = LinearObjectScanner::new(
+            &PdfParser::from(input.as_bytes()),
+            &ObjectReader::new(EmptySource),
+        )
+        .scan()
+        .unwrap();
 
         assert_eq!(table.entries.len(), 1);
         assert!(table.entries.contains_key(&1));
@@ -359,9 +385,12 @@ mod tests {
     fn recovers_stream_with_incorrect_direct_length() {
         let input = b"%PDF-1.7\n1 0 obj\n<< /Length 2 >>\nstream\nHello World\nendstream\nendobj\ntrailer\n<< /Root 1 0 R >>\n";
 
-        let table = LinearObjectScanner::new(&PdfParser::from(input.as_slice()))
-            .scan()
-            .unwrap();
+        let table = LinearObjectScanner::new(
+            &PdfParser::from(input.as_slice()),
+            &ObjectReader::new(EmptySource),
+        )
+        .scan()
+        .unwrap();
 
         assert_eq!(table.entries.len(), 1);
         assert!(table.entries.contains_key(&1));
@@ -371,9 +400,12 @@ mod tests {
     fn requires_a_trailer_root_that_was_indexed() {
         let input = b"%PDF-1.7\n1 0 obj\nnull\nendobj\ntrailer\n<< /Root 2 0 R >>\n";
 
-        let error = LinearObjectScanner::new(&PdfParser::from(input.as_slice()))
-            .scan()
-            .expect_err("the missing root object should reject recovery");
+        let error = LinearObjectScanner::new(
+            &PdfParser::from(input.as_slice()),
+            &ObjectReader::new(EmptySource),
+        )
+        .scan()
+        .expect_err("the missing root object should reject recovery");
 
         assert_eq!(error, ParserError::MissingStartXref);
     }

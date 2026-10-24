@@ -1,4 +1,4 @@
-use pdf_object_reader::{object_resolver::ObjectResolver, pdf_array::PdfArray};
+use pdf_object_reader::pdf_array::PdfArray;
 use pdf_tokenizer::PdfToken;
 
 use crate::{error::ParserError, parser::PdfParser};
@@ -11,7 +11,7 @@ impl PdfParser<'_> {
     /// An `Array` object containing the parsed PDF objects as its elements,
     /// or a `ParserError` if the input is malformed (e.g., missing delimiters,
     /// invalid object syntax within the array, or an unexpected token).
-    pub fn parse_array(&mut self, objects: &dyn ObjectResolver) -> Result<PdfArray, ParserError> {
+    pub fn parse_array(&mut self) -> Result<PdfArray, ParserError> {
         self.tokenizer.expect(PdfToken::LeftSquareBracket)?;
         self.skip_whitespace_and_comments();
 
@@ -21,7 +21,7 @@ impl PdfParser<'_> {
 
             match self.tokenizer.peek() {
                 Some(PdfToken::RightSquareBracket) => break,
-                Some(_) => values.push(self.parse_object(objects)?),
+                Some(_) => values.push(self.parse_object()?),
                 None => break,
             };
         }
@@ -35,7 +35,6 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use pdf_object_reader::object_resolver::PassthroughResolver;
 
     use super::*;
 
@@ -55,7 +54,7 @@ mod tests {
 
         for (input, expected_count) in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_array(&PassthroughResolver).unwrap();
+            let result = parser.parse_array().unwrap();
             assert_eq!(
                 result.len(),
                 expected_count,
@@ -66,7 +65,7 @@ mod tests {
         }
 
         let mut parser = PdfParser::from(b"[]0".as_slice());
-        let result = parser.parse_array(&PassthroughResolver).unwrap();
+        let result = parser.parse_array().unwrap();
         assert!(result.is_empty());
         assert_eq!(parser.tokenizer.peek_byte(), Some(b'0'));
     }
@@ -81,7 +80,7 @@ mod tests {
 
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            if let Ok(v) = parser.parse_array(&PassthroughResolver) {
+            if let Ok(v) = parser.parse_array() {
                 panic!(
                     "Expected Err, got {:?} len {} input '{}™",
                     v,

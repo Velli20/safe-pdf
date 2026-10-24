@@ -5,9 +5,8 @@
 //! any other object, because every later object may need decrypting.
 
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult, object_id::ObjectId,
-    object_resolver::PassthroughResolver, object_variant::ObjectVariant, pdf_string::PdfString,
-    trailer::Trailer,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_id::ObjectId,
+    object_variant::ObjectVariant, pdf_string::PdfString, trailer::Trailer,
 };
 
 use crate::decryption::{DecryptionError, DocumentDecryptor};
@@ -48,8 +47,8 @@ impl EncryptionContext {
             return Ok(None);
         }
 
-        let document_id = ObjectReader::new(PassthroughResolver)
-            .read::<DocumentId>(trailer.dictionary.get_or_err(b"ID")?)?;
+        let document_id =
+            loader.read::<DocumentId>(trailer.dictionary.get_or_err(b"ID")?.clone())?;
         let decryptor = DocumentDecryptor::new(
             &encryption,
             document_id.0.as_bytes(),

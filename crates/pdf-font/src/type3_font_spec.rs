@@ -1,7 +1,6 @@
 //! Type 3 specifications and glyph procedures decoded in the font's traversal.
 
 use crate::{
-    encoding::simple_encoding,
     error::FontError,
     font::{FontMetadata, GlyphId, GlyphName},
     pdf::{PdfMetrics, SimpleEncoding, ToUnicodeMap},
@@ -58,13 +57,13 @@ impl FromPdfObject for CharProcedures {
         let mut context = context.dictionary()?;
         let mut handles = BTreeMap::new();
         let mut streams = HashMap::new();
-        for name in context.dictionary().dictionary.keys() {
+        for name in context.keys() {
             // Every procedure shares the font's traversal and document-wide stream IDs.
             let stream: ContentStream = context.required(name)?;
             let handle = GlyphId::try_from(stream.id).map_err(|_| {
                 FontError::InvalidDescendantFonts("Type 3 content stream ID does not fit u32")
             })?;
-            handles.insert(GlyphName(Arc::from(name.as_slice())), handle);
+            handles.insert(GlyphName(Arc::from(name)), handle);
             streams.insert(handle, stream);
         }
         Ok(Self {
@@ -82,7 +81,7 @@ impl FromPdfObject for Type3FontSpec {
         let mut context = context.dictionary()?;
         let font_matrix = context.required(b"FontMatrix")?;
         let bounds = context.required(b"FontBBox")?;
-        let encoding = simple_encoding(&mut context, false)?;
+        let encoding = SimpleEncoding::new(context.optional(b"Encoding")?, false);
         let metrics: PdfMetrics = context.read(value)?;
         Ok(Self {
             base_font: context.lenient(b"BaseFont").unwrap_or_default(),

@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use pdf_object_reader::{
-    cross_reference_table::CrossReferenceEntryType, object_resolver::PassthroughResolver,
+    cross_reference_table::CrossReferenceEntryType, object_variant::ObjectVariant,
 };
 use pdf_parser::{error::ParserError, parser::PdfParser};
 
@@ -421,14 +421,10 @@ fn build_xref_table_simple() {
     );
     assert!(table.entries.get(&0).expect("obj 0 should exist").is_free());
 
-    let size: i64 = table
-        .trailer
-        .dictionary
-        .get(b"Size")
-        .expect("Size expected")
-        .try_number(&PassthroughResolver)
-        .unwrap();
-    assert_eq!(size, 2);
+    assert_eq!(
+        table.trailer.dictionary.get(b"Size"),
+        Some(&ObjectVariant::Integer(2))
+    );
 }
 
 #[test]

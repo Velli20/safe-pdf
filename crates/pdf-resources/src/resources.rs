@@ -2,10 +2,7 @@
 use crate::{external_graphics_state::ExternalGraphicsState, pattern::Pattern, resource::Resource};
 use pdf_color_space::color_space::ColorSpace;
 use pdf_font::PdfFontSpec;
-use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult,
-    object_variant::ObjectVariant,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult};
 use pdf_optional_content::OptionalContentMembership;
 use pdf_shading::model::Shading;
 use std::{collections::HashMap, sync::Arc};
@@ -35,23 +32,11 @@ pub struct Resources {
     pub optional_content: HashMap<Vec<u8>, OptionalContentMembership>,
 }
 
+/// Decodes the resource categories of a resource dictionary (PDF spec §7.8.3), or of a
+/// stream's dictionary.
 impl FromPdfObject for Resources {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        if matches!(context.object(), ObjectVariant::Stream(_)) {
-            let mut stream = context.stream()?;
-            Self::decode_dictionary(stream.dictionary())
-        } else {
-            Self::decode_dictionary(context.dictionary()?)
-        }
-    }
-}
-
-impl Resources {
-    /// Decodes the resource categories of a resource dictionary (PDF spec §7.8.3).
-    fn decode_dictionary<A>(mut context: DictionaryContext<'_, A>) -> ReadResult<Self>
-    where
-        A: ObjectAccess + ?Sized,
-    {
+        let mut context = context.dictionary()?;
         Ok(Self {
             fonts: context
                 .optional_entries(b"Font", |context, value| context.read_shared(value))?,
@@ -75,7 +60,9 @@ impl Resources {
             optional_content: context.lenient_entries(b"Properties")?,
         })
     }
+}
 
+impl Resources {
     /// Returns a reference to a font resource by name, if it exists.
     ///
     /// # Parameters

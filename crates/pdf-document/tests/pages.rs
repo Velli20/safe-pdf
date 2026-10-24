@@ -11,8 +11,7 @@ use std::collections::BTreeMap;
 use pdf_color_space::color_space::ColorSpace;
 use pdf_document::page_tree::PageTree;
 use pdf_object_reader::{
-    dictionary::Dictionary, object_error::ObjectError, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    dictionary::Dictionary, object_error::ObjectError, object_variant::ObjectVariant,
 };
 
 struct MapResolver {
@@ -30,23 +29,6 @@ impl pdf_object_reader::ObjectSource for MapResolver {
             .get(&id.number())
             .cloned()
             .map(pdf_object_reader::pdf_object::PdfObject::new))
-    }
-}
-
-impl ObjectResolver for MapResolver {
-    fn resolve_object<'a>(
-        &'a self,
-        obj: &'a ObjectVariant,
-    ) -> Result<&'a ObjectVariant, ObjectError> {
-        match obj {
-            ObjectVariant::Reference(object_number) => self
-                .objects
-                .get(&object_number.number)
-                .ok_or(ObjectError::FailedResolveObjectReference {
-                    obj_num: object_number.number,
-                }),
-            _ => Ok(obj),
-        }
     }
 }
 

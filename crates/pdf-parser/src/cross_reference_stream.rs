@@ -1,36 +1,23 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use pdf_filter::filter::DecodedStream;
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ObjectReader, ReadResult,
+    FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
-    object_resolver::PassthroughResolver,
-    object_variant::ObjectVariant,
-    stream::StreamObject,
     trailer::Trailer,
 };
 
-use crate::error::ParserError;
-
-/// Parses a cross-reference stream (PDF 1.5+) into a `CrossReferenceTable`.
+/// A cross-reference stream (PDF 1.5+) decoded into its table of entries and its trailer.
 ///
-/// Cross-reference streams replace traditional xref tables in modern PDFs.
-/// They encode the same information in a compact binary format stored as a
-/// stream object with `/Type /XRef`.
-///
-/// The stream data is decoded (filters such as FlateDecode and predictors
-/// are applied) before reading the binary xref entries.
-pub fn parse_xref_stream(stream: StreamObject) -> Result<CrossReferenceTable, ParserError> {
-    let XrefStream(table) =
-        ObjectReader::new(PassthroughResolver).read(&ObjectVariant::Stream(stream))?;
-    Ok(table)
-}
-
-/// A cross-reference stream decoded into its table of entries and its trailer.
-struct XrefStream(CrossReferenceTable);
+/// Cross-reference streams replace traditional xref tables in modern PDFs. They encode
+/// the same information in a compact binary format stored as a stream object with
+/// `/Type /XRef`. The stream data is filter decoded before its entries are read.
+pub(crate) struct XrefStream(pub(crate) CrossReferenceTable);
 
 impl FromPdfObject for XrefStream {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object();
         let mut stream = context.stream()?;
         let mut dictionary = stream.dictionary();
         if let Some(type_name) = dictionary.optional::<Arc<[u8]>>(b"Type")?
@@ -66,7 +53,7 @@ impl FromPdfObject for XrefStream {
                 .into(),
             });
         };
-        let data = pdf_filter::filter::decode_with_access(stream.stream(), stream.access())?;
+        let DecodedStream(data) = stream.read(object)?;
         let mut decoder = XrefStreamEntryDecoder::new(&data, layout);
         let mut entries = BTreeMap::new();
         for &[start, count] in subsections {
@@ -178,12 +165,18 @@ fn read_field(bytes: &[u8]) -> usize {
 )]
 mod tests {
     use pdf_object_reader::{
-        cross_reference_table::CrossReferenceEntryType, dictionary::Dictionary,
-        object_variant::ObjectVariant,
+        EmptySource, ObjectReader, cross_reference_table::CrossReferenceEntryType,
+        dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject,
     };
     use std::collections::BTreeMap;
 
     use super::*;
+
+    fn parse_xref_stream(stream: StreamObject) -> ReadResult<CrossReferenceTable> {
+        let XrefStream(table) =
+            ObjectReader::new(EmptySource).read(&ObjectVariant::Stream(stream))?;
+        Ok(table)
+    }
 
     /// Helper to build a minimal xref stream for testing.
     fn build_xref_stream(
@@ -224,7 +217,7 @@ mod tests {
             ObjectVariant::Integer(raw_data.len() as i64),
         );
 
-        StreamObject::new(0, 0, Dictionary::new(dict_map), raw_data)
+        StreamObject::new_encoded(0, 0, Dictionary::new(dict_map), raw_data)
     }
 
     #[test]
@@ -408,7 +401,7 @@ mod tests {
             ObjectVariant::Integer(compressed.len() as i64),
         );
 
-        StreamObject::new(0, 0, Dictionary::new(dict_map), compressed)
+        StreamObject::new_encoded(0, 0, Dictionary::new(dict_map), compressed)
     }
 
     #[test]
