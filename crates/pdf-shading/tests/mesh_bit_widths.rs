@@ -1,8 +1,8 @@
 //! Unit tests for mesh bit-width parsing and validation.
 
 use pdf_object_reader::{
-    ObjectReadError, ObjectReader, ReadResult, dictionary::Dictionary,
-    object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+    EmptySource, ObjectReadError, ObjectReader, ReadResult, dictionary::Dictionary,
+    object_variant::ObjectVariant,
 };
 
 use crate::{error::PdfShadingError, mesh_decoder::MeshDecoderError};
@@ -10,7 +10,7 @@ use crate::{error::PdfShadingError, mesh_decoder::MeshDecoderError};
 use super::MeshBitWidths;
 
 fn read_widths(dictionary: Dictionary) -> ReadResult<MeshBitWidths> {
-    ObjectReader::new(&PassthroughResolver).read(&ObjectVariant::Dictionary(dictionary))
+    ObjectReader::new(EmptySource).read(&ObjectVariant::Dictionary(dictionary))
 }
 
 fn decoder_error(result: ReadResult<MeshBitWidths>) -> Option<MeshDecoderError> {

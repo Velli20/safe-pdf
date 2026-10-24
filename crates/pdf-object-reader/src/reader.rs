@@ -180,9 +180,6 @@ where
 /// Custom implementations can support alternate reading strategies or tests
 /// without changing domain decoders.
 pub trait ObjectAccess {
-    /// Borrows the raw source for leaf parsers and bootstrap operations.
-    fn source(&self) -> &dyn crate::object_resolver::ObjectResolver;
-
     /// Returns the content-stream ID allocator shared by this traversal.
     ///
     /// Implementations must return the same allocator throughout nested reads.
@@ -249,10 +246,6 @@ where
     S: ObjectSource,
     C: ObjectCache,
 {
-    fn source(&self) -> &dyn crate::object_resolver::ObjectResolver {
-        &self.reader.source
-    }
-
     fn content_stream_ids(&self) -> &ContentStreamIdAllocator {
         self.reader.content_stream_ids()
     }

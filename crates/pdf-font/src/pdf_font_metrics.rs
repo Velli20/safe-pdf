@@ -82,11 +82,11 @@ impl PdfMetrics {
 mod tests {
     use super::*;
     use pdf_object_reader::dictionary::Dictionary;
-    use pdf_object_reader::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
+    use pdf_object_reader::{EmptySource, object_variant::ObjectVariant};
     use std::collections::BTreeMap;
 
     fn read_metrics(dictionary: &Dictionary) -> ReadResult<PdfMetrics> {
-        pdf_object_reader::ObjectReader::new(PassthroughResolver)
+        pdf_object_reader::ObjectReader::new(EmptySource)
             .read::<PdfMetrics>(&ObjectVariant::Dictionary(dictionary.clone()))
     }
 

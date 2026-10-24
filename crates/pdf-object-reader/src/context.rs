@@ -13,6 +13,7 @@ use crate::object_kind::ObjectKind;
 use crate::object_variant::ObjectVariant;
 use crate::pdf_name::PdfName;
 use crate::reader::ObjectAccess;
+use crate::resolved_object::ResolvedObject;
 use crate::{dictionary::Dictionary, stream::StreamObject};
 use pdf_graphics::interval::Interval;
 use std::collections::HashMap;
@@ -43,6 +44,15 @@ impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
     /// context reads children.
     pub fn object(&self) -> &'read ObjectVariant {
         self.object
+    }
+
+    /// Decodes the bound object as `T` within the same traversal and decode level.
+    ///
+    /// For decoders whose value is spelled by another decoded type, such as a name enum
+    /// reading its name bytes.
+    #[inline]
+    pub fn decode<T: FromPdfObject>(self) -> ReadResult<T> {
+        T::from_pdf_object(self)
     }
 
     /// Requires a dictionary or stream and transfers the traversal into its dictionary context.
@@ -96,19 +106,47 @@ pub struct DictionaryContext<'read, A: ObjectAccess + ?Sized> {
 }
 
 impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
-    /// Binds a direct dictionary the caller already holds to an active access implementation.
-    ///
-    /// Entries are read within the access's current traversal, as if the
-    /// dictionary had been reached through it.
-    pub fn new(dictionary: &'read Dictionary, access: &'read mut A) -> Self {
-        Self { dictionary, access }
+    /// Returns whether `key` is present, whatever its value, including null or invalid ones.
+    pub fn contains(&self, key: &[u8]) -> bool {
+        self.dictionary.get(key).is_some()
     }
 
-    /// Returns the immutable dictionary for iteration or custom entry selection.
+    /// Returns the entry names in key order.
     ///
-    /// The borrow outlives `&self`, so entries can be held while the context reads them.
-    pub fn dictionary(&self) -> &'read Dictionary {
-        self.dictionary
+    /// The names borrow the dictionary rather than the context, so entries can be read
+    /// while iterating.
+    pub fn keys(&self) -> impl Iterator<Item = &'read [u8]> + use<'read, A> {
+        self.dictionary.dictionary.keys().map(Vec::as_slice)
+    }
+
+    /// Returns the number of the indirect object holding this dictionary, if it is one.
+    pub fn object_number(&self) -> Option<usize> {
+        self.dictionary.object_number
+    }
+
+    /// Returns the identifier of an entry stored as an indirect reference.
+    pub fn reference(&self, key: &[u8]) -> Option<ObjectId> {
+        match self.dictionary.get(key) {
+            Some(ObjectVariant::Reference(id)) => Some(*id),
+            _ => None,
+        }
+    }
+
+    /// Resolves an entry's reference chain without entering its eager decoding scope.
+    ///
+    /// For an entry that may refer back to an object being decoded, whose eager read would
+    /// reenter the active path.
+    pub fn resolve_entry(&mut self, key: &[u8]) -> ReadResult<Option<ResolvedObject>> {
+        let Some(object) = self.dictionary.get(key) else {
+            return Ok(None);
+        };
+        self.access
+            .resolve(object)
+            .map(Some)
+            .map_err(|source| ObjectReadError::At {
+                location: ReadLocation::DictionaryKey(PdfName::from_bytes(key)),
+                source: Box::new(source),
+            })
     }
 
     /// Reads a required entry and annotates failures with its byte-oriented key.
@@ -477,11 +515,6 @@ macro_rules! context_access {
             /// Reborrows the active traversal for decoders that take an access directly.
             pub fn access(&mut self) -> &mut A {
                 self.access
-            }
-
-            /// Borrows the source for leaf-level raw object inspection.
-            pub fn source(&self) -> &dyn crate::object_resolver::ObjectResolver {
-                self.access.source()
             }
 
             /// Returns the reader's shared content-stream ID allocator.

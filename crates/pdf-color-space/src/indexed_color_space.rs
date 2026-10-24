@@ -147,8 +147,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     use pdf_object_reader::{
-        ObjectReader, dictionary::Dictionary, object_resolver::PassthroughResolver,
-        object_variant::ObjectVariant, stream::StreamObject,
+        EmptySource, ObjectReader, dictionary::Dictionary, object_variant::ObjectVariant,
+        stream::StreamObject,
     };
 
     use super::*;
@@ -161,7 +161,7 @@ mod tests {
             ObjectVariant::Integer(0),
             lookup,
         ];
-        ObjectReader::new(&PassthroughResolver)
+        ObjectReader::new(EmptySource)
             .read::<IndexedColorSpace>(&ObjectVariant::Array(array.into()))
             .expect("lookup table should parse")
             .lookup
@@ -185,23 +185,20 @@ mod tests {
 
     #[test]
     fn string_lookups_preserve_their_bytes() {
-        for lookup in [
-            pdf_object_reader::pdf_string::PdfString::from(
-                vec![1, 2, 3],
+        for (bytes, kind) in [
+            (
+                [1, 2, 3],
                 pdf_object_reader::string_kind::StringKind::Literal,
             ),
-            pdf_object_reader::pdf_string::PdfString::from(
-                vec![4, 5, 6],
+            (
+                [4, 5, 6],
                 pdf_object_reader::string_kind::StringKind::Hexadecimal,
             ),
         ] {
-            let expected = lookup
-                .try_bytes(&PassthroughResolver)
-                .expect("test lookup should contain bytes")
-                .to_vec();
-            let extracted = read_lookup(lookup);
+            let extracted =
+                read_lookup(pdf_object_reader::pdf_string::PdfString::from(bytes, kind));
 
-            assert_eq!(extracted.as_ref(), expected.as_slice());
+            assert_eq!(extracted.as_ref(), bytes);
         }
     }
 

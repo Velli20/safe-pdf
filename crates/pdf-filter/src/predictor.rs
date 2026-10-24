@@ -1,8 +1,5 @@
 use crate::error::FilterError;
-use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
-    object_variant::ObjectVariant,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 /// Parameters for the Predictor post-processing step shared by
 /// LZWDecode and FlateDecode (PDF spec §7.4.4.4, Table 10).
@@ -29,39 +26,25 @@ impl Default for PredictorParams {
     }
 }
 
-/// Reads a `/DecodeParms` dictionary; missing keys keep the PDF-specified defaults.
+/// Reads a `/DecodeParms` dictionary; missing or null keys keep the PDF-specified defaults.
 impl FromPdfObject for PredictorParams {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
-        let mut params = Self::default();
-        for (key, value) in context.dictionary().iter() {
-            params.absorb(key, value, &mut context)?;
-        }
-        Ok(params)
+        let defaults = Self::default();
+        Ok(Self {
+            predictor: context
+                .optional(b"Predictor")?
+                .unwrap_or(defaults.predictor),
+            colors: context.optional(b"Colors")?.unwrap_or(defaults.colors),
+            bits_per_component: context
+                .optional(b"BitsPerComponent")?
+                .unwrap_or(defaults.bits_per_component),
+            columns: context.optional(b"Columns")?.unwrap_or(defaults.columns),
+        })
     }
 }
 
 impl PredictorParams {
-    /// Records `value` when `key` is a predictor entry; null values keep the default.
-    pub(crate) fn absorb(
-        &mut self,
-        key: &[u8],
-        value: &ObjectVariant,
-        context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
-    ) -> ReadResult<()> {
-        if context.is_absent(value)? {
-            return Ok(());
-        }
-        match key {
-            b"Predictor" => self.predictor = context.read(value)?,
-            b"Colors" => self.colors = context.read(value)?,
-            b"BitsPerComponent" => self.bits_per_component = context.read(value)?,
-            b"Columns" => self.columns = context.read(value)?,
-            _ => {}
-        }
-        Ok(())
-    }
-
     /// Returns `true` if no prediction is needed.
     pub fn is_none(&self) -> bool {
         self.predictor == 1

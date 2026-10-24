@@ -13,8 +13,7 @@
 use std::sync::Arc;
 
 use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
-    dictionary::Dictionary,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, dictionary::Dictionary,
 };
 
 use crate::decryption::DecryptionError;
@@ -98,7 +97,7 @@ impl std::fmt::Display for EncryptionVersion {
 /// Reads the encryption dictionary's `/V` entry.
 impl FromPdfObject for EncryptionVersion {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().try_number::<i32>(context.source())? {
+        match context.decode::<i32>()? {
             1 => Ok(EncryptionVersion::V1),
             2 => Ok(EncryptionVersion::V2),
             3 => Ok(EncryptionVersion::V3),
@@ -110,32 +109,25 @@ impl FromPdfObject for EncryptionVersion {
 }
 
 impl EncryptionVersion {
-    /// Resolves the document-default crypt filter that `entry` (`/StmF` or `/StrF`) names.
-    ///
-    /// A missing V=4 entry keeps the historical AES-128 default, while a named filter is
-    /// resolved through `/CF` so RC4 (`/V2`) documents decrypt correctly. A missing V=5
-    /// entry is `/Identity`.
-    fn default_crypt_filter(
-        self,
-        dictionary: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
-        entry: &[u8],
-    ) -> ReadResult<CryptFilterMethod> {
-        let absent = match self {
-            EncryptionVersion::V1 | EncryptionVersion::V2 => return Ok(CryptFilterMethod::Rc4),
-            EncryptionVersion::V3 => return Ok(CryptFilterMethod::Identity),
-            EncryptionVersion::V4 => CryptFilterMethod::Aes128,
-            EncryptionVersion::V5 => CryptFilterMethod::Identity,
-        };
-        let Some(filter_name) = dictionary.optional::<Arc<[u8]>>(entry)? else {
-            return Ok(absent);
-        };
-        if filter_name.as_ref() == b"Identity" {
-            return Ok(CryptFilterMethod::Identity);
-        }
+    /// Returns whether `/StmF` and `/StrF` select this version's default crypt filters.
+    fn names_crypt_filters(self) -> bool {
+        matches!(self, EncryptionVersion::V4 | EncryptionVersion::V5)
+    }
 
-        let crypt_filters: Dictionary = dictionary.required(b"CF")?;
-        let method = DictionaryContext::new(&crypt_filters, dictionary.access())
-            .required::<CryptFilterMethod>(&filter_name)?;
+    /// Returns the default crypt filter when none is named.
+    ///
+    /// A missing V=4 entry keeps the historical AES-128 default; a missing V=5 entry is
+    /// `/Identity`.
+    fn unnamed_crypt_filter(self) -> CryptFilterMethod {
+        match self {
+            EncryptionVersion::V1 | EncryptionVersion::V2 => CryptFilterMethod::Rc4,
+            EncryptionVersion::V3 | EncryptionVersion::V5 => CryptFilterMethod::Identity,
+            EncryptionVersion::V4 => CryptFilterMethod::Aes128,
+        }
+    }
+
+    /// Accepts a named crypt filter's method when this version supports it.
+    fn accept_crypt_filter(self, method: CryptFilterMethod) -> ReadResult<CryptFilterMethod> {
         match (self, method) {
             (EncryptionVersion::V4, CryptFilterMethod::Aes256) => {
                 Err(PdfReaderError::DecryptionSetup(
@@ -150,6 +142,39 @@ impl EncryptionVersion {
             ))
             .into()),
         }
+    }
+}
+
+/// The document-default crypt filters of an encryption dictionary: the methods its
+/// `/StmF` and `/StrF` entries select for streams and strings.
+struct DefaultCryptFilters {
+    stream: CryptFilterMethod,
+    string: CryptFilterMethod,
+}
+
+/// Resolves each named filter through `/CF`, so RC4 (`/V2`) documents decrypt correctly.
+impl FromPdfObject for DefaultCryptFilters {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
+        let version: EncryptionVersion = dictionary.required(b"V")?;
+        let mut select = |entry: &[u8]| -> ReadResult<CryptFilterMethod> {
+            if !version.names_crypt_filters() {
+                return Ok(version.unnamed_crypt_filter());
+            }
+            match dictionary.optional::<Arc<[u8]>>(entry)?.as_deref() {
+                None => Ok(version.unnamed_crypt_filter()),
+                Some(b"Identity") => Ok(CryptFilterMethod::Identity),
+                Some(name) => {
+                    let crypt_filters: Dictionary = dictionary.required(b"CF")?;
+                    let method = dictionary.read(crypt_filters.get_or_err(name)?)?;
+                    version.accept_crypt_filter(method)
+                }
+            }
+        };
+        Ok(Self {
+            stream: select(b"StmF")?,
+            string: select(b"StrF")?,
+        })
     }
 }
 
@@ -217,6 +242,7 @@ impl FromPdfObject for EncryptDictionary {
     ///
     /// Fails if parsing fails or the security handler is not `/Standard`.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object();
         let mut dictionary = context.dictionary()?;
         // Other handlers (such as the public-key `/Adobe.PubSec`) lack the Standard entries
         // below and need keys this reader cannot obtain.
@@ -231,6 +257,7 @@ impl FromPdfObject for EncryptDictionary {
         }
 
         let version: EncryptionVersion = dictionary.required(b"V")?;
+        let crypt_filters: DefaultCryptFilters = dictionary.read(object)?;
         Ok(EncryptDictionary {
             version,
             revision: dictionary.required(b"R")?,
@@ -244,8 +271,8 @@ impl FromPdfObject for EncryptDictionary {
             owner_encrypted_key: dictionary.optional(b"OE")?,
             user_encrypted_key: dictionary.optional(b"UE")?,
             encrypted_permissions: dictionary.optional(b"Perms")?,
-            stream_method: version.default_crypt_filter(&mut dictionary, b"StmF")?,
-            string_method: version.default_crypt_filter(&mut dictionary, b"StrF")?,
+            stream_method: crypt_filters.stream,
+            string_method: crypt_filters.string,
         })
     }
 }
@@ -279,9 +306,7 @@ impl EncryptDictionary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pdf_object_reader::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
-    };
+    use pdf_object_reader::{EmptySource, dictionary::Dictionary, object_variant::ObjectVariant};
     use std::collections::BTreeMap;
 
     fn make_dictionary(entries: Vec<(&str, ObjectVariant)>) -> Dictionary {
@@ -295,7 +320,7 @@ mod tests {
     #[test]
     fn test_encryption_version_conversion() {
         let read = |version| {
-            pdf_object_reader::ObjectReader::new(PassthroughResolver)
+            pdf_object_reader::ObjectReader::new(EmptySource)
                 .read::<EncryptionVersion>(&ObjectVariant::Integer(version))
         };
         assert_eq!(read(1).unwrap(), EncryptionVersion::V1);
@@ -338,7 +363,7 @@ mod tests {
             ("EncryptMetadata", ObjectVariant::Boolean(false)),
         ]);
 
-        let result = pdf_object_reader::ObjectReader::new(PassthroughResolver)
+        let result = pdf_object_reader::ObjectReader::new(EmptySource)
             .read::<EncryptDictionary>(&ObjectVariant::Dictionary(dict));
 
         assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
@@ -434,7 +459,7 @@ mod tests {
             ),
         ]);
 
-        let encrypt = pdf_object_reader::ObjectReader::new(PassthroughResolver)
+        let encrypt = pdf_object_reader::ObjectReader::new(EmptySource)
             .read::<EncryptDictionary>(&ObjectVariant::Dictionary(dict))
             .unwrap();
 

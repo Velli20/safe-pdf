@@ -1,7 +1,7 @@
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use std::sync::Arc;
 
-use pdf_annotation_core::SourceAnnotation;
+use pdf_annotation_core::{PageAnnotations, SourceAnnotation};
 use pdf_content_stream::ContentStream;
 use pdf_graphics::{
     rect::Rect,
@@ -169,7 +169,9 @@ impl FromPdfObject for PdfPage {
             .optional_shared::<Resources>(b"Resources")?
             .map(|handle| handle.get())
             .transpose()?;
-        let annotations = SourceAnnotation::from_page_dictionary(&mut context)?;
+        let annotations = context
+            .optional::<PageAnnotations>(b"Annots")?
+            .and_then(|PageAnnotations(annotations)| annotations);
         let annotation_id_high_watermark = annotations.as_ref().map_or(0, Vec::len);
         Ok(Self {
             contents,

@@ -27,20 +27,6 @@ pub enum SourceDecodeError {
     ResourceLimit,
 }
 
-impl From<pdf_optional_content::OptionalContentError> for SourceDecodeError {
-    fn from(error: pdf_optional_content::OptionalContentError) -> Self {
-        use pdf_optional_content::OptionalContentError;
-        match error {
-            OptionalContentError::Object(error) => Self::Object(error),
-            OptionalContentError::InvalidEntry { entry, reason } => {
-                Self::InvalidEntry { entry, reason }
-            }
-            OptionalContentError::MissingEntry { entry } => Self::MissingEntry { entry },
-            OptionalContentError::ResourceLimit => Self::ResourceLimit,
-        }
-    }
-}
-
 impl From<SourceDecodeError> for pdf_object_reader::ObjectReadError {
     fn from(source: SourceDecodeError) -> Self {
         Self::Decode {

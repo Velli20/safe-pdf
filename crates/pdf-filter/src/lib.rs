@@ -12,11 +12,10 @@
 //! - **ASCIIHexDecode** — ASCII hexadecimal encoding
 //! - **RunLengthDecode** — PDF run-length encoding
 //!
-//! The main entry point is [`filter::decode`], which accepts a
-//! [`StreamObject`](pdf_object_reader::stream::StreamObject) and applies the full
-//! filter chain declared in its `/Filter` dictionary entry. Callers that hold
-//! a dictionary and shared data separately can use
-//! [`filter::decode_data_with_resolver`] without constructing a stream object.
+//! Streams are decoded by reading [`filter::DecodedStream`] or
+//! [`image_payload::ImagePayload`] through an object reader, which applies the full
+//! filter chain declared in the stream's `/Filter` entry and resolves indirect filter
+//! entries. [`filter::decode`] does the same for a stream with only direct entries.
 //!
 //! `JPXDecode` is the one filter this crate does not turn into samples. A JPEG
 //! 2000 codestream describes its own components, precision, colour space, and

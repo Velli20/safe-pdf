@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 
-use pdf_object_reader::{
-    cross_reference_table::{CrossReferenceEntryType, CrossReferenceStatus, CrossReferenceTable},
-    object_resolver::ObjectResolver,
+use pdf_object_reader::cross_reference_table::{
+    CrossReferenceEntryType, CrossReferenceStatus, CrossReferenceTable,
 };
 use pdf_tokenizer::PdfToken;
 use thiserror::Error;
@@ -21,13 +20,10 @@ pub enum CrossReferenceTableError {
 }
 
 impl PdfParser<'_> {
-    pub fn parse_cross_reference_table(
-        &mut self,
-        objects: &dyn ObjectResolver,
-    ) -> Result<CrossReferenceTable, ParserError> {
+    pub fn parse_cross_reference_table(&mut self) -> Result<CrossReferenceTable, ParserError> {
         self.read_keyword(XREF_KEYWORD)?;
         let entries = self.parse_cross_reference_subsections()?;
-        let trailer = self.parse_trailer(objects)?;
+        let trailer = self.parse_trailer()?;
 
         Ok(CrossReferenceTable::new(entries, trailer))
     }
@@ -143,7 +139,6 @@ fn is_malformed_leading_free_object_zero(entry: &CrossReferenceEntryType) -> boo
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
-    use pdf_object_reader::object_resolver::PassthroughResolver;
 
     use super::*;
 
@@ -151,9 +146,7 @@ mod tests {
     fn test_parse_valid_xref_section() {
         let data = b"xref\n0 2\n0000000000 65535 f\n0000000017 00000 n\ntrailer\n<< /Size 2 >>\nstartxref\n0\n";
         let mut parser = PdfParser::from(data.as_slice());
-        let table = parser
-            .parse_cross_reference_table(&PassthroughResolver)
-            .unwrap();
+        let table = parser.parse_cross_reference_table().unwrap();
         assert_eq!(table.entries.len(), 2);
 
         let entry0 = &table.entries[&0];
@@ -169,7 +162,7 @@ mod tests {
         let data = b"xref\n0 2\n0000000000 65535 f\n";
         let mut parser = PdfParser::from(data.as_slice());
 
-        let result = parser.parse_cross_reference_table(&PassthroughResolver);
+        let result = parser.parse_cross_reference_table();
         assert!(result.is_err());
     }
 
@@ -178,9 +171,7 @@ mod tests {
         let data = b"xref\n0 0\ntrailer\n<< /Size 0 >>\nstartxref\n0\n";
         let mut parser = PdfParser::from(data.as_slice());
 
-        let table = parser
-            .parse_cross_reference_table(&PassthroughResolver)
-            .unwrap();
+        let table = parser.parse_cross_reference_table().unwrap();
         assert!(table.entries.is_empty());
     }
 
@@ -195,9 +186,7 @@ mod tests {
         trailer\n<< /Size 6 >>\nstartxref\n0\n";
 
         let mut parser = PdfParser::from(data.as_slice());
-        let table = parser
-            .parse_cross_reference_table(&PassthroughResolver)
-            .unwrap();
+        let table = parser.parse_cross_reference_table().unwrap();
         assert_eq!(table.entries.len(), 4);
         assert!(table.entries.contains_key(&0));
         assert!(table.entries.contains_key(&1));
@@ -210,9 +199,7 @@ mod tests {
         let data = b"xref\n0 3\n0000000000 65535 f\n0000000017 00000 n\n% comment between rows\n0000000081 00000 n\ntrailer\n<< /Size 3 >>\nstartxref\n0\n";
         let mut parser = PdfParser::from(data.as_slice());
 
-        let table = parser
-            .parse_cross_reference_table(&PassthroughResolver)
-            .unwrap();
+        let table = parser.parse_cross_reference_table().unwrap();
 
         assert_eq!(table.entries.len(), 3);
         assert!(table.entries[&0].is_free());
@@ -225,9 +212,7 @@ mod tests {
         let data = b"xref\n1 1\n0000000017 00000 o\ntrailer\n<< /Size 2 >>\nstartxref\n0\n";
         let mut parser = PdfParser::from(data.as_slice());
 
-        let table = parser
-            .parse_cross_reference_table(&PassthroughResolver)
-            .unwrap();
+        let table = parser.parse_cross_reference_table().unwrap();
 
         assert!(table.entries[&1].is_free());
     }
@@ -237,9 +222,7 @@ mod tests {
         let data = b"xref\n0 1\n0000000000 65535 x\n";
         let mut parser = PdfParser::from(data.as_slice());
 
-        let error = parser
-            .parse_cross_reference_table(&PassthroughResolver)
-            .unwrap_err();
+        let error = parser.parse_cross_reference_table().unwrap_err();
 
         assert_eq!(
             error,
@@ -254,9 +237,7 @@ mod tests {
         let data = b"xref\n0 1\n0000000000 65535";
         let mut parser = PdfParser::from(data.as_slice());
 
-        let error = parser
-            .parse_cross_reference_table(&PassthroughResolver)
-            .unwrap_err();
+        let error = parser.parse_cross_reference_table().unwrap_err();
 
         assert_eq!(
             error,

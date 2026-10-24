@@ -91,7 +91,8 @@ impl FromPdfObject for CidToGidMap {
 impl FromPdfObject for CidFontKind {
     /// Decodes the descendant dictionary's Subtype name into a supported CID kind.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().try_bytes(context.source())? {
+        let name = context.decode::<Arc<[u8]>>()?;
+        match &*name {
             b"CIDFontType0" => Ok(Self::Type0),
             b"CIDFontType2" => Ok(Self::Type2),
             other => Err(FontError::UnsupportedCidFontSubtype {

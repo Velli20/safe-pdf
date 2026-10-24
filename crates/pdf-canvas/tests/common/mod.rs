@@ -14,8 +14,7 @@ use pdf_graphics::{
     BlendMode, Image, PathFillType, PixelFormat, color::Color, transform::Transform,
 };
 use pdf_object_reader::{
-    dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
-    stream::StreamObject,
+    EmptySource, dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -164,7 +163,7 @@ pub fn content_stream(object_number: usize, data: &[u8]) -> ContentStream {
         >::new()),
         data.to_vec(),
     );
-    let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+    let reader = pdf_object_reader::ObjectReader::new(EmptySource);
     let mut content_stream = reader
         .read::<ContentStream>(&ObjectVariant::Stream(stream))
         .expect("content stream should parse");

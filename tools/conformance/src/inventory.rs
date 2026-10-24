@@ -3,8 +3,8 @@
 use crate::model::Inventory;
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-    string_kind::StringKind,
+    ObjectAccess, ObjectReader, ReadSession, dictionary::Dictionary, object_variant::ObjectVariant,
+    pdf_name::PdfName,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -50,11 +50,15 @@ const CRATES: [(&str, &str); 22] = [
     ("xfa", "unsupported (XFA forms)"),
 ];
 
+/// The traversal through which scanned values are resolved.
+type Objects<'reader> = ReadSession<'reader, ObjectCollection>;
+
 /// Scans every loaded object.
-pub fn scan(objects: &ObjectCollection) -> Inventory {
+pub fn scan(reader: &ObjectReader<ObjectCollection>) -> Inventory {
     let mut features = BTreeMap::<String, usize>::new();
     let mut non_embedded = BTreeSet::new();
-    for object in objects.map.values() {
+    let objects = &mut reader.session();
+    for object in reader.source().map.values() {
         let dictionary = match object {
             ObjectVariant::Dictionary(dictionary) => dictionary,
             ObjectVariant::Stream(stream) => {
@@ -67,7 +71,7 @@ pub fn scan(objects: &ObjectCollection) -> Inventory {
             _ => continue,
         };
         scan_dictionary(objects, dictionary, &mut features, &mut non_embedded);
-        walk(object, 0, &mut features);
+        walk(objects, object, 0, &mut features);
     }
     if !non_embedded.is_empty() {
         count(&mut features, "non_embedded_font".to_owned());
@@ -95,53 +99,51 @@ fn count(features: &mut BTreeMap<String, usize>, feature: String) {
     *entry = entry.saturating_add(1);
 }
 
-fn resolve<'a>(
-    objects: &'a ObjectCollection,
-    value: &'a ObjectVariant,
-) -> Option<&'a ObjectVariant> {
-    objects.resolve_object(value).ok()
-}
-
-fn name(value: &ObjectVariant) -> Option<String> {
-    match value {
-        ObjectVariant::String(text) if text.kind() == StringKind::Name => {
-            Some(String::from_utf8_lossy(text.as_bytes()).into_owned())
-        }
-        _ => None,
-    }
+fn name(objects: &mut Objects<'_>, value: &ObjectVariant) -> Option<String> {
+    let name = objects.read::<PdfName>(value).ok()?;
+    Some(String::from_utf8_lossy(name.as_bytes()).into_owned())
 }
 
 /// Returns a name, or the names of an array.
-fn names(objects: &ObjectCollection, value: Option<&ObjectVariant>) -> Vec<String> {
-    match value.and_then(|value| resolve(objects, value)) {
-        Some(ObjectVariant::Array(items)) => items
+fn names(objects: &mut Objects<'_>, value: Option<&ObjectVariant>) -> Vec<String> {
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    let Ok(resolved) = objects.resolve(value) else {
+        return Vec::new();
+    };
+    match resolved.value() {
+        ObjectVariant::Array(items) => items
             .iter()
-            .filter_map(|item| resolve(objects, item).and_then(name))
+            .filter_map(|item| name(objects, item))
             .collect(),
-        Some(other) => name(other).into_iter().collect(),
-        None => Vec::new(),
+        _ => name(objects, value).into_iter().collect(),
     }
 }
 
-fn get_name(objects: &ObjectCollection, dictionary: &Dictionary, key: &[u8]) -> Option<String> {
-    dictionary
-        .get(key)
-        .and_then(|value| resolve(objects, value))
-        .and_then(name)
+fn get_name(objects: &mut Objects<'_>, dictionary: &Dictionary, key: &[u8]) -> Option<String> {
+    name(objects, dictionary.get(key)?)
 }
 
-fn get_integer(objects: &ObjectCollection, dictionary: &Dictionary, key: &[u8]) -> Option<i64> {
-    match dictionary
-        .get(key)
-        .and_then(|value| resolve(objects, value))
-    {
-        Some(ObjectVariant::Integer(value)) => Some(*value),
+fn get_integer(objects: &mut Objects<'_>, dictionary: &Dictionary, key: &[u8]) -> Option<i64> {
+    objects.read(dictionary.get(key)?).ok()
+}
+
+/// Returns the `/S` name of the dictionary held by `key`, such as a soft mask or a group.
+fn get_dictionary_kind(
+    objects: &mut Objects<'_>,
+    dictionary: &Dictionary,
+    key: &[u8],
+) -> Option<String> {
+    let resolved = objects.resolve(dictionary.get(key)?).ok()?;
+    match resolved.value() {
+        ObjectVariant::Dictionary(entry) => get_name(objects, entry, b"S"),
         _ => None,
     }
 }
 
 fn scan_dictionary(
-    objects: &ObjectCollection,
+    objects: &mut Objects<'_>,
     dictionary: &Dictionary,
     features: &mut BTreeMap<String, usize>,
     non_embedded: &mut BTreeSet<String>,
@@ -211,18 +213,10 @@ fn scan_dictionary(
             count(features, format!("blend:{mode}"));
         }
     }
-    if let Some(ObjectVariant::Dictionary(mask)) = dictionary
-        .get(b"SMask")
-        .and_then(|value| resolve(objects, value))
-        && let Some(kind) = get_name(objects, mask, b"S")
-    {
+    if let Some(kind) = get_dictionary_kind(objects, dictionary, b"SMask") {
         count(features, format!("soft_mask:{kind}"));
     }
-    if let Some(ObjectVariant::Dictionary(group)) = dictionary
-        .get(b"Group")
-        .and_then(|value| resolve(objects, value))
-        && get_name(objects, group, b"S").as_deref() == Some("Transparency")
-    {
+    if get_dictionary_kind(objects, dictionary, b"Group").as_deref() == Some("Transparency") {
         count(features, "transparency_group".to_owned());
     }
     if dictionary.get(b"OCProperties").is_some() {
@@ -233,31 +227,37 @@ fn scan_dictionary(
     }
 }
 
-/// Finds color space arrays nested anywhere in an object without following references.
-fn walk(object: &ObjectVariant, depth: usize, features: &mut BTreeMap<String, usize>) {
+/// Finds color space arrays nested anywhere in an object without following references
+/// into nested values.
+fn walk(
+    objects: &mut Objects<'_>,
+    object: &ObjectVariant,
+    depth: usize,
+    features: &mut BTreeMap<String, usize>,
+) {
     if depth > 8 {
         return;
     }
     let next = depth.saturating_add(1);
     match object {
         ObjectVariant::Array(items) => {
-            if let Some(family) = items.first().and_then(name)
+            if let Some(family) = items.first().and_then(|item| name(objects, item))
                 && COLOR_SPACES.contains(&family.as_bytes())
             {
                 count(features, format!("colorspace:{family}"));
             }
             for item in items.iter() {
-                walk(item, next, features);
+                walk(objects, item, next, features);
             }
         }
         ObjectVariant::Dictionary(dictionary) => {
             for value in dictionary.dictionary.values() {
-                walk(value, next, features);
+                walk(objects, value, next, features);
             }
         }
         ObjectVariant::Stream(stream) => {
             for value in stream.dictionary.dictionary.values() {
-                walk(value, next, features);
+                walk(objects, value, next, features);
             }
         }
         _ => {}

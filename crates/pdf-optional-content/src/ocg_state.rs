@@ -1,5 +1,4 @@
 //! Optional content group state retained from `SetOCGState` actions.
-use crate::error::OptionalContentError;
 
 /// Owned optional content group target of a `SetOCGState` `/State` element.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -41,22 +40,4 @@ pub enum OcgStateEntry {
     Toggle,
     /// A group governed by the preceding operation.
     Group(OcgTarget),
-}
-
-/// Reads a `/State` operation name; group targets are decoded from the objects
-/// that follow their operation and never reach this conversion.
-impl TryFrom<&[u8]> for OcgStateEntry {
-    type Error = OptionalContentError;
-
-    fn try_from(name: &[u8]) -> Result<Self, Self::Error> {
-        match name {
-            b"ON" => Ok(Self::On),
-            b"OFF" => Ok(Self::Off),
-            b"Toggle" => Ok(Self::Toggle),
-            other => Err(OptionalContentError::InvalidEntry {
-                entry: b"State",
-                reason: format!("unsupported optional content operation '{other:?}'"),
-            }),
-        }
-    }
 }

@@ -101,7 +101,16 @@ impl FromPdfObject for AnnotationDestination {
 impl FromPdfObject for ExplicitDestination {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut items = context.array()?;
-        let page = DestinationTarget::from_array(&mut items)?;
+        let Some(page) = items.array().first() else {
+            return Err(ObjectReadError::ArrayIndexOutOfBounds {
+                index: 0,
+                length: 0,
+            });
+        };
+        let page = match items.is_absent(page)? {
+            true => DestinationTarget::Null,
+            false => DestinationTarget::try_from(page)?,
+        };
         let mode = items.at::<Arc<[u8]>>(1)?;
         Ok(match mode.as_ref() {
             b"XYZ" => Self::Xyz {
@@ -146,21 +155,14 @@ impl FromPdfObject for ExplicitDestination {
     }
 }
 
-impl DestinationTarget {
-    /// Reads the page target, the first element of an explicit destination.
-    ///
-    /// A page reference keeps its unresolved identity, so the element is inspected raw
-    /// rather than decoded.
-    fn from_array<A: ObjectAccess + ?Sized>(items: &mut ArrayContext<'_, A>) -> ReadResult<Self> {
-        let Some(value) = items.array().first() else {
-            return Err(ObjectReadError::ArrayIndexOutOfBounds {
-                index: 0,
-                length: 0,
-            });
-        };
-        if items.is_absent(value)? {
-            return Ok(Self::Null);
-        }
+/// Reads the page target of an explicit destination from its unresolved element.
+///
+/// A page reference keeps its identity, so the element is inspected as written rather
+/// than decoded; a target that resolves to null is checked by the caller.
+impl TryFrom<&ObjectVariant> for DestinationTarget {
+    type Error = ObjectReadError;
+
+    fn try_from(value: &ObjectVariant) -> ReadResult<Self> {
         Ok(match value {
             ObjectVariant::Reference(id) => Self::Reference {
                 number: u64::try_from(id.number).map_err(|_| SourceDecodeError::ResourceLimit)?,
@@ -185,9 +187,7 @@ impl DestinationTarget {
 impl FromPdfObject for FileSpecification {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         if !matches!(context.object(), ObjectVariant::Dictionary(_)) {
-            return Ok(Self::Path(
-                context.object().try_bytes(context.source())?.to_vec(),
-            ));
+            return Ok(Self::Path(context.decode::<Arc<[u8]>>()?.to_vec()));
         }
         let mut dictionary = context.dictionary()?;
         Ok(Self::Dictionary(Box::new(FileSpecificationDictionary {
@@ -237,10 +237,7 @@ fn ocg_state<A: ObjectAccess + ?Sized>(
                 }
                 .into());
             }
-            state.push(
-                OcgStateEntry::try_from(item.try_bytes(items.source())?)
-                    .map_err(SourceDecodeError::from)?,
-            );
+            state.push(items.read::<OcgStateEntry>(item)?);
             seen_operation = true;
             pending_operation = true;
             continue;

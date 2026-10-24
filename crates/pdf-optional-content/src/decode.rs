@@ -3,7 +3,7 @@
 //! A group is identified by the object number of its dictionary, so group references are
 //! resolved only to read that number and the group's `/Name`.
 use crate::error::OptionalContentError;
-use crate::ocg_state::OcgTarget;
+use crate::ocg_state::{OcgStateEntry, OcgTarget};
 use crate::optional_content::{
     OptionalContentBaseState, OptionalContentConfiguration, OptionalContentGroup,
     OptionalContentGroupId, OptionalContentMembership, OptionalContentPolicy,
@@ -38,7 +38,8 @@ impl FromPdfObject for OptionalContentConfiguration {
 /// Reads a `/BaseState` name. An absent entry is the caller's `On` default.
 impl FromPdfObject for OptionalContentBaseState {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().try_bytes(context.source())? {
+        let name = context.decode::<Arc<[u8]>>()?;
+        match &*name {
             b"ON" => Ok(Self::On),
             b"OFF" => Ok(Self::Off),
             other => Err(OptionalContentError::InvalidEntry {
@@ -50,10 +51,29 @@ impl FromPdfObject for OptionalContentBaseState {
     }
 }
 
+/// Reads a `/State` operation name; group targets are decoded from the objects
+/// that follow their operation and never reach this decoder.
+impl FromPdfObject for OcgStateEntry {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let name = context.decode::<Arc<[u8]>>()?;
+        match &*name {
+            b"ON" => Ok(Self::On),
+            b"OFF" => Ok(Self::Off),
+            b"Toggle" => Ok(Self::Toggle),
+            other => Err(OptionalContentError::InvalidEntry {
+                entry: b"State",
+                reason: format!("unsupported optional content operation '{other:?}'"),
+            }
+            .into()),
+        }
+    }
+}
+
 /// Reads a `/P` policy name. An absent entry is the caller's `AnyOn` default.
 impl FromPdfObject for OptionalContentPolicy {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().try_bytes(context.source())? {
+        let name = context.decode::<Arc<[u8]>>()?;
+        match &*name {
             b"AnyOn" => Ok(Self::AnyOn),
             b"AllOn" => Ok(Self::AllOn),
             b"AnyOff" => Ok(Self::AnyOff),
@@ -75,7 +95,7 @@ impl FromPdfObject for OptionalContentGroup {
         // A malformed name never discards an otherwise identifiable group.
         let name = context.lenient::<Arc<[u8]>>(b"Name");
         Ok(Self {
-            id: OptionalContentGroupId::new(context.dictionary().object_number, name.as_deref())?,
+            id: OptionalContentGroupId::new(context.object_number(), name.as_deref())?,
             name: name.map(|name| name.to_vec()),
         })
     }
@@ -87,10 +107,7 @@ impl FromPdfObject for OptionalContentGroupId {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
         let name = context.lenient::<Arc<[u8]>>(b"Name");
-        Ok(Self::new(
-            context.dictionary().object_number,
-            name.as_deref(),
-        )?)
+        Ok(Self::new(context.object_number(), name.as_deref())?)
     }
 }
 
@@ -105,7 +122,7 @@ impl FromPdfObject for OptionalContentMembership {
                 // `/OCGs` is a single group or an array of them.
                 groups: context.optional_list(b"OCGs")?,
                 policy: context.optional(b"P")?.unwrap_or_default(),
-                has_visibility_expression: context.dictionary().get(b"VE").is_some(),
+                has_visibility_expression: context.contains(b"VE"),
             }),
             // A single group is a membership of that group under the default `AnyOn` policy.
             // A missing or invalid `/Type` is ignored and the dictionary read as a group.
@@ -113,7 +130,7 @@ impl FromPdfObject for OptionalContentMembership {
                 let name = context.lenient::<Arc<[u8]>>(b"Name");
                 Ok(Self {
                     groups: vec![OptionalContentGroupId::new(
-                        context.dictionary().object_number,
+                        context.object_number(),
                         name.as_deref(),
                     )?],
                     policy: OptionalContentPolicy::AnyOn,

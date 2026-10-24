@@ -27,8 +27,7 @@ impl FromPdfObject for SoftMask {
         // painted under it, so the group must be a stream. The group may be the form being
         // decoded, so it is checked on its resolved value: an eager read of /G would reenter
         // the active path.
-        if let Some(group) = context.dictionary().get(b"G") {
-            let group = context.resolve(group)?;
+        if let Some(group) = context.resolve_entry(b"G")? {
             let actual = group.kind();
             if actual != ObjectKind::Stream {
                 return Err(ObjectReadError::TypeMismatch {
@@ -105,8 +104,7 @@ mod tests {
 
     use pdf_graphics::MaskMode;
     use pdf_object_reader::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver,
-        object_variant::ObjectVariant, stream::StreamObject,
+        EmptySource, dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject,
     };
 
     use crate::error::PdfPagesError;
@@ -175,7 +173,7 @@ mod tests {
         dictionary
             .dictionary
             .insert(b"TR".to_vec(), ObjectVariant::Stream(function));
-        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let reader = pdf_object_reader::ObjectReader::new(EmptySource);
         let mask = reader
             .read::<SoftMask>(&ObjectVariant::Dictionary(dictionary))
             .unwrap();
@@ -191,7 +189,7 @@ mod tests {
         dictionary
             .dictionary
             .insert(b"TR".to_vec(), ObjectVariant::name_from_bytes(b"Identity"));
-        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let reader = pdf_object_reader::ObjectReader::new(EmptySource);
         let mask = reader
             .read::<SoftMask>(&ObjectVariant::Dictionary(dictionary))
             .unwrap();
@@ -202,7 +200,7 @@ mod tests {
     fn parses_soft_mask_dictionary() {
         let dictionary = soft_mask_dictionary(7, "Form");
 
-        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let reader = pdf_object_reader::ObjectReader::new(EmptySource);
 
         let soft_mask = reader
             .read::<Option<SoftMask>>(
@@ -268,7 +266,7 @@ mod tests {
     fn non_form_shape_is_rejected() {
         let dictionary = soft_mask_dictionary(7, "Image");
 
-        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let reader = pdf_object_reader::ObjectReader::new(EmptySource);
 
         let error = match reader.read::<Option<SoftMask>>(
             &pdf_object_reader::object_variant::ObjectVariant::Dictionary(dictionary.clone()),

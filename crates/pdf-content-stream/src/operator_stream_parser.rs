@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
+use pdf_image::{InlineDataLength, InlineImageHeader, PdfImage};
 use pdf_object_reader::{
-    ArrayContext, ReadSession, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+    ArrayContext, EmptySource, ObjectAccess, ReadSession, object_variant::ObjectVariant,
 };
 use pdf_parser::error::ParserError;
 use pdf_parser::parser::PdfParser;
@@ -13,7 +14,7 @@ use pdf_content_stream_operators::{error::PdfOperatorError, variants::PdfOperato
 /// same operand buffer across operator boundaries.
 pub(super) struct OperatorStreamParser<'a, 'out, 'session, 'reader> {
     parser: PdfParser<'a>,
-    session: &'session mut ReadSession<'reader, PassthroughResolver>,
+    session: &'session mut ReadSession<'reader, EmptySource>,
     operands: Vec<ObjectVariant>,
     out: &'out mut Vec<PdfOperatorVariant>,
 }
@@ -26,7 +27,7 @@ impl<'a, 'out, 'session, 'reader> OperatorStreamParser<'a, 'out, 'session, 'read
     /// fixed number of operands.
     pub(super) fn new(
         input: &'a [u8],
-        session: &'session mut ReadSession<'reader, PassthroughResolver>,
+        session: &'session mut ReadSession<'reader, EmptySource>,
         out: &'out mut Vec<PdfOperatorVariant>,
     ) -> Self {
         Self {
@@ -83,7 +84,7 @@ impl<'a, 'out, 'session, 'reader> OperatorStreamParser<'a, 'out, 'session, 'read
         let value = if matches!(first_byte, b'+' | b'-' | b'.' | b'0'..=b'9') {
             self.parser.parse_number()?
         } else {
-            self.parser.parse_object(&PassthroughResolver)?
+            self.parser.parse_object()?
         };
         self.operands.push(value);
         Ok(())
@@ -108,8 +109,9 @@ impl<'a, 'out, 'session, 'reader> OperatorStreamParser<'a, 'out, 'session, 'read
     fn parse_operator_from_stream(&mut self) -> Result<(), PdfOperatorError> {
         let name = self.parser.read_operator_name()?;
         let operator = if name == b"BI" {
-            let image = self.parser.parse_inline_image(self.session)?;
-            Some(PdfOperatorVariant::InlineImage(Arc::new(image)))
+            Some(PdfOperatorVariant::InlineImage(Arc::new(
+                self.parse_inline_image()?,
+            )))
         } else {
             PdfOperatorVariant::read(name, &mut ArrayContext::new(&self.operands, self.session))
                 .ok()
@@ -121,6 +123,18 @@ impl<'a, 'out, 'session, 'reader> OperatorStreamParser<'a, 'out, 'session, 'read
         }
         self.operands.clear();
         Ok(())
+    }
+
+    /// Parses an inline image after its `BI` operator, through `EI`.
+    ///
+    /// The data is consumed before the image is read, so an image whose dictionary does
+    /// not decode still leaves the parser after its data.
+    fn parse_inline_image(&mut self) -> Result<PdfImage, ParserError> {
+        let header = InlineImageHeader::from(self.parser.parse_inline_image_dictionary()?);
+        let InlineDataLength(length) = self.session.read(header.object())?;
+        let data = self.parser.parse_inline_image_data(length)?;
+        PdfImage::inline(header, data, self.session)
+            .map_err(|error| ParserError::InlineImageError(error.to_string()))
     }
 
     /// Drops malformed syntax and guarantees the parser can try the next byte.
@@ -212,7 +226,7 @@ mod tests {
     #[test]
     fn read_operator_reads_operands_in_place() {
         let operands = vec![ObjectVariant::Integer(10), ObjectVariant::Integer(20)];
-        let reader = ObjectReader::new(PassthroughResolver);
+        let reader = ObjectReader::new(EmptySource);
 
         let operator = PdfOperatorVariant::read(
             b"m",
@@ -233,7 +247,7 @@ mod tests {
             ObjectVariant::Integer(2),
             ObjectVariant::Integer(3),
         ];
-        let reader = ObjectReader::new(PassthroughResolver);
+        let reader = ObjectReader::new(EmptySource);
 
         let operator = PdfOperatorVariant::read(
             b"m",
@@ -248,7 +262,7 @@ mod tests {
     #[test]
     fn parse_next_item_skips_unknown_operator_and_clears_pending_operands() {
         let mut out = Vec::new();
-        let reader = ObjectReader::new(PassthroughResolver);
+        let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
         let mut parser = OperatorStreamParser::new(b"unknown q", &mut session, &mut out);
         parser.operands.push(ObjectVariant::Integer(1));
@@ -276,7 +290,7 @@ mod tests {
     #[test]
     fn parse_next_item_parses_inline_image_and_resumes_after_it() {
         let mut out = Vec::new();
-        let reader = ObjectReader::new(PassthroughResolver);
+        let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
         let mut parser = OperatorStreamParser::new(
             b"BI /W 1 /H 1 /BPC 8 /CS /G ID x\nEI Q",
@@ -320,7 +334,7 @@ mod tests {
     #[test]
     fn parse_next_item_stops_cleanly_on_truncated_trailing_operand() {
         let mut out = Vec::new();
-        let reader = ObjectReader::new(PassthroughResolver);
+        let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
         let mut parser = OperatorStreamParser::new(b"0 j 0 J [ ", &mut session, &mut out);
 
@@ -344,7 +358,7 @@ mod tests {
     #[test]
     fn parse_next_item_recovers_from_leading_invalid_delimiter() {
         let mut out = Vec::new();
-        let reader = ObjectReader::new(PassthroughResolver);
+        let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
         let mut parser = OperatorStreamParser::new(b") q", &mut session, &mut out);
 
@@ -364,7 +378,7 @@ mod tests {
     #[test]
     fn parse_next_item_recovers_from_corrupt_operand_before_valid_operator() {
         let mut out = Vec::new();
-        let reader = ObjectReader::new(PassthroughResolver);
+        let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
         let mut parser = OperatorStreamParser::new(b"[ ) 0 J", &mut session, &mut out);
 
@@ -384,7 +398,7 @@ mod tests {
     #[test]
     fn numeric_operands_recover_from_top_level_reference_syntax() {
         let mut out = Vec::new();
-        let reader = ObjectReader::new(PassthroughResolver);
+        let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
         let mut parser = OperatorStreamParser::new(b"1 0 R q", &mut session, &mut out);
 
@@ -403,7 +417,7 @@ mod tests {
     #[test]
     fn generic_operands_keep_nested_indirect_references() {
         let mut out = Vec::new();
-        let reader = ObjectReader::new(PassthroughResolver);
+        let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
         let mut parser =
             OperatorStreamParser::new(b"/Tag << /Ref 5 0 R >> BDC EMC", &mut session, &mut out);
@@ -427,7 +441,7 @@ mod tests {
     #[test]
     fn parse_next_item_recovers_from_invalid_operator_operand_value() {
         let mut out = Vec::new();
-        let reader = ObjectReader::new(PassthroughResolver);
+        let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
         let mut parser = OperatorStreamParser::new(b"9 J q", &mut session, &mut out);
         let original_capacity = parser.operands.capacity();
@@ -449,7 +463,7 @@ mod tests {
     #[test]
     fn parse_next_item_recovers_from_malformed_inline_image() {
         let mut out = Vec::new();
-        let reader = ObjectReader::new(PassthroughResolver);
+        let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
         let mut parser =
             OperatorStreamParser::new(b"BI /W 1 /H 1 ID abc Q", &mut session, &mut out);
@@ -470,7 +484,7 @@ mod tests {
     #[test]
     fn parse_next_item_skips_untokenized_delimiters() {
         let mut out = Vec::new();
-        let reader = ObjectReader::new(PassthroughResolver);
+        let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
         let mut parser = OperatorStreamParser::new(b"} { q", &mut session, &mut out);
 
@@ -490,7 +504,7 @@ mod tests {
     #[test]
     fn parse_next_item_reads_inline_image_ending_directly_after_binary_data() {
         let mut out = Vec::new();
-        let reader = ObjectReader::new(PassthroughResolver);
+        let reader = ObjectReader::new(EmptySource);
         let mut session = reader.session();
         let mut parser = OperatorStreamParser::new(
             b"BI /IM true /W 8 /H 1 /F /CCF /DP << /K -1 /Columns 8 >> ID \x01}\x10EI\nQ",

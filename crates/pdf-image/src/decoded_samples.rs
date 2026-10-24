@@ -460,9 +460,7 @@ impl<'a> ComponentDomain<'a> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_object_reader::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
-    };
+    use pdf_object_reader::{EmptySource, dictionary::Dictionary, object_variant::ObjectVariant};
 
     use super::*;
 
@@ -488,7 +486,7 @@ mod tests {
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
-        let metadata = pdf_object_reader::ObjectReader::new(PassthroughResolver)
+        let metadata = pdf_object_reader::ObjectReader::new(EmptySource)
             .read::<ImageMetadata>(&ObjectVariant::Dictionary(dictionary))
             .expect("direct image metadata should be valid");
         let samples = Bytes::from_static(&[12, 34]);
