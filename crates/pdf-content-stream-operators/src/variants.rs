@@ -94,6 +94,7 @@ pub enum PdfOperatorVariant {
     /// This is equivalent to a `ClosePath` followed by a `StrokePath`.
     CloseStrokePath,
     /// Fills the current path using the non-zero winding number rule.
+    /// Read from `f` and from its compatibility alias `F`.
     FillPathNonZero,
     /// Fills the current path using the even-odd rule.
     FillPathEvenOdd,
@@ -440,6 +441,7 @@ impl PdfOperatorVariant {
             (b"EMC", 0) => Self::EndMarkedContent,
             (b"ET", 0) => Self::EndText,
             (b"EX", 0) => Self::EndCompatibility,
+            (b"F", 0) => Self::FillPathNonZero,
             (b"G", 1) => Self::SetGrayStroke {
                 gray: operands.at(0)?,
             },
