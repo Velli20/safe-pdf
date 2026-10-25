@@ -67,7 +67,7 @@ impl FunctionImpl for PostScriptCalculatorFunction {
             .map(|(interval, &x)| Value::Real(f64::from(interval.clamp(x))))
             .collect();
         // Execute PostScript operators
-        let result_stack = pdf_postscript::calculator::execute(&stack, &self.operators)?;
+        let result_stack = pdf_postscript::calculator::execute(stack, &self.operators)?;
 
         // Extract and clamp outputs
         self.outputs(&result_stack)

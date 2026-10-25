@@ -10,3 +10,10 @@ workspace = true
 [dependencies]
 thiserror = "2.0.12"
 num-traits = "0.2.19"
+
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "calculator"
+harness = false
