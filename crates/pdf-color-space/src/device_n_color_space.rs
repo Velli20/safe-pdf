@@ -151,7 +151,7 @@ mod tests {
         let arr = device_n_array(vec![
             ObjectVariant::Array(vec![name("Cyan"), name("Magenta")].into()),
             name("DeviceRGB"),
-            function_stream("pop pop 0.1 0.2 0.3", 3),
+            function_stream("{ pop pop 0.1 0.2 0.3 }", 3),
         ]);
 
         let parsed = read_device_n(arr).unwrap();
@@ -178,7 +178,7 @@ mod tests {
         let arr = device_n_array(vec![
             ObjectVariant::Array(vec![name("Spot")].into()),
             name("DeviceCMYK"),
-            function_stream("pop 0.2 0.4 0.6 0.8", 4),
+            function_stream("{ pop 0.2 0.4 0.6 0.8 }", 4),
             attrs,
         ]);
 
@@ -197,7 +197,7 @@ mod tests {
         let arr = device_n_array(vec![
             ObjectVariant::Array(vec![name("Cyan"), name("Magenta"), name("Yellow")].into()),
             name("DeviceRGB"),
-            function_stream("pop pop pop 0.25 0.5 0.75", 3),
+            function_stream("{ pop pop pop 0.25 0.5 0.75 }", 3),
         ]);
 
         let parsed = read_device_n(arr).unwrap();
@@ -218,7 +218,7 @@ mod tests {
         let arr = device_n_array(vec![
             ObjectVariant::Array(vec![name("Cyan"), name("Magenta"), name("Yellow")].into()),
             name("DeviceRGB"),
-            function_stream("pop pop 0.25 0.5", 2),
+            function_stream("{ pop pop 0.25 0.5 }", 2),
         ]);
 
         let parsed = read_device_n(arr).unwrap();
@@ -243,7 +243,7 @@ mod tests {
         let arr = device_n_array(vec![
             ObjectVariant::Array(vec![name("Cyan"), name("Magenta")].into()),
             name("DeviceRGB"),
-            function_stream("pop pop 0.1 0.2 0.3", 3),
+            function_stream("{ pop pop 0.1 0.2 0.3 }", 3),
         ]);
 
         let parsed = read_device_n(arr).unwrap();

@@ -301,7 +301,7 @@ mod tests {
                     ),
                 ),
             ])),
-            b"4 3 roll pop".to_vec(),
+            b"{ 4 3 roll pop }".to_vec(),
         );
 
         ObjectVariant::Array(
@@ -546,7 +546,7 @@ mod tests {
                     ),
                 ),
             ])),
-            b"pop 1 1 1".to_vec(),
+            b"{ pop 1 1 1 }".to_vec(),
         );
         let dictionary = Dictionary::new(BTreeMap::from([
             (Vec::from(b"BitsPerComponent"), ObjectVariant::Integer(8)),
