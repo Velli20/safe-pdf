@@ -1,12 +1,18 @@
-use crate::{operator::Operator, parser::parse_tokens, value::Value};
+use crate::{operator::Operator, parser::parse, value::Value};
 use num_traits::ToPrimitive;
 use thiserror::Error;
 
 /// Errors that can occur while executing a PostScript-like calculator program.
 #[derive(Debug, Error, PartialEq)]
 pub enum CalcError {
-    #[error("unexpected end of block stack")]
-    EmptyBlockStack,
+    #[error("program is not enclosed in a '{{ }}' procedure")]
+    MissingProgramProcedure,
+    #[error("unbalanced braces or tokens outside the program procedure")]
+    UnbalancedBraces,
+    #[error("procedure is not an operand of 'if' or 'ifelse'")]
+    UnexpectedProcedure,
+    #[error("unexpected delimiter '{}' in program", char::from(*.0))]
+    UnexpectedDelimiter(u8),
     #[error("missing procedure block before 'if' operator")]
     MissingIfBlock,
     #[error("missing two procedure blocks before 'ifelse' operator")]
@@ -25,8 +31,6 @@ pub enum CalcError {
     RollCountTooLarge { n: usize, size: usize },
     #[error("invalid copy count n={n} larger than stack size {size}")]
     CopyCountTooLarge { n: usize, size: usize },
-    #[error("token index overflow while parsing")]
-    TokenIndexOverflow,
     #[error("arithmetic overflow in {op} operation")]
     ArithmeticOverflow { op: &'static str },
     #[error("operand for {op} must be an integer (no fraction) within valid range, got {value}")]
@@ -466,15 +470,12 @@ pub fn execute(input_stack: Vec<Value>, ops: &[Operator]) -> Result<Vec<Value>, 
     Ok(stack.values)
 }
 
-/// Convenience helper that tokenizes & parses a PostScript-like `code` string
-/// and then invokes [`execute`].
+/// Convenience helper that parses a Type 4 `program` (one `{ ... }` procedure)
+/// with [`parse`] and then invokes [`execute`].
 ///
-/// The `input_stack` supplies initial operands (in bottom-to-top order). The
-/// `code` string can contain numeric literals, the supported operators, and
-/// procedure blocks delimited by `{` and `}` used by `if` / `ifelse`.
-pub fn evaluate_postscript(input_stack: &[Value], code: &str) -> Result<Vec<Value>, CalcError> {
-    let code = code.replace("{", " { ").replace("}", " } ");
-    let ops = parse_tokens(&code.split_whitespace().collect::<Vec<_>>())?;
+/// The `input_stack` supplies initial operands (in bottom-to-top order).
+pub fn evaluate_postscript(input_stack: &[Value], program: &[u8]) -> Result<Vec<Value>, CalcError> {
+    let ops = parse(program)?;
     execute(input_stack.to_vec(), &ops)
 }
 
@@ -622,442 +623,6 @@ fn checked_real(value: f64, op: &'static str) -> Result<Value, CalcError> {
     }
 }
 
-#[cfg(all(test, not(test)))]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
-mod tests {
-    use super::*;
-
-    fn assert_approx_eq(actual: f64, expected: f64) {
-        let delta = (actual - expected).abs();
-        assert!(
-            delta < 1e-12,
-            "expected {expected}, got {actual}, delta {delta}"
-        );
-    }
-
-    #[test]
-    fn test_parse_simple_operators() {
-        let tokens = vec!["add", "sub", "mul", "div"];
-        let ops = parse_tokens(&tokens).unwrap();
-        assert_eq!(
-            ops,
-            vec![Operator::Add, Operator::Sub, Operator::Mul, Operator::Div]
-        );
-    }
-
-    #[test]
-    fn test_parse_numbers() {
-        let tokens = vec!["1", "2.5", "-3"];
-        let ops = parse_tokens(&tokens).unwrap();
-        assert_eq!(
-            ops,
-            vec![
-                Operator::Number(1.0),
-                Operator::Number(2.5),
-                Operator::Number(-3.0)
-            ]
-        );
-    }
-
-    #[test]
-    fn test_parse_if_block() {
-        let tokens = vec!["{", "2", "3", "add", "}", "if"];
-        let ops = parse_tokens(&tokens).unwrap();
-        assert_eq!(
-            ops,
-            vec![Operator::If(vec![
-                Operator::Number(2.0),
-                Operator::Number(3.0),
-                Operator::Add
-            ])]
-        );
-    }
-
-    #[test]
-    fn test_parse_ifelse_block() {
-        let tokens = vec![
-            "{", "2", "3", "add", "}", "{", "4", "5", "add", "}", "ifelse",
-        ];
-        let ops = parse_tokens(&tokens).unwrap();
-        assert_eq!(
-            ops,
-            vec![Operator::IfElse(
-                vec![Operator::Number(2.0), Operator::Number(3.0), Operator::Add],
-                vec![Operator::Number(4.0), Operator::Number(5.0), Operator::Add]
-            )]
-        );
-    }
-
-    #[test]
-    fn test_parse_nested_blocks() {
-        let tokens = vec!["{", "1", "{", "2", "3", "add", "}", "if", "}", "if"];
-        let ops = parse_tokens(&tokens).unwrap();
-        assert_eq!(
-            ops,
-            vec![Operator::If(vec![
-                Operator::Number(1.0),
-                Operator::If(vec![
-                    Operator::Number(2.0),
-                    Operator::Number(3.0),
-                    Operator::Add
-                ])
-            ])]
-        );
-    }
-
-    #[test]
-    fn test_parse_invalid_number() {
-        let tokens = vec!["foo"];
-        let err = parse_tokens(&tokens).unwrap_err();
-        assert!(matches!(err, CalcError::InvalidNumber(_)));
-    }
-
-    #[test]
-    fn test_parse_logical_operators() {
-        let tokens = vec![
-            "eq", "ne", "gt", "lt", "ge", "le", "and", "or", "xor", "not",
-        ];
-        let ops = parse_tokens(&tokens).unwrap();
-        assert_eq!(
-            ops,
-            vec![
-                Operator::Eq,
-                Operator::Ne,
-                Operator::Gt,
-                Operator::Lt,
-                Operator::Ge,
-                Operator::Le,
-                Operator::And,
-                Operator::Or,
-                Operator::Xor,
-                Operator::Not
-            ]
-        );
-    }
-
-    #[test]
-    fn test_parse_transcendental_operators() {
-        let tokens = vec!["sin", "cos", "tan", "atan", "log", "floor"];
-        let ops = parse_tokens(&tokens).unwrap();
-        assert_eq!(
-            ops,
-            vec![
-                Operator::Sin,
-                Operator::Cos,
-                Operator::Tan,
-                Operator::Atan,
-                Operator::Log,
-                Operator::Floor
-            ]
-        );
-    }
-
-    #[test]
-    fn test_parse_cvr_operator() {
-        let tokens = vec!["cvr"];
-        let ops = parse_tokens(&tokens).unwrap();
-        assert_eq!(ops, vec![Operator::Cvr]);
-    }
-
-    #[test]
-    fn test_add() {
-        let result = evaluate_postscript(&[2.0, 3.0], "add").unwrap();
-        assert_eq!(result, vec![5.0]);
-    }
-
-    #[test]
-    fn test_sub() {
-        let result = evaluate_postscript(&[5.0, 2.0], "sub").unwrap();
-        assert_eq!(result, vec![3.0]);
-    }
-
-    #[test]
-    fn test_mul() {
-        let result = evaluate_postscript(&[4.0, 3.0], "mul").unwrap();
-        assert_eq!(result, vec![12.0]);
-    }
-
-    #[test]
-    fn test_div() {
-        let result = evaluate_postscript(&[8.0, 2.0], "div").unwrap();
-        assert_eq!(result, vec![4.0]);
-    }
-
-    #[test]
-    fn test_cvr_is_no_op_for_real_stack_values() {
-        let result = evaluate_postscript(&[8.5], "cvr").unwrap();
-        assert_eq!(result, vec![8.5]);
-    }
-
-    #[test]
-    fn test_dup() {
-        let result = evaluate_postscript(&[7.0], "dup").unwrap();
-        assert_eq!(result, vec![7.0, 7.0]);
-    }
-
-    #[test]
-    fn test_exch() {
-        let result = evaluate_postscript(&[1.0, 2.0], "exch").unwrap();
-        assert_eq!(result, vec![2.0, 1.0]);
-    }
-
-    #[test]
-    fn test_pop() {
-        let result = evaluate_postscript(&[1.0, 2.0, 3.0], "pop").unwrap();
-        assert_eq!(result, vec![1.0, 2.0]);
-    }
-
-    #[test]
-    fn test_eq() {
-        let result = evaluate_postscript(&[2.0, 2.0], "eq").unwrap();
-        assert_eq!(result, vec![1.0]);
-        let result = evaluate_postscript(&[2.0, 3.0], "eq").unwrap();
-        assert_eq!(result, vec![0.0]);
-    }
-
-    #[test]
-    fn test_ne() {
-        let result = evaluate_postscript(&[2.0, 3.0], "ne").unwrap();
-        assert_eq!(result, vec![1.0]);
-        let result = evaluate_postscript(&[2.0, 2.0], "ne").unwrap();
-        assert_eq!(result, vec![0.0]);
-    }
-
-    #[test]
-    fn test_gt() {
-        let result = evaluate_postscript(&[3.0, 2.0], "gt").unwrap();
-        assert_eq!(result, vec![1.0]);
-        let result = evaluate_postscript(&[2.0, 3.0], "gt").unwrap();
-        assert_eq!(result, vec![0.0]);
-    }
-
-    #[test]
-    fn test_lt() {
-        let result = evaluate_postscript(&[2.0, 3.0], "lt").unwrap();
-        assert_eq!(result, vec![1.0]);
-        let result = evaluate_postscript(&[3.0, 2.0], "lt").unwrap();
-        assert_eq!(result, vec![0.0]);
-    }
-
-    #[test]
-    fn test_ge() {
-        let result = evaluate_postscript(&[3.0, 2.0], "ge").unwrap();
-        assert_eq!(result, vec![1.0]);
-        let result = evaluate_postscript(&[2.0, 2.0], "ge").unwrap();
-        assert_eq!(result, vec![1.0]);
-        let result = evaluate_postscript(&[1.0, 2.0], "ge").unwrap();
-        assert_eq!(result, vec![0.0]);
-    }
-
-    #[test]
-    fn test_le() {
-        let result = evaluate_postscript(&[2.0, 3.0], "le").unwrap();
-        assert_eq!(result, vec![1.0]);
-        let result = evaluate_postscript(&[2.0, 2.0], "le").unwrap();
-        assert_eq!(result, vec![1.0]);
-        let result = evaluate_postscript(&[3.0, 2.0], "le").unwrap();
-        assert_eq!(result, vec![0.0]);
-    }
-
-    #[test]
-    fn test_and() {
-        let result = evaluate_postscript(&[1.0, 1.0], "and").unwrap();
-        assert_eq!(result, vec![1.0]);
-        let result = evaluate_postscript(&[1.0, 0.0], "and").unwrap();
-        assert_eq!(result, vec![0.0]);
-    }
-
-    #[test]
-    fn test_or() {
-        let result = evaluate_postscript(&[0.0, 1.0], "or").unwrap();
-        assert_eq!(result, vec![1.0]);
-        let result = evaluate_postscript(&[0.0, 0.0], "or").unwrap();
-        assert_eq!(result, vec![0.0]);
-    }
-
-    #[test]
-    fn test_xor() {
-        let result = evaluate_postscript(&[1.0, 0.0], "xor").unwrap();
-        assert_eq!(result, vec![1.0]);
-        let result = evaluate_postscript(&[1.0, 1.0], "xor").unwrap();
-        assert_eq!(result, vec![0.0]);
-        let result = evaluate_postscript(&[0.0, 0.0], "xor").unwrap();
-        assert_eq!(result, vec![0.0]);
-    }
-
-    #[test]
-    fn test_not() {
-        let result = evaluate_postscript(&[0.0], "not").unwrap();
-        assert_eq!(result, vec![1.0]);
-        let result = evaluate_postscript(&[1.0], "not").unwrap();
-        assert_eq!(result, vec![0.0]);
-    }
-
-    #[test]
-    fn test_if_true() {
-        let result = evaluate_postscript(&[1.0], "{ 2 3 add } if").unwrap();
-        assert_eq!(result, vec![5.0]);
-    }
-
-    #[test]
-    fn test_if_false() {
-        let result = evaluate_postscript(&[0.0], "{ 2 3 add } if").unwrap();
-        assert_eq!(result, Vec::<f64>::new());
-    }
-
-    #[test]
-    fn test_ifelse_true() {
-        let result = evaluate_postscript(&[1.0], "{ 2 3 add } { 4 5 add } ifelse").unwrap();
-        assert_eq!(result, vec![5.0]);
-    }
-
-    #[test]
-    fn test_ifelse_false() {
-        let result = evaluate_postscript(&[0.0], "{ 2 3 add } { 4 5 add } ifelse").unwrap();
-        assert_eq!(result, vec![9.0]);
-    }
-
-    #[test]
-    fn test_nested_blocks() {
-        let result = evaluate_postscript(&[1.0], "{ 1 { 2 3 add } if } if").unwrap();
-        assert_eq!(result, vec![5.0]);
-    }
-
-    #[test]
-    fn test_complex_expression() {
-        let result = evaluate_postscript(&[2.0, 3.0, 4.0], "add mul").unwrap();
-        assert_eq!(result, vec![14.0]);
-    }
-
-    #[test]
-    fn test_copy() {
-        let result = evaluate_postscript(&[1.0, 2.0, 3.0], "2 copy").unwrap();
-        assert_eq!(result, vec![1.0, 2.0, 3.0, 2.0, 3.0]);
-    }
-
-    #[test]
-    fn test_index() {
-        let result = evaluate_postscript(&[1.0, 2.0, 3.0, 4.0], "2 index").unwrap();
-        assert_eq!(result, vec![1.0, 2.0, 3.0, 4.0, 2.0]);
-    }
-
-    #[test]
-    fn test_roll() {
-        let result = evaluate_postscript(&[1.0, 2.0, 3.0, 4.0, 5.0], "3 1 roll").unwrap();
-        assert_eq!(result, vec![1.0, 2.0, 5.0, 3.0, 4.0]);
-        let result = evaluate_postscript(&[1.0, 2.0, 3.0, 4.0, 5.0], "4 -2 roll").unwrap();
-        assert_eq!(result, vec![1.0, 4.0, 5.0, 2.0, 3.0]);
-        let result = evaluate_postscript(&[1.0, 2.0, 3.0, 4.0, 5.0], "0 7 roll").unwrap();
-        assert_eq!(result, vec![1.0, 2.0, 3.0, 4.0, 5.0]);
-    }
-
-    #[test]
-    fn test_sqrt() {
-        let result = evaluate_postscript(&[9.0], "sqrt").unwrap();
-        assert_eq!(result, vec![3.0]);
-        let result = evaluate_postscript(&[2.25], "sqrt").unwrap();
-        assert_eq!(result, vec![1.5]);
-    }
-
-    #[test]
-    fn test_sin() {
-        let result = evaluate_postscript(&[30.0], "sin").unwrap();
-        assert_approx_eq(result[0], 0.5);
-        let result = evaluate_postscript(&[90.0], "sin").unwrap();
-        assert_approx_eq(result[0], 1.0);
-    }
-
-    #[test]
-    fn test_cos() {
-        let result = evaluate_postscript(&[60.0], "cos").unwrap();
-        assert_approx_eq(result[0], 0.5);
-        let result = evaluate_postscript(&[180.0], "cos").unwrap();
-        assert_approx_eq(result[0], -1.0);
-    }
-
-    #[test]
-    fn test_tan() {
-        let result = evaluate_postscript(&[45.0], "tan").unwrap();
-        assert_approx_eq(result[0], 1.0);
-    }
-
-    #[test]
-    fn test_atan() {
-        let result = evaluate_postscript(&[1.0, 1.0], "atan").unwrap();
-        assert_approx_eq(result[0], 45.0);
-        let result = evaluate_postscript(&[1.0, 0.0], "atan").unwrap();
-        assert_approx_eq(result[0], 90.0);
-    }
-
-    #[test]
-    fn test_log() {
-        let result = evaluate_postscript(&[std::f64::consts::E], "log").unwrap();
-        assert_approx_eq(result[0], 1.0);
-        let result = evaluate_postscript(&[1.0], "log").unwrap();
-        assert_approx_eq(result[0], 0.0);
-    }
-
-    #[test]
-    fn test_log_domain_error() {
-        let err = evaluate_postscript(&[0.0], "log").unwrap_err();
-        assert!(matches!(err, CalcError::LogDomainError { value } if value == 0.0));
-        let err = evaluate_postscript(&[-1.0], "log").unwrap_err();
-        assert!(matches!(err, CalcError::LogDomainError { value } if value == -1.0));
-    }
-
-    #[test]
-    fn test_floor() {
-        let result = evaluate_postscript(&[3.7], "floor").unwrap();
-        assert_eq!(result, vec![3.0]);
-        let result = evaluate_postscript(&[-2.1], "floor").unwrap();
-        assert_eq!(result, vec![-3.0]);
-    }
-
-    #[test]
-    fn test_truncate() {
-        let result = evaluate_postscript(&[3.7], "truncate").unwrap();
-        assert_eq!(result, vec![3.0]);
-        let result = evaluate_postscript(&[-2.9], "truncate").unwrap();
-        assert_eq!(result, vec![-2.0]);
-        let result = evaluate_postscript(&[0.0], "truncate").unwrap();
-        assert_eq!(result, vec![0.0]);
-    }
-
-    #[test]
-    fn test_abs() {
-        let result = evaluate_postscript(&[-5.0], "abs").unwrap();
-        assert_eq!(result, vec![5.0]);
-        let result = evaluate_postscript(&[3.2], "abs").unwrap();
-        assert_eq!(result, vec![3.2]);
-        let result = evaluate_postscript(&[0.0], "abs").unwrap();
-        assert_eq!(result, vec![0.0]);
-    }
-
-    #[test]
-    fn test_cvi() {
-        let result = evaluate_postscript(&[3.7], "cvi").unwrap();
-        assert_eq!(result, vec![3.0]);
-        let result = evaluate_postscript(&[-2.9], "cvi").unwrap();
-        assert_eq!(result, vec![-2.0]);
-        let result = evaluate_postscript(&[0.0], "cvi").unwrap();
-        assert_eq!(result, vec![0.0]);
-        let result = evaluate_postscript(&[5.0], "cvi").unwrap();
-        assert_eq!(result, vec![5.0]);
-    }
-
-    #[test]
-    fn test_mod() {
-        let result = evaluate_postscript(&[10.0, 3.0], "mod").unwrap();
-        assert_eq!(result, vec![1.0]);
-        let result = evaluate_postscript(&[-10.0, 3.0], "mod").unwrap();
-        assert_eq!(result, vec![-1.0]);
-        let result = evaluate_postscript(&[10.0, -3.0], "mod").unwrap();
-        assert_eq!(result, vec![1.0]);
-        let result = evaluate_postscript(&[0.0, 3.0], "mod").unwrap();
-        assert_eq!(result, vec![0.0]);
-    }
-}
-
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -1081,8 +646,7 @@ mod typed_tests {
 
     #[test]
     fn parses_typed_literals_and_new_operators() {
-        let tokens = vec!["1", "2.5", "-3", "true", "false", "idiv", "bitshift"];
-        let ops = parse_tokens(&tokens).unwrap();
+        let ops = parse(b"{ 1 2.5 -3 true false idiv bitshift }").unwrap();
         assert_eq!(
             ops,
             vec![
@@ -1099,25 +663,25 @@ mod typed_tests {
 
     #[test]
     fn integer_arithmetic_preserves_integer_type() {
-        let result = evaluate_postscript(&[], "2 3 add 4 mul 5 sub").unwrap();
+        let result = evaluate_postscript(&[], b"{ 2 3 add 4 mul 5 sub }").unwrap();
         assert_eq!(result, vec![Value::Integer(15)]);
     }
 
     #[test]
     fn mixed_arithmetic_promotes_to_real() {
-        let result = evaluate_postscript(&[], "2 3.5 add").unwrap();
+        let result = evaluate_postscript(&[], b"{ 2 3.5 add }").unwrap();
         assert_eq!(result, vec![Value::Real(5.5)]);
     }
 
     #[test]
     fn div_always_returns_real() {
-        let result = evaluate_postscript(&[], "8 2 div").unwrap();
+        let result = evaluate_postscript(&[], b"{ 8 2 div }").unwrap();
         assert_eq!(result, vec![Value::Real(4.0)]);
     }
 
     #[test]
     fn idiv_truncates_toward_zero() {
-        let result = evaluate_postscript(&[], "7 3 idiv -7 3 idiv 7 -3 idiv").unwrap();
+        let result = evaluate_postscript(&[], b"{ 7 3 idiv -7 3 idiv 7 -3 idiv }").unwrap();
         assert_eq!(
             result,
             vec![Value::Integer(2), Value::Integer(-2), Value::Integer(-2)]
@@ -1126,10 +690,10 @@ mod typed_tests {
 
     #[test]
     fn idiv_rejects_zero_and_real_operands() {
-        let err = evaluate_postscript(&[], "1 0 idiv").unwrap_err();
+        let err = evaluate_postscript(&[], b"{ 1 0 idiv }").unwrap_err();
         assert_eq!(err, CalcError::DivisionByZero);
 
-        let err = evaluate_postscript(&[], "1.0 1 idiv").unwrap_err();
+        let err = evaluate_postscript(&[], b"{ 1.0 1 idiv }").unwrap_err();
         assert!(matches!(
             err,
             CalcError::InvalidIntegerOperand {
@@ -1141,28 +705,28 @@ mod typed_tests {
 
     #[test]
     fn bitshift_shifts_left_and_arithmetic_right() {
-        let result = evaluate_postscript(&[], "3 2 bitshift -8 -1 bitshift").unwrap();
+        let result = evaluate_postscript(&[], b"{ 3 2 bitshift -8 -1 bitshift }").unwrap();
         assert_eq!(result, vec![Value::Integer(12), Value::Integer(-4)]);
     }
 
     #[test]
     fn bitshift_rejects_invalid_shift_amounts() {
-        let err = evaluate_postscript(&[], "1 32 bitshift").unwrap_err();
+        let err = evaluate_postscript(&[], b"{ 1 32 bitshift }").unwrap_err();
         assert_eq!(err, CalcError::ArithmeticOverflow { op: "bitshift" });
     }
 
     #[test]
     fn boolean_control_flow_uses_bool_values() {
-        let result = evaluate_postscript(&[], "true { 2 3 add } if").unwrap();
+        let result = evaluate_postscript(&[], b"{ true { 2 3 add } if }").unwrap();
         assert_eq!(result, vec![Value::Integer(5)]);
 
-        let result = evaluate_postscript(&[], "false { 2 } { 3 } ifelse").unwrap();
+        let result = evaluate_postscript(&[], b"{ false { 2 } { 3 } ifelse }").unwrap();
         assert_eq!(result, vec![Value::Integer(3)]);
     }
 
     #[test]
     fn control_flow_rejects_numeric_condition() {
-        let err = evaluate_postscript(&[], "1 { 2 } if").unwrap_err();
+        let err = evaluate_postscript(&[], b"{ 1 { 2 } if }").unwrap_err();
         assert!(matches!(
             err,
             CalcError::InvalidOperandType {
@@ -1175,19 +739,19 @@ mod typed_tests {
 
     #[test]
     fn comparisons_and_logical_ops_return_bools() {
-        let result = evaluate_postscript(&[], "2 3 lt true xor").unwrap();
+        let result = evaluate_postscript(&[], b"{ 2 3 lt true xor }").unwrap();
         assert_eq!(result, vec![Value::Bool(false)]);
     }
 
     #[test]
     fn integer_bitwise_ops_use_integer_type() {
-        let result = evaluate_postscript(&[], "6 3 and 4 or 7 xor not").unwrap();
+        let result = evaluate_postscript(&[], b"{ 6 3 and 4 or 7 xor not }").unwrap();
         assert_eq!(result, vec![Value::Integer(-2)]);
     }
 
     #[test]
     fn stack_ops_accept_integer_counts() {
-        let result = evaluate_postscript(&[], "1 2 3 2 copy 4 5 3 1 roll").unwrap();
+        let result = evaluate_postscript(&[], b"{ 1 2 3 2 copy 4 5 3 1 roll }").unwrap();
         assert_eq!(
             result,
             vec![
@@ -1204,7 +768,8 @@ mod typed_tests {
 
     #[test]
     fn cvi_cvr_floor_truncate_and_abs_convert_types() {
-        let result = evaluate_postscript(&[], "3.7 cvi -2.1 floor 5 cvr -2.9 truncate").unwrap();
+        let result =
+            evaluate_postscript(&[], b"{ 3.7 cvi -2.1 floor 5 cvr -2.9 truncate }").unwrap();
         assert_eq!(
             result,
             vec![
@@ -1215,13 +780,13 @@ mod typed_tests {
             ]
         );
 
-        let result = evaluate_postscript(&[], "-5 abs 3.25 abs").unwrap();
+        let result = evaluate_postscript(&[], b"{ -5 abs 3.25 abs }").unwrap();
         assert_eq!(result, vec![Value::Integer(5), Value::Real(3.25)]);
     }
 
     #[test]
     fn transcendental_ops_still_return_reals() {
-        let result = evaluate_postscript(&[], "9 sqrt 30 sin").unwrap();
+        let result = evaluate_postscript(&[], b"{ 9 sqrt 30 sin }").unwrap();
         assert_real_approx_eq(result[0], 3.0);
         assert_real_approx_eq(result[1], 0.5);
     }

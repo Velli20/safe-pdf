@@ -1,4 +1,4 @@
-use crate::value::Value;
+use crate::{calculator::CalcError, value::Value};
 
 /// Represents a subset of PostScript operators (and literals) supported by the PDF
 /// PostScript-like calculator in this crate. Each variant corresponds to an
@@ -103,4 +103,55 @@ pub enum Operator {
     IfElse(Vec<Operator>, Vec<Operator>),
     /// Literal value.
     Number(Value),
+}
+
+/// Reads one word of a Type 4 program as an operator name or a literal.
+/// `if` and `ifelse` take procedure operands, so the parser handles them.
+impl TryFrom<&[u8]> for Operator {
+    type Error = CalcError;
+
+    fn try_from(word: &[u8]) -> Result<Self, Self::Error> {
+        Ok(match word {
+            b"add" => Self::Add,
+            b"sub" => Self::Sub,
+            b"mul" => Self::Mul,
+            b"div" => Self::Div,
+            b"idiv" => Self::Idiv,
+            b"dup" => Self::Dup,
+            b"exch" => Self::Exch,
+            b"pop" => Self::Pop,
+            b"eq" => Self::Eq,
+            b"ne" => Self::Ne,
+            b"gt" => Self::Gt,
+            b"lt" => Self::Lt,
+            b"ge" => Self::Ge,
+            b"le" => Self::Le,
+            b"and" => Self::And,
+            b"or" => Self::Or,
+            b"xor" => Self::Xor,
+            b"not" => Self::Not,
+            b"bitshift" => Self::Bitshift,
+            b"copy" => Self::Copy,
+            b"index" => Self::Index,
+            b"roll" => Self::Roll,
+            b"sqrt" => Self::Sqrt,
+            b"sin" => Self::Sin,
+            b"cos" => Self::Cos,
+            b"tan" => Self::Tan,
+            b"atan" => Self::Atan,
+            b"exp" => Self::Exp,
+            b"ln" => Self::Ln,
+            b"log" => Self::Log,
+            b"cvi" => Self::Cvi,
+            b"cvr" => Self::Cvr,
+            b"mod" => Self::Mod,
+            b"floor" => Self::Floor,
+            b"ceiling" => Self::Ceiling,
+            b"round" => Self::Round,
+            b"truncate" => Self::Truncate,
+            b"abs" => Self::Abs,
+            b"neg" => Self::Neg,
+            literal => Self::Number(Value::try_from(literal)?),
+        })
+    }
 }

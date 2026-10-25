@@ -3,7 +3,7 @@
 //! This crate provides:
 //! * A small set of PostScript arithmetic, comparison, logical, transcendental
 //!   and stack manipulation operators (see [`operator::Operator`]).
-//! * A parser (`parser::parse_tokens`) that turns token slices into an
+//! * A parser (`parser::parse`) that lexes Type 4 program bytes into an
 //!   executable operator list supporting nested procedure blocks for `if` / `ifelse`.
 //! * An interpreter (`calculator::execute` / `calculator::evaluate_postscript`) that
 //!   evaluates the operators against a typed operand stack.
