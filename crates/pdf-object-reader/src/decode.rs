@@ -2,6 +2,7 @@
 
 use num_traits::FromPrimitive;
 use pdf_graphics::{LineCap, LineJoin, MaskMode, TextRenderingMode};
+use std::any::TypeId;
 
 use crate::context::ObjectContext;
 use crate::error::{ObjectReadError, ReadResult};
@@ -22,8 +23,9 @@ use pdf_graphics::{color::Color, interval::Interval, rect::Rect, transform::Tran
 /// Implementations should use context reads for recursion rather than starting
 /// fresh sessions.
 ///
-/// There are no ownership or thread-safety bounds on eager outputs.
-/// Shared reading additionally requires `Self: Send + Sync + 'static`.
+/// Outputs are `'static`, so the reader can tell decoders apart when it detects
+/// cycles (see [`FromPdfObject::cycle_key`]). Shared reading additionally requires
+/// `Self: Send + Sync`.
 ///
 /// Implementations must not retain strong pointers to other cached values as
 /// graph edges: store `ObjectHandle<T>` for indirect edges to avoid ownership
@@ -51,12 +53,22 @@ use pdf_graphics::{color::Color, interval::Interval, rect::Rect, transform::Tran
 ///     let _ = reader.read_shared_indirect::<Local>(id);
 /// }
 /// ```
-pub trait FromPdfObject: Sized {
+pub trait FromPdfObject: Sized + 'static {
     /// Converts the context's object, retaining its session for all nested reads.
     ///
     /// Return domain failures using `ObjectReadError::Decode`; shape and child
     /// failures propagate through `ReadResult`.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self>;
+
+    /// Identifies this decoder when the reader detects cycles: an object a decoder is
+    /// still decoding cannot be entered again by a decoder with the same key.
+    ///
+    /// A decoder that decodes its object only through another decoder returns that
+    /// decoder's key, so reaching the object through either one is the same visit.
+    #[inline]
+    fn cycle_key() -> TypeId {
+        TypeId::of::<Self>()
+    }
 }
 
 macro_rules! value_decoder {
@@ -119,6 +131,11 @@ impl<T: FromPdfObject> FromPdfObject for Option<T> {
         } else {
             T::from_pdf_object(context).map(Some)
         }
+    }
+
+    #[inline]
+    fn cycle_key() -> TypeId {
+        T::cycle_key()
     }
 }
 
