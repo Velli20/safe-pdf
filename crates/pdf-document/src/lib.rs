@@ -1,14 +1,17 @@
+mod catalog;
 mod cipher;
 mod decryption;
 pub mod diagnostic;
 pub mod document;
 mod encrypt_objects;
 mod encryption;
+mod encryption_context;
 pub mod error;
 mod md5_key_derivation;
 pub mod object_loader;
 pub mod object_stream;
 pub mod page;
+pub mod page_tree;
 pub mod reader;
 pub mod report;
 mod sha2_key_derivation;

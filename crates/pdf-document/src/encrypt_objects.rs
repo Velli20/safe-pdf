@@ -7,15 +7,16 @@
 
 use std::collections::BTreeMap;
 
+use crate::diagnostic::{PdfReadDiagnostic, PdfReadDiagnosticKind};
 use crate::encryption::EncryptDictionary;
 use crate::error::PdfReaderError;
-use crate::reader::object_id;
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{
-    cross_reference_table::CrossReferenceEntryType, object_error::ObjectError,
-    object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+    FromPdfObject, ObjectReader, cross_reference_table::CrossReferenceEntryType,
+    dictionary::Dictionary, object_error::ObjectError, object_id::ObjectId,
+    object_variant::ObjectVariant,
 };
-use pdf_parser::{error::ParserError, parser::PdfParser};
+use pdf_parser::{error::ParserError, indirect_object::IndirectValue, parser::PdfParser};
 
 /// Upper bound on indirect objects loaded for one encryption dictionary.
 ///
@@ -39,49 +40,96 @@ impl<'a, 'input> EncryptObjectLoader<'a, 'input> {
     }
 
     /// Resolves the trailer's `/Encrypt` value and parses it without decrypting it.
+    ///
+    /// A dictionary that cannot be parsed is reported as a diagnostic and yields `None`,
+    /// so the document is read as unencrypted; other failures are fatal.
     pub(crate) fn load_dictionary(
         &self,
         encrypt: ObjectVariant,
-    ) -> Result<EncryptDictionary, PdfReaderError> {
-        let dictionary = match encrypt {
-            ObjectVariant::Reference(identifier) => self.load_object(identifier.number)?,
-            object => object,
-        };
-        let objects = self.load_referenced_objects(&dictionary)?;
-        EncryptDictionary::from_dictionary(dictionary.try_dictionary(&objects)?, &objects)
+        identifier: Option<ObjectId>,
+        diagnostics: &mut Vec<PdfReadDiagnostic>,
+    ) -> Result<Option<EncryptDictionary>, PdfReaderError> {
+        match self.read::<EncryptDictionary>(encrypt) {
+            Ok(dictionary) => Ok(Some(dictionary)),
+            Err(error) if error.is_recoverable_optional_object_error() => {
+                diagnostics.push(PdfReadDiagnostic::new(
+                    PdfReadDiagnosticKind::MalformedEncryption,
+                    None,
+                    identifier,
+                    error,
+                ));
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
     }
 
-    /// Loads the objects referenced from `root` into a collection used for resolution.
+    /// Loads `value` and the objects it references, then decodes it through them.
     ///
-    /// Nested references that cannot be loaded are left unresolved; parsing the
-    /// dictionary reports them only if the entry holding them is actually needed.
+    /// Nested references that cannot be loaded are left unresolved; decoding reports
+    /// them only if the entry holding them is actually needed.
+    fn read<T: FromPdfObject>(&self, value: ObjectVariant) -> Result<T, PdfReaderError> {
+        let mut objects = ObjectCollection::default();
+        let value = match value {
+            ObjectVariant::Reference(identifier) => {
+                self.load_object(identifier.number, &objects)?
+            }
+            object => object,
+        };
+        self.load_referenced_objects(&value, &mut objects)?;
+        Ok(ObjectReader::new(objects).read::<T>(&value)?)
+    }
+
+    /// Loads the required `key` entry of `dictionary` and the objects it references, then
+    /// decodes it through them.
+    ///
+    /// Nested references that cannot be loaded are left unresolved; decoding reports
+    /// them only if the entry holding them is actually needed.
+    pub(crate) fn required<T: FromPdfObject>(
+        &self,
+        dictionary: &Dictionary,
+        key: &[u8],
+    ) -> Result<T, PdfReaderError> {
+        let mut objects = ObjectCollection::default();
+        if let Some(value) = dictionary.get(key) {
+            self.load_referenced_objects(value, &mut objects)?;
+        }
+        Ok(ObjectReader::new(objects).required::<T>(dictionary, key)?)
+    }
+
+    /// Loads the objects referenced from `root` into `objects`.
     fn load_referenced_objects(
         &self,
         root: &ObjectVariant,
-    ) -> Result<ObjectCollection, PdfReaderError> {
-        let mut objects = ObjectCollection::default();
-        let mut pending = Vec::new();
-        collect_references(root, &mut pending);
+        objects: &mut ObjectCollection,
+    ) -> Result<(), PdfReaderError> {
+        let mut pending = PendingReferences::default();
+        pending.push_nested(root);
         let mut loaded = 0usize;
-        while let Some(number) = pending.pop() {
-            if loaded == MAX_ENCRYPT_OBJECTS {
-                break;
-            }
-            if objects.get(number).is_some() {
+        while loaded < MAX_ENCRYPT_OBJECTS
+            && let Some(identifier) = pending.pop()
+        {
+            if objects.get(identifier.number).is_some() {
                 continue;
             }
-            let Ok(object) = self.load_object(number) else {
+            let Ok(object) = self.load_object(identifier.number, objects) else {
                 continue;
             };
-            collect_references(&object, &mut pending);
-            objects.insert(object_id(number), object)?;
+            pending.push_nested(&object);
+            objects.insert(identifier, object)?;
             loaded = loaded.saturating_add(1);
         }
-        Ok(objects)
+        Ok(())
     }
 
     /// Parses the uncompressed indirect object `number` at its cross-reference offset.
-    fn load_object(&self, number: usize) -> Result<ObjectVariant, PdfReaderError> {
+    ///
+    /// A stream's `/Length` may refer to one of the `objects` already loaded.
+    fn load_object(
+        &self,
+        number: usize,
+        objects: &ObjectCollection,
+    ) -> Result<ObjectVariant, PdfReaderError> {
         let byte_offset = self
             .entries
             .get(&number)
@@ -93,24 +141,42 @@ impl<'a, 'input> EncryptObjectLoader<'a, 'input> {
                 position: byte_offset,
             },
         )?;
-        Ok(parser.parse_indirect_object_value(identifier, &PassthroughResolver)?)
+        Ok(match parser.parse_indirect_object_value(identifier)? {
+            IndirectValue::Object(object) => object,
+            IndirectValue::Stream(header) => {
+                let length = objects
+                    .loaded()
+                    .required::<usize>(header.dictionary(), b"Length")
+                    .map_err(ParserError::from)?;
+                parser.parse_stream_body(header, length)?
+            }
+        })
     }
 }
 
-/// Appends the object numbers of every reference nested in `value` to `references`.
-fn collect_references(value: &ObjectVariant, references: &mut Vec<usize>) {
-    match value {
-        ObjectVariant::Reference(identifier) => references.push(identifier.number),
-        ObjectVariant::Dictionary(dictionary) => dictionary
-            .iter()
-            .for_each(|(_, value)| collect_references(value, references)),
-        ObjectVariant::Stream(stream) => stream
-            .dictionary
-            .iter()
-            .for_each(|(_, value)| collect_references(value, references)),
-        ObjectVariant::Array(array) => array
-            .iter()
-            .for_each(|value| collect_references(value, references)),
-        _ => {}
+/// Indirect references discovered in the encryption dictionary but not yet loaded.
+#[derive(Default)]
+struct PendingReferences(Vec<ObjectId>);
+
+impl PendingReferences {
+    /// Queues every reference nested in `value`.
+    fn push_nested(&mut self, value: &ObjectVariant) {
+        match value {
+            ObjectVariant::Reference(identifier) => self.0.push(*identifier),
+            ObjectVariant::Dictionary(dictionary) => dictionary
+                .iter()
+                .for_each(|(_, value)| self.push_nested(value)),
+            ObjectVariant::Stream(stream) => stream
+                .dictionary
+                .iter()
+                .for_each(|(_, value)| self.push_nested(value)),
+            ObjectVariant::Array(array) => array.iter().for_each(|value| self.push_nested(value)),
+            _ => {}
+        }
+    }
+
+    /// Takes the most recently queued reference.
+    fn pop(&mut self) -> Option<ObjectId> {
+        self.0.pop()
     }
 }

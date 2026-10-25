@@ -7,11 +7,12 @@ use pdf_graphics::rect::Rect;
 
 use crate::base_encoding::BaseEncoding;
 use crate::font::{FontMetadata, GlyphName};
+use crate::glyph_widths_map::GlyphWidthsMap;
 pub use crate::pdf_font_spec::PdfFontSpec;
 pub use crate::simple_font_spec::SimpleFontSpec;
 pub use crate::standard14::Standard14Font;
-pub use crate::type0_font_spec::{CidFontKind, CidFontSpec, Type0FontSpec};
-pub use crate::type3_font_spec::Type3FontSpec;
+pub use crate::type0_font_spec::{CidFontKind, CidFontSpec, CidToGidMap, Type0FontSpec};
+pub use crate::type3_font_spec::{CharProcedures, Type3FontSpec};
 pub use pdf_cmap::{PdfCode, ToUnicodeMap};
 
 /// Number of PDF glyph-space units in one text-space em.
@@ -38,29 +39,16 @@ pub struct SimpleEncoding {
     pub differences: BTreeMap<u8, GlyphName>,
 }
 
-/// Horizontal advance and optional vertical placement for one PDF character.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PdfGlyphMetric {
-    /// Horizontal displacement in the font's PDF glyph space.
-    pub advance_x: f32,
-    /// Vertical displacement in the font's PDF glyph space.
-    pub advance_y: f32,
-    /// Horizontal coordinate of the vertical glyph origin.
-    pub vertical_origin_x: Option<f32>,
-    /// Vertical coordinate of the vertical glyph origin.
-    pub vertical_origin_y: Option<f32>,
-}
-
 /// Sparse PDF metrics table with a required default.
 ///
 /// Typed object decoding accepts a complete simple, Type 3, or descendant CID
 /// font dictionary. Its subtype selects the width table and default-width rule.
 #[derive(Debug, Clone)]
 pub struct PdfMetrics {
-    /// Metric used when no explicit entry exists.
-    pub default: PdfGlyphMetric,
-    /// Explicit metrics indexed by character code or CID.
-    pub explicit: BTreeMap<u32, PdfGlyphMetric>,
+    /// Width used when no explicit entry exists, in PDF glyph space.
+    pub default: f32,
+    /// Explicit widths indexed by character code or CID.
+    pub explicit: GlyphWidthsMap,
 }
 
 /// Descriptor information shared by PDF font subtypes.
@@ -79,7 +67,7 @@ pub struct PdfFontDescriptor {
 }
 
 /// Registry and ordering information from a CID font dictionary.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CidSystemInfo {
     /// Registry string.
     pub registry: Arc<[u8]>,

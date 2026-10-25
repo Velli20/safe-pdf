@@ -124,8 +124,7 @@
 //!
 //! [`ObjectSource`] and [`ObjectCache`] accept custom storage strategies;
 //! [`ObjectAccess`] supports custom traversal implementations. A custom access
-//! implementation can validate a direct value with
-//! `ResolvedObject::try_from(object)`, then construct an [`ObjectContext`].
+//! implementation can construct an [`ObjectContext`] over a direct value.
 //! It remains responsible for maintaining the traversal scope around the decoder.
 //!
 //! The parser and domain decoders use the same [`ObjectVariant`] model.
@@ -167,8 +166,6 @@ pub mod pdf_object;
 pub mod pdf_string;
 /// Reader configuration and session-local traversal contracts.
 pub mod reader;
-/// Checked direct PDF object handles.
-pub mod resolved_object;
 /// Acquisition of raw indirect objects from a document snapshot.
 pub mod source;
 /// PDF string source representations.
@@ -181,7 +178,7 @@ pub use decode::FromPdfObject;
 pub use error::{BoxedError, ObjectReadError, ReadLocation, ReadResult};
 pub use handle::{HandleState, ObjectHandle};
 pub use reader::{ObjectAccess, ObjectReader, ReadLimits, ReadSession};
-pub use source::ObjectSource;
+pub use source::{EmptySource, ObjectSource};
 
 /// PDF cross reference table model and parsing operations.
 pub mod cross_reference_table;
@@ -189,12 +186,6 @@ pub mod cross_reference_table;
 pub mod dictionary;
 /// PDF object error model and parsing operations.
 pub mod object_error;
-/// PDF object lookup model and parsing operations.
-pub mod object_lookup;
-/// PDF object resolver model and parsing operations.
-pub mod object_resolver;
-/// Iteration over `/Parent` dictionary chains.
-pub mod parent_chain;
 /// PDF stream model and parsing operations.
 pub mod stream;
 /// PDF text encoding model and parsing operations.

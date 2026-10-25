@@ -1,5 +1,5 @@
 use pdf_filter::error::FilterError;
-use pdf_object_reader::object_error::ObjectError;
+use pdf_object_reader::{ObjectReadError, object_error::ObjectError};
 use pdf_tokenizer::error::TokenizerError;
 use thiserror::Error;
 
@@ -64,4 +64,28 @@ pub enum ParserError {
     FilterError(#[from] FilterError),
     #[error("Inline image error: {0}")]
     InlineImageError(String),
+    #[error("Object read error: {0}")]
+    ObjectRead(String),
+}
+
+impl From<ObjectReadError> for ParserError {
+    /// Unwraps object failures raised while converting a value or loading a referenced
+    /// object, so they keep their `ObjectError` variant.
+    fn from(error: ObjectReadError) -> Self {
+        match object_error(&error) {
+            Some(object_error) => Self::ObjectError(object_error.clone()),
+            None => Self::ObjectRead(error.to_string()),
+        }
+    }
+}
+
+/// Returns the object failure beneath a read error's location context, if any.
+fn object_error(error: &ObjectReadError) -> Option<&ObjectError> {
+    match error {
+        ObjectReadError::At { source, .. } => object_error(source),
+        ObjectReadError::Decode { source, .. } | ObjectReadError::Source { source, .. } => {
+            source.downcast_ref()
+        }
+        _ => None,
+    }
 }

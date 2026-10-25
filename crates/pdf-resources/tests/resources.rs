@@ -3,8 +3,8 @@ use std::{collections::BTreeMap, sync::Arc};
 use pdf_graphics::transform::Transform;
 use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{
-    dictionary::Dictionary, object_id::ObjectId, object_resolver::PassthroughResolver,
-    object_variant::ObjectVariant, stream::StreamObject,
+    EmptySource, dictionary::Dictionary, object_id::ObjectId, object_variant::ObjectVariant,
+    stream::StreamObject,
 };
 
 use pdf_resources::{pattern::Pattern, resource::Resource, resources::Resources};
@@ -27,7 +27,7 @@ fn real(value: f64) -> ObjectVariant {
 
 fn name(value: &str) -> ObjectVariant {
     pdf_object_reader::pdf_string::PdfString::from(
-        value.as_bytes().to_vec(),
+        value.as_bytes(),
         pdf_object_reader::string_kind::StringKind::Name,
     )
 }
@@ -69,7 +69,7 @@ fn form_xobject_stream(object_number: usize, data: &[u8]) -> ObjectVariant {
         (
             Vec::from(b"Subtype"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"Form".to_vec(),
+                b"Form",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         ),
@@ -99,7 +99,7 @@ fn recursive_form_xobject_stream(
         (
             Vec::from(b"Subtype"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"Form".to_vec(),
+                b"Form",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         ),
@@ -186,7 +186,7 @@ fn self_referential_type3_font(object_number: usize) -> Dictionary {
             Vec::from(b"FontMatrix"),
             ObjectVariant::Array(
                 vec![
-                    real(0.001.into()),
+                    real(0.001),
                     real(0.0),
                     real(0.0),
                     real(0.001),
@@ -281,7 +281,7 @@ fn cached_form_xobjects_keep_their_generated_ids() {
     let reader = pdf_object_reader::ObjectReader::new(&objects);
 
     let parsed = reader
-        .read_shared::<Resources>((&resources).get(b"Resources").expect("resource entry"))
+        .read_shared::<Resources>(resources.get(b"Resources").expect("resource entry"))
         .and_then(|handle| handle.get())
         .expect("xobjects should parse");
 
@@ -299,7 +299,7 @@ fn cached_form_xobjects_keep_their_generated_ids() {
     assert_ne!(distinct_id, shared_a);
 
     let parsed_again = reader
-        .read_shared::<Resources>((&resources).get(b"Resources").expect("resource entry"))
+        .read_shared::<Resources>(resources.get(b"Resources").expect("resource entry"))
         .and_then(|handle| handle.get())
         .expect("cached xobjects should parse");
     let shared_again = form_content_stream_id(
@@ -313,11 +313,7 @@ fn cached_form_xobjects_keep_their_generated_ids() {
     let later_resources =
         xobject_resources(vec![("Later", ObjectVariant::Reference(object_id(13)))]);
     let later = reader
-        .read_shared::<Resources>(
-            (&later_resources)
-                .get(b"Resources")
-                .expect("resource entry"),
-        )
+        .read_shared::<Resources>(later_resources.get(b"Resources").expect("resource entry"))
         .and_then(|handle| handle.get())
         .expect("later xobject should parse");
     let later_id = form_content_stream_id(&later.xobject("Later").expect("Later should exist"))
@@ -407,7 +403,7 @@ fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
         (
             Vec::from(b"Subtype"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"Form".to_vec(),
+                b"Form",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         ),
@@ -421,7 +417,7 @@ fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
             Vec::from(b"Matrix"),
             ObjectVariant::Array(
                 vec![
-                    real(2.0.into()),
+                    real(2.0),
                     real(0.0),
                     real(0.0),
                     real(3.0),
@@ -444,7 +440,7 @@ fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
     let reader = pdf_object_reader::ObjectReader::new(&objects);
 
     let resources = reader
-        .read_shared::<Resources>((&page_dict).get(b"Resources").expect("resource entry"))
+        .read_shared::<Resources>(page_dict.get(b"Resources").expect("resource entry"))
         .and_then(|handle| handle.get())
         .expect("resources should parse");
 
@@ -475,10 +471,10 @@ fn dictionary_only_form_xobjects_are_loaded_as_empty_forms() {
 fn inline_shading_resource_without_object_number_parses() {
     let page_dict = page_resources(vec![("Inline", inline_axial_shading())]);
 
-    let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+    let reader = pdf_object_reader::ObjectReader::new(EmptySource);
 
     let resources = reader
-        .read_shared::<Resources>((&page_dict).get(b"Resources").expect("resource entry"))
+        .read_shared::<Resources>(page_dict.get(b"Resources").expect("resource entry"))
         .and_then(|handle| handle.get())
         .expect("inline shading resources should parse");
 
@@ -506,7 +502,7 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
         (
             Vec::from(b"Subtype"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"Form".to_vec(),
+                b"Form",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         ),
@@ -541,12 +537,12 @@ fn cyclic_form_resources_resolve_lazily_without_recursing_forever() {
     let reader = pdf_object_reader::ObjectReader::new(&objects);
 
     let resources = reader
-        .read_shared::<Resources>((&page_dict).get(b"Resources").expect("resource entry"))
+        .read_shared::<Resources>(page_dict.get(b"Resources").expect("resource entry"))
         .and_then(|handle| handle.get())
         .expect("cyclic resources should parse");
 
     let cached_resources = reader
-        .read_shared::<Resources>((&page_dict).get(b"Resources").expect("resource entry"))
+        .read_shared::<Resources>(page_dict.get(b"Resources").expect("resource entry"))
         .and_then(|handle| handle.get())
         .expect("cached resources should parse");
     assert!(Arc::ptr_eq(&resources, &cached_resources));
@@ -618,7 +614,7 @@ fn mutually_recursive_form_xobjects_resolve_lazily() {
 
     let reader = pdf_object_reader::ObjectReader::new(&objects);
     let resources = reader
-        .read_shared::<Resources>((&page_dict).get(b"Resources").expect("resource entry"))
+        .read_shared::<Resources>(page_dict.get(b"Resources").expect("resource entry"))
         .and_then(|handle| handle.get())
         .expect("mutually recursive forms should parse");
 
@@ -674,7 +670,7 @@ fn self_referential_font_resources_resolve_lazily() {
     let reader = pdf_object_reader::ObjectReader::new(&objects);
 
     let resources = reader
-        .read_shared::<Resources>((&page_dict).get(b"Resources").expect("resource entry"))
+        .read_shared::<Resources>(page_dict.get(b"Resources").expect("resource entry"))
         .and_then(|handle| handle.get())
         .expect("resources should parse");
 
@@ -707,7 +703,7 @@ fn fallback_fonts_do_not_read_nested_type3_resources() {
         (
             Vec::from(b"Subtype"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"Type3".to_vec(),
+                b"Type3",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         ),
@@ -724,10 +720,10 @@ fn fallback_fonts_do_not_read_nested_type3_resources() {
         )]))),
     )]));
 
-    let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+    let reader = pdf_object_reader::ObjectReader::new(EmptySource);
 
     let resources = reader
-        .read_shared::<Resources>((&page_dict).get(b"Resources").expect("resource entry"))
+        .read_shared::<Resources>(page_dict.get(b"Resources").expect("resource entry"))
         .and_then(|handle| handle.get())
         .expect("fallback font resources should parse");
     let (font, nested_resources) = resources.font("F1").expect("font should resolve");
@@ -757,7 +753,7 @@ fn self_referential_pattern_resources_resolve_lazily() {
     let reader = pdf_object_reader::ObjectReader::new(&objects);
 
     let resources = reader
-        .read_shared::<Resources>((&page_dict).get(b"Resources").expect("resource entry"))
+        .read_shared::<Resources>(page_dict.get(b"Resources").expect("resource entry"))
         .and_then(|handle| handle.get())
         .expect("resources should parse");
 

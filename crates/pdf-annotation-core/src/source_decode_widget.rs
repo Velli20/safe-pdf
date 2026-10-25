@@ -1,27 +1,23 @@
 //! Widget decoding, including field properties inherited through `/Parent`.
+use std::sync::Arc;
+
 use crate::error::SourceDecodeError;
-use crate::pdf_data::{
-    AnnotationAction, AppearanceCharacteristics, BorderStyle, WidgetAnnotation, WidgetChoiceOption,
-    WidgetFieldFlags, WidgetFieldValue,
-};
-use crate::source_decode::DecodeResult;
+use crate::pdf_data::{WidgetAnnotation, WidgetChoiceOption, WidgetFieldFlags, WidgetFieldValue};
 use pdf_object_reader::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-    parent_chain::ParentChain,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
 };
 
-impl WidgetAnnotation {
-    pub(crate) fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
+impl FromPdfObject for WidgetAnnotation {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object();
+        let mut dictionary = context.dictionary()?;
         let field_id = dictionary
-            .parent_reference()
-            .map(|(_, parent_id)| {
+            .reference(b"Parent")
+            .map(|parent_id| {
                 u64::try_from(parent_id.number).map_err(|_| SourceDecodeError::ResourceLimit)
             })
             .transpose()?;
-        let fields = FieldProperties::inherit(dictionary, objects)?;
+        let fields: FieldProperties = dictionary.read(object)?;
 
         Ok(Self {
             field_id,
@@ -38,11 +34,9 @@ impl WidgetAnnotation {
             options: fields.options,
             selected_indices: fields.selected_indices,
             top_index: fields.top_index,
-            appearance_characteristics: AppearanceCharacteristics::from_dictionary(
-                dictionary, objects,
-            )?,
-            border_style: BorderStyle::from_dictionary(dictionary, b"BS", objects)?,
-            action: AnnotationAction::from_dictionary(dictionary, b"A", objects)?,
+            appearance_characteristics: dictionary.optional(b"MK")?,
+            border_style: dictionary.optional(b"BS")?,
+            action: dictionary.optional(b"A")?,
         })
     }
 }
@@ -65,159 +59,95 @@ struct FieldProperties {
     top_index: Option<u64>,
 }
 
-impl FieldProperties {
-    /// Collects field entries from the widget and its `/Parent` chain; nearer nodes win.
-    fn inherit(dictionary: &Dictionary, objects: &dyn ObjectResolver) -> DecodeResult<Self> {
-        let mut properties = Self::default();
-        for node in ParentChain::new(dictionary, objects) {
-            properties.absorb(node?, objects)?;
+/// Reads the field entries of a widget or field node, inheriting each absent entry from
+/// its `/Parent` chain; nearer nodes win. A cyclic `/Parent` chain ends at the repeated node.
+impl FromPdfObject for FieldProperties {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
+        let parent = match dictionary.optional::<Self>(b"Parent") {
+            Err(error) if error.is_cyclic_reference() => None,
+            result => result?,
         }
-        Ok(properties)
-    }
+        .unwrap_or_default();
 
-    /// Records every field entry of `dictionary` that a nearer node has not already defined.
-    fn absorb(
-        &mut self,
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<()> {
-        for (key, value) in dictionary.iter() {
-            let value = objects.resolve_object(value)?;
-            if value == &ObjectVariant::Null {
-                continue;
-            }
-
-            match key {
-                b"FT" if self.field_type.is_none() => {
-                    self.field_type = Some(value.try_bytes_vec(objects)?);
-                }
-                b"T" if self.field_name.is_none() => {
-                    self.field_name = Some(value.try_bytes_vec(objects)?);
-                }
-                b"TU" if self.alternate_name.is_none() => {
-                    self.alternate_name = Some(value.try_bytes_vec(objects)?);
-                }
-                b"TM" if self.mapping_name.is_none() => {
-                    self.mapping_name = Some(value.try_bytes_vec(objects)?);
-                }
-                b"Ff" if self.field_flags.is_none() => {
-                    self.field_flags = Some(
-                        value
-                            .try_number(objects)
-                            .map(WidgetFieldFlags::from_bits_truncate)?,
-                    );
-                }
-                b"V" if self.value.is_none() => {
-                    self.value = Some(widget_field_value(b"V", value, objects)?);
-                }
-                b"DV" if self.default_value.is_none() => {
-                    self.default_value = Some(widget_field_value(b"DV", value, objects)?);
-                }
-                b"DA" if self.default_appearance.is_none() => {
-                    self.default_appearance = Some(value.try_bytes_vec(objects)?);
-                }
-                b"Q" if self.quadding.is_none() => {
-                    self.quadding = Some(value.try_number(objects)?);
-                }
-                b"MaxLen" if self.max_length.is_none() => {
-                    self.max_length = Some(value.try_number(objects)?);
-                }
-                b"Opt" if self.options.is_none() => {
-                    self.options = Some(choice_options(value, objects)?);
-                }
-                b"I" if self.selected_indices.is_none() => {
-                    self.selected_indices = Some(choice_indices(value, objects)?);
-                }
-                b"TI" if self.top_index.is_none() => {
-                    self.top_index = Some(value.try_number::<u64>(objects)?);
-                }
-                _ => {}
-            }
-        }
-        Ok(())
-    }
-}
-
-fn choice_options(
-    value: &ObjectVariant,
-    objects: &dyn ObjectResolver,
-) -> DecodeResult<Vec<WidgetChoiceOption>> {
-    let values = value.try_array(objects)?;
-    values
-        .iter()
-        .map(|value| {
-            let resolved = objects.resolve_object(value)?;
-            if let Ok(bytes) = resolved.try_bytes_vec(objects) {
-                return Ok(WidgetChoiceOption {
-                    export_value: bytes.clone(),
-                    display_value: bytes,
-                });
-            }
-
-            let pair = resolved.try_array(objects)?;
-            if pair.len() != 2 {
-                return Err(SourceDecodeError::InvalidEntry {
-                    entry: b"Opt",
-                    reason: "expected each option pair to contain an export and display value"
-                        .to_owned(),
-                });
-            }
-            let export_value = pair
-                .first()
-                .ok_or_else(|| SourceDecodeError::InvalidEntry {
-                    entry: b"Opt",
-                    reason: "missing option export value".to_owned(),
-                })?
-                .try_bytes_vec(objects)?;
-            let display_value = pair
-                .get(1)
-                .ok_or_else(|| SourceDecodeError::InvalidEntry {
-                    entry: b"Opt",
-                    reason: "missing option display value".to_owned(),
-                })?
-                .try_bytes_vec(objects)?;
-            Ok(WidgetChoiceOption {
-                export_value,
-                display_value,
-            })
+        Ok(Self {
+            field_type: dictionary
+                .optional::<Arc<[u8]>>(b"FT")?
+                .map(|bytes| bytes.to_vec())
+                .or(parent.field_type),
+            field_name: dictionary
+                .optional::<Arc<[u8]>>(b"T")?
+                .map(|bytes| bytes.to_vec())
+                .or(parent.field_name),
+            alternate_name: dictionary
+                .optional::<Arc<[u8]>>(b"TU")?
+                .map(|bytes| bytes.to_vec())
+                .or(parent.alternate_name),
+            mapping_name: dictionary
+                .optional::<Arc<[u8]>>(b"TM")?
+                .map(|bytes| bytes.to_vec())
+                .or(parent.mapping_name),
+            field_flags: dictionary
+                .optional::<i32>(b"Ff")?
+                .map(WidgetFieldFlags::from_bits_truncate)
+                .or(parent.field_flags),
+            value: dictionary.optional(b"V")?.or(parent.value),
+            default_value: dictionary.optional(b"DV")?.or(parent.default_value),
+            default_appearance: dictionary
+                .optional::<Arc<[u8]>>(b"DA")?
+                .map(|bytes| bytes.to_vec())
+                .or(parent.default_appearance),
+            quadding: dictionary.optional(b"Q")?.or(parent.quadding),
+            max_length: dictionary.optional(b"MaxLen")?.or(parent.max_length),
+            options: dictionary.optional(b"Opt")?.or(parent.options),
+            selected_indices: dictionary.optional(b"I")?.or(parent.selected_indices),
+            top_index: dictionary.optional(b"TI")?.or(parent.top_index),
         })
-        .collect()
+    }
 }
 
-fn choice_indices(value: &ObjectVariant, objects: &dyn ObjectResolver) -> DecodeResult<Vec<u64>> {
-    value
-        .try_array(objects)?
-        .iter()
-        .map(|value| choice_index(value, objects))
-        .collect()
+/// Reads one `/Opt` entry: a single string, or an `[export display]` pair.
+impl FromPdfObject for WidgetChoiceOption {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        if !matches!(context.object(), ObjectVariant::Array(_)) {
+            let bytes = context.decode::<Arc<[u8]>>()?.to_vec();
+            return Ok(Self {
+                export_value: bytes.clone(),
+                display_value: bytes,
+            });
+        }
+        let mut pair = context.array()?;
+        if pair.array().len() != 2 {
+            return Err(SourceDecodeError::InvalidEntry {
+                entry: b"Opt",
+                reason: "expected each option pair to contain an export and display value"
+                    .to_owned(),
+            }
+            .into());
+        }
+        Ok(Self {
+            export_value: pair.at::<Arc<[u8]>>(0)?.to_vec(),
+            display_value: pair.at::<Arc<[u8]>>(1)?.to_vec(),
+        })
+    }
 }
 
-fn choice_index(value: &ObjectVariant, objects: &dyn ObjectResolver) -> DecodeResult<u64> {
-    let value = value.try_number::<u64>(objects)?;
-    Ok(value)
-}
-
-fn widget_field_value(
-    entry: &'static [u8],
-    value: &ObjectVariant,
-    objects: &dyn ObjectResolver,
-) -> DecodeResult<WidgetFieldValue> {
-    let value = objects.resolve_object(value)?;
-    match value {
-        ObjectVariant::String(bytes) => Ok(WidgetFieldValue::Bytes(bytes.as_bytes().to_vec())),
-        ObjectVariant::Dictionary(_) | ObjectVariant::Stream(_) => Ok(WidgetFieldValue::Dictionary),
-        ObjectVariant::Array(values) => values
-            .iter()
-            .map(|value| widget_field_value(entry, value, objects))
-            .collect::<Result<Vec<_>, _>>()
-            .map(WidgetFieldValue::Array),
-        ObjectVariant::Null => Ok(WidgetFieldValue::Null),
-        other => Err(SourceDecodeError::InvalidEntry {
-            entry,
-            reason: format!(
-                "expected string, name, dictionary, array, or null field value, found {}",
-                other.name()
-            ),
-        }),
+/// Reads a `/V` or `/DV` field value; dictionary values are recorded without their contents.
+impl FromPdfObject for WidgetFieldValue {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match context.object() {
+            ObjectVariant::String(bytes) => Ok(Self::Bytes(bytes.as_bytes().to_vec())),
+            ObjectVariant::Dictionary(_) | ObjectVariant::Stream(_) => Ok(Self::Dictionary),
+            ObjectVariant::Array(_) => context.array()?.read_all().map(Self::Array),
+            ObjectVariant::Null => Ok(Self::Null),
+            other => Err(SourceDecodeError::InvalidEntry {
+                entry: b"V",
+                reason: format!(
+                    "expected string, name, dictionary, array, or null field value, found {}",
+                    other.name()
+                ),
+            }
+            .into()),
+        }
     }
 }

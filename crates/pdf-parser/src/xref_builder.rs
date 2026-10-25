@@ -12,21 +12,19 @@
 //! before its `/XRefStm` stream for the same reason. A set of visited offsets prevents
 //! malformed cyclic chains from looping forever.
 //!
-//! Exact section parsing is deliberately separate from repair. `parse_section_at`
-//! accepts only the syntax located at the supplied byte offset and never searches the
-//! surrounding input. The builder delegates to the private `XrefRecovery` type when
-//! exact parsing or offset validation fails, keeping the normal parser reusable by
-//! recovery probes without embedding heuristics in it. When no declared marker yields a
-//! table that can reach the document catalog, the builder falls back to that module's
-//! linear object reconstruction.
+//! Exact section parsing is deliberately separate from repair.
+//! `XrefRecovery::parse_section_at` accepts only the syntax located at the supplied byte
+//! offset and never searches the surrounding input. The builder delegates to the private
+//! `XrefRecovery` type when exact parsing or offset validation fails, keeping the normal
+//! parser reusable by recovery probes without embedding heuristics in it. When no declared
+//! marker yields a table that can reach the document catalog, the builder falls back to
+//! that module's linear object reconstruction.
 
 use std::collections::{BTreeMap, HashSet};
 
 use pdf_object_reader::{
+    EmptySource, ObjectReader,
     cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
-    object_resolver::PassthroughResolver,
-    object_variant::ObjectVariant,
-    stream::StreamObject,
     trailer::Trailer,
 };
 
@@ -65,6 +63,9 @@ pub(crate) struct ParsedXrefSection {
 /// probes are forked from it, so building a table never mutates the user's parser.
 struct XrefBuilder<'input> {
     parser: PdfParser<'input>,
+    /// The indirect objects readable while the table is built: none yet, so references
+    /// read as null and only direct values, such as a stream's `/Length`, are used.
+    objects: ObjectReader<EmptySource>,
 }
 
 impl<'input> XrefBuilder<'input> {
@@ -73,7 +74,10 @@ impl<'input> XrefBuilder<'input> {
     /// Callers normally provide a parser positioned at byte zero. The cursor itself is
     /// used only as the source for further independent probes.
     fn new(parser: PdfParser<'input>) -> Self {
-        Self { parser }
+        Self {
+            parser,
+            objects: ObjectReader::new(EmptySource),
+        }
     }
 
     /// Forks the builder at an absolute byte offset without changing this builder.
@@ -106,23 +110,22 @@ impl<'input> XrefBuilder<'input> {
         let offsets = match self.startxref_offsets() {
             Ok(offsets) => offsets,
             Err(ParserError::MissingStartXref) => {
-                return XrefRecovery::new(&self.parser).rebuild_without_xref();
+                return XrefRecovery::new(&self.parser, &self.objects).rebuild_without_xref();
             }
             Err(error) => return Err(error),
         };
         let mut last_error = None;
 
         for offset in offsets {
-            match self
-                .merge_chain(offset)
-                .and_then(|table| XrefRecovery::new(&self.parser).validate(table, offset))
-            {
+            match self.merge_chain(offset).and_then(|table| {
+                XrefRecovery::new(&self.parser, &self.objects).validate(table, offset)
+            }) {
                 Ok(table) => return Ok(table),
                 Err(error) => last_error = Some(error),
             }
         }
 
-        match XrefRecovery::new(&self.parser).rebuild_without_xref() {
+        match XrefRecovery::new(&self.parser, &self.objects).rebuild_without_xref() {
             Ok(table) => Ok(table),
             Err(error) => Err(last_error.unwrap_or(error)),
         }
@@ -195,24 +198,23 @@ impl<'input> XrefBuilder<'input> {
         let mut visited_offsets = HashSet::new();
         let mut current_offset = start_offset;
         let mut trailer = None;
-        let mut recovery = XrefRecovery::new(&self.parser);
+        let mut recovery = XrefRecovery::new(&self.parser, &self.objects);
 
         while visited_offsets.insert(current_offset) {
             let table = recovery.parse_section_with_recovery(current_offset)?;
-            let auxiliary_offset = table.trailer.dictionary.get(b"XRefStm").cloned();
-            let previous_offset = table.trailer.dictionary.get(b"Prev").cloned();
+            let auxiliary_offset = self.trailer_offset(&table.trailer, b"XRefStm")?;
+            let previous_offset = self.trailer_offset(&table.trailer, b"Prev")?;
 
             // The loop walks newest to oldest. Inserting only vacant keys below makes
             // the first visible declaration of each object number authoritative.
             Self::merge_entries(&mut entries, table.entries);
 
-            if let Some(offset) = auxiliary_offset {
-                let offset = offset.try_number::<usize>(&PassthroughResolver)?;
-                if visited_offsets.insert(offset) {
-                    let auxiliary_table = recovery.parse_section_with_recovery(offset)?;
-                    // Traditional entries are authoritative in hybrid revisions.
-                    Self::merge_entries(&mut entries, auxiliary_table.entries);
-                }
+            if let Some(offset) = auxiliary_offset
+                && visited_offsets.insert(offset)
+            {
+                let auxiliary_table = recovery.parse_section_with_recovery(offset)?;
+                // Traditional entries are authoritative in hybrid revisions.
+                Self::merge_entries(&mut entries, auxiliary_table.entries);
             }
 
             Self::prefer_newer_trailer(&mut trailer, table.trailer);
@@ -220,11 +222,21 @@ impl<'input> XrefBuilder<'input> {
             let Some(previous_offset) = previous_offset else {
                 break;
             };
-            current_offset = previous_offset.try_number::<usize>(&PassthroughResolver)?;
+            current_offset = previous_offset;
         }
 
         let trailer = trailer.ok_or(ParserError::MissingStartXref)?;
         Ok(CrossReferenceTable::new(entries, trailer))
+    }
+
+    /// Reads a trailer's byte-offset link, such as `/Prev`; a missing or null one is absent.
+    fn trailer_offset(&self, trailer: &Trailer, key: &[u8]) -> Result<Option<usize>, ParserError> {
+        Ok(trailer
+            .dictionary
+            .get(key)
+            .map(|offset| self.objects.read::<Option<usize>>(offset))
+            .transpose()?
+            .flatten())
     }
 
     /// Adds entries that have not already been supplied by a newer section.
@@ -260,62 +272,6 @@ impl<'input> XrefBuilder<'input> {
             *preferred = Some(candidate);
         }
     }
-}
-
-/// Strictly parses a cross-reference section at exactly `offset`.
-///
-/// Traditional tables begin directly with the `xref` object syntax. Xref streams begin
-/// with an indirect-object header, so the initial identifier probe selects the correct
-/// parsing route without consuming state on failure. Both routes use
-/// [`PassthroughResolver`]: this stage parses section syntax but does not load arbitrary
-/// referenced objects.
-///
-/// The resulting object must be either a traditional table or a stream decodable as an
-/// xref stream. No surrounding search, offset adjustment, or entry repair occurs here.
-/// This strict primitive is visible within the crate so recovery can test candidate
-/// offsets without duplicating normal parsing behavior.
-///
-/// # Errors
-///
-/// Returns [`ParserError::InvalidXrefAtOffset`] when `offset` is outside the input or the
-/// parsed object is not an xref section. Object, stream, filter, and xref-stream decoding
-/// errors are otherwise propagated unchanged.
-pub(crate) fn parse_section_at(
-    parser: &PdfParser<'_>,
-    offset: usize,
-) -> Result<ParsedXrefSection, ParserError> {
-    let mut parser = parser
-        .at_offset(offset)
-        .map_err(|_| ParserError::InvalidXrefAtOffset { offset })?;
-    let object = match parser.parse_indirect_object_id() {
-        Some(identifier) => parser.parse_indirect_object_value(identifier, &PassthroughResolver)?,
-        None => parser.parse_object(&PassthroughResolver)?,
-    };
-
-    match object {
-        ObjectVariant::CrossReferenceTable(table) => Ok(ParsedXrefSection {
-            kind: XrefSectionKind::Traditional,
-            table,
-        }),
-        ObjectVariant::Stream(stream) => parse_stream_section(stream),
-        _ => Err(ParserError::InvalidXrefAtOffset { offset }),
-    }
-}
-
-/// Decodes one parsed stream as a cross-reference stream section.
-///
-/// Stream filters and `/W`/`/Index` field interpretation are delegated to the dedicated
-/// xref-stream parser. Tagging the result as [`XrefSectionKind::Stream`] preserves the
-/// source-specific validation policy for recovery.
-///
-/// # Errors
-///
-/// Propagates stream decoding and malformed xref-stream dictionary or entry errors.
-pub(crate) fn parse_stream_section(stream: StreamObject) -> Result<ParsedXrefSection, ParserError> {
-    Ok(ParsedXrefSection {
-        kind: XrefSectionKind::Stream,
-        table: crate::cross_reference_stream::parse_xref_stream(stream, &PassthroughResolver)?,
-    })
 }
 
 impl PdfParser<'_> {

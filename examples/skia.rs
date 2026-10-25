@@ -11,7 +11,7 @@ use glutin::{
 };
 use glutin_winit::DisplayBuilder;
 use pdf_canvas::canvas_backend::{CanvasBackend, Shader};
-use pdf_graphics::{BlendMode, PathFillType, color::Color, pdf_path::PdfPath};
+use pdf_graphics::{BlendMode, PathFillType, color::Color, pdf_path::PdfPath, size::Size};
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
 use raw_window_handle::HasWindowHandle;
 use skia_safe::{Color as SkiaColor, Surface};
@@ -52,6 +52,8 @@ pub enum AppError {
     PdfRendererError(#[from] pdf_renderer::PdfRendererError),
     #[error("Failed to draw PDF canvas overlay: {0}")]
     PdfCanvasError(#[from] pdf_canvas::error::PdfCanvasError),
+    #[error("Failed to map PDF page to the window: {0}")]
+    Viewport(#[from] pdf_canvas::ViewportError),
     #[error("Failed to create event loop: {0}")]
     EventLoop(#[from] winit::error::EventLoopError),
     #[error("Failed to create window: {0}")]
@@ -145,10 +147,16 @@ impl Application {
                 height,
             };
             if self.text_layout.is_none() {
-                self.text_layout = Some(
-                    self.renderer
-                        .render_with_text_layout(&mut backend, self.current_page)?,
-                );
+                let viewport = self
+                    .renderer
+                    .page(self.current_page)?
+                    .viewport(None, Size::new(width, height))?;
+                self.text_layout = Some(self.renderer.render_with_text_layout(
+                    &mut backend,
+                    self.current_page,
+                    &viewport,
+                    &self.renderer.default_optional_content(),
+                )?);
             } else {
                 self.renderer.render(&mut backend, self.current_page)?;
             }

@@ -168,11 +168,6 @@ source: SourceAnnotation | null,
 action: AnnotationAction | null, };
 
 /**
- * Owned `/OC` entry of an annotation: a single group, or a membership dictionary.
- */
-export type AnnotationOptionalContent = { "Group": OptionalContentGroupId } | { "Membership": OptionalContentMembership };
-
-/**
  * Acknowledgement of a committed in-memory edit, never a storage acknowledgement.
  */
 export type AnnotationReceipt = {
@@ -805,7 +800,7 @@ color: Color, };
  */
 export type InkAnnotation = {
 /**
- * The required ink list.
+ * The ink list; empty when `/InkList` is absent.
  */
 ink_list: InkList,
 /**
@@ -1030,7 +1025,7 @@ export type OcgStateEntry = "On" | "Off" | "Toggle" | { "Group": OcgTarget };
  */
 export type OcgTarget = { "Reference": {
 /**
- * PDF object number, distinct from Core annotation and field identities.
+ * PDF object number of the group's dictionary.
  */
 number: string,
 /**
@@ -1156,7 +1151,7 @@ export type OptionId = number;
  */
 export type OptionalContentGroupId = { "Object": {
 /**
- * PDF object number, distinct from Core annotation and field identities.
+ * PDF object number of the group's dictionary.
  */
 number: string, } } | { "Name": {
 /**
@@ -1165,12 +1160,15 @@ number: string, } } | { "Name": {
 name: Array<number>, } };
 
 /**
- * Owned `/OCMD` membership dictionary retained from the source PDF.
+ * The optional content an annotation or marked-content sequence depends on.
+ *
+ * Declared either as an `/OCMD` membership dictionary or as a single `/OCG`, which
+ * means the same as a membership of that one group under the default `AnyOn` policy.
  */
 export type OptionalContentMembership = {
 /**
- * The `/OCGs` member groups. A single group reference is retained as a
- * one-element list. Null members are dropped rather than retained.
+ * The member groups. A single group is retained as a one-element list. Null
+ * members are dropped rather than retained.
  */
 groups: Array<OptionalContentGroupId>,
 /**
@@ -1568,7 +1566,7 @@ struct_parent: string | null,
  * The optional `/OC` optional content membership governing display.
  * Defaulted on load so sidecars written before this entry still deserialize.
  */
-optional_content?: AnnotationOptionalContent,
+optional_content?: OptionalContentMembership,
 /**
  * The parsed subtype-specific payload.
  */

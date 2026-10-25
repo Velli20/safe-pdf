@@ -1,8 +1,6 @@
 use pdf_color_space::error::ColorSpaceError;
 use pdf_decode::DecodeError;
-use pdf_function::{
-    error::FunctionReadError, function_interpolation_error::FunctionInterpolationError,
-};
+use pdf_function::function_interpolation_error::FunctionInterpolationError;
 use pdf_object_reader::{ObjectReadError, object_error::ObjectError};
 use thiserror::Error;
 
@@ -21,8 +19,6 @@ pub enum PdfShadingError {
     ColorSpace(#[from] ColorSpaceError),
     #[error("{0}")]
     FunctionInterpolation(#[from] FunctionInterpolationError),
-    #[error("{0}")]
-    FunctionRead(#[from] FunctionReadError),
     #[error("{0}")]
     Decode(#[from] DecodeError),
     #[error("missing required dictionary entry '/{entry}'")]
@@ -49,15 +45,4 @@ impl From<PdfShadingError> for ObjectReadError {
             },
         }
     }
-}
-
-/// Failures while sampling a shading paint into pixels.
-#[derive(Debug, Error)]
-pub enum ShadingRasterError {
-    /// Geometry, gradient stops, dimensions, or raster data are invalid.
-    #[error("invalid shading raster input: {0}")]
-    InvalidInput(&'static str),
-    /// The requested buffer size overflows or its allocation fails.
-    #[error("shading raster allocation limit exceeded")]
-    ResourceLimit,
 }

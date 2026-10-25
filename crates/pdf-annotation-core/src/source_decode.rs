@@ -2,149 +2,104 @@
 //!
 //! Parsing is strict for any entry that is present: malformed values fail the
 //! annotation. Referenced resources are retained as leaves, never fetched.
+use std::sync::Arc;
+
 use crate::error::SourceDecodeError;
 use crate::metadata::AnnotationFlags;
 use crate::pdf_data::{
     AnnotationBorder, AppearanceCharacteristics, AppearanceDictionary, BorderEffect,
-    BorderEffectStyle, BorderStyle, BorderStyleName, CaretAnnotation, CircleAnnotation,
-    FreeTextAnnotation, HighlightAnnotation, InkAnnotation, LineAnnotation, LinkAnnotation,
-    NativeAnnotation, PolyLineAnnotation, PolygonAnnotation, PopupAnnotation, SourceAnnotation,
-    SquareAnnotation, SquigglyAnnotation, StampAnnotation, StrikeOutAnnotation, TextAnnotation,
-    UnderlineAnnotation, WidgetAnnotation,
+    BorderEffectStyle, BorderStyle, BorderStyleName, NativeAnnotation, PageAnnotations,
+    SourceAnnotation,
 };
-use pdf_graphics::{DashPattern, color::Color, rect::Rect};
+use pdf_graphics::{DashPattern, rect::Rect};
 use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-    object_lookup::ObjectLookupExt,
-    object_resolver::{DanglingAsNullResolver, ObjectResolver},
+    ArrayContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_kind::ObjectKind,
     object_variant::ObjectVariant,
 };
+use pdf_optional_content::OptionalContentMembership;
 
 pub(crate) type DecodeResult<T> = Result<T, SourceDecodeError>;
 
 impl FromPdfObject for SourceAnnotation {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let context = context.dictionary()?;
-        let dictionary = context.dictionary();
-        // Annotations often carry stale references, which read as null (ISO 32000 §7.3.10).
-        let objects = &DanglingAsNullResolver(context.source());
+        let object = context.object();
+        let mut dictionary = context.dictionary()?;
         // Some PDFs omit `/Type` on annotation dictionaries even though the
         // entry is nominally expected to be `/Annot`, so only validate it when
         // the key is actually present.
-        if let Some(annotation_type) = dictionary.optional_bytes(b"Type", objects)? {
-            match annotation_type {
-                b"Annot" => {}
-                other => {
-                    return Err(SourceDecodeError::InvalidEntry {
-                        entry: b"Type",
-                        reason: format!("expected /Annot, found /{other:?}"),
-                    }
-                    .into());
-                }
+        if let Some(annotation_type) = dictionary.optional::<Arc<[u8]>>(b"Type")?
+            && annotation_type.as_ref() != b"Annot"
+        {
+            return Err(SourceDecodeError::InvalidEntry {
+                entry: b"Type",
+                reason: format!("expected /Annot, found /{annotation_type:?}"),
             }
+            .into());
         }
-
-        // `/Subtype` identifies the concrete annotation kind and is required
-        // for dispatching to the subtype-specific parser.
-        let subtype = dictionary
-            .get_or_err(b"Subtype")?
-            .try_bytes(objects)?
-            .to_vec();
-
-        let rect = dictionary
-            .get(b"Rect")
-            .map(|value| {
-                // `/Rect` is `[left, bottom, right, top]`; keep the source
-                // edges as-is so inverted rectangles survive decoding.
-                value.try_array_of::<f32, 4>(objects).map(|arr| {
-                    let [left, bottom, right, top] = arr;
-                    Rect {
-                        left,
-                        top,
-                        right,
-                        bottom,
-                    }
-                })
-            })
-            .transpose()?;
-
-        let kind = NativeAnnotation::from_dictionary(&subtype, dictionary, objects)?;
-
-        // `/Contents` is descriptive text only; like PDFium, a malformed value (e.g. an
-        // integer) is treated as absent rather than rejecting the annotation.
-        let contents = dictionary
-            .optional_bytes_vec(b"Contents", objects)
-            .ok()
-            .flatten();
-        let name = dictionary.optional_bytes_vec(b"NM", objects)?;
-        let flags = dictionary
-            .optional_number::<i32>(b"F", objects)?
-            .map(AnnotationFlags::from_bits_retain);
-        let appearance_state = dictionary
-            .get(b"AS")
-            .map(|value| value.try_bytes(objects).map(Vec::from))
-            .transpose()?;
-        let struct_parent = dictionary.optional_number::<u64>(b"StructParent", objects)?;
-        let optional_content =
-            crate::source_decode_optional_content::optional_content(dictionary, objects)?;
-
-        let border = AnnotationBorder::from_dictionary(dictionary, objects)?;
-        let color = color(dictionary, b"C", objects)?;
-
-        let opacity = dictionary
-            .optional_number::<f64>(b"CA", objects)?
-            .filter(|v| v.is_finite())
-            .unwrap_or(1.0)
-            .clamp(0.0, 1.0);
-        let appearance = AppearanceDictionary::from_dictionary(dictionary, objects)?;
 
         Ok(Self {
             id: 0,
             object_number: None,
-            opacity,
-            subtype,
-            rect,
-            contents,
-            name,
-            flags,
-            appearance,
-            appearance_state,
-            border,
-            color,
-            struct_parent,
-            optional_content,
-            kind,
+            opacity: dictionary
+                .optional::<f64>(b"CA")?
+                .filter(|v| v.is_finite())
+                .unwrap_or(1.0)
+                .clamp(0.0, 1.0),
+            // `/Subtype` identifies the concrete annotation kind.
+            subtype: dictionary.required::<Arc<[u8]>>(b"Subtype")?.to_vec(),
+            // `/Rect` is `[left, bottom, right, top]`; keep the source edges
+            // as-is so inverted rectangles survive decoding.
+            rect: dictionary
+                .optional::<[f32; 4]>(b"Rect")?
+                .map(|[left, bottom, right, top]| Rect {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                }),
+            // `/Contents` is descriptive text only; like PDFium, a malformed value (e.g. an
+            // integer) is treated as absent rather than rejecting the annotation.
+            contents: dictionary
+                .lenient::<Arc<[u8]>>(b"Contents")
+                .map(|bytes| bytes.to_vec()),
+            name: dictionary
+                .optional::<Arc<[u8]>>(b"NM")?
+                .map(|bytes| bytes.to_vec()),
+            flags: dictionary
+                .optional::<i32>(b"F")?
+                .map(AnnotationFlags::from_bits_retain),
+            appearance: dictionary.optional(b"AP")?,
+            appearance_state: dictionary
+                .optional::<Arc<[u8]>>(b"AS")?
+                .map(|bytes| bytes.to_vec()),
+            border: dictionary.optional(b"Border")?,
+            color: dictionary.optional(b"C")?,
+            struct_parent: dictionary.optional(b"StructParent")?,
+            optional_content: dictionary.optional::<OptionalContentMembership>(b"OC")?,
+            kind: dictionary.read(object)?,
         })
     }
 }
 
-impl SourceAnnotation {
-    /// Read page annotations and assign stable page-local identifiers.
-    pub fn from_page_dictionary<A: ObjectAccess + ?Sized>(
-        context: &mut DictionaryContext<'_, A>,
-    ) -> ReadResult<Option<Vec<Self>>> {
-        let Some(entry) = context.dictionary().get(b"Annots") else {
-            return Ok(None);
+/// Reads a page's `/Annots` array, assigning stable page-local identifiers.
+///
+/// `/Annots` that resolves to anything but an array (e.g. a reference whose object
+/// number was reused by a later update) holds no annotations.
+impl FromPdfObject for PageAnnotations {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let ObjectVariant::Array(_) = context.object() else {
+            return Ok(Self(None));
         };
-        // `/Annots` that resolves to anything but an array (e.g. a reference whose object
-        // number was reused by a later update) holds no annotations.
-        let resolved = match context.resolve(entry) {
-            Ok(resolved) => resolved,
-            Err(ObjectReadError::MissingObject { .. }) => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        let ObjectVariant::Array(annots) = resolved.value() else {
-            return Ok(None);
-        };
-        let mut annotations = Vec::with_capacity(annots.len());
-        for value in annots.iter() {
-            // Stale entries in `/Annots` read as null (ISO 32000 §7.3.10).
-            let objects = DanglingAsNullResolver(context.source());
-            if value.is_null(&objects)? {
+        let mut annots = context.array()?;
+        let mut annotations = Vec::with_capacity(annots.array().len());
+        for value in annots.array() {
+            // Stale entries in `/Annots` resolve to null (ISO 32000 §7.3.10).
+            let resolved = annots.resolve(value)?;
+            if resolved.kind() == ObjectKind::Null {
                 continue;
             }
 
-            let dictionary = value.try_dictionary(&objects)?;
+            let dictionary = resolved.value().dictionary()?;
             if dictionary.get(b"Subtype").is_none() {
                 continue;
             }
@@ -155,7 +110,7 @@ impl SourceAnnotation {
                     .and_then(|number| u64::try_from(number).ok()),
             };
             let defines_field = dictionary.get(b"T").is_some();
-            let mut annotation: Self = context.read(value)?;
+            let mut annotation: SourceAnnotation = annots.read(value)?;
             // A merged field/widget with its own partial name is a terminal
             // field. Its Parent may be a nonterminal name-tree node, not the
             // owner of a shared value; grouping by that parent merges siblings.
@@ -167,158 +122,94 @@ impl SourceAnnotation {
             annotation.object_number = object_number;
             annotations.push(annotation);
         }
-        Ok(Some(annotations))
+        Ok(Self(Some(annotations)))
     }
 }
 
-impl FromPdfObject for NativeAnnotation {
+/// Reads `/AP` normal-state names; drawing streams are never decoded.
+impl FromPdfObject for AppearanceDictionary {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(SourceAnnotation::from_pdf_object(context)?.kind)
-    }
-}
-
-macro_rules! native_subtype_decoder {
-    ($type:ident, $variant:ident) => {
-        impl FromPdfObject for $type {
-            fn from_pdf_object(
-                context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
-            ) -> ReadResult<Self> {
-                match SourceAnnotation::from_pdf_object(context)?.kind {
-                    NativeAnnotation::$variant(value) => Ok(*value),
-                    _ => Err(SourceDecodeError::InvalidEntry {
-                        entry: b"Subtype",
-                        reason: concat!("expected /", stringify!($variant), " annotation").into(),
-                    }
-                    .into()),
-                }
-            }
-        }
-    };
-}
-
-native_subtype_decoder!(TextAnnotation, Text);
-native_subtype_decoder!(LinkAnnotation, Link);
-native_subtype_decoder!(FreeTextAnnotation, FreeText);
-native_subtype_decoder!(LineAnnotation, Line);
-native_subtype_decoder!(SquareAnnotation, Square);
-native_subtype_decoder!(CircleAnnotation, Circle);
-native_subtype_decoder!(PolygonAnnotation, Polygon);
-native_subtype_decoder!(PolyLineAnnotation, PolyLine);
-native_subtype_decoder!(HighlightAnnotation, Highlight);
-native_subtype_decoder!(UnderlineAnnotation, Underline);
-native_subtype_decoder!(SquigglyAnnotation, Squiggly);
-native_subtype_decoder!(StrikeOutAnnotation, StrikeOut);
-native_subtype_decoder!(StampAnnotation, Stamp);
-native_subtype_decoder!(CaretAnnotation, Caret);
-native_subtype_decoder!(InkAnnotation, Ink);
-native_subtype_decoder!(PopupAnnotation, Popup);
-native_subtype_decoder!(WidgetAnnotation, Widget);
-
-impl AppearanceDictionary {
-    /// Reads the normal-state names from `/AP`; drawing streams are never decoded.
-    pub(crate) fn from_dictionary(
-        dictionary: &pdf_object_reader::dictionary::Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Option<Self>> {
-        let Some(appearance) = dictionary.optional_dictionary(b"AP", objects)? else {
-            return Ok(None);
-        };
-        let Some(normal) = appearance.get(b"N") else {
-            return Ok(Some(Self {
+        let mut appearance = context.dictionary()?;
+        let Some(normal) = appearance.resolve_entry(b"N")? else {
+            return Ok(Self {
                 normal_states: Vec::new(),
-            }));
+            });
         };
-        let states = match objects.resolve_object(normal)? {
+        let states = match normal.value() {
             ObjectVariant::Dictionary(states) => states,
             ObjectVariant::Stream(_) | ObjectVariant::Null => {
-                return Ok(Some(Self {
+                return Ok(Self {
                     normal_states: Vec::new(),
-                }));
+                });
             }
             _ => {
                 return Err(SourceDecodeError::InvalidEntry {
                     entry: b"N",
                     reason: "expected a drawing stream or state dictionary".into(),
-                });
+                }
+                .into());
             }
         };
         let mut normal_states = Vec::with_capacity(states.len());
         for (name, value) in states.iter() {
-            if value.is_null(objects)? {
-                continue;
+            match appearance.resolve(value)?.kind() {
+                ObjectKind::Null => continue,
+                ObjectKind::Stream => normal_states.push(name.to_vec()),
+                _ => {
+                    return Err(SourceDecodeError::InvalidEntry {
+                        entry: b"N",
+                        reason: "expected a stream for each normal state".into(),
+                    }
+                    .into());
+                }
             }
-            if !matches!(objects.resolve_object(value)?, ObjectVariant::Stream(_)) {
-                return Err(SourceDecodeError::InvalidEntry {
-                    entry: b"N",
-                    reason: "expected a stream for each normal state".into(),
-                });
-            }
-            normal_states.push(name.to_vec());
         }
-        Ok(Some(Self { normal_states }))
+        Ok(Self { normal_states })
     }
 }
 
-impl AppearanceCharacteristics {
-    pub(crate) fn from_dictionary(
-        dictionary: &pdf_object_reader::dictionary::Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Option<Self>> {
-        let Some(dictionary) = dictionary.optional_dictionary(b"MK", objects)? else {
-            return Ok(None);
-        };
-        let rotation = dictionary.optional_number::<i32>(b"R", objects)?;
-        let border_color = color(dictionary, b"BC", objects)?;
-        let background_color = color(dictionary, b"BG", objects)?;
-        let normal_caption = dictionary.optional_bytes_vec(b"CA", objects)?;
-        let rollover_caption = dictionary.optional_bytes_vec(b"RC", objects)?;
-        let alternate_caption = dictionary.optional_bytes_vec(b"AC", objects)?;
-
-        Ok(Some(Self {
-            rotation,
-            border_color,
-            background_color,
-            normal_caption,
-            rollover_caption,
-            alternate_caption,
-        }))
+/// Reads a widget's `/MK` appearance characteristics dictionary.
+impl FromPdfObject for AppearanceCharacteristics {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
+        Ok(Self {
+            rotation: dictionary.optional(b"R")?,
+            border_color: dictionary.optional(b"BC")?,
+            background_color: dictionary.optional(b"BG")?,
+            normal_caption: dictionary
+                .optional::<Arc<[u8]>>(b"CA")?
+                .map(|bytes| bytes.to_vec()),
+            rollover_caption: dictionary
+                .optional::<Arc<[u8]>>(b"RC")?
+                .map(|bytes| bytes.to_vec()),
+            alternate_caption: dictionary
+                .optional::<Arc<[u8]>>(b"AC")?
+                .map(|bytes| bytes.to_vec()),
+        })
     }
 }
 
-impl AnnotationBorder {
-    pub(crate) fn from_dictionary(
-        dictionary: &pdf_object_reader::dictionary::Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Option<Self>> {
-        let Some(value) = dictionary.optional_array(b"Border", objects)? else {
-            return Ok(None);
-        };
-
-        let [horizontal_radius, vertical_radius, width, rest @ ..] = value.as_slice() else {
+/// Reads a `/Border` array `[horizontal_radius vertical_radius width dash_array?]`.
+impl FromPdfObject for AnnotationBorder {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut array = context.array()?;
+        let [_, _, _, rest @ ..] = array.array() else {
             return Err(SourceDecodeError::InvalidEntry {
                 entry: b"Border",
                 reason: "expected an array with at least 3 numbers".to_owned(),
-            });
+            }
+            .into());
         };
-
-        let horizontal_radius = horizontal_radius.try_number::<f32>(objects)?;
-        let vertical_radius = vertical_radius.try_number::<f32>(objects)?;
-        let width = width.try_number::<f32>(objects)?;
+        let [horizontal_radius, vertical_radius, width] = array.read_array::<f32, 3>()?;
 
         // The dash array is nominally nested, but some writers flatten it into the
         // `/Border` array itself.
-        let intervals = match rest {
-            [] => Vec::new(),
-            [first, ..] => match first.try_array(objects) {
-                Ok(dash_array) => dash_array
-                    .iter()
-                    .map(|value| value.try_number::<f32>(objects))
-                    .collect::<Result<Vec<_>, _>>()?,
-                Err(_) => rest
-                    .iter()
-                    .map(|value| value.try_number::<f32>(objects))
-                    .collect::<Result<Vec<_>, _>>()?,
-            },
+        let intervals: Vec<f32> = match rest.first() {
+            None => Vec::new(),
+            Some(first) if array.resolve(first)?.kind() == ObjectKind::Array => {
+                array.read(first)?
+            }
+            Some(_) => ArrayContext::new(rest, array.access()).read_all()?,
         };
         // `/Border` carries no dash phase.
         let dash_pattern =
@@ -327,88 +218,61 @@ impl AnnotationBorder {
                 reason: error.to_string(),
             })?;
 
-        Ok(Some(Self {
+        Ok(Self {
             horizontal_radius,
             vertical_radius,
             width,
             dash_pattern,
-        }))
-    }
-}
-
-/// Decodes an optional device color array (gray, RGB, or CMYK) into sRGB.
-///
-/// An empty array means transparent per the PDF specification and is retained
-/// with alpha `0.0`. Nonfinite components and unsupported component counts fail
-/// the entry.
-pub(crate) fn color(
-    dictionary: &pdf_object_reader::dictionary::Dictionary,
-    key: &'static [u8],
-    objects: &dyn ObjectResolver,
-) -> DecodeResult<Option<Color>> {
-    let Some(value) = dictionary.get(key) else {
-        return Ok(None);
-    };
-    let components = value.try_vec_of::<f32>(objects)?;
-    if components.iter().any(|v| !v.is_finite()) {
-        return Err(SourceDecodeError::InvalidEntry {
-            entry: key,
-            reason: "color components must be finite".into(),
-        });
-    }
-    if components.is_empty() {
-        return Ok(Some(Color::TRANSPARENT));
-    }
-    Color::from_device_components(&components)
-        .map(Some)
-        .ok_or_else(|| SourceDecodeError::InvalidEntry {
-            entry: key,
-            reason: format!(
-                "expected one, three, or four color components, found {}",
-                components.len()
-            ),
         })
-}
-
-impl BorderStyle {
-    pub(crate) fn from_dictionary(
-        dictionary: &pdf_object_reader::dictionary::Dictionary,
-        key: &'static [u8],
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Option<Self>> {
-        let Some(dictionary) = dictionary.optional_dictionary(key, objects)? else {
-            return Ok(None);
-        };
-        let width = dictionary.optional_number::<f32>(b"W", objects)?;
-        let style = dictionary
-            .get(b"S")
-            .map(|value| value.try_bytes(objects).map(BorderStyleName::from))
-            .transpose()?;
-        let dash_pattern = dictionary.optional_vec_of::<f32>(b"D", objects)?;
-
-        Ok(Some(Self {
-            width,
-            style,
-            dash_pattern,
-        }))
     }
 }
 
-impl BorderEffect {
-    pub(crate) fn from_dictionary(
-        dictionary: &pdf_object_reader::dictionary::Dictionary,
-        key: &'static [u8],
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Option<Self>> {
-        let Some(dictionary) = dictionary.optional_dictionary(key, objects)? else {
-            return Ok(None);
-        };
-        let style = dictionary
-            .get(b"S")
-            .map(|value| value.try_bytes(objects).map(BorderEffectStyle::from))
-            .transpose()?;
-        let intensity = dictionary.optional_number::<f64>(b"I", objects)?;
+/// Reads a `/BS` border style dictionary.
+impl FromPdfObject for BorderStyle {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
+        Ok(Self {
+            width: dictionary.optional(b"W")?,
+            style: dictionary.optional(b"S")?,
+            dash_pattern: dictionary.optional(b"D")?,
+        })
+    }
+}
 
-        Ok(Some(Self { style, intensity }))
+/// Reads a `/BE` border effect dictionary.
+impl FromPdfObject for BorderEffect {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
+        Ok(Self {
+            style: dictionary.optional(b"S")?,
+            intensity: dictionary.optional(b"I")?,
+        })
+    }
+}
+
+/// Reads a `/BS` `/S` border style name, preserving unknown names.
+impl FromPdfObject for BorderStyleName {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let name = context.decode::<Arc<[u8]>>()?;
+        Ok(match &*name {
+            b"S" => Self::Solid,
+            b"D" => Self::Dashed,
+            b"B" => Self::Beveled,
+            b"I" => Self::Inset,
+            b"U" => Self::Underline,
+            other => Self::Unknown(Vec::from(other)),
+        })
+    }
+}
+
+/// Reads a `/BE` `/S` border effect name, preserving unknown names.
+impl FromPdfObject for BorderEffectStyle {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let name = context.decode::<Arc<[u8]>>()?;
+        Ok(match &*name {
+            b"S" => Self::None,
+            b"C" => Self::Cloudy,
+            other => Self::Unknown(Vec::from(other)),
+        })
     }
 }

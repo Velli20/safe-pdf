@@ -2,8 +2,7 @@ use std::str::FromStr;
 
 use crate::error::ParserError;
 use pdf_object_reader::{
-    object_resolver::ObjectResolver, object_variant::ObjectVariant, pdf_string::PdfString,
-    string_kind::StringKind,
+    object_variant::ObjectVariant, pdf_string::PdfString, string_kind::StringKind,
 };
 use pdf_tokenizer::{PdfToken, Tokenizer};
 
@@ -285,10 +284,7 @@ impl<'a> PdfParser<'a> {
         Ok(())
     }
 
-    fn parse_object_internal(
-        &mut self,
-        objects: &dyn ObjectResolver,
-    ) -> Result<ObjectVariant, ParserError> {
+    fn parse_object_internal(&mut self) -> Result<ObjectVariant, ParserError> {
         self.skip_whitespace_and_comments();
 
         let Some(token) = self.tokenizer.peek() else {
@@ -329,17 +325,13 @@ impl<'a> PdfParser<'a> {
                         self.read_keyword(NULL_LITERAL)?;
                         ObjectVariant::Null
                     }
-                    b'x' => ObjectVariant::CrossReferenceTable(
-                        self.parse_cross_reference_table(objects)?,
-                    ),
+                    b'x' => ObjectVariant::CrossReferenceTable(self.parse_cross_reference_table()?),
                     other => {
                         return Err(ParserError::InvalidToken(char::from(other)));
                     }
                 }
             }
-            PdfToken::DoubleLeftAngleBracket => {
-                ObjectVariant::Dictionary(self.parse_dictionary(objects)?)
-            }
+            PdfToken::DoubleLeftAngleBracket => ObjectVariant::Dictionary(self.parse_dictionary()?),
             PdfToken::LeftAngleBracket => {
                 PdfString::from(self.parse_hex_string()?, StringKind::Hexadecimal)
             }
@@ -348,7 +340,7 @@ impl<'a> PdfParser<'a> {
             PdfToken::Minus => self.parse_number()?,
             PdfToken::Plus => self.parse_number()?,
             PdfToken::Period => self.parse_number()?,
-            PdfToken::LeftSquareBracket => ObjectVariant::Array(self.parse_array(objects)?),
+            PdfToken::LeftSquareBracket => ObjectVariant::Array(self.parse_array()?),
             PdfToken::LeftParenthesis => {
                 PdfString::from(self.parse_literal_string()?, StringKind::Literal)
             }
@@ -367,16 +359,13 @@ impl<'a> PdfParser<'a> {
     ///
     /// Dispatches to the appropriate sub-parser based on the next token. Enforces a maximum
     /// nesting depth to guard against deeply recursive structures.
-    pub fn parse_object(
-        &mut self,
-        objects: &dyn ObjectResolver,
-    ) -> Result<ObjectVariant, ParserError> {
+    pub fn parse_object(&mut self) -> Result<ObjectVariant, ParserError> {
         // Prevent excessive nesting depth.
         if self.current_nesting_depth >= Self::MAX_NESTING_DEPTH {
             return Err(ParserError::NestingDepthExceeded);
         }
         self.current_nesting_depth = self.current_nesting_depth.saturating_add(1);
-        let result = self.parse_object_internal(objects);
+        let result = self.parse_object_internal();
         self.current_nesting_depth = self.current_nesting_depth.saturating_sub(1);
         result
     }
@@ -385,7 +374,6 @@ impl<'a> PdfParser<'a> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use pdf_object_reader::object_resolver::PassthroughResolver;
 
     use super::*;
 
@@ -439,7 +427,7 @@ mod tests {
         let input = b"%PDF-1.3
  ";
         let mut parser = PdfParser::from(input.as_slice());
-        let result = parser.parse_object(&PassthroughResolver);
+        let result = parser.parse_object();
         assert!(result.is_ok());
     }
 
@@ -722,7 +710,7 @@ mod tests {
 
         for (input, expected) in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let value = parser.parse_object(&PassthroughResolver).unwrap();
+            let value = parser.parse_object().unwrap();
             assert_eq!(
                 value,
                 ObjectVariant::Boolean(expected),
@@ -738,7 +726,7 @@ mod tests {
 
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_object(&PassthroughResolver);
+            let result = parser.parse_object();
             assert!(
                 result.is_err(),
                 "Expected error for invalid input `{}`",
@@ -764,7 +752,7 @@ mod tests {
 
         for input in valid_inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_object(&PassthroughResolver);
+            let result = parser.parse_object();
             assert_eq!(
                 result,
                 Ok(ObjectVariant::Null),
@@ -786,7 +774,7 @@ mod tests {
         ];
         for input in invalid_inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_object(&PassthroughResolver);
+            let result = parser.parse_object();
             assert!(
                 result.is_err(),
                 "Expected error for invalid input `{}`",
@@ -799,7 +787,7 @@ mod tests {
     fn parse_object_reports_untokenized_byte_instead_of_end_of_file() {
         for input in [b" }".as_slice(), b"{"] {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_object(&PassthroughResolver);
+            let result = parser.parse_object();
             assert!(
                 matches!(result, Err(ParserError::UnexpectedTokenAt { .. })),
                 "Expected an error for `{}`, got {result:?}",
@@ -808,9 +796,6 @@ mod tests {
         }
 
         let mut parser = PdfParser::from(b"  ".as_slice());
-        assert_eq!(
-            parser.parse_object(&PassthroughResolver),
-            Ok(ObjectVariant::EndOfFile)
-        );
+        assert_eq!(parser.parse_object(), Ok(ObjectVariant::EndOfFile));
     }
 }

@@ -4,8 +4,7 @@ use crate::{font::GlyphName, pdf::SimpleEncoding};
 use std::{borrow::Cow, convert::TryFrom, sync::Arc};
 
 use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ReadResult,
-    object_variant::ObjectVariant,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
 };
 
 use crate::{base_encoding::BaseEncoding, error::FontError};
@@ -48,16 +47,6 @@ impl Encoding {
         };
         Ok(Self { names })
     }
-
-    /// Reads the optional `/Encoding` name or dictionary from a font dictionary.
-    ///
-    /// Missing or null entries return `None`. Invalid entries retain contextual
-    /// reader errors; unsupported base names are reported as font error sources.
-    pub fn from_dictionary(
-        context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
-    ) -> ReadResult<Option<Self>> {
-        context.optional(b"Encoding")
-    }
 }
 
 impl TryFrom<BaseEncoding> for Encoding {
@@ -72,7 +61,7 @@ impl TryFrom<BaseEncoding> for Encoding {
 impl FromPdfObject for Encoding {
     /// Reads a base-encoding name or an encoding dictionary in the active traversal.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        if !matches!(context.object().value(), ObjectVariant::Dictionary(_)) {
+        if !matches!(context.object(), ObjectVariant::Dictionary(_)) {
             let name = Arc::<[u8]>::from_pdf_object(context)?;
             return Ok(Self::try_from(BaseEncoding::from(name.as_ref()))?);
         }
@@ -116,32 +105,32 @@ impl FromPdfObject for EncodingDifferences {
     }
 }
 
-/// Normalizes a simple encoding, leaving symbolic fonts to use their built-in names.
-pub(crate) fn simple_encoding(
-    context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
-    symbolic: bool,
-) -> ReadResult<SimpleEncoding> {
-    let encoding = Encoding::from_dictionary(context)?.unwrap_or_else(|| {
-        if symbolic {
-            Encoding { names: Vec::new() }
-        } else {
-            Encoding::default()
+impl SimpleEncoding {
+    /// Normalizes a font's `/Encoding`, leaving symbolic fonts without one to use their
+    /// built-in names.
+    pub(crate) fn new(encoding: Option<Encoding>, symbolic: bool) -> Self {
+        let encoding = encoding.unwrap_or_else(|| {
+            if symbolic {
+                Encoding { names: Vec::new() }
+            } else {
+                Encoding::default()
+            }
+        });
+        let differences = encoding
+            .names
+            .iter()
+            .enumerate()
+            .filter_map(|(index, name)| {
+                u8::try_from(index)
+                    .ok()
+                    .map(|code| (code, GlyphName(Arc::from(name.as_ref()))))
+            })
+            .collect();
+        Self {
+            base: BaseEncoding::BuiltIn,
+            differences,
         }
-    });
-    let differences = encoding
-        .names
-        .iter()
-        .enumerate()
-        .filter_map(|(index, name)| {
-            u8::try_from(index)
-                .ok()
-                .map(|code| (code, GlyphName(Arc::from(name.as_ref()))))
-        })
-        .collect();
-    Ok(SimpleEncoding {
-        base: BaseEncoding::BuiltIn,
-        differences,
-    })
+    }
 }
 
 /// Borrows static glyph names until a PDF difference replaces them.

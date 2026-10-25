@@ -1,5 +1,4 @@
 //! Optional content group state retained from `SetOCGState` actions.
-use crate::error::SourceDecodeError;
 
 /// Owned optional content group target of a `SetOCGState` `/State` element.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -9,7 +8,7 @@ pub enum OcgTarget {
     /// A group reference into the containing source PDF. The referenced group
     /// resource is not resolved, preserving the reference identity.
     Reference {
-        /// PDF object number, distinct from Core annotation and field identities.
+        /// PDF object number of the group's dictionary.
         #[serde(with = "crate::wire")]
         #[cfg_attr(feature = "typescript", ts(type = "string"))]
         number: u64,
@@ -41,22 +40,4 @@ pub enum OcgStateEntry {
     Toggle,
     /// A group governed by the preceding operation.
     Group(OcgTarget),
-}
-
-/// Reads a `/State` operation name; group targets are decoded from the objects
-/// that follow their operation and never reach this conversion.
-impl TryFrom<&[u8]> for OcgStateEntry {
-    type Error = SourceDecodeError;
-
-    fn try_from(name: &[u8]) -> Result<Self, Self::Error> {
-        match name {
-            b"ON" => Ok(Self::On),
-            b"OFF" => Ok(Self::Off),
-            b"Toggle" => Ok(Self::Toggle),
-            other => Err(SourceDecodeError::InvalidEntry {
-                entry: b"State",
-                reason: format!("unsupported optional content operation '{other:?}'"),
-            }),
-        }
-    }
 }

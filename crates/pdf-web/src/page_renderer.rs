@@ -5,11 +5,10 @@ use crate::{
     annotation_overlay::{PreparedAnnotationOverlay, WebAnnotationOverlay},
     error::{WebError as Error, WebResult},
 };
-use pdf_document::page::PdfPage;
+use pdf_document::document::PdfDocument;
 use pdf_graphics::size::Size;
 use pdf_graphics_web::WebCanvasBackend;
-use pdf_renderer::PageTextLayout;
-use pdf_text_engine::FontSystem;
+use pdf_renderer::{PageTextLayout, PdfRenderer};
 use std::sync::Arc;
 
 /// Results of one page-content pass and independently prepared annotation presentation.
@@ -24,24 +23,29 @@ pub struct WebPageOutput {
     pub annotations: PreparedAnnotationOverlay,
 }
 
-/// Thin orchestration around PdfCanvas; no new content-stream or font rendering engine.
+/// Thin orchestration around PdfRenderer; no new content-stream or font rendering engine.
 pub struct WebPageRenderer {
-    fonts: Arc<FontSystem>,
+    renderer: PdfRenderer,
 }
 
 impl WebPageRenderer {
-    /// Uses the application's shared font system for page content.
-    pub fn new(fonts: Arc<FontSystem>) -> Self {
-        Self { fonts }
+    /// Renders page content of the document `renderer` owns.
+    pub fn new(renderer: PdfRenderer) -> Self {
+        Self { renderer }
     }
 
-    /// Renders only page content via PdfCanvas, collects its existing TextGlyph output,
+    /// Returns the document whose pages this renderer draws.
+    pub fn document(&self) -> &PdfDocument {
+        self.renderer.document()
+    }
+
+    /// Renders only page content via PdfRenderer, collects its existing TextGlyph output,
     /// and prepares annotations separately through the supplied overlay layer.
     ///
     /// Uses the shared content-and-text pass; annotation preparation produces native
     /// models only. Both passes use the supplied viewport.
     /// Finishes with balanced backend state, retaining no backend borrow in the output.
-    /// `page_index` selects the Core page in `overlay`; `page` supplies PDF content.
+    /// `page_index` selects both the document page and the Core page in `overlay`.
     /// `content_revision` identifies the text layout independently of annotation edits.
     /// `backend` and `viewport` must describe the same device layout.
     ///
@@ -51,7 +55,6 @@ impl WebPageRenderer {
     pub fn render(
         &self,
         page_index: u32,
-        page: &PdfPage,
         content_revision: u32,
         backend: &mut WebCanvasBackend,
         viewport: &WebViewport,
@@ -65,11 +68,12 @@ impl WebPageRenderer {
             ));
         }
         let result = (|| {
-            let text_layout = Arc::new(pdf_renderer::render_page_content_with_text_layout(
+            let index = usize::try_from(page_index).map_err(|_| Error::ResourceLimit)?;
+            let text_layout = Arc::new(self.renderer.render_with_text_layout(
                 backend,
-                page,
+                index,
                 viewport.page(),
-                Arc::clone(&self.fonts),
+                overlay.optional_content(),
             )?);
             backend.finish_page()?;
             let annotations = overlay.prepare(page_index, viewport)?;
@@ -102,12 +106,13 @@ mod tests {
         WebPageOutput,
         WebCanvasBackend,
         WebAnnotationOverlay,
-        pdf_document::document::PdfDocument,
+        WebPageRenderer,
     ) {
         let document = pdf_document::reader::PdfReader
             .read_from_bytes(bytes, None)
             .unwrap();
-        let page = document.pages.first().unwrap();
+        let renderer = WebPageRenderer::new(PdfRenderer::new(document));
+        let page = renderer.document().pages.first().unwrap();
         let canvas = web_sys::window()
             .unwrap()
             .document()
@@ -128,10 +133,10 @@ mod tests {
         .unwrap();
         let mut backend =
             WebCanvasBackend::new(canvas, *viewport.canvas(), WebCanvasOptions::default()).unwrap();
-        let mut overlay = WebAnnotationOverlay::new(&document).unwrap();
-        let output = WebPageRenderer::new(pdf_text_engine::bundled_font_system())
-            .render(0, page, 1, &mut backend, &viewport, &mut overlay)
+        let mut overlay = WebAnnotationOverlay::new(renderer.document()).unwrap();
+        let output = renderer
+            .render(0, 1, &mut backend, &viewport, &mut overlay)
             .unwrap();
-        (output, backend, overlay, document)
+        (output, backend, overlay, renderer)
     }
 }

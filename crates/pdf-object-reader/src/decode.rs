@@ -1,15 +1,19 @@
 //! Extensible typed decoding with one object-bound context per invocation.
 
+use num_traits::FromPrimitive;
+use pdf_graphics::{LineCap, LineJoin, MaskMode, TextRenderingMode};
+
 use crate::context::ObjectContext;
 use crate::error::{ObjectReadError, ReadResult};
+use crate::object_error::ObjectError;
 use crate::object_kind::ObjectKind;
 use crate::object_variant::ObjectVariant;
 use crate::pdf_array::PdfArray;
-use crate::pdf_object::PdfObject;
+use crate::pdf_name::PdfName;
 use crate::pdf_string::PdfString;
 use crate::reader::ObjectAccess;
-use crate::resolved_object::ResolvedObject;
 use crate::{dictionary::Dictionary, stream::StreamObject};
+use pdf_graphics::{color::Color, interval::Interval, rect::Rect, transform::Transform};
 
 /// Decodes a resolved PDF value using one object-bound context.
 ///
@@ -61,7 +65,7 @@ macro_rules! value_decoder {
             fn from_pdf_object(
                 context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
             ) -> ReadResult<Self> {
-                match context.object().value() {
+                match context.object() {
                     ObjectVariant::$variant(value) => Ok(value.clone()),
                     _ => Err(ObjectReadError::TypeMismatch {
                         expected: ObjectKind::$kind,
@@ -78,7 +82,7 @@ value_decoder!(StreamObject, Stream, Stream);
 
 impl FromPdfObject for () {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().value() {
+        match context.object() {
             ObjectVariant::Null => Ok(()),
             _ => Err(ObjectReadError::TypeMismatch {
                 expected: ObjectKind::Null,
@@ -94,7 +98,7 @@ impl FromPdfObject for f64 {
         reason = "PDF integer-to-real conversion intentionally permits rounding"
     )]
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().value() {
+        match context.object() {
             ObjectVariant::Real(value) => Ok(*value),
             ObjectVariant::Integer(value) => Ok(*value as f64),
             _ => Err(ObjectReadError::TypeMismatch {
@@ -102,18 +106,6 @@ impl FromPdfObject for f64 {
                 actual: context.object().kind(),
             }),
         }
-    }
-}
-
-impl FromPdfObject for PdfObject {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(context.object().object().clone())
-    }
-}
-
-impl FromPdfObject for ResolvedObject {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(context.object().clone())
     }
 }
 
@@ -138,8 +130,9 @@ impl<T: FromPdfObject> FromPdfObject for Vec<T> {
 }
 
 impl FromPdfObject for PdfString {
+    #[inline]
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().value() {
+        match context.object() {
             ObjectVariant::String(value) => Ok(value.clone()),
             _ => Err(ObjectReadError::TypeMismatch {
                 expected: ObjectKind::String,
@@ -151,7 +144,7 @@ impl FromPdfObject for PdfString {
 
 impl FromPdfObject for PdfArray {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().value() {
+        match context.object() {
             ObjectVariant::Array(value) => Ok(value.clone()),
             _ => Err(ObjectReadError::TypeMismatch {
                 expected: ObjectKind::Array,
@@ -166,22 +159,55 @@ macro_rules! number_decoder {
         $(
             impl FromPdfObject for $type {
                 /// Decodes a resolved number with the model's checked numeric conversion.
+                #[inline]
                 fn from_pdf_object(
                     context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
                 ) -> ReadResult<Self> {
                     // The context has already resolved references and owns their scope.
-                    Ok(context.object().value().try_number(context.source())?)
+                    let value = match context.object() {
+                        ObjectVariant::Integer(value) => Self::from_i64(*value),
+                        ObjectVariant::Real(value) => Self::from_f64(*value),
+                        other => {
+                            return Err(ObjectError::TypeMismatch("Number", other.name()).into());
+                        }
+                    };
+                    Ok(value.ok_or(ObjectError::NumberConversionError)?)
                 }
             }
         )+
     };
 }
 
-number_decoder!(f32, i32, i64, u8, u16, u32, usize);
+number_decoder!(f32, i32, i64, u8, u16, u32, u64, usize);
+
+macro_rules! enumerated_number_decoder {
+    ($($type:ty => $expected:literal),+ $(,)?) => {
+        $(
+            impl FromPdfObject for $type {
+                /// Decodes the number that names one value of this parameter.
+                fn from_pdf_object(
+                    context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+                ) -> ReadResult<Self> {
+                    let found = context.decode::<i32>()?;
+                    Ok(Self::from_i32(found).ok_or(ObjectError::InvalidEnumValue {
+                        expected: $expected,
+                        found,
+                    })?)
+                }
+            }
+        )+
+    };
+}
+
+enumerated_number_decoder!(
+    LineCap => "a line cap style (0 butt, 1 round, 2 projecting square)",
+    LineJoin => "a line join style (0 miter, 1 round, 2 bevel)",
+    TextRenderingMode => "a text rendering mode (0 to 7)",
+);
 
 impl FromPdfObject for bool {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        match context.object().value() {
+        match context.object() {
             ObjectVariant::Boolean(value) => Ok(*value),
             _ => Err(ObjectReadError::TypeMismatch {
                 expected: ObjectKind::Boolean,
@@ -218,13 +244,91 @@ impl<T: FromPdfObject, const N: usize> FromPdfObject for [T; N] {
     }
 }
 
-/// Reads the bytes of a name or string, accepting producer substitutions between them.
+/// Reads a `[min max]` array, such as a function `/Domain`, as an interval.
 ///
-/// Use `PdfName` or `PdfString` when the PDF object kind must be enforced.
+/// Trailing elements are ignored, like the `[T; N]` decoder.
+impl FromPdfObject for Interval {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let [min, max] = context.array()?.read_array::<f32, 2>()?;
+        Ok(Self::new(min, max))
+    }
+}
+
+/// Reads a rectangle `[x1 y1 x2 y2]` in its original coordinate order.
+///
+/// Trailing elements are ignored, like the `[T; N]` decoder.
+impl FromPdfObject for Rect {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        Ok(Self::from(context.array()?.read_array::<f32, 4>()?))
+    }
+}
+
+/// Reads an affine matrix `[a b c d e f]`.
+///
+/// Trailing elements are ignored, like the `[T; N]` decoder.
+impl FromPdfObject for Transform {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        Ok(Self::from(context.array()?.read_array::<f32, 6>()?))
+    }
+}
+
+/// Reads a device color array: one gray, three RGB, or four CMYK components.
+///
+/// An empty array is transparent, as for annotation colors. Nonfinite components and
+/// other component counts are rejected.
+impl FromPdfObject for Color {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let components: Vec<f32> = context.array()?.read_all()?;
+        if components.iter().any(|component| !component.is_finite()) {
+            return Err(ObjectError::NumberConversionError.into());
+        }
+        if components.is_empty() {
+            return Ok(Self::TRANSPARENT);
+        }
+        Self::from_device_components(&components).ok_or_else(|| ObjectReadError::Decode {
+            target: "device color",
+            source: format!(
+                "expected one, three, or four color components, found {}",
+                components.len()
+            )
+            .into(),
+        })
+    }
+}
+
+/// Reads a soft mask's `/S` subtype. Unrecognized names are kept as `Unknown`.
+impl FromPdfObject for MaskMode {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let name = context.decode::<std::sync::Arc<[u8]>>()?;
+        Ok(match &*name {
+            b"Alpha" => Self::Alpha,
+            b"Luminosity" => Self::Luminosity,
+            other => Self::Unknown(Vec::from(other)),
+        })
+    }
+}
+
+/// Reads a name, accepting a string in its place as producers substitute one for the
+/// other. The bytes are shared with the object, not copied.
+impl FromPdfObject for PdfName {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        match context.object() {
+            ObjectVariant::String(value) => Ok(Self(std::sync::Arc::clone(&value.bytes))),
+            other => Err(ObjectError::TypeMismatch("Name", other.name()).into()),
+        }
+    }
+}
+
+/// Reads the bytes of a name or string, accepting producer substitutions between them,
+/// or the raw data of a stream.
+///
+/// Use `PdfString` when the PDF object kind must be enforced.
 impl FromPdfObject for std::sync::Arc<[u8]> {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(Self::from(
-            context.object().value().try_bytes(context.source())?,
-        ))
+        match context.object() {
+            ObjectVariant::String(value) => Ok(Self::clone(&value.bytes)),
+            ObjectVariant::Stream(stream) => Ok(Self::from(stream.raw_data())),
+            other => Err(ObjectError::TypeMismatch("Bytes", other.name()).into()),
+        }
     }
 }

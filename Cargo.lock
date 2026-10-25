@@ -2082,6 +2082,7 @@ dependencies = [
  "num-traits",
  "pdf-graphics",
  "pdf-object-reader",
+ "pdf-optional-content",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -2104,6 +2105,7 @@ dependencies = [
  "pdf-graphics",
  "pdf-image",
  "pdf-object-reader",
+ "pdf-optional-content",
  "pdf-resources",
  "pdf-shading",
  "pdf-text-engine",
@@ -2189,7 +2191,6 @@ name = "pdf-content-stream-operators"
 version = "0.1.0"
 dependencies = [
  "bytes",
- "num-traits",
  "pdf-graphics",
  "pdf-image",
  "pdf-object-reader",
@@ -2213,7 +2214,9 @@ name = "pdf-document"
 version = "0.1.0"
 dependencies = [
  "aes",
+ "bytes",
  "cbc",
+ "criterion",
  "md-5",
  "pdf-annotation-core",
  "pdf-color-space",
@@ -2221,6 +2224,7 @@ dependencies = [
  "pdf-graphics",
  "pdf-object-collection",
  "pdf-object-reader",
+ "pdf-optional-content",
  "pdf-parser",
  "pdf-resources",
  "pdf-utils",
@@ -2269,7 +2273,6 @@ dependencies = [
 name = "pdf-function"
 version = "0.1.0"
 dependencies = [
- "num-derive",
  "num-traits",
  "pdf-decode",
  "pdf-graphics",
@@ -2408,13 +2411,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdf-optional-content"
+version = "0.1.0"
+dependencies = [
+ "pdf-object-reader",
+ "serde",
+ "thiserror 2.0.12",
+ "ts-rs",
+]
+
+[[package]]
 name = "pdf-parser"
 version = "0.1.0"
 dependencies = [
  "criterion",
  "flate2",
  "pdf-filter",
- "pdf-image",
  "pdf-object-reader",
  "pdf-tokenizer",
  "thiserror 2.0.12",
@@ -2438,6 +2450,7 @@ dependencies = [
  "pdf-document",
  "pdf-font",
  "pdf-graphics",
+ "pdf-optional-content",
  "pdf-text-engine",
  "pdf-utils",
  "thiserror 2.0.12",
@@ -2459,6 +2472,7 @@ dependencies = [
  "pdf-image",
  "pdf-object-collection",
  "pdf-object-reader",
+ "pdf-optional-content",
  "pdf-shading",
  "thiserror 2.0.12",
 ]
@@ -2473,6 +2487,7 @@ dependencies = [
  "pdf-decode",
  "pdf-function",
  "pdf-graphics",
+ "pdf-image",
  "pdf-object-reader",
  "pdf-utils",
  "thiserror 2.0.12",
@@ -2515,8 +2530,8 @@ dependencies = [
  "pdf-font",
  "pdf-graphics",
  "pdf-graphics-web",
+ "pdf-optional-content",
  "pdf-renderer",
- "pdf-text-engine",
  "serde",
  "serde_json",
  "thiserror 2.0.12",

@@ -123,15 +123,6 @@ impl<'stream, 'data> JBig2ArithDecoder<'stream, 'data> {
         let mut source = SegmentSource::new(stream, *byte_limit);
         Ok(u8::from(registers.decode(&mut source, context)?))
     }
-
-    /// Return whether Annex A.1 byte input has reached the stream or segment end.
-    #[cfg(test)]
-    pub(super) fn stream_exhausted(&self) -> bool {
-        self.stream.exhausted()
-            || self
-                .byte_limit
-                .is_some_and(|limit| self.stream.byte_pos() >= limit)
-    }
 }
 
 #[cfg(test)]

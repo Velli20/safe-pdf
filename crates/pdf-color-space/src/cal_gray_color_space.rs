@@ -20,11 +20,12 @@ pub struct CalGrayColorSpace {
 /// Reads the dictionary operand of a CalGray color space, `[/CalGray dict]`.
 impl FromPdfObject for CalGrayColorSpace {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object();
         let mut dictionary = context.dictionary()?;
         let CieColorSpaceParams {
             white_point,
             black_point,
-        } = CieColorSpaceParams::read(&mut dictionary)?;
+        } = dictionary.read(object)?;
         let gamma = dictionary.optional(b"Gamma")?.unwrap_or(1.0);
         Ok(Self {
             white_point,
@@ -39,37 +40,8 @@ impl CalGrayColorSpace {
         let [a] = components else {
             return Err(ColorSpaceError::InsufficientComponents(1, components.len()));
         };
+        // The gray level is used as is; the white point and gamma do not tint it.
         let a = a.clamp(0.0, 1.0);
-        // X = Xw * A^Gamma, Y = Yw * A^Gamma, Z = Zw * A^Gamma
-        let a_gamma = a.powf(self.gamma);
-        let [xw, yw, zw] = self.white_point;
-        Ok(xyz_to_srgb(xw * a_gamma, yw * a_gamma, zw * a_gamma))
+        Ok(Color::from_rgb(a, a, a))
     }
-}
-
-/// Converts CIE XYZ to sRGB using the IEC 61966-2-1 D65 matrix and gamma encoding.
-///
-/// This is an approximation when the source white point differs from D65;
-/// proper colour management would require a chromatic adaptation transform.
-pub(crate) fn xyz_to_srgb(x: f32, y: f32, z: f32) -> Color {
-    // XYZ → linear sRGB (IEC 61966-2-1 D65 matrix)
-    let r_lin = 3.240_454_2 * x - 1.537_138_5 * y - 0.498_531_4 * z;
-    let g_lin = -0.969_266 * x + 1.876_010_8 * y + 0.041_556 * z;
-    let b_lin = 0.055_643_4 * x - 0.204_025_9 * y + 1.057_225_2 * z;
-
-    // Linear → gamma-encoded sRGB, clamped to [0, 1]
-    let gamma_encode = |c: f32| -> f32 {
-        let c = c.clamp(0.0, 1.0);
-        if c <= 0.003_130_8 {
-            12.92 * c
-        } else {
-            1.055 * c.powf(1.0 / 2.4) - 0.055
-        }
-    };
-
-    Color::from_rgb(
-        gamma_encode(r_lin),
-        gamma_encode(g_lin),
-        gamma_encode(b_lin),
-    )
 }

@@ -91,6 +91,7 @@ impl CustomHuffmanTableCursor {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::CustomHuffmanTableCursor;
     use crate::{

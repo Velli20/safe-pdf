@@ -2,11 +2,15 @@ use std::fmt;
 
 use bytes::Bytes;
 
-use crate::{error::FilterError, image_payload::ImagePayload, jpeg_frame::JpegFrameHeader};
+use crate::{
+    error::FilterError,
+    image_payload::{FilterPipeline, ImagePayload},
+    jpeg_frame::JpegFrameHeader,
+};
 
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult, dictionary::Dictionary,
-    object_resolver::PassthroughResolver, object_variant::ObjectVariant, stream::StreamObject,
+    EmptySource, FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult,
+    object_variant::ObjectVariant, stream::StreamObject,
 };
 
 /// Represents the compression filter applied to a stream or image in a PDF.
@@ -99,7 +103,7 @@ impl Filters {
 /// Reads a `/Filter` value: one filter name or an array applied in order.
 impl FromPdfObject for Filters {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let filters = match context.object().value() {
+        let filters = match context.object() {
             ObjectVariant::Array(_) => context.array()?.read_all()?,
             _ => vec![Filter::from_pdf_object(context)?],
         };
@@ -110,9 +114,7 @@ impl FromPdfObject for Filters {
 /// Reads a filter name, accepting a malformed string where the name is expected.
 impl FromPdfObject for Filter {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Ok(Self::from(
-            context.object().value().try_bytes(context.source())?,
-        ))
+        Ok(Self::from(&*context.decode::<std::sync::Arc<[u8]>>()?))
     }
 }
 
@@ -215,70 +217,55 @@ impl Filter {
     }
 }
 
-/// Decodes stream data by applying the filter chain from its dictionary.
-///
-/// Reads the `/Filter` entry from `dictionary` and applies each filter in order.
-/// Returns shared ownership of the fully decoded bytes.
-/// Unfiltered input retains the original shared allocation.
-///
-/// This entry point accepts a dictionary and shared data separately so callers
-/// such as inline-image decoders do not need to construct a temporary
-/// [`StreamObject`].
-///
-/// A `JPXDecode` chain yields no samples, because a JPEG 2000 codestream must
-/// be decoded with its own metadata; such a stream belongs to
-/// [`ImagePayload::decode`] instead.
-///
-/// # Errors
-///
-/// Returns [`FilterError`] if a filter fails, is unsupported, or is
-/// `JPXDecode`, except when an adjacent duplicate filter fails after its first
-/// pass succeeded.
-pub fn decode_data_with_access(
-    dictionary: &Dictionary,
-    stream_data: Bytes,
-    access: &mut (impl ObjectAccess + ?Sized),
-) -> Result<Bytes, FilterError> {
-    ImagePayload::decode(dictionary, stream_data, access)?.into_samples()
-}
-
-/// Decodes a [`StreamObject`] by applying its full filter chain.
+/// A stream's data with its whole filter chain applied.
 ///
 /// Unfiltered data shares the stream's existing allocation. Filtered data is
-/// returned in a newly allocated shared buffer.
-///
-/// # Errors
-///
-/// Returns [`FilterError`] if a filter fails or is unsupported, except when an
-/// adjacent duplicate filter fails after its first pass succeeded.
-pub fn decode_with_access(
-    stream: &StreamObject,
-    access: &mut (impl ObjectAccess + ?Sized),
-) -> Result<Bytes, FilterError> {
-    decode_data_with_access(&stream.dictionary, stream.shared_data(), access)
+/// held in a newly allocated shared buffer. A JPEG 2000 codestream is not samples,
+/// so a `JPXDecode` stream is rejected; read [`ImagePayload`] to accept one.
+#[derive(Debug)]
+pub struct DecodedStream(pub Bytes);
+
+impl FromPdfObject for DecodedStream {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        Ok(Self(context.decode::<ImagePayload>()?.into_samples()?))
+    }
 }
 
 /// Decodes a [`StreamObject`] by applying its full filter chain.
 ///
 /// This convenience wrapper reads without an object source, so it only
 /// supports direct `/Filter` and `/DecodeParms` values.
-pub fn decode(stream: &StreamObject) -> Result<Bytes, FilterError> {
-    decode_with_access(
-        stream,
-        &mut ObjectReader::new(PassthroughResolver).session(),
-    )
+///
+/// # Errors
+///
+/// Returns [`FilterError`] if a filter fails or is unsupported, except when an
+/// adjacent duplicate filter fails after its first pass succeeded.
+pub fn decode(stream: StreamObject) -> Result<Bytes, FilterError> {
+    let data = stream.shared_data();
+    let pipeline: FilterPipeline =
+        ObjectReader::new(EmptySource).read(&ObjectVariant::Stream(stream))?;
+    pipeline.apply(data)?.into_samples()
 }
 
 #[cfg(test)]
+#[allow(clippy::as_conversions)]
 mod tests {
     use std::collections::BTreeMap;
 
     use pdf_object_reader::{
-        dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-        stream::StreamObject,
+        dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject,
     };
 
     use super::*;
+
+    /// Decodes `stream` with references read from `source`.
+    fn decode_with(
+        stream: StreamObject,
+        source: impl pdf_object_reader::ObjectSource,
+    ) -> ReadResult<Bytes> {
+        let DecodedStream(data) = ObjectReader::new(source).read(&ObjectVariant::Stream(stream))?;
+        Ok(data)
+    }
 
     #[test]
     fn test_filter_name_round_trip_ascii_hex() {
@@ -315,10 +302,9 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
         let data = Bytes::from_static(b"stream data");
 
-        let decoded = decode_data_with_access(
-            &dictionary,
-            data.clone(),
-            &mut ObjectReader::new(PassthroughResolver).session(),
+        let decoded = decode_with(
+            StreamObject::new_encoded(1, 0, dictionary, data.clone()),
+            EmptySource,
         )
         .expect("unfiltered data should decode");
 
@@ -331,16 +317,15 @@ mod tests {
         let dictionary = Dictionary::new(BTreeMap::from([(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"ASCIIHexDecode".to_vec(),
+                b"ASCIIHexDecode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         )]));
 
         let encoded = Bytes::from_static(b"48 65 6c 6c 6f>");
-        let decoded = decode_data_with_access(
-            &dictionary,
-            encoded.clone(),
-            &mut ObjectReader::new(PassthroughResolver).session(),
+        let decoded = decode_with(
+            StreamObject::new_encoded(1, 0, dictionary, encoded.clone()),
+            EmptySource,
         )
         .expect("filtered data should decode");
 
@@ -358,9 +343,10 @@ mod tests {
             b"shared stream data".to_vec(),
         );
 
-        let decoded = decode(&stream).expect("unfiltered data should decode");
+        let data = stream.shared_data();
+        let decoded = decode(stream).expect("unfiltered data should decode");
 
-        assert_eq!(decoded.as_ptr(), stream.data.as_ptr());
+        assert_eq!(decoded.as_ptr(), data.as_ptr());
         assert_eq!(decoded.as_ref(), b"shared stream data");
     }
 
@@ -370,13 +356,13 @@ mod tests {
         dict.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"JBIG2Decode".to_vec(),
+                b"JBIG2Decode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
 
         let stream = StreamObject::new(1, 0, Dictionary::new(dict), Vec::new());
-        let err = decode(&stream).expect_err("expected decode failure");
+        let err = decode(stream).expect_err("expected decode failure");
         assert!(matches!(err, FilterError::Decompression(_)));
     }
 
@@ -387,25 +373,6 @@ mod tests {
         struct TrackingResolver {
             objects: BTreeMap<usize, ObjectVariant>,
             resolved_globals: AtomicBool,
-        }
-
-        impl ObjectResolver for TrackingResolver {
-            fn resolve_object<'a>(
-                &'a self,
-                obj: &'a ObjectVariant,
-            ) -> Result<&'a ObjectVariant, pdf_object_reader::object_error::ObjectError>
-            {
-                match obj {
-                    ObjectVariant::Reference(object_number) => {
-                        self.objects.get(&object_number.number).ok_or(
-                            pdf_object_reader::object_error::ObjectError::FailedResolveObjectReference {
-                                obj_num: object_number.number,
-                            },
-                        )
-                    }
-                    other => Ok(other),
-                }
-            }
         }
 
         impl pdf_object_reader::ObjectSource for TrackingResolver {
@@ -430,7 +397,7 @@ mod tests {
         globals_dict.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"JBIG2Decode".to_vec(),
+                b"JBIG2Decode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
@@ -446,7 +413,7 @@ mod tests {
         dict.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"JBIG2Decode".to_vec(),
+                b"JBIG2Decode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
@@ -457,7 +424,7 @@ mod tests {
             ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(2, 0)),
         );
 
-        let stream = StreamObject::new(1, 0, Dictionary::new(dict), Vec::new());
+        let stream = StreamObject::new_encoded(1, 0, Dictionary::new(dict), Vec::new());
 
         let mut objects = BTreeMap::new();
         objects.insert(2, ObjectVariant::Dictionary(Dictionary::new(decode_parms)));
@@ -468,7 +435,7 @@ mod tests {
             resolved_globals: AtomicBool::new(false),
         };
 
-        let _ = decode_with_access(&stream, &mut ObjectReader::new(&resolver).session())
+        let _ = decode_with(stream, &resolver)
             .expect_err("empty JBIG2 stream should fail after globals resolution");
         assert!(resolver.resolved_globals.load(Ordering::Relaxed));
     }
@@ -479,7 +446,7 @@ mod tests {
         dict.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"JBIG2Decode".to_vec(),
+                b"JBIG2Decode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
@@ -488,7 +455,7 @@ mod tests {
 
         let stream = StreamObject::new(1, 0, Dictionary::new(dict), vec![0x00]);
 
-        let err = decode(&stream).expect_err("expected decode failure");
+        let err = decode(stream).expect_err("expected decode failure");
         assert!(matches!(err, FilterError::Decompression(_)));
     }
 
@@ -498,7 +465,7 @@ mod tests {
         dict.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"ASCIIHexDecode".to_vec(),
+                b"ASCIIHexDecode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
@@ -510,31 +477,12 @@ mod tests {
             b"48 65 6c 6c 6f>ignored".to_vec(),
         );
 
-        let decoded = decode(&stream).expect("decode failed");
+        let decoded = decode(stream).expect("decode failed");
         assert_eq!(decoded.as_ref(), b"Hello");
     }
 
     struct TestResolver {
         objects: BTreeMap<usize, ObjectVariant>,
-    }
-
-    impl ObjectResolver for TestResolver {
-        fn resolve_object<'a>(
-            &'a self,
-            obj: &'a ObjectVariant,
-        ) -> Result<&'a ObjectVariant, pdf_object_reader::object_error::ObjectError> {
-            match obj {
-                ObjectVariant::Reference(object_number) => self
-                    .objects
-                    .get(&object_number.number)
-                    .ok_or(
-                    pdf_object_reader::object_error::ObjectError::FailedResolveObjectReference {
-                        obj_num: object_number.number,
-                    },
-                ),
-                other => Ok(other),
-            }
-        }
     }
 
     impl pdf_object_reader::ObjectSource for TestResolver {
@@ -571,14 +519,14 @@ mod tests {
             ObjectVariant::Integer(compressed.len() as i64),
         );
 
-        let stream = StreamObject::new(1, 0, Dictionary::new(dict), compressed);
+        let stream = StreamObject::new_encoded(1, 0, Dictionary::new(dict), compressed);
 
         let mut objects = BTreeMap::new();
         objects.insert(
             3,
             ObjectVariant::Array(
                 vec![pdf_object_reader::pdf_string::PdfString::from(
-                    b"FlateDecode".to_vec(),
+                    b"FlateDecode",
                     pdf_object_reader::string_kind::StringKind::Name,
                 )]
                 .into(),
@@ -586,8 +534,7 @@ mod tests {
         );
         let resolver = TestResolver { objects };
 
-        let decoded = decode_with_access(&stream, &mut ObjectReader::new(&resolver).session())
-            .expect("decode failed");
+        let decoded = decode_with(stream, &resolver).expect("decode failed");
         assert_eq!(decoded.as_ref(), b"hello");
     }
 
@@ -613,11 +560,11 @@ mod tests {
                 ObjectVariant::Array(
                     vec![
                         pdf_object_reader::pdf_string::PdfString::from(
-                            b"ASCIIHexDecode".to_vec(),
+                            b"ASCIIHexDecode",
                             pdf_object_reader::string_kind::StringKind::Name,
                         ),
                         pdf_object_reader::pdf_string::PdfString::from(
-                            b"FlateDecode".to_vec(),
+                            b"FlateDecode",
                             pdf_object_reader::string_kind::StringKind::Name,
                         ),
                     ]
@@ -630,10 +577,9 @@ mod tests {
             ),
         ]));
 
-        let decoded = decode_data_with_access(
-            &dictionary,
-            encoded.into_bytes().into(),
-            &mut ObjectReader::new(PassthroughResolver).session(),
+        let decoded = decode_with(
+            StreamObject::new_encoded(1, 0, dictionary, encoded.into_bytes()),
+            EmptySource,
         )
         .expect("decode failed");
 
@@ -655,7 +601,7 @@ mod tests {
             (
                 Vec::from(b"Filter"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"FlateDecode".to_vec(),
+                    b"FlateDecode",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -673,10 +619,9 @@ mod tests {
                 )),
             )]),
         };
-        let decoded = decode_data_with_access(
-            &dictionary,
-            compressed.into(),
-            &mut ObjectReader::new(&resolver).session(),
+        let decoded = decode_with(
+            StreamObject::new_encoded(1, 0, dictionary, compressed),
+            &resolver,
         )
         .expect("decode failed");
 
@@ -689,7 +634,7 @@ mod tests {
         dict.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"RunLengthDecode".to_vec(),
+                b"RunLengthDecode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
@@ -701,7 +646,7 @@ mod tests {
             vec![2, b'A', b'B', b'C', 255, b'!', 128],
         );
 
-        let decoded = decode(&stream).expect("decode failed");
+        let decoded = decode(stream).expect("decode failed");
         assert_eq!(decoded.as_ref(), b"ABC!!");
     }
 
@@ -711,14 +656,14 @@ mod tests {
         dict.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"RL".to_vec(),
+                b"RL",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
 
         let stream = StreamObject::new(1, 0, Dictionary::new(dict), vec![0, b'X', 128]);
 
-        let decoded = decode(&stream).expect("decode failed");
+        let decoded = decode(stream).expect("decode failed");
         assert_eq!(decoded.as_ref(), b"X");
     }
 }

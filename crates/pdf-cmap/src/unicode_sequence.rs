@@ -48,12 +48,16 @@ impl From<Arc<[char]>> for UnicodeSequence {
     }
 }
 
-impl From<Vec<char>> for UnicodeSequence {
-    fn from(characters: Vec<char>) -> Self {
-        match characters.as_slice() {
-            [] => Self::Empty,
-            [character] => Self::Scalar(*character),
-            _ => Self::Sequence(Arc::from(characters)),
-        }
+impl FromIterator<char> for UnicodeSequence {
+    /// Collects `characters`, allocating shared storage only for two or more scalars.
+    fn from_iter<I: IntoIterator<Item = char>>(characters: I) -> Self {
+        let mut characters = characters.into_iter();
+        let Some(first) = characters.next() else {
+            return Self::Empty;
+        };
+        let Some(second) = characters.next() else {
+            return Self::Scalar(first);
+        };
+        Self::Sequence([first, second].into_iter().chain(characters).collect())
     }
 }

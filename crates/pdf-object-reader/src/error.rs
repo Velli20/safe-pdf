@@ -63,12 +63,6 @@ pub enum ObjectReadError {
         #[source]
         source: BoxedError,
     },
-    /// The source had no value for a referenced indirect object.
-    #[error("indirect object {object_id:?} was not found")]
-    MissingObject {
-        /// The unresolved object identifier.
-        object_id: ObjectId,
-    },
     /// Reference traversal revisited an object active in the current read.
     #[error("cyclic reference encountered at {repeated:?}; active path: {path:?}")]
     CyclicReference {
@@ -160,6 +154,8 @@ pub enum ObjectReadError {
         #[source]
         source: BoxedError,
     },
+    #[error("unsupported XObject /Subtype: '{subtype}'")]
+    UnsupportedXObjectSubtype { subtype: String },
 }
 
 impl From<crate::object_error::ObjectError> for ObjectReadError {
@@ -176,6 +172,17 @@ impl From<crate::ContentStreamIdExhausted> for ObjectReadError {
         Self::Decode {
             target: "PDF content stream",
             source: Box::new(source),
+        }
+    }
+}
+
+impl ObjectReadError {
+    /// Returns whether the read failed on a cyclic reference, at any container depth.
+    pub fn is_cyclic_reference(&self) -> bool {
+        match self {
+            Self::At { source, .. } => source.is_cyclic_reference(),
+            Self::CyclicReference { .. } => true,
+            _ => false,
         }
     }
 }

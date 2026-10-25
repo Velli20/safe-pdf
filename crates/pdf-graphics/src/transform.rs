@@ -38,6 +38,13 @@ impl Default for Transform {
     }
 }
 
+/// Builds a transform from a PDF matrix array `[a b c d e f]`.
+impl From<[f32; 6]> for Transform {
+    fn from([sx, ky, kx, sy, tx, ty]: [f32; 6]) -> Self {
+        Self::from_row(sx, ky, kx, sy, tx, ty)
+    }
+}
+
 impl Transform {
     /// Maps a point, rejecting nonfinite input or output coordinates.
     pub fn try_map_point(

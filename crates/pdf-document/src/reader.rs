@@ -1,25 +1,16 @@
-use std::collections::BTreeMap;
-
-use crate::decryption::DocumentDecryptor;
-use crate::diagnostic::{PdfReadDiagnostic, PdfReadDiagnosticKind};
+use crate::catalog::Catalog;
+use crate::diagnostic::PdfReadDiagnostic;
 use crate::document::PdfDocument;
 use crate::encrypt_objects::EncryptObjectLoader;
+use crate::encryption_context::EncryptionContext;
 use crate::error::PdfReaderError;
 use crate::object_loader::ObjectLoader;
 use crate::report::PdfReadReport;
-use pdf_annotation_core::OptionalContentProperties;
-use pdf_object_reader::ObjectReader;
-use pdf_object_reader::object_id::ObjectId;
-use pdf_object_reader::object_lookup::ObjectLookupExt;
-use pdf_object_reader::object_resolver::PassthroughResolver;
+use pdf_object_collection::object_collection::ObjectCollection;
 use pdf_object_reader::{
-    cross_reference_table::{CrossReferenceEntryType, CrossReferenceTable},
-    trailer::Trailer,
+    ObjectReader, cross_reference_table::CrossReferenceTable, trailer::Trailer,
 };
 use pdf_parser::parser::PdfParser;
-use std::sync::Arc;
-
-const EMPTY_PASSWORD: &[u8] = b"";
 
 /// Reads PDF documents from byte slices.
 #[derive(Default)]
@@ -33,7 +24,7 @@ impl PdfReader {
         password: Option<&[u8]>,
     ) -> Result<PdfReadReport, PdfReaderError> {
         let mut parser = PdfParser::from(input);
-        validate_header(&mut parser)?;
+        self.check_version(&mut parser)?;
 
         let CrossReferenceTable {
             entries,
@@ -42,13 +33,12 @@ impl PdfReader {
         let mut diagnostics = Vec::new();
         let encryption = EncryptionContext::from_trailer(
             &mut trailer,
-            &entries,
-            &parser,
-            password.unwrap_or(EMPTY_PASSWORD),
+            &EncryptObjectLoader::new(&entries, &parser),
+            password,
             &mut diagnostics,
         )?;
         let objects = ObjectLoader::new(&entries, &parser, encryption, &mut diagnostics).load()?;
-        let document = extract_page_tree(&trailer, objects, &mut diagnostics)?;
+        let document = self.read_document(&trailer, objects, &mut diagnostics)?;
 
         Ok(PdfReadReport::new(document, diagnostics))
     }
@@ -62,136 +52,27 @@ impl PdfReader {
         self.read_with_report(input, password)
             .map(PdfReadReport::into_document)
     }
-}
 
-/// Validates the optional header near the start of a PDF.
-fn validate_header(parser: &mut PdfParser) -> Result<(), PdfReaderError> {
-    if let Some(version) = parser.parse_header_in_opening_bytes()?
-        && version.major() > 2
-    {
-        return Err(PdfReaderError::UnsupportedVersion(
-            version.major(),
-            version.minor(),
-        ));
+    /// Rejects documents whose optional header declares an unsupported major version.
+    fn check_version(&self, parser: &mut PdfParser) -> Result<(), PdfReaderError> {
+        match parser.parse_header_in_opening_bytes()? {
+            Some(version) if version.major() > 2 => Err(PdfReaderError::UnsupportedVersion(
+                version.major(),
+                version.minor(),
+            )),
+            _ => Ok(()),
+        }
     }
-    Ok(())
-}
 
-/// Holds decryption state needed while loading objects.
-pub(crate) struct EncryptionContext {
-    decryptor: Option<DocumentDecryptor>,
-    dictionary_object_number: Option<usize>,
-}
-
-impl EncryptionContext {
-    /// Creates decryption state from the trailer's optional encryption entry.
-    fn from_trailer(
-        trailer: &mut Trailer,
-        entries: &BTreeMap<usize, CrossReferenceEntryType>,
-        parser: &PdfParser,
-        password: &[u8],
+    /// Decodes the catalog referenced by the trailer into a document.
+    fn read_document(
+        &self,
+        trailer: &Trailer,
+        objects: ObjectCollection,
         diagnostics: &mut Vec<PdfReadDiagnostic>,
-    ) -> Result<Self, PdfReaderError> {
-        let Some(encrypt_reference) = trailer.dictionary.take(b"Encrypt") else {
-            return Ok(Self {
-                decryptor: None,
-                dictionary_object_number: None,
-            });
-        };
-        let dictionary_object_number = encrypt_reference.try_object_number().ok();
-        let encryption =
-            match EncryptObjectLoader::new(entries, parser).load_dictionary(encrypt_reference) {
-                Ok(encryption) => encryption,
-                Err(error) if error.is_recoverable_optional_object_error() => {
-                    diagnostics.push(PdfReadDiagnostic::new(
-                        PdfReadDiagnosticKind::MalformedEncryption,
-                        None,
-                        dictionary_object_number.map(object_id),
-                        error,
-                    ));
-                    return Ok(Self {
-                        decryptor: None,
-                        dictionary_object_number: None,
-                    });
-                }
-                Err(error) => return Err(error),
-            };
-        if encryption.leaves_streams_and_strings_unencrypted() {
-            return Ok(Self {
-                decryptor: None,
-                dictionary_object_number,
-            });
-        }
-        let document_id = extract_document_id(trailer)?;
-        let decryptor = DocumentDecryptor::new(&encryption, document_id, password)
-            .map_err(PdfReaderError::from_decryption_setup)?;
-        Ok(Self {
-            decryptor: Some(decryptor),
-            dictionary_object_number,
-        })
+    ) -> Result<PdfDocument, PdfReaderError> {
+        let reader = ObjectReader::new(objects);
+        let catalog = reader.required::<Catalog>(&trailer.dictionary, b"Root")?;
+        Ok(catalog.into_document(reader, diagnostics))
     }
-
-    /// Returns the decryptor unless the object is the encryption dictionary itself.
-    pub(crate) fn decryptor_for(&self, object: Option<ObjectId>) -> Option<&DocumentDecryptor> {
-        let object_number = object.map(|identifier| identifier.number);
-        (object_number != self.dictionary_object_number)
-            .then_some(self.decryptor.as_ref())
-            .flatten()
-    }
-}
-
-/// Creates an identifier for an object whose generation is not available in xref context.
-pub(crate) fn object_id(number: usize) -> ObjectId {
-    ObjectId {
-        number,
-        generation: 0,
-    }
-}
-
-/// Resolves the page tree rooted at the trailer catalog, along with the catalog's
-/// optional content declaration.
-fn extract_page_tree(
-    trailer: &Trailer,
-    objects: pdf_object_collection::object_collection::ObjectCollection,
-    diagnostics: &mut Vec<PdfReadDiagnostic>,
-) -> Result<PdfDocument, PdfReaderError> {
-    let catalog = trailer.dictionary.required_dictionary(b"Root", &objects)?;
-    let pages = catalog.get_or_err(b"Pages")?.clone();
-    let optional_content = catalog.get(b"OCProperties").cloned();
-    let reader = Arc::new(ObjectReader::new(objects));
-    let mut pages = reader.read::<PdfDocument>(&pages)?.pages;
-    for page in &mut pages {
-        page.read_state = Some(Arc::clone(&reader));
-    }
-    // Optional content only governs presentation, so an unreadable declaration is
-    // reported and dropped rather than failing an otherwise usable document.
-    let optional_content = optional_content.and_then(|value| {
-        let object = value.try_object_number().ok().map(object_id);
-        match reader.read::<OptionalContentProperties>(&value) {
-            Ok(properties) => Some(properties),
-            Err(error) => {
-                diagnostics.push(PdfReadDiagnostic::new(
-                    PdfReadDiagnosticKind::ObjectParse,
-                    None,
-                    object,
-                    error,
-                ));
-                None
-            }
-        }
-    });
-    Ok(PdfDocument {
-        pages,
-        optional_content,
-    })
-}
-
-/// Extracts the first trailer document identifier used for encryption key derivation.
-fn extract_document_id(trailer: &Trailer) -> Result<&[u8], PdfReaderError> {
-    let identifier = trailer
-        .dictionary
-        .required_array(b"ID", &PassthroughResolver)?
-        .first()
-        .ok_or(PdfReaderError::MissingDocumentId)?;
-    Ok(identifier.try_bytes(&PassthroughResolver)?)
 }

@@ -9,7 +9,7 @@ cargo test                                  # Run all tests
 cargo test -p pdf-parser                    # Run tests for a single crate
 cargo test -p pdf-parser -- test_name       # Run a single test
 cargo check                                 # Type-check all crates
-cargo clippy --all --workspace              # Run lints
+cargo clippy --workspace --all-targets      # Run lints (CI adds --all-features -D warnings)
 cargo fmt                                   # Format code
 cargo build --example skia --features skia  # Build Skia example
 cargo run --example skia --features skia -- examples/assets/webgl.pdf  # Run viewer
@@ -60,7 +60,7 @@ PDF bytes → pdf-tokenizer → pdf-parser → pdf-object → pdf-document
 
 Key architectural traits:
 - **`CanvasBackend`** (in `pdf-canvas`): Abstracts rendering. Skia and FemtoVG are current implementations.
-- **`PdfOperatorBackend`**: Content stream operators dispatched via traits, enabling substitution with analyzers/exporters without modifying core logic.
+- **`PdfOperatorVariant`** (in `pdf-content-stream-operators`): A closed enum of parsed content stream operators. Consumers (the canvas, analyzers, exporters) match on it directly; `PdfCanvas::apply_operator` dispatches it for rendering.
 
 Supporting crates:
 - `pdf-font`: Font decoding (Type1/TrueType/Type3), isolated from rendering

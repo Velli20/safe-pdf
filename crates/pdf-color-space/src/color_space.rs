@@ -35,28 +35,6 @@ pub enum ColorSpace {
     Pattern(Option<Box<ColorSpace>>),
 }
 
-impl TryFrom<&[u8]> for ColorSpace {
-    type Error = ColorSpaceError;
-
-    fn try_from(name: &[u8]) -> Result<Self, Self::Error> {
-        match name {
-            b"DeviceRGB" => Ok(Self::DeviceRGB),
-            b"DeviceCMYK" => Ok(Self::DeviceCMYK),
-            b"DeviceGray" => Ok(Self::DeviceGray),
-            // Default color spaces substitute for the device spaces when a resource-level
-            // override is not available. Without access to the resource dictionary here,
-            // fall back to the corresponding device space.
-            b"DefaultGray" => Ok(Self::DeviceGray),
-            b"DefaultRGB" => Ok(Self::DeviceRGB),
-            b"DefaultCMYK" => Ok(Self::DeviceCMYK),
-            b"Pattern" => Ok(Self::Pattern(None)),
-            unknown => Err(ColorSpaceError::InvalidColorSpace {
-                description: format!("unsupported color space name: /{unknown:?}"),
-            }),
-        }
-    }
-}
-
 impl ColorSpace {
     /// Returns the number of color components required as *input* to this color space.
     ///

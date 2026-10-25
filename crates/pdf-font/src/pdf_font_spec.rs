@@ -1,8 +1,6 @@
 //! Complete normalized PDF font resource specifications.
 
-use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -12,14 +10,14 @@ use crate::error::FontError;
 use crate::fallback::{
     FallbackCandidate, FallbackProvider, GlyphFallbackRequest, WholeFontFallbackRequest,
 };
+use crate::flags::FontFlags;
 use crate::font::GlyphId;
 use crate::font::{FontMetadata, FontProgramFormat, FontSource};
 use crate::pdf::{
-    FALLBACK_GLYPH_WIDTH, PdfFontDescriptor, PdfGlyphMetric, PdfMetrics, SimpleEncoding,
-    SimpleFontSpec, Type0FontSpec, Type3FontSpec,
+    FALLBACK_GLYPH_WIDTH, PdfFontDescriptor, PdfMetrics, SimpleEncoding, SimpleFontSpec,
+    Type0FontSpec, Type3FontSpec,
 };
-use crate::pdf_font_metrics::horizontal_metric;
-use crate::standard14::{Standard14Font, from_base_font_name};
+use crate::standard14::{self, Standard14Font};
 use pdf_cmap::WritingMode;
 
 const NOTO_SANS_CJK_JP_REGULAR: &[u8] =
@@ -43,31 +41,24 @@ pub enum PdfFontSpec {
 impl FromPdfObject for PdfFontSpec {
     /// Reads a font resource, substituting a Standard 14 font on parsing failure.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let value = context.object();
         let mut context = context.dictionary()?;
-        // Keep recovery at the resource boundary; strict conversion reports the cause.
-        Ok(Self::try_from(&mut context).unwrap_or_else(|_| {
-            Self::from(crate::fallback::fallback_standard14_font(&mut context))
+        // Keep recovery at the resource boundary: a missing or unsupported subtype, or a
+        // concrete font that fails to parse, falls back to a Standard 14 font.
+        let subtype = context.required::<Arc<[u8]>>(b"Subtype").ok();
+        let spec = match subtype.as_deref() {
+            Some(b"Type0") => context.read(value).map(Self::Type0).ok(),
+            Some(b"Type1") => context.read(value).map(Self::Type1).ok(),
+            Some(b"MMType1") => context.read(value).map(Self::MultipleMasterType1).ok(),
+            Some(b"TrueType") => context.read(value).map(Self::TrueType).ok(),
+            Some(b"Type3") => context.read(value).map(Self::Type3).ok(),
+            _ => None,
+        };
+        // The whole-font fallback follows BaseFont alone, without descriptor flags.
+        Ok(spec.unwrap_or_else(|| {
+            let base_font = context.lenient::<Arc<[u8]>>(b"BaseFont");
+            Self::from(standard14::select(base_font.as_deref(), FontFlags::empty()))
         }))
-    }
-}
-
-impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for PdfFontSpec {
-    type Error = ObjectReadError;
-
-    /// Parses a font dictionary without applying whole-font substitution.
-    fn try_from(context: &mut DictionaryContext<'_, A>) -> ReadResult<Self> {
-        let subtype: Arc<[u8]> = context.required(b"Subtype")?;
-        match subtype.as_ref() {
-            b"Type0" => Type0FontSpec::try_from(context).map(Self::Type0),
-            b"Type1" => SimpleFontSpec::try_from(context).map(Self::Type1),
-            b"MMType1" => SimpleFontSpec::try_from(context).map(Self::MultipleMasterType1),
-            b"TrueType" => SimpleFontSpec::try_from(context).map(Self::TrueType),
-            b"Type3" => Type3FontSpec::try_from(context).map(Self::Type3),
-            other => Err(FontError::UnsupportedFontSubtype {
-                subtype: String::from_utf8_lossy(other).into_owned(),
-            }
-            .into()),
-        }
     }
 }
 
@@ -83,8 +74,8 @@ impl From<Standard14Font> for PdfFontSpec {
                 differences: std::collections::BTreeMap::new(),
             },
             metrics: PdfMetrics {
-                default: horizontal_metric(FALLBACK_GLYPH_WIDTH),
-                explicit: std::collections::BTreeMap::new(),
+                default: FALLBACK_GLYPH_WIDTH,
+                explicit: crate::glyph_widths_map::GlyphWidthsMap::default(),
             },
             to_unicode: None,
         })
@@ -92,26 +83,6 @@ impl From<Standard14Font> for PdfFontSpec {
 }
 
 impl PdfFontSpec {
-    /// Returns the PDF metric for a character code or CID.
-    ///
-    /// Sparse explicit entries take precedence; the normalized table's required default is
-    /// returned for every missing code, so callers do not need another optional layer.
-    #[must_use]
-    pub fn metric(&self, code: u32) -> PdfGlyphMetric {
-        let metrics = match self {
-            Self::Type0(font) => &font.descendant.metrics,
-            Self::Type1(font) | Self::MultipleMasterType1(font) | Self::TrueType(font) => {
-                &font.metrics
-            }
-            Self::Type3(font) => &font.metrics,
-        };
-        metrics
-            .explicit
-            .get(&code)
-            .copied()
-            .unwrap_or(metrics.default)
-    }
-
     /// Borrows the normalized metadata associated with this PDF font.
     ///
     /// Borrowing avoids cloning names and classification data during face loading and fallback
@@ -161,7 +132,7 @@ impl PdfFontSpec {
         let Self::Type3(font) = self else {
             return None;
         };
-        font.type3_procedures.get(&glyph)
+        font.char_procedures.get(glyph)
     }
 
     /// Returns the bundled Standard 14 identity, when present.
@@ -228,7 +199,7 @@ impl PdfFontSpec {
             | PdfFontSpec::MultipleMasterType1(font)
             | PdfFontSpec::TrueType(font) => font.standard14.unwrap_or_default(),
             PdfFontSpec::Type0(font) => {
-                from_base_font_name(&font.base_font).unwrap_or(Standard14Font::Helvetica)
+                standard14::from_base_font_name(&font.base_font).unwrap_or_default()
             }
             _ => Standard14Font::Helvetica,
         }

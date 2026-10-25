@@ -1,17 +1,13 @@
-//! Typed decoding of font dictionaries into horizontal glyph metrics.
+//! Typed decoding of font dictionaries into glyph widths.
 
 use crate::{
     PDF_GLYPH_SPACE_UNITS_PER_EM,
     error::FontError,
-    glyph_widths_map::GlyphWidthsMap,
-    pdf::{FALLBACK_GLYPH_WIDTH, PdfFontDescriptor, PdfGlyphMetric, PdfMetrics, SimpleEncoding},
+    pdf::{FALLBACK_GLYPH_WIDTH, PdfFontDescriptor, PdfMetrics, SimpleEncoding},
     standard14::Standard14Font,
 };
-use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-    pdf_array::PdfArray,
-};
-use std::{collections::BTreeMap, sync::Arc};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
+use std::sync::Arc;
 
 impl FromPdfObject for PdfMetrics {
     /// Reads a simple, Type 3, or descendant CID font dictionary.
@@ -19,15 +15,6 @@ impl FromPdfObject for PdfMetrics {
     /// The input is the whole font dictionary, since character bounds and
     /// default widths are stored outside the width arrays. Type 0 containers
     /// obtain their metrics from a descendant rather than this decoder.
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Self::try_from(&mut context.dictionary()?)
-    }
-}
-
-impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for PdfMetrics {
-    type Error = ObjectReadError;
-
-    /// Reads metrics within the active font-dictionary traversal.
     ///
     /// Simple fonts default to the descriptor's `/MissingWidth` or
     /// [`FALLBACK_GLYPH_WIDTH`], Type 3 fonts to zero, and CID fonts to `/DW` or
@@ -39,29 +26,21 @@ impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for PdfMet
     /// Returns a reader error for missing or unsupported subtypes, malformed
     /// width entries, or invalid required character bounds. CID range errors
     /// retain their font-domain source; optional descriptor hints remain lenient.
-    fn try_from(context: &mut DictionaryContext<'_, A>) -> ReadResult<Self> {
+    /// The explicit table itself is read by [`crate::glyph_widths_map::GlyphWidthsMap`].
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let value = context.object();
+        let mut context = context.dictionary()?;
         let subtype: Arc<[u8]> = context.required(b"Subtype")?;
-        let (default_width, explicit) = match subtype.as_ref() {
-            b"Type1" | b"MMType1" | b"TrueType" => {
-                // Decode metadata only; font program loading belongs to the font spec.
-                let missing_width = context
-                    .optional::<PdfFontDescriptor>(b"FontDescriptor")?
-                    .and_then(|descriptor| descriptor.missing_width);
-                (
-                    missing_width.unwrap_or(FALLBACK_GLYPH_WIDTH),
-                    Self::simple_widths(context)?,
-                )
-            }
-            b"Type3" => (0.0, Self::simple_widths(context)?),
-            b"CIDFontType0" | b"CIDFontType2" => (
-                context
-                    .optional::<f32>(b"DW")?
-                    .unwrap_or(PDF_GLYPH_SPACE_UNITS_PER_EM),
-                context
-                    .optional::<GlyphWidthsMap>(GlyphWidthsMap::KEY)?
-                    .map(BTreeMap::from)
-                    .unwrap_or_default(),
-            ),
+        let default_width = match subtype.as_ref() {
+            // Decode metadata only; font program loading belongs to the font spec.
+            b"Type1" | b"MMType1" | b"TrueType" => context
+                .optional::<PdfFontDescriptor>(b"FontDescriptor")?
+                .and_then(|descriptor| descriptor.missing_width)
+                .unwrap_or(FALLBACK_GLYPH_WIDTH),
+            b"Type3" => 0.0,
+            b"CIDFontType0" | b"CIDFontType2" => context
+                .optional::<f32>(b"DW")?
+                .unwrap_or(PDF_GLYPH_SPACE_UNITS_PER_EM),
             other => {
                 return Err(FontError::UnsupportedFontSubtype {
                     subtype: String::from_utf8_lossy(other).into_owned(),
@@ -70,30 +49,13 @@ impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for PdfMet
             }
         };
         Ok(Self {
-            default: horizontal_metric(default_width),
-            explicit,
+            default: default_width,
+            explicit: context.read(value)?,
         })
     }
 }
 
 impl PdfMetrics {
-    /// Reads a simple or Type 3 font's `/Widths` array indexed from `/FirstChar`.
-    fn simple_widths(
-        context: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
-    ) -> ReadResult<BTreeMap<u32, PdfGlyphMetric>> {
-        // Standard 14 fonts can omit widths and character bounds entirely.
-        let Some(array) = context.optional::<PdfArray>(b"Widths")? else {
-            return Ok(BTreeMap::new());
-        };
-        // Retain the raw array to avoid decoding surplus entries.
-        let first: u16 = context.required(b"FirstChar")?;
-        let last: u16 = context.required(b"LastChar")?;
-        (first..=last)
-            .zip(array.iter())
-            .map(|(code, value)| Ok((u32::from(code), horizontal_metric(context.read(value)?))))
-            .collect()
-    }
-
     /// Supplies Standard 14 AFM widths for encoded glyph names when the PDF lists no widths.
     ///
     /// Explicit `/Widths` entries remain authoritative, so a non-empty table is left unchanged.
@@ -102,24 +64,16 @@ impl PdfMetrics {
         font: Standard14Font,
         encoding: &SimpleEncoding,
     ) {
-        if !self.explicit.is_empty() {
-            return;
+        if self.explicit.is_empty() {
+            self.explicit = encoding
+                .differences
+                .iter()
+                .filter_map(|(code, name)| {
+                    font.glyph_width(name.0.as_ref())
+                        .map(|width| (u32::from(*code), width))
+                })
+                .collect();
         }
-        self.explicit
-            .extend(encoding.differences.iter().filter_map(|(code, name)| {
-                font.glyph_width(name.0.as_ref())
-                    .map(|width| (u32::from(*code), horizontal_metric(width)))
-            }));
-    }
-}
-
-/// Constructs the horizontal advance used for PDF glyph width entries.
-pub(crate) const fn horizontal_metric(width: f32) -> PdfGlyphMetric {
-    PdfGlyphMetric {
-        advance_x: width,
-        advance_y: 0.0,
-        vertical_origin_x: None,
-        vertical_origin_y: None,
     }
 }
 
@@ -128,11 +82,11 @@ pub(crate) const fn horizontal_metric(width: f32) -> PdfGlyphMetric {
 mod tests {
     use super::*;
     use pdf_object_reader::dictionary::Dictionary;
-    use pdf_object_reader::{object_resolver::PassthroughResolver, object_variant::ObjectVariant};
+    use pdf_object_reader::{EmptySource, object_variant::ObjectVariant};
     use std::collections::BTreeMap;
 
     fn read_metrics(dictionary: &Dictionary) -> ReadResult<PdfMetrics> {
-        pdf_object_reader::ObjectReader::new(PassthroughResolver)
+        pdf_object_reader::ObjectReader::new(EmptySource)
             .read::<PdfMetrics>(&ObjectVariant::Dictionary(dictionary.clone()))
     }
 
@@ -143,7 +97,7 @@ mod tests {
             .chain([(
                 b"Subtype".to_vec(),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"Type1".to_vec(),
+                    b"Type1",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             )])
@@ -171,10 +125,10 @@ mod tests {
             (b"Widths", arr(vec![real(250.0), real(300.0), real(400.0)])),
         ]);
         let result = read_metrics(&dict).unwrap();
-        assert_eq!(result.explicit.len(), 3);
-        assert_eq!(result.explicit[&32].advance_x, 250.0);
-        assert_eq!(result.explicit[&33].advance_x, 300.0);
-        assert_eq!(result.explicit[&34].advance_x, 400.0);
+        assert_eq!(result.explicit.get(32).unwrap(), 250.0);
+        assert_eq!(result.explicit.get(33).unwrap(), 300.0);
+        assert_eq!(result.explicit.get(34).unwrap(), 400.0);
+        assert_eq!(result.explicit.get(35), None);
     }
 
     #[test]
@@ -182,7 +136,7 @@ mod tests {
         let dict = make_dict(vec![(b"FirstChar", int(0)), (b"LastChar", int(0))]);
         let result = read_metrics(&dict).unwrap();
         assert!(result.explicit.is_empty());
-        assert_eq!(result.default, horizontal_metric(500.0));
+        assert_eq!(result.default, 500.0);
     }
 
     #[test]
@@ -191,7 +145,7 @@ mod tests {
         let dict = make_dict(vec![]);
         let result = read_metrics(&dict).unwrap();
         assert!(result.explicit.is_empty());
-        assert_eq!(result.default, horizontal_metric(500.0));
+        assert_eq!(result.default, 500.0);
     }
 
     #[test]
@@ -203,7 +157,7 @@ mod tests {
         ]);
         let result = read_metrics(&dict).unwrap();
         assert!(result.explicit.is_empty());
-        assert_eq!(result.default, horizontal_metric(500.0));
+        assert_eq!(result.default, 500.0);
     }
 
     #[test]
@@ -224,10 +178,9 @@ mod tests {
             ),
         ]);
         let result = read_metrics(&dict).unwrap();
-        assert_eq!(result.explicit.len(), 2);
-        assert_eq!(result.explicit[&10].advance_x, 100.0);
-        assert_eq!(result.explicit[&11].advance_x, 200.0);
-        assert!(!result.explicit.contains_key(&12));
+        assert_eq!(result.explicit.get(10).unwrap(), 100.0);
+        assert_eq!(result.explicit.get(11).unwrap(), 200.0);
+        assert_eq!(result.explicit.get(12), None);
     }
 
     #[test]
@@ -239,8 +192,8 @@ mod tests {
             (b"Widths", arr(vec![real(600.0)])),
         ]);
         let result = read_metrics(&dict).unwrap();
-        assert_eq!(result.explicit.len(), 1);
-        assert_eq!(result.explicit[&65].advance_x, 600.0);
+        assert_eq!(result.explicit.get(65).unwrap(), 600.0);
+        assert_eq!(result.explicit.get(66), None);
     }
 
     #[test]
@@ -251,7 +204,7 @@ mod tests {
             (b"Widths", arr(vec![real(1000.0)])),
         ]);
         let result = read_metrics(&dict).unwrap();
-        assert_eq!(result.explicit.len(), 1);
-        assert_eq!(result.explicit[&0].advance_x, 1000.0);
+        assert_eq!(result.explicit.get(0).unwrap(), 1000.0);
+        assert_eq!(result.explicit.get(1), None);
     }
 }

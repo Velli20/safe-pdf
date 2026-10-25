@@ -1,13 +1,14 @@
 //! PDF object variants and checked accessors.
 
+use crate::error::ObjectReadError;
+use crate::object_kind::ObjectKind;
 use crate::pdf_array::PdfArray;
 use crate::pdf_string::PdfString;
 use crate::string_kind::StringKind;
 use crate::{
-    cross_reference_table::CrossReferenceTable, dictionary::Dictionary, object_error::ObjectError,
-    object_id::ObjectId, object_resolver::ObjectResolver, stream::StreamObject, trailer::Trailer,
+    cross_reference_table::CrossReferenceTable, dictionary::Dictionary, object_id::ObjectId,
+    stream::StreamObject, trailer::Trailer,
 };
-use num_traits::FromPrimitive;
 /// Represents any PDF object as described in the PDF specification.
 ///
 /// This enum is the central value type used across the crate to model
@@ -43,94 +44,6 @@ pub enum ObjectVariant {
 }
 
 impl ObjectVariant {
-    /// Resolves an `ObjectVariant` into a `Dictionary`.
-    ///
-    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
-    /// into a direct or stream object's dictionary.
-    ///
-    /// # Parameters
-    ///
-    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
-    ///
-    /// # Returns
-    ///
-    /// `Dictionary` or `Err` if the object is not a dictionary or if a reference cannot be
-    /// resolved.
-    pub fn try_dictionary<'a>(
-        &'a self,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a Dictionary, ObjectError> {
-        let object = if let ObjectVariant::Reference(_) = self {
-            objects.resolve_object(self)?
-        } else {
-            self
-        };
-
-        match object {
-            ObjectVariant::Dictionary(dict) => Ok(dict),
-            ObjectVariant::Stream(stream) => Ok(&stream.dictionary),
-            _ => Err(ObjectError::TypeMismatch("Dictionary", object.name())),
-        }
-    }
-
-    /// Resolves an `ObjectVariant` into a `StreamObject`.
-    ///
-    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
-    /// into a `StreamObject`.
-    ///
-    /// # Parameters
-    ///
-    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
-    ///
-    /// # Returns
-    ///
-    /// `StreamObject` or `Err` if the object is not a stream or if a reference cannot be
-    /// resolved.
-    pub fn try_stream<'a>(
-        &'a self,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a StreamObject, ObjectError> {
-        let object = if let ObjectVariant::Reference(_) = self {
-            objects.resolve_object(self)?
-        } else {
-            self
-        };
-
-        match object {
-            ObjectVariant::Stream(s) => Ok(s),
-            _ => Err(ObjectError::TypeMismatch("Stream", object.name())),
-        }
-    }
-
-    /// Resolves an `ObjectVariant` into an `Array`.
-    ///
-    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
-    /// into an `Array`.
-    ///
-    /// # Parameters
-    ///
-    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
-    ///
-    /// # Returns
-    ///
-    /// `Array` or `Err` if the object is not an array or if a reference cannot be
-    /// resolved.
-    pub fn try_array<'a>(
-        &'a self,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a PdfArray, ObjectError> {
-        let object = if let ObjectVariant::Reference(_) = self {
-            objects.resolve_object(self)?
-        } else {
-            self
-        };
-
-        match object {
-            ObjectVariant::Array(arr) => Ok(arr),
-            _ => Err(ObjectError::TypeMismatch("Array", object.name())),
-        }
-    }
-
     /// Creates an owned PDF Name from borrowed bytes.
     ///
     /// Parsed names should be moved directly into [`ObjectVariant::String`].
@@ -140,70 +53,37 @@ impl ObjectVariant {
         PdfString::from(name, StringKind::Name)
     }
 
-    /// Resolves an `ObjectVariant` into a `Vec<T>` of numeric values.
-    ///
-    /// This function attempts to convert an array object into a dynamically-sized
-    /// vector where each element is parsed as a numeric value.
-    ///
-    /// # Type Parameters
-    ///
-    /// - `T`: The numeric type to convert each element to. Must implement `FromPrimitive`,
-    ///   `Copy`, and `Default`.
-    ///
-    /// # Parameters
-    ///
-    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
-    ///
-    /// # Returns
-    ///
-    /// `Vec<T>` or `Err` if:
-    /// - The object is not an array.
-    /// - Any element cannot be converted to type `T`.
-    pub fn try_vec_of<T>(&self, objects: &dyn ObjectResolver) -> Result<Vec<T>, ObjectError>
-    where
-        T: FromPrimitive + Copy + Default,
-    {
-        let values = self.try_array(objects)?;
-
-        let mut result: Vec<T> = Vec::new();
-        for v in values.iter() {
-            result.push(v.try_number(objects)?);
+    /// Returns the runtime kind of this value.
+    pub fn kind(&self) -> ObjectKind {
+        match self {
+            ObjectVariant::Null => ObjectKind::Null,
+            ObjectVariant::Boolean(_) => ObjectKind::Boolean,
+            ObjectVariant::Integer(_) => ObjectKind::Integer,
+            ObjectVariant::Real(_) => ObjectKind::Real,
+            ObjectVariant::String(value) if value.kind() == StringKind::Name => ObjectKind::Name,
+            ObjectVariant::String(_) => ObjectKind::String,
+            ObjectVariant::Array(_) => ObjectKind::Array,
+            ObjectVariant::Dictionary(_) => ObjectKind::Dictionary,
+            ObjectVariant::Stream(_) => ObjectKind::Stream,
+            ObjectVariant::Reference(_) => ObjectKind::Reference,
+            ObjectVariant::Trailer(_) => ObjectKind::Trailer,
+            ObjectVariant::CrossReferenceTable(_) => ObjectKind::CrossReferenceTable,
+            ObjectVariant::EndOfFile => ObjectKind::EndOfFile,
         }
-
-        Ok(result)
     }
 
-    /// Resolves an `ObjectVariant` into a numeric type `T`.
+    /// Returns the dictionary of a direct dictionary or stream.
     ///
-    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
-    /// into a numeric type `T`.
-    ///
-    /// # Parameters
-    ///
-    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
-    ///
-    /// # Returns
-    ///
-    /// `T` or `Err` if the object is not a number or if a reference cannot be
-    /// resolved.
-    pub fn try_number<T>(&self, objects: &dyn ObjectResolver) -> Result<T, ObjectError>
-    where
-        T: FromPrimitive,
-    {
-        let object = if let ObjectVariant::Reference(_) = self {
-            objects.resolve_object(self)?
-        } else {
-            self
-        };
-
-        match object {
-            ObjectVariant::Integer(value) => {
-                T::from_i64(*value).ok_or(ObjectError::NumberConversionError)
-            }
-            ObjectVariant::Real(value) => {
-                T::from_f64(*value).ok_or(ObjectError::NumberConversionError)
-            }
-            _ => Err(ObjectError::TypeMismatch("Number", object.name())),
+    /// No reference is followed, so no resolver is borrowed and the dictionary
+    /// lives as long as this value.
+    pub fn dictionary(&self) -> Result<&Dictionary, ObjectReadError> {
+        match self {
+            ObjectVariant::Dictionary(dictionary) => Ok(dictionary),
+            ObjectVariant::Stream(stream) => Ok(&stream.dictionary),
+            _ => Err(ObjectReadError::TypeMismatch {
+                expected: ObjectKind::Dictionary,
+                actual: self.kind(),
+            }),
         }
     }
 
@@ -212,172 +92,9 @@ impl ObjectVariant {
         matches!(self, ObjectVariant::String(value) if value.kind() == StringKind::Name)
     }
 
-    /// Returns `true` if this value, or the object it references, spells `name`.
-    ///
-    /// Like [`Self::try_bytes`], strings are accepted alongside names because malformed
-    /// PDFs sometimes encode one as the other. An unresolvable reference is not `name`.
-    pub fn is_named(&self, name: &[u8], objects: &dyn ObjectResolver) -> bool {
-        let object = match self {
-            ObjectVariant::Reference(_) => objects.resolve_object(self),
-            _ => Ok(self),
-        };
-        matches!(object, Ok(ObjectVariant::String(value)) if value.as_bytes() == name)
-    }
-
     /// Returns `true` if this value is an `Array`.
     pub fn is_array(&self) -> bool {
         matches!(self, ObjectVariant::Array(_))
-    }
-
-    /// Returns `true` if this value, or the object it references, is `Null`.
-    ///
-    /// # Parameters
-    ///
-    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
-    ///
-    /// # Returns
-    ///
-    /// `bool` or `Err` if a reference cannot be resolved.
-    pub fn is_null(&self, objects: &dyn ObjectResolver) -> Result<bool, ObjectError> {
-        let object = if let ObjectVariant::Reference(_) = self {
-            objects.resolve_object(self)?
-        } else {
-            self
-        };
-
-        Ok(matches!(object, ObjectVariant::Null))
-    }
-
-    /// Resolves an `ObjectVariant` into a fixed-size array of numeric values.
-    ///
-    /// This function attempts to convert an array object into a Rust array of type `[T; N]`,
-    /// where each element is parsed as a numeric value. Some producers pad fixed-size arrays
-    /// with extra entries, so only the leading `N` elements are read and the rest are ignored.
-    ///
-    /// # Type Parameters
-    ///
-    /// - `T`: The numeric type to convert each element to. Must implement `FromPrimitive`,
-    ///   `Copy`, and `Default`.
-    /// - `N`: The number of leading elements to read (compile-time constant).
-    ///
-    /// # Parameters
-    ///
-    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
-    ///
-    /// # Returns
-    ///
-    /// `[T; N]` or `Err` if:
-    /// - The object is not an array.
-    /// - The array holds fewer than `N` elements.
-    /// - Any of the first `N` elements cannot be converted to type `T`.
-    pub fn try_array_of<T, const N: usize>(
-        &self,
-        objects: &dyn ObjectResolver,
-    ) -> Result<[T; N], ObjectError>
-    where
-        T: FromPrimitive + Copy + Default,
-    {
-        let values = self.try_array(objects)?;
-
-        if values.len() < N {
-            return Err(ObjectError::InvalidArrayLength {
-                expected: N,
-                found: values.len(),
-            });
-        }
-
-        let mut result = [T::default(); N];
-        result
-            .iter_mut()
-            .zip(values.iter())
-            .try_for_each(|(out, v)| {
-                *out = v.try_number(objects)?;
-                Ok::<(), ObjectError>(())
-            })?;
-
-        Ok(result)
-    }
-
-    /// Resolves an `ObjectVariant` into raw bytes.
-    ///
-    /// This function extracts the underlying byte representation from PDF Names
-    /// and strings. Accepting both representations is intentional: malformed PDFs
-    /// sometimes encode a Name as a string or a string as a Name.
-    ///
-    /// # Parameters
-    ///
-    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
-    ///
-    /// # Returns
-    ///
-    /// `&[u8]` or `Err` if the object is not byte-backed or if a reference cannot
-    /// be resolved.
-    pub fn try_bytes<'a>(
-        &'a self,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<&'a [u8], ObjectError> {
-        let object = if let ObjectVariant::Reference(_) = self {
-            objects.resolve_object(self)?
-        } else {
-            self
-        };
-
-        match object {
-            ObjectVariant::String(value) => Ok(value.as_bytes()),
-            ObjectVariant::Stream(stream) => Ok(stream.raw_data()),
-            _ => Err(ObjectError::TypeMismatch("Bytes", object.name())),
-        }
-    }
-
-    /// Resolves a byte-backed PDF object and returns an owned copy of its bytes.
-    pub fn try_bytes_vec<'a>(
-        &'a self,
-        objects: &'a dyn ObjectResolver,
-    ) -> Result<Vec<u8>, ObjectError> {
-        self.try_bytes(objects).map(|bytes| bytes.to_vec())
-    }
-
-    /// Resolves an `ObjectVariant` into a boolean value.
-    ///
-    /// This function takes a reference to an `ObjectVariant` and attempts to resolve it
-    /// into a `bool`.
-    ///
-    /// # Parameters
-    ///
-    /// - `objects`: A reference to the `ObjectResolver` used for resolving references.
-    ///
-    /// # Returns
-    ///
-    /// `bool` or `Err` if the object is not a boolean or if a reference cannot be
-    /// resolved.
-    pub fn try_boolean(&self, objects: &dyn ObjectResolver) -> Result<bool, ObjectError> {
-        let object = if let ObjectVariant::Reference(_) = self {
-            objects.resolve_object(self)?
-        } else {
-            self
-        };
-
-        match object {
-            ObjectVariant::Boolean(value) => Ok(*value),
-            _ => Err(ObjectError::TypeMismatch("Boolean", object.name())),
-        }
-    }
-
-    /// Returns the object number if this is a `Reference`.
-    pub fn try_object_number(&self) -> Result<usize, ObjectError> {
-        match self {
-            ObjectVariant::Reference(value) => Ok(value.number),
-            ObjectVariant::Dictionary(value) => {
-                value.object_number.ok_or(ObjectError::ObjectMissingNumber {
-                    found_type: "Dictionary",
-                })
-            }
-            ObjectVariant::Stream(value) => Ok(value.object_number),
-            _ => Err(ObjectError::TypeMismatch(
-                "Reference or Object with number",
-                self.name(),
-            )),
-        }
     }
 
     /// Returns the variant name as a static string, useful in error messages.
@@ -401,131 +118,6 @@ impl ObjectVariant {
             ObjectVariant::CrossReferenceTable(_) => "CrossReferenceTable",
             ObjectVariant::EndOfFile => "EndOfFile",
             ObjectVariant::Reference(_) => "Reference",
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::object_resolver::PassthroughResolver;
-
-    struct FixedResolver {
-        object: ObjectVariant,
-    }
-
-    impl ObjectResolver for FixedResolver {
-        fn resolve_object<'a>(
-            &'a self,
-            object: &'a ObjectVariant,
-        ) -> Result<&'a ObjectVariant, ObjectError> {
-            match object {
-                ObjectVariant::Reference(_) => Ok(&self.object),
-                _ => Ok(object),
-            }
-        }
-    }
-
-    #[test]
-    fn try_bytes_accepts_names_and_strings() {
-        for (object, expected) in [
-            (
-                crate::pdf_string::PdfString::from(
-                    vec![0xFF],
-                    crate::string_kind::StringKind::Name,
-                ),
-                vec![0xFF],
-            ),
-            (
-                crate::pdf_string::PdfString::from(
-                    vec![0xFE],
-                    crate::string_kind::StringKind::Literal,
-                ),
-                vec![0xFE],
-            ),
-            (
-                crate::pdf_string::PdfString::from(
-                    vec![0xFD],
-                    crate::string_kind::StringKind::Hexadecimal,
-                ),
-                vec![0xFD],
-            ),
-        ] {
-            assert_eq!(
-                object
-                    .try_bytes(&PassthroughResolver)
-                    .expect("byte-backed PDF objects should return their raw bytes"),
-                expected
-            );
-        }
-    }
-
-    #[test]
-    fn try_bytes_accepts_resolved_byte_backed_object() {
-        let reference = ObjectVariant::Reference(crate::object_id::ObjectId::new(1, 0));
-        let resolver = FixedResolver {
-            object: crate::pdf_string::PdfString::from(
-                vec![0xFF],
-                crate::string_kind::StringKind::Name,
-            ),
-        };
-
-        assert_eq!(
-            reference
-                .try_bytes(&resolver)
-                .expect("a reference to a byte-backed object should resolve"),
-            [0xFF]
-        );
-    }
-
-    #[test]
-    fn try_number_returns_type_mismatch_for_non_number() {
-        let object = ObjectVariant::Array(vec![].into());
-        let err = object
-            .try_number::<u16>(&PassthroughResolver)
-            .expect_err("non-number object should not decode as number");
-
-        assert_eq!(err, ObjectError::TypeMismatch("Number", "Array".into()));
-    }
-
-    #[test]
-    fn try_stream_returns_type_mismatch_for_non_stream() {
-        let null_object = ObjectVariant::Null;
-        let null_err = null_object
-            .try_stream(&PassthroughResolver)
-            .expect_err("null object should not decode as a stream");
-        assert_eq!(null_err, ObjectError::TypeMismatch("Stream", "Null"));
-
-        let dict_object = ObjectVariant::Dictionary(crate::dictionary::Dictionary::new(
-            std::collections::BTreeMap::<Vec<u8>, ObjectVariant>::new(),
-        ));
-        let dict_err = dict_object
-            .try_stream(&PassthroughResolver)
-            .expect_err("dictionary object should not decode as a stream");
-        assert_eq!(dict_err, ObjectError::TypeMismatch("Stream", "Dictionary"));
-    }
-
-    #[test]
-    fn try_bytes_returns_type_mismatch_for_non_bytes() {
-        for (object, name) in [
-            (ObjectVariant::Integer(7), "Integer"),
-            (
-                ObjectVariant::Array(crate::pdf_array::PdfArray::new(Vec::new())),
-                "Array",
-            ),
-            (
-                ObjectVariant::Dictionary(crate::dictionary::Dictionary::new(
-                    std::collections::BTreeMap::<Vec<u8>, ObjectVariant>::new(),
-                )),
-                "Dictionary",
-            ),
-            (ObjectVariant::Boolean(true), "Boolean"),
-        ] {
-            let error = object
-                .try_bytes(&PassthroughResolver)
-                .expect_err("non-byte-backed object should not decode as bytes");
-
-            assert_eq!(error, ObjectError::TypeMismatch("Bytes", name));
         }
     }
 }

@@ -7,8 +7,6 @@ pub enum ColorSpaceError {
     ObjectError(#[from] pdf_object_reader::object_error::ObjectError),
     #[error("Invalid or unsupported ColorSpace: {description}")]
     InvalidColorSpace { description: String },
-    #[error("Function parsing error: {0}")]
-    FunctionError(#[from] pdf_function::error::FunctionReadError),
     #[error("Indexed color space error: {0}")]
     IndexedColorSpaceError(String),
     #[error("Insufficient color components: expected {0}, found {1}")]

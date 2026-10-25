@@ -24,22 +24,22 @@ impl FromPdfObject for FormXObject {
         let object = context.object();
         // Both stream-backed and dictionary-only forms expose the same metadata.
         let mut context = context.dictionary()?;
-        let content_stream = match object.value() {
+        let content_stream = match object {
             // Dictionary-only forms still receive an ID, but have no drawing operators.
             ObjectVariant::Dictionary(_) => ContentStream {
                 operators: Vec::new(),
                 id: context.content_stream_ids().next_id()?,
             },
-            _ => context.read::<ContentStream>(object.value())?,
+            _ => context.read::<ContentStream>(object)?,
         };
-        let bbox = context.dictionary().optional_bbox(context.source())?;
-        let matrix = context.dictionary().optional_matrix(context.source())?;
-        // Retain deferred handles so recursive resource graphs can finish decoding.
-        let resources = context.optional_shared::<Resources>(b"Resources")?;
         Ok(Self {
-            bbox,
-            matrix,
-            resources,
+            // A malformed /BBox leaves the form unclipped.
+            bbox: context
+                .lenient::<Rect>(b"BBox")
+                .map(|bbox| bbox.normalized()),
+            matrix: context.optional(b"Matrix")?,
+            // Retain deferred handles so recursive resource graphs can finish decoding.
+            resources: context.optional_shared(b"Resources")?,
             content_stream,
         })
     }
@@ -52,8 +52,7 @@ mod tests {
 
     use pdf_graphics::transform::Transform;
     use pdf_object_reader::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver,
-        object_variant::ObjectVariant, stream::StreamObject,
+        EmptySource, dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject,
     };
 
     use super::FormXObject;
@@ -65,7 +64,7 @@ mod tests {
                 Vec::from(b"BBox"),
                 ObjectVariant::Array(
                     vec![
-                        ObjectVariant::Real(265.077.into()),
+                        ObjectVariant::Real(265.077),
                         ObjectVariant::Real(71.8304),
                         ObjectVariant::Real(301.321),
                         ObjectVariant::Real(43.3206),
@@ -76,14 +75,14 @@ mod tests {
             (
                 Vec::from(b"Subtype"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"Form".to_vec(),
+                    b"Form",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
         ]));
         let stream = StreamObject::new(7, 0, dictionary.clone(), Vec::new());
 
-        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let reader = pdf_object_reader::ObjectReader::new(EmptySource);
 
         let form = reader
             .read::<FormXObject>(&ObjectVariant::Stream(stream))
@@ -103,7 +102,7 @@ mod tests {
                 Vec::from(b"BBox"),
                 ObjectVariant::Array(
                     vec![
-                        ObjectVariant::Real(0.0.into()),
+                        ObjectVariant::Real(0.0),
                         ObjectVariant::Real(0.0),
                         ObjectVariant::Real(10.0),
                         ObjectVariant::Real(10.0),
@@ -114,7 +113,7 @@ mod tests {
             (
                 Vec::from(b"Subtype"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"Form".to_vec(),
+                    b"Form",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -122,7 +121,7 @@ mod tests {
                 Vec::from(b"Matrix"),
                 ObjectVariant::Array(
                     vec![
-                        ObjectVariant::Real(2.0.into()),
+                        ObjectVariant::Real(2.0),
                         ObjectVariant::Real(0.0),
                         ObjectVariant::Real(0.0),
                         ObjectVariant::Real(3.0),
@@ -134,13 +133,11 @@ mod tests {
             ),
         ]));
 
-        let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+        let reader = pdf_object_reader::ObjectReader::new(EmptySource);
 
         let form = reader
             .read::<FormXObject>(
-                &pdf_object_reader::object_variant::ObjectVariant::Dictionary(
-                    (&dictionary).clone(),
-                ),
+                &pdf_object_reader::object_variant::ObjectVariant::Dictionary(dictionary.clone()),
             )
             .expect("dictionary-only form should parse");
 

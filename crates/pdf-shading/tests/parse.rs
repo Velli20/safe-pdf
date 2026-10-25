@@ -5,8 +5,7 @@
 use std::collections::BTreeMap;
 
 use pdf_object_reader::{
-    dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
-    stream::StreamObject,
+    EmptySource, dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject,
 };
 use pdf_shading::{
     error::{FreeFormMeshError, MeshDecoderError, PatchMeshError, PdfShadingError},
@@ -81,7 +80,7 @@ fn mesh_entries(
         (
             Vec::from(b"ColorSpace"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"DeviceRGB".to_vec(),
+                b"DeviceRGB",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         ),
@@ -145,7 +144,7 @@ fn append_vertex(
 }
 
 fn parsed_triangles(object: &ObjectVariant) -> Vec<MeshTriangle> {
-    let shading = pdf_object_reader::ObjectReader::new(&PassthroughResolver)
+    let shading = pdf_object_reader::ObjectReader::new(EmptySource)
         .read::<Shading>(object)
         .expect("free-form triangle mesh should parse");
     match shading {
@@ -291,13 +290,13 @@ fn applies_optional_function_to_vertex_parameter() {
 fn rejects_invalid_or_incomplete_triangle_streams() {
     let empty = free_form_stream(Vec::new(), 2, 3, None);
     assert!(matches!(
-        pdf_object_reader::ObjectReader::new(&PassthroughResolver).read::<Shading>(&empty),
+        pdf_object_reader::ObjectReader::new(EmptySource).read::<Shading>(&empty),
         Err(pdf_object_reader::ObjectReadError::Decode { source, .. }) if matches!(source.downcast_ref::<PdfShadingError>(), Some(PdfShadingError::FreeFormMesh(FreeFormMeshError::EmptyMesh)))
     ));
 
     let missing_previous = free_form_stream(encode_vertex(1, [0, 0], &[15, 0, 0], 2), 2, 3, None);
     assert!(matches!(
-        pdf_object_reader::ObjectReader::new(&PassthroughResolver).read::<Shading>(&missing_previous),
+        pdf_object_reader::ObjectReader::new(EmptySource).read::<Shading>(&missing_previous),
         Err(pdf_object_reader::ObjectReadError::Decode { source, .. }) if matches!(source.downcast_ref::<PdfShadingError>(), Some(PdfShadingError::FreeFormMesh(
             FreeFormMeshError::ContinuationWithoutPreviousTriangle { flag: 1 }
         )))
@@ -305,7 +304,7 @@ fn rejects_invalid_or_incomplete_triangle_streams() {
 
     let invalid_flag = free_form_stream(encode_vertex(3, [0, 0], &[15, 0, 0], 2), 2, 3, None);
     assert!(matches!(
-        pdf_object_reader::ObjectReader::new(&PassthroughResolver).read::<Shading>(&invalid_flag),
+        pdf_object_reader::ObjectReader::new(EmptySource).read::<Shading>(&invalid_flag),
         Err(pdf_object_reader::ObjectReadError::Decode { source, .. }) if matches!(source.downcast_ref::<PdfShadingError>(), Some(PdfShadingError::FreeFormMesh(
             FreeFormMeshError::InvalidEdgeFlag { flag: 3 }
         )))
@@ -313,7 +312,7 @@ fn rejects_invalid_or_incomplete_triangle_streams() {
 
     let incomplete = free_form_stream(encode_vertex(0, [0, 0], &[15, 0, 0], 2), 2, 3, None);
     assert!(matches!(
-        pdf_object_reader::ObjectReader::new(&PassthroughResolver).read::<Shading>(&incomplete),
+        pdf_object_reader::ObjectReader::new(EmptySource).read::<Shading>(&incomplete),
         Err(pdf_object_reader::ObjectReadError::Decode { source, .. }) if matches!(source.downcast_ref::<PdfShadingError>(), Some(PdfShadingError::FreeFormMesh(
             FreeFormMeshError::IncompleteTriangle
         )))
@@ -321,7 +320,7 @@ fn rejects_invalid_or_incomplete_triangle_streams() {
 
     let truncated = free_form_stream(vec![0], 2, 3, None);
     assert!(matches!(
-        pdf_object_reader::ObjectReader::new(&PassthroughResolver).read::<Shading>(&truncated),
+        pdf_object_reader::ObjectReader::new(EmptySource).read::<Shading>(&truncated),
         Err(pdf_object_reader::ObjectReadError::Decode { source, .. }) if matches!(source.downcast_ref::<PdfShadingError>(), Some(PdfShadingError::MeshDecoder(
             MeshDecoderError::TruncatedSample
         )))
@@ -337,7 +336,7 @@ fn parses_coons_and_tensor_patch_streams() {
         append_patch_record(&mut data, 0, point_count, 4);
         let object = patch_stream(shading_type, data, [8, 8, 8], patch_decode(), None);
 
-        let shading = pdf_object_reader::ObjectReader::new(&PassthroughResolver)
+        let shading = pdf_object_reader::ObjectReader::new(EmptySource)
             .read::<Shading>(&object)
             .expect("patch mesh should parse");
         assert!(matches!(
@@ -354,7 +353,7 @@ fn patch_parser_uses_only_the_low_two_flag_bits() {
     append_patch_record(&mut data, 0b1111_1101, 8, 2);
     let object = patch_stream(6, data, [8, 8, 8], patch_decode(), None);
 
-    let shading = pdf_object_reader::ObjectReader::new(&PassthroughResolver)
+    let shading = pdf_object_reader::ObjectReader::new(EmptySource)
         .read::<Shading>(&object)
         .expect("patches should parse");
     assert!(matches!(
@@ -367,7 +366,7 @@ fn patch_parser_uses_only_the_low_two_flag_bits() {
 fn rejects_invalid_patch_widths_and_decode_arity() {
     let coordinate_width = patch_stream(6, Vec::new(), [3, 8, 8], patch_decode(), None);
     assert!(matches!(
-        pdf_object_reader::ObjectReader::new(&PassthroughResolver).read::<Shading>(&coordinate_width),
+        pdf_object_reader::ObjectReader::new(EmptySource).read::<Shading>(&coordinate_width),
         Err(pdf_object_reader::ObjectReadError::Decode { source, .. }) if matches!(source.downcast_ref::<PdfShadingError>(), Some(PdfShadingError::MeshDecoder(
             MeshDecoderError::InvalidBitsPerCoordinate { value: 3 }
         )))
@@ -375,7 +374,7 @@ fn rejects_invalid_patch_widths_and_decode_arity() {
 
     let component_width = patch_stream(6, Vec::new(), [8, 3, 8], patch_decode(), None);
     assert!(matches!(
-        pdf_object_reader::ObjectReader::new(&PassthroughResolver).read::<Shading>(&component_width),
+        pdf_object_reader::ObjectReader::new(EmptySource).read::<Shading>(&component_width),
         Err(pdf_object_reader::ObjectReadError::Decode { source, .. }) if matches!(source.downcast_ref::<PdfShadingError>(), Some(PdfShadingError::MeshDecoder(
             MeshDecoderError::InvalidBitsPerComponent { value: 3 }
         )))
@@ -383,7 +382,7 @@ fn rejects_invalid_patch_widths_and_decode_arity() {
 
     let flag_width = patch_stream(6, Vec::new(), [8, 8, 1], patch_decode(), None);
     assert!(matches!(
-        pdf_object_reader::ObjectReader::new(&PassthroughResolver).read::<Shading>(&flag_width),
+        pdf_object_reader::ObjectReader::new(EmptySource).read::<Shading>(&flag_width),
         Err(pdf_object_reader::ObjectReadError::Decode { source, .. }) if matches!(source.downcast_ref::<PdfShadingError>(), Some(PdfShadingError::MeshDecoder(
             MeshDecoderError::InvalidBitsPerFlag { value: 1 }
         )))
@@ -397,7 +396,7 @@ fn rejects_invalid_patch_widths_and_decode_arity() {
         None,
     );
     assert!(matches!(
-        pdf_object_reader::ObjectReader::new(&PassthroughResolver).read::<Shading>(&short_decode),
+        pdf_object_reader::ObjectReader::new(EmptySource).read::<Shading>(&short_decode),
         Err(pdf_object_reader::ObjectReadError::Decode { source, .. }) if matches!(source.downcast_ref::<PdfShadingError>(), Some(PdfShadingError::MeshDecoder(
             MeshDecoderError::InvalidDecodeLength {
                 expected: 10,
@@ -415,7 +414,7 @@ fn rejects_invalid_patch_widths_and_decode_arity() {
         Some(type_2_rgb_function()),
     );
     assert!(matches!(
-        pdf_object_reader::ObjectReader::new(&PassthroughResolver).read::<Shading>(&function_decode),
+        pdf_object_reader::ObjectReader::new(EmptySource).read::<Shading>(&function_decode),
         Err(pdf_object_reader::ObjectReadError::Decode { source, .. }) if matches!(source.downcast_ref::<PdfShadingError>(), Some(PdfShadingError::MeshDecoder(
             MeshDecoderError::InvalidDecodeLength {
                 expected: 6,
@@ -430,13 +429,13 @@ fn rejects_invalid_patch_widths_and_decode_arity() {
 fn rejects_empty_patch_stream_and_continuation_without_previous_patch() {
     let empty = patch_stream(6, Vec::new(), [8, 8, 8], patch_decode(), None);
     assert!(matches!(
-        pdf_object_reader::ObjectReader::new(&PassthroughResolver).read::<Shading>(&empty),
+        pdf_object_reader::ObjectReader::new(EmptySource).read::<Shading>(&empty),
         Err(pdf_object_reader::ObjectReadError::Decode { source, .. }) if matches!(source.downcast_ref::<PdfShadingError>(), Some(PdfShadingError::PatchMesh(PatchMeshError::EmptyMesh)))
     ));
 
     let continuation = patch_stream(6, vec![1], [8, 8, 8], patch_decode(), None);
     assert!(matches!(
-        pdf_object_reader::ObjectReader::new(&PassthroughResolver).read::<Shading>(&continuation),
+        pdf_object_reader::ObjectReader::new(EmptySource).read::<Shading>(&continuation),
         Err(pdf_object_reader::ObjectReadError::Decode { source, .. }) if matches!(source.downcast_ref::<PdfShadingError>(), Some(PdfShadingError::PatchMesh(
             PatchMeshError::ContinuationWithoutPreviousPatch {
                 kind: "Coons",

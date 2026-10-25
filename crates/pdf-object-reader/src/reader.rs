@@ -6,14 +6,14 @@ use std::num::NonZeroUsize;
 use crate::ContentStreamIdAllocator;
 use crate::cache::Reservation;
 use crate::cache::{ConcurrentObjectCache, ObjectCache, TypedObjectCache};
-use crate::context::ObjectContext;
+use crate::context::{DictionaryContext, ObjectContext};
 use crate::decode::FromPdfObject;
+use crate::dictionary::Dictionary;
 use crate::error::{ObjectReadError, ReadResult};
 use crate::handle::ObjectHandle;
 use crate::object_id::ObjectId;
 use crate::object_variant::ObjectVariant;
 use crate::pdf_object::PdfObject;
-use crate::resolved_object::ResolvedObject;
 use crate::source::ObjectSource;
 use std::sync::Arc;
 
@@ -142,6 +142,13 @@ where
         self.session().read_indirect(id)
     }
 
+    /// Reads a required dictionary entry in a fresh session.
+    ///
+    /// A missing key and decoding failures are annotated with the entry's key.
+    pub fn required<T: FromPdfObject>(&self, dictionary: &Dictionary, key: &[u8]) -> ReadResult<T> {
+        DictionaryContext::new(dictionary, &mut self.session()).required(key)
+    }
+
     /// Decodes through the typed cache, preserving recursive links as handles.
     ///
     /// For an indirect input, atomically reserve its typed entry before decoding.
@@ -180,9 +187,6 @@ where
 /// Custom implementations can support alternate reading strategies or tests
 /// without changing domain decoders.
 pub trait ObjectAccess {
-    /// Borrows the raw source for leaf parsers and bootstrap operations.
-    fn source(&self) -> &dyn crate::object_resolver::ObjectResolver;
-
     /// Returns the content-stream ID allocator shared by this traversal.
     ///
     /// Implementations must return the same allocator throughout nested reads.
@@ -193,9 +197,11 @@ pub trait ObjectAccess {
 
     /// Resolves a top-level reference chain with cycle and depth checks.
     ///
+    /// The returned object is never a reference.
+    ///
     /// This operation ends its tracking scope before returning. Recursive
     /// decoding must use the read operations, which retain the scope.
-    fn resolve(&mut self, object: &ObjectVariant) -> ReadResult<ResolvedObject>;
+    fn resolve(&mut self, object: &ObjectVariant) -> ReadResult<PdfObject>;
 
     /// Resolves and eagerly decodes within the current active path.
     fn read<T: FromPdfObject>(&mut self, object: &ObjectVariant) -> ReadResult<T>;
@@ -249,10 +255,6 @@ where
     S: ObjectSource,
     C: ObjectCache,
 {
-    fn source(&self) -> &dyn crate::object_resolver::ObjectResolver {
-        &self.reader.source
-    }
-
     fn content_stream_ids(&self) -> &ContentStreamIdAllocator {
         self.reader.content_stream_ids()
     }
@@ -277,7 +279,8 @@ where
                 object_id: id,
                 source: Box::new(source),
             })?
-            .ok_or(ObjectReadError::MissingObject { object_id: id })?;
+            // A reference to a nonexistent object is null (ISO 32000 §7.3.10).
+            .unwrap_or_else(|| PdfObject::new(ObjectVariant::Null));
         self.reader
             .raw_cache
             .insert_if_absent(id, object)
@@ -287,7 +290,7 @@ where
             })
     }
 
-    fn resolve(&mut self, object: &ObjectVariant) -> ReadResult<ResolvedObject> {
+    fn resolve(&mut self, object: &ObjectVariant) -> ReadResult<PdfObject> {
         // Raw probes have chain-local tracking, so shared recursive edges can be inspected.
         let mut path = Vec::new();
         let mut ids = HashSet::new();
@@ -306,42 +309,25 @@ where
             path.push(id);
             object = self.load_object(id)?;
         }
-        ResolvedObject::try_from(object)
+        Ok(object)
     }
 
+    #[inline]
     fn read<T: FromPdfObject>(&mut self, object: &ObjectVariant) -> ReadResult<T> {
         if self.decode_depth >= self.reader.limits.max_decode_depth().get() {
             return Err(ObjectReadError::DecodeDepthExceeded {
                 maximum: self.reader.limits.max_decode_depth().get(),
             });
         }
-        // The child owns its traversal scope. Parent state remains intact on errors and unwinding.
-        let mut child = ReadSession {
-            reader: self.reader,
-            active_path: self.active_path.clone(),
-            active_ids: self.active_ids.clone(),
-            decode_depth: self.decode_depth.saturating_add(1),
+        let ObjectVariant::Reference(id) = object else {
+            // A direct value adds nothing to the active path, so it decodes in this
+            // session without copying the value or the traversal state.
+            self.decode_depth = self.decode_depth.saturating_add(1);
+            let result = T::from_pdf_object(ObjectContext::new(object, self));
+            self.decode_depth = self.decode_depth.saturating_sub(1);
+            return result;
         };
-        let mut object = PdfObject::new(object.clone());
-        while let ObjectVariant::Reference(id) = object.value() {
-            let id = *id;
-            if !child.active_ids.insert(id) {
-                return Err(ObjectReadError::CyclicReference {
-                    repeated: id,
-                    path: child.active_path,
-                });
-            }
-            if child.active_path.len() >= child.reader.limits.max_reference_depth().get() {
-                return Err(ObjectReadError::ReferenceDepthExceeded {
-                    maximum: child.reader.limits.max_reference_depth().get(),
-                    path: child.active_path,
-                });
-            }
-            child.active_path.push(id);
-            object = child.load_object(id)?;
-        }
-        let object = ResolvedObject::try_from(object)?;
-        T::from_pdf_object(ObjectContext::new(&object, &mut child))
+        self.read_reference(*id)
     }
 
     fn read_indirect<T: FromPdfObject>(&mut self, id: ObjectId) -> ReadResult<T> {
@@ -380,5 +366,45 @@ where
         T: FromPdfObject + Send + Sync + 'static,
     {
         self.read_shared(&ObjectVariant::Reference(id))
+    }
+}
+
+impl<S, C> ReadSession<'_, S, C>
+where
+    S: ObjectSource,
+    C: ObjectCache,
+{
+    /// Follows a reference chain and decodes its target in a child traversal scope.
+    ///
+    /// Kept out of [`ObjectAccess::read`] so the direct-value path stays small enough to inline.
+    fn read_reference<T: FromPdfObject>(&mut self, mut id: ObjectId) -> ReadResult<T> {
+        // The child owns its traversal scope. Parent state remains intact on errors and unwinding.
+        let mut child = ReadSession {
+            reader: self.reader,
+            active_path: self.active_path.clone(),
+            active_ids: self.active_ids.clone(),
+            decode_depth: self.decode_depth.saturating_add(1),
+        };
+        let object = loop {
+            if !child.active_ids.insert(id) {
+                return Err(ObjectReadError::CyclicReference {
+                    repeated: id,
+                    path: child.active_path,
+                });
+            }
+            if child.active_path.len() >= child.reader.limits.max_reference_depth().get() {
+                return Err(ObjectReadError::ReferenceDepthExceeded {
+                    maximum: child.reader.limits.max_reference_depth().get(),
+                    path: child.active_path,
+                });
+            }
+            child.active_path.push(id);
+            let object = child.load_object(id)?;
+            match object.value() {
+                ObjectVariant::Reference(next) => id = *next,
+                _ => break object,
+            }
+        };
+        T::from_pdf_object(ObjectContext::new(object.value(), &mut child))
     }
 }

@@ -1,8 +1,6 @@
 //! Parsing and validation of packed mesh bit widths.
 
-use pdf_object_reader::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 use crate::{error::PdfShadingError, mesh_decoder::MeshDecoderError};
 
@@ -29,23 +27,16 @@ pub(crate) struct MeshBitWidths {
     flag: usize,
 }
 
-impl MeshBitWidths {
-    /// Reads and validates the bit widths declared by a mesh shading dictionary.
-    ///
-    /// The required `/BitsPerCoordinate`, `/BitsPerComponent`, and
-    /// `/BitsPerFlag` entries are resolved through `objects` before their
-    /// values are checked against the widths permitted by the PDF
-    /// specification.
-    ///
-    /// Returns an error when an entry is missing, cannot be resolved as a
-    /// non-negative integer, or specifies an unsupported width.
-    pub(crate) fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Self, PdfShadingError> {
-        let coordinate = dictionary.required_number::<usize>(b"BitsPerCoordinate", objects)?;
-        let component = dictionary.required_number::<usize>(b"BitsPerComponent", objects)?;
-        let flag = dictionary.required_number::<usize>(b"BitsPerFlag", objects)?;
+/// Reads and validates the bit widths declared by a mesh shading dictionary.
+///
+/// The required `/BitsPerCoordinate`, `/BitsPerComponent`, and `/BitsPerFlag` entries are
+/// checked against the widths permitted by the PDF specification.
+impl FromPdfObject for MeshBitWidths {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        let coordinate = context.required::<usize>(b"BitsPerCoordinate")?;
+        let component = context.required::<usize>(b"BitsPerComponent")?;
+        let flag = context.required::<usize>(b"BitsPerFlag")?;
 
         validate_allowed_width(
             coordinate,
@@ -69,7 +60,9 @@ impl MeshBitWidths {
             flag,
         })
     }
+}
 
+impl MeshBitWidths {
     /// Returns the number of bits used to encode each coordinate component.
     pub(crate) fn coordinate(self) -> usize {
         self.coordinate

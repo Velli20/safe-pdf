@@ -1,11 +1,11 @@
 mod array;
-pub mod cross_reference_stream;
+mod cross_reference_stream;
 mod cross_reference_table;
 mod dictionary;
 pub mod error;
 pub mod header;
 mod hex_string;
-mod indirect_object;
+pub mod indirect_object;
 mod inline_image;
 mod linear_object_scanner;
 mod literal_string;

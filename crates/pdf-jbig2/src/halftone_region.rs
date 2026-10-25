@@ -301,6 +301,7 @@ fn bitplane_weight(plane: usize) -> Result<usize, Jbig2Error> {
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::{
         HalftoneGrayPlanes, apply_gray_code_plane_delta, decode_gray_indices,

@@ -280,26 +280,33 @@ impl DecodedSamples {
         })
     }
 
-    /// Applies an explicit decode map or the implicit PDF identity/inverted default.
+    /// Applies an explicit decode map or the implicit PDF identity default.
+    ///
+    /// An image mask paints where its decoded value is 0, so its samples are
+    /// returned as coverage instead: `output_max` where the mask paints.
     fn apply_decode(
         sample_codes: Bytes,
         decode: Option<&DecodeMap>,
         sample_max: u8,
         output_max: u8,
-        default_inverted: bool,
+        image_mask: bool,
     ) -> Bytes {
         if let Some(decode) = decode {
-            return decode
-                .apply_to_bytes(sample_codes.as_ref(), sample_max, output_max)
-                .into();
+            let mut decoded = decode.apply_to_bytes(sample_codes.as_ref(), sample_max, output_max);
+            if image_mask {
+                decoded
+                    .iter_mut()
+                    .for_each(|value| *value = output_max.saturating_sub(*value));
+            }
+            return decoded.into();
         }
 
-        if sample_max == output_max && !default_inverted {
+        if sample_max == output_max && !image_mask {
             return sample_codes;
         }
 
         let mut decoded = BytesMut::from(sample_codes);
-        let default_range = if default_inverted {
+        let default_range = if image_mask {
             DecodeRange::inverted_identity()
         } else {
             DecodeRange::identity()
@@ -453,9 +460,7 @@ impl<'a> ComponentDomain<'a> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use pdf_object_reader::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver, object_variant::ObjectVariant,
-    };
+    use pdf_object_reader::{EmptySource, dictionary::Dictionary, object_variant::ObjectVariant};
 
     use super::*;
 
@@ -474,18 +479,16 @@ mod tests {
             (
                 Vec::from(b"ColorSpace"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"DeviceGray".to_vec(),
+                    b"DeviceGray",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
             (Vec::from(b"Height"), ObjectVariant::Integer(1)),
             (Vec::from(b"Width"), ObjectVariant::Integer(2)),
         ]));
-        let metadata = ImageMetadata::read(&mut pdf_object_reader::DictionaryContext::new(
-            &dictionary,
-            &mut pdf_object_reader::ObjectReader::new(PassthroughResolver).session(),
-        ))
-        .expect("direct image metadata should be valid");
+        let metadata = pdf_object_reader::ObjectReader::new(EmptySource)
+            .read::<ImageMetadata>(&ObjectVariant::Dictionary(dictionary))
+            .expect("direct image metadata should be valid");
         let samples = Bytes::from_static(&[12, 34]);
 
         let decoded = DecodedSamples::decode_direct(samples.clone(), &metadata, 1)

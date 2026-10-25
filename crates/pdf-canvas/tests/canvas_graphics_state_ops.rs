@@ -14,7 +14,7 @@ use pdf_resources::{
     form::FormXObject,
     resource::Resource,
     resources::Resources,
-    soft_mask::SoftMask,
+    soft_mask::{MaskTransfer, SoftMask},
 };
 use pdf_text_engine::bundled_font_system;
 
@@ -99,7 +99,7 @@ fn soft_mask_form_with_zero_area_bbox_is_ignored() {
     let resources = Arc::new(graphics_state_resource(vec![
         ExternalGraphicsStateKey::SoftMask(Some(pdf_object_reader::ObjectHandle::from(SoftMask {
             mask_type: MaskMode::Alpha,
-            transfer: None,
+            transfer: MaskTransfer::Identity,
             shape: form.into(),
         }))),
     ]));

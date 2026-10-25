@@ -81,6 +81,7 @@ pub(crate) fn decode_ascii85(stream_data: &[u8]) -> Result<Vec<u8>, FilterError>
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
 

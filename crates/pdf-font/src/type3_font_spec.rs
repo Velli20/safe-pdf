@@ -1,17 +1,13 @@
 //! Type 3 specifications and glyph procedures decoded in the font's traversal.
 
 use crate::{
-    encoding::simple_encoding,
     error::FontError,
     font::{FontMetadata, GlyphId, GlyphName},
     pdf::{PdfMetrics, SimpleEncoding, ToUnicodeMap},
-    pdf_font_parser::{base_font, to_unicode},
 };
 use pdf_content_stream::ContentStream;
 use pdf_graphics::{rect::Rect, transform::Transform};
-use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
@@ -32,71 +28,70 @@ pub struct Type3FontSpec {
     pub encoding: SimpleEncoding,
     /// PDF width data.
     pub metrics: PdfMetrics,
-    /// Opaque character procedure handles indexed by glyph name.
-    pub char_procedures: Arc<BTreeMap<GlyphName, GlyphId>>,
-    /// Parsed PDF content streams indexed by their opaque glyph handles.
-    pub type3_procedures: Arc<HashMap<GlyphId, ContentStream>>,
+    /// Character procedures and their opaque glyph handles.
+    pub char_procedures: CharProcedures,
     /// Optional source-code-to-Unicode map.
-    pub to_unicode: Option<Arc<dyn ToUnicodeMap>>,
+    pub to_unicode: Option<Arc<ToUnicodeMap>>,
 }
 
-/// Glyph procedures and their normalized handles, decoded in the CharProcs scope.
-struct CharProcedures {
-    handles: BTreeMap<GlyphName, GlyphId>,
-    streams: HashMap<GlyphId, ContentStream>,
+/// Type 3 glyph procedures and their opaque handles, decoded in the CharProcs scope.
+#[derive(Clone)]
+pub struct CharProcedures {
+    /// Opaque procedure handles indexed by glyph name.
+    pub handles: Arc<BTreeMap<GlyphName, GlyphId>>,
+    /// Parsed PDF content streams indexed by their opaque handles.
+    streams: Arc<HashMap<GlyphId, ContentStream>>,
+}
+
+impl CharProcedures {
+    /// Resolves a glyph handle to its PDF content stream.
+    #[must_use]
+    pub fn get(&self, glyph: GlyphId) -> Option<&ContentStream> {
+        self.streams.get(&glyph)
+    }
 }
 
 impl FromPdfObject for CharProcedures {
+    #[allow(clippy::arc_with_non_send_sync)]
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
         let mut handles = BTreeMap::new();
         let mut streams = HashMap::new();
-        for name in context.dictionary().dictionary.keys() {
+        for name in context.keys() {
             // Every procedure shares the font's traversal and document-wide stream IDs.
             let stream: ContentStream = context.required(name)?;
-            let handle = GlyphId(u32::try_from(stream.id).map_err(|_| {
+            let handle = GlyphId::try_from(stream.id).map_err(|_| {
                 FontError::InvalidDescendantFonts("Type 3 content stream ID does not fit u32")
-            })?);
-            handles.insert(GlyphName(Arc::from(name.as_slice())), handle);
+            })?;
+            handles.insert(GlyphName(Arc::from(name)), handle);
             streams.insert(handle, stream);
         }
-        Ok(Self { handles, streams })
+        Ok(Self {
+            handles: Arc::new(handles),
+            streams: Arc::new(streams),
+        })
     }
 }
 
 impl FromPdfObject for Type3FontSpec {
-    /// Decodes the concrete font dictionary without whole-font substitution.
+    /// Decodes a Type 3 dictionary without whole-font substitution; absent glyph widths
+    /// default to zero.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Self::try_from(&mut context.dictionary()?)
-    }
-}
-
-impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for Type3FontSpec {
-    type Error = ObjectReadError;
-
-    /// Reads a Type 3 dictionary, whose absent glyph widths default to zero.
-    #[allow(clippy::arc_with_non_send_sync)]
-    fn try_from(context: &mut DictionaryContext<'_, A>) -> ReadResult<Self> {
-        let [a, b, c, d, e, f] = context.required::<[f32; 6]>(b"FontMatrix")?;
-        let [left, top, right, bottom] = context.required::<[f32; 4]>(b"FontBBox")?;
-        let encoding = simple_encoding(context, false)?;
-        let metrics = PdfMetrics::try_from(&mut *context)?;
-        let procedures: CharProcedures = context.required(b"CharProcs")?;
+        let value = context.object();
+        let mut context = context.dictionary()?;
+        let font_matrix = context.required(b"FontMatrix")?;
+        let bounds = context.required(b"FontBBox")?;
+        let encoding = SimpleEncoding::new(context.optional(b"Encoding")?, false);
+        let metrics: PdfMetrics = context.read(value)?;
         Ok(Self {
-            base_font: base_font(context).unwrap_or_default(),
+            base_font: context.lenient(b"BaseFont").unwrap_or_default(),
             metadata: FontMetadata::default(),
-            font_matrix: Transform::from_row(a, b, c, d, e, f),
-            bounds: Rect {
-                left,
-                top,
-                right,
-                bottom,
-            },
+            font_matrix,
+            bounds,
             encoding,
             metrics,
-            char_procedures: Arc::new(procedures.handles),
-            type3_procedures: Arc::new(procedures.streams),
-            to_unicode: to_unicode(context)?,
+            char_procedures: context.required(b"CharProcs")?,
+            to_unicode: context.optional(b"ToUnicode")?.map(Arc::new),
         })
     }
 }

@@ -1,181 +1,220 @@
-//! CID glyph widths decoded from explicit arrays and compact uniform ranges.
+//! Explicit glyph widths decoded from a font dictionary's `/W` or `/Widths` entry.
 
+use pdf_cmap::{CodeRange, CodeRanges, code_range};
 use pdf_object_reader::{
     FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_variant::ObjectVariant,
+    pdf_array::PdfArray,
 };
-use std::collections::{BTreeMap, btree_map::Entry};
 use thiserror::Error;
 
-use crate::{error::FontError, pdf::PdfGlyphMetric, pdf_font_metrics::horizontal_metric};
-
-/// Errors that can occur during GlyphWidthsMap parsing from a /W array.
+/// Errors that can occur while reading a `/W` array.
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum GlyphWidthsMapError {
     /// The end of a CID range is less than the start.
     #[error("Invalid CID range: c_last ({c_last}) < c_first ({c_first})")]
     InvalidCIDRange {
         /// First CID in the range.
-        c_first: u16,
+        c_first: u32,
         /// Inclusive final CID in the range.
-        c_last: u16,
+        c_last: u32,
     },
     /// Missing width value after a CID range.
     #[error("Missing width after c_last for range starting at CID {c_first}")]
     MissingWidthForCIDRange {
         /// First CID of the incomplete range.
-        c_first: u16,
+        c_first: u32,
     },
     /// CID entry is incomplete.
     #[error("CID {cid} found without a corresponding width array or c_last value")]
     IncompleteCIDEntry {
         /// CID lacking a width array or range end.
-        cid: u16,
-    },
-    /// Overlapping CID segment definition.
-    #[error("Overlapping CID segment starting at {cid}")]
-    OverlappingRange {
-        /// CID assigned conflicting widths.
-        cid: u16,
-    },
-    /// Range length was excessively large (possible malformed file / resource exhaustion risk).
-    #[error("Range from {cid} to `u16::MAX` is too large ({length} entries)")]
-    RangeTooLarge {
-        /// Starting CID of the explicit run.
-        cid: u16,
-        /// Number of widths in the run.
-        length: usize,
+        cid: u32,
     },
 }
 
-/// Per-CID horizontal metrics read from a PDF `/W` array. This applies to
-/// CID-keyed fonts `/CIDFontType0` and `/CIDFontType2` (descendants of /Type0).
+/// Explicit glyph widths of a font, keyed by character code or CID.
 ///
-/// Both entry forms are expanded while reading, so the table converts into the
-/// font's explicit metrics without another pass.
-#[derive(Default)]
+/// Decoded from a font dictionary: `/W` for CID-keyed fonts (`/CIDFontType0` and
+/// `/CIDFontType2`), or `/Widths` indexed from `/FirstChar` for simple and Type 3 fonts.
+/// Widths are kept as the ranges the font declares and never expanded per code.
+#[derive(Debug, Clone, Default)]
 pub struct GlyphWidthsMap {
-    /// Metrics keyed by CID.
-    widths: BTreeMap<u32, PdfGlyphMetric>,
+    /// Width runs, sorted by first code and disjoint.
+    runs: Vec<WidthRun>,
 }
 
 impl GlyphWidthsMap {
-    pub const KEY: &'static [u8] = b"W";
-
-    /// Inserts `[c_first [w1 ... wn]]` widths for consecutive CIDs starting at `cid`.
-    fn insert_explicit_widths(
-        &mut self,
-        cid: u16,
-        widths: Vec<f32>,
-    ) -> Result<(), GlyphWidthsMapError> {
-        let length = widths.len();
-        for (offset, width) in widths.into_iter().enumerate() {
-            let current_cid = u16::try_from(offset)
-                .ok()
-                .and_then(|offset| cid.checked_add(offset))
-                .ok_or(GlyphWidthsMapError::RangeTooLarge { cid, length })?;
-            self.insert(current_cid, width)?;
-        }
-        Ok(())
+    /// Returns the width the font lists for `code`, if any.
+    pub fn get(&self, code: u32) -> Option<f32> {
+        let (run, offset) = self.runs.covering(code)?;
+        run.width(offset)
     }
 
-    /// Inserts a `[c_first c_last w]` range with constant `width`.
-    fn insert_uniform(
-        &mut self,
-        cid: u16,
-        c_last: u16,
-        width: f32,
-    ) -> Result<(), GlyphWidthsMapError> {
-        if c_last < cid {
-            return Err(GlyphWidthsMapError::InvalidCIDRange {
-                c_first: cid,
-                c_last,
-            });
-        }
-        (cid..=c_last).try_for_each(|current_cid| self.insert(current_cid, width))
-    }
-
-    /// Stores one CID's width; a redefinition must repeat the stored width.
-    fn insert(&mut self, cid: u16, width: f32) -> Result<(), GlyphWidthsMapError> {
-        match self.widths.entry(u32::from(cid)) {
-            Entry::Vacant(entry) => {
-                entry.insert(horizontal_metric(width));
-                Ok(())
-            }
-            Entry::Occupied(entry) if widths_match(entry.get().advance_x, width) => Ok(()),
-            Entry::Occupied(_) => Err(GlyphWidthsMapError::OverlappingRange { cid }),
-        }
+    /// Reports whether the font lists no explicit widths.
+    pub fn is_empty(&self) -> bool {
+        self.runs.is_empty()
     }
 }
 
-impl From<GlyphWidthsMap> for BTreeMap<u32, PdfGlyphMetric> {
-    /// Moves the decoded metrics out as a font's explicit metrics table.
-    fn from(map: GlyphWidthsMap) -> Self {
-        map.widths
-    }
-}
-
-/// Allows redundant widths that differ by no more than floating-point epsilon.
-fn widths_match(left: f32, right: f32) -> bool {
-    (left - right).abs() <= f32::EPSILON
-}
-
-/// The second item of a CID-width entry determines its array or range form.
-enum WidthEntry {
-    /// Widths for consecutive CIDs starting at the entry's first CID.
-    Explicit(Vec<f32>),
-    /// Inclusive final CID, followed by one width in the enclosing array.
-    End(u16),
-}
-
-impl FromPdfObject for WidthEntry {
-    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        if matches!(context.object().value(), ObjectVariant::Array(_)) {
-            Vec::<f32>::from_pdf_object(context).map(Self::Explicit)
-        } else {
-            u16::from_pdf_object(context).map(Self::End)
+impl FromIterator<(u32, f32)> for GlyphWidthsMap {
+    /// Collects individual code widths; on duplicate codes the first width wins.
+    fn from_iter<I: IntoIterator<Item = (u32, f32)>>(widths: I) -> Self {
+        Self {
+            runs: code_range::disjoint(
+                widths
+                    .into_iter()
+                    .map(|(code, width)| WidthRun::uniform(code, code, width))
+                    .collect(),
+            ),
         }
     }
 }
 
 impl FromPdfObject for GlyphWidthsMap {
-    /// Reads `/W` entries as `c_first [w1 ... wn]` or `c_first c_last w`.
+    /// Reads a font dictionary's explicit widths: `/W` for CID-keyed fonts, or `/Widths`
+    /// indexed from `/FirstChar` for simple and Type 3 fonts.
     ///
-    /// Indexed reads resolve indirect values and retain array error locations.
-    /// Empty explicit arrays are ignored; overlapping entries must agree on widths.
+    /// Overlapping `/W` entries resolve to the lower-starting entry.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        let mut context = context.array()?;
-        let mut map = Self::default();
-        let mut index = 0_usize;
-        while index < context.array().len() {
-            let cid = context.at::<u16>(index)?;
-            index = index.saturating_add(1);
-            if index == context.array().len() {
-                return Err(
-                    FontError::from(GlyphWidthsMapError::IncompleteCIDEntry { cid }).into(),
-                );
-            }
-            match context.at::<WidthEntry>(index)? {
-                WidthEntry::Explicit(widths) => {
-                    map.insert_explicit_widths(cid, widths)
-                        .map_err(FontError::from)?;
-                    index = index.saturating_add(1);
+        let object = context.object();
+        let mut context = context.dictionary()?;
+        let runs = match context.optional::<CidWidthRuns>(b"W")? {
+            Some(CidWidthRuns(runs)) => runs,
+            None => context
+                .read::<SimpleWidthRun>(object)?
+                .0
+                .into_iter()
+                .collect(),
+        };
+        Ok(Self {
+            runs: code_range::disjoint(runs),
+        })
+    }
+}
+
+/// The runs of a CID font's `/W` array, omitting empty ones.
+struct CidWidthRuns(Vec<WidthRun>);
+
+/// Reads each `c_first [w1 ... wn]` or `c_first c_last w` entry of a `/W` array.
+impl FromPdfObject for CidWidthRuns {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut items = context.array()?;
+        let mut entries = items.array().iter();
+        let mut runs = Vec::new();
+        while let Some(first) = entries.next() {
+            let first = items.read::<u32>(first)?;
+            let second = entries
+                .next()
+                .ok_or(GlyphWidthsMapError::IncompleteCIDEntry { cid: first })?;
+            // The second item selects the form; an indirect width array is allowed.
+            let second = items.resolve(second)?;
+            if let ObjectVariant::Array(_) = second.value() {
+                let widths = items.read::<Vec<f32>>(second.value())?;
+                if !widths.is_empty() {
+                    runs.push(WidthRun::explicit(first, widths.into_boxed_slice()));
                 }
-                WidthEntry::End(end) => {
-                    index = index.saturating_add(1);
-                    if index == context.array().len() {
-                        return Err(FontError::from(
-                            GlyphWidthsMapError::MissingWidthForCIDRange { c_first: cid },
-                        )
-                        .into());
-                    }
-                    let width = context.at(index)?;
-                    map.insert_uniform(cid, end, width)
-                        .map_err(FontError::from)?;
-                    index = index.saturating_add(1);
-                }
+                continue;
             }
+            let last = items.read::<u32>(second.value())?;
+            let width = entries
+                .next()
+                .ok_or(GlyphWidthsMapError::MissingWidthForCIDRange { c_first: first })?;
+            let width = items.read::<f32>(width)?;
+            if last < first {
+                return Err(GlyphWidthsMapError::InvalidCIDRange {
+                    c_first: first,
+                    c_last: last,
+                }
+                .into());
+            }
+            runs.push(WidthRun::uniform(first, last, width));
         }
-        Ok(map)
+        Ok(Self(runs))
+    }
+}
+
+/// A simple or Type 3 font's `/Widths` as one run starting at `/FirstChar`.
+///
+/// Fonts without `/Widths`, such as Standard 14 fonts, have no run. Only the
+/// `/FirstChar..=/LastChar` widths are decoded, so surplus items stay unread; a reversed
+/// or empty range yields no run.
+struct SimpleWidthRun(Option<WidthRun>);
+
+impl FromPdfObject for SimpleWidthRun {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        let Some(widths) = context.optional::<PdfArray>(b"Widths")? else {
+            return Ok(Self(None));
+        };
+        let first: u16 = context.required(b"FirstChar")?;
+        let last: u16 = context.required(b"LastChar")?;
+        let count = usize::from(last)
+            .checked_sub(usize::from(first))
+            .map_or(0, |span| span.saturating_add(1));
+        let widths = widths
+            .iter()
+            .take(count)
+            .map(|width| context.read(width))
+            .collect::<ReadResult<Box<[f32]>>>()?;
+        Ok(Self(
+            (!widths.is_empty()).then(|| WidthRun::explicit(u32::from(first), widths)),
+        ))
+    }
+}
+
+/// Widths for the inclusive code range `first..=last`.
+#[derive(Debug, Clone)]
+struct WidthRun {
+    first: u32,
+    last: u32,
+    widths: RunWidths,
+}
+
+/// The widths of one run.
+#[derive(Debug, Clone)]
+enum RunWidths {
+    /// `c_first c_last w`: one width for every code in the run.
+    Uniform(f32),
+    /// `c_first [w1 ... wn]` or a simple font's `/Widths`: one width per code.
+    Explicit(Box<[f32]>),
+}
+
+impl WidthRun {
+    /// One width shared by every code in `first..=last`.
+    fn uniform(first: u32, last: u32, width: f32) -> Self {
+        Self {
+            first,
+            last,
+            widths: RunWidths::Uniform(width),
+        }
+    }
+
+    /// Consecutive widths starting at `first`.
+    fn explicit(first: u32, widths: Box<[f32]>) -> Self {
+        let span = u32::try_from(widths.len().saturating_sub(1)).unwrap_or(u32::MAX);
+        Self {
+            first,
+            last: first.saturating_add(span),
+            widths: RunWidths::Explicit(widths),
+        }
+    }
+
+    /// Returns the width `offset` codes past the start of the run.
+    fn width(&self, offset: u32) -> Option<f32> {
+        match &self.widths {
+            RunWidths::Uniform(width) => Some(*width),
+            RunWidths::Explicit(widths) => widths.get(usize::try_from(offset).ok()?).copied(),
+        }
+    }
+}
+
+impl CodeRange for WidthRun {
+    fn first(&self) -> u32 {
+        self.first
+    }
+
+    fn last(&self) -> u32 {
+        self.last
     }
 }
 
@@ -183,15 +222,23 @@ impl FromPdfObject for GlyphWidthsMap {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+    use crate::error::FontError;
     use pdf_object_reader::{
-        object_error::ObjectError, object_resolver::ObjectResolver,
-        object_resolver::PassthroughResolver, object_variant::ObjectVariant,
+        EmptySource, object_error::ObjectError, object_variant::ObjectVariant,
     };
+
+    // Wrap a `/W` array in the font dictionary the decoder reads.
+    fn font_dictionary(array: Vec<ObjectVariant>) -> ObjectVariant {
+        ObjectVariant::Dictionary(pdf_object_reader::dictionary::Dictionary::from_entries([(
+            b"W".as_slice(),
+            ObjectVariant::Array(array.into()),
+        )]))
+    }
 
     // Keep domain-error assertions while exercising the context reader exclusively.
     fn read_widths(array: &[ObjectVariant]) -> Result<GlyphWidthsMap, GlyphWidthsMapError> {
-        pdf_object_reader::ObjectReader::new(PassthroughResolver)
-            .read::<GlyphWidthsMap>(&ObjectVariant::Array(array.to_vec().into()))
+        pdf_object_reader::ObjectReader::new(EmptySource)
+            .read::<GlyphWidthsMap>(&font_dictionary(array.to_vec()))
             .map_err(|error| {
                 let mut source: &dyn std::error::Error = &error;
                 loop {
@@ -207,9 +254,9 @@ mod tests {
             })
     }
 
-    // Look up a decoded horizontal advance by CID.
+    // Look up a decoded width by CID.
     fn width(map: &GlyphWidthsMap, cid: u32) -> Option<f32> {
-        map.widths.get(&cid).map(|metric| metric.advance_x)
+        map.get(cid)
     }
 
     fn num_i64(n: i64) -> ObjectVariant {
@@ -244,23 +291,11 @@ mod tests {
         }
     }
 
-    impl ObjectResolver for SingleObjectResolver {
-        fn resolve_object<'a>(
-            &'a self,
-            obj: &'a ObjectVariant,
-        ) -> Result<&'a ObjectVariant, ObjectError> {
-            match obj {
-                ObjectVariant::Reference(_) => Ok(&self.resolved),
-                _ => Ok(obj),
-            }
-        }
-    }
-
     #[test]
     fn test_from_array_empty() {
         let input_array = vec![];
         let glyph_widths_map = read_widths(&input_array).unwrap();
-        assert!(glyph_widths_map.widths.is_empty());
+        assert!(glyph_widths_map.is_empty());
     }
 
     #[test]
@@ -268,7 +303,6 @@ mod tests {
         // [ 0 [500 450] ]
         let input_array = vec![num_i64(0), arr(vec![num_f32(500.0), num_f32(450.0)])];
         let glyph_widths_map = read_widths(&input_array).unwrap();
-        assert_eq!(glyph_widths_map.widths.len(), 2);
         assert_eq!(width(&glyph_widths_map, 0), Some(500.0));
         assert_eq!(width(&glyph_widths_map, 1), Some(450.0));
     }
@@ -284,10 +318,9 @@ mod tests {
         let resolver = SingleObjectResolver { resolved: widths };
 
         let glyph_widths_map = pdf_object_reader::ObjectReader::new(resolver)
-            .read::<GlyphWidthsMap>(&ObjectVariant::Array(input_array.into()))
+            .read::<GlyphWidthsMap>(&font_dictionary(input_array))
             .unwrap();
 
-        assert_eq!(glyph_widths_map.widths.len(), 2);
         assert_eq!(width(&glyph_widths_map, 0), Some(500.0));
         assert_eq!(width(&glyph_widths_map, 1), Some(450.0));
     }
@@ -327,7 +360,6 @@ mod tests {
             arr(vec![num_f32(700.0)]),
         ];
         let glyph_widths_map = read_widths(&input_array).unwrap();
-        assert_eq!(glyph_widths_map.widths.len(), 4);
         assert_eq!(width(&glyph_widths_map, 0), Some(500.0));
         assert_eq!(width(&glyph_widths_map, 10), Some(600.0));
         assert_eq!(width(&glyph_widths_map, 11), Some(650.0));
@@ -362,7 +394,6 @@ mod tests {
         // [ 10 12 600 ] -> CIDs 10, 11, 12 have width 600
         let input_array = vec![num_i64(10), num_i64(12), num_f32(600.0)];
         let glyph_widths_map = read_widths(&input_array).unwrap();
-        assert_eq!(glyph_widths_map.widths.len(), 3);
         assert_eq!(width(&glyph_widths_map, 10), Some(600.0));
         assert_eq!(width(&glyph_widths_map, 11), Some(600.0));
         assert_eq!(width(&glyph_widths_map, 12), Some(600.0));
@@ -373,7 +404,6 @@ mod tests {
         // [ 5 5 300 ] -> CID 5 has width 300
         let input_array = vec![num_i64(5), num_i64(5), num_f32(300.0)];
         let glyph_widths_map = read_widths(&input_array).unwrap();
-        assert_eq!(glyph_widths_map.widths.len(), 1);
         assert_eq!(width(&glyph_widths_map, 5), Some(300.0));
     }
 
@@ -390,7 +420,6 @@ mod tests {
             arr(vec![num_f32(700.0), num_f32(750.0)]),
         ];
         let glyph_widths_map = read_widths(&input_array).unwrap();
-        assert_eq!(glyph_widths_map.widths.len(), 5);
         assert_eq!(width(&glyph_widths_map, 0), Some(500.0));
         assert_eq!(width(&glyph_widths_map, 10), Some(600.0));
         assert_eq!(width(&glyph_widths_map, 11), Some(600.0));
@@ -403,7 +432,7 @@ mod tests {
         // [ 0 [] ]
         let input_array = vec![num_i64(0), arr(vec![])];
         let glyph_widths_map = read_widths(&input_array).unwrap();
-        assert!(glyph_widths_map.widths.is_empty());
+        assert!(glyph_widths_map.is_empty());
         assert_eq!(width(&glyph_widths_map, 0), None);
     }
 
@@ -417,13 +446,12 @@ mod tests {
             arr(vec![num_f32(500.0)]),
         ];
         let glyph_widths_map = read_widths(&input_array).unwrap();
-        assert_eq!(glyph_widths_map.widths.len(), 1);
         assert_eq!(width(&glyph_widths_map, 0), None);
         assert_eq!(width(&glyph_widths_map, 1), Some(500.0));
     }
 
     #[test]
-    fn test_from_array_error_duplicate_start() {
+    fn test_from_array_duplicate_start_keeps_first_entry() {
         // [ 0 [500] 0 [600] ]
         let input_array = vec![
             num_i64(0),
@@ -431,11 +459,8 @@ mod tests {
             num_i64(0),
             arr(vec![num_f32(600.0)]),
         ];
-        let result = read_widths(&input_array);
-        assert!(matches!(
-            result,
-            Err(GlyphWidthsMapError::OverlappingRange { cid: 0 })
-        ));
+        let glyph_widths_map = read_widths(&input_array).unwrap();
+        assert_eq!(width(&glyph_widths_map, 0), Some(500.0));
     }
 
     #[test]
@@ -452,8 +477,8 @@ mod tests {
     }
 
     #[test]
-    fn test_from_array_error_overlapping_range_with_explicit() {
-        // [ 0 [500 510] 1 2 600 ] -> second segment overlaps (explicit covers 0,1)
+    fn test_from_array_overlapping_range_keeps_lower_starting_entry() {
+        // [ 0 [500 510] 1 2 600 ] -> the range overlaps the explicit entry and is dropped
         let input_array = vec![
             num_i64(0),
             arr(vec![num_f32(500.0), num_f32(510.0)]),
@@ -461,16 +486,14 @@ mod tests {
             num_i64(2),
             num_f32(600.0),
         ];
-        let result = read_widths(&input_array);
-        assert!(matches!(
-            result,
-            Err(GlyphWidthsMapError::OverlappingRange { cid: 1 })
-        ));
+        let glyph_widths_map = read_widths(&input_array).unwrap();
+        assert_eq!(width(&glyph_widths_map, 1), Some(510.0));
+        assert_eq!(width(&glyph_widths_map, 2), None);
     }
 
     #[test]
-    fn test_from_array_error_overlapping_explicit_with_range() {
-        // [ 0 2 600 2 [700] ] -> explicit start 2 overlaps (range covers 0,1,2)
+    fn test_from_array_overlapping_explicit_keeps_lower_starting_range() {
+        // [ 0 2 600 2 [700] ] -> the explicit entry overlaps the range and is dropped
         let input_array = vec![
             num_i64(0),
             num_i64(2),
@@ -478,11 +501,8 @@ mod tests {
             num_i64(2),
             arr(vec![num_f32(700.0)]),
         ];
-        let result = read_widths(&input_array);
-        assert!(matches!(
-            result,
-            Err(GlyphWidthsMapError::OverlappingRange { cid: 2 })
-        ));
+        let glyph_widths_map = read_widths(&input_array).unwrap();
+        assert_eq!(width(&glyph_widths_map, 2), Some(600.0));
     }
 
     #[test]

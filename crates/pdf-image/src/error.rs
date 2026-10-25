@@ -1,7 +1,9 @@
 use pdf_color_space::error::ColorSpaceError;
 use pdf_decode::DecodeError;
 use pdf_filter::error::FilterError;
+use pdf_graphics::transform::TransformError;
 use pdf_jpeg2000::Jpeg2000Error;
+use pdf_object_reader::ObjectReadError;
 use thiserror::Error;
 
 /// Errors that can occur while parsing or decoding PDF image data.
@@ -10,7 +12,7 @@ pub enum PdfImageError {
     #[error("{0}")]
     Object(#[from] pdf_object_reader::object_error::ObjectError),
     #[error("{0}")]
-    Read(#[from] pdf_object_reader::ObjectReadError),
+    Read(pdf_object_reader::ObjectReadError),
     #[error("{0}")]
     ColorSpace(#[from] ColorSpaceError),
     #[error("{0}")]
@@ -27,8 +29,11 @@ pub enum PdfImageError {
     InvalidSoftMaskXObject,
     #[error("{0}")]
     Raster(#[from] ImageRasterError),
-    #[error("invalid image dimensions: width={width}, height={height}")]
-    InvalidImageDimensions { width: usize, height: usize },
+    #[error("invalid image dimensions: width={width:?}, height={height:?}")]
+    InvalidImageDimensions {
+        width: Option<usize>,
+        height: Option<usize>,
+    },
     #[error(
         "unsupported image BitsPerComponent value: {bits_per_component} (supported: 1, 2, 4, 8, 16)"
     )]
@@ -60,6 +65,32 @@ impl PdfImageError {
     /// short for its dimensions, so the image has no samples to draw.
     pub fn is_unreadable_data(&self) -> bool {
         matches!(self, Self::Filter(_) | Self::TruncatedImageData { .. })
+    }
+}
+
+/// Recovers an image or filter failure that crossed a typed read.
+impl From<ObjectReadError> for PdfImageError {
+    fn from(error: ObjectReadError) -> Self {
+        let ObjectReadError::Decode { target, source } = error else {
+            return Self::Read(error);
+        };
+        let source = match source.downcast::<Self>() {
+            Ok(error) => return *error,
+            Err(source) => source,
+        };
+        match source.downcast::<FilterError>() {
+            Ok(error) => Self::Filter(*error),
+            Err(source) => Self::Read(ObjectReadError::Decode { target, source }),
+        }
+    }
+}
+
+impl From<PdfImageError> for ObjectReadError {
+    fn from(source: PdfImageError) -> Self {
+        Self::Decode {
+            target: "PDF image",
+            source: Box::new(source),
+        }
     }
 }
 
@@ -111,4 +142,26 @@ pub enum ImageRasterError {
     /// The requested buffer size overflows or its allocation fails.
     #[error("image raster allocation limit exceeded")]
     ResourceLimit,
+}
+
+impl From<std::collections::TryReserveError> for ImageRasterError {
+    fn from(_: std::collections::TryReserveError) -> Self {
+        Self::ResourceLimit
+    }
+}
+
+impl From<std::num::TryFromIntError> for ImageRasterError {
+    /// A dimension that does not fit the target integer type exceeds the raster's limits.
+    fn from(_: std::num::TryFromIntError) -> Self {
+        Self::ResourceLimit
+    }
+}
+
+impl From<TransformError> for ImageRasterError {
+    fn from(error: TransformError) -> Self {
+        match error {
+            TransformError::NonFinite => Self::InvalidInput("nonfinite transform"),
+            TransformError::Singular => Self::InvalidInput("singular transform"),
+        }
+    }
 }

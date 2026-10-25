@@ -2,10 +2,8 @@
 use crate::{external_graphics_state::ExternalGraphicsState, pattern::Pattern, resource::Resource};
 use pdf_color_space::color_space::ColorSpace;
 use pdf_font::PdfFontSpec;
-use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult,
-    object_variant::ObjectVariant,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ObjectHandle, ReadResult};
+use pdf_optional_content::OptionalContentMembership;
 use pdf_shading::model::Shading;
 use std::{collections::HashMap, sync::Arc};
 
@@ -30,25 +28,15 @@ pub struct Resources {
     pub shadings: HashMap<Vec<u8>, Resource>,
     /// The /ColorSpace resource namespace.
     pub color_spaces: HashMap<Vec<u8>, Resource>,
+    /// The optional content group and membership entries of the /Properties namespace.
+    pub optional_content: HashMap<Vec<u8>, OptionalContentMembership>,
 }
 
+/// Decodes the resource categories of a resource dictionary (PDF spec §7.8.3), or of a
+/// stream's dictionary.
 impl FromPdfObject for Resources {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        if matches!(context.object().value(), ObjectVariant::Stream(_)) {
-            let mut stream = context.stream()?;
-            Self::decode_dictionary(stream.dictionary())
-        } else {
-            Self::decode_dictionary(context.dictionary()?)
-        }
-    }
-}
-
-impl Resources {
-    /// Decodes the resource categories of a resource dictionary (PDF spec §7.8.3).
-    fn decode_dictionary<A>(mut context: DictionaryContext<'_, A>) -> ReadResult<Self>
-    where
-        A: ObjectAccess + ?Sized,
-    {
+        let mut context = context.dictionary()?;
         Ok(Self {
             fonts: context
                 .optional_entries(b"Font", |context, value| context.read_shared(value))?,
@@ -68,9 +56,13 @@ impl Resources {
             color_spaces: context.optional_entries(b"ColorSpace", |context, value| {
                 Ok(Resource::ColorSpace(context.read_shared(value)?.get()?))
             })?,
+            // Other property lists, such as tagged content's, are skipped.
+            optional_content: context.lenient_entries(b"Properties")?,
         })
     }
+}
 
+impl Resources {
     /// Returns a reference to a font resource by name, if it exists.
     ///
     /// # Parameters
@@ -119,6 +111,15 @@ impl Resources {
     /// [`Resource::UnavailableImage`], or [`Resource::Form`] entry if found.
     pub fn xobject<N: AsRef<[u8]>>(&self, name: N) -> Option<Arc<Resource>> {
         self.xobjects.get(name.as_ref())?.get().ok()
+    }
+
+    /// Returns the optional content a `/Properties` entry names, if it exists.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: The property list name as referenced by a `BDC` operator.
+    pub fn optional_content<N: AsRef<[u8]>>(&self, name: N) -> Option<&OptionalContentMembership> {
+        self.optional_content.get(name.as_ref())
     }
 
     /// Returns a reference to a pattern resource by name, if it exists.
@@ -171,33 +172,51 @@ impl Resources {
     /// in one category (e.g. a font named `"F1"`) never blocks inheritance of a
     /// parent entry of a different category with the same name (e.g. an XObject
     /// named `"F1"`).
+    ///
+    /// Returns `None` when `parent` defines no entry that `self` lacks, so `self`
+    /// can be used unchanged.
     pub fn merged_with_parent(&self, parent: &Self) -> Option<Self> {
         let child = self;
-
-        Some(Self {
-            fonts: Self::merged_category(&child.fonts, &parent.fonts),
-            ext_g_states: Self::merged_category(&child.ext_g_states, &parent.ext_g_states),
-            patterns: Self::merged_category(&child.patterns, &parent.patterns),
-            xobjects: Self::merged_category(&child.xobjects, &parent.xobjects),
-            shadings: Self::merged_category(&child.shadings, &parent.shadings),
-            color_spaces: Self::merged_category(&child.color_spaces, &parent.color_spaces),
+        let inherits_any = child.fonts.lacks_any_of(&parent.fonts)
+            || child.ext_g_states.lacks_any_of(&parent.ext_g_states)
+            || child.patterns.lacks_any_of(&parent.patterns)
+            || child.xobjects.lacks_any_of(&parent.xobjects)
+            || child.shadings.lacks_any_of(&parent.shadings)
+            || child.color_spaces.lacks_any_of(&parent.color_spaces)
+            || child
+                .optional_content
+                .lacks_any_of(&parent.optional_content);
+        inherits_any.then(|| Self {
+            fonts: child.fonts.merged_with(&parent.fonts),
+            ext_g_states: child.ext_g_states.merged_with(&parent.ext_g_states),
+            patterns: child.patterns.merged_with(&parent.patterns),
+            xobjects: child.xobjects.merged_with(&parent.xobjects),
+            shadings: child.shadings.merged_with(&parent.shadings),
+            color_spaces: child.color_spaces.merged_with(&parent.color_spaces),
+            optional_content: child.optional_content.merged_with(&parent.optional_content),
         })
     }
+}
 
-    /// Returns one merged resource category with child entries taking precedence.
-    fn merged_category<T: Clone>(
-        child: &HashMap<Vec<u8>, T>,
-        parent: &HashMap<Vec<u8>, T>,
-    ) -> HashMap<Vec<u8>, T> {
-        let mut merged = HashMap::with_capacity(child.len().saturating_add(parent.len()));
-        merged.extend(
-            child
-                .iter()
-                .map(|(name, value)| (name.clone(), value.clone())),
-        );
-        for (k, v) in parent {
-            if !merged.contains_key(k) {
-                merged.insert(k.clone(), v.clone());
+/// One named resource category, merged with the same category of an ancestor.
+trait ResourceCategory {
+    /// Returns whether `parent` defines a name that `self` does not.
+    fn lacks_any_of(&self, parent: &Self) -> bool;
+
+    /// Returns `self` with the entries only `parent` defines added.
+    fn merged_with(&self, parent: &Self) -> Self;
+}
+
+impl<T: Clone> ResourceCategory for HashMap<Vec<u8>, T> {
+    fn lacks_any_of(&self, parent: &Self) -> bool {
+        parent.keys().any(|name| !self.contains_key(name))
+    }
+
+    fn merged_with(&self, parent: &Self) -> Self {
+        let mut merged = self.clone();
+        for (name, value) in parent {
+            if !merged.contains_key(name) {
+                merged.insert(name.clone(), value.clone());
             }
         }
         merged

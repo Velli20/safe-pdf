@@ -2,9 +2,7 @@ use pdf_color_space::error::ColorSpaceError;
 use pdf_content_stream_operators::error::PdfOperatorError;
 use pdf_decode::DecodeError;
 use pdf_font::error::FontError;
-use pdf_function::{
-    error::FunctionReadError, function_interpolation_error::FunctionInterpolationError,
-};
+use pdf_function::function_interpolation_error::FunctionInterpolationError;
 use pdf_graphics::dash_pattern::DashPatternError;
 use pdf_image::PdfImageError;
 use pdf_shading::error::PdfShadingError;
@@ -33,20 +31,14 @@ pub enum PdfPagesError {
     InvalidExtGStateArrayLength { entry: &'static str, found: usize },
     #[error("invalid /ExtGState entry '/D': {0}")]
     InvalidExtGStateDashPattern(#[from] DashPatternError),
-    #[error("invalid /ExtGState entry '/LC': unsupported line cap value {0} (expected 0, 1, or 2)")]
-    InvalidExtGStateLineCap(i32),
-    #[error(
-        "invalid /ExtGState entry '/LJ': unsupported line join value {0} (expected 0, 1, or 2)"
-    )]
-    InvalidExtGStateLineJoin(i32),
     #[error(
         "invalid /ExtGState entry '/SMask': expected a soft mask dictionary or the name 'None'"
     )]
     InvalidExtGStateSoftMask,
     #[error(
-        "invalid /ExtGState entry '/SMask': group XObject must have /Subtype /Form, found /{subtype}"
+        "invalid /ExtGState entry '/SMask': group XObject must have /Subtype /Form, found /Image"
     )]
-    SoftMaskGroupNotForm { subtype: String },
+    SoftMaskGroupNotForm,
     #[error("invalid /ExtGState entry '/SMask': /TR must produce one finite output")]
     InvalidSoftMaskTransfer,
     #[error("invalid /PaintType value: {value}")]
@@ -57,12 +49,8 @@ pub enum PdfPagesError {
     InvalidTilingType { value: i32 },
     #[error("invalid /ShadingType value: {value}")]
     InvalidShadingType { value: i32 },
-    #[error("unsupported XObject /Subtype: '{subtype}'")]
-    UnsupportedXObjectSubtype { subtype: String },
     #[error("failed to process image: {0}")]
     Image(#[from] PdfImageError),
-    #[error("{0}")]
-    FunctionRead(#[from] FunctionReadError),
     #[error("{0}")]
     Decode(#[from] DecodeError),
     #[error("{0}")]

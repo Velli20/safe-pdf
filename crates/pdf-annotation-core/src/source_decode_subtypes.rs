@@ -1,79 +1,42 @@
 //! Subtype-specific payload decoding for the `/Subtype` vocabulary Core retains.
+use std::sync::Arc;
+
 use crate::error::SourceDecodeError;
 use crate::models::{Point, Quad};
 use crate::pdf_data::{
-    AnnotationAction, AnnotationDestination, BorderEffect, BorderStyle, CaretAnnotation,
-    CaretSymbolStyle, CircleAnnotation, FreeTextAnnotation, HighlightAnnotation, InkAnnotation,
-    InkList, LineAnnotation, LineEndingStyle, LinkAnnotation, LinkHighlightMode, NativeAnnotation,
-    PolyLineAnnotation, PolygonAnnotation, PopupAnnotation, SquareAnnotation, SquigglyAnnotation,
-    StampAnnotation, StrikeOutAnnotation, TextAnnotation, UnderlineAnnotation, WidgetAnnotation,
+    CaretAnnotation, CaretSymbolStyle, CircleAnnotation, FreeTextAnnotation, HighlightAnnotation,
+    InkAnnotation, InkList, LineAnnotation, LineEndingStyle, LinkAnnotation, LinkHighlightMode,
+    NativeAnnotation, PolyLineAnnotation, PolygonAnnotation, PopupAnnotation, SquareAnnotation,
+    SquigglyAnnotation, StampAnnotation, StrikeOutAnnotation, TextAnnotation, UnderlineAnnotation,
 };
-use crate::source_decode::{DecodeResult, color};
-use pdf_graphics::{polyline::Polyline, rect::Rect};
-use pdf_object_reader::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
-};
+use crate::source_decode::DecodeResult;
+use pdf_graphics::polyline::Polyline;
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
-impl NativeAnnotation {
-    /// Dispatches on `/Subtype`; unrecognized names retain their bytes unparsed.
-    pub(crate) fn from_dictionary(
-        subtype: &[u8],
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        Ok(match subtype {
-            b"Text" => Self::Text(Box::new(TextAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
-            b"Link" => Self::Link(Box::new(LinkAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
-            b"FreeText" => Self::FreeText(Box::new(FreeTextAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
-            b"Line" => Self::Line(Box::new(LineAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
-            b"Square" => Self::Square(Box::new(SquareAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
-            b"Circle" => Self::Circle(Box::new(CircleAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
-            b"Polygon" => Self::Polygon(Box::new(PolygonAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
-            b"PolyLine" => Self::PolyLine(Box::new(PolyLineAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
-            b"Highlight" => Self::Highlight(Box::new(HighlightAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
-            b"Underline" => Self::Underline(Box::new(UnderlineAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
-            b"Squiggly" => Self::Squiggly(Box::new(SquigglyAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
-            b"StrikeOut" => Self::StrikeOut(Box::new(StrikeOutAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
-            b"Stamp" => Self::Stamp(Box::new(StampAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
-            b"Caret" => Self::Caret(Box::new(CaretAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
-            b"Ink" => Self::Ink(Box::new(InkAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
-            b"Popup" => Self::Popup(Box::new(PopupAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
-            b"Widget" => Self::Widget(Box::new(WidgetAnnotation::from_dictionary(
-                dictionary, objects,
-            )?)),
+/// Dispatches on `/Subtype`; unrecognized names retain their bytes unparsed.
+impl FromPdfObject for NativeAnnotation {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object();
+        let mut dictionary = context.dictionary()?;
+        let subtype = dictionary.required::<Arc<[u8]>>(b"Subtype")?;
+        Ok(match subtype.as_ref() {
+            b"Text" => Self::Text(Box::new(dictionary.read(object)?)),
+            b"Link" => Self::Link(Box::new(dictionary.read(object)?)),
+            b"FreeText" => Self::FreeText(Box::new(dictionary.read(object)?)),
+            b"Line" => Self::Line(Box::new(dictionary.read(object)?)),
+            b"Square" => Self::Square(Box::new(dictionary.read(object)?)),
+            b"Circle" => Self::Circle(Box::new(dictionary.read(object)?)),
+            b"Polygon" => Self::Polygon(Box::new(dictionary.read(object)?)),
+            b"PolyLine" => Self::PolyLine(Box::new(dictionary.read(object)?)),
+            b"Highlight" => Self::Highlight(Box::new(dictionary.read(object)?)),
+            b"Underline" => Self::Underline(Box::new(dictionary.read(object)?)),
+            b"Squiggly" => Self::Squiggly(Box::new(dictionary.read(object)?)),
+            b"StrikeOut" => Self::StrikeOut(Box::new(dictionary.read(object)?)),
+            b"Stamp" => Self::Stamp(Box::new(dictionary.read(object)?)),
+            b"Caret" => Self::Caret(Box::new(dictionary.read(object)?)),
+            b"Ink" => Self::Ink(Box::new(dictionary.read(object)?)),
+            b"Popup" => Self::Popup(Box::new(dictionary.read(object)?)),
+            b"Widget" => Self::Widget(Box::new(dictionary.read(object)?)),
             _ => Self::Unknown {
                 subtype: subtype.to_vec(),
             },
@@ -81,385 +44,307 @@ impl NativeAnnotation {
     }
 }
 
-impl TextAnnotation {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        let open = dictionary.optional_boolean(b"Open", objects)?;
-        let name = dictionary.optional_bytes(b"Name", objects)?.map(Vec::from);
-        let state = dictionary.optional_bytes_vec(b"State", objects)?;
-        let state_model = dictionary.optional_bytes_vec(b"StateModel", objects)?;
-        let intent = dictionary.optional_bytes(b"IT", objects)?.map(Vec::from);
-
+impl FromPdfObject for TextAnnotation {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
         Ok(Self {
-            open,
-            name,
-            state,
-            state_model,
-            intent,
+            open: dictionary.optional(b"Open")?,
+            name: dictionary
+                .optional::<Arc<[u8]>>(b"Name")?
+                .map(|bytes| bytes.to_vec()),
+            state: dictionary
+                .optional::<Arc<[u8]>>(b"State")?
+                .map(|bytes| bytes.to_vec()),
+            state_model: dictionary
+                .optional::<Arc<[u8]>>(b"StateModel")?
+                .map(|bytes| bytes.to_vec()),
+            intent: dictionary
+                .optional::<Arc<[u8]>>(b"IT")?
+                .map(|bytes| bytes.to_vec()),
         })
     }
 }
 
-impl LinkAnnotation {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        let highlight_mode = dictionary
-            .get(b"H")
-            .map(|value| value.try_bytes(objects).map(LinkHighlightMode::from))
-            .transpose()?;
-        let destination = AnnotationDestination::from_dictionary(dictionary, b"Dest", objects)?;
-        let action = AnnotationAction::from_dictionary(dictionary, b"A", objects)?;
-        let quad_points = quad_points(dictionary, objects)?;
-        let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
-        let border_effect = BorderEffect::from_dictionary(dictionary, b"BE", objects)?;
-
+impl FromPdfObject for LinkAnnotation {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
         Ok(Self {
-            highlight_mode,
-            destination,
-            action,
-            quad_points,
-            border_style,
-            border_effect,
+            highlight_mode: dictionary.optional(b"H")?,
+            destination: dictionary.optional(b"Dest")?,
+            action: dictionary.optional(b"A")?,
+            quad_points: dictionary
+                .optional(b"QuadPoints")?
+                .map(quad_points)
+                .transpose()?,
+            border_style: dictionary.optional(b"BS")?,
+            border_effect: dictionary.optional(b"BE")?,
         })
     }
 }
 
-impl FreeTextAnnotation {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        let default_appearance = dictionary.optional_bytes_vec(b"DA", objects)?;
-        let quadding = dictionary.optional_number::<i32>(b"Q", objects)?;
-        let rich_contents = dictionary.optional_bytes_vec(b"RC", objects)?;
-        let default_style = dictionary.optional_bytes_vec(b"DS", objects)?;
-        let callout_line = dictionary
-            .get(b"CL")
-            .map(|value| callout_line(value, objects))
-            .transpose()?;
-        let difference_rect = dictionary
-            .optional_array_of::<f32, 4>(b"RD", objects)?
-            .map(Rect::from);
-        let intent = dictionary.optional_bytes(b"IT", objects)?.map(Vec::from);
-        let border_effect = BorderEffect::from_dictionary(dictionary, b"BE", objects)?;
-
+impl FromPdfObject for FreeTextAnnotation {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
         Ok(Self {
-            default_appearance,
-            quadding,
-            rich_contents,
-            default_style,
-            callout_line,
-            border_effect,
-            difference_rect,
-            intent,
+            default_appearance: dictionary
+                .optional::<Arc<[u8]>>(b"DA")?
+                .map(|bytes| bytes.to_vec()),
+            quadding: dictionary.optional(b"Q")?,
+            rich_contents: dictionary
+                .optional::<Arc<[u8]>>(b"RC")?
+                .map(|bytes| bytes.to_vec()),
+            default_style: dictionary
+                .optional::<Arc<[u8]>>(b"DS")?
+                .map(|bytes| bytes.to_vec()),
+            callout_line: dictionary.optional(b"CL")?.map(callout_line).transpose()?,
+            border_effect: dictionary.optional(b"BE")?,
+            difference_rect: dictionary.lenient(b"RD"),
+            intent: dictionary
+                .optional::<Arc<[u8]>>(b"IT")?
+                .map(|bytes| bytes.to_vec()),
         })
     }
 }
 
-impl LineAnnotation {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        let line = dictionary
-            .get_or_err(b"L")?
-            .try_array_of::<f32, 4>(objects)?;
-        let line_endings = line_endings(dictionary, objects)?;
-        let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
-        let interior_color = color(dictionary, b"IC", objects)?;
-        let leader_line_length = dictionary.optional_number::<f32>(b"LL", objects)?;
-        let leader_line_extension = dictionary.optional_number::<f32>(b"LLE", objects)?;
-        let caption = dictionary.optional_boolean(b"Cap", objects)?;
-        let intent = dictionary.optional_bytes(b"IT", objects)?.map(Vec::from);
-
+impl FromPdfObject for LineAnnotation {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
         Ok(Self {
-            line,
-            line_endings,
-            border_style,
-            interior_color,
-            leader_line_length,
-            leader_line_extension,
-            caption,
-            intent,
+            line: dictionary.required(b"L")?,
+            line_endings: dictionary.optional(b"LE")?,
+            border_style: dictionary.optional(b"BS")?,
+            interior_color: dictionary.optional(b"IC")?,
+            leader_line_length: dictionary.optional(b"LL")?,
+            leader_line_extension: dictionary.optional(b"LLE")?,
+            caption: dictionary.optional(b"Cap")?,
+            intent: dictionary
+                .optional::<Arc<[u8]>>(b"IT")?
+                .map(|bytes| bytes.to_vec()),
         })
     }
 }
 
-impl SquareAnnotation {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
-        let interior_color = color(dictionary, b"IC", objects)?;
-        let border_effect = BorderEffect::from_dictionary(dictionary, b"BE", objects)?;
-        let difference_rect = dictionary
-            .optional_array_of::<f32, 4>(b"RD", objects)?
-            .map(Rect::from);
-
+impl FromPdfObject for SquareAnnotation {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
         Ok(Self {
-            border_style,
-            interior_color,
-            border_effect,
-            difference_rect,
+            border_style: dictionary.optional(b"BS")?,
+            interior_color: dictionary.optional(b"IC")?,
+            border_effect: dictionary.optional(b"BE")?,
+            difference_rect: dictionary.lenient(b"RD"),
         })
     }
 }
 
-impl CircleAnnotation {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
-        let interior_color = color(dictionary, b"IC", objects)?;
-        let border_effect = BorderEffect::from_dictionary(dictionary, b"BE", objects)?;
-        let difference_rect = dictionary
-            .optional_array_of::<f32, 4>(b"RD", objects)?
-            .map(Rect::from);
-
+impl FromPdfObject for CircleAnnotation {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
         Ok(Self {
-            border_style,
-            interior_color,
-            border_effect,
-            difference_rect,
+            border_style: dictionary.optional(b"BS")?,
+            interior_color: dictionary.optional(b"IC")?,
+            border_effect: dictionary.optional(b"BE")?,
+            difference_rect: dictionary.lenient(b"RD"),
         })
     }
 }
 
-impl PolygonAnnotation {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        let vertices = Polyline {
-            points: point_list(b"Vertices", dictionary.get_or_err(b"Vertices")?, objects)?,
-            closed: true,
-        };
-        let line_endings = line_endings(dictionary, objects)?;
-        let interior_color = color(dictionary, b"IC", objects)?;
-        let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
-        let intent = dictionary.optional_bytes(b"IT", objects)?.map(Vec::from);
-
+impl FromPdfObject for PolygonAnnotation {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
         Ok(Self {
-            vertices,
-            line_endings,
-            interior_color,
-            border_style,
-            intent,
+            vertices: Polyline {
+                points: point_list(b"Vertices", dictionary.required(b"Vertices")?)?,
+                closed: true,
+            },
+            line_endings: dictionary.optional(b"LE")?,
+            interior_color: dictionary.optional(b"IC")?,
+            border_style: dictionary.optional(b"BS")?,
+            intent: dictionary
+                .optional::<Arc<[u8]>>(b"IT")?
+                .map(|bytes| bytes.to_vec()),
         })
     }
 }
 
-impl PolyLineAnnotation {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        let vertices = Polyline {
-            points: point_list(b"Vertices", dictionary.get_or_err(b"Vertices")?, objects)?,
-            closed: false,
-        };
-        let line_endings = line_endings(dictionary, objects)?;
-        let interior_color = color(dictionary, b"IC", objects)?;
-        let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
-        let intent = dictionary.optional_bytes(b"IT", objects)?.map(Vec::from);
-
+impl FromPdfObject for PolyLineAnnotation {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
         Ok(Self {
-            vertices,
-            line_endings,
-            interior_color,
-            border_style,
-            intent,
-        })
-    }
-}
-
-impl HighlightAnnotation {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        let quad_points = required_quad_points(dictionary, objects)?;
-        let color = color(dictionary, b"C", objects)?;
-        let constant_opacity = dictionary.optional_number::<f64>(b"CA", objects)?;
-
-        Ok(Self {
-            quad_points,
-            color,
-            constant_opacity,
-        })
-    }
-}
-
-impl UnderlineAnnotation {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        let quad_points = required_quad_points(dictionary, objects)?;
-        let color = color(dictionary, b"C", objects)?;
-        let constant_opacity = dictionary.optional_number::<f64>(b"CA", objects)?;
-
-        Ok(Self {
-            quad_points,
-            color,
-            constant_opacity,
-        })
-    }
-}
-
-impl SquigglyAnnotation {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        let quad_points = required_quad_points(dictionary, objects)?;
-        let color = color(dictionary, b"C", objects)?;
-        let constant_opacity = dictionary.optional_number::<f64>(b"CA", objects)?;
-
-        Ok(Self {
-            quad_points,
-            color,
-            constant_opacity,
-        })
-    }
-}
-
-impl StrikeOutAnnotation {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        let quad_points = required_quad_points(dictionary, objects)?;
-        let color = color(dictionary, b"C", objects)?;
-        let constant_opacity = dictionary.optional_number::<f64>(b"CA", objects)?;
-
-        Ok(Self {
-            quad_points,
-            color,
-            constant_opacity,
-        })
-    }
-}
-
-impl StampAnnotation {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        let name = dictionary.optional_bytes(b"Name", objects)?.map(Vec::from);
-        Ok(Self { name })
-    }
-}
-
-impl CaretAnnotation {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        let difference_rect = dictionary
-            .optional_array_of::<f32, 4>(b"RD", objects)?
-            .map(Rect::from);
-        let style = dictionary
-            .get(b"Sy")
-            .map(|value| value.try_bytes(objects).map(CaretSymbolStyle::from))
-            .transpose()?;
-
-        Ok(Self {
-            difference_rect,
-            style,
-        })
-    }
-}
-
-impl InkAnnotation {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        let ink_list = InkList::from_dictionary(dictionary, objects)?
-            .ok_or(SourceDecodeError::MissingEntry { entry: b"InkList" })?;
-        let border_style = BorderStyle::from_dictionary(dictionary, b"BS", objects)?;
-        let interior_color = color(dictionary, b"IC", objects)?;
-
-        Ok(Self {
-            ink_list,
-            border_style,
-            interior_color,
-        })
-    }
-}
-
-impl InkList {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Option<Self>> {
-        let Some(value) = dictionary.get(b"InkList") else {
-            return Ok(None);
-        };
-
-        let strokes = value.try_array(objects)?;
-        let mut parsed = Vec::with_capacity(strokes.len());
-
-        for stroke in strokes {
-            parsed.push(Polyline {
-                points: point_list(b"InkList", stroke, objects)?,
+            vertices: Polyline {
+                points: point_list(b"Vertices", dictionary.required(b"Vertices")?)?,
                 closed: false,
-            });
+            },
+            line_endings: dictionary.optional(b"LE")?,
+            interior_color: dictionary.optional(b"IC")?,
+            border_style: dictionary.optional(b"BS")?,
+            intent: dictionary
+                .optional::<Arc<[u8]>>(b"IT")?
+                .map(|bytes| bytes.to_vec()),
+        })
+    }
+}
+
+macro_rules! text_markup_decoder {
+    ($type:ident) => {
+        impl FromPdfObject for $type {
+            fn from_pdf_object(
+                context: ObjectContext<'_, impl ObjectAccess + ?Sized>,
+            ) -> ReadResult<Self> {
+                let mut dictionary = context.dictionary()?;
+                Ok(Self {
+                    quad_points: quad_points(dictionary.required(b"QuadPoints")?)?,
+                    color: dictionary.optional(b"C")?,
+                    constant_opacity: dictionary.optional(b"CA")?,
+                })
+            }
         }
+    };
+}
 
-        Ok(Some(Self { strokes: parsed }))
+text_markup_decoder!(HighlightAnnotation);
+text_markup_decoder!(UnderlineAnnotation);
+text_markup_decoder!(SquigglyAnnotation);
+text_markup_decoder!(StrikeOutAnnotation);
+
+impl FromPdfObject for StampAnnotation {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        Ok(Self {
+            name: context
+                .dictionary()?
+                .optional::<Arc<[u8]>>(b"Name")?
+                .map(|bytes| bytes.to_vec()),
+        })
     }
 }
 
-impl PopupAnnotation {
-    fn from_dictionary(
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> DecodeResult<Self> {
-        let parent = dictionary
-            .get(b"Parent")
-            .map(|obj| {
-                let number = obj.try_object_number()?;
-                u64::try_from(number).map_err(|_| SourceDecodeError::ResourceLimit)
-            })
-            .transpose()?;
-        let open = dictionary.optional_boolean(b"Open", objects)?;
-
-        Ok(Self { parent, open })
+impl FromPdfObject for CaretAnnotation {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
+        Ok(Self {
+            difference_rect: dictionary.lenient(b"RD"),
+            style: dictionary.optional(b"Sy")?,
+        })
     }
 }
 
-fn point_list(
-    key: &'static [u8],
-    value: &ObjectVariant,
-    objects: &dyn ObjectResolver,
-) -> DecodeResult<Vec<Point>> {
-    let values = value.try_vec_of::<f32>(objects)?;
+impl FromPdfObject for InkAnnotation {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
+        Ok(Self {
+            // Producers omit `/InkList` when the strokes live only in the appearance stream,
+            // which still draws the annotation, so a missing entry reads as no strokes.
+            ink_list: dictionary.optional(b"InkList")?.unwrap_or_default(),
+            border_style: dictionary.optional(b"BS")?,
+            interior_color: dictionary.optional(b"IC")?,
+        })
+    }
+}
+
+/// Reads `/InkList`, an array of flat `[x1 y1 x2 y2 ...]` stroke arrays.
+impl FromPdfObject for InkList {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let strokes: Vec<Vec<f32>> = context.array()?.read_all()?;
+        Ok(Self {
+            strokes: strokes
+                .into_iter()
+                .map(|stroke| {
+                    Ok(Polyline {
+                        points: point_list(b"InkList", stroke)?,
+                        closed: false,
+                    })
+                })
+                .collect::<DecodeResult<_>>()?,
+        })
+    }
+}
+
+impl FromPdfObject for PopupAnnotation {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
+        Ok(Self {
+            // The parent is identified by its object number and never resolved.
+            parent: match dictionary.reference(b"Parent") {
+                Some(parent) => Some(
+                    u64::try_from(parent.number).map_err(|_| SourceDecodeError::ResourceLimit)?,
+                ),
+                None if dictionary.contains(b"Parent") => {
+                    return Err(SourceDecodeError::InvalidEntry {
+                        entry: b"Parent",
+                        reason: "expected an indirect reference".into(),
+                    }
+                    .into());
+                }
+                None => None,
+            },
+            open: dictionary.optional(b"Open")?,
+        })
+    }
+}
+
+/// Reads a `/Sy` caret symbol name, preserving unknown names.
+impl FromPdfObject for CaretSymbolStyle {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let name = context.decode::<Arc<[u8]>>()?;
+        Ok(match &*name {
+            b"P" => Self::P,
+            b"None" => Self::None,
+            other => Self::Unknown(Vec::from(other)),
+        })
+    }
+}
+
+/// Reads a link's `/H` highlight mode name, preserving unknown names.
+impl FromPdfObject for LinkHighlightMode {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let name = context.decode::<Arc<[u8]>>()?;
+        Ok(match &*name {
+            b"I" => Self::Invert,
+            b"O" => Self::Outline,
+            b"P" => Self::Push,
+            b"N" => Self::None,
+            b"T" => Self::Toggle,
+            other => Self::Unknown(Vec::from(other)),
+        })
+    }
+}
+
+/// Reads one `/LE` line ending name, preserving unknown names.
+impl FromPdfObject for LineEndingStyle {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let name = context.decode::<Arc<[u8]>>()?;
+        Ok(match &*name {
+            b"S" => Self::Slash,
+            b"B" | b"Square" => Self::Square,
+            b"C" | b"Circle" => Self::Circle,
+            b"D" | b"Diamond" => Self::Diamond,
+            b"OpenArrow" => Self::OpenArrow,
+            b"ClosedArrow" => Self::ClosedArrow,
+            b"Butt" => Self::Butt,
+            b"None" => Self::None,
+            other => Self::Unknown(Vec::from(other)),
+        })
+    }
+}
+
+/// Pairs a flat `[x1 y1 x2 y2 ...]` coordinate list into points.
+fn point_list(key: &'static [u8], values: Vec<f32>) -> DecodeResult<Vec<Point>> {
     if !values.len().is_multiple_of(2) {
         return Err(SourceDecodeError::InvalidEntry {
             entry: key,
             reason: format!("expected an even number of values, found {}", values.len()),
         });
     }
-
-    let mut points = Vec::with_capacity(values.len() / 2);
-    for &[x, y] in values.as_chunks::<2>().0 {
-        points.push(Point { x, y });
-    }
-
-    Ok(points)
+    Ok(values
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&[x, y]| Point { x, y })
+        .collect())
 }
 
 /// Parses a free-text callout's required two or three vertices.
-fn callout_line(value: &ObjectVariant, objects: &dyn ObjectResolver) -> DecodeResult<Polyline> {
-    let points = point_list(b"CL", value, objects)?;
+fn callout_line(values: Vec<f32>) -> DecodeResult<Polyline> {
+    let points = point_list(b"CL", values)?;
     if !matches!(points.len(), 2 | 3) {
         return Err(SourceDecodeError::InvalidEntry {
             entry: b"CL",
@@ -472,65 +357,27 @@ fn callout_line(value: &ObjectVariant, objects: &dyn ObjectResolver) -> DecodeRe
     })
 }
 
-fn quad_points(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> DecodeResult<Option<Vec<Quad>>> {
-    let Some(value) = dictionary.get(b"QuadPoints") else {
-        return Ok(None);
-    };
-    let values = value.try_vec_of::<f32>(objects)?;
+/// Groups a flat `/QuadPoints` list into quadrilaterals of eight coordinates each.
+fn quad_points(values: Vec<f32>) -> DecodeResult<Vec<Quad>> {
     if !values.len().is_multiple_of(8) {
         return Err(SourceDecodeError::InvalidEntry {
             entry: b"QuadPoints",
             reason: format!("expected a multiple of 8 numbers, found {}", values.len()),
         });
     }
-    let mut quads = Vec::with_capacity(values.len() / 8);
-    for &[x1, y1, x2, y2, x3, y3, x4, y4] in values.as_chunks::<8>().0 {
+    Ok(values
+        .as_chunks::<8>()
+        .0
+        .iter()
         // Convert the PDF's top-left, top-right, bottom-left, bottom-right
         // points into perimeter order.
-        quads.push(Quad {
+        .map(|&[x1, y1, x2, y2, x3, y3, x4, y4]| Quad {
             corners: [
                 Point { x: x1, y: y1 },
                 Point { x: x2, y: y2 },
                 Point { x: x4, y: y4 },
                 Point { x: x3, y: y3 },
             ],
-        });
-    }
-    Ok(Some(quads))
-}
-
-fn required_quad_points(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> DecodeResult<Vec<Quad>> {
-    quad_points(dictionary, objects)?.ok_or(SourceDecodeError::MissingEntry {
-        entry: b"QuadPoints",
-    })
-}
-
-fn line_endings(
-    dictionary: &Dictionary,
-    objects: &dyn ObjectResolver,
-) -> DecodeResult<Option<[LineEndingStyle; 2]>> {
-    let Some(value) = dictionary.get(b"LE") else {
-        return Ok(None);
-    };
-
-    let endings = value.try_array(objects)?;
-    if endings.len() != 2 {
-        return Err(SourceDecodeError::InvalidEntry {
-            entry: b"LE",
-            reason: format!("expected 2 line ending names, found {}", endings.len()),
-        });
-    }
-
-    let mut parsed = [LineEndingStyle::None, LineEndingStyle::None];
-    for (slot, item) in parsed.iter_mut().zip(endings.iter()) {
-        *slot = LineEndingStyle::from(item.try_bytes(objects)?);
-    }
-
-    Ok(Some(parsed))
+        })
+        .collect())
 }

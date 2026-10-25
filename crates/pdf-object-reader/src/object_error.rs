@@ -29,6 +29,9 @@ pub enum ObjectError {
     FailedResolveStreamObject { resolved_type: &'static str },
     #[error("Invalid array length: expected {expected}, but found {found}")]
     InvalidArrayLength { expected: usize, found: usize },
+    /// Indicates a number that does not name any value of an enumerated parameter.
+    #[error("Invalid value {found}; expected {expected}")]
+    InvalidEnumValue { expected: &'static str, found: i32 },
     /// Indicates that an attempt was made to insert an object into a collection
     /// but the object does not have an associated object number (is not a reference,
     /// indirect object, or stream with object number).

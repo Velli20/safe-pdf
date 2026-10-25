@@ -1,9 +1,7 @@
-use pdf_object_collection::object_collection::ObjectCollection;
-use pdf_object_reader::object_lookup::ObjectLookupExt;
-use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ObjectReader, ReadResult};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use std::sync::Arc;
 
-use pdf_annotation_core::SourceAnnotation;
+use pdf_annotation_core::{PageAnnotations, SourceAnnotation};
 use pdf_content_stream::ContentStream;
 use pdf_graphics::{
     rect::Rect,
@@ -35,9 +33,6 @@ pub struct PdfPage {
     /// Next page-scoped annotation identifier.
     #[doc(hidden)]
     pub annotation_id_high_watermark: usize,
-    /// Retains the source and typed resources when a page is detached from its document.
-    #[doc(hidden)]
-    pub read_state: Option<Arc<ObjectReader<ObjectCollection>>>,
 }
 
 impl PdfPage {
@@ -166,27 +161,17 @@ impl PdfPage {
 impl FromPdfObject for PdfPage {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut context = context.dictionary()?;
-        let dictionary = context.dictionary();
-        // A dangling `/Contents` reference is null (ISO 32000 §7.3.10), leaving the page empty.
-        let contents_absent = match dictionary.get(b"Contents") {
-            Some(object) => context.is_absent(object)?,
-            None => true,
-        };
-        let contents = if contents_absent {
-            None
-        } else {
-            context.optional::<ContentStream>(b"Contents")?
-        };
-        let media_box = dictionary.optional_media_box(context.source())?;
-        let crop_box = dictionary
-            .optional_array_of::<f32, 4>(b"CropBox", context.source())?
-            .map(Rect::from);
-        let rotation = dictionary.optional_number::<i32>(b"Rotate", context.source())?;
+        let contents = context.optional::<ContentStream>(b"Contents")?;
+        let media_box = context.lenient(b"MediaBox");
+        let crop_box = context.lenient(b"CropBox");
+        let rotation = context.optional::<i32>(b"Rotate")?;
         let resources = context
             .optional_shared::<Resources>(b"Resources")?
             .map(|handle| handle.get())
             .transpose()?;
-        let annotations = SourceAnnotation::from_page_dictionary(&mut context)?;
+        let annotations = context
+            .optional::<PageAnnotations>(b"Annots")?
+            .and_then(|PageAnnotations(annotations)| annotations);
         let annotation_id_high_watermark = annotations.as_ref().map_or(0, Vec::len);
         Ok(Self {
             contents,
@@ -196,7 +181,6 @@ impl FromPdfObject for PdfPage {
             resources,
             annotations,
             annotation_id_high_watermark,
-            read_state: None,
         })
     }
 }

@@ -1,32 +1,39 @@
-use pdf_object_reader::object_resolver::PassthroughResolver;
+use std::sync::Arc;
+
+use pdf_image::{InlineDataLength, InlineImageHeader, PdfImage};
+use pdf_object_reader::{
+    ArrayContext, EmptySource, ObjectAccess, ReadSession, object_variant::ObjectVariant,
+};
 use pdf_parser::error::ParserError;
 use pdf_parser::parser::PdfParser;
 use pdf_tokenizer::error::TokenizerError;
 
-use pdf_content_stream_operators::{
-    error::PdfOperatorError,
-    operands::Operands,
-    operation_map::{OpDescriptor, get_operation_descriptor},
-    variants::PdfOperatorVariant,
-};
+use pdf_content_stream_operators::{error::PdfOperatorError, variants::PdfOperatorVariant};
 
 /// Incrementally parses one content stream into PDF operators while reusing the
 /// same operand buffer across operator boundaries.
-pub(super) struct OperatorStreamParser<'a, 'out> {
+pub(super) struct OperatorStreamParser<'a, 'out, 'session, 'reader> {
     parser: PdfParser<'a>,
-    operands: Operands,
+    session: &'session mut ReadSession<'reader, EmptySource>,
+    operands: Vec<ObjectVariant>,
     out: &'out mut Vec<PdfOperatorVariant>,
 }
 
-impl<'a, 'out> OperatorStreamParser<'a, 'out> {
+impl<'a, 'out, 'session, 'reader> OperatorStreamParser<'a, 'out, 'session, 'reader> {
     /// Creates a parser for a single borrowed content stream.
     ///
-    /// The operand buffer is preallocated because PDF operators typically have
-    /// a small fixed number of operands.
-    pub(super) fn new(input: &'a [u8], out: &'out mut Vec<PdfOperatorVariant>) -> Self {
+    /// Operators read their operands in place through `session`. The operand
+    /// buffer is preallocated because PDF operators typically have a small
+    /// fixed number of operands.
+    pub(super) fn new(
+        input: &'a [u8],
+        session: &'session mut ReadSession<'reader, EmptySource>,
+        out: &'out mut Vec<PdfOperatorVariant>,
+    ) -> Self {
         Self {
             parser: PdfParser::from(input),
-            operands: Operands::with_capacity(6),
+            session,
+            operands: Vec::with_capacity(6),
             out,
         }
     }
@@ -77,7 +84,7 @@ impl<'a, 'out> OperatorStreamParser<'a, 'out> {
         let value = if matches!(first_byte, b'+' | b'-' | b'.' | b'0'..=b'9') {
             self.parser.parse_number()?
         } else {
-            self.parser.parse_object(&PassthroughResolver)?
+            self.parser.parse_object()?
         };
         self.operands.push(value);
         Ok(())
@@ -95,44 +102,39 @@ impl<'a, 'out> OperatorStreamParser<'a, 'out> {
         }
     }
 
-    /// Parses the next operator token and dispatches it through the operation map.
+    /// Parses the next operator token and reads it from the collected operands.
+    ///
+    /// An inline image (`BI`) is parsed from the stream bytes that follow it.
+    /// An unknown operator, or one whose operands do not decode, is dropped.
     fn parse_operator_from_stream(&mut self) -> Result<(), PdfOperatorError> {
-        let descriptor = {
-            let name = self.read_operator_name()?;
-            get_operation_descriptor(name)
-        };
-
-        let Some(descriptor) = descriptor else {
-            self.operands.clear();
-            return Ok(());
-        };
-
-        let parsed = if let Some(parse_hook) = descriptor.parse_hook {
-            if let Some(operator) = parse_hook(&mut self.parser)? {
-                Some(operator)
-            } else {
-                parse_operator(&descriptor, &mut self.operands)?
-            }
+        let name = self.parser.read_operator_name()?;
+        let operator = if name == b"BI" {
+            Some(PdfOperatorVariant::InlineImage(Arc::new(
+                self.parse_inline_image()?,
+            )))
         } else {
-            parse_operator(&descriptor, &mut self.operands)?
+            PdfOperatorVariant::read(name, &mut ArrayContext::new(&self.operands, self.session))
+                .ok()
+                .flatten()
         };
 
-        self.push_if_parsed(parsed);
+        if let Some(operator) = operator {
+            self.out.push(operator);
+        }
         self.operands.clear();
         Ok(())
     }
 
-    /// Reads a single operator token and normalizes low-level tokenization
-    /// failures into content-stream operator errors.
-    fn read_operator_name(&mut self) -> Result<&[u8], PdfOperatorError> {
-        Ok(self.parser.read_operator_name()?)
-    }
-
-    /// Appends a parsed operator when dispatch produced one.
-    fn push_if_parsed(&mut self, operator: Option<PdfOperatorVariant>) {
-        if let Some(operator) = operator {
-            self.out.push(operator);
-        }
+    /// Parses an inline image after its `BI` operator, through `EI`.
+    ///
+    /// The data is consumed before the image is read, so an image whose dictionary does
+    /// not decode still leaves the parser after its data.
+    fn parse_inline_image(&mut self) -> Result<PdfImage, ParserError> {
+        let header = InlineImageHeader::from(self.parser.parse_inline_image_dictionary()?);
+        let InlineDataLength(length) = self.session.read(header.object())?;
+        let data = self.parser.parse_inline_image_data(length)?;
+        PdfImage::inline(header, data, self.session)
+            .map_err(|error| ParserError::InlineImageError(error.to_string()))
     }
 
     /// Drops malformed syntax and guarantees the parser can try the next byte.
@@ -177,45 +179,23 @@ fn is_truncated_operand_error(error: &PdfOperatorError) -> bool {
     }
 }
 
-/// Parses a single operator with its operands.
-///
-/// Looks up the operator descriptor by name and validates the operand count
-/// before parsing. The operand buffer retains its allocation for the next
-/// operator, including when parsing fails.
-fn parse_operator(
-    descriptor: &OpDescriptor,
-    operands: &mut Operands,
-) -> Result<Option<PdfOperatorVariant>, PdfOperatorError> {
-    if let Some(required_count) = descriptor.operand_count
-        && operands.len() != required_count
-    {
-        return Ok(None);
-    }
-
-    let operator = (descriptor.parser)(operands)?;
-    Ok(Some(operator))
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
-    use pdf_content_stream_operators::{
-        graphics_state_operators::RestoreGraphicsState, variants::PdfOperatorVariant,
-    };
-    use pdf_object_reader::object_variant::ObjectVariant;
+    use pdf_object_reader::ObjectReader;
 
     use super::*;
 
     #[test]
     fn next_item_is_operator_rejects_numeric_prefixes() {
-        for byte in [b'+', b'-', b'.', b'0', b'9'] {
+        for byte in *b"+-.09" {
             assert!(
                 !next_item_is_operator(byte),
                 "byte {byte:?} should be an operand"
             );
         }
 
-        for byte in [b'q', b'B', b'*', b'@'] {
+        for byte in *b"qB*@" {
             assert!(
                 next_item_is_operator(byte),
                 "byte {byte:?} should be an operator"
@@ -244,42 +224,47 @@ mod tests {
     }
 
     #[test]
-    fn parse_operator_reuses_operand_buffer_after_success() {
-        let descriptor = get_operation_descriptor(b"m").expect("operator descriptor should exist");
-        let mut operands =
-            Operands::from(vec![ObjectVariant::Integer(10), ObjectVariant::Integer(20)]);
-        let original_capacity = operands.capacity();
+    fn read_operator_reads_operands_in_place() {
+        let operands = vec![ObjectVariant::Integer(10), ObjectVariant::Integer(20)];
+        let reader = ObjectReader::new(EmptySource);
 
-        let operator = parse_operator(&descriptor, &mut operands).expect("operator should parse");
+        let operator = PdfOperatorVariant::read(
+            b"m",
+            &mut ArrayContext::new(&operands, &mut reader.session()),
+        );
 
-        assert!(matches!(operator, Some(PdfOperatorVariant::MoveTo(_))));
-        assert!(operands.is_empty());
-        assert!(operands.capacity() >= original_capacity);
+        assert!(matches!(
+            operator,
+            Ok(Some(PdfOperatorVariant::MoveTo { .. }))
+        ));
+        assert_eq!(operands.len(), 2);
     }
 
     #[test]
-    fn parse_operator_skips_malformed_fixed_arity_operator_without_consuming_buffer() {
-        let descriptor = get_operation_descriptor(b"m").expect("operator descriptor should exist");
-        let mut operands = Operands::from(vec![
+    fn read_operator_skips_malformed_fixed_arity_operator_without_consuming_buffer() {
+        let operands = vec![
             ObjectVariant::Integer(1),
             ObjectVariant::Integer(2),
             ObjectVariant::Integer(3),
-        ]);
-        let original_capacity = operands.capacity();
+        ];
+        let reader = ObjectReader::new(EmptySource);
 
-        let operator = parse_operator(&descriptor, &mut operands)
-            .expect("malformed operator should be skipped");
+        let operator = PdfOperatorVariant::read(
+            b"m",
+            &mut ArrayContext::new(&operands, &mut reader.session()),
+        );
 
-        assert!(operator.is_none());
+        assert!(matches!(operator, Ok(None)));
         assert_eq!(operands.len(), 3);
-        assert_eq!(operands.peek_next(), Some(&ObjectVariant::Integer(1)));
-        assert_eq!(operands.capacity(), original_capacity);
+        assert_eq!(operands.first(), Some(&ObjectVariant::Integer(1)));
     }
 
     #[test]
     fn parse_next_item_skips_unknown_operator_and_clears_pending_operands() {
         let mut out = Vec::new();
-        let mut parser = OperatorStreamParser::new(b"unknown q", &mut out);
+        let reader = ObjectReader::new(EmptySource);
+        let mut session = reader.session();
+        let mut parser = OperatorStreamParser::new(b"unknown q", &mut session, &mut out);
         parser.operands.push(ObjectVariant::Integer(1));
 
         assert!(
@@ -298,15 +283,20 @@ mod tests {
         );
         assert!(matches!(
             parser.out.first(),
-            Some(PdfOperatorVariant::SaveGraphicsState(_))
+            Some(PdfOperatorVariant::SaveGraphicsState)
         ));
     }
 
     #[test]
-    fn parse_next_item_uses_parse_hook_and_resumes_after_inline_image() {
+    fn parse_next_item_parses_inline_image_and_resumes_after_it() {
         let mut out = Vec::new();
-        let mut parser =
-            OperatorStreamParser::new(b"BI /W 1 /H 1 /BPC 8 /CS /G ID x\nEI Q", &mut out);
+        let reader = ObjectReader::new(EmptySource);
+        let mut session = reader.session();
+        let mut parser = OperatorStreamParser::new(
+            b"BI /W 1 /H 1 /BPC 8 /CS /G ID x\nEI Q",
+            &mut session,
+            &mut out,
+        );
 
         assert!(
             parser
@@ -337,16 +327,16 @@ mod tests {
         );
         assert!(matches!(
             parser.out.get(1),
-            Some(PdfOperatorVariant::RestoreGraphicsState(
-                RestoreGraphicsState
-            ))
+            Some(PdfOperatorVariant::RestoreGraphicsState)
         ));
     }
 
     #[test]
     fn parse_next_item_stops_cleanly_on_truncated_trailing_operand() {
         let mut out = Vec::new();
-        let mut parser = OperatorStreamParser::new(b"0 j 0 J [ ", &mut out);
+        let reader = ObjectReader::new(EmptySource);
+        let mut session = reader.session();
+        let mut parser = OperatorStreamParser::new(b"0 j 0 J [ ", &mut session, &mut out);
 
         while parser
             .parse_next_item()
@@ -357,18 +347,20 @@ mod tests {
         assert_eq!(parser.out.len(), 2);
         assert!(matches!(
             parser.out.first(),
-            Some(PdfOperatorVariant::SetLineJoinStyle(_))
+            Some(PdfOperatorVariant::SetLineJoinStyle { .. })
         ));
         assert!(matches!(
             parser.out.get(1),
-            Some(PdfOperatorVariant::SetLineCapStyle(_))
+            Some(PdfOperatorVariant::SetLineCapStyle { .. })
         ));
     }
 
     #[test]
     fn parse_next_item_recovers_from_leading_invalid_delimiter() {
         let mut out = Vec::new();
-        let mut parser = OperatorStreamParser::new(b") q", &mut out);
+        let reader = ObjectReader::new(EmptySource);
+        let mut session = reader.session();
+        let mut parser = OperatorStreamParser::new(b") q", &mut session, &mut out);
 
         while parser
             .parse_next_item()
@@ -379,14 +371,16 @@ mod tests {
         assert_eq!(parser.out.len(), 1);
         assert!(matches!(
             parser.out.first(),
-            Some(PdfOperatorVariant::SaveGraphicsState(_))
+            Some(PdfOperatorVariant::SaveGraphicsState)
         ));
     }
 
     #[test]
     fn parse_next_item_recovers_from_corrupt_operand_before_valid_operator() {
         let mut out = Vec::new();
-        let mut parser = OperatorStreamParser::new(b"[ ) 0 J", &mut out);
+        let reader = ObjectReader::new(EmptySource);
+        let mut session = reader.session();
+        let mut parser = OperatorStreamParser::new(b"[ ) 0 J", &mut session, &mut out);
 
         while parser
             .parse_next_item()
@@ -397,14 +391,16 @@ mod tests {
         assert_eq!(parser.out.len(), 1);
         assert!(matches!(
             parser.out.first(),
-            Some(PdfOperatorVariant::SetLineCapStyle(_))
+            Some(PdfOperatorVariant::SetLineCapStyle { .. })
         ));
     }
 
     #[test]
     fn numeric_operands_recover_from_top_level_reference_syntax() {
         let mut out = Vec::new();
-        let mut parser = OperatorStreamParser::new(b"1 0 R q", &mut out);
+        let reader = ObjectReader::new(EmptySource);
+        let mut session = reader.session();
+        let mut parser = OperatorStreamParser::new(b"1 0 R q", &mut session, &mut out);
 
         while parser
             .parse_next_item()
@@ -414,14 +410,17 @@ mod tests {
         assert_eq!(parser.out.len(), 1);
         assert!(matches!(
             parser.out.first(),
-            Some(PdfOperatorVariant::SaveGraphicsState(_))
+            Some(PdfOperatorVariant::SaveGraphicsState)
         ));
     }
 
     #[test]
     fn generic_operands_keep_nested_indirect_references() {
         let mut out = Vec::new();
-        let mut parser = OperatorStreamParser::new(b"/Tag << /Ref 5 0 R >> BDC EMC", &mut out);
+        let reader = ObjectReader::new(EmptySource);
+        let mut session = reader.session();
+        let mut parser =
+            OperatorStreamParser::new(b"/Tag << /Ref 5 0 R >> BDC EMC", &mut session, &mut out);
 
         while parser
             .parse_next_item()
@@ -435,14 +434,16 @@ mod tests {
         ));
         assert!(matches!(
             parser.out.get(1),
-            Some(PdfOperatorVariant::EndMarkedContent(_))
+            Some(PdfOperatorVariant::EndMarkedContent)
         ));
     }
 
     #[test]
     fn parse_next_item_recovers_from_invalid_operator_operand_value() {
         let mut out = Vec::new();
-        let mut parser = OperatorStreamParser::new(b"9 J q", &mut out);
+        let reader = ObjectReader::new(EmptySource);
+        let mut session = reader.session();
+        let mut parser = OperatorStreamParser::new(b"9 J q", &mut session, &mut out);
         let original_capacity = parser.operands.capacity();
 
         while parser
@@ -455,14 +456,17 @@ mod tests {
         assert_eq!(parser.out.len(), 1);
         assert!(matches!(
             parser.out.first(),
-            Some(PdfOperatorVariant::SaveGraphicsState(_))
+            Some(PdfOperatorVariant::SaveGraphicsState)
         ));
     }
 
     #[test]
     fn parse_next_item_recovers_from_malformed_inline_image() {
         let mut out = Vec::new();
-        let mut parser = OperatorStreamParser::new(b"BI /W 1 /H 1 ID abc Q", &mut out);
+        let reader = ObjectReader::new(EmptySource);
+        let mut session = reader.session();
+        let mut parser =
+            OperatorStreamParser::new(b"BI /W 1 /H 1 ID abc Q", &mut session, &mut out);
 
         while parser
             .parse_next_item()
@@ -473,14 +477,16 @@ mod tests {
         assert_eq!(parser.out.len(), 1);
         assert!(matches!(
             parser.out.first(),
-            Some(PdfOperatorVariant::RestoreGraphicsState(_))
+            Some(PdfOperatorVariant::RestoreGraphicsState)
         ));
     }
 
     #[test]
     fn parse_next_item_skips_untokenized_delimiters() {
         let mut out = Vec::new();
-        let mut parser = OperatorStreamParser::new(b"} { q", &mut out);
+        let reader = ObjectReader::new(EmptySource);
+        let mut session = reader.session();
+        let mut parser = OperatorStreamParser::new(b"} { q", &mut session, &mut out);
 
         while parser
             .parse_next_item()
@@ -491,15 +497,18 @@ mod tests {
         assert_eq!(parser.out.len(), 1);
         assert!(matches!(
             parser.out.first(),
-            Some(PdfOperatorVariant::SaveGraphicsState(_))
+            Some(PdfOperatorVariant::SaveGraphicsState)
         ));
     }
 
     #[test]
     fn parse_next_item_reads_inline_image_ending_directly_after_binary_data() {
         let mut out = Vec::new();
+        let reader = ObjectReader::new(EmptySource);
+        let mut session = reader.session();
         let mut parser = OperatorStreamParser::new(
             b"BI /IM true /W 8 /H 1 /F /CCF /DP << /K -1 /Columns 8 >> ID \x01}\x10EI\nQ",
+            &mut session,
             &mut out,
         );
 
@@ -516,7 +525,7 @@ mod tests {
         ));
         assert!(matches!(
             parser.out.get(1),
-            Some(PdfOperatorVariant::RestoreGraphicsState(_))
+            Some(PdfOperatorVariant::RestoreGraphicsState)
         ));
     }
 }

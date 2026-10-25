@@ -17,6 +17,15 @@ pub struct FontFaceId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct GlyphId(pub u32);
 
+impl TryFrom<usize> for GlyphId {
+    type Error = std::num::TryFromIntError;
+
+    /// Converts an index to a glyph ID, failing when it does not fit `u32`.
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        u32::try_from(value).map(Self)
+    }
+}
+
 /// Opaque key understood by an application-provided external font source.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ExternalFontKey(pub Arc<str>);
@@ -121,9 +130,16 @@ pub enum FontStretch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FontWeight(pub u16);
 
+impl FontWeight {
+    /// The CSS `normal` weight.
+    pub const NORMAL: Self = Self(400);
+    /// The CSS `bold` weight.
+    pub const BOLD: Self = Self(700);
+}
+
 impl Default for FontWeight {
     fn default() -> Self {
-        Self(400)
+        Self::NORMAL
     }
 }
 

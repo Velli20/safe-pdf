@@ -9,10 +9,9 @@
 use std::collections::BTreeMap;
 
 use pdf_color_space::color_space::ColorSpace;
-use pdf_document::document::PdfDocument;
+use pdf_document::page_tree::PageTree;
 use pdf_object_reader::{
-    dictionary::Dictionary, object_error::ObjectError, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    dictionary::Dictionary, object_error::ObjectError, object_variant::ObjectVariant,
 };
 
 struct MapResolver {
@@ -33,26 +32,9 @@ impl pdf_object_reader::ObjectSource for MapResolver {
     }
 }
 
-impl ObjectResolver for MapResolver {
-    fn resolve_object<'a>(
-        &'a self,
-        obj: &'a ObjectVariant,
-    ) -> Result<&'a ObjectVariant, ObjectError> {
-        match obj {
-            ObjectVariant::Reference(object_number) => self
-                .objects
-                .get(&object_number.number)
-                .ok_or(ObjectError::FailedResolveObjectReference {
-                    obj_num: object_number.number,
-                }),
-            _ => Ok(obj),
-        }
-    }
-}
-
 fn name(value: &str) -> ObjectVariant {
     pdf_object_reader::pdf_string::PdfString::from(
-        value.as_bytes().to_vec(),
+        value.as_bytes(),
         pdf_object_reader::string_kind::StringKind::Name,
     )
 }
@@ -62,16 +44,16 @@ fn integer(value: i64) -> ObjectVariant {
 }
 
 fn color_space(value: &str) -> ObjectVariant {
-    ObjectVariant::Array(vec![name(value.into())].into())
+    ObjectVariant::Array(vec![name(value)].into())
 }
 
 fn resources_dictionary(entries: &[(&str, &str)]) -> Dictionary {
-    let color_spaces = Dictionary::new(BTreeMap::from(
+    let color_spaces = Dictionary::new(
         entries
             .iter()
             .map(|(name, value)| (Vec::from(name.as_bytes()), color_space(value)))
             .collect::<BTreeMap<_, _>>(),
-    ));
+    );
 
     Dictionary::new(BTreeMap::from([(
         Vec::from(b"ColorSpace"),
@@ -105,13 +87,7 @@ fn page_dictionary(
         entries.insert(
             Vec::from(b"MediaBox"),
             ObjectVariant::Array(
-                vec![
-                    integer(left.into()),
-                    integer(bottom),
-                    integer(right),
-                    integer(top),
-                ]
-                .into(),
+                vec![integer(left), integer(bottom), integer(right), integer(top)].into(),
             ),
         );
     }
@@ -153,13 +129,7 @@ fn pages_dictionary(
         entries.insert(
             Vec::from(b"MediaBox"),
             ObjectVariant::Array(
-                vec![
-                    integer(left.into()),
-                    integer(bottom),
-                    integer(right),
-                    integer(top),
-                ]
-                .into(),
+                vec![integer(left), integer(bottom), integer(right), integer(top)].into(),
             ),
         );
     }
@@ -190,10 +160,10 @@ fn inherited_resources_and_media_box_apply_to_leaf_pages() {
     let reader = pdf_object_reader::ObjectReader::new(&resolver);
 
     let pages = reader
-        .read::<PdfDocument>(
-            &pdf_object_reader::object_variant::ObjectVariant::Dictionary((&root_pages).clone()),
+        .read::<PageTree>(
+            &pdf_object_reader::object_variant::ObjectVariant::Dictionary(root_pages.clone()),
         )
-        .map(|document| document.pages)
+        .map(|tree| tree.pages)
         .expect("page tree should parse");
 
     assert_eq!(pages.len(), 1);
@@ -245,10 +215,10 @@ fn child_resources_keep_their_own_entries_while_inheriting_missing_ones() {
     let reader = pdf_object_reader::ObjectReader::new(&resolver);
 
     let pages = reader
-        .read::<PdfDocument>(
-            &pdf_object_reader::object_variant::ObjectVariant::Dictionary((&root_pages).clone()),
+        .read::<PageTree>(
+            &pdf_object_reader::object_variant::ObjectVariant::Dictionary(root_pages.clone()),
         )
-        .map(|document| document.pages)
+        .map(|tree| tree.pages)
         .expect("page tree should parse");
 
     let page = pages.first().expect("page should exist");

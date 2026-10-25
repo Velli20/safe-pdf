@@ -1,18 +1,13 @@
 //! Simple-font specifications and decoding for Type 1, MMType1, and TrueType.
 
 use crate::{
-    encoding::simple_encoding,
     error::FontError,
     font::FontSource,
     pdf::{PdfFontDescriptor, PdfMetrics, SimpleEncoding, ToUnicodeMap},
-    pdf_font_descriptor::descriptor,
-    pdf_font_parser::{base_font, to_unicode},
     pdf_font_program::{TrueTypeProgram, Type1Program},
     standard14::{self, Standard14Font},
 };
-use pdf_object_reader::{
-    DictionaryContext, FromPdfObject, ObjectAccess, ObjectContext, ObjectReadError, ReadResult,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use std::sync::Arc;
 
 /// Data shared by Type 1, Multiple Master Type 1, and TrueType simple fonts.
@@ -31,26 +26,25 @@ pub struct SimpleFontSpec {
     /// Explicit PDF width data.
     pub metrics: PdfMetrics,
     /// Optional source-code-to-Unicode map.
-    pub to_unicode: Option<Arc<dyn ToUnicodeMap>>,
+    pub to_unicode: Option<Arc<ToUnicodeMap>>,
 }
 
 impl FromPdfObject for SimpleFontSpec {
-    /// Decodes the concrete font dictionary without whole-font substitution.
+    /// Decodes the concrete font dictionary without whole-font substitution, choosing its
+    /// program and encoding policy from Subtype.
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
-        Self::try_from(&mut context.dictionary()?)
-    }
-}
-
-impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for SimpleFontSpec {
-    type Error = ObjectReadError;
-
-    /// Reads a simple font, choosing its program and encoding policy from Subtype.
-    fn try_from(context: &mut DictionaryContext<'_, A>) -> ReadResult<Self> {
+        let value = context.object();
+        let mut context = context.dictionary()?;
         let subtype: Arc<[u8]> = context.required(b"Subtype")?;
-        let base_font = base_font(context);
-        let (descriptor, program) = match subtype.as_ref() {
-            b"Type1" | b"MMType1" => descriptor::<Type1Program>(context, base_font.as_deref())?,
-            b"TrueType" => descriptor::<TrueTypeProgram>(context, base_font.as_deref())?,
+        let base_font: Option<Arc<[u8]>> = context.lenient(b"BaseFont");
+        // A bad program must not discard an otherwise usable font.
+        let program: Option<FontSource> = match subtype.as_ref() {
+            b"Type1" | b"MMType1" => context
+                .lenient::<Type1Program>(b"FontDescriptor")
+                .map(Into::into),
+            b"TrueType" => context
+                .lenient::<TrueTypeProgram>(b"FontDescriptor")
+                .map(Into::into),
             other => {
                 return Err(FontError::UnsupportedFontSubtype {
                     subtype: String::from_utf8_lossy(other).into_owned(),
@@ -58,9 +52,13 @@ impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for Simple
                 .into());
             }
         };
+        let descriptor = context
+            .optional::<PdfFontDescriptor>(b"FontDescriptor")?
+            .unwrap_or_default()
+            .named(base_font.as_deref());
         let symbolic = subtype.as_ref() == b"TrueType" && descriptor.metadata.symbolic;
-        let encoding = simple_encoding(context, symbolic)?;
-        let mut metrics = PdfMetrics::try_from(&mut *context)?;
+        let encoding = SimpleEncoding::new(context.optional(b"Encoding")?, symbolic);
+        let mut metrics: PdfMetrics = context.read(value)?;
         let standard14 = base_font
             .as_deref()
             .and_then(standard14::from_base_font_name);
@@ -76,7 +74,7 @@ impl<A: ObjectAccess + ?Sized> TryFrom<&mut DictionaryContext<'_, A>> for Simple
             standard14,
             encoding,
             metrics,
-            to_unicode: to_unicode(context)?,
+            to_unicode: context.optional(b"ToUnicode")?.map(Arc::new),
         })
     }
 }

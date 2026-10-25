@@ -6,6 +6,7 @@ pub mod error;
 pub mod fallback;
 pub mod flags;
 pub mod font;
+mod font_metadata;
 pub mod font_registry;
 pub mod glyph_name_to_unicode;
 pub mod glyph_widths_map;
@@ -13,7 +14,6 @@ pub mod pdf;
 mod pdf_font_descriptor;
 pub mod pdf_font_handle;
 mod pdf_font_metrics;
-mod pdf_font_parser;
 mod pdf_font_program;
 pub mod pdf_font_spec;
 mod pdf_path_pen;
@@ -39,9 +39,9 @@ pub use font::{
 };
 pub use font_registry::FontRegistry;
 pub use pdf::{
-    CidFontKind, CidFontSpec, CidSystemInfo, PDF_GLYPH_SPACE_UNITS_PER_EM, PdfCode,
-    PdfFontDescriptor, PdfGlyphMetric, PdfMetrics, SimpleEncoding, SimpleFontSpec, ToUnicodeMap,
-    Type0FontSpec, Type3FontSpec,
+    CharProcedures, CidFontKind, CidFontSpec, CidSystemInfo, CidToGidMap,
+    PDF_GLYPH_SPACE_UNITS_PER_EM, PdfCode, PdfFontDescriptor, PdfMetrics, SimpleEncoding,
+    SimpleFontSpec, ToUnicodeMap, Type0FontSpec, Type3FontSpec,
 };
 pub use pdf_font_spec::BundledFallbackProvider;
 pub use pdf_font_spec::PdfFontSpec;

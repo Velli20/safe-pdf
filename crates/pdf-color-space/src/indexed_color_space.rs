@@ -1,8 +1,8 @@
 use bytes::Bytes;
 use pdf_graphics::color::Color;
 use pdf_object_reader::{
-    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
+    FromPdfObject, ObjectAccess, ObjectContext, ReadResult, object_kind::ObjectKind,
+    pdf_string::PdfString, stream::StreamObject,
 };
 
 use crate::{color_space::ColorSpace, error::ColorSpaceError};
@@ -29,7 +29,7 @@ pub struct IndexedColorSpace {
 impl FromPdfObject for IndexedColorSpace {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut array = context.array()?;
-        let [_, _, _, lookup] = array.array().as_slice() else {
+        let [_, _, _, lookup] = array.array() else {
             return Err(ColorSpaceError::InvalidColorSpace {
                 description: format!(
                     "/Indexed requires 4 elements, found {}",
@@ -42,24 +42,14 @@ impl FromPdfObject for IndexedColorSpace {
         Ok(Self {
             base: Box::new(array.at(1)?),
             hival: array.at(2)?,
-            lookup: extract_lookup_table(array.source(), lookup)?,
+            // Streams must be matched first: a string read would also accept a stream's raw,
+            // possibly still encoded, bytes.
+            lookup: match array.resolve(lookup)?.kind() {
+                ObjectKind::Stream => array.at::<StreamObject>(3)?.shared_data(),
+                _ => Bytes::copy_from_slice(array.at::<PdfString>(3)?.as_bytes()),
+            },
         })
     }
-}
-
-/// Extracts the lookup table bytes from an Indexed color space.
-///
-/// The lookup table can be either a string/hex-string or a stream.
-fn extract_lookup_table(
-    objects: &dyn ObjectResolver,
-    lookup: &ObjectVariant,
-) -> Result<Bytes, ColorSpaceError> {
-    // Streams must be matched first: `try_bytes` also accepts streams but
-    // exposes their raw (possibly still encoded) bytes.
-    if let Ok(stream) = lookup.try_stream(objects) {
-        return Ok(stream.shared_data());
-    }
-    Ok(Bytes::copy_from_slice(lookup.try_bytes(objects)?))
 }
 
 /// Converts a raw palette entry (byte slice) to a [`Color`] using the given base color space.
@@ -157,10 +147,25 @@ mod tests {
     use std::collections::BTreeMap;
 
     use pdf_object_reader::{
-        dictionary::Dictionary, object_resolver::PassthroughResolver, stream::StreamObject,
+        EmptySource, ObjectReader, dictionary::Dictionary, object_variant::ObjectVariant,
+        stream::StreamObject,
     };
 
     use super::*;
+
+    /// Reads `[/Indexed /DeviceGray 0 lookup]` and returns its lookup table.
+    fn read_lookup(lookup: ObjectVariant) -> Bytes {
+        let array = vec![
+            ObjectVariant::name_from_bytes(b"Indexed"),
+            ObjectVariant::name_from_bytes(b"DeviceGray"),
+            ObjectVariant::Integer(0),
+            lookup,
+        ];
+        ObjectReader::new(EmptySource)
+            .read::<IndexedColorSpace>(&ObjectVariant::Array(array.into()))
+            .expect("lookup table should parse")
+            .lookup
+    }
 
     #[test]
     fn stream_lookup_shares_decoded_stream_bytes() {
@@ -173,32 +178,27 @@ mod tests {
         let stream_data = stream.shared_data();
         let lookup = ObjectVariant::Stream(stream);
 
-        let extracted = extract_lookup_table(&PassthroughResolver, &lookup)
-            .expect("stream lookup table should parse");
+        let extracted = read_lookup(lookup);
 
         assert_eq!(extracted.as_ptr(), stream_data.as_ptr());
     }
 
     #[test]
     fn string_lookups_preserve_their_bytes() {
-        for lookup in [
-            pdf_object_reader::pdf_string::PdfString::from(
-                vec![1, 2, 3],
+        for (bytes, kind) in [
+            (
+                [1, 2, 3],
                 pdf_object_reader::string_kind::StringKind::Literal,
             ),
-            pdf_object_reader::pdf_string::PdfString::from(
-                vec![4, 5, 6],
+            (
+                [4, 5, 6],
                 pdf_object_reader::string_kind::StringKind::Hexadecimal,
             ),
         ] {
-            let expected = lookup
-                .try_bytes(&PassthroughResolver)
-                .expect("test lookup should contain bytes")
-                .to_vec();
-            let extracted = extract_lookup_table(&PassthroughResolver, &lookup)
-                .expect("string lookup table should parse");
+            let extracted =
+                read_lookup(pdf_object_reader::pdf_string::PdfString::from(bytes, kind));
 
-            assert_eq!(extracted.as_ref(), expected.as_slice());
+            assert_eq!(extracted.as_ref(), bytes);
         }
     }
 

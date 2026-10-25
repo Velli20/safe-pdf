@@ -1,10 +1,8 @@
-use pdf_filter::filter::Filters;
-use pdf_object_reader::object_resolver::ObjectResolver;
+use pdf_filter::image_payload::ImagePayload;
 use pdf_object_reader::{
-    DictionaryContext, ObjectAccess, ObjectReader, object_error::ObjectError, object_id::ObjectId,
-    object_variant::ObjectVariant, stream::StreamObject,
+    ObjectReader, object_error::ObjectError, object_id::ObjectId, object_variant::ObjectVariant,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 #[cfg(feature = "json")]
 use serde_json::{Value as JsonValue, json};
@@ -16,34 +14,6 @@ pub struct ObjectCollection {
     /// Lookups ignore the generation of a reference, like PDFium: incremental updates
     /// sometimes redefine an object with a different generation than its referrers use.
     pub map: HashMap<usize, ObjectVariant>,
-}
-
-impl ObjectResolver for ObjectCollection {
-    fn resolve_object<'a>(
-        &'a self,
-        obj: &'a ObjectVariant,
-    ) -> Result<&'a ObjectVariant, ObjectError> {
-        let mut current_obj = obj;
-        let mut in_progress = HashSet::new();
-
-        loop {
-            match current_obj {
-                ObjectVariant::Reference(object_number) => {
-                    if !in_progress.insert(*object_number) {
-                        return Err(ObjectError::CyclicDependency {
-                            obj_num: object_number.number,
-                        });
-                    }
-                    current_obj = self.map.get(&object_number.number).ok_or(
-                        ObjectError::FailedResolveObjectReference {
-                            obj_num: object_number.number,
-                        },
-                    )?;
-                }
-                other => return Ok(other),
-            }
-        }
-    }
 }
 
 impl ObjectCollection {
@@ -79,21 +49,18 @@ impl ObjectCollection {
             ObjectVariant::Stream(stream) => {
                 stream.object_number = identifier.number;
                 stream.generation_number = identifier.generation;
-                // A JPXDecode stream stays encoded: its codestream carries the
-                // component, precision, colour, and opacity metadata that a
-                // flat byte buffer would lose, so the image path decodes it.
-                if !stream.filters_applied() {
-                    let reader = ObjectReader::new(&*self);
-                    let mut session = reader.session();
-                    if !carries_jpx_codestream(stream, &mut session)
-                        && let Ok(data) =
-                            pdf_filter::filter::decode_with_access(stream, &mut session)
-                    {
-                        stream.set_filtered_data(data);
-                    }
-                }
             }
             _ => {}
+        }
+
+        // A JPXDecode stream stays encoded: its codestream carries the component,
+        // precision, colour, and opacity metadata that a flat byte buffer would lose,
+        // so the image path decodes it. A stream whose chain fails stays encoded too.
+        if matches!(&obj, ObjectVariant::Stream(stream) if !stream.filters_applied())
+            && let Ok(ImagePayload::Samples(data)) = self.loaded().read::<ImagePayload>(&obj)
+            && let ObjectVariant::Stream(stream) = &mut obj
+        {
+            stream.set_filtered_data(data);
         }
 
         if self.map.insert(identifier.number, obj).is_some() {
@@ -113,6 +80,14 @@ impl ObjectCollection {
     /// xref table). The object-stream version is authoritative for these objects.
     pub fn insert_compressed(&mut self, obj_num: usize, obj: ObjectVariant) {
         self.map.insert(obj_num, obj);
+    }
+
+    /// Returns a reader over the objects inserted so far.
+    ///
+    /// A reference to an object not yet inserted fails to read instead of reading as null,
+    /// so a read that depends on it can be retried once that object is loaded.
+    pub fn loaded(&self) -> ObjectReader<LoadedObjects<'_>> {
+        ObjectReader::new(LoadedObjects(self))
     }
 
     pub fn get(&self, key: usize) -> Option<&ObjectVariant> {
@@ -255,24 +230,48 @@ impl ObjectCollection {
     }
 }
 
-/// Returns whether a stream's filter chain leaves a JPEG 2000 codestream.
+/// Reads the objects inserted so far, failing on a reference to one not yet loaded.
 ///
-/// The `/Filter` entry is read through the same access that decodes the
-/// stream, so an indirect filter name resolves exactly as it will when the
-/// stream is decoded. An unreadable chain is not treated as JPX; the decode
-/// attempt that follows reports the problem.
-fn carries_jpx_codestream(stream: &StreamObject, access: &mut impl ObjectAccess) -> bool {
-    DictionaryContext::new(&stream.dictionary, access)
-        .optional::<Filters>(Filters::KEY)
-        .ok()
-        .flatten()
-        .is_some_and(|filters| filters.has_jpx_filter())
+/// Insertion decodes stream filters before later objects arrive, so an object missing
+/// here may still be defined. Failing the read keeps such a stream encoded for a later
+/// decode, where [`ObjectCollection`] resolves an object that is still missing to null.
+pub struct LoadedObjects<'a>(&'a ObjectCollection);
+
+impl pdf_object_reader::ObjectSource for LoadedObjects<'_> {
+    type Error = ObjectError;
+    fn read_object(
+        &self,
+        id: pdf_object_reader::object_id::ObjectId,
+    ) -> Result<Option<pdf_object_reader::pdf_object::PdfObject>, Self::Error> {
+        self.0
+            .read_object(id)?
+            .map(Some)
+            .ok_or_else(|| ObjectError::FailedResolveObjectReference {
+                obj_num: id.number(),
+            })
+    }
+}
+
+impl pdf_object_reader::ObjectSource for ObjectCollection {
+    type Error = ObjectError;
+    fn read_object(
+        &self,
+        id: pdf_object_reader::object_id::ObjectId,
+    ) -> Result<Option<pdf_object_reader::pdf_object::PdfObject>, Self::Error> {
+        Ok(self
+            .map
+            .get(&id.number())
+            .cloned()
+            .map(pdf_object_reader::pdf_object::PdfObject::new))
+    }
 }
 
 #[cfg(test)]
+#[allow(clippy::as_conversions)]
 mod tests {
     use std::collections::BTreeMap;
 
+    use pdf_filter::filter::DecodedStream;
     use pdf_object_reader::{dictionary::Dictionary, stream::StreamObject};
 
     use super::*;
@@ -337,48 +336,6 @@ mod tests {
     }
 
     #[test]
-    fn resolve_object_reports_direct_self_reference_cycle() {
-        let mut collection = ObjectCollection::default();
-        collection.map.insert(
-            1,
-            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0)),
-        );
-
-        let err = collection
-            .resolve_object(&ObjectVariant::Reference(
-                pdf_object_reader::object_id::ObjectId::new(1, 0),
-            ))
-            .expect_err("self-referential object should report a cycle");
-
-        assert_eq!(err, ObjectError::CyclicDependency { obj_num: 1 });
-    }
-
-    #[test]
-    fn resolve_object_reports_indirect_reference_cycle() {
-        let mut collection = ObjectCollection::default();
-        collection.map.insert(
-            1,
-            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(2, 0)),
-        );
-        collection.map.insert(
-            2,
-            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(3, 0)),
-        );
-        collection.map.insert(
-            3,
-            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0)),
-        );
-
-        let err = collection
-            .resolve_object(&ObjectVariant::Reference(
-                pdf_object_reader::object_id::ObjectId::new(1, 0),
-            ))
-            .expect_err("mutually recursive references should report a cycle");
-
-        assert_eq!(err, ObjectError::CyclicDependency { obj_num: 1 });
-    }
-
-    #[test]
     fn insert_decodes_stream_with_indirect_decode_parms() {
         use std::io::Write;
 
@@ -413,7 +370,7 @@ mod tests {
         stream_dict.insert(
             Vec::from(b"Filter"),
             pdf_object_reader::pdf_string::PdfString::from(
-                b"FlateDecode".to_vec(),
+                b"FlateDecode",
                 pdf_object_reader::string_kind::StringKind::Name,
             ),
         );
@@ -461,7 +418,7 @@ mod tests {
             (
                 Vec::from(b"Filter"),
                 pdf_object_reader::pdf_string::PdfString::from(
-                    b"ASCIIHexDecode".to_vec(),
+                    b"ASCIIHexDecode",
                     pdf_object_reader::string_kind::StringKind::Name,
                 ),
             ),
@@ -500,18 +457,9 @@ mod tests {
             )
             .expect("decode parameters should be inserted");
 
-        let stored = collection
-            .get(1)
-            .and_then(|object| match object {
-                ObjectVariant::Stream(stream) => Some(stream),
-                _ => None,
-            })
-            .expect("stream should remain in the collection");
-        let decoded = pdf_filter::filter::decode_with_access(
-            stored,
-            &mut ObjectReader::new(&collection).session(),
-        )
-        .expect("filter retry should succeed after dependency insertion");
+        let DecodedStream(decoded) = ObjectReader::new(&collection)
+            .read_indirect(ObjectId::new(1, 0))
+            .expect("filter retry should succeed after dependency insertion");
         assert_eq!(decoded.as_ref(), &[0x2A]);
     }
 
@@ -521,19 +469,5 @@ mod tests {
 
         assert!(collection.map.capacity() >= 12);
         assert!(collection.map.is_empty());
-    }
-}
-
-impl pdf_object_reader::ObjectSource for ObjectCollection {
-    type Error = ObjectError;
-    fn read_object(
-        &self,
-        id: pdf_object_reader::object_id::ObjectId,
-    ) -> Result<Option<pdf_object_reader::pdf_object::PdfObject>, Self::Error> {
-        Ok(self
-            .map
-            .get(&id.number())
-            .cloned()
-            .map(pdf_object_reader::pdf_object::PdfObject::new))
     }
 }

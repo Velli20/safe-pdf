@@ -3,6 +3,8 @@
 use crate::{model::ErrorDetail, trace_backend::TraceBackend};
 use anyhow::{Result, anyhow, bail};
 use image::RgbaImage;
+use pdf_canvas::canvas_backend::CanvasBackend;
+use pdf_graphics::size::Size;
 use pdf_graphics_skia::skia_canvas_backend::SkiaCanvasBackend;
 use pdf_renderer::{PdfRenderer, PdfRendererError, RecordedPage, text_selection::PageTextLayout};
 
@@ -75,7 +77,15 @@ pub fn trace(
         f32::from(u16::try_from(width)?),
         f32::from(u16::try_from(height)?),
     );
-    let layout = renderer.render_with_text_layout(&mut backend, page)?;
+    let viewport = renderer
+        .page(page)?
+        .viewport(None, Size::new(backend.width(), backend.height()))?;
+    let layout = renderer.render_with_text_layout(
+        &mut backend,
+        page,
+        &viewport,
+        &renderer.default_optional_content(),
+    )?;
     Ok((backend, layout))
 }
 

@@ -1,7 +1,4 @@
 //! PDF drawing interpretation, recording, and portable backend contracts.
-use canvas_backend::CanvasBackend;
-use pdf_canvas::PdfCanvas;
-use pdf_content_stream_operators::pdf_operator_backend::PdfOperatorBackend;
 
 /// Drawing operations implemented by concrete rendering backends.
 pub mod canvas_backend;
@@ -15,6 +12,8 @@ mod canvas_external_object_ops;
 mod canvas_graphics_state_ops;
 /// Marked-content operator handling.
 mod canvas_marked_content_ops;
+/// Dispatch of parsed content-stream operators to their handlers.
+mod canvas_operator_dispatch;
 /// PDF path construction and painting operators.
 mod canvas_path_ops;
 /// PDF graphics-state values retained across saved states.
@@ -27,6 +26,8 @@ mod content_stream_render_state;
 pub mod error;
 /// Validated mask descriptions and portable coverage preparation.
 pub mod mask_layer;
+/// Hiding of marked-content sequences whose optional content is off.
+mod optional_content_filter;
 
 pub use pdf_graphics::viewport::{CanvasViewport, PageViewport, ViewportError};
 
@@ -47,5 +48,3 @@ pub mod text;
 mod text_state;
 /// Tiling shader.
 pub mod tiling_shader;
-
-impl<B: CanvasBackend> PdfOperatorBackend for PdfCanvas<'_, B> {}

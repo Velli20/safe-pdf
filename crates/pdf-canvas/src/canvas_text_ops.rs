@@ -2,52 +2,52 @@ use crate::CanvasPath;
 use crate::canvas_backend::CanvasBackend;
 use crate::error::PdfCanvasError;
 use crate::pdf_canvas::PdfCanvas;
-use pdf_content_stream_operators::pdf_operator_backend::{
-    TextObjectOps, TextPositioningOps, TextShowingOps, TextStateOps,
-};
 use pdf_content_stream_operators::variants::PdfOperatorVariant;
 use pdf_graphics::pdf_path::PdfPath;
 use pdf_graphics::transform::Transform;
 use pdf_graphics::{PaintMode, PathFillType, TextRenderingMode};
 use pdf_text_engine::text::{PdfTextItem, PdfTextRun};
 
-impl<B: CanvasBackend> TextPositioningOps for PdfCanvas<'_, B> {
-    type ErrorType = PdfCanvasError;
-    fn move_text_position(&mut self, tx: f32, ty: f32) -> Result<(), Self::ErrorType> {
+impl<B: CanvasBackend> PdfCanvas<'_, B> {
+    /// Handles `Td`: offsets the start of the next line.
+    pub(crate) fn move_text_position(&mut self, tx: f32, ty: f32) -> Result<(), PdfCanvasError> {
         self.current_state_mut()?
             .text_state
             .move_line_position(tx, ty);
         Ok(())
     }
 
-    fn move_text_position_and_set_leading(
+    /// Handles `TD`: sets the leading to `-ty` and offsets the next line.
+    pub(crate) fn move_text_position_and_set_leading(
         &mut self,
         tx: f32,
         ty: f32,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         // TD: Set leading to -ty, then perform Td(tx, ty)
         let neg_ty = -ty;
         self.current_state_mut()?.text_state.leading = neg_ty;
         self.move_text_position(tx, ty)
     }
 
-    fn set_text_matrix(&mut self, transform: &Transform) -> Result<(), Self::ErrorType> {
+    /// Handles `Tm`: sets the text and text line matrices.
+    pub(crate) fn set_text_matrix(&mut self, transform: &Transform) -> Result<(), PdfCanvasError> {
         self.current_state_mut()?
             .text_state
             .set_matrices(*transform);
         Ok(())
     }
 
-    fn move_to_start_of_next_line(&mut self) -> Result<(), Self::ErrorType> {
+    /// Handles `T*`: moves to the start of the next line.
+    pub(crate) fn move_to_start_of_next_line(&mut self) -> Result<(), PdfCanvasError> {
         // T*: Move to start of next line using current leading: Tlm = Tlm * T(0, -Tl); Tm = Tlm.
         self.current_state_mut()?.text_state.move_to_next_line();
         Ok(())
     }
 }
 
-impl<B: CanvasBackend> TextObjectOps for PdfCanvas<'_, B> {
-    type ErrorType = PdfCanvasError;
-    fn begin_text_object(&mut self) -> Result<(), Self::ErrorType> {
+impl<B: CanvasBackend> PdfCanvas<'_, B> {
+    /// Handles `BT`: resets the text matrices.
+    pub(crate) fn begin_text_object(&mut self) -> Result<(), PdfCanvasError> {
         let state = self.current_state_mut()?;
         state.text_state.matrix = Transform::identity();
         state.text_state.line_matrix = Transform::identity();
@@ -56,7 +56,8 @@ impl<B: CanvasBackend> TextObjectOps for PdfCanvas<'_, B> {
         Ok(())
     }
 
-    fn end_text_object(&mut self) -> Result<(), Self::ErrorType> {
+    /// Handles `ET`: applies any pending text clip.
+    pub(crate) fn end_text_object(&mut self) -> Result<(), PdfCanvasError> {
         // Apply any glyph outlines accumulated for clip-mode text rendering (modes 4–7).
         // Per ISO 32000 §9.3.6, the clip path is set at the end of the text object.
         if let Some(clip_path) = self.current_state_mut()?.pending_text_clip.take() {
@@ -70,30 +71,41 @@ impl<B: CanvasBackend> TextObjectOps for PdfCanvas<'_, B> {
     }
 }
 
-impl<B: CanvasBackend> TextStateOps for PdfCanvas<'_, B> {
-    type ErrorType = PdfCanvasError;
-    fn set_character_spacing(&mut self, spacing: f32) -> Result<(), Self::ErrorType> {
+impl<B: CanvasBackend> PdfCanvas<'_, B> {
+    /// Handles `Tc`: sets the character spacing.
+    pub(crate) fn set_character_spacing(&mut self, spacing: f32) -> Result<(), PdfCanvasError> {
         self.current_state_mut()?.text_state.style.character_spacing = spacing;
         Ok(())
     }
 
-    fn set_word_spacing(&mut self, spacing: f32) -> Result<(), Self::ErrorType> {
+    /// Handles `Tw`: sets the word spacing.
+    pub(crate) fn set_word_spacing(&mut self, spacing: f32) -> Result<(), PdfCanvasError> {
         self.current_state_mut()?.text_state.style.word_spacing = spacing;
         Ok(())
     }
 
-    fn set_horizontal_text_scaling(&mut self, scale_percent: f32) -> Result<(), Self::ErrorType> {
+    /// Handles `Tz`: sets the horizontal scaling from a percentage.
+    pub(crate) fn set_horizontal_text_scaling(
+        &mut self,
+        scale_percent: f32,
+    ) -> Result<(), PdfCanvasError> {
         self.current_state_mut()?.text_state.style.horizontal_scale = scale_percent / 100.0;
         Ok(())
     }
 
-    fn set_text_leading(&mut self, leading: f32) -> Result<(), Self::ErrorType> {
+    /// Handles `TL`: sets the text leading.
+    pub(crate) fn set_text_leading(&mut self, leading: f32) -> Result<(), PdfCanvasError> {
         // TL sets the text leading parameter
         self.current_state_mut()?.text_state.leading = leading;
         Ok(())
     }
 
-    fn set_font_and_size(&mut self, font_name: &[u8], size: f32) -> Result<(), Self::ErrorType> {
+    /// Handles `Tf`: selects a font resource and size.
+    pub(crate) fn set_font_and_size(
+        &mut self,
+        font_name: &[u8],
+        size: f32,
+    ) -> Result<(), PdfCanvasError> {
         let (font, nested_resources) = self
             .current_state()?
             .resources
@@ -111,44 +123,52 @@ impl<B: CanvasBackend> TextStateOps for PdfCanvas<'_, B> {
         Ok(())
     }
 
-    fn set_text_rendering_mode(&mut self, mode: TextRenderingMode) -> Result<(), Self::ErrorType> {
+    /// Handles `Tr`: sets the text rendering mode.
+    pub(crate) fn set_text_rendering_mode(
+        &mut self,
+        mode: TextRenderingMode,
+    ) -> Result<(), PdfCanvasError> {
         self.current_state_mut()?.paint.rendering_mode = mode;
         Ok(())
     }
 
-    fn set_text_rise(&mut self, rise: f32) -> Result<(), Self::ErrorType> {
+    /// Handles `Ts`: sets the text rise.
+    pub(crate) fn set_text_rise(&mut self, rise: f32) -> Result<(), PdfCanvasError> {
         self.current_state_mut()?.text_state.style.rise = rise;
         Ok(())
     }
 }
 
-impl<B: CanvasBackend> TextShowingOps for PdfCanvas<'_, B> {
-    type ErrorType = PdfCanvasError;
-    fn show_text(&mut self, text: &PdfTextItem) -> Result<(), Self::ErrorType> {
+impl<B: CanvasBackend> PdfCanvas<'_, B> {
+    /// Handles `Tj`: shows a text string.
+    pub(crate) fn show_text(&mut self, text: &PdfTextItem) -> Result<(), PdfCanvasError> {
         self.render_text_items(std::slice::from_ref(text))
     }
 
-    fn show_text_with_glyph_positioning(
+    /// Handles `TJ`: shows strings with individual position adjustments.
+    pub(crate) fn show_text_with_glyph_positioning(
         &mut self,
         elements: &[PdfTextItem],
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         self.render_text_items(elements)
     }
 
-    fn move_to_next_line_and_show_text(
+    /// Handles `'`: moves to the next line and shows text.
+    pub(crate) fn move_to_next_line_and_show_text(
         &mut self,
         text: &PdfTextItem,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         self.move_to_start_of_next_line()?;
         self.show_text(text)
     }
 
-    fn set_spacing_and_show_text(
+    /// Handles `"`: sets word and character spacing, then behaves as `'`.
+    pub(crate) fn set_spacing_and_show_text(
         &mut self,
         word_spacing: f32,
         char_spacing: f32,
         text: &PdfTextItem,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         self.set_word_spacing(word_spacing)?;
         self.set_character_spacing(char_spacing)?;
         self.move_to_next_line_and_show_text(text)
@@ -239,8 +259,8 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
         let mut filter = |operator: &PdfOperatorVariant| {
             matches!(
                 operator,
-                PdfOperatorVariant::SetCharWidth(_)
-                    | PdfOperatorVariant::SetCharWidthAndBoundingBox(_)
+                PdfOperatorVariant::SetCharWidth { .. }
+                    | PdfOperatorVariant::SetCharWidthAndBoundingBox { .. }
             )
         };
 
@@ -301,7 +321,8 @@ impl<B: CanvasBackend> PdfCanvas<'_, B> {
                         self.paint_outline(&outline, &glyph_transform)?;
                     }
                 }
-                if let Some(recorded) = &mut self.text_glyphs {
+                let hidden = self.content_hidden();
+                if let Some(recorded) = self.text_glyphs.as_mut().filter(|_| !hidden) {
                     let bounds = base_transform.map_rect(&glyph.bounds).normalized();
                     if bounds.is_valid() {
                         recorded.push(crate::text::TextGlyph {

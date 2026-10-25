@@ -1,15 +1,15 @@
-use pdf_content_stream_operators::pdf_operator_backend::ClippingPathOps;
 use pdf_graphics::PathFillType;
 
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
-impl<B: CanvasBackend> ClippingPathOps for PdfCanvas<'_, B> {
-    type ErrorType = PdfCanvasError;
-    fn clip_path_nonzero_winding(&mut self) -> Result<(), Self::ErrorType> {
+impl<B: CanvasBackend> PdfCanvas<'_, B> {
+    /// Handles `W`: marks the current path as a nonzero-winding clip.
+    pub(crate) fn clip_path_nonzero_winding(&mut self) -> Result<(), PdfCanvasError> {
         self.mark_clip_path(PathFillType::Winding)
     }
 
-    fn clip_path_even_odd(&mut self) -> Result<(), Self::ErrorType> {
+    /// Handles `W*`: marks the current path as an even-odd clip.
+    pub(crate) fn clip_path_even_odd(&mut self) -> Result<(), PdfCanvasError> {
         self.mark_clip_path(PathFillType::EvenOdd)
     }
 }

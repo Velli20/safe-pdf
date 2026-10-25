@@ -11,12 +11,14 @@ serde = ["dep:serde", "pdf-object-reader/serde"]
 pdf-utils = { path = "../pdf-utils" }
 pdf-content-stream = { path = "../pdf-content-stream" }
 pdf-annotation-core = { path = "../pdf-annotation-core" }
+pdf-optional-content = { path = "../pdf-optional-content" }
 pdf-object-collection = { path = "../pdf-object-collection" }
 pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-parser = { path = "../pdf-parser" }
 pdf-resources = { path = "../pdf-resources" }
 pdf-graphics = { path = "../pdf-graphics" }
 thiserror = "2.0.12"
+bytes = "1.10.1"
 serde = { version = "1", features = ["derive"], optional = true }
 
 md-5 = "0.10.6"
@@ -31,3 +33,8 @@ workspace = true
 
 [dev-dependencies]
 pdf-color-space = { path = "../pdf-color-space" }
+criterion = "0.8"
+
+[[bench]]
+name = "document_open"
+harness = false

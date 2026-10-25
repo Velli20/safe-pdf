@@ -1,7 +1,6 @@
-use pdf_function::{
-    function::{Function, FunctionImpl},
-    function_interpolation_error::FunctionInterpolationError,
-};
+use std::sync::Arc;
+
+use pdf_function::{function::Function, function_interpolation_error::FunctionInterpolationError};
 use pdf_graphics::color::Color;
 use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
@@ -17,7 +16,7 @@ use crate::{color_space::ColorSpace, error::ColorSpaceError};
 #[derive(Debug, Clone)]
 pub struct DeviceNColorSpace {
     /// Ordered list of colorant names (e.g., `["Cyan", "Magenta"]`).
-    pub names: Vec<Vec<u8>>,
+    pub names: Vec<Arc<[u8]>>,
     /// Fallback color space used when the colorants are not available.
     pub alternate_space: Box<ColorSpace>,
     /// Tint transform function used to map DeviceN components into the alternate space.
@@ -30,7 +29,7 @@ pub struct DeviceNColorSpace {
 impl FromPdfObject for DeviceNColorSpace {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
         let mut array = context.array()?;
-        let [_, names, _, tint_transform, ..] = array.array().as_slice() else {
+        let [_, _, _, _, ..] = array.array() else {
             return Err(ColorSpaceError::InvalidColorSpace {
                 description: format!(
                     "/DeviceN requires [/DeviceN names alternateSpace tintTransform] with an optional attributes dictionary; found {} element(s)",
@@ -40,19 +39,10 @@ impl FromPdfObject for DeviceNColorSpace {
             .into());
         };
 
-        let objects = array.source();
-        let names = names
-            .try_array(objects)?
-            .iter()
-            .map(|name| name.try_bytes(objects).map(Vec::from))
-            .collect::<Result<Vec<_>, _>>()?;
-        let alternate_space = Box::new(array.at(2)?);
-        let tint_transform = array.resolve(tint_transform)?;
         Ok(Self {
-            names,
-            alternate_space,
-            tint_transform: Function::parse(tint_transform.value(), array.source())
-                .map_err(ColorSpaceError::from)?,
+            names: array.at(1)?,
+            alternate_space: Box::new(array.at(2)?),
+            tint_transform: array.at(3)?,
         })
     }
 }
@@ -93,20 +83,21 @@ impl DeviceNColorSpace {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use crate::{color_space::ColorSpace, error::ColorSpaceError};
     use pdf_function::{
         function::Function, function_interpolation_error::FunctionInterpolationError,
     };
     use pdf_object_reader::{
-        ObjectReadError, ObjectReader, ReadResult, dictionary::Dictionary,
-        object_resolver::PassthroughResolver, object_variant::ObjectVariant, stream::StreamObject,
+        EmptySource, ObjectReadError, ObjectReader, ReadResult, dictionary::Dictionary,
+        object_variant::ObjectVariant, stream::StreamObject,
     };
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, sync::Arc};
 
     fn name(value: &str) -> ObjectVariant {
         pdf_object_reader::pdf_string::PdfString::from(
-            value.as_bytes().to_vec(),
+            value.as_bytes(),
             pdf_object_reader::string_kind::StringKind::Name,
         )
     }
@@ -118,8 +109,7 @@ mod tests {
     }
 
     fn read_device_n(arr: Vec<ObjectVariant>) -> ReadResult<ColorSpace> {
-        ObjectReader::new(&PassthroughResolver)
-            .read::<ColorSpace>(&ObjectVariant::Array(arr.into()))
+        ObjectReader::new(EmptySource).read::<ColorSpace>(&ObjectVariant::Array(arr.into()))
     }
 
     fn function_stream(code: &str, output_components: usize) -> ObjectVariant {
@@ -129,7 +119,7 @@ mod tests {
             Vec::from(b"Domain"),
             ObjectVariant::Array(
                 vec![
-                    ObjectVariant::Real(0.0.into()),
+                    ObjectVariant::Real(0.0),
                     ObjectVariant::Real(1.0),
                     ObjectVariant::Real(0.0),
                     ObjectVariant::Real(1.0),
@@ -159,7 +149,7 @@ mod tests {
     #[test]
     fn parses_four_element_device_n_array() {
         let arr = device_n_array(vec![
-            ObjectVariant::Array(vec![name("Cyan".into()), name("Magenta")].into()),
+            ObjectVariant::Array(vec![name("Cyan"), name("Magenta")].into()),
             name("DeviceRGB"),
             function_stream("pop pop 0.1 0.2 0.3", 3),
         ]);
@@ -172,7 +162,7 @@ mod tests {
 
         assert_eq!(
             device_n.names,
-            vec![Vec::from(b"Cyan"), Vec::from(b"Magenta")]
+            vec![Arc::from(&b"Cyan"[..]), Arc::from(&b"Magenta"[..])]
         );
         assert!(matches!(*device_n.alternate_space, ColorSpace::DeviceRGB));
         assert!(matches!(
@@ -186,7 +176,7 @@ mod tests {
         let attrs =
             ObjectVariant::Dictionary(Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new()));
         let arr = device_n_array(vec![
-            ObjectVariant::Array(vec![name("Spot".into())].into()),
+            ObjectVariant::Array(vec![name("Spot")].into()),
             name("DeviceCMYK"),
             function_stream("pop 0.2 0.4 0.6 0.8", 4),
             attrs,
@@ -198,14 +188,14 @@ mod tests {
             panic!("expected DeviceN color space");
         };
 
-        assert_eq!(device_n.names, vec![Vec::from(b"Spot")]);
+        assert_eq!(device_n.names, vec![Arc::from(&b"Spot"[..])]);
         assert!(matches!(*device_n.alternate_space, ColorSpace::DeviceCMYK));
     }
 
     #[test]
     fn applies_device_n_through_tint_transform_and_alternate_space() {
         let arr = device_n_array(vec![
-            ObjectVariant::Array(vec![name("Cyan".into()), name("Magenta"), name("Yellow")].into()),
+            ObjectVariant::Array(vec![name("Cyan"), name("Magenta"), name("Yellow")].into()),
             name("DeviceRGB"),
             function_stream("pop pop pop 0.25 0.5 0.75", 3),
         ]);
@@ -226,7 +216,7 @@ mod tests {
     #[test]
     fn rejects_device_n_tint_transform_output_arity_mismatch() {
         let arr = device_n_array(vec![
-            ObjectVariant::Array(vec![name("Cyan".into()), name("Magenta"), name("Yellow")].into()),
+            ObjectVariant::Array(vec![name("Cyan"), name("Magenta"), name("Yellow")].into()),
             name("DeviceRGB"),
             function_stream("pop pop 0.25 0.5", 2),
         ]);
@@ -251,7 +241,7 @@ mod tests {
     #[test]
     fn rejects_device_n_with_too_few_input_components() {
         let arr = device_n_array(vec![
-            ObjectVariant::Array(vec![name("Cyan".into()), name("Magenta")].into()),
+            ObjectVariant::Array(vec![name("Cyan"), name("Magenta")].into()),
             name("DeviceRGB"),
             function_stream("pop pop 0.1 0.2 0.3", 3),
         ]);
@@ -270,7 +260,7 @@ mod tests {
     fn rejects_three_element_device_n_array() {
         let arr = vec![
             name("DeviceN"),
-            ObjectVariant::Array(vec![name("Cyan".into())].into()),
+            ObjectVariant::Array(vec![name("Cyan")].into()),
             name("DeviceRGB"),
         ];
 

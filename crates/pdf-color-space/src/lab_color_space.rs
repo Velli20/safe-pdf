@@ -3,6 +3,12 @@ use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 use crate::{cie_color_space::CieColorSpaceParams, error::ColorSpaceError};
 
+/// Reference white used to convert L*a*b* values to XYZ.
+///
+/// Conversion uses this fixed daylight white rather than the space's `WhitePoint`, so a
+/// document white point never tints the result.
+const LAB_REFERENCE_WHITE: [f32; 3] = [0.957, 1.0, 1.0889];
+
 /// CIE 1976 L*a*b* color space.
 ///
 /// A device-independent, perceptually uniform color space.
@@ -24,11 +30,12 @@ pub struct LabColorSpace {
 /// and `Range` entries.
 impl FromPdfObject for LabColorSpace {
     fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let object = context.object();
         let mut dictionary = context.dictionary()?;
         let CieColorSpaceParams {
             white_point,
             black_point,
-        } = CieColorSpaceParams::read(&mut dictionary)?;
+        } = dictionary.read(object)?;
         let range = dictionary
             .optional(b"Range")?
             .unwrap_or([-100.0, 100.0, -100.0, 100.0]);
@@ -51,7 +58,7 @@ impl LabColorSpace {
             (*l).clamp(0.0, 100.0),
             (*a).clamp(amin, amax),
             (*b).clamp(bmin, bmax),
-            self.white_point,
+            LAB_REFERENCE_WHITE,
         ))
     }
 }

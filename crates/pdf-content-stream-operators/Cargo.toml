@@ -15,4 +15,3 @@ pdf-object-reader = { path = "../pdf-object-reader" }
 pdf-image = { path = "../pdf-image" }
 pdf-graphics = { path = "../pdf-graphics" }
 thiserror = "2.0.12"
-num-traits = "0.2.19"

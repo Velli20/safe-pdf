@@ -1,10 +1,8 @@
 //! Owned PDF metadata. These values retain source information without resolving resources.
 //! Raw byte fields are never interpreted as UTF-8 merely to serialize them.
-use crate::{
-    metadata::AnnotationFlags, models::Quad, ocg_state::OcgStateEntry,
-    optional_content::AnnotationOptionalContent,
-};
+use crate::{metadata::AnnotationFlags, models::Quad};
 use pdf_graphics::{DashPattern, color::Color, polyline::Polyline, rect::Rect};
+use pdf_optional_content::{OcgStateEntry, OptionalContentMembership};
 
 bitflags::bitflags! {
     /// Widget form field flags parsed from the inherited `/Ff` entry.
@@ -458,7 +456,7 @@ impl AnnotationAction {
 }
 
 /// Owned InkList data retained from the source PDF.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct InkList {
@@ -546,7 +544,7 @@ pub struct HighlightAnnotation {
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript", ts(export_to = "annotation_contract.ts"))]
 pub struct InkAnnotation {
-    /// The required ink list.
+    /// The ink list; empty when `/InkList` is absent.
     pub ink_list: InkList,
     /// The border style.
     pub border_style: Option<BorderStyle>,
@@ -848,6 +846,9 @@ pub enum NativeAnnotation {
     },
 }
 
+/// The annotations of a page's `/Annots` entry, or `None` when it is not an array.
+pub struct PageAnnotations(pub Option<Vec<SourceAnnotation>>);
+
 /// Native PDF annotation data retained from a page object.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "typescript", derive(ts_rs::TS))]
@@ -894,7 +895,7 @@ pub struct SourceAnnotation {
     /// Defaulted on load so sidecars written before this entry still deserialize.
     #[serde(default)]
     #[cfg_attr(feature = "typescript", ts(optional))]
-    pub optional_content: Option<AnnotationOptionalContent>,
+    pub optional_content: Option<OptionalContentMembership>,
     /// The parsed subtype-specific payload.
     pub kind: NativeAnnotation,
 }

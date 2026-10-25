@@ -1,4 +1,4 @@
-use pdf_object_reader::{DictionaryContext, ObjectAccess, ReadResult};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 /// Parameters shared by the CalGray, CalRGB, and Lab color spaces.
 #[derive(Debug, PartialEq)]
@@ -11,11 +11,10 @@ pub(crate) struct CieColorSpaceParams {
     pub(crate) black_point: [f32; 3],
 }
 
-impl CieColorSpaceParams {
-    /// Reads `/WhitePoint` and `/BlackPoint` from a CIE-based color space dictionary.
-    pub(crate) fn read(
-        dictionary: &mut DictionaryContext<'_, impl ObjectAccess + ?Sized>,
-    ) -> ReadResult<Self> {
+/// Reads `/WhitePoint` and `/BlackPoint` from a CIE-based color space dictionary.
+impl FromPdfObject for CieColorSpaceParams {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut dictionary = context.dictionary()?;
         let white_point = dictionary.required(b"WhitePoint")?;
         let black_point = dictionary.optional(b"BlackPoint")?.unwrap_or_default();
 
@@ -29,14 +28,13 @@ impl CieColorSpaceParams {
 #[cfg(test)]
 mod tests {
     use pdf_object_reader::{
-        ObjectReader, dictionary::Dictionary, object_resolver::PassthroughResolver,
-        object_variant::ObjectVariant,
+        EmptySource, ObjectReader, dictionary::Dictionary, object_variant::ObjectVariant,
     };
 
     use crate::cal_gray_color_space::CalGrayColorSpace;
 
     fn read_cal_gray(dictionary: Dictionary) -> CalGrayColorSpace {
-        ObjectReader::new(&PassthroughResolver)
+        ObjectReader::new(EmptySource)
             .read::<CalGrayColorSpace>(&ObjectVariant::Dictionary(dictionary))
             .unwrap()
     }

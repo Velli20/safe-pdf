@@ -7,7 +7,7 @@
 )]
 
 use pdf_document::{diagnostic::PdfReadDiagnosticKind, error::PdfReaderError, reader::PdfReader};
-use pdf_object_reader::object_error::ObjectError;
+use pdf_object_reader::ObjectReadError;
 
 fn format_xref_entry(offset: usize, generation: u16, used: bool) -> String {
     let kind = if used { 'n' } else { 'f' };
@@ -653,8 +653,12 @@ fn test_encrypted_document_detection() {
     let result = reader.read_from_bytes(&data, None);
     assert!(matches!(
         result,
-        Err(PdfReaderError::ObjectError(ref error))
-            if matches!(error.error(), ObjectError::MissingRequiredKey { key } if key == "ID")
+        Err(PdfReaderError::ObjectRead(ref error))
+            if matches!(
+                error.error(),
+                ObjectReadError::At { source, .. }
+                    if matches!(&**source, ObjectReadError::MissingDictionaryKey { key } if key.as_bytes() == b"ID")
+            )
     ));
 }
 

@@ -27,6 +27,9 @@ pub enum WebError {
     /// Host coordinate conversion failed.
     #[error(transparent)]
     Transform(#[from] pdf_graphics::transform::TransformError),
+    /// Page lookup or rendering failed.
+    #[error(transparent)]
+    Renderer(#[from] pdf_renderer::PdfRendererError),
     /// A renderer-owned text-selection operation failed.
     #[error(transparent)]
     TextSelection(#[from] pdf_renderer::TextSelectionError),

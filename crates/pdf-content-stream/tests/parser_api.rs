@@ -4,14 +4,10 @@ use std::sync::Arc;
 use pdf_content_stream::ContentStream;
 use pdf_content_stream_operators::{
     PdfTextItem,
-    graphics_state_operators::SaveGraphicsState,
-    recording_pdf_operator_backend::{RecordedOperation, RecordingBackend},
-    text_showing_operators::ShowTextArray,
-    variants::PdfOperatorVariant,
+    variants::PdfOperatorVariant::{self, *},
 };
 use pdf_object_reader::{
-    dictionary::Dictionary, object_error::ObjectError, object_resolver::ObjectResolver,
-    object_resolver::PassthroughResolver, object_variant::ObjectVariant, stream::StreamObject,
+    EmptySource, dictionary::Dictionary, object_variant::ObjectVariant, stream::StreamObject,
 };
 
 struct PageContents(Option<ContentStream>);
@@ -36,16 +32,6 @@ fn stream_object(object_number: usize, data: &[u8]) -> StreamObject {
     )
 }
 
-fn recorded_operations(operators: &[PdfOperatorVariant]) -> Vec<RecordedOperation> {
-    let mut backend = RecordingBackend::default();
-    for operator in operators {
-        operator
-            .call(&mut backend)
-            .expect("operator should dispatch");
-    }
-    backend.operations
-}
-
 struct MapResolver {
     objects: BTreeMap<usize, ObjectVariant>,
 }
@@ -65,26 +51,9 @@ impl pdf_object_reader::ObjectSource for MapResolver {
     }
 }
 
-impl ObjectResolver for MapResolver {
-    fn resolve_object<'a>(
-        &'a self,
-        obj: &'a ObjectVariant,
-    ) -> Result<&'a ObjectVariant, ObjectError> {
-        match obj {
-            ObjectVariant::Reference(object_number) => self
-                .objects
-                .get(&object_number.number)
-                .ok_or(ObjectError::FailedResolveObjectReference {
-                    obj_num: object_number.number,
-                }),
-            _ => Ok(obj),
-        }
-    }
-}
-
 #[test]
 fn content_stream_read_returns_expected_operators_and_assigns_ids() {
-    let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+    let reader = pdf_object_reader::ObjectReader::new(EmptySource);
     let parsed = reader
         .read::<ContentStream>(&ObjectVariant::Stream(stream_object(
             1,
@@ -94,25 +63,19 @@ fn content_stream_read_returns_expected_operators_and_assigns_ids() {
 
     assert_eq!(parsed.id, 0);
     assert!(matches!(
-        parsed.operators.first(),
-        Some(PdfOperatorVariant::BeginCompatibility(_))
-    ));
-    assert!(matches!(
-        parsed.operators.get(1),
-        Some(PdfOperatorVariant::EndCompatibility(_))
-    ));
-    assert_eq!(
-        recorded_operations(&parsed.operators),
-        vec![
-            RecordedOperation::MoveTo { x: 10.0, y: 20.0 },
-            RecordedOperation::LineTo { x: 30.0, y: 40.0 },
+        parsed.operators.as_slice(),
+        [
+            BeginCompatibility,
+            EndCompatibility,
+            MoveTo { x: 10.0, y: 20.0 },
+            LineTo { x: 30.0, y: 40.0 }
         ]
-    );
+    ));
 }
 
 #[test]
 fn content_stream_read_handles_bare_sign_text_array_adjustment() {
-    let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+    let reader = pdf_object_reader::ObjectReader::new(EmptySource);
     let parsed = reader.read::<ContentStream>(
         &ObjectVariant::Stream(stream_object(
             1,
@@ -123,9 +86,9 @@ fn content_stream_read_handles_bare_sign_text_array_adjustment() {
 
     assert!(matches!(
         parsed.operators.get(3),
-        Some(PdfOperatorVariant::ShowTextArray(op))
-            if op
-                == &ShowTextArray::new(vec![
+        Some(PdfOperatorVariant::ShowTextArray { elements })
+            if elements
+                == &vec![
                     PdfTextItem::Text(Arc::from(&b"e"[..])),
                     PdfTextItem::Adjustment(-4.0),
                     PdfTextItem::Text(Arc::from(&b"x"[..])),
@@ -147,77 +110,49 @@ fn content_stream_read_handles_bare_sign_text_array_adjustment() {
                     PdfTextItem::Text(Arc::from(&b"l"[..])),
                     PdfTextItem::Adjustment(3.0),
                     PdfTextItem::Text(Arc::from(&b"y"[..])),
-                ])
+                ]
     ));
 }
 
 #[test]
 fn content_stream_preserves_non_utf8_font_name() {
-    let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+    let reader = pdf_object_reader::ObjectReader::new(EmptySource);
     let parsed = reader
         .read::<ContentStream>(&ObjectVariant::Stream(stream_object(1, b"/#FF 12 Tf")))
         .expect("non-UTF-8 resource names should parse");
 
-    assert_eq!(
-        recorded_operations(&parsed.operators),
-        vec![RecordedOperation::SetFontAndSize {
-            font_name: vec![0xFF],
-            size: 12.0,
-        }]
+    assert!(
+        matches!(parsed.operators.as_slice(), [SetFont { name, size: 12.0 }] if **name == [0xFF])
     );
 }
 
 #[test]
-fn parsed_inline_image_can_be_dispatched() {
-    let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+fn content_stream_read_parses_inline_image() {
+    let reader = pdf_object_reader::ObjectReader::new(EmptySource);
     let parsed = reader
         .read::<ContentStream>(&ObjectVariant::Stream(stream_object(
             1,
             b"BI /W 1 /H 1 /BPC 8 /CS /G ID \x00 EI",
         )))
         .expect("inline image should parse");
-    let inline_image = parsed
-        .operators
-        .first()
-        .and_then(|operator| match operator {
-            PdfOperatorVariant::InlineImage(image) => Some(image),
-            _ => None,
-        })
-        .expect("expected inline image");
 
-    let mut backend = RecordingBackend::default();
-    parsed
-        .operators
-        .first()
-        .expect("inline image operator")
-        .call(&mut backend)
-        .expect("dispatch should succeed");
-
-    assert_eq!(
-        backend.operations,
-        vec![RecordedOperation::PaintInlineImage {
-            data: inline_image.shared_data(),
-        }]
-    );
+    assert!(matches!(parsed.operators.as_slice(), [InlineImage(_)]));
 }
 
 #[test]
 fn content_stream_read_skips_unknown_operator_and_recovers() {
-    let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+    let reader = pdf_object_reader::ObjectReader::new(EmptySource);
     let parsed = reader
         .read::<ContentStream>(&ObjectVariant::Stream(stream_object(1, b"@ q")))
         .expect("stream should parse");
 
-    assert_eq!(
-        recorded_operations(&parsed.operators),
-        vec![RecordedOperation::SaveGraphicsState]
-    );
+    assert!(matches!(parsed.operators.as_slice(), [SaveGraphicsState]));
 }
 
 #[test]
 fn optional_contents_preserves_allocator_for_missing_contents() {
     let page = Dictionary::new(BTreeMap::<Vec<u8>, ObjectVariant>::new());
-    let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+    let reader = pdf_object_reader::ObjectReader::new(EmptySource);
 
     let contents = reader
         .read::<PageContents>(&ObjectVariant::Dictionary(page))
@@ -238,7 +173,7 @@ fn optional_contents_preserves_allocator_for_missing_contents() {
 fn optional_contents_parses_stream_arrays_and_allocates_monotonically() {
     let contents = ObjectVariant::Array(
         vec![
-            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0).into()),
+            ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(1, 0)),
             ObjectVariant::Reference(pdf_object_reader::object_id::ObjectId::new(2, 0)),
         ]
         .into(),
@@ -259,10 +194,10 @@ fn optional_contents_parses_stream_arrays_and_allocates_monotonically() {
         .expect("page should have a content stream");
 
     assert_eq!(content_stream.id, 0);
-    assert_eq!(
-        recorded_operations(&content_stream.operators),
-        vec![RecordedOperation::MoveTo { x: 1.0, y: 2.0 }]
-    );
+    assert!(matches!(
+        content_stream.operators.as_slice(),
+        [MoveTo { x: 1.0, y: 2.0 }]
+    ));
 
     let next = reader
         .read::<ContentStream>(&ObjectVariant::Stream(stream_object(3, b"q")))
@@ -273,7 +208,7 @@ fn optional_contents_parses_stream_arrays_and_allocates_monotonically() {
 #[test]
 fn content_stream_read_rejects_non_stream_array_entries() {
     let contents = ObjectVariant::Array(vec![ObjectVariant::Integer(0)].into());
-    let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+    let reader = pdf_object_reader::ObjectReader::new(EmptySource);
 
     let err = reader
         .read::<ContentStream>(&contents)
@@ -281,15 +216,14 @@ fn content_stream_read_rejects_non_stream_array_entries() {
         .expect("non-stream array entries should fail");
 
     assert!(matches!(
-        err,
-        pdf_object_reader::ObjectReadError::At {
-                location: pdf_object_reader::ReadLocation::ArrayIndex(0),
-                source,
-            } if matches!(*source, pdf_object_reader::ObjectReadError::TypeMismatch {
-                expected: pdf_object_reader::object_kind::ObjectKind::Stream,
-                actual: pdf_object_reader::object_kind::ObjectKind::Integer,
-            })
-    .into()));
+    err,
+    pdf_object_reader::ObjectReadError::At {
+            location: pdf_object_reader::ReadLocation::ArrayIndex(0),
+            source,
+        } if matches!(*source, pdf_object_reader::ObjectReadError::TypeMismatch {
+            expected: pdf_object_reader::object_kind::ObjectKind::Stream,
+            actual: pdf_object_reader::object_kind::ObjectKind::Integer,
+        })));
     assert_eq!(
         reader
             .content_stream_ids()
@@ -301,7 +235,7 @@ fn content_stream_read_rejects_non_stream_array_entries() {
 
 #[test]
 fn content_stream_read_skips_malformed_inline_image_and_consumes_an_id() {
-    let reader = pdf_object_reader::ObjectReader::new(&PassthroughResolver);
+    let reader = pdf_object_reader::ObjectReader::new(EmptySource);
     let parsed = reader
         .read::<ContentStream>(&ObjectVariant::Stream(stream_object(
             1,
@@ -310,10 +244,10 @@ fn content_stream_read_skips_malformed_inline_image_and_consumes_an_id() {
         .expect("malformed inline image should be skipped");
 
     assert_eq!(parsed.id, 0);
-    assert_eq!(
-        recorded_operations(&parsed.operators),
-        vec![RecordedOperation::RestoreGraphicsState]
-    );
+    assert!(matches!(
+        parsed.operators.as_slice(),
+        [RestoreGraphicsState]
+    ));
     assert_eq!(
         reader
             .content_stream_ids()
@@ -326,7 +260,7 @@ fn content_stream_read_skips_malformed_inline_image_and_consumes_an_id() {
 #[test]
 fn content_stream_is_plain_data_after_parsing() {
     let content_stream = ContentStream {
-        operators: vec![PdfOperatorVariant::SaveGraphicsState(SaveGraphicsState)],
+        operators: vec![PdfOperatorVariant::SaveGraphicsState],
         id: 9,
     };
 

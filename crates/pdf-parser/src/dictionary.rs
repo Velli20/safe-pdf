@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use pdf_object_reader::{
-    dictionary::Dictionary, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-    pdf_string::PdfString, string_kind::StringKind,
+    dictionary::Dictionary, object_variant::ObjectVariant, pdf_string::PdfString,
+    string_kind::StringKind,
 };
 use pdf_tokenizer::PdfToken;
 
@@ -21,16 +21,13 @@ impl PdfParser<'_> {
     ///
     /// A `Dictionary` object containing the parsed key-value pairs,
     /// or a `ParserError` if the input is malformed.
-    pub fn parse_dictionary(
-        &mut self,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Dictionary, ParserError> {
+    pub fn parse_dictionary(&mut self) -> Result<Dictionary, ParserError> {
         // Expect the opening `<<` of the dictionary.
         self.tokenizer.expect(PdfToken::DoubleLeftAngleBracket)?;
 
         self.skip_whitespace_and_comments();
 
-        let dictionary = self.parse_dictionary_entries(objects)?;
+        let dictionary = self.parse_dictionary_entries()?;
 
         // Consume the closing `>>` of the dictionary.
         self.tokenizer.expect(PdfToken::DoubleRightAngleBracket)?;
@@ -39,10 +36,7 @@ impl PdfParser<'_> {
     }
 
     /// Parses the key-value pairs inside a regular dictionary until `>>`.
-    fn parse_dictionary_entries(
-        &mut self,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Dictionary, ParserError> {
+    fn parse_dictionary_entries(&mut self) -> Result<Dictionary, ParserError> {
         let mut dictionary = BTreeMap::new();
         let mut state = DictionaryEntryState::ExpectKeyOrTerminator;
 
@@ -61,7 +55,7 @@ impl PdfParser<'_> {
                 return Ok(Dictionary::new(dictionary));
             }
 
-            state = self.next_dictionary_state(objects, &mut dictionary, state)?;
+            state = self.next_dictionary_state(&mut dictionary, state)?;
         }
     }
 
@@ -69,10 +63,7 @@ impl PdfParser<'_> {
     ///
     /// This stops as soon as the next non-whitespace token is no longer a name
     /// key, leaving `ID` in the input stream for the caller to consume.
-    pub(crate) fn parse_inline_image_dictionary(
-        &mut self,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Dictionary, ParserError> {
+    pub(crate) fn parse_inline_image_entries(&mut self) -> Result<Dictionary, ParserError> {
         let mut dictionary = BTreeMap::new();
 
         loop {
@@ -86,7 +77,7 @@ impl PdfParser<'_> {
 
             let key = self.parse_name()?;
             self.skip_whitespace_and_comments();
-            let object = self.parse_inline_image_dictionary_value(objects)?;
+            let object = self.parse_inline_image_dictionary_value()?;
             dictionary.insert(key, object);
         }
     }
@@ -95,27 +86,23 @@ impl PdfParser<'_> {
     ///
     /// Inline-image dictionaries allow bare names as values, so this preserves
     /// the leading slash form when the next token is another name.
-    fn parse_inline_image_dictionary_value(
-        &mut self,
-        objects: &dyn ObjectResolver,
-    ) -> Result<ObjectVariant, ParserError> {
+    fn parse_inline_image_dictionary_value(&mut self) -> Result<ObjectVariant, ParserError> {
         match self.tokenizer.peek() {
             Some(PdfToken::Solidus) => Ok(PdfString::from(self.parse_name()?, StringKind::Name)),
-            _ => self.parse_object(objects),
+            _ => self.parse_object(),
         }
     }
 
     /// Advances the regular dictionary state machine by one step.
     fn next_dictionary_state(
         &mut self,
-        objects: &dyn ObjectResolver,
         dictionary: &mut BTreeMap<Vec<u8>, ObjectVariant>,
         state: DictionaryEntryState,
     ) -> Result<DictionaryEntryState, ParserError> {
         match state {
             DictionaryEntryState::ExpectKeyOrTerminator => self.parse_dictionary_key_state(),
             DictionaryEntryState::ExpectValue { key } => {
-                self.parse_dictionary_value_state(objects, dictionary, key)
+                self.parse_dictionary_value_state(dictionary, key)
             }
             DictionaryEntryState::ContinueNameValue { key, value } => {
                 self.continue_dictionary_name_value(dictionary, key, value)
@@ -135,7 +122,6 @@ impl PdfParser<'_> {
     /// characters so spaced name values remain intact.
     fn parse_dictionary_value_state(
         &mut self,
-        objects: &dyn ObjectResolver,
         dictionary: &mut BTreeMap<Vec<u8>, ObjectVariant>,
         key: Vec<u8>,
     ) -> Result<DictionaryEntryState, ParserError> {
@@ -145,7 +131,7 @@ impl PdfParser<'_> {
                 Ok(DictionaryEntryState::ContinueNameValue { key, value })
             }
             _ => {
-                let object = self.parse_object(objects)?;
+                let object = self.parse_object()?;
                 dictionary.insert(key, object);
                 Ok(DictionaryEntryState::ExpectKeyOrTerminator)
             }
@@ -194,7 +180,6 @@ impl PdfParser<'_> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use pdf_object_reader::object_resolver::PassthroughResolver;
 
     use super::*;
 
@@ -214,7 +199,7 @@ mod tests {
 
         for (input, expected_count) in inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_dictionary(&PassthroughResolver).unwrap();
+            let result = parser.parse_dictionary().unwrap();
 
             assert_eq!(
                 result.dictionary.len(),
@@ -230,12 +215,12 @@ mod tests {
     #[test]
     fn test_dictionary_recovers_spaced_name_value() {
         let mut parser = PdfParser::from(b"<< /AnyName /A B /Next 1 >>".as_slice());
-        let result = parser.parse_dictionary(&PassthroughResolver).unwrap();
+        let result = parser.parse_dictionary().unwrap();
 
         assert_eq!(
             result.get(b"AnyName"),
             Some(&pdf_object_reader::pdf_string::PdfString::from(
-                b"A B".to_vec(),
+                b"A B",
                 pdf_object_reader::string_kind::StringKind::Name
             ))
         );
@@ -245,12 +230,12 @@ mod tests {
     #[test]
     fn test_dictionary_recovers_multiple_spaced_name_tokens() {
         let mut parser = PdfParser::from(b"<< /AnyName /A B C /Next 1 >>".as_slice());
-        let result = parser.parse_dictionary(&PassthroughResolver).unwrap();
+        let result = parser.parse_dictionary().unwrap();
 
         assert_eq!(
             result.get(b"AnyName"),
             Some(&pdf_object_reader::pdf_string::PdfString::from(
-                b"A B C".to_vec(),
+                b"A B C",
                 pdf_object_reader::string_kind::StringKind::Name
             ))
         );
@@ -260,19 +245,19 @@ mod tests {
     #[test]
     fn test_dictionary_spaced_name_recovery_stops_at_next_key() {
         let mut parser = PdfParser::from(b"<< /Name /Value /Next /Other >>".as_slice());
-        let result = parser.parse_dictionary(&PassthroughResolver).unwrap();
+        let result = parser.parse_dictionary().unwrap();
 
         assert_eq!(
             result.get(b"Name"),
             Some(&pdf_object_reader::pdf_string::PdfString::from(
-                b"Value".to_vec(),
+                b"Value",
                 pdf_object_reader::string_kind::StringKind::Name
             ))
         );
         assert_eq!(
             result.get(b"Next"),
             Some(&pdf_object_reader::pdf_string::PdfString::from(
-                b"Other".to_vec(),
+                b"Other",
                 pdf_object_reader::string_kind::StringKind::Name
             ))
         );
@@ -282,7 +267,7 @@ mod tests {
     fn dictionary_preserves_non_utf8_name_keys_and_values() {
         let mut parser = PdfParser::from(b"<< /#FF /#FE >>".as_slice());
         let result = parser
-            .parse_dictionary(&PassthroughResolver)
+            .parse_dictionary()
             .expect("arbitrary Name bytes should parse");
 
         assert_eq!(
@@ -297,7 +282,7 @@ mod tests {
     #[test]
     fn test_dictionary_rejects_bare_regular_token_after_non_name_value() {
         let mut parser = PdfParser::from(b"<< /Count 1 Foo /Next 2 >>".as_slice());
-        let result = parser.parse_dictionary(&PassthroughResolver);
+        let result = parser.parse_dictionary();
 
         assert!(result.is_err());
     }
@@ -323,7 +308,7 @@ mod tests {
 
         for input in inputs {
             let mut parser = PdfParser::from(input);
-            let result = parser.parse_dictionary(&PassthroughResolver);
+            let result = parser.parse_dictionary();
 
             assert!(
                 result.is_err(),
@@ -337,9 +322,7 @@ mod tests {
     #[test]
     fn test_inline_image_dictionary_stops_before_data_keyword() {
         let mut parser = PdfParser::from(b"/IM true /W 1 /H 1 ID \x00\x01".as_slice());
-        let result = parser
-            .parse_inline_image_dictionary(&PassthroughResolver)
-            .unwrap();
+        let result = parser.parse_inline_image_entries().unwrap();
 
         assert_eq!(result.dictionary.len(), 3);
         assert!(parser.tokenizer.data().starts_with(b"ID \x00\x01"));
@@ -348,14 +331,12 @@ mod tests {
     #[test]
     fn test_inline_image_dictionary_name_value_stops_before_data_keyword() {
         let mut parser = PdfParser::from(b"/CS /DeviceGray ID \x00\x01".as_slice());
-        let result = parser
-            .parse_inline_image_dictionary(&PassthroughResolver)
-            .unwrap();
+        let result = parser.parse_inline_image_entries().unwrap();
 
         assert_eq!(
             result.get(b"CS"),
             Some(&pdf_object_reader::pdf_string::PdfString::from(
-                b"DeviceGray".to_vec(),
+                b"DeviceGray",
                 pdf_object_reader::string_kind::StringKind::Name
             ))
         );
@@ -365,7 +346,7 @@ mod tests {
     #[test]
     fn test_inline_image_dictionary_missing_value_errors() {
         let mut parser = PdfParser::from(b"/Title ID".as_slice());
-        let result = parser.parse_inline_image_dictionary(&PassthroughResolver);
+        let result = parser.parse_inline_image_entries();
 
         assert!(result.is_err());
     }

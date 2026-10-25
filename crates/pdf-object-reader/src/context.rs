@@ -11,11 +11,11 @@ use crate::handle::ObjectHandle;
 use crate::object_id::ObjectId;
 use crate::object_kind::ObjectKind;
 use crate::object_variant::ObjectVariant;
-use crate::pdf_array::PdfArray;
 use crate::pdf_name::PdfName;
+use crate::pdf_object::PdfObject;
 use crate::reader::ObjectAccess;
-use crate::resolved_object::ResolvedObject;
 use crate::{dictionary::Dictionary, stream::StreamObject};
+use pdf_graphics::interval::Interval;
 use std::collections::HashMap;
 
 /// The single argument passed to a typed decoder.
@@ -24,16 +24,17 @@ use std::collections::HashMap;
 /// this context. Shape conversions preserve that same traversal and report a
 /// type mismatch instead of silently accepting an unrelated object kind.
 pub struct ObjectContext<'read, A: ObjectAccess + ?Sized> {
-    object: &'read ResolvedObject,
+    object: &'read ObjectVariant,
     access: &'read mut A,
 }
 
 impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
-    /// Binds a validated direct object to an active access implementation.
+    /// Binds a direct object to an active access implementation.
     ///
+    /// The object must already be resolved: a top-level reference is never followed.
     /// Custom access implementations must establish their traversal scope
     /// before constructing the context and retain it until decoding returns.
-    pub fn new(object: &'read ResolvedObject, access: &'read mut A) -> Self {
+    pub fn new(object: &'read ObjectVariant, access: &'read mut A) -> Self {
         Self { object, access }
     }
 
@@ -41,8 +42,17 @@ impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
     ///
     /// The borrow outlives `&self`, so the object can be inspected while the
     /// context reads children.
-    pub fn object(&self) -> &'read ResolvedObject {
+    pub fn object(&self) -> &'read ObjectVariant {
         self.object
+    }
+
+    /// Decodes the bound object as `T` within the same traversal and decode level.
+    ///
+    /// For decoders whose value is spelled by another decoded type, such as a name enum
+    /// reading its name bytes.
+    #[inline]
+    pub fn decode<T: FromPdfObject>(self) -> ReadResult<T> {
+        T::from_pdf_object(self)
     }
 
     /// Requires a dictionary or stream and transfers the traversal into its dictionary context.
@@ -57,7 +67,7 @@ impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
 
     /// Requires an array and transfers the traversal into its context.
     pub fn array(self) -> ReadResult<ArrayContext<'read, A>> {
-        match self.object.value() {
+        match self.object {
             ObjectVariant::Array(array) => Ok(ArrayContext {
                 array,
                 access: self.access,
@@ -71,7 +81,7 @@ impl<'read, A: ObjectAccess + ?Sized> ObjectContext<'read, A> {
 
     /// Requires a stream and transfers the traversal into its context.
     pub fn stream(self) -> ReadResult<StreamContext<'read, A>> {
-        match self.object.value() {
+        match self.object {
             ObjectVariant::Stream(stream) => Ok(StreamContext {
                 stream,
                 access: self.access,
@@ -96,19 +106,55 @@ pub struct DictionaryContext<'read, A: ObjectAccess + ?Sized> {
 }
 
 impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
-    /// Binds a direct dictionary the caller already holds to an active access implementation.
+    /// Binds a dictionary the caller already holds to an active access implementation.
     ///
-    /// Entries are read within the access's current traversal, as if the
-    /// dictionary had been reached through it.
+    /// Entries are read within the access's current traversal, as if the dictionary had
+    /// been reached through it.
     pub fn new(dictionary: &'read Dictionary, access: &'read mut A) -> Self {
         Self { dictionary, access }
     }
 
-    /// Returns the immutable dictionary for iteration or custom entry selection.
+    /// Returns whether `key` is present, whatever its value, including null or invalid ones.
+    pub fn contains(&self, key: &[u8]) -> bool {
+        self.dictionary.get(key).is_some()
+    }
+
+    /// Returns the entry names in key order.
     ///
-    /// The borrow outlives `&self`, so entries can be held while the context reads them.
-    pub fn dictionary(&self) -> &'read Dictionary {
-        self.dictionary
+    /// The names borrow the dictionary rather than the context, so entries can be read
+    /// while iterating.
+    pub fn keys(&self) -> impl Iterator<Item = &'read [u8]> + use<'read, A> {
+        self.dictionary.dictionary.keys().map(Vec::as_slice)
+    }
+
+    /// Returns the number of the indirect object holding this dictionary, if it is one.
+    pub fn object_number(&self) -> Option<usize> {
+        self.dictionary.object_number
+    }
+
+    /// Returns the identifier of an entry stored as an indirect reference.
+    pub fn reference(&self, key: &[u8]) -> Option<ObjectId> {
+        match self.dictionary.get(key) {
+            Some(ObjectVariant::Reference(id)) => Some(*id),
+            _ => None,
+        }
+    }
+
+    /// Resolves an entry's reference chain without entering its eager decoding scope.
+    ///
+    /// For an entry that may refer back to an object being decoded, whose eager read would
+    /// reenter the active path.
+    pub fn resolve_entry(&mut self, key: &[u8]) -> ReadResult<Option<PdfObject>> {
+        let Some(object) = self.dictionary.get(key) else {
+            return Ok(None);
+        };
+        self.access
+            .resolve(object)
+            .map(Some)
+            .map_err(|source| ObjectReadError::At {
+                location: ReadLocation::DictionaryKey(PdfName::from_bytes(key)),
+                source: Box::new(source),
+            })
     }
 
     /// Reads a required entry and annotates failures with its byte-oriented key.
@@ -136,6 +182,11 @@ impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
                 location: ReadLocation::DictionaryKey(PdfName::from_bytes(key)),
                 source: Box::new(source),
             })
+    }
+
+    /// Reads an optional entry whose malformed value is treated as absent, for best-effort hints.
+    pub fn lenient<T: FromPdfObject>(&mut self, key: &[u8]) -> Option<T> {
+        self.optional(key).unwrap_or_default()
     }
 
     /// Reads a required entry as a shared value or a pending recursive handle.
@@ -201,35 +252,140 @@ impl<'read, A: ObjectAccess + ?Sized> DictionaryContext<'read, A> {
         }
         Ok(entries)
     }
+
+    /// Decodes each entry of an optional sub-dictionary as `T`, keyed by entry name, skipping
+    /// entries that do not decode as `T`, for namespaces that mix value kinds.
+    ///
+    /// A missing or null sub-dictionary yields an empty map, as with [`Self::optional_entries`].
+    pub fn lenient_entries<T: FromPdfObject>(
+        &mut self,
+        key: &[u8],
+    ) -> ReadResult<HashMap<Vec<u8>, T>> {
+        let Some(dictionary) = self.optional::<Dictionary>(key)? else {
+            return Ok(HashMap::new());
+        };
+        Ok(dictionary
+            .dictionary
+            .iter()
+            .filter_map(|(name, value)| Some((name.clone(), self.access.read(value).ok()?)))
+            .collect())
+    }
+
+    /// Reads an entry holding one value or an array of values, as a list.
+    ///
+    /// A missing or null entry yields an empty list, and null array members, such as
+    /// references to missing objects, are skipped.
+    pub fn optional_list<T: FromPdfObject>(&mut self, key: &[u8]) -> ReadResult<Vec<T>> {
+        let Some(object) = self.dictionary.get(key) else {
+            return Ok(Vec::new());
+        };
+        let resolved = self.access.resolve(object);
+        let result = resolved.and_then(|resolved| match resolved.value() {
+            ObjectVariant::Array(array) => array
+                .iter()
+                .filter_map(|member| self.access.read::<Option<T>>(member).transpose())
+                .collect(),
+            ObjectVariant::Null => Ok(Vec::new()),
+            _ => Ok(vec![self.access.read(object)?]),
+        });
+        result.map_err(|source| ObjectReadError::At {
+            location: ReadLocation::DictionaryKey(PdfName::from_bytes(key)),
+            source: Box::new(source),
+        })
+    }
+
+    /// Reads an optional flat `[min0 max0 min1 max1 ...]` array as one interval per pair.
+    ///
+    /// A missing or null entry is absent, and a trailing unpaired value is ignored.
+    pub fn optional_intervals(&mut self, key: &[u8]) -> ReadResult<Option<Vec<Interval>>> {
+        let Some(object) = self.dictionary.get(key) else {
+            return Ok(None);
+        };
+        let resolved = self.access.resolve(object);
+        let result = resolved.and_then(|resolved| match resolved.value() {
+            ObjectVariant::Array(array) => ArrayContext::new(array, &mut *self.access)
+                .read_intervals()
+                .map(Some),
+            ObjectVariant::Null => Ok(None),
+            value => Err(ObjectReadError::TypeMismatch {
+                expected: ObjectKind::Array,
+                actual: value.kind(),
+            }),
+        });
+        result.map_err(|source| ObjectReadError::At {
+            location: ReadLocation::DictionaryKey(PdfName::from_bytes(key)),
+            source: Box::new(source),
+        })
+    }
+
+    /// Reads a required flat `[min0 max0 min1 max1 ...]` array as one interval per pair.
+    ///
+    /// A trailing unpaired value is ignored.
+    pub fn required_intervals(&mut self, key: &[u8]) -> ReadResult<Vec<Interval>> {
+        self.optional_intervals(key)?
+            .ok_or_else(|| ObjectReadError::At {
+                location: ReadLocation::DictionaryKey(PdfName::from_bytes(key)),
+                source: Box::new(ObjectReadError::MissingDictionaryKey {
+                    key: PdfName::from_bytes(key),
+                }),
+            })
+    }
 }
 
 /// Provides bounds-checked typed array reads in source order.
 pub struct ArrayContext<'read, A: ObjectAccess + ?Sized> {
-    array: &'read PdfArray,
+    array: &'read [ObjectVariant],
     access: &'read mut A,
 }
 
 impl<'read, A: ObjectAccess + ?Sized> ArrayContext<'read, A> {
-    /// Returns the immutable array for length checks or custom inspection.
+    /// Binds a direct sequence of values the caller already holds to an active access
+    /// implementation.
+    ///
+    /// Elements are read within the access's current traversal, as if the array had
+    /// been reached through it.
+    pub fn new(array: &'read [ObjectVariant], access: &'read mut A) -> Self {
+        Self { array, access }
+    }
+
+    /// Returns the immutable elements for length checks or custom inspection.
     ///
     /// The borrow outlives `&self`, so elements can be held while the context reads them.
-    pub fn array(&self) -> &'read PdfArray {
+    pub fn array(&self) -> &'read [ObjectVariant] {
         self.array
     }
 
     /// Reads an element, reporting an out-of-bounds error for an invalid index.
+    #[inline]
     pub fn at<T: FromPdfObject>(&mut self, index: usize) -> ReadResult<T> {
-        let result = match self.array.get(index) {
-            Some(object) => self.access.read(object),
-            None => Err(ObjectReadError::ArrayIndexOutOfBounds {
-                index,
-                length: self.array.len(),
-            }),
+        let Some(object) = self.array.get(index) else {
+            return Err(ObjectReadError::At {
+                location: ReadLocation::ArrayIndex(index),
+                source: Box::new(ObjectReadError::ArrayIndexOutOfBounds {
+                    index,
+                    length: self.array.len(),
+                }),
+            });
         };
-        result.map_err(|source| ObjectReadError::At {
-            location: ReadLocation::ArrayIndex(index),
-            source: Box::new(source),
-        })
+        self.access
+            .read(object)
+            .map_err(|source| ObjectReadError::At {
+                location: ReadLocation::ArrayIndex(index),
+                source: Box::new(source),
+            })
+    }
+
+    /// Reads an optional element: an index past the end or a value resolving to null is absent.
+    pub fn optional_at<T: FromPdfObject>(&mut self, index: usize) -> ReadResult<Option<T>> {
+        let Some(object) = self.array.get(index) else {
+            return Ok(None);
+        };
+        self.access
+            .read(object)
+            .map_err(|source| ObjectReadError::At {
+                location: ReadLocation::ArrayIndex(index),
+                source: Box::new(source),
+            })
     }
 
     /// Reads an element through typed caching while retaining array diagnostics.
@@ -252,7 +408,58 @@ impl<'read, A: ObjectAccess + ?Sized> ArrayContext<'read, A> {
 
     /// Eagerly decodes every element in source order, stopping at the first error.
     pub fn read_all<T: FromPdfObject>(&mut self) -> ReadResult<Vec<T>> {
-        (0..self.array.len()).map(|index| self.at(index)).collect()
+        let mut values = Vec::with_capacity(self.array.len());
+        for (index, object) in self.array.iter().enumerate() {
+            values.push(
+                self.access
+                    .read(object)
+                    .map_err(|source| ObjectReadError::At {
+                        location: ReadLocation::ArrayIndex(index),
+                        source: Box::new(source),
+                    })?,
+            );
+        }
+        Ok(values)
+    }
+
+    /// Reads the elements as a flat `[min0 max0 min1 max1 ...]` list, one interval per pair.
+    ///
+    /// A trailing unpaired value is ignored.
+    pub fn read_intervals(&mut self) -> ReadResult<Vec<Interval>> {
+        (0..self.array.len().saturating_sub(1))
+            .step_by(2)
+            .map(|min| {
+                Ok(Interval::new(
+                    self.at(min)?,
+                    self.at(min.saturating_add(1))?,
+                ))
+            })
+            .collect()
+    }
+
+    /// Decodes the first `N` elements in source order, validating the length first.
+    ///
+    /// Trailing elements are ignored, like the `[T; N]` decoder.
+    #[inline]
+    pub fn read_array<T: FromPdfObject + Default, const N: usize>(&mut self) -> ReadResult<[T; N]> {
+        if self.array.len() < N {
+            return Err(crate::object_error::ObjectError::InvalidArrayLength {
+                expected: N,
+                found: self.array.len(),
+            }
+            .into());
+        }
+        let mut values = std::array::from_fn(|_| T::default());
+        for (index, (value, object)) in values.iter_mut().zip(self.array).enumerate() {
+            *value = self
+                .access
+                .read(object)
+                .map_err(|source| ObjectReadError::At {
+                    location: ReadLocation::ArrayIndex(index),
+                    source: Box::new(source),
+                })?;
+        }
+        Ok(values)
     }
 }
 
@@ -298,30 +505,24 @@ macro_rules! context_access {
                 self.access.read_shared(object)
             }
             /// Resolves a raw child without entering its eager decoding scope.
-            pub fn resolve(&mut self, object: &ObjectVariant) -> ReadResult<ResolvedObject> {
+            pub fn resolve(
+                &mut self,
+                object: &ObjectVariant,
+            ) -> ReadResult<crate::pdf_object::PdfObject> {
                 self.access.resolve(object)
             }
 
-            /// Returns whether an object is null or references a nonexistent object.
+            /// Returns whether an object resolves to null.
             ///
-            /// Per PDF spec §7.3.10 such a reference is treated as null, and per §7.3.7 a
-            /// null dictionary value is equivalent to an absent entry.
+            /// A reference to a nonexistent object resolves to null (PDF spec §7.3.10), and
+            /// per §7.3.7 a null dictionary value is equivalent to an absent entry.
             pub fn is_absent(&mut self, object: &ObjectVariant) -> ReadResult<bool> {
-                match self.access.resolve(object) {
-                    Ok(resolved) => Ok(resolved.kind() == ObjectKind::Null),
-                    Err(ObjectReadError::MissingObject { .. }) => Ok(true),
-                    Err(error) => Err(error),
-                }
+                Ok(self.access.resolve(object)?.kind() == ObjectKind::Null)
             }
 
             /// Reborrows the active traversal for decoders that take an access directly.
             pub fn access(&mut self) -> &mut A {
                 self.access
-            }
-
-            /// Borrows the source for leaf-level raw object inspection.
-            pub fn source(&self) -> &dyn crate::object_resolver::ObjectResolver {
-                self.access.source()
             }
 
             /// Returns the reader's shared content-stream ID allocator.

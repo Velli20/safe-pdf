@@ -29,18 +29,14 @@ pub mod free_text;
 pub mod kind;
 /// Source snapshots and live annotation capabilities.
 pub mod metadata;
-/// Optional content group state retained from `SetOCGState` actions.
-pub mod ocg_state;
-/// Optional content group visibility applied to annotation presentation.
-pub mod optional_content;
 /// Owned source PDF annotation types, independent of parser resources.
 pub mod pdf_data;
 /// Canonical native PDF annotation record and subtype vocabulary.
 pub use pdf_data::{
     CaretAnnotation, CircleAnnotation, FreeTextAnnotation, HighlightAnnotation, InkAnnotation,
-    LineAnnotation, LinkAnnotation, NativeAnnotation, PolyLineAnnotation, PolygonAnnotation,
-    PopupAnnotation, SourceAnnotation, SquareAnnotation, SquigglyAnnotation, StampAnnotation,
-    StrikeOutAnnotation, TextAnnotation, UnderlineAnnotation, WidgetAnnotation,
+    LineAnnotation, LinkAnnotation, NativeAnnotation, PageAnnotations, PolyLineAnnotation,
+    PolygonAnnotation, PopupAnnotation, SourceAnnotation, SquareAnnotation, SquigglyAnnotation,
+    StampAnnotation, StrikeOutAnnotation, TextAnnotation, UnderlineAnnotation, WidgetAnnotation,
 };
 /// Device-independent style conversion and interpretation.
 pub mod style;
@@ -50,7 +46,6 @@ mod validation;
 
 mod source_decode;
 mod source_decode_actions;
-mod source_decode_optional_content;
 mod source_decode_subtypes;
 mod source_decode_widget;
 /// Shared fields normalized from the widget records that display them.
@@ -78,9 +73,6 @@ mod widget_control;
 
 pub use entry::{AnnotationEntry, ControlKind, ControlTag, WidgetControl};
 pub use layer_error::{AnnotationLayerError, AnnotationLayerResult};
-pub use optional_content::{
-    AnnotationOptionalContent, OptionalContentProperties, OptionalContentState,
-};
 pub use overlay::{AnnotationOverlay, PreparedAnnotations};
 pub use requests::{
     AnnotationCommandRequest, AnnotationReceipt, AnnotationTarget, OptionalContentReceipt,

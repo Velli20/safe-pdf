@@ -1,26 +1,14 @@
 //! PDF graphics-state selection and save/restore operators.
 use std::sync::Arc;
 
-use pdf_content_stream_operators::pdf_operator_backend::GraphicsStateOps;
 use pdf_graphics::{DashPattern, LineCap, LineJoin, MaskMode, transform::Transform};
 use pdf_resources::{external_graphics_state::ExternalGraphicsStateKey, resource::Resource};
 
 use crate::{canvas_backend::CanvasBackend, error::PdfCanvasError, pdf_canvas::PdfCanvas};
 
-impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
-    type ErrorType = PdfCanvasError;
-    /// Saves PDF graphics state together with the corresponding backend state.
-    fn save_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
-        self.save()
-    }
-
-    /// Restores PDF graphics state and its corresponding backend save.
-    fn restore_graphics_state(&mut self) -> Result<(), Self::ErrorType> {
-        self.restore()
-    }
-
+impl<B: CanvasBackend> PdfCanvas<'_, B> {
     /// Concatenates the supplied matrix with the current PDF transformation.
-    fn concat_matrix(&mut self, transform: &Transform) -> Result<(), Self::ErrorType> {
+    pub(crate) fn concat_matrix(&mut self, transform: &Transform) -> Result<(), PdfCanvasError> {
         // PDF 'cm' operator: update the current transformation matrix (CTM) by
         // concatenating the provided matrix [a b c d e f] onto the current CTM.
         //
@@ -31,51 +19,44 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
     }
 
     /// Updates the width used for subsequent path strokes.
-    fn set_line_width(&mut self, width: f32) -> Result<(), Self::ErrorType> {
+    pub(crate) fn set_line_width(&mut self, width: f32) -> Result<(), PdfCanvasError> {
         self.current_state_mut()?.paint.line_width = width;
         Ok(())
     }
 
     /// Updates the end-cap style used for subsequent path strokes.
-    fn set_line_cap(&mut self, cap_style: LineCap) -> Result<(), Self::ErrorType> {
+    pub(crate) fn set_line_cap(&mut self, cap_style: LineCap) -> Result<(), PdfCanvasError> {
         self.current_state_mut()?.paint.line_cap = cap_style;
         Ok(())
     }
 
     /// Updates the corner-join style used for subsequent path strokes.
-    fn set_line_join(&mut self, line_join: LineJoin) -> Result<(), Self::ErrorType> {
+    pub(crate) fn set_line_join(&mut self, line_join: LineJoin) -> Result<(), PdfCanvasError> {
         self.current_state_mut()?.paint.line_join = line_join;
         Ok(())
     }
 
     /// Updates the maximum miter length relative to stroke width.
-    fn set_miter_limit(&mut self, miter_limit: f32) -> Result<(), Self::ErrorType> {
+    pub(crate) fn set_miter_limit(&mut self, miter_limit: f32) -> Result<(), PdfCanvasError> {
         self.current_state_mut()?.paint.miter_limit = miter_limit;
         Ok(())
     }
 
     /// Validates and stores dash intervals and their starting phase.
-    fn set_dash_pattern(
+    pub(crate) fn set_dash_pattern(
         &mut self,
         dash_array: &[f32],
         dash_phase: f32,
-    ) -> Result<(), Self::ErrorType> {
+    ) -> Result<(), PdfCanvasError> {
         self.current_state_mut()?.paint.dash_pattern = DashPattern::new(dash_array, dash_phase)?;
         Ok(())
     }
 
-    /// Handles the rendering-intent operator; color conversion currently uses its default intent.
-    fn set_rendering_intent(&mut self, _intent: &[u8]) -> Result<(), Self::ErrorType> {
-        Ok(())
-    }
-
-    /// Handles the flatness operator; path approximation remains backend-controlled.
-    fn set_flatness_tolerance(&mut self, _tolerance: f32) -> Result<(), Self::ErrorType> {
-        Ok(())
-    }
-
     /// Applies extended graphics-state entries, preparing soft-mask recordings when selected.
-    fn set_graphics_state_from_dict(&mut self, dict_name: &[u8]) -> Result<(), Self::ErrorType> {
+    pub(crate) fn set_graphics_state_from_dict(
+        &mut self,
+        dict_name: &[u8],
+    ) -> Result<(), PdfCanvasError> {
         let resources = self
             .current_state()?
             .resources
@@ -153,6 +134,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                                 .map(|resources| resources.get())
                                 .transpose()?,
                             None,
+                            None,
                         )?;
 
                         let transform = self.current_state()?.transform;
@@ -162,7 +144,7 @@ impl<B: CanvasBackend> GraphicsStateOps for PdfCanvas<'_, B> {
                                 Arc::new(recording_canvas),
                                 transform,
                                 smask.mask_type.clone(),
-                                smask.transfer.clone(),
+                                smask.transfer.table().cloned(),
                             )?);
                     } else {
                         self.current_state_mut()?.soft_mask = None;

@@ -1,11 +1,10 @@
 use num_traits::ToPrimitive;
 use pdf_graphics::interval::Interval;
-use pdf_object_reader::{object_resolver::ObjectResolver, object_variant::ObjectVariant};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 use pdf_postscript::{operator::Operator, value::Value};
 
 use crate::{
-    error::FunctionReadError,
-    function::{Function, FunctionImpl},
+    error::FunctionReadError, function::FunctionImpl,
     function_interpolation_error::FunctionInterpolationError,
 };
 
@@ -77,29 +76,27 @@ impl FunctionImpl for PostScriptCalculatorFunction {
     fn domain(&self) -> Option<Interval> {
         self.domain.first().copied()
     }
+}
 
-    /// Parses a Type 4 (PostScript Calculator) function.
-    fn parse(
-        object: &ObjectVariant,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Function, FunctionReadError> {
-        let stream = object.try_stream(objects)?;
-        let domain = stream.dictionary.required_intervals(b"Domain", objects)?;
-
-        let range = stream.dictionary.required_intervals(b"Range", objects)?;
+/// Reads a Type 4 (PostScript Calculator) function stream.
+impl FromPdfObject for PostScriptCalculatorFunction {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.stream()?;
+        let mut dictionary = context.dictionary();
+        let domain = dictionary.required_intervals(b"Domain")?;
+        let range = dictionary.required_intervals(b"Range")?;
 
         // Parse PostScript code: add spaces around braces for tokenization
-        let code_str = String::from_utf8_lossy(stream.raw_data());
+        let code_str = String::from_utf8_lossy(context.stream().raw_data());
         let code_with_spaces = code_str.replace('{', " { ").replace('}', " } ");
         let tokens: Vec<&str> = code_with_spaces.split_whitespace().collect();
-        let operators = pdf_postscript::parser::parse_tokens(&tokens)?;
+        let operators =
+            pdf_postscript::parser::parse_tokens(&tokens).map_err(FunctionReadError::from)?;
 
-        Ok(Function::PostScriptCalculator(
-            PostScriptCalculatorFunction {
-                operators,
-                domain,
-                range,
-            },
-        ))
+        Ok(Self {
+            operators,
+            domain,
+            range,
+        })
     }
 }

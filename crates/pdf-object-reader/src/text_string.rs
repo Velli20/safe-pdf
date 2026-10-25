@@ -1,4 +1,4 @@
-use crate::text_encoding::BigEndianU16Units;
+use crate::text_encoding::Utf16BeUnits;
 use thiserror::Error;
 
 const UTF16_BIG_ENDIAN_BOM: &[u8] = &[0xFE, 0xFF];
@@ -49,12 +49,15 @@ pub fn encode(text: &str) -> Vec<u8> {
 }
 
 fn decode_utf16_big_endian(bytes: &[u8]) -> Result<String, TextStringError> {
-    let decoded = BigEndianU16Units::from(bytes);
-    if decoded.trailing_byte.is_some() {
+    let units = Utf16BeUnits::from(bytes);
+    if units.trailing_byte().is_some() {
         return Err(TextStringError::IncompleteUtf16CodeUnit);
     }
 
-    String::from_utf16(&decoded.units).map_err(|_| TextStringError::InvalidUtf16)
+    units
+        .chars()
+        .collect::<Result<String, _>>()
+        .map_err(|_| TextStringError::InvalidUtf16)
 }
 
 fn decode_pdf_doc_encoding(bytes: &[u8]) -> Result<String, TextStringError> {

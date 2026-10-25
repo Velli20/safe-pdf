@@ -1,6 +1,6 @@
 //! Recovery-only parsing for malformed PDF streams.
 //!
-//! The strict [`PdfParser::parse_stream`](crate::parser::PdfParser::parse_stream) treats
+//! The strict [`PdfParser::parse_stream_body`](crate::parser::PdfParser::parse_stream_body) treats
 //! `/Length` as authoritative. The recovery path here also accepts a missing, indirect,
 //! stale, or otherwise incorrect `/Length`:
 //!
@@ -17,11 +17,6 @@
 
 use std::ops::Range;
 
-use pdf_object_reader::{
-    dictionary::Dictionary, object_lookup::ObjectLookupExt, object_resolver::ObjectResolver,
-    object_variant::ObjectVariant,
-};
-
 use crate::{error::ParserError, parser::PdfParser};
 
 const STREAM_KEYWORD: &[u8] = b"stream";
@@ -29,39 +24,6 @@ const STREAM_KEYWORD: &[u8] = b"stream";
 const TRUNCATED_ENDSTREAM_KEYWORD: &[u8] = b"endstrea";
 
 impl PdfParser<'_> {
-    /// Parses a raw stream body, resolving an indirect `/Length` through `objects`.
-    ///
-    /// Boundary rules and the final parser position are those of
-    /// [`Self::recover_stream_range`]. The returned bytes are not filter decoded.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `/Length` cannot be interpreted or resolved, or if
-    /// [`Self::recover_stream_range`] fails.
-    pub(crate) fn parse_stream_recovering(
-        &mut self,
-        dictionary: &Dictionary,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Vec<u8>, ParserError> {
-        let length = dictionary.optional_number::<usize>(b"Length", objects)?;
-        self.recovered_stream_bytes(length)
-    }
-
-    /// Parses a raw stream body using only a direct `/Length`.
-    ///
-    /// Used for objects parsed before any reference can be resolved; see
-    /// [`direct_stream_length`].
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if [`Self::recover_stream_range`] fails.
-    pub(crate) fn parse_stream_recovering_direct_length(
-        &mut self,
-        dictionary: &Dictionary,
-    ) -> Result<Vec<u8>, ParserError> {
-        self.recovered_stream_bytes(direct_stream_length(dictionary))
-    }
-
     /// Locates a stream body using `length` only as a hint.
     ///
     /// The parser must point at the `stream` keyword. Returns the byte range of the
@@ -97,25 +59,16 @@ impl PdfParser<'_> {
     }
 
     /// Recovers a stream body and copies it out of the parser's input.
-    fn recovered_stream_bytes(&mut self, length: Option<usize>) -> Result<Vec<u8>, ParserError> {
+    pub(crate) fn recovered_stream_bytes(
+        &mut self,
+        length: Option<usize>,
+    ) -> Result<Vec<u8>, ParserError> {
         let range = self.recover_stream_range(length)?;
         self.tokenizer
             .input
             .get(range)
             .map(<[u8]>::to_vec)
             .ok_or(ParserError::UnexpectedEndOfFile)
-    }
-}
-
-/// Extracts the only kind of `/Length` usable before references can be resolved.
-///
-/// A negative integer cannot represent a byte count. References are deliberately
-/// ignored: resolving them while reconstructing the cross-reference table would make
-/// reconstruction depend on the index it is trying to build.
-pub(crate) fn direct_stream_length(dictionary: &Dictionary) -> Option<usize> {
-    match dictionary.get(b"Length") {
-        Some(ObjectVariant::Integer(length)) => usize::try_from(*length).ok(),
-        _ => None,
     }
 }
 

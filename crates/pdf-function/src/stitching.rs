@@ -1,9 +1,7 @@
 use std::cmp::Ordering;
 
 use pdf_graphics::interval::Interval;
-use pdf_object_reader::{
-    object_lookup::ObjectLookupExt, object_resolver::ObjectResolver, object_variant::ObjectVariant,
-};
+use pdf_object_reader::{FromPdfObject, ObjectAccess, ObjectContext, ReadResult};
 
 use crate::{
     error::FunctionReadError,
@@ -82,27 +80,22 @@ impl FunctionImpl for StitchingFunction {
     fn domain(&self) -> Option<Interval> {
         Some(self.domain)
     }
+}
 
-    fn parse(
-        object: &ObjectVariant,
-        objects: &dyn ObjectResolver,
-    ) -> Result<Function, FunctionReadError> {
-        let dictionary = object.try_dictionary(objects)?;
+/// Reads a Type 3 (Stitching) function dictionary.
+impl FromPdfObject for StitchingFunction {
+    fn from_pdf_object(context: ObjectContext<'_, impl ObjectAccess + ?Sized>) -> ReadResult<Self> {
+        let mut context = context.dictionary()?;
+        let domain = context.required::<Interval>(b"Domain")?;
 
-        let domain = dictionary.required_interval(b"Domain", objects)?;
+        // Sub-functions to stitch together.
+        let functions = context.required::<Vec<Function>>(b"Functions")?;
 
-        // Parse /Functions array (sub-functions to stitch together)
-        let functions_arr = dictionary.required_array(b"Functions", objects)?;
-        let functions = functions_arr
-            .iter()
-            .map(|obj| Function::parse(obj, objects))
-            .collect::<Result<Vec<_>, _>>()?;
+        // Boundaries between sub-functions.
+        let mut bounds = context.required::<Vec<f32>>(b"Bounds")?;
 
-        // Parse /Bounds array (boundaries between sub-functions)
-        let mut bounds = dictionary.required_vec_of::<f32>(b"Bounds", objects)?;
-
-        // Parse /Encode array (input mapping for each sub-function)
-        let encode = dictionary.required_intervals(b"Encode", objects)?;
+        // Input mapping for each sub-function.
+        let encode = context.required_intervals(b"Encode")?;
 
         // Validate structural relationships. Producers sometimes pad /Bounds or /Encode, so
         // extra trailing values are dropped rather than rejected.
@@ -111,24 +104,25 @@ impl FunctionImpl for StitchingFunction {
             .checked_sub(1)
             .ok_or(FunctionReadError::InvalidBoundsLength)?;
         if bounds.len() < expected_bounds {
-            return Err(FunctionReadError::InvalidBoundsLength);
+            return Err(FunctionReadError::InvalidBoundsLength.into());
         }
         bounds.truncate(expected_bounds);
 
         if encode.len() < functions.len() {
-            return Err(FunctionReadError::InvalidEncodeLength);
+            return Err(FunctionReadError::InvalidEncodeLength.into());
         }
         let segments = functions.into_iter().zip(encode).collect();
 
-        Ok(Function::Stitching(StitchingFunction {
+        Ok(Self {
             segments,
             bounds,
             domain,
-        }))
+        })
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing)]
 mod tests {
     use super::*;
     use crate::{
@@ -153,7 +147,14 @@ mod tests {
         StitchingFunction {
             segments: functions
                 .into_iter()
-                .zip(Interval::from_pairs(&encode))
+                .zip(
+                    encode
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .copied()
+                        .map(Interval::from),
+                )
                 .collect(),
             bounds,
             domain: Interval::UNIT,
